@@ -12,10 +12,17 @@ fact against live state first — this doc is as-of 2026-06-11. Full sprint cont
   WHY: 15+ load-bearing hardcoded paths — all 9 hook commands in settings.json, the
   integrity-guard engine paths, send-via-outlook.ps1's log path, SKILL.md output paths.
   If the profile dir differs, EVERY hook fails at first session.
-- **Backup remote: `ZeOoba/ora-claude-config` (PRIVATE).** Created + pushed 2026-06-11.
+- **Backup remote: `ZeOoba/ora-claude-config` (PRIVATE).** Created + pushed 2026-06-11;
+  history PURGED to a single term-free commit the same evening (the initial push had
+  carried pre-scrub history — 48 term occurrences in old diffs; caught by
+  doctrine-integrity-probe check 8, remediated via branch swap, Gabriel-approved).
   Confidential terms are scrubbed from all tracked files (verified 0 hits across the
   full live terms list). NEVER commit a deal term to it; the guard test suite derives
-  its fixtures from the untracked terms file.
+  its fixtures from the untracked terms file. **STANDING RULE: any pre-push
+  confidentiality gate must scan `git log -p --all` (full history), not just the
+  tree — a clean HEAD does not mean a clean push.** The pre-purge history lives on
+  LOCAL-ONLY branch `archive/pre-purge-20260611` — NEVER push it; exclude it from any
+  future remote (it does not migrate via clone; if migrating by disk copy, leave it).
 
 ## B1. Provision (in order)
 1. Windows local account `Owner` → verify `echo %USERPROFILE%` = `C:\Users\Owner`.
