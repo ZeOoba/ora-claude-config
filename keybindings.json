@@ -1,0 +1,19 @@
+{
+  "$schema": "https://www.schemastore.org/claude-code-keybindings.json",
+  "bindings": [
+    {
+      "context": "Chat",
+      "bindings": {
+        "ctrl+k ctrl+s": "chat:submit",
+        "ctrl+e": "chat:externalEditor",
+        "ctrl+shift+u": "skill:acquisition-underwriting",
+        "ctrl+shift+s": "skill:deal-screen",
+        "ctrl+shift+d": "skill:deploy-site",
+        "ctrl+shift+t": "skill:tenant-email",
+        "ctrl+shift+c": "skill:cap-rate-snapshot",
+        "ctrl+shift+l": "skill:lease-renewal-pipeline",
+        "ctrl+shift+m": "skill:market-comp-analyzer"
+      }
+    }
+  ]
+}

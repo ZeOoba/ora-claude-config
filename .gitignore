@@ -1,0 +1,43 @@
+# ============================================================
+# ~/.claude .gitignore — FAIL-CLOSED (default-deny).
+# Ignore everything; explicitly opt in ONLY versionable machinery.
+# Rationale: this dir mixes secrets (.credentials.json), confidential
+# deal terms (hooks/confidential-terms.json) and transient runtime
+# state with the config worth tracking. Default-deny prevents an
+# accidental secret commit — matches the firm's fail-closed doctrine.
+# To track a new machinery dir, add an explicit "!/<dir>/" line.
+# ============================================================
+
+# 1) Ignore everything at root by default (matches dotfiles too)
+/*
+
+# 2) Opt IN the machinery worth versioning
+!/.gitignore
+!/CLAUDE.md
+!/settings.json
+!/keybindings.json
+!/confidential-repos.json
+!/uuid-baseline.json
+!/check-uuid-drift.sh
+!/daily-setup-audit-prompt.md
+!/scheduled-tasks-starter-pack.md
+!/hooks/
+!/commands/
+!/agents/
+!/skills/
+!/maintenance/
+!/docs/
+!/ora-ops-plugin/
+
+# 3) Re-ignore secrets, caches & transient state INSIDE opted-in dirs
+hooks/confidential-terms.json
+hooks/sessions/
+# county-parcel-screen embeds active-deal counterparty names in its never-call
+# machinery (operationally required locally; must not reach the off-machine
+# remote). Local-only until the names are externalized to an untracked data file.
+skills/county-parcel-screen/
+**/__pycache__/
+*.pyc
+*.log
+*.bak
+*.bak-*

@@ -1,0 +1,191 @@
+"""Tests for eos-telemetry.py SessionEnd hook.
+
+Run: python test-eos-telemetry.py
+Stdlib only. ASCII-only. Self-contained (creates its own temp dirs/files).
+"""
+
+import json
+import os
+import subprocess
+import sys
+import tempfile
+
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # hooks/ (test in hooks/tests/)
+HOOK = os.path.join(HERE, "eos-telemetry.py")
+
+
+def run_hook(stdin_text, telemetry_dir):
+    """Run the hook as a subprocess. Returns (returncode, stdout, stderr)."""
+    env = dict(os.environ)
+    env["EOS_TELEMETRY_DIR"] = telemetry_dir
+    proc = subprocess.run(
+        [sys.executable, HOOK],
+        input=stdin_text,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    return proc.returncode, proc.stdout, proc.stderr
+
+
+def make_transcript(path):
+    """Write a fake JSONL transcript with an Edit, a Bash 'npm run gate',
+    a Task tool_use, and an assistant text line containing 'Dispatch: Inline'."""
+    lines = [
+        # assistant message with a tool_use Edit
+        {
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "name": "Edit",
+                        "input": {"file_path": "C:/proj/foo.py"},
+                    }
+                ],
+            },
+        },
+        # assistant message with a Bash tool_use running the gate
+        {
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "name": "Bash",
+                        "input": {"command": "npm run gate"},
+                    }
+                ],
+            },
+        },
+        # assistant message dispatching a Task
+        {
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "name": "Task",
+                        "input": {"description": "do thing"},
+                    }
+                ],
+            },
+        },
+        # assistant text line with a lane declaration
+        {
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": "Dispatch: Inline - claude-opus-4-8"}
+                ],
+            },
+        },
+        # a deliberately malformed line should be skipped, not crash
+        "this is not json at all",
+    ]
+    with open(path, "w", encoding="ascii") as fh:
+        for ln in lines:
+            if isinstance(ln, str):
+                fh.write(ln + "\n")
+            else:
+                fh.write(json.dumps(ln) + "\n")
+
+
+def test_happy_path():
+    tmp = tempfile.mkdtemp(prefix="eos-test-")
+    transcript = os.path.join(tmp, "transcript.jsonl")
+    tele_dir = os.path.join(tmp, "telemetry")
+    make_transcript(transcript)
+
+    stdin = json.dumps({"session_id": "test123", "transcript_path": transcript})
+    rc, out, err = run_hook(stdin, tele_dir)
+    assert rc == 0, "expected exit 0, got %s (stderr=%s)" % (rc, err)
+
+    out_file = os.path.join(tele_dir, "lane-telemetry.jsonl")
+    assert os.path.exists(out_file), "telemetry file was not created"
+    with open(out_file, "r", encoding="ascii") as fh:
+        data_lines = [l for l in fh.read().splitlines() if l.strip()]
+    assert len(data_lines) == 1, "expected exactly 1 line, got %d" % len(data_lines)
+
+    rec = json.loads(data_lines[0])
+    assert rec["session_id"] == "test123", rec
+    assert rec["edits"] >= 1, rec
+    assert rec["bash_test_ran"] is True, rec
+    assert rec["task_dispatched"] is True, rec
+    assert rec["lane_declared"] is True, rec
+    assert "C:/proj/foo.py" in rec["files"], rec
+    print("PASS test_happy_path")
+
+
+def test_malformed_stdin_fails_open():
+    tmp = tempfile.mkdtemp(prefix="eos-test-")
+    tele_dir = os.path.join(tmp, "telemetry")
+    rc, out, err = run_hook("not json", tele_dir)
+    assert rc == 0, "malformed stdin must exit 0, got %s" % rc
+    assert out == "", "expected no stdout, got %r" % out
+    print("PASS test_malformed_stdin_fails_open")
+
+
+def test_empty_object_fails_open():
+    tmp = tempfile.mkdtemp(prefix="eos-test-")
+    tele_dir = os.path.join(tmp, "telemetry")
+    rc, out, err = run_hook(json.dumps({}), tele_dir)
+    assert rc == 0, "empty object must exit 0, got %s" % rc
+    print("PASS test_empty_object_fails_open")
+
+
+def test_missing_transcript_fails_open():
+    tmp = tempfile.mkdtemp(prefix="eos-test-")
+    tele_dir = os.path.join(tmp, "telemetry")
+    stdin = json.dumps(
+        {"session_id": "x", "transcript_path": os.path.join(tmp, "nope.jsonl")}
+    )
+    rc, out, err = run_hook(stdin, tele_dir)
+    assert rc == 0, "missing transcript must exit 0, got %s" % rc
+    # No code activity / unreadable -> nothing written
+    out_file = os.path.join(tele_dir, "lane-telemetry.jsonl")
+    assert not os.path.exists(out_file) or os.path.getsize(out_file) == 0, (
+        "should not write telemetry for missing transcript"
+    )
+    print("PASS test_missing_transcript_fails_open")
+
+
+def test_no_code_activity_skipped():
+    """A transcript with only text (no edits, no bash test, no task) writes nothing."""
+    tmp = tempfile.mkdtemp(prefix="eos-test-")
+    transcript = os.path.join(tmp, "t.jsonl")
+    tele_dir = os.path.join(tmp, "telemetry")
+    with open(transcript, "w", encoding="ascii") as fh:
+        fh.write(
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "hello there"}],
+                    },
+                }
+            )
+            + "\n"
+        )
+    stdin = json.dumps({"session_id": "y", "transcript_path": transcript})
+    rc, out, err = run_hook(stdin, tele_dir)
+    assert rc == 0, rc
+    out_file = os.path.join(tele_dir, "lane-telemetry.jsonl")
+    assert not os.path.exists(out_file) or os.path.getsize(out_file) == 0, (
+        "non-coding session should write nothing"
+    )
+    print("PASS test_no_code_activity_skipped")
+
+
+if __name__ == "__main__":
+    test_happy_path()
+    test_malformed_stdin_fails_open()
+    test_empty_object_fails_open()
+    test_missing_transcript_fails_open()
+    test_no_code_activity_skipped()
+    print("ALL TELEMETRY TESTS PASS")

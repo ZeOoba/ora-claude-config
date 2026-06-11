@@ -1,0 +1,26 @@
+# /build — Lane L3 (Feature / new behavior)
+
+Use when constructing something new. Size it first.
+
+## Size
+- **Small** (one component, < ~1 day): light inline brainstorm → `/plan` → TDD → LOCAL review → land.
+- **Large:** full chain below.
+
+## Chain (large)
+1. **superpowers:brainstorming** — design before code (scale to complexity).
+2. **/plan** → **superpowers:writing-plans** — bite-sized TDD tasks; show the file inventory.
+3. **superpowers:using-git-worktrees** — isolate (never build a feature on main).
+4. **superpowers:subagent-driven-development** — one task at a time (sequential implementer + 2-stage spec/quality review each), under **superpowers:test-driven-development** (test first, watched to fail).
+5. Pull IMPLEMENT skills as needed (frontend-design, mcp-builder, skill-creator, xlsx/docx/pdf/pptx) and **context7** before any library/API work.
+6. **superpowers:verification-before-completion** + the repo gate.
+7. **superpowers:requesting-code-review** (LOCAL). Cloud `/code-review ultra` ONLY if the repo is not in `confidential-repos.json` AND you explicitly opt in.
+8. **superpowers:receiving-code-review** → fix Critical/Important.
+9. **superpowers:finishing-a-development-branch** → merge / PR / keep / discard.
+10. PERSIST → `memory/event_log.md`; `conversation-archival` if institutional.
+
+## ORA rules (kept)
+- Read before writing; check if it already exists (skills/commands/project).
+- Exact output path + naming: formal docs `ORA_[DocType]_[Topic]_v[X.Y].[ext]`; deal files `[Address] [Purpose] [MM-YYYY]`; outputs to `/outputs/` with `YYYY-MM-DD_` prefix.
+- No placeholder content; no features beyond what was asked (YAGNI).
+- Code: no hardcoded secrets, no external CDN.
+- Hard guardrails: no website, no business-OneDrive writes, no email/money without permission.
