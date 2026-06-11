@@ -13,9 +13,15 @@ fact against live state first — this doc is as-of 2026-06-11. Full sprint cont
   integrity-guard engine paths, send-via-outlook.ps1's log path, SKILL.md output paths.
   If the profile dir differs, EVERY hook fails at first session.
 - **Backup remote: `ZeOoba/ora-claude-config` (PRIVATE).** Created + pushed 2026-06-11;
-  history PURGED to a single term-free commit the same evening (the initial push had
-  carried pre-scrub history — 48 term occurrences in old diffs; caught by
-  doctrine-integrity-probe check 8, remediated via branch swap, Gabriel-approved).
+  history PURGED to the term-free baseline `7ede278` the same evening (the initial push
+  had carried pre-scrub history — 48 term occurrences in old diffs; caught by
+  doctrine-integrity-probe check 8, remediated via branch swap, Gabriel-approved), then
+  belt-and-suspenders FINISHED same evening: repo deleted + recreated PRIVATE + clean
+  main re-pushed, so pre-scrub objects are no longer fetchable by exact SHA (GitHub
+  answers 422 "No commit found"; on any future object-gone check expect 404 OR 422 —
+  404 means the repo itself is missing). State git preconditions structurally ("main
+  has `7ede278` as root commit"), never count-based ("single commit") — clean commits
+  accumulate on top of the baseline.
   Confidential terms are scrubbed from all tracked files (verified 0 hits across the
   full live terms list). NEVER commit a deal term to it; the guard test suite derives
   its fixtures from the untracked terms file. **STANDING RULE: any pre-push
@@ -74,11 +80,15 @@ fact against live state first — this doc is as-of 2026-06-11. Full sprint cont
       `ZeOoba/ora-cowork-watchdog` green. The migration gap WILL trip the 16h alarm
       once — treat as a LIVE TEST of the dead-man chain: confirm the alert reaches
       Gabriel, then clear.
-- [ ] `python hooks/tests/test-confidentiality-guard.py` → ALL PASS (630 as of 6/11)
+- [ ] `python hooks/tests/test-confidentiality-guard.py` → ALL PASS (term-derived; was
+      1149 on 6/11 — the count scales with the terms file, assert ALL PASS not a number)
       BEFORE any egress-capable automation runs. (Fail-closed: if confidential-terms
       .json is missing the guard BLOCKS all egress — placing it is step B1.5.)
+- [ ] `python hooks/tests/test-git-prepush-scan.py` → all pass, AND re-install the
+      native hook after cloning: write .git/hooks/pre-push per the header of
+      hooks/git-prepush-confidential-scan.py (clones do NOT carry .git/hooks).
 - [ ] `python maintenance/registry-membership-probe.py` → exit 0, roster regenerated.
-- [ ] `python maintenance/test-registry-membership-probe.py` → 15/15.
+- [ ] `python maintenance/test-registry-membership-probe.py` → all pass (19 on 6/11).
 - [ ] doctrine-integrity / governor-drift / memory-integrity probes → exit 0.
 - [ ] One COM test send to ggoldberg@oxfordra.net — ONLY with Gabriel's explicit
       per-send confirmation; verify `_shared/send-log.txt` writes.
@@ -93,16 +103,19 @@ vault, `C:\Users\Owner\ora-skills`, `website-canonical`, `oxford-command-center`
 wipe (cloud-side); `fleet-deadman.ps1` does not (local schtasks — recreated in B2.4).
 
 ## Known holds & residuals (carry into Phase C)
-- 5 folders held pending Gabriel's ratification (named by skill docs, in NO registry):
-  ora-annual-budget-kickoff, ora-year-end-review, ora-lender-covenant-tracker,
-  ora-cash-position-snapshot, ora-heartbeat-chain-verify-20260611.
+- RESOLVED 2026-06-11 (Gabriel ratified "don't need them"): ora-annual-budget-kickoff,
+  ora-year-end-review, ora-lender-covenant-tracker, ora-cash-position-snapshot archived
+  to _archive_2026-06-11_orphans (no registry entries; guard verified no resurrection).
 - LAMS registry still holds disabled entries (scheduled-task-integrity-guard,
   ora-lams-fire-test-20260610, ora-heartbeat-chain-verify-20260611) — remove via the
-  Cowork UI when convenient; until then their folders cannot be archived (the guard
-  restores them — observed live 2026-06-11).
-- Guard gap (PROPOSED, data fix for Gabriel): squeezed multi-word identifiers (e.g.
-  a no-space form of a 2-word counterparty name) evade the substring matcher — add
-  no-space forms to each deal's `always` array in confidential-terms.json.
+  Cowork UI (prompt issued to Gabriel 2026-06-11); until then their folders cannot be
+  archived (the guard restores them — observed live 2026-06-11).
+- RESOLVED 2026-06-11: squeezed-identifier guard gap closed via data fix — 14
+  squeezed/hyphenated variants added to the `always` arrays (Gabriel-authorized);
+  guard suite re-derived, all surfaces re-proven.
+- RESOLVED 2026-06-11: county-parcel-screen counterparty names externalized to
+  data/pipeline-guard.local.json (UNTRACKED — must travel in the out-of-band
+  transfer with the secrets, B1.5); skill code re-tracked in the backup repo.
 - county-parcel-screen is git-UNTRACKED (embeds counterparty names in its never-call
   machinery) — local-only; needs a sanitized backup path (externalize the names to an
   untracked data file, then re-track).

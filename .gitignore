@@ -32,10 +32,12 @@
 # 3) Re-ignore secrets, caches & transient state INSIDE opted-in dirs
 hooks/confidential-terms.json
 hooks/sessions/
-# county-parcel-screen embeds active-deal counterparty names in its never-call
-# machinery (operationally required locally; must not reach the off-machine
-# remote). Local-only until the names are externalized to an untracked data file.
-skills/county-parcel-screen/
+# county-parcel-screen code is TRACKED (counterparty names externalized 2026-06-11);
+# its data/ tree (public county dumps + the pipeline-guard.local.json counterparty
+# floor) stays local-only. *.local.json is the standing convention for
+# never-track local data files anywhere in the repo.
+skills/county-parcel-screen/data/
+*.local.json
 **/__pycache__/
 *.pyc
 *.log
