@@ -1,0 +1,58 @@
+{
+  "captured_at": "2026-04-16T19:07:00Z",
+  "captured_by": "skill-audit-priority-3",
+  "environment": {
+    "host_os": "Windows 11 Home 10.0.26200 (MSYS2 / Git Bash)",
+    "user": "Owner",
+    "home": "/c/Users/Owner"
+  },
+  "appdata_skill_path": {
+    "full_path": "/c/Users/Owner/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/583f08bc-0123-4111-8158-8fe3d927e350/a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3/skills",
+    "outer_uuid": "583f08bc-0123-4111-8158-8fe3d927e350",
+    "inner_uuid": "a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3",
+    "outer_uuid_created": "2026-02-21T18:32:25-05:00",
+    "stability_note": "Outer UUID has been stable for ~2 months (survived many Claude Desktop sessions). Inner UUID appears session-coupled (also appears as a peer directory under local-agent-mode-sessions/). A Claude Desktop reinstall, plugin reset, or OS migration will regenerate these."
+  },
+  "cowork_skill_path": {
+    "full_path": "/c/Users/Owner/OneDrive - Oxford Capital Partners (1)/Cowork OS/.claude/skills",
+    "authoritative": true,
+    "note": "Version-controlled via OneDrive. Source of truth. Survives Claude Desktop regeneration."
+  },
+  "cowork_desktop_skill_path": {
+    "runtime_path": "/sessions/<session-name>/mnt/.claude/skills",
+    "note": "Cowork Desktop (Electron wrapper around claude.ai) runs skills in a cloud-hosted sandbox, not from the local AppData path. Local file edits do NOT propagate to Cowork Desktop. Skills must be re-uploaded via claude.ai UI to update Cowork Desktop's copies. This baseline does NOT cover Cowork Desktop."
+  },
+  "installed_skills": [
+    {
+      "name": "underwrite",
+      "cowork_hash": "6d10b3e9d050655a2615e0cbe2b664b6",
+      "appdata_hash": "6d10b3e9d050655a2615e0cbe2b664b6",
+      "hashes_match": true
+    },
+    {
+      "name": "acquisition-underwriting",
+      "cowork_hash": "159947a707f91b70808e4727b5455ef8",
+      "appdata_hash": "159947a707f91b70808e4727b5455ef8",
+      "hashes_match": true
+    },
+    {
+      "name": "document-assembly",
+      "cowork_hash": "dbb40537fabd502d65952932574f2225",
+      "appdata_hash": "dbb40537fabd502d65952932574f2225",
+      "hashes_match": true,
+      "note": "Hash updated 2026-04-16 after field-name fix: 'Landlord Entity' -> 'Property Entity / LLC' to match Notion Tenant DB schema"
+    },
+    {
+      "name": "lease-abstraction-pipeline",
+      "cowork_hash": "07dc6a54beadf29e3d19e3fc133838a6",
+      "appdata_hash": "07dc6a54beadf29e3d19e3fc133838a6",
+      "hashes_match": true
+    },
+    {
+      "name": "monthly-close",
+      "cowork_hash": "357f13ddaf1f055d4d1a02318323715d",
+      "appdata_hash": "357f13ddaf1f055d4d1a02318323715d",
+      "hashes_match": true
+    }
+  ]
+}

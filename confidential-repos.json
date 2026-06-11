@@ -1,0 +1,10 @@
+{
+  "confidential_repos": [
+    "oxford-command-center",
+    "website-canonical",
+    "oxford-site",
+    "ora-pm"
+  ],
+  "rule": "Cloud '/code-review ultra' is FORBIDDEN on these repos (they embed confidential deal figures, public-site content under the never-touch guardrail, or tenant PII + secrets). Default review everywhere = superpowers:requesting-code-review (LOCAL subagent). Maintain alongside hooks/confidential-terms.json.",
+  "updated": "2026-06-05"
+}

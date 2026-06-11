@@ -1,0 +1,10 @@
+{
+  "name": "ora-ops",
+  "version": "1.0.0",
+  "description": "Oxford Realty Advisors daily-automation logic, bundled as one-line slash commands. Each command is a thin pointer at the authoritative on-disk SKILL.md (or audit) spec, so a Claude Desktop scheduled task can run an entire routine from a single line. All five are manual-invoke-only (side-effecting) and preserve the firm's recipients, full python path, and Outlook send paths.",
+  "author": {
+    "name": "Gabriel Goldberg",
+    "email": "ggoldberg@oxfordra.net"
+  },
+  "keywords": ["ora", "oxford-realty-advisors", "scheduled-tasks", "automation", "industrial-re", "acquisitions", "operations"]
+}

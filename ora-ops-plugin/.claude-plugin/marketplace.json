@@ -1,0 +1,17 @@
+{
+  "name": "ora-ops-marketplace",
+  "owner": {
+    "name": "Gabriel Goldberg",
+    "email": "ggoldberg@oxfordra.net"
+  },
+  "description": "Local marketplace for the ORA-Ops plugin — bundles Oxford Realty Advisors daily-automation logic (Morning Brief, Deal-Sourcing Scan, Evening Ledger, Setup Self-Audit, Health Guard) as one-line slash commands.",
+  "plugins": [
+    {
+      "name": "ora-ops",
+      "source": "./plugins/ora-ops",
+      "description": "ORA daily automation logic as slash commands — thin pointers at the authoritative on-disk SKILL.md specs, ready to paste as Claude Desktop scheduled-task prompts.",
+      "category": "productivity",
+      "tags": ["ora", "oxford-realty-advisors", "scheduled-tasks", "automation", "industrial-re"]
+    }
+  ]
+}

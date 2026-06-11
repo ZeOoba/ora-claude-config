@@ -1,0 +1,28 @@
+{
+ "ts": "2026-06-11T16:04:23",
+ "fleets": {
+  "cc": [
+   "ora-am-brief",
+   "ora-automation-health-monitor",
+   "ora-consolidate-memory-monthly",
+   "ora-dashboard-refresh",
+   "ora-deal-sourcing-scan",
+   "ora-dormant-thread-revival",
+   "ora-health-guard",
+   "ora-master-workbook-ingest",
+   "ora-pm-ledger",
+   "ora-setup-audit",
+   "ora-skill-text-audit",
+   "ora-task-integrity-guard",
+   "ora-week-ahead-briefing",
+   "ora-weekly-hygiene",
+   "ora-weekly-tooling-intel-sweep"
+  ],
+  "lams": [
+   "ora-cowork-heartbeat",
+   "ora-om-intake-ocr",
+   "ora-replacement-cost-refresh",
+   "ora-skill-store-drift-check"
+  ]
+ }
+}
