@@ -330,7 +330,9 @@ def term_word_seqs(terms_data):
             shape_warns.append("terms deal #%d: entry is not an object -- "
                                "skipped (fail-open)" % deal_idx)
             continue
-        if not entry.get("active"):
+        if not entry.get("active", True):
+            # default-ACTIVE matches confidentiality-guard.py (aligned 2026-06-11):
+            # a deal missing the flag must be both enforced AND leak-scanned.
             continue
         always = entry.get("always")
         if not isinstance(always, list):

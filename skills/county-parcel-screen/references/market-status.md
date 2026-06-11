@@ -1,0 +1,55 @@
+# Market status tracker (update after every run)
+
+RETRO-SWEEP 2026-06-10: all four pre-module markets (Columbus/Cincinnati/KC/Indy, 10,173
+scored rows) re-audited against institutional_owners.py. 30 findings, 17 strike-list rows —
+see 20260610_Four-Market-Retro-Sweep_QC-Audit_v01.xlsx (Investment Candidates -- 2026).
+Key: AIC INCOME FUND CROSSROADS x2 at Indy A-tier/72 (new TIER1 alias 'AIC Ventures' added,
+self-test 25/25); SCANNELL #673 at KC/82; an active-deal counterparty (never-call; see data/pipeline-guard.local.json) on Columbus A-Call List; DUKE
+SECURED/PROLOGIS Columbus B/70; Warren institutional rows still live in Cincinnati v01
+workbook roster (data re-run 6/9 excluded them; workbook never rebuilt). Strike the Action
+sheet rows from any mail merge before the campaign — v01/v02 workbooks NOT regenerated.
+PERSISTENCE VERIFIED 2026-06-10 PM: the 04:35Z workbook save never landed on disk (filename
+search 23:33Z = absent). sweep.py (ora-financials-work/retro-sweep/) re-executed 23:37Z —
+identical results 30 findings / 17 strike rows; file confirmed present in Investment
+Candidates -- 2026 and spot-checked against KC/Columbus/Indy workbooks (3/3 rows trace).
+MASTER CONSOLIDATION 2026-06-10: 20260610_AllMarkets-OffMarket-Master_v01.xlsx (Investment
+Candidates -- 2026) — all 9 metros on one workbook, tab per metro: 18,260 rows kept / 106
+excluded at build (strike list + fresh module re-screen; GR retro-caught 90 incl. CONSUMERS
+POWER ×83 + G&I XI ×5 + AIC ×2 — GR ran pre-module). A 1,474 / B 1,546 / C 6,853 / D 8,387;
+416 fresh estate; 12 VERIFY-institutional pending adjudication. Scores within-metro only.
+Rebuild: ora-financials-work/master/build_master.py (workbook = build artifact, never hand-edit).
+Web-enrichment re-rank plan: 20260610_OffMarket-BuyBox-Screen_Plan_v02.md (same folder) —
+SUPERSEDES the v01 plan; re-keyed per Gabriel to the acquisition-underwriting Buy Box &
+Scorecard v1.0 (gates → walk-price floors → 100-pt scorecard → T1/T2/PASS/KILLED, DD-Critical
+T2 cap). Coverage audit: basis-floor pre-checkable on 46% of pool today; 1,234 SF>50K gate
+kills pending; KC (no SF/values) + Indy (no SF) are the enrichment critical path. RCT v02 pinned.
+
+| Market | Counties | Status | Outputs | Next pass |
+|---|---|---|---|---|
+| Columbus | Franklin | DONE v03 (2026-06-04/05); ESTATE FLAGS CORRECTED 2026-06-06 (51→38; 46 FP owners removed, 29 new TPs; see v02 CHANGELOG) | Parcel-Screen v01/v02, Top10-CallList, Motivated-Leads v01 → SUPERSEDED by 20260605_Columbus-Motivated-Leads_v02.xlsx (Investment Candidates -- 2026) | Payment-velocity, BOR, permits, collar counties |
+| Cincinnati | Hamilton, Butler, Clermont, Warren | v01 DONE (2026-06-05); ESTATE FLAGS CORRECTED 2026-06-06 (Ham 115→44, But 45→23, Cle 23→9, War 25→11; see v02 CHANGELOG). WARREN re-run isolated 2026-06-09: 481 industrial → 48 non-product dropped / 6 gov / 4 inst-EXCLUDE → 423 scored; 11 estate (matches v02), 2 VERIFY (both DUKE ENERGY OHIO = utility, adjudicate-drop). NO public values/SF/sales → factor UNDEFINED (n=0), rescaled 0-75→100; no Warren parcels in Notion pipeline bcfe4a03 (closest = Liberty Office Park Butler / 754 Old SR 74 Clermont, both never-call). | Cincinnati-Parcel-Screen_v01; motivated sheets SUPERSEDED by 20260605_Cincinnati-Motivated-Leads_v02-EstateCorrected.xlsx (Investment Candidates -- 2026); Warren raw+scored JSON at ora-financials-work/warren-screen/raw/ | Hamilton HistoricSalesExport (sellers-in-motion), CAGIS footprint SF join, Clermont/Warren enrichment; Warren needs CAMA extract (GIS 513-695-1000) or auditor PropertySearch scrape for SF/values to lift off the rescaled 0-75 ceiling |
+| Kansas City | Jackson, Clay, Platte MO; Johnson, Wyandotte KS | v01 DONE (2026-06-05) — Jackson 1,845 / Clay 515 / WyCo 797 screened; 154 motivated leads; JoCo+Platte data-hostile | KansasCity-Parcel-Screen_v01 | Buy JoCo AIMS ADS extract (top gap); Jackson DLT PDFs (Aug/Sep); WyCo Landsweb mail-addr scrape; footprint-SF spatial joins; MO/KS = non-disclosure states — no public calibration ever |
+| Indianapolis | Marion + 4 collar counties IN | v01 DONE (2026-06-09, per Gabriel) — 5,147 industrial parcels / 5 counties, 2,688 screened, 139 motivated leads; IN disclosure state: Marion median 2.32x assessed (n=226), ZIP-level factors. Finisher caught DRA Advisors + Ambrose leakage; 'FJS PROPERTIES LLC' (Noblesville, ampersand-stripped) excluded as probable ORA FJ&S — VERIFY before any outreach | Indianapolis-Parcel-Screen v01 (see Investment Candidates -- 2026); top lead James M Maddox Revocable Living Trust warehouse, Americana Blvd (estate + nominal transfer 2026-04) | Confirm FJS=FJ&S; collar-county enrichment |
+| Maryland | Anne Arundel, Howard, Baltimore Co — ALL v01 DONE | **3-county v01 DONE (2026-06-09)** via parcel-screen-fanout workflow (v2 pipeline guard). **Anne Arundel** (JURSCODE='ANNE'): 222,817 parcels → 1,263 product → 943 scored; A 18/B 36/C 103; calib 1.093 (n=104). **Howard** ('HOWA'): 751 product parcels scored; calib **1.79** (n=60 product-only; broad 1.49 n=97); ZIP 20723~1.07/21075~2.34/21046~2.05; SF coverage 59% (440/751, warehouse-condos null SQFTSTRC); 28 institutional caught via MAIL-screen (Prologis/Link/Blackstone, Jessup/Dorsey BWI corridor — F8 averted). **Baltimore Co** ('BACO'): 1,276 parcels, **OWNER NAMES RECOVERED via join to county bcgis Property/MapServer/1** (ACCTID[4:]=TAXPIN, 1274/1276) → FULL 0-100 scale (SF 89% + CONSIDR1 sale price + NFMTTLVL all public); calib **1.639 (n=73 ≤3yr) BUT 1.211 (n=169 5yr) = F2 assessment-lag, deep modeled discounts are partly artifact — confirm real $/SF per finalist**; ZIP 21227=2.24/21030=1.06/21222=3.46; 17 estate via estate_v2 (0 FP); 14 institutional (First Industrial/EQT Exeter/STAG); 1 ORA-self (Eric Goldberg Family LLC) excluded. *** ANNE+HOWARD OWNER NAMES STILL SDAT-SCRUBBED (only mailing addr public); BACO has names. *** Pipeline guard (bcfe4a03, 7 deals): ZERO MD overlap. TOP ACTIONABLE: Petting Zoo Inc / 100-120 Langley Rd N Glen Burnie (AnneArundel — DELISTED LoopNet listing, owner=plush-toy distributor leasing it out, broker Mike Moran KLNB); Beaver Dam Realty / Williamson Rd Cockeysville (BACO — succession: pres John Williamson d.2010, likely successor Lucy Zouck); 9391 Davis Ave (Howard — self-mgr absentee mailing to a 55+ community). | per-county raw+scored JSON + workbooks under ora-financials-work/{anne-arundel,howard,baltimore}-screen/ (20260609_*-Parcel-Screen_v01.xlsx; NOT copied to Investment Candidates business OneDrive — needs explicit permission) | SDAT name-recovery (Real Property Search / Business Express) for Anne Arundel + Howard finalists BEFORE outreach (BACO names done); delinquency feeds (AACo + Howard + Baltimore Co tax-sale lists); confirm $/SF vs assessment-lag on every MD discount |
+| Madison | Dane WI | v01 DONE (2026-06-09) — 218,093 parcels → 1,513 industrial universe → 787 scored; A 28 / B 34 / C 154; 16 estate + 1 tax-deed + 5 recent-NONARMS; calibration 1.000 (n=78, WI full-value confirmed; ZIP ~1.0) | 20260609_Madison-Parcel-Screen_v01.xlsx + Madison-Motivated-Leads_v01 (Investment Candidates -- 2026) | Suburban SF enrichment; RETR via GenTax (manual); AccessDane delinquency per-finalist; deed pull for ~56 OWNER-NA rows incl. tax-deed parcel |
+| Grand Rapids | Kent, Ottawa MI | v01 DONE (2026-06-09) — Kent 2,933→1,563 scored / Ottawa 1,809→916; A 434 / B 335 / C 1,029; 47 estate; Ottawa calibration 1.927 empirical (n=30, county ECF sales), Kent 2.0x statutory (no public sales — MI quirk); hold via TV/SEV Prop-A gap proxy | 20260609_GrandRapids-Parcel-Screen_v01.xlsx + GrandRapids-Motivated-Leads_v01 (Investment Candidates -- 2026) | Kent foreclosure list ~Jul 1; BS&A per-parcel SF on A-tier; class-201 flex mining; Ottawa 2026 ECF when posted |
+| Richmond | Henrico, Chesterfield, Hanover VA + city | v01 DONE (2026-06-09) — 1,496 scored (Henrico 277 / Chesterfield 260 / Hanover ~643 prospect-grade / RVA 316); A 82 / B 82 / C 346; 26 estate + 10 RVA delinquent; calibration Henrico 1.409 (n=62) / Chesterfield 1.177 (n=60, FMV=LAND-ONLY quirk corrected) / RVA 1.473 (n=18) / Hanover 1.0 default NOT empirical. HENRICO OWNER-SCRUBBED — all 279 owners recovered via APEX wwv_flow.accept POST (method in endpoints); mail addrs still missing | 20260609_Richmond-Parcel-Screen_v01.xlsx + Richmond-Motivated-Leads_v01 (Investment Candidates -- 2026) | TACS judicial lists (taxva.com, JS-gated) browser pass; Henrico mail addresses; Hanover per-parcel enrichment; verify DUKE COMBINED LLC |
+| Des Moines | Polk, Dallas IA | v01 DONE (2026-06-09) — Polk 13,181 comm rows → 2,017 universe → 796 scored / Dallas 86; A 130 / B 136 / C 406; 38 estate + 44 SELLERS-IN-MOTION (first market w/ full grantor data — Polk 1987→current sales file w/ seller/buyer/instrument) + 41 contract-sale; calibration Polk 1.089 (n=246, 20 ZIP factors) / Dallas 1.190 (n=79). Polk = best assessor source to date (bulk CSVs: SF, occupancy, owners, contract buyers) | 20260609_DesMoines-Parcel-Screen_v01.xlsx + DesMoines-Motivated-Leads_v01 (Investment Candidates -- 2026) | TIME-CRITICAL: SRI iowataxauction.com June 15-16 tax-sale lists (login-gated) — pull this week; Dallas/WDM flex via Beacon; stale Polk occupant DBAs — re-verify per call |
+
+Constants so far: Ohio auditor-to-market ~1.6x post-2023 reappraisal; nominal-transfer
+share of recent sale dates ~40%+; commercial SF publication is the exception (Franklin), not the rule.
+ORA pipeline counterparties to flag, never cold-call: the never-call floor in
+data/pipeline-guard.local.json (UNTRACKED — counterparty names stay out of tracked files;
+3 seller families as of 2026-06-11: the Franklin active-deal counterparty, the 754 Old SR 74
+seller family (Clermont), the Liberty Office Park seller (Butler)).
+Self-owned/affiliate entities (OXFORD*, GOLDBERG, FJ&S): FLAG ORA-AFFILIATED and KEEP — never
+drop, per Gabriel 2026-06-10. Only never-call counterparties (list above) are excluded.
+
+ESTATE-SIGNAL REGEX (corrected 2026-06-06, after KC run found ~45% FP inflation): never match
+bare \bESTATE\b or \bTR\b. Match only personal fiduciary/succession capacity — ESTATE OF (not
+REAL ESTATE OF), LIFE ESTATE, EXECUTOR/EXECUTRIX, ADMINISTRATOR/ADMR, TTEE, TRUSTEE
+(non-institutional), CO-TR, SUCCESSOR TRUSTEE, personal-name + TR/TRS/TRUST suffix,
+REVOCABLE/LIVING/FAMILY TRUST, TRUST DATED/AGREEMENT. Exclude REAL ESTATE*, ESTATES place
+names, TRUST CO/banks, township/board/church trustees, street-suffix TR. Scan BOTH owner-name
+fields (trust co-owners surface in field 2). Booster retained: TR-pattern + nominal transfer
+<$25K since 2021. Canonical implementation: scripts/estate_v2.py IN THIS SKILL (moved from session outputs 2026-06-09; includes the Colby '&' trailing-TRUST patch). Institutional/ORA exclusion: scripts/institutional_owners.py (tiered EXCLUDE/VERIFY alias table — built after G&I XI fund-naming miss and DUKE COMBINED FP-direction, 2026-06-09). Owner-scrubbed APEX counties: scripts/apex_owner_pull.py.
