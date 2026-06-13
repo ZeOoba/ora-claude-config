@@ -100,6 +100,31 @@ try:
 finally:
     os.unlink(_p)
 
+# --- ratified_drops (2026-06-11 auto-ratification) -------------------------------------
+import datetime as _dt
+_TODAY = _dt.date(2026, 6, 11)
+_LOG = ("# Event log\nintro prose\n"
+        "\n### 2026-06-11 — LAMS registry cleanup (RATIFIED) + lesson\n"
+        "Removed scheduled-task-integrity-guard and others.\n"
+        "\n### 2026-05-01 — old cleanup (RATIFIED)\n"
+        "Removed ora-ancient-task.\n"
+        "\n### 2026-06-10 — unrelated note, no keyword\n"
+        "Mentions ora-unratified-task but never the magic word.\n")
+expect("ratify: named in recent RATIFIED entry",
+       rmp.ratified_drops(_LOG, ["scheduled-task-integrity-guard"], _TODAY)
+       == {"scheduled-task-integrity-guard"})
+expect("ratify: outside 14d window -> not ratified",
+       rmp.ratified_drops(_LOG, ["ora-ancient-task"], _TODAY) == set())
+expect("ratify: entry lacks RATIFIED token -> not ratified",
+       rmp.ratified_drops(_LOG, ["ora-unratified-task"], _TODAY) == set())
+expect("ratify: id absent from log -> not ratified",
+       rmp.ratified_drops(_LOG, ["ora-never-mentioned"], _TODAY) == set())
+expect("ratify: empty/garbage log -> empty set",
+       rmp.ratified_drops("", ["x"], _TODAY) == set()
+       and rmp.ratified_drops("\n### not-a-date (RATIFIED) x\nx\n", ["x"], _TODAY) == set())
+expect("ratify: empty id never matches",
+       rmp.ratified_drops(_LOG, [""], _TODAY) == set())
+
 # --- summary ---------------------------------------------------------------------------
 passed = sum(1 for ok, _ in results if ok)
 print("\nregistry-membership-probe tests: %d/%d passed" % (passed, len(results)))
