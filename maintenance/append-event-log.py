@@ -52,6 +52,15 @@ def insert_newest(content, entry):
 
 
 def main(argv=None):
+    # Windows consoles default to cp1252; entries routinely contain em-dashes / arrows / box
+    # glyphs. Reconfigure the std streams to UTF-8 so the success + diagnostic prints never raise
+    # UnicodeEncodeError AFTER the atomic write has already succeeded (which would mask a good
+    # append with a non-zero exit and break `&&` caller chains).
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+        except Exception:
+            pass
     ap = argparse.ArgumentParser(description="Append a newest-first event_log entry.")
     ap.add_argument("--entry-file", help="file holding the entry markdown; stdin if omitted")
     ap.add_argument("--log", default=LOG, help="target log (default: canonical event_log.md)")
