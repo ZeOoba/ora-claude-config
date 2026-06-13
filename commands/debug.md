@@ -17,5 +17,8 @@ Use when something is broken. Run this chain; do not guess-fix.
 - Hook blocking a tool call → check PreToolUse in `settings.json`.
 - Wrong cwd · skill frontmatter · node `--env-file` won't override an already-set empty var (the agent-harness shadow footgun).
 
+## Safe rebase (stacked branches)
+Before any `git rebase --onto <long-lived>` (or any rebase onto a long-lived branch like main): **`git fetch` first and rebase onto `origin/<branch>`, never the local ref** — a stale local main whose base was squash-merged silently DROPS the merged feature. After the rebase and **BEFORE any force-push**, verify intact: full test count unchanged-or-higher **AND** a sentinel file from the parent feature still present (`git cat-file -e HEAD:<path>`). If either check fails, STOP — do not force-push.
+
 ## Document
 Recurring failure mode → `memory/event_log.md`; MCP issue → `memory/tech.md`.
