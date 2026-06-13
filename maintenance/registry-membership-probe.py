@@ -13,6 +13,9 @@ versus the prior snapshot.
 Exit 0 = no drops (snapshot refreshed). Exit 1 = [ACTION] drop detected.
 The snapshot is refreshed even on a drop, so each drop alarms exactly once;
 re-register the task or ratify the retirement (and note it in event_log.md).
+Drops named in a recent (<=14d) event_log.md entry containing 'RATIFIED' are
+auto-ratified: reported INFO, exit stays 0 (2026-06-11 optimization -- planned
+retirements no longer raise a one-time false [ACTION]).
 One-time fireAt tasks are ignored -- they expire by design.
 
 Run daily from the ora-setup-audit STEP 1 block. First run writes a baseline.
@@ -38,6 +41,34 @@ LOG = os.path.join(STATE_DIR, "registry-membership.log")
 SESSION_CONTEXT = os.path.join(os.path.expanduser("~"), ".claude", "session-context.md")
 BEGIN_MARKER = "<!--BEGIN-GENERATED-FLEET-->"
 END_MARKER = "<!--END-GENERATED-FLEET-->"
+
+# Auto-ratification of planned retirements (2026-06-11): a drop is ratified iff a
+# recent event_log entry both contains the literal token 'RATIFIED' and names the
+# task id. Conservative by design -- anything unparseable is NOT ratified.
+EVENT_LOG = os.path.join(os.path.expanduser("~"), ".claude", "projects",
+                         "C--Users-Owner-OneDrive---Oxford-Capital-Partners--1-",
+                         "memory", "event_log.md")
+RATIFY_WINDOW_DAYS = 14
+
+
+def ratified_drops(log_text, ids, today, window_days=RATIFY_WINDOW_DAYS):
+    """Subset of `ids` ratified by a recent event_log entry.
+
+    An entry = a '### YYYY-MM-DD ...' header section. Requires the literal
+    token 'RATIFIED' (case-sensitive) AND the exact task id in the same entry,
+    with the entry dated within `window_days` of `today`. Pure function."""
+    out = set()
+    for chunk in log_text.split("\n### ")[1:]:
+        try:
+            d = datetime.date.fromisoformat(chunk[:10])
+        except ValueError:
+            continue
+        if (today - d).days > window_days or "RATIFIED" not in chunk:
+            continue
+        for i in ids:
+            if i and i in chunk:
+                out.add(i)
+    return out
 
 
 def discover_store(store):
@@ -192,12 +223,27 @@ def main():
               "fleet may be dark or the store moved.")
         bad = True
     if drops:
+        ratified = set()
+        try:
+            if os.path.isfile(EVENT_LOG):
+                all_ids = sorted({i for ids in drops.values() for i in ids})
+                ratified = ratified_drops(
+                    open(EVENT_LOG, encoding="utf-8").read(), all_ids,
+                    datetime.date.today())
+        except Exception as e:  # fail-loud: an unreadable log ratifies nothing
+            print(f"  WARN ratification check skipped: {e}")
         for label, ids in drops.items():
-            print(f"  [ACTION] DROPPED from {label} registry: {', '.join(ids)} -- "
-                  "re-register on the owning surface or ratify the retirement "
-                  "(log to event_log.md). This is the 2026-06-09 silent-drop "
-                  "failure mode.")
-        bad = True
+            rat = [i for i in ids if i in ratified]
+            hot = [i for i in ids if i not in ratified]
+            if rat:
+                print(f"  INFO ratified drop from {label} (event_log RATIFIED "
+                      f"entry <= {RATIFY_WINDOW_DAYS}d): {', '.join(rat)}")
+            if hot:
+                print(f"  [ACTION] DROPPED from {label} registry: {', '.join(hot)} -- "
+                      "re-register on the owning surface or ratify the retirement "
+                      "(log to event_log.md). This is the 2026-06-09 silent-drop "
+                      "failure mode.")
+                bad = True
     if not bad:
         print("  OK -- membership unchanged.")
     return 1 if bad else 0

@@ -1,5 +1,5 @@
 {
- "ts": "2026-06-11T16:04:23",
+ "ts": "2026-06-13T06:37:13",
  "fleets": {
   "cc": [
    "ora-am-brief",
@@ -10,6 +10,7 @@
    "ora-dormant-thread-revival",
    "ora-health-guard",
    "ora-master-workbook-ingest",
+   "ora-open-sessions-board",
    "ora-pm-ledger",
    "ora-setup-audit",
    "ora-skill-text-audit",
