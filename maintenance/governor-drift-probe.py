@@ -173,6 +173,92 @@ RE_LTV_CORRECTION = re.compile(
 RE_DSCR_CORRECTION = re.compile(
     r"corrected[^0-9\n]{0,20}from\s+[0-9]+\.[0-9]+\s*[x×]?\s*(?:\bto\b|→|->|=>)\s*"
     + re.escape(CANON_DSCR) + r"(?![0-9])", re.I)  # (?![0-9]) not \b: a trailing x ("→ 1.25x") must still suppress
+# --- CODE-AWARE governor check (2026-06-14) -------------------------------------------------
+# Prose proximity is WRONG for code: a camelCase identifier (`dscrFloor`) embeds the keyword,
+# and the real governor is the ENFORCEMENT COMPARISON, not an error-string. `.ts/.tsx/.js` files
+# are routed to scan_code() (NOT scan_line) -- so the identifier-substring false-positive class
+# (e.g. the `> 3` sanity ceiling reading as a 3.0 DSCR threshold) cannot occur, and a drifted
+# CONSTANT (`dscrFloor < 1.10`) is caught directly instead of only-if-the-message-also-changed.
+# Keyed on identifier + the floor/ceiling-defining operator. Capital config is unit-interval:
+# DSCR floor literal == 1.25, LTV ceiling literal == 0.40 (NOT 40). The legit sanity ceiling
+# `dscrFloor > 3` is ignored; an inverted floor `dscrFloor > <=2>` (the governor range, not a
+# sane ceiling) IS flagged.
+# The acquisition governor lives in exactly ONE code file (CLAUDE.md §4). scan_code is routed ONLY
+# to that file by main(): the identifiers dscrFloor/ltvCeiling are OVERLOADED -- conditions.ts reuses
+# them for operational ALERT thresholds at different LEGIT values (e.g. dscrFloor: 1.1, ltvCeiling:
+# 0.65), so a global check would false-positive. Number literal allows leading-dot (.40) -- a valid
+# TS form. Capital config is unit-interval: DSCR floor == 1.25, LTV ceiling == 0.40 (NOT 40).
+GOVERNOR_CODE_FILES = {"capital-config.ts"}
+_NUM = r"(?:[0-9]*\.[0-9]+|[0-9]+)"
+# Enforcement-GUARD forms: identifier <op> literal  (`if (next.dscrFloor < 1.25)`).
+RE_CODE_DSCR = re.compile(r"\bdscrFloor\s*(<=?|>=?)\s*(" + _NUM + r")")
+RE_CODE_LTV = re.compile(r"\bltvCeiling\s*(<=?|>=?)\s*(" + _NUM + r")")
+# SEED-literal forms: `dscrFloor: 1.25` (the ratified CAPITAL_CONFIG default -- the LIVE governor
+# value merged into every write). The type annotation `dscrFloor: number` and an expression RHS
+# (`?? current.x`) do NOT match -- _NUM requires a digit/dot literal.
+RE_CODE_DSCR_ASSIGN = re.compile(r"\bdscrFloor\s*:\s*(" + _NUM + r")")
+RE_CODE_LTV_ASSIGN = re.compile(r"\bltvCeiling\s*:\s*(" + _NUM + r")")
+# PRESENCE (deletion guard, used in main): any NUMERIC governor declaration (seed OR guard). The
+# bare interface type `dscrFloor: number` must NOT satisfy it, else deleting the value while keeping
+# the type would mask the deletion -- so a numeric literal is required.
+RE_CODE_DSCR_ANY = re.compile(r"\bdscrFloor\s*(?::|<=?|>=?)\s*" + _NUM)
+RE_CODE_LTV_ANY = re.compile(r"\bltvCeiling\s*(?::|<=?|>=?)\s*" + _NUM)
+CANON_DSCR_NUM = 1.25
+CANON_LTV_NUM = 0.40
+
+def scan_code(text):
+    """Validate the acquisition-governor ENFORCEMENT CONSTANTS in the GOVERNOR SOURCE FILE
+    (capital-config.ts) -- not prose. main() routes ONLY that file here (see GOVERNOR_CODE_FILES:
+    the identifiers are overloaded, so a global check would false-positive on conditions.ts alert
+    thresholds). Numeric equality: 0.4 == 0.40, 1.250 == 1.25, leading-dot .40 == 0.40.
+
+    Covers: the ratified SEED literal (`dscrFloor: 1.25`, `ltvCeiling: 0.40`) AND the write-time
+    GUARD (`dscrFloor < 1.25`, `ltvCeiling > 0.40`); a changed literal, an operator flip (<=/>=), an
+    inverted guard (`dscrFloor > 1.25`). The `> 3` sanity ceiling is exempt. Whole-file DELETION of a
+    governor declaration is caught separately in main() (presence guard).
+
+    Adversarial residuals (single-line regex, stdlib-only -- a full TS AST is out of scope; low risk
+    given the scope is ONE small controlled file using identifier-first literal forms): a renamed
+    identifier; a constant via a variable (`< MIN`) or scientific notation (`1.25e-1` / `4e-1`); a
+    Yoda comparison (`1.10 > dscrFloor`); a declaration split across lines or broken by a comment."""
+    out = []
+    for i, raw in enumerate(text.splitlines(), 1):
+        # SEED literals -- the ratified default value; must equal canonical.
+        for m in RE_CODE_DSCR_ASSIGN.finditer(raw):
+            if float(m.group(1)) != CANON_DSCR_NUM:
+                out.append((i, "DSCR floor seed constant %s != canonical %s" % (m.group(1), CANON_DSCR),
+                            raw.strip()[:120]))
+        for m in RE_CODE_LTV_ASSIGN.finditer(raw):
+            if float(m.group(1)) != CANON_LTV_NUM:
+                out.append((i, "LTV ceiling seed constant %s != canonical %s" % (m.group(1), CANON_LTV_NUM),
+                            raw.strip()[:120]))
+        # ENFORCEMENT guards.
+        for m in RE_CODE_DSCR.finditer(raw):
+            op, num = m.group(1), float(m.group(2))
+            if op in ("<", "<="):  # the FLOOR guard: refuse when floor is below the canonical min
+                if op == "<=":
+                    out.append((i, "DSCR floor guard uses '<=' (direction drift; expected '< %s')"
+                                % CANON_DSCR, raw.strip()[:120]))
+                elif num != CANON_DSCR_NUM:
+                    out.append((i, "DSCR floor constant %s != canonical %s" % (m.group(2), CANON_DSCR),
+                                raw.strip()[:120]))
+            elif num <= 2:  # '>'/'>=' in the governor range = inverted/relaxed floor; '> 3' sanity exempt
+                out.append((i, "DSCR floor compared with '%s %s' -- inverted/relaxed floor"
+                            % (op, m.group(2)), raw.strip()[:120]))
+        for m in RE_CODE_LTV.finditer(raw):
+            op, num = m.group(1), float(m.group(2))
+            if op in (">", ">="):  # the CEILING guard: refuse when ceiling is above the canonical max
+                if op == ">=":
+                    out.append((i, "LTV ceiling guard uses '>=' (direction drift; expected '> %s')"
+                                % CANON_LTV_NUM, raw.strip()[:120]))
+                elif num != CANON_LTV_NUM:
+                    out.append((i, "LTV ceiling constant %s != canonical %s" % (m.group(2), CANON_LTV_NUM),
+                                raw.strip()[:120]))
+            elif num >= 0.2:  # '<'/'<=' in range = inverted/relaxed ceiling
+                out.append((i, "LTV ceiling compared with '%s %s' -- inverted/relaxed ceiling"
+                            % (op, m.group(2)), raw.strip()[:120]))
+    return out
+# --------------------------------------------------------------------------------------------
 # Governor-declaration signals. The equality checks fire ONLY on lines that actually
 # DECLARE the governor -- not on prose that merely cites a deal's DSCR or current LTV.
 GOV_KEYWORDS = ("governor", "hard filter", "hard screen", "hard acquisition",
@@ -303,11 +389,34 @@ def main():
         for path in iter_files(root, exts):
             if os.path.abspath(path) == self_path or os.path.basename(path) in skip_names:
                 continue
+            low_path = path.lower().replace("\\", "/")
+            is_code = low_path.endswith((".ts", ".tsx", ".js"))
+            is_governor_code = os.path.basename(low_path) in GOVERNOR_CODE_FILES
+            # brain data snapshots hold per-DEAL dscr/ltv VALUES, not governor declarations --
+            # skip them so a deal landing at 1.75 / 0.54 never reads as drift.
+            is_data_json = low_path.endswith(".json") and "/data/" in low_path
             try:
+                if is_data_json:
+                    continue
                 with open(path, "r", encoding="utf-8", errors="replace") as fh:
-                    for i, raw in enumerate(fh, 1):
-                        for reason in scan_line(raw):
-                            findings.append((path, i, reason, raw.strip()[:120]))
+                    if is_governor_code:
+                        # The ONE governor source file: validate enforcement CONSTANTS directly.
+                        content = fh.read()
+                        for ln, reason, txt in scan_code(content):
+                            findings.append((path, ln, reason, txt))
+                        # deletion guard: the governor file MUST carry a numeric declaration of each.
+                        if not RE_CODE_DSCR_ANY.search(content):
+                            findings.append((path, 0, "DSCR floor governor declaration ABSENT (deleted?)", ""))
+                        if not RE_CODE_LTV_ANY.search(content):
+                            findings.append((path, 0, "LTV ceiling governor declaration ABSENT (deleted?)", ""))
+                    elif is_code:
+                        # other code files: dscrFloor/ltvCeiling here are NOT the governor (overloaded
+                        # identifiers -- e.g. conditions.ts alert thresholds) -- never governor-checked.
+                        pass
+                    else:
+                        for i, raw in enumerate(fh, 1):
+                            for reason in scan_line(raw):
+                                findings.append((path, i, reason, raw.strip()[:120]))
                 scanned += 1
             except Exception as e:
                 # fail loud per I5 -- a file we cannot read is a probe error, not a silent skip

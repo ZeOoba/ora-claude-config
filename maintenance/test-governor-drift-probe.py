@@ -356,6 +356,89 @@ def test_incidental_figures_not_flagged_unit():
     print("  PASS test_incidental_figures_not_flagged_unit")
 
 
+def test_scan_code_canonical_clean_unit():
+    """Code-aware path (2026-06-14): the real capital-config ENFORCEMENT CONSTANTS are clean, and
+    the `dscrFloor > 3` sanity ceiling no longer reads as a 3.0 DSCR threshold (the FP class is gone
+    because code is routed to scan_code, not the prose scan_line). Numeric equality: 0.4 == 0.40."""
+    m = _load_probe_module()
+    code = "\n".join([
+        "export const CAPITAL_CONFIG = {",        # the real seed object (CAPITAL_CONFIG)
+        "  dscrFloor: 1.25,",
+        "  ltvCeiling: 0.40,",
+        "} as const;",
+        "  dscrFloor: number;",                    # interface type annotation -- must NOT flag
+        "  if (next.dscrFloor < 1.25) { throw new Error('capital-config: DSCR floor below 1.25 -- refused'); }",
+        "  if (next.ltvCeiling > 0.40) { throw new Error('capital-config: LTV ceiling above 0.40 -- refused'); }",
+        "  if (next.dscrFloor > 3) { throw new Error('exceeds sane ceiling 3.0 -- likely a fat-finger'); }",
+        "    dscrFloor: update.dscrFloor ?? current.dscrFloor,",  # expression RHS -- must NOT flag
+    ])
+    assert m.scan_code(code) == [], "canonical seed + guard + sanity ceiling must be clean; got %r" % m.scan_code(code)
+    assert m.scan_code("if (next.ltvCeiling > 0.4) {}") == [], "0.4 must equal 0.40 (no drift)"
+    assert m.scan_code("if (next.dscrFloor < 1.250) {}") == [], "1.250 must equal 1.25 (no drift)"
+    assert m.scan_code("  ltvCeiling: .40,") == [], "leading-dot .40 must equal 0.40 (no drift)"
+    print("  PASS test_scan_code_canonical_clean_unit")
+
+
+def test_scan_code_constant_drift_flags_unit():
+    """Closes the latent FALSE NEGATIVE: a drifted enforcement CONSTANT flags even if no prose /
+    error-string changes (the old probe only validated the message)."""
+    m = _load_probe_module()
+    assert any("DSCR" in r for _, r, _ in m.scan_code("if (next.dscrFloor < 1.10) {}")), \
+        "drifted DSCR floor 1.10 must flag"
+    assert any("LTV" in r for _, r, _ in m.scan_code("if (next.ltvCeiling > 0.50) {}")), \
+        "drifted LTV ceiling 0.50 must flag"
+    print("  PASS test_scan_code_constant_drift_flags_unit")
+
+
+def test_scan_code_direction_and_inversion_flags_unit():
+    """Operator flips and inverted guards are SEMANTIC drift -- must flag; the legit `> 3` sanity
+    ceiling must NOT be mistaken for an inverted floor."""
+    m = _load_probe_module()
+    assert m.scan_code("if (next.dscrFloor <= 1.25) {}"), "dscr '<=' direction drift must flag"
+    assert m.scan_code("if (next.ltvCeiling >= 0.40) {}"), "ltv '>=' direction drift must flag"
+    assert m.scan_code("if (next.dscrFloor > 1.25) {}"), "inverted dscr floor (>1.25) must flag"
+    assert m.scan_code("if (next.ltvCeiling < 0.40) {}"), "inverted ltv ceiling (<0.40) must flag"
+    assert m.scan_code("if (next.dscrFloor > 3) {}") == [], "sanity ceiling > 3 must stay clean"
+    print("  PASS test_scan_code_direction_and_inversion_flags_unit")
+
+
+def test_scan_code_ignores_deal_values_unit():
+    """scan_code keys ONLY on the enforcement identifiers (dscrFloor / ltvCeiling), so per-deal
+    dscr/ltv VALUES -- the latent JSON-sentinel FP (a deal at exactly 1.75) -- never flag."""
+    m = _load_probe_module()
+    assert m.scan_code('{ "dscr": 1.75, "ltv": 0.54 }') == [], "json deal values must not flag"
+    assert m.scan_code("const dscr = 1.10; const ltv = 0.65;") == [], "local deal vars must not flag"
+    print("  PASS test_scan_code_ignores_deal_values_unit")
+
+
+def test_scan_code_seed_literal_drift_flags_unit():
+    """BLOCKER fix (adversarial review 2026-06-14): the ratified SEED literal in CAPITAL_CONFIG --
+    `dscrFloor: 1.25,` / `ltvCeiling: 0.40,` -- IS the live governor value (a one-char edit there
+    weakens the governor). The comparison-only check missed it; the seed (colon) check must flag it.
+    Leading-dot form too. NOTE: scan_code flags conditions.ts's legit `dscrFloor: 1.1,` BY DESIGN --
+    the FP is avoided by main() ROUTING scan_code ONLY to the governor file, verified by the E2E."""
+    m = _load_probe_module()
+    assert any("DSCR" in r for _, r, _ in m.scan_code("  dscrFloor: 1.00,")), "seed DSCR 1.00 must flag"
+    assert any("LTV" in r for _, r, _ in m.scan_code("  ltvCeiling: 0.75,")), "seed LTV 0.75 must flag"
+    assert any("LTV" in r for _, r, _ in m.scan_code("  ltvCeiling: .65,")), "leading-dot seed .65 must flag"
+    # proof the check is LIVE (so the E2E green => routing, not a dead check, protects conditions.ts):
+    assert m.scan_code("  dscrFloor: 1.1,"), "scan_code must flag a non-canonical seed (live check)"
+    print("  PASS test_scan_code_seed_literal_drift_flags_unit")
+
+
+def test_scan_code_presence_regexes_unit():
+    """Deletion guard (main): the presence regexes match a NUMERIC governor declaration (seed OR
+    guard) but NOT the bare interface type annotation -- so deleting the value while keeping the
+    type does not mask the deletion."""
+    m = _load_probe_module()
+    assert m.RE_CODE_DSCR_ANY.search("  dscrFloor: 1.25,"), "seed satisfies presence"
+    assert m.RE_CODE_DSCR_ANY.search("if (next.dscrFloor < 1.25) {"), "guard satisfies presence"
+    assert not m.RE_CODE_DSCR_ANY.search("  dscrFloor: number;"), "type annotation must NOT satisfy presence"
+    assert m.RE_CODE_LTV_ANY.search("  ltvCeiling: 0.40,"), "ltv seed satisfies presence"
+    assert not m.RE_CODE_LTV_ANY.search("  ltvCeiling: number;"), "ltv type annotation must NOT satisfy presence"
+    print("  PASS test_scan_code_presence_regexes_unit")
+
+
 def test_event_log_excluded_e2e():
     """End-to-end: real tree is clean AND no finding cites event_log.md."""
     r = run_probe()
@@ -387,6 +470,12 @@ def main():
     test_no_x_pivot_decoy_flags_via_canonical_left_operand_unit()
     test_canonical_decoy_does_not_hide_ltv_drift_unit()
     test_incidental_figures_not_flagged_unit()
+    test_scan_code_canonical_clean_unit()
+    test_scan_code_constant_drift_flags_unit()
+    test_scan_code_direction_and_inversion_flags_unit()
+    test_scan_code_ignores_deal_values_unit()
+    test_scan_code_seed_literal_drift_flags_unit()
+    test_scan_code_presence_regexes_unit()
     test_event_log_excluded_e2e()
     print("ALL GOVERNOR-PROBE TESTS PASS")
 
