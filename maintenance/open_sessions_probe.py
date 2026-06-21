@@ -19,6 +19,7 @@ Usage:
 """
 import argparse
 import glob
+import itertools
 import json
 import os
 import re
@@ -160,7 +161,7 @@ def _head_lines(path, nbytes=262_144):
         if len(data.encode("utf-8", errors="replace")) >= nbytes and lines:
             lines = lines[:-1]  # drop partial last line
         return lines
-    except OSError:
+    except (OSError, MemoryError):
         return []
 
 
@@ -175,8 +176,52 @@ def _tail_lines(path):
         if offset > 0 and lines:
             lines = lines[1:]  # drop partial first line
         return lines
-    except OSError:
+    except (OSError, MemoryError):
         return []
+
+
+# Session metadata files carry a ~540 KB `remoteMcpServersConfig` blob; fully
+# json.load-ing 1000+ of them explodes the heap on a RAM-pinched box. We need
+# only a handful of top-level scalars, all of which sit BEFORE that blob — so
+# read the text once and regex them out, skipping the heavy parse entirely.
+def _grab_str(text, key):
+    m = re.search(r'"' + key + r'"\s*:\s*"((?:[^"\\]|\\.)*)"', text)
+    if not m:
+        return None
+    try:
+        return json.loads('"' + m.group(1) + '"')
+    except ValueError:
+        return None
+
+
+def _grab_int(text, key):
+    m = re.search(r'"' + key + r'"\s*:\s*(-?\d+)', text)
+    return int(m.group(1)) if m else None
+
+
+def _grab_bool(text, key):
+    m = re.search(r'"' + key + r'"\s*:\s*(true|false)', text)
+    return (m.group(1) == "true") if m else None
+
+
+def _load_meta_lite(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    except (OSError, MemoryError):
+        return None
+    cut = text.find('"remoteMcpServersConfig"')
+    if cut > 0:
+        text = text[:cut]  # everything we need precedes the giant MCP blob
+    return {
+        "sessionId": _grab_str(text, "sessionId"),
+        "cliSessionId": _grab_str(text, "cliSessionId"),
+        "cwd": _grab_str(text, "cwd"),
+        "title": _grab_str(text, "title"),
+        "createdAt": _grab_int(text, "createdAt"),
+        "lastActivityAt": _grab_int(text, "lastActivityAt"),
+        "isArchived": _grab_bool(text, "isArchived"),
+    }
 
 
 def _parse_jsonl(lines):
@@ -209,12 +254,8 @@ def _cc_transcript(meta):
 
 def _iter_store(store, surface):
     for meta_path in glob.glob(os.path.join(store, "*", "*", "local_*.json")):
-        try:
-            with open(meta_path, encoding="utf-8") as f:
-                meta = json.load(f)
-        except (OSError, ValueError):
-            continue
-        if not isinstance(meta, dict) or meta.get("isArchived"):
+        meta = _load_meta_lite(meta_path)
+        if not meta or meta.get("isArchived"):
             continue
         yield meta_path, meta, surface
 
@@ -223,8 +264,8 @@ def collect(days):
     now_ms = time.time() * 1000
     cutoff = now_ms - days * 86_400_000
     rows = []
-    for meta_path, meta, surface in (
-            list(_iter_store(CC_STORE, "CODE")) + list(_iter_store(LAMS_STORE, "COWORK"))):
+    for meta_path, meta, surface in itertools.chain(
+            _iter_store(CC_STORE, "CODE"), _iter_store(LAMS_STORE, "COWORK")):
         last_ms = meta.get("lastActivityAt") or meta.get("createdAt") or 0
         if last_ms < cutoff:
             continue
