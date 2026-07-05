@@ -15,7 +15,7 @@ import json
 import os
 import sys
 
-DEFAULT_SESSIONS_DIR = "C:/Users/Owner/.claude/hooks/sessions"
+DEFAULT_SESSIONS_DIR = os.path.expanduser("~/.claude/hooks/sessions")
 
 CODE_EXTS = {
     ".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".go", ".rs",

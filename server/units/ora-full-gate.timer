@@ -1,0 +1,14 @@
+# ora-full-gate.timer -- nightly 02:30 LOCAL time (quiet window: after any
+# late-evening pushes, before the 05:30/06:00 morning jobs). Local TZ must be
+# America/New_York (provision.sh). Persistent=true: a gate missed while the
+# box was down runs at next boot.
+
+[Unit]
+Description=ORA nightly full-gate timer (02:30 local)
+
+[Timer]
+OnCalendar=02:30
+Persistent=true
+
+[Install]
+WantedBy=timers.target
