@@ -1,0 +1,18 @@
+# ora-full-gate.service -- nightly FULL oxford-command-center gate
+# (governance, typecheck, lint, test, reconcile, warehouse:verify,
+# warehouse:drift). The data-bound steps read WORKBOOK_PATH/FINANCIALS_DIR
+# from ora.env via EnvironmentFile.
+# SKIP semantics: ConditionPathExists cannot dereference a path stored IN an
+# EnvironmentFile variable, so run-full-gate.sh performs the check itself and
+# exits 0 with a SKIP message when the data corpus is absent (EOS doctrine:
+# productivity gates fail open). A failed unit therefore always means the
+# gate itself is red.
+# Install: provision.sh copies this to ~/.config/systemd/user/.
+
+[Unit]
+Description=ORA nightly full gate (oxford-command-center npm run gate)
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/ora/ora.env
+ExecStart=/usr/bin/bash %h/.claude/server/run-full-gate.sh

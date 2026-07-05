@@ -28,6 +28,9 @@
 !/maintenance/
 !/docs/
 !/ora-ops-plugin/
+# server/ is the Linux server provisioning kit. Only secrets.env.EXAMPLE is
+# tracked -- the real env lives at ~/.config/ora/ora.env, outside this repo.
+!/server/
 
 # 3) Re-ignore secrets, caches & transient state INSIDE opted-in dirs
 hooks/confidential-terms.json

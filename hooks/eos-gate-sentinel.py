@@ -14,7 +14,7 @@ import os
 import re
 import sys
 
-DEFAULT_SESSIONS_DIR = "C:/Users/Owner/.claude/hooks/sessions"
+DEFAULT_SESSIONS_DIR = os.path.expanduser("~/.claude/hooks/sessions")
 
 TEST_RE = re.compile(
     r"pytest|vitest|npm test|npm run gate|go test|cargo test|\btest-",

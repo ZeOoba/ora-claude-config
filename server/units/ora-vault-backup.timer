@@ -1,0 +1,14 @@
+# ora-vault-backup.timer -- daily 18:05 LOCAL time (5 minutes after the old
+# Windows 18:00 task so the two writers never fire in the same minute during
+# the cutover overlap). Local TZ must be America/New_York (provision.sh).
+# Persistent=true: a backup missed while the box was down runs at next boot.
+
+[Unit]
+Description=ORA BrainVault backup timer (daily 18:05 local)
+
+[Timer]
+OnCalendar=18:05
+Persistent=true
+
+[Install]
+WantedBy=timers.target

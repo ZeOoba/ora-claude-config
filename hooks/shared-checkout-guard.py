@@ -12,7 +12,10 @@ SAFETY INVARIANT: warn-only. It NEVER denies a tool call, and the whole body is
 wrapped in try/except -- on ANY error it prints nothing and exits 0 (ALLOW).
 A bug here must never block or slow an edit.
 
-Stdlib only. ASCII-only. Windows (`python`).
+SHARED_CHECKOUT_REPOS override is split on os.pathsep: ';' on Windows,
+':' on Linux (e.g. SHARED_CHECKOUT_REPOS=~/repoA:~/repoB).
+
+Stdlib only. ASCII-only. Cross-platform (`python3`/`python`).
 """
 
 import json
@@ -20,11 +23,17 @@ import os
 import subprocess
 import sys
 
-DEFAULT_REPOS = [
-    "C:/Users/Owner/oxford-command-center",
-    "C:/Users/Owner/ora-skills",
-]
-DEFAULT_SESSIONS_DIR = "C:/Users/Owner/.claude/hooks/sessions"
+if os.name == "nt":
+    DEFAULT_REPOS = [
+        "C:/Users/Owner/oxford-command-center",
+        "C:/Users/Owner/ora-skills",
+    ]
+else:
+    DEFAULT_REPOS = [
+        os.path.expanduser("~/oxford-command-center"),
+        os.path.expanduser("~/ora-skills"),
+    ]
+DEFAULT_SESSIONS_DIR = os.path.expanduser("~/.claude/hooks/sessions")
 
 
 def _norm(p):

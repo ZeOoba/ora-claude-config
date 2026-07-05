@@ -14,7 +14,7 @@ import json
 import os
 import sys
 
-DEFAULT_SESSIONS_DIR = "C:/Users/Owner/.claude/hooks/sessions"
+DEFAULT_SESSIONS_DIR = os.path.expanduser("~/.claude/hooks/sessions")
 
 REMINDER = (
     "[Engineering OS] No test/gate recorded this session - "
