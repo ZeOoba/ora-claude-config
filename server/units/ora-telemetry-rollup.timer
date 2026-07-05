@@ -1,0 +1,14 @@
+# ora-telemetry-rollup.timer -- weekly, Monday 05:30 LOCAL time (matches the
+# old Windows 'ORA EOS Health' schtask slot). Local TZ must be
+# America/New_York (provision.sh). Persistent=true: a run missed while the
+# box was down fires at next boot.
+
+[Unit]
+Description=ORA EOS telemetry rollup timer (Mon 05:30 local)
+
+[Timer]
+OnCalendar=Mon 05:30
+Persistent=true
+
+[Install]
+WantedBy=timers.target

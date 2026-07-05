@@ -13,9 +13,28 @@ Always exits 0 — never blocks a tool call.
 """
 import sys, os, json, datetime
 
-STATE        = os.environ.get("ORA_FLEET_STATE") or r"C:\Users\Owner\.claude\obsidian-fleet-mirror\session-state.json"
-OUT          = os.environ.get("ORA_OBSIDIAN_OUT") or r"C:\Users\Owner\Obsidian\BrainVault\_Claude\Claude Session Tasks.md"
-SESSIONS_DIR = os.environ.get("ORA_OBSIDIAN_SESSIONS") or r"C:\Users\Owner\Obsidian\BrainVault\_Claude\Sessions"
+def _default_paths():
+    # Per-OS defaults; ORA_FLEET_STATE / ORA_OBSIDIAN_OUT / ORA_OBSIDIAN_SESSIONS
+    # env overrides (below) always win over these.
+    if os.name == "nt":
+        return (r"C:\Users\Owner\.claude\obsidian-fleet-mirror\session-state.json",
+                r"C:\Users\Owner\Obsidian\BrainVault\_Claude\Claude Session Tasks.md",
+                r"C:\Users\Owner\Obsidian\BrainVault\_Claude\Sessions")
+    state = os.path.expanduser("~/.claude/obsidian-fleet-mirror/session-state.json")
+    if os.path.isdir(os.path.expanduser("~/BrainVault")):
+        out = os.path.expanduser("~/BrainVault/_Claude/Claude Session Tasks.md")
+        sessions = os.path.expanduser("~/BrainVault/_Claude/Sessions")
+    else:
+        # No vault checkout on this box -> mirror locally (synced by the backup path).
+        out = os.path.expanduser("~/.claude/obsidian-fleet-mirror/vault/Claude Session Tasks.md")
+        sessions = os.path.expanduser("~/.claude/obsidian-fleet-mirror/vault/Sessions")
+    return state, out, sessions
+
+
+_STATE_DEFAULT, _OUT_DEFAULT, _SESSIONS_DEFAULT = _default_paths()
+STATE        = os.environ.get("ORA_FLEET_STATE") or _STATE_DEFAULT
+OUT          = os.environ.get("ORA_OBSIDIAN_OUT") or _OUT_DEFAULT
+SESSIONS_DIR = os.environ.get("ORA_OBSIDIAN_SESSIONS") or _SESSIONS_DEFAULT
 
 FEED_CAP        = 20
 SESSION_PRUNE_H = 6

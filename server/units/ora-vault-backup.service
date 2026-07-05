@@ -1,0 +1,15 @@
+# ora-vault-backup.service -- BrainVault git backup (Linux successor to the
+# Windows vault-backup.ps1 scheduled task). The script itself lives in the
+# BrainVault repo (vault-backup.sh) and owns the commit/pull/push logic.
+# ora.env is loaded for optional GIT_AUTHOR_NAME/EMAIL overrides -- leave
+# those COMMENTED in ora.env unless set to non-empty values (an empty ident
+# breaks git commit).
+# Install: provision.sh copies this to ~/.config/systemd/user/.
+
+[Unit]
+Description=ORA BrainVault git backup (commit + push)
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/ora/ora.env
+ExecStart=%h/BrainVault/vault-backup.sh
