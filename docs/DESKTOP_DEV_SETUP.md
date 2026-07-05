@@ -56,7 +56,7 @@ design never calls `Set-ExecutionPolicy` at any scope).
 | Parameter | Default | When to use |
 |---|---|---|
 | `-ProjectPath` | `C:\Users\Owner\oxford-command-center` | Override only if the repo genuinely lives elsewhere. |
-| `-SkipInstall` | off | Verify-only mode: probes and reports everything, runs zero winget installs and zero `npm install`/`npm ci` (still runs the read-only checks). Use for a quick health check on a box you don't want to change. |
+| `-SkipInstall` | off | True verify-only / no-write pass: runs zero winget installs, zero `npm install`/`npm ci`, skips the gate smoke test, AND suppresses every mutation -- `git config --global core.longpaths/autocrlf/credential.helper` and the elevated `HKLM ... LongPathsEnabled` write all become `would set X` INFO rows instead of executing. Only read-only probes run. Use for a health check on a box you genuinely do not want to change. |
 | `-WhatIfInstall` | off | Logs the exact `winget install` command line it would run for Node/Git instead of executing it. Use to preview what an install would do. |
 | `-StartDevServer` | off | Only when set, the script launches `npm run dev` for a bounded health check against `http://localhost:8911` (Brain Server) and `http://localhost:5273` (web), then **always** stops what it launched. Use after a clean install to confirm the app actually comes up end-to-end. |
 | `-BrainPort` | 8911 | Pre-flighted always; only polled under `-StartDevServer`. |
@@ -94,7 +94,9 @@ Typical usage:
    `core.autocrlf=false` only if currently unset or `true` (an explicit `input`/`false`
    is left alone), `credential.helper=manager` only if empty and a GCM binary is
    found on disk. Also checks (and, if elevated, sets) the machine-wide
-   `HKLM\...\FileSystem\LongPathsEnabled` registry value.
+   `HKLM\...\FileSystem\LongPathsEnabled` registry value. Under `-SkipInstall` all of
+   these writes are suppressed and reported as `would set X` INFO rows -- the step
+   becomes fully read-only.
 7. **Project locate** (HARD prerequisite) -- the project directory and its
    `package.json` must both exist. WARNs loudly if the resolved path is under a
    OneDrive-synced folder (dehydration can corrupt `node_modules`), if the directory
@@ -103,7 +105,7 @@ Typical usage:
 8. **`.claude\settings.json` read-only guard** -- hashes the file, scans for
    unresolved merge-conflict markers, and confirms it parses as JSON. The file is
    never written, reformatted, or round-tripped -- only read. A missing file is a
-   WARN (`git checkout -- .claude/settings.json` restores it); a corrupt file
+   WARN (`git -C C:\Users\Owner\oxford-command-center checkout -- .claude/settings.json` restores it from the project checkout); a corrupt file
    is a HARD FAIL.
 9. **`package.json` parse** -- reads `engines.node` for an informational comparison
    and enumerates which of `dev` / `gate` / `ensure-deps` scripts actually exist, so
@@ -165,7 +167,7 @@ append-only -- it is never truncated, so history accumulates across runs.
 Exit code is **1** only for one of three hard-prerequisite failures:
 - Node `>=20` could not be resolved even after an install attempt (this includes a
   present-but-`<20` Node that was deliberately not auto-upgraded).
-- The project directory or its `package.json` is missing.
+- The project directory or its `package.json` is missing (or `package.json` is present but fails to parse as JSON).
 - `.claude\settings.json` is corrupt, contains conflict markers, or its hash changed
   during the run (proof the script -- or something else running concurrently --
   mutated it).

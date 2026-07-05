@@ -24,6 +24,10 @@ WHY THIS SCRIPT EXISTS
   This is the DEV-PROJECT bring-up subset only. Full machine migration (Python for
   hooks, gh CLI, netlify CLI, Outlook COM, secrets, OneDrive hydration) is covered by
   docs/MIGRATION_RUNBOOK.md -- see that doc rather than duplicating it here.
+  HOW TO RUN: invoke as a script, e.g.
+    powershell -ExecutionPolicy Bypass -File maintenance\setup-desktop-windows.ps1
+  Do NOT dot-source or Import it -- it ends with exit 0/1, which would terminate the
+  caller's shell if dot-sourced.
 #>
 param(
     [string]$ProjectPath = 'C:\Users\Owner\oxford-command-center',
@@ -65,7 +69,12 @@ function Log {
     try {
         Add-Content -LiteralPath $LogPath -Value $line -ErrorAction Stop
     } catch {
-        # Logging must never abort the run; fall back to console only.
+        # Logging must never abort the run; fall back to console only. Announce the
+        # fallback ONCE so a silently-dropped log is not mistaken for a clean run.
+        if (-not $script:LogWriteFailed) {
+            $script:LogWriteFailed = $true
+            Write-Host ("[WARN] log write to {0} failed -- continuing console-only for the rest of this run ({1})" -f $LogPath, $_.Exception.Message) -ForegroundColor Yellow
+        }
     }
     $color = 'Gray'
     if ($Level -eq 'PASS') { $color = 'Green' }
@@ -119,7 +128,24 @@ function Update-SessionPath {
     $user = [Environment]::GetEnvironmentVariable('Path', 'User')
     if ($null -eq $machine) { $machine = '' }
     if ($null -eq $user) { $user = '' }
-    $env:Path = $machine + ';' + $user
+    $rebuilt = $machine + ';' + $user
+    # Preserve process-only PATH entries inherited from the launching shell (portable
+    # toolchains / fnm / volta shims) that are absent from the registry hives, so a
+    # rebuild never un-resolves a tool that was already on PATH at script start. Dedup
+    # keeps the value from growing across the several calls to this function.
+    $seen = @{}
+    foreach ($e in ($rebuilt -split ';')) {
+        if ($e -ne '') { $seen[$e.TrimEnd('\').ToLowerInvariant()] = $true }
+    }
+    $extra = @()
+    foreach ($e in ($env:Path -split ';')) {
+        if ($e -ne '') {
+            $k = $e.TrimEnd('\').ToLowerInvariant()
+            if (-not $seen.ContainsKey($k)) { $seen[$k] = $true; $extra += $e }
+        }
+    }
+    if ($extra.Count -gt 0) { $rebuilt = $rebuilt + ';' + ($extra -join ';') }
+    $env:Path = $rebuilt
 }
 
 function Get-NodeMajor {
@@ -166,7 +192,14 @@ function Test-SettingsJson {
     param([string]$Path)
     $result = [pscustomobject]@{ Exists = $false; Valid = $false; Hash = ''; Reason = '' }
     if (-not (Test-Path -LiteralPath $Path)) {
-        $result.Reason = 'missing'
+        $claudeDir = Split-Path -Parent $Path
+        if (Test-Path -LiteralPath $claudeDir -PathType Leaf) {
+            $result.Reason = ('.claude exists but is a FILE not a directory ({0}) -- settings.json cannot exist under it' -f $claudeDir)
+        } elseif (-not (Test-Path -LiteralPath $claudeDir -PathType Container)) {
+            $result.Reason = ('.claude directory missing ({0})' -f $claudeDir)
+        } else {
+            $result.Reason = 'settings.json missing but .claude directory is present'
+        }
         return $result
     }
     $result.Exists = $true
@@ -222,7 +255,13 @@ function Stop-LaunchedDev {
     Start-Sleep -Seconds 2
     foreach ($p in $Ports) {
         $still = Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue
-        if ($still) { Log 'WARN' ("port {0} still listening after stop attempt -- possible orphan, investigate manually" -f $p) }
+        if ($still) {
+            $orphanPid = $still[0].OwningProcess
+            $orphanName = 'unknown'
+            $op = Get-Process -Id $orphanPid -ErrorAction SilentlyContinue
+            if ($op) { $orphanName = $op.ProcessName }
+            Log 'WARN' ("port {0} still listening after stop attempt -- possible orphan PID {1} ({2}). Diagnose: tasklist /PID {1} -- if it is a stray node/cmd from this run, stop it: taskkill /PID {1} /T /F" -f $p, $orphanPid, $orphanName)
+        }
     }
 }
 
@@ -414,11 +453,15 @@ try {
         $lp = Invoke-Native -Exe 'git' -CmdArgs @('config', '--get', 'core.longpaths')
         $lpVal = $lp.Out.Trim()
         if ($lpVal -ne 'true') {
-            $setLp = Invoke-Native -Exe 'git' -CmdArgs @('config', '--global', 'core.longpaths', 'true')
-            if ($setLp.Ok) {
-                Add-Result -Step 'Git/LongPaths(config)' -Status 'PASS' -Detail 'set git config --global core.longpaths true'
+            if ($SkipInstall) {
+                Add-Result -Step 'Git/LongPaths(config)' -Status 'INFO' -Detail 'would set git config --global core.longpaths true -- skipped under -SkipInstall (no-write)'
             } else {
-                Add-Result -Step 'Git/LongPaths(config)' -Status 'WARN' -Detail ("failed to set core.longpaths: {0}" -f $setLp.Out.Trim())
+                $setLp = Invoke-Native -Exe 'git' -CmdArgs @('config', '--global', 'core.longpaths', 'true')
+                if ($setLp.Ok) {
+                    Add-Result -Step 'Git/LongPaths(config)' -Status 'PASS' -Detail 'set git config --global core.longpaths true'
+                } else {
+                    Add-Result -Step 'Git/LongPaths(config)' -Status 'WARN' -Detail ("failed to set core.longpaths: {0}" -f $setLp.Out.Trim())
+                }
             }
         } else {
             Add-Result -Step 'Git/LongPaths(config)' -Status 'PASS' -Detail 'core.longpaths already true -- unchanged'
@@ -429,7 +472,9 @@ try {
             $lpeVal = 0
             if ($lpe) { $lpeVal = $lpe.LongPathsEnabled }
             if ($lpeVal -ne 1) {
-                if ($script:IsAdmin) {
+                if ($SkipInstall) {
+                    Add-Result -Step 'Git/LongPaths(registry)' -Status 'INFO' -Detail 'would set HKLM LongPathsEnabled=1 (when elevated) -- skipped under -SkipInstall (no-write)'
+                } elseif ($script:IsAdmin) {
                     New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name 'LongPathsEnabled' -Value 1 -PropertyType DWord -Force | Out-Null
                     Add-Result -Step 'Git/LongPaths(registry)' -Status 'WARN' -Detail 'set HKLM LongPathsEnabled=1 -- a reboot may be needed for it to fully apply'
                 } else {
@@ -445,11 +490,15 @@ try {
         $acrlf = Invoke-Native -Exe 'git' -CmdArgs @('config', '--get', 'core.autocrlf')
         $acrlfVal = $acrlf.Out.Trim()
         if ([string]::IsNullOrEmpty($acrlfVal) -or $acrlfVal -eq 'true') {
-            $setA = Invoke-Native -Exe 'git' -CmdArgs @('config', '--global', 'core.autocrlf', 'false')
-            if ($setA.Ok) {
-                Add-Result -Step 'Git/Autocrlf' -Status 'PASS' -Detail ("set core.autocrlf false (was '{0}')" -f $acrlfVal)
+            if ($SkipInstall) {
+                Add-Result -Step 'Git/Autocrlf' -Status 'INFO' -Detail ("would set core.autocrlf false (currently '{0}') -- skipped under -SkipInstall (no-write)" -f $acrlfVal)
             } else {
-                Add-Result -Step 'Git/Autocrlf' -Status 'WARN' -Detail ("failed to set core.autocrlf: {0}" -f $setA.Out.Trim())
+                $setA = Invoke-Native -Exe 'git' -CmdArgs @('config', '--global', 'core.autocrlf', 'false')
+                if ($setA.Ok) {
+                    Add-Result -Step 'Git/Autocrlf' -Status 'PASS' -Detail ("set core.autocrlf false (was '{0}')" -f $acrlfVal)
+                } else {
+                    Add-Result -Step 'Git/Autocrlf' -Status 'WARN' -Detail ("failed to set core.autocrlf: {0}" -f $setA.Out.Trim())
+                }
             }
         } else {
             Add-Result -Step 'Git/Autocrlf' -Status 'PASS' -Detail ("core.autocrlf already explicit ('{0}') -- left unchanged" -f $acrlfVal)
@@ -466,11 +515,15 @@ try {
             )
             $gcmFound = $gcmCandidates | Where-Object { Test-Path -LiteralPath $_ }
             if ($gcmFound) {
-                $setC = Invoke-Native -Exe 'git' -CmdArgs @('config', '--global', 'credential.helper', 'manager')
-                if ($setC.Ok) {
-                    Add-Result -Step 'Git/CredentialHelper' -Status 'PASS' -Detail 'set credential.helper manager (GCM binary found on disk)'
+                if ($SkipInstall) {
+                    Add-Result -Step 'Git/CredentialHelper' -Status 'INFO' -Detail 'would set credential.helper manager (GCM binary found) -- skipped under -SkipInstall (no-write)'
                 } else {
-                    Add-Result -Step 'Git/CredentialHelper' -Status 'WARN' -Detail ("failed to set credential.helper: {0}" -f $setC.Out.Trim())
+                    $setC = Invoke-Native -Exe 'git' -CmdArgs @('config', '--global', 'credential.helper', 'manager')
+                    if ($setC.Ok) {
+                        Add-Result -Step 'Git/CredentialHelper' -Status 'PASS' -Detail 'set credential.helper manager (GCM binary found on disk)'
+                    } else {
+                        Add-Result -Step 'Git/CredentialHelper' -Status 'WARN' -Detail ("failed to set credential.helper: {0}" -f $setC.Out.Trim())
+                    }
                 }
             } else {
                 Add-Result -Step 'Git/CredentialHelper' -Status 'WARN' -Detail 'no credential.helper configured and no git-credential-manager binary found -- the private ZeOoba clone will prompt or fail. See docs/MIGRATION_RUNBOOK.md auth section. Never embed a PAT.'
@@ -522,7 +575,7 @@ try {
 try {
     $chk = Test-SettingsJson -Path $script:SettingsPath
     if (-not $chk.Exists) {
-        Add-Result -Step 'SettingsJson' -Status 'WARN' -Detail ("not found at {0}. Restore with: git checkout -- .claude/settings.json (never synthesized by this script)" -f $script:SettingsPath)
+        Add-Result -Step 'SettingsJson' -Status 'WARN' -Detail ("not found ({0}) at {1}. Restore with: git -C {2} checkout -- .claude/settings.json (cwd-safe; never synthesized by this script)" -f $chk.Reason, $script:SettingsPath, $ProjectPath)
     } elseif (-not $chk.Valid) {
         Add-Result -Step 'SettingsJson' -Status 'FAIL' -Detail ("present but invalid: {0}" -f $chk.Reason) -Hard $true
     } else {
@@ -579,8 +632,8 @@ try {
             } else {
                 if ($script:HasGateScript) {
                     $gate = Invoke-Native -Exe 'npm' -CmdArgs @('run', 'gate')
-                    $script:GateAlreadyRan = $true
                     if ($gate.Ok) {
+                        $script:GateAlreadyRan = $true
                         Add-Result -Step 'Deps' -Status 'PASS' -Detail 'npm run gate self-healed dependencies via ensure-deps.mjs'
                     } else {
                         $tail = $gate.Out
@@ -612,7 +665,14 @@ try {
                             $detail += ' -- TLS interception suspected. Set NODE_EXTRA_CA_CERTS (or npm cafile) to the corporate root PEM. NEVER set strict-ssl false. See docs/MIGRATION_RUNBOOK.md.'
                         } elseif ($installResult.Out -match 'EPERM|EBUSY') {
                             $detail += ' -- possible Defender file lock persisted after retry. Consider an Add-MpPreference -ExclusionPath for the project (requires admin).'
+                        } elseif ($installResult.Out -match 'ETIMEDOUT|ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|EPROTO') {
+                            $detail += ' -- registry unreachable (proxy/network/DNS). Check npm config get registry/proxy/https-proxy; behind a corporate proxy set https-proxy; try npm cache verify. NEVER set strict-ssl false. See docs/MIGRATION_RUNBOOK.md.'
+                        } elseif ($installResult.Out -match 'ENOSPC') {
+                            $detail += ' -- out of disk space during install (see the Preamble/DiskFree row and maintenance/ora-nightly-disk.ps1).'
                         }
+                        $npmTail = $installResult.Out
+                        if ($null -ne $npmTail -and $npmTail.Length -gt 400) { $npmTail = $npmTail.Substring($npmTail.Length - 400) }
+                        $detail += (' | npm output tail: ' + $npmTail)
                         Add-Result -Step 'Deps' -Status 'WARN' -Detail $detail
                     }
                 }
@@ -798,7 +858,7 @@ try {
             $deadline = (Get-Date).AddSeconds($HealthTimeoutSec)
             $brainUp = $false
             $webUp = $false
-            while ((Get-Date) -lt $deadline -and -not ($brainUp -and $webUp)) {
+            while ((Get-Date) -lt $deadline -and -not ($brainUp -and $webUp) -and -not $proc.HasExited) {
                 if (-not $brainUp) { $brainUp = Test-DevHealth -Port $BrainPort }
                 if (-not $webUp) { $webUp = Test-DevHealth -Port $WebPort }
                 if (-not ($brainUp -and $webUp)) { Start-Sleep -Seconds 2 }
@@ -808,7 +868,9 @@ try {
             } else {
                 $stderrTail = ''
                 if (Test-Path -LiteralPath $stderrLog) { $stderrTail = (Get-Content -LiteralPath $stderrLog -Tail 20 | Out-String) }
-                Add-Result -Step 'DevHealth' -Status 'WARN' -Detail ("timed out after {0}s -- Brain up={1} Web up={2}. stderr tail written to log." -f $HealthTimeoutSec, $brainUp, $webUp)
+                $devReason = ("timed out after {0}s" -f $HealthTimeoutSec)
+                if ($proc.HasExited) { $devReason = 'dev process exited early before both ports came up' }
+                Add-Result -Step 'DevHealth' -Status 'WARN' -Detail ("{0} -- Brain up={1} Web up={2}. stderr tail written to log." -f $devReason, $brainUp, $webUp)
                 Log 'WARN' ("dev stderr tail: {0}" -f $stderrTail)
             }
         } finally {
