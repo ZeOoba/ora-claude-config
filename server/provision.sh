@@ -40,6 +40,19 @@ SELF_USER="$(id -un)"
 MANUAL_STEPS=()
 add_manual() { MANUAL_STEPS+=("$1"); }
 
+# The accumulated manual-steps summary must print even if a later step aborts
+# the run (set -e). Registered on EXIT so a fatal error still surfaces the
+# degrade-to-manual list instead of leaving the operator with a bare stack.
+print_manual_summary() {
+  if [ "${#MANUAL_STEPS[@]}" -gt 0 ]; then
+    printf '\nADDITIONAL MANUAL ITEMS from this run:\n'
+    for STEP in "${MANUAL_STEPS[@]}"; do
+      printf '  - %s\n' "$STEP"
+    done
+  fi
+}
+trap print_manual_summary EXIT
+
 # ---------------------------------------------------------------- sudo check
 HAVE_SUDO=0
 if command -v sudo >/dev/null 2>&1; then
@@ -55,11 +68,21 @@ if [ "$HAVE_SUDO" -ne 1 ]; then
 fi
 
 # ------------------------------------------------------------- apt packages
+# DPkg::Lock::Timeout=600 waits (up to 10 min) for the dpkg/apt lock that
+# unattended-upgrades holds on a fresh boot instead of erroring out; without
+# it, set -e would abort the whole run -- contradicting the degrade-to-manual
+# doctrine. If apt still fails (no network, etc.) we degrade to a manual step.
+APT_PKGS=(git curl ripgrep python3 python3-venv jq sqlite3 build-essential unzip)
 if [ "$HAVE_SUDO" -eq 1 ]; then
   log "apt packages"
-  sudo apt-get update
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    git curl ripgrep python3 python3-venv jq sqlite3 build-essential unzip
+  if sudo apt-get -o DPkg::Lock::Timeout=600 update && \
+     sudo DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 install -y \
+       "${APT_PKGS[@]}"; then
+    echo "apt packages installed"
+  else
+    warn "apt-get failed (lock held past timeout, or no network) -- degrading to manual"
+    add_manual "sudo apt-get -o DPkg::Lock::Timeout=600 install -y ${APT_PKGS[*]}"
+  fi
 fi
 
 # ----------------------------------------------------------------- timezone
@@ -84,28 +107,34 @@ fi
 log "Node 22 via fnm"
 FNM_DIR="$HOME/.local/share/fnm"
 if ! command -v fnm >/dev/null 2>&1 && [ ! -x "$FNM_DIR/fnm" ]; then
-  curl -fsSL https://fnm.vercel.app/install | bash -s -- --install-dir "$FNM_DIR" --skip-shell
+  # Bootstrap must not abort the run under set -e -- degrade to manual instead.
+  if ! curl -fsSL https://fnm.vercel.app/install | bash -s -- --install-dir "$FNM_DIR" --skip-shell; then
+    warn "fnm bootstrap failed (network?)"
+  fi
 fi
 export PATH="$FNM_DIR:$PATH"
 if command -v fnm >/dev/null 2>&1; then
   eval "$(fnm env)"
-  fnm install 22
-  fnm default 22
-  # Idempotent shell init (the systemd units do NOT rely on this -- they
-  # source fnm themselves via server/run-full-gate.sh).
-  if ! grep -q 'fnm env' "$HOME/.bashrc" 2>/dev/null; then
-    {
-      echo ''
-      echo '# fnm (installed by ora provision.sh)'
-      # shellcheck disable=SC2016  # literal $HOME/$(...) must expand at shell startup, not now
-      echo 'export PATH="$HOME/.local/share/fnm:$PATH"'
-      # shellcheck disable=SC2016
-      echo 'command -v fnm >/dev/null 2>&1 && eval "$(fnm env)"'
-    } >> "$HOME/.bashrc"
+  if fnm install 22 && fnm default 22; then
+    # Idempotent shell init (the systemd units do NOT rely on this -- they
+    # source fnm themselves via server/run-full-gate.sh).
+    if ! grep -q 'fnm env' "$HOME/.bashrc" 2>/dev/null; then
+      {
+        echo ''
+        echo '# fnm (installed by ora provision.sh)'
+        # shellcheck disable=SC2016  # literal $HOME/$(...) must expand at shell startup, not now
+        echo 'export PATH="$HOME/.local/share/fnm:$PATH"'
+        # shellcheck disable=SC2016
+        echo 'command -v fnm >/dev/null 2>&1 && eval "$(fnm env)"'
+      } >> "$HOME/.bashrc"
+    fi
+    echo "node: $(node --version 2>/dev/null || echo 'NOT ON PATH')"
+  else
+    warn "fnm install 22 failed"
+    add_manual "install Node 22: eval \"\$(fnm env)\" && fnm install 22 && fnm default 22"
   fi
-  echo "node: $(node --version 2>/dev/null || echo 'NOT ON PATH')"
 else
-  warn "fnm install failed"
+  warn "fnm not on PATH (bootstrap failed?)"
   add_manual "install Node 22: curl -fsSL https://fnm.vercel.app/install | bash && fnm install 22 && fnm default 22"
 fi
 
@@ -294,11 +323,6 @@ cat <<'STEPS'
      then: RUNNER_TOKEN=<token> bash ~/.claude/server/install-runner.sh
 STEPS
 
-if [ "${#MANUAL_STEPS[@]}" -gt 0 ]; then
-  printf '\nADDITIONAL MANUAL ITEMS from this run:\n'
-  for STEP in "${MANUAL_STEPS[@]}"; do
-    printf '  - %s\n' "$STEP"
-  done
-fi
-
+# The manual-steps summary prints via the EXIT trap (print_manual_summary),
+# so it surfaces even if an earlier step aborted the run.
 log "provision complete"

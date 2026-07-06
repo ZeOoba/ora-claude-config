@@ -73,6 +73,12 @@ if [ -f "$RUNALL" ]; then
     *RUNALL_FAILED*) report FAIL "hooks tests (run-all.sh)" "${HOOKS_SUMMARY:-suite failed -- run manually for detail}" ;;
     *)               report PASS "hooks tests (run-all.sh)" "${HOOKS_SUMMARY:-passed}" ;;
   esac
+  # A SKIP of the confidentiality guard suite otherwise disappears into the
+  # aggregate PASS above -- a vacuous pass. Surface it as its own WARN so the
+  # operator knows the egress guard was NOT exercised (terms file absent).
+  if printf '%s\n' "$HOOKS_OUT" | grep -q 'SKIP.*test-confidentiality-guard.py'; then
+    report WARN "confidentiality guard suite" "SKIPPED (confidential-terms.json absent) -- vacuous pass; place terms then re-run (or gate with run-all.sh --require-confidentiality)"
+  fi
 else
   report FAIL "hooks tests (run-all.sh)" "missing: $RUNALL"
 fi
@@ -138,6 +144,19 @@ else
   report FAIL "financials corpus (>=32 files)" "FINANCIALS_DIR missing"
 fi
 
+# ---------------------------------------------------------- rclone remote state
+# Tells the operator whether the pull-transport is ready -- i.e. whether
+# ora-data-sync.timer can be enabled, or whether they must use the desktop push.
+if command -v rclone >/dev/null 2>&1; then
+  if rclone listremotes 2>/dev/null | grep -qx 'onedrive-oxford:'; then
+    report PASS "rclone remote (onedrive-oxford)" "configured -- ora-data-sync.timer can be enabled"
+  else
+    report WARN "rclone remote (onedrive-oxford)" "not configured -- run 'rclone config' (or push via desktop-push-data.ps1)"
+  fi
+else
+  report WARN "rclone remote (onedrive-oxford)" "rclone not installed -- pull transport unavailable (use desktop-push-data.ps1)"
+fi
+
 # ------------------------------------------------------------ pre-push shims
 for REPO in "$HOME/.claude" "$HOME/oxford-command-center" "$HOME/ora-skills" "$HOME/BrainVault"; do
   NAME="$(basename "$REPO")"
@@ -182,6 +201,19 @@ elif [ -f "$HOME/actions-runner-occ/.runner" ]; then
   report WARN "GitHub runner service" "configured but service not installed -- sudo ~/actions-runner-occ/svc.sh install"
 else
   report WARN "GitHub runner service" "not installed -- see server/install-runner.sh"
+fi
+
+# Runner .env inlines the confidential data paths (WORKBOOK_PATH etc.) -- it
+# must be 0600 so other local users cannot read them. install-runner.sh sets
+# this, but a hand-edit or older run can leave it 0644.
+RUNNER_ENV="$HOME/actions-runner-occ/.env"
+if [ -f "$RUNNER_ENV" ]; then
+  RMODE="$(stat -c '%a' "$RUNNER_ENV" 2>/dev/null || echo '?')"
+  if [ "$RMODE" = "600" ]; then
+    report PASS "runner .env mode 600" "$RUNNER_ENV"
+  else
+    report WARN "runner .env mode 600" "mode is $RMODE -- chmod 600 $RUNNER_ENV (inlines confidential data paths)"
+  fi
 fi
 
 # ------------------------------------------------------------------ timezone

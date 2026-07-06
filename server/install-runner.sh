@@ -108,19 +108,44 @@ if [ -f "$ORA_ENV" ]; then
     printf '%s=%s\n' "$VAR" "$VAL" >> "$RUNNER_ENV"
     echo "runner .env: exported $VAR"
   done
+  # Re-assert 600: the grep-into-tmp + mv rewrite above replaces the file with
+  # one created under the default umask (0644), which would expose the inlined
+  # confidential data paths to other local users. Runner jobs read it either way.
+  chmod 600 "$RUNNER_ENV"
 else
   echo "WARN: $ORA_ENV missing -- runner jobs will not see WORKBOOK_PATH/FINANCIALS_DIR (full gate will fail); re-run after provisioning secrets" >&2
 fi
 
 # ------------------------------------------------------- systemd service
+# Mirror provision.sh's sudo probe: svc.sh needs root. Without working sudo,
+# degrade to a printed manual step rather than aborting under set -e -- the
+# runner is already registered (config.sh consumed the one-shot token above),
+# so aborting here would waste that token on the next re-run.
+HAVE_SUDO=0
+if command -v sudo >/dev/null 2>&1; then
+  if sudo -n true 2>/dev/null; then
+    HAVE_SUDO=1
+  elif [ -t 0 ] && sudo -v; then
+    HAVE_SUDO=1
+  fi
+fi
+
 cd "$RUNNER_DIR"
-if sudo ./svc.sh status >/dev/null 2>&1; then
-  echo "runner service already installed"
+if [ "$HAVE_SUDO" -ne 1 ]; then
+  echo "WARN: sudo unavailable -- cannot install/restart the runner service. Run manually:" >&2
+  echo "  sudo $RUNNER_DIR/svc.sh install $(id -un)" >&2
+  echo "  sudo $RUNNER_DIR/svc.sh start" >&2
+elif sudo ./svc.sh status >/dev/null 2>&1; then
+  # Already installed: restart so the rewritten .env is re-read by the job runner.
+  echo "runner service already installed -- restarting to pick up .env changes"
+  sudo ./svc.sh stop || true
+  sudo ./svc.sh start || true
+  sudo ./svc.sh status || true
 else
   sudo ./svc.sh install "$(id -un)"
+  sudo ./svc.sh start || true
+  sudo ./svc.sh status || true
 fi
-sudo ./svc.sh start || true
-sudo ./svc.sh status || true
 
 echo ""
 echo "install-runner: done. Verify at $REPO_URL/settings/actions/runners"

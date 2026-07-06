@@ -20,7 +20,14 @@ PY=""
 for CAND in python3 python \
     /c/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \
     "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe"; do
-  if command -v "$CAND" >/dev/null 2>&1; then
+  # Skip the Microsoft Store App-Execution-Alias stub: on stock Windows,
+  # "python3" resolves to a WindowsApps stub that cannot actually run.
+  RESOLVED=$(command -v "$CAND" 2>/dev/null) || RESOLVED=$CAND
+  case "$RESOLVED" in
+    *[Ww]indows[Aa]pps*) continue ;;
+  esac
+  # Functional probe (not mere existence): the stub fails to run Python.
+  if "$CAND" -c "import sys" >/dev/null 2>&1; then
     PY=$CAND
     break
   fi

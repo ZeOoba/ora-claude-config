@@ -132,9 +132,14 @@ numbered rows in the MANUAL ACTIONS table.
    audit this is the auto-updating recommended path), `loginctl enable-linger`
    for the service user (WITHOUT this, every systemd --user timer dies at logout --
    FM-8), directory skeleton (`~/ora-data/...`, `~/.config/ora/`), repo clones
-   into the D3 layout, `hooks/install-prepush.sh` against `~/.claude` and every
-   confidential repo clone (per `confidential-repos.json`; clones do NOT carry
-   `.git/hooks` -- B3 learned this the hard way), systemd user units copied from
+   into the D3 layout, `hooks/install-prepush.sh` against exactly four hardcoded
+   repos -- `~/.claude`, `~/oxford-command-center`, `~/ora-skills`, `~/BrainVault`
+   (clones do NOT carry `.git/hooks` -- B3 learned this the hard way). NOTE: that
+   four-repo set is NOT the same as `confidential-repos.json` (which lists
+   `oxford-command-center`, `website-canonical`, `oxford-site`, `ora-pm`); if you
+   later clone any other repo named there (`ora-pm`, `oxford-site`,
+   `website-canonical`) run `bash ~/.claude/hooks/install-prepush.sh <repo>`
+   manually before pushing from it. Systemd user units are then copied from
    `server/units/` (NOT yet enabled -- S4 enables them deliberately), and an
    `npm ci` in `~/oxford-command-center`.
 4. Claude auth -- CHOOSE ONE (manual action M4):
@@ -189,9 +194,14 @@ Rules that bind here:
   the server, EVERY matched Write/Edit/Bash call blocks -- the deployment is
   bricked (by design: fail-closed is the doctrine, D4). Place it in the same
   sitting as the clone, before anything else runs. `server/verify-setup.sh`
-  checks presence + mode and `hooks/tests/run-all.sh` refuses a vacuous pass
-  (the confidentiality suite exits 1 if the terms file is missing or has <3
-  active always-terms).
+  checks presence + mode -- but note it reports a MISSING terms file only as a
+  WARN (not a hard fail), and `hooks/tests/run-all.sh` SKIPs the confidentiality
+  suite (it does NOT fail) and still exits 0 when the terms file is absent, since
+  that suite derives its fixtures from the live file. A "green" run whose
+  confidentiality line reads `SKIP (terms file not provisioned)` is therefore a
+  VACUOUS pass -- place the terms file FIRST, then confirm the suite actually RAN
+  (line reads PASS, not SKIP). See the burn-in note in S5 and the OPERATIONAL
+  NOTES.
 - The same terms file gates pushes (`git-prepush-confidential-scan.py` is
   fail-closed on an unreadable terms file: ALL pushes block). Missing terms file
   therefore = bricked sessions AND bricked pushes. One file, two brick modes.
@@ -249,11 +259,23 @@ mtimes before touching code.
 ## S4. Services + runner
 
 1. **Enable the timers** (deliberate, after S2+S3 are green -- units were installed
-   but NOT enabled in S1):
+   but NOT enabled in S1). Enable in TWO groups -- the corpus-sync timer is
+   transport-conditional, the rest are unconditional. Do NOT blanket-enable every
+   file in `server/units/`: `ora-data-sync.timer` must stay OFF on the desktop-push
+   transport (Path B) -- there is no rclone remote on the box, so every fire would
+   fail.
 
    ```bash
-   systemctl --user enable --now <unit>.timer   # for each timer in server/units/
-   systemctl --user list-timers                 # evidence: NEXT column populated
+   # (a) ALWAYS -- these run on every server regardless of transport choice:
+   for U in ora-heartbeat ora-vault-backup ora-telemetry-rollup ora-full-gate; do
+     systemctl --user enable --now "$U.timer"
+   done
+   # (b) ora-data-sync.timer ONLY on the rclone-pull transport (Path A, S3):
+   #     enable it if and only if Path A was chosen AND a manual
+   #     `bash ~/.claude/server/rclone-sync.sh` has already succeeded once.
+   #     On the desktop-push transport (Path B) LEAVE THIS OFF.
+   systemctl --user enable --now ora-data-sync.timer   # Path A only
+   systemctl --user list-timers                        # evidence: NEXT column populated
    ```
 
    The moved-job units (authoritative list = `server/units/`): heartbeat producer
@@ -309,10 +331,12 @@ the burn-in log, same rule as B3.
 
 - [ ] `bash ~/.claude/server/verify-setup.sh` -> ALL lines PASS.
 - [ ] `bash ~/.claude/hooks/tests/run-all.sh` -> ALL PASS **including the
-      confidentiality suite** (it must actually RUN -- it exits 1 and refuses if
-      the terms file is absent; a run where it was skipped is NOT a pass) and the
-      autonomy-gate adversarial harness. Run the same command on the DESKTOP in
-      Git Bash after `git pull` -> ALL PASS there too (D9 backward-compat gate).
+      confidentiality suite** (it must actually RUN -- run-all SKIPs that suite and
+      still exits 0 when the terms file is absent, so a line reading
+      `SKIP (terms file not provisioned)` is NOT a pass; the terms file must be in
+      place first) and the autonomy-gate adversarial harness. Run the same command
+      on the DESKTOP in Git Bash after `git pull` -> ALL PASS there too (D9
+      backward-compat gate).
 - [ ] **SEEDED pre-push block test** (proves the fail-closed backstop with a live
       round, without touching real terms): in a THROWAWAY clone of a guarded
       repo, `git checkout -b tmp/prepush-seed-test`; commit a file containing one
@@ -396,18 +420,18 @@ server-side with queue-to-Windows send; Graph API ratification, D6).
 
 | # | Symptom | Detection | Root cause | Remediation | Strands data? |
 |---|---|---|---|---|---|
-| FM-1 | Every Write/Edit/Bash in a session blocks with a confidentiality-guard message; pushes also block | verify-setup.sh terms-file line; first session bricked; run-all confidentiality suite exits 1 | `~/.claude/hooks/confidential-terms.json` missing/unreadable (gitignored -- fresh clones never have it); guard is FAIL-CLOSED by doctrine D4 | Place the real terms file out-of-band (S2), mode 600; rerun verify-setup.sh | No -- blocks work, protects data |
+| FM-1 | Every Write/Edit/Bash in a session blocks with a confidentiality-guard message; pushes also block | verify-setup.sh terms-file WARN line; first session bricked; run-all shows `SKIP (terms file not provisioned)` for the confidentiality suite (a vacuous pass -- not a real green) | `~/.claude/hooks/confidential-terms.json` missing/unreadable (gitignored -- fresh clones never have it); guard is FAIL-CLOSED by doctrine D4 | Place the real terms file out-of-band (S2), mode 600; rerun verify-setup.sh | No -- blocks work, protects data |
 | FM-2 | Fail-closed hooks exit 2 with ASCII stderr on every call (strict launcher); OR productivity gates silently do nothing (open launcher) | verify-setup.sh interpreter line; `hooks/tests/run-all.sh` fails; strict-guard stderr names the missing interpreter | No `python3`/`python` on PATH (or not on the PATH systemd/hook context sees) | `apt install python3` (provision.sh does); for systemd units, ensure PATH in the unit env. Note the asymmetry is BY DESIGN: strict = blocked loudly, open = silent no-op | No |
 | FM-3 | Corpus files stop updating; reconcile counts drift from desktop truth or go stale silently | `systemctl --user status` on the rclone timer (failed runs in journalctl); file mtimes in `~/ora-data` older than 24h; S3 verification counts | OneDrive rclone token expired/revoked (device-code grants can be invalidated by tenant policy or password change) | Re-run the rclone device-code auth (M5); re-run S3 verification; consider Path B as stopgap | No -- OneDrive remains source of truth; risk is DECISIONS on stale data |
 | FM-4 | Dispatched full-gate runs sit "Queued" forever | Actions UI shows queued job; repo Settings -> Runners shows runner Offline | Runner service dead (reboot without service install, crash, token revoked) | `systemctl status` the runner service; restart; if unregistered, re-run `server/install-runner.sh` with a fresh token (M6) | No |
-| FM-5 | SQLITE_BUSY / locked-database errors; or backfill and serving process corrupt each other's view | Server logs; `npm run warehouse:drift` mismatch; gate step failures naming the live DB | SQLite WAL is single-writer: a serving process and `warehouse:backfill` sharing one `WAREHOUSE_DB` | Gate is SAFE anywhere (warehouse:verify builds in os.tmpdir(), never the live DB). Discipline: stop the server before backfill against the live DB, or point backfill at a scratch `WAREHOUSE_DB` and swap. Worktrees each set their own WAREHOUSE_DB (worktree-env.example) | YES if DDL is run against the live DB directly -- doctrine: migrations only, never delete `data/warehouse/finance.sqlite` |
+| FM-5 | SQLITE_BUSY / locked-database errors; or backfill and serving process corrupt each other's view | Server logs; `npm run warehouse:drift` mismatch; gate step failures naming the live DB | SQLite WAL is single-writer: a serving process and `warehouse:backfill` sharing one `WAREHOUSE_DB` | Gate is SAFE anywhere (warehouse:verify builds in os.tmpdir(), never the live DB). Discipline: stop the server before backfill against the live DB, or point backfill at a scratch `WAREHOUSE_DB` and swap. Worktrees each set their own WAREHOUSE_DB (worktree-env.example). Separately, the DATA CORPUS has its own advisory lock: `server/rclone-sync.sh` and `server/run-full-gate.sh` both `flock ~/.cache/ora-data.lock` (`-w 1800`, fail-open) so the hourly sync never leaves the nightly gate reading a torn workbook -- a self-hosted runner gate job MUST invoke the gate via `run-full-gate.sh`, not `npm run gate` directly, to honor that lock | YES if DDL is run against the live DB directly -- doctrine: migrations only, never delete `data/warehouse/finance.sqlite` |
 | FM-6 | Vault backup push rejected (non-fast-forward) or merge conflicts; worst case: desktop backups silently dead | vault-backup.sh logs a visible error (I6); `git log origin/main` missing recent `backup:` commits; desktop pull conflicts | Two writers (desktop Obsidian + server) on one branch; legacy `vault-backup.ps1` swallowed push errors with `2>$null` (skills/vault audit) -- a failed push looked like success | I6 strategy: `git pull --rebase --autostash` BEFORE commit/push; on conflict, abort and alert, never force. Verify the desktop task runs the fixed logic. Gitignore the churning `.obsidian/copilot-index-*.json` (tracked today -- will conflict the moment two writers exist) | YES in legacy mode (unpushed desktop commits can strand invisibly) -- that is WHY the S5 dual-writer box exists |
 | FM-7 | Notion heartbeat page edited 4x/day during cutover; watchdog behavior questioned | Notion page edit history; watchdog Actions logs show hours-since-edit near 0 | Server timer AND LAMS task both live (the S4.1 ordering does this deliberately for one day) | None needed -- watchdog measures staleness, not count. Disable the LAMS task after the S5 heartbeat box; a GAP is the dangerous state, not a double-beat | No |
 | FM-8 | All systemd --user timers stop after SSH logout/reboot; watchdog trips ~16h later | `systemctl --user list-timers` empty when logged back in; heartbeat-alert issue opens; S5 reboot check fails | `loginctl enable-linger` never ran (user manager exits with last session) | `sudo loginctl enable-linger <user>`; provision.sh does this -- verify-setup.sh asserts it | No |
 | FM-9 | `npm ci` fails building better-sqlite3/sqlite-vec; or binary loads then crashes | provision.sh / gate step 1 output; node -e "require('better-sqlite3')" | Wrong platform: musl (Alpine), non-x86_64, or Node older than engines >= 20; prebuilds are linux-x64/glibc | Use Ubuntu 24.04 x86_64 (S1 floor); Node 20+ (CI uses 24); `apt install build-essential python3` enables from-source fallback | No |
 | FM-10 | A secret or deal term reaches GitHub | Pre-push hook block message (the backstop working); GitHub secret-scanning alert; doctrine-integrity probe check 8 (the alarm that caught the 2026-06-11 incident) | Secret placed inside a tracked tree, or pre-push shim missing (clones do not carry .git/hooks) | The backstop is `hooks/git-prepush-confidential-scan.py` scanning FULL history (`git log -p`) per the standing rule -- TEST IT with the S5 seeded block test. If a push lands anyway: treat as the 2026-06-11 incident -- purge history to a clean baseline, rotate the secret, verify old objects unfetchable | No (data loss no; confidentiality incident YES -- highest severity in this estate) |
 | FM-11 | After a desktop `git pull` of ora-claude-config, Windows hooks stop firing or misbehave | Desktop session start errors; `hooks/tests/run-all.sh` under Git Bash goes red; deadman/registry probes flag desktop fleet issues | A server-motivated edit broke the shared contract (non-ASCII output, bash-ism in POSIX sh launcher, dropped Windows interpreter fallback, path assumption) | Revert the offending commit in ora-claude-config; the D9 gate exists precisely for this: run-all on BOTH tiers before pushing config changes | No |
-| FM-12 | Heartbeat producer 401s (journalctl) OR watchdog probe fails while the page is fresh | Producer leg: `systemctl --user status` heartbeat unit, journal shows Notion API error. Probe leg: heartbeat-alert issue / red watchdog run despite fresh page | NOTION_TOKEN rotated in one place, not both -- the token now lives in TWO homes: `~/.config/ora/ora.env` (producer) and the ora-cowork-watchdog GitHub Actions secret (probe) | Rotate BOTH in the same sitting. Paste carefully: a trailing newline in the Actions secret caused an InvalidHeader failure 2026-06-11 (the probe .strip()s, but do not rely on it) | No |
+| FM-12 | Heartbeat producer 401s (journalctl) OR watchdog probe fails while the page is fresh | Producer leg: `systemctl --user status` heartbeat unit, journal shows Notion API error. Probe leg: heartbeat-alert issue / red watchdog run despite fresh page | NOTION_TOKEN rotated in one place, not both -- the token now lives in TWO homes: `~/.config/ora/ora.env` (producer) and the ora-cowork-watchdog GitHub Actions secret (probe) | Rotate BOTH in the same sitting. Paste carefully: a trailing newline in the Actions secret caused an InvalidHeader failure 2026-06-11 (the probe .strip()s, but do not rely on it). Note the producer alternates the page icon by 12h beat-index parity (`server/heartbeat.py`), so every scheduled PATCH mutates the page and bumps last_edited_time -- a stale page after a logged `heartbeat OK` is therefore NOT a no-op-dedup artifact; look at the unit/token, not the payload | No |
 | FM-13 | Property names / NOI matrices visible to unauthorized eyes via CI logs | Periodic review of Actions run visibility; repo audit log | Self-hosted runner executes warehouse-verify, which prints the NOI matrix; logs live on GitHub | Repo PRIVATE (verify, do not assume); restrict Actions log access; runner never serves fork PRs; keep full-gate workflow_dispatch-only until burn-in (S4.3) | No -- exposure risk, not loss |
 | FM-14 | reconcile suddenly asserts wrong counts (not 14/137/16) on one tier only | Gate red on reconcile step with a count mismatch; corpus file mtimes differ between tiers | Corpus-version coupling (S3): workbook changed, tiers out of sync, or counts legitimately changed with portfolio changes | Check mtimes FIRST (data, not code); sync both tiers; if the portfolio really changed, update the asserted counts in the same commit as the corpus doc note | No -- but a masked version skew can quietly produce wrong analytics; treat count drift as a stop-the-line signal |
 
@@ -430,6 +454,26 @@ server-side with queue-to-Windows send; Graph API ratification, D6).
 Nine rows. If a tenth manual step appears during execution, that is a defect in
 the provisioning kit -- file it against `server/provision.sh`, do not just do it
 by hand silently.
+
+---
+
+## OPERATIONAL NOTES (standing, not one-time)
+
+- **Launch Claude Code from the repo ROOT, never a subdirectory.** A session
+  started below the repo root loads NO project `.claude/settings.json` and none of
+  the project hooks -- the OCC project guard (unit I5), the confidentiality guard,
+  and the autonomy gate are all silently absent and the session runs UNGUARDED.
+  Start with `cd ~/oxford-command-center && claude` (or the target repo's root),
+  not a nested path. This is the same cwd discipline S3 imposes on
+  reconcile/warehouse:verify (they resolve the account-mapping seed from cwd).
+- **The confidentiality suite must actually RUN during burn-in -- a SKIP is not a
+  pass.** `hooks/tests/run-all.sh` SKIPs `test-confidentiality-guard.py` (and still
+  exits 0) when `~/.claude/hooks/confidential-terms.json` is absent, because that
+  suite derives its fixtures from the live terms file. `verify-setup.sh` reports the
+  missing terms file only as a WARN and still marks the run-all line PASS, so a
+  vacuous pass can slip past BOTH checks. Read the run-all output directly: the
+  confidentiality line must read `PASS`, not `SKIP (terms file not provisioned)`.
+  Place the terms file (S2) first, then re-run before checking the S5 box.
 
 ---
 
