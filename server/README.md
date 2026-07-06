@@ -21,6 +21,13 @@ partial failure.
 | 5 | Enable timers | `systemctl --user enable --now ora-heartbeat.timer ora-vault-backup.timer ora-telemetry-rollup.timer ora-full-gate.timer ora-data-sync.timer` |
 | 6 | Runner | mint token, then `RUNNER_TOKEN=<t> bash ~/.claude/server/install-runner.sh` |
 
+The hourly data sync and the 02:30 full gate share `~/.cache/ora-data.lock`
+(an advisory `flock`) so the gate never reads a workbook mid-write -- the apt
+rclone (1.60) rewrites files in place. A self-hosted runner's gate job MUST
+therefore invoke `run-full-gate.sh` (which takes the lock) rather than calling
+`npm run gate` directly, or prefer the upstream rclone (>=1.63, atomic
+`.partial`+rename) to sidestep torn reads entirely.
+
 Timers are deliberately NOT enabled by provision (step 5 is human-gated on
 step 4 passing). The GitHub Actions watchdog (ZeOoba/ora-cowork-watchdog)
 stays where it is -- it is the off-box monitor for the heartbeat this server

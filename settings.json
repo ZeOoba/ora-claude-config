@@ -211,7 +211,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash -c 'PY=$(command -v python3 || command -v python); INPUT=$(cat); TOOL=$(echo \"$INPUT\" | \"$PY\" -c \"import sys,json; print(json.load(sys.stdin).get(\\\"tool_name\\\",\\\"\\\"))\" 2>/dev/null || echo \"\"); if echo \"$TOOL\" | grep -qE \"updater$\"; then STATUS=$(curl -s -o /dev/null -w \"%{http_code}\" https://oxfordra.net); if [ \"$STATUS\" != \"200\" ]; then echo \"WARNING: oxfordra.net returned HTTP $STATUS after Netlify MCP $TOOL\" >&2; fi; fi'"
+            "command": "bash -c 'PY=\"\"; for CAND in python3 python \"/c/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe\" \"C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe\"; do R=$(command -v \"$CAND\" 2>/dev/null) || R=$CAND; case \"$R\" in *[Ww]indows[Aa]pps*) continue;; esac; if \"$CAND\" -c \"import sys\" >/dev/null 2>&1; then PY=$CAND; break; fi; done; INPUT=$(cat); TOOL=$(echo \"$INPUT\" | \"$PY\" -c \"import sys,json; print(json.load(sys.stdin).get(\\\"tool_name\\\",\\\"\\\"))\" 2>/dev/null || echo \"\"); if echo \"$TOOL\" | grep -qE \"updater$\"; then STATUS=$(curl -s -o /dev/null -w \"%{http_code}\" https://oxfordra.net); if [ \"$STATUS\" != \"200\" ]; then echo \"WARNING: oxfordra.net returned HTTP $STATUS after Netlify MCP $TOOL\" >&2; fi; fi'"
           }
         ]
       },
@@ -220,7 +220,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash -c 'PY=$(command -v python3 || command -v python); INPUT=$(cat); OUTPUT=$(echo \"$INPUT\" | \"$PY\" -c \"import sys,json; d=json.load(sys.stdin); print(d.get(\\\"stdout\\\",\\\"\\\"))\" 2>/dev/null || echo \"\"); if echo \"$OUTPUT\" | grep -qiE \"(IRR|Equity Multiple|Cap Rate|NOI)\"; then echo \"NOTE: Financial model output detected. Consider filing in the appropriate deal folder per naming convention: [Address] [Purpose] [MM-YYYY]\" >&2; fi'"
+            "command": "bash -c 'PY=\"\"; for CAND in python3 python \"/c/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe\" \"C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe\"; do R=$(command -v \"$CAND\" 2>/dev/null) || R=$CAND; case \"$R\" in *[Ww]indows[Aa]pps*) continue;; esac; if \"$CAND\" -c \"import sys\" >/dev/null 2>&1; then PY=$CAND; break; fi; done; INPUT=$(cat); OUTPUT=$(echo \"$INPUT\" | \"$PY\" -c \"import sys,json; d=json.load(sys.stdin); print(d.get(\\\"stdout\\\",\\\"\\\"))\" 2>/dev/null || echo \"\"); if echo \"$OUTPUT\" | grep -qiE \"(IRR|Equity Multiple|Cap Rate|NOI)\"; then echo \"NOTE: Financial model output detected. Consider filing in the appropriate deal folder per naming convention: [Address] [Purpose] [MM-YYYY]\" >&2; fi'"
           }
         ]
       },
@@ -278,7 +278,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash -c 'PY=$(command -v python3 || command -v python); INPUT=$(cat); if [ -z \"$PY\" ]; then if echo \"$INPUT\" | grep -qiE \"(credentials|\\.env|password)\"; then echo \"BLOCKED: no python interpreter available and raw payload matched sensitive pattern (credentials/.env/password)\" >&2; exit 2; fi; exit 0; fi; FILE=$(echo \"$INPUT\" | \"$PY\" -c \"import sys,json; print(json.load(sys.stdin).get(\\\"tool_input\\\",{}).get(\\\"file_path\\\",\\\"\\\"))\" 2>/dev/null || echo \"\"); if echo \"$FILE\" | grep -qiE \"(credentials|\\.env|password)\"; then echo \"BLOCKED: Cannot edit sensitive file: $FILE\" >&2; exit 2; fi'"
+            "command": "bash -c 'PY=\"\"; for CAND in python3 python \"/c/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe\" \"C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe\"; do R=$(command -v \"$CAND\" 2>/dev/null) || R=$CAND; case \"$R\" in *[Ww]indows[Aa]pps*) continue;; esac; if \"$CAND\" -c \"import sys\" >/dev/null 2>&1; then PY=$CAND; break; fi; done; INPUT=$(cat); if [ -z \"$PY\" ]; then FILE=$(printf \"%s\" \"$INPUT\" | sed -nE \"s/.*\\\"file_path\\\"[[:space:]]*:[[:space:]]*\\\"([^\\\"]*)\\\".*/\\1/p\" | head -n1); if echo \"$FILE\" | grep -qiE \"(credentials|\\.env|password)\"; then echo \"BLOCKED: no python interpreter; file_path matched sensitive pattern (credentials/.env/password): $FILE\" >&2; exit 2; fi; exit 0; fi; FILE=$(echo \"$INPUT\" | \"$PY\" -c \"import sys,json; print(json.load(sys.stdin).get(\\\"tool_input\\\",{}).get(\\\"file_path\\\",\\\"\\\"))\" 2>/dev/null || echo \"\"); if echo \"$FILE\" | grep -qiE \"(credentials|\\.env|password)\"; then echo \"BLOCKED: Cannot edit sensitive file: $FILE\" >&2; exit 2; fi'"
           }
         ]
       },
@@ -287,7 +287,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash -c 'PY=$(command -v python3 || command -v python); INPUT=$(cat); FILE=$(echo \"$INPUT\" | \"$PY\" -c \"import sys,json; import os; f=json.load(sys.stdin).get(\\\"tool_input\\\",{}).get(\\\"file_path\\\",\\\"\\\"); print(os.path.basename(f) if f else \\\"\\\")\" 2>/dev/null || echo \"\"); if echo \"$FILE\" | grep -qiE \"\\.(xlsx|docx|pdf|html)$\"; then if ! echo \"$FILE\" | grep -qE \"^[0-9A-Za-z].*[0-9]{2}-[0-9]{4}\"; then echo \"REMINDER: Deal files should follow naming convention: [Address] [Purpose] [MM-YYYY]\" >&2; fi; fi'"
+            "command": "bash -c 'PY=\"\"; for CAND in python3 python \"/c/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe\" \"C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe\"; do R=$(command -v \"$CAND\" 2>/dev/null) || R=$CAND; case \"$R\" in *[Ww]indows[Aa]pps*) continue;; esac; if \"$CAND\" -c \"import sys\" >/dev/null 2>&1; then PY=$CAND; break; fi; done; INPUT=$(cat); FILE=$(echo \"$INPUT\" | \"$PY\" -c \"import sys,json; import os; f=json.load(sys.stdin).get(\\\"tool_input\\\",{}).get(\\\"file_path\\\",\\\"\\\"); print(os.path.basename(f) if f else \\\"\\\")\" 2>/dev/null || echo \"\"); if echo \"$FILE\" | grep -qiE \"\\.(xlsx|docx|pdf|html)$\"; then if ! echo \"$FILE\" | grep -qE \"^[0-9A-Za-z].*[0-9]{2}-[0-9]{4}\"; then echo \"REMINDER: Deal files should follow naming convention: [Address] [Purpose] [MM-YYYY]\" >&2; fi; fi'"
           }
         ]
       },
