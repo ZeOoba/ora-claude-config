@@ -14,6 +14,23 @@ and reported, nothing is silently swallowed), and conservative (never installs/u
 Claude Code, never deletes anything, never overwrites a config, never starts the dev
 server unless you ask it to, never kills a process it did not launch).
 
+## Easiest way -- double-click, no PowerShell needed
+
+If you would rather not open PowerShell at all, two double-clickable launchers sit
+next to the script in `maintenance\`:
+
+1. **`1-Check-My-Setup-SAFE.cmd`** -- double-click first. Runs a read-only check
+   (`-SkipInstall`, no-write) and prints the PASS/WARN/FAIL table so you can see what
+   is installed and what is missing. Changes nothing.
+2. **`2-Set-Up-My-Dev-Environment.cmd`** -- double-click when you are ready to actually
+   install what is missing and configure the environment. Safe to run more than once.
+   To install machine-wide (needs an admin prompt), right-click it and choose
+   **Run as administrator** instead of double-clicking.
+
+Both open a window, run to completion, and stay open so you can read (and copy) the
+result table. Everything below documents the same script for when you want the flags
+directly.
+
 ## Prerequisites
 
 - Windows 10 or 11, local profile `Owner` so `%USERPROFILE%` resolves to
