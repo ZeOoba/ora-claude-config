@@ -16,8 +16,8 @@ server unless you ask it to, never kills a process it did not launch).
 
 ## Easiest way -- double-click, no PowerShell needed
 
-If you would rather not open PowerShell at all, two double-clickable launchers sit
-next to the script in `maintenance\`:
+If you would rather not open PowerShell at all, double-clickable launchers sit next
+to the script in `maintenance\`:
 
 1. **`1-Check-My-Setup-SAFE.cmd`** -- double-click first. Runs a read-only check
    (`-SkipInstall`, no-write) and prints the PASS/WARN/FAIL table so you can see what
@@ -26,9 +26,14 @@ next to the script in `maintenance\`:
    install what is missing and configure the environment. Safe to run more than once.
    To install machine-wide (needs an admin prompt), right-click it and choose
    **Run as administrator** instead of double-clicking.
+3. **`3-Restore-Missing-Settings-File.cmd`** -- only needed if step 1 or 2 shows a
+   `SettingsJson` WARN saying the file is missing. Double-click to restore
+   `oxford-command-center\.claude\settings.json` from git history with the exact
+   `git checkout` command the setup script itself recommends. Does nothing (safely)
+   if the file is already present -- never overwrites an existing file.
 
-Both open a window, run to completion, and stay open so you can read (and copy) the
-result table. Everything below documents the same script for when you want the flags
+All three open a window, run to completion, and stay open so you can read (and copy)
+the result. Everything below documents the same script for when you want the flags
 directly.
 
 ## Prerequisites
