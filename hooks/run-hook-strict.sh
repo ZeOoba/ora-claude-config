@@ -27,7 +27,14 @@ PY=""
 for CAND in python3 python \
     /c/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \
     "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe"; do
-  if command -v "$CAND" >/dev/null 2>&1; then
+  # Skip the Microsoft Store App-Execution-Alias stub: on stock Windows,
+  # "python3" resolves to a WindowsApps stub that cannot actually run.
+  RESOLVED=$(command -v "$CAND" 2>/dev/null) || RESOLVED=$CAND
+  case "$RESOLVED" in
+    *[Ww]indows[Aa]pps*) continue ;;
+  esac
+  # Functional probe (not mere existence): the stub fails to run Python.
+  if "$CAND" -c "import sys" >/dev/null 2>&1; then
     PY=$CAND
     break
   fi
@@ -37,4 +44,15 @@ if [ -z "$PY" ]; then
   exit 2
 fi
 
-exec "$PY" "$HOOK_FILE" "$@"
+# Do NOT exec: we must inspect the hook's exit code and coerce fail-closed.
+# Claude Code treats only exit 2 as a block; any other non-zero (stub exit 49,
+# 126, OOM kill, etc.) would otherwise fail OPEN. Force those to 2.
+"$PY" "$HOOK_FILE" "$@"
+RC=$?
+case "$RC" in
+  0|2) exit "$RC" ;;
+  *)
+    echo "run-hook-strict: hook exited $RC (not 0/2) - BLOCKING (fail-closed)" >&2
+    exit 2
+    ;;
+esac

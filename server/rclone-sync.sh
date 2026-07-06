@@ -12,9 +12,23 @@
 # Scheduled hourly by ora-data-sync.timer (see server/units/).
 # Remote paths can be overridden via ORA_ONEDRIVE_SPREADSHEETS /
 # ORA_ONEDRIVE_FINANCIALS in ~/.config/ora/ora.env.
+#
+# TORN-READ CAVEAT: the apt rclone (1.60 on Ubuntu 24.04) writes destination
+# files IN PLACE, so a reader (the nightly full gate) can observe a partially
+# written workbook mid-sync. Two defenses: (1) both this script and
+# run-full-gate.sh take the ~/.cache/ora-data.lock advisory lock below, giving
+# mutual exclusion; (2) prefer the upstream rclone (>=1.63, which writes to a
+# .partial temp file then atomically renames) -- install it with
+# 'curl https://rclone.org/install.sh | sudo bash'.
 # ASCII only. shellcheck-clean. Idempotent (sync is convergent).
 
 set -euo pipefail
+
+# ora-data mutual exclusion (see TORN-READ CAVEAT above): serialize against the
+# nightly full gate so it never reads a workbook this sync is mid-write on.
+mkdir -p "$HOME/.cache"
+exec 9>"$HOME/.cache/ora-data.lock"
+flock -w 1800 9 || { echo "rclone-sync: could not acquire ora-data.lock within 1800s (full gate in flight); skipping this round"; exit 0; }
 
 DRY_ARGS=()
 for ARG in "$@"; do
