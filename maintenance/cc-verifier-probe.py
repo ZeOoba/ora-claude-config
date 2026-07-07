@@ -67,7 +67,7 @@ check("V1 keybinding", u == "skill:acquisition-underwriting", f"ctrl+shift+u={u}
 rube_targets = {
     "settings.json": os.path.join(CLAUDE, "settings.json"),
     "project settings.json": os.path.join(PROJ, "settings.json"),
-    "onedrive settings.local": r"C:\Users\Owner\OneDrive - Oxford Capital Partners (1)\.claude\settings.local.json",
+    "onedrive settings.local": r"C:\Users\Owner\OneDrive - Oxford Capital Partners\.claude\settings.local.json",
     "LAMS registry": LAMS,
 }
 rube_hits = [n for n, p in rube_targets.items() if ("d6315173" in read(p) or "RUBE_" in read(p))]
@@ -122,10 +122,11 @@ if os.path.isdir(os.path.join(repo, ".git")) if repo else False:
 check("V10 OXFORDRA_REPO canonical", repo_ok and "ZeOoba/Website" in remote, f"{repo} -> {remote}")
 
 # ---- Live scheduler fleets (DUAL-FLEET doctrine 2026-06-10) ----
-# CC/MCP fleet = claude-code-sessions registry (scheduled-tasks MCP, 14 tasks).
+# CC/MCP fleet = claude-code-sessions registry (scheduled-tasks MCP).
 # LAMS/Cowork fleet = local-agent-mode-sessions registry (Cowork-created tasks:
-# om-intake-ocr, replacement-cost-refresh, cowork-heartbeat, integrity-guard).
-# Both LIVE; Cowork-created tasks land in LAMS by platform design.
+# om-intake-ocr, replacement-cost-refresh, cowork-heartbeat, skill-store-drift-check;
+# the integrity-guard twin was retired 2026-06-11). Both LIVE; Cowork-created tasks
+# land in LAMS by platform design.
 def discover_live_store():
     p = _discover_store("claude-code-sessions")
     return (p, jload(p)) if p else (None, None)
@@ -145,8 +146,11 @@ check("Live SKILL files present", live_path is not None and not bad_paths,
 lams = jload(LAMS) or {}
 lams_tasks = (lams or {}).get("scheduledTasks", []) or []
 lams_enabled = {t.get("id") for t in lams_tasks if t.get("enabled")}
+# LAMS expected set (2026-06-14): the LAMS integrity twin `scheduled-task-integrity-guard`
+# was RETIRED 2026-06-11 — the CC task `ora-task-integrity-guard` is now the SOLE integrity
+# runner — so it is dropped here. `ora-skill-store-drift-check` is the live 4th LAMS task.
 EXPECTED_LAMS = {"ora-om-intake-ocr", "ora-replacement-cost-refresh",
-                 "ora-cowork-heartbeat", "scheduled-task-integrity-guard"}
+                 "ora-cowork-heartbeat", "ora-skill-store-drift-check"}
 lams_missing = EXPECTED_LAMS - lams_enabled
 check("LAMS/Cowork fleet present", bool(LAMS) and not lams_missing,
       (f"{len(lams_enabled)} enabled in local-agent-mode-sessions")

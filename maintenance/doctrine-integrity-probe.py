@@ -102,7 +102,7 @@ SLASH_SKILL_ALLOWLIST = {"code-review"}
 #   Cowork surface -> the OneDrive workspace
 # Backup/archive trees are pruned so a deleted skill that lingers only in a backup
 # still reports MISSING (correct), and so the live skill is found wherever it sits.
-WORKSPACE = HOME / "OneDrive - Oxford Capital Partners (1)" / "Claude_Workspace"
+WORKSPACE = HOME / "OneDrive - Oxford Capital Partners" / "Claude_Workspace"
 SKILL_SCAN_ROOTS = (CLAUDE_DIR / "skills", CLAUDE_DIR / "plugins", WORKSPACE)
 # Pruned ONLY for correctness (backup/archive copies) and speed (the top-level
 # 02_Outputs artifact tree). Resolution is by SKILL.md presence (see

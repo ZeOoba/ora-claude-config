@@ -29,7 +29,7 @@ import re
 import sys
 import time
 
-OVERRIDE_DIR = os.environ.get("ORA_OVERRIDE_DIR") or os.path.expanduser("~/.claude/hooks/overrides")
+OVERRIDE_DIR = r"C:\Users\Owner\.claude\hooks\overrides"
 OVERRIDE_TTL_SECONDS = 3600
 INTERNAL_DOMAIN = "@oxfordra.net"
 SITE_PATH_MARKERS = ("website-canonical", "oxford-site")

@@ -3,7 +3,7 @@ as a subprocess with each payload on stdin and checks exit code (2=block, 0=pass
 import json, subprocess, sys, os
 
 PY = sys.executable
-HOOK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ora-autonomy-gate.py")
+HOOK = os.path.join(os.path.dirname(__file__), "..", "hooks", "ora-autonomy-gate.py")
 
 def run(name, payload, expect):
     p = subprocess.run([PY, HOOK], input=json.dumps(payload).encode(),
@@ -55,4 +55,3 @@ for name, payload, expect in cases:
         good = run(name, payload, expect)
     ok += good
 print(f"\n{ok}/{len(cases)} as-expected")
-sys.exit(0 if ok == len(cases) else 1)

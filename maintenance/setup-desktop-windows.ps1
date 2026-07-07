@@ -325,13 +325,6 @@ try {
     Add-Result -Step 'Winget' -Status 'WARN' -Detail $_.Exception.Message
 }
 
-# Refresh PATH once, unconditionally, before any tool detection below. If Node/Git/etc
-# were installed by an EARLIER run of this script in a different window, THIS window
-# may still have inherited a stale PATH from Explorer (Explorer does not always notice
-# a PATH change until sign-out/reboot) -- without this, a tool that is actually present
-# could be misreported as missing here. In-process only; never touches the registry.
-Update-SessionPath
-
 # ---------------------------------------------------------------------------
 # STEP 2: Node -- three-way (skip>=20 / install-if-absent / warn-if-old, never silent-upgrade)
 # ---------------------------------------------------------------------------
