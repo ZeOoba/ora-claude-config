@@ -45,7 +45,7 @@ for _s in (sys.stdout, sys.stderr):
 
 HOME = os.path.expanduser("~")
 SKILL_ROOT = os.path.join(
-    HOME, "OneDrive - Oxford Capital Partners (1)", "Documents", "Claude", "Scheduled")
+    HOME, "OneDrive - Oxford Capital Partners", "Documents", "Claude", "Scheduled")
 
 def skill_path(task_id):
     return os.path.join(SKILL_ROOT, task_id, "SKILL.md")

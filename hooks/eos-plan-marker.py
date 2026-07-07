@@ -13,7 +13,7 @@ import json
 import os
 import sys
 
-DEFAULT_SESSIONS_DIR = os.path.expanduser("~/.claude/hooks/sessions")
+DEFAULT_SESSIONS_DIR = "C:/Users/Owner/.claude/hooks/sessions"
 
 PLAN_SUBSTR = ("docs/superpowers/plans/", "docs\\superpowers\\plans\\")
 

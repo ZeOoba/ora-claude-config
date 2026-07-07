@@ -18,7 +18,7 @@ import os
 import re
 import sys
 
-DEFAULT_DIR = os.path.expanduser("~/.claude/telemetry")
+DEFAULT_DIR = "C:/Users/Owner/.claude/telemetry"
 OUT_NAME = "lane-telemetry.jsonl"
 
 EDIT_TOOLS = ("Edit", "Write", "MultiEdit")

@@ -45,7 +45,7 @@
 - Surfaces: Cowork = autonomous multi-step, scheduled tasks, artifacts · Code = filesystem, git, deploys, skill authoring · Chat = one-shot reasoning.
 
 ## Skill tie-breaks (descriptions route; prefer the narrowest match)
-- Deal evaluation: `acquisition-underwriting` is the single funnel (modes SCREEN · SNAPSHOT · COMPS · UNDERWRITE · FULL; the standalone `deal-screen` / `cap-rate-snapshot` / `market-comp-analyzer` are subsumed). Single-target pre-screen default: `verified-deal-recon` (bare `deal-recon` agent = instant first-look only). Then `deal-comparison` → `loi-generation` → `document-assembly` (IC memo).
+- Deal evaluation: `acquisition-underwriting` is the single funnel (modes SCREEN · SNAPSHOT · COMPS · UNDERWRITE · FULL; the standalone `deal-screen` / `cap-rate-snapshot` / `market-comp-analyzer` are subsumed). Single-target pre-screen default: `verified-deal-recon` (bare `deal-recon` agent = instant first-look only). FULL mode produces its own canonical 12-section IC memo (pre-mortem + Edge-scan floor mandatory) — `document-assembly`'s Template 2 is a thinner generic fallback, use only if `acquisition-underwriting` is unavailable. Then `deal-comparison` → `loi-generation`.
 - LOI: `loi-generation` is the SOLE path — never document-assembly's generic template (it skips the QC gate).
 - Comms drafting: `tenant-email` (tenants) · `communication-intelligence` (broker/lender/vendor/attorney/external). Exception scans: `exception-detection` (live Notion/HubSpot) · `portfolio-anomaly-scout` (file-export sweeps).
 - If a referenced skill is absent on the current surface, say so — never improvise its procedure.
