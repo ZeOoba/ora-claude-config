@@ -28,6 +28,7 @@
 !/maintenance/
 !/docs/
 !/ora-ops-plugin/
+!/.github/
 
 # 3) Re-ignore secrets, caches & transient state INSIDE opted-in dirs
 hooks/confidential-terms.json
