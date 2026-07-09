@@ -86,3 +86,41 @@ def diff_stages(current, snapshot):
                 "new_stage": new_stage,
             })
     return transitions
+
+
+def classify_disposition(new_stage, stage_map):
+    """Map a live Notion Stage string to a terminal-disposition token using `stage_map`
+    ({notion_stage_string: disposition_token}). Returns the token only if `new_stage` is
+    a key in `stage_map` AND the mapped value is a real DISPOSITION_TOKENS member;
+    otherwise None -- never guesses. None means "log to event_log only, no ledger row"."""
+    token = stage_map.get(new_stage)
+    if token in DISPOSITION_TOKENS:
+        return token
+    return None
+
+
+def format_event_log_entry(transition, date):
+    """Render the dated event_log.md entry body for one transition. `date` is a
+    'YYYY-MM-DD' string supplied by the caller -- never computed inside this pure
+    function (no datetime.today() here, so it stays trivially testable)."""
+    deal = transition["deal"]
+    old = transition["old_stage"] if transition["old_stage"] is not None else "(none)"
+    new = transition["new_stage"]
+    return (
+        "## %s — Deal-stage sync: %s — %s → %s (Notion)\n\n"
+        "Detected by ora-open-sessions-board's reconciliation step; no corresponding "
+        "entry existed. Tripwire only — see Notion for the actual decision context."
+        % (date, deal, old, new)
+    )
+
+
+def format_ledger_row(transition, disposition, date, reason=None):
+    """Render one deal-decision-ledger.md markdown table row: | Date | Deal | Verdict |
+    One-line reason | Buy-box rule validated / refined |. `reason` is the one-line
+    rationale if known; when None, uses the standing fallback rather than fabricating
+    one."""
+    if reason is None:
+        reason = ("Notion Stage → %s; reason not logged elsewhere — "
+                   "reconcile manually" % transition["new_stage"])
+    return "| %s | %s | %s | %s | — |" % (date, transition["deal"], disposition,
+                                                 reason)
