@@ -231,7 +231,7 @@
         ]
       },
       {
-        "matcher": "Bash|Task|TaskCreate|TaskUpdate",
+        "matcher": "Bash|Task|TaskCreate|TaskUpdate|Edit|Write|MultiEdit",
         "hooks": [
           {
             "type": "command",
