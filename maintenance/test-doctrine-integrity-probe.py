@@ -521,6 +521,64 @@ def test_guard_liveness_fixture_orphan_and_override_excluded():
           "(2 guards; wired OK, orphan WARN, override excluded, exit 0)")
 
 
+def test_quick_mode_clean_passes():
+    """--quick against the real (clean) CLAUDE.md -> exit 0."""
+    r = run_probe(["--quick"])
+    assert r.returncode == 0, (
+        "expected exit 0 for --quick against real CLAUDE.md, got %d\n%s"
+        % (r.returncode, r.stdout))
+    assert "QUICK-CHECK OK" in r.stdout, "expected the quick-check OK line:\n%s" % r.stdout
+    print("  PASS test_quick_mode_clean_passes")
+
+
+def test_quick_mode_size_budget_fails():
+    """--quick on an over-budget fixture -> exit 1, reports size budget only
+    (no skills/leak/guard-liveness output -- proves --quick skips those checks)."""
+    path = _write_fixture(_v21_base() + ("word " * 1900) + "\n")
+    try:
+        r = run_probe(["--quick", path])
+        assert r.returncode == 1, (
+            "expected exit 1 for over-budget --quick fixture, got %d\n%s"
+            % (r.returncode, r.stdout))
+        assert "size budget exceeded" in r.stdout, (
+            "expected size-budget violation:\n%s" % r.stdout)
+        assert "Skills referenced" not in r.stdout, (
+            "--quick must skip the skills scan:\n%s" % r.stdout)
+        assert "Guard liveness" not in r.stdout, (
+            "--quick must skip guard-liveness:\n%s" % r.stdout)
+    finally:
+        os.remove(path)
+    print("  PASS test_quick_mode_size_budget_fails (fails, and skips slow checks)")
+
+
+def test_quick_mode_bare_date_fails():
+    """--quick on a fixture with a bare date -> exit 1, reports it; slug dates exempt."""
+    path = _write_fixture(_v21_base() + "- ratified 2026-06-10, do not unify\n")
+    try:
+        r = run_probe(["--quick", path])
+        assert r.returncode == 1, (
+            "expected exit 1 for bare-date --quick fixture, got %d\n%s"
+            % (r.returncode, r.stdout))
+        assert "bare date 2026-06-10" in r.stdout, (
+            "expected the specific bare-date violation:\n%s" % r.stdout)
+    finally:
+        os.remove(path)
+    print("  PASS test_quick_mode_bare_date_fails")
+
+
+def test_quick_mode_clean_fixture_passes():
+    """--quick on a clean v2.1 fixture -> exit 0."""
+    path = _write_fixture(_v21_base())
+    try:
+        r = run_probe(["--quick", path])
+        assert r.returncode == 0, (
+            "expected exit 0 for clean --quick fixture, got %d\n%s"
+            % (r.returncode, r.stdout))
+    finally:
+        os.remove(path)
+    print("  PASS test_quick_mode_clean_fixture_passes")
+
+
 def main():
     assert os.path.isfile(REAL_CLAUDE_MD), "real CLAUDE.md not found: %s" % REAL_CLAUDE_MD
     test_real_doctrine_valid()
@@ -542,6 +600,10 @@ def main():
     test_leak_formatting_and_excerpt_withholding()
     test_guard_liveness_real_no_orphans()
     test_guard_liveness_fixture_orphan_and_override_excluded()
+    test_quick_mode_clean_passes()
+    test_quick_mode_size_budget_fails()
+    test_quick_mode_bare_date_fails()
+    test_quick_mode_clean_fixture_passes()
     print("ALL DOCTRINE-PROBE TESTS PASS")
 
 

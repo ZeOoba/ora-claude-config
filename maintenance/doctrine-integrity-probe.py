@@ -77,6 +77,7 @@ Optional argv[1] = path to a CLAUDE.md override (defaults to the real one),
 so tests can point it at a fixture. Optional --session-context=PATH /
 --rules=PATH / --terms=PATH override the companion files the same way.
 Live mode (no CLAUDE.md override) additionally leak-scans ~/.claude root *.md.
+--quick runs only checks 5+6 (size budget, bare dates) against the given/default path and skips everything else -- fast enough to run on every CLAUDE.md edit.
 
 Pure stdlib (re, os, sys, json, datetime, pathlib). ASCII-only output
 (Windows cp1252 console).
@@ -365,6 +366,37 @@ def bare_dates(text):
     return out
 
 
+def check_size_and_dates(text):
+    """CLAUDE.md hard-fail violations only (checks 5+6's MISSING-tier findings):
+    size budget and bare ISO dates. Pure function -- no I/O, no printing, no
+    side effects on the module-level 'missing'/WARN_COUNT state main() uses.
+    Returns a list of violation message strings (empty = clean).
+
+    Deliberately NOT reused by main()'s own checks 5/6 (which keep their
+    existing inline print/warn/missing.append flow untouched) -- main()'s path
+    is exercised by test_size_budget_fail/test_dated_annotation_fails and must
+    stay byte-for-byte unchanged; this is intentionally the small amount of
+    accepted duplication with bare_dates()/WORD_BUDGET_FAIL that buys that
+    guarantee, not an oversight.
+
+    Does NOT include check 6's session-context tombstone-aging sub-check
+    (WARN-only, reads session-context.md, not CLAUDE.md -- out of scope for a
+    per-edit CLAUDE.md check).
+    """
+    violations = []
+    words = len(text.split())
+    if words > WORD_BUDGET_FAIL:
+        violations.append(
+            "size budget exceeded: %d > %d words (one-in-one-out gate breached -- "
+            "trim an equivalent amount elsewhere in this same change; move a rule "
+            "down a layer)" % (words, WORD_BUDGET_FAIL))
+    for ln_no, d in bare_dates(text):
+        violations.append(
+            "bare date %s at line %d (dated history belongs in event_log.md)"
+            % (d, ln_no))
+    return violations
+
+
 def word_stream(text):
     """Lowercased alphanumeric word sequence -- normalization for the
     duplication check (markdown, punctuation and unicode dashes drop out)."""
@@ -484,11 +516,13 @@ def parse_args(argv):
             overrides["rules"] = Path(a.split("=", 1)[1])
         elif a.startswith("--terms="):
             overrides["terms"] = Path(a.split("=", 1)[1])
+        elif a == "--quick":
+            overrides["quick"] = True
         elif a.startswith("--"):
             # A typo'd flag must not silently become the CLAUDE.md path (which
             # would also disable live-mode scanning). Fail loud.
             print("[MISSING] unknown option: %s (known: --session-context= "
-                  "--rules= --terms=)" % ascii_safe(a))
+                  "--rules= --terms= --quick)" % ascii_safe(a))
             sys.exit(1)
         else:
             pos.append(a)
@@ -510,6 +544,17 @@ def main():
     except Exception as e:
         print("[MISSING] cannot read CLAUDE.md (%s): %s" % (claude_md, e))
         sys.exit(1)
+
+    if overrides.get("quick"):
+        violations = check_size_and_dates(text)
+        if violations:
+            print("DOCTRINE QUICK-CHECK -- source: %s" % claude_md)
+            for v in violations:
+                print("  [MISSING] " + v)
+            print("QUICK-CHECK DRIFT: %d violation(s)" % len(violations))
+            sys.exit(1)
+        print("QUICK-CHECK OK -- %s within word budget, no bare dates" % claude_md)
+        sys.exit(0)
 
     section = extract_section(text)
     if section is None:
