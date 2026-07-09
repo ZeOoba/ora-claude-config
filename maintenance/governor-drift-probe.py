@@ -33,7 +33,7 @@ CANON_LTV = "40"
 HOME = os.path.expanduser("~")
 CLAUDE = os.path.join(HOME, ".claude")
 MEM = os.path.join(CLAUDE, "projects",
-                   "C--Users-Owner-OneDrive---Oxford-Capital-Partners--1-", "memory")
+                   "C--Users-Owner-OneDrive---Oxford-Capital-Partners", "memory")
 
 def discover_skills_root():
     """Auto-discover the live Cowork skills tree (GUIDs rotate -- never hardcode, I4)."""
@@ -265,6 +265,87 @@ GOV_KEYWORDS = ("governor", "hard filter", "hard screen", "hard acquisition",
                 "disqualif", "non-negotiable", "dscr floor", "ltv ceiling",
                 "self-imposed", "minimum dscr", "min dscr", "acquisition screen")
 
+# --- Portfolio-level DSCR qualifier (2026-07-08) --------------------------------------------
+# Gabriel-ratified doctrine (2026-07-08): "DSCR of 1.25 for each property and 1.75 for the entire
+# portfolio." So DSCR 1.25x is the PER-DEAL / per-property acquisition governor (canonical, I3),
+# while 1.75x is a SEPARATE, legitimate PORTFOLIO-WIDE blended target -- a distinct aggregate
+# metric, NOT the per-deal floor. Before this, the 1.75 regression sentinel (scan_line branch 1)
+# and the DSCR equality check (branch 2) flagged ANY 1.75 near dscr/governor, which conflated the
+# two figures and would false-positive on a legitimately-labelled portfolio-level 1.75.
+#
+# _portfolio_qualified() SUPPRESSES the flag ONLY when the line unambiguously frames the value as
+# portfolio-level. Same detection-over-silence bias as the rest of the module -- suppression is a
+# false negative, so it is kept TIGHT with two independent guards:
+#   * VETO first: any per-deal / per-property marker on the line ("per-deal", "per property",
+#     "hard acquisition governor") means the line claims to be the DEAL-level governor -- if that
+#     shows 1.75 it is a REAL per-deal drift and must STILL flag, so we never suppress it.
+#   * Then REQUIRE an explicit portfolio qualifier: a "portfolio dscr"/"portfolio-wide"/
+#     "portfolio-level"/"blended portfolio" token, OR the bare word "portfolio" within 30 chars of
+#     the offending value. A stray "portfolio" far from the number does NOT qualify (so it cannot
+#     be used to mask a governor drift elsewhere on a long line).
+PORTFOLIO_QUALIFIERS = ("portfolio dscr", "portfolio-wide", "portfolio wide",
+                        "portfolio-level", "portfolio level", "blended portfolio")
+PERDEAL_MARKERS = ("per-deal", "per deal", "per-property", "per property",
+                   "hard acquisition governor")
+
+def _portfolio_qualified(low, val_start):
+    """True when the DSCR value at index `val_start` (already lower-cased `low`) is unambiguously a
+    PORTFOLIO-LEVEL figure and the 1.75/equality flag should be suppressed. A per-deal marker
+    anywhere on the line vetoes suppression (real per-deal drift must still flag)."""
+    if any(m in low for m in PERDEAL_MARKERS):
+        return False
+    if any(q in low for q in PORTFOLIO_QUALIFIERS):
+        return True
+    return "portfolio" in low[max(0, val_start - 30):val_start + 30]
+
+# --- Post-close refinancing-scenario qualifier (2026-07-08) ----------------------------------
+# Gabriel-ratified doctrine: DSCR 1.25x / LTV 40% is the ACQUISITION-time governor (how ORA buys).
+# The acquisition-underwriting skill ALSO documents a distinct POST-CLOSE REFINANCING scenario
+# ("all-cash bid + refi post-close") whose debt-SIZING assumptions legitimately cite different
+# numbers -- a refi LTV taken against STABILIZED EXIT value (65%) and DSCR-based rate-pricing tiers
+# ("-25 bps for stabilized multi-tenant >=1.40x DSCR"). Those are refinance-market inputs, NOT the
+# acquisition governor; the SAME line states the governor CORRECTLY ("1.25x DSCR (the governor --
+# never exceed)"). Because the bare word "governor" on that line trips is_gov, the DSCR-equality
+# pass (branch 2) and the LTV proximity pass (branch 3) flag the refi figures as drift -- a false
+# positive of exactly the class this module's docstring warns against.
+#
+# _refi_qualified() SUPPRESSES a DSCR/LTV flag ONLY when the offending value sits in an unambiguous
+# post-close-refi debt-sizing context. Detection-over-silence bias, so kept TIGHT with three guards:
+#   * VETO on any ACQUISITION-governor marker on the line -- it would make the value the acquisition
+#     governor itself, so a drift there must STILL flag.
+#   * REQUIRE the line to be an explicit refi debt-sizing line: a refi/refinance token AND a
+#     post-close / refi-debt / refi-sized frame (a stray "refi" alone does not qualify).
+#   * VETO if the value is itself declared AS "the governor" -- the literal token "governor" within
+#     25 chars either side of the value -- so drifting the on-line governor CITATION (e.g. the 1.25x
+#     -> 1.40x in "(the governor -- never exceed)") is NOT masked. The genuine refi figures sit far
+#     from any "governor" token, so they are still suppressed.
+REFI_TOKENS = ("refi", "refinance")
+REFI_FRAME = ("post-close", "post close", "refi debt", "refi sized", "refi assumption",
+              "refinance debt", "refinancing")
+# markers that would make the flagged value the ACQUISITION governor (veto suppression):
+ACQ_GOV_MARKERS = ("acquisition governor", "acquisition screen", "hard filter", "hard screen",
+                   "hard acquisition", "ltv ceiling", "dscr floor", "min dscr", "minimum dscr",
+                   "buy box", "buy-box", "non-negotiable") + PERDEAL_MARKERS
+
+def _refi_qualified(low, val_start):
+    """True when the DSCR/LTV value at index `val_start` (in already-lower-cased `low`) is
+    unambiguously a POST-CLOSE REFI debt-sizing figure and the drift flag should be suppressed.
+    TIGHT by design (suppression is a false negative): an acquisition-governor marker anywhere on
+    the line, or the value being declared AS "the governor" (token within 25 chars), both veto
+    suppression so a real acquisition-governor drift still flags."""
+    if any(m in low for m in ACQ_GOV_MARKERS):
+        return False
+    if not (any(t in low for t in REFI_TOKENS) and any(f in low for f in REFI_FRAME)):
+        return False
+    # "governor" token close to the value = the value is declared AS the governor (a drifted
+    # citation) -> do NOT suppress. The after-reach (40) spans a "Nx DSCR** (the governor" markdown
+    # declaration (~26 chars) while staying well short of the genuine refi figures, whose nearest
+    # "governor" token sits 60+ chars away (the refi-sizing "65% LTV ... and 1.25x DSCR (the
+    # governor")) and which therefore stay suppressed.
+    if "governor" in low[max(0, val_start - 25):val_start + 40]:
+        return False
+    return True
+
 def scan_line(raw):
     """Return list of (reason) drift findings for one line."""
     out = []
@@ -276,12 +357,18 @@ def scan_line(raw):
     ltv_corr_spans = [mm.span() for mm in RE_LTV_CORRECTION.finditer(low)]
     is_gov = any(k in low for k in GOV_KEYWORDS)
 
-    # 1) Regression sentinel: 1.75 near DSCR/governor. Fires only for a 1.75 OUTSIDE any correction
-    #    span -- a live drift, not the corrected-away value of a "corrected from 1.75 → 1.25" note.
+    # 1) Regression sentinel: 1.75 near DSCR/governor. Fires only for a 1.75 that is NEITHER (a) the
+    #    corrected-away value of a "corrected from 1.75 → 1.25" note NOR (b) an explicit PORTFOLIO-LEVEL
+    #    DSCR figure (1.75x is the ratified blended portfolio-wide target -- a distinct metric from the
+    #    1.25x per-deal governor). _portfolio_qualified() vetoes suppression on any per-deal marker, so
+    #    a per-deal governor that has drifted to 1.75 STILL flags. Scanning continues past a suppressed
+    #    1.75 so a second, unqualified 1.75 on the same line is not missed.
     if "dscr" in low or "governor" in low:
         idx = low.find("1.75")
         while idx != -1:
-            if not any(s <= idx < e for (s, e) in dscr_corr_spans):
+            safe = (any(s <= idx < e for (s, e) in dscr_corr_spans)
+                    or _portfolio_qualified(low, idx))
+            if not safe:
                 out.append("DSCR governor appears as 1.75 (canonical is %sx)" % CANON_DSCR)
                 break
             idx = low.find("1.75", idx + 1)
@@ -324,6 +411,19 @@ def scan_line(raw):
             # skip the corrected-away old value of a DSCR correction note (span-scoped, M-2).
             if any(s <= vs and ve <= e for (s, e) in dscr_corr_spans):
                 continue
+            # skip an explicit PORTFOLIO-LEVEL DSCR figure: the blended portfolio-wide target
+            # (ratified 1.75x, 2026-07-08) is a SEPARATE aggregate metric, not the per-deal governor
+            # threshold, so it is not measured against the 1.25x per-deal floor. Vetoed by any
+            # per-deal marker (see _portfolio_qualified), so a per-deal floor drifted off-canonical
+            # still flags here.
+            if _portfolio_qualified(low, vs):
+                continue
+            # skip a POST-CLOSE-REFI debt-sizing DSCR figure (a DSCR-based rate-pricing tier such as
+            # ">=1.40x DSCR", or a refi-sizing DSCR) -- a distinct refinance-market input, not the
+            # acquisition governor. Vetoed by any acquisition-governor marker or a value declared AS
+            # the governor (see _refi_qualified), so a real per-deal governor drift still flags.
+            if _refi_qualified(low, vs):
+                continue
             in_pair = any(s <= vs and ve <= e for (s, e) in pair_spans)
             if is_rubric and in_pair:
                 continue  # a scored multiple inside a genuine rubric -- not a declared floor
@@ -363,6 +463,11 @@ def scan_line(raw):
                     _flag_ltv(pm.group(1))
             if not cmp_hits:  # proximity fallback only when no comparator-bound value was found
                 for m in RE_LTV_NEAR.finditer(low):
+                    # skip a POST-CLOSE-REFI LTV sizing figure (e.g. "refi ... 65% LTV" against
+                    # stabilized exit value) -- not the acquisition LTV governor. Vetoed by any
+                    # acquisition-governor marker or a value declared AS the governor.
+                    if _refi_qualified(low, m.start()):
+                        continue
                     _flag_ltv(m.group(1) or m.group(2), kind="governor")
     return out
 
@@ -381,7 +486,14 @@ def main():
     # quote off-canonical numbers and would false-positive forever. The LIVING governor lives in
     # standards.md / rules.md / firm.md / CLAUDE.md / skills, which stay in scope. (Precision over
     # recall, per the module docstring.)
-    skip_names |= {"event_log.md"}
+    # MEMORY.md (the index) and dated audit/project memory files are the same class: they NARRATE
+    # findings (e.g. "governor-drift probe caught DSCR 1.75x") rather than declare a live governor.
+    # Exempting the index broadly (not just event_log.md) accepts a small blind spot -- a governor
+    # change accidentally recorded ONLY in the index, never in standards.md/rules.md/firm.md/CLAUDE.md/
+    # skills, would go undetected -- judged acceptable since those are the doctrinal homes for a real
+    # change, not the index (2026-07-08, added after the formal CLAUDE.md audit's own tracking file
+    # tripped this sentinel).
+    skip_names |= {"event_log.md", "MEMORY.md", "project_claude-md-formal-audit-2026-07-08.md"}
     for root, exts in build_targets():
         if not (os.path.isfile(root) or os.path.isdir(root)):
             skipped_roots.append(root)
