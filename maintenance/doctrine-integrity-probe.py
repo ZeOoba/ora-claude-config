@@ -54,8 +54,9 @@ Checks:
      The report references deal/term by INDEX ONLY -- this probe's stdout is
      emailed weekly (eos-health-report.ps1) and must never echo a term.
      Unreadable terms file -> WARN (fail open), never a crash.
-  9. MEMORY.md index-entry length: any index bullet (- [Title](file.md) -- desc)
-     longer than MEMORY_INDEX_LINE_MAXLEN chars -- memory-policy.md sec 3 mandates
+  9. MEMORY.md index-entry hook length: for any index bullet
+     (- [Title](file.md) -- desc), the hook text after the link, if over
+     MEMORY_INDEX_HOOK_MAXLEN chars -- memory-policy.md sec 3 mandates
      "a one-line description" per entry (no numeric cap of its own)  [WARN only]
  10. session-context.md terseness: whole file over SESSION_CONTEXT_MAX_LINES lines,
      or any bullet over SESSION_CONTEXT_MAX_BULLET_WORDS words -- the volatile
