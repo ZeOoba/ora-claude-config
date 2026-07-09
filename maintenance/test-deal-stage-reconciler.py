@@ -76,6 +76,42 @@ expect("diff_stages: brand-new page_id has old_stage None",
 expect("diff_stages: page removed from current is not reported", "pg4" not in by_id)
 expect("diff_stages: exactly 2 transitions", len(transitions) == 2, transitions)
 
+# --- classify_disposition -------------------------------------------------------------
+stage_map = {"Passed": "PASS", "Killed": "TERMINATE", "Under Review": "NOT_A_TOKEN"}
+expect("classify_disposition: mapped stage returns its token",
+       dsr.classify_disposition("Passed", stage_map) == "PASS")
+expect("classify_disposition: unmapped stage returns None",
+       dsr.classify_disposition("Candidate", stage_map) is None)
+expect("classify_disposition: mapped-but-invalid-token returns None (never guesses)",
+       dsr.classify_disposition("Under Review", stage_map) is None)
+
+# --- format_event_log_entry / format_ledger_row ----------------------------------------
+t = {"page_id": "pg2", "deal": "470 McCormick Blvd", "old_stage": "In Negotiation",
+     "new_stage": "Passed"}
+entry = dsr.format_event_log_entry(t, "2026-07-08")
+expect("format_event_log_entry: starts with dated header",
+       entry.startswith("## 2026-07-08 — Deal-stage sync: 470 McCormick Blvd"),
+       entry)
+expect("format_event_log_entry: mentions both stages",
+       "In Negotiation" in entry and "Passed" in entry)
+
+t_new = {"page_id": "pg2", "deal": "470 McCormick Blvd", "old_stage": None,
+         "new_stage": "Passed"}
+entry_new = dsr.format_event_log_entry(t_new, "2026-07-08")
+expect("format_event_log_entry: None old_stage renders as (none), not the word None",
+       "(none)" in entry_new and "None" not in entry_new)
+
+row = dsr.format_ledger_row(t, "PASS", "2026-07-08")
+expect("format_ledger_row: correct column count", row.count("|") == 6, row)
+expect("format_ledger_row: uses the standing fallback reason when none given",
+       "reason not logged elsewhere" in row)
+
+row_with_reason = dsr.format_ledger_row(t, "PASS", "2026-07-08",
+                                         reason="LOI lapsed, Gabriel killed in-session")
+expect("format_ledger_row: uses supplied reason when given",
+       "LOI lapsed" in row_with_reason
+       and "reason not logged elsewhere" not in row_with_reason)
+
 # --- summary ----------------------------------------------------------------------------
 passed = sum(1 for ok, _ in results if ok)
 print("\ndeal-stage-reconciler tests: %d/%d passed" % (passed, len(results)))
