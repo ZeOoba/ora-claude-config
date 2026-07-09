@@ -32,6 +32,8 @@
 # 3) Re-ignore secrets, caches & transient state INSIDE opted-in dirs
 hooks/confidential-terms.json
 hooks/sessions/
+# roster-staleness runtime breadcrumb written by confidentiality-guard.py (transient; never track)
+hooks/state/
 # county-parcel-screen code is TRACKED (counterparty names externalized 2026-06-11);
 # its data/ tree (public county dumps + the pipeline-guard.local.json counterparty
 # floor) stays local-only. *.local.json is the standing convention for

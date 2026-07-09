@@ -15,7 +15,14 @@ are inserted as the NEWEST entry (directly above the first existing '## ').
 Usage:
   python append-event-log.py --entry-file path\\to\\entry.md
   echo "## 2026-06-12 — title" | python append-event-log.py        (stdin)
-Exit 0 = appended (header echoed). Exit 1 = failed after retries.
+Exit 0 = appended (header echoed), or SPOOLED for auto-drain when the log is locked
+(the entry is parked under <log>.pending/ and replayed on the next run -- never lost).
+Exit 1 = failed to BOTH append and spool.
+
+SPOOL (2026-07-08): an OS file-handle lock (another process holding event_log.md open)
+survives the mtime-retry loop and used to drop the append entirely. Now a run first
+DRAINS any parked entries, then appends; if the lock never clears it SPOOLS the new
+entry (oldest-first replay preserves newest-on-top order).
 """
 import argparse
 import os
@@ -23,7 +30,7 @@ import sys
 import time
 
 LOG = os.path.join(os.path.expanduser("~"), ".claude", "projects",
-                   "C--Users-Owner-OneDrive---Oxford-Capital-Partners--1-",
+                   "C--Users-Owner-OneDrive---Oxford-Capital-Partners",
                    "memory", "event_log.md")
 
 
@@ -51,6 +58,75 @@ def insert_newest(content, entry):
     return content[:idx].rstrip() + "\n\n" + entry + "\n\n" + content[idx:]
 
 
+def spool_dir_for(log):
+    """Directory holding entries that could not be written yet (lock contention)."""
+    return log + ".pending"
+
+
+def spool_entry(log, entry, now_ns):
+    """Durably park `entry` for later draining. Filename is monotonic (ns) so a later
+    drain replays oldest-first. Returns the spooled path."""
+    d = spool_dir_for(log)
+    os.makedirs(d, exist_ok=True)
+    p = os.path.join(d, "%d.md" % now_ns)
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(entry)
+    return p
+
+
+def _atomic_insert(log, entry):
+    """One mtime-guarded read + newest-first insert + atomic replace. Returns True on
+    success; raises on lock/other error (caller decides retry/spool)."""
+    st_before = os.stat(log).st_mtime_ns
+    with open(log, encoding="utf-8") as f:
+        content = f.read()
+    new = insert_newest(content, entry)
+    if os.stat(log).st_mtime_ns != st_before:
+        raise BlockingIOError("log changed mid-read")
+    tmp = log + ".tmp-append"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(new)
+    os.replace(tmp, log)  # atomic on the same volume
+    return True
+
+
+def drain_spool(log, attempts=3):
+    """Replay spooled entries (oldest-first) into `log`. Stops at the first one that
+    still can't be written -- leaves it and the rest for next time (nothing is lost).
+    A malformed spooled entry is discarded so it can't wedge the queue forever.
+    Returns the count successfully drained."""
+    d = spool_dir_for(log)
+    if not os.path.isdir(d):
+        return 0
+    drained = 0
+    for name in sorted(n for n in os.listdir(d) if n.endswith(".md")):
+        p = os.path.join(d, name)
+        try:
+            with open(p, encoding="utf-8") as f:
+                entry = f.read().strip()
+        except Exception:
+            continue
+        done = False
+        for attempt in range(attempts):
+            try:
+                _atomic_insert(log, entry)
+                done = True
+                break
+            except ValueError:  # malformed -> discard, don't wedge the queue
+                done = True
+                break
+            except Exception:
+                time.sleep(0.2 * (attempt + 1))
+        if not done:
+            break  # lock still held -- retry this + the rest on a later run
+        try:
+            os.remove(p)
+        except Exception:
+            pass
+        drained += 1
+    return drained
+
+
 def main(argv=None):
     # Windows consoles default to cp1252; entries routinely contain em-dashes / arrows / box
     # glyphs. Reconfigure the std streams to UTF-8 so the success + diagnostic prints never raise
@@ -76,18 +152,20 @@ def main(argv=None):
         return 1
 
     header = entry.splitlines()[0]
+
+    # Drain anything parked by a prior locked run first, so pending entries land as
+    # soon as the lock clears. They are older than this new entry, so they end up
+    # below it (newest-on-top preserved).
+    try:
+        n = drain_spool(a.log)
+        if n:
+            print("drained %d spooled entr%s" % (n, "y" if n == 1 else "ies"))
+    except Exception as e:
+        sys.stderr.write("spool drain skipped: %s\n" % e)
+
     for attempt in range(6):
         try:
-            st_before = os.stat(a.log).st_mtime_ns
-            with open(a.log, encoding="utf-8") as f:
-                content = f.read()
-            new = insert_newest(content, entry)
-            if os.stat(a.log).st_mtime_ns != st_before:
-                raise BlockingIOError("log changed mid-read")
-            tmp = a.log + ".tmp-append"
-            with open(tmp, "w", encoding="utf-8") as f:
-                f.write(new)
-            os.replace(tmp, a.log)  # atomic on the same volume
+            _atomic_insert(a.log, entry)
             with open(a.log, encoding="utf-8") as f:
                 if header in f.read():
                     print("appended: %s" % header)
@@ -97,8 +175,17 @@ def main(argv=None):
         except Exception as e:
             sys.stderr.write("attempt %d: %s — retrying\n" % (attempt + 1, e))
         time.sleep(0.25 * (attempt + 1))
-    sys.stderr.write("FAILED to append after retries — append manually.\n")
-    return 1
+
+    # Lock never cleared: park the entry instead of losing it. It drains on the next
+    # run (2026-07-08 -- a held event_log.md handle used to drop the append entirely).
+    try:
+        p = spool_entry(a.log, entry, time.time_ns())
+        sys.stderr.write("SPOOLED to %s — log locked; will auto-drain next run.\n" % p)
+        print("spooled (log locked): %s" % header)
+        return 0
+    except Exception as e:
+        sys.stderr.write("FAILED to append AND to spool (%s) — append manually.\n" % e)
+        return 1
 
 
 if __name__ == "__main__":

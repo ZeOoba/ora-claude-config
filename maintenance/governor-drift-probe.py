@@ -140,6 +140,20 @@ RE_DSCR_FROMTO = re.compile(
 RE_DSCR_DECL = re.compile(
     r"(?:floor|minimum|min|maximum|max|ceiling|>=|<=|[≥≤]|" + _PIVOT + r")"
     r"\s*(?:[<>]=?|[≥≤])?\s*([0-9]+\.[0-9]+)\s*[x×](?!\s*%)", re.I)
+# DSCR DECL, REVERSE WORD ORDER (2026-07-08): the NUMBER-then-keyword form "1.40x floor" /
+# "1.40x minimum" -- the mirror image of RE_DSCR_DECL, which only reads keyword-BEFORE-number
+# ("floor 1.40x"). A governor restatement written "This 1.40x floor is the acquisition governor"
+# carries NO literal "dscr" (so RE_DSCR_THRESH, anchored on the word "dscr", misses it) AND puts the
+# keyword AFTER the value (so RE_DSCR_DECL misses it) -- a genuine false-negative discovered in the
+# 2026-07-08 CLAUDE.md audit (a line was reworded to dodge it; this closes the root gap). Same metric
+# guard as RE_DSCR_DECL: the trailing x/× is REQUIRED and must abut the value -- that is what
+# separates a DSCR multiple ("1.40x floor") from a rent/height/throughput decimal that merely
+# precedes a keyword ("5.50 psf rent floor", "32.0 ft clear-height ceiling" -- neither has an x
+# touching the number). It is added to the branch-2 candidate list, so it flows through the SAME
+# suppressors as every other DSCR candidate (canonical-skip, correction-span, portfolio-level,
+# post-close-refi, rubric-pair); a portfolio-wide "1.75x floor" or a refi tier is still suppressed.
+RE_DSCR_DECL_REV = re.compile(
+    r"([0-9]+\.[0-9]+)\s*[x×]\s*(?:floor|ceiling|minimum|min|maximum|max)\b", re.I)
 RE_LTV_FROMTO = re.compile(
     r"(?:" + _CHANGE_VERB + r")\b[^0-9\n]{0,16}?from\s+" + re.escape(CANON_LTV)
     + r"\s*%\s+to\s+([0-9]{1,3})\s*%", re.I)
@@ -158,6 +172,17 @@ RE_DSCR_PIVOT_DECOY = re.compile(
 # percent ("max LTV 40% and 25% basis discount", "ceiling 40% with 8% yield") is a DIFFERENT
 # metric and is left alone -- this holds even when a connective (not a list delimiter) joins them.
 RE_LTV_ANCHOR = re.compile(r"ltv\s*(?:ceiling|maximum|max)|(?:ceiling|maximum|max)\s*ltv", re.I)
+# LTV ceiling, REVERSE WORD ORDER (2026-07-08): the NUMBER-then-keyword form "65% ceiling" /
+# "65% maximum" on a governor line that carries NO literal "ltv" -- the LTV analog of the reverse
+# DSCR gap above. "This 65% ceiling is the acquisition governor" never enters the ltv-gated LTV
+# branch (no "ltv" token), so it silently evades. A percent has no intrinsic metric discriminator
+# (no x-analog), so precision rests on two things: (a) is_gov line-level gating (used at the call
+# site -- the line must already carry a governor keyword), and (b) the keyword set kept to
+# {ceiling, maximum} ONLY. "min"/"minimum" are DSCR-floor words; bare "max"/"maximum" abut non-LTV
+# percents ("vacancy 15% max", "exit cap 8% max") -- so bare "max" is DELIBERATELY EXCLUDED, and
+# "maximum" (spelled in full) is a rare enough non-LTV collocation to accept. "ceiling"/"maximum"
+# abutting a percent read unambiguously as an LTV ceiling on a governor line.
+RE_LTV_CEIL_REV = re.compile(r"([0-9]{1,3})\s*%\s*(?:ceiling|maximum)\b", re.I)
 # LTV audit-note suppressor (I-4): a PAST correction landing on canonical 40%. Kept TIGHT --
 # requires the explicit "corrected ... from <N>% to/→ 40%" structure. Its MATCH SPAN is used to
 # SPAN-SCOPE the suppression (branch 3): only a percent sitting INSIDE the span (the corrected-away
@@ -397,7 +422,7 @@ def scan_line(raw):
         is_rubric = len(pair_spans) >= 2
         seen = set()
         cands = (list(RE_DSCR_THRESH.finditer(low)) + list(RE_DSCR_FROMTO.finditer(low))
-                 + list(RE_DSCR_DECL.finditer(low)))
+                 + list(RE_DSCR_DECL.finditer(low)) + list(RE_DSCR_DECL_REV.finditer(low)))
         # PIVOT_DECOY keys only on the literal canonical value + a pivot, so require the word
         # "dscr" on the line -- otherwise an unrelated "v1.25 -> 2.00" / "ratio 1.25 now 1.80"
         # would mis-fire (the other passes are self-qualifying via "dscr"-anchor or x/keyword).
@@ -435,41 +460,75 @@ def scan_line(raw):
     #    restated as canonical then changed ("LTV ceiling now 65%", "raised from 40% to 65%") is
     #    caught by FROMTO and by scanning a short clause window after an LTV-adjacent ceiling/max
     #    anchor (the metric guard that keeps exit-cap/rent/occupancy percents out).
-    if "ltv" in low:
+    #    Reverse-order gap (2026-07-08): a governor line may carry NO literal "ltv" yet still declare
+    #    the ceiling number-then-keyword ("65% ceiling"/"65% maximum"). The outer gate therefore also
+    #    admits any is_gov line; every ltv-TOKEN-dependent pass below stays behind an explicit 'ltv'
+    #    check so its pre-2026-07-08 firing is byte-for-byte unchanged, and ONLY RE_LTV_CEIL_REV is
+    #    new. seen_ltv dedupes so an ltv-present value already flagged forward is not double-flagged.
+    if "ltv" in low or is_gov:
         seen_ltv = set()
         def _flag_ltv(val, kind="ceiling"):
             if val and val != CANON_LTV and val not in seen_ltv and 1 <= int(val) <= 100:
                 seen_ltv.add(val)
                 out.append("LTV %s %s%% != canonical %s%%" % (kind, val, CANON_LTV))
-        cmp_hits = RE_LTV_CMP.findall(low)
+        cmp_hits = RE_LTV_CMP.findall(low)  # RE_LTV_CMP embeds 'ltv' -> [] on an ltv-less line
         for val in cmp_hits:
             _flag_ltv(val)
         if is_gov:
-            for m in RE_LTV_FROMTO.finditer(low):
+            # ltv-TOKEN-dependent passes -- kept behind 'ltv in low' so their firing is UNCHANGED
+            # (RE_LTV_FROMTO carries no 'ltv' literal, so it MUST stay gated to avoid new behavior).
+            if "ltv" in low:
+                for m in RE_LTV_FROMTO.finditer(low):
+                    _flag_ltv(m.group(1))
+                # read the FIRST percent after each LTV-adjacent ceiling/max anchor -- that is the
+                # declared ceiling. A canonical 40% there satisfies it and leaves any later figure
+                # (basis discount, yield, exit cap) untouched; a non-canonical first percent flags.
+                # The window reaches 40 chars (I-3: catches a moderately verbose "ceiling ... set to
+                # 65%") but stops at a clause break [(;|] so a following clause's percent is never the
+                # one read when the ceiling itself states no percent. Commas are NOT breaks, so
+                # "LTV ceiling, revised, 65%" still reads 65 as the declared ceiling.
+                for am in RE_LTV_ANCHOR.finditer(low):
+                    base = am.end()
+                    window = re.split(r"[(;|\n]", low[base:base + 40])[0]
+                    pm = RE_LTV_NUM.search(window)
+                    # skip the percent if it is the corrected-away old value of an LTV correction note
+                    if pm and not any(s <= base + pm.start(1) < e for (s, e) in ltv_corr_spans):
+                        _flag_ltv(pm.group(1))
+                if not cmp_hits:  # proximity fallback only when no comparator-bound value was found
+                    for m in RE_LTV_NEAR.finditer(low):
+                        # skip a POST-CLOSE-REFI LTV sizing figure (e.g. "refi ... 65% LTV" against
+                        # stabilized exit value) -- not the acquisition LTV governor. Vetoed by any
+                        # acquisition-governor marker or a value declared AS the governor.
+                        if _refi_qualified(low, m.start()):
+                            continue
+                        _flag_ltv(m.group(1) or m.group(2), kind="governor")
+            # REVERSE-ORDER ceiling ("65% ceiling"/"65% maximum") -- number-then-keyword, needs NO
+            # 'ltv' token, so it closes "This 65% ceiling is the acquisition governor". Correction-
+            # span-skipped and post-close-refi-suppressed exactly like the forward passes.
+            for m in RE_LTV_CEIL_REV.finditer(low):
+                vs = m.start(1)
+                if any(s <= vs < e for (s, e) in ltv_corr_spans):
+                    continue
+                if _refi_qualified(low, vs):
+                    continue
                 _flag_ltv(m.group(1))
-            # read the FIRST percent after each LTV-adjacent ceiling/max anchor -- that is the
-            # declared ceiling. A canonical 40% there satisfies it and leaves any later figure
-            # (basis discount, yield, exit cap) untouched; a non-canonical first percent flags.
-            # The window reaches 40 chars (I-3: catches a moderately verbose "ceiling ... set to
-            # 65%") but stops at a clause break [(;|] so a following clause's percent is never the
-            # one read when the ceiling itself states no percent. Commas are NOT breaks, so
-            # "LTV ceiling, revised, 65%" still reads 65 as the declared ceiling.
-            for am in RE_LTV_ANCHOR.finditer(low):
-                base = am.end()
-                window = re.split(r"[(;|\n]", low[base:base + 40])[0]
-                pm = RE_LTV_NUM.search(window)
-                # skip the percent if it is the corrected-away old value of an LTV correction note
-                if pm and not any(s <= base + pm.start(1) < e for (s, e) in ltv_corr_spans):
-                    _flag_ltv(pm.group(1))
-            if not cmp_hits:  # proximity fallback only when no comparator-bound value was found
-                for m in RE_LTV_NEAR.finditer(low):
-                    # skip a POST-CLOSE-REFI LTV sizing figure (e.g. "refi ... 65% LTV" against
-                    # stabilized exit value) -- not the acquisition LTV governor. Vetoed by any
-                    # acquisition-governor marker or a value declared AS the governor.
-                    if _refi_qualified(low, m.start()):
-                        continue
-                    _flag_ltv(m.group(1) or m.group(2), kind="governor")
     return out
+
+def _is_test_file(path):
+    """Test modules and _tests/ fixtures are NOT governor declarations -- they intentionally quote
+    off-canonical values (a mock "[GOVERNOR DRIFT] DSCR 1.20" summary, a 1.75 sentinel) to exercise
+    detection/gating, EXACTLY like the probe's own test file (already in skip_names) and
+    restore-skill-governor.py. The living governor is declared in standards.md / rules.md / CLAUDE.md
+    / skills / capital-config.ts, never in a test. Skips the maintenance/_tests/ subtree (any file)
+    and sibling python test modules (test-*.py / test_*.py / *_test.py). Added 2026-07-08 after
+    maintenance/_tests/test_git_prepush_doctrine_gate.py -- committed AFTER this probe -- tripped it
+    on its fixture strings (a pre-existing false positive; precision over recall, per the docstring)."""
+    low = path.replace("\\", "/").lower()
+    if "/_tests/" in low:
+        return True
+    bn = os.path.basename(low)
+    return bn.endswith(".py") and (bn.startswith("test-") or bn.startswith("test_")
+                                   or bn.endswith("_test.py"))
 
 def main():
     quiet = "--quiet" in sys.argv
@@ -499,7 +558,8 @@ def main():
             skipped_roots.append(root)
             continue
         for path in iter_files(root, exts):
-            if os.path.abspath(path) == self_path or os.path.basename(path) in skip_names:
+            if (os.path.abspath(path) == self_path or os.path.basename(path) in skip_names
+                    or _is_test_file(path)):
                 continue
             low_path = path.lower().replace("\\", "/")
             is_code = low_path.endswith((".ts", ".tsx", ".js"))
