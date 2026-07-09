@@ -117,7 +117,7 @@ expect("format_ledger_row: uses supplied reason when given",
 # --- CLI (E2E via subprocess, mirroring test-governor-drift-probe.py's pattern) --------
 def run_cli(args):
     return subprocess.run([sys.executable, MOD_PATH] + args,
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, encoding="utf-8")
 
 cli_current_path = os.path.join(tmpdir, "cli-current.json")
 with open(cli_current_path, "w", encoding="utf-8") as f:
@@ -141,6 +141,10 @@ expect("CLI: 511 transition has no disposition (not in stage_map) and null ledge
        any(x["deal"] == "511 Industrial Mile Rd" and x["disposition"] is None
            and x["ledger_row"] is None for x in payload.get("transitions", [])),
        payload)
+expect("CLI: ledger_row preserves UTF-8 em-dash end-to-end",
+       any(x["ledger_row"] and "—" in x["ledger_row"]
+           for x in payload.get("transitions", [])),
+       payload)
 expect("CLI: snapshot file updated to current state",
        dsr.load_snapshot(cli_snapshot_path) == current)
 
@@ -158,6 +162,32 @@ expect("CLI --bootstrap: snapshot seeded to current state",
 proc3 = run_cli(["--current-file", os.path.join(tmpdir, "nope.json"),
                  "--stage-map-file", cli_map_path])
 expect("CLI: missing --current-file exits 2 (fail loud)", proc3.returncode == 2)
+expect("CLI: missing --current-file names the failing input on stderr",
+       "cannot read --current-file" in proc3.stderr, proc3.stderr)
+
+proc4 = run_cli(["--current-file", cli_current_path,
+                 "--stage-map-file", os.path.join(tmpdir, "nope-map.json"),
+                 "--snapshot-file", os.path.join(tmpdir, "exit2-snap-a.json")])
+expect("CLI: missing --stage-map-file exits 2 (fail loud)", proc4.returncode == 2,
+       proc4.stderr)
+
+nondict_current_path = os.path.join(tmpdir, "cli-nondict-current.json")
+with open(nondict_current_path, "w", encoding="utf-8") as f:
+    json.dump([1, 2], f)
+proc5 = run_cli(["--current-file", nondict_current_path,
+                 "--stage-map-file", cli_map_path,
+                 "--snapshot-file", os.path.join(tmpdir, "exit2-snap-b.json")])
+expect("CLI: non-dict JSON in --current-file exits 2", proc5.returncode == 2,
+       proc5.stderr)
+
+nondict_map_path = os.path.join(tmpdir, "cli-nondict-map.json")
+with open(nondict_map_path, "w", encoding="utf-8") as f:
+    json.dump([1, 2], f)
+proc6 = run_cli(["--current-file", cli_current_path,
+                 "--stage-map-file", nondict_map_path,
+                 "--snapshot-file", os.path.join(tmpdir, "exit2-snap-c.json")])
+expect("CLI: non-dict JSON in --stage-map-file exits 2", proc6.returncode == 2,
+       proc6.stderr)
 
 # --- summary ----------------------------------------------------------------------------
 passed = sum(1 for ok, _ in results if ok)
