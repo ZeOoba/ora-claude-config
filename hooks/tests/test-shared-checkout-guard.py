@@ -15,10 +15,12 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # hooks/ (te
 HOOK = os.path.join(HERE, "shared-checkout-guard.py")
 
 
-def run_hook(stdin_text, repos, sessions_dir):
+def run_hook(stdin_text, repos, sessions_dir, extra_env=None):
     env = dict(os.environ)
     env["SHARED_CHECKOUT_REPOS"] = os.pathsep.join(repos)
     env["SHARED_CHECKOUT_SESSIONS_DIR"] = sessions_dir
+    if extra_env:
+        env.update(extra_env)
     proc = subprocess.run(
         [sys.executable, HOOK],
         input=stdin_text, capture_output=True, text=True, env=env,
@@ -112,6 +114,67 @@ def test_malformed_stdin_fails_open():
     print("PASS test_malformed_stdin_fails_open")
 
 
+def test_rearm_on_dirty_set_change():
+    """A NEW dirty-state fingerprint after the first warning re-arms it --
+    the fix for 'warns only once per session even if new external changes land'."""
+    repo = make_main_repo(dirty=True)
+    sess = sessions_tmp()
+    fp = os.path.join(repo, "server", "x.ts")
+    _, out1, _ = run_hook(payload("s6", fp), [repo], sess)
+    assert "systemMessage" in out1, "first call must warn, got %r" % out1
+    with open(os.path.join(repo, "second-foreign-file.txt"), "w") as fh:
+        fh.write("more WIP")
+    _, out2, _ = run_hook(payload("s6", fp), [repo], sess)
+    assert "systemMessage" in out2, (
+        "changed dirty set must re-arm the warning, got %r" % out2)
+    print("PASS test_rearm_on_dirty_set_change")
+
+
+def test_same_dirty_set_stays_silent_after_warning():
+    """Re-confirms the ORIGINAL dedupe intent survives the re-arm fix: an
+    UNCHANGED dirty set must not re-warn on every single edit."""
+    repo = make_main_repo(dirty=True)
+    sess = sessions_tmp()
+    fp = os.path.join(repo, "server", "x.ts")
+    _, out1, _ = run_hook(payload("s7", fp), [repo], sess)
+    _, out2, _ = run_hook(payload("s7", fp), [repo], sess)
+    assert "systemMessage" in out1, "first call must warn, got %r" % out1
+    assert "systemMessage" not in out2, (
+        "unchanged dirty set must stay silent on the second call, got %r" % out2)
+    print("PASS test_same_dirty_set_stays_silent_after_warning")
+
+
+def test_other_active_session_named_in_message():
+    """When session_liveness reports another open session, the warning names it."""
+    repo = make_main_repo(dirty=True)
+    sess = sessions_tmp()
+    fp = os.path.join(repo, "server", "x.ts")
+    fd, state_path = tempfile.mkstemp(suffix="_session-state.json")
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump({"sessions": {"other-session-99": {"status": "working", "cwd": repo, "lastAt": "t"}}}, fh)
+    try:
+        rc, out, err = run_hook(payload("s8", fp), [repo], sess, extra_env={"ORA_FLEET_STATE": state_path})
+        assert "other-se" in out, (
+            "expected the other session's (truncated) id in the warning, got %r" % out)
+    finally:
+        os.remove(state_path)
+    print("PASS test_other_active_session_named_in_message")
+
+
+def test_no_other_session_generic_message():
+    """When session_liveness finds nothing (empty/missing state), the message
+    stays the original generic form -- proves the enrichment degrades safely."""
+    repo = make_main_repo(dirty=True)
+    sess = sessions_tmp()
+    fp = os.path.join(repo, "server", "x.ts")
+    rc, out, err = run_hook(payload("s9", fp), [repo], sess,
+                            extra_env={"ORA_FLEET_STATE": "C:/does/not/exist_xyz.json"})
+    assert "systemMessage" in out, "must still warn, got %r" % out
+    assert "is open right now" not in out, (
+        "no other session known -> must not fabricate a collision note, got %r" % out)
+    print("PASS test_no_other_session_generic_message")
+
+
 if __name__ == "__main__":
     test_outside_repo_silent()
     test_worktree_silent()
@@ -119,4 +182,8 @@ if __name__ == "__main__":
     test_main_dirty_warns()
     test_dedupe_once_per_session()
     test_malformed_stdin_fails_open()
+    test_rearm_on_dirty_set_change()
+    test_same_dirty_set_stays_silent_after_warning()
+    test_other_active_session_named_in_message()
+    test_no_other_session_generic_message()
     print("ALL SHARED-CHECKOUT-GUARD TESTS PASS")
