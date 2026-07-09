@@ -11,9 +11,17 @@ indices are reported.
 FAIL-CLOSED: terms file unreadable -> block; git log fails (e.g. unknown remote
 sha — run `git fetch` first) -> block. No active terms (all deals closed) -> allow.
 
-Install (done 2026-06-11; re-do after any fresh clone — see docs/MIGRATION_RUNBOOK.md):
+Install (done 2026-06-11; re-do after any fresh clone — see docs/MIGRATION_RUNBOOK.md).
+The .git/hooks/pre-push shim is NOT version-controlled, so it must be recreated on every
+fresh clone. It runs BOTH tracked checks — the doctrine-drift gate FIRST, then this
+fail-closed confidentiality scan (the doctrine gate takes </dev/null so it never consumes
+git's ref stdin; the exec hands that stdin to this scan unchanged):
   .git/hooks/pre-push  ->  #!/bin/sh
-                           exec python "$(git rev-parse --show-toplevel)/hooks/git-prepush-confidential-scan.py" "$@"
+                           ROOT="$(git rev-parse --show-toplevel)"
+                           python "$ROOT/hooks/git-prepush-doctrine-gate.py" "$@" </dev/null || exit $?
+                           exec python "$ROOT/hooks/git-prepush-confidential-scan.py" "$@"
+  (The doctrine-drift check lives in hooks/git-prepush-doctrine-gate.py; THIS scan's own
+   logic is unchanged — the doctrine gate was added ahead of it, not merged into it.)
 
 Exit 0 = allow push. Exit 1 = block (git pre-push convention).
 """

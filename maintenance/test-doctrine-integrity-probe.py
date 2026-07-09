@@ -221,6 +221,13 @@ def _write_fixture(content):
     return path
 
 
+def _guards_fixture(guards_line):
+    """A minimal v2.1 fixture with GUARDS_LINE injected into the EOS section (so
+    extract_section(EOS) and the check-11 'Guards:' scan both see it)."""
+    return _v21_base().replace(
+        " no commands here\n", " no commands here\n" + guards_line + "\n", 1)
+
+
 def test_v21_headers_parse():
     """The renamed v2.1 headers ('Engineering OS', 'Skill tie-breaks') are parsed.
 
@@ -252,9 +259,12 @@ def test_v21_headers_parse():
 
 
 def test_size_budget_fail():
-    """CLAUDE.md over the word budget -> exit 1 with a size-budget report.
-    The pre-trim v1 file was 1,597 words; regression to that size must FAIL."""
-    path = _write_fixture(_v21_base() + ("word " * 1600) + "\n")
+    """CLAUDE.md over the word budget (WORD_BUDGET_FAIL, currently 1850) -> exit 1 with
+    a size-budget report. Fixture uses 1,900 words to clear the recalibrated ceiling:
+    the 1590->1850 budget recalibration left this fixture's former 1,600-word count
+    UNDER the new fail line, so it had stopped exercising the fail path (a stale test,
+    not a real regression -- the check itself is correct)."""
+    path = _write_fixture(_v21_base() + ("word " * 1900) + "\n")
     try:
         r = run_probe([path])
         assert r.returncode == 1, (
@@ -263,7 +273,7 @@ def test_size_budget_fail():
             "expected the specific size-budget failure line:\n%s" % r.stdout)
     finally:
         os.remove(path)
-    print("  PASS test_size_budget_fail (1,600-word fixture fails the budget)")
+    print("  PASS test_size_budget_fail (1,900-word fixture fails the budget)")
 
 
 def test_dated_annotation_fails():
@@ -447,6 +457,70 @@ def test_leak_formatting_and_excerpt_withholding():
     print("  PASS test_leak_formatting_and_excerpt_withholding (split term caught; excerpt withheld)")
 
 
+def test_guard_liveness_real_no_orphans():
+    """Check 11 against the LIVE CLAUDE.md / settings.json / scheduled-tasks / pre-push
+    shim finds NO orphans: every guard named in the real 'Guards:' line has a live
+    invocation point. This is the end-to-end proof the meta-guard closes the exact gap
+    that motivated it -- a guard named "active" whose only runner was silently retired.
+    A failure here means either an extraction/lookup bug OR a guard genuinely lost its
+    runner (e.g. the ora-doctrine-integrity-guard scheduled-task SKILL.md that wires
+    governor-drift-probe.py went missing) -- both are real signals, not noise to mute.
+    """
+    r = run_probe()  # defaults to the real CLAUDE.md (live mode)
+    assert r.returncode == 0, (
+        "expected exit 0 against real CLAUDE.md, got %d\nSTDOUT:\n%s\nSTDERR:\n%s"
+        % (r.returncode, r.stdout, r.stderr))
+    assert "Guard liveness:" in r.stdout, (
+        "probe did not run the guard-liveness check:\n%s" % r.stdout)
+    assert "has no live invocation point found" not in r.stdout, (
+        "check 11 found an orphan guard in the live doctrine (a named guard with no "
+        "settings.json hook / scheduled-task SKILL.md / pre-push shim runner):\n%s"
+        % r.stdout)
+    for guard in ("doctrine-integrity-probe.py", "governor-drift-probe.py",
+                  "git-prepush-doctrine-gate.py", "eos-telemetry", "eos-plan-gate"):
+        line = next((l for l in r.stdout.splitlines()
+                     if l.lstrip().startswith("[OK]") and (" " + guard + " ") in l), "")
+        assert "live invocation point found" in line, (
+            "%s should resolve to a live invocation point:\n%s" % (guard, r.stdout))
+    print("  PASS test_guard_liveness_real_no_orphans (5 guards resolve, 0 orphans)")
+
+
+def test_guard_liveness_fixture_orphan_and_override_excluded():
+    """Check 11 on a fixture 'Guards:' line, proving three properties at once:
+    (a) a wired guard (eos-telemetry, resolved against the REAL settings.json) is [OK];
+    (b) an unwired guard produces the orphan WARN and, being WARN-only this rollout,
+        does NOT flip the exit code (mirrors the checks 9/10 WARN-only precedent);
+    (c) the eos-plan-gate-style override recipe `touch hooks/sessions/<id>/override`
+        -- a second backtick token inside a parenthetical -- is NOT mis-parsed as a
+        guard (exactly 2 guards extracted, and 'touch hooks' never printed)."""
+    # Real middle-dot (U+00B7) separator between entries, as the live doctrine uses.
+    guards = ("Guards: `eos-telemetry` (compliance) · `zzz-orphan-guard.py` "
+              "(4+ edits; override `touch hooks/sessions/<id>/override`); all fail open.")
+    path = _write_fixture(_guards_fixture(guards))
+    try:
+        r = run_probe([path])
+        assert r.returncode == 0, (
+            "guard-liveness is WARN-only; a lone orphan must not flip the exit code, "
+            "got %d\nSTDOUT:\n%s\nSTDERR:\n%s" % (r.returncode, r.stdout, r.stderr))
+        assert "Guard liveness: 2 guard(s) checked" in r.stdout, (
+            "expected exactly 2 guards extracted (override recipe excluded):\n%s" % r.stdout)
+        assert ("has no live invocation point found" in r.stdout
+                and "zzz-orphan-guard.py" in r.stdout), (
+            "expected the unwired guard to be flagged an orphan:\n%s" % r.stdout)
+        ok = next((l for l in r.stdout.splitlines()
+                   if l.lstrip().startswith("[OK]") and " eos-telemetry " in l), "")
+        assert "live invocation point found" in ok, (
+            "wired guard eos-telemetry should resolve against the real settings.json:\n%s"
+            % r.stdout)
+        assert "touch hooks" not in r.stdout, (
+            "the override recipe was mis-parsed as a guard (should be shape-filtered):\n%s"
+            % r.stdout)
+    finally:
+        os.remove(path)
+    print("  PASS test_guard_liveness_fixture_orphan_and_override_excluded "
+          "(2 guards; wired OK, orphan WARN, override excluded, exit 0)")
+
+
 def main():
     assert os.path.isfile(REAL_CLAUDE_MD), "real CLAUDE.md not found: %s" % REAL_CLAUDE_MD
     test_real_doctrine_valid()
@@ -466,6 +540,8 @@ def main():
     test_confidential_leak_fails()
     test_terms_shape_failopen()
     test_leak_formatting_and_excerpt_withholding()
+    test_guard_liveness_real_no_orphans()
+    test_guard_liveness_fixture_orphan_and_override_excluded()
     print("ALL DOCTRINE-PROBE TESTS PASS")
 
 

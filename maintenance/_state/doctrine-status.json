@@ -1,0 +1,13 @@
+{
+  "last_check": "2026-07-08T21:48:30.326907",
+  "source": "pre-push",
+  "doctrine_probe": {
+    "exit_code": 0,
+    "summary": "clean, 37 warning(s)"
+  },
+  "governor_probe": {
+    "exit_code": null,
+    "summary": null
+  },
+  "guard_orphans": []
+}

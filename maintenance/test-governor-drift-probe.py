@@ -439,6 +439,110 @@ def test_scan_code_presence_regexes_unit():
     print("  PASS test_scan_code_presence_regexes_unit")
 
 
+def test_reverse_order_dscr_floor_flags_unit():
+    """Reverse-order gap (2026-07-08): a governor DSCR floor written NUMBER-then-keyword
+    ("This 1.40x floor is the acquisition governor") carries no literal 'dscr' AND puts the keyword
+    AFTER the value, so RE_DSCR_THRESH (dscr-anchored) and RE_DSCR_DECL (keyword-before-number) both
+    miss it. Pre-fix this returned [] (a real false negative); RE_DSCR_DECL_REV closes it. The
+    trailing x/× stays REQUIRED, so a rent/height decimal that merely precedes a keyword never trips."""
+    m = _load_probe_module()
+    out = m.scan_line("This 1.40x floor is the acquisition governor for every deal.")
+    assert any("1.40" in o for o in out), (
+        "reverse-order DSCR floor 1.40x must flag; got %r" % out)
+    for line in ["Hard acquisition governor: the 1.10x minimum stands.",
+                 "Governor: 1.15x floor, non-negotiable.",
+                 "Acquisition screen: a 1.40X ceiling applies."]:   # uppercase X too (re.I)
+        out2 = m.scan_line(line)
+        assert any(("1.10" in o) or ("1.15" in o) or ("1.40" in o) for o in out2), (
+            "reverse-order DSCR drift must flag; line=%r got=%r" % (line, out2))
+    # canonical reverse form stays CLEAN (no over-match):
+    assert m.scan_line("This 1.25x floor is the acquisition governor.") == [], \
+        "canonical reverse 1.25x floor must not flag"
+    print("  PASS test_reverse_order_dscr_floor_flags_unit")
+
+
+def test_reverse_order_ltv_ceiling_flags_unit():
+    """Reverse-order LTV gap: "65% ceiling"/"65% maximum" NUMBER-then-keyword with NO literal 'ltv'
+    on the line (so the ltv-gated LTV branch never ran). RE_LTV_CEIL_REV closes it on
+    governor-declaration lines. Word set is {ceiling, maximum} only."""
+    m = _load_probe_module()
+    for line in ["This 65% ceiling is the acquisition governor.",
+                 "Hard filter: a 65% maximum applies to every deal.",
+                 "Acquisition screen: 55% ceiling, non-negotiable."]:
+        out = m.scan_line(line)
+        assert any(("65" in o) or ("55" in o) for o in out), (
+            "reverse-order LTV ceiling drift must flag; line=%r got=%r" % (line, out))
+    # canonical reverse form stays CLEAN.
+    assert m.scan_line("Governor: 40% ceiling on every deal.") == [], \
+        "canonical reverse 40% ceiling must not flag"
+    print("  PASS test_reverse_order_ltv_ceiling_flags_unit")
+
+
+def test_reverse_order_no_false_positive_unit():
+    """The reverse-order path must NOT flag stray numbers with no governor meaning: a bare count, a
+    physical ceiling, a rent/height decimal preceding a keyword (no abutting x), and non-LTV percents
+    abutting bare 'max' (deliberately excluded from the LTV reverse set). This is the false-positive
+    class the fix must avoid (precision over recall)."""
+    m = _load_probe_module()
+    clean = [
+        "40 tenants across the portfolio pay on time.",       # bare count -- no % / x
+        "The ceiling is 12 feet in the warehouse.",           # physical ceiling -- no % / x, not is_gov
+        "Governor: DSCR floor 1.25x; rent floor 5.50 psf, clear-height ceiling 32.0 ft.",  # no abutting x
+        "Hard filter: DSCR >= 1.25x, LTV <= 40%; vacancy 15% max, exit cap 8% max.",  # bare 'max' excluded
+        "Acquisition governor: DSCR >= 1.25x, LTV <= 40% (portfolio 1.42x avg, 28% actual).",
+    ]
+    for line in clean:
+        assert m.scan_line(line) == [], (
+            "reverse-order path must not false-positive; line=%r got=%r" % (line, m.scan_line(line)))
+    print("  PASS test_reverse_order_no_false_positive_unit")
+
+
+def test_reverse_order_suppression_still_applies_unit():
+    """The reverse-order DSCR path honors the SAME suppressors as the forward passes: a portfolio-
+    level "1.75x floor" (the ratified blended target, a distinct metric) stays suppressed, while a
+    per-deal / acquisition-governor marker VETOES suppression so a real per-deal drift still flags."""
+    m = _load_probe_module()
+    assert m.scan_line("Portfolio-wide governor: the 1.75x floor is the blended target.") == [], \
+        "portfolio-wide reverse 1.75x floor must be suppressed"
+    out = m.scan_line("Per-deal acquisition governor: the 1.75x floor now applies.")
+    assert any("1.75" in o for o in out), (
+        "per-deal reverse 1.75x floor must still flag (veto); got %r" % out)
+    print("  PASS test_reverse_order_suppression_still_applies_unit")
+
+
+def test_reverse_order_refi_suppression_unit():
+    """The reverse-order LTV path honors the post-close-refi suppressor: a refi debt-sizing
+    "65% maximum" (no acquisition-governor marker, value not declared AS the governor) is suppressed;
+    an acquisition-governor marker on the line vetoes suppression so a real drift still flags."""
+    m = _load_probe_module()
+    suppressed = "Self-imposed refi debt post-close sizing: a 65% maximum against stabilized exit value."
+    assert m.scan_line(suppressed) == [], (
+        "post-close-refi reverse 65%% maximum must be suppressed; got %r" % m.scan_line(suppressed))
+    vetoed = "Refi post-close note, yet the acquisition governor is now a 65% maximum."
+    assert any("65" in o for o in m.scan_line(vetoed)), (
+        "acq-governor marker must veto refi suppression on the reverse path; got %r" % m.scan_line(vetoed))
+    print("  PASS test_reverse_order_refi_suppression_unit")
+
+
+def test_test_files_excluded_from_scan_unit():
+    """Pre-existing false positive (2026-07-08): the probe scanned maintenance/_tests/ fixture files
+    that intentionally quote off-canonical governor values ("[GOVERNOR DRIFT] DSCR 1.20") to test
+    OTHER gates -- the same class as the probe's own already-skipped test file. _is_test_file() now
+    excludes the _tests/ subtree and sibling python test modules so those fixtures never read as
+    live drift."""
+    m = _load_probe_module()
+    assert m._is_test_file(r"C:\Users\Owner\.claude\maintenance\_tests\test_git_prepush_doctrine_gate.py")
+    assert m._is_test_file("/home/x/.claude/maintenance/_tests/anything.json")
+    assert m._is_test_file(r"C:\Users\Owner\.claude\maintenance\test-doctrine-integrity-probe.py")
+    assert m._is_test_file("/x/maintenance/test_open_sessions_probe.py")
+    assert m._is_test_file("/x/foo_test.py")
+    # real governor homes must NOT be treated as test files:
+    assert not m._is_test_file(r"C:\Users\Owner\.claude\projects\...\memory\standards.md")
+    assert not m._is_test_file("/x/.claude/CLAUDE.md")
+    assert not m._is_test_file("/x/oxford-command-center/src/capital-config.ts")
+    print("  PASS test_test_files_excluded_from_scan_unit")
+
+
 def test_event_log_excluded_e2e():
     """End-to-end: real tree is clean AND no finding cites event_log.md."""
     r = run_probe()
@@ -476,6 +580,12 @@ def main():
     test_scan_code_ignores_deal_values_unit()
     test_scan_code_seed_literal_drift_flags_unit()
     test_scan_code_presence_regexes_unit()
+    test_reverse_order_dscr_floor_flags_unit()
+    test_reverse_order_ltv_ceiling_flags_unit()
+    test_reverse_order_no_false_positive_unit()
+    test_reverse_order_suppression_still_applies_unit()
+    test_reverse_order_refi_suppression_unit()
+    test_test_files_excluded_from_scan_unit()
     test_event_log_excluded_e2e()
     print("ALL GOVERNOR-PROBE TESTS PASS")
 

@@ -19,7 +19,7 @@ for _s in (sys.stdout, sys.stderr):
 
 HOME = os.path.expanduser("~")
 MEM = os.path.join(HOME, ".claude", "projects",
-                   "C--Users-Owner-OneDrive---Oxford-Capital-Partners--1-", "memory")
+                   "C--Users-Owner-OneDrive---Oxford-Capital-Partners", "memory")
 INDEX = os.path.join(MEM, "MEMORY.md")
 GOV_PROBE = os.path.join(HOME, ".claude", "maintenance", "governor-drift-probe.py")
 
