@@ -1,0 +1,143 @@
+# FLEET DEAD-MAN -- external cross-fleet monitor (Task 6, DEADMAN_APPROACH=GITHUB-ACTION,
+# Gabriel-ratified 2026-07-09).
+#
+# WHY THIS LIVES ON GITHUB: on 2026-07-05 a Desktop app reinstall destroyed the CC/MCP
+# scheduled-task registry, and the one guard built to catch that was itself a fleet
+# member and died with it (~14 CC functions dark ~3 weeks). This monitor runs OUTSIDE
+# the machine, so it survives total local fleet loss -- if the machine stops pushing a
+# fresh heartbeat, THIS still fires.
+#
+# HOW: maintenance/emit-fleet-heartbeat.py writes maintenance/_state/fleet-heartbeat.json
+# locally (counts + registry hashes, nothing sensitive); maintenance/push-fleet-heartbeat.ps1
+# commits + pushes it daily. This workflow parses the committed copy and FAILS when:
+#   (a) heartbeat timestamp older than 24h vs run time
+#   (b) cc  enabled-recurring count < 10  (ratified floor, 2026-07-09)
+#   (c) lams enabled-recurring count < 18 (ratified floor, 2026-07-09)
+#   (d) heartbeat file missing or unparseable
+#   (e) either registry existence flag is false
+# On failure it opens a GitHub issue (or comments on the existing open one -- deduped
+# on the "FLEET DEAD-MAN:" title prefix).
+#
+# EMAIL LEG: rides GitHub's NATIVE issue-notification email to the repo owner
+# (ggoldberg's GitHub account) -- no SMTP is wired (no secrets exist for it).
+# GABRIEL: confirm this repo's notification settings actually deliver issue emails
+# (repo Watch setting "All Activity", and Settings -> Notifications -> email enabled).
+#
+# Schedule: 13:00 UTC daily (~09:00 ET summer / 08:00 ET winter) -- after the morning
+# probe and the 07:30 local heartbeat push. Runbook on alarm: memory/oxford-cc-repo-health.md
+# (locally: ~/.claude/projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/).
+
+name: fleet-deadman
+
+on:
+  schedule:
+    - cron: "0 13 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  deadman:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Evaluate heartbeat
+        id: check
+        run: |
+          python3 - <<'PY'
+          import datetime, json, os
+
+          HB_PATH = "maintenance/_state/fleet-heartbeat.json"
+          MAX_AGE_H = 24
+          FLOORS = {"cc": 10, "lams": 18}  # ratified 2026-07-09; a count below floor = silent registry shrink
+
+          reasons, lines = [], []
+          hb = None
+          try:
+              with open(HB_PATH, encoding="utf-8") as f:
+                  hb = json.load(f)
+          except Exception as e:  # (d) missing/unparseable
+              reasons.append("heartbeat file missing or unparseable (%s)" % e.__class__.__name__)
+
+          if hb is not None:
+              ts_raw = hb.get("ts")
+              lines.append("- heartbeat ts: `%s`" % ts_raw)
+              lines.append("- probe version: `%s`" % hb.get("probe_version"))
+              try:  # (a) staleness
+                  ts = datetime.datetime.strptime(ts_raw, "%Y-%m-%dT%H:%M:%SZ").replace(
+                      tzinfo=datetime.timezone.utc)
+                  age_h = (datetime.datetime.now(datetime.timezone.utc) - ts).total_seconds() / 3600
+                  lines.append("- heartbeat age: %.1fh (max %dh)" % (age_h, MAX_AGE_H))
+                  if age_h > MAX_AGE_H:
+                      reasons.append("heartbeat stale (%.1fh > %dh)" % (age_h, MAX_AGE_H))
+              except Exception:
+                  reasons.append("heartbeat timestamp unparseable (%r)" % ts_raw)
+              for label, floor in FLOORS.items():  # (b)/(c) counts, (e) existence
+                  count = (hb.get("fleets") or {}).get(label)
+                  reg = (hb.get("registries") or {}).get(label) or {}
+                  lines.append("- %s: count=%s (floor %d) · registry exists=%s · sha256=%s"
+                               % (label, count, floor, reg.get("exists"), reg.get("sha256")))
+                  if not isinstance(count, int) or isinstance(count, bool) or count < floor:
+                      reasons.append("%s enabled count %r below ratified floor %d" % (label, count, floor))
+                  if reg.get("exists") is not True:
+                      reasons.append("%s registry file existence flag is false" % label)
+
+          alert = bool(reasons)
+          today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+          body = "\n".join(
+              ["**ORA fleet dead-man tripped** (run %s UTC)." % datetime.datetime.now(
+                  datetime.timezone.utc).strftime("%Y-%m-%d %H:%M"),
+               "", "Failure condition(s):"]
+              + ["- %s" % r for r in reasons]
+              + ["", "Parsed heartbeat values:"] + (lines or ["- (none -- file unreadable)"])
+              + ["",
+                 "Runbook: `memory/oxford-cc-repo-health.md` (July 2026 fleet-loss incident record; "
+                 "locally under `~/.claude/projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/`).",
+                 "First checks: is the Desktop app open on the workstation? Did "
+                 "`maintenance/push-fleet-heartbeat.ps1` push last night (see its .log)? Then run "
+                 "`maintenance/registry-membership-probe.py` locally for the per-task drop detail."])
+          with open("deadman-body.md", "w", encoding="utf-8") as f:
+              f.write(body + "\n")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write("alert=%s\n" % str(alert).lower())
+              out.write("reason=%s\n" % (reasons[0] if reasons else "healthy"))
+              out.write("date=%s\n" % today)
+
+          print(("ALERT: " + "; ".join(reasons)) if alert else "OK -- heartbeat healthy")
+          for ln in lines:
+              print(" " + ln)
+          PY
+
+      - name: Open or update dead-man issue
+        if: steps.check.outputs.alert == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REASON: ${{ steps.check.outputs.reason }}
+          RUN_DATE: ${{ steps.check.outputs.date }}
+        run: |
+          # Dedupe on the title prefix: comment on an existing OPEN dead-man issue
+          # instead of opening a duplicate.
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+            --json number,title \
+            --jq '[.[] | select(.title | startswith("FLEET DEAD-MAN:"))][0].number // empty')
+          if [ -n "$existing" ]; then
+            echo "Open dead-man issue #$existing exists -- commenting."
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body-file deadman-body.md
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" \
+              --title "FLEET DEAD-MAN: $REASON — $RUN_DATE" \
+              --body-file deadman-body.md
+          fi
+
+      - name: Fail run on alert
+        if: steps.check.outputs.alert == 'true'
+        env:
+          REASON: ${{ steps.check.outputs.reason }}
+        run: |
+          echo "::error::FLEET DEAD-MAN tripped: $REASON"
+          exit 1
