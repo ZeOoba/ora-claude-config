@@ -27,7 +27,8 @@ Checks:
      [WARN], not [MISSING], so a transient cloud condition can't fail the gate.
 
   5. CLAUDE.md size budget: > WORD_BUDGET_FAIL words            [MISSING -> fail]
-     (the pre-trim v1 file was 1,597 words; regression to that size must fail),
+     (fail is a one-in-one-out gate ~95 words above the honest post-consolidation
+     floor -- see the WORD_BUDGET_* constants for the calibration),
      > WORD_BUDGET_WARN = approaching                            [WARN only]
   6. Dated annotations: CLAUDE.md is doctrine-dateless (v2.1 layering: ALL dated
      history -> event_log.md). Any bare ISO date in CLAUDE.md    [MISSING -> fail]
@@ -46,9 +47,27 @@ Checks:
      an ACTIVE deal in hooks/confidential-terms.json found in CLAUDE.md, or (live
      mode) in any other *.md at the ~/.claude root              [MISSING -> fail]
      session-context.md is exempt: the sanctioned, git-UNTRACKED roster home.
+     Files under ~/.claude/_confidential-staging/ are likewise exempt: the
+     sanctioned untracked home for active deal-bound artifacts (rules.md sec 7a).
+     The exemption is NARROW -- only that one subtree, and only while untracked;
+     a git-TRACKED file there is still scanned (tracked = off-machine remote).
      The report references deal/term by INDEX ONLY -- this probe's stdout is
      emailed weekly (eos-health-report.ps1) and must never echo a term.
      Unreadable terms file -> WARN (fail open), never a crash.
+  9. MEMORY.md index-entry length: any index bullet (- [Title](file.md) -- desc)
+     longer than MEMORY_INDEX_LINE_MAXLEN chars -- memory-policy.md sec 3 mandates
+     "a one-line description" per entry (no numeric cap of its own)  [WARN only]
+ 10. session-context.md terseness: whole file over SESSION_CONTEXT_MAX_LINES lines,
+     or any bullet over SESSION_CONTEXT_MAX_BULLET_WORDS words -- the volatile
+     current-state layer must not accrete dated narratives (dated history ->
+     event_log.md, per CLAUDE.md's scope-layering rule)             [WARN only]
+ 11. Guard liveness: every guard named in CLAUDE.md's "Guards:" line (EOS section)
+     must have a LIVE invocation point -- a settings.json hook command, a CC/MCP
+     scheduled-task SKILL.md, or the ~/.claude git pre-push shim -- not merely a
+     file that exists on disk. Closes the orphan class that motivated this probe:
+     a guard named "active" whose only runner was silently retired, unnoticed.
+     Code-surface scope only (no OneDrive LAMS fleet I/O); an unreadable source
+     downgrades an unresolved guard to a soft WARN, never a false orphan  [WARN only]
 
 Exit 1 = any hard [MISSING] (command/file/skill absent, size budget, dated
          annotation, confidential leak), or CLAUDE.md / the EOS section is
@@ -74,7 +93,7 @@ CLAUDE_DIR = HOME / ".claude"
 REAL_CLAUDE_MD = CLAUDE_DIR / "CLAUDE.md"
 COMMANDS_DIR = CLAUDE_DIR / "commands"
 MEMORY_DIR = (CLAUDE_DIR / "projects"
-              / "C--Users-Owner-OneDrive---Oxford-Capital-Partners--1-" / "memory")
+              / "C--Users-Owner-OneDrive---Oxford-Capital-Partners" / "memory")
 REPO_ROOT = Path("C:/Users/Owner")
 
 # v2.1 (2026-06-11) renamed the section to "## Engineering OS (...)"; accept both
@@ -143,12 +162,31 @@ WORKFLOWS_DIR = CLAUDE_DIR / "workflows"
 SESSION_CONTEXT_MD = CLAUDE_DIR / "session-context.md"
 RULES_MD = MEMORY_DIR / "rules.md"
 TERMS_JSON = CLAUDE_DIR / "hooks" / "confidential-terms.json"
-# Budget calibration: the ratified v2.1 file (post Cowork-merge + Gabriel's edits,
-# 2026-06-11) = 1,555 words; pre-trim v1 = 1,597 words and MUST fail. WARN starts
-# below current size so the weekly report keeps nudging consolidation. TIGHTEN to
-# 1400/1500 after the next consolidation pass claws back the merge-day growth.
-WORD_BUDGET_FAIL = 1590
-WORD_BUDGET_WARN = 1450
+# Sanctioned untracked confidential-staging home (rules.md sec 7a): active
+# deal-bound files legitimately sit UNTRACKED under this subtree during a live
+# deal. They never reach git (the fail-closed .gitignore ignores the whole dir,
+# plus the pre-push scanner), so check 8's leak scan intentionally does NOT
+# descend into it -- otherwise every staged file re-fires an unresolvable
+# [MISSING] every run and buries a genuinely new leak in known noise (alert
+# fatigue). The exemption is NARROW: it covers this one dir, and only for
+# UNTRACKED files -- git_tracked_md() still scans anything git-TRACKED under it,
+# so a file that ever gets `git add`ed here is still caught (tracked =
+# off-machine remote = real egress; invariant 3 holds).
+CONFIDENTIAL_STAGING_DIRNAME = "_confidential-staging"
+# Budget calibration (recalibrated 2026-07-08): the old 1590 fail was just a
+# snapshot of pre-trim v1 (1,597 words), not a principled ceiling. Two independent
+# full-file consolidation passes -- each verified by THIS probe at 0 cross-file
+# duplication with every skill/file ref still [OK] -- both bottomed out at
+# ~1700-1755 words as the honest floor for CLAUDE.md's current legitimate scope;
+# cutting further would gut Hard Invariants or skill-routing rules that fixed real
+# bugs. FAIL (1850) sits ~95 words above the actual count ON PURPOSE: it is a
+# one-in-one-out forcing function -- additions get a small buffer, but anything past
+# it demands an equivalent trim elsewhere in the SAME change, turning CLAUDE.md's
+# own "when adding a rule, move something down a layer" principle into a measurable
+# gate instead of an aspiration. WARN (1700) marks the consolidation floor so the
+# weekly report keeps nudging before the gate bites.
+WORD_BUDGET_FAIL = 1850
+WORD_BUDGET_WARN = 1700
 TOMBSTONE_AGE_DAYS = 30
 DUP_SHINGLE_WORDS = 12
 # Bare ISO date. The lookahead exempts dates embedded in hyphenated slugs
@@ -158,6 +196,47 @@ DUP_SHINGLE_WORDS = 12
 # Deliberately NOT exempting trailing-slug dates (name-2026-06-05.md): that
 # pattern is indistinguishable from a dated annotation -- fail closed.
 ISO_DATE_RE = re.compile(r"\b20\d{2}-\d{2}-\d{2}(?![0-9]|-[0-9A-Za-z])")
+
+# --- Checks 9-10 (2026-07-08 extension): the same one-fact-one-home / terseness
+# discipline this probe already enforces on CLAUDE.md, extended to the two files
+# that were failing it undetected because the probe only ever scanned CLAUDE.md --
+# MEMORY.md's index and session-context.md. ---
+# Check 9: memory-policy.md sec 3 requires each MEMORY.md index entry be "a one-line
+# description", but states NO numeric cap; 150 chars operationalizes "one-line" --
+# past it a "- [Title](file.md) -- desc" bullet has become a paragraph, not a
+# pointer (a prior audit found index entries running 400-800 chars). WARN, mirroring
+# check 7's severity: index bloat is hygiene drift, not a broken reference, so it
+# nudges via the weekly report without flipping the exit code.
+MEMORY_INDEX_MD = MEMORY_DIR / "MEMORY.md"
+MEMORY_INDEX_LINE_MAXLEN = 150
+# An index entry = a bulleted markdown link to a .md file: "- [Title](file.md) ...".
+# '>' blockquote pointer lines at the top of MEMORY.md are intentionally NOT matched.
+MEMORY_INDEX_ENTRY_RE = re.compile(r"^\s*[-*]\s*\[[^\]]+\]\([^)]*\.md[^)]*\)")
+# Check 10: session-context.md's own header says "keep terse" and the v2.1 layering
+# makes it the VOLATILE current-state layer only -- ALL dated history belongs in
+# event_log.md. It had no numeric enforcement and accreted 200-300 word incident
+# narratives. Two proxies for "this is a narrative, not a terse state pointer": the
+# whole file over 40 lines, OR any single bullet over 80 words. WARN, not fail --
+# what is still "current state" vs. "history" legitimately needs a human judgment
+# call, so this informs rather than blocks.
+SESSION_CONTEXT_MAX_LINES = 40
+SESSION_CONTEXT_MAX_BULLET_WORDS = 80
+BULLET_RE = re.compile(r"^\s*[-*]\s+\S")
+
+# --- Check 11 (2026-07-08 extension): guard liveness. The failure THIS probe exists
+# to catch was itself an orphan -- for weeks doctrine-integrity-probe.py had no live
+# runner after its only scheduled trigger was retired, and nothing noticed. Checks 1-4
+# prove a named guard's FILE exists; none proved it is actually WIRED to run. Check 11
+# verifies each guard in CLAUDE.md's "Guards:" line has >=1 live invocation point. ---
+SETTINGS_JSON = CLAUDE_DIR / "settings.json"
+SCHEDULED_TASKS_DIR = CLAUDE_DIR / "scheduled-tasks"
+PREPUSH_SHIM = CLAUDE_DIR / ".git" / "hooks" / "pre-push"
+# A backtick-quoted token on the Guards: line. Guard names are bare filenames/
+# identifiers; GUARD_NAME_RE drops anything else the parse catches (e.g. the
+# eos-plan-gate override recipe `touch hooks/sessions/<id>/override`, which is a
+# command with spaces/slashes, not a guard).
+GUARD_TOKEN_RE = re.compile(r"`([^`]+)`")
+GUARD_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 
 WARN_COUNT = 0
 
@@ -253,6 +332,28 @@ def collect_flat_names(directory, suffix):
     except OSError:
         pass
     return out
+
+
+def collect_hook_commands(settings_obj):
+    """Every hook 'command' string anywhere under settings['hooks'], walked
+    generically across ALL lifecycle stages (PreToolUse/PostToolUse/SessionStart/
+    Stop/SessionEnd/...) so a guard wired into any stage resolves. Used by check 11
+    (guard liveness) to test a guard's filename stem against real invocations."""
+    cmds = []
+
+    def _walk(node):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k == "command" and isinstance(v, str):
+                    cmds.append(v)
+                else:
+                    _walk(v)
+        elif isinstance(node, list):
+            for item in node:
+                _walk(item)
+
+    _walk(settings_obj.get("hooks", {}) if isinstance(settings_obj, dict) else {})
+    return cmds
 
 
 def bare_dates(text):
@@ -514,7 +615,8 @@ def main():
           % (words, WORD_BUDGET_WARN, WORD_BUDGET_FAIL))
     if words > WORD_BUDGET_FAIL:
         print("  [MISSING] size budget exceeded: %d > %d words "
-              "(pre-trim v1 was 1,597 -- this is regression; move a rule down a layer)"
+              "(one-in-one-out gate breached -- trim an equivalent amount elsewhere "
+              "in this same change; move a rule down a layer)"
               % (words, WORD_BUDGET_FAIL))
         missing.append("CLAUDE.md size budget (%d > %d words)" % (words, WORD_BUDGET_FAIL))
     elif words > WORD_BUDGET_WARN:
@@ -609,6 +711,9 @@ def main():
     # ~/.claude (tracked files are exactly what reaches the off-machine remote;
     # verified 29+ tracked .md live in agents/, commands/, docs/, ...) + every
     # UNTRACKED *.md at the root (local staging hygiene -- port artifacts etc.).
+    # The ~/.claude/_confidential-staging/ subtree is exempt from the untracked
+    # root scan (rules.md sec 7a: sanctioned untracked home for active deal-bound
+    # files); TRACKED files there are NOT exempt -- see CONFIDENTIAL_STAGING_DIRNAME.
     # session-context.md is the sanctioned roster home (invariant 3) and is
     # exempt ONLY while untracked: the exemption is revoked at runtime the
     # moment git ls-files reports it. Matching is by normalized word run
@@ -638,6 +743,15 @@ def main():
             try:
                 for fn in sorted(os.listdir(CLAUDE_DIR)):
                     fl = fn.lower()
+                    # Sanctioned untracked confidential-staging home (rules.md
+                    # sec 7a): the root listing is non-recursive, so this subtree's
+                    # UNTRACKED files are already out of scope; skip the dir entry
+                    # explicitly so the exemption is intentional, not incidental,
+                    # and survives any future move to a recursive walk. A TRACKED
+                    # file under it is NOT exempt -- git_tracked_md() above still
+                    # scans it (tracked = off-machine remote = real egress).
+                    if fl == CONFIDENTIAL_STAGING_DIRNAME:
+                        continue
                     if (not fl.endswith(".md")) or fl in seen:
                         continue
                     if fl == sc_name and not sc_tracked:
@@ -681,6 +795,161 @@ def main():
         # gutted terms file impersonates a clean pass.
         warn("confidential-term scan: 0 active term(s) resolved -- leak check "
              "inert this run")
+
+    # --- 9. MEMORY.md index-entry line length (memory-policy.md sec 3: each index
+    # entry is "a one-line description"). WARN-only, mirroring check 7: this ADDS
+    # detection, it does not remediate -- an over-long entry is flagged, not edited. ---
+    mem_text, mem_err = read_optional(MEMORY_INDEX_MD)
+    if mem_text is None:
+        warn("MEMORY.md index-entry check skipped: %s" % ascii_safe(mem_err))
+    else:
+        over = []
+        for ln_no, ln in enumerate(mem_text.splitlines(), 1):
+            if MEMORY_INDEX_ENTRY_RE.match(ln):
+                length = len(ln.strip())
+                if length > MEMORY_INDEX_LINE_MAXLEN:
+                    over.append((ln_no, length))
+        print("MEMORY.md index entries over %d chars: %d "
+              "(memory-policy sec 3: entries are 'a one-line description')"
+              % (MEMORY_INDEX_LINE_MAXLEN, len(over)))
+        for ln_no, length in over:
+            warn("MEMORY.md index entry at line %d is %d chars (> %d) -- collapse to "
+                 "a one-line pointer; detail belongs in the linked file"
+                 % (ln_no, length, MEMORY_INDEX_LINE_MAXLEN))
+
+    # --- 10. session-context.md terseness (header: "keep terse"; volatile
+    # current-state layer only -- dated narratives belong in event_log.md). sc_text
+    # was loaded once for check 6/7; reuse it. WARN-only (structural hygiene). ---
+    if sc_text is None:
+        warn("session-context terseness check skipped: %s" % ascii_safe(sc_err))
+    else:
+        sc_lines = sc_text.splitlines()
+        print("session-context.md size: %d lines (warn > %d; per-bullet cap %d words)"
+              % (len(sc_lines), SESSION_CONTEXT_MAX_LINES, SESSION_CONTEXT_MAX_BULLET_WORDS))
+        if len(sc_lines) > SESSION_CONTEXT_MAX_LINES:
+            warn("session-context.md is %d lines (> %d) -- move dated incident "
+                 "narratives to event_log.md; this layer is current state only"
+                 % (len(sc_lines), SESSION_CONTEXT_MAX_LINES))
+        for ln_no, ln in enumerate(sc_lines, 1):
+            if BULLET_RE.match(ln):
+                wc = len(ln.split())
+                if wc > SESSION_CONTEXT_MAX_BULLET_WORDS:
+                    warn("session-context bullet at line %d is %d words (> %d) -- reads "
+                         "as narrative, not a terse state pointer; move history to "
+                         "event_log.md" % (ln_no, wc, SESSION_CONTEXT_MAX_BULLET_WORDS))
+
+    # --- 11. guard liveness (every named guard has a LIVE invocation point) ---
+    # THE failure this whole probe exists to catch was itself an orphan: for weeks
+    # doctrine-integrity-probe.py had no live runner after its only scheduled trigger
+    # was retired on a false rationale, and nothing noticed. Checks 1-4 prove a named
+    # guard's FILE exists; none proved it is actually WIRED to run. This closes that
+    # gap -- each guard in CLAUDE.md's "Guards:" line must resolve to >=1 live
+    # invocation home: (a) a settings.json hook command, (b) a CC/MCP scheduled-task
+    # SKILL.md, or (c) the ~/.claude git pre-push shim.
+    # WARN-ONLY this rollout, deliberately: checks 9 and 10 (added the same day) both
+    # launched "detection first", and check 7 documents the same WARN->fail discipline
+    # -- a new structural check earns a hard [MISSING] only after a burn-in with zero
+    # false positives, never on day one. Escalate to fail once the wiring is stable.
+    # SCOPE: Code surface only (settings.json + the CC/MCP scheduled-tasks tree + the
+    # ~/.claude shim). It does NOT reach the OneDrive LAMS fleet -- no other check here
+    # does cross-surface scheduler I/O, and widening scope silently would be its own
+    # drift. A guard whose ONLY runner is a LAMS task WARNs here; that is a known,
+    # accepted Code-surface limitation, not a false positive to engineer around.
+    guards_line = next((ln for ln in section.splitlines() if "Guards:" in ln), None)
+    if guards_line is None:
+        # The line this check audits is absent from the EOS section. Fail-open to a
+        # WARN (this rollout is WARN-only; a future burn-in could escalate absence to
+        # a hard [MISSING], mirroring check 4's treatment of a vanished section).
+        warn("guard-liveness check skipped: no 'Guards:' line in the EOS section")
+        print("Guard liveness: 0 guard(s) checked (no 'Guards:' line found)")
+    else:
+        frag = guards_line.split("Guards:", 1)[1]
+        # Cut trailing prose at the sentence terminator so "; all fail open." and any
+        # later text on the line never enter the token parse.
+        frag = re.split(r";\s*all fail open\.", frag, maxsplit=1)[0]
+        # Enumerate guards by EVERY backtick token in the fragment, kept only if it is a
+        # bare filename/identifier. This is chosen deliberately over a "split on the
+        # middle-dot separator, take the first backtick per entry" parse: a separator
+        # that ever drifts (a different dot glyph, a stray one) would SILENTLY drop a
+        # guard -- and a dropped guard is exactly the orphan this check must surface, so
+        # the extraction's own failure mode must never be "quietly enumerate fewer
+        # guards". The shape filter still excludes the only non-guard backtick on the
+        # line, eos-plan-gate's `touch hooks/sessions/<id>/override` override recipe
+        # (spaces/slashes fail GUARD_NAME_RE). Precision over recall, one exact line.
+        guards = [t.strip() for t in GUARD_TOKEN_RE.findall(frag)
+                  if GUARD_NAME_RE.match(t.strip())]
+
+        # Build the three invocation-point haystacks, each fail-open. A guard that HITS
+        # a readable source resolves regardless; only a ZERO-hit guard is affected by a
+        # degraded source, and then it is downgraded to a soft WARN rather than asserted
+        # a hard orphan on incomplete visibility (mirrors check 4's `degraded` handling).
+        degraded = False
+
+        # (a) settings.json hook command strings (parsed JSON, walked generically).
+        hook_cmds = []
+        settings_raw, settings_err = read_optional(SETTINGS_JSON)
+        if settings_raw is None:
+            degraded = True
+            warn("guard-liveness: settings.json unreadable (%s) -- hook invocation "
+                 "points not checked this run" % ascii_safe(settings_err))
+        else:
+            try:
+                hook_cmds = collect_hook_commands(json.loads(settings_raw))
+            except ValueError as e:
+                degraded = True
+                warn("guard-liveness: settings.json unparseable (%s) -- hook "
+                     "invocation points not checked this run" % ascii_safe(e))
+
+        # (b) CC/MCP scheduled-task SKILL.md bodies (non-archived only; Code fleet).
+        skill_md_blob = ""
+        if not SCHEDULED_TASKS_DIR.is_dir():
+            degraded = True
+            warn("guard-liveness: scheduled-tasks dir absent (%s) -- SKILL.md "
+                 "invocation points not checked this run" % SCHEDULED_TASKS_DIR)
+        else:
+            for skill_md in sorted(SCHEDULED_TASKS_DIR.glob("*/SKILL.md")):
+                if skill_md.parent.name.lower().startswith("_archive"):
+                    continue
+                body, err = read_optional(skill_md)
+                if body is None:
+                    warn("guard-liveness: cannot read %s (%s)"
+                         % (ascii_safe(skill_md.parent.name + "/SKILL.md"),
+                            ascii_safe(err)))
+                    continue
+                skill_md_blob += "\n" + body
+
+        # (c) the ~/.claude git pre-push shim (doctrine gate + confidentiality scan).
+        shim_text, shim_err = read_optional(PREPUSH_SHIM)
+        if shim_text is None:
+            degraded = True
+            warn("guard-liveness: pre-push shim unreadable (%s) -- git-hook "
+                 "invocation point not checked this run" % ascii_safe(shim_err))
+            shim_text = ""
+
+        print("Guard liveness: %d guard(s) checked" % len(guards))
+        for name in guards:
+            # Match on the filename STEM (trailing .py/.sh dropped) as a substring.
+            # This makes the conceptual-name -> file mapping automatic and table-free:
+            # `eos-telemetry` is a substring of the wired `eos-telemetry.py`, and
+            # `doctrine-integrity-probe` matches the pre-push shim that names it without
+            # the .py. The stems are long, specific, hyphenated names, so a stem
+            # substring cannot collide across guards (`eos-plan-gate` is not a substring
+            # of `eos-plan-marker` / `eos-gate-sentinel`).
+            stem = re.sub(r"\.(py|sh)$", "", name)
+            hit = (any(stem in c for c in hook_cmds)
+                   or stem in skill_md_blob
+                   or stem in shim_text)
+            if hit:
+                print("  [OK]      %s -> live invocation point found" % ascii_safe(name))
+            elif degraded:
+                warn("guard '%s' unresolved, but a liveness source was unavailable "
+                     "this run (see notes above) -- not asserting orphan"
+                     % ascii_safe(name))
+            else:
+                warn("guard '%s' named in CLAUDE.md's Guards: line has no live "
+                     "invocation point found (checked: settings.json hooks, CC/MCP "
+                     "scheduled-task SKILL.mds, ~/.claude pre-push shim)"
+                     % ascii_safe(name))
 
     # --- verdict ---
     if missing:
