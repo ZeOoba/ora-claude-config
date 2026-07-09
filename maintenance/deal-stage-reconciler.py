@@ -124,3 +124,72 @@ def format_ledger_row(transition, disposition, date, reason=None):
                    "reconcile manually" % transition["new_stage"])
     return "| %s | %s | %s | %s | — |" % (date, transition["deal"], disposition,
                                                  reason)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(
+        description="Deal-stage reconciler: diff live Notion stage values against the "
+                     "last snapshot.")
+    ap.add_argument("--current-file", required=True,
+                     help="JSON file: {page_id: {\"deal\":..., \"stage\":...}} (live "
+                          "Notion state, written by the caller -- never stdin, see "
+                          "feedback_append_event_log_stdin_encoding.md)")
+    ap.add_argument("--stage-map-file", required=True,
+                     help="JSON file: {notion_stage_string: disposition_token}")
+    ap.add_argument("--snapshot-file", default=DEFAULT_SNAPSHOT,
+                     help="path to the rolling snapshot (default: canonical _state path)")
+    ap.add_argument("--bootstrap", action="store_true",
+                     help="seed the snapshot from --current-file with ZERO diff output "
+                          "(first-run only -- never logs pre-existing state as a change)")
+    ap.add_argument("--date", default=None,
+                     help="YYYY-MM-DD to stamp entries with (default: today)")
+    a = ap.parse_args(argv)
+
+    try:
+        with open(a.current_file, encoding="utf-8") as f:
+            current = json.load(f)
+    except (OSError, ValueError) as e:
+        sys.stderr.write("cannot read --current-file: %s\n" % e)
+        return 2
+    if not isinstance(current, dict):
+        sys.stderr.write("--current-file must contain a JSON object\n")
+        return 2
+
+    if a.bootstrap:
+        save_snapshot(a.snapshot_file, current)
+        print(json.dumps({"bootstrap": True, "count": len(current)}))
+        return 0
+
+    try:
+        with open(a.stage_map_file, encoding="utf-8") as f:
+            stage_map = json.load(f)
+    except (OSError, ValueError) as e:
+        sys.stderr.write("cannot read --stage-map-file: %s\n" % e)
+        return 2
+    if not isinstance(stage_map, dict):
+        sys.stderr.write("--stage-map-file must contain a JSON object\n")
+        return 2
+
+    date = a.date or dt.date.today().isoformat()
+    snapshot = load_snapshot(a.snapshot_file)
+    transitions = diff_stages(current, snapshot)
+    out = []
+    for t in transitions:
+        disposition = classify_disposition(t["new_stage"], stage_map)
+        out.append({
+            "page_id": t["page_id"],
+            "deal": t["deal"],
+            "old_stage": t["old_stage"],
+            "new_stage": t["new_stage"],
+            "disposition": disposition,
+            "event_log_entry": format_event_log_entry(t, date),
+            "ledger_row": (format_ledger_row(t, disposition, date)
+                            if disposition else None),
+        })
+    save_snapshot(a.snapshot_file, current)
+    print(json.dumps({"transitions": out, "count": len(out)}, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

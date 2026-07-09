@@ -11,6 +11,8 @@ Run: python test-deal-stage-reconciler.py   (exit 0 = all pass)
 import importlib.util
 import json
 import os
+import subprocess
+import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -111,6 +113,51 @@ row_with_reason = dsr.format_ledger_row(t, "PASS", "2026-07-08",
 expect("format_ledger_row: uses supplied reason when given",
        "LOI lapsed" in row_with_reason
        and "reason not logged elsewhere" not in row_with_reason)
+
+# --- CLI (E2E via subprocess, mirroring test-governor-drift-probe.py's pattern) --------
+def run_cli(args):
+    return subprocess.run([sys.executable, MOD_PATH] + args,
+                           capture_output=True, text=True)
+
+cli_current_path = os.path.join(tmpdir, "cli-current.json")
+with open(cli_current_path, "w", encoding="utf-8") as f:
+    json.dump(current, f)
+cli_map_path = os.path.join(tmpdir, "cli-map.json")
+with open(cli_map_path, "w", encoding="utf-8") as f:
+    json.dump({"Passed": "PASS"}, f)
+cli_snapshot_path = os.path.join(tmpdir, "cli-snapshot.json")
+dsr.save_snapshot(cli_snapshot_path, snapshot)
+
+proc = run_cli(["--current-file", cli_current_path, "--stage-map-file", cli_map_path,
+                "--snapshot-file", cli_snapshot_path, "--date", "2026-07-10"])
+expect("CLI: exit 0 on normal run", proc.returncode == 0, proc.stderr)
+payload = json.loads(proc.stdout) if proc.returncode == 0 else {}
+expect("CLI: reports 2 transitions", payload.get("count") == 2, payload)
+expect("CLI: 470 transition carries a PASS disposition + non-null ledger_row",
+       any(x["deal"] == "470 McCormick Blvd" and x["disposition"] == "PASS"
+           and x["ledger_row"] for x in payload.get("transitions", [])),
+       payload)
+expect("CLI: 511 transition has no disposition (not in stage_map) and null ledger_row",
+       any(x["deal"] == "511 Industrial Mile Rd" and x["disposition"] is None
+           and x["ledger_row"] is None for x in payload.get("transitions", [])),
+       payload)
+expect("CLI: snapshot file updated to current state",
+       dsr.load_snapshot(cli_snapshot_path) == current)
+
+bootstrap_snapshot_path = os.path.join(tmpdir, "bootstrap-snapshot.json")
+proc2 = run_cli(["--current-file", cli_current_path, "--stage-map-file", cli_map_path,
+                 "--snapshot-file", bootstrap_snapshot_path, "--bootstrap"])
+expect("CLI --bootstrap: exit 0", proc2.returncode == 0, proc2.stderr)
+bootstrap_payload = json.loads(proc2.stdout) if proc2.returncode == 0 else {}
+expect("CLI --bootstrap: reports bootstrap true, no transitions key",
+       bootstrap_payload.get("bootstrap") is True
+       and "transitions" not in bootstrap_payload)
+expect("CLI --bootstrap: snapshot seeded to current state",
+       dsr.load_snapshot(bootstrap_snapshot_path) == current)
+
+proc3 = run_cli(["--current-file", os.path.join(tmpdir, "nope.json"),
+                 "--stage-map-file", cli_map_path])
+expect("CLI: missing --current-file exits 2 (fail loud)", proc3.returncode == 2)
 
 # --- summary ----------------------------------------------------------------------------
 passed = sum(1 for ok, _ in results if ok)
