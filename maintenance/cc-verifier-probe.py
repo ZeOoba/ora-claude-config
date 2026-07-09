@@ -11,7 +11,7 @@ emails the table (subject prefix [ACTION] on any FAIL).
 import json, os, subprocess, sys
 
 CLAUDE = r"C:\Users\Owner\.claude"
-PROJ   = os.path.join(CLAUDE, r"projects\C--Users-Owner-OneDrive---Oxford-Capital-Partners--1-")
+PROJ   = os.path.join(CLAUDE, r"projects\C--Users-Owner-OneDrive---Oxford-Capital-Partners")
 # DUAL-FLEET (2026-06-10): local-agent-mode-sessions (LAMS) is the LIVE Cowork
 # fleet registry, NOT orphaned. Both stores are discovered dynamically (I4: GUIDs
 # rotate, never hardcode; the MSIX LocalCache path mirrors Roaming -- one per store).

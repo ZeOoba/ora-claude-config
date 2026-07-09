@@ -24,9 +24,21 @@ repo contents, so this hook scans only the command text. Deep confidential-conte
 checking of what a push would publish is enforced by the build-time grep gate on the
 mirror/site `dist/` (Phase 2/6), not here.
 
-Exit 0 = allow. Exit 2 = block (PreToolUse convention).
+Roster-freshness tripwire (2026-07-08 audit finding): FAIL-CLOSED covers the roster being
+ABSENT/unreadable, but NOT the roster being STALE-BUT-PRESENT -- the file parses fine, yet nobody
+has re-confirmed the active-deal list lately (a closed deal never retired, or a NEW confidential
+deal not yet added). The second case is INVISIBLE to fail-closed: there are no terms to match, so
+the deal leaks. A stale `_meta.roster_last_verified` (> STALENESS_THRESHOLD_DAYS old) therefore
+makes the guard surface a loud, one-time-per-session ADVISORY (plus a durable state breadcrumb)
+instead of trusting the snapshot silently -- per Invariant 3 ("verify before naming any deal
+externally -- if unverifiable, ask"). Staleness WARNS, it does NOT hard-block: the roster is
+present, only possibly-incomplete, and freezing all egress forever would be disproportionate. Only
+the no-hit clean-egress path (the exact path a missing deal would slip through) carries the advisory.
+
+Exit 0 = allow. Exit 2 = block (PreToolUse convention). The stale-roster advisory rides on the
+allow path (exit 0 + stderr) -- it never flips an allow into a block or vice-versa.
 """
-import sys, os, json, re
+import sys, os, json, re, datetime
 
 HOOK_DIR = os.path.dirname(os.path.abspath(__file__))
 TERMS_FILE = os.path.join(HOOK_DIR, "confidential-terms.json")
@@ -45,6 +57,32 @@ EGRESS_BASH = re.compile(
 )
 
 
+# --- Roster-freshness tripwire ------------------------------------------------------------------
+# WHY (2026-07-08 audit finding): Invariant 3's self-heal ("if confidential-deal state is
+# unavailable ... verify ... if unverifiable, ask") fires ONLY on the roster being ABSENT/unreadable
+# -- the load_terms() except-branch in main(). It is BLIND to the roster being STALE-BUT-PRESENT:
+# the file parses fine, but nobody has re-confirmed the deal LIST lately. Two drift shapes:
+#   * a deal quietly closed and was never retired  -> the guard over-blocks (annoying, but SAFE); OR
+#   * a NEW confidential deal should have been added and wasn't -> the guard UNDER-blocks: the deal
+#     leaks because there are no terms to match it. This second shape is the dangerous one, and it
+#     is EXACTLY what fail-closed cannot catch (fail-closed needs terms present; here there are none).
+# So we anchor freshness on `_meta.roster_last_verified` (ISO date) and trip when it ages out.
+#
+# ROSTER-LEVEL (in `_meta`), NOT per-deal, BY DESIGN: a per-deal "verified" date can only attest to
+# deals ALREADY in the file -- it structurally cannot flag a deal that SHOULD exist but is missing
+# (the dangerous under-block case). Only a whole-roster "the list was confirmed current on <date>"
+# field catches that, so the anchor is roster-wide -- matching how the list is actually reviewed
+# (see `_meta.review_cadence`).
+#
+# THRESHOLD 30 days: the file's own `_meta.review_cadence` ("quarterly", ~90d) is the FORMAL deep
+# review; this is a lighter "is the list still current?" tripwire that catches quiet drift ~2 months
+# before the quarterly review would. Deliberately tighter than the formal cadence: a leaked
+# confidential deal is unrecoverable, a re-verify prompt is cheap -- asymmetric cost, so err early.
+STALENESS_THRESHOLD_DAYS = 30
+STATE_DIR = os.path.join(HOOK_DIR, "state")            # gitignored transient runtime state (.gitignore §3)
+STALE_STATE_FILE = os.path.join(STATE_DIR, "roster-staleness.json")
+
+
 def block(reason):
     sys.stderr.write("BLOCKED (confidentiality, fail-closed): %s\n" % reason)
     sys.exit(2)
@@ -53,6 +91,83 @@ def block(reason):
 def load_terms():
     with open(TERMS_FILE, encoding="utf-8") as f:
         return json.load(f)
+
+
+def roster_staleness(terms):
+    """(is_stale, detail) for the roster freshness anchor `_meta.roster_last_verified`.
+
+    FAIL-CAUTIOUS (mirrors this hook's fail-closed bias -- detection over silence): a MISSING or
+    UNPARSEABLE anchor is treated as STALE, not fresh. An absent freshness date is itself an
+    unverifiable state, and Invariant 3 says treat unverifiable as ask-first -- silently assuming
+    "fresh" would reintroduce exactly the blind spot this tripwire exists to close. A parseable
+    FUTURE date (clock skew / forward-dated verification) is accepted as not-stale but noted, so it
+    never nags. `detail` is a short human string reused verbatim in the advisory and the breadcrumb.
+    """
+    meta = terms.get("_meta") if isinstance(terms, dict) else None
+    raw = (meta or {}).get("roster_last_verified")
+    if not raw:
+        return True, "_meta.roster_last_verified is MISSING -- roster freshness cannot be proven"
+    try:
+        verified = datetime.date.fromisoformat(str(raw).strip())
+    except Exception:
+        return True, "_meta.roster_last_verified (%r) is not an ISO date -- freshness cannot be proven" % raw
+    days = (datetime.date.today() - verified).days
+    if days > STALENESS_THRESHOLD_DAYS:
+        return True, ("_meta.roster_last_verified=%s is %d days old (> %d-day tripwire); the "
+                      "active-deal list may be out of date" % (verified.isoformat(), days,
+                                                               STALENESS_THRESHOLD_DAYS))
+    return False, "_meta.roster_last_verified=%s (%d days old)" % (verified.isoformat(), days)
+
+
+def surface_staleness(detail, session_id):
+    """Surface a STALE roster WITHOUT hard-blocking (Invariant 3: warn, don't freeze legitimate work).
+
+    Two coordinated signals, BOTH best-effort -- a state read/write failure must NEVER affect the
+    egress decision (this is telemetry, not the safety gate):
+      * a one-time-per-session loud stderr ADVISORY, so the operator sees it in real time at the
+        moment an egress decision is being made against a possibly-incomplete roster; and
+      * a durable JSON breadcrumb (hooks/state/roster-staleness.json) a periodic check (the weekly
+        eos-health-report / a doctrine probe) or a human can pick up. It also stores
+        `last_warned_session`, which is how the advisory is throttled to once per session.
+
+    If the breadcrumb can't be read (so we can't prove we already warned this session), we FAIL
+    CAUTIOUS and warn anyway -- a repeated advisory is a cheaper failure than a silent stale roster.
+    The caller still ALLOWS the (clean) egress: present-but-stale is a WARN, not the absent-roster
+    hard-block. NOTE the breadcrumb carries only dates / a session id / this module's own detail
+    string -- never any deal term -- so it is safe to write and to grep.
+    """
+    prior = {}
+    try:
+        with open(STALE_STATE_FILE, encoding="utf-8") as f:
+            prior = json.load(f)
+    except Exception:
+        prior = {}  # unreadable/absent -> cannot prove a prior warning this session -> warn (cautious)
+    already_warned = bool(session_id) and prior.get("last_warned_session") == session_id
+
+    if not already_warned:
+        sys.stderr.write(
+            "WARNING (confidentiality, STALE ROSTER): %s. Re-verify the active-deal list against the "
+            "source of record, then set _meta.roster_last_verified in confidential-terms.json to "
+            "today. Until then, do NOT name any deal on an external surface without independent "
+            "confirmation -- a newly-confidential deal may not yet be on the list.\n" % detail)
+
+    # Best-effort durable breadcrumb. Wrapped so a write failure (perms, race) can never touch the
+    # egress decision: staleness telemetry is advisory, egress safety is not negotiable.
+    try:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        with open(STALE_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump({
+                "stale": True,
+                "detail": detail,
+                "detected_at": datetime.datetime.now().isoformat(timespec="seconds"),
+                "threshold_days": STALENESS_THRESHOLD_DAYS,
+                # Record the current session as warned so the advisory stays 1x/session. A blank
+                # session_id can't be deduped (e.g. a direct test invocation) -> keep any prior
+                # marker rather than clobber it, and such calls simply warn every time (cautious).
+                "last_warned_session": session_id or prior.get("last_warned_session"),
+            }, f, indent=2)
+    except Exception:
+        pass  # telemetry only -- egress safety must never depend on this write succeeding
 
 
 def find_hit(text, terms):
@@ -166,6 +281,16 @@ def main():
         block("'%s' identifier ('%s') would cross egress surface [%s]. "
               "This deal must not reach any external surface until closing. "
               "Keep it on internal/local paths only." % (label, term, surface))
+
+    # Clean egress. Before allowing, check roster FRESHNESS -- this no-hit path is the exact failure
+    # mode a stale roster hides: a NEW confidential deal that should be on the list but isn't produces
+    # ZERO hits and would sail through silently. A present-but-stale roster is a WARN (surface the
+    # advisory + allow), NOT the absent-roster hard-block; staleness makes the hook speak up, it does
+    # not freeze all legitimate egress forever. Evaluated only here (egress surface, no hit) so the
+    # cost/noise lands only where a missing-deal leak could actually occur.
+    stale, detail = roster_staleness(terms)
+    if stale:
+        surface_staleness(detail, data.get("session_id") or "")
 
     sys.exit(0)
 

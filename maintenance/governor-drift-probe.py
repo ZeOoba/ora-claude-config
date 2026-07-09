@@ -33,7 +33,7 @@ CANON_LTV = "40"
 HOME = os.path.expanduser("~")
 CLAUDE = os.path.join(HOME, ".claude")
 MEM = os.path.join(CLAUDE, "projects",
-                   "C--Users-Owner-OneDrive---Oxford-Capital-Partners--1-", "memory")
+                   "C--Users-Owner-OneDrive---Oxford-Capital-Partners", "memory")
 
 def discover_skills_root():
     """Auto-discover the live Cowork skills tree (GUIDs rotate -- never hardcode, I4)."""
@@ -140,6 +140,20 @@ RE_DSCR_FROMTO = re.compile(
 RE_DSCR_DECL = re.compile(
     r"(?:floor|minimum|min|maximum|max|ceiling|>=|<=|[≥≤]|" + _PIVOT + r")"
     r"\s*(?:[<>]=?|[≥≤])?\s*([0-9]+\.[0-9]+)\s*[x×](?!\s*%)", re.I)
+# DSCR DECL, REVERSE WORD ORDER (2026-07-08): the NUMBER-then-keyword form "1.40x floor" /
+# "1.40x minimum" -- the mirror image of RE_DSCR_DECL, which only reads keyword-BEFORE-number
+# ("floor 1.40x"). A governor restatement written "This 1.40x floor is the acquisition governor"
+# carries NO literal "dscr" (so RE_DSCR_THRESH, anchored on the word "dscr", misses it) AND puts the
+# keyword AFTER the value (so RE_DSCR_DECL misses it) -- a genuine false-negative discovered in the
+# 2026-07-08 CLAUDE.md audit (a line was reworded to dodge it; this closes the root gap). Same metric
+# guard as RE_DSCR_DECL: the trailing x/× is REQUIRED and must abut the value -- that is what
+# separates a DSCR multiple ("1.40x floor") from a rent/height/throughput decimal that merely
+# precedes a keyword ("5.50 psf rent floor", "32.0 ft clear-height ceiling" -- neither has an x
+# touching the number). It is added to the branch-2 candidate list, so it flows through the SAME
+# suppressors as every other DSCR candidate (canonical-skip, correction-span, portfolio-level,
+# post-close-refi, rubric-pair); a portfolio-wide "1.75x floor" or a refi tier is still suppressed.
+RE_DSCR_DECL_REV = re.compile(
+    r"([0-9]+\.[0-9]+)\s*[x×]\s*(?:floor|ceiling|minimum|min|maximum|max)\b", re.I)
 RE_LTV_FROMTO = re.compile(
     r"(?:" + _CHANGE_VERB + r")\b[^0-9\n]{0,16}?from\s+" + re.escape(CANON_LTV)
     + r"\s*%\s+to\s+([0-9]{1,3})\s*%", re.I)
@@ -158,6 +172,17 @@ RE_DSCR_PIVOT_DECOY = re.compile(
 # percent ("max LTV 40% and 25% basis discount", "ceiling 40% with 8% yield") is a DIFFERENT
 # metric and is left alone -- this holds even when a connective (not a list delimiter) joins them.
 RE_LTV_ANCHOR = re.compile(r"ltv\s*(?:ceiling|maximum|max)|(?:ceiling|maximum|max)\s*ltv", re.I)
+# LTV ceiling, REVERSE WORD ORDER (2026-07-08): the NUMBER-then-keyword form "65% ceiling" /
+# "65% maximum" on a governor line that carries NO literal "ltv" -- the LTV analog of the reverse
+# DSCR gap above. "This 65% ceiling is the acquisition governor" never enters the ltv-gated LTV
+# branch (no "ltv" token), so it silently evades. A percent has no intrinsic metric discriminator
+# (no x-analog), so precision rests on two things: (a) is_gov line-level gating (used at the call
+# site -- the line must already carry a governor keyword), and (b) the keyword set kept to
+# {ceiling, maximum} ONLY. "min"/"minimum" are DSCR-floor words; bare "max"/"maximum" abut non-LTV
+# percents ("vacancy 15% max", "exit cap 8% max") -- so bare "max" is DELIBERATELY EXCLUDED, and
+# "maximum" (spelled in full) is a rare enough non-LTV collocation to accept. "ceiling"/"maximum"
+# abutting a percent read unambiguously as an LTV ceiling on a governor line.
+RE_LTV_CEIL_REV = re.compile(r"([0-9]{1,3})\s*%\s*(?:ceiling|maximum)\b", re.I)
 # LTV audit-note suppressor (I-4): a PAST correction landing on canonical 40%. Kept TIGHT --
 # requires the explicit "corrected ... from <N>% to/→ 40%" structure. Its MATCH SPAN is used to
 # SPAN-SCOPE the suppression (branch 3): only a percent sitting INSIDE the span (the corrected-away
@@ -265,6 +290,87 @@ GOV_KEYWORDS = ("governor", "hard filter", "hard screen", "hard acquisition",
                 "disqualif", "non-negotiable", "dscr floor", "ltv ceiling",
                 "self-imposed", "minimum dscr", "min dscr", "acquisition screen")
 
+# --- Portfolio-level DSCR qualifier (2026-07-08) --------------------------------------------
+# Gabriel-ratified doctrine (2026-07-08): "DSCR of 1.25 for each property and 1.75 for the entire
+# portfolio." So DSCR 1.25x is the PER-DEAL / per-property acquisition governor (canonical, I3),
+# while 1.75x is a SEPARATE, legitimate PORTFOLIO-WIDE blended target -- a distinct aggregate
+# metric, NOT the per-deal floor. Before this, the 1.75 regression sentinel (scan_line branch 1)
+# and the DSCR equality check (branch 2) flagged ANY 1.75 near dscr/governor, which conflated the
+# two figures and would false-positive on a legitimately-labelled portfolio-level 1.75.
+#
+# _portfolio_qualified() SUPPRESSES the flag ONLY when the line unambiguously frames the value as
+# portfolio-level. Same detection-over-silence bias as the rest of the module -- suppression is a
+# false negative, so it is kept TIGHT with two independent guards:
+#   * VETO first: any per-deal / per-property marker on the line ("per-deal", "per property",
+#     "hard acquisition governor") means the line claims to be the DEAL-level governor -- if that
+#     shows 1.75 it is a REAL per-deal drift and must STILL flag, so we never suppress it.
+#   * Then REQUIRE an explicit portfolio qualifier: a "portfolio dscr"/"portfolio-wide"/
+#     "portfolio-level"/"blended portfolio" token, OR the bare word "portfolio" within 30 chars of
+#     the offending value. A stray "portfolio" far from the number does NOT qualify (so it cannot
+#     be used to mask a governor drift elsewhere on a long line).
+PORTFOLIO_QUALIFIERS = ("portfolio dscr", "portfolio-wide", "portfolio wide",
+                        "portfolio-level", "portfolio level", "blended portfolio")
+PERDEAL_MARKERS = ("per-deal", "per deal", "per-property", "per property",
+                   "hard acquisition governor")
+
+def _portfolio_qualified(low, val_start):
+    """True when the DSCR value at index `val_start` (already lower-cased `low`) is unambiguously a
+    PORTFOLIO-LEVEL figure and the 1.75/equality flag should be suppressed. A per-deal marker
+    anywhere on the line vetoes suppression (real per-deal drift must still flag)."""
+    if any(m in low for m in PERDEAL_MARKERS):
+        return False
+    if any(q in low for q in PORTFOLIO_QUALIFIERS):
+        return True
+    return "portfolio" in low[max(0, val_start - 30):val_start + 30]
+
+# --- Post-close refinancing-scenario qualifier (2026-07-08) ----------------------------------
+# Gabriel-ratified doctrine: DSCR 1.25x / LTV 40% is the ACQUISITION-time governor (how ORA buys).
+# The acquisition-underwriting skill ALSO documents a distinct POST-CLOSE REFINANCING scenario
+# ("all-cash bid + refi post-close") whose debt-SIZING assumptions legitimately cite different
+# numbers -- a refi LTV taken against STABILIZED EXIT value (65%) and DSCR-based rate-pricing tiers
+# ("-25 bps for stabilized multi-tenant >=1.40x DSCR"). Those are refinance-market inputs, NOT the
+# acquisition governor; the SAME line states the governor CORRECTLY ("1.25x DSCR (the governor --
+# never exceed)"). Because the bare word "governor" on that line trips is_gov, the DSCR-equality
+# pass (branch 2) and the LTV proximity pass (branch 3) flag the refi figures as drift -- a false
+# positive of exactly the class this module's docstring warns against.
+#
+# _refi_qualified() SUPPRESSES a DSCR/LTV flag ONLY when the offending value sits in an unambiguous
+# post-close-refi debt-sizing context. Detection-over-silence bias, so kept TIGHT with three guards:
+#   * VETO on any ACQUISITION-governor marker on the line -- it would make the value the acquisition
+#     governor itself, so a drift there must STILL flag.
+#   * REQUIRE the line to be an explicit refi debt-sizing line: a refi/refinance token AND a
+#     post-close / refi-debt / refi-sized frame (a stray "refi" alone does not qualify).
+#   * VETO if the value is itself declared AS "the governor" -- the literal token "governor" within
+#     25 chars either side of the value -- so drifting the on-line governor CITATION (e.g. the 1.25x
+#     -> 1.40x in "(the governor -- never exceed)") is NOT masked. The genuine refi figures sit far
+#     from any "governor" token, so they are still suppressed.
+REFI_TOKENS = ("refi", "refinance")
+REFI_FRAME = ("post-close", "post close", "refi debt", "refi sized", "refi assumption",
+              "refinance debt", "refinancing")
+# markers that would make the flagged value the ACQUISITION governor (veto suppression):
+ACQ_GOV_MARKERS = ("acquisition governor", "acquisition screen", "hard filter", "hard screen",
+                   "hard acquisition", "ltv ceiling", "dscr floor", "min dscr", "minimum dscr",
+                   "buy box", "buy-box", "non-negotiable") + PERDEAL_MARKERS
+
+def _refi_qualified(low, val_start):
+    """True when the DSCR/LTV value at index `val_start` (in already-lower-cased `low`) is
+    unambiguously a POST-CLOSE REFI debt-sizing figure and the drift flag should be suppressed.
+    TIGHT by design (suppression is a false negative): an acquisition-governor marker anywhere on
+    the line, or the value being declared AS "the governor" (token within 25 chars), both veto
+    suppression so a real acquisition-governor drift still flags."""
+    if any(m in low for m in ACQ_GOV_MARKERS):
+        return False
+    if not (any(t in low for t in REFI_TOKENS) and any(f in low for f in REFI_FRAME)):
+        return False
+    # "governor" token close to the value = the value is declared AS the governor (a drifted
+    # citation) -> do NOT suppress. The after-reach (40) spans a "Nx DSCR** (the governor" markdown
+    # declaration (~26 chars) while staying well short of the genuine refi figures, whose nearest
+    # "governor" token sits 60+ chars away (the refi-sizing "65% LTV ... and 1.25x DSCR (the
+    # governor")) and which therefore stay suppressed.
+    if "governor" in low[max(0, val_start - 25):val_start + 40]:
+        return False
+    return True
+
 def scan_line(raw):
     """Return list of (reason) drift findings for one line."""
     out = []
@@ -276,12 +382,18 @@ def scan_line(raw):
     ltv_corr_spans = [mm.span() for mm in RE_LTV_CORRECTION.finditer(low)]
     is_gov = any(k in low for k in GOV_KEYWORDS)
 
-    # 1) Regression sentinel: 1.75 near DSCR/governor. Fires only for a 1.75 OUTSIDE any correction
-    #    span -- a live drift, not the corrected-away value of a "corrected from 1.75 → 1.25" note.
+    # 1) Regression sentinel: 1.75 near DSCR/governor. Fires only for a 1.75 that is NEITHER (a) the
+    #    corrected-away value of a "corrected from 1.75 → 1.25" note NOR (b) an explicit PORTFOLIO-LEVEL
+    #    DSCR figure (1.75x is the ratified blended portfolio-wide target -- a distinct metric from the
+    #    1.25x per-deal governor). _portfolio_qualified() vetoes suppression on any per-deal marker, so
+    #    a per-deal governor that has drifted to 1.75 STILL flags. Scanning continues past a suppressed
+    #    1.75 so a second, unqualified 1.75 on the same line is not missed.
     if "dscr" in low or "governor" in low:
         idx = low.find("1.75")
         while idx != -1:
-            if not any(s <= idx < e for (s, e) in dscr_corr_spans):
+            safe = (any(s <= idx < e for (s, e) in dscr_corr_spans)
+                    or _portfolio_qualified(low, idx))
+            if not safe:
                 out.append("DSCR governor appears as 1.75 (canonical is %sx)" % CANON_DSCR)
                 break
             idx = low.find("1.75", idx + 1)
@@ -310,7 +422,7 @@ def scan_line(raw):
         is_rubric = len(pair_spans) >= 2
         seen = set()
         cands = (list(RE_DSCR_THRESH.finditer(low)) + list(RE_DSCR_FROMTO.finditer(low))
-                 + list(RE_DSCR_DECL.finditer(low)))
+                 + list(RE_DSCR_DECL.finditer(low)) + list(RE_DSCR_DECL_REV.finditer(low)))
         # PIVOT_DECOY keys only on the literal canonical value + a pivot, so require the word
         # "dscr" on the line -- otherwise an unrelated "v1.25 -> 2.00" / "ratio 1.25 now 1.80"
         # would mis-fire (the other passes are self-qualifying via "dscr"-anchor or x/keyword).
@@ -324,6 +436,19 @@ def scan_line(raw):
             # skip the corrected-away old value of a DSCR correction note (span-scoped, M-2).
             if any(s <= vs and ve <= e for (s, e) in dscr_corr_spans):
                 continue
+            # skip an explicit PORTFOLIO-LEVEL DSCR figure: the blended portfolio-wide target
+            # (ratified 1.75x, 2026-07-08) is a SEPARATE aggregate metric, not the per-deal governor
+            # threshold, so it is not measured against the 1.25x per-deal floor. Vetoed by any
+            # per-deal marker (see _portfolio_qualified), so a per-deal floor drifted off-canonical
+            # still flags here.
+            if _portfolio_qualified(low, vs):
+                continue
+            # skip a POST-CLOSE-REFI debt-sizing DSCR figure (a DSCR-based rate-pricing tier such as
+            # ">=1.40x DSCR", or a refi-sizing DSCR) -- a distinct refinance-market input, not the
+            # acquisition governor. Vetoed by any acquisition-governor marker or a value declared AS
+            # the governor (see _refi_qualified), so a real per-deal governor drift still flags.
+            if _refi_qualified(low, vs):
+                continue
             in_pair = any(s <= vs and ve <= e for (s, e) in pair_spans)
             if is_rubric and in_pair:
                 continue  # a scored multiple inside a genuine rubric -- not a declared floor
@@ -335,36 +460,75 @@ def scan_line(raw):
     #    restated as canonical then changed ("LTV ceiling now 65%", "raised from 40% to 65%") is
     #    caught by FROMTO and by scanning a short clause window after an LTV-adjacent ceiling/max
     #    anchor (the metric guard that keeps exit-cap/rent/occupancy percents out).
-    if "ltv" in low:
+    #    Reverse-order gap (2026-07-08): a governor line may carry NO literal "ltv" yet still declare
+    #    the ceiling number-then-keyword ("65% ceiling"/"65% maximum"). The outer gate therefore also
+    #    admits any is_gov line; every ltv-TOKEN-dependent pass below stays behind an explicit 'ltv'
+    #    check so its pre-2026-07-08 firing is byte-for-byte unchanged, and ONLY RE_LTV_CEIL_REV is
+    #    new. seen_ltv dedupes so an ltv-present value already flagged forward is not double-flagged.
+    if "ltv" in low or is_gov:
         seen_ltv = set()
         def _flag_ltv(val, kind="ceiling"):
             if val and val != CANON_LTV and val not in seen_ltv and 1 <= int(val) <= 100:
                 seen_ltv.add(val)
                 out.append("LTV %s %s%% != canonical %s%%" % (kind, val, CANON_LTV))
-        cmp_hits = RE_LTV_CMP.findall(low)
+        cmp_hits = RE_LTV_CMP.findall(low)  # RE_LTV_CMP embeds 'ltv' -> [] on an ltv-less line
         for val in cmp_hits:
             _flag_ltv(val)
         if is_gov:
-            for m in RE_LTV_FROMTO.finditer(low):
+            # ltv-TOKEN-dependent passes -- kept behind 'ltv in low' so their firing is UNCHANGED
+            # (RE_LTV_FROMTO carries no 'ltv' literal, so it MUST stay gated to avoid new behavior).
+            if "ltv" in low:
+                for m in RE_LTV_FROMTO.finditer(low):
+                    _flag_ltv(m.group(1))
+                # read the FIRST percent after each LTV-adjacent ceiling/max anchor -- that is the
+                # declared ceiling. A canonical 40% there satisfies it and leaves any later figure
+                # (basis discount, yield, exit cap) untouched; a non-canonical first percent flags.
+                # The window reaches 40 chars (I-3: catches a moderately verbose "ceiling ... set to
+                # 65%") but stops at a clause break [(;|] so a following clause's percent is never the
+                # one read when the ceiling itself states no percent. Commas are NOT breaks, so
+                # "LTV ceiling, revised, 65%" still reads 65 as the declared ceiling.
+                for am in RE_LTV_ANCHOR.finditer(low):
+                    base = am.end()
+                    window = re.split(r"[(;|\n]", low[base:base + 40])[0]
+                    pm = RE_LTV_NUM.search(window)
+                    # skip the percent if it is the corrected-away old value of an LTV correction note
+                    if pm and not any(s <= base + pm.start(1) < e for (s, e) in ltv_corr_spans):
+                        _flag_ltv(pm.group(1))
+                if not cmp_hits:  # proximity fallback only when no comparator-bound value was found
+                    for m in RE_LTV_NEAR.finditer(low):
+                        # skip a POST-CLOSE-REFI LTV sizing figure (e.g. "refi ... 65% LTV" against
+                        # stabilized exit value) -- not the acquisition LTV governor. Vetoed by any
+                        # acquisition-governor marker or a value declared AS the governor.
+                        if _refi_qualified(low, m.start()):
+                            continue
+                        _flag_ltv(m.group(1) or m.group(2), kind="governor")
+            # REVERSE-ORDER ceiling ("65% ceiling"/"65% maximum") -- number-then-keyword, needs NO
+            # 'ltv' token, so it closes "This 65% ceiling is the acquisition governor". Correction-
+            # span-skipped and post-close-refi-suppressed exactly like the forward passes.
+            for m in RE_LTV_CEIL_REV.finditer(low):
+                vs = m.start(1)
+                if any(s <= vs < e for (s, e) in ltv_corr_spans):
+                    continue
+                if _refi_qualified(low, vs):
+                    continue
                 _flag_ltv(m.group(1))
-            # read the FIRST percent after each LTV-adjacent ceiling/max anchor -- that is the
-            # declared ceiling. A canonical 40% there satisfies it and leaves any later figure
-            # (basis discount, yield, exit cap) untouched; a non-canonical first percent flags.
-            # The window reaches 40 chars (I-3: catches a moderately verbose "ceiling ... set to
-            # 65%") but stops at a clause break [(;|] so a following clause's percent is never the
-            # one read when the ceiling itself states no percent. Commas are NOT breaks, so
-            # "LTV ceiling, revised, 65%" still reads 65 as the declared ceiling.
-            for am in RE_LTV_ANCHOR.finditer(low):
-                base = am.end()
-                window = re.split(r"[(;|\n]", low[base:base + 40])[0]
-                pm = RE_LTV_NUM.search(window)
-                # skip the percent if it is the corrected-away old value of an LTV correction note
-                if pm and not any(s <= base + pm.start(1) < e for (s, e) in ltv_corr_spans):
-                    _flag_ltv(pm.group(1))
-            if not cmp_hits:  # proximity fallback only when no comparator-bound value was found
-                for m in RE_LTV_NEAR.finditer(low):
-                    _flag_ltv(m.group(1) or m.group(2), kind="governor")
     return out
+
+def _is_test_file(path):
+    """Test modules and _tests/ fixtures are NOT governor declarations -- they intentionally quote
+    off-canonical values (a mock "[GOVERNOR DRIFT] DSCR 1.20" summary, a 1.75 sentinel) to exercise
+    detection/gating, EXACTLY like the probe's own test file (already in skip_names) and
+    restore-skill-governor.py. The living governor is declared in standards.md / rules.md / CLAUDE.md
+    / skills / capital-config.ts, never in a test. Skips the maintenance/_tests/ subtree (any file)
+    and sibling python test modules (test-*.py / test_*.py / *_test.py). Added 2026-07-08 after
+    maintenance/_tests/test_git_prepush_doctrine_gate.py -- committed AFTER this probe -- tripped it
+    on its fixture strings (a pre-existing false positive; precision over recall, per the docstring)."""
+    low = path.replace("\\", "/").lower()
+    if "/_tests/" in low:
+        return True
+    bn = os.path.basename(low)
+    return bn.endswith(".py") and (bn.startswith("test-") or bn.startswith("test_")
+                                   or bn.endswith("_test.py"))
 
 def main():
     quiet = "--quiet" in sys.argv
@@ -381,13 +545,21 @@ def main():
     # quote off-canonical numbers and would false-positive forever. The LIVING governor lives in
     # standards.md / rules.md / firm.md / CLAUDE.md / skills, which stay in scope. (Precision over
     # recall, per the module docstring.)
-    skip_names |= {"event_log.md"}
+    # MEMORY.md (the index) and dated audit/project memory files are the same class: they NARRATE
+    # findings (e.g. "governor-drift probe caught DSCR 1.75x") rather than declare a live governor.
+    # Exempting the index broadly (not just event_log.md) accepts a small blind spot -- a governor
+    # change accidentally recorded ONLY in the index, never in standards.md/rules.md/firm.md/CLAUDE.md/
+    # skills, would go undetected -- judged acceptable since those are the doctrinal homes for a real
+    # change, not the index (2026-07-08, added after the formal CLAUDE.md audit's own tracking file
+    # tripped this sentinel).
+    skip_names |= {"event_log.md", "MEMORY.md", "project_claude-md-formal-audit-2026-07-08.md"}
     for root, exts in build_targets():
         if not (os.path.isfile(root) or os.path.isdir(root)):
             skipped_roots.append(root)
             continue
         for path in iter_files(root, exts):
-            if os.path.abspath(path) == self_path or os.path.basename(path) in skip_names:
+            if (os.path.abspath(path) == self_path or os.path.basename(path) in skip_names
+                    or _is_test_file(path)):
                 continue
             low_path = path.lower().replace("\\", "/")
             is_code = low_path.endswith((".ts", ".tsx", ".js"))

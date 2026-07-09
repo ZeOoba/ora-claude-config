@@ -1,25 +1,34 @@
 {
- "ts": "2026-07-07T11:51:11",
+ "ts": "2026-07-08T13:58:33",
  "fleets": {
   "cc": [
    "ora-deal-sourcing-scan",
    "ora-financial-code-integrity-sweep",
-   "ora-health-guard",
    "ora-master-workbook-ingest",
    "ora-monthly-portfolio-briefing",
-   "ora-pm-ledger",
-   "ora-task-integrity-guard",
-   "ora-weekly-hygiene"
+   "ora-task-integrity-guard"
   ],
   "lams": [
    "automation-health-monitor",
    "ora-am-brief",
+   "ora-bearmode-refresh",
+   "ora-cam-reconciliation-annual",
+   "ora-consolidate-memory-monthly",
    "ora-cowork-heartbeat",
+   "ora-dashboard-refresh",
    "ora-friday-closeout",
    "ora-lease-expiration-brief",
    "ora-monday-sync",
-   "ora-weekly-sourcing-digest",
-   "ora-weekly-tooling-intel-sweep"
+   "ora-om-intake-ocr",
+   "ora-owner-outreach-queue-refresh",
+   "ora-passed-deal-tracker",
+   "ora-replacement-cost-refresh",
+   "ora-skill-store-drift-check",
+   "ora-skill-text-audit"
   ]
+ },
+ "missing_streaks": {
+  "cc": 0,
+  "lams": 0
  }
 }

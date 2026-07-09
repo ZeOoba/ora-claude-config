@@ -18,6 +18,13 @@ auto-ratified: reported INFO, exit stays 0 (2026-06-11 optimization -- planned
 retirements no longer raise a one-time false [ACTION]).
 One-time fireAt tasks are ignored -- they expire by design.
 
+An enabled->DISABLED task (still registered, just paused) is a WARN regression,
+NOT a drop -- disabling is a legitimate user action (2026-07-08). A whole registry
+FILE that is absent is treated as transient for MISSING_STORE_GRACE_RUNS consecutive
+runs (reinstall / session-dir rotation) before escalating to [ACTION] -- the
+2026-07-05 reinstall's mid-recovery probe cried CRITICAL on a store that reappeared
+hours later (2026-07-08).
+
 Run daily from the ora-setup-audit STEP 1 block. First run writes a baseline.
 """
 import datetime
@@ -46,9 +53,15 @@ END_MARKER = "<!--END-GENERATED-FLEET-->"
 # recent event_log entry both contains the literal token 'RATIFIED' and names the
 # task id. Conservative by design -- anything unparseable is NOT ratified.
 EVENT_LOG = os.path.join(os.path.expanduser("~"), ".claude", "projects",
-                         "C--Users-Owner-OneDrive---Oxford-Capital-Partners--1-",
+                         "C--Users-Owner-OneDrive---Oxford-Capital-Partners",
                          "memory", "event_log.md")
 RATIFY_WINDOW_DAYS = 14
+
+# A whole registry FILE vanishing is treated as transient (reinstall / session-dir
+# rotation / app-not-yet-initialized) until it persists across this many consecutive
+# probe runs -- the 2026-07-05 reinstall's mid-recovery probe cried CRITICAL on a
+# store that reappeared hours later. Per-ENTRY drops still alarm on the first run.
+MISSING_STORE_GRACE_RUNS = 2
 
 
 def ratified_drops(log_text, ids, today, window_days=RATIFY_WINDOW_DAYS):
@@ -115,6 +128,51 @@ def enabled_recurring_detail(path):
     return sorted(out)
 
 
+def all_recurring_states(path):
+    """{id: enabled_bool} for every recurring (5-field cron) task in the store,
+    regardless of enabled state. None if unreadable. Lets the caller tell a
+    DISABLED task apart from a DELETED one -- both leave the enabled set."""
+    try:
+        d = json.load(open(path, encoding="utf-8"))
+    except Exception:
+        return None
+    out = {}
+    for t in d.get("scheduledTasks", []) or []:
+        expr = t.get("cronExpression")
+        if isinstance(expr, str) and len(expr.split()) == 5:
+            out[t.get("id") or "?"] = bool(t.get("enabled"))
+    return out
+
+
+def classify_absent(prior_enabled_ids, current_states):
+    """Split ids that left the ENABLED set into (disabled_regressions, true_drops).
+
+    current_states = {id: enabled} for all recurring tasks now in the store. A
+    prior-enabled id still present but disabled => regression (e.g. a task that came
+    back DISABLED after a recovery); absent from the registry entirely => true drop
+    (the 2026-06-09 silent-drop failure mode). Pure."""
+    regressions, drops = [], []
+    for i in prior_enabled_ids:
+        if i in current_states and not current_states[i]:
+            regressions.append(i)
+        elif i not in current_states:
+            drops.append(i)
+    return sorted(regressions), sorted(drops)
+
+
+def next_missing_streaks(prior_streaks, missing_labels, all_labels):
+    """Consecutive-run absence counter per store label: +1 while missing, 0 when
+    present. Pure."""
+    return {label: (prior_streaks.get(label, 0) + 1) if label in missing_labels else 0
+            for label in all_labels}
+
+
+def missing_is_actionable(streak, grace=MISSING_STORE_GRACE_RUNS):
+    """A whole-store absence escalates to [ACTION] only once it has persisted across
+    `grace` consecutive probe runs."""
+    return streak >= grace
+
+
 def render_fleet_block(detail, ts):
     """Markdown roster block (markers included) from {label: [(id, cron), ...]}."""
     labels = {"cc": "CC/MCP", "lams": "LAMS/Cowork"}
@@ -143,7 +201,8 @@ def splice_generated_block(content, block):
 
 
 def main():
-    current, current_detail, missing_stores = {}, {}, []
+    current, current_detail, current_states, missing_stores = {}, {}, {}, []
+    all_labels = ["cc", "lams"]
     for label, store in (("cc", "claude-code-sessions"),
                          ("lams", "local-agent-mode-sessions")):
         p = discover_store(store)
@@ -153,34 +212,47 @@ def main():
             continue
         current[label] = [i for i, _ in detail]
         current_detail[label] = detail
+        current_states[label] = all_recurring_states(p) or {}
 
-    prior = {}
+    prior, prior_streaks = {}, {}
     if os.path.isfile(STATE):
         try:
-            prior = json.load(open(STATE, encoding="utf-8")).get("fleets", {})
+            _s = json.load(open(STATE, encoding="utf-8"))
+            prior = _s.get("fleets", {})
+            prior_streaks = _s.get("missing_streaks", {})
         except Exception:
-            prior = {}
+            prior, prior_streaks = {}, {}
 
-    drops, adds = {}, {}
+    # Split ids that left the ENABLED set into disabled-regressions (still registered,
+    # just paused -> WARN) and true drops (gone from the registry -> [ACTION]).
+    regressions, drops, adds = {}, {}, {}
     for label, ids in current.items():
         before = set(prior.get(label, []))
         now = set(ids)
-        if before - now:
-            drops[label] = sorted(before - now)
+        absent = sorted(before - now)
+        if absent:
+            reg, drp = classify_absent(absent, current_states.get(label, {}))
+            if reg:
+                regressions[label] = reg
+            if drp:
+                drops[label] = drp
         if now - before and prior:
             adds[label] = sorted(now - before)
-    # a whole store vanishing is itself a drop event
+    # a whole store vanishing (in prior, absent now) is a missing-store event
     for label in prior:
         if label not in current and label not in missing_stores:
             missing_stores.append(label)
 
+    streaks = next_missing_streaks(prior_streaks, set(missing_stores), all_labels)
+
     ts = datetime.datetime.now().isoformat(timespec="seconds")
     os.makedirs(STATE_DIR, exist_ok=True)
     with open(STATE, "w", encoding="utf-8") as f:
-        json.dump({"ts": ts, "fleets": current}, f, indent=1)
+        json.dump({"ts": ts, "fleets": current, "missing_streaks": streaks},
+                  f, indent=1)
 
     line = (f"{ts} cc={len(current.get('cc', []))} lams={len(current.get('lams', []))}"
-            f" drops={drops or '-'} adds={adds or '-'}"
+            f" drops={drops or '-'} regressions={regressions or '-'} adds={adds or '-'}"
             f" missing_stores={missing_stores or '-'}")
     try:
         with open(LOG, "a", encoding="utf-8") as f:
@@ -217,11 +289,31 @@ def main():
     if adds:
         for label, ids in adds.items():
             print(f"  INFO new in {label}: {', '.join(ids)}")
+    # Recovery/flux signal: any membership change means the roster is a moving target.
+    if adds or drops or regressions or missing_stores:
+        print("  INFO fleet membership CHANGED this run -- if a recovery/rebuild is in "
+              "progress, re-run the probe until two consecutive clean runs before "
+              "trusting the generated roster as settled.")
     bad = False
     if missing_stores:
-        print(f"  [ACTION] registry store(s) not found: {missing_stores} -- "
-              "fleet may be dark or the store moved.")
-        bad = True
+        for label in missing_stores:
+            streak = streaks.get(label, 1)
+            if missing_is_actionable(streak):
+                print(f"  [ACTION] registry store '{label}' absent for {streak} "
+                      f"consecutive probe runs (>= {MISSING_STORE_GRACE_RUNS}) -- fleet "
+                      "is dark or the store moved; investigate.")
+                bad = True
+            else:
+                print(f"  WARN registry store '{label}' not found (absence run {streak}/"
+                      f"{MISSING_STORE_GRACE_RUNS}) -- treating as transient (reinstall / "
+                      "session-dir rotation); escalates to [ACTION] if still absent next "
+                      "run.")
+    if regressions:
+        for label, ids in regressions.items():
+            print(f"  WARN enabled->DISABLED in {label}: {', '.join(ids)} -- still "
+                  "registered but no longer firing. Deliberate pause or a restore that "
+                  "came back disabled? Re-enable via update_scheduled_task or note the "
+                  "pause. (NOT a silent drop; no exit-1.)")
     if drops:
         ratified = set()
         try:
@@ -245,7 +337,7 @@ def main():
                       "failure mode.")
                 bad = True
     if not bad:
-        print("  OK -- membership unchanged.")
+        print("  OK -- no actionable drift.")
     return 1 if bad else 0
 
 
