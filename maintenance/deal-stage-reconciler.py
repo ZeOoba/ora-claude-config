@@ -172,6 +172,11 @@ def main(argv=None):
 
     date = a.date or dt.date.today().isoformat()
     snapshot = load_snapshot(a.snapshot_file)
+    if len(current) < len(snapshot):
+        sys.stderr.write(
+            "current-file has fewer rows (%d) than the snapshot (%d) -- refusing to "
+            "overwrite (possible partial Notion fetch)\n" % (len(current), len(snapshot)))
+        return 3
     transitions = diff_stages(current, snapshot)
     out = []
     for t in transitions:

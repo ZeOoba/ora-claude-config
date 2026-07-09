@@ -189,6 +189,48 @@ proc6 = run_cli(["--current-file", cli_current_path,
 expect("CLI: non-dict JSON in --stage-map-file exits 2", proc6.returncode == 2,
        proc6.stderr)
 
+# --- shrink-guard (normal mode refuses to overwrite snapshot on apparent partial fetch) ---
+shrink_snapshot_seed = {
+    "pg1": {"deal": "511 Industrial Mile Rd", "stage": "Candidate"},
+    "pg2": {"deal": "470 McCormick Blvd", "stage": "Passed"},
+    "pg3": {"deal": "754 Old State Route 74", "stage": "In Negotiation"},
+}
+shrink_current = {
+    "pg1": {"deal": "511 Industrial Mile Rd", "stage": "Candidate"},
+}
+
+shrink_snapshot_path = os.path.join(tmpdir, "shrink-snapshot.json")
+dsr.save_snapshot(shrink_snapshot_path, shrink_snapshot_seed)
+shrink_current_path = os.path.join(tmpdir, "shrink-current.json")
+with open(shrink_current_path, "w", encoding="utf-8") as f:
+    json.dump(shrink_current, f)
+
+proc_shrink = run_cli(["--current-file", shrink_current_path,
+                       "--stage-map-file", cli_map_path,
+                       "--snapshot-file", shrink_snapshot_path])
+expect("CLI: shrink guard exits 3 when current-file has fewer rows than the snapshot",
+       proc_shrink.returncode == 3, (proc_shrink.returncode, proc_shrink.stderr))
+expect("CLI: shrink guard stderr names the failure (greppable message)",
+       "fewer rows" in proc_shrink.stderr and "refusing to overwrite" in proc_shrink.stderr,
+       proc_shrink.stderr)
+expect("CLI: shrink guard prints no transitions JSON to stdout",
+       proc_shrink.stdout.strip() == "", proc_shrink.stdout)
+expect("CLI: shrink guard leaves the snapshot file byte-for-byte unchanged",
+       dsr.load_snapshot(shrink_snapshot_path) == shrink_snapshot_seed)
+
+# --- shrink-guard: --bootstrap is a deliberate re-seed and must bypass the guard ----------
+shrink_bootstrap_snapshot_path = os.path.join(tmpdir, "shrink-bootstrap-snapshot.json")
+dsr.save_snapshot(shrink_bootstrap_snapshot_path, shrink_snapshot_seed)
+proc_shrink_bootstrap = run_cli(["--current-file", shrink_current_path,
+                                 "--stage-map-file", cli_map_path,
+                                 "--snapshot-file", shrink_bootstrap_snapshot_path,
+                                 "--bootstrap"])
+expect("CLI --bootstrap: exits 0 even when current-file has fewer rows than the snapshot",
+       proc_shrink_bootstrap.returncode == 0, proc_shrink_bootstrap.stderr)
+expect("CLI --bootstrap: overwrites snapshot to the smaller current-file content "
+       "(guard bypassed by design)",
+       dsr.load_snapshot(shrink_bootstrap_snapshot_path) == shrink_current)
+
 # --- summary ----------------------------------------------------------------------------
 passed = sum(1 for ok, _ in results if ok)
 print("\ndeal-stage-reconciler tests: %d/%d passed" % (passed, len(results)))
