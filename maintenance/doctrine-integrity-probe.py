@@ -208,8 +208,11 @@ ISO_DATE_RE = re.compile(r"\b20\d{2}-\d{2}-\d{2}(?![0-9]|-[0-9A-Za-z])")
 # pointer (a prior audit found index entries running 400-800 chars). WARN, mirroring
 # check 7's severity: index bloat is hygiene drift, not a broken reference, so it
 # nudges via the weekly report without flipping the exit code.
+# The measurement is the HOOK text only (the description after the link),
+# not the whole bulleted line. Renamed MEMORY_INDEX_LINE_MAXLEN ->
+# MEMORY_INDEX_HOOK_MAXLEN accordingly.
 MEMORY_INDEX_MD = MEMORY_DIR / "MEMORY.md"
-MEMORY_INDEX_LINE_MAXLEN = 150
+MEMORY_INDEX_HOOK_MAXLEN = 150
 # An index entry = a bulleted markdown link to a .md file: "- [Title](file.md) ...".
 # '>' blockquote pointer lines at the top of MEMORY.md are intentionally NOT matched.
 MEMORY_INDEX_ENTRY_RE = re.compile(r"^\s*[-*]\s*\[[^\]]+\]\([^)]*\.md[^)]*\)")
@@ -518,11 +521,13 @@ def parse_args(argv):
             overrides["terms"] = Path(a.split("=", 1)[1])
         elif a == "--quick":
             overrides["quick"] = True
+        elif a.startswith("--memory-index="):
+            overrides["memory_index"] = Path(a.split("=", 1)[1])
         elif a.startswith("--"):
             # A typo'd flag must not silently become the CLAUDE.md path (which
             # would also disable live-mode scanning). Fail loud.
             print("[MISSING] unknown option: %s (known: --session-context= "
-                  "--rules= --terms= --quick)" % ascii_safe(a))
+                  "--rules= --terms= --quick --memory-index=)" % ascii_safe(a))
             sys.exit(1)
         else:
             pos.append(a)
@@ -841,26 +846,29 @@ def main():
         warn("confidential-term scan: 0 active term(s) resolved -- leak check "
              "inert this run")
 
-    # --- 9. MEMORY.md index-entry line length (memory-policy.md sec 3: each index
+    # --- 9. MEMORY.md index-entry hook length (memory-policy.md sec 3: each index
     # entry is "a one-line description"). WARN-only, mirroring check 7: this ADDS
     # detection, it does not remediate -- an over-long entry is flagged, not edited. ---
-    mem_text, mem_err = read_optional(MEMORY_INDEX_MD)
+    mem_path = overrides.get("memory_index", MEMORY_INDEX_MD)
+    mem_text, mem_err = read_optional(mem_path)
     if mem_text is None:
         warn("MEMORY.md index-entry check skipped: %s" % ascii_safe(mem_err))
     else:
         over = []
         for ln_no, ln in enumerate(mem_text.splitlines(), 1):
-            if MEMORY_INDEX_ENTRY_RE.match(ln):
-                length = len(ln.strip())
-                if length > MEMORY_INDEX_LINE_MAXLEN:
+            m = MEMORY_INDEX_ENTRY_RE.match(ln)
+            if m:
+                hook_text = ln[m.end():].strip()
+                length = len(hook_text)
+                if length > MEMORY_INDEX_HOOK_MAXLEN:
                     over.append((ln_no, length))
-        print("MEMORY.md index entries over %d chars: %d "
+        print("MEMORY.md index entries with a hook description over %d chars: %d "
               "(memory-policy sec 3: entries are 'a one-line description')"
-              % (MEMORY_INDEX_LINE_MAXLEN, len(over)))
+              % (MEMORY_INDEX_HOOK_MAXLEN, len(over)))
         for ln_no, length in over:
-            warn("MEMORY.md index entry at line %d is %d chars (> %d) -- collapse to "
-                 "a one-line pointer; detail belongs in the linked file"
-                 % (ln_no, length, MEMORY_INDEX_LINE_MAXLEN))
+            warn("MEMORY.md index entry at line %d has a %d-char hook description "
+                 "(> %d) -- collapse to a one-line pointer; detail belongs in the "
+                 "linked file" % (ln_no, length, MEMORY_INDEX_HOOK_MAXLEN))
 
     # --- 10. session-context.md terseness (header: "keep terse"; volatile
     # current-state layer only -- dated narratives belong in event_log.md). sc_text
