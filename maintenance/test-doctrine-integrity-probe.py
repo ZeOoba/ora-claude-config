@@ -579,6 +579,55 @@ def test_quick_mode_clean_fixture_passes():
     print("  PASS test_quick_mode_clean_fixture_passes")
 
 
+def test_memory_index_long_title_short_hook_no_warn():
+    """Regression fix: a long title/filename must NOT trip the check when the
+    hook (description after the link) is short -- the bug this fix corrects."""
+    fd, path = tempfile.mkstemp(suffix="_MEMORY.md", text=True)
+    long_title = "A" * 140
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write("- [%s](some-very-long-filename-that-eats-the-budget.md) -- ok\n" % long_title)
+    try:
+        r = run_probe(["--memory-index=%s" % path])
+        assert r.returncode == 0, (
+            "expected exit 0 (WARN-only check), got %d\n%s" % (r.returncode, r.stdout))
+        assert "index entry at line 1" not in r.stdout, (
+            "a long title with a short hook must NOT warn (regression):\n%s" % r.stdout)
+    finally:
+        os.remove(path)
+    print("  PASS test_memory_index_long_title_short_hook_no_warn")
+
+
+def test_memory_index_long_hook_warns():
+    """A genuinely long HOOK description (past the link) still warns."""
+    fd, path = tempfile.mkstemp(suffix="_MEMORY.md", text=True)
+    long_hook = "word " * 40  # well over 150 chars
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write("- [Short Title](file.md) -- %s\n" % long_hook)
+    try:
+        r = run_probe(["--memory-index=%s" % path])
+        assert r.returncode == 0, "index check is WARN-only, got %d\n%s" % (r.returncode, r.stdout)
+        assert "index entry at line 1" in r.stdout, (
+            "a genuinely long hook must still warn:\n%s" % r.stdout)
+    finally:
+        os.remove(path)
+    print("  PASS test_memory_index_long_hook_warns")
+
+
+def test_memory_index_hookless_entry_no_warn():
+    """An entry with no ' -- hook' at all (just a bare link) must not warn or crash."""
+    fd, path = tempfile.mkstemp(suffix="_MEMORY.md", text=True)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write("- [Title](file.md)\n")
+    try:
+        r = run_probe(["--memory-index=%s" % path])
+        assert r.returncode == 0, "hookless entry must not fail, got %d\n%s" % (r.returncode, r.stdout)
+        assert "index entry at line 1" not in r.stdout, (
+            "a hookless entry must not warn:\n%s" % r.stdout)
+    finally:
+        os.remove(path)
+    print("  PASS test_memory_index_hookless_entry_no_warn")
+
+
 def main():
     assert os.path.isfile(REAL_CLAUDE_MD), "real CLAUDE.md not found: %s" % REAL_CLAUDE_MD
     test_real_doctrine_valid()
@@ -604,6 +653,9 @@ def main():
     test_quick_mode_size_budget_fails()
     test_quick_mode_bare_date_fails()
     test_quick_mode_clean_fixture_passes()
+    test_memory_index_long_title_short_hook_no_warn()
+    test_memory_index_long_hook_warns()
+    test_memory_index_hookless_entry_no_warn()
     print("ALL DOCTRINE-PROBE TESTS PASS")
 
 
