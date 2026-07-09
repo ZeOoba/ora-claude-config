@@ -222,7 +222,7 @@ def check_drift():
     try:
         live = len(_live_tasks())
         sor = os.path.join(CLAUDE, "projects",
-                           "C--Users-Owner-OneDrive---Oxford-Capital-Partners--1-", "memory",
+                           "C--Users-Owner-OneDrive---Oxford-Capital-Partners", "memory",
                            "00_system_of_record.md")
         if not os.path.exists(sor):
             add("memory-fleet-drift", "SKIP", "SoR unavailable")
