@@ -18,7 +18,7 @@ use is allowed, and that the guard fails CLOSED on an unparseable payload.
 
 Run: python test-confidentiality-guard.py   (exit 0 = all pass; exit 1 = any fail)
 """
-import os, sys, json, subprocess
+import os, sys, json, subprocess, tempfile, datetime, atexit
 
 HOOK_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # hooks/ (this test lives in hooks/tests/)
 GUARD = os.path.join(HOOK_DIR, "confidentiality-guard.py")
@@ -39,7 +39,44 @@ INTERNAL = "C:/Users/Owner/deals/working/notes.md"
 
 
 # --- derive test terms from the LIVE terms file (sanity-gated, never hardcoded) --------
+# Synthetic fallback (2026-07-09): when zero deals are currently active (e.g. right after a
+# declassification), the live roster alone can't exercise the matcher. confidentiality-guard.py
+# reads its terms file directly (subprocess, not import), so injecting synthetic terms requires
+# pointing THAT subprocess at a synthetic file -- not just changing what this test script
+# generates. confidentiality-guard.py supports CONFIDENTIAL_TERMS_FILE_OVERRIDE for exactly this
+# (mirrors shared-checkout-guard.py's SHARED_CHECKOUT_REPOS env override; unset in every real
+# session, so production behavior is untouched). These are clearly-fake placeholder terms --
+# never a real deal identifier.
+ACTIVE_TERMS_FILE = TERMS_FILE  # what GUARD subprocess calls should read; may become a temp file below
+SYNTHETIC_ALWAYS = ["Zephyr Corp Portfolio", "1234 Placeholder Ave", "Project Nightingale"]
+SYNTHETIC_CONTEXT = ["synthetic contaminant plume"]
+
+
+def _write_synthetic_terms_file():
+    """Write a properly-shaped synthetic confidential-terms.json to a temp file and return its path."""
+    fd, path = tempfile.mkstemp(prefix="synthetic-confidential-terms-", suffix=".json")
+    data = {
+        "_meta": {
+            "purpose": "synthetic fixture for test-confidentiality-guard.py -- no real deal data",
+            "roster_last_verified": datetime.date.today().isoformat(),
+        },
+        "synthetic_test_deal": {
+            "active": True,
+            "label": "Synthetic Test Deal (fixture, not real)",
+            "always": SYNTHETIC_ALWAYS,
+            "context": SYNTHETIC_CONTEXT,
+            "context_requires_any": SYNTHETIC_ALWAYS,
+            "note": "fixture only",
+        },
+    }
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+    atexit.register(lambda: os.path.exists(path) and os.remove(path))
+    return path
+
+
 def load_live_terms():
+    global ACTIVE_TERMS_FILE
     try:
         with open(TERMS_FILE, encoding="utf-8") as f:
             data = json.load(f)
@@ -53,9 +90,11 @@ def load_live_terms():
         always.extend(t for t in deal.get("always", []) if isinstance(t, str) and t.strip())
         context.extend(t for t in deal.get("context", []) if isinstance(t, str) and t.strip())
     if len(always) < 3:
-        print("CANNOT RUN: fewer than 3 active always-terms in confidential-terms.json — "
-              "an empty roster would make every BLOCK test vacuous. Refusing.")
-        sys.exit(1)
+        print("No active deals in confidential-terms.json (fewer than 3 always-terms) — "
+              "falling back to a SYNTHETIC terms file (via CONFIDENTIAL_TERMS_FILE_OVERRIDE) so "
+              "the matcher engine itself stays regression-tested during this no-active-deal window.")
+        ACTIVE_TERMS_FILE = _write_synthetic_terms_file()
+        return SYNTHETIC_ALWAYS, SYNTHETIC_CONTEXT
     return always, context
 
 
@@ -87,8 +126,9 @@ A1, A2, A3 = ALWAYS[0], ALWAYS[1 % len(ALWAYS)], ALWAYS[2 % len(ALWAYS)]
 
 def run(payload_obj, raw=None):
     raw = raw if raw is not None else json.dumps(payload_obj)
+    env = dict(os.environ, CONFIDENTIAL_TERMS_FILE_OVERRIDE=ACTIVE_TERMS_FILE)
     p = subprocess.run([sys.executable, GUARD], input=raw.encode("utf-8"),
-                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
     return p.returncode, p.stderr.decode("utf-8", "replace")
 
 

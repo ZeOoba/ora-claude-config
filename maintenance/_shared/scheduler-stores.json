@@ -1,0 +1,17 @@
+{
+  "_doc": "SINGLE SOURCE OF TRUTH for scheduler registry store roots + ratified fleet floors (2026-07-09). A store-path move or floor recalibration is an edit HERE only. Consumers: maintenance/_shared/store_discovery.py (cc-verifier-probe, registry-membership-probe, fleet-status, setup-self-audit) and the PowerShell engines guard.ps1 / membership-guard.ps1 (each falls back to built-in defaults if this file is unreadable — fail-open). fleet-deadman.ps1 deliberately does NOT read this file: it is the independent backstop and stays self-contained.",
+  "ratified": "2026-07-09",
+  "storeRoots": [
+    "%APPDATA%\\Claude",
+    "%LOCALAPPDATA%\\Packages\\Claude_pzs8sxrjxfjjc\\LocalCache\\Roaming\\Claude"
+  ],
+  "stores": {
+    "cc": "claude-code-sessions",
+    "lams": "local-agent-mode-sessions"
+  },
+  "fleetFloors": {
+    "cc": 13,
+    "lams": 4,
+    "_note": "Tripwires, not targets. cc=13 ratified 2026-07-09 (post CC->LAMS consolidation, Gabriel); lams=4 enabled-recurring minimum (2026-06-10). A live count below a floor means a silent registry shrink -- investigate before touching the floor."
+  }
+}

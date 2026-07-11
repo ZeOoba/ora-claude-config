@@ -1,0 +1,6 @@
+{
+  "Passed": "PASS",
+  "Closed Won": "CLOSE",
+  "Killed — Note/Short-Sale in Discussion": "TERMINATE",
+  "Killed — Reneg Only": "TERMINATE"
+}

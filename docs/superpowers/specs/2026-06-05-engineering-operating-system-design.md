@@ -196,7 +196,7 @@ The system **chooses its own** execution mode and model and announces the choice
 
 **Execution mode (first match):** trivial single-file → just do it inline · small (≤~4 tasks)/coupled/doc-config-dominant/RAM-tight-non-critical → **inline** (`executing-plans`) · code-heavy + mostly-independent + (high importance/precision OR >~4 tasks) → **subagent-driven-development** (from a lean CLI if RAM tight) · large independent fan-out (audit/migration/many files) + explicit opt-in → **Workflow**.
 
-**Model tier (default `claude-opus-4-8`):** opus = architecture/design · financial/confidential/security/precision · final review+verify; sonnet = multi-file integration · debugging · standard implementation; haiku = mechanical, well-specified 1–2 file tasks. **Invariants:** reviewer ≥ implementer in capability; never below opus for confidential/financial/governor code; when unsure, go up a tier. (Tier→task mapping follows `subagent-driven-development`'s own Model Selection guidance.)
+**Model tier (default `claude-opus-4-8`):** Fable = hardest tier — financial/confidential/security/precision, final review+verify; opus = architecture/design; sonnet = multi-file integration · debugging · standard implementation; haiku = mechanical, well-specified 1–2 file tasks. **Invariants:** reviewer ≥ implementer in capability; never below Fable for confidential/financial/governor code; when unsure, go up a tier. (Tier→task mapping follows `subagent-driven-development`'s own Model Selection guidance.) **(Updated post-2026-06-05: this section originally had opus doing double duty as both the architecture tier and the highest-stakes tier — Fable was subsequently split out as the dedicated hardest-tier model; see CLAUDE.md's Dispatch line for the current statement.)**
 
 This rule lives in the CLAUDE.md doctrine (always-loaded) and is applied at the writing-plans→execute handoff.
 
@@ -214,8 +214,8 @@ This rule lives in the CLAUDE.md doctrine (always-loaded) and is applied at the 
 ## 9. Resource & parallelism rule (fix for the `/ram` etc. misread)
 
 - `/ram` **measures only** (baseline ~1,860 MB). The reclaimers: `/solo` (this session → lean CLI, others untouched, ~130 MB), `/handoff` (this session → lean CLI + quit GUI, ~1.3 GB), `/heavy` (fresh lean CLI), `/cleardisk` (quit GUI + npm/CLI caches, ~2.5 GB).
-- **Doctrine:** gauge `/ram` before a large sub-agent/Workflow run; on pressure, move heavy multi-agent work to a lean CLI via `/solo` or `/handoff`. Machine ceiling is 5.7 GB, single C: volume — every change reduces, not grows, footprint.
-- **Parallelism cap:** `subagent-driven-development` is sequential by design. For `dispatching-parallel-agents` / `Workflow`, keep concurrency modest (Workflow self-caps at `min(16, cores−2)`; on this machine prefer ≤ a few and run from a lean CLI). No silent truncation — `log()` anything dropped.
+- **Doctrine (retuned 2026-07-09, RAM_POSTURE=RETUNE-32GB):** gauge `/ram` before a large sub-agent/Workflow run; on pressure, move heavy multi-agent work to a lean CLI via `/solo` or `/handoff`. Machine: 32 GB physical, **~24 GB working ceiling** (OS/app headroom), single C: volume — footprint discipline stays (no standing RAM-heavy services without justification).
+- **Parallelism cap (retuned 2026-07-09):** `subagent-driven-development` is sequential by design. For `dispatching-parallel-agents` / `Workflow`, concurrency up to **≤ 8** is acceptable on this box (was "≤ a few" on the 5.7 GB machine; Workflow still self-caps at `min(16, cores−2)`). UNCHANGED: the ~2–3 concurrent-opus cap on adversarial/review fan-outs — that is a request-burst rate limit, not RAM (`reference_lean_ram_toolkit.md` 2026-07-09 section); more RAM does not relax it. No silent truncation — `log()` anything dropped.
 
 ---
 

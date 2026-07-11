@@ -41,7 +41,11 @@ allow path (exit 0 + stderr) -- it never flips an allow into a block or vice-ver
 import sys, os, json, re, datetime
 
 HOOK_DIR = os.path.dirname(os.path.abspath(__file__))
-TERMS_FILE = os.path.join(HOOK_DIR, "confidential-terms.json")
+# Test-only override (2026-07-09), same pattern as shared-checkout-guard.py's
+# SHARED_CHECKOUT_REPOS env var: unset in every real session, so production behavior is
+# byte-identical. Lets test-confidentiality-guard.py point this subprocess at a synthetic
+# terms file when the live roster has zero active deals, without touching the real one.
+TERMS_FILE = os.environ.get("CONFIDENTIAL_TERMS_FILE_OVERRIDE") or os.path.join(HOOK_DIR, "confidential-terms.json")
 
 SITE_MARKERS = ("oxford-site", "oxfordra.net", "oxfordra_net", "website-canonical")
 ARTIFACT_EXT = (".pptx", ".docx", ".pdf", ".html", ".htm", ".csv")

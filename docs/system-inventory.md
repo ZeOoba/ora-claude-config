@@ -6,8 +6,10 @@ overwrite each run; no history preserved here (history → `memory/event_log.md`
 
 ## Hardware / OS
 - Windows 11 Home, build 10.0.26200
-- RAM ceiling: 5.7 GB (documented constraint — Engineering OS caps concurrency to this; do not install
-  RAM-heavy services like Docker Desktop without accounting for it)
+- RAM: 32 GB physical (LAPTOP-CSHSCBE6, ASUS Zenbook S14 — in service 2026-07); working ceiling
+  ~24 GB (OS/app headroom). Retuned 2026-07-09 from the old 5.7 GB box (RAM_POSTURE=RETUNE-32GB);
+  Engineering OS concurrency guidance keys off the ~24 GB working ceiling. Still no RAM-heavy
+  standing services (Docker Desktop etc.) without justification — nothing here needs them.
 
 ## Toolchain (verified present this pass)
 - git 2.55.0.windows.2
@@ -21,8 +23,8 @@ overwrite each run; no history preserved here (history → `memory/event_log.md`
 ## Not present (confirmed absent, not just off-PATH)
 pnpm, uv, Docker, VS Code CLI (`code`), fd, fzf, jq, yq, make, just — none justified by any live workflow.
 Do not install Docker/Postgres/Redis: nothing here needs containers or a server DB (QuickBooks Desktop +
-Notion + HubSpot are the data layer, already MCP-wired), and Docker Desktop's VM alone would eat the 5.7GB
-ceiling.
+Notion + HubSpot are the data layer, already MCP-wired); even on the 32 GB box a standing Docker VM is
+unjustified footprint.
 
 ## Claude Code plugins (17 installed, 14 active — dedup CLEAN this pass, 0 flags)
 The 2026-07-07 dedup held: `code-review`, `pr-review-toolkit`, and `superpowers` each appear under two

@@ -25,6 +25,12 @@ for _s in (sys.stdout, sys.stderr):  # UTF-8 safe output on Windows cp1252 pipes
     except Exception:
         pass
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "_shared"))
+try:
+    import store_discovery as _sd
+except Exception:
+    _sd = None  # fail-open: fall back to the built-in base list below
+
 def discover_registries():
     """All live scheduler registries: [(fleet_label, path), ...].
 
@@ -38,7 +44,9 @@ def discover_registries():
     out = []
     for label, store in (("cc", "claude-code-sessions"),
                          ("lams", "local-agent-mode-sessions")):
-        bases = [
+        # roots from _shared/scheduler-stores.json (single source 2026-07-09);
+        # the built-in list is the fail-open fallback if the helper is unavailable
+        bases = _sd.store_bases(store) if _sd else [
             os.path.join(appdata, "Claude", store),
             os.path.join(local, "Packages", "Claude_pzs8sxrjxfjjc", "LocalCache",
                          "Roaming", "Claude", store),
