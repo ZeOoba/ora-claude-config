@@ -1,16 +1,24 @@
 {
- "ts": "2026-07-08T13:58:33",
+ "ts": "2026-07-09T19:34:48",
  "fleets": {
   "cc": [
+   "ora-command-center-mirror-drift-check",
    "ora-deal-sourcing-scan",
+   "ora-doctrine-integrity-guard",
    "ora-financial-code-integrity-sweep",
+   "ora-health-guard",
    "ora-master-workbook-ingest",
    "ora-monthly-portfolio-briefing",
-   "ora-task-integrity-guard"
+   "ora-open-sessions-board",
+   "ora-pm-ledger",
+   "ora-task-integrity-guard",
+   "ora-week-ahead-briefing",
+   "ora-weekly-hygiene"
   ],
   "lams": [
    "automation-health-monitor",
    "ora-am-brief",
+   "ora-ar-export-freshness-nudge",
    "ora-bearmode-refresh",
    "ora-cam-reconciliation-annual",
    "ora-consolidate-memory-monthly",
@@ -24,7 +32,8 @@
    "ora-passed-deal-tracker",
    "ora-replacement-cost-refresh",
    "ora-skill-store-drift-check",
-   "ora-skill-text-audit"
+   "ora-skill-text-audit",
+   "ora-stale-pipeline-nudge"
   ]
  },
  "missing_streaks": {

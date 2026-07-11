@@ -41,6 +41,12 @@ cases = [
  ("chained && prod deploy",  {"tool_name":"Bash","tool_input":{"command":"cd /c/x && netlify deploy --prod --dir deploy"}}, "BLOCK"),
  ("powershell -File ext send",{"tool_name":"Bash","tool_input":{"command":f'powershell.exe -File "send-via-outlook.ps1" -To "{E}"'}}, "BLOCK"),
  ("log mention no trip",     {"tool_name":"Bash","tool_input":{"command":"append-event-log.py \"blocks netlify deploy --prod via hook\""}}, "PASS"),
+ ("read-only 2>&1 no trip",  {"tool_name":"Bash","tool_input":{"command":'ls -d "C:/Users/Owner/oxford-site" 2>&1'}}, "PASS"),
+ ("read-only &> no trip",    {"tool_name":"Bash","tool_input":{"command":"cat C:/Users/Owner/website-canonical/index.html &> /tmp/out.txt"}}, "PASS"),
+ ("real redirect still blocks", {"tool_name":"Bash","tool_input":{"command":'echo hi > "C:/Users/Owner/oxford-site/index.html"'}}, "BLOCK"),
+ ("read-only 2>/dev/null no trip", {"tool_name":"Bash","tool_input":{"command":'grep -c "x" "C:/Users/Owner/oxford-site/CLAUDE.md" 2>/dev/null'}}, "PASS"),
+ ("read-only 2>nul no trip", {"tool_name":"Bash","tool_input":{"command":'type "C:/Users/Owner/oxford-site/CLAUDE.md" 2>nul'}}, "PASS"),
+ ("real redirect to devnull-lookalike still blocks", {"tool_name":"Bash","tool_input":{"command":'echo hi > "C:/Users/Owner/oxford-site/dev/null.html"'}}, "BLOCK"),
  # fail-open
  ("malformed input",        "NOT_A_DICT_SENTINEL", "PASS"),
 ]

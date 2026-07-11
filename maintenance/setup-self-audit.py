@@ -4,11 +4,15 @@ ORA Claude Setup Self-Audit  (read-only, fail-open)
 ====================================================
 Deterministic daily health scan of the Claude Code + Cowork setup.
 Adds the checks the existing probes do NOT cover:
-  1. FLEET PRESENCE     -- are the expected tasks (decided 14-task baseline, 2026-06-09) present in the live store ~/.claude/scheduled-tasks/?
+  1. FLEET INTEGRITY    -- registry-derived (2026-07-09): every ENABLED task's SKILL.md
+                           filePath resolves, and no live-store folder is registered in
+                           NEITHER fleet (disk->registry orphan / dark task -- the one
+                           direction no other probe checks).
   2. SKILL FRONTMATTER  -- any SKILL.md with collapsed/unparseable frontmatter?
   3. SECRET SCAN        -- any live credential literal in config/backups/logs?
   4. CONNECTOR ALLOWLIST-- any non-Outlook (Gmail/Google/Drive) connector re-authed?
-  5. MEMORY/FLEET DRIFT -- does documented fleet count match the live registry?
+  5. MEMORY/FLEET DRIFT -- does SoR section 7 hardcode a task count that contradicts the
+                           live registries? (counts belong to the generated roster, not prose)
 
 Companion to (does NOT replace): fleet-status.py, doctrine-integrity-probe.py,
 governor-drift-probe.py, memory-integrity-probe.py, eos-telemetry-rollup.py.
@@ -33,25 +37,22 @@ results = []  # list of dicts: {check, status (OK|WARN|CRIT|SKIP), detail, items
 def add(check, status, detail, items=None):
     results.append({"check": check, "status": status, "detail": detail, "items": items or []})
 
-# (dead helpers _parse_ts / _load_registry removed 2026-06-07: Check 1 is presence-only against
-#  the live store ~/.claude/scheduled-tasks/. The orphaned-LAMS reader they fed is gone — its
-#  lingering definition previously caused a setup audit to mis-flag this script as still on LAMS.)
-
-# ---- Check 1: FLEET PRESENCE (live store = ~/.claude/scheduled-tasks/) ----
-# The app migrated scheduler stores 2026-06-06; the LAMS registry is orphaned. The live
-# store keeps only SKILL.md per task (no on-disk lastRunAt) -> this probe verifies the
-# EXPECTED task set is present on disk; run-liveness is verified by the Health Guard email,
-# the GitHub ora-cowork-watchdog, and the scheduled-tasks MCP (callable only inside Claude).
+# ---- Check 1: FLEET INTEGRITY (registry-derived, 2026-07-09) ----
+# The hand-curated EXPECTED_TASKS baseline (2026-06-09) was RETIRED 2026-07-09: it
+# predated the CC->LAMS consolidation and over-reported six migrated/retired tasks as
+# MISSING. The expected set now comes from the LIVE registries, discovered via
+# _shared/store_discovery.py (same single source as the other probes; roots + floors
+# in _shared/scheduler-stores.json). What this check covers that NO other probe does:
+# DISK->REGISTRY orphans -- folders in the live store ~/.claude/scheduled-tasks/
+# registered in NEITHER fleet (dark task or leftover; the 2026-07-09
+# 16-folders-vs-13-registrations drift class). Registry->disk (an ENABLED task whose
+# SKILL.md filePath no longer resolves) is CRIT.
 NEW_STORE = os.path.join(CLAUDE, "scheduled-tasks")
-# Decided baseline 2026-06-09 (Gabriel): 5 core + 9 ops = 14. The 8 Tier-2 internal tasks were
-# RETIRED the same day (archived to _archive_2026-06-09_retired; do NOT re-register).
-EXPECTED_TASKS = {"ora-health-guard", "ora-am-brief", "ora-setup-audit", "ora-pm-ledger",
-                  "ora-deal-sourcing-scan",
-                  "ora-automation-health-monitor", "ora-consolidate-memory-monthly",
-                  "ora-dashboard-refresh", "ora-dormant-thread-revival",
-                  "ora-master-workbook-ingest", "ora-skill-text-audit",
-                  "ora-week-ahead-briefing", "ora-weekly-hygiene",
-                  "ora-weekly-tooling-intel-sweep"}
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "_shared"))
+try:
+    import store_discovery as _sd
+except Exception:
+    _sd = None  # fail-open: fleet checks SKIP, others continue
 
 def _live_tasks():
     out = []
@@ -63,21 +64,65 @@ def _live_tasks():
                 out.append(d)
     return out
 
+def _registry_tasks():
+    """All tasks across BOTH live registries (dual-fleet doctrine 2026-06-10), or
+    None when no registry could be discovered/read. Each entry: id, enabled,
+    recurring (5-field cron), exists (SKILL.md filePath resolves), fleet."""
+    if _sd is None:
+        return None
+    out, found = [], False
+    for label, store in (("cc", "claude-code-sessions"),
+                         ("lams", "local-agent-mode-sessions")):
+        p = _sd.discover_store(store)
+        if not p:
+            continue
+        try:
+            d = json.load(open(p, encoding="utf-8"))
+        except Exception:
+            continue
+        found = True
+        for t in d.get("scheduledTasks", []) or []:
+            fp = t.get("filePath") or ""
+            expr = t.get("cronExpression")
+            out.append({"id": t.get("id") or "?",
+                        "enabled": bool(t.get("enabled")),
+                        "recurring": isinstance(expr, str) and len(expr.split()) == 5,
+                        "exists": bool(fp) and os.path.isfile(fp),
+                        "fleet": label})
+    return out if found else None
+
+def classify_fleet(registry_tasks, disk_folders):
+    """Pure. registry_tasks spans BOTH fleets. Returns (broken, orphans):
+    broken  = ENABLED registered tasks whose SKILL.md filePath does not resolve;
+    orphans = live-store folders registered in NEITHER fleet (union semantics --
+    a task correctly living on the other fleet is not an orphan)."""
+    ids = {t.get("id") for t in registry_tasks}
+    broken = sorted(t.get("id") or "?" for t in registry_tasks
+                    if t.get("enabled") and not t.get("exists"))
+    orphans = sorted(d for d in disk_folders if d not in ids)
+    return broken, orphans
+
 def check_fleet():
     try:
-        if not os.path.isdir(NEW_STORE):
-            add("fleet", "SKIP", "live scheduler store ~/.claude/scheduled-tasks/ not found")
+        regs = _registry_tasks()
+        if regs is None:
+            add("fleet", "SKIP", "no scheduler registry discovered (helper missing or both "
+                "stores unreadable) -- registry-membership-probe owns store-absence escalation")
             return
-        live = _live_tasks()
-        note = "liveness via Health Guard email / GitHub ora-cowork-watchdog / scheduled-tasks MCP (lastRunAt not on disk)"
-        missing = sorted(EXPECTED_TASKS - set(live))
-        extra = sorted(set(live) - EXPECTED_TASKS)
-        if missing:
-            add("fleet", "CRIT", f"{len(live)} live tasks; MISSING expected: {', '.join(missing)} | {note}", live)
-        elif extra:
-            add("fleet", "WARN", f"{len(live)} live tasks; all {len(EXPECTED_TASKS)} expected present + extras: {', '.join(extra)} | {note}", live)
+        disk = _live_tasks()
+        broken, orphans = classify_fleet(regs, disk)
+        n_en = sum(1 for r in regs if r["enabled"])
+        base = (f"{len(regs)} registered ({n_en} enabled) across both fleets; "
+                f"{len(disk)} folder(s) in the live store")
+        if broken:
+            add("fleet", "CRIT", f"{base}; ENABLED task(s) whose SKILL.md filePath does "
+                f"NOT resolve: {', '.join(broken)}", broken)
+        elif orphans:
+            add("fleet", "WARN", f"{base}; folder(s) registered in NEITHER fleet (dark "
+                f"task or leftover -- register via the supervised MCP flow or archive): "
+                f"{', '.join(orphans)}", orphans)
         else:
-            add("fleet", "OK", f"all {len(EXPECTED_TASKS)} expected tasks present in ~/.claude/scheduled-tasks/ | {note}", live)
+            add("fleet", "OK", f"{base}; every enabled filePath resolves; no unregistered folders")
     except Exception as e:
         add("fleet", "SKIP", f"error: {e}")
 
@@ -217,10 +262,30 @@ def check_connectors():
     except Exception as e:
         add("connector-allowlist", "SKIP", f"error: {e}")
 
-# ---- Check 5: MEMORY <-> FLEET DRIFT ----
+# ---- Check 5: MEMORY <-> FLEET DRIFT (registry-derived, SoR-section-7-scoped 2026-07-09) ----
+# Fleet counts in SoR prose were the recurring drift class (three stale "14-task
+# baseline" copies found 2026-07-09). Section 7 should carry NO hardcoded count --
+# the roster is GENERATED into session-context.md daily. This check guards that a
+# hardcoded count does not creep back in; historical sections elsewhere in the SoR
+# legitimately state old counts and are ignored.
+def fleet_count_claims(txt):
+    """Task-count claims scoped to the SoR '## 7.' HEADLINE area (pure): stops at
+    the first subsection ('###') or next section -- dated historical subsections
+    inside section 7 legitimately state old counts. Catches plural, singular, and
+    hyphenated forms ('19 live tasks', '14-task baseline' -- the original drift
+    phrasing). Sorted ints."""
+    m = re.search(r"^## 7\..*?(?=^###? |\Z)", txt, re.M | re.S)
+    if not m:
+        return []
+    return sorted(set(int(x) for x in
+                      re.findall(r"(\d{1,3})[\s-]+(?:live[\s-]+)?tasks?\b", m.group(0))))
+
 def check_drift():
     try:
-        live = len(_live_tasks())
+        regs = _registry_tasks()
+        if regs is None:
+            add("memory-fleet-drift", "SKIP", "no scheduler registry discovered")
+            return
         sor = os.path.join(CLAUDE, "projects",
                            "C--Users-Owner-OneDrive---Oxford-Capital-Partners", "memory",
                            "00_system_of_record.md")
@@ -228,13 +293,28 @@ def check_drift():
             add("memory-fleet-drift", "SKIP", "SoR unavailable")
             return
         txt = open(sor, encoding="utf-8", errors="replace").read()
-        claimed = sorted(set(int(m) for m in re.findall(r"(\d{1,3})\s+(?:live )?tasks", txt)))
-        if claimed and live not in claimed:
+        claimed = fleet_count_claims(txt)
+        by = {}
+        for r in regs:
+            f = by.setdefault(r["fleet"], {"enabled": 0, "recurring": 0})
+            if r["enabled"]:
+                f["enabled"] += 1
+                if r["recurring"]:
+                    f["recurring"] += 1
+        cc, lams = by.get("cc", {}), by.get("lams", {})
+        acceptable = {v for f in (cc, lams) for v in f.values()} | \
+                     {cc.get(k, 0) + lams.get(k, 0) for k in ("enabled", "recurring")}
+        stale = [c for c in claimed if c not in acceptable]
+        live = (f"cc={cc.get('enabled', 0)} enabled ({cc.get('recurring', 0)} recurring), "
+                f"lams={lams.get('enabled', 0)} enabled ({lams.get('recurring', 0)} recurring)")
+        if stale:
             add("memory-fleet-drift", "WARN",
-                f"SoR task-count mentions {claimed} but the live store has {live} -- overwrite SoR section 7",
-                [f"live={live}", f"documented={claimed}"])
+                f"SoR section 7 hardcodes task count(s) {stale} but live registries have {live} "
+                "-- de-hardcode section 7 (counts belong to the generated roster in session-context.md)",
+                [f"stale={stale}", f"live: {live}"])
         else:
-            add("memory-fleet-drift", "OK", f"SoR fleet count consistent with live store ({live})")
+            add("memory-fleet-drift", "OK",
+                f"SoR section 7 carries no stale fleet count (live: {live})")
     except Exception as e:
         add("memory-fleet-drift", "SKIP", f"error: {e}")
 

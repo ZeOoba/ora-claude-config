@@ -1,6 +1,6 @@
 ---
 name: lease-sweep
-description: Use when 5 or more leases must be abstracted in bulk (new acquisition, tenant onboarding, lender data request). Reads full lease PDFs in isolated context and returns a structured abstract TABLE only — keeping hundreds of pages of raw lease text out of the main conversation. For one or two leases, use the lease-abstraction skill instead.
+description: Use when 5 or more leases must be abstracted in bulk (new acquisition, tenant onboarding, lender data request). Reads full lease PDFs in isolated context and returns a structured abstract TABLE only — keeping hundreds of pages of raw lease text out of the main conversation. For one or two leases, use the lease-abstraction-pipeline skill instead.
 tools: Read, Grep, Glob
 model: sonnet
 ---

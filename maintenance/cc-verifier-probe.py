@@ -13,28 +13,19 @@ import json, os, subprocess, sys
 CLAUDE = r"C:\Users\Owner\.claude"
 PROJ   = os.path.join(CLAUDE, r"projects\C--Users-Owner-OneDrive---Oxford-Capital-Partners")
 # DUAL-FLEET (2026-06-10): local-agent-mode-sessions (LAMS) is the LIVE Cowork
-# fleet registry, NOT orphaned. Both stores are discovered dynamically (I4: GUIDs
-# rotate, never hardcode; the MSIX LocalCache path mirrors Roaming -- one per store).
-import glob as _glob0
+# fleet registry, NOT orphaned. Discovery consolidated 2026-07-09 into
+# maintenance/_shared/store_discovery.py (roots in scheduler-stores.json --
+# a store move is a one-file edit there, not here).
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "_shared"))
+try:
+    import store_discovery as _sd
+except Exception:
+    _sd = None  # fail-open: callers treat '' as store-absent
 
 def _discover_store(store):
-    home = os.path.expanduser("~")
-    appdata = os.environ.get("APPDATA") or os.path.join(home, "AppData", "Roaming")
-    localap = os.environ.get("LOCALAPPDATA") or os.path.join(home, "AppData", "Local")
-    bases = [os.path.join(appdata, "Claude", store),
-             os.path.join(localap, "Packages", "Claude_pzs8sxrjxfjjc", "LocalCache",
-                          "Roaming", "Claude", store)]
-    best = None
-    for base in bases:
-        for p in _glob0.glob(os.path.join(base, "**", "scheduled-tasks.json"), recursive=True):
-            try:
-                d = json.load(open(p, encoding="utf-8"))
-            except Exception:
-                continue
-            n = len(d.get("scheduledTasks", []) or [])
-            if n and (best is None or (n, os.path.getmtime(p)) > best[0]):
-                best = ((n, os.path.getmtime(p)), p)
-    return best[1] if best else ""
+    """Delegates to _shared/store_discovery; '' when the helper or store is
+    unavailable (this probe's callers use '' as the absent sentinel)."""
+    return (_sd.discover_store(store) if _sd else None) or ""
 
 LAMS = _discover_store("local-agent-mode-sessions")
 
@@ -131,13 +122,22 @@ def discover_live_store():
     p = _discover_store("claude-code-sessions")
     return (p, jload(p)) if p else (None, None)
 
-EXPECTED_FLEET = {"ora-am-brief", "ora-setup-audit", "ora-health-guard",
+# ora-setup-audit RETIRED 2026-06-16 (strategic-audit kill: daily cadence overkill,
+# overlaps ora-health-guard's pre-session probe suite); archived 2026-07-07, on the
+# event_log ratified-retirements list. Its probes are absorbed by the guard trio
+# (ora-health-guard + ora-task-integrity-guard + ora-doctrine-integrity-guard). Dropped here.
+EXPECTED_FLEET = {"ora-am-brief", "ora-health-guard",
                   "ora-pm-ledger", "ora-deal-sourcing-scan"}
 live_path, live = discover_live_store()
 live_tasks = (live or {}).get("scheduledTasks", []) or []
 live_enabled = {t.get("id") for t in live_tasks if t.get("enabled")}
-missing = EXPECTED_FLEET - live_enabled
-check("Live fleet present (MCP store)", live_path is not None and not missing,
+# EXPECTED_FLEET spans BOTH fleets: ora-am-brief is a Cowork/Daily-Brief task that
+# lives in LAMS by design (2026-07-09) — check membership against the union so a
+# correctly-placed LAMS task isn't false-flagged as a dark CC task.
+_lams_pre = jload(LAMS) or {}
+_lams_pre_enabled = {t.get("id") for t in (_lams_pre.get("scheduledTasks", []) or []) if t.get("enabled")}
+missing = EXPECTED_FLEET - (live_enabled | _lams_pre_enabled)
+check("Live fleet present (dual-fleet)", live_path is not None and not missing,
       (f"{len(live_enabled)} enabled in claude-code-sessions") + (f" MISSING {sorted(missing)}" if missing else ""))
 check("Live fleet Rube-free", live is not None and not ("d6315173" in json.dumps(live) or "RUBE_" in json.dumps(live)), "clean")
 bad_paths = [t.get("id") for t in live_tasks if not os.path.isfile(t.get("filePath", ""))]
@@ -168,16 +168,20 @@ notes = []
 # pm-ar-export-freshness-check, distress-signal-monitor) were RETIRED by decision — archived to
 # _archive_2026-06-09_retired in all four stores; do NOT re-register. Regression tripwire: alert
 # if the live fleet silently shrinks below the decided floor (a re-orphaning / migration drop).
-RESTORED_FLEET_FLOOR = 14
+# Floor RECALIBRATED 14 -> 13 on 2026-07-09: Gabriel ratified the CC->LAMS consolidation
+# that moved ora-setup-audit + siblings off the CC fleet. The ratified floors now live in
+# _shared/scheduler-stores.json (single source of truth) -- recalibrate THERE, not here;
+# the literals below are only the fail-open fallback if the config is unreadable.
+RESTORED_FLEET_FLOOR = _sd.fleet_floor("cc", 13) if _sd else 13
 if len(live_tasks) < RESTORED_FLEET_FLOOR:
-    notes.append(f"CC fleet = {len(live_tasks)}; expected >= {RESTORED_FLEET_FLOOR} per the 2026-06-09 decided baseline (8 Tier-2 tasks retired) -- tasks may have gone dark (check the scheduled-tasks MCP store).")
+    notes.append(f"CC fleet = {len(live_tasks)}; expected >= {RESTORED_FLEET_FLOOR} per the 2026-07-09 ratified post-consolidation baseline -- a task may have gone dark (check the scheduled-tasks MCP store).")
 # LAMS floor (2026-06-10): 4 recurring Cowork tasks. A drop below = a rebuild/
 # migration silently removed registry entries (the exact failure that left the
 # heartbeat dark 2026-05-31..06-10).
-LAMS_FLEET_FLOOR = 4
+LAMS_FLEET_FLOOR = _sd.fleet_floor("lams", 4) if _sd else 4
 lams_recurring = [t for t in lams_tasks if t.get("enabled") and t.get("cronExpression")]
 if len(lams_recurring) < LAMS_FLEET_FLOOR:
-    notes.append(f"LAMS fleet = {len(lams_recurring)} enabled recurring; expected >= {LAMS_FLEET_FLOOR} (om-intake-ocr, replacement-cost-refresh, cowork-heartbeat, integrity-guard) -- a registry drop may have recurred.")
+    notes.append(f"LAMS fleet = {len(lams_recurring)} enabled recurring; expected >= {LAMS_FLEET_FLOOR} (om-intake-ocr, replacement-cost-refresh, cowork-heartbeat, skill-store-drift-check) -- a registry drop may have recurred.")
 
 # ---- output ----
 npass = sum(1 for _, ok, _ in results if ok)

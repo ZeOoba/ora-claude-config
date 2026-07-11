@@ -42,6 +42,17 @@ SITE_WRITE_INDICATORS = (
     "set-content", "add-content", "out-file", "tee ", "new-item",
 )
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", re.IGNORECASE)
+# Matches fd-duplication redirects (2>&1, >&2, &>, &>>) so they don't get mistaken for a
+# write redirect by the bare ">" in SITE_WRITE_INDICATORS (2026-07-09 — false-blocked a
+# plain `ls ... 2>&1` read-only existence check).
+FD_DUP_RE = re.compile(r"\d*>&\d*|&>{1,2}")
+# Matches redirects to the null device (2>/dev/null, 2>nul, >/dev/null) — same rationale
+# as FD_DUP_RE: discarding stderr/stdout into the void writes nothing, so it must not
+# trip the bare ">" write indicator. Anchored immediately after ">" (only whitespace
+# allowed between) so a real write whose PATH merely contains "/dev/null" as a substring
+# (e.g. `> ".../dev/null.html"`) is not exempted (2026-07-10 — false-blocked a read-only
+# grep with `2>/dev/null` against an oxford-site path).
+NULL_REDIRECT_RE = re.compile(r"\d*>\s*(?:/dev/null|nul)\b", re.IGNORECASE)
 # Matches netlify only as the leading token of a command segment (start, after ; & | or $( ),
 # optionally via npx — so quoting/echoing/logging the phrase does not trip the gate.
 NETLIFY_INVOKE_RE = re.compile(
@@ -82,7 +93,11 @@ def check_bash(command):
             block("production deploy to oxfordra.net (netlify --prod)", "allow-website-change")
     # GATE 2b — writing into the site tree via a raw shell op (cp/mv/redirect/etc).
     # The Edit/Write tool path is covered by check_file_write; Bash bypassed it (2026-06-13).
-    if any(m in lowered for m in SITE_PATH_MARKERS) and any(w in lowered for w in SITE_WRITE_INDICATORS):
+    # Strip fd-duplication redirects (2>&1, &>) before checking the bare ">" write indicator,
+    # so a routine read-only command like `ls ... 2>&1` doesn't false-block (2026-07-09).
+    write_check_target = FD_DUP_RE.sub(" ", lowered)
+    write_check_target = NULL_REDIRECT_RE.sub(" ", write_check_target)
+    if any(m in lowered for m in SITE_PATH_MARKERS) and any(w in write_check_target for w in SITE_WRITE_INDICATORS):
         if not override_active("allow-website-change"):
             block("shell write into oxfordra.net site tree: %s" % command.strip(), "allow-website-change")
 

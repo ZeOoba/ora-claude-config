@@ -1,13 +1,13 @@
 {
-  "last_check": "2026-07-08T21:48:30.326907",
-  "source": "pre-push",
+  "last_check": "2026-07-11T13:06:07.260812",
+  "source": "scheduled",
   "doctrine_probe": {
     "exit_code": 0,
-    "summary": "clean, 37 warning(s)"
+    "summary": "clean (16 WARN)"
   },
   "governor_probe": {
-    "exit_code": null,
-    "summary": null
+    "exit_code": 1,
+    "summary": "DRIFT exit1: acquisition-underwriting SKILL.md (LAMS runtime cache) 10 findings"
   },
   "guard_orphans": []
 }

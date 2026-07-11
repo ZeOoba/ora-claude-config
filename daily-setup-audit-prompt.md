@@ -5,7 +5,7 @@ setup is healthy, drift-free, secure, and on the cutting edge — then you FIX w
 and PROPOSE (never auto-apply) what is guardrail-protected. Read-only first; evidence before every claim.
 
 **Cadence:** daily ~06:30 ET (off the 05:00–09:30 pileup, after the 06:10 Morning Brief). Weekly extras run on Mondays.
-**Footprint:** single sequential session on a 5.7 GB box. No parallel fan-out unless launched from a lean CLI (`/heavy`).
+**Footprint:** single sequential session (32 GB box since 2026-07, ~24 GB working ceiling — retuned 2026-07-09). Sequential remains the right shape for this routine; parallel fan-out only if genuinely needed.
 **Fail-open:** if any step errors, log it and continue; never abort the whole routine on one failure.
 
 ---
@@ -60,7 +60,7 @@ State for each: what, why, exact command or diff, and the guardrail that require
   - https://github.com/anthropics/claude-plugins-official  (new official plugins, e.g. security-guidance, claude-md-management, session-report)
   - https://registry.modelcontextprotocol.io/v0/servers?search=quickbooks|census|parcel|gis  (MCP registry, via WebFetch not the in-session tool)
   - Anthropic blog/news for new Claude Code features (routines, output styles, checkpointing, /loop, Agent SDK).
-  Score each by: fits a one-person family-office industrial-RE shop? real & maintained? respects the 5.7 GB footprint? not already owned? Report a 3–5 line shortlist; recommend trial, not adopt.
+  Score each by: fits a one-person family-office industrial-RE shop? real & maintained? justified footprint on a 32 GB box (~24 GB working ceiling — no standing RAM-heavy services without cause)? not already owned? Report a 3–5 line shortlist; recommend trial, not adopt.
 - **Cross-doc canonical-fact audit:** portfolio SF / property / tenant counts / DSCR / LTV identical wherever they appear (firm.md vs projects.md vs SoR). Fail on disagreement.
 - **Long-cadence integrity:** load each annual/quarterly task's SKILL.md; assert frontmatter + send-path refs parse (catch latent breakage months early).
 - **Skill version sweep:** list SKILL.md files with no version/last-validated tag.

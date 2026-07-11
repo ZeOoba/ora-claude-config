@@ -25,7 +25,7 @@ and date, verifies the gate is clean, and emits a durable audit memo under
 
 ## Pre-flight (run before any prompt to Gabriel)
 
-**1. Confirm migration 014 has been applied.**
+**1. Confirm migration 015_hurdle_rate.sql has been applied.**
 
 ```python
 import sqlite3
@@ -36,9 +36,9 @@ print(cols)
 
 If `hurdle_rate_ratification` is NOT in the column list: STOP.
 
-> "Migration 015_hurdle_rate.sql has not been applied yet. The branch
-> `claude/recursing-chatelet-f908d3` contains this migration — merge or apply it
-> first, then re-invoke this skill."
+> "Migration 015_hurdle_rate.sql has not been applied yet. It is present on `main`
+> (merged via PR #117) — run `npm run migrate` from oxford-command-center to apply
+> it, then re-invoke this skill."
 
 **2. Read the current proposed row.**
 
@@ -154,7 +154,7 @@ oxford-command-center repo. Do NOT commit — leave integration to Gabriel.
 ```markdown
 # ORA Hurdle Rate Ratification — [YYYY-MM-DD]
 
-**Ratified by:** Gabriel Goldberg, VP Acquisitions, Oxford Realty Advisors
+**Ratified by:** Gabriel Goldberg, Principal, Oxford Realty Advisors
 **Date:** [YYYY-MM-DD]
 **Hurdle rate:** [X]% unlevered IRR (decimal: [0.XX])
 **Ratification status:** proposed → ratified
@@ -180,7 +180,7 @@ Confirm the file was written, then report:
 
 | Condition | Action |
 |-----------|--------|
-| `hurdle_rate_ratification` column missing from `capital_config` | STOP — apply migration 014 (branch `claude/recursing-chatelet-f908d3`) |
+| `hurdle_rate_ratification` column missing from `capital_config` | STOP — run `npm run migrate` to apply 015_hurdle_rate.sql (already on `main`, PR #117) |
 | `capital_config` empty | STOP — run `npm run migrate` to seed |
 | Already `ratified` | STOP — surface current state, nothing to do |
 | UPDATE affects 0 rows | STOP — surface error |

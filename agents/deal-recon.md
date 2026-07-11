@@ -29,6 +29,7 @@ A single, tight **pre-screen brief** (one page). Do the legwork across all lanes
 - **Recommendation**: PURSUE / PASS / NEEDS MORE, one sentence why. **Basis discipline:** basis at/above replacement with NO credible value-add path to ORA's >8% stabilized yield-on-cost → PASS; *fair* basis WITH a credible value-add path → NEEDS MORE (underwrite the upside); below-replacement or clear value-add upside → PURSUE-eligible. Do NOT hard-kill on basis alone when a real value-add path exists, and do NOT call PURSUE on a fair-basis deal with no upside path.
 
 ## Rules
+- **Confidentiality:** if this target has since become (or is) an active ORA deal, never include ORA's own internal deal data (LOI/PSA status, negotiated terms, DD findings) in any external search query or in your output — research the property's public market context only.
 - Cite every external figure with its source and date. Mark anything you couldn't confirm as [UNVERIFIED].
 - Do NOT underwrite, build models, or compute IRR — that's the acquisition-underwriting skill's job. Hand off cleanly.
 - You cannot ask questions mid-task; work with what's given and note gaps.

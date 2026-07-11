@@ -553,13 +553,19 @@ def main():
     # change, not the index (2026-07-08, added after the formal CLAUDE.md audit's own tracking file
     # tripped this sentinel).
     skip_names |= {"event_log.md", "MEMORY.md", "project_claude-md-formal-audit-2026-07-08.md"}
+    # Dated event_log rollover archives (memory-policy.md's rollover rule, first exercised
+    # 2026-07-09: _archive/event_log_<YYYY-MM-DD>.md) are the SAME append-only narrative class
+    # as event_log.md itself -- a straight cut of its older entries, not a new kind of file.
+    # Exempt by pattern so every future rollover doesn't need its own skip_names entry.
+    EVENT_LOG_ARCHIVE_RE = re.compile(r"^event_log_\d{4}-\d{2}-\d{2}\.md$")
     for root, exts in build_targets():
         if not (os.path.isfile(root) or os.path.isdir(root)):
             skipped_roots.append(root)
             continue
         for path in iter_files(root, exts):
-            if (os.path.abspath(path) == self_path or os.path.basename(path) in skip_names
-                    or _is_test_file(path)):
+            basename = os.path.basename(path)
+            if (os.path.abspath(path) == self_path or basename in skip_names
+                    or EVENT_LOG_ARCHIVE_RE.match(basename) or _is_test_file(path)):
                 continue
             low_path = path.lower().replace("\\", "/")
             is_code = low_path.endswith((".ts", ".tsx", ".js"))

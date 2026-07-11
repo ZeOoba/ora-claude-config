@@ -11,8 +11,9 @@
 param([string]$CurrentSid = '')
 $ErrorActionPreference = 'SilentlyContinue'
 
-$WARN_MB  = 300    # warn below this many MB free
-$CRIT_MB  = 200    # auto-park below this
+$WARN_MB  = 2048   # warn below this many MB free (retuned 2026-07-09 for the 32 GB box:
+                   # was 300 on the 5.7 GB machine; ~24 GB working ceiling, so warn at ~2 GB free)
+$CRIT_MB  = 1024   # auto-park below this (was 200 on the 5.7 GB machine)
 $MIN_IDLE = 900    # a session must be idle this many seconds to be park-eligible.
                    # Raised 300 -> 900 on 2026-06-11: transcript mtime goes stale during a
                    # long-running tool call, so 300s parked ACTIVELY-WORKING scheduled runs
@@ -56,7 +57,10 @@ $victim = $cands | Where-Object { $_.Idle -ge $MIN_IDLE } | Sort-Object Idle -De
 if ($victim) {
   $p  = Get-Process -Id $victim.ProcId -ErrorAction SilentlyContinue
   $mb = if ($p) { [math]::Round($p.WorkingSet64 / 1MB) } else { 0 }
-  Stop-Process -Id $victim.ProcId -Force -ErrorAction SilentlyContinue
+  # Tree-kill: Stop-Process only kills the top PID, orphaning any cmd.exe/npx/node
+  # MCP-server descendants (confirmed 2026-07-10: 32 orphaned desktop-commander
+  # pairs found hanging off parked/idle sessions). taskkill /T recurses.
+  & taskkill.exe /PID $victim.ProcId /T /F 2>$null | Out-Null
   $short = $victim.Sid.Substring(0, 8)
   $im    = [math]::Round($victim.Idle / 60)
   Emit @{

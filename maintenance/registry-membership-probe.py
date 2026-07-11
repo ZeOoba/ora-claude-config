@@ -28,10 +28,15 @@ hours later (2026-07-08).
 Run daily from the ora-setup-audit STEP 1 block. First run writes a baseline.
 """
 import datetime
-import glob
 import json
 import os
 import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "_shared"))
+try:
+    import store_discovery as _sd
+except Exception:
+    _sd = None  # fail-open: discover_store() returns None -> missing-store path
 
 for _s in (sys.stdout, sys.stderr):
     try:
@@ -85,26 +90,11 @@ def ratified_drops(log_text, ids, today, window_days=RATIFY_WINDOW_DAYS):
 
 
 def discover_store(store):
-    """Biggest-then-newest scheduled-tasks.json for a store (I4: GUIDs rotate;
-    the MSIX LocalCache path mirrors Roaming -- one registry per store)."""
-    home = os.path.expanduser("~")
-    appdata = os.environ.get("APPDATA") or os.path.join(home, "AppData", "Roaming")
-    localap = os.environ.get("LOCALAPPDATA") or os.path.join(home, "AppData", "Local")
-    bases = [os.path.join(appdata, "Claude", store),
-             os.path.join(localap, "Packages", "Claude_pzs8sxrjxfjjc", "LocalCache",
-                          "Roaming", "Claude", store)]
-    best = None
-    for base in bases:
-        for p in glob.glob(os.path.join(base, "**", "scheduled-tasks.json"),
-                           recursive=True):
-            try:
-                d = json.load(open(p, encoding="utf-8"))
-            except Exception:
-                continue
-            n = len(d.get("scheduledTasks", []) or [])
-            if n and (best is None or (n, os.path.getmtime(p)) > best[0]):
-                best = ((n, os.path.getmtime(p)), p)
-    return best[1] if best else None
+    """Biggest-then-newest scheduled-tasks.json for a store. Delegates to
+    maintenance/_shared/store_discovery.py (single source of truth 2026-07-09;
+    roots live in scheduler-stores.json). None when the helper or store is
+    unavailable -- callers already treat None as a missing store."""
+    return _sd.discover_store(store) if _sd else None
 
 
 def enabled_recurring(path):
