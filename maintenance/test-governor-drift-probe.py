@@ -524,6 +524,271 @@ def test_reverse_order_refi_suppression_unit():
     print("  PASS test_reverse_order_refi_suppression_unit")
 
 
+def test_version_token_not_a_dscr_threshold_unit():
+    """2026-07-11 FP fix (root cause 1): a VERSION token ("v3.8") abutting the digits is NOT a DSCR
+    threshold -- a real threshold is never written letter-abutted ("floor 1.10", never "v1.10" /
+    "spec3.8"). The letter-lookbehind must kill the version-token read WITHOUT weakening detection:
+    a real drifted floor sharing a line with a version token must still flag."""
+    m = _load_probe_module()
+    # the real SKILL.md:50 shape -- v3.8 read as "DSCR 3.8x" (the false positive):
+    clean = [
+        "- **DSCR floor (per-property governor — v3.8; reported on every UNDERWRITE, not just "
+        "at refi sizing):** post-refi DSCR must be ≥1.25x at the market-rate refi terms.",
+        "Governor spec v3.8: DSCR floor unchanged at 1.25x.",
+        "Hard filter (v2.7): DSCR >= 1.25x on every deal.",
+    ]
+    for line in clean:
+        assert m.scan_line(line) == [], (
+            "version token must not read as a DSCR threshold; line=%r got=%r"
+            % (line, m.scan_line(line)))
+    # REFUTE guard: real drift NEAR a version token still flags.
+    out1 = m.scan_line("Hard filter: DSCR floor 1.10x (spec v3.8).")
+    assert any("1.10" in o for o in out1), (
+        "real 1.10 drift beside a version token must flag; got %r" % out1)
+    assert not any("3.8" in o for o in out1), (
+        "the v3.8 version token must never flag; got %r" % out1)
+    out2 = m.scan_line("Governor v3.8: DSCR floor 1.10.")
+    assert any("1.10" in o for o in out2), (
+        "x-less 1.10 drift after a version token must flag; got %r" % out2)
+    print("  PASS test_version_token_not_a_dscr_threshold_unit")
+
+
+def test_rate_percent_not_a_dscr_threshold_unit():
+    """2026-07-11 FP fix (root cause 1b): "DSCR, 7.00% fixed" was read as "DSCR 7.0x" -- the regex
+    backtracked to a PARTIAL capture ("7.0" of "7.00") to defeat the (?!\\s*%) percent guard. The
+    full-number capture ((?![0-9]) after the value) must kill that, while an actual absurd DSCR
+    threshold ("floor 7.0x") still flags."""
+    m = _load_probe_module()
+    # the real SKILL.md:281 shape:
+    clean = ("7. **Debt & Capital Structure** — all-cash close + per-property refi terms "
+             "(per UNDERWRITING CONVENTIONS: LESSER of 65% LTV and 1.25x DSCR, 7.00% fixed, "
+             "25-yr amort, 5/10-yr term — state which of LTV/DSCR binds), and the "
+             "portfolio-aggregate LTV governor check (40% ceiling, STAGE 2.3) stated explicitly.")
+    assert m.scan_line(clean) == [], (
+        "a percent rate after DSCR must not partial-capture as a threshold; got %r"
+        % m.scan_line(clean))
+    assert m.scan_line("Governor note: DSCR-linked refi rate 7.00% fixed.") == [], \
+        "DSCR-adjacent 7.00%% rate must not flag"
+    out = m.scan_line("Governor: DSCR floor 7.0x on every deal.")
+    assert any("7.0" in o for o in out), (
+        "a real (absurd) DSCR floor 7.0x must still flag; got %r" % out)
+    print("  PASS test_rate_percent_not_a_dscr_threshold_unit")
+
+
+def test_refi_lesser_of_construct_suppressed_unit():
+    """2026-07-11 FP fix (root cause 2): a 65% sitting INSIDE the explicit ratified refi-sizing
+    construct "LESSER of 65% LTV and 1.25x DSCR" is a refinance-market input, not the acquisition
+    governor -- suppressed even when the line carries per-property / dscr-floor markers (which
+    legitimately describe the refi rule post-v3.8). The construct's guard is the LITERAL canonical
+    1.25x DSCR member: drift EITHER member and the construct no longer suppresses."""
+    m = _load_probe_module()
+    clean = [
+        # SKILL.md:50 (also carries the v3.8 token + "dscr floor" marker):
+        "- **DSCR floor (per-property governor — v3.8; reported on every UNDERWRITE, not just "
+        "at refi sizing):** post-refi DSCR must be ≥1.25x at the market-rate refi terms in "
+        "UNDERWRITING CONVENTIONS (LESSER of 65% LTV per-property and 1.25x DSCR).",
+        # SKILL.md:260:
+        "  - **LTV-governor check:** the refi LTV assumption on the Inputs tab must be validated "
+        "against the stated governor (LESSER of 65% LTV per-property and 1.25x DSCR; UNDERWRITING "
+        "CONVENTIONS) via a formula/flag on the Inputs or Returns tab.",
+        # SKILL.md:300 (both a LESSER-of pair and a "refis running to 65% LTV"):
+        "100% family capital; ~15% portfolio LTV; **Two governors, two levels:** per-property refi "
+        "ceiling = LESSER of 65% LTV and 1.25x DSCR (UNDERWRITING CONVENTIONS); portfolio-aggregate "
+        "ceiling = 40% LTV (Hard Invariant 4), checked per-deal at STAGE 2.3. At ~15% actual, ORA "
+        "carries headroom even with individual refis running to 65% LTV.",
+        # SKILL.md:112 (hyphenated/slash form + "refi to 65% LTV"):
+        "**A. Portfolio-aggregate LTV governor (RATIFIED — Hard Invariant 4):** compute LTV = "
+        "(aggregate debt, including this deal's post-refi debt at the LESSER-of-65%-LTV/1.25x-DSCR "
+        "sizing from UNDERWRITING CONVENTIONS) ÷ (aggregate value). This governor is distinct "
+        "from the per-property 65% LTV / 1.25x DSCR refi-sizing convention — a single property "
+        "can refi to 65% LTV while the portfolio in aggregate stays well under 40%.",
+    ]
+    for line in clean:
+        out = m.scan_line(line)
+        assert out == [], (
+            "refi-sizing LESSER-of construct must be suppressed; line=%r got=%r" % (line[:90], out))
+    # REFUTE guards -- drift either member of the construct and detection returns:
+    out1 = m.scan_line("Acquisition LTV ceiling: LESSER of 65% LTV and 1.10x DSCR.")
+    assert any("65" in o for o in out1), (
+        "a LESSER-of pair whose DSCR member drifted off 1.25x is NOT the ratified construct; "
+        "its 65%% must flag; got %r" % out1)
+    out2 = m.scan_line("Governor: refi post-close sized to LESSER of 75% LTV and 1.25x DSCR.")
+    # 75% inside a canonical-anchored LESSER-of span is a refi-sizing figure (drift of the refi
+    # ceiling, not the acquisition governor) -- out of this probe's scope, stays suppressed.
+    assert out2 == [], (
+        "the refi-sizing ceiling itself is not the acquisition governor; got %r" % out2)
+    print("  PASS test_refi_lesser_of_construct_suppressed_unit")
+
+
+def test_refi_sizing_phrase_suppressed_unit():
+    """SKILL.md:8 shapes: "65% LTV refi-sizing figure" / "65% LTV is the PER-PROPERTY refi-sizing
+    ceiling" -- a percent NAMED as the refi-sizing figure is suppressed; a bare singular 'governor'
+    token near the value vetoes the suppression (a value declared AS the governor must flag)."""
+    m = _load_probe_module()
+    line8 = ("**Clarified LTV governor scope** — an earlier draft flagged the skill's 65% LTV "
+             "refi-sizing figure as conflicting with ORA's 40% LTV governor. Gabriel confirmed "
+             "2026-07-11 these are two distinct, non-conflicting governors: **65% LTV is the "
+             "PER-PROPERTY refi-sizing ceiling** (unchanged; correctly LESSER-of with 1.25x DSCR "
+             "in UNDERWRITING CONVENTIONS), and **40% LTV is a separate PORTFOLIO-AGGREGATE "
+             "ceiling** (Hard Invariant 4).")
+    assert m.scan_line(line8) == [], (
+        "the ratified refi-sizing scope-clarification must be suppressed; got %r" % m.scan_line(line8))
+    # REFUTE guard: the same refi words cannot mask a value declared AS the governor.
+    out = m.scan_line("Hard screen: the acquisition LTV governor is 65% LTV refi-sizing parity.")
+    assert any("65" in o for o in out), (
+        "a 65%% declared AS the governor must flag despite refi-sizing phrasing; got %r" % out)
+    print("  PASS test_refi_sizing_phrase_suppressed_unit")
+
+
+def test_canonical_dscr_governor_at_ltv_suppressed_unit():
+    """SKILL.md:249 shape: "the 1.25x DSCR governor at 65% LTV" -- the 65% is the refi level AT
+    WHICH the canonical DSCR governor applies (the 'governor' token binds to the canonical 1.25x
+    DSCR on its left, not to the 65%). Suppressed. A 'governor' token NOT bound to the canonical
+    DSCR phrase still vetoes (a real LTV-governor declaration flags)."""
+    m = _load_probe_module()
+    line249 = ("- **Madison DSCR caution:** owner-user pricing $148–$176/SF makes DSCR "
+               "≥1.25x extremely difficult on most sub-$10M Class B/C assets — verify "
+               "deal-level DSCR before LOI on every Madison screen. **[Unaffected by the "
+               "LTV-governor scope clarification — this caution was already anchored to the "
+               "1.25x DSCR governor at 65% LTV, both unchanged.]**")
+    assert m.scan_line(line249) == [], (
+        "the '1.25x DSCR governor at 65%% LTV' pairing must be suppressed; got %r"
+        % m.scan_line(line249))
+    # REFUTE guards:
+    out1 = m.scan_line("The LTV governor at 65% LTV must hold on every deal.")
+    assert any("65" in o for o in out1), (
+        "a bare 'LTV governor at 65%%' declaration must flag; got %r" % out1)
+    out2 = m.scan_line("Governor: 1.25x DSCR at 65% LTV applies at acquisition close.")
+    assert any("65" in o for o in out2), (
+        "'governor:' introducing the pair (not the canonical-DSCR-governor phrase) must flag; "
+        "got %r" % out2)
+    print("  PASS test_canonical_dscr_governor_at_ltv_suppressed_unit")
+
+
+def test_bps_rate_pricing_tier_suppressed_unit():
+    """SKILL.md:196 shape: "−25 bps for stabilized multi-tenant ≥1.40x DSCR" is a refi
+    RATE-PRICING TIER (a bps adjustment keyed to a DSCR band), never a governor floor -- suppressed.
+    The same 1.40x declared as a floor/governor elsewhere on the line still flags."""
+    m = _load_probe_module()
+    line196 = ("- **All-cash bid + refi post-close (per-property governor: LESSER of 65% LTV and "
+               "1.25x DSCR).** **Refi debt assumptions (2026 defaults):** fixed rate **7.00%** "
+               "(band 6.75–7.25% for DSCR/agency-style industrial; +25 bps for sub-$2M or "
+               "single-tenant, −25 bps for stabilized multi-tenant ≥1.40x DSCR) · "
+               "**25-yr amortization** · refi sized to the LESSER of **65% LTV** (stabilized "
+               "value at exit cap, per-property) **and 1.25x DSCR** (the governor — never "
+               "exceed). NOTE: the IRR floor and the DSCR floor (Stage 1) are the two floors "
+               "computed with debt layered in.")
+    assert m.scan_line(line196) == [], (
+        "the bps rate-pricing tier + LESSER-of refi sizing must be suppressed; got %r"
+        % m.scan_line(line196))
+    # REFUTE guard: a 1.40x declared as a floor OUTSIDE the bps tier still flags on the same line.
+    out = m.scan_line("Refi post-close pricing: −25 bps at ≥1.40x DSCR — and this "
+                      "1.40x floor is the acquisition governor now.")
+    assert any("1.40" in o for o in out), (
+        "a 1.40x floor declared as the acquisition governor must flag even beside a bps tier; "
+        "got %r" % out)
+    # REFUTE guard (closed hole, 2026-07-11): a DECLARED floor whose 'governor' token sits ~30
+    # chars before the value must not be masked by the bps-tier span (the -40 before-reach).
+    out2 = m.scan_line("Governor floor -25 bps tier >=1.10x DSCR is the new per-deal minimum.")
+    assert any("1.10" in o for o in out2), (
+        "a governor floor phrased through a bps tier must still flag; got %r" % out2)
+    print("  PASS test_bps_rate_pricing_tier_suppressed_unit")
+
+
+def test_perdeal_perproperty_drift_still_flags_unit():
+    """Regression (task-mandated): per-deal / per-property GOVERNOR drift must still flag -- the
+    refi-construct suppressors must not extend to bare per-property declarations."""
+    m = _load_probe_module()
+    for line, val in [
+        ("Per-deal governor: DSCR floor 1.10x.", "1.10"),
+        ("Per-property DSCR floor 1.40x (governor).", "1.40"),
+        ("Per-deal governor DSCR 1.75x on every acquisition.", "1.75"),
+        ("Hard filter: per-property LTV ceiling 65%.", "65"),
+    ]:
+        out = m.scan_line(line)
+        assert any(val in o for o in out), (
+            "per-deal/per-property governor drift must still flag; line=%r got=%r" % (line, out))
+    print("  PASS test_perdeal_perproperty_drift_still_flags_unit")
+
+
+def test_review_hole1_lesser_of_gap_drift_flags_unit():
+    """REVIEW HOLE 1: a drift hidden INSIDE a LESSER-of construct's gap must flag -- the earlier
+    whole-span suppressor masked it because the canonical 1.25x member still terminated the match.
+    Member-scoped suppression + decimal-free gap: the gap drift breaks the match, so both the
+    injected floor AND the ceiling member stay visible."""
+    m = _load_probe_module()
+    out1 = m.scan_line("Per-property governor: LESSER of 65% LTV and DSCR floor 1.10x / 1.25x DSCR.")
+    assert any("1.10" in o for o in out1), ("HOLE1a: gap-hidden 1.10 must flag; got %r" % out1)
+    assert any("65" in o for o in out1), ("HOLE1a: 65 must flag (construct broken); got %r" % out1)
+    out2 = m.scan_line("LESSER of 65% LTV and the governor DSCR floor 1.10x and 1.25x DSCR.")
+    assert any("1.10" in o for o in out2), ("HOLE1b: gap-hidden 1.10 must flag; got %r" % out2)
+    print("  PASS test_review_hole1_lesser_of_gap_drift_flags_unit")
+
+
+def test_review_hole2_bps_gap_no_leapfrog_flags_unit():
+    """REVIEW HOLE 2: the bps rate-tier gap must not leapfrog a declared floor to reach the tier's
+    band value -- a decimal-free gap breaks the match so the injected floor stays visible."""
+    m = _load_probe_module()
+    out1 = m.scan_line("Minimum DSCR schedule: -25 bps applies at DSCR floor 1.10x for >=1.40x DSCR deals.")
+    assert any("1.10" in o for o in out1), ("HOLE2a: 1.10 must flag; got %r" % out1)
+    out2 = m.scan_line("Hard filter note (see refi tier schedule): -25 bps DSCR floor 1.10x stabilized >=1.40x DSCR.")
+    assert any("1.10" in o for o in out2), ("HOLE2b: 1.10 must flag; got %r" % out2)
+    print("  PASS test_review_hole2_bps_gap_no_leapfrog_flags_unit")
+
+
+def test_review_hole3_paired_gap_drift_flags_unit():
+    """REVIEW HOLE 3: a no-x floor hidden in the PAIRED (1.25x DSCR ... N% LTV) gap must flag, and
+    the N% member no longer masks either -- decimal-free gap breaks the match."""
+    m = _load_probe_module()
+    out = m.scan_line("Minimum DSCR: 1.25x DSCR floor 1.10 at 65% LTV.")
+    assert any("1.10" in o for o in out), ("HOLE3: 1.10 must flag; got %r" % out)
+    assert any("65" in o for o in out), ("HOLE3: 65 must flag; got %r" % out)
+    print("  PASS test_review_hole3_paired_gap_drift_flags_unit")
+
+
+def test_review_hole4_veto_window_and_refi_gate_flags_unit():
+    """REVIEW HOLE 4: the +-40 veto window must be REAL (overlap over the whole line), and the bps
+    tier must be gated on a refi token. A value declared AS the governor ~34 chars out flags; a
+    bps-shaped governor-change note with NO refi context flags."""
+    m = _load_probe_module()
+    out1 = m.scan_line("Buy note: 65% LTV refi-sizing figure is the governor now.")
+    assert any("65" in o for o in out1), ("HOLE4a: declared-governor 65 must flag; got %r" % out1)
+    out2 = m.scan_line("Governor ratified change, all deals, notes: -25 bps at >=1.10x DSCR pricing.")
+    assert any("1.10" in o for o in out2), ("HOLE4b: no-refi bps 1.10 must flag; got %r" % out2)
+    print("  PASS test_review_hole4_veto_window_and_refi_gate_flags_unit")
+
+
+def test_review_hole5_dscr_extraction_regressions_flags_unit():
+    """REVIEW HOLE 5: the version-lookbehind must not silence a letter-glued drift ('changed to1.10'
+    -- 'o' abuts, not a version 'v'), and the percent guard must only exclude an ABUTTING percent so
+    a space-separated '1.10 %' DSCR multiple still flags. Genuine version token 'v3.8' stays clean."""
+    m = _load_probe_module()
+    out1 = m.scan_line("Governor DSCR floor changed to1.10 effective now.")
+    assert any("1.10" in o for o in out1), ("HOLE5a: letter-glued to1.10 must flag; got %r" % out1)
+    out2 = m.scan_line("Governor: minimum DSCR 1.10 %")
+    assert any("1.10" in o for o in out2), ("HOLE5b: space-percent 1.10 %% must flag; got %r" % out2)
+    # the genuine version token must still NOT flag (FP fix preserved):
+    assert m.scan_line("Governor spec v3.8: DSCR floor unchanged at 1.25x.") == [], \
+        "v3.8 version token must stay clean"
+    print("  PASS test_review_hole5_dscr_extraction_regressions_flags_unit")
+
+
+def test_acquisition_underwriting_skill_file_clean():
+    """The live acquisition-underwriting SKILL.md (repo copy) must scan CLEAN line-by-line --
+    the 10 false positives of 2026-07-11 (lines 8, 50, 112, 196, 249, 260, 281, 300)."""
+    m = _load_probe_module()
+    path = r"C:\Users\Owner\ora-skills\acquisition-underwriting\SKILL.md"
+    assert os.path.isfile(path), "skill file not found: %s" % path
+    findings = []
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        for i, raw in enumerate(fh, 1):
+            for reason in m.scan_line(raw):
+                findings.append((i, reason))
+    assert findings == [], (
+        "acquisition-underwriting SKILL.md must be clean; got %r" % findings)
+    print("  PASS test_acquisition_underwriting_skill_file_clean (0 findings)")
+
+
 def test_test_files_excluded_from_scan_unit():
     """Pre-existing false positive (2026-07-08): the probe scanned maintenance/_tests/ fixture files
     that intentionally quote off-canonical governor values ("[GOVERNOR DRIFT] DSCR 1.20") to test
@@ -585,6 +850,19 @@ def main():
     test_reverse_order_no_false_positive_unit()
     test_reverse_order_suppression_still_applies_unit()
     test_reverse_order_refi_suppression_unit()
+    test_version_token_not_a_dscr_threshold_unit()
+    test_rate_percent_not_a_dscr_threshold_unit()
+    test_refi_lesser_of_construct_suppressed_unit()
+    test_refi_sizing_phrase_suppressed_unit()
+    test_canonical_dscr_governor_at_ltv_suppressed_unit()
+    test_bps_rate_pricing_tier_suppressed_unit()
+    test_perdeal_perproperty_drift_still_flags_unit()
+    test_review_hole1_lesser_of_gap_drift_flags_unit()
+    test_review_hole2_bps_gap_no_leapfrog_flags_unit()
+    test_review_hole3_paired_gap_drift_flags_unit()
+    test_review_hole4_veto_window_and_refi_gate_flags_unit()
+    test_review_hole5_dscr_extraction_regressions_flags_unit()
+    test_acquisition_underwriting_skill_file_clean()
     test_test_files_excluded_from_scan_unit()
     test_event_log_excluded_e2e()
     print("ALL GOVERNOR-PROBE TESTS PASS")
