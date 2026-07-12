@@ -50,7 +50,16 @@ import sys, os, json, re, datetime, subprocess
 HOOK_DIR = os.path.dirname(os.path.abspath(__file__))
 LIB_DIR = os.path.join(HOOK_DIR, "lib")
 sys.path.insert(0, LIB_DIR)
-from site_markers import SITE_PATH_MARKERS as SITE_MARKERS  # noqa: E402
+try:
+    from site_markers import SITE_PATH_MARKERS, SITE_DOMAIN_MARKERS  # noqa: E402
+    SITE_MARKERS = SITE_PATH_MARKERS + SITE_DOMAIN_MARKERS
+except Exception:
+    # This hook is FAIL-CLOSED (see module docstring) -- an import failure must
+    # never silently degrade it to fail-open. Fallback matches site_markers.py's
+    # current combined value, so a missing/broken shared module keeps this guard
+    # functioning at its last-known-good marker set instead of crashing past the
+    # module-level import (which would exit 1 = non-blocking = a leak).
+    SITE_MARKERS = ("oxford-site", "oxfordra.net", "oxfordra_net", "website-canonical")
 # Test-only override (2026-07-09), same pattern as shared-checkout-guard.py's
 # SHARED_CHECKOUT_REPOS env var: unset in every real session, so production behavior is
 # byte-identical. Lets test-confidentiality-guard.py point this subprocess at a synthetic

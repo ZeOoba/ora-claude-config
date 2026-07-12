@@ -315,6 +315,49 @@ with tempfile.TemporaryDirectory() as td:
     code, err = run_in_worktree({"tool_name": "Read", "tool_input": {}})
     expect("load_terms: missing everywhere -> fails closed (blocks even a non-egress call)", 2, code, err)
 
+# --- BLOCK: site_markers.py import failure must not degrade fail-closed to fail-open ----
+# 2026-07-12 code review finding: the module-level `from site_markers import ...` sat
+# outside main()'s try/except, so a missing/broken shared module raised at import time and
+# exited 1 (non-blocking) -- silently ALLOWING egress instead of blocking it. Fixed with a
+# try/except + hardcoded fallback around the import. This proves the fallback actually
+# classifies a site path as an egress surface (not just "still exits 2 for some other
+# unrelated reason like a missing terms file").
+with tempfile.TemporaryDirectory() as td2:
+    iso_hooks = os.path.join(td2, "hooks")
+    os.makedirs(iso_hooks)  # deliberately NO lib/ subdirectory -- site_markers.py is absent
+    with open(GUARD, encoding="utf-8") as f:
+        iso_guard_src = f.read()
+    iso_guard = os.path.join(iso_hooks, "confidentiality-guard.py")
+    with open(iso_guard, "w", encoding="utf-8") as f:
+        f.write(iso_guard_src)
+
+    iso_terms = os.path.join(td2, "confidential-terms.json")
+    with open(iso_terms, "w", encoding="utf-8") as f:
+        json.dump({
+            "_meta": {"roster_last_verified": datetime.date.today().isoformat()},
+            "site_markers_fallback_test_deal": {
+                "active": True,
+                "label": "Site Markers Fallback Test Deal (fixture, not real)",
+                "always": ["Grommet Fallback Industries"],
+            },
+        }, f)
+
+    iso_env = dict(os.environ, CONFIDENTIAL_TERMS_FILE_OVERRIDE=iso_terms)
+    p = subprocess.run(
+        [sys.executable, iso_guard],
+        input=json.dumps(write_payload(
+            "C:/Users/Owner/website-canonical/src/press.html",
+            "Announcing the Grommet Fallback Industries partnership",
+        )).encode("utf-8"),
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=iso_env,
+    )
+    iso_err = p.stderr.decode("utf-8", "replace")
+    expect("site_markers import failure: still recognizes the site path as an egress "
+           "surface via the hardcoded fallback (blocks the hit)", 2, p.returncode, iso_err)
+    expect("site_markers import failure: block reason names the fixture deal (proves the "
+           "fallback SITE_MARKERS worked, not a generic/unrelated block)",
+           True, "Grommet Fallback Industries" in iso_err, iso_err)
+
 # --- summary ---------------------------------------------------------------------------
 passed = sum(1 for ok, _ in results if ok)
 total = len(results)

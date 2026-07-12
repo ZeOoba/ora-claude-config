@@ -31,7 +31,14 @@ import time
 
 LIB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib")
 sys.path.insert(0, LIB_DIR)
-from site_markers import SITE_PATH_MARKERS  # noqa: E402
+try:
+    from site_markers import SITE_PATH_MARKERS  # noqa: E402
+except Exception:
+    # Fallback matches site_markers.py's current value. This hook's own stated
+    # philosophy is fail-open-on-malfunction, so a missing/broken shared module
+    # should not crash it -- but a hardcoded fallback keeps Gate 2 functional
+    # rather than silently disabling it entirely.
+    SITE_PATH_MARKERS = ("website-canonical", "oxford-site")
 
 OVERRIDE_DIR = r"C:\Users\Owner\.claude\hooks\overrides"
 OVERRIDE_TTL_SECONDS = 3600
