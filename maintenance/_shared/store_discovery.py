@@ -24,6 +24,10 @@ CONFIG_PATH = os.path.join(_HERE, "scheduler-stores.json")
 _DEFAULT_ROOTS = [r"%APPDATA%\Claude",
                   r"%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude"]
 _DEFAULT_FLOORS = {"cc": 13, "lams": 4}
+_DEFAULT_SKILL_FOLDER_ROOTS = {
+    "cc": r"%USERPROFILE%\.claude\scheduled-tasks",
+    "lams": r"%USERPROFILE%\OneDrive - Oxford Capital Partners\Documents\Claude\Scheduled",
+}
 
 
 def _load_config():
@@ -34,13 +38,14 @@ def _load_config():
 
 
 def _expand(path):
-    # %VAR% expansion with fallbacks for the two vars the roots actually use,
-    # so discovery still works in a stripped environment (scheduled context).
+    # %VAR% expansion with fallbacks for the vars the roots actually use, so
+    # discovery still works in a stripped environment (scheduled context).
     home = os.path.expanduser("~")
     path = path.replace("%APPDATA%", os.environ.get("APPDATA")
                         or os.path.join(home, "AppData", "Roaming"))
     path = path.replace("%LOCALAPPDATA%", os.environ.get("LOCALAPPDATA")
                         or os.path.join(home, "AppData", "Local"))
+    path = path.replace("%USERPROFILE%", os.environ.get("USERPROFILE") or home)
     return os.path.expandvars(path)
 
 
@@ -80,3 +85,25 @@ def fleet_floor(label, default, config=None):
     if isinstance(v, int) and not isinstance(v, bool):
         return v
     return _DEFAULT_FLOORS.get(label, default)
+
+
+def store_name(label, config=None):
+    """Registry store name ('claude-code-sessions'/'local-agent-mode-sessions')
+    for a 'cc'/'lams' label, from config's `stores` map else the built-in
+    default. None for an unknown label. Existing discover_store() callers
+    (registry-membership-probe et al.) each hardcode this same label->name
+    pair inline; new callers should prefer this getter over a 4th copy."""
+    cfg = _load_config() if config is None else config
+    defaults = {"cc": "claude-code-sessions", "lams": "local-agent-mode-sessions"}
+    return (cfg.get("stores") or {}).get(label) or defaults.get(label)
+
+
+def skill_folder_root(label, config=None):
+    """Fixed SKILL.md task-folder root for 'cc'/'lams' (distinct from the
+    registry JSON store paths above). Configured value from
+    scheduler-stores.json's skillFolderRoots, else the built-in default for
+    the label, else None for an unknown label -- fail-open, same posture as
+    discover_store()."""
+    cfg = _load_config() if config is None else config
+    v = (cfg.get("skillFolderRoots") or {}).get(label) or _DEFAULT_SKILL_FOLDER_ROOTS.get(label)
+    return _expand(v) if v else None
