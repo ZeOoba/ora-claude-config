@@ -17,7 +17,7 @@ Design notes (precision over recall, to avoid false positives):
 Usage: python governor-drift-probe.py            # scan default roots
        python governor-drift-probe.py --quiet     # only print on drift
 """
-import os, re, sys, glob
+import os, re, sys
 
 # Output may echo file content with non-cp1252 chars (≠, ≥, ×) -> force UTF-8 so the
 # probe never crashes on its own output when stdout is a Windows cp1252 pipe (I5).
@@ -35,14 +35,7 @@ CLAUDE = os.path.join(HOME, ".claude")
 MEM = os.path.join(CLAUDE, "projects",
                    "C--Users-Owner-OneDrive---Oxford-Capital-Partners", "memory")
 
-def discover_skills_root():
-    """Auto-discover the live Cowork skills tree (GUIDs rotate -- never hardcode, I4)."""
-    base = os.path.join(os.environ.get("APPDATA", os.path.join(HOME, "AppData", "Roaming")),
-                        "Claude", "local-agent-mode-sessions", "skills-plugin")
-    hits = glob.glob(os.path.join(base, "*", "*", "skills"))
-    # newest by mtime wins
-    hits = [h for h in hits if os.path.isdir(h)]
-    return max(hits, key=os.path.getmtime) if hits else None
+ORA_SKILLS_REPO = os.path.join(HOME, "ora-skills")
 
 # Scan roots: (path, file-extensions). Missing roots are skipped silently (logged once).
 def build_targets():
@@ -52,9 +45,16 @@ def build_targets():
     targets.append((os.path.join(CLAUDE, "agents"), (".md",)))
     targets.append((os.path.join(CLAUDE, "hooks"), (".py", ".json")))
     targets.append((os.path.join(CLAUDE, "maintenance"), (".py", ".json")))
-    sk = discover_skills_root()
-    if sk:
-        targets.append((sk, (".md", ".json")))
+    # Canonical ora-skills repo (source of truth for skill edits, per tech.md) -- NOT the AppData
+    # runtime cache (the prior target here, via discover_skills_root(), removed 2026-07-12). The
+    # cache is a passive mirror that converges from this repo with propagation lag (repo push ->
+    # claude.ai cloud converge -> Cowork runtime resync); scanning the lagging cache instead of the
+    # repo was producing false-positive HIGH alarms when a skill was already corrected in the repo
+    # but the cache copy hadn't caught up yet (2026-07-12 EOD ledger finding). _archive/_staging
+    # hold retired/in-progress content, not live governor declarations -- excluded in iter_files()
+    # the same way node_modules/dist/.git already are.
+    if os.path.isdir(ORA_SKILLS_REPO):
+        targets.append((ORA_SKILLS_REPO, (".md", ".json")))
     brain = os.path.join(HOME, "oxford-command-center")
     for sub in ("src", "server", "scripts", "data"):
         targets.append((os.path.join(brain, sub), (".ts", ".tsx", ".js", ".json", ".md")))
@@ -67,8 +67,9 @@ def iter_files(root, exts):
     if not os.path.isdir(root):
         return
     for dirpath, dirnames, filenames in os.walk(root):
-        # never descend into dependency / build trees
-        dirnames[:] = [d for d in dirnames if d not in ("node_modules", "dist", ".git", "__pycache__")]
+        # never descend into dependency / build trees, or retired/in-progress skill content
+        dirnames[:] = [d for d in dirnames
+                       if d not in ("node_modules", "dist", ".git", "__pycache__", "_archive", "_staging")]
         for fn in filenames:
             if exts is None or fn.lower().endswith(exts):
                 yield os.path.join(dirpath, fn)

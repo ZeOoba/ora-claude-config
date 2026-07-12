@@ -69,7 +69,7 @@ feedback_qb_desktop, feedback_netlify_mcp, feedback_less_permission_prompts, fee
 - **Enforcement:** `maintenance/doctrine-integrity-probe.py` check 8 scans CLAUDE.md + every git-tracked `*.md` + untracked root `*.md` for active confidential terms (index-only reporting). Surfaced via a git pre-push blocking gate (`hooks/git-prepush-doctrine-gate.py`, in-band) plus the daily `ora-doctrine-integrity-guard` scheduled task (push-independent backstop, alarms via Notion Ops Hub + best-effort email; corrected 2026-07-08 — the prior weekly eos-health-report email mechanism was retired, see event_log). The `_confidential-staging/` subtree is exempt from the untracked scan (narrow to that one dir; `CONFIDENTIAL_STAGING_DIRNAME` in the probe) — but only for UNTRACKED files: a git-tracked file there is still scanned. The session-context exemption auto-revokes if that file is ever git-tracked.
 - **Owner-ratified repo exception (2026-06-14):** `oxford-command-center` (PRIVATE single-owner, `ZeOoba/oxford-command-center`) MAY hold active confidential deal terms in committed source (e.g. `src/data/seed-deals.ts`) — Gabriel's standing decision; the repo's pre-push scan was removed (PR #32). The egress guard + the rules above STILL bar deal terms from the public site, the `/dist/` mirror, Notion, Outlook, and every OTHER repo/surface. Audits / probes must NOT flag committed terms in THIS repo as a finding. (The egress guard never blocked internal repo writes/pushes anyway — see `~/.claude/hooks/confidentiality-guard.py`.)
 
-## 7b. Declassification / reclassification file checklist (2026-07-09)
+## 7b. Declassification / reclassification file checklist (2026-07-09; amended 2026-07-12)
 
 No checklist existed for this before 2026-07-09; the E. Fulton declassification
 touched 4 files ad hoc and missed `session-context.md` (caught and fixed
@@ -86,6 +86,18 @@ out-of-band — see `event_log.md`). When a confidential deal's status changes
 - `memory/MEMORY.md` — only if the deal's index-entry description text changes.
 - `memory/firm.md` — only if firm-level facts changed (e.g. portfolio
   composition).
+- `CLAUDE.md` (master `~/.claude/CLAUDE.md`) and every ported copy — Cowork
+  Settings user-preferences text (not file-backed; requires a manual paste by
+  Gabriel), `Obsidian BrainVault/CLAUDE.md`, and any other surface-specific
+  copy — remove the belt-and-suspenders deal-name reference outright. Added
+  2026-07-12 after a second miss: the original 2026-07-09 pass never touched
+  these, so `~/.claude/CLAUDE.md`'s Invariant 3 and the Obsidian vault's
+  confidentiality rule both still named E. Fulton by name a full 3 days later —
+  caught by a Cowork session running the (unrelated) post-legal-hold
+  consolidation task. Gabriel's call (2026-07-12): just delete the stale
+  reference each time — do NOT replace it with standing "never name an active
+  confidential deal in this file" policy language; that's Hard Invariant 3's
+  job at the roster level, not a per-file rule to maintain.
 
 Doc-only enforcement (decided 2026-07-09): declassification is rare enough
 that a lightweight automated check isn't warranted yet — revisit if a future
