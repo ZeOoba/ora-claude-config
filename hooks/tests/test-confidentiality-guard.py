@@ -223,6 +223,84 @@ if CONTEXT:
     expect("ALLOW context-term generic (no deal)", 0,
            run(write_payload(SITE, "%s is a common industrial contaminant nationwide" % CONTEXT[0]))[0])
 
+# --- load_terms(): linked-worktree fallback to the main checkout's terms file ----------
+# 2026-07-12: hooks/confidential-terms.json is gitignored, so `git worktree add` never
+# materializes it in a fresh linked worktree -- confidentiality-guard.py's load_terms() must
+# fall back to the MAIN worktree's copy (resolved via `git rev-parse --git-common-dir`, which
+# always points at the shared .git dir regardless of which worktree asks). Mirrors the
+# equivalent test added to test-git-prepush-scan.py, adapted for this guard's
+# subprocess-invocation style: it's exec'd as a standalone script, not imported as a module,
+# so the repro copies the real (just-edited) guard source into a throwaway git repo rather
+# than monkeypatching an imported module's globals.
+with tempfile.TemporaryDirectory() as td:
+    main_repo = os.path.join(td, "main-repo")
+    os.makedirs(os.path.join(main_repo, "hooks"))
+    subprocess.run(["git", "init", "-q", main_repo], check=True)
+    subprocess.run(["git", "-C", main_repo, "config", "user.email", "t@example.com"], check=True)
+    subprocess.run(["git", "-C", main_repo, "config", "user.name", "t"], check=True)
+    with open(os.path.join(main_repo, "README.md"), "w") as f:
+        f.write("seed\n")
+    # confidentiality-guard.py is tracked under hooks/ in the real repo, so it DOES
+    # materialize into a linked worktree's checkout -- only confidential-terms.json is
+    # gitignored out of it. Copy the actual current guard source so this exercises the
+    # real implementation, not a stale hand-written stand-in.
+    with open(GUARD, encoding="utf-8") as f:
+        guard_src = f.read()
+    with open(os.path.join(main_repo, "hooks", "confidentiality-guard.py"), "w", encoding="utf-8") as f:
+        f.write(guard_src)
+    subprocess.run(["git", "-C", main_repo, "add", "README.md", "hooks/confidentiality-guard.py"], check=True)
+    subprocess.run(["git", "-C", main_repo, "commit", "-q", "-m", "seed"], check=True)
+
+    # Never committed -- mirrors the real file being gitignored (present in the main
+    # checkout's working tree, absent from anything `git worktree add` creates).
+    terms_path = os.path.join(main_repo, "hooks", "confidential-terms.json")
+    with open(terms_path, "w", encoding="utf-8") as f:
+        json.dump({
+            "_meta": {"roster_last_verified": datetime.date.today().isoformat()},
+            "worktree_fallback_test_deal": {
+                "active": True,
+                "label": "Worktree Fallback Test Deal (fixture, not real)",
+                "always": ["Wraith Fallback Corp"],
+            },
+        }, f)
+
+    linked_wt = os.path.join(td, "linked-wt")
+    subprocess.run(["git", "-C", main_repo, "worktree", "add", linked_wt, "-b", "wt-branch"],
+                    check=True, capture_output=True)
+
+    linked_terms = os.path.join(linked_wt, "hooks", "confidential-terms.json")
+    expect("setup: linked worktree genuinely lacks a local terms file (proves the repro)",
+           True, not os.path.isfile(linked_terms))
+
+    linked_guard = os.path.join(linked_wt, "hooks", "confidentiality-guard.py")
+    # No CONFIDENTIAL_TERMS_FILE_OVERRIDE here -- must resolve on its own via the fallback,
+    # not via the escape hatch the rest of this suite relies on.
+    wt_env = dict(os.environ)
+    wt_env.pop("CONFIDENTIAL_TERMS_FILE_OVERRIDE", None)
+
+    def run_in_worktree(payload_obj):
+        p = subprocess.run([sys.executable, linked_guard], input=json.dumps(payload_obj).encode("utf-8"),
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=wt_env)
+        return p.returncode, p.stderr.decode("utf-8", "replace")
+
+    code, err = run_in_worktree(write_payload(SITE, "Press release: Wraith Fallback Corp update"))
+    expect("load_terms: falls back to main worktree's terms file (blocks the hit)", 2, code, err)
+    # Exit 2 alone doesn't prove the fallback FOUND the deal -- a totally broken (pre-fix)
+    # guard also blocks everything with exit 2, just because terms are unreadable everywhere.
+    # Require the block reason to name the fixture deal, not a generic unreadable-file error,
+    # so this assertion actually discriminates "fallback worked" from "still fail-closed-broken".
+    expect("load_terms: block reason names the fixture deal (proves fallback, not blanket fail-closed)",
+           True, "Worktree Fallback Test Deal" in err and "unreadable" not in err, err)
+
+    code, err = run_in_worktree(write_payload(SITE, "Columbus industrial market update Q2 2026"))
+    expect("load_terms: falls back to main worktree's terms file (allows clean egress)", 0, code, err)
+
+    # Truly missing everywhere (main copy removed too) must still fail closed -- even for a
+    # non-egress-shaped payload, since load_terms() is evaluated before the surface check.
+    os.remove(terms_path)
+    code, err = run_in_worktree({"tool_name": "Read", "tool_input": {}})
+    expect("load_terms: missing everywhere -> fails closed (blocks even a non-egress call)", 2, code, err)
+
 # --- summary ---------------------------------------------------------------------------
 passed = sum(1 for ok, _ in results if ok)
 total = len(results)
