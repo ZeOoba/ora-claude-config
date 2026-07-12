@@ -773,6 +773,101 @@ def test_review_hole5_dscr_extraction_regressions_flags_unit():
     print("  PASS test_review_hole5_dscr_extraction_regressions_flags_unit")
 
 
+def test_followup1_value_dscr_keyword_order_flags_unit():
+    """FOLLOW-UP 1: close the pre-existing reverse-order FN for the value->dscr->floor-word shape
+    ('1.10x DSCR floor' / '1.10x DSCR minimum') -- a value, then the literal 'dscr', then a
+    floor-word AFTER it. RE_DSCR_DECL_REV misses it (dscr between value and keyword) and
+    RE_DSCR_THRESH misses it (dscr precedes the value). New matcher feeds the SAME suppressor
+    pipeline, so canonical/portfolio/version/rent guards all still apply."""
+    m = _load_probe_module()
+    for line, val in [
+        ("Hard filter: 1.10x DSCR minimum on every deal.", "1.10"),
+        ("Acquisition governor: 1.10x DSCR floor per deal.", "1.10"),
+        ("Governor screen: 1.40x DSCR ceiling applies.", "1.40"),   # uppercase-insensitive keyword
+    ]:
+        out = m.scan_line(line)
+        assert any(val in o for o in out), (
+            "value->dscr->floor-word drift must flag; line=%r got=%r" % (line, out))
+    # canonical must NOT flag (canonical-skip suppressor):
+    assert m.scan_line("Governor: 1.25x DSCR floor on every deal.") == [], \
+        "canonical 1.25x DSCR floor must not flag"
+    # portfolio-wide 1.75 must NOT flag (portfolio suppressor + 1.75 sentinel portfolio-qualified):
+    assert m.scan_line("Governor: 1.75x DSCR floor (portfolio-wide) is the blended target.") == [], \
+        "portfolio-wide 1.75x DSCR floor must not flag"
+    # version-glued and rent/height decimals must NOT over-match:
+    assert m.scan_line("Governor spec v1.10x DSCR floor note (typo).") == [], \
+        "version-glued v1.10 must not flag via the new matcher"
+    assert m.scan_line("Governor: DSCR >= 1.25x; rent floor 5.50 psf, clear-height ceiling 32.0 ft.") == [], \
+        "rent/height decimals must not match the value->dscr->keyword shape"
+    print("  PASS test_followup1_value_dscr_keyword_order_flags_unit")
+
+
+def test_followup2_refi_to_ltv_veto_tier_unit():
+    """FOLLOW-UP 2: RE_REFI_TO_LTV moves to the VETO tier -- a 'refi to N% LTV' declared AS a
+    ceiling/governor nearby FLAGS, while the legitimate skill refi-to lines (no governor-declaration
+    nearby) stay suppressed. 'hard ceiling'/'hard cap' added as declaration tokens (the skill uses
+    'aggregate ceiling'/'per-property ceiling'/'refi-sizing ceiling', never 'hard ceiling')."""
+    m = _load_probe_module()
+    # MUST FLAG -- value declared as a hard ceiling / governor / acquisition nearby:
+    out1 = m.scan_line("Hard filter: every deal must refi to 65% LTV as the hard ceiling.")
+    assert any("65" in o for o in out1), (
+        "refi-to-65 declared as the hard ceiling must flag; got %r" % out1)
+    out2 = m.scan_line("Governor: refi to 65% LTV is the acquisition ceiling now.")
+    assert any("65" in o for o in out2), (
+        "refi-to-65 declared as the acquisition ceiling must flag; got %r" % out2)
+    # MUST NOT FLAG -- the :300-shaped legit refi-to (portfolio governor far, no hard-ceiling decl):
+    clean = "Headroom to the portfolio governor even with individual refis running to 65% LTV."
+    assert m.scan_line(clean) == [], (
+        "legit refi-to-65 (no governor-declaration nearby) must stay suppressed; got %r"
+        % m.scan_line(clean))
+    print("  PASS test_followup2_refi_to_ltv_veto_tier_unit")
+
+
+def test_round2_declaring_governor_before_value_flags_unit():
+    """ROUND-2 review W1 (was an OLD-flagged -> NEW-silent regression): a real drift whose declaring
+    'governor' sits ~22 chars BEFORE a refi-sizing-named member ("acquisition governor was hereby
+    raised to 55% LTV refi-sizing parity") must flag. VETO_BEFORE widened 20->28 to catch it while
+    staying below the tightest benign real-skill before-gap (:196 at 32). W3: an "Nx DSCR minimum"
+    floor declared inside a bps rate tier is a governor statement and must flag despite the tier."""
+    m = _load_probe_module()
+    out1 = m.scan_line("The acquisition LTV governor was hereby raised to 55% LTV refi-sizing parity.")
+    assert any("55" in o for o in out1), (
+        "W1: governor-declared 55%% ~22 chars after the keyword must flag; got %r" % out1)
+    out2 = m.scan_line("Refi governor floor for all deals was cut hard to -25 bps 1.10x DSCR minimum.")
+    assert any("1.10" in o for o in out2), (
+        "W3: an 'Nx DSCR minimum' floor inside a bps tier must flag; got %r" % out2)
+    # guard the widened window's upper edge: the benign :196-style contrast mention (governor ~32
+    # before a refi-sizing member) must STILL be suppressed -- proven by the full-file test, but
+    # pinned here directly against the exact shape.
+    benign = ("Scope note: conflicting with ORA's 40% LTV governor. Gabriel confirmed later that "
+              "65% LTV is the per-property refi-sizing ceiling.")
+    assert m.scan_line(benign) == [], (
+        "benign 'governor. <32 chars> 65% refi-sizing' contrast must stay suppressed; got %r"
+        % m.scan_line(benign))
+    print("  PASS test_round2_declaring_governor_before_value_flags_unit")
+
+
+def test_n6_hard_cap_ceiling_is_gov_gate_unit():
+    """N6 (asymmetry from follow-up 2): 'hard cap'/'hard ceiling' were added to the VETO tokens but
+    not to GOV_KEYWORDS, so a line whose ONLY governor signal is 'hard cap'/'hard ceiling' was never
+    treated as a governor declaration -> nothing scanned it -> SILENT. Fix adds them to GOV_KEYWORDS.
+    A drift declared solely via 'hard cap'/'hard ceiling' must now flag."""
+    m = _load_probe_module()
+    out1 = m.scan_line("1.25x DSCR at 65% LTV is the hard cap now.")
+    assert any("65" in o for o in out1), (
+        "N6: '... 65% LTV is the hard cap' must flag 65; got %r" % out1)
+    out2 = m.scan_line("65% LTV is the hard ceiling.")
+    assert any("65" in o for o in out2), (
+        "N6: '65% LTV is the hard ceiling' must flag 65; got %r" % out2)
+    out3 = m.scan_line("Every deal: DSCR floor 1.10x is our hard cap.")
+    assert any("1.10" in o for o in out3), (
+        "N6: a DSCR drift on a 'hard cap'-only line must flag; got %r" % out3)
+    # canonical on a 'hard cap' line must stay clean (no over-match from the widened gate):
+    assert m.scan_line("DSCR >= 1.25x, LTV <= 40% is our hard cap.") == [], \
+        "canonical governor on a hard-cap line must not flag"
+    print("  PASS test_n6_hard_cap_ceiling_is_gov_gate_unit")
+
+
 def test_acquisition_underwriting_skill_file_clean():
     """The live acquisition-underwriting SKILL.md (repo copy) must scan CLEAN line-by-line --
     the 10 false positives of 2026-07-11 (lines 8, 50, 112, 196, 249, 260, 281, 300)."""
@@ -862,6 +957,10 @@ def main():
     test_review_hole3_paired_gap_drift_flags_unit()
     test_review_hole4_veto_window_and_refi_gate_flags_unit()
     test_review_hole5_dscr_extraction_regressions_flags_unit()
+    test_followup1_value_dscr_keyword_order_flags_unit()
+    test_followup2_refi_to_ltv_veto_tier_unit()
+    test_round2_declaring_governor_before_value_flags_unit()
+    test_n6_hard_cap_ceiling_is_gov_gate_unit()
     test_acquisition_underwriting_skill_file_clean()
     test_test_files_excluded_from_scan_unit()
     test_event_log_excluded_e2e()
