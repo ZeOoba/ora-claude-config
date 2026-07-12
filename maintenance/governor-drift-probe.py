@@ -78,7 +78,22 @@ def iter_files(root, exts):
 # Guards against over-match: a value immediately followed by '%' is an LTV-style figure,
 # not a DSCR multiple -> excluded via lookahead. Still gated to governor-DECLARATION lines
 # (is_gov) in scan_line, so prose mentions of a deal's DSCR don't trip it.
-RE_DSCR_THRESH = re.compile(r"dscr[^0-9\n]{0,40}?([0-9]+\.[0-9]+)\s*[x×]?(?!\s*%)", re.I)
+# 2026-07-11 precision guards (each unambiguously excludes a NON-threshold; none narrows a real
+# drift shape -- REFUTE-verified against Hole 5):
+#   * (?<![vV]) version-prefix lookbehind: a digit glued to a 'v'/'V' is a VERSION token ("v3.8"),
+#     never a DSCR multiple. NARROWED from the earlier (?<![a-zA-Z]): a blanket letter-lookbehind
+#     also silenced a genuine letter-glued drift ("changed to1.10" -- 'o' abuts the digit), which
+#     is the catastrophic class. Only 'v'/'V' (the version marker) is excluded now, so "to1.10"
+#     still flags while "v3.8" does not.
+#   * (?![0-9]) full-number capture: without it, "DSCR, 7.00% fixed" backtracked to the PARTIAL
+#     capture "7.0" (leaving "0" to slip past the percent guard) and read a refi RATE as a DSCR
+#     multiple. The value must be consumed whole, so a %-suffixed rate can never match.
+#   * (?!%) percent guard placed IMMEDIATELY after the number (before any \s*): only a percent
+#     ABUTTING the digits ("1.25%") is an LTV-style figure to exclude. The old (?!\s*%) after the
+#     optional x also swallowed a space-separated "1.10 %" (a real DSCR multiple with a stray
+#     space) -- another Hole-5 false negative. Abutting-only keeps "1.25%" out yet flags "1.10 %".
+RE_DSCR_THRESH = re.compile(
+    r"dscr[^0-9\n]{0,40}?(?<![vV])([0-9]+\.[0-9]+)(?![0-9])(?!%)\s*[x×]?", re.I)
 # Scoring-rubric PAIR: a single "<value>=<points>" or "<band>=<points>" assignment, e.g.
 # ">=2.5x=10", "2.0-2.49x=8", "<1.25x=0". We match the WHOLE pair (the DSCR multiple/band
 # AND its "=points" tail together) -- deliberately NOT a bare "=N" or a bare band. This is
@@ -154,6 +169,17 @@ RE_DSCR_DECL = re.compile(
 # post-close-refi, rubric-pair); a portfolio-wide "1.75x floor" or a refi tier is still suppressed.
 RE_DSCR_DECL_REV = re.compile(
     r"([0-9]+\.[0-9]+)\s*[x×]\s*(?:floor|ceiling|minimum|min|maximum|max)\b", re.I)
+# DSCR DECL, value->DSCR->keyword order (2026-07-12, follow-up 1): "1.10x DSCR floor" / "1.10x DSCR
+# minimum" -- a value, then the literal 'dscr', then a floor-word AFTER it. This closes a pre-existing
+# false negative that BOTH reverse passes missed: RE_DSCR_DECL_REV requires the floor-word to abut the
+# value ("1.10x floor", no 'dscr' between), and RE_DSCR_THRESH anchors on 'dscr' and reads FORWARD (so
+# a value BEFORE the word 'dscr' is invisible to it). Same metric guards as the other reverse matcher:
+# the trailing x/× is REQUIRED and abuts the value (separates a DSCR multiple from a rent/height
+# decimal that merely precedes a keyword), and the (?<![vV]) version-prefix guard applies. Added to the
+# branch-2 candidate list, so it flows through EVERY suppressor (canonical-skip, correction-span,
+# portfolio, refi member-span, rubric) -- no bypass.
+RE_DSCR_KW_AFTER_DSCR = re.compile(
+    r"(?<![vV])([0-9]+\.[0-9]+)\s*[x×]\s*dscr\s+(?:floor|minimum|min|maximum|max|ceiling)\b", re.I)
 RE_LTV_FROMTO = re.compile(
     r"(?:" + _CHANGE_VERB + r")\b[^0-9\n]{0,16}?from\s+" + re.escape(CANON_LTV)
     + r"\s*%\s+to\s+([0-9]{1,3})\s*%", re.I)
@@ -288,7 +314,12 @@ def scan_code(text):
 # DECLARE the governor -- not on prose that merely cites a deal's DSCR or current LTV.
 GOV_KEYWORDS = ("governor", "hard filter", "hard screen", "hard acquisition",
                 "disqualif", "non-negotiable", "dscr floor", "ltv ceiling",
-                "self-imposed", "minimum dscr", "min dscr", "acquisition screen")
+                "self-imposed", "minimum dscr", "min dscr", "acquisition screen",
+                # N6 (2026-07-12): 'hard cap'/'hard ceiling' are veto tokens (ACQ_DECL_NEARBY), so
+                # they must ALSO gate is_gov -- otherwise a line whose ONLY governor signal is one of
+                # them is never scanned and a drift declared solely via it goes silent. The skill uses
+                # "aggregate/per-property/refi-sizing ceiling", never "hard cap"/"hard ceiling".
+                "hard cap", "hard ceiling")
 
 # --- Portfolio-level DSCR qualifier (2026-07-08) --------------------------------------------
 # Gabriel-ratified doctrine (2026-07-08): "DSCR of 1.25 for each property and 1.75 for the entire
@@ -371,6 +402,161 @@ def _refi_qualified(low, val_start):
         return False
     return True
 
+# --- Refi-sizing CONSTRUCT member-value spans (2026-07-11; redesigned after adversarial review) --
+# _refi_qualified() is LINE-scoped and its ACQ_GOV_MARKERS veto misfires on the v3.8-ratified skill
+# text: post-2026-07-11 doctrine, "per-property governor: LESSER of 65% LTV and 1.25x DSCR"
+# legitimately NAMES the refi-sizing rule with per-deal/per-property words, and the same dense lines
+# also carry "dscr floor" (correctly, for the canonical 1.25x floor) -- so the line-level veto
+# swallows the suppression and the refi figures false-positive.
+#
+# An earlier fix suppressed the WHOLE construct span; adversarial review proved that masks a real
+# drift hidden INSIDE a construct's gap (the canonical 1.25x member still terminates the match while
+# a drifted floor sits between). The catastrophic class -- a false NEGATIVE -- so this version
+# suppresses ONLY the construct's OWN MEMBER VALUES (captured as regex groups: the N% LTV member,
+# the canonical 1.25 DSCR member, the bps-tier DSCR band). Any OTHER value on the line -- including a
+# drift in the gap -- stays fully visible to the normal passes.
+# Two further hardenings from the review:
+#   * DECIMAL/PERCENT-FREE gaps ([^\n%0-9]): a construct can never LEAPFROG a real figure to reach
+#     its terminator, so injecting "DSCR floor 1.10 / 1.25x DSCR" into a LESSER-of simply breaks the
+#     match -> the 65% and the 1.10 both stay visible.
+#   * The bps RATE-PRICING TIER is additionally gated on a refi TOKEN being present on the line
+#     (REFI_TOKENS): a "-25 bps ... >=1.10x DSCR" governor-change note with no refi context is NOT a
+#     refi rate tier and its DSCR value stays visible.
+# Veto policy (which members honor _governor_declared_nearby):
+#   * NO-VETO member -- the canonical-anchored LESSER-of N% only. It is unambiguously the refi-sizing
+#     ceiling AND, in the real skill, legitimately sits a few chars from the word "governor"
+#     ("per-property governor: LESSER of 65%"). Group-scoping + decimal-free gaps already make it safe
+#     (a drift can't hide as the ceiling member or in the gap), so a nearby-governor veto would only
+#     re-introduce the 10 false positives.
+#   * VETO members -- "refi(s) to N% LTV" (follow-up 2), "N% LTV refi-sizing figure", "1.25x DSCR at
+#     N% LTV" (PAIRED), and the bps DSCR band. A nearby singular 'governor' or acquisition-declaration
+#     token (incl. "hard ceiling"/"hard cap") means the value is being declared AS the governor, so it
+#     must flag ("65% LTV refi-sizing figure is the governor now", "refi to 65% LTV as the hard
+#     ceiling"). The real skill's "refis running to 65% LTV" has its 'governor' >VETO_BEFORE away and
+#     no ceiling declaration, so it stays suppressed. The task-acknowledged residual: a drift phrased
+#     as the canonical LESSER-of construct is masked -- but the anchor/comparator/FROMTO/reverse LTV
+#     passes (never suppressed) catch every explicitly-declared "LTV ceiling 65%" / "65% ceiling" form.
+#     The real skill's occurrences of these have their nearest 'governor' either >40 chars away,
+#     PLURAL ("two distinct governors: 65% LTV is the ...refi-sizing ceiling"), or inside the
+#     canonical phrase "1.25x DSCR governor" -- all exempt, so they stay suppressed. (Full-file test
+#     enforces that these margins hold if the skill is reworded.)
+# Construct GAP fragment: any non-percent, non-digit char OR the literal canonical DSCR ("1.25").
+# Allowing the canonical figure (benign) keeps a legit refi-sizing phrase intact even when it reads
+# "65% LTV / 1.25x DSCR refi-sizing convention" (SKILL.md:112) -- the 1.25 sits in the gap. Any
+# OTHER number (a DRIFTED floor like 1.10) is NOT the canonical literal, so it still BREAKS the gap
+# and the construct fails to match -> the drift stays fully visible (review Holes 1-3).
+_GAP = r"(?:[^\n%0-9]|" + re.escape(CANON_DSCR) + r")"
+RE_REFI_LESSER_OF_PAIR = re.compile(        # capture: (1) N% LTV member, (2) canonical DSCR member
+    r"lesser[\s\-]*of\b" + _GAP + r"{0,15}?([0-9]{1,3})\s*%[\s\-*]*ltv" + _GAP + r"{0,60}?"
+    + r"(" + re.escape(CANON_DSCR) + r")\s*[x×][\s\-*]*dscr", re.I)
+RE_REFI_SIZING_NAMED = re.compile(          # "<N>% LTV ... refi-sizing/refi-sized"; capture (1) N%
+    r"([0-9]{1,3})\s*%[\s\-*]*ltv\b" + _GAP + r"{0,30}?refi[\s\-]?siz", re.I)
+RE_REFI_TO_LTV = re.compile(                # "refi(s/nanced) ... to <N>% LTV"; capture (1) N%
+    r"refi\w*\b" + _GAP + r"{0,20}?to\s+([0-9]{1,3})\s*%[\s\-*]*ltv", re.I)
+RE_CANON_DSCR_PAIRED_LTV = re.compile(      # "1.25x DSCR <at/,> <N>% LTV"; capture (1) canon, (2) N%
+    r"(" + re.escape(CANON_DSCR) + r")\s*[x×][\s\-*]*dscr\b" + _GAP + r"{0,20}?([0-9]{1,3})\s*%[\s\-*]*ltv",
+    re.I)
+RE_BPS_DSCR_TIER = re.compile(              # "+/-N bps ... <X.XX>x DSCR" rate tier; capture (1) band
+    r"[+\-−±]\s*[0-9]+\s*bps\b" + _GAP + r"{0,50}?([0-9]+\.[0-9]+)\s*[x×][\s\-*]*dscr", re.I)
+RE_GOV_TOKEN = re.compile(r"governors?\b")
+RE_CANON_DSCR_GOV_PHRASE = re.compile(
+    re.escape(CANON_DSCR) + r"\s*[x×][\s\-*]*dscr\s+governor\b", re.I)
+
+def _refi_member_value_spans(low):
+    """Return (ltv_noveto, ltv_veto, dscr_veto): the exact digit-group spans of refi-sizing
+    construct MEMBER VALUES -- never whole-construct spans. Only these specific values are
+    refi-market inputs to (conditionally) suppress; any other value on the line stays visible."""
+    ltv_noveto, ltv_veto, dscr_veto = [], [], []
+    for mm in RE_REFI_LESSER_OF_PAIR.finditer(low):
+        ltv_noveto.append(mm.span(1))       # canonical-anchored refi ceiling -> no veto
+        # group(2) is the canonical 1.25 DSCR member; the DSCR loop skips canonical anyway.
+    for mm in RE_REFI_TO_LTV.finditer(low):
+        ltv_veto.append(mm.span(1))         # "refi(s) to N% LTV" -> VETO tier (follow-up 2): a real
+        # drift "refi to 65% LTV as the hard ceiling" flags; the skill's plain "refis running to 65%
+        # LTV" (portfolio governor >VETO_BEFORE away, no ceiling/gov declaration) stays suppressed.
+    for mm in RE_REFI_SIZING_NAMED.finditer(low):
+        ltv_veto.append(mm.span(1))
+    for mm in RE_CANON_DSCR_PAIRED_LTV.finditer(low):
+        ltv_veto.append(mm.span(2))         # the N% LTV member of the pairing -> veto
+    if any(t in low for t in REFI_TOKENS):  # bps tier is a refi input only in a refi context
+        for mm in RE_BPS_DSCR_TIER.finditer(low):
+            dscr_veto.append(mm.span(1))
+    return ltv_noveto, ltv_veto, dscr_veto
+
+def _in_spans(vs, ve, spans):
+    """True when the value span [vs, ve) is fully contained in one of `spans`."""
+    return any(s <= vs and ve <= e for (s, e) in spans)
+
+# Tokens that, near a VETO-tier member, mean the value is being declared AS the (acquisition)
+# governor -- so suppression is vetoed and the value flags. Bare 'floor'/'dscr floor'/'minimum dscr'
+# added per review: a value declared as a floor next to a refi phrasing is a governor declaration.
+# None of these sit within +-40 of any real-skill VETO-tier member (full-file test enforces this).
+ACQ_DECL_NEARBY = ("acquisition", "buy box", "buy-box", "hard filter", "hard screen",
+                   "hard ceiling", "hard cap", "floor", "dscr floor", "minimum dscr", "min dscr")
+
+def _spans_overlap(a0, a1, b0, b1):
+    return a0 < b1 and a1 > b0
+
+# Direction-aware veto reach. A declaration token is far more meaningful AFTER the value ("65% ...
+# is the governor" / "65% ... acquisition ceiling") than BEFORE it. The before-reach is deliberately
+# SHORT so a governor named earlier in the sentence as a DIFFERENT subject does NOT veto -- the real
+# skill writes "This [portfolio] governor is distinct from the per-property 65% ... refi-sizing
+# convention" (governor ~35 chars before the member) and "portfolio governor even with individual
+# refis running to 65% LTV". A tight before-reach keeps those suppressed while still catching a
+# value declared right after a lead-in ("the acquisition LTV governor is 65%", token ~12 before).
+# After-reach 40 catches "65% ... is the governor now" (~34 after). Widened 2026-07-12 (round-2
+# review W1: a real drift "acquisition governor was hereby raised to 55% LTV refi-sizing parity"
+# parks its declaring 'governor' ~22 chars before the value, in the old dead-zone). The tightest
+# real-skill BEFORE gap for a veto-tier member is 32 (:196 "40% LTV governor. Gabriel confirmed
+# 2026-07-11: 65% ..." -- a benign contrast mention), next is 39 (:300); 28 stays clear of both
+# while catching the ~22-char declaration. Margins enforced by the full-file test.
+VETO_BEFORE = 28
+VETO_AFTER = 40
+
+def _governor_declared_nearby(low, vs, ve=None):
+    """True when a bare singular 'governor' token -- or an acquisition-declaration token
+    (ACQ_DECL_NEARBY) -- OVERLAPS the DIRECTION-AWARE interval [vs-VETO_BEFORE, ve+VETO_AFTER]
+    around the value: the value may be declared AS the governor, so a VETO-tier refi member must
+    NOT be suppressed. Whole-line search + overlap test (review Hole 4: the prior finditer
+    end-bound / substring slice silently shrank the effective reach and biased toward silence).
+    Exemptions (both err toward detection elsewhere): PLURAL 'governors' (names multiple governors),
+    and a 'governor' inside the canonical phrase '1.25x DSCR governor' (binds to the canonical DSCR
+    on its left, e.g. 'the 1.25x DSCR governor at 65% LTV')."""
+    if ve is None:
+        ve = vs
+    lo, hi = vs - VETO_BEFORE, ve + VETO_AFTER
+    # acquisition-declaration substrings: any occurrence overlapping the interval vetoes.
+    for t in ACQ_DECL_NEARBY:
+        start = 0
+        while True:
+            k = low.find(t, start)
+            if k == -1:
+                break
+            if _spans_overlap(k, k + len(t), lo, hi):
+                return True
+            start = k + 1
+    phrase_spans = [pm.span() for pm in RE_CANON_DSCR_GOV_PHRASE.finditer(low)]
+    for gm in RE_GOV_TOKEN.finditer(low):
+        if gm.group(0).endswith("s"):        # plural 'governors' -> exempt
+            continue
+        gs, ge = gm.span()
+        if not _spans_overlap(gs, ge, lo, hi):
+            continue
+        if any(s <= gs and ge <= e for (s, e) in phrase_spans):  # canonical '1.25x DSCR governor'
+            continue
+        return True
+    return False
+
+def _refi_construct_suppressed(low, vs, ve, uncond_spans, guarded_spans):
+    """True when the value span [vs, ve) sits INSIDE a refi-sizing construct span and (for the
+    guarded tier) is not declared AS the governor nearby. Span containment only -- a value
+    outside every construct is never suppressed here."""
+    if any(s <= vs and ve <= e for (s, e) in uncond_spans):
+        return True
+    if any(s <= vs and ve <= e for (s, e) in guarded_spans):
+        return not _governor_declared_nearby(low, vs)
+    return False
+
 def scan_line(raw):
     """Return list of (reason) drift findings for one line."""
     out = []
@@ -381,6 +567,13 @@ def scan_line(raw):
     dscr_corr_spans = [mm.span() for mm in RE_DSCR_CORRECTION.finditer(low)]
     ltv_corr_spans = [mm.span() for mm in RE_LTV_CORRECTION.finditer(low)]
     is_gov = any(k in low for k in GOV_KEYWORDS)
+    # refi-sizing construct MEMBER-VALUE spans (2026-07-11): member-scoped suppression for the
+    # DSCR-candidate loop and the LTV proximity fallback ONLY -- the comparator (RE_LTV_CMP), anchor
+    # (RE_LTV_ANCHOR), FROMTO and reverse-order passes stay fully armed as the backstop for any
+    # explicitly-declared ceiling/floor, and the 1.75 sentinel (branch 1) is untouched. Only the
+    # construct's own member digits are suppressed -- a drift elsewhere on the line stays visible.
+    refi_ltv_noveto, refi_ltv_veto, refi_dscr_veto = (
+        _refi_member_value_spans(low) if is_gov else ([], [], []))
 
     # 1) Regression sentinel: 1.75 near DSCR/governor. Fires only for a 1.75 that is NEITHER (a) the
     #    corrected-away value of a "corrected from 1.75 → 1.25" note NOR (b) an explicit PORTFOLIO-LEVEL
@@ -421,8 +614,10 @@ def scan_line(raw):
         pair_spans = [mm.span() for mm in RE_RUBRIC_PAIR.finditer(low)]
         is_rubric = len(pair_spans) >= 2
         seen = set()
+        kw_after_spans = [mm.span(1) for mm in RE_DSCR_KW_AFTER_DSCR.finditer(low)]
         cands = (list(RE_DSCR_THRESH.finditer(low)) + list(RE_DSCR_FROMTO.finditer(low))
-                 + list(RE_DSCR_DECL.finditer(low)) + list(RE_DSCR_DECL_REV.finditer(low)))
+                 + list(RE_DSCR_DECL.finditer(low)) + list(RE_DSCR_DECL_REV.finditer(low))
+                 + list(RE_DSCR_KW_AFTER_DSCR.finditer(low)))
         # PIVOT_DECOY keys only on the literal canonical value + a pivot, so require the word
         # "dscr" on the line -- otherwise an unrelated "v1.25 -> 2.00" / "ratio 1.25 now 1.80"
         # would mis-fire (the other passes are self-qualifying via "dscr"-anchor or x/keyword).
@@ -448,6 +643,16 @@ def scan_line(raw):
             # acquisition governor. Vetoed by any acquisition-governor marker or a value declared AS
             # the governor (see _refi_qualified), so a real per-deal governor drift still flags.
             if _refi_qualified(low, vs):
+                continue
+            # skip a DSCR value that IS the bps rate-pricing tier's band member (a refi input) --
+            # member-scoped, so a floor declared elsewhere on the line still flags. Vetoed if the
+            # value is declared AS the governor nearby, OR if it is itself written "Nx DSCR
+            # floor/minimum" (a KW_AFTER_DSCR declaration): an explicitly-declared floor is a
+            # governor statement, not a rate-tier band, so it must flag even inside a bps tier
+            # (round-2 review W3). The legit ":196" tier "1.40x DSCR)" has no trailing floor-word,
+            # so it is NOT a KW_AFTER_DSCR match and stays suppressed.
+            if (_in_spans(vs, ve, refi_dscr_veto) and not _in_spans(vs, ve, kw_after_spans)
+                    and not _governor_declared_nearby(low, vs, ve)):
                 continue
             in_pair = any(s <= vs and ve <= e for (s, e) in pair_spans)
             if is_rubric and in_pair:
@@ -500,6 +705,20 @@ def scan_line(raw):
                         # stabilized exit value) -- not the acquisition LTV governor. Vetoed by any
                         # acquisition-governor marker or a value declared AS the governor.
                         if _refi_qualified(low, m.start()):
+                            continue
+                        # skip a percent that IS a refi-sizing construct's own LTV member value
+                        # ("LESSER of 65% LTV and 1.25x DSCR", "65% LTV refi-sizing figure",
+                        # "refi to 65% LTV", "1.25x DSCR governor at 65% LTV"). Member-scoped: a
+                        # ceiling declared elsewhere on the line stays visible. NO-VETO members
+                        # (LESSER-of ceiling, refi-to) suppress unconditionally; VETO members
+                        # (refi-sizing-named, PAIRED) flag if declared AS the governor nearby.
+                        # Applies ONLY to this weakest (bare-proximity) pass; comparator/anchor/
+                        # FROMTO/reverse passes stay un-suppressed.
+                        pvs, pve = m.span(1) if m.group(1) else m.span(2)
+                        if _in_spans(pvs, pve, refi_ltv_noveto):
+                            continue
+                        if (_in_spans(pvs, pve, refi_ltv_veto)
+                                and not _governor_declared_nearby(low, pvs, pve)):
                             continue
                         _flag_ltv(m.group(1) or m.group(2), kind="governor")
             # REVERSE-ORDER ceiling ("65% ceiling"/"65% maximum") -- number-then-keyword, needs NO

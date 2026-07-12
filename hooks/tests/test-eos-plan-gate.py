@@ -99,6 +99,26 @@ def test_empty_object_fails_open():
     print("PASS test_empty_object_fails_open")
 
 
+def test_denial_message_requests_reason():
+    """The 4th-edit denial must ask for a written reason, not a bare touch,
+    so the override carries an audit trail. Must still name the override path."""
+    tmp = tempfile.mkdtemp(prefix="eos-pg-")
+    for _ in range(3):
+        run_hook(payload("sess5", "C:/proj/x.py"), tmp)
+    rc, out, err = run_hook(payload("sess5", "C:/proj/x.py"), tmp)
+    assert rc == 0, "4th edit expected exit 0, got %s" % rc
+    decoded = json.loads(out)
+    reason_text = decoded["hookSpecificOutput"]["permissionDecisionReason"]
+    override_path = os.path.join(tmp, "sess5", "override")
+    assert override_path.replace("\\", "/") in reason_text.replace("\\", "/"), (
+        "denial must name the override path, got %r" % reason_text
+    )
+    assert "reason" in reason_text.lower(), (
+        "denial must ask for a written reason (not a bare touch), got %r" % reason_text
+    )
+    print("PASS test_denial_message_requests_reason")
+
+
 if __name__ == "__main__":
     test_four_code_edits_denies_on_fourth()
     test_non_code_path_always_allows()
@@ -106,4 +126,5 @@ if __name__ == "__main__":
     test_plan_approved_marker_allows_past_limit()
     test_malformed_stdin_fails_open()
     test_empty_object_fails_open()
+    test_denial_message_requests_reason()
     print("ALL PLAN-GATE TESTS PASS")
