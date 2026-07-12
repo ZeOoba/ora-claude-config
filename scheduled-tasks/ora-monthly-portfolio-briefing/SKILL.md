@@ -1,0 +1,35 @@
+---
+name: ora-monthly-portfolio-briefing
+description: Monthly AI-narrated portfolio briefing (1st @ 7:30 AM) — NOI trajectory, WALT, debt-maturity countdown, acquisition conversion + cross-sectional compound-risk synthesis; emails ggoldberg, archives to Notion. v1.0 2026-06-16 (strategic-audit Fix #5). Restored 2026-07-07. [MODEL: UNVERIFIABLE | checked 2026-07-08]
+---
+
+Run the ORA Monthly Portfolio Briefing — a self-contained, AI-narrated portfolio-health report. This scheduled session starts fresh with no memory; this prompt is the authoritative, complete spec. Today is the run date; the briefing covers the trailing month and the forward 18-month risk horizon.
+
+(Restored 2026-07-07 after the CC/MCP registry was destroyed by a 2026-07-05 app reinstall — recovered from the 2026-06-22 fleet snapshot.)
+
+TOOLING / CONVENTIONS
+- Python (if needed): use the FULL path C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe (bare `python` is NOT on PATH in scheduled sessions).
+- Email send: C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1 — this is the SOLE automated send path (Outlook COM / M365 only; no Gmail; the Composio and Rube connectors are removed — never reference them). On a non-zero exit: retry ONCE, then flag loudly in the Notion completion row — do NOT halt.
+- Recipient: ggoldberg@oxfordra.net ONLY (per the 2026-05-15 routing directive, re-ratified 2026-06-10 — only the Daily Brief cc's Eric; this briefing does not).
+- Notion canon: Acquisition Pipeline bcfe4a03 · Tenant DB 8dbbaec0 · Operations Hub 32b6ecd8. Notion via the native mcp__c5f4869f-…__notion-* tools. HubSpot via the native mcp__a3e380ce-…__* tools (current tenants only).
+- Formatting: ORA Institutional Style Guide v1.0+ (institutional, structured, direct; no filler).
+
+SOURCE OF RECORD (read order)
+1. The live ORA Master Workbook (SharePoint) is the FIRST source for firm figures — NOI, occupancy, debt schedule (balloon maturities + rates), cash. Read order + freshness canon: Notion pointer page 3706ecd8-9e59-813a-b4c7-ecbc2c213fa8. A mirror >7 days behind the workbook is STALE — note staleness, never present a stale mirror as current.
+2. Notion Tenant DB (8dbbaec0) for lease expirations / WALT inputs.
+3. Notion Acquisition Pipeline (bcfe4a03) for deal stages and conversion.
+
+BRIEFING SECTIONS (narrate, do not just tabulate)
+1. NOI Trajectory — portfolio NOI this period vs. prior period and trailing trend; name the 2–3 properties moving the number most, with direction and magnitude.
+2. Occupancy & WALT — current occupancy and weighted-average lease term (SF-weighted); flag WALT compression vs. last month.
+3. Debt-Maturity Countdown — every balloon/maturity inside 18 months, sorted by date, with balance, rate, and DSCR/LTV against the governors (DSCR ≥ 1.25x, LTV ≤ 40%). Flag any breach or near-breach.
+4. Acquisition Conversion — pipeline by stage; deals advanced/stalled/died this month; rough sourcing→LOI→close conversion read.
+5. Cash & Liquidity — total cash, largest-entity concentration, net of near-term debt service.
+6. COMPOUND-RISK SYNTHESIS (the point of this briefing) — synthesize ACROSS the sections: surface emerging multi-factor risks no single section shows. Example shape: "three orange-band-equivalent properties have balloon maturities inside 18 months while their submarket WALT is compressing and the 10Y is rising — open a refi conversation before Q4." Give 2–4 such cross-sectional judgments with a recommended next action each.
+
+OUTPUT
+- Email ggoldberg@oxfordra.net from ggoldberg via send-via-outlook.ps1. Subject: "ORA Monthly Portfolio Briefing — [Month YYYY]".
+- Archive the same briefing to a new Notion page under the Operations Hub (32b6ecd8). Apply the publication guard: capture the created page id+url; if null/errored, retry the create exactly ONCE; then search-verify the title was created today; if still failed, note "Publish: ❌ fallback" and include the full briefing body verbatim in the email so nothing is lost.
+- End your chat-summary output with one line: Publish: [✅ direct | ✅ retry | ❌ fallback] and Send: [✅ | ⚠ retried | ❌ flagged].
+
+HARD GUARDRAILS: never move money, modify financial models or governor constants (DSCR 1.25 / LTV 40), or touch oxfordra.net. Keep active confidential deals OFF all external/egress surfaces (the confidentiality guard is fail-closed). Do not modify settings.json, ~/.claude config, hooks, or memory files. Read the source of record before stating any figure — never fabricate firm, tenant, or deal data.
