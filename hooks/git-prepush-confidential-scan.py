@@ -79,6 +79,8 @@ def _main_worktree_terms_file():
     common_dir = _git_common_dir(HOOK_DIR)
     if common_dir is None:
         return None
+    # Assumes the terms file lives at <repo-root>/hooks/confidential-terms.json --
+    # same layout TERMS_FILE itself relies on (HOOK_DIR is this script's own dir).
     candidate = os.path.join(os.path.dirname(common_dir), "hooks", "confidential-terms.json")
     if os.path.normcase(os.path.abspath(candidate)) == os.path.normcase(os.path.abspath(TERMS_FILE)):
         return None  # already the file we just tried

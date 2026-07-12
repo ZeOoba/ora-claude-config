@@ -99,10 +99,34 @@ with tempfile.TemporaryDirectory() as td:
         expect("load_terms: falls back to main worktree's terms file",
                pps.load_terms() == ["zephyr corp"])
 
+        # Local copy present but malformed must ALSO fall back, not just an absent one.
+        local_terms = os.path.join(linked_wt, "hooks", "confidential-terms.json")
+        with open(local_terms, "w", encoding="utf-8") as f:
+            f.write("{not valid json")
+        _point_at(linked_wt)
+        expect("load_terms: falls back on a corrupt local file, not just a missing one",
+               pps.load_terms() == ["zephyr corp"])
+        os.remove(local_terms)
+
         # Truly missing everywhere (main copy removed too) must still fail closed.
         os.remove(terms_path)
         _point_at(linked_wt)
         expect("load_terms: missing everywhere -> None (fail-closed preserved)",
+               pps.load_terms() is None)
+    finally:
+        pps.HOOK_DIR, pps.TERMS_FILE = saved_hook_dir, saved_terms_file
+
+# --- load_terms(): no git repo at all (git rev-parse fails) -> still fail-closed --
+# Covers _git_common_dir's own failure path (not a repo / git unavailable), distinct
+# from the "resolves fine but file absent" case above.
+with tempfile.TemporaryDirectory() as td:
+    orphan_hooks = os.path.join(td, "not-a-repo", "hooks")
+    os.makedirs(orphan_hooks)
+    saved_hook_dir, saved_terms_file = pps.HOOK_DIR, pps.TERMS_FILE
+    pps.HOOK_DIR = orphan_hooks
+    pps.TERMS_FILE = os.path.join(orphan_hooks, "confidential-terms.json")
+    try:
+        expect("load_terms: HOOK_DIR outside any git repo -> None (fail-closed preserved)",
                pps.load_terms() is None)
     finally:
         pps.HOOK_DIR, pps.TERMS_FILE = saved_hook_dir, saved_terms_file
