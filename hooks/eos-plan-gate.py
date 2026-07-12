@@ -86,8 +86,9 @@ def main():
         override_path = os.path.join(sess_dir, "override")
         reason = (
             "Engineering OS: 4+ code files edited with no plan this session. "
-            "Run /plan or /build first, or `touch " + override_path +
-            "` to proceed."
+            "Run /plan or /build first, or write a one-line reason to `" +
+            override_path + "` to proceed (e.g. `echo reason: <why> > \"" +
+            override_path + "\"`) -- the reason is surfaced in session telemetry."
         )
         out = {
             "hookSpecificOutput": {
