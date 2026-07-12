@@ -38,13 +38,9 @@
 !/scheduled-tasks/*/
 /scheduled-tasks/*/*
 !/scheduled-tasks/*/SKILL.md
-# HOLD — specs referencing a still-listed confidential-roster term (E. Fulton) stay OUT
-# until confidential-terms.json is cleaned per rules.md §7b (declassification checklist).
-# Re-include these four by deleting their lines once the roster no longer lists the term.
-/scheduled-tasks/ora-health-guard/SKILL.md
-/scheduled-tasks/ora-open-sessions-board/SKILL.md
-/scheduled-tasks/ora-pm-ledger/SKILL.md
-/scheduled-tasks/ora-weekly-hygiene/SKILL.md
+# (2026-07-12) The former E. Fulton HOLD block was removed once the deal was confirmed
+# declassified (confidential-terms.json e_fulton active:false, §7b). All scheduled-task
+# SKILL.mds are now versioned; runtime state (_state/ _unsent/ logs/.bak) stays ignored below.
 
 # 3) Re-ignore secrets, caches & transient state INSIDE opted-in dirs
 hooks/confidential-terms.json
