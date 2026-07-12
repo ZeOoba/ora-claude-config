@@ -37,15 +37,23 @@ the no-hit clean-egress path (the exact path a missing deal would slip through) 
 
 Exit 0 = allow. Exit 2 = block (PreToolUse convention). The stale-roster advisory rides on the
 allow path (exit 0 + stderr) -- it never flips an allow into a block or vice-versa.
+
+Linked worktrees: hooks/confidential-terms.json is gitignored, so `git worktree add` never
+checks it out into a fresh linked worktree. load_terms() falls back to the MAIN worktree's
+copy (resolved via `git rev-parse --git-common-dir`, shared by every worktree of the same
+repo) when this checkout's own copy is missing or unreadable and no explicit
+CONFIDENTIAL_TERMS_FILE_OVERRIDE is set. Still fail-closed if the file is unreadable in BOTH
+places (2026-07-12, mirrors the same fix in git-prepush-confidential-scan.py).
 """
-import sys, os, json, re, datetime
+import sys, os, json, re, datetime, subprocess
 
 HOOK_DIR = os.path.dirname(os.path.abspath(__file__))
 # Test-only override (2026-07-09), same pattern as shared-checkout-guard.py's
 # SHARED_CHECKOUT_REPOS env var: unset in every real session, so production behavior is
 # byte-identical. Lets test-confidentiality-guard.py point this subprocess at a synthetic
 # terms file when the live roster has zero active deals, without touching the real one.
-TERMS_FILE = os.environ.get("CONFIDENTIAL_TERMS_FILE_OVERRIDE") or os.path.join(HOOK_DIR, "confidential-terms.json")
+TERMS_FILE_OVERRIDE = os.environ.get("CONFIDENTIAL_TERMS_FILE_OVERRIDE")
+TERMS_FILE = TERMS_FILE_OVERRIDE or os.path.join(HOOK_DIR, "confidential-terms.json")
 
 SITE_MARKERS = ("oxford-site", "oxfordra.net", "oxfordra_net", "website-canonical")
 ARTIFACT_EXT = (".pptx", ".docx", ".pdf", ".html", ".htm", ".csv")
@@ -92,9 +100,62 @@ def block(reason):
     sys.exit(2)
 
 
+def _git_common_dir(start_dir):
+    """Absolute path to the repo's shared .git dir (same for every worktree of
+    the same repo), or None on any failure -- not a git repo, git missing, etc."""
+    try:
+        p = subprocess.run(
+            ["git", "-C", start_dir, "rev-parse", "--git-common-dir"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except Exception:
+        return None
+    if p.returncode != 0:
+        return None
+    out = p.stdout.strip()
+    if not out:
+        return None
+    if not os.path.isabs(out):
+        out = os.path.normpath(os.path.join(start_dir, out))
+    return out
+
+
+def _main_worktree_terms_file():
+    """confidential-terms.json in the MAIN worktree, or None if it can't be
+    resolved or doesn't exist there. hooks/confidential-terms.json is gitignored
+    (see .gitignore), so `git worktree add` never checks it out into a linked
+    worktree -- this lets a linked worktree fall back to the main checkout's
+    copy instead of failing closed on every egress call from a fresh worktree
+    (2026-07-12, mirrors the same fix in git-prepush-confidential-scan.py)."""
+    common_dir = _git_common_dir(HOOK_DIR)
+    if common_dir is None:
+        return None
+    candidate = os.path.join(os.path.dirname(common_dir), "hooks", "confidential-terms.json")
+    if os.path.normcase(os.path.abspath(candidate)) == os.path.normcase(os.path.abspath(TERMS_FILE)):
+        return None  # already the file we just tried
+    return candidate
+
+
 def load_terms():
-    with open(TERMS_FILE, encoding="utf-8") as f:
-        return json.load(f)
+    """Parsed terms dict. Tries this checkout's copy first; when no explicit
+    CONFIDENTIAL_TERMS_FILE_OVERRIDE is set and that copy is missing/unreadable,
+    falls back to the MAIN worktree's copy (git-common-dir is shared across every
+    worktree of the repo) before giving up. The override is a test-only escape
+    hatch and is used EXACTLY as given, with no fallback, so a test pointed at a
+    synthetic fixture never silently falls through to the real roster. Still
+    raises (the caller's except in main() fails closed) if unreadable everywhere.
+    """
+    try:
+        with open(TERMS_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        if TERMS_FILE_OVERRIDE:
+            raise
+        fallback = _main_worktree_terms_file()
+        if fallback is None:
+            raise
+        with open(fallback, encoding="utf-8") as f:
+            return json.load(f)
 
 
 def roster_staleness(terms):
