@@ -407,8 +407,11 @@ def test_terms_shape_failopen():
                 "probe must never crash (stderr non-empty):\n%s" % r.stderr)
             assert expect in r.stdout, (
                 "expected a '%s' fail-open WARN:\n%s" % (expect, r.stdout))
-            assert "inert this run" in r.stdout, (
-                "an inert leak check must announce itself:\n%s" % r.stdout)
+            # With 0 usable term sequences the leak check now runs a synthetic matcher
+            # self-check instead of going silently inert -- it must announce a PASS.
+            assert "self-check: PASS" in r.stdout, (
+                "the matcher self-check must run and pass when there is no real "
+                "leak target:\n%s" % r.stdout)
         finally:
             os.remove(doc)
             os.remove(tpath)
@@ -628,6 +631,65 @@ def test_memory_index_hookless_entry_no_warn():
     print("  PASS test_memory_index_hookless_entry_no_warn")
 
 
+def _load_probe_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("doctrine_integrity_probe", PROBE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_selfcheck_positive_and_negative_controls():
+    """leak_scan_selfcheck: a clean sample (no synthetic terms) -> ok=True; a sample
+    that DOES contain a synthetic term (collision) -> ok=False with a finding."""
+    m = _load_probe_module()
+    ok, findings = m.leak_scan_selfcheck([("clean", "ordinary CLAUDE doctrine text, no fixtures")])
+    assert ok and not findings, "clean sample must pass the self-check; got %r" % findings
+    bad = "policy note mentioning Project Halcyon Placeholder in prose"
+    ok2, findings2 = m.leak_scan_selfcheck([("bad", bad)])
+    assert not ok2 and any("collided" in f or "over-match" in f for f in findings2), (
+        "a synthetic-term collision must fail the self-check; got %r" % findings2)
+    print("  PASS test_selfcheck_positive_and_negative_controls")
+
+
+def test_selfcheck_detects_broken_matcher():
+    """If contains_run regresses (always False), the POSITIVE control must catch it ->
+    ok=False with a NON-FUNCTIONAL finding. This is the assurance the check exists to give."""
+    m = _load_probe_module()
+    orig = m.contains_run
+    try:
+        m.contains_run = lambda hay, needle: False  # simulate a broken matcher
+        ok, findings = m.leak_scan_selfcheck([("clean", "nothing here")])
+        assert not ok and any("NON-FUNCTIONAL" in f for f in findings), (
+            "a broken matcher must fail the self-check; got %r" % findings)
+    finally:
+        m.contains_run = orig
+    print("  PASS test_selfcheck_detects_broken_matcher")
+
+
+def test_no_active_deal_runs_selfcheck_and_passes():
+    """Integration: with a 0-active-deal terms file, the probe runs the synthetic
+    self-check (instead of going inert) and stays exit 0, announcing a PASS."""
+    import json
+    terms = {"_meta": {"purpose": "test"},
+             "closed_deal": {"label": "t", "active": False, "always": ["zzz-closed"]}}
+    fd, tpath = tempfile.mkstemp(suffix="_terms.json", text=True)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump(terms, fh)
+    doc = _write_fixture(_v21_base())
+    try:
+        r = run_probe([doc, "--terms=%s" % tpath])
+        assert r.returncode == 0, (
+            "0-active-deal self-check must keep exit 0, got %d\n%s" % (r.returncode, r.stdout))
+        assert "self-check: PASS" in r.stdout, (
+            "the probe must announce the matcher self-check PASS:\n%s" % r.stdout)
+        assert "[MISSING]" not in r.stdout, "no MISSING expected on a passing self-check:\n%s" % r.stdout
+    finally:
+        os.remove(doc)
+        os.remove(tpath)
+    print("  PASS test_no_active_deal_runs_selfcheck_and_passes")
+
+
 def main():
     assert os.path.isfile(REAL_CLAUDE_MD), "real CLAUDE.md not found: %s" % REAL_CLAUDE_MD
     test_real_doctrine_valid()
@@ -656,6 +718,9 @@ def main():
     test_memory_index_long_title_short_hook_no_warn()
     test_memory_index_long_hook_warns()
     test_memory_index_hookless_entry_no_warn()
+    test_selfcheck_positive_and_negative_controls()
+    test_selfcheck_detects_broken_matcher()
+    test_no_active_deal_runs_selfcheck_and_passes()
     print("ALL DOCTRINE-PROBE TESTS PASS")
 
 

@@ -495,6 +495,48 @@ def contains_run(haystack_words, needle_words):
     return False
 
 
+# Synthetic control terms for the no-active-deal self-check (check 8). Chosen to be
+# distinctive enough to never legitimately appear in the tree, so the NEGATIVE control
+# (they must be absent from real content) is stable.
+SYNTHETIC_LEAK_TERMS = [
+    "Zephyr Nightingale Portfolio LLC",
+    "1742 Chimera Fixture Boulevard",
+    "Project Halcyon Placeholder",
+]
+
+
+def leak_scan_selfcheck(samples):
+    """Positive+negative control that the confidential leak MATCHER (word_stream +
+    contains_run) is still live during a no-active-deal window -- when there are zero
+    real term sequences and check 8 would otherwise be fully inert, silently providing
+    no assurance on this fail-closed boundary. Mirrors the synthetic-terms fallback in
+    hooks/tests/test-confidentiality-guard.py, reused inside the probe itself.
+
+    samples = [(label, body_text)] of real content KNOWN not to contain the synthetic
+    terms (e.g. CLAUDE.md). Returns (ok, findings): findings is a list of hard-fail
+    strings -- a broken matcher (a planted synthetic term NOT detected) or an
+    over-match/collision (a synthetic control term found in real content). Empty
+    findings => ok=True."""
+    findings = []
+    seqs = [tuple(word_stream(t)) for t in SYNTHETIC_LEAK_TERMS]
+    # POSITIVE control: a body that DOES contain each synthetic term MUST match.
+    for term, seq in zip(SYNTHETIC_LEAK_TERMS, seqs):
+        planted = word_stream("lead-in noise " + term + " trailing noise")
+        if not seq or not contains_run(planted, seq):
+            findings.append("leak-scan SELF-CHECK FAILED: the matcher did not detect a "
+                            "planted synthetic term -- confidential leak detection is "
+                            "NON-FUNCTIONAL (word_stream/contains_run regression)")
+    # NEGATIVE control: the synthetic terms MUST NOT appear in any real sample.
+    for label, body in samples:
+        bw = word_stream(body)
+        for seq in seqs:
+            if seq and contains_run(bw, seq):
+                findings.append("leak-scan SELF-CHECK: a synthetic control term matched in "
+                                "%s -- matcher over-matching or a synthetic term collided "
+                                "with real content" % ascii_safe(label))
+    return (not findings), findings
+
+
 def git_tracked_md(repo_dir):
     """Repo-relative paths (posix) of git-TRACKED *.md files, or None if git is
     unavailable -- tracked files are exactly what reaches the off-machine remote."""
@@ -841,11 +883,27 @@ def main():
                     missing.append("confidential leak in %s (deal #%d, term %d)"
                                    % (safe_label, deal_idx, t_i))
     else:
-        # 0 active term sequences = either every deal genuinely closed, or the
-        # terms file degraded above. Either way say so -- silence is how a
-        # gutted terms file impersonates a clean pass.
-        warn("confidential-term scan: 0 active term(s) resolved -- leak check "
-             "inert this run")
+        # 0 active term sequences = every deal genuinely closed, or the terms file
+        # degraded above. Either way, the leak MATCHER (word_stream + contains_run)
+        # would go fully untested through the whole no-active-deal window -- a silent
+        # loss of assurance on this fail-closed boundary. Run a synthetic
+        # positive+negative control so the matcher stays regression-tested EVERY run
+        # (reusing the synthetic-terms idea from test-confidentiality-guard.py). A
+        # planted synthetic term MUST be detected (else the matcher is broken); the
+        # synthetic terms MUST be absent from real content (else over-match/collision) --
+        # either failure is a hard [MISSING], because it means the leak scan is not
+        # actually working.
+        warn("confidential-term scan: 0 active term(s) resolved -- no real leak "
+             "target this run; running synthetic matcher self-check")
+        sc_ok, sc_findings = leak_scan_selfcheck([("CLAUDE.md", text)])
+        if sc_ok:
+            print("Confidential leak-scan self-check: PASS -- matcher live "
+                  "(%d synthetic control term(s), 0 real terms this window)"
+                  % len(SYNTHETIC_LEAK_TERMS))
+        else:
+            for f in sc_findings:
+                print("  [MISSING] " + f)
+                missing.append(f)
 
     # --- 9. MEMORY.md index-entry hook length (memory-policy.md sec 3: each index
     # entry is "a one-line description"). WARN-only, mirroring check 7: this ADDS
