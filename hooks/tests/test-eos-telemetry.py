@@ -14,10 +14,12 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # hooks/ (te
 HOOK = os.path.join(HERE, "eos-telemetry.py")
 
 
-def run_hook(stdin_text, telemetry_dir):
+def run_hook(stdin_text, telemetry_dir, sessions_dir=None):
     """Run the hook as a subprocess. Returns (returncode, stdout, stderr)."""
     env = dict(os.environ)
     env["EOS_TELEMETRY_DIR"] = telemetry_dir
+    if sessions_dir is not None:
+        env["EOS_SESSIONS_DIR"] = sessions_dir
     proc = subprocess.run(
         [sys.executable, HOOK],
         input=stdin_text,
@@ -182,10 +184,83 @@ def test_no_code_activity_skipped():
     print("PASS test_no_code_activity_skipped")
 
 
+def test_override_used_surfaces_reason():
+    tmp = tempfile.mkdtemp(prefix="eos-test-")
+    transcript = os.path.join(tmp, "transcript.jsonl")
+    tele_dir = os.path.join(tmp, "telemetry")
+    sessions_dir = os.path.join(tmp, "sessions")
+    make_transcript(transcript)
+
+    sess_dir = os.path.join(sessions_dir, "test-override")
+    os.makedirs(sess_dir, exist_ok=True)
+    with open(os.path.join(sess_dir, "override"), "w", encoding="utf-8") as fh:
+        fh.write("reason: applying planned fleet migration, plan doc pending")
+
+    stdin = json.dumps({"session_id": "test-override", "transcript_path": transcript})
+    rc, out, err = run_hook(stdin, tele_dir, sessions_dir)
+    assert rc == 0, "expected exit 0, got %s (stderr=%s)" % (rc, err)
+
+    out_file = os.path.join(tele_dir, "lane-telemetry.jsonl")
+    with open(out_file, "r", encoding="ascii") as fh:
+        rec = json.loads(fh.read().splitlines()[-1])
+    assert rec["override_used"] is True, rec
+    assert rec["override_reason"] == "reason: applying planned fleet migration, plan doc pending", rec
+    assert rec["override_at"], "expected a non-empty override_at timestamp, got %r" % rec
+    print("PASS test_override_used_surfaces_reason")
+
+
+def test_override_used_no_reason_backward_compat():
+    """Old-style 0-byte override files (pre-fix) must still surface override_used=True
+    with a null reason, not crash telemetry."""
+    tmp = tempfile.mkdtemp(prefix="eos-test-")
+    transcript = os.path.join(tmp, "transcript.jsonl")
+    tele_dir = os.path.join(tmp, "telemetry")
+    sessions_dir = os.path.join(tmp, "sessions")
+    make_transcript(transcript)
+
+    sess_dir = os.path.join(sessions_dir, "test-empty-override")
+    os.makedirs(sess_dir, exist_ok=True)
+    open(os.path.join(sess_dir, "override"), "w").close()  # 0 bytes, old style
+
+    stdin = json.dumps({"session_id": "test-empty-override", "transcript_path": transcript})
+    rc, out, err = run_hook(stdin, tele_dir, sessions_dir)
+    assert rc == 0, "expected exit 0, got %s (stderr=%s)" % (rc, err)
+
+    out_file = os.path.join(tele_dir, "lane-telemetry.jsonl")
+    with open(out_file, "r", encoding="ascii") as fh:
+        rec = json.loads(fh.read().splitlines()[-1])
+    assert rec["override_used"] is True, rec
+    assert rec["override_reason"] is None, rec
+    print("PASS test_override_used_no_reason_backward_compat")
+
+
+def test_no_override_file():
+    tmp = tempfile.mkdtemp(prefix="eos-test-")
+    transcript = os.path.join(tmp, "transcript.jsonl")
+    tele_dir = os.path.join(tmp, "telemetry")
+    sessions_dir = os.path.join(tmp, "sessions")
+    make_transcript(transcript)
+
+    stdin = json.dumps({"session_id": "test-no-override", "transcript_path": transcript})
+    rc, out, err = run_hook(stdin, tele_dir, sessions_dir)
+    assert rc == 0, "expected exit 0, got %s (stderr=%s)" % (rc, err)
+
+    out_file = os.path.join(tele_dir, "lane-telemetry.jsonl")
+    with open(out_file, "r", encoding="ascii") as fh:
+        rec = json.loads(fh.read().splitlines()[-1])
+    assert rec["override_used"] is False, rec
+    assert rec["override_reason"] is None, rec
+    assert rec["override_at"] is None, rec
+    print("PASS test_no_override_file")
+
+
 if __name__ == "__main__":
     test_happy_path()
     test_malformed_stdin_fails_open()
     test_empty_object_fails_open()
     test_missing_transcript_fails_open()
     test_no_code_activity_skipped()
+    test_override_used_surfaces_reason()
+    test_override_used_no_reason_backward_compat()
+    test_no_override_file()
     print("ALL TELEMETRY TESTS PASS")
