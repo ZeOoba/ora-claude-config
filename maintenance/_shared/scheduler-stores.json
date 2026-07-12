@@ -9,6 +9,11 @@
     "cc": "claude-code-sessions",
     "lams": "local-agent-mode-sessions"
   },
+  "skillFolderRoots": {
+    "_doc": "Fixed roots for SKILL.md task folders (distinct from the registry JSON stores above). Added 2026-07-12 for task-folder-registration-probe.py.",
+    "cc": "%USERPROFILE%\\.claude\\scheduled-tasks",
+    "lams": "%USERPROFILE%\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled"
+  },
   "fleetFloors": {
     "cc": 13,
     "lams": 4,
