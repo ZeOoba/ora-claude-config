@@ -11,6 +11,12 @@ indices are reported.
 FAIL-CLOSED: terms file unreadable -> block; git log fails (e.g. unknown remote
 sha — run `git fetch` first) -> block. No active terms (all deals closed) -> allow.
 
+Linked worktrees: hooks/confidential-terms.json is gitignored, so `git worktree
+add` never checks it out into a fresh linked worktree. load_terms() falls back to
+the MAIN worktree's copy (resolved via `git rev-parse --git-common-dir`, shared by
+every worktree of the same repo) when this checkout's own copy is missing or
+unreadable. Still fail-closed if the file is unreadable in BOTH places (2026-07-12).
+
 Install (done 2026-06-11; re-do after any fresh clone — see docs/MIGRATION_RUNBOOK.md).
 The .git/hooks/pre-push shim is NOT version-controlled, so it must be recreated on every
 fresh clone. It runs BOTH tracked checks — the doctrine-drift gate FIRST, then this
@@ -35,12 +41,61 @@ TERMS_FILE = os.path.join(HOOK_DIR, "confidential-terms.json")
 ZERO_RE = "0"
 
 
-def load_terms():
-    """Lowercased active always-terms, or None if the file is unreadable (fail-closed)."""
+def _read_json(path):
+    """Parsed JSON from path, or None on any read/parse error."""
     try:
-        with open(TERMS_FILE, encoding="utf-8") as f:
-            d = json.load(f)
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
     except Exception:
+        return None
+
+
+def _git_common_dir(start_dir):
+    """Absolute path to the repo's shared .git dir (same for every worktree of
+    the same repo), or None on any failure -- not a git repo, git missing, etc."""
+    try:
+        p = subprocess.run(
+            ["git", "-C", start_dir, "rev-parse", "--git-common-dir"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except Exception:
+        return None
+    if p.returncode != 0:
+        return None
+    out = p.stdout.strip()
+    if not out:
+        return None
+    if not os.path.isabs(out):
+        out = os.path.normpath(os.path.join(start_dir, out))
+    return out
+
+
+def _main_worktree_terms_file():
+    """confidential-terms.json in the MAIN worktree, or None if it can't be
+    resolved or doesn't exist there. hooks/confidential-terms.json is gitignored
+    (see .gitignore), so `git worktree add` never checks it out into a linked
+    worktree -- this lets a linked worktree fall back to the main checkout's
+    copy instead of failing closed on every push from a fresh worktree."""
+    common_dir = _git_common_dir(HOOK_DIR)
+    if common_dir is None:
+        return None
+    # Assumes the terms file lives at <repo-root>/hooks/confidential-terms.json --
+    # same layout TERMS_FILE itself relies on (HOOK_DIR is this script's own dir).
+    candidate = os.path.join(os.path.dirname(common_dir), "hooks", "confidential-terms.json")
+    if os.path.normcase(os.path.abspath(candidate)) == os.path.normcase(os.path.abspath(TERMS_FILE)):
+        return None  # already the file we just tried
+    return candidate
+
+
+def load_terms():
+    """Lowercased active always-terms, or None if unreadable both in this
+    checkout and (falling back) in the main worktree's copy (fail-closed)."""
+    d = _read_json(TERMS_FILE)
+    if d is None:
+        fallback = _main_worktree_terms_file()
+        if fallback is not None:
+            d = _read_json(fallback)
+    if d is None:
         return None
     out = []
     for key, deal in d.items():
