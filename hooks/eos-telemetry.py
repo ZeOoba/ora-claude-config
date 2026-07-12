@@ -3,7 +3,9 @@
 Reads the SessionEnd hook JSON from stdin, parses the session transcript,
 and (only for coding sessions) appends one telemetry record to
 lane-telemetry.jsonl. Used to measure how often coding sessions declare a
-lane, run a test, dispatch a subagent, and show verification evidence.
+lane, run a test, dispatch a subagent, show verification evidence, and
+whether the session bypassed eos-plan-gate.py's plan requirement via an
+override marker (and, if so, the reason recorded in that marker).
 
 SAFETY INVARIANT: this hook FAILS OPEN. The entire body is wrapped in a
 broad try/except. On ANY error -- bad stdin, missing field, unreadable file,
@@ -17,9 +19,11 @@ import json
 import os
 import re
 import sys
+from datetime import datetime, timezone
 
 DEFAULT_DIR = "C:/Users/Owner/.claude/telemetry"
 OUT_NAME = "lane-telemetry.jsonl"
+DEFAULT_SESSIONS_DIR = "C:/Users/Owner/.claude/hooks/sessions"
 
 EDIT_TOOLS = ("Edit", "Write", "MultiEdit")
 BASH_TEST_RE = re.compile(
@@ -141,6 +145,23 @@ def main():
         return
     out_file = os.path.join(out_dir, OUT_NAME)
 
+    override_used = False
+    override_reason = None
+    override_at = None
+    try:
+        sessions_dir = os.environ.get("EOS_SESSIONS_DIR") or DEFAULT_SESSIONS_DIR
+        override_path = os.path.join(sessions_dir, session_id, "override")
+        if os.path.isfile(override_path):
+            override_used = True
+            override_at = datetime.fromtimestamp(
+                os.stat(override_path).st_mtime, tz=timezone.utc
+            ).isoformat()
+            with open(override_path, "r", encoding="utf-8", errors="replace") as fh:
+                text = fh.read().strip()
+            override_reason = text if text else None
+    except Exception:
+        pass  # a corrupt override file must not drop the rest of the record
+
     record = {
         "session_id": session_id,
         "edits": edits,
@@ -149,6 +170,9 @@ def main():
         "task_dispatched": task_dispatched,
         "lane_declared": lane_declared,
         "verification_seen": verification_seen,
+        "override_used": override_used,
+        "override_reason": override_reason,
+        "override_at": override_at,
     }
     with open(out_file, "a", encoding="ascii") as fh:
         fh.write(json.dumps(record) + "\n")
