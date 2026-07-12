@@ -53,6 +53,30 @@ def test_plan_path_backslash_creates_marker():
     print("PASS test_plan_path_backslash_creates_marker")
 
 
+def test_native_plan_mode_path_creates_marker():
+    """Native Claude Code plan-mode writes to ~/.claude/plans/*.md -- this must
+    also count as an approved plan, not just the superpowers docs/ convention.
+    Confirmed 2026-07-12: this session's own plan file wouldn't have cleared
+    the gate before this fix."""
+    tmp = tempfile.mkdtemp(prefix="eos-pm-")
+    p = "C:/Users/Owner/.claude/plans/some-plan-slug.md"
+    rc, out, err = run_hook(payload("s5", p), tmp)
+    assert rc == 0, "expected exit 0, got %s (%s)" % (rc, err)
+    marker = os.path.join(tmp, "s5", "plan-approved")
+    assert os.path.exists(marker), "plan-approved marker not created for native plan-mode path"
+    print("PASS test_native_plan_mode_path_creates_marker")
+
+
+def test_native_plan_mode_path_backslash_creates_marker():
+    tmp = tempfile.mkdtemp(prefix="eos-pm-")
+    p = r"C:\Users\Owner\.claude\plans\some-plan-slug.md"
+    rc, out, err = run_hook(payload("s6", p), tmp)
+    assert rc == 0, "expected exit 0, got %s" % rc
+    marker = os.path.join(tmp, "s6", "plan-approved")
+    assert os.path.exists(marker), "plan-approved marker not created (backslash, native path)"
+    print("PASS test_native_plan_mode_path_backslash_creates_marker")
+
+
 def test_non_plan_path_no_marker():
     tmp = tempfile.mkdtemp(prefix="eos-pm-")
     rc, out, err = run_hook(payload("s3", "C:/proj/src/x.py"), tmp)
@@ -79,6 +103,8 @@ def test_empty_object_fails_open():
 if __name__ == "__main__":
     test_plan_path_creates_marker()
     test_plan_path_backslash_creates_marker()
+    test_native_plan_mode_path_creates_marker()
+    test_native_plan_mode_path_backslash_creates_marker()
     test_non_plan_path_no_marker()
     test_malformed_stdin_fails_open()
     test_empty_object_fails_open()

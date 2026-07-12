@@ -248,7 +248,21 @@ with tempfile.TemporaryDirectory() as td:
         guard_src = f.read()
     with open(os.path.join(main_repo, "hooks", "confidentiality-guard.py"), "w", encoding="utf-8") as f:
         f.write(guard_src)
-    subprocess.run(["git", "-C", main_repo, "add", "README.md", "hooks/confidentiality-guard.py"], check=True)
+    # hooks/lib/site_markers.py (2026-07-12) is a tracked dependency confidentiality-guard.py
+    # now imports at load time -- it must be seeded into this synthetic repo too, exactly
+    # like the real one, or the linked-worktree repro below fails for a reason unrelated to
+    # what this test actually exercises (the terms-file fallback).
+    os.makedirs(os.path.join(main_repo, "hooks", "lib"), exist_ok=True)
+    real_lib_dir = os.path.join(os.path.dirname(GUARD), "lib")
+    with open(os.path.join(real_lib_dir, "site_markers.py"), encoding="utf-8") as f:
+        site_markers_src = f.read()
+    with open(os.path.join(main_repo, "hooks", "lib", "site_markers.py"), "w", encoding="utf-8") as f:
+        f.write(site_markers_src)
+    subprocess.run(
+        ["git", "-C", main_repo, "add", "README.md",
+         "hooks/confidentiality-guard.py", "hooks/lib/site_markers.py"],
+        check=True,
+    )
     subprocess.run(["git", "-C", main_repo, "commit", "-q", "-m", "seed"], check=True)
 
     # Never committed -- mirrors the real file being gitignored (present in the main

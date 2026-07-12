@@ -48,6 +48,9 @@ places (2026-07-12, mirrors the same fix in git-prepush-confidential-scan.py).
 import sys, os, json, re, datetime, subprocess
 
 HOOK_DIR = os.path.dirname(os.path.abspath(__file__))
+LIB_DIR = os.path.join(HOOK_DIR, "lib")
+sys.path.insert(0, LIB_DIR)
+from site_markers import SITE_PATH_MARKERS as SITE_MARKERS  # noqa: E402
 # Test-only override (2026-07-09), same pattern as shared-checkout-guard.py's
 # SHARED_CHECKOUT_REPOS env var: unset in every real session, so production behavior is
 # byte-identical. Lets test-confidentiality-guard.py point this subprocess at a synthetic
@@ -55,7 +58,6 @@ HOOK_DIR = os.path.dirname(os.path.abspath(__file__))
 TERMS_FILE_OVERRIDE = os.environ.get("CONFIDENTIAL_TERMS_FILE_OVERRIDE")
 TERMS_FILE = TERMS_FILE_OVERRIDE or os.path.join(HOOK_DIR, "confidential-terms.json")
 
-SITE_MARKERS = ("oxford-site", "oxfordra.net", "oxfordra_net", "website-canonical")
 ARTIFACT_EXT = (".pptx", ".docx", ".pdf", ".html", ".htm", ".csv")
 BUILD_MARKERS = ("/dist/", "\\dist\\", "/outputs/", "\\outputs\\", "mirror")
 

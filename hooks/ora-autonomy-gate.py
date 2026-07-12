@@ -29,10 +29,13 @@ import re
 import sys
 import time
 
+LIB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib")
+sys.path.insert(0, LIB_DIR)
+from site_markers import SITE_PATH_MARKERS  # noqa: E402
+
 OVERRIDE_DIR = r"C:\Users\Owner\.claude\hooks\overrides"
 OVERRIDE_TTL_SECONDS = 3600
 INTERNAL_DOMAIN = "@oxfordra.net"
-SITE_PATH_MARKERS = ("website-canonical", "oxford-site")
 RECIPIENT_FLAGS = ("-to", "-cc", "-bcc")  # any one means the send has external reach
 # Mutating shell ops; if one of these co-occurs with a site-path marker in a Bash
 # command, treat it as a write into the oxfordra.net tree (Gate 2). Read-only verbs
