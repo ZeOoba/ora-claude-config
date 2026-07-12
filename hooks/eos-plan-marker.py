@@ -1,7 +1,9 @@
 """Engineering OS plan marker -- PostToolUse hook for Write|Edit.
 
-When a plan file under docs/superpowers/plans/ is written, drop a
-`plan-approved` marker in the session dir so the plan gate stops counting.
+When a plan file under docs/superpowers/plans/ (the superpowers convention) OR
+~/.claude/plans/ (native Claude Code plan-mode's own output path) is written,
+drop a `plan-approved` marker in the session dir so the plan gate stops
+counting.
 
 SAFETY INVARIANT: wrapped in try/except. On ANY error, prints nothing and
 exits 0. Fail open.
@@ -15,7 +17,10 @@ import sys
 
 DEFAULT_SESSIONS_DIR = "C:/Users/Owner/.claude/hooks/sessions"
 
-PLAN_SUBSTR = ("docs/superpowers/plans/", "docs\\superpowers\\plans\\")
+PLAN_SUBSTR = (
+    "docs/superpowers/plans/", "docs\\superpowers\\plans\\",
+    ".claude/plans/", ".claude\\plans\\",
+)
 
 
 def main():
