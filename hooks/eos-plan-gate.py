@@ -64,8 +64,18 @@ def main():
     # Existing markers -> allow.
     if os.path.exists(os.path.join(sess_dir, "plan-approved")):
         return
-    if os.path.exists(os.path.join(sess_dir, "override")):
-        return
+    override_path = os.path.join(sess_dir, "override")
+    if os.path.isfile(override_path):
+        # Presence alone is NOT enough -- a real, non-empty reason is required (an
+        # empty/whitespace-only file no longer counts as approval). A read error is
+        # treated as "no valid override" rather than crashing the hook.
+        try:
+            with open(override_path, "r", encoding="utf-8", errors="replace") as fh:
+                override_content = fh.read().strip()
+        except Exception:
+            override_content = ""
+        if override_content:
+            return
 
     os.makedirs(sess_dir, exist_ok=True)
     count_file = os.path.join(sess_dir, "code-edits.count")
@@ -83,7 +93,6 @@ def main():
         fh.write(str(count))
 
     if count > LIMIT:
-        override_path = os.path.join(sess_dir, "override")
         reason = (
             "Engineering OS: 4+ code files edited with no plan this session. "
             "Run /plan or /build first, or write a one-line reason to `" +

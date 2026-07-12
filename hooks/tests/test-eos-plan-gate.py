@@ -58,16 +58,38 @@ def test_non_code_path_always_allows():
 
 
 def test_override_marker_allows_past_limit():
+    """A non-empty override (a real reason) clears the gate. Content is now
+    REQUIRED -- see test_empty_override_content_still_denies."""
     tmp = tempfile.mkdtemp(prefix="eos-pg-")
     sess_dir = os.path.join(tmp, "sess3")
     os.makedirs(sess_dir, exist_ok=True)
     with open(os.path.join(sess_dir, "override"), "w") as fh:
-        fh.write("")
+        fh.write("reason: applying a planned mechanical fix\n")
     for _ in range(8):
         rc, out, err = run_hook(payload("sess3", "C:/proj/x.py"), tmp)
         assert rc == 0, "override expected exit 0, got %s" % rc
         assert "deny" not in out, "override must never deny, got %r" % out
     print("PASS test_override_marker_allows_past_limit")
+
+
+def test_empty_override_content_still_denies():
+    """An override file that EXISTS but is empty/whitespace-only must NOT count
+    as approval -- only real, non-empty content clears the gate. Closes the
+    presence-only enforcement gap: PR #12 fixed the denial message but not this;
+    76/79 real override markers were still empty even after that fix shipped."""
+    tmp = tempfile.mkdtemp(prefix="eos-pg-")
+    sess_dir = os.path.join(tmp, "sess6")
+    os.makedirs(sess_dir, exist_ok=True)
+    with open(os.path.join(sess_dir, "override"), "w") as fh:
+        fh.write("   \n")  # whitespace-only -- same as truly empty
+    for i in range(3):
+        rc, out, err = run_hook(payload("sess6", "C:/proj/x.py"), tmp)
+        assert rc == 0, "edit %d expected exit 0, got %s" % (i, rc)
+    rc, out, err = run_hook(payload("sess6", "C:/proj/x.py"), tmp)
+    assert '"permissionDecision": "deny"' in out or '"permissionDecision":"deny"' in out, (
+        "4th edit with empty-content override must still deny, got %r" % out
+    )
+    print("PASS test_empty_override_content_still_denies")
 
 
 def test_plan_approved_marker_allows_past_limit():
@@ -123,6 +145,7 @@ if __name__ == "__main__":
     test_four_code_edits_denies_on_fourth()
     test_non_code_path_always_allows()
     test_override_marker_allows_past_limit()
+    test_empty_override_content_still_denies()
     test_plan_approved_marker_allows_past_limit()
     test_malformed_stdin_fails_open()
     test_empty_object_fails_open()
