@@ -1,6 +1,6 @@
 ---
 name: ora-command-center-mirror-drift-check
-description: Weekday 10:40 AM ET alerting layer for the native "ORA Command Center - Mirror Deploy" Windows task — checks LastTaskResult/LastRunTime + git tree state, emails ggoldberg only on alarm. v1.0 2026-07-09.
+description: Weekday 10:40 AM ET alerting layer for the native "ORA Command Center - Mirror Deploy" Windows task — checks LastTaskResult/LastRunTime + git tree state, emails ggoldberg only on alarm. v1.0 2026-07-09. [MODEL: UNVERIFIABLE | checked 2026-07-12]
 ---
 
 ORA Command Center Mirror — Drift & Health Check (CC/MCP fleet)
