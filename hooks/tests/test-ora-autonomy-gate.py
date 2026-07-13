@@ -7,23 +7,36 @@ No existing test file covered this hook before 2026-07-12 (verified absent).
 Written alongside the site-marker de-duplication fix (hooks/lib/site_markers.py)
 to lock in both the pre-existing legacy-marker behavior and the newly-closed
 domain-form-marker gap.
+
+Every call defaults OVERRIDE_DIR to a fresh, empty, isolated temp directory
+(systematization follow-up, 2026-07-12) -- without this, every block-expecting
+test here silently depended on the real ~/.claude/hooks/overrides/ directory's
+live contents: a legitimate active override (e.g. a real Gabriel-approved
+"allow-website-change" sentinel from a concurrent session) would flip
+test_blocks_legacy_markers from PASS to a false PASS-via-wrong-reason, or a
+future stricter assertion could fail the suite outright. Mirrors
+shared-checkout-guard.py's SHARED_CHECKOUT_REPOS env-var isolation pattern.
 """
 
 import json
 import os
 import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOOK = os.path.join(HERE, "ora-autonomy-gate.py")
 
 
-def run_hook(payload_dict):
+def run_hook(payload_dict, override_dir=None):
+    env = dict(os.environ)
+    env["OVERRIDE_DIR"] = override_dir if override_dir is not None else tempfile.mkdtemp(prefix="oag-ovr-")
     proc = subprocess.run(
         [sys.executable, HOOK],
         input=json.dumps(payload_dict),
         capture_output=True,
         text=True,
+        env=env,
     )
     return proc.returncode, proc.stdout, proc.stderr
 
@@ -110,6 +123,35 @@ def test_malformed_stdin_fails_open():
     print("PASS test_malformed_stdin_fails_open")
 
 
+def test_override_dir_env_var_honors_isolated_override():
+    """Candidate 2: OVERRIDE_DIR must be env-overridable so an override sentinel
+    placed in an isolated test directory is honored, independent of the real
+    ~/.claude/hooks/overrides/ directory's live contents."""
+    isolated = tempfile.mkdtemp(prefix="oag-ovr-live-")
+    with open(os.path.join(isolated, "allow-website-change"), "w") as fh:
+        fh.write("test override")
+    rc, out, err = run_hook(
+        write_payload("C:/Users/Owner/website-canonical/src/index.html"), override_dir=isolated
+    )
+    assert rc == 0, (
+        "a fresh override sentinel in the isolated OVERRIDE_DIR must allow the "
+        "write, got %s (%s)" % (rc, err)
+    )
+    print("PASS test_override_dir_env_var_honors_isolated_override")
+
+
+def test_override_dir_env_var_empty_dir_still_blocks():
+    """Same env var, but pointed at an empty isolated dir -- proves the hook
+    reads OVERRIDE_DIR (not silently falling back to the live default) and
+    that isolation doesn't accidentally allow-by-default."""
+    empty = tempfile.mkdtemp(prefix="oag-ovr-empty-")
+    rc, out, err = run_hook(
+        write_payload("C:/Users/Owner/website-canonical/src/index.html"), override_dir=empty
+    )
+    assert rc == 2, "an empty isolated OVERRIDE_DIR must still block, got %s (%s)" % (rc, err)
+    print("PASS test_override_dir_env_var_empty_dir_still_blocks")
+
+
 if __name__ == "__main__":
     test_blocks_legacy_markers()
     test_domain_form_markers_do_not_block_via_this_hook()
@@ -119,4 +161,6 @@ if __name__ == "__main__":
     test_allows_file_mentioning_domain_in_name()
     test_non_site_path_allows()
     test_malformed_stdin_fails_open()
+    test_override_dir_env_var_honors_isolated_override()
+    test_override_dir_env_var_empty_dir_still_blocks()
     print("ALL AUTONOMY-GATE TESTS PASS")
