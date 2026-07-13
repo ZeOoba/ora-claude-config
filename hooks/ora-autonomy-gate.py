@@ -40,6 +40,11 @@ except Exception:
     # rather than silently disabling it entirely.
     SITE_PATH_MARKERS = ("website-canonical", "oxford-site")
 
+# OVERRIDE_DIR is a TEST SEAM ONLY -- it must never be set in settings.json's env
+# block or any production scheduled-task context. Setting it there would let a
+# process redirect this security gate's override lookup to an attacker-writable
+# directory. It exists purely so test-ora-autonomy-gate.py can isolate itself from
+# whatever is actually live in the real overrides folder (2026-07-12).
 OVERRIDE_DIR = os.environ.get("OVERRIDE_DIR") or r"C:\Users\Owner\.claude\hooks\overrides"
 OVERRIDE_TTL_SECONDS = 3600
 INTERNAL_DOMAIN = "@oxfordra.net"
