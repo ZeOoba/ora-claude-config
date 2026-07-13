@@ -1,6 +1,6 @@
 ---
 name: ora-entry-market-scan
-description: Monthly sourcing + screening scan for 4 ORA entry markets (Louisville KY, Delmarva MD/DE, Grand Rapids MI, Des Moines IA) — buy-box filter, SCREEN-mode underwriting, Notion Deal Sourcing Log dedup + update, price-watch re-engage alerts, digest email to ggoldberg only. Complements ora-deal-sourcing-scan (established clusters). v1.0
+description: Monthly sourcing + screening scan for 4 ORA entry markets (Louisville KY, Delmarva MD/DE, Grand Rapids MI, Des Moines IA) — buy-box filter, SCREEN-mode underwriting, Notion Deal Sourcing Log dedup + update, price-watch re-engage alerts, digest email to ggoldberg only. Complements ora-deal-sourcing-scan (established clusters). v1.0 [MODEL: UNVERIFIABLE | checked 2026-07-12]
 ---
 
 Read and follow C:\Users\Owner\.claude\scheduled-tasks\ora-entry-market-scan\SKILL.md in full before taking any action.

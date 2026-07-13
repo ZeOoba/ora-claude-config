@@ -1,6 +1,6 @@
 ---
 name: ora-calibration-snapshot
-description: Quarterly calibration snapshot — logs current property verdicts + resolves due outcomes in the calibration scoring loop (oxford-command-center)
+description: Quarterly calibration snapshot — logs current property verdicts + resolves due outcomes in the calibration scoring loop (oxford-command-center). [MODEL: UNVERIFIABLE | checked 2026-07-12]
 ---
 
 Read and follow C:\Users\Owner\.claude\scheduled-tasks\ora-calibration-snapshot\SKILL.md in full before taking any action.
