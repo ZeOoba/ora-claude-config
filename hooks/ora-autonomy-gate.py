@@ -40,7 +40,7 @@ except Exception:
     # rather than silently disabling it entirely.
     SITE_PATH_MARKERS = ("website-canonical", "oxford-site")
 
-OVERRIDE_DIR = r"C:\Users\Owner\.claude\hooks\overrides"
+OVERRIDE_DIR = os.environ.get("OVERRIDE_DIR") or r"C:\Users\Owner\.claude\hooks\overrides"
 OVERRIDE_TTL_SECONDS = 3600
 INTERNAL_DOMAIN = "@oxfordra.net"
 RECIPIENT_FLAGS = ("-to", "-cc", "-bcc")  # any one means the send has external reach
