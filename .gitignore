@@ -46,6 +46,10 @@
 # 3) Re-ignore secrets, caches & transient state INSIDE opted-in dirs
 hooks/confidential-terms.json
 hooks/sessions/
+# generated probe-state snapshot (doctrine-integrity-probe.py / ora-doctrine-integrity-guard);
+# rewritten on every run -> was showing as a tracked modification on every single probe fire,
+# recurring dirty-tree noise with no review value (2026-07-12 systematization follow-up)
+maintenance/_state/doctrine-status.json
 # roster-staleness runtime breadcrumb written by confidentiality-guard.py (transient; never track)
 hooks/state/
 # county-parcel-screen code is TRACKED (counterparty names externalized 2026-06-11);
