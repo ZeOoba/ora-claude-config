@@ -328,6 +328,10 @@
           {
             "type": "command",
             "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/eos-claude-md-guard.py\""
+          },
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/memory-index-guard.py\""
           }
         ]
       },

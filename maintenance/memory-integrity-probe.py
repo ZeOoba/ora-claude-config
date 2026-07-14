@@ -18,8 +18,10 @@ for _s in (sys.stdout, sys.stderr):
     except Exception: pass
 
 HOME = os.path.expanduser("~")
-MEM = os.path.join(HOME, ".claude", "projects",
-                   "C--Users-Owner-OneDrive---Oxford-Capital-Partners", "memory")
+# ORA_MEMORY_DIR overrides the scanned directory (tests only -- production runs use the default).
+MEM = os.environ.get("ORA_MEMORY_DIR") or os.path.join(
+    HOME, ".claude", "projects",
+    "C--Users-Owner-OneDrive---Oxford-Capital-Partners", "memory")
 INDEX = os.path.join(MEM, "MEMORY.md")
 GOV_PROBE = os.path.join(HOME, ".claude", "maintenance", "governor-drift-probe.py")
 
@@ -31,6 +33,13 @@ RETIRED_DOCS = ("reference_tech.md", "reference_financial.md", "reference_commun
 STALE_DAYS = {"markets.md": 90, "people.md": 60, "projects.md": 21}  # report-only windows
 DATE_RE = re.compile(r"(20\d{2})-(\d{2})-(\d{2})")
 EMAIL_RE = re.compile(r"[a-z0-9._%+-]+@oxfordra\.net", re.I)
+# A dated memory (a watch note, a "check back after X" tracking item) may declare its own
+# expiry in frontmatter:  review_by: YYYY-MM-DD
+# Once that date passes, the note is overdue for a resolve-or-archive decision and this probe
+# says so every run. Added 2026-07-14 after project_owner_outreach_stale_guard_watch sat a day
+# past its own stated deadline with nobody looking -- and the answer, when finally checked,
+# inverted the note's premise. Report-only: an overdue note is a nudge, never a hard failure.
+REVIEW_BY_RE = re.compile(r"^review_by:\s*(20\d{2}-\d{2}-\d{2})\s*$", re.M)
 
 
 def fail(findings):
@@ -95,8 +104,30 @@ def main():
                 if re.search(r"\]\(%s" % re.escape(rd), txt):  # markdown link to a retired doc
                     issues.append("%s links retired/archived doc as live: %s" % (name, rd))
 
-    # --- 3. staleness (warnings only) ---
+    # --- 2c. overdue review_by (warnings only) ---
+    # Scanned in the same pass as 2b would be cheaper, but this reads the file fresh so the
+    # check stands alone and can't be broken by an early `continue` above.
     today = datetime.date.today()
+    for path in sorted(glob.glob(os.path.join(MEM, "*.md"))):
+        name = os.path.basename(path)
+        try:
+            txt = open(path, encoding="utf-8").read()
+        except Exception:
+            continue
+        m = REVIEW_BY_RE.search(txt)
+        if not m:
+            continue
+        try:
+            due = datetime.datetime.strptime(m.group(1), "%Y-%m-%d").date()
+        except ValueError:
+            warnings.append("%s has an unparseable review_by: %s" % (name, m.group(1)))
+            continue
+        if due < today:
+            warnings.append(
+                "%s is OVERDUE for review (review_by: %s, %d day(s) ago) -- resolve it or "
+                "archive it; do not let it rot" % (name, due, (today - due).days))
+
+    # --- 3. staleness (warnings only) ---
     for fn, win in STALE_DAYS.items():
         p = os.path.join(MEM, fn)
         if not os.path.isfile(p):

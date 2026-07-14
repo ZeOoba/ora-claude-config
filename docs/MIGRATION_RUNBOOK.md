@@ -39,6 +39,17 @@ fact against live state first — this doc is as-of 2026-06-11. Full sprint cont
 3. Install: Claude Desktop, Claude Code, Python 3.x (on PATH — hooks require it),
    Node + npm, git, gh CLI, netlify CLI, Outlook desktop (M365 profile for
    ggoldberg@oxfordra.net — the COM send path needs a configured profile).
+3a. Restore the local-script Python environment in ONE SHOT — do not let it fail
+    forward script-by-script: `pip install -r` both
+    `C:\Users\Owner\.claude\scheduled-tasks\_shared\python-requirements.txt` and
+    `C:\Users\Owner\OneDrive - Oxford Capital Partners\Investment Candidates -- 2026\
+    requirements.txt` (same pinned Python 3.13 interpreter behind both directories'
+    scripts — currently one list, kept in two places for proximity to each script
+    set). WHY: the 2026-07-05 migration wiped site-packages and packages were
+    reinstalled reactively over the following week as each script first hit
+    `ModuleNotFoundError` — `python-docx` wasn't caught until 2026-07-12, blocking
+    that week's Owner-Outreach letter pack. Verify with
+    `pip show python-docx openpyxl pandas reportlab pypdf` before starting B3.
 4. `git clone https://github.com/ZeOoba/ora-claude-config.git C:\Users\Owner\.claude`
    (gh auth login as ZeOoba first).
 5. Place SECRETS from the out-of-band transfer (USB/local only — NEVER via git,
@@ -94,6 +105,9 @@ fact against live state first — this doc is as-of 2026-06-11. Full sprint cont
       per-send confirmation; verify `_shared/send-log.txt` writes.
 - [ ] ora-am-brief produces + publishes end-to-end; lane-telemetry.jsonl appending.
 - [ ] `ora-task-integrity-guard` (CC, 12:45) fires and prints GUARD OK cc=N lams=N.
+- [ ] Python dependency restore (B1.3a) verified — `pip show` confirms python-docx,
+      openpyxl, pandas, reportlab, pypdf all present at the pinned versions, not just
+      documented in the requirements.txt files.
 
 ## B4. Old machine decommission
 ONLY after every B3 box is checked AND on Gabriel's explicit go. Before wipe: export

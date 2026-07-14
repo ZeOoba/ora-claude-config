@@ -7,3 +7,5 @@ Classification key: CURRENT = tag matches standard · STALE = tag present but mi
 2026-07-10 — 14 tasks: 11 MODEL-UNVERIFIABLE, 3 MODEL-UNTAGGED, 0 MODEL-STALE, 0 MODEL-CURRENT, standard=claude-sonnet-5
 2026-07-11 — 18 tasks: 12 MODEL-UNVERIFIABLE, 6 MODEL-UNTAGGED, 0 MODEL-CURRENT, 0 MODEL-STALE, standard=claude-sonnet-5
 2026-07-12 — 18 tasks: 12 MODEL-UNVERIFIABLE, 6 MODEL-UNTAGGED, 0 MODEL-CURRENT, 0 MODEL-STALE, standard=claude-sonnet-5
+2026-07-13 — 19 tasks: 18 MODEL-UNVERIFIABLE, 1 MODEL-CURRENT (ora-cc-schematic-refresh=claude-sonnet-5), 0 MODEL-STALE, 0 MODEL-UNTAGGED, standard=claude-sonnet-5
+2026-07-14 — 20 tasks: 18 MODEL-UNVERIFIABLE, 1 MODEL-CURRENT (ora-cc-schematic-refresh=claude-sonnet-5), 0 MODEL-STALE, 1 MODEL-UNTAGGED (canary-model-check-temp, disabled one-time), standard=claude-sonnet-5
