@@ -24,12 +24,23 @@ overrides any older per-block instruction that conflicts with it.
 
 ## 0.5 PRE-FLIGHT DE-DUPE GUARD (run FIRST, before Block A)
 
-This task is registered on BOTH fleets (CC/MCP + LAMS/Cowork). On 2026-07-09 both
-fired the same day (a LAMS run ~16:27 ET delivered A/B/C; the CC 18:00 fire then
-re-ran) — producing a full DUPLICATE set of emails and Notion pages, and the
-duplicate Ops Hub pages double-count in the next morning's brief. Until the
-redundant registration is retired, THIS guard makes a second same-day fire a no-op.
-Run it before anything else:
+Added 2026-07-09 after a genuine cross-fleet double-fire: a LAMS run ~16:27 ET
+delivered A/B/C, then the CC 18:00 fire re-ran the same day — producing a full
+DUPLICATE set of emails and Notion pages, with the duplicate Ops Hub pages also
+double-counting in the next morning's brief.
+
+**Root cause RESOLVED 2026-07-12 — not a pending retirement.** The suspected
+LAMS/Cowork twin registration was confirmed absent/never-live on both surfaces:
+Cowork (LAMS) `list_scheduled_tasks` shows no `ora-pm-ledger` entry, and the
+folder once believed to be its live LAMS spec
+(`Claude_Workspace\00_Governance\Scheduled\ora-pm-ledger\`) was an orphan never
+wired to any scheduler — archived 2026-07-12. CC/MCP (cron `0 18`) is and was
+the SOLE live registration; full detail in memory
+`reference_ora_pm_ledger_double_fire.md`. This guard is kept anyway as a
+**permanent belt-and-suspenders backstop**, not a stopgap awaiting a retirement
+that already happened — it is cheap, purely mechanical (no Gabriel input
+required per run), and protects against any future re-registration mistake on
+either fleet. Run it before anything else:
 
 1. **Check whether today's deliverables already exist for `{TODAY}` (ET):**
    - Sent Items for subjects `ORA Notion Daily Digest - {TODAY}`,
@@ -610,3 +621,20 @@ automated sends INCLUDED for this check). Would have caught the frozen-date
 Command Center Daily Brief on 2026-07-08. The "Outside A–H" section header
 became "Outside A–I". No other block logic changed; registration untouched
 (content-only edit per the LAMS/CC single-writer rule).
+
+## AMENDMENT NOTE (2026-07-14 — documentation-sync only, no guard-logic change)
+
+§0.5's preamble was reframed: it had described the de-dupe guard as a stopgap
+"[u]ntil the redundant registration is retired," but that retirement already
+happened — `reference_ora_pm_ledger_double_fire.md` confirms the suspected
+LAMS/Cowork twin was found absent/never-live on 2026-07-12, and CC/MCP was
+already the sole registration throughout. Updated the prose to state the guard
+is a permanent, intentional backstop rather than a pending-cleanup workaround,
+so a future reader doesn't re-open an already-closed question. The guard's
+actual check logic (§0.5 steps 1–4) is unchanged — this was prompted by a
+sweep checking whether other scheduled-task guards shared the
+`ora-owner-outreach-queue-refresh` STALE-guard pattern (a one-time human
+confirmation the guard has no way to remember). This guard doesn't share that
+pattern — it never waits on a Gabriel decision, it re-derives its own answer
+mechanically from today's evidence on every run — but its rationale text was
+stale relative to memory, which this note corrects.
