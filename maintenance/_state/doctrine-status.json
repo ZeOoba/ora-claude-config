@@ -1,13 +1,13 @@
 {
-  "last_check": "2026-07-12T15:05:49.889359",
-  "source": "pre-push",
+  "last_check": "2026-07-14T13:05:52.003247",
+  "source": "scheduled",
   "doctrine_probe": {
     "exit_code": 0,
-    "summary": "clean, 12 warning(s)"
+    "summary": "clean (17 WARN)"
   },
   "governor_probe": {
-    "exit_code": null,
-    "summary": null
+    "exit_code": 0,
+    "summary": "clean (545 files, DSCR 1.25x / LTV 40% consistent)"
   },
   "guard_orphans": []
 }

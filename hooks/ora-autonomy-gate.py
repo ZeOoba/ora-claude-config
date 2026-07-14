@@ -107,9 +107,31 @@ def check_bash(command):
     # so a routine read-only command like `ls ... 2>&1` doesn't false-block (2026-07-09).
     write_check_target = FD_DUP_RE.sub(" ", lowered)
     write_check_target = NULL_REDIRECT_RE.sub(" ", write_check_target)
-    if any(m in lowered for m in SITE_PATH_MARKERS) and any(w in write_check_target for w in SITE_WRITE_INDICATORS):
+    markers = [m for m in SITE_PATH_MARKERS if m in lowered]
+    indicators = [w for w in SITE_WRITE_INDICATORS if w in write_check_target]
+    if markers and indicators:
         if not override_active("allow-website-change"):
-            block("shell write into oxfordra.net site tree: %s" % command.strip(), "allow-website-change")
+            # Say WHICH marker and WHICH indicator matched. This gate matches both
+            # anywhere in the command, with no requirement that they be related -- so a
+            # command that merely QUOTES a site path (writing site prose into a memory
+            # file, committing a message that names the repo) trips it. That breadth is
+            # deliberate and stays: the gate cannot parse shell semantics, so a
+            # target-based rule would miss `cd website-canonical; echo x > f.html`, and a
+            # false negative here publishes to the live site while a false positive only
+            # costs a retry. What was missing was the diagnosis -- the operator had to
+            # read this file to find out what matched (2026-07-14).
+            block(
+                "shell write into oxfordra.net site tree\n"
+                "  matched site marker : %s\n"
+                "  matched write verb  : %s\n"
+                "  command             : %s\n"
+                "  NOTE: both are matched ANYWHERE in the command, related or not. If this\n"
+                "  command does not actually write to the site tree (e.g. it only quotes a\n"
+                "  site path inside a string, heredoc, or commit message), do NOT create the\n"
+                "  override -- re-run it via the Edit/Write tool, or drop the marker text from\n"
+                "  the command. The override is for real site changes Gabriel just approved."
+                % (", ".join(markers), ", ".join(repr(i) for i in indicators), command.strip()),
+                "allow-website-change")
 
 
 def check_file_write(file_path):
