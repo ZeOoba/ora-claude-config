@@ -1,6 +1,6 @@
 ---
 name: ora-entry-market-scan
-description: Monthly sourcing + screening scan for 4 ORA entry markets (Louisville KY, Delmarva MD/DE, Grand Rapids MI, Des Moines IA) — buy-box filter, SCREEN-mode underwriting, Notion Deal Sourcing Log dedup + update, price-watch re-engage alerts, digest email to ggoldberg only. Complements ora-deal-sourcing-scan (established clusters). v1.0 [MODEL: UNVERIFIABLE | checked 2026-07-12]
+description: Monthly sourcing + screening scan for 4 ORA entry markets (Louisville KY, Delmarva MD/DE, Grand Rapids MI, Des Moines IA) — buy-box filter, SCREEN-mode underwriting, Notion Deal Sourcing Log dedup + update, price-watch re-engage alerts, digest email to ggoldberg only. Complements ora-deal-sourcing-scan (established clusters). v1.1 (2026-07-14): added a per-listing `Gate Review` Notion field so a Louisville/Delmarva off-taxonomy GATE-FLAGGED listing Gabriel already reviewed doesn't re-ask the identical review question every month while it sits unchanged on-market. [MODEL: UNVERIFIABLE | checked 2026-07-12]
 ---
 
 Read and follow C:\Users\Owner\.claude\scheduled-tasks\ora-entry-market-scan\SKILL.md in full before taking any action.
@@ -32,7 +32,7 @@ For each qualifying listing, run SCREEN-mode acquisition underwriting (Buy Box &
 - ORA hurdle rate: 8% (ratified 2026-06-22). DSCR governor ≥ 1.25x. LTV governor ≤ 40%.
 
 Critical market flags:
-- Louisville KY + Delmarva MD/DE: Off-taxonomy markets — cap Quality Score market component at 60 per Ruling 5. Any T1/T2 verdict = GATE-FLAGGED. Requires Gabriel's explicit review before advancing.
+- Louisville KY + Delmarva MD/DE: Off-taxonomy markets — cap Quality Score market component at 60 per Ruling 5. Any T1/T2 verdict = GATE-FLAGGED. Requires Gabriel's explicit review before advancing. Once Gabriel has reviewed a specific listing (recorded in that listing's `Gate Review` field, Step 3), do NOT re-surface it as GATE-FLAGGED in a future run at an unchanged verdict/price — only re-flag it if the score, price, or listing status materially changed since the ratified review. This prevents the same off-taxonomy listing from re-asking Gabriel an identical review question every month while it sits unchanged on-market.
 - Grand Rapids MI: Michigan Proposal A applies. Append PROP-A-UNCAP-PREMORTEM-REQUIRED to every MI listing.
 
 ### Step 3 — LOG
@@ -40,6 +40,7 @@ Dedup against and update the Notion Deal Sourcing Log (collection ID: 9a6ae219-8
 - Match on address (≥90% similarity) or listing URL (exact). Update existing records in place — do NOT duplicate.
 - Create new records for first-time listings.
 - Log: Quality Score, Economics Score, Combined Score [est], P(exec)%, Expected Score, Verdict, Source URL, Broker, Confidence (VERIFIED/SNIPPET), Seller Signals, Bear-Mode State, DD-Critical Status, Screen Date, Source Task = ora-entry-market-scan.
+- **Gate Review** field (added 2026-07-14, for Louisville/Delmarva GATE-FLAGGED listings only): blank until Gabriel reviews; once he does, record `Cleared-<date>` or `Rejected-<date>` plus a one-line note. This is the durable ratification Step 2 checks before re-flagging — it stops an unchanged off-taxonomy listing from re-asking the identical review question every month.
 - Never overwrite prior immutable score snapshots — add new dated fields alongside prior entries.
 
 ### Step 4 — PRICE-WATCH
@@ -51,7 +52,7 @@ Send summary email via Outlook COM:
 - To: ggoldberg@oxfordra.net ONLY (never cc egoldberg@, never ze@ addresses)
 - On COM failure: retry once, then log failure to Notion Ops Hub (32b6ecd8) — do NOT halt
 - Subject: "ORA Entry Market Scan — [Month YYYY]: [N] New Candidates, [N] Watched, [N] Passed"
-- Body: RE-ENGAGE alerts first (if any), then T1/T2 ranked table (address, market, ask, SF, $/SF, Combined [est], P(exec)%, Expected Score, verdict, top seller signal, flags), then market summary, then data gaps / questions for Gabriel
+- Body: RE-ENGAGE alerts first (if any), then T1/T2 ranked table (address, market, ask, SF, $/SF, Combined [est], P(exec)%, Expected Score, verdict, top seller signal, flags) — for any GATE-FLAGGED Louisville/Delmarva listing already carrying a `Gate Review` ratification, mark it "reviewed <date>" in the table instead of re-asking, then market summary, then data gaps / questions for Gabriel (genuinely new items only)
 
 ## Invariants
 - READ-ONLY task: no LOIs, no counterparty emails, no underwriting commits, no capital decisions.
