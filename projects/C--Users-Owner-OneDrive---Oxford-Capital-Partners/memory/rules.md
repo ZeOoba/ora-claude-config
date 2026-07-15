@@ -36,7 +36,7 @@ feedback_qb_desktop, feedback_netlify_mcp, feedback_less_permission_prompts, fee
 
 - **Routing:** canonical rule → `CLAUDE.md` Email & scheduler section (supersedes the old cc-both default, re-ratified 2026-06-10). In Outlook COM, semicolon-delimit if a send legitimately has multiple recipients.
 
-## 3b. HubSpot — current tenants ONLY (Gabriel 2026-06-11)
+## 3b. HubSpot — current tenants ONLY
 
 - HubSpot's scope at ORA is **tracking current tenants** — it is NOT a broker, deal, or general-relationship CRM.
 - Broker/counterparty last-contact truth = **Outlook** (M365 search). Missing or stale broker records in HubSpot are expected, never defects to "fix."
@@ -57,24 +57,23 @@ feedback_qb_desktop, feedback_netlify_mcp, feedback_less_permission_prompts, fee
 - Do NOT recommend "reconnect the connector" as a fix — past failures were server-side, not auth.
 - **Never deploy oxfordra.net without explicit request.**
 
-## 6. Permissions — keep the allowlist current (DORMANT under §10 bypass regime, 2026-06-12)
+## 6. Permissions — keep the allowlist current (DORMANT under §10 bypass regime)
 
 - **Superseded while §10 is in force:** defaultMode is `bypassPermissions`, so allowlist upkeep changes nothing — do NOT proactively offer `less-permission-prompts`. Keep the allowlist intact as the fallback if the mode is ever reverted.
 - (Dormant rule, kept for reversion:) `less-permission-prompts` only expands the allowlist for safe, read-only, already-used commands. **Never** add destructive operations (`rm`, `push --force`, etc.) without explicit approval.
 
-## 7a. Confidentiality — egress surfaces & staging (verified 2026-06-11)
+## 7a. Confidentiality — egress surfaces & staging
 
-- **Egress surfaces (hook-blocked, fail-closed):** `Claude_Workspace/00_Governance/outputs/` is classified mirror/build output — the confidentiality guard BLOCKS confidential-deal terms there (proven in production twice on 2026-06-11: the audit report draft and the Cowork port artifact). Treat all outward-mirroring `outputs/` trees, the site repos, Notion external pages, and email the same.
+- **Egress surfaces (hook-blocked, fail-closed):** `Claude_Workspace/00_Governance/outputs/` is classified mirror/build output — the confidentiality guard BLOCKS confidential-deal terms there (proven in production twice — see `event_log.md`). Treat all outward-mirroring `outputs/` trees, the site repos, Notion external pages, and email the same.
 - **Sanctioned staging for confidential-deal artifacts until closing:** `~/.claude/_confidential-staging/`, UNTRACKED files only — the canonical home for active deal-bound working files (put new ones here directly, not loose at the `~/.claude` root). `~/.claude` is a git repo pushing to `github.com/ZeOoba/ora-claude-config` (PRIVATE) — anything git-ADDED reaches an off-machine remote. The fail-closed `.gitignore` (`/*` default-deny) ignores the whole `_confidential-staging/` subtree, so files land untracked by default; never `git add` a file carrying a deal name. `session-context.md` (untracked, root) remains the sanctioned roster home. (Loose deal-bound `*.md` at the root still works but fires check-8 `[MISSING]` noise every run — use the subfolder.)
 - **Enforcement:** `maintenance/doctrine-integrity-probe.py` check 8 scans CLAUDE.md + every git-tracked `*.md` + untracked root `*.md` for active confidential terms (index-only reporting). Surfaced via a git pre-push blocking gate (`hooks/git-prepush-doctrine-gate.py`, in-band) plus the daily `ora-doctrine-integrity-guard` scheduled task (push-independent backstop, alarms via Notion Ops Hub + best-effort email; corrected 2026-07-08 — the prior weekly eos-health-report email mechanism was retired, see event_log). The `_confidential-staging/` subtree is exempt from the untracked scan (narrow to that one dir; `CONFIDENTIAL_STAGING_DIRNAME` in the probe) — but only for UNTRACKED files: a git-tracked file there is still scanned. The session-context exemption auto-revokes if that file is ever git-tracked.
 - **Owner-ratified repo exception (2026-06-14):** `oxford-command-center` (PRIVATE single-owner, `ZeOoba/oxford-command-center`) MAY hold active confidential deal terms in committed source (e.g. `src/data/seed-deals.ts`) — Gabriel's standing decision; the repo's pre-push scan was removed (PR #32). The egress guard + the rules above STILL bar deal terms from the public site, the `/dist/` mirror, Notion, Outlook, and every OTHER repo/surface. Audits / probes must NOT flag committed terms in THIS repo as a finding. (The egress guard never blocked internal repo writes/pushes anyway — see `~/.claude/hooks/confidentiality-guard.py`.)
 
-## 7b. Declassification / reclassification file checklist (2026-07-09; amended 2026-07-12)
+## 7b. Declassification / reclassification file checklist
 
-No checklist existed for this before 2026-07-09; the E. Fulton declassification
-touched 4 files ad hoc and missed `session-context.md` (caught and fixed
-out-of-band — see `event_log.md`). When a confidential deal's status changes
-(declassified, or re-classified confidential), update ALL of:
+When a confidential deal's status changes (declassified, or re-classified
+confidential), update ALL of — full incident history for why this checklist
+exists (two documented misses): `event_log.md`, E. Fulton declassification:
 
 - `hooks/confidential-terms.json` — flip the deal's `active` flag.
 - `session-context.md` — update the roster line (Hard Invariant 3's sanctioned
@@ -89,19 +88,14 @@ out-of-band — see `event_log.md`). When a confidential deal's status changes
 - `CLAUDE.md` (master `~/.claude/CLAUDE.md`) and every ported copy — Cowork
   Settings user-preferences text (not file-backed; requires a manual paste by
   Gabriel), `Obsidian BrainVault/CLAUDE.md`, and any other surface-specific
-  copy — remove the belt-and-suspenders deal-name reference outright. Added
-  2026-07-12 after a second miss: the original 2026-07-09 pass never touched
-  these, so `~/.claude/CLAUDE.md`'s Invariant 3 and the Obsidian vault's
-  confidentiality rule both still named E. Fulton by name a full 3 days later —
-  caught by a Cowork session running the (unrelated) post-legal-hold
-  consolidation task. Gabriel's call (2026-07-12): just delete the stale
-  reference each time — do NOT replace it with standing "never name an active
-  confidential deal in this file" policy language; that's Hard Invariant 3's
-  job at the roster level, not a per-file rule to maintain.
+  copy — remove the belt-and-suspenders deal-name reference outright. Do NOT
+  replace it with standing "never name an active confidential deal in this
+  file" policy language — that's Hard Invariant 3's job at the roster level,
+  not a per-file rule to maintain.
 
-Doc-only enforcement (decided 2026-07-09): declassification is rare enough
-that a lightweight automated check isn't warranted yet — revisit if a future
-declassification misses this checklist despite the Hard Invariant 3 pointer.
+Doc-only enforcement: declassification is rare enough that a lightweight
+automated check isn't warranted — revisit if a future declassification misses
+this checklist.
 
 ## 7. Website / CSP (oxfordra.net)
 
@@ -109,19 +103,19 @@ declassification misses this checklist despite the Hard Invariant 3 pointer.
 - When tightening CSP on a static site, audit for `onload=`/`onerror=`/any `on*=` inline handlers — they fail silently. FOUC savings aren't worth the fragility. If FOUC avoidance is critical: inline the full stylesheet, OR add `'unsafe-hashes' 'sha256-<hash>'`, OR move swap logic into an external hashed script.
 - Style guide: EB Garamond / DM Sans / IBM Plex Mono; `#1B2A4A` / `#C9A96E` / `#F5F3EF` (Parchment corrected 2026-06-11 — `#F5F0E8` was wrong; verified against `--parchment` in website-canonical CSS).
 
-## 8. Parked-task chips — claim-lock before executing (race-proofing, 2026-06-11)
+## 8. Parked-task chips — claim-lock before executing (race-proofing)
 
 - **Why:** a parked chip can launch on two surfaces (Code + Cowork) and double-run — proven by the GitHub purge chip executing twice concurrently; benign only because both runs converged on the same end state.
 - **Step 0 of every chip runbook:** check `C:\Users\Owner\.claude\chip-claims.log` (untracked — the fail-closed .gitignore keeps it off the remote). If a `CLAIMED` line for the same chip title is **< 60 min old** with no matching `DONE`/`ABORTED`, ABORT and report the prior claim instead of executing. Otherwise append `<ISO-8601 local> | CLAIMED | <chip title> | <surface/session-id>`, and on exit append the matching `| DONE` (or `| ABORTED <reason>`) line.
 - **Authoring rule:** any session creating a chip via `spawn_task` must embed this step 0 verbatim in the chip prompt — the spawned session starts cold and cannot recall this rule on its own.
 - **Verification-phrasing conventions for purge/state-check runbooks:** an object-gone check on GitHub returns **404 OR 422** ("No commit found" = object missing from an existing repo; 404 = the repo itself is missing) — expect either. Phrase git preconditions **structurally** ("main has `X` as root commit"), never count-based ("single commit") — clean commits legitimately accumulate on top of a baseline.
 
-## 9. Automation budget & event-log concurrency (2026-06-11)
+## 9. Automation budget & event-log concurrency
 
-- **AUTOMATION BUDGET (re-ratified 2026-07-09, expires 2026-10-07):** new scheduled tasks/monitoring layers still need a real P0-critical (or otherwise clearly load-bearing) justification — the bar against low-value automation sprawl stays. The **one-in-one-out retirement requirement is DROPPED** as of this re-ratification (Gabriel's decision) — a new automation no longer requires killing an existing task to add it. Original rationale for the now-dropped clause: the 2026-06-11 audit found 36 archived tasks from 2 months of churn.
+- **AUTOMATION BUDGET (expires 2026-10-07):** new scheduled tasks/monitoring layers still need a real P0-critical (or otherwise clearly load-bearing) justification — the bar against low-value automation sprawl stays. The one-in-one-out retirement requirement is DROPPED (Gabriel's decision, 2026-07-09) — a new automation no longer requires killing an existing task to add it.
 - **EVENT-LOG CONCURRENCY:** entries are appended ONLY via `python ~/.claude/maintenance/append-event-log.py` (atomic, newest-first) — never Edit-anchor the log header (3 header-anchor collisions on 2026-06-11). One structural writer at a time. Retirement entries that should auto-ratify probe drops must contain the literal token RATIFIED plus the exact task ids.
 
-## 10. Permission regime — bypass + structural gates (Gabriel-directed 2026-06-12)
+## 10. Permission regime — bypass + structural gates
 
 - **defaultMode is `bypassPermissions`** in both `~/.claude/settings.json` and the OneDrive project `.claude/settings.json` — Gabriel's standing directive: the system acts without approval prompts; the only human gates are money movement, external email, and oxfordra.net changes. Do NOT "fix" this back to default/acceptEdits; the project-level key is load-bearing (project overrides user, and every CC scheduled task runs with that cwd).
 - **The three gates are enforced by `~/.claude/hooks/ora-autonomy-gate.py`** (PreToolUse, first in chain), NOT by permission prompts: COM sends to non-`@oxfordra.net` recipients blocked · Edit/Write into `website-canonical`/any `oxford-site` tree blocked · Netlify production deploys blocked. Money has no tool path (doctrine-only, invariant 1). The 3 Netlify updater MCP tools sit in user-settings deny rules (deny survives bypass).
@@ -129,20 +123,20 @@ declassification misses this checklist despite the Hard Invariant 3 pointer.
 - **Before requesting a sentinel:** quote the hook's actual block condition and the exact blocked command in the request. Reads of the site tree pass the gate untouched — a "blocked read" means the command carried a write indicator (`>`, `cp `, `rm `, …), so fix the command instead of overriding (2026-07-09; see memory `feedback_autonomy_gate_blocks_writes_not_reads.md`).
 - **`less-permission-prompts` allowlist upkeep (§6) is now moot under bypass** — keep the allowlist intact anyway as the fallback if the mode is ever reverted.
 
-## 11. Edit-tool / bash-mount sync verification on large diffs (2026-07-08)
+## 11. Edit-tool / bash-mount sync verification on large diffs
 
 - **On large diffs, the Edit tool's write and the bash-mounted view of the same file can diverge** — a Windows-side Read after an Edit can show the change landed while the bash-side file (same path, mounted view) still shows stale length/content, or vice versa. Hit twice in one Cowork deal session building v03 model deliverables, costing real time chasing a "the edit didn't take" false alarm.
 - **How to apply:** past a certain diff size (large multi-section rewrites, not small single-line edits), don't trust the Windows-side Read alone to confirm a write landed — cross-check the bash-side file directly (`wc -l`, `stat`, or a targeted `grep` for the new content) after the Edit. If the two views disagree, re-read both before deciding which is authoritative; don't assume either side is automatically correct.
 
-## 12. Governance-ledger writes — append-only via helper script (2026-07-10)
+## 12. Governance-ledger writes — append-only via helper script
 
-- **Never add a new section to a governance ledger (`Claude_Workspace\00_Governance\outputs\*ledger*.md`, e.g. `2026-06-10_fleet-disposition-ledger.md`) with a general-purpose overwrite-mode write.** Second incident of this exact failure mode: a prior session used the wrong write mode and overwrote `2026-06-10_fleet-disposition-ledger.md`, wiping §1–§7 down to just the newly-added §8. Recovery required an OneDrive Version History restore — and finding the right version required first discovering the file's canonical copy is synced under **egoldberg@oxfordra.net**'s OneDrive account, not Gabriel's own (`(1)`-suffixed local folder) — see `reference_memory_scope_fragmentation.md`.
+- **Never add a new section to a governance ledger (`Claude_Workspace\00_Governance\outputs\*ledger*.md`, e.g. `2026-06-10_fleet-disposition-ledger.md`) with a general-purpose overwrite-mode write.** A prior overwrite-mode write wiped one ledger down to just its newest section, requiring an OneDrive Version History restore (canonical copy synced under **egoldberg@oxfordra.net**'s OneDrive account, not Gabriel's own — see `reference_memory_scope_fragmentation.md`). Full incident: `event_log.md`.
 - **Route every ledger append through `Claude_Workspace\00_Governance\Scripts\Append-Ledger.ps1`** (`powershell -NoProfile -ExecutionPolicy Bypass -File Append-Ledger.ps1 -LedgerPath <path> -TextFile <new-section.md>`). It refuses any path outside `00_Governance\...\outputs\*ledger*.md`, refuses a nonexistent target (ledgers are created once by normal write, then only appended to), snapshots the pre-append file to a sibling `archive\` folder by default (never-delete canon), and appends via `Add-Content` only — there is no code path in it that can overwrite.
-- **How to apply:** when a skill/task/session needs to add a new dated section to any governance ledger, use the helper instead of Edit/Write in overwrite mode. If the helper is unavailable on the current surface (e.g. a non-Code session without shell access), fall back to an explicit append-mode operation and double-check the resulting line count grew rather than shrank before moving on.
+- **How to apply:** use the helper instead of Edit/Write in overwrite mode. If unavailable on the current surface, fall back to an explicit append-mode operation and confirm the resulting line count grew rather than shrank before moving on.
 
 
-## 13. Recovery/cleanup briefs — state-freshness header + re-verify before acting (2026-07-10)
+## 13. Recovery/cleanup briefs — state-freshness header + re-verify before acting
 
-- **Why:** the 2026-07-05→07-10 fleet-loss recovery repeatedly produced briefs/docs written against registry state that a parallel session had already changed. The 2026-07-10 cleanup session found 3 of its 8 instructed steps stale on arrival (tasks already deleted, content already promoted, tasks already re-enabled) — and one step's instructed action (an OneDrive recycle-bin recovery) would have RISKED REGRESSION had it been executed as written, because a verified-current restoration had superseded the "lost" file the day before.
+- **Why:** repeated fleet-loss-recovery briefs were written against registry state a parallel session had already changed, once nearly causing a regression (a step would have restored a stale file over a verified-current one). Full incident: `event_log.md`, 2026-07-10.
 - **Authoring rule:** any recovery/cleanup brief, handoff prompt, or multi-step remediation doc MUST carry a header line: `STATE AS OF <ISO-8601 timestamp> — re-verify registry/filesystem ground truth per step before acting; treat every step as a hypothesis, not a fact.` Chip prompts and scheduled-task remediation SKILL.mds count as briefs for this purpose.
-- **Executing rule:** on receiving such a brief (with or without the header), verify each step's premise against the live source of record (`list_scheduled_tasks`, filesystem, event_log.md) BEFORE mutating anything. If the premise no longer holds, record "already done / superseded — verified" and move on; never execute a stale instruction because the brief says so. This is the scheduler-registry analogue of the git single-writer doctrine (event_log 2026-07-08 near-miss #1) applied to instructions instead of writes.
+- **Executing rule:** on receiving such a brief (with or without the header), verify each step's premise against the live source of record (`list_scheduled_tasks`, filesystem, event_log.md) BEFORE mutating anything. If the premise no longer holds, record "already done / superseded — verified" and move on; never execute a stale instruction because the brief says so.

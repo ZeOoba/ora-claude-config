@@ -1,4 +1,12 @@
-"""Scheduled-task registry write-guard -- PreToolUse hook for Edit|Write|MultiEdit.
+"""Scheduled-task registry write-guard -- PreToolUse hook for Edit|Write|MultiEdit plus
+Desktop Commander's write_file/edit_block (both the mcp__Desktop_Commander__ and
+mcp__plugin_desktop-commander_desktop-commander__ tool-name prefixes). This guard is
+purely path-based (blocks ANY write to the registry file regardless of content), so
+unlike memory-index-guard.py it needs no edit-simulation logic -- just the file_path
+fallback below. edit_block already shares Edit's "file_path" field name and worked
+before this change; write_file's "path" field did not. Extended 2026-07-14, same day
+as memory-index-guard.py's identical gap, proactively rather than after an incident --
+see hooks/tests/test-registry-write-guard.py cases for the Desktop Commander coverage.
 
 BLOCKS a direct Edit/Write/MultiEdit to either fleet's scheduled-task REGISTRY
 backing file. The two registries are the ONLY source of truth for what is
@@ -62,7 +70,10 @@ def main():
     tool_input = payload.get("tool_input") or {}
     if not isinstance(tool_input, dict):
         return
-    file_path = tool_input.get("file_path")
+    # Desktop Commander's write_file uses "path", not "file_path" -- edit_block
+    # already matches native Edit's "file_path", so this fallback only changes
+    # write_file's case.
+    file_path = tool_input.get("file_path") or tool_input.get("path")
     fleet = registry_fleet(file_path)
     if fleet is None:
         return  # not a registry backing file -> allow

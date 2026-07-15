@@ -100,6 +100,62 @@ denied, _ = run({"tool_name": "Edit",
                  "tool_input": {"old_string": "nope-not-present", "new_string": LONG}}, SHORT)
 check("unsimulatable edit shape -> allow (fail open)", not denied)
 
+# 10-16. DESKTOP COMMANDER COVERAGE (added 2026-07-14): several scheduled tasks are
+# approved to write memory files through Desktop Commander's write_file/edit_block MCP
+# tools instead of native Edit/Write/MultiEdit -- a distinct tool_input shape (write_file
+# uses "path" not "file_path"; edit_block has no "replace_all", it has
+# "expected_replacements"). A same-day regression (MEMORY.md line 85, 170 chars) reached
+# disk despite this guard supposedly being live, because the guard only recognized native
+# tool calls. These cases close that gap for both known tool-name prefixes.
+DC_WRITE_FILE_NAMES = [
+    "mcp__Desktop_Commander__write_file",
+    "mcp__plugin_desktop-commander_desktop-commander__write_file",
+]
+DC_EDIT_BLOCK_NAMES = [
+    "mcp__Desktop_Commander__edit_block",
+    "mcp__plugin_desktop-commander_desktop-commander__edit_block",
+]
+
+for name in DC_WRITE_FILE_NAMES:
+    # 10. write_file in (default) rewrite mode introducing an over-length hook -> DENY.
+    denied, _ = run({"tool_name": name, "tool_input": {"path": "PLACEHOLDER", "content": SHORT + LONG}}, SHORT)
+    check("%s rewrite adding an over-length hook -> DENY" % name, denied)
+
+    # 11. write_file in append mode: the "content" param is only the appended chunk, not
+    # the full file -- simulate() must concatenate onto current_text, not replace it.
+    denied, _ = run({"tool_name": name,
+                     "tool_input": {"path": "PLACEHOLDER", "content": LONG, "mode": "append"}}, SHORT)
+    check("%s append introducing an over-length hook -> DENY" % name, denied)
+
+    denied, _ = run({"tool_name": name,
+                     "tool_input": {"path": "PLACEHOLDER", "content": SHORT, "mode": "append"}}, SHORT)
+    check("%s append with a compliant hook -> allow" % name, not denied)
+
+    # 12. Non-string content (Excel 2D-array mode) can't be simulated as index text -> allow.
+    denied, _ = run({"tool_name": name,
+                     "tool_input": {"path": "PLACEHOLDER", "content": [["a", "b"]]}}, SHORT)
+    check("%s non-string content -> allow (fail open)" % name, not denied)
+
+for name in DC_EDIT_BLOCK_NAMES:
+    # 13. edit_block's native field names (file_path/old_string/new_string) introducing
+    # an over-length hook -> DENY, same as the native Edit tool.
+    denied, _ = run({"tool_name": name,
+                     "tool_input": {"old_string": SHORT, "new_string": LONG}}, SHORT)
+    check("%s introducing an over-length hook -> DENY" % name, denied)
+
+    # 14. expected_replacements != 1 means simulating a single replace() would be a guess
+    # about how many replacements Desktop Commander will actually make -> fail open.
+    denied, _ = run({"tool_name": name,
+                     "tool_input": {"old_string": SHORT, "new_string": LONG, "expected_replacements": 2}},
+                    SHORT + SHORT)
+    check("%s with expected_replacements=2 -> allow (fail open, ambiguous count)" % name, not denied)
+
+    # 15. Excel/Word range mode (no old_string/new_string, uses "range"/"content" instead)
+    # isn't text-length-simulatable -> allow.
+    denied, _ = run({"tool_name": name,
+                     "tool_input": {"range": "Sheet1!A1:B2", "content": [["x", "y"]]}}, SHORT)
+    check("%s Excel/Word range mode -> allow (fail open, not text)" % name, not denied)
+
 print()
 if failures:
     print("%d FAILED: %s" % (len(failures), "; ".join(failures)))
