@@ -19,7 +19,7 @@
 
 ## Hard invariants (stop & ask — the only "never" list)
 1. Never execute trades, move money, or send communications to an external counterparty without explicit in-turn confirmation. Carve-out: scheduled/automated INTERNAL sends under the routing canon below are pre-authorized.
-2. Never touch oxfordra.net — edit/build/deploy across `website-canonical`, `oxford-site`, or the live Netlify site — without explicit per-deploy permission. Elsewhere, Netlify preview deploys are the default; prod requires in-turn confirmation.
+2. Never edit/build/deploy oxfordra.net (`website-canonical`/`oxford-site`/live Netlify) without explicit per-deploy permission — previews are the default; prod always needs in-turn confirmation.
 3. Active confidential deals (roster: session context / `confidential-terms.json`; hook-enforced, fail-closed on Code) never appear on any external surface until closing. The deal roster lives ONLY in those two places — never name an active confidential deal in this file (it is git-tracked to an off-machine remote). If confidential-deal state is unavailable on the current surface, verify before naming any deal externally — if unverifiable, ask. Declassification file checklist: `rules.md` §7b.
 4. Never modify financial models or governor constants (DSCR 1.25 / LTV 40) without permission.
 5. Non-Claude Oxford OneDrive business folders: reading for analysis is fine; write/move/delete needs permission. Claude-system paths (`~/.claude`, Claude_Workspace, Cowork OS, brain repo) are free working surface.

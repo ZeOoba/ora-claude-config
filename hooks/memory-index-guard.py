@@ -1,4 +1,10 @@
-"""MEMORY.md index-hook write-time guard -- PreToolUse hook for Edit|Write|MultiEdit.
+"""MEMORY.md index-hook write-time guard -- PreToolUse hook for Edit|Write|MultiEdit plus
+Desktop Commander's write_file/edit_block (both the mcp__Desktop_Commander__ and
+mcp__plugin_desktop-commander_desktop-commander__ tool-name prefixes -- both exist live in
+this stack). Several scheduled tasks are approved to write memory files through Desktop
+Commander instead of native Edit/Write/MultiEdit; a same-day regression (MEMORY.md line 85,
+170 chars) reached disk because the guard only recognized native tool calls. Extended
+2026-07-14 to close that gap -- see hooks/tests/test-memory-index-guard.py cases 10-16.
 
 memory-policy.md sec 3 says each MEMORY.md index entry is "a one-line description";
 doctrine-integrity-probe.py check 9 operationalizes that as a 150-char cap on the HOOK
@@ -34,6 +40,15 @@ MAINTENANCE_DIR = os.path.normpath(
 DEFAULT_MEMORY_INDEX = (
     "C:/Users/Owner/.claude/projects/"
     "C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/MEMORY.md")
+
+DC_WRITE_FILE_NAMES = frozenset((
+    "mcp__Desktop_Commander__write_file",
+    "mcp__plugin_desktop-commander_desktop-commander__write_file",
+))
+DC_EDIT_BLOCK_NAMES = frozenset((
+    "mcp__Desktop_Commander__edit_block",
+    "mcp__plugin_desktop-commander_desktop-commander__edit_block",
+))
 
 
 def _norm(p):
@@ -86,6 +101,32 @@ def simulate_edit(tool_name, tool_input, current_text):
                 text = text.replace(old, new, 1)
         return text
 
+    if tool_name in DC_WRITE_FILE_NAMES:
+        # Desktop Commander's write_file uses "path"/"content"/"mode", not Write's
+        # "file_path"/"content". In append mode, "content" is only the appended chunk --
+        # simulating it as the full new file (like rewrite) would be wrong.
+        content = tool_input.get("content")
+        if not isinstance(content, str):
+            return None  # e.g. Excel 2D-array content -- not text, can't simulate
+        if tool_input.get("mode") == "append":
+            return current_text + content
+        return content  # "rewrite" (the schema default)
+
+    if tool_name in DC_EDIT_BLOCK_NAMES:
+        # edit_block shares Edit's field names (file_path/old_string/new_string) but has
+        # no "replace_all" -- it has "expected_replacements" (default 1). A count other
+        # than 1 means simulating a single replace() would be guessing how many
+        # replacements Desktop Commander will actually make, so fail open instead.
+        old = tool_input.get("old_string")
+        new = tool_input.get("new_string")
+        if not isinstance(old, str) or not isinstance(new, str) or old == "":
+            return None  # Excel/Word range mode (range/content, no old_string) etc.
+        if tool_input.get("expected_replacements", 1) != 1:
+            return None
+        if current_text.count(old) != 1:
+            return None
+        return current_text.replace(old, new, 1)
+
     return None
 
 
@@ -121,7 +162,9 @@ def main():
 
     tool_name = payload.get("tool_name")
     tool_input = payload.get("tool_input") or {}
-    file_path = tool_input.get("file_path")
+    # Desktop Commander's write_file uses "path", not "file_path" -- edit_block already
+    # matches native Edit's "file_path", so this fallback only changes write_file's case.
+    file_path = tool_input.get("file_path") or tool_input.get("path")
     if not isinstance(file_path, str) or not file_path:
         return
     if not is_memory_index(file_path):
