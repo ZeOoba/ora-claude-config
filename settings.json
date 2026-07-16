@@ -90,14 +90,7 @@
       "mcp__a66aaa4a-ffcd-4066-b2af-79c4ce807809__netlify-user-services-reader",
       "mcp__a66aaa4a-ffcd-4066-b2af-79c4ce807809__netlify-extension-services-reader",
       "mcp__a66aaa4a-ffcd-4066-b2af-79c4ce807809__get-netlify-coding-context",
-      "mcp__Apify__apify--rag-web-browser",
-      "mcp__Apify__fetch-apify-docs",
-      "mcp__Apify__search-apify-docs",
-      "mcp__Apify__fetch-actor-details",
-      "mcp__Apify__search-actors",
-      "mcp__Apify__get-actor-run",
       "mcp__claude-in-chrome__*",
-      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__*",
       "mcp__excel__*",
       "mcp__pdf-viewer__*",
       "mcp__plugin_desktop-commander_desktop-commander__*",
@@ -162,7 +155,6 @@
     "firecrawl:skill-gen": "off",
     "anthropic-skills:personal-portfolio": "off",
     "anthropic-skills:setup-cowork": "off",
-    "anthropic-skills:census-acs-extract": "off",
     "simplify": "user-invocable-only",
     "init": "user-invocable-only",
     "run": "user-invocable-only",
@@ -240,7 +232,7 @@
         ]
       },
       {
-        "matcher": "Write|Edit",
+        "matcher": "Write|Edit|Skill",
         "hooks": [
           {
             "type": "command",
