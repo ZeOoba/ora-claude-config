@@ -20,6 +20,17 @@ export const meta = {
 //     is + audit intent). A Phase-0 Orient scout reads the repo and derives the ground truth +
 //     per-dimension focus that are baked in for cc. E.g.
 //     Workflow({ name: 'cc-audit-army', args: { worktree: 'C:/Users/Owner/ora-pm', brief: 'ORA property-management app: React + Supabase tenant portal.' } })
+// Some harnesses deliver args as a JSON-ENCODED STRING (proven 2026-07-16, runs wf_ae4150f2-651 /
+// wf_514f9699-d33): pre-guard it slipped past `typeof args === 'object'` and silently audited the
+// default worktree. Self-parse a JSON string; fail closed on anything else.
+if (typeof args === 'string') {
+  try { args = JSON.parse(args); } catch (e) {
+    throw new Error('args string is not valid JSON (' + e.message + ') — refusing to fall back to the default worktree (fail closed).');
+  }
+}
+if (args !== undefined && args !== null && typeof args !== 'object') {
+  throw new Error('args must be a JSON object, got ' + typeof args + ' — refusing to fall back to the default worktree (fail closed).');
+}
 const WT = (typeof args === 'object' && args && args.worktree) || 'C:/Users/Owner/oxford-command-center';
 const BRIEF = (typeof args === 'object' && args && typeof args.brief === 'string' && args.brief.trim()) || null;
 if (typeof args === 'object' && args && 'brief' in args && !BRIEF) {
@@ -52,7 +63,7 @@ const ccGroundTruth = (refresh) => [
   'BASELINE = ' + refresh.baseline + ' (the worktree HEAD). This is the authoritative current state. The repo is a TS/React+Vite command center over a server/warehouse SQLite (WAL) layer for Oxford Realty Advisors (private-family-office industrial real estate; goals in priority order: acquisition velocity > ops optimization > institutional quality > comms/brand > knowledge capture; ~$60M AUM heading to $700-800M).',
   'Orient with: architecture/system-overview.md, architecture/coding-standards.md, architecture/database-schema.md, architecture/api-contracts.md, and the ratified master plan docs/superpowers/specs/2026-06-13-ora-intelligence-platform-master-plan.md.',
   'RATIFIED BASELINE: the 2026-06-13 master plan already encodes current-state, the F1-F13 value matrix, the gap list, and a pre-mortem. This audit is DELTA-ONLY: find what the master plan MISSED or what is actually WRONG in the code — NOT a re-derivation of the plan.',
-  'ALREADY-DONE (do NOT report these as gaps/bugs-of-omission; they are DONE on this baseline): (a) F1 NOI A<->B reconciliation — server/warehouse/reconcile-noi.ts (CHANGELOG Phase 1c); (b) get_macro FRED agent tool — server/macro/ + server/ai (Phase 1b); (c) the acquisition scorecard contract + deterministic engine — server/warehouse/acquisition.ts, src/contracts/acquisition.ts, config/acquisition-ruleset.v1.proposed.json (PROPOSED / fail-closed, un-ratified). The acquisition ruleset is the GOVERNOR SURFACE and is intentionally un-ratified (ratified slots empty by design) — do NOT flag the empty ratified values as a bug; flag only real defects in the engine mechanism, fail-closed behavior, or contract.',
+  'ALREADY-DONE (do NOT report these as gaps/bugs-of-omission; they are DONE on this baseline): (a) F1 NOI A<->B reconciliation — server/warehouse/reconcile-noi.ts (CHANGELOG Phase 1c); (b) get_macro FRED agent tool — server/macro/ + server/ai (Phase 1b); (c) the acquisition scorecard contract + deterministic engine — server/warehouse/acquisition.ts, src/contracts/acquisition.ts, config/acquisition-ruleset.v1.proposed.json (fail-closed; scorecard v1.0 RATIFIED @ 31d872e — the commit after the curated sha — and the 8% unlevered-IRR hurdle governor ratified @ 3538282; verified 2026-07-16). The acquisition ruleset is the GOVERNOR SURFACE — do NOT propose changing ratified values; flag only real defects in the engine mechanism, fail-closed behavior, or contract.',
   'ALREADY-DONE — NEWER (landed after the curated list above, per the refresh scout; same rule, do NOT re-report as gaps): ' + refresh.newerAlreadyDone,
   GOVERNOR_CLAUSE,
 ].join('\n');
@@ -285,40 +296,68 @@ const killed = candidates.length - confirmed.length - unverified;
 log('Verification: ' + confirmed.length + ' confirmed, ' + killed + ' killed' + (unverified ? ', ' + unverified + ' UNVERIFIED (verifier agent death)' : '') + '.');
 
 phase('Rank');
-const REPORT_SCHEMA = {
+// LLM ranks, code renders: the previous single-agent design demanded the entire report as one
+// structured string and blew the StructuredOutput retry cap at 32 findings (~53KB JSON). The agent
+// now emits only a compact ranking + summary; the markdown is assembled deterministically below.
+// Proven 2026-07-16 (wf_f70c9ac8-4d3 site-repo re-run): resumed from cache, only Rank re-ran live,
+// succeeded on attempt 1 against the same 32-finding payload that exhausted the retry cap before.
+const RANK_SCHEMA = {
   type: 'object', additionalProperties: false,
   properties: {
-    reportMarkdown: { type: 'string', description: 'the full ranked Audit Report in markdown, grouped by severity, each finding tagged to a goal' },
     ranked: {
       type: 'array',
       items: {
         type: 'object', additionalProperties: false,
         properties: {
-          rank: { type: 'number' }, id: { type: 'string' }, title: { type: 'string' },
-          severity: { type: 'string' }, file: { type: 'string' }, line: { type: 'string' },
-          fix: { type: 'string' }, goalImpact: { type: 'string' },
+          rank: { type: 'number' },
+          id: { type: 'string' },
           riskTierHint: { type: 'string', enum: ['GREEN', 'YELLOW', 'RED'], description: 'GREEN additive+safe / YELLOW touches financial mechanism / RED governor-constant|confidential|external|deploy|destructive' },
+          rationale: { type: 'string', description: 'one line: why this rank and tier' },
         },
-        required: ['rank', 'id', 'title', 'severity', 'file', 'line', 'fix', 'goalImpact', 'riskTierHint'],
+        required: ['rank', 'id', 'riskTierHint', 'rationale'],
       },
     },
     summary: { type: 'string', description: '4-6 sentence executive summary of the codebase health vs ORA goals' },
   },
-  required: ['reportMarkdown', 'ranked', 'summary'],
+  required: ['ranked', 'summary'],
 };
-const report = await agent(
-  CONTRACT + '\n\n=== GROUND TRUTH ===\n' + GROUND_TRUTH + '\n\nYou are the SYNTHESIS pass. Below are the CONFIRMED, deduped findings (each already re-verified against the file). Produce ONE ranked Audit Report: order by (severity, then goal-priority impact: acquisition velocity > ops > institutional quality > comms > knowledge), group by severity, tag each to the goal it affects, and assign a riskTierHint (GREEN additive-safe / YELLOW touches financial mechanism / RED governor-constant|confidential|external|deploy|destructive) to pre-stage the implementation phase. Also note these audit COVERAGE NOTES (gaps in the audit itself):\n' + coverageNotes.join('\n') + '\n\n=== CONFIRMED FINDINGS (JSON) ===\n' + JSON.stringify(confirmed),
-  { label: 'synthesize-report', phase: 'Rank', model: modelFor('opus'), schema: REPORT_SCHEMA }
+const slim = confirmed.map((f) => ({ id: f.id, title: f.title, severity: f.severity, file: f.file, line: f.line, goalImpact: f.goalImpact, fix: f.fix }));
+const rank = await agent(
+  CONTRACT + '\n\n=== GROUND TRUTH ===\n' + GROUND_TRUTH + '\n\nYou are the SYNTHESIS pass. Below are the CONFIRMED, deduped findings (each already re-verified against the file; slimmed to decision fields). Rank EVERY finding by (severity, then goal-priority impact: acquisition velocity > ops > institutional quality > comms > knowledge) and assign each a riskTierHint (GREEN additive-safe / YELLOW touches financial mechanism / RED governor-constant|confidential|external|deploy|destructive) with a one-line rationale — every input id must appear exactly once in ranked. Also write a 4-6 sentence executive summary of codebase health vs ORA goals, accounting for these audit COVERAGE NOTES (gaps in the audit itself):\n' + coverageNotes.join('\n') + '\n\n=== CONFIRMED FINDINGS (JSON, slimmed) ===\n' + JSON.stringify(slim),
+  { label: 'rank-findings', phase: 'Rank', model: modelFor('opus'), schema: RANK_SCHEMA }
 );
+if (!rank) throw new Error('Rank agent failed — findings are verified but unranked; re-run the Rank phase (fail closed).');
 
-if (!report) throw new Error('Synthesis agent failed — findings are verified but unranked; re-run the Rank phase (fail closed).');
+const byId = {}; confirmed.forEach((f) => { byId[f.id] = f; });
+const rankById = {}; (rank.ranked || []).forEach((r) => { rankById[r.id] = r; });
+const orderedRanked = (rank.ranked || []).filter((r) => byId[r.id]).slice().sort((a, b) => a.rank - b.rank);
+const unranked = confirmed.filter((f) => !rankById[f.id]);
+const ordered = orderedRanked.map((r) => byId[r.id]).concat(unranked);
+const SEV_ORDER = ['critical', 'high', 'medium', 'low'];
+let md = '# Audit Report — ' + WT + '\n\n' + rank.summary + '\n\n**Counts:** ' + confirmed.length + ' confirmed (' + SEV_ORDER.map((s) => confirmed.filter((f) => f.severity === s).length + ' ' + s).join(' / ') + ')' + (unranked.length ? ' — ' + unranked.length + ' finding(s) missing from the ranking, appended last' : '') + '\n';
+for (const sev of SEV_ORDER) {
+  const group = ordered.filter((f) => f.severity === sev);
+  if (!group.length) continue;
+  md += '\n## ' + sev.toUpperCase() + ' (' + group.length + ')\n';
+  for (const f of group) {
+    const r = rankById[f.id] || {};
+    md += '\n### ' + (r.rank != null ? r.rank + '. ' : '') + f.title + '\n'
+      + '- **id:** `' + f.id + '` · **file:** `' + f.file + ':' + f.line + '` · **risk:** ' + (r.riskTierHint || 'UNRATED') + ' · **goal:** ' + f.goalImpact + '\n'
+      + (r.rationale ? '- **rank rationale:** ' + r.rationale + '\n' : '')
+      + '- **evidence:** ' + f.evidence + '\n'
+      + '- **excerpt:** `' + String(f.excerpt || '').replace(/`/g, "'").replace(/\s+/g, ' ').slice(0, 400) + '`\n'
+      + '- **fix:** ' + f.fix + '\n'
+      + '- **contributing dimensions:** ' + (f.contributingDimensions || []).join(', ') + '\n';
+  }
+}
+md += '\n---\n\n## Audit coverage notes\n\n' + coverageNotes.map((c) => '- ' + c).join('\n') + '\n';
 
 return {
   mode: GENERIC ? 'generic' : 'cc',
   worktree: WT,
-  summary: report.summary,
-  reportMarkdown: report.reportMarkdown,
-  ranked: report.ranked,
+  summary: rank.summary,
+  reportMarkdown: md,
+  ranked: orderedRanked.map((r) => ({ rank: r.rank, id: r.id, riskTierHint: r.riskTierHint, rationale: r.rationale, title: (byId[r.id] || {}).title, severity: (byId[r.id] || {}).severity, file: (byId[r.id] || {}).file, line: (byId[r.id] || {}).line, fix: (byId[r.id] || {}).fix, goalImpact: (byId[r.id] || {}).goalImpact })),
   counts: { raw: rawFindings.length, deduped: candidates.length, confirmed: confirmed.length, killed, unverified, droppedAlreadyDone: (dedup.droppedAlreadyDone || []).length },
   coverageNotes,
   confirmedFindings: confirmed,
