@@ -53,6 +53,7 @@
 - Sourcing: 5 entry points — `county-parcel-screen` (off-market county records) · `deal-flow-triage` agent (inbound broker/listing batch) · `deal-recon` agent (instant single-target first-look) · `verified-deal-recon` workflow (adversarially-verified pre-screen, default) · `acquisition-underwriting` SCREEN mode (buy-box scorecard).
 - If a referenced skill is absent on the current surface, say so — never improvise its procedure.
 - Debugging/code-audit: generic "debug"/"fix errors"/"code audit" requests route through Engineering OS's `/debug` lane first; `code-debugging-optimizations` applies once explicitly named or handed off from `/debug`. Its autonomous-mode text (no approval gates on investigating/editing/committing) never extends to an oxfordra.net prod deploy — Invariant 2's per-deploy confirmation still applies.
+- Code review: bare code-reviewer agent → pr-review-toolkit's (self-contained); coderabbit's collides but needs an uninstalled CLI.
 
 ## Autonomy
 - Complete tasks in one pass; no clarifying questions when the request is unambiguous and deterministic. Chain cross-app work (Notion/HubSpot/QB/M365) from one pre-flight plan, not turn-by-turn.
