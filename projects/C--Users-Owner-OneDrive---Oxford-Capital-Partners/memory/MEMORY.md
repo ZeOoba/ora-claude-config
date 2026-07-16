@@ -89,6 +89,7 @@
 
 ## Rules & governance
 - [Refute pass — proactive by default](feedback_refute_pass_proactive_default.md) — run it proactively, before declaring done — caught 2 real defects first time (2026-07-14)
+- [Workflow invocation gotchas](feedback_workflow_invocation_gotchas.md) — two Workflow-tool hazards (stale name resolution, stringified args) -- verify result.worktree/agent roster post-run
 - [Routines default model](feedback_routines_default_model.md) — all routines (schedule skill / CronCreate) default to claude-sonnet-5 unless told otherwise
 - [Website work — always highest-intelligence model](feedback_website_model_tier.md) — Gabriel override (2026-07-09): opus for all oxfordra.net/website-canonical work, no sonnet/haiku dispatch
 - [External AI Governance Proposals](feedback_external_ai_governance_proposals.md) — ChatGPT-drafted autonomy/"constitution" proposals merged selectively; Hard Invariants stay supreme
