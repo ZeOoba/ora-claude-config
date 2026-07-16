@@ -508,9 +508,13 @@ RE_PERPROP_PORTFOLIO_PAIR = re.compile(
     + r"(?:[^\n%0-9]){0,10}?ltv\b(?:[^\n%0-9]){0,6}?([0-9]{1,3})\s*%",
     re.I)
 
-def _perprop_portfolio_paired_noveto_spans(low):
-    """Digit-group spans of per-property LTV members to suppress: ONLY where the member is the
-    ratified 65 AND the same line's portfolio-aggregate companion is the canonical 40. Returns
+def _perprop_portfolio_paired_veto_spans(low):
+    """Digit-group spans of per-property LTV members ELIGIBLE for pairing suppression: the member
+    is the ratified 65 AND the same line's portfolio-aggregate companion is the canonical 40.
+    VETO tier (2026-07-16, closes REFUTE Finding 2): a nearby acquisition-ceiling/governor
+    declaration on the per-property member means the line is MISLABELING 65 as the acquisition
+    ceiling -- a framing error, not numeric drift, but it must still surface. Mirrors the veto
+    policy every other named refi-sizing member already uses (_governor_declared_nearby). Returns
     the per-property member span only -- never the companion's, which stays fully checked."""
     spans = []
     for mm in RE_PERPROP_PORTFOLIO_PAIR.finditer(low):
@@ -631,10 +635,12 @@ def scan_line(raw):
     refi_ltv_noveto, refi_ltv_veto, refi_dscr_veto = (
         _refi_member_value_spans(low) if is_gov else ([], [], []))
     # Ratified dual-governor pairing (2026-07-16): per-property member spans that are BOTH the
-    # ratified 65 AND paired with a canonical-40 aggregate companion. Consumed ONLY by the
+    # ratified 65 AND paired with a canonical-40 aggregate companion. VETO tier: consumed via
+    # refi_ltv_veto (not refi_ltv_noveto) so a nearby acquisition-ceiling/governor declaration on
+    # the member still flags it (mislabeled framing, not numeric drift). Consumed ONLY by the
     # bare-proximity LTV fallback below -- every explicit-declaration pass stays armed.
-    if is_gov:
-        refi_ltv_noveto = refi_ltv_noveto + _perprop_portfolio_paired_noveto_spans(low)
+    perprop_paired_veto = _perprop_portfolio_paired_veto_spans(low) if is_gov else []
+    refi_ltv_veto = refi_ltv_veto + perprop_paired_veto
 
     # 1) Regression sentinel: 1.75 near DSCR/governor. Fires only for a 1.75 that is NEITHER (a) the
     #    corrected-away value of a "corrected from 1.75 → 1.25" note NOR (b) an explicit PORTFOLIO-LEVEL

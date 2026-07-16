@@ -945,6 +945,30 @@ def test_perproperty_non_ratified_ltv_still_flags_unit():
     print("  PASS test_perproperty_non_ratified_ltv_still_flags_unit")
 
 
+def test_perprop_pairing_vetoed_when_declared_as_acquisition_ceiling_unit():
+    """VETO tier (Refute Finding 2, 2026-07-16): a MISLABELED pairing still flags.
+
+    The pairing suppresses "per-property LTV 65% / portfolio-aggregate LTV 40%" because 65 and 40
+    are both the ratified numbers -- but if the SAME LINE declares the per-property 65 AS the
+    acquisition hard ceiling/governor (a labeling error, not a numeric drift), that must still
+    surface: the two-level framing is being misapplied even though neither number is wrong. Mirrors
+    the veto policy every other named refi-sizing member already uses (_governor_declared_nearby).
+    """
+    m = _load_probe_module()
+    for line in ("the acquisition hard ceiling: per-property LTV 65% / portfolio-aggregate LTV 40%",
+                 "per-property LTV 65% is the governor now / portfolio-aggregate LTV 40%"):
+        out = m.scan_line(line)
+        assert any("65" in o for o in out), (
+            "per-property 65%% declared AS the acquisition ceiling must flag despite a canonical "
+            "companion; line=%r got=%r" % (line, out))
+    # And the ordinary, correctly-framed pairing (no nearby ceiling/governor declaration on the
+    # per-property member) must stay suppressed -- this is a VETO, not a blanket re-flag.
+    assert m.scan_line("No scorecard weights or governor constants (DSCR 1.25x / per-property LTV "
+                       "65% / portfolio-aggregate LTV 40%) changed.") == [], \
+        "the ordinary ratified pairing must remain suppressed"
+    print("  PASS test_perprop_pairing_vetoed_when_declared_as_acquisition_ceiling_unit")
+
+
 def test_dated_audit_memory_file_excluded_unit():
     """Dated audit/project memory files NARRATE findings -- they do not declare a live governor.
 
@@ -1067,6 +1091,7 @@ def main():
     test_perprop_portfolio_aggregate_pairing_suppressed_unit()
     test_perprop_member_value_locked_to_ratified_65_unit()
     test_perproperty_non_ratified_ltv_still_flags_unit()
+    test_perprop_pairing_vetoed_when_declared_as_acquisition_ceiling_unit()
     test_dated_audit_memory_file_excluded_unit()
     test_acquisition_underwriting_skill_file_clean()
     test_test_files_excluded_from_scan_unit()
