@@ -521,6 +521,111 @@ def test_declassification_residue_absent_without_root_in_fixture_mode():
     print("  PASS test_declassification_residue_absent_without_root_in_fixture_mode")
 
 
+def test_declassification_roster_flags_marker_near_term():
+    """A declassified deal's term co-occurring with a leftover confidentiality
+    marker ([CONFIDENTIAL], (CONFIDENTIAL, 'must never appear externally')
+    within a small line window in a --roster-files= file -> WARN, exit 0."""
+    doc = _write_fixture(_v21_base())
+    fd, terms_file = tempfile.mkstemp(suffix="_terms.json", text=True)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps({
+            "old_deal": {"active": False, "always": ["zebraquartz"]},
+        }))
+    fd2, roster_file = tempfile.mkstemp(suffix="_projects.md", text=True)
+    with os.fdopen(fd2, "w", encoding="utf-8") as fh:
+        fh.write("## Zebraquartz Portfolio\n[CONFIDENTIAL] status: terminated.\n")
+    try:
+        r = run_probe([doc, "--terms=%s" % terms_file,
+                      "--roster-files=%s" % roster_file])
+        assert r.returncode == 0, (
+            "roster marker residue is WARN-only, got exit %d\n%s"
+            % (r.returncode, r.stdout))
+        assert "old_deal" in r.stdout and "confidentiality" in r.stdout.lower(), (
+            "expected a WARN naming the deal and the marker residue:\n%s" % r.stdout)
+    finally:
+        os.remove(doc)
+        os.remove(terms_file)
+        os.remove(roster_file)
+    print("  PASS test_declassification_roster_flags_marker_near_term")
+
+
+def test_declassification_roster_allows_bare_mention_without_marker():
+    """A declassified deal's term mentioned in a roster file WITHOUT a
+    confidentiality marker nearby must NOT be flagged -- these files are
+    SUPPOSED to keep discussing a declassified deal, just without the tags."""
+    doc = _write_fixture(_v21_base())
+    fd, terms_file = tempfile.mkstemp(suffix="_terms.json", text=True)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps({
+            "old_deal": {"active": False, "always": ["zebraquartz"]},
+        }))
+    fd2, roster_file = tempfile.mkstemp(suffix="_projects.md", text=True)
+    with os.fdopen(fd2, "w", encoding="utf-8") as fh:
+        fh.write("## Zebraquartz Portfolio\nStatus: terminated, declassified, "
+                 "now a lender note.\n")
+    try:
+        r = run_probe([doc, "--terms=%s" % terms_file,
+                      "--roster-files=%s" % roster_file])
+        assert r.returncode == 0
+        assert "old_deal" not in r.stdout, (
+            "a bare mention with no marker must not be flagged:\n%s" % r.stdout)
+        assert "Declassification-residue sweep: clean" in r.stdout
+    finally:
+        os.remove(doc)
+        os.remove(terms_file)
+        os.remove(roster_file)
+    print("  PASS test_declassification_roster_allows_bare_mention_without_marker")
+
+
+def test_declassification_roster_ignores_marker_for_unrelated_active_deal():
+    """A confidentiality marker elsewhere in a multi-deal roster file, near a
+    DIFFERENT (still-active) deal's term, must not falsely tag the
+    declassified deal -- the line-window scope must stay per-deal."""
+    doc = _write_fixture(_v21_base())
+    fd, terms_file = tempfile.mkstemp(suffix="_terms.json", text=True)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps({
+            "old_deal": {"active": False, "always": ["zebraquartz"]},
+            "live_deal": {"active": True, "always": ["yttriumfalcon"]},
+        }))
+    fd2, roster_file = tempfile.mkstemp(suffix="_projects.md", text=True)
+    with os.fdopen(fd2, "w", encoding="utf-8") as fh:
+        fh.write(
+            "## Zebraquartz Portfolio\nStatus: declassified, lender note.\n\n\n\n"
+            "## Yttriumfalcon Deal\n[CONFIDENTIAL] active acquisition in progress.\n"
+        )
+    try:
+        r = run_probe([doc, "--terms=%s" % terms_file,
+                      "--roster-files=%s" % roster_file])
+        assert "old_deal" not in r.stdout, (
+            "the marker near the UNRELATED active deal must not tag old_deal:\n%s"
+            % r.stdout)
+    finally:
+        os.remove(doc)
+        os.remove(terms_file)
+        os.remove(roster_file)
+    print("  PASS test_declassification_roster_ignores_marker_for_unrelated_active_deal")
+
+
+def test_declassification_roster_absent_without_override_in_fixture_mode():
+    """Fixture runs without --roster-files= must simply scan zero roster files
+    (live-only default), matching check 12/13's established contract."""
+    doc = _write_fixture(_v21_base())
+    fd, terms_file = tempfile.mkstemp(suffix="_terms.json", text=True)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps({
+            "old_deal": {"active": False, "always": ["zebraquartz"]},
+        }))
+    try:
+        r = run_probe([doc, "--terms=%s" % terms_file])
+        assert r.returncode == 0
+        assert "roster file(s) checked" in r.stdout
+    finally:
+        os.remove(doc)
+        os.remove(terms_file)
+    print("  PASS test_declassification_roster_absent_without_override_in_fixture_mode")
+
+
 def test_confidential_leak_fails():
     """An ACTIVE confidential term in CLAUDE.md (invariant 3) -> exit 1, and the
     probe report must NOT echo the term itself (the report is emailed weekly)."""
@@ -891,6 +996,10 @@ def main():
     test_declassification_residue_clean_when_scrubbed()
     test_declassification_residue_ignores_active_deals()
     test_declassification_residue_absent_without_root_in_fixture_mode()
+    test_declassification_roster_flags_marker_near_term()
+    test_declassification_roster_allows_bare_mention_without_marker()
+    test_declassification_roster_ignores_marker_for_unrelated_active_deal()
+    test_declassification_roster_absent_without_override_in_fixture_mode()
     test_confidential_leak_fails()
     test_terms_shape_failopen()
     test_leak_formatting_and_excerpt_withholding()

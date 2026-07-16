@@ -93,14 +93,20 @@ exists (two documented misses): `event_log.md`, E. Fulton declassification:
   file" policy language — that's Hard Invariant 3's job at the roster level,
   not a per-file rule to maintain.
 
-**Automated backstop (2026-07-16):** `maintenance/doctrine-integrity-probe.py`
+**Automated backstop (2026-07-16, extended same day):** `maintenance/doctrine-integrity-probe.py`
 check 13 (declassification-residue sweep) now runs on every push and daily via
 `ora-doctrine-integrity-guard` — for every deal marked `active: false`, it scans
 CLAUDE.md and every known ported copy (`PORTED_CLAUDE_MD_COPIES`) for that
 deal's terms and WARNs if any linger, closing the specific gap that caused the
-E. Fulton miss (this check only covers CLAUDE.md/ported copies; the other
-checklist items above — `session-context.md`, `projects.md`, `MEMORY.md`,
-`firm.md`, `event_log.md` — remain manual, doc-only). WARN, not a hard fail: a
+E. Fulton miss. **Extended same day** to the 4 roster-style checklist items —
+`session-context.md`, `projects.md`, `MEMORY.md`, `firm.md` — but NOT as a bare
+mention check (these files are supposed to keep discussing a declassified deal,
+just without confidentiality tags): it flags a declassified deal's term
+co-occurring with a leftover confidentiality marker (`[CONFIDENTIAL]`,
+`(CONFIDENTIAL`, "must never appear externally") within a small line window,
+which is the actual defect class the checklist exists to prevent. Only
+`event_log.md` remains fully manual, doc-only (append-only by design — see §9 —
+so there is no "stale marker" state to detect there). WARN, not a hard fail: a
 declassified deal's name is no longer confidential, so a hit is a
 checklist-completeness signal, not a leak (check 8 already hard-fails on
 ACTIVE-deal terms anywhere).

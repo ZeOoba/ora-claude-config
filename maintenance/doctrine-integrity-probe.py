@@ -572,6 +572,44 @@ def leak_scan_selfcheck(samples):
     return (not findings), findings
 
 
+# Check 13 extension (2026-07-16): rules.md 7b's checklist has 6 items; the
+# original check 13 covers only the ONE item (CLAUDE.md + ported copies) that
+# caused the proven E. Fulton miss. The other 4 file-level items --
+# session-context.md, projects.md, MEMORY.md, firm.md -- legitimately still
+# MENTION a declassified deal after the checklist runs (only the CONFIDENTIAL
+# markers should be gone, per the checklist's own "dropped [CONFIDENTIAL],
+# removed 'must never appear externally' language" wording from the real
+# E. Fulton fix, event_log.md). So this extension does NOT flag every mention
+# of a declassified deal in these files (that would be noisy and wrong --
+# these files are SUPPOSED to keep discussing the deal, just without the
+# confidentiality tags) -- it flags a declassified deal's term co-occurring
+# with a leftover confidentiality MARKER within a small line window, which is
+# the specific defect class the checklist exists to prevent.
+DECLASSIFICATION_MARKER_TOKENS = ("[confidential]", "(confidential",
+                                  "must never appear externally")
+DECLASSIFICATION_RESIDUE_WINDOW = 3  # lines; markdown entries often span 2-3 lines
+
+
+def find_marker_residue(text, always_terms, window=DECLASSIFICATION_RESIDUE_WINDOW):
+    """{(term, marker): first 1-indexed line_no} for every place a declassified
+    deal's term and a confidentiality marker token both appear within `window`
+    consecutive lines of each other. Line-windowed (not whole-file) so a marker
+    used for a DIFFERENT, still-active deal elsewhere in a multi-deal roster
+    file doesn't false-positive against an unrelated declassified deal."""
+    lowered_lines = [ln.lower() for ln in text.splitlines()]
+    hits = {}
+    for i in range(len(lowered_lines)):
+        window_text = "\n".join(lowered_lines[i:i + window])
+        for term in always_terms:
+            if term not in window_text:
+                continue
+            for marker in DECLASSIFICATION_MARKER_TOKENS:
+                if marker in window_text:
+                    key = (term, marker)
+                    hits.setdefault(key, i + 1)
+    return hits
+
+
 def git_tracked_md(repo_dir):
     """Repo-relative paths (posix) of git-TRACKED *.md files, or None if git is
     unavailable -- tracked files are exactly what reaches the off-machine remote."""
@@ -606,12 +644,15 @@ def parse_args(argv):
         elif a.startswith("--ported-copies="):
             v = a.split("=", 1)[1]
             overrides["ported_copies"] = [Path(p) for p in v.split(",") if p]
+        elif a.startswith("--roster-files="):
+            v = a.split("=", 1)[1]
+            overrides["roster_files"] = [Path(p) for p in v.split(",") if p]
         elif a.startswith("--"):
             # A typo'd flag must not silently become the CLAUDE.md path (which
             # would also disable live-mode scanning). Fail loud.
             print("[MISSING] unknown option: %s (known: --session-context= "
                   "--rules= --terms= --quick --memory-index= --backup-root= "
-                  "--ported-copies=)" % ascii_safe(a))
+                  "--ported-copies= --roster-files=)" % ascii_safe(a))
             sys.exit(1)
         else:
             pos.append(a)
@@ -1198,10 +1239,41 @@ def main():
                          "(proven miss: E. Fulton lingered in CLAUDE.md 3 days "
                          "post-declassification, event_log.md 2026-07-12)"
                          % (ascii_safe(key), ascii_safe(label), ", ".join(hits[:3])))
+        # --- roster-file extension: session-context.md, projects.md,
+        # MEMORY.md, firm.md -- see find_marker_residue's docstring for why
+        # this checks marker+term CO-OCCURRENCE, not bare mention.
+        roster_files = (overrides["roster_files"] if "roster_files" in overrides
+                        else ([SESSION_CONTEXT_MD, MEMORY_DIR / "projects.md",
+                              MEMORY_DIR / "MEMORY.md", MEMORY_DIR / "firm.md"]
+                              if live_mode else []))
+        for key, entry in terms_data.items():
+            if key.startswith("_") or not isinstance(entry, dict):
+                continue
+            if entry.get("active") is not False:
+                continue
+            always = [t.lower() for t in entry.get("always", []) if isinstance(t, str)]
+            if not always:
+                continue
+            for roster_path in roster_files:
+                body, err = read_optional(roster_path)
+                if body is None:
+                    warn("declassification-residue sweep: roster file unreadable "
+                         "(fail-open, not asserted this file) -- %s" % ascii_safe(err))
+                    continue
+                marker_hits = find_marker_residue(body, always)
+                for (term, marker), line_no in sorted(marker_hits.items()):
+                    residue_total += 1
+                    warn("declassified deal '%s' still has a confidentiality "
+                         "marker (%r) near its term at %s:%d -- rules.md 7b "
+                         "requires the marker be dropped even though the deal "
+                         "may still be legitimately mentioned there"
+                         % (ascii_safe(key), ascii_safe(marker),
+                            ascii_safe(str(roster_path)), line_no))
         if residue_total == 0:
             print("Declassification-residue sweep: clean (0 hits across "
-                  "CLAUDE.md + %d ported cop%s checked)"
-                  % (len(ported_copies), "y" if len(ported_copies) == 1 else "ies"))
+                  "CLAUDE.md + %d ported cop%s + %d roster file(s) checked)"
+                  % (len(ported_copies), "y" if len(ported_copies) == 1 else "ies",
+                     len(roster_files)))
 
     # --- verdict ---
     if missing:
