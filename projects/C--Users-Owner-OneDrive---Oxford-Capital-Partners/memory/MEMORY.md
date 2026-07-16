@@ -61,7 +61,7 @@
 - [OneDrive Business/Personal Scope](reference_onedrive_business_scope.md) — classification only, no files moved; consult before broad business-focused OneDrive-root searches
 - [Model Release Checklist](reference_model_release_checklist.md) — where hardcoded Claude model IDs live (settings.json, scheduled-task standard, oxford-command-center) + sweep process for new releases
 - [Tech Stack & Paths](tech.md) — Paths, MCP connectors + Composio/FRED gotchas, secrets index, scheduler, Obsidian mirror, machine constraints
-- [ORA PM App](reference_ora_pm.md) — ZeOoba/ora-pm (local `C:\Users\Owner\ora-pm`); Supabase magic-link whitelist; Phase 1+2a shipped+pushed, Stripe ACH built beyond original scope; 07-16 audit (3 criticals) + confidential-terms purge status
+- [ORA PM App](reference_ora_pm.md) — ZeOoba/ora-pm (local `C:\Users\Owner\ora-pm`); 07-16 audit (3 criticals) + confidential-terms purge status
 - [oxfordra.net Deploy Canon](reference_oxfordra_deploy_canon.md) — netlify-cli from website-canonical is THE path; ⚠ merging a PR to `main` auto-deploys to PROD — gate before merge, not after
 - [Standards — Financial & Communication](standards.md) — Modeling conventions (DSCR 1.25×/LTV 40%) + comms tone by audience
 - [Scheduled-Task Model Standard](reference_scheduled_task_model_standard.md) — standard = claude-sonnet-5; `[MODEL: …]` tag per task; CC/MCP model is observable but NOT settable (server-pinned)
