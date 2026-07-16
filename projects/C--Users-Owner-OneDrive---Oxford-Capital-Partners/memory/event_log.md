@@ -11,6 +11,18 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-16 — Schematic refresh (rev b, then rev c): governor-drift-probe.py false positive fixed, fleet shrank, open question resolved
+
+Manual mid-day schematic refresh (off-cycle from the 13:10 automated slot). Material changes since rev a:
+- governor-drift-probe.py's LTV-65% false positive (2 hits, flagged in rev a) is FIXED — a companion-anchored, value-locked suppressor now recognizes the ratified per-property-65%/portfolio-aggregate-40% dual-governor pairing (ratified 2026-07-11). CANON_LTV (40%, Hard Invariant 4) untouched. Built by a separate concurrent Code session; verified independently (52/52 governor-probe tests, live probe clean, doctrine-integrity clean) before being accepted. Landed via another session's concurrent commit on the shared checkout (swept up during an index race between `git add` and `git commit`) — confirmed correct by diff content before accepting, then confirmed pushed to origin.
+- memory-integrity-probe.py cleared as a direct consequence (was exiting 1 solely via governor-drift passthrough; now 88/88 clean).
+- CC/MCP fleet shrank 21 tracked -> 19 tracked (44 -> 42 total tasks, both fleets): ora-week-ahead-briefing and canary-model-check-temp are both now fully absent from the registry, not merely disabled. Rev b flagged this as "not investigated further."
+- doctrine-integrity-probe.py: MEMORY.md over-cap entry from rev a fixed (1 -> 0), but CLAUDE.md crossed the 1700-word warn threshold (1692 -> 1708 words) — new watch item, not yet at the 1850 fail line.
+
+Published to https://claude.ai/code/artifact/4ad3530d-f84f-4def-a472-d16ef107e74c as rev 2026-07-16b.
+
+**Follow-up (rev c, same day):** the fleet-drop question is resolved, not open. Both drops are deliberate, Gabriel-ratified execution of the Fleet Disposition Ledger v2 (ruling C1) — confirmed via this log's own contemporaneous entry ("Tier-0 fleet-v2-cc-execution handoff EXECUTED"), git history (commit `f6c36a3`), and on-disk archive folders (`scheduled-tasks/_archive_2026-07-16_retired/`). `canary-model-check-temp` was already-dead housekeeping (expired one-time canary, 2026-07-13); `ora-week-ahead-briefing`'s content was merged into `ora-friday-closeout` (LAMS) as a new "Part B" before the CC original was deleted — confirmed by reading that task's live v2.0 SKILL.md. Republished as rev 2026-07-16c.
+
 ## 2026-07-15 — Deal-stage sync: 5515 Catfish Court — Westport (Waunakee), WI — (none) → Candidate (Notion)
 
 Detected by ora-open-sessions-board's reconciliation step; no corresponding entry existed. Tripwire only — see Notion for the actual decision context.
