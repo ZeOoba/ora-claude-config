@@ -77,6 +77,19 @@ Obsidian-copy fix) is invariant-specific, not a general rule that every CLAUDE.m
 every section. **Scope: this is a ruling about the Skill tie-breaks section specifically** — a future
 Hard Invariant change still needs the per-file propagation check these 4 files got during E. Fulton.
 
+**REVERSED same day (Gabriel, via AskUserQuestion, later 2026-07-16 session):** shown the ruling
+above, Gabriel chose "Reverse it — propagate for real," including into the thin-pointer file. Done:
+the bullet was added to all 4 files (a new "## Skill tie-breaks" section in each, since none carried
+it). Git/PR reality varied by location — `Claude Command Center Code/` and `Claude_Workspace/
+01_Workspace/` are not git repos (direct edit only); `oxford-site/.claude/`'s parent repo has a
+corrupted `.git` (missing `refs/` entirely — direct edit only, flagged separately, see
+[[reference_workflows_dir_single_writer_gap]]-adjacent finding in event_log.md); only
+`Obsidian/BrainVault` is a working git repo with a GitHub remote, where the change shipped as
+[ZeOoba/BrainVault#2](https://github.com/ZeOoba/BrainVault/pull/2) off an isolated branch (that repo
+had ~1,100 unrelated uncommitted paths already sitting in its working tree — untouched, flagged
+separately as a likely auto-backup-hook failure). **This entry supersedes the "No — leave as-is"
+ruling above; kept for the record rather than deleted, per this log's own append-only convention.**
+
 ### 2026-07-12 — Is the fleet's shared Python 3.13 environment missing packages?
 **Answer: no, as of 2026-07-12** — `python-docx`, `openpyxl`, `pandas`, `reportlab`, `pypdf` all
 verified installed at the pinned versions (`pip show`, live machine check) against

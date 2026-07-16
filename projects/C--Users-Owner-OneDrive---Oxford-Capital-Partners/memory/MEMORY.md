@@ -11,7 +11,9 @@
 - [People](people.md) — Eric, Gabriel, Philip Collins (counsel), Tamara Lucas (title); brokers/lenders/vendors
 
 ## Projects & system
-- [BrainVault vault-backup silent failure](project_brainvault_vault_backup_failure_2026-07-16.md) — 0 backups since 07-10 20:05, likely Windows Job-Object kill of detached child; PR #2 OPEN not merged; 1,123-path backlog awaits Gabriel review
+- [ora-am-brief LAMS retirement — BLOCKED](project_ora_am_brief_lams_retirement_blocked.md) — Code-surface session can't reach LAMS registry writes; both fleets still double-firing 0 6 * * *, needs a Cowork session to finish
+- [ORA Notion Daily Digest coverage gaps](project_notion_daily_digest_coverage_gaps_2026-07-16.md) — CLOSED 07-16: edit-detection upgraded via last_edited_time columns, 3 IDs re-verified live, 3 wrong Notion lease-exp dates found + fixed
+- [BrainVault vault-backup fix](project_brainvault_vault_backup_failure_2026-07-16.md) — CLOSED 07-16, 6 commits pushed, backlog triaged; PR #2 tie-break bullet still needs separate landing
 - [Active Projects](projects.md) — deal pipeline (6 deals) · E. Fulton (TERMINATED→lender note, declassified 07-09) · React brain · oxfordra.net · PM/lease/governance
 - [AAOS Agent Coordination Layer](project_aaos_agent_coordination_layer.md) — real infra (`C:\Users\Owner\AAOS` + OneDrive seam), v1.0 shipped 2026-07-10; verify here before treating any AAOS reference as injected
 - [System of Record](00_system_of_record.md) — full architecture + cold-start runbook + fleet/connector/secret inventory
@@ -28,7 +30,7 @@
 - [oxford-command-center worktree gotchas](project_oxford-command-center_worktree_gotchas.md) — WORKBOOK_PATH not inherited per-worktree; warehouse:verify EPERM on tmp-cleanup only in worktrees
 - [CLAUDE.md Formal Audit](project_claude-md-formal-audit-2026-07-08.md) — 2026-07-08 5-agent audit, Phases 0-3 DONE; 4 deferred items in file
 - [Claude Code Setup Audit 2026-07-09](project_claude-setup-audit-2026-07-09.md) — 9-agent audit; machine-migration status OPEN (needs Gabriel); 8 fixes applied; 21 items pending — full report is an artifact, link in file
-- [Claude Setup Comprehensive Review 2026-07-16](project_claude-setup-audit-2026-07-16.md) — 6-agent review + tiered plan; dead-man chain broken, v4.0 stranded, middle-funnel void; NOTHING executed yet
+- [Claude Setup Comprehensive Review 2026-07-16](project_claude-setup-audit-2026-07-16.md) — 6-agent review; Tier 0 + Gabriel Batch G1–G8 EXECUTED same day; close-out handoff + remaining clicks in file
 - [oxfordra.net SEO Audit 2026-07](project_oxfordra_seo_audit_2026-07.md) — 11-part Searchfit audit 2026-07-10: overall C- (59/100); technical strong, content/market coverage weak. Report + action list in file
 - [Owner-Outreach Stale-Guard Watch](project_owner_outreach_stale_guard_watch.md) — CLOSED 2026-07-14: guard re-tripped 07-13 correctly (real staleness); Gabriel ratified vintage same-day, SKILL.md v1.3 now remembers it per-vintage
 - [Ops Decision Log](ops_decision_log.md) — standing log of small recurring operational yes/no calls, so they aren't re-litigated each session; companion to deal-decision-ledger.md
@@ -106,12 +108,4 @@
 - [Procurement Stance — Deepen, Don't Migrate](procurement-stance-deepen-not-migrate.md) — below $150M AUM, tooling spend goes to the Claude/agent stack, not per-seat PropTech SaaS (Gabriel-approved)
 
 ---
-*Index hygiene 2026-06-09 (monthly consolidation): the inline QuickBooks block was moved to [reference_quickbooks_financials.md](reference_quickbooks_financials.md) — the index holds pointers, not content. Scheduled-fleet count corrected 22 → **14 live** (observed via `list_scheduled_tasks`) in [tech.md](tech.md) §3 + [00_system_of_record.md](00_system_of_record.md) §7.*
-
-*Index hygiene 2026-06-11 (Phase A remediation): the inline "2026-06-09 Deep folder sweep + Master WB findings" block was relocated to [reference_quickbooks_financials.md](reference_quickbooks_financials.md) — the index holds pointers, not content. Fleet roster is now REGISTRY-GENERATED into `~/.claude/session-context.md` (registry-membership-probe.py, daily) — never hand-edit counts here or anywhere.*
-
-*Scope merge 2026-07-08: this index absorbed the `--1-`-scope index verbatim (all link targets now resolve locally — every source file was copied alongside this merge) plus this session's own 6 pre-existing entries. No content was dropped or overwritten; nothing in the `--1-` scope was deleted.*
-
-*Index consolidation 2026-07-14: collapsed all 15 over-length index hooks (>150 chars) plus the oversized scope blockquote down to one-line pointers — doctrine-probe over-length count 15 → **0**, total warnings 17 → 2. No content was lost: every trimmed detail was verified present in its linked file first. Side finding while checking the dated [Owner-Outreach Stale-Guard Watch](project_owner_outreach_stale_guard_watch.md): its watched 2026-07-13 fire DID re-trip the guard, but as a **true** positive (33-day content staleness) — watch closed, [Case 2](reference_scheduled_task_staleness_guard_trips.md) logged, and an unanswered QUESTIONS-FOR-GABRIEL email is holding Notion promotions until the off-market master is refreshed.*
-
-*Monthly consolidation 2026-07-12: archived the stale `composio-ora` config detail out of [tech.md](tech.md) into `_archive/reference_composio_ora_config_historical_2026-07-12.md`; added a live-registry drift-check note in tech.md §3 (LAMS = 20 tasks, expected growth not drift); confirmed no retired connector (Rube/Composio/Zapier/Gmail) is mis-stated as active anywhere; confirmed OXFORDRA_REPO resolves; doctrine/governor audit logged in [event_log.md](event_log.md) (clean, no overrides). Full detail in event_log.md.*
+*Index hygiene history (2026-06-09 through 2026-07-16 consolidations) moved to [event_log.md](event_log.md) — the index holds pointers, not narration. Last compacted 2026-07-16.*

@@ -86,6 +86,57 @@ def test_non_plan_path_no_marker():
     print("PASS test_non_plan_path_no_marker")
 
 
+def skill_payload(session_id, skill):
+    return json.dumps(
+        {"session_id": session_id, "tool_name": "Skill", "tool_input": {"skill": skill}}
+    )
+
+
+def test_lane_skill_creates_marker():
+    """Invoking an Engineering OS lane skill (/build etc. via the Skill tool) IS
+    the lane declaration -- it must clear the plan gate. Confirmed 2026-07-16:
+    a /build session hit the gate mid-lane and was forced to override."""
+    tmp = tempfile.mkdtemp(prefix="eos-pm-")
+    rc, out, err = run_hook(skill_payload("s7", "build"), tmp)
+    assert rc == 0, "expected exit 0, got %s (%s)" % (rc, err)
+    marker = os.path.join(tmp, "s7", "plan-approved")
+    assert os.path.exists(marker), "plan-approved marker not created for /build skill"
+    with open(marker, "r", encoding="ascii") as fh:
+        assert fh.read() == "lane:build", "marker should record the declaring lane"
+    print("PASS test_lane_skill_creates_marker")
+
+
+def test_all_lane_skills_create_marker():
+    for i, skill in enumerate(("plan", "build", "debug", "refactor", "research", "ship")):
+        tmp = tempfile.mkdtemp(prefix="eos-pm-")
+        sid = "s8-%d" % i
+        rc, out, err = run_hook(skill_payload(sid, skill), tmp)
+        assert rc == 0, "expected exit 0 for %s, got %s" % (skill, rc)
+        marker = os.path.join(tmp, sid, "plan-approved")
+        assert os.path.exists(marker), "marker not created for lane skill %s" % skill
+    print("PASS test_all_lane_skills_create_marker")
+
+
+def test_non_lane_skill_no_marker():
+    tmp = tempfile.mkdtemp(prefix="eos-pm-")
+    rc, out, err = run_hook(skill_payload("s9", "tenant-email"), tmp)
+    assert rc == 0, "expected exit 0, got %s" % rc
+    marker = os.path.join(tmp, "s9", "plan-approved")
+    assert not os.path.exists(marker), "non-lane skill must not create marker"
+    print("PASS test_non_lane_skill_no_marker")
+
+
+def test_skill_payload_without_skill_fails_open():
+    tmp = tempfile.mkdtemp(prefix="eos-pm-")
+    rc, out, err = run_hook(
+        json.dumps({"session_id": "s10", "tool_name": "Skill", "tool_input": {}}), tmp
+    )
+    assert rc == 0, "Skill payload without skill name must exit 0, got %s" % rc
+    marker = os.path.join(tmp, "s10", "plan-approved")
+    assert not os.path.exists(marker), "no marker without a skill name"
+    print("PASS test_skill_payload_without_skill_fails_open")
+
+
 def test_malformed_stdin_fails_open():
     tmp = tempfile.mkdtemp(prefix="eos-pm-")
     rc, out, err = run_hook("not json", tmp)
@@ -106,6 +157,10 @@ if __name__ == "__main__":
     test_native_plan_mode_path_creates_marker()
     test_native_plan_mode_path_backslash_creates_marker()
     test_non_plan_path_no_marker()
+    test_lane_skill_creates_marker()
+    test_all_lane_skills_create_marker()
+    test_non_lane_skill_no_marker()
+    test_skill_payload_without_skill_fails_open()
     test_malformed_stdin_fails_open()
     test_empty_object_fails_open()
     print("ALL PLAN-MARKER TESTS PASS")

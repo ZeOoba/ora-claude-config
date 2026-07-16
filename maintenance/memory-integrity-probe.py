@@ -98,11 +98,22 @@ def main():
             for em in set(m.lower() for m in EMAIL_RE.findall(txt)):
                 if em not in CANON_RECIPIENTS:
                     warnings.append("%s references non-canonical recipient '%s' in a send/digest context" % (name, em))
-        # retired-doc links presented as live (skip the index + archive references)
+        # retired-doc links presented as live (skip the index + archive references).
+        # Guard on presence first: a link whose target still exists as a LIVE root
+        # memory file is never a violation, even when its name shares a retired prefix.
+        # The current scheme reuses the "feedback_" prefix for LIVE notes while the
+        # retired ones were merged into rules.md and moved to _archive/ (so they are
+        # absent from `present`); without this guard the broad "feedback_" prefix
+        # false-positives on every live feedback_* file that gets body-linked.
         if name != "MEMORY.md":
-            for rd in RETIRED_DOCS:
-                if re.search(r"\]\(%s" % re.escape(rd), txt):  # markdown link to a retired doc
-                    issues.append("%s links retired/archived doc as live: %s" % (name, rd))
+            for tgt in re.findall(r"\]\(([A-Za-z0-9_./-]+\.md)[^)]*\)", txt):
+                base = os.path.basename(tgt)
+                if base in present:
+                    continue  # links to a live file are fine
+                for rd in RETIRED_DOCS:
+                    if base.startswith(rd):  # link to a retired/archived doc name
+                        issues.append("%s links retired/archived doc as live: %s" % (name, base))
+                        break
 
     # --- 2c. overdue review_by (warnings only) ---
     # Scanned in the same pass as 2b would be cheaper, but this reads the file fresh so the

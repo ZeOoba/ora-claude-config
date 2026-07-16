@@ -32,6 +32,14 @@ After INPLACE_FALLBACK_AFTER failed atomic-replace attempts, both the main retry
 and drain_spool now also try an in-place write (same mtime-guard, plus a pre-write
 backup and a post-write read-back verify) before giving up on that attempt. Spooling
 is now the last resort only when BOTH paths fail.
+
+RESIDUE (2026-07-16, same day): the two paths above each leaked a ~480KB scratch file
+next to the log. os.replace is the only thing that consumes .tmp-append, so a blocked
+atomic attempt orphaned it -- and the in-place fallback writes straight to the log and
+never picks it up. Both are now cleaned up once their content is durably in the log
+(the .inplace-backup only after its read-back verify passes, so failure paths keep it).
+Orphans read as unmerged data and cost a real investigation to clear, which is the
+actual harm -- the content was a pure duplicate both times.
 """
 import argparse
 import os
@@ -98,9 +106,21 @@ def _atomic_insert(log, entry):
     if os.stat(log).st_mtime_ns != st_before:
         raise BlockingIOError("log changed mid-read")
     tmp = log + ".tmp-append"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(new)
-    os.replace(tmp, log)  # atomic on the same volume
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(new)
+        os.replace(tmp, log)  # atomic on the same volume; consumes tmp on success
+    except Exception:
+        # os.replace is the ONLY thing that consumes tmp, so any failure here orphans
+        # it -- and the in-place fallback that follows writes straight to `log` and
+        # never picks it up (2026-07-16: a 480KB orphan sat next to event_log.md,
+        # reading as unmerged data until a hash proved it a pure duplicate). The
+        # content is re-derived from `log` on the next attempt, so it is pure scratch.
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
     return True
 
 
@@ -109,10 +129,11 @@ def _inplace_insert(log, entry):
     open without FILE_SHARE_DELETE -- proven 2026-07-16, see memory
     reference_event_log_app_handle_lock.md) but direct reads/writes to the same
     path still succeed. Same mtime-guard as _atomic_insert, PLUS a pre-write
-    backup (so a partial/interrupted write is always recoverable) and a
-    post-write read-back verify (so a silent corruption is never trusted as
-    success). Returns True on success; raises on any check failure -- caller
-    decides whether to retry or spool."""
+    backup (so a partial/interrupted write is always recoverable; removed once
+    the read-back verify proves it redundant) and a post-write read-back verify
+    (so a silent corruption is never trusted as success). Returns True on
+    success; raises on any check failure -- caller decides whether to retry or
+    spool, and the backup is left on disk for recovery."""
     st_before = os.stat(log).st_mtime_ns
     with open(log, encoding="utf-8") as f:
         content = f.read()
@@ -128,6 +149,13 @@ def _inplace_insert(log, entry):
         written = f.read()
     if written != new:
         raise IOError("in-place write verify mismatch -- backup at %s" % backup)
+    # Verify passed, so `log` is known-good and the backup has discharged its purpose.
+    # Removing it ONLY here keeps the net intact on every failure path: a partial write
+    # or a failed verify never reaches this line, so the backup survives for recovery.
+    try:
+        os.remove(backup)
+    except OSError:
+        pass
     return True
 
 

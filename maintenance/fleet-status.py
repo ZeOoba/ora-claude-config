@@ -113,6 +113,32 @@ def fire_at(t):
     return None
 
 
+def cadence_buffer_days(expr):
+    """Heuristic buffer (days) before a never-fired RECURRING task counts as overdue,
+    inferred from which cron fields are restricted -- no cron library (stdlib only),
+    intentionally approximate. Returns None if the cadence can't be classified (caller
+    must then not flag, rather than guess). Only suppresses false positives for
+    infrequent cadences; never affects same-time collisions or one-time fire checks.
+
+    Recalibration (2026-07-14): the prior verdict flagged ANY never-ran task
+    regardless of cadence, so a quarterly/annual task that simply hadn't reached its
+    first fire yet permanently kept the fleet at ATTENTION -- structurally unable to
+    ever show OK on a fleet with mixed cadences. See test-fleet-status.py."""
+    if not isinstance(expr, str):
+        return None
+    parts = expr.split()
+    if len(parts) != 5:
+        return None
+    _mn, _hr, dom, mon, dow = parts
+    if mon != "*":       # month restricted -> quarterly/annual-ish
+        return 120
+    if dom != "*":       # day-of-month restricted, month open -> monthly-ish
+        return 40
+    if dow != "*":       # day-of-week restricted -> weekly-ish
+        return 10
+    return 3              # daily/hourly/frequent
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--registry")
@@ -153,9 +179,46 @@ def main():
     onetime = [t for t in tasks if fire_at(t)]
     expired = [t for t in tasks if fire_at(t) and fire_at(t) < now_ms]
 
-    # skip attribution
+    # RECALIBRATED VERDICT INPUTS (2026-07-14) -- see cadence_buffer_days() docstring.
+    # never-ran is only overdue for a RECURRING task (no fireAt -- one-time tasks are
+    # handled by expired_needs_attention instead) whose age exceeds its cadence buffer.
+    never_ran_overdue = []
+    for t in never_ran:
+        if fire_at(t):
+            continue  # one-time -- not this check's business
+        created = t.get("createdAt")
+        if not isinstance(created, (int, float)):
+            continue  # can't determine age -- don't flag on missing data
+        buf = cadence_buffer_days(t.get("cronExpression"))
+        if buf is None:
+            continue  # can't classify cadence -- don't guess
+        if (now_ms - created) / 86400000.0 > buf:
+            never_ran_overdue.append(t)
+
+    # expired one-time is only VERDICT-worthy if it never fired (missed) or is still
+    # enabled past its fireAt (didn't auto-disable) -- a normal successful one-time
+    # completion (lastRunAt set, enabled false) is success, not a fault.
+    expired_needs_attention = [
+        t for t in expired if not t.get("lastRunAt") or t.get("enabled", True)
+    ]
+
+    # skip attribution -- ALL-TIME (unchanged, still shown as context) ...
     skip_counts = {k: len(v) for k, v in skips.items()} if isinstance(skips, dict) else {}
     total_skip_events = sum(skip_counts.values())
+    # ... and RECENT (last 24h), which is what actually drives the verdict. recordedSkips
+    # is a permanent historical log (grows forever, never reset), so counting all-time
+    # events meant one old burst kept the verdict at ATTENTION indefinitely.
+    SKIP_WINDOW_MS = 24 * 3600 * 1000
+    recent_skip_counts = {}
+    for tid, events in (skips.items() if isinstance(skips, dict) else []):
+        if not isinstance(events, list):
+            continue
+        n = sum(1 for e in events if isinstance(e, dict)
+                and isinstance(e.get("at"), (int, float))
+                and 0 <= (now_ms - e["at"]) <= SKIP_WINDOW_MS)
+        if n:
+            recent_skip_counts[tid] = n
+    recent_skip_total = sum(recent_skip_counts.values())
 
     # collisions: tasks sharing the same fixed (hour, minute)
     hm = {}
@@ -172,6 +235,18 @@ def main():
         if key and (5 <= key[0] < 9 or (key[0] == 9 and key[1] <= 30)):
             am_pileup.append((("%02d:%02d" % key), t.get("id")))
 
+    verdict_flags = []
+    if never_ran_overdue:
+        verdict_flags.append("%d never-ran past their expected cadence" % len(never_ran_overdue))
+    if expired_needs_attention:
+        verdict_flags.append("%d one-time task(s) missed their fire or stayed enabled past fireAt"
+                              % len(expired_needs_attention))
+    if recent_skip_total > 0:
+        verdict_flags.append("%d throttle skip(s) in the last 24h" % recent_skip_total)
+    if collisions:
+        verdict_flags.append("%d schedule collisions" % len(collisions))
+    verdict = "OK" if not verdict_flags else "ATTENTION -- " + "; ".join(verdict_flags)
+
     if args.json:
         print(json.dumps({
             "registries": {lbl: p for lbl, p in regs},
@@ -179,12 +254,17 @@ def main():
                                   for lbl, _ in regs},
             "total": len(tasks), "enabled": len(enabled), "disabled": len(disabled),
             "never_ran": [t.get("id") for t in never_ran],
+            "never_ran_overdue": [t.get("id") for t in never_ran_overdue],
             "onetime": [t.get("id") for t in onetime],
             "expired_onetime": [t.get("id") for t in expired],
+            "expired_needs_attention": [t.get("id") for t in expired_needs_attention],
             "total_skip_events": total_skip_events,
             "tasks_with_skips": skip_counts,
+            "recent_skip_events_24h": recent_skip_total,
+            "recent_tasks_with_skips": recent_skip_counts,
             "collisions": collisions,
             "am_pileup_count": len(am_pileup),
+            "verdict": verdict,
         }, indent=2))
         sys.exit(0)
 
@@ -215,23 +295,28 @@ def main():
           % (len(tasks), len(enabled), len(disabled),
              ", ".join("%s=%d" % kv for kv in per_fleet.items())))
     print("  never-ran .......... %d   %s" % (len(never_ran), ", ".join(sorted(t.get("id") for t in never_ran)) or "-"))
+    print("      of which overdue  %d   %s" % (len(never_ran_overdue),
+          ", ".join(sorted(t.get("id") for t in never_ran_overdue)) or "- (not yet due, by cadence)"))
     print("  one-time fireAt .... %d   %s" % (len(onetime), ", ".join(sorted(t.get("id") for t in onetime)) or "-"))
     print("  EXPIRED one-time ... %d   %s" % (len(expired), ", ".join(sorted(t.get("id") for t in expired)) or "-"))
-    print("  throttle skips ..... %d events across %d tasks" % (total_skip_events, len(skip_counts)))
+    print("      of which missed/stuck %d   %s" % (len(expired_needs_attention),
+          ", ".join(sorted(t.get("id") for t in expired_needs_attention)) or "- (normal completions)"))
+    print("  throttle skips ..... %d events across %d tasks (all-time)" % (total_skip_events, len(skip_counts)))
     if skip_counts:
         top = sorted(skip_counts.items(), key=lambda kv: kv[1], reverse=True)[:5]
         print("                       top: %s" % ", ".join("%s=%d" % (k, v) for k, v in top))
+    print("      of which last 24h %d   %s" % (recent_skip_total,
+          ", ".join("%s=%d" % kv for kv in sorted(recent_skip_counts.items())) or "-"))
     print("  same-time collisions %d   %s" % (len(collisions),
           "; ".join("%s:{%s}" % (k, ",".join(v)) for k, v in sorted(collisions.items())) or "-"))
     print("  AM pileup (05-0930). %d tasks" % len(am_pileup))
 
-    # health verdict (non-fatal; reporting tool)
-    flags = []
-    if len(never_ran) > 0: flags.append("%d never-ran" % len(never_ran))
-    if len(expired) > 0: flags.append("%d expired one-time" % len(expired))
-    if total_skip_events > 0: flags.append("%d throttle skips (over ceiling)" % total_skip_events)
-    if collisions: flags.append("%d schedule collisions" % len(collisions))
-    print("\n  VERDICT: %s" % ("OK" if not flags else "ATTENTION -- " + "; ".join(flags)))
+    # health verdict (non-fatal; reporting tool). Recalibrated 2026-07-14: the prior
+    # verdict flagged ANY never-ran/expired/all-time-skip count, which a mixed-cadence
+    # fleet can never clear (a quarterly task is "never-ran" for up to 3 months by
+    # design). Now only flags the subsets above that represent an actual anomaly --
+    # see cadence_buffer_days() and test-fleet-status.py.
+    print("\n  VERDICT: %s" % verdict)
     sys.exit(0)
 
 
