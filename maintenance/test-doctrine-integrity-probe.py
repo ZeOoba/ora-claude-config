@@ -321,10 +321,13 @@ def test_tombstone_aging_warns():
     print("  PASS test_tombstone_aging_warns (90-day-old tombstone -> WARN, exit 0)")
 
 
-def test_cross_file_duplication_warns():
+def test_cross_file_duplication_fails():
     """A >=12-word verbatim run shared between CLAUDE.md and session-context.md
-    -> WARN (one fact, one home), never exit 1 (known-deliberate residuals exist
-    until the rules.md consolidation pass; flip to fail after it lands)."""
+    -> hard fail, exit 1 (one fact, one home). FLIPPED 2026-07-14: this was
+    WARN-only pending the rules.md consolidation pass (10 dated history-wall
+    section headers removed, 3 narrative walls trimmed to event_log.md
+    pointers, 2677 -> 2521 words) -- that pass landed, so duplication is now
+    enforced, not just advisory."""
     shared = ("alpha bravo charlie delta echo foxtrot golf hotel india "
               "juliet kilo lima mike november oscar")
     doc = _write_fixture(_v21_base() + "- " + shared + "\n")
@@ -333,14 +336,30 @@ def test_cross_file_duplication_warns():
         fh.write("unrelated line\n- " + shared + "\n")
     try:
         r = run_probe([doc, "--session-context=%s" % sc])
-        assert r.returncode == 0, (
-            "duplication is WARN-only, got exit %d\n%s" % (r.returncode, r.stdout))
+        assert r.returncode == 1, (
+            "duplication must now hard-fail, got exit %d\n%s" % (r.returncode, r.stdout))
         assert "duplicated run (" in r.stdout, (
-            "expected a cross-file duplication WARN:\n%s" % r.stdout)
+            "expected a cross-file duplication finding:\n%s" % r.stdout)
     finally:
         os.remove(doc)
         os.remove(sc)
-    print("  PASS test_cross_file_duplication_warns (shared 15-word run -> WARN, exit 0)")
+    print("  PASS test_cross_file_duplication_fails (shared 15-word run -> FAIL, exit 1)")
+
+
+def test_no_duplication_still_ok():
+    """Sanity check the flip doesn't false-positive: no shared run -> exit 0."""
+    doc = _write_fixture(_v21_base() + "- a unique unshared line here\n")
+    fd, sc = tempfile.mkstemp(suffix="_session-context.md", text=True)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write("completely different content, nothing in common at all\n")
+    try:
+        r = run_probe([doc, "--session-context=%s" % sc])
+        assert r.returncode == 0, (
+            "no duplication should stay exit 0, got %d\n%s" % (r.returncode, r.stdout))
+    finally:
+        os.remove(doc)
+        os.remove(sc)
+    print("  PASS test_no_duplication_still_ok (no shared run -> OK, exit 0)")
 
 
 def test_confidential_leak_fails():
@@ -705,7 +724,8 @@ def main():
     test_size_budget_fail()
     test_dated_annotation_fails()
     test_tombstone_aging_warns()
-    test_cross_file_duplication_warns()
+    test_cross_file_duplication_fails()
+    test_no_duplication_still_ok()
     test_confidential_leak_fails()
     test_terms_shape_failopen()
     test_leak_formatting_and_excerpt_withholding()

@@ -795,9 +795,18 @@ def main():
             if len(runs) > 5:
                 warn("... and %d more duplicated run(s) (%s <-> %s)"
                      % (len(runs) - 5, name_a, name_b))
-    print("Cross-file duplication: %d shared run(s) of >= %d words "
-          "(WARN-only until the rules.md consolidation pass; then flip to fail)"
+    # FLIPPED 2026-07-14: was WARN-only pending the rules.md consolidation pass
+    # (10 dated history-wall section headers removed, 3 narrative walls trimmed
+    # to event_log.md pointers, 2677 -> 2449 words -- see event_log.md). That
+    # pass has landed, so a new duplication is now a hard failure, not just
+    # advisory -- the individual excerpts above still print via warn() for
+    # detail, but the run itself now also fails the probe.
+    print("Cross-file duplication: %d shared run(s) of >= %d words"
           % (dup_total, DUP_SHINGLE_WORDS))
+    if dup_total > 0:
+        missing.append("%d cross-file duplicated run(s) of >= %d words (one fact, "
+                        "one home -- see the [WARN] lines above for which files/excerpts)"
+                        % (dup_total, DUP_SHINGLE_WORDS))
 
     # --- 8. confidential-term leak scan (invariant 3) ---
     # Coverage = the probed CLAUDE.md + (live mode) every git-TRACKED *.md in
