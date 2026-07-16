@@ -93,9 +93,17 @@ exists (two documented misses): `event_log.md`, E. Fulton declassification:
   file" policy language — that's Hard Invariant 3's job at the roster level,
   not a per-file rule to maintain.
 
-Doc-only enforcement: declassification is rare enough that a lightweight
-automated check isn't warranted — revisit if a future declassification misses
-this checklist.
+**Automated backstop (2026-07-16):** `maintenance/doctrine-integrity-probe.py`
+check 13 (declassification-residue sweep) now runs on every push and daily via
+`ora-doctrine-integrity-guard` — for every deal marked `active: false`, it scans
+CLAUDE.md and every known ported copy (`PORTED_CLAUDE_MD_COPIES`) for that
+deal's terms and WARNs if any linger, closing the specific gap that caused the
+E. Fulton miss (this check only covers CLAUDE.md/ported copies; the other
+checklist items above — `session-context.md`, `projects.md`, `MEMORY.md`,
+`firm.md`, `event_log.md` — remain manual, doc-only). WARN, not a hard fail: a
+declassified deal's name is no longer confidential, so a hit is a
+checklist-completeness signal, not a leak (check 8 already hard-fails on
+ACTIVE-deal terms anywhere).
 
 ## 7. Website / CSP (oxfordra.net)
 
@@ -112,7 +120,7 @@ this checklist.
 
 ## 9. Automation budget & event-log concurrency
 
-- **AUTOMATION BUDGET (expires 2026-10-07):** new scheduled tasks/monitoring layers still need a real P0-critical (or otherwise clearly load-bearing) justification — the bar against low-value automation sprawl stays. The one-in-one-out retirement requirement is DROPPED (Gabriel's decision, 2026-07-09) — a new automation no longer requires killing an existing task to add it.
+- **AUTOMATION BUDGET (standing; quarterly review — re-ratified 2026-07-16):** new scheduled tasks/monitoring layers still need a real P0-critical (or otherwise clearly load-bearing) justification — the bar against low-value automation sprawl stays. One-in-one-out remains DROPPED (Gabriel, 2026-07-09). The fixed expiry (was 2026-10-07) is replaced by a **quarterly re-ratification review** aligned to the 9th-of-Mar/Jun/Sep/Dec refresh cluster (next: 2026-09-09): the review re-confirms these terms and sweeps the fleet disposition ledger. A missed review is a loud advisory (automation-health-monitor class), not a silent lapse.
 - **EVENT-LOG CONCURRENCY:** entries are appended ONLY via `python ~/.claude/maintenance/append-event-log.py` (atomic, newest-first) — never Edit-anchor the log header (3 header-anchor collisions on 2026-06-11). One structural writer at a time. Retirement entries that should auto-ratify probe drops must contain the literal token RATIFIED plus the exact task ids.
 
 ## 10. Permission regime — bypass + structural gates
