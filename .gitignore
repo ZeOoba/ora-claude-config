@@ -43,6 +43,23 @@
 # declassified (confidential-terms.json e_fulton active:false, §7b). All scheduled-task
 # SKILL.mds are now versioned; runtime state (_state/ _unsent/ logs/.bak) stays ignored below.
 
+# 2c) Memory (projects/.../memory/) — versioned 2026-07-15 for durability, same rationale
+#     as 2b: this /* default-deny (introduced in the SAME 2026-07-12 commit as 2b) never
+#     got a matching opt-in for memory, so every memory file except rules.md (already
+#     tracked since 2026-07-09, predating the lockdown) silently fell out of git backup —
+#     82 files, unnoticed for 3 days, the identical failure mode 2b exists to prevent.
+#     Pre-commit checked: 0 active confidential-deal terms found in any memory file
+#     (doctrine-integrity-probe.py's own term-matching functions, reused directly; matcher
+#     self-check against a synthetic control term confirmed the scan itself works).
+#     `projects/` also holds hundreds of raw session-transcript .jsonl files alongside
+#     memory/ -- those must NEVER be tracked (arbitrary conversation content). The nested
+#     opt-in below reaches memory/ only; everything else under projects/ stays ignored.
+!/projects/
+/projects/*
+!/projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/
+/projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/*
+!/projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/
+
 # 3) Re-ignore secrets, caches & transient state INSIDE opted-in dirs
 hooks/confidential-terms.json
 hooks/sessions/
@@ -52,6 +69,9 @@ hooks/sessions/
 maintenance/_state/doctrine-status.json
 # roster-staleness runtime breadcrumb written by confidentiality-guard.py (transient; never track)
 hooks/state/
+# append-event-log.py's lock-contention spool (drains automatically into event_log.md on
+# the next successful append; transient by design, never track) -- see 2c above.
+projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/event_log.md.pending/
 # county-parcel-screen code is TRACKED (counterparty names externalized 2026-06-11);
 # its data/ tree (public county dumps + the pipeline-guard.local.json counterparty
 # floor) stays local-only. *.local.json is the standing convention for
