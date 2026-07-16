@@ -47,6 +47,11 @@ console.log('Test A: cc-mode (no args) prompts byte-identical to snapshot + cc-r
   check('cc mode: baked focus paths retained', auditCalls.some((c) => c.label === 'audit:correctness' && c.prompt.includes('server/warehouse')));
   check('cc mode: result still has reportMarkdown/ranked/counts', !!(result && result.reportMarkdown !== undefined && result.ranked && result.counts));
   check('cc mode: result reports mode=cc', !!result && result.mode === 'cc');
+  // Rank-phase fix (2026-07-16): the single-string synthesize-report design blew the StructuredOutput
+  // retry cap at 32 findings; the agent now emits only a compact ranking and code renders the markdown.
+  check('cc mode: rank phase uses rank-findings label', calls.some((c) => c.label === 'rank-findings'));
+  check('cc mode: synthesize-report label retired', !calls.some((c) => c.label === 'synthesize-report'));
+  check('cc mode: reportMarkdown is code-rendered from ranked findings', typeof result.reportMarkdown === 'string' && result.reportMarkdown.includes('# Audit Report'));
 }
 
 // --- Test B: generic mode — Orient scout feeds ground truth + per-dimension focus ---
@@ -69,6 +74,7 @@ console.log('Test B: generic mode (args.worktree + args.brief)');
   check('dedup does not cite cc master-plan paths', calls.filter((c) => c.label === 'dedup-reconcile').every((c) => !c.prompt.includes('docs/superpowers/specs')));
   check('governor clause retained in generic mode', auditCalls.every((c) => c.prompt.includes('DSCR 1.25')));
   check('result reports mode=generic', !!result && result.mode === 'generic');
+  check('generic mode: rank phase also uses rank-findings label', calls.some((c) => c.label === 'rank-findings'));
 }
 
 // --- Test C: malformed brief fails closed (never silently degrades to cc ground truth) ---
@@ -93,6 +99,23 @@ console.log('Test D: args.forceModel overrides every dispatch model');
   const { calls } = await runWorkflow(SCRIPT, args);
   const deadDup = calls.find((c) => c.label === 'audit:dead-duplicate');
   check('forceModel unset: dimension default (sonnet) preserved', !!deadDup && deadDup.model === 'sonnet');
+}
+
+// --- Test E2: stringified args is parsed; garbage args fails closed (never the default worktree) ---
+// The harness delivers args as a JSON-ENCODED STRING (proven runs wf_ae4150f2-651, wf_514f9699-d33):
+// pre-guard it slipped past `typeof args === 'object'` and silently audited the default checkout.
+// The script now self-parses a JSON string and still fails closed on anything else.
+console.log('Test E2: stringified args parsed, garbage args fails closed');
+{
+  const { calls, result } = await runWorkflow(SCRIPT, '{"worktree": "C:/tmp/stringified-wt"}');
+  const auditCalls = calls.filter((c) => c.label.startsWith('audit:'));
+  check('JSON-string args: audits the passed worktree', auditCalls.length === 9 && auditCalls.every((c) => c.prompt.includes('C:/tmp/stringified-wt')));
+  check('JSON-string args: still cc mode', !!result && result.mode === 'cc' && result.worktree === 'C:/tmp/stringified-wt');
+}
+for (const bad of ['not json', '"just-a-string"', 42]) {
+  let threw = false;
+  try { await runWorkflow(SCRIPT, bad); } catch { threw = true; }
+  check('args=' + JSON.stringify(bad) + ' throws (no default-worktree fallback)', threw);
 }
 
 // --- Test E: cc-refresh scout death fails closed (never audits on the stale baked baseline) ---

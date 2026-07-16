@@ -37,8 +37,8 @@ function canned(label) {
   if (label.startsWith('verify:')) {
     return { verdicts: [{ id: 'm1', status: 'confirmed', adjustedSeverity: 'none', note: 'ok' }] };
   }
-  if (label === 'synthesize-report') {
-    return { reportMarkdown: '# R', ranked: [], summary: 'S' };
+  if (label === 'rank-findings') {
+    return { ranked: [{ rank: 1, id: 'm1', riskTierHint: 'YELLOW', rationale: 'r' }], summary: 'S' };
   }
   throw new Error('no canned response for label: ' + label);
 }
