@@ -30,6 +30,11 @@
 !/docs/
 !/ora-ops-plugin/
 !/.github/
+# (2026-07-16) Named Workflow scripts + their test rigs — versioned for durability, same
+# rationale as 2b/2c: cc-audit-army.js was unversioned when parameterized; its pre-change
+# prompt snapshot (_tests/cc-mode-prompts.snapshot.json) byte-pins the proven cc pipeline
+# and must survive scratchpad cleanup. Contents pre-checked: no secrets, no deal terms.
+!/workflows/
 
 # 2b) Scheduled-task SPECS (SKILL.md only) — versioned 2026-07-12 for durability.
 #     Previously unversioned runtime state (repeated loss→restore incidents).
