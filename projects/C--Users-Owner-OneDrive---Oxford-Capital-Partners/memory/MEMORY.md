@@ -11,6 +11,7 @@
 - [People](people.md) — Eric, Gabriel, Philip Collins (counsel), Tamara Lucas (title); brokers/lenders/vendors
 
 ## Projects & system
+- [BrainVault vault-backup silent failure](project_brainvault_vault_backup_failure_2026-07-16.md) — 0 backups since 07-10 20:05, likely Windows Job-Object kill of detached child; PR #2 OPEN not merged; 1,123-path backlog awaits Gabriel review
 - [Active Projects](projects.md) — deal pipeline (6 deals) · E. Fulton (TERMINATED→lender note, declassified 07-09) · React brain · oxfordra.net · PM/lease/governance
 - [AAOS Agent Coordination Layer](project_aaos_agent_coordination_layer.md) — real infra (`C:\Users\Owner\AAOS` + OneDrive seam), v1.0 shipped 2026-07-10; verify here before treating any AAOS reference as injected
 - [System of Record](00_system_of_record.md) — full architecture + cold-start runbook + fleet/connector/secret inventory
@@ -27,6 +28,7 @@
 - [oxford-command-center worktree gotchas](project_oxford-command-center_worktree_gotchas.md) — WORKBOOK_PATH not inherited per-worktree; warehouse:verify EPERM on tmp-cleanup only in worktrees
 - [CLAUDE.md Formal Audit](project_claude-md-formal-audit-2026-07-08.md) — 2026-07-08 5-agent audit, Phases 0-3 DONE; 4 deferred items in file
 - [Claude Code Setup Audit 2026-07-09](project_claude-setup-audit-2026-07-09.md) — 9-agent audit; machine-migration status OPEN (needs Gabriel); 8 fixes applied; 21 items pending — full report is an artifact, link in file
+- [Claude Setup Comprehensive Review 2026-07-16](project_claude-setup-audit-2026-07-16.md) — 6-agent review + tiered plan; dead-man chain broken, v4.0 stranded, middle-funnel void; NOTHING executed yet
 - [oxfordra.net SEO Audit 2026-07](project_oxfordra_seo_audit_2026-07.md) — 11-part Searchfit audit 2026-07-10: overall C- (59/100); technical strong, content/market coverage weak. Report + action list in file
 - [Owner-Outreach Stale-Guard Watch](project_owner_outreach_stale_guard_watch.md) — CLOSED 2026-07-14: guard re-tripped 07-13 correctly (real staleness); Gabriel ratified vintage same-day, SKILL.md v1.3 now remembers it per-vintage
 - [Ops Decision Log](ops_decision_log.md) — standing log of small recurring operational yes/no calls, so they aren't re-litigated each session; companion to deal-decision-ledger.md
@@ -46,17 +48,20 @@
 - [Verify Registry Mutation Claims](feedback_verify_registry_mutation_claims.md) — a logged scheduled-task delete/update isn't confirmed without a same-fleet `list_scheduled_tasks` re-check; cross-fleet calls can silently no-op
 - [Verify Probe Findings Before Acting](feedback_verify_probe_findings_before_acting.md) — a probe finding is a hypothesis, not a verdict; the defect can be in the probe, not the flagged artifact
 - [fleet-status.py Dual-Fleet Read](reference_fleet_status_dual_read.md) — reads BOTH registries directly off disk from either surface; only WRITES need the matching-surface MCP tool, don't handoff just to check state
-- [Verify Negative Glob Results](feedback_verify_negative_glob_results.md) — a Glob "no files found" in a git repo isn't proof of absence; cross-check with `git ls-files`/`ls` before telling the user something has no repo home
+- [Verify Negative Glob Results](feedback_verify_negative_glob_results.md) — a Glob "no files found" isn't proof of absence; cross-check with `git ls-files`/`ls` before claiming something has no repo home
+- [Workflow named-args not delivered](feedback_workflow_named_args_not_delivered.md) — Workflow({name, args}) drops args on CC Desktop (4 runs, 2026-07-16); hardcode targets via scriptPath + verify the first agent prompt
 - [Autonomy Gate Blocks Writes, Not Reads](feedback_autonomy_gate_blocks_writes_not_reads.md) — a "blocked read" on website-canonical means the command carried a write indicator (`>`, `2>&1`); read the hook before the override sentinel
+- [Autonomy Gate Matcher Cannot Be Safely Narrowed](feedback_autonomy_gate_matcher_cannot_be_safely_narrowed.md) — 3 adversarial review rounds each found a real bypass in one 2026-07-16 attempt; reverted, the broad match stays
 - [Confidentiality Guard Self-Deadlock](feedback_confidentiality_guard_selfdeadlock.md) — malformed confidential-terms.json fail-closes Write/Edit/Bash machine-wide; recover via desktop-commander edit_block
 - [Sed Windows path escapes](feedback_sed_windows_path_escapes.md) — never sed s/// with literal backslash paths in replacement; use Python
 - [append-event-log.py stdin encoding](feedback_append_event_log_stdin_encoding.md) — heredoc-to-stdin mangles UTF-8 on Windows; use --entry-file
+- [event_log app-handle lock](reference_event_log_app_handle_lock.md) — Claude.exe can hold event_log.md, blocking the appender's os.replace while direct writes work; drain in-place with backup + mtime guard
 - [Destructive git deny stays hard](feedback_destructive_git_deny_stays_hard.md) — git reset --hard/push --force are a categorical permissions.deny (intentional); never suggest loosening
 - [npm test intermittent access violation](feedback_npm_test_intermittent_access_violation.md) — npm test/gate throws spurious 0xC0000005 ~30-50% of runs; content always correct — just rerun, don't debug
 - [OneDrive Business/Personal Scope](reference_onedrive_business_scope.md) — classification only, no files moved; consult before broad business-focused OneDrive-root searches
 - [Model Release Checklist](reference_model_release_checklist.md) — where hardcoded Claude model IDs live (settings.json, scheduled-task standard, oxford-command-center) + sweep process for new releases
 - [Tech Stack & Paths](tech.md) — Paths, MCP connectors + Composio/FRED gotchas, secrets index, scheduler, Obsidian mirror, machine constraints
-- [ORA PM App](reference_ora_pm.md) — ZeOoba/ora-pm (local `C:\Users\Owner\ora-pm`); Supabase magic-link whitelist; 3-phase UX overhaul (Phase 1 shipped local, unpushed)
+- [ORA PM App](reference_ora_pm.md) — ZeOoba/ora-pm (local `C:\Users\Owner\ora-pm`); Supabase magic-link whitelist; Phase 1+2a shipped+pushed, Stripe ACH built beyond original scope; 07-16 audit (3 criticals) + confidential-terms purge status
 - [oxfordra.net Deploy Canon](reference_oxfordra_deploy_canon.md) — netlify-cli from website-canonical is THE path; ⚠ merging a PR to `main` auto-deploys to PROD — gate before merge, not after
 - [Standards — Financial & Communication](standards.md) — Modeling conventions (DSCR 1.25×/LTV 40%) + comms tone by audience
 - [Scheduled-Task Model Standard](reference_scheduled_task_model_standard.md) — standard = claude-sonnet-5; `[MODEL: …]` tag per task; CC/MCP model is observable but NOT settable (server-pinned)
@@ -78,10 +83,12 @@
 - [GitHub Credential Path](reference_github_credential_path.md) — gh.exe-scoped helper overrides GCM for github.com; GCM `-c` fallback + API-token recipe; auth re-seed procedure
 - [oxford-command-center Repo Health](oxford-cc-repo-health.md) — tombstones deleted + 24 stale branches pruned 2026-07-07; ~90 unmerged branches need a supervised pass
 - [gate vs gate:ci divergence](feedback_command_center_gate_vs_gate_ci_divergence.md) — `gate:ci` runs a real `vite build` that `gate` skips; run `gate:ci` locally to catch build-only breaks
+- [Piped gate exit masking](feedback_piped_gate_exit_masking.md) — `gate | tail` returns TAIL's exit code (masked 2 red gates 2026-07-16); redirect to file + `echo $?` when the exit code is the evidence
 - [Command Center CRLF Hazard](reference_command_center_crlf_hazard.md) — CRLF blobs + autocrlf=true: script writeFileSync flips EOL and bloats diffs; prefer the Edit tool (EOL-preserving)
 - [Shared-Checkout Co-File Patch Hazard](shared-checkout-cofile-patch-hazard.md) — `git diff -- <file>` scopes files not hunks; on a co-edited file it grabs the other writer's hunks too — inspect diff CONTENT before committing
 - [session-env Retention Proposal](reference_session_env_retention_proposal.md) — PROPOSAL (unimplemented): age-gate `session-env\` (763 empty dirs, 150-350/day growth) per the `hooks\sessions\` precedent in `ora-nightly-disk.ps1`
 - [WebFetch Markdown False Negatives](feedback_webfetch_markdown_false_negatives.md) — WebFetch's HTML→markdown strips `<head>`/`<script>`; false "no title/meta/schema" claims on SEO checks — verify via raw curl before trusting
+- [workflows dir single-writer gap](reference_workflows_dir_single_writer_gap.md) — RESOLVED 2026-07-16: workflows/ now git-tracked (fa9da40); mtime sweep still catches in-flight edits
 - [ECC Repo Flagged](reference_ecc_repo_flagged.md) — affaan-m/ECC rejected 2026-07-10: documented malware-clone risk + inflated star stats; redundant with the existing skill stack
 - [Obsidian Copilot Keychain Migration Gap](reference_obsidian_copilot_keychain_migration_gap.md) — post-migration "Needs API key" on every model = empty per-machine secretStorage, not a vault bug; Gabriel must re-enter keys himself
 - [NY Fed API 403 to Hosted Fetch](reference_newyorkfed_api_403_hosted_fetch.md) — NY Fed SOFR API 403s hosted fetch; 180d-avg+Index have no web_search fallback and go stale — pull locally via Desktop Commander
@@ -89,6 +96,7 @@
 
 ## Rules & governance
 - [Refute pass — proactive by default](feedback_refute_pass_proactive_default.md) — run it proactively, before declaring done — caught 2 real defects first time (2026-07-14)
+- [Prompt-embedded current-state prose](feedback_prompt_current_state_prose.md) — baked shas/counts/ratification claims in prompts rot; refresh at runtime or tag `curated @` + VERIFY (proven 2x 2026-07-16)
 - [Workflow invocation gotchas](feedback_workflow_invocation_gotchas.md) — two Workflow-tool hazards (stale name resolution, stringified args) -- verify result.worktree/agent roster post-run
 - [Routines default model](feedback_routines_default_model.md) — all routines (schedule skill / CronCreate) default to claude-sonnet-5 unless told otherwise
 - [Website work — always highest-intelligence model](feedback_website_model_tier.md) — Gabriel override (2026-07-09): opus for all oxfordra.net/website-canonical work, no sonnet/haiku dispatch
