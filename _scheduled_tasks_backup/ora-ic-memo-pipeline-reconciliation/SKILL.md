@@ -1,0 +1,33 @@
+---
+name: ora-ic-memo-pipeline-reconciliation
+description: Weekly Tuesday 10:30 AM ET — diffs the Investment Candidates IC Memo folder (SharePoint) against Notion Acquisition Pipeline Tracker + Deal Sourcing Log to catch completed-IC-Memo deals that never got logged (the Catfish Court / Waukee IA gap class found 2026-07-15). Flag-only, never auto-writes Notion rows. v1.0 (2026-07-15).
+---
+
+ORA IC Memo ↔ Pipeline Tracker Reconciliation — v1.0 (2026-07-15)
+
+PURPOSE
+On 2026-07-15, two ORA deals (5515 Catfish Court, Westport/Waunakee WI and 250 NW 10th Street, Waukee IA) were found to have fully completed IC Memos and underwriting models on SharePoint but ZERO rows in either Notion Deal Sourcing Log or Acquisition Pipeline Tracker — confirmed via direct SQL query against both data sources, zero matches. This task exists to catch that specific gap class automatically, on a recurring basis, before it goes another week+ unnoticed. This is a DETECT-AND-FLAG task — it must NEVER auto-create or modify Notion pages. Judgment calls (verdict mapping, purchase price selection, etc.) are for Gabriel, not this task, per the 2026-07-15 precedent where "MARGINAL ADVANCE" required manual mapping to the Verdict select's four options.
+
+DATA SOURCES (verified 2026-07-15 — do not re-derive from scratch each run, but re-verify if either lookup fails)
+1. SharePoint / OneDrive: site oxfordraeg-my.sharepoint.com, personal drive of egoldberg_oxfordra_net, folder "Investment Candidates -- 2026" (root level — NOTE: some deals are filed in per-property subfolders under this root, e.g. "1333 Research Rd/", "Allentown Portfolio (Rich) 07-2026/"; others sit directly in the root, e.g. the two 2026-07-15 gap deals. Search must cover both root and subfolders.) Use the sharepoint_search MCP tool (folderName: "Investment Candidates -- 2026") with multiple query passes since filenames are NOT consistently formatted — observed patterns include: "ORA_ICMemo_<Property>_v<X.X>.docx", "IC_Memo_<Property>.docx", "<Address> <City><State> ICMemo <MMDDYYYY>.docx", "<YYYYMMDD>_<Property>_IC-Memo_v<XX>.docx", "<YYYYMMDD>_<Property>_ICMemo_v<XX>.docx". Run separate searches for query terms "IC Memo", "ICMemo", "Investment Committee Memorandum" and dedupe by returned "id". For each result, use lastModifiedDateTime to keep only the latest revision per distinct property (multiple memo versions/revisions of the same deal should collapse to one).
+2. Notion Acquisition Pipeline Tracker — data source collection://bcfe4a03-7e61-4ac1-a0bb-c44174fa138b. Query via notion-query-data-sources (SQL mode): SELECT "Deal Name", "Address", "IC Memo", "Stage" FROM this data source.
+3. Notion Deal Sourcing Log — data source collection://9a6ae219-85a3-4621-899c-c757fd062f8b. Query via notion-query-data-sources (SQL mode): SELECT "Deal Name / Address", "IC Memo Done", "Verdict", "Status" FROM this data source.
+(If either Notion fetch needs the parent database first: Acquisition Pipeline Tracker page id 46c8a5c6-8b37-4c53-a10d-0f55c97613e5; Deal Sourcing Log page id 8d2ddc51-77e8-4cd7-b1c0-c0f6ef943479 — fetch title "Deal Sourcing Log" / "Acquisition Pipeline Tracker" via notion-search if IDs have drifted.)
+
+PROCEDURE
+1. Pull the deduped SharePoint IC Memo list (step 1 above). For each, extract a normalized address key from the filename and/or the document's first-page snippet (street number + street name, stripped of suite/unit, city/state normalized e.g. "St"→"Street" tolerant matching, "Ct"→"Court", etc.).
+2. Pull all rows from both Notion data sources (steps 2–3). Build a set of tracked address keys from "Address" / "Deal Name" (Pipeline Tracker) and "Deal Name / Address" (Sourcing Log), normalized the same way.
+3. For each SharePoint IC Memo, fuzzy-match its address key against BOTH tracked sets. A memo is a GAP if it has no reasonable match in EITHER Notion database. A memo matched in Sourcing Log but NOT in Pipeline Tracker is a PARTIAL GAP (worth flagging separately — a memo reaching "Complete" status is normally past the Sourcing Log-only stage per the 2026-07-15 finding that Pipeline Tracker had zero Madison WI / Des Moines IA rows despite ~30 Sourcing Log entries in those markets).
+4. Secondary, lower-priority check: any Pipeline Tracker row with "IC Memo" = "Complete" but no discoverable matching SharePoint file — flag as STALE POINTER (memo may have been moved/renamed) but do not treat as urgent as a full GAP.
+5. Do NOT create, update, or delete any Notion page. For each GAP/PARTIAL GAP, stage a suggested-properties summary (address, SF/asset type/verdict/score IF legible from the doc snippet, source file webUrl) that Gabriel could paste into a follow-up request — but do not act on it.
+
+OUTPUT
+- Notion Ops Hub (page id 32b6ecd8-9e59-81f2-b329-df3fd0e25062): post a status block. Clean pass (zero gaps) → log-only line, no email. Any GAP or PARTIAL GAP found → structured block listing each with file path, best-guess address, and match status.
+- If any GAP/PARTIAL GAP found: draft and send via Outlook COM (C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1 — the sole send path) to ggoldberg@oxfordra.net ONLY (no cc — this is not the Daily Brief exception). Subject: "[ACTION REQUIRED] IC Memo / Pipeline Tracker reconciliation — N gap(s)". Body: one line per gap with file link, guessed address, and "not logged in: Pipeline Tracker / Sourcing Log / both". On non-zero COM exit: retry once, then flag loudly in the Notion completion row — do not halt.
+- If SharePoint or either Notion query fails/errors for this run, do NOT report "0 gaps" — state explicitly that the check could not complete and why, and escalate in the same email/Ops Hub post rather than going silent.
+
+RELATIONSHIP TO SIBLING TASKS (do not duplicate their logic)
+- ora-om-intake-ocr already handles NEW OM intake at Stage-0 gate-screening (weekly Wed 6:15 AM ET) — that is upstream of this task and a different lifecycle stage (pre-IC-Memo). This task is downstream: it only catches memos that reached full "IC Memo Done"/"Complete" status without a corresponding Pipeline/Sourcing row.
+- ora-stale-pipeline-nudge flags Pipeline Tracker rows that are 15+ days stale — different failure mode (rows that exist but haven't moved), not missing rows.
+
+NEVER FABRICATE: if an address match is ambiguous (e.g. multiple similarly-named streets/cities), do not force a match either way — list it as UNRESOLVED with both candidates and let Gabriel disambiguate.

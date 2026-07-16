@@ -35,6 +35,18 @@
 # prompt snapshot (_tests/cc-mode-prompts.snapshot.json) byte-pins the proven cc pipeline
 # and must survive scratchpad cleanup. Contents pre-checked: no secrets, no deal terms.
 !/workflows/
+# (2026-07-16) Four opt-ins ratified by Gabriel after the probe's new backup-coverage
+# sweep (check 12) flagged them. Each scrubbed pre-commit: zero confidential-term hits
+# (E. Fulton mentions are declassified historical references, matching already-tracked
+# memory files); the ONE embedded secret found (FRED API key in a retired
+# ora-debt-maturity-snapshot SKILL.md) was redacted to {{FRED_API_KEY}} before opt-in.
+!/prompts/
+!/mcp-servers/
+!/obsidian-fleet-mirror/
+# live runtime state rewritten every few minutes by write-fleet.ps1 -- tracking it
+# would recreate the doctrine-status.json perpetual-dirty-tree noise; scripts only.
+obsidian-fleet-mirror/session-state.json
+!/_scheduled_tasks_backup/
 
 # 2b) Scheduled-task SPECS (SKILL.md only) — versioned 2026-07-12 for durability.
 #     Previously unversioned runtime state (repeated loss→restore incidents).

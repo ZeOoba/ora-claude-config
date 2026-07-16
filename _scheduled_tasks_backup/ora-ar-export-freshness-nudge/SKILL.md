@@ -1,0 +1,29 @@
+---
+name: ora-ar-export-freshness-nudge
+description: 1st & 15th of month, 11:30 AM ET — confirms the AR Aging exports (Rent Manager/Yardi/AppFolio) and QB Desktop PL/Cash Flow exports were actually uploaded to SharePoint for the current cycle; escalates by platform if any are missing/stale. Closes the manual-export compliance gap behind the 85-day-stale AR figure. v1.0 (2026-07-08). [MODEL: claude-sonnet-5 | set 2026-07-13]
+---
+
+ORA AR/QB Export Freshness Nudge — v1.1 (2026-07-08, updated). Context: per the 2026-04-28 "QuickBooks-Scrub Master Change Set" (Notion page 3506ecd8-9e59-815b-b6a8-cff24fa5b926), AR aging's canonical source is the PM platforms (Rent Manager, Yardi, AppFolio) via manual export to SharePoint — QuickBooks Desktop AR is explicitly NOT the primary source. The documented manual process is in Notion page 3316ecd8-9e59-8106-a380-ce129044fdbe ("QuickBooks Export Instructions"). As of 2026-07-07 the AR export had gone 84 days stale (last file dated 2026-04-14) despite this exact gap being flagged by prior "[ALERT][STALE-DATA] Delinquency Aging" runs in May 2026.
+
+UPDATE (2026-07-08): a real AR-aging import tool now exists — `feat/ar-aging-parser` merged as PR #81 into the oxford-command-center repo (`C:\Users\Owner\oxford-command-center`, branch main, commits 07d7bfa/2221f8c). It provides `npx tsx scripts/ar-import.ts <pdf-path>` — an interactive CLI that parses a Yardi/AppFolio A/R aging export, fuzzy-matches tenants to leases with a review-then-write flow, and posts confirmed arrears to the Command Center's overlay via POST /api/actions/tenant-arrears. Checked 2026-07-08: this importer has NO automatic trigger (zero references in package.json, .github/workflows, AUDIT.md, CHANGELOG.md, or IMPLEMENTATION_PLAN.md) — it is interactive-CLI-only by design (a human must confirm ambiguous tenant matches), so it cannot be cron-invoked as-is. This task's job is therefore now two-part: gate the export upload step AND remind that the new importer needs to be run by hand once a fresh export lands.
+
+STEP 1 — Check SharePoint. Use `sharepoint_search` (and `sharepoint_folder_search` if needed) against the folder "Cowork OS / QB Exports" and its subfolders "AR Aging", "PL by Property", "Cash Flow". Look for files matching each expected pattern for the CURRENT cycle (today's month, on-or-after the 1st or 15th, whichever just occurred):
+  - AR_Aging_RentManager_YYYY-MM-DD.xlsx (Columbus + Kansas City + Toledo)
+  - AR_Aging_Yardi_CRC_YYYY-MM-DD.xlsx (1900 N Broadway, 9050 Red Branch Rd)
+  - AR_Aging_Yardi_29000_YYYY-MM-DD.xlsx (29000 Information Lane)
+  - AR_Aging_AppFolio_YYYY-MM-DD.xlsx (2203-2207 Northwood)
+  - QB_PL_{LLC-Name}_YYYY-MM-DD.xlsx and QB_CashFlow_{LLC-Name}_YYYY-MM-DD.xlsx (QB Desktop, ~20 LLC files — don't expect a fully complete set every cycle, but flag if the whole PL/Cash Flow folder shows nothing newer than the PRIOR cycle)
+
+IMPORTANT — known unreliability: prior Freshness Audits (Notion pages 37a6ecd8-9e59-8176-9c3d-d625e1b8cd26 and 3966ecd8-9e59-8195-b974-e694189ee89f) found the SharePoint search index returns unreliable dates for some files. Cross-check via `read_resource` on the actual file item for true last-modified metadata where possible. If you cannot get a reliable date for a file, say so explicitly — do not assert freshness you can't verify.
+
+STEP 2 — Determine gaps. A platform's export is "missing for this cycle" if there is no file matching its pattern dated within the current cycle window (cycle date through cycle date + 5 days). List missing platforms individually.
+
+STEP 3 — If everything for AR Aging (all 4 platform files) is present and verifiably fresh: post a one-line clean-pass note to the Notion Ops Hub (32b6ecd8-9e59-81f2-b329-df3fd0e25062 or its automation-log child), ALSO include a reminder line: "Fresh AR Aging exports detected — run `npx tsx scripts/ar-import.ts <pdf-path>` from C:\Users\Owner\oxford-command-center for each platform file to post arrears to the Command Center (interactive: confirm ambiguous tenant matches as prompted)." Do NOT send an email for a clean pass — Notion-only, per existing convention.
+
+STEP 4 — If any AR Aging platform export is missing/stale: send an email. Subject: "[ORA] AR Export Gap — {today's date} — {N} of 4 platform exports missing". Body: name each missing platform, the exact expected filename pattern and SharePoint upload path from the QuickBooks Export Instructions page (repeat the instructions inline), AND append: "Once uploaded, run `npx tsx scripts/ar-import.ts <pdf-path>` from C:\Users\Owner\oxford-command-center to post arrears (PR #81 — interactive tool, no auto-trigger exists yet)." If the Notion Tenant Database has a last-known AR balance/aging figure, include it captioned "as of {last known date} — NOT current." If not queryable, state "current AR exposure not verifiable — awaiting export."
+
+STEP 5 — Send via the sole automated send path: `C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1` with `-To ggoldberg@oxfordra.net` ONLY, `-Subject "..."`, `-BodyFile <path>`, `-BodyFormat html`. On non-zero exit, retry once; if still failing, post the full gap detail to the Notion Ops Hub as a fallback.
+
+STEP 6 — Always post the finding (clean pass or gap list) to the Notion Ops Hub for audit trail.
+
+Do not attempt to read QuickBooks Desktop or the PM platforms directly — no live connector exists for either (checked 2026-07-08, none in the connector registry). This task is a compliance gate on the manual upload step plus a pointer to the new importer, not a data pull. If `scripts/ar-import.ts` is ever wired to an automatic trigger (CI job, scheduled ingest) in the future, flag that as a "QUESTIONS FOR GABRIEL — this task may be retirable" note rather than continuing to nag for a manual run that's no longer necessary.
