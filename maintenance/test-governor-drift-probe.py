@@ -868,6 +868,109 @@ def test_n6_hard_cap_ceiling_is_gov_gate_unit():
     print("  PASS test_n6_hard_cap_ceiling_is_gov_gate_unit")
 
 
+def test_perprop_portfolio_aggregate_pairing_suppressed_unit():
+    """RATIFIED 2026-07-11 dual-governor pairing (setup-review finding C4, 2026-07-16): the real
+    acquisition-underwriting SKILL.md v4.0 line 10 closes "...governor constants (DSCR 1.25x /
+    per-property LTV 65% / portfolio-aggregate LTV 40%) changed" -- documenting two distinct,
+    non-conflicting governors this probe only tracks one of (the portfolio-aggregate 40%). Suppressed
+    ONLY when the portfolio-aggregate companion on the same line equals the canonical 40 -- the bare
+    per-property case (test_perdeal_perproperty_drift_still_flags_unit, no portfolio-aggregate
+    companion at all) and a drifted companion both continue to flag in full."""
+    m = _load_probe_module()
+    real_line = ("No scorecard weights, Stage 1 floors, or governor constants (DSCR 1.25x / "
+                 "per-property LTV 65% / portfolio-aggregate LTV 40%) changed.")
+    assert m.scan_line(real_line) == [], (
+        "ratified per-property/portfolio-aggregate 40%% pairing must be suppressed; got %r"
+        % m.scan_line(real_line))
+    # REFUTE guard 1: a drifted portfolio-aggregate companion (not 40) must still flag BOTH members --
+    # the pairing is only exempt when the canonical portfolio ceiling is actually present.
+    drifted = ("governor constants (DSCR 1.25x / per-property LTV 65% / "
+               "portfolio-aggregate LTV 45%) changed.")
+    out = m.scan_line(drifted)
+    assert any("65" in o for o in out) and any("45" in o for o in out), (
+        "a drifted portfolio-aggregate companion must leave both members flagged; got %r" % out)
+    # REFUTE guard 2: swapping which member carries which label must not accidentally suppress a
+    # real drift -- a per-property value paired with a NON-canonical "portfolio-aggregate" figure
+    # elsewhere on the line is not the ratified exemption. (The line MUST carry a governor keyword:
+    # without one, is_gov is False and the module's long-standing "plain prose mentions of LTV are
+    # ignored" gate makes the line unflaggable for reasons unrelated to this pairing -- which would
+    # make the guard vacuous rather than protective.)
+    out2 = m.scan_line("Governor constants: per-property LTV 70% / portfolio-aggregate LTV 55% "
+                       "-- both revised upward.")
+    assert any("70" in o for o in out2) and any("55" in o for o in out2), (
+        "a non-canonical portfolio-aggregate companion must not suppress the pairing; got %r" % out2)
+    print("  PASS test_perprop_portfolio_aggregate_pairing_suppressed_unit")
+
+
+def test_perprop_member_value_locked_to_ratified_65_unit():
+    """VALUE-LOCK: a per-property member that is NOT the ratified 65 flags even when its
+    portfolio-aggregate companion IS canonical 40.
+
+    Closes the hole in companion-anchoring alone: without the value-lock, a real per-property drift
+    could ride a correctly-stated canonical companion into silence. The aggregate figure is
+    canonical here, so the ONLY thing that can flag this line is the per-property member itself.
+    """
+    m = _load_probe_module()
+    for val in ("80", "55", "45", "70"):
+        line = ("governor constants (DSCR 1.25x / per-property LTV %s%% / "
+                "portfolio-aggregate LTV 40%%) restated." % val)
+        out = m.scan_line(line)
+        assert any(val in o for o in out), (
+            "per-property LTV %s%% must flag despite a canonical-40 companion; got %r" % (val, out))
+    print("  PASS test_perprop_member_value_locked_to_ratified_65_unit")
+
+
+def test_perproperty_non_ratified_ltv_still_flags_unit():
+    """ANTI-BLINDING: an unpaired per-property LTV declaration still flags at ANY value.
+
+    This is why the fix is pairing-anchored + value-locked rather than the blanket "per-property
+    veto span" the setup-audit note (C4) sketched. Instrumentation: each of these flags ONLY via the
+    bare-proximity pass, so a blanket per-property span would silence a REAL per-property drift --
+    the catastrophic false-negative class this module is written to avoid. C4 should not be
+    implemented as written.
+    """
+    m = _load_probe_module()
+    for line, val in (("Per-property LTV 80% is the governor now.", "80"),
+                      ("Governor: per-property LTV 55% hard cap.", "55"),
+                      ("Per-property LTV 70% (governor, non-negotiable).", "70"),
+                      ("The per-property 45% LTV governor applies to every deal.", "45")):
+        out = m.scan_line(line)
+        assert any(val in o for o in out), (
+            "unpaired per-property LTV %s%% must still flag; line=%r got=%r" % (val, line, out))
+    # ... and the ratified 65 itself, when UNPAIRED, is still not exempt: the pairing is what
+    # licenses it, not the number alone.
+    out65 = m.scan_line("Hard filter: per-property LTV ceiling 65%.")
+    assert any("65" in o for o in out65), (
+        "unpaired per-property 65%% declared as an acquisition ceiling must flag; got %r" % out65)
+    print("  PASS test_perproperty_non_ratified_ltv_still_flags_unit")
+
+
+def test_dated_audit_memory_file_excluded_unit():
+    """Dated audit/project memory files NARRATE findings -- they do not declare a live governor.
+
+    The 2026-07-16 setup-audit file tripped the probe on the very line describing this false
+    positive. The exemption already existed in intent but was hardcoded to one filename; it is now a
+    pattern (mirroring EVENT_LOG_ARCHIVE_RE). Kept tight so live doctrine files stay in scope.
+    """
+    m = _load_probe_module()
+    skipped = ("project_claude-setup-audit-2026-07-16.md",
+               "project_claude-md-formal-audit-2026-07-08.md",
+               "project_claude-setup-audit-2026-07-09.md")
+    for bn in skipped:
+        assert m.DATED_AUDIT_RE.match(bn), "dated audit file must be exempt: %s" % bn
+    scanned = ("project_replacement_cost_benchmark_unratified.md",  # live doctrine, no date
+               "standards.md", "rules.md", "firm.md", "CLAUDE.md",
+               "project_oxfordra_seo_audit_2026-07.md")             # partial date -> still scanned
+    for bn in scanned:
+        assert not m.DATED_AUDIT_RE.match(bn), "live/doctrine file must NOT be exempt: %s" % bn
+    # The exemption is FILE-scoped, not logic-level: the narrative line still trips scan_line().
+    audit_line = ('- **C4 -- governor-drift probe FP** on "per-property LTV 65%" '
+                  '(ratified distinct governor 2026-07-11) -> memory-integrity RED daily.')
+    assert m.scan_line(audit_line), (
+        "detection logic must be intact -- the audit line is excluded by FILE, not by gutting scan_line")
+    print("  PASS test_dated_audit_memory_file_excluded_unit")
+
+
 def test_acquisition_underwriting_skill_file_clean():
     """The live acquisition-underwriting SKILL.md (repo copy) must scan CLEAN line-by-line --
     the 10 false positives of 2026-07-11 (lines 8, 50, 112, 196, 249, 260, 281, 300)."""
@@ -961,6 +1064,10 @@ def main():
     test_followup2_refi_to_ltv_veto_tier_unit()
     test_round2_declaring_governor_before_value_flags_unit()
     test_n6_hard_cap_ceiling_is_gov_gate_unit()
+    test_perprop_portfolio_aggregate_pairing_suppressed_unit()
+    test_perprop_member_value_locked_to_ratified_65_unit()
+    test_perproperty_non_ratified_ltv_still_flags_unit()
+    test_dated_audit_memory_file_excluded_unit()
     test_acquisition_underwriting_skill_file_clean()
     test_test_files_excluded_from_scan_unit()
     test_event_log_excluded_e2e()

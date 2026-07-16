@@ -63,6 +63,20 @@ authoritative per [[reference_cc_scheduler_filepath_mechanism]] regardless of wh
 it). See [[project_owner_outreach_stale_guard_watch]] for full detail and the Case 2 true-positive
 analysis this decision follows from.
 
+### 2026-07-16 — Should CLAUDE.md's Skill tie-breaks section propagate to the 4 known "ported copy" files?
+**Answer (Gabriel, via AskUserQuestion): No — leave as-is.** Investigated before asking: none of the
+4 files (`Claude Command Center Code/CLAUDE.md`, `Claude_Workspace/01_Workspace/CLAUDE.md`,
+`Claude_Workspace/01_Workspace/oxford-site/.claude/CLAUDE.md`, `Obsidian/BrainVault/CLAUDE.md`)
+actually carry the Skill tie-breaks section today — they're narrowly-scoped project/vault context
+files, not verbatim doctrine mirrors, despite the master CLAUDE.md's scope-note language ("true on
+EVERY surface... ported copies omit only Engineering OS"). One (`Claude_Workspace/01_Workspace/
+CLAUDE.md`) is an explicit "THIN POINTER" that states it intentionally avoids duplicating doctrine
+and points to the master file instead — adding content there would contradict its own design. The
+propagation mandate that DID apply for real (Hard Invariant 3 / confidentiality, the E. Fulton
+Obsidian-copy fix) is invariant-specific, not a general rule that every CLAUDE.md-named file mirrors
+every section. **Scope: this is a ruling about the Skill tie-breaks section specifically** — a future
+Hard Invariant change still needs the per-file propagation check these 4 files got during E. Fulton.
+
 ### 2026-07-12 — Is the fleet's shared Python 3.13 environment missing packages?
 **Answer: no, as of 2026-07-12** — `python-docx`, `openpyxl`, `pandas`, `reportlab`, `pypdf` all
 verified installed at the pinned versions (`pip show`, live machine check) against

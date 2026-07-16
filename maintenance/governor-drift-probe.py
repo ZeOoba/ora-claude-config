@@ -463,6 +463,61 @@ RE_GOV_TOKEN = re.compile(r"governors?\b")
 RE_CANON_DSCR_GOV_PHRASE = re.compile(
     re.escape(CANON_DSCR) + r"\s*[x×][\s\-*]*dscr\s+governor\b", re.I)
 
+# --- RATIFIED DUAL-GOVERNOR PAIRING (2026-07-16) ---------------------------------------------
+# Gabriel-ratified doctrine (2026-07-11; recorded at acquisition-underwriting/SKILL.md:221,
+# restated :343). ORA runs TWO LTV governors at TWO LEVELS:
+#   * per-property refi-sizing ceiling = LESSER of 65% LTV and 1.25x DSCR
+#   * portfolio-aggregate ceiling      = 40% LTV  (Hard Invariant 4 -- CANON_LTV, unchanged)
+# They are not in tension: one property can refi to 65% while the portfolio stays under 40%. This
+# probe tracks the AGGREGATE governor, so a correctly-stated per-property member is not a drift
+# candidate. (LTV analog of the DSCR 1.25x-per-deal / 1.75x-portfolio split in _portfolio_qualified.)
+#
+# Why this is needed on top of the 2026-07-11 refi machinery: those suppressors recognize the 65%
+# ONLY inside its refi-sizing SYNTACTIC forms ("LESSER of 65% LTV and 1.25x DSCR", "refi to 65%
+# LTV", "65% LTV refi-sizing"). SKILL.md v4.0 (2026-07-16) states the SAME ratified governor in a
+# new bare shorthand -- "governor constants (DSCR 1.25x / per-property LTV 65% /
+# portfolio-aggregate LTV 40%)" -- matching no construct, so the weakest bare-proximity pass read
+# it as drift. That is why the probe (and the repo gate's full-file test) went red on 2026-07-16.
+#
+# TWO independent conditions are BOTH required to suppress the per-property member. Either alone
+# leaves a hole, and each closes the other's:
+#   * COMPANION-ANCHORED: the same line's portfolio-aggregate companion must equal canonical 40.
+#     A drifted companion suppresses nothing -- the aggregate figure AND the per-property member
+#     alongside it both stay visible.
+#   * VALUE-LOCKED to the ratified 65: without this, "per-property LTV 80% / portfolio-aggregate
+#     LTV 40%" would ride the canonical companion and silence a REAL per-property drift.
+# This also refutes the shape the setup-audit note (C4) sketched -- a blanket "per-property veto
+# span". Instrumentation showed "Per-property LTV 80% is the governor now" flags ONLY via the
+# bare-proximity pass, so a blanket span would silence exactly that drift: the catastrophic
+# false-negative class. C4's prescription should not be implemented as written.
+#
+# Scope guards, consistent with the rest of the module:
+#   * DECIMAL/PERCENT-FREE gaps ([^\n%0-9], canonical 1.25 permitted) -- the construct cannot
+#     LEAPFROG an intervening figure to reach its companion, so injecting a drift between the two
+#     members simply breaks the match and leaves everything visible.
+#   * GROUP-SCOPED: only the per-property member's own digits are suppressed (span(1)); the
+#     aggregate member (span(2)) is never suppressed and stays fully checked by the normal passes.
+#   * WEAKEST-PASS-ONLY at the call site: comparator, LTV-adjacent ceiling/max anchor,
+#     reverse-order and FROM-TO passes stay fully armed, so a bare "per-property LTV ceiling 65%"
+#     (no companion; 65 declared AS an acquisition ceiling) still flags -- pinned by
+#     test_perdeal_perproperty_drift_still_flags_unit.
+CANON_LTV_PERPROPERTY = "65"
+RE_PERPROP_PORTFOLIO_PAIR = re.compile(
+    r"per[\s\-]?propert(?:y|ies)\b(?:[^\n%0-9]){0,10}?ltv\b(?:[^\n%0-9]){0,6}?([0-9]{1,3})\s*%"
+    + r"(?:[^\n%0-9]|" + re.escape(CANON_DSCR) + r"){0,40}?portfolio[\s\-]?aggregate\b"
+    + r"(?:[^\n%0-9]){0,10}?ltv\b(?:[^\n%0-9]){0,6}?([0-9]{1,3})\s*%",
+    re.I)
+
+def _perprop_portfolio_paired_noveto_spans(low):
+    """Digit-group spans of per-property LTV members to suppress: ONLY where the member is the
+    ratified 65 AND the same line's portfolio-aggregate companion is the canonical 40. Returns
+    the per-property member span only -- never the companion's, which stays fully checked."""
+    spans = []
+    for mm in RE_PERPROP_PORTFOLIO_PAIR.finditer(low):
+        if mm.group(1) == CANON_LTV_PERPROPERTY and mm.group(2) == CANON_LTV:
+            spans.append(mm.span(1))
+    return spans
+
 def _refi_member_value_spans(low):
     """Return (ltv_noveto, ltv_veto, dscr_veto): the exact digit-group spans of refi-sizing
     construct MEMBER VALUES -- never whole-construct spans. Only these specific values are
@@ -575,6 +630,11 @@ def scan_line(raw):
     # construct's own member digits are suppressed -- a drift elsewhere on the line stays visible.
     refi_ltv_noveto, refi_ltv_veto, refi_dscr_veto = (
         _refi_member_value_spans(low) if is_gov else ([], [], []))
+    # Ratified dual-governor pairing (2026-07-16): per-property member spans that are BOTH the
+    # ratified 65 AND paired with a canonical-40 aggregate companion. Consumed ONLY by the
+    # bare-proximity LTV fallback below -- every explicit-declaration pass stays armed.
+    if is_gov:
+        refi_ltv_noveto = refi_ltv_noveto + _perprop_portfolio_paired_noveto_spans(low)
 
     # 1) Regression sentinel: 1.75 near DSCR/governor. Fires only for a 1.75 that is NEITHER (a) the
     #    corrected-away value of a "corrected from 1.75 → 1.25" note NOR (b) an explicit PORTFOLIO-LEVEL
@@ -734,6 +794,21 @@ def scan_line(raw):
                 _flag_ltv(m.group(1))
     return out
 
+# DATED AUDIT/PROJECT memory files (2026-07-16): the same append-only NARRATIVE class as
+# event_log.md / MEMORY.md -- an audit file RECORDS a finding ("governor-drift probe FP on
+# 'per-property LTV 65%'"), it does not DECLARE a live governor. This exemption already existed in
+# INTENT (main()'s skip_names comment says "dated audit/project memory files are the same class")
+# but was hardcoded to ONE filename, so every new dated audit re-tripped the probe: the 2026-07-16
+# setup-audit file did exactly that, and its flagged line is literally the note describing this
+# false positive -- the probe re-flagging its own paper trail. Generalized to a pattern for the same
+# reason EVENT_LOG_ARCHIVE_RE exists: so a future file needs no hand-added entry.
+# Kept TIGHT -- 'project_' prefix AND an 'audit' token AND a FULL ISO date -- so live doctrine files
+# (project_replacement_cost_benchmark_unratified.md) stay fully in scope. Module-level so it is
+# unit-testable. Accepted blind spot, unchanged IN KIND from the existing precedent: a governor
+# change recorded ONLY in a dated audit file and nowhere in standards.md / rules.md / firm.md /
+# CLAUDE.md / skills (the doctrinal homes) would go unseen.
+DATED_AUDIT_RE = re.compile(r"^project_.*audit.*\d{4}-\d{2}-\d{2}\.md$", re.I)
+
 def _is_test_file(path):
     """Test modules and _tests/ fixtures are NOT governor declarations -- they intentionally quote
     off-canonical values (a mock "[GOVERNOR DRIFT] DSCR 1.20" summary, a 1.75 sentinel) to exercise
@@ -772,7 +847,8 @@ def main():
     # skills, would go undetected -- judged acceptable since those are the doctrinal homes for a real
     # change, not the index (2026-07-08, added after the formal CLAUDE.md audit's own tracking file
     # tripped this sentinel).
-    skip_names |= {"event_log.md", "MEMORY.md", "project_claude-md-formal-audit-2026-07-08.md"}
+    skip_names |= {"event_log.md", "MEMORY.md"}
+    # DATED AUDIT/PROJECT memory files: exempt by pattern -- see DATED_AUDIT_RE at module level.
     # Dated event_log rollover archives (memory-policy.md's rollover rule, first exercised
     # 2026-07-09: _archive/event_log_<YYYY-MM-DD>.md) are the SAME append-only narrative class
     # as event_log.md itself -- a straight cut of its older entries, not a new kind of file.
@@ -785,7 +861,8 @@ def main():
         for path in iter_files(root, exts):
             basename = os.path.basename(path)
             if (os.path.abspath(path) == self_path or basename in skip_names
-                    or EVENT_LOG_ARCHIVE_RE.match(basename) or _is_test_file(path)):
+                    or EVENT_LOG_ARCHIVE_RE.match(basename) or DATED_AUDIT_RE.match(basename)
+                    or _is_test_file(path)):
                 continue
             low_path = path.lower().replace("\\", "/")
             is_code = low_path.endswith((".ts", ".tsx", ".js"))
