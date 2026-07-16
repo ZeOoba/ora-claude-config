@@ -86,6 +86,9 @@ hooks/sessions/
 maintenance/_state/doctrine-status.json
 # roster-staleness runtime breadcrumb written by confidentiality-guard.py (transient; never track)
 hooks/state/
+# append-event-log.py's in-place-fallback safety-net copy (overwritten every use;
+# recoverable from event_log.md's own git history anyway -- never track, 2026-07-16)
+projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/event_log.md.inplace-backup
 # append-event-log.py's lock-contention spool (drains automatically into event_log.md on
 # the next successful append; transient by design, never track) -- see 2c above.
 projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/event_log.md.pending/
