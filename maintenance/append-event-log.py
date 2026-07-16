@@ -23,6 +23,15 @@ SPOOL (2026-07-08): an OS file-handle lock (another process holding event_log.md
 survives the mtime-retry loop and used to drop the append entirely. Now a run first
 DRAINS any parked entries, then appends; if the lock never clears it SPOOLS the new
 entry (oldest-first replay preserves newest-on-top order).
+
+IN-PLACE FALLBACK (2026-07-16): diagnosed via Restart Manager that the Desktop app
+(Claude.exe) can hold a long-lived read handle on event_log.md that blocks os.replace
+(the atomic-insert rename step) specifically, while direct reads AND direct writes to
+the same file keep working throughout -- see memory reference_event_log_app_handle_lock.md.
+After INPLACE_FALLBACK_AFTER failed atomic-replace attempts, both the main retry loop
+and drain_spool now also try an in-place write (same mtime-guard, plus a pre-write
+backup and a post-write read-back verify) before giving up on that attempt. Spooling
+is now the last resort only when BOTH paths fail.
 """
 import argparse
 import os
@@ -32,6 +41,11 @@ import time
 LOG = os.path.join(os.path.expanduser("~"), ".claude", "projects",
                    "C--Users-Owner-OneDrive---Oxford-Capital-Partners",
                    "memory", "event_log.md")
+
+# After this many failed atomic-replace attempts within a retry loop, also attempt
+# the in-place fallback on each remaining attempt (rather than waiting for every
+# attempt to exhaust before ever trying it).
+INPLACE_FALLBACK_AFTER = 3
 
 
 def insert_newest(content, entry):
@@ -90,6 +104,55 @@ def _atomic_insert(log, entry):
     return True
 
 
+def _inplace_insert(log, entry):
+    """Fallback for when os.replace is blocked (e.g. another process holds `log`
+    open without FILE_SHARE_DELETE -- proven 2026-07-16, see memory
+    reference_event_log_app_handle_lock.md) but direct reads/writes to the same
+    path still succeed. Same mtime-guard as _atomic_insert, PLUS a pre-write
+    backup (so a partial/interrupted write is always recoverable) and a
+    post-write read-back verify (so a silent corruption is never trusted as
+    success). Returns True on success; raises on any check failure -- caller
+    decides whether to retry or spool."""
+    st_before = os.stat(log).st_mtime_ns
+    with open(log, encoding="utf-8") as f:
+        content = f.read()
+    new = insert_newest(content, entry)
+    if os.stat(log).st_mtime_ns != st_before:
+        raise BlockingIOError("log changed mid-read")
+    backup = log + ".inplace-backup"
+    with open(backup, "w", encoding="utf-8") as f:
+        f.write(content)
+    with open(log, "w", encoding="utf-8") as f:
+        f.write(new)
+    with open(log, encoding="utf-8") as f:
+        written = f.read()
+    if written != new:
+        raise IOError("in-place write verify mismatch -- backup at %s" % backup)
+    return True
+
+
+def _insert_or_inplace(log, entry, try_inplace):
+    """Try the atomic (os.replace) insert; if it fails (not a malformed-entry
+    ValueError) and `try_inplace` is set, fall back to _inplace_insert. Returns
+    True on success via either path. A ValueError from either path propagates
+    immediately (malformed entry -- retrying or falling back cannot help). If
+    both paths fail, raises the ATOMIC path's exception, since that's the one
+    callers already log per-attempt."""
+    try:
+        return _atomic_insert(log, entry)
+    except ValueError:
+        raise
+    except Exception as atomic_exc:
+        if not try_inplace:
+            raise
+        try:
+            return _inplace_insert(log, entry)
+        except ValueError:
+            raise
+        except Exception:
+            raise atomic_exc
+
+
 def drain_spool(log, attempts=3):
     """Replay spooled entries (oldest-first) into `log`. Stops at the first one that
     still can't be written -- leaves it and the rest for next time (nothing is lost).
@@ -108,8 +171,9 @@ def drain_spool(log, attempts=3):
             continue
         done = False
         for attempt in range(attempts):
+            try_inplace = (attempt + 1) >= min(INPLACE_FALLBACK_AFTER, attempts)
             try:
-                _atomic_insert(log, entry)
+                _insert_or_inplace(log, entry, try_inplace)
                 done = True
                 break
             except ValueError:  # malformed -> discard, don't wedge the queue
@@ -164,8 +228,9 @@ def main(argv=None):
         sys.stderr.write("spool drain skipped: %s\n" % e)
 
     for attempt in range(6):
+        try_inplace = (attempt + 1) >= INPLACE_FALLBACK_AFTER
         try:
-            _atomic_insert(a.log, entry)
+            _insert_or_inplace(a.log, entry, try_inplace)
             with open(a.log, encoding="utf-8") as f:
                 if header in f.read():
                     print("appended: %s" % header)
