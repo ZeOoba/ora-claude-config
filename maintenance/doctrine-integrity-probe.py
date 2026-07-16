@@ -113,6 +113,31 @@ SLASH_RE = re.compile(r"(?:^|(?<=[\s(]))`/([a-z][a-z0-9-]*)\b")
 # Repo names to check for as a local directory (WARN only).
 REPO_NAMES = ("oxford-command-center", "website-canonical", "oxford-site", "ora-pm")
 
+# --- Check 12 (2026-07-16 extension): backup-coverage sweep. Three times now a
+# top-level ~/.claude dir accumulated doctrine-bearing content while the
+# .gitignore /* default-deny silently kept it out of the private-remote backup
+# AND out of git-status single-writer visibility (scheduled-tasks -> opt-in 2b,
+# memory/ -> 2c, workflows/ -> 2026-07-16). The sweep flags any top-level dir
+# with ZERO git-tracked files that is not a known-transient runtime dir -- an
+# opt-in REVIEW CANDIDATE, not a verdict (WARN-only: every opt-in needs its own
+# confidential-terms scrub first). Root-level FILES are out of scope: they are
+# opted in one-by-one and a new one is conspicuous in any .gitignore review;
+# dirs are where content accumulates unnoticed. Adding a name here is a
+# deliberate, git-recorded ruling that the dir is transient/runtime state (or,
+# for _confidential-staging, must NEVER reach the off-machine remote).
+BACKUP_SWEEP_TRANSIENT_DIRS = {
+    # harness/runtime state, caches, per-session scratch -- regenerable
+    ".claude", ".firecrawl", ".superpowers", "artifacts", "backups", "cache",
+    "daemon", "debug", "downloads", "handoffs", "ide", "jobs", "paste-cache",
+    "plans", "plugins", "session-env", "sessions", "shell-snapshots", "statsig",
+    "tasks", "telemetry", "todos", "worktrees",
+    # append-event-log.py staging (drains into event_log.md; transient by design)
+    "_tmp_entries",
+    # NEVER track (invariant 3): confidential staging must not reach the remote.
+    # daemon/ (above) additionally holds key files -- also never track.
+    "_confidential-staging",
+}
+
 # Tokens that look like slash commands but resolve via a plugin skill rather than
 # a ~/.claude/commands/<name>.md file -> not a command-file MISSING.
 SLASH_SKILL_ALLOWLIST = {"code-review"}
@@ -566,11 +591,14 @@ def parse_args(argv):
             overrides["quick"] = True
         elif a.startswith("--memory-index="):
             overrides["memory_index"] = Path(a.split("=", 1)[1])
+        elif a.startswith("--backup-root="):
+            overrides["backup_root"] = Path(a.split("=", 1)[1])
         elif a.startswith("--"):
             # A typo'd flag must not silently become the CLAUDE.md path (which
             # would also disable live-mode scanning). Fail loud.
             print("[MISSING] unknown option: %s (known: --session-context= "
-                  "--rules= --terms= --quick --memory-index=)" % ascii_safe(a))
+                  "--rules= --terms= --quick --memory-index= --backup-root=)"
+                  % ascii_safe(a))
             sys.exit(1)
         else:
             pos.append(a)
@@ -1071,6 +1099,48 @@ def main():
                      "invocation point found (checked: settings.json hooks, CC/MCP "
                      "scheduled-task SKILL.mds, ~/.claude pre-push shim)"
                      % ascii_safe(name))
+
+    # --- 12. backup-coverage sweep (top-level dirs invisible to the backup) ---
+    # Runs live (root = ~/.claude) or on a fixture root via --backup-root=.
+    # WARN-only by design: a hit is an opt-in review candidate, not drift --
+    # see BACKUP_SWEEP_TRANSIENT_DIRS for rationale and the allowlist contract.
+    backup_root = overrides.get("backup_root") or (CLAUDE_DIR if live_mode else None)
+    if backup_root is not None:
+        sweep_skipped = None
+        candidates = []
+        try:
+            import subprocess
+            r = subprocess.run(["git", "-C", str(backup_root), "ls-files", "-z"],
+                               capture_output=True, timeout=30)
+            if r.returncode != 0:
+                sweep_skipped = "git ls-files rc=%d" % r.returncode
+            else:
+                tracked_top = {p.split("/", 1)[0] for p in
+                               r.stdout.decode("utf-8", "replace").split("\0") if p}
+                for entry in sorted(Path(backup_root).iterdir(),
+                                    key=lambda e: e.name):
+                    if not entry.is_dir() or entry.name == ".git":
+                        continue
+                    if entry.name in tracked_top:
+                        continue
+                    if entry.name in BACKUP_SWEEP_TRANSIENT_DIRS:
+                        continue
+                    candidates.append(entry.name)
+        except Exception as e:
+            sweep_skipped = ascii_safe(e)
+        if sweep_skipped is not None:
+            warn("backup-coverage sweep skipped -- %s (fail-open; coverage "
+                 "not asserted this run)" % ascii_safe(sweep_skipped))
+        else:
+            print("Backup-coverage sweep: %d opt-in review candidate(s)"
+                  % len(candidates))
+            for name in candidates:
+                warn("top-level dir '%s/' has no git-tracked files and is not on "
+                     "the transient allowlist -- invisible to the private-remote "
+                     "backup and to git-status single-writer checks; review for a "
+                     ".gitignore opt-in (2b/2c/workflows precedent -- scrub for "
+                     "confidential terms FIRST) or add it to "
+                     "BACKUP_SWEEP_TRANSIENT_DIRS with a reason" % ascii_safe(name))
 
     # --- verdict ---
     if missing:

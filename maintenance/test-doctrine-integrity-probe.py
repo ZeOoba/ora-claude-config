@@ -5,6 +5,8 @@ Run: python test-doctrine-integrity-probe.py
 Pure stdlib. ASCII-only output (Windows cp1252 console).
 """
 import os
+import re
+import shutil
 import sys
 import subprocess
 import tempfile
@@ -360,6 +362,57 @@ def test_no_duplication_still_ok():
         os.remove(doc)
         os.remove(sc)
     print("  PASS test_no_duplication_still_ok (no shared run -> OK, exit 0)")
+
+
+def test_backup_coverage_flags_untracked_dir():
+    """--backup-root: a top-level dir with no git-tracked files that is not on
+    the transient allowlist -> WARN opt-in review candidate (advisory, exit 0).
+    A dir with a tracked file and an allowlisted dir must both stay silent."""
+    doc = _write_fixture(_v21_base())
+    root = tempfile.mkdtemp(prefix="probe_backup_root_")
+    try:
+        subprocess.run(["git", "init", "-q", root], check=True, timeout=15)
+        os.makedirs(os.path.join(root, "tracked"))
+        with open(os.path.join(root, "tracked", "keep.md"), "w") as fh:
+            fh.write("kept\n")
+        subprocess.run(["git", "-C", root, "add", "tracked/keep.md"],
+                       check=True, timeout=15)
+        os.makedirs(os.path.join(root, "cache"))       # allowlisted name
+        with open(os.path.join(root, "cache", "x.tmp"), "w") as fh:
+            fh.write("x\n")
+        os.makedirs(os.path.join(root, "newthing"))    # the review candidate
+        with open(os.path.join(root, "newthing", "y.md"), "w") as fh:
+            fh.write("y\n")
+        r = run_probe([doc, "--backup-root=%s" % root])
+        assert r.returncode == 0, (
+            "backup-coverage is WARN-only, got exit %d\n%s"
+            % (r.returncode, r.stdout))
+        assert "Backup-coverage sweep:" in r.stdout, (
+            "expected the sweep summary line:\n%s" % r.stdout)
+        assert re.search(r"\[WARN\].*'newthing/'", r.stdout), (
+            "expected a WARN naming 'newthing/':\n%s" % r.stdout)
+        for silent in ("'tracked/'", "'cache/'"):
+            assert silent not in r.stdout, (
+                "%s must not be flagged:\n%s" % (silent, r.stdout))
+    finally:
+        os.remove(doc)
+        shutil.rmtree(root, ignore_errors=True)
+    print("  PASS test_backup_coverage_flags_untracked_dir "
+          "(candidate WARNs; tracked + allowlisted silent; exit 0)")
+
+
+def test_backup_coverage_absent_without_root_in_fixture_mode():
+    """Fixture runs without --backup-root must skip the sweep entirely
+    (live-only check; fixtures opt in via the override)."""
+    doc = _write_fixture(_v21_base())
+    try:
+        r = run_probe([doc])
+        assert "Backup-coverage sweep:" not in r.stdout, (
+            "sweep must not run on a fixture without --backup-root:\n%s"
+            % r.stdout)
+    finally:
+        os.remove(doc)
+    print("  PASS test_backup_coverage_absent_without_root_in_fixture_mode")
 
 
 def test_confidential_leak_fails():
@@ -726,6 +779,8 @@ def main():
     test_tombstone_aging_warns()
     test_cross_file_duplication_fails()
     test_no_duplication_still_ok()
+    test_backup_coverage_flags_untracked_dir()
+    test_backup_coverage_absent_without_root_in_fixture_mode()
     test_confidential_leak_fails()
     test_terms_shape_failopen()
     test_leak_formatting_and_excerpt_withholding()
