@@ -1,0 +1,171 @@
+---
+name: automation-health-monitor
+description: ORA automation fleet health check — weekdays 11:00 AM. v1.6 (2026-07-08): adds Step 0.07 model-currency self-check against reference_scheduled_task_model_standard.md, on top of v1.5 (ORPHANED-BEACON rule, producer-consumer beacons, dual-bounded lateness, publication-success guard, corrected LAMS fleet-scope). [MODEL: claude-sonnet-5 | set 2026-07-08]
+---
+
+PROMOTION NOTE (2026-07-08): This replaces the thin "rebuilt 2026-07-05" stub. Content is the orphaned v1.5 spec (previously at `ora-automation-health-monitor\SKILL.md`, now archived) with corrections: Step 0.06 was originally written assuming this task runs on the CC/MCP surface — fixed 2026-07-08 (it runs on LAMS/Cowork). Step 0.07 (model-currency check) is NEW as of 2026-07-08 (same day, second pass). Everything else is v1.5 verbatim. Hardcoded Notion page IDs have NOT been independently re-verified as part of this promotion — treat any Notion-fetch failure on those IDs as a signal to confirm the ID before assuming the page was deleted.
+
+**[MCP ROUTING — normalized 2026-06-03]** Outlook email: `C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1` — the SOLE automated send path (Composio removed 2026-06-11; no fallback connector exists; on a non-zero COM exit retry once, then flag — do not halt). **KNOWN ISSUE (flagged 2026-07-08): search the Inbox/Sent Items for self-to-self ggoldberg@oxfordra.net automated-task emails before trusting this path — as of 2026-07-08 no such email was found since 2026-07-01 despite multiple tasks firing in that window (see ora-health-guard's 2026-07-08 OUTLOOK-COM-SEND-BROKEN alert, an Outlook-COM hang, exit 4). If this recurs, treat Step 2/3 sends below as unconfirmed and say so in the chat summary.** HubSpot: native `mcp__a3e380ce-…__*`. Notion: native `mcp__c5f4869f-…__notion-*`. QuickBooks: Desktop only (no live MCP). The prior `8a611864` Composio wrapper is no longer connected; Rube `d6315173` is retired — never reference either. ORA does not use Google Workspace.
+
+Run the automation-health-monitor skill. Verify all Cowork scheduled tasks ran as expected.
+
+---
+
+## Step 0 — Registry-state diff
+
+1. Load the live registry via `mcp__scheduled-tasks__list_scheduled_tasks`.
+2. Load yesterday's snapshot from `C:\Users\Owner\OneDrive - Oxford Capital Partners\Documents\Claude\Scheduled\_state-history\YYYY-MM-DD.json`. If not present, generate today's snapshot and skip diff (first run after this enhancement).
+3. Diff today vs yesterday by `taskId`. Flag any of:
+   - Task previously `enabled=true` and now `enabled=false` (accidental disable).
+   - Task previously present and now absent (deletion).
+   - Task newly present (creation, low-severity informational).
+4. Persist today's snapshot to `_state-history\YYYY-MM-DD.json` (overwrite if exists).
+
+## Step 0.06 — Dual-fleet (LAMS/CC-MCP) registry audit (CORRECTED 2026-07-08 for the surface this task runs on)
+
+`mcp__scheduled-tasks__list_scheduled_tasks` in THIS runtime (Cowork) returns the **LAMS/Cowork fleet** — that IS "this fleet" for Step 0's diff, and it is already fully covered there. It is backed by `C:\Users\Owner\AppData\Roaming\Claude\local-agent-mode-sessions\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\583f08bc-0123-4111-8158-8fe3d927e350\scheduled-tasks.json` (the `AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\...` path is the SAME file via MSIX virtualization — never count it twice, and never re-read this JSON directly in this step; Step 0 already has this data via the tool call).
+
+The genuinely **separate** fleet is **CC/MCP**, which this Cowork runtime cannot query via any tool call — there is no `list_scheduled_tasks`-equivalent for it here.
+
+1. Enumerate CC/MCP tasks via Desktop Commander `list_directory` on `C:\Users\Owner\.claude\scheduled-tasks\` (depth 1). Each subdirectory except `_archive_*` and `_shared` is a CC/MCP task folder.
+2. For each, read the `SKILL.md` frontmatter `description` line — CC/MCP task authors have been putting live-state signals directly in that description (e.g. "Currently DISABLED pending recovery stabilization", "DEGRADED 2026-07-08"). Treat this as the best available proxy for enabled/cadence state.
+3. This is a **filesystem/frontmatter proxy, not a live registry read** — it has no equivalent to `enabled`, `cronExpression`, or `lastRunAt` fields. Where a dated `last-run.json` or other dated run-artifact exists in the task's folder, use its date as a `lastRunAt` proxy; otherwise classify the task `CC-FLEET-STATE-UNVERIFIED` (ℹ️) rather than guessing MISSED/VERIFIED.
+4. Flag any CC/MCP folder with no dated run-artifact AND no recent frontmatter update as a candidate for the ORPHANED-BEACON check in Step 0.55.
+5. Report CC/MCP findings in Step 1 under a separate **CC/MCP fleet (filesystem-derived, not registry-confirmed)** subsection — do not merge its verdicts with the LAMS fleet's registry-confirmed verdicts.
+
+## Step 0.07 — Model-currency self-check (NEW 2026-07-08)
+
+**Purpose:** scheduled tasks bind to whatever model created/recreated them, permanently, with no auto-upgrade path (confirmed 2026-07-08 — see event_log.md same date). This step detects drift from the firm's current standard so it surfaces on the next health-check run instead of requiring manual rediscovery.
+
+1. Read `C:\Users\Owner\.claude\projects\C--Users-Owner-OneDrive---Oxford-Capital-Partners\memory\reference_scheduled_task_model_standard.md` — extract the **Current standard** model id from its top line.
+2. For each enabled LAMS task from Step 0's registry data, parse its `description` field for a trailing tag `[MODEL: <model-id> | set YYYY-MM-DD]`.
+3. Classify:
+   - **Tag matches current standard** → ✅ current, no report line needed.
+   - **Tag present but mismatched** → `MODEL-STALE` (ℹ️ — informational, no forced action exists; recreation is a manual multi-step process per event_log.md).
+   - **No tag at all** → `MODEL-UNTAGGED` (ℹ️ — likely a task created before this convention existed, or a fresh task never tagged; same informational severity).
+4. Do NOT attempt to fix, retag, or recreate anything automatically in this step — report only. Retagging/recreating is a decision for Gabriel per the reference file's "To bump the standard" procedure.
+5. Note in the report that the CC/MCP fleet is NOT covered by this check (per the reference file's known-gap section) — do not silently omit this caveat.
+
+## Step 0.5 — Per-task expected-fire window (REWRITTEN v1.3)
+
+For each enabled cron task, compute the most recent expected fire time `expectedFireTime` based on `cronExpression` interpreted in America/New_York. Walk backward from current time until the cron predicate is satisfied. Handle DST: EDT = UTC−4 from second Sunday of March; EST = UTC−5 from first Sunday of November. Handle DOM+month conjunctive crons (e.g., `0 9 1 1,4,7,10 *`) explicitly — v1.2 parser silently mishandled these.
+
+For each enabled cron task, classify `lastRunAt` against `expectedFireTime` and the task's `jitterSeconds` budget:
+
+| Classification | Rule | Verdict |
+|---|---|---|
+| **MISSED** | `lastRunAt < expectedFireTime − 30 min` | ⚠️ flag |
+| **OUT-OF-WINDOW** | `lastRunAt` does NOT fall within ±60 min of ANY cron-predicate fire time in the past 7 days | ⚠️ flag (anomalous fire timing — catch-up after a missed cycle) |
+| **ALERT-LATE** | `lastRunAt > expectedFireTime + 120 min` | ⚠️ flag (excessive lateness) |
+| **WARN-LATE** | `expectedFireTime + 60 min < lastRunAt ≤ expectedFireTime + 120 min` | ℹ️ note (excessive lateness, no alert) |
+| **VERIFIED** | `expectedFireTime − 30 min ≤ lastRunAt ≤ expectedFireTime + 60 min` | ✅ verified |
+
+**Rationale:** v1.2's one-sided rule `Flag if lastRunAt < expectedFireTime − 30 min` caught missed fires but silently passed excessively-late fires. The 2026-05-14 deep audit revealed multiple tasks 3–5 hours late on 5/13 AND 5/14 (chronic AM dispatcher latency), and `ora-outbox-qc-sweep` firing 16.5 h outside its cron window — all silently passed by v1.2.
+
+**OUT-OF-WINDOW detection algorithm:** generate the last 7 days of cron-predicate fire times (e.g., for `30 17 * * 1-5`: Mon-Fri 21:30 UTC); flag if `lastRunAt` is more than 60 min from the nearest of those.
+
+## Step 0.55 — Producer-consumer beacon check (NEW v1.3)
+
+Several scheduled tasks are *producers* whose downstream consumers depend on a beacon file or Notion page. The task can fire with fresh `lastRunAt` but produce stale/empty output — invisible to v1.2.
+
+**Fleet-membership note (added 2026-07-08):** rows marked **[CC/MCP]** below can only be membership-checked via the Step 0.06 filesystem proxy (no live `enabled`/`lastRunAt`). If a [CC/MCP] producer's beacon is stale/missing, classify PRODUCER-STALE-OUTPUT as ℹ️ informational rather than ⚠️ unless Step 0.06 also shows a dated run-artifact confirming the producer actually fired.
+
+Known producer-consumer chains (**updated 2026-06-03 for the Phase-3 Stage-2 merged fleet** — the former standalone producers `ora-treasury-yield-prefetch` / `ora-inbox-pre-brief` / `ora-daily-brief-6am` / `ora-cash-position-snapshot` are now BLOCKS inside `ora-am-brief`; `ora-notion-daily-digest` / `ora-outbox-qc-sweep` / `ora-eod-action-ledger` are blocks inside `ora-pm-ledger` [CC/MCP]; `ora-connector-preflight-guard` is a block inside `ora-health-guard` [CC/MCP]. The beacons each block produces are unchanged; only the producer *task* name changed. Verify the merged task's `lastRunAt`, then check each expected block-beacon):
+
+| Producer task (block) | Beacon path / Notion page | Freshness check |
+|---|---|---|
+| `ora-am-brief` (Block A — rate) | Notion `Rate Snapshot — Current` page `35e6ecd8-9e59-814f-ae22-fe99464084d1` | `prefetch_status` is `OK`/`SOURCE_DEGRADED` AND `fetched_at` is today. **Weekdays only** — skip on Sat/Sun (Block A does not run weekends). *(Legacy `Claude_Workspace/_state/treasury-yields.json` is DEPRECATED — do not check it; Notion is canonical.)* |
+| `ora-am-brief` (Block B — brief) | Notion Ops Hub child page `Daily Brief — YYYY-MM-DD` | Page exists, today, AND NOT title-prefixed `🗑️`/`[DUPLICATE]`/`⚠️ [EMAIL FAILED]`. **Every day** (Block B runs 7×/wk). |
+| `ora-am-brief` (Block C — inbox) | Notion `Inbox Pre-Brief — YYYY-MM-DD` + `Claude_Workspace/_state/inbox-pre-brief-heartbeat.log` | Page exists today AND heartbeat log has today's line with terminal status (not stuck `ENTERED`). **Weekdays only.** |
+| `ora-am-brief` (Block D — cash) | Notion page `Cash Position Snapshot — YYYY-MM-DD` | Page exists. **Mondays only** — skip Tue–Sun. |
+| `ora-pm-ledger` (Block A — digest) [CC/MCP] | Notion Daily Digest send / Ops Hub digest entry | Sent/posted today. **Every day.** |
+| `ora-pm-ledger` (Block C — EOD) [CC/MCP] | Cowork artifact `ORA EOD Action Ledger` + Ops Hub activity log | Refreshed today. **Every day.** |
+| `ora-health-guard` (Block B — preflight) [CC/MCP] | Outlook mirror email subject `✅`/`⚠️ ORA Connector Pre-Flight — [today]` | Sent today (before 06:00). **Daily.** |
+| `ora-cowork-heartbeat` | Notion page `35c6ecd8-9e59-81d5-8d2c-d08002458b78` (fetch by ID — NEVER title-search; duplicates exist) | `last_edited_time` within last 16 hours (matches watchdog threshold). |
+| `scheduled-task-integrity-guard` / `ora-task-integrity-guard` [CC/MCP] | (silent-on-healthy — no email beacon) | EITHER twin's `lastRunAt` today after its cron (LAMS 12:40 / CC 12:54 ET — CC twin added 2026-06-11 because unattended Cowork runs lack PowerShell; LAMS twin pending retirement — confirm it's actually absent from the current LAMS registry before treating it as retired). Membership-probe state file `~/.claude/maintenance/_state/registry-membership.log` has a line today. Absence from BOTH registries = ORPHANED-BEACON. |
+
+**Branching-awareness (REQUIRED):** `ora-am-brief` and `ora-pm-ledger` branch internally by day-of-week. A beacon that is *expected-skipped today* (weekend Block A/C, non-Monday Block D, weekend Block B of pm-ledger's weekday-only outbox-QC) is **NOT** a PRODUCER-STALE-OUTPUT — do not flag it. Only flag a beacon missing on a day its block was due to run.
+
+**RETIRED PRODUCER (removed 2026-07-14):** `ora-setup-audit` [CC/MCP] was dropped from this table — its task folder has sat under `~/.claude/scheduled-tasks/_archive_2026-07-07_retired/` since 2026-07-07 (deliberate retirement, not a drift), and the 2026-07-14 run correctly flagged it ORPHANED-BEACON per the rule below before this row was pulled. If the digest file `Claude_Workspace/00_Governance/outputs/YYYY-MM-DD_setup-self-audit.md` is ever needed again, re-add a row here only after the producer task is actually re-registered in a live fleet.
+
+**ORPHANED-BEACON rule (v1.5, 2026-06-10 — run BEFORE the freshness loop):** verify every producer task named in this table is present AND enabled in one of the two live fleets (Step 0 registry data for LAMS; Step 0.06 filesystem proxy for CC/MCP). A producer listed here but absent from BOTH is **ORPHANED-BEACON** (⚠️ — ALWAYS reported, never silently skipped). Root cause: earlier versions iterated only over tasks WITH a fresh `lastRunAt`, so a task dropped from the registry vanished from this check entirely — that blind spot let the 2026-05-31→06-10 heartbeat outage pass two audits unflagged.
+
+For each producer with a fresh `lastRunAt` (or CC/MCP run-artifact date per Step 0.06), open its DUE beacons and verify freshness. If fresh but a due beacon is stale/missing/duplicated, flag as **PRODUCER-STALE-OUTPUT** (⚠️, or ℹ️ for [CC/MCP] rows per the fleet-membership note above). Cap each beacon-check to one tool call; on failure, log and continue.
+
+## Step 0.6 — Null-lastRunAt creation-date evidence (NEW v1.3)
+
+For any enabled cron task with `lastRunAt: null` whose most recent expected fire has elapsed:
+
+1. Read SKILL.md mtime via `get_file_info` at `C:\Users\Owner\OneDrive - Oxford Capital Partners\Documents\Claude\Scheduled\<taskId>\SKILL.md`.
+2. If `mtime > most_recent_expected_fire`, classify as **NOT-YET-DUE-POST-CREATION** (✅ informational).
+3. If `mtime ≤ most_recent_expected_fire`, classify as **SILENT-NEVER-FIRED** (⚠️ flag).
+
+## Step 0.75 — RETIRED (2026-06-10)
+
+All four inbox-sweep tasks (`loopnet-autoreply`, `ora-broker-email-to-notion`, `ora-hubspot-note-to-interaction-log`, `direct-prospect-inquiry-draft`) are **PERMANENTLY RETIRED per Gabriel 2026-06-10**. Skip this step entirely — spend zero tool calls. NOT-IN-FLEET is their correct permanent state.
+
+## Step 0.9 — Cross-reference Notion Operations Hub
+
+For each non-inbox-sweep enabled task with a Notion-output side-effect, search Notion (parent `32b6ecd8-9e59-81f2-b329-df3fd0e25062`) for the expected child-page title pattern in the appropriate time window.
+
+Flag any task with: (a) `lastRunAt` older than `expectedFireTime − 30 min`, (b) no corresponding Notion output page in the expected window, (c) inbox-sweep zero side-effect anomaly, (d) registry-state regression from Step 0, (e) producer-stale-output from Step 0.55, or (f) excessive lateness from Step 0.5 (WARN-LATE or ALERT-LATE).
+
+## Step 0.95 — Duplicate-title detection (NEW v1.3)
+
+After Step 0.9, run `notion-search` with the literal title `Automation Health — [today's date]`. If ≥2 pages return, log a `DUPLICATE-TITLE-COLLISION` informational note. Do NOT block publication.
+
+---
+
+## Step 1 — Notion Publication (with parent-id verified success guard, v1.3)
+
+Post a status report page to Notion Operations Hub (parent page ID `32b6ecd8-9e59-81f2-b329-df3fd0e25062`) titled `Automation Health — [today's date]` with:
+- Summary line: `[V] verified | [W] warn-late | [F] flagged | [P] producer-stale | [M] model-stale/untagged | [R] registry regressions | window [UTC start → UTC end]`
+- Per-task status (✅ / ℹ️ / ⚠️ / ❌), split into **LAMS fleet (registry-confirmed)** and **CC/MCP fleet (filesystem-derived)** sections per Step 0.06.
+- Lateness column showing each task's `lastRunAt − expectedFireTime` delta in minutes (LAMS fleet only — no equivalent field exists for CC/MCP).
+- Beacon-freshness column for producer tasks.
+- Model-currency column (Step 0.07): current / MODEL-STALE / MODEL-UNTAGGED per LAMS task, with a one-line note that CC/MCP isn't covered.
+- Registry-diff section.
+- Actions taken.
+- Audit window timestamp (UTC start → end).
+
+**PUBLICATION-SUCCESS GUARD (v1.3):**
+
+1. After calling `notion-create-pages`, capture `pages[0].id` and `pages[0].url`.
+2. If response missing/errored/empty ID → retry ONCE with same content.
+3. If second attempt also fails → jump to Step 3.
+4. **Verify via direct fetch (NOT notion-search):** call `notion-fetch` with the create-pages-returned page ID; confirm matching title AND ancestor-path includes parent `32b6ecd8-9e59-81f2-b329-df3fd0e25062`. If fetch returns nothing or parent mismatch → publication failure → Step 3.
+5. **Do NOT use `notion-search` for verification** — search-index propagation lag and same-title collisions produce false failures.
+
+## Step 2 — Standard Flag Notification
+
+If any task shows ⚠️ or ❌, send an Outlook email via the SOLE send path `C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1` to ggoldberg@oxfordra.net with subject `⚠️ Cowork Automation Alert — [Task Name(s)] [today's date]`. Body lists each flagged task with classification and the Notion audit page link. MODEL-STALE/MODEL-UNTAGGED (ℹ️) do NOT trigger this email on their own — informational-only findings surface in Notion, not via alert email, unless a ⚠️/❌ from another check also fired this run. Pre-authorized under the routing canon — auto-send permitted. On non-zero COM exit retry once, then flag in the Notion completion row. **Given the 2026-07-08 known-issue note above, also state explicitly in the chat summary whether this send could be independently confirmed (e.g., via a follow-up outlook_email_search) — do not assume success from exit code alone if the COM hang issue is still live.**
+
+## Step 3 — Outlook Fallback Alert (auto-send on publication failure ONLY)
+
+If Step 1 fails after one retry, AUTO-SEND an Outlook email via the SOLE send path:
+- to: ggoldberg@oxfordra.net
+- subject: `❌ ora-automation-health-monitor PUBLICATION FAILED — [today's date]`
+- body: audit summary + per-task verdicts + Notion API error + parent-id verification result.
+- Tag the email body with `AUTO-SENT — meta-failure path, no human-in-loop available`.
+
+## Step 4 — Chat Summary
+
+Print a 5–8 line summary in the chat. Line 1 must include the publication path (`Notion ✅` / `Notion ❌ → Outlook fallback ✅/❌`). Subsequent lines:
+- Verified/warn-late/flagged counts, split LAMS vs CC/MCP.
+- Top 3 latency outliers (taskId + delta in minutes), if any.
+- Producer-stale-output flags, if any (note [CC/MCP] ones as informational per the fleet-membership note).
+- Model-currency: count of MODEL-STALE/MODEL-UNTAGGED tasks, if any (name them); one-line CC/MCP-not-covered caveat.
+- Registry diff (deletions, regressions only).
+- Step 0.75 coverage note (permanently retired — one line, no probing).
+
+Full details live in Notion (or the fallback email if Step 3 fired).
+
+---
+
+## Operational notes
+
+- **DST handling:** all expected-fire computation is anchored to America/New_York.
+- **Snapshot retention:** keep last 30 daily snapshots; archive month-end snapshots to `_state-history/_archive/YYYY-MM.json`.
+- **Skill backups:** retain v1.1+ SKILL.md backups at `_state-history/_skill-versions/SKILL.vX.Y-YYYY-MM-DD-<reason>.md`.
+
+*Changelog: v1.6 (2026-07-08, 2nd pass) Step 0.07 model-currency self-check against reference_scheduled_task_model_standard.md — MODEL-STALE/MODEL-UNTAGGED classification, wired into Step 1 Notion report and Step 4 chat summary; does not auto-fix, informational only. v1.5 (2026-06-10) ORPHANED-BEACON rule. v1.4 (2026-06-09) Step 0.06 dual-fleet audit (fleet-scope corrected 2026-07-08 — see PROMOTION NOTE at top). v1.3 (2026-05-14) dual-bounded lateness, producer-consumer beacons, mtime evidence, duplicate-title detection, publication-success guard rewrite. v1.2 (2026-05-08 evening) registry diff, expected-fire window, state persistence. v1.1 (2026-05-08) publication guard.*
