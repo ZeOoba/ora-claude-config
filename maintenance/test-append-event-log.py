@@ -140,9 +140,11 @@ try:
     with open(path, encoding="utf-8") as f:
         result = f.read()
     expect("_inplace_insert applies the entry", "in-place fallback test" in result)
-    backup_path = path + ".inplace-backup"
-    expect("_inplace_insert writes a backup of the PRIOR content",
-           os.path.exists(backup_path) and open(backup_path, encoding="utf-8").read() == log_seed)
+    # On success the backup has discharged its purpose and is removed (2026-07-16 --
+    # it used to strand next to the log). The "backup survives a FAILED write" half of
+    # the net is asserted in the residue block below.
+    expect("_inplace_insert removes the backup once the write verifies",
+           not os.path.exists(path + ".inplace-backup"))
 finally:
     _cleanup(path)
 
@@ -210,6 +212,110 @@ try:
     spooled = os.path.isdir(pending_dir) and any(
         n.endswith(".md") for n in os.listdir(pending_dir))
     expect("main() did NOT spool -- the fallback made it unnecessary", not spooled)
+finally:
+    _cleanup(path)
+    if os.path.exists(entry_path):
+        os.remove(entry_path)
+    pending_dir = path + ".pending"
+    if os.path.isdir(pending_dir):
+        for n in os.listdir(pending_dir):
+            os.remove(os.path.join(pending_dir, n))
+        os.rmdir(pending_dir)
+
+# --- scratch-file residue (2026-07-16, same day as the fallback itself): both write
+# paths leaked a ~480KB scratch file next to event_log.md. os.replace is the ONLY
+# thing that consumes .tmp-append, so a blocked atomic attempt orphaned it -- and the
+# in-place fallback that rescued the append writes straight to the log and never
+# picked it up. Filenames are fixed, so at most one of each can strand; the harm is
+# that an orphan reads as unmerged data and costs a real investigation to clear.
+
+def _residue(path):
+    """Scratch files still on disk next to `path`."""
+    return sorted(s for s in (".tmp-append", ".inplace-backup")
+                  if os.path.exists(path + s))
+
+
+# a blocked atomic insert must not strand its scratch file
+path = _make_temp_log(log_seed)
+try:
+    with _HoldWithoutDeleteShare(path):
+        try:
+            ael._atomic_insert(path, new_entry)
+            expect("sanity: atomic insert blocked (residue test)", False,
+                   "(expected PermissionError)")
+        except ValueError:
+            raise
+        except Exception:
+            pass
+    expect("blocked _atomic_insert leaves no .tmp-append", _residue(path) == [], _residue(path))
+finally:
+    _cleanup(path)
+
+# a verified in-place write makes its backup redundant -> no residue
+path = _make_temp_log(log_seed)
+try:
+    ael._inplace_insert(path, new_entry)
+    expect("verified _inplace_insert removes its .inplace-backup",
+           _residue(path) == [], _residue(path))
+finally:
+    _cleanup(path)
+
+# ...but a FAILED in-place write must KEEP the backup -- recovery is its whole purpose.
+# Fails only the log's "w" open, so the backup is written and the log write then dies.
+path = _make_temp_log(log_seed)
+_real_open = open
+
+
+def _open_failing_log_write(p, *a, **k):
+    if p == path and a and a[0] == "w":
+        raise PermissionError("simulated mid-write failure")
+    return _real_open(p, *a, **k)
+
+
+ael.open = _open_failing_log_write
+try:
+    try:
+        ael._inplace_insert(path, new_entry)
+        expect("failed _inplace_insert raises", False, "(no exception)")
+    except ValueError:
+        raise
+    except Exception:
+        expect("failed _inplace_insert raises", True)
+finally:
+    del ael.open
+try:
+    backup_path = path + ".inplace-backup"
+    expect("failed _inplace_insert KEEPS its backup (recovery net intact)",
+           os.path.exists(backup_path))
+    expect("kept backup holds the prior content",
+           os.path.exists(backup_path)
+           and _real_open(backup_path, encoding="utf-8").read() == log_seed)
+finally:
+    _cleanup(path)
+
+# the actual production scenario: fallback rescues the append under lock, no residue
+path = _make_temp_log(log_seed)
+try:
+    with _HoldWithoutDeleteShare(path):
+        ael._insert_or_inplace(path, new_entry, try_inplace=True)
+    expect("in-place fallback under lock leaves no residue", _residue(path) == [], _residue(path))
+finally:
+    _cleanup(path)
+
+# end-to-end regression for the 2026-07-16 incident: main() under a full-run lock
+# appended correctly but stranded a 480KB .tmp-append next to the log
+path = _make_temp_log(log_seed)
+entry_fd, entry_path = tempfile.mkstemp(suffix=".md", text=True)
+with os.fdopen(entry_fd, "w", encoding="utf-8") as f:
+    f.write(new_entry)
+try:
+    with _HoldWithoutDeleteShare(path):
+        rc = ael.main(["--entry-file", entry_path, "--log", path])
+    expect("main() under lock exits 0 (residue test)", rc == 0)
+    with open(path, encoding="utf-8") as f:
+        expect("main() under lock still appended the entry", "in-place fallback test" in f.read())
+    expect("main() under lock leaves no residue (2026-07-16 regression)",
+           _residue(path) == [], _residue(path))
 finally:
     _cleanup(path)
     if os.path.exists(entry_path):

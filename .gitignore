@@ -89,6 +89,11 @@ hooks/state/
 # append-event-log.py's in-place-fallback safety-net copy (overwritten every use;
 # recoverable from event_log.md's own git history anyway -- never track, 2026-07-16)
 projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/event_log.md.inplace-backup
+# append-event-log.py's atomic-insert scratch file. The script now cleans up both of
+# these itself; these lines are the backstop for the one case it can't cover -- a kill
+# between the tmp write and os.replace. Added 2026-07-16 after a stranded 480KB copy
+# showed up as an untracked `??` next to the log, one `git add -A` from being committed.
+projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/event_log.md.tmp-append
 # append-event-log.py's lock-contention spool (drains automatically into event_log.md on
 # the next successful append; transient by design, never track) -- see 2c above.
 projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/event_log.md.pending/

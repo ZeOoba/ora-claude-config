@@ -11,11 +11,21 @@ export const meta = {
 }
 
 // Reusable: pass the repo/worktree path via Workflow args, e.g. { worktree: 'C:/path/to/wt' }.
+// Some harnesses deliver args as a JSON-ENCODED STRING (proven 2026-07-16, runs wf_ae4150f2-651 /
+// wf_514f9699-d33). Self-parse a JSON string; fail closed on anything else.
+if (typeof args === 'string') {
+  try { args = JSON.parse(args); } catch (e) {
+    throw new Error('args string is not valid JSON (' + e.message + ') — refusing to fall back to the default worktree (fail closed).');
+  }
+}
+if (args !== undefined && args !== null && typeof args !== 'object') {
+  throw new Error('args must be a JSON object, got ' + typeof args + ' — refusing to fall back to the default worktree (fail closed).');
+}
 const WT = (typeof args === 'object' && args && args.worktree) || 'C:/Users/Owner/oxford-command-center';
-const ARTIFACTS = 'Read these from the worktree before answering: ' + WT + '/_run/AUDIT-REPORT.md (the ranked 37-finding audit), ' + WT + '/_run/confirmed-findings.json (structured findings w/ file:line, severity, riskTierHint), and the ratified master plan ' + WT + '/docs/superpowers/specs/2026-06-13-ora-intelligence-platform-master-plan.md. Also available: the PFI architecture spec, acquisition-scorecard-contract, calibration-log-design, hurdle-rate-governor-proposal in the same specs/ dir, and architecture/{system-overview,coding-standards,database-schema}.md.';
+const ARTIFACTS = 'Read these from the worktree before answering: ' + WT + '/_run/AUDIT-REPORT.md (the ranked Audit Report from the cc-audit-army run on this worktree — its finding count and baseline are authoritative), ' + WT + '/_run/confirmed-findings.json (structured findings w/ file:line, severity, riskTierHint), and the ratified master plan ' + WT + '/docs/superpowers/specs/2026-06-13-ora-intelligence-platform-master-plan.md. Also available: the PFI architecture spec, acquisition-scorecard-contract, calibration-log-design, hurdle-rate-governor-proposal in the same specs/ dir, and architecture/{system-overview,coding-standards,database-schema}.md.';
 
 const GROUND = [
-  'BASELINE = origin/main @ 823574d (worktree ' + WT + '). ORA = private-family-office shallow-bay industrial; goals in PRIORITY order: acquisition velocity > ops optimization > institutional quality > comms/brand > knowledge capture; ~$60M AUM → $700-800M over 30-40 yrs. Governor surface = config/acquisition-ruleset.v1.proposed.json (un-ratified, fail-closed; DSCR 1.25 / LTV 40 are governor constants). ALREADY-DONE (do not re-plan): F1 NOI A↔B reconcile, get_macro FRED tool, acquisition scorecard engine, parser-version re-ingest.',
+  'BASELINE = the worktree HEAD of ' + WT + ' (confirm via read-only git log; the Audit Report records the audited baseline — if the two diverge, flag it in your output rather than trusting either silently). ORA = private-family-office shallow-bay industrial; goals in PRIORITY order: acquisition velocity > ops optimization > institutional quality > comms/brand > knowledge capture; ~$60M AUM → $700-800M over 30-40 yrs. Governor surface = config/acquisition-ruleset.v1.proposed.json (fail-closed; DSCR 1.25 / LTV 40 are governor constants; scorecard v1.0 ratified @ 31d872e and the 8% hurdle governor @ 3538282, verified 2026-07-16 — still VERIFY the current ratification state in the worktree config/ + git log rather than assuming). ALREADY-DONE (curated 2026-06 — cross-check the Audit Report + CHANGELOG for newer landed work; anything on origin/main is done, do not re-plan it): F1 NOI A↔B reconcile, get_macro FRED tool, acquisition scorecard engine, parser-version re-ingest.',
   'The 2026-06-13 master plan is the RATIFIED BASELINE (current-state, F1-F13 value matrix, gap list, pre-mortem PFR-1..7). Work is DELTA-ONLY: VALIDATE/EXTEND it, do not re-derive or silently overwrite it. A material contradiction with the ratified matrix is a DEFER-and-surface event.',
   'ANALYTICS CONTRACT (the digestibility bar): every analytic = answer-first → why → do → supporting KPIs, with confidence + provenance(inputs_version), computed by a pure tested deterministic function (LLM narrates, never computes). DESIGN CONTRACT: conform to src/tokens/theme.css + ORA style guide (Navy #1B2A4A / Gold #C9A96E / Parchment #F5F3EF; EB Garamond / DM Sans / IBM Plex Mono); no ad-hoc colors/fonts.',
   'RISK TIERS: GREEN = additive-only, zero governor/financial-constant/confidential/external/deploy surface, fully test-coverable. YELLOW = touches financial math/mechanism but not a frozen constant/ratified slot. RED = governor constant, confidential, external send, deploy/mirror, destructive/irreversible, or architecture-breaking.',
@@ -37,7 +47,7 @@ const EVAL_SCHEMA = {
   required: ['scorecardMarkdown', 'dimensionScores', 'topGaps', 'matrixAdjustments'],
 };
 const evalRes = await agent(
-  'You are the Phase-2 EVALUATION pass for the ORA command center. ' + ARTIFACTS + '\n\n=== GROUND ===\n' + GROUND + '\n\nSynthesize a holistic assessment of the SETUP + CODE vs the ORA goals. Score the architecture 0-10 on EXACTLY these 5 dimensions: acquisition-velocity, ops-optimization, institutional-quality, analytics-digestibility, learn-from-data. VALIDATE/ADJUST the master plan F1-F13 value matrix against the 37 audit findings (do not re-derive it). Name the 5-8 HIGHEST-LEVERAGE gaps (cross-checked against ALREADY-DONE — anything on origin/main is not a gap). Output an Evaluation Scorecard (markdown) + the structured fields.',
+  'You are the Phase-2 EVALUATION pass for the ORA command center. ' + ARTIFACTS + '\n\n=== GROUND ===\n' + GROUND + '\n\nSynthesize a holistic assessment of the SETUP + CODE vs the ORA goals. Score the architecture 0-10 on EXACTLY these 5 dimensions: acquisition-velocity, ops-optimization, institutional-quality, analytics-digestibility, learn-from-data. VALIDATE/ADJUST the master plan F1-F13 value matrix against the confirmed audit findings you read from _run/ (do not re-derive it). Name the 5-8 HIGHEST-LEVERAGE gaps (cross-checked against ALREADY-DONE — anything on origin/main is not a gap). Output an Evaluation Scorecard (markdown) + the structured fields.',
   { label: 'evaluate', phase: 'Evaluate', model: 'opus', schema: EVAL_SCHEMA }
 );
 log('Evaluation done: ' + evalRes.dimensionScores.map((d) => d.dimension + '=' + d.score).join(' · '));
@@ -59,7 +69,7 @@ const PLAN_SCHEMA = {
   required: ['planMarkdown', 'initiatives', 'flywheelDesign'],
 };
 const planRes = await agent(
-  'You are the Phase-3 PLAN pass (writing-plans discipline). ' + ARTIFACTS + '\n\n=== GROUND ===\n' + GROUND + '\n\n=== EVALUATION (just produced) ===\n' + JSON.stringify({ dimensionScores: evalRes.dimensionScores, topGaps: evalRes.topGaps, matrixAdjustments: evalRes.matrixAdjustments }) + '\n\nProduce an EXTENSIVE phased improvement roadmap that EXTENDS the master plan (does not replace it). Every initiative: tied to a goal, value+effort, dependency order, success criteria, test strategy, and pre-classified GREEN/YELLOW/RED. Sequence by dependency and value/effort. Fold the 37 audit findings into initiatives (reference finding ids). Include the DESIGN-ONLY data-flywheel workstream with its closed-loop done-definition. Output planMarkdown + structured initiatives + flywheelDesign.',
+  'You are the Phase-3 PLAN pass (writing-plans discipline). ' + ARTIFACTS + '\n\n=== GROUND ===\n' + GROUND + '\n\n=== EVALUATION (just produced) ===\n' + JSON.stringify({ dimensionScores: evalRes.dimensionScores, topGaps: evalRes.topGaps, matrixAdjustments: evalRes.matrixAdjustments }) + '\n\nProduce an EXTENSIVE phased improvement roadmap that EXTENDS the master plan (does not replace it). Every initiative: tied to a goal, value+effort, dependency order, success criteria, test strategy, and pre-classified GREEN/YELLOW/RED. Sequence by dependency and value/effort. Fold the confirmed audit findings into initiatives (reference finding ids). Include the DESIGN-ONLY data-flywheel workstream with its closed-loop done-definition. Output planMarkdown + structured initiatives + flywheelDesign.',
   { label: 'plan', phase: 'Plan', model: 'opus', schema: PLAN_SCHEMA }
 );
 log('Plan: ' + planRes.initiatives.length + ' initiatives (' + planRes.initiatives.filter((i) => i.tier === 'GREEN').length + ' GREEN).');

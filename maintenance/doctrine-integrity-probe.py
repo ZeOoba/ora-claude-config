@@ -659,6 +659,38 @@ def parse_args(argv):
     return pos, overrides
 
 
+# --- Check 12 (2026-07-16): ora-am-brief SOFR-narration guardrail presence.
+# Defect (event_log.md 2026-07-16): ora-am-brief Block A narrated the freshness
+# of the SOFR 30/90/180-day averages / Index in its degraded-status callout --
+# fields OWNED by the separate CC/MCP task ora-sofr-direct-prefetch, not by this
+# task -- so the header rotted the instant that task patched the page (and under
+# a catch-up burst the two can fire in either order). The fix installed a literal
+# CALLOUT TEMPLATE (with the SOFR-average clause deliberately ABSENT) plus a
+# CALLOUT SCOPE hard rule. This check asserts BOTH guardrails still exist in the
+# SKILL.md so a later edit cannot silently strip them.
+#
+# Why this is a fix-PRESENCE check, not an anti-pattern grep: the hard rule
+# legitimately QUOTES the forbidden phrases ("carried forward", "SOFR ... Index")
+# in order to forbid them, so a co-occurrence scan would flag the very fix that
+# prevents the defect. Narrow by design -- one task, WARN-only, fail-open on the
+# OneDrive/LAMS cloud path (this probe otherwise scans only the CC/MCP fleet, so
+# ora-am-brief is invisible to every other check here). ---
+AM_BRIEF_SKILL = (HOME / "OneDrive - Oxford Capital Partners" / "Documents" /
+                  "Claude" / "Scheduled" / "ora-am-brief" / "SKILL.md")
+AM_BRIEF_SENTINELS = (
+    "CALLOUT TEMPLATE (assemble",
+    "There is deliberately NO clause for the SOFR 30/90/180-day averages",
+    "CALLOUT SCOPE (hard rule)",
+)
+
+
+def check_am_brief_sofr_guardrail(text):
+    """Return the list of guardrail sentinels ABSENT from the SKILL.md text
+    (empty == guardrail intact). Pure over text so it is unit-testable without
+    the cloud read."""
+    return [s for s in AM_BRIEF_SENTINELS if s not in text]
+
+
 def main():
     pos, overrides = parse_args(sys.argv[1:])
     argv_path = pos[0] if pos else None
@@ -1274,6 +1306,29 @@ def main():
                   "CLAUDE.md + %d ported cop%s + %d roster file(s) checked)"
                   % (len(ported_copies), "y" if len(ported_copies) == 1 else "ies",
                      len(roster_files)))
+
+    # --- Check 12: ora-am-brief SOFR-narration guardrail presence (LAMS/cloud,
+    # WARN-only, fail-open) -- guards the event_log.md 2026-07-16 fix from silent
+    # removal. Skips in single-file argv mode (live_mode False). ---
+    if live_mode:
+        ab_text, ab_err = read_optional(AM_BRIEF_SKILL)
+        if ab_text is None:
+            warn("ora-am-brief SOFR-narration guardrail: SKILL.md unreadable "
+                 "(fail-open, not asserted) -- %s" % ascii_safe(ab_err))
+        else:
+            gaps = check_am_brief_sofr_guardrail(ab_text)
+            if gaps:
+                warn("ora-am-brief Block A SOFR-narration guardrail INCOMPLETE "
+                     "-- missing sentinel(s): %s. A later edit stripped the "
+                     "CALLOUT TEMPLATE / SCOPE rule that stops the degraded-"
+                     "status callout from narrating SOFR-average/Index freshness "
+                     "(fields owned by ora-sofr-direct-prefetch). Restore per "
+                     "event_log.md 2026-07-16."
+                     % ascii_safe(" | ".join(gaps)))
+            else:
+                print("ora-am-brief SOFR-narration guardrail: intact "
+                      "(%d/%d sentinels present)"
+                      % (len(AM_BRIEF_SENTINELS), len(AM_BRIEF_SENTINELS)))
 
     # --- verdict ---
     if missing:
