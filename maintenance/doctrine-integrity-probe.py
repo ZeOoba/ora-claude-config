@@ -113,6 +113,16 @@ SLASH_RE = re.compile(r"(?:^|(?<=[\s(]))`/([a-z][a-z0-9-]*)\b")
 # Repo names to check for as a local directory (WARN only).
 REPO_NAMES = ("oxford-command-center", "website-canonical", "oxford-site", "ora-pm")
 
+# Known ported copies of CLAUDE.md (the master ~/.claude/CLAUDE.md is the probed
+# file itself and is covered separately). Used by check 13 -- see that check for
+# why this specific set of files matters.
+PORTED_CLAUDE_MD_COPIES = (
+    Path(r"C:\Users\Owner\OneDrive - Oxford Capital Partners\Claude Command Center Code\CLAUDE.md"),
+    Path(r"C:\Users\Owner\OneDrive - Oxford Capital Partners\Claude_Workspace\01_Workspace\CLAUDE.md"),
+    Path(r"C:\Users\Owner\OneDrive - Oxford Capital Partners\Claude_Workspace\01_Workspace\oxford-site\.claude\CLAUDE.md"),
+    Path(r"C:\Users\Owner\Obsidian\BrainVault\CLAUDE.md"),
+)
+
 # --- Check 12 (2026-07-16 extension): backup-coverage sweep. Three times now a
 # top-level ~/.claude dir accumulated doctrine-bearing content while the
 # .gitignore /* default-deny silently kept it out of the private-remote backup
@@ -593,12 +603,15 @@ def parse_args(argv):
             overrides["memory_index"] = Path(a.split("=", 1)[1])
         elif a.startswith("--backup-root="):
             overrides["backup_root"] = Path(a.split("=", 1)[1])
+        elif a.startswith("--ported-copies="):
+            v = a.split("=", 1)[1]
+            overrides["ported_copies"] = [Path(p) for p in v.split(",") if p]
         elif a.startswith("--"):
             # A typo'd flag must not silently become the CLAUDE.md path (which
             # would also disable live-mode scanning). Fail loud.
             print("[MISSING] unknown option: %s (known: --session-context= "
-                  "--rules= --terms= --quick --memory-index= --backup-root=)"
-                  % ascii_safe(a))
+                  "--rules= --terms= --quick --memory-index= --backup-root= "
+                  "--ported-copies=)" % ascii_safe(a))
             sys.exit(1)
         else:
             pos.append(a)
@@ -777,6 +790,7 @@ def main():
     # --- confidential-term sequences (loaded BEFORE checks 7-8: check 7 screens
     # its printed excerpts against them; check 8 is the leak scan itself) ---
     term_seqs = []
+    terms_data = None
     terms_raw, terms_err = read_optional(overrides.get("terms", TERMS_JSON))
     if terms_raw is None:
         warn("confidential-term scan skipped (fail-open): %s" % ascii_safe(terms_err))
@@ -1141,6 +1155,53 @@ def main():
                      ".gitignore opt-in (2b/2c/workflows precedent -- scrub for "
                      "confidential terms FIRST) or add it to "
                      "BACKUP_SWEEP_TRANSIENT_DIRS with a reason" % ascii_safe(name))
+
+    # --- 13. declassification-residue sweep (rules.md §7b checklist gap) ---
+    # rules.md §7b's checklist item "remove the belt-and-suspenders deal-name
+    # reference outright" was missed for CLAUDE.md and its ported copies for 3
+    # days after the 2026-07-09 E. Fulton declassification (event_log.md,
+    # 2026-07-12 entry) -- nothing re-checked those surfaces because they sit
+    # outside the routine memory-file sweep. For every deal in
+    # confidential-terms.json explicitly marked active:false (declassified --
+    # mirrors term_word_seqs' own default-active convention), scan the probed
+    # CLAUDE.md AND every known ported copy (PORTED_CLAUDE_MD_COPIES) for that
+    # deal's "always" terms. WARN-only: a declassified deal's name is no longer
+    # confidential, so this is a checklist-completeness signal, not a leak
+    # (check 8 already hard-fails on ACTIVE-deal terms anywhere).
+    ported_copies = (overrides["ported_copies"] if "ported_copies" in overrides
+                     else (list(PORTED_CLAUDE_MD_COPIES) if live_mode else []))
+    if terms_data is not None and isinstance(terms_data, dict):
+        residue_total = 0
+        for key, entry in terms_data.items():
+            if key.startswith("_") or not isinstance(entry, dict):
+                continue
+            if entry.get("active") is not False:
+                continue  # only EXPLICITLY declassified deals are in scope
+            always = [t.lower() for t in entry.get("always", []) if isinstance(t, str)]
+            if not always:
+                continue
+            check_sources = [("CLAUDE.md", text)]
+            for copy_path in ported_copies:
+                body, err = read_optional(copy_path)
+                if body is None:
+                    warn("declassification-residue sweep: ported copy unreadable "
+                         "(fail-open, not asserted this file) -- %s" % ascii_safe(err))
+                    continue
+                check_sources.append((str(copy_path), body))
+            for label, body in check_sources:
+                low = body.lower()
+                hits = sorted(set(t for t in always if t in low))
+                if hits:
+                    residue_total += 1
+                    warn("declassified deal '%s' still named in %s (terms: %s) -- "
+                         "rules.md 7b requires this reference be removed outright "
+                         "(proven miss: E. Fulton lingered in CLAUDE.md 3 days "
+                         "post-declassification, event_log.md 2026-07-12)"
+                         % (ascii_safe(key), ascii_safe(label), ", ".join(hits[:3])))
+        if residue_total == 0:
+            print("Declassification-residue sweep: clean (0 hits across "
+                  "CLAUDE.md + %d ported cop%s checked)"
+                  % (len(ported_copies), "y" if len(ported_copies) == 1 else "ies"))
 
     # --- verdict ---
     if missing:

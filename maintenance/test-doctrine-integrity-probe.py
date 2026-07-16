@@ -4,6 +4,7 @@
 Run: python test-doctrine-integrity-probe.py
 Pure stdlib. ASCII-only output (Windows cp1252 console).
 """
+import json
 import os
 import re
 import shutil
@@ -415,6 +416,111 @@ def test_backup_coverage_absent_without_root_in_fixture_mode():
     print("  PASS test_backup_coverage_absent_without_root_in_fixture_mode")
 
 
+def test_declassification_residue_warns():
+    """A deal marked active:false whose 'always' term still appears in the
+    probed CLAUDE.md or a --ported-copies= file -> WARN (checklist-completeness
+    signal), never a hard fail. Exit 0."""
+    doc = _write_fixture(_v21_base())
+    fd, terms_file = tempfile.mkstemp(suffix="_terms.json", text=True)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps({
+            "old_deal": {"active": False, "always": ["zebraquartz"]},
+        }))
+    fd2, copy_file = tempfile.mkstemp(suffix="_ported_CLAUDE.md", text=True)
+    with os.fdopen(fd2, "w", encoding="utf-8") as fh:
+        fh.write("# Ported copy\n\nStill mentions zebraquartz here.\n")
+    try:
+        r = run_probe([doc, "--terms=%s" % terms_file,
+                      "--ported-copies=%s" % copy_file])
+        assert r.returncode == 0, (
+            "declassification residue is WARN-only, got exit %d\n%s"
+            % (r.returncode, r.stdout))
+        assert "old_deal" in r.stdout and "zebraquartz" in r.stdout, (
+            "expected a WARN naming the deal and the residual term:\n%s" % r.stdout)
+    finally:
+        os.remove(doc)
+        os.remove(terms_file)
+        os.remove(copy_file)
+    print("  PASS test_declassification_residue_warns "
+          "(residual term in a ported copy -> WARN, exit 0)")
+
+
+def test_declassification_residue_clean_when_scrubbed():
+    """The same declassified deal, but the ported copy has been scrubbed ->
+    no WARN, prints the clean summary line."""
+    doc = _write_fixture(_v21_base())
+    fd, terms_file = tempfile.mkstemp(suffix="_terms.json", text=True)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps({
+            "old_deal": {"active": False, "always": ["zebraquartz"]},
+        }))
+    fd2, copy_file = tempfile.mkstemp(suffix="_ported_CLAUDE.md", text=True)
+    with os.fdopen(fd2, "w", encoding="utf-8") as fh:
+        fh.write("# Ported copy\n\nNothing relevant here.\n")
+    try:
+        r = run_probe([doc, "--terms=%s" % terms_file,
+                      "--ported-copies=%s" % copy_file])
+        assert r.returncode == 0
+        assert "Declassification-residue sweep: clean" in r.stdout, (
+            "expected the clean summary line:\n%s" % r.stdout)
+        assert "zebraquartz" not in r.stdout
+    finally:
+        os.remove(doc)
+        os.remove(terms_file)
+        os.remove(copy_file)
+    print("  PASS test_declassification_residue_clean_when_scrubbed "
+          "(scrubbed copy -> clean, exit 0)")
+
+
+def test_declassification_residue_ignores_active_deals():
+    """A deal that is still ACTIVE (or missing the flag -> default-active) is
+    out of scope for this check even if its term appears in a ported copy --
+    that is check 8's job (the hard-fail leak scan), not this WARN-only sweep."""
+    doc = _write_fixture(_v21_base())
+    fd, terms_file = tempfile.mkstemp(suffix="_terms.json", text=True)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps({
+            "live_deal": {"active": True, "always": ["yttriumfalcon"]},
+        }))
+    fd2, copy_file = tempfile.mkstemp(suffix="_ported_CLAUDE.md", text=True)
+    with os.fdopen(fd2, "w", encoding="utf-8") as fh:
+        fh.write("# Ported copy\n\nyttriumfalcon appears here too.\n")
+    try:
+        r = run_probe([doc, "--terms=%s" % terms_file,
+                      "--ported-copies=%s" % copy_file])
+        assert "yttriumfalcon" not in r.stdout or "declassified deal" not in r.stdout, (
+            "an active deal must never be reported by the declassification-"
+            "residue sweep:\n%s" % r.stdout)
+    finally:
+        os.remove(doc)
+        os.remove(terms_file)
+        os.remove(copy_file)
+    print("  PASS test_declassification_residue_ignores_active_deals "
+          "(active deal out of scope for this check)")
+
+
+def test_declassification_residue_absent_without_root_in_fixture_mode():
+    """Fixture runs without --ported-copies= (but WITH a declassified deal in
+    the terms file) must still just scan CLAUDE.md alone -- no crash, no
+    unconditional skip message required, matching check 12's fixture-mode
+    contract (opt in via the override; live default only applies with
+    live_mode=True, which a fixture run never is)."""
+    doc = _write_fixture(_v21_base())
+    fd, terms_file = tempfile.mkstemp(suffix="_terms.json", text=True)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps({
+            "old_deal": {"active": False, "always": ["zebraquartz"]},
+        }))
+    try:
+        r = run_probe([doc, "--terms=%s" % terms_file])
+        assert r.returncode == 0
+        assert "Declassification-residue sweep: clean" in r.stdout
+    finally:
+        os.remove(doc)
+        os.remove(terms_file)
+    print("  PASS test_declassification_residue_absent_without_root_in_fixture_mode")
+
+
 def test_confidential_leak_fails():
     """An ACTIVE confidential term in CLAUDE.md (invariant 3) -> exit 1, and the
     probe report must NOT echo the term itself (the report is emailed weekly)."""
@@ -781,6 +887,10 @@ def main():
     test_no_duplication_still_ok()
     test_backup_coverage_flags_untracked_dir()
     test_backup_coverage_absent_without_root_in_fixture_mode()
+    test_declassification_residue_warns()
+    test_declassification_residue_clean_when_scrubbed()
+    test_declassification_residue_ignores_active_deals()
+    test_declassification_residue_absent_without_root_in_fixture_mode()
     test_confidential_leak_fails()
     test_terms_shape_failopen()
     test_leak_formatting_and_excerpt_withholding()
