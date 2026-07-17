@@ -1,9 +1,11 @@
 {
- "ts": "2026-07-16T13:50:00",
+ "ts": "2026-07-16T22:45:56",
  "fleets": {
   "cc": [
    "ora-aaos-expire-leases",
    "ora-aaos-publish-contracts",
+   "ora-am-brief",
+   "ora-broker-touch-cadence",
    "ora-calibration-snapshot",
    "ora-cc-schematic-refresh",
    "ora-command-center-mirror-drift-check",
@@ -24,7 +26,6 @@
   ],
   "lams": [
    "automation-health-monitor",
-   "ora-am-brief",
    "ora-ar-export-freshness-nudge",
    "ora-bearmode-refresh",
    "ora-cam-reconciliation-annual",
@@ -42,6 +43,7 @@
    "ora-session-sweep",
    "ora-skill-store-drift-check",
    "ora-skill-text-audit",
+   "ora-skills-reimport-watch",
    "ora-stale-pipeline-nudge"
   ]
  },
