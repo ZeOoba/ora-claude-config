@@ -1,17 +1,23 @@
 ---
 name: ora-intelligence-platform-master-plan
-description: "The ratified-pending master plan extending the Command Center from decision-support to investment-intelligence; corrects the \"greenfield\" framing"
+description: "SUPERSEDED gap list (2026-06-13) — kept for history; see the 2026-07-17 correction below for actual current build state before citing any gap as open"
 metadata: 
   node_type: memory
   type: project
   originSessionId: da8cf1a2-70af-476e-aba2-f2f1320c51bb
 ---
 
+> **CORRECTION — 2026-07-17 (verified via direct repo recon: `git log`, `npm run gate`, source grep):** the gap list below is stale and mostly WRONG as of today. Every item marked "0%"/"absent"/"roster only" in the original 2026-06-13 plan has since been built and merged (PRs #84/#85, #95-#99, #107/#109/#111, #117, plus continuous July hardening). Do not cite this file's gap list as current — see [[cc-build-state]] for the PR trail. **Actual remaining gaps as of 2026-07-17:** (1) Market intel cap-rate feed is a real, honest stub (`fetchFredCapRates()` always returns null, static seed-table fallback) — closing it needs a paid CRE vendor (CBRE/RCA/Green Street), which conflicts with [[procurement-stance-deepen-not-migrate]]'s AUM gate; don't build until $150M AUM or explicit override. (2) NOI reconciliation is a CI/batch gate (`npm run gate` → `reconcile.ts`), not a live in-UI indicator — small-medium effort to close fully. (3) Hurdle-rate ratification has a 3-way inconsistency (migration default `'proposed'`, a code comment claiming "ratified 2026-06-22," CLAUDE.md roadmap saying "pending sign-off") — the `ratify-hurdle-rate` skill exists to close this, trivial effort. (4) An orphaned worktree `.claude/worktrees/wave1-analytics` (not in `git worktree list`) needs cleanup. Codebase health as of 2026-07-17: 231 test files / 2792 tests green, only 3 TODO/STUB markers in the whole server+src tree.
+
+---
+
+*Below is the original 2026-06-13 plan, retained for history only — treat every "gap" claim as CLOSED unless the correction above says otherwise.*
+
 On 2026-06-13 a full Phase 0→3 strategic review + master plan was authored at `oxford-command-center/docs/superpowers/specs/2026-06-13-ora-intelligence-platform-master-plan.md` (status: plan only, no code until ratified).
 
 **Core reframe (verify before treating any "build a warehouse from scratch" brief as valid):** The financial warehouse and deterministic intelligence are NOT greenfield — they are built, tested (483 tests green), and live on `main` (5-layer SQLite, 32 P&L files ingested; growth/drivers/anomalies/scores/benchmarks/PM engines; Intel module answer-first verdict→why→do). Priority 1 (Property Financial Intelligence) is ~70% done.
 
-**The real gaps (build targets, ranked):** Acquisition Intelligence Engine = 0% (firm priority #1; port the ratified Buy Box scorecard from the `acquisition-underwriting` skill) · Debt/Refi = alerts only, workbook-sourced, no refi score · Leasing/Tenant intel = roster only (no risk/renewal/mark-to-market) · Forecast = absent · Market intel = macro only · Capital Allocation = 4-way action, not the 5-way Buy/Hold/Sell/Refi/Improve · AI = Q&A + deterministic daily template, no narrative/cadenced memos.
+**The real gaps (build targets, ranked) — SUPERSEDED, all CLOSED per the 2026-07-17 correction above:** ~~Acquisition Intelligence Engine = 0% (firm priority #1; port the ratified Buy Box scorecard from the `acquisition-underwriting` skill) · Debt/Refi = alerts only, workbook-sourced, no refi score · Leasing/Tenant intel = roster only (no risk/renewal/mark-to-market) · Forecast = absent · Market intel = macro only · Capital Allocation = 4-way action, not the 5-way Buy/Hold/Sell/Refi/Improve · AI = Q&A + deterministic daily template, no narrative/cadenced memos.~~
 
 **Two structural integrity fixes that gate everything (Revision 1):** (1) two un-reconciled NOI sources — workbook `Property.noi` formula cells vs. warehouse ledger NOI, no tie-out; (2) cross-accounting-basis aggregation with `basis` stored but never surfaced/flagged. No new scoring engine ships until ledger NOI is reconciled and basis-disciplined.
 
