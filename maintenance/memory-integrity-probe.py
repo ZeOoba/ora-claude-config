@@ -8,10 +8,19 @@ Checks the consolidated memory set for:
      governor-drift-probe if present), digest-recipient drift (stray non-canonical
      addresses in a recipient context), and references to retired/archived docs as if live.
   3. Staleness (warnings)  — newest in-file date vs a per-type window. Warnings do NOT fail.
+  4. Open-items tracker (open-items-tracker.md, added 2026-07-17 after the
+     oxford-cc-repo-health.md -> session-context.md dead-pointer incident):
+       4a. dead pointers — any "open-items-tracker.md#OI-NNN" reference elsewhere in
+           memory/*.md whose ID has no matching row in the tracker           [fail]
+       4b. auto-check drift (warnings) — any tracker item marked OPEN that carries an
+           Auto-check line gets evaluated against live fleet-status.py --json output
+           (bounded vocabulary only, no code execution); a match means the item looks
+           resolved but is still marked OPEN — WARN, never auto-closes.  Skipped
+           entirely if open-items-tracker.md doesn't exist (optional companion file).
 
 Exit 0 = integrity OK (staleness warnings allowed). Exit 1 = integrity issue. Exit 2 = probe error.
 """
-import os, re, sys, glob, subprocess, datetime
+import os, re, sys, glob, json, subprocess, datetime
 
 for _s in (sys.stdout, sys.stderr):
     try: _s.reconfigure(encoding="utf-8", errors="replace")
@@ -40,6 +49,77 @@ EMAIL_RE = re.compile(r"[a-z0-9._%+-]+@oxfordra\.net", re.I)
 # past its own stated deadline with nobody looking -- and the answer, when finally checked,
 # inverted the note's premise. Report-only: an overdue note is a nudge, never a hard failure.
 REVIEW_BY_RE = re.compile(r"^review_by:\s*(20\d{2}-\d{2}-\d{2})\s*$", re.M)
+
+# --- open-items tracker (check 4) ---
+TRACKER = os.path.join(MEM, "open-items-tracker.md")
+FLEET_STATUS_PROBE = os.path.join(HOME, ".claude", "maintenance", "fleet-status.py")
+OI_ID_RE = re.compile(r"^###\s+(OI-\d{3,})\s*$", re.M)
+OI_STATUS_RE = re.compile(r"\*\*Status:\*\*\s*(\S+)")
+OI_AUTOCHECK_RE = re.compile(r"\*\*Auto-check:\*\*\s*(.+)")
+OI_REF_RE = re.compile(r"open-items-tracker\.md#(OI-\d{3,})")
+KV_RE = re.compile(r'(\w+)=("[^"]*"|\S+)')
+
+
+def parse_open_items(text):
+    """### OI-NNN header blocks -> {id: {status, autocheck}}. Tolerant of missing fields."""
+    items = {}
+    headers = list(OI_ID_RE.finditer(text))
+    for i, m in enumerate(headers):
+        oid = m.group(1)
+        end = headers[i + 1].start() if i + 1 < len(headers) else len(text)
+        body = text[m.end():end]
+        sm = OI_STATUS_RE.search(body)
+        am = OI_AUTOCHECK_RE.search(body)
+        items[oid] = {
+            "status": sm.group(1).upper() if sm else None,
+            "autocheck": am.group(1).strip() if am else None,
+        }
+    return items
+
+
+def parse_kv(raw):
+    return {k: v.strip('"') for k, v in KV_RE.findall(raw)}
+
+
+def load_fleet_json():
+    """Best-effort live fleet snapshot for auto-check evaluation. (result, error)."""
+    if not os.path.isfile(FLEET_STATUS_PROBE):
+        return None, "fleet-status.py not found at %s" % FLEET_STATUS_PROBE
+    try:
+        r = subprocess.run([sys.executable, FLEET_STATUS_PROBE, "--json"],
+                           capture_output=True, text=True, timeout=30)
+    except Exception as e:
+        return None, "fleet-status.py failed to run: %s" % e
+    if r.returncode != 0:
+        return None, "fleet-status.py exited %d: %s" % (r.returncode, (r.stderr or "").strip()[:200])
+    try:
+        return json.loads(r.stdout), None
+    except Exception as e:
+        return None, "fleet-status.py --json unparseable: %s" % e
+
+
+def eval_autocheck(kv, fleet_json):
+    """Bounded vocabulary only -- no arbitrary code execution. True/False/None (unsupported/malformed)."""
+    kind = kv.get("kind")
+    try:
+        if kind == "registry_disabled_count":
+            fleet = kv.get("fleet", "all")
+            expect = int(kv.get("expect"))
+            dbf = fleet_json.get("disabled_by_fleet", {}) or {}
+            actual = sum(dbf.values()) if fleet == "all" else dbf.get(fleet, 0)
+            return actual == expect
+        if kind == "registry_field_equals":
+            fleet, task_id, field, expect = kv.get("fleet"), kv.get("task_id"), kv.get("field"), kv.get("expect")
+            for t in fleet_json.get("tasks", []) or []:
+                if t.get("fleet") == fleet and t.get("id") == task_id:
+                    actual = t.get(field)
+                    if field == "enabled":
+                        return str(bool(actual)).lower() == str(expect).lower()
+                    return str(actual) == str(expect)
+            return False  # task not present in that fleet -> condition not met
+    except Exception:
+        return None
+    return None  # unknown kind
 
 
 def fail(findings):
@@ -137,6 +217,48 @@ def main():
             warnings.append(
                 "%s is OVERDUE for review (review_by: %s, %d day(s) ago) -- resolve it or "
                 "archive it; do not let it rot" % (name, due, (today - due).days))
+
+    # --- 4. open-items tracker: dead pointers [fail] + auto-check drift [warn] ---
+    # Optional companion file -- absent tracker just means no items exist to check yet.
+    tracker_items = {}
+    if os.path.isfile(TRACKER):
+        try:
+            tracker_items = parse_open_items(open(TRACKER, encoding="utf-8").read())
+        except Exception as e:
+            warnings.append("open-items-tracker.md unreadable: %s" % e)
+
+    # 4a. dead pointers -- any #OI-NNN reference elsewhere that doesn't resolve here.
+    for path in glob.glob(os.path.join(MEM, "*.md")):
+        name = os.path.basename(path)
+        if name == "open-items-tracker.md":
+            continue
+        try:
+            txt = open(path, encoding="utf-8").read()
+        except Exception:
+            continue
+        for ref in sorted(set(OI_REF_RE.findall(txt))):
+            if ref not in tracker_items:
+                issues.append("%s references open-items-tracker.md#%s, which has no matching "
+                              "row in the tracker (dead pointer)" % (name, ref))
+
+    # 4b. auto-check drift -- OPEN items whose stated condition now mechanically matches.
+    open_autochecks = [(oid, it) for oid, it in tracker_items.items()
+                       if it["status"] == "OPEN" and it["autocheck"]]
+    if open_autochecks:
+        fleet_json, ferr = load_fleet_json()
+        for oid, it in open_autochecks:
+            if fleet_json is None:
+                warnings.append("open-items-tracker.md#%s: auto-check could not run (%s)" % (oid, ferr))
+                continue
+            kv = parse_kv(it["autocheck"])
+            result = eval_autocheck(kv, fleet_json)
+            if result is None:
+                warnings.append("open-items-tracker.md#%s: auto-check malformed or unsupported kind "
+                                "(%s)" % (oid, it["autocheck"]))
+            elif result is True:
+                warnings.append("open-items-tracker.md#%s is marked OPEN but its auto-check now "
+                                "MATCHES the closing condition (%s) -- verify and close it out"
+                                % (oid, it["autocheck"]))
 
     # --- 3. staleness (warnings only) ---
     for fn, win in STALE_DAYS.items():
