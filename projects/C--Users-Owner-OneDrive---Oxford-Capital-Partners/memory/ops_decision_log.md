@@ -97,3 +97,24 @@ verified installed at the pinned versions (`pip show`, live machine check) again
 `Investment Candidates -- 2026\requirements.txt` (same interpreter, both frozen 2026-07-12). The
 2026-07-05→07-12 reactive-install gap that caused this is now closed procedurally too — see
 `MIGRATION_RUNBOOK.md` B1.3a (added 2026-07-12).
+
+### 2026-07-17 — Should `scheduled-tasks/_archive_2026-05-31_orphans/ora-fulton-deadline-alert/SKILL.md` be tracked (or redacted-and-tracked) now that `.gitignore` opts in archived task specs?
+**Answer: no — leave excluded, untracked, local-disk-only. Decided, not deferred.** During the
+2026-07-17 55-file historical backfill (see [[reference_commit_provenance_guard]]'s sibling
+`.gitignore` work), this file was the one exclusion out of 55: it carries raw, granular E. Fulton
+PSA terms from while that deal was still live-confidential — $4M closing price, $200K deposit
+wired to a named title company, named counterparties (McGrath, August Mack, Vector Security,
+Whitehall CCD). Checked `confidential-terms.json`'s live `e_fulton` record before deciding (not
+assumed from memory): declassified 2026-07-09, but **"over a stated recommendation to keep it
+confidential during the live lender discussion"** — ORA is in an ACTIVE lender note/foreclosure
+discussion on this property right now, with confirmed TCE/chlorinated-solvent contamination.
+Declassification authorized referencing the deal by name operationally, not publishing its raw
+financial/DD terms — the precedent's own bar is "matching already-tracked memory files," and this
+file exceeds it (none of these figures exist anywhere else in the tracked repo). Redaction was
+considered and rejected: there is no clean secret-shaped token to substitute — the file's entire
+content IS the sensitive part, so a redacted version would be a near-empty husk duplicating what
+tracked memory files already say about the deal's existence/outcome. Re-scanned all 49 files that
+WERE backfilled against the full `e_fulton` term list (SIJ, Nutis, Columbus Stamping, 3520, TCE,
+chlorinated solvent, vinyl chloride — not just "fulton") before finalizing: clean, nothing else
+leaked. **Do not re-open this without new information** (e.g. the lender matter actually closing)
+— check here first.
