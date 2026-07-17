@@ -1,6 +1,6 @@
 ---
 name: project-autonomy-gate-indirection-ceiling-followup
-description: "CLOSED 2026-07-17: value/reference indirection (a variable/file-sourced recipient, a renamed netlify binary, splitting a deploy across two Bash calls) used to defeat ora-autonomy-gate.py's Gate 1/2a detection entirely -- fixed via outbound-action checks at the point where a shell has already resolved indirection, not another regex. Email side landed on ~/.claude main; netlify side merged via website-canonical PR #30. Tracked: open-items-tracker.md#OI-007."
+description: "CLOSED 2026-07-17 (including the machine-wide netlify follow-up): value/reference indirection (a variable/file-sourced recipient, a renamed netlify binary, splitting a deploy across two Bash calls, or invoking netlify from outside the repo) used to defeat ora-autonomy-gate.py's Gate 1/2a detection entirely -- fixed via outbound-action checks at the point where a shell has already resolved indirection, not another regex. Email side + global netlify guard landed on ~/.claude main; repo-local netlify side merged via website-canonical PR #30. Tracked: open-items-tracker.md#OI-007."
 metadata:
   type: project
   originSessionId: 3fc20af9-9fcb-4681-a66a-c6eb07fdd7db
@@ -47,11 +47,23 @@ at all.
   switch across 9+ scenarios, plus a real `npm install` proving the postinstall hook re-patches
   a reverted shim.
 
-**Known residual gap, not fixed (low priority, flagged in the PR):** invoking the netlify CLI
-from OUTSIDE website-canonical's directory tree resolves a separate, unguarded copy via npm's
-global/registry fallback — the wrapper protects the local `node_modules` tree, not the `netlify`
-command globally. Revisit if this ever becomes a real vector (would need a machine-wide PATH
-shim rather than a per-repo postinstall hook).
+**Residual gap, also closed (2026-07-17, same session):** invoking `npx netlify` (or a bare
+`netlify` command) from OUTSIDE website-canonical's directory tree used to resolve a separate,
+unguarded copy via npm's global/registry fallback. Closed by deliberately installing netlify-cli
+GLOBALLY (pinned to the same 26.2.0 as the site repo) and patching ITS shims too: `hooks/bin/
+netlify-guard-global.js` + `maintenance/patch-global-netlify-shim.js`, landed on `~/.claude` main.
+Since npx always prefers an already-installed package over a fresh registry fetch, and a LOCAL
+guarded install always wins over a global one in npx's own resolution order, this closes the gap
+for any directory on the machine with zero double-check risk against the per-repo guard (proven:
+invoking from inside website-canonical still hits the LOCAL guard; invoking from anywhere else
+now hits the GLOBAL one). Verified via 8 dry-run scenarios, reusing the same detection logic and
+Python validator already adversarially reviewed on the repo-local version.
+
+**Known limit, accepted (Gabriel-ratified 2026-07-17):** global npm installs have no
+postinstall-equivalent lifecycle hook — nothing auto-reapplies this patch if netlify-cli is ever
+reinstalled or updated globally. Manual fix: re-run `maintenance/patch-global-netlify-shim.js`
+after any such operation. Chose this over a scheduled health-check, given the underlying gap was
+already flagged low-priority.
 
 Related: [[reference_autonomy_gate_override_mechanism]] (the token mechanism these checks build
 on), [[feedback_autonomy_gate_matcher_cannot_be_safely_narrowed]] (the sibling constraint on NOT
