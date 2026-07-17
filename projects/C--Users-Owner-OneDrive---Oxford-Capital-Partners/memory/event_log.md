@@ -11,6 +11,14 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-16 — oxfordra.net deploy: GA4/analytics wiring, image/CSS/focus optimization, 404 mobile-nav fix
+
+Pushed and deployed 5 commits on `website-canonical` `main` to production (`https://oxfordra.net`): `670ef4d` (deno.lock build exclusion), `df2bc2a` (real GA4 Measurement ID wired into all 16 analytics snippets), `f45a735` (image recompression/responsive srcset/deferred CSS/focus management), `ad44f6d` (GA4/LinkedIn tracking added to remaining pages), `fe1e271` (404.html mobile-nav fix — restored keyboard/SR-reachable links via horizontal-scroll strip, replacing a broken `display:none` under 960px). The 5th commit was authored mid-session by a concurrent Claude Code session (co-authored by Claude Sonnet 5) — surfaced to Gabriel before push since it wasn't part of the original push request; Gabriel confirmed include-and-deploy-all-5.
+
+`site-qc-reviewer` gate: APPROVE (zero confidential-term matches against the live `confidential-terms.json` roster, no broken links/assets, CSP preload-onload pattern confirmed non-breaking under current headers, 404 nav strip verified keyboard/SR-reachable). Deploy via `netlify deploy --build --prod` (MCP deploy-services-updater tool was permission-denied, used the documented CLI fallback); prod deploy only re-uploaded 2 changed files, confirming the concurrent session had already CLI-deployed most of this content live minutes earlier — the git push brought origin/main in sync with what was already running in production, closing the no-remote-backup gap flagged at session start. Post-verify: curl 200 on `/` and `/404.html`; page content confirmed live.
+
+Non-blocking follow-ups flagged, not yet actioned: (1) convert the 5 pages using the preload-onload CSS pattern (index, about, contact, tenant-application, markets/index) to the safer `media="print"` swap already used elsewhere on the site; (2) LinkedIn Insight partner ID is still the placeholder `XXXXXXX` across all 16 analytics snippets.
+
 ## 2026-07-16 — CC/MCP residuals closed for LAMS ora-am-brief retirement; registry-membership-probe.py ratification bug fixed
 
 Closed out the CC/MCP-surface residuals from the same-day LAMS ora-am-brief retirement (see prior entry "RATIFIED: LAMS ora-am-brief retired" and `memory/project_ora_am_brief_lams_retirement_blocked.md`, now RETIRED + VERIFIED). Concurrent-writer check clear (registry-membership.log latest entry complete, not mid-edit; `~/.claude` git tree clean at `242fd6f`).
