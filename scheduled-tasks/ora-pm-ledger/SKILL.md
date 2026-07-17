@@ -1,6 +1,6 @@
 ---
 name: ora-pm-ledger
-description: ORA Evening Ledger — consolidated daily close. Runs three blocks in order at one cadence — A Notion Daily Digest (every day), B Outbox QC Sweep (weekdays only), C EOD Action Ledger (every day). Restored 2026-07-08 from three separately-archived block specs after the 2026-07-05 CC/MCP registry loss destroyed the original consolidated file; routing/send-path/paths corrected to current canon during restoration (see RESTORATION NOTE at bottom). CC canonical file inlined 2026-07-08 (second restoration same day) to remove a redirect-to-OneDrive pattern that had already broken twice. Re-enabled 2026-07-09 (Gabriel-approved, post-recovery-stabilization confirmation). [MODEL: UNVERIFIABLE | checked 2026-07-08]
+description: ORA Evening Ledger — consolidated daily close. Runs three blocks in order at one cadence — A Notion Daily Digest (every day), B Outbox QC Sweep (weekdays only), C EOD Action Ledger (every day). Restored 2026-07-08 from three separately-archived block specs after the 2026-07-05 CC/MCP registry loss destroyed the original consolidated file; routing/send-path/paths corrected to current canon during restoration (see RESTORATION NOTE at bottom). CC canonical file inlined 2026-07-08 (second restoration same day) to remove a redirect-to-OneDrive pattern that had already broken twice. Re-enabled 2026-07-09 (Gabriel-approved, post-recovery-stabilization confirmation). Block A edit-detection coverage gaps fixed 2026-07-16 (see AMENDMENT NOTE at bottom). [MODEL: UNVERIFIABLE | checked 2026-07-08]
 ---
 
 # ORA EVENING LEDGER — Consolidated Daily Close (ora-pm-ledger)
@@ -76,29 +76,37 @@ shallow-bay, multi-tenant, below replacement cost.
 ### A.1 SOURCES — THE NOTION SURFACE TO SCAN
 
 Priority sections (always reported first, even if empty, each with its own
-heading). IDs below are as last verified 2026-06-11 (Ops Hub Databases
-Maintenance Sweep entries) — **not re-verified during this 2026-07-08
-restoration**; if a fetch errors, record a COVERAGE GAP, do not silently
-drop the source, and flag the ID for a refresh.
+heading). **IDs re-verified live 2026-07-16** (fetched directly, not carried
+forward) — all six database sources resolve, and each carries a native Notion
+`last_edited_time`-type column; the two page-tree sources (C, D) do not, since
+they aren't databases. If a fetch ever errors again, record a COVERAGE GAP, do
+not silently drop the source, and re-verify the ID before the next run.
 
-| # | Section heading | Notion target | ID |
-|---|---|---|---|
-| A | **Deal Pipeline** | Acquisition Pipeline Tracker | `bcfe4a03-7e61-4ac1-a0bb-c44174fa138b` |
-| A | **Deal Pipeline** | Deal Sourcing Log | `9a6ae219-85a3-4621-899c-c757fd062f8b` (canonical pair: database `8d2ddc5177e84cd7b1c0c0f6ef943479` / data source `9a6ae219-85a3-4621-899c-c757fd062f8b`) |
-| A | **Deal Pipeline** | Broker Relationships | `48e43778-b1f2-4b16-8f3c-0bf18f8642e9` |
-| B | **Tenants & Operations** | Tenant Database — query via data source, NOT the wrapper ID (wrapper `8dbbaec0…` throws "Aggregation property not found"; root cause was a tool-routing quirk, not a broken rollup — fixed 2026-04-27) | `collection://b12f4cfd-a995-4755-8341-6435ae8173b4` |
-| B | **Tenants & Operations** | Property Register | `19a61fc9-21ed-42d7-a0db-aa730d9a9683` |
-| B | **Tenants & Operations** | CapEx & Maintenance Log | `5dfcc3ad-532e-4e5f-bf8d-512e2b69e317` |
-| C | **Knowledge Base & Decisions** | 📚 Oxford Institutional Knowledge Base | `3386ecd8-9e59-8166-af49-da066dc7ca14` |
-| D | **Operations Hub (everything else)** | Oxford Real Assets — Operations Hub | `32b6ecd8-9e59-81f2-b329-df3fd0e25062` |
+**⚠ The "Native last-edited column" column below states a SCHEMA FACT, not a
+working mechanism — do not infer trustworthy edit-detection from it.** Tested
+live 2026-07-16: the Tenant DB's `Last Updated` is correctly typed
+`last_edited_time` and is nonetheless **frozen at 2026-03-30** — it does not
+bump, so its zero is a false negative (full evidence in A.2 step 2). A column
+existing and being typed correctly proved nothing about whether it advances.
+Per-source status must be established at RUN TIME, not read off this table.
+
+| # | Section heading | Notion target | ID | Kind | Native last-edited column |
+|---|---|---|---|---|---|
+| A | **Deal Pipeline** | Acquisition Pipeline Tracker | `bcfe4a03-7e61-4ac1-a0bb-c44174fa138b` | database | `Last Updated` |
+| A | **Deal Pipeline** | Deal Sourcing Log | `9a6ae219-85a3-4621-899c-c757fd062f8b` (canonical pair: database `8d2ddc5177e84cd7b1c0c0f6ef943479` / data source `9a6ae219-85a3-4621-899c-c757fd062f8b`) | database | `Last Updated` |
+| A | **Deal Pipeline** | Broker Relationships | `48e43778-b1f2-4b16-8f3c-0bf18f8642e9` | database | `Last Updated` |
+| B | **Tenants & Operations** | Tenant Database — query via data source, NOT the wrapper ID (wrapper `8dbbaec0…` throws "Aggregation property not found"; root cause was a tool-routing quirk, not a broken rollup — fixed 2026-04-27) | `collection://b12f4cfd-a995-4755-8341-6435ae8173b4` | database | `Last Updated` |
+| B | **Tenants & Operations** | Property Register | `19a61fc9-21ed-42d7-a0db-aa730d9a9683` (data source `24d6a531-f4b7-4c38-87fb-3b1be4a4f1f3`) | database | `Last Updated` |
+| B | **Tenants & Operations** | CapEx & Maintenance Log | `5dfcc3ad-532e-4e5f-bf8d-512e2b69e317` (data source `acd5102e-16bc-4171-9cde-19a2496b1429`) | database | `Last Edited` |
+| C | **Knowledge Base & Decisions** | 📚 Oxford Institutional Knowledge Base | `3386ecd8-9e59-8166-af49-da066dc7ca14` | page tree (not a database — no queryable last-edited column) | n/a |
+| D | **Operations Hub (everything else)** | Oxford Real Assets — Operations Hub | `32b6ecd8-9e59-81f2-b329-df3fd0e25062` | page tree (not a database — no queryable last-edited column) | n/a |
 
 Section **E — Everything Else Edited Today** is a workspace-wide catch-all
 for anything created/edited today that does not belong to A–D.
 
 ### A.2 METHOD — HOW TO DETERMINE "CHANGED TODAY"
 
-The Notion MCP exposes two reliable signals; use BOTH and merge, deduping by
-page ID:
+Use all of the following signals and merge, deduping by page ID:
 
 1. **Newly created today (precise):** `notion-search` with
    `query_type: "internal"` and
@@ -108,19 +116,180 @@ page ID:
    others, first `notion-fetch` the database ID to read its
    `<data-source url="collection://…">` tag, then search that data source).
 
-2. **Edited today (best-effort):** `notion-search` returns each result's
-   `timestamp` (last-edited). For each priority source, run a broad semantic
-   search and KEEP any result whose `timestamp` date == `{TODAY}`. Also
-   `notion-fetch` the Operations Hub page and scan its recent activity /
-   child pages for `{TODAY}` last-edited stamps.
+2. **Edited today — SQL last-edited query, OPPORTUNISTIC (NOT "precise", and
+   NOT mandatory). Read the two verified defects below before trusting a
+   zero.** Each of the six databases does carry a native Notion
+   `last_edited_time` column (name per the A.1 table — `Last Updated` for
+   five, `Last Edited` for CapEx & Maintenance Log). Where it works, query it:
+   ```sql
+   SELECT * FROM "<data_source_url>" WHERE date("<column name>") = '{TODAY}'
+   ```
 
-**Known limitation — state it honestly, do not hide it:** the available MCP
-filters on *created* date precisely but cannot range-filter on *last-edited*
-date server-side, so edits to older pages are caught only when they surface in
-the semantic searches above. If you suspect coverage is partial for a source,
-say so in that section ("edit-detection best-effort — newly-created items are
-complete; edits to pre-existing pages may be incomplete"). Never imply
-completeness you didn't achieve.
+   **⚠ DEFECT 1 — the Tenant DB's `Last Updated` DOES NOT BUMP. A zero result
+   from it is meaningless.** Measured live 2026-07-16: the column is correctly
+   typed `last_edited_time` and the schema annotates it *"automatically set…
+   the canonical time for when the page was last edited"* — but every one of
+   the 296 rows reports March (`03-22` ×147, `03-23` ×116, `03-26` ×22,
+   `03-30` ×11) and **nothing after 2026-03-30 exists in the column**. Proof it
+   is broken rather than merely quiet: rows whose own title reads
+   `⛔ ARCHIVED 2026-07-12 — …` — self-witnessing evidence of a 2026-07-12
+   edit — still report `Last Updated = 2026-03-30`. The retitling of those 124
+   rows did not advance the column. Therefore
+   `WHERE date("Last Updated") = '{TODAY}'` against the Tenant DB returns **zero
+   rows every run, forever**, and reporting that as "no edits today, precisely
+   confirmed" is a confident false negative — strictly worse than the honest
+   best-effort search it replaced. **For the Tenant DB: never present a zero
+   from this query as evidence of no edits. Record it as a COVERAGE GAP and
+   fall back to the step-3 semantic sweep.**
+
+   **What the column actually appears to track (root-cause pass 2026-07-16 —
+   behavior PROVEN, mechanism NOT).** Proven: three independent write events
+   hit these rows — ~9 rows verified with Notes on 2026-04-27 (corroborated by
+   the Ops Hub log), 16 live HubSpot-Contact writes on 2026-07-10 (memory
+   `reference_tenant_db_completeness_gap.md`), and 124 retitles on 2026-07-12 —
+   and the MAX `last_edited_time` across all 296 rows is still `2026-03-30`.
+   Ruled out: an MCP read cache (SQL, `notion-search` and `notion-fetch` all
+   independently return `2026-03-30T11:50:30` for the same page, and they return
+   today's timestamps for Ops Hub pages), and a stale/duplicate data source
+   (database `8dbbaec0` has exactly ONE data source, `b12f4cfd`; the other
+   collection ids under it are relation targets). The values cluster on four
+   dates (03-22 ×147, 03-23 ×116, 03-26 ×22, 03-30 ×11) matching the bulk-import
+   batches, and the sample page's own body reads *"AUTO-CREATED by sync on
+   2026-03-30"*. **[SPECULATIVE] leading hypothesis: this column reflects when
+   the bulk sync process last wrote the row, not when a human or agent last
+   edited it.** Not established — do not repeat it as fact.
+
+   **Corollary — do NOT treat Property Register as a working control.** It
+   returned `2026-07-12` for all 14 rows, which was initially read as "the column
+   is live there." On the hypothesis above that is more likely a single bulk-sync
+   stamp than 14 organic same-day edits — a uniform date across every row of a
+   table is the signature of a batch write, not of editing. **Treat EVERY source
+   as unproven: a non-zero result is only trustworthy if the dates VARY across
+   rows and at least one is genuinely recent.** A table where every row shares
+   one date is telling you when it was last synced, not what changed today.
+
+   **The one experiment that would settle the mechanism** (not run — it is a
+   write to a live CRM system of record, and a dedicated Tenant DB session was
+   working that database concurrently, so a write here risked colliding with
+   it): make one controlled, reversible edit to a single already-tombstoned
+   `⛔ ARCHIVED` row, then re-read its `Last Updated`. If it advances, the
+   column works and all three historical write events used some path that
+   bypasses it; if it stays at 2026-03-30, the column is inert for this
+   collection and the fallback below is permanent. Ask Gabriel before running it.
+
+   **✅ PREFERRED PATH — Notion REST API via the existing integration token. No
+   MCP quota, no plan upgrade, no cost (established 2026-07-16).** The
+   entitlement error in DEFECT 2 below is an **MCP-connector upsell**
+   (`tool_error_code: entitlement_required`, `source=mcp_tool_upsell`,
+   `product=business`) — it is NOT a Notion limit. Notion's own REST API has no
+   per-plan query quota for integrations; it is rate-limited at ~3 req/s, which
+   is irrelevant at 6 queries/day. A working integration token already exists:
+   **`NOTION_TOKEN` in `C:\Users\Owner\oxford-command-center\.env`** (bot name
+   "ORA Command Center", verified live 2026-07-16 via `GET /v1/users/me`). Use:
+   ```
+   POST https://api.notion.com/v1/databases/{database_id}/query
+   Authorization: Bearer $NOTION_TOKEN   ·   Notion-Version: 2022-06-28
+   {"filter":{"timestamp":"last_edited_time",
+              "last_edited_time":{"on_or_after":"{TODAY}T00:00:00Z"}}}
+   ```
+   This is a true server-side last-edited filter. **Verified working 2026-07-16:**
+   sorting `/v1/search` by `last_edited_time` returned real, VARIED timestamps
+   (`2026-07-15T13:56`, `2026-07-09T18:55`) — i.e. over REST the field behaves
+   correctly, unlike the frozen values the SQL bridge reports for the Tenant DB.
+
+   **⚠ BLOCKED ON ONE PERMISSION GRANT (Gabriel, one-time, ~6 clicks, free).**
+   The token currently reaches only 14 pages and **zero databases** — every
+   database query returns HTTP 404, which in Notion means "integration not
+   shared", not "missing". Until Gabriel adds the **ORA Command Center**
+   connection to the Ops Hub / 📂 Databases parent (connections cascade to child
+   databases) — Notion UI: `⋯ → Connections → ORA Command Center` — this path is
+   unavailable and the run must fall back. Re-test with
+   `GET /v1/databases/8dbbaec0-611a-4617-be07-6a77d0d0307a`: a 200 means the
+   grant landed and this becomes the primary mechanism for ALL SIX databases.
+
+   **This grant also settles DEFECT 1's open mechanism.** Once the Tenant DB is
+   reachable over REST, fetch page `3336ecd8-9e59-8108-9287-cd14dd363233` (the
+   `⛔ ARCHIVED 2026-07-12 — TWO MEN AND A TRUCK` row) and read its
+   `last_edited_time`. **07-12 ⇒ the MCP bridge is the defect and REST is simply
+   correct. 03-30 ⇒ Notion itself is frozen for that collection.** Read-only,
+   costs nothing, and answers it definitively.
+
+   **⚠ DEFECT 2 — `notion-query-data-sources` is ENTITLEMENT-GATED and will
+   hard-fail mid-run.** Measured live 2026-07-16: after ~5 queries the tool
+   returns `validation_error` / `entitlement_required` —
+   *"You've used all of your plan's free data source queries for now. Upgrade
+   to a Business plan or higher…"* — with `tool_error_retryable: "false"`. The
+   tool's own docs confirm SQL and view mode need **Business + Notion AI**.
+   Six mandatory queries per run therefore cannot be guaranteed to complete,
+   and the failure is non-retryable and quota-based (i.e. nondeterministic —
+   it may pass some runs and fail others depending on what else drew from the
+   quota that day). **On an entitlement error: record that source as a COVERAGE
+   GAP by name, fall back down the ladder below, and continue — do NOT halt the
+   block and do NOT retry in a loop (it burns the same quota).**
+
+   **MECHANISM LADDER — try in this order; never depend on any single rung:**
+   1. **REST API + `last_edited_time` filter** (see PREFERRED PATH above) —
+      free, precise, unlimited, server-side. Blocked only on the one-time share.
+      **This is the target state; once granted, rungs 2–3 become fallbacks only.**
+   2. **`notion-search` via MCP, scoped per `data_source_url`**, keeping results
+      whose returned `timestamp` (= last-edited) date == `{TODAY}`. **Not
+      entitlement-gated** — it ran freely throughout 2026-07-16 while the SQL
+      tool was exhausted, so this rung is always available. Recall is
+      ranked/semantic, so it is genuinely best-effort: it can miss rows and MUST
+      be labelled best-effort, never "precise".
+   3. **`notion-query-data-sources` SQL** — opportunistic ONLY, given the quota.
+      If used at all, spend it on the source most likely to matter (A — Deal
+      Pipeline) rather than round-robining all six.
+   4. **Nothing worked ⇒ name that source in COVERAGE GAPS.** Never a silent pass.
+
+   **Do not wire the REST rung as unverified code.** Every database call 404s
+   until the share lands, so it cannot be tested today — and shipping an
+   untested query into a daily task is exactly how a silent false negative is
+   born (that is the defect this whole section exists to document). Confirm a
+   200 from `GET /v1/databases/8dbbaec0-611a-4617-be07-6a77d0d0307a` FIRST, then
+   implement, then re-verify against a row known to have changed.
+
+   **Still binding — the anti-skip rule this step was built for:** a source
+   returning zero rows from step 1 (created-today) is NOT evidence it has no
+   edits today. Every source must be *attempted* by step 2 or step 3 and, if
+   neither produced a trustworthy answer, named individually in COVERAGE GAPS.
+   The 2026-07-16 finding was exactly this failure mode (the workspace-wide
+   created-date search found nothing for Broker Relationships / Property
+   Register / CapEx & Maintenance Log, and no per-source edit check was run as
+   a result). Before writing A.3, confirm in-session what each of the six
+   returned — a source with no confirmation is a COVERAGE GAP, never a silent
+   pass.
+
+3. **Edited today — best-effort for the two page-tree sources (C, D) only.**
+   Knowledge Base and Operations Hub are page hierarchies, not databases, so
+   they have no queryable last-edited column. For these two only:
+   `notion-fetch` the page and scan child pages' last-edited stamps, plus a
+   broad `notion-search` semantic query, KEEPing any result whose `timestamp`
+   date == `{TODAY}`.
+
+**Known limitation — corrected 2026-07-16 ~19:35 ET after live testing.** This
+paragraph previously read: *"edit detection is **precise** for all six database
+sources (step 2) and best-effort only for the two page-tree sources."* **Both
+halves of that were wrong, and the error was the dangerous direction — it
+promised precision the tooling does not deliver, which converts a silent miss
+into a confident false negative.** Measured reality (evidence in step 2):
+
+- **Tenant DB — NOT precise. The column is frozen** at 2026-03-30 and does not
+  bump; provably-edited rows still report March. Its zero is meaningless.
+- **All six — NOT guaranteed to run at all.** The SQL tool is entitlement-gated
+  and hard-fails (non-retryable) once the plan's free query quota is spent.
+- **Property Register — genuinely live** (returned 2026-07-12). So the mechanism
+  is real *where it works*; it just cannot be assumed per-source or per-run.
+- **Knowledge Base + Ops Hub (C, D)** — best-effort as before; they are page
+  trees with no queryable last-edited column.
+
+**Therefore: do not print a precise/best-effort split by SOURCE CLASS. Report
+what actually happened, per source, this run.** For each of the eight sources
+state which of these it was: `sql-confirmed` (query ran and the column is
+trusted for that source) · `sql-unavailable` (entitlement/quota — name it) ·
+`column-unreliable` (Tenant DB) · `best-effort` (semantic sweep only). Never
+imply completeness that wasn't achieved — and never let a zero from a known-
+frozen column read as "nothing changed."
 
 For every item captured, record: **title**, **what changed** (created vs.
 edited; 1-line substance if discernible from the page), **last-edited time
@@ -169,14 +338,67 @@ alerts engine** (`src/analytics/conditions.ts` + `src/brain/critical-dates.ts`),
 which runs daily and produces that morning's **Command Center Daily Brief**
 (posted to Notion ~06:15 ET — the same brief Block A already fetches, and whose
 run-state is in `C:\Users\Owner\oxford-command-center\data\brief-health.json`).
-Surface the Brief's already-computed flags rather than re-deriving them: the
-warehouse's lease/debt tables are not yet populated, so re-derivation would
-silently UNDER-report. List only alerts that FIRE, most-urgent first:
+Surface the Brief's already-computed flags rather than re-deriving them from the
+warehouse: the warehouse's lease/debt tables are not populated well enough to
+re-derive from, so re-derivation would silently UNDER-report. List only alerts
+that FIRE, most-urgent first:
 - **Lease expirations ≤90 days** — tenant · property · annual rent · days out. Source: the day's Command Center Daily Brief critical-dates section.
-- **Insurance ≤30 days / expired** — count + total premium + next renewal date. Source: the Brief. MAY be verified/refined directly from the live warehouse `C:\Users\Owner\oxford-command-center\data\warehouse\finance.sqlite`, table `property_insurance_policies` (columns `expiration_date`, `premium_annual`, `policy_type`) — the one alert class fully populated in the warehouse.
-- **Loan balloons ≤18 months** — loan · months · balance. Source: the Brief (warehouse `debt_positions` is currently EMPTY — do NOT read it as authoritative).
-- **DSCR < 1.25× or LTV > 40%** — property · figure. Source: the Brief / warehouse `debt_scores` once populated.
+- **Insurance ≤30 days / expired** — count + total premium + next renewal date. Source: the Brief. MAY be verified/refined directly from the live warehouse `C:\Users\Owner\oxford-command-center\data\warehouse\finance.sqlite`, table `property_insurance_policies` (columns `expiration_date`, `premium_annual`, `policy_type`) — the one alert class fully populated in the warehouse (25 rows, verified 2026-07-16).
+- **Loan balloons ≤18 months** — loan · months · balance. Source: the Brief. Warehouse `debt_positions` is NOT empty (earlier wording said "EMPTY" — corrected 2026-07-16): it holds 20 rows = 4 daily snapshots × 5 loans, latest 2026-07-14. Those 5 are exactly the portfolio's 5 `direction: borrower` loans — ORA's real borrowings — and all are Amortizing with maturities 2028–2032, so **a balloon query against it correctly returns nothing**. Do not read that empty result as an under-report; ORA genuinely has no debt balloon inside 18 months. **The live balloon alert is on a note RECEIVABLE** (see the direction trap below), which is why it can only come from the Brief.
+- **DSCR < 1.25× or LTV > 40%** — property · figure. Source: the Brief / warehouse `debt_scores` once populated (still 0 rows, verified 2026-07-16).
 - **Acquisition deadlines / stalled deals** — deal · market. Already covered by Block A's live Notion Acquisition Pipeline query — cross-reference it, do NOT re-derive.
+
+**Where the Brief's lease/debt alerts actually come from** (established 2026-07-16
+— do not re-derive this the hard way): the alerts engine reads
+`oxford-command-center\data\snapshots\portfolio.json`, NOT the warehouse. That
+file carries `leases` (with `leaseEnd`, `status`, `annualRent`) and `loans` (12
+rows, with `direction` = borrower | lender | internal, `maturity`, `balloon`).
+Its `meta` block states `source` = the Master Excel Template (DSOR lineage),
+`asOf` = the data month, and `generatedAt` = when it was baked — check all three
+before treating a figure as current. This is the file to read when an alert needs
+verifying or a Brief figure looks wrong; the warehouse will not confirm it.
+
+**The direction trap — read this before reporting any loan alert.** Each loan
+carries `direction`: `borrower` (ORA owes — real debt), `lender` (ORA is owed —
+a note RECEIVABLE), or `internal` (intercompany). As of 2026-07-16 the Brief's
+balloon alert does NOT filter on direction, so it fires on `lender` loans with
+the detail line *"Prepare refinance or payoff"* — the wrong action for a note ORA
+holds and collects. The live example is **Restoration Church Trust** ($979,772,
+9%, balloon 2027-02-20): it is an ASSET, not a liability. Two other `lender`
+loans exist (1100 Rarig/Fenton $553,045; 485 S. Walnut St. $252,000). When a
+balloon alert fires, check `direction` in `portfolio.json` first and report it as
+a collection event, not a refinancing obligation. Do not "fix" `conditions.ts`
+from this task — it is financial-decision code (Invariant 4, mandatory
+adversarial REFUTE pass); flag it instead.
+
+**The Notion-vs-Brief cross-check — read this before reporting a lease alert
+that another source also reports.** The Command Center Brief (via
+`portfolio.json`, Master Workbook-sourced) and `ora-am-brief`'s Daily Brief
+(via its own daily-brief skill, Notion Tenant DB-sourced, `collection://b12f4cfd-…`)
+are two independently-fed pipelines that can and do disagree on the same
+tenant's lease-expiration date — Notion Tenant DB has documented,
+previously-remediated data-quality problems (duplicate rows, phantom rows,
+stale fields from its original March 2026 import; see the 2026-07-12 Tenant DB
+cleanup). **Confirmed 2026-07-16:** the two briefs disagreed on tenants
+expiring 2026-07-31 — Command Center listed J&R Enterprises; `ora-am-brief`
+listed Chesapeake Brands and Stone Crest Counters instead, omitting J&R. Cross-
+referencing `portfolio.json` against the live Tenant DB rows by property/unit/
+contact/rent (not by name alone — several tenants share near-identical names)
+confirmed: J&R Enterprises genuinely expires 2026-07-31 (Notion's live row for
+it had no Lease Expiration value at all — a gap, not a conflict); Chesapeake
+Brands' Notion row wrongly carried 2026-07-31 (actual, per the Workbook:
+2027-03-31); Stone Crest Counters' Notion row likewise wrongly carried
+2026-07-31 (actual: 2028-07-31). All three Notion rows were corrected
+2026-07-16 to match the Workbook, which CLAUDE.md designates as the firm's
+source of record for firm figures. **Going forward:** when this section's
+Command Center figure for a tenant and that tenant's live Notion Lease
+Expiration disagree (or Notion has no value where the Brief has one), do not
+silently trust either — cross-reference `portfolio.json` by property/unit/
+contact (not tenant name alone) and flag the specific discrepancy by name in
+COVERAGE GAPS rather than letting only one brief's version reach Gabriel
+unremarked. Do not silently rewrite Notion tenant data from this read-only
+Block A — a mismatch found here is reported, not auto-corrected in-run.
+
 Each alert = one line: number + threshold + "so what", with a link to the
 dashboard (https://ora-command-center.pages.dev) for detail. If the day's
 Command Center Daily Brief is unavailable on the run surface, record a COVERAGE
@@ -416,6 +638,27 @@ by name as a COVERAGE GAP — never silently omit it (the 2026-07-09 run omitted
 these without flagging; that is the failure this rule closes). Any other
 unreachable source is likewise recorded as a COVERAGE GAP, not dropped.
 
+**DSOR reachability — check BEFORE declaring a COVERAGE GAP (added 2026-07-16):**
+the 2026-07-16 run declared the ORA Master Workbook "not locally resolvable
+from this surface" without trying either of two paths that do work from
+CC/MCP: (1) the workbook is OneDrive-synced locally at
+`C:\Users\Owner\OneDrive - Oxford Capital Partners\eric spreadsheets\Master Excel Template Company Wide -- Oxford.xlsx`
+(same path `ora-master-workbook-ingest` reads directly — verified present
+2026-07-16, `lastModifiedDateTime` 2026-07-15) — read it cell-accurately via
+`mcp__Desktop_Commander__read_file`, exactly as that task does; (2) failing
+that, `sharepoint_search`/`read_resource` also reaches it directly (confirmed
+2026-07-16) under `eric spreadsheets/` in egoldberg's SharePoint. Try both
+before recording the DSOR itself as a COVERAGE GAP. **The Monthly Checklist
+is NOT a separate file — corrected 2026-07-16 (Gabriel-confirmed):** it is a
+sheet (`Monthly Checklist`, plus a mirrored `EXPORT_MonthlyChecklist` tab)
+INSIDE this same Master Workbook — read it the same way as any other SoR tab
+(`mcp__Desktop_Commander__read_file`, sheet="Monthly Checklist"). The prior
+framing of it as an unreachable 31/59-item close workbook living only in
+SharePoint was wrong and should not recur. Ignore the stale
+(2026-04-17) "Monthly Checklist Accounting+Operations.xlsx" at the OneDrive
+root — that's an old standalone export, not the source of record; the live
+checklist is the in-workbook sheet.
+
 ## C.3 TRIAGE — CLASSIFY EVERY ITEM
 For each inventoried item assign exactly one tier:
 
@@ -583,6 +826,18 @@ Maintenance Log) are carried forward from the archived original as-is. If a
 future run hits errors against these, treat it as a stale-ID problem to fix,
 not a connector outage.
 
+**RESOLVED 2026-07-16:** the above was never re-checked, and the archived
+spec's blanket "best-effort" edit-detection language was never re-examined
+either — together these produced a real coverage gap (the per-source edit
+sweep silently never ran against these three). Both are now fixed: all three
+IDs were fetched live and confirmed correct; each of the six database sources
+in §A.1 (not just these three) was found to carry a native `last_edited_time`
+column, so §A.2 step 2 now runs a precise SQL query per source instead of a
+"broad semantic search," and §A.2 explicitly mandates that step run against
+all six named sources every run regardless of what the created-date search
+found. See the current §A.1/§A.2 text — this note stays as a record of what
+was wrong, not as live guidance.
+
 **RESOLVED 2026-07-09:** the §A.4 dashboard data path
 (`C:\Users\Owner\oxford-perfection\ora-dashboard\data\`) was found archived
 2026-07-07 and 17+ days stale; §A.4 has been repointed to the live
@@ -638,3 +893,32 @@ confirmation the guard has no way to remember). This guard doesn't share that
 pattern — it never waits on a Gabriel decision, it re-derives its own answer
 mechanically from today's evidence on every run — but its rationale text was
 stale relative to memory, which this note corrects.
+
+## AMENDMENT NOTE (2026-07-16 — edit-detection coverage-gap remediation)
+
+Three coverage gaps flagged this date, all fixed in §A.1/§A.2/§A.4 above:
+
+1. **Blanket "best-effort" edit-detection language.** §A.2 previously applied
+   one best-effort disclaimer to all eight priority sources. Live-checked all
+   six database sources (A + B) and found each carries a native Notion
+   `last_edited_time` column — edit detection for those six is now a precise
+   SQL query (`WHERE date("Last Updated"/"Last Edited") = '{TODAY}'`), not
+   best-effort. Best-effort now correctly applies only to the two page-tree
+   sources, C (Knowledge Base) and D (Ops Hub), which have no such column.
+2. **Per-source edit sweep never run for Broker Relationships / Property
+   Register / CapEx & Maintenance Log**, with their IDs carried forward
+   unverified since the 2026-06-11 archived spec. All three IDs re-verified
+   live (all resolve correctly — never actually stale); §A.2 step 2 now
+   explicitly mandates the sweep run against all six named database sources
+   every run, independent of what the created-date search in step 1 found.
+3. **Two daily briefs (Command Center vs. `ora-am-brief`) disagreeing on
+   lease-expiration data** — added the "Notion-vs-Brief cross-check" note in
+   §A.4 documenting the 2026-07-16 case (J&R Enterprises / Chesapeake Brands /
+   Stone Crest Counters) and requiring future disagreements to be
+   cross-referenced against `portfolio.json` by property/unit/contact and
+   flagged by name, not silently resolved to one source. The three
+   underlying Notion Tenant DB rows were corrected the same day (outside this
+   file — see memory `project_notion_daily_digest_coverage_gaps_2026-07-16.md`).
+
+No block logic, routing, or send-path changed — this was a coverage-quality
+and documentation fix to Block A only.
