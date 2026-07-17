@@ -140,11 +140,21 @@ def parse_token(path):
 
     Fails closed on: unreadable, oversized, non-UTF-8, or DUPLICATE keys (a token with two
     `scope:` lines is ambiguous, and ambiguity must never resolve in the grant's favor).
+
+    Uses utf-8-sig, not utf-8: PowerShell's default `Out-File`/`Set-Content`/`>` redirection
+    on Windows writes a UTF-8 BOM by default, and every block() message on every gate tells
+    the operator to "write this override token" with no encoding caveat -- the natural tool
+    for a Windows session to reach for is exactly the one that adds a BOM. Plain "utf-8"
+    leaves that BOM attached to the first line, corrupting the leading key (`scope` becomes
+    `﻿scope`, a distinct dict key) so a genuinely Gabriel-approved token silently fails
+    closed with no diagnostic (adversarial review, 2026-07-17). utf-8-sig strips a BOM if
+    present and decodes identically to utf-8 if not -- availability fix, not a security
+    change: a token that already worked still works.
     """
     try:
         if os.path.getsize(path) > MAX_TOKEN_BYTES:
             return None
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, "r", encoding="utf-8-sig") as fh:
             raw = fh.read()
     except (OSError, UnicodeDecodeError):
         return None

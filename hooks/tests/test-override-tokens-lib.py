@@ -101,6 +101,20 @@ with tempfile.TemporaryDirectory() as td:
     expect("multi-use token survives a grant", os.path.isfile(p))
     expect("multi-use token grants again", ot.token_grants(SESSION, PLAIN) is not None)
 
+    # --- BOM regression (adversarial review, 2026-07-17): PowerShell's default Out-File/
+    # Set-Content/`>` redirection on Windows writes a UTF-8 BOM. Plain "utf-8" decoding
+    # leaves the BOM attached to the first line, corrupting "scope" into a different dict
+    # key -- a genuinely Gabriel-approved token minted via ordinary Windows tooling would
+    # silently fail closed with no diagnostic. utf-8-sig fixes this.
+    BOM_TIER = ot.Tier("t-bom", "bom-scope", 3600)
+    bom_path = os.path.join(td, SESSION, "overrides", BOM_TIER.name)
+    os.makedirs(os.path.dirname(bom_path), exist_ok=True)
+    with open(bom_path, "w", encoding="utf-8-sig") as fh:
+        fh.write("scope: bom-scope\nsession: %s\nreason: minted via PowerShell Out-File\n" % SESSION)
+    expect("a BOM-prefixed token still grants",
+           ot.token_grants(SESSION, BOM_TIER) is not None,
+           "utf-8 (not utf-8-sig) would corrupt the leading 'scope' key and silently deny")
+
     os.environ.pop("ORA_OVERRIDE_SESSIONS_DIR", None)
 
 passed = sum(1 for ok, _ in results if ok)
