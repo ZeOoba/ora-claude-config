@@ -1,6 +1,6 @@
 ---
 name: ora-cowork-heartbeat
-description: Silent dead-man's-switch heartbeat — 05:50 + 17:50 ET daily. Updates hardcoded Notion page timestamp by ID; no search, no email, no page creation. Watched by external GitHub Actions watchdog (16h threshold). v03. [MODEL: claude-sonnet-5 | set 2026-07-08]
+description: Silent dead-man's-switch heartbeat — 05:50 + 17:50 ET daily. Updates hardcoded Notion page timestamp by ID; no search, no email, no page creation. Watched by external GitHub Actions watchdog (16h threshold). v03. [MODEL: claude-sonnet-5 | set 2026-07-08 | tool-grant re-approved 2026-07-17]
 ---
 
 **Cowork Heartbeat — silent signal task** (v03, re-registered 2026-07-08 to standardize onto claude-sonnet-5; preserves v02 hardening of 2026-05-23 and v03 retiming of 2026-06-10. v02 root-cause: notion-search is semantic and unreliable for exact-title lookup; v01's create-if-missing branch produced duplicate pages. Therefore: hardcoded ID only, never search, never create.)
@@ -23,4 +23,4 @@ You are emitting a heartbeat signal that an external watchdog (GitHub Actions) r
 ## Manual recovery — if the canonical page is destroyed
 Restore from Notion trash (preserves page ID). If unrestorable: create a new page under parent `32b6ecd8-9e59-81f2-b329-df3fd0e25062` titled `Cowork Heartbeat — 2x/day signal` (icon 💓) with the standard 4-line body ending `Last heartbeat: <now_utc> · Next expected: <next_utc>`, then update this task's Canonical target block AND repoint the external watchdog in the same maintenance window.
 
-**Restoration note:** Re-registered 2026-07-08 to standardize execution model onto claude-sonnet-5 (previously re-registered 2026-07-07 after the 2026-07-05 machine migration orphaned it). Content restored verbatim from the surviving SKILL.md.
+**Restoration note:** Re-registered 2026-07-08 to standardize execution model onto claude-sonnet-5 (previously re-registered 2026-07-07 after the 2026-07-05 machine migration orphaned it). Content restored verbatim from the surviving SKILL.md. Re-approved 2026-07-17 to grant this task's unattended runs a standing tool-approval for `notion-fetch` and `notion-update-page` — the missing grant was the confirmed root cause of the 2026-07-15/16 ~42h beacon stale incident (dispatch succeeded per registry `lastRunAt`, but the unattended notion-update-page call could not complete without an approved permission, so the write silently failed).

@@ -1,6 +1,6 @@
 ---
 name: ora-ic-memo-pipeline-reconciliation
-description: Weekly Tuesday 10:30 AM ET — diffs the Investment Candidates IC Memo folder (SharePoint) against Notion Acquisition Pipeline Tracker + Deal Sourcing Log to catch completed-IC-Memo deals that never got logged (the Catfish Court / Waukee IA gap class found 2026-07-15). Flag-only, never auto-writes Notion rows. v1.0 (2026-07-15).
+description: Weekly Tuesday 10:30 AM ET — diffs the Investment Candidates IC Memo folder (SharePoint) against Notion Acquisition Pipeline Tracker + Deal Sourcing Log to catch completed-IC-Memo deals that never got logged (the Catfish Court / Waukee IA gap class found 2026-07-15). Flag-only, never auto-writes Notion rows. v1.0 (2026-07-15). [MODEL: claude-sonnet-5 | set 2026-07-15]
 ---
 
 ORA IC Memo ↔ Pipeline Tracker Reconciliation — v1.0 (2026-07-15)

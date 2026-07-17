@@ -1,11 +1,11 @@
 ---
 name: ora-cc-schematic-refresh
-description: Daily refresh of the interactive "Claude Code — System Schematic" artifact with fresh live-health-check data (fleet status, governor/doctrine/memory probes, repo states) — republishes in place, no email, silent unless something material changed. v1.1 2026-07-14: added mandatory fleet-count and enabled-plugin-count cross-checks after an independent re-audit found both had drifted (Scheduled fleet section undercounted LAMS 19 vs actual 21; enabledPlugins overcounted 14 vs actual 12 true). [MODEL: claude-sonnet-5 | checked 2026-07-14]
+description: 2x/week (Mon+Thu 14:15 ET, non-peak; retimed 2026-07-16 same day as the daily→weekly Fleet Ledger v2 C3 ruling, Gabriel-directed) refresh of the interactive "Claude Code — System Schematic" artifact with fresh live-health-check data (fleet status, governor/doctrine/memory probes, repo states) — republishes in place, no email, silent unless something material changed. v1.1 2026-07-14: added mandatory fleet-count and enabled-plugin-count cross-checks after an independent re-audit found both had drifted (Scheduled fleet section undercounted LAMS 19 vs actual 21; enabledPlugins overcounted 14 vs actual 12 true). [MODEL: claude-sonnet-5 | checked 2026-07-16]
 ---
 
-ORA Claude Code Schematic Refresh — daily interactive-artifact updater (CC/MCP fleet). Read-only diagnostics + one file edit + one republish. No email under any circumstance.
+ORA Claude Code Schematic Refresh — 2x/week (Mon+Thu, 14:15 ET non-peak slot) interactive-artifact updater (CC/MCP fleet; daily→weekly ruled 2026-07-16, weekly→2x/week Gabriel-directed same day). Read-only diagnostics + one file edit + one republish. No email under any circumstance.
 
-PURPOSE: keep the "Claude Code — System Schematic" artifact (published at https://claude.ai/code/artifact/4ad3530d-f84f-4def-a472-d16ef107e74c) current with a fresh live-health-check snapshot every day, WITHOUT regenerating the whole page from scratch.
+PURPOSE: keep the "Claude Code — System Schematic" artifact (published at https://claude.ai/code/artifact/4ad3530d-f84f-4def-a472-d16ef107e74c) current with a fresh live-health-check snapshot each run, WITHOUT regenerating the whole page from scratch.
 
 DURABLE SOURCE: C:\Users\Owner\.claude\artifacts\claude-code-schematic.html — Read it first. Make TARGETED Edit calls, not a full rewrite. Leave the static structural sections (Entry surfaces, Governance, Hook lifecycle, Skills & Plugins, Subagents, MCP Connectors, Scheduled fleet roster, Memory, Downstream systems) untouched UNLESS something structurally real changed (e.g. settings.json's enabledPlugins list, a hook script added/removed/renamed in ~/.claude/hooks/) — verify against the live source before touching a structural section; don't assume drift you haven't confirmed.
 

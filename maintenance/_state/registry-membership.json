@@ -1,5 +1,5 @@
 {
- "ts": "2026-07-16T22:47:36",
+ "ts": "2026-07-17T14:43:35",
  "fleets": {
   "cc": [
    "ora-aaos-expire-leases",
@@ -9,6 +9,7 @@
    "ora-calibration-snapshot",
    "ora-cc-schematic-refresh",
    "ora-command-center-mirror-drift-check",
+   "ora-deal-command-board",
    "ora-deal-sourcing-scan",
    "ora-doctrine-integrity-guard",
    "ora-entry-market-scan",
@@ -43,7 +44,6 @@
    "ora-session-sweep",
    "ora-skill-store-drift-check",
    "ora-skill-text-audit",
-   "ora-skills-reimport-watch",
    "ora-stale-pipeline-nudge"
   ]
  },
