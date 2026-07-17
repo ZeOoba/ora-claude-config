@@ -12,6 +12,7 @@
 
 ## Projects & system
 - [Autonomy-gate indirection ceiling — CLOSED 07-17](project_autonomy_gate_indirection_ceiling_followup.md) — outbound-action checks landed both sides (email on `main`, netlify via merged PR #30); [OI-007](open-items-tracker.md#OI-007)
+- [bash-guard.mjs indirection gap — CLOSED 07-17](project_bash_guard_indirection_gap.md) — indirection + read/write fixes landed; [OI-010](open-items-tracker.md#OI-010)/[OI-011](open-items-tracker.md#OI-011)
 - [ora-am-brief LAMS retirement — BLOCKED](project_ora_am_brief_lams_retirement_blocked.md) — Code can't reach LAMS registry writes; both fleets double-firing 0 6 * * *
 - [ORA Notion Daily Digest gaps](project_notion_daily_digest_coverage_gaps_2026-07-16.md) — CLOSED 07-16: edit-detection upgraded, 3 wrong lease-exp dates fixed
 - [BrainVault vault-backup fix](project_brainvault_vault_backup_failure_2026-07-16.md) — CLOSED 07-16, 6 commits; PR #2 tie-break bullet still needs separate landing
@@ -47,6 +48,7 @@
 - [Basis Denominator — RCT v03 (RATIFIED)](project_replacement_cost_benchmark_unratified.md) — the ONE denominator; ORA buys at ~35-40% of true replacement
 
 ## Reference
+- [ECC Repo Flagged](reference_ecc_repo_flagged.md) — affaan-m/ECC evaluated + rejected: documented malware-clone risk, fully redundant with existing skill stack
 - [Memory Scope Fragmentation](reference_memory_scope_fragmentation.md) — `(1)` folder = ggoldberg's account; canonical no-suffix = **egoldberg's**
 - [Subagent Anti-Delegation](feedback_subagent_anti_delegation.md) — `Tools:*` subagents may recurse via Agent/Task instead of working; forbid explicitly
 - [Verify Subagent "Safe" Claims](feedback_verify_subagent_safe_claims.md) — re-verify file-move "safe-now" claims directly; grep-for-refs misses doctrine-in-prose
