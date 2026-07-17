@@ -129,6 +129,85 @@ def fail(findings):
     sys.exit(1)
 
 
+def _git(*args):
+    """Run git inside MEM. Returns stdout, or None on any failure (not a repo, no git,
+    no HEAD yet). Every caller treats None as 'skip the git check'.
+
+    encoding=utf-8/errors=replace (not the default locale codec, cp1252 on this machine):
+    a memory filename or title with a byte invalid in cp1252 would otherwise raise
+    UnicodeDecodeError, get swallowed below, and SILENTLY disable the whole check. Matches
+    how this script already opens files and reconfigures its streams. timeout so a stuck
+    index lock can never hang the daily health guard (parity with load_fleet_json)."""
+    try:
+        r = subprocess.run(["git"] + list(args), cwd=MEM, capture_output=True,
+                           text=True, encoding="utf-8", errors="replace", timeout=30)
+    except Exception:
+        return None
+    return r.stdout if r.returncode == 0 else None
+
+
+def head_orphans():
+    """Basenames linked by HEAD's MEMORY.md but absent from HEAD's tree -- i.e. exactly the
+    pointers a fresh clone would find broken. Sorted; empty when the check cannot apply.
+
+    WHY THIS EXISTS, given check 1 already reconciles the index. Check 1 globs the
+    FILESYSTEM, so it answers "is the file on this disk?" -- and a file can sit on disk,
+    indexed and healthy-looking, while git has never heard of it. That is not hypothetical:
+    32f3065 committed a MEMORY.md pointer without the file it points at (`git commit -am`
+    stages tracked files only and silently skips new ones), the probe stayed green, and the
+    dangling pointer reached the remote. A check that asks the working tree a question only
+    git can answer.
+
+    The precise failure is worth keeping straight, because check 1 is not simply blind here:
+    replayed against a CLONE of 32f3065, check 1 DOES flag it -- the file is absent from that
+    disk, so it looks like an ordinary orphan. But this probe runs daily via ora-health-guard
+    on the machine that AUTHORED the commit, where the file is sitting right there on disk,
+    untracked and healthy-looking. So check 1 is blind exactly where it runs and sighted only
+    where nobody runs it. That is why this check reads HEAD instead of the disk: HEAD is the
+    same everywhere, so the probe sees what every other reader sees.
+
+    THE RULE IS HEAD-vs-HEAD, deliberately -- not "every memory file must be committed".
+    Writing a memory and not having committed it yet is the normal state of a live session;
+    failing on that would make this probe cry wolf on every new note and train everyone to
+    ignore it. What is never legitimate is a COMMITTED pointer to a file git does not have,
+    because that is broken for every reader but the machine that wrote it.
+
+    Skips silently (returns []) when the check cannot apply: memory dir not in a git repo
+    (the pre-existing probe tests run over plain temp dirs), git unavailable, no commits
+    yet, or MEMORY.md not yet tracked. A probe that cannot look must not invent findings --
+    this is report-only and must never crash the daily health guard.
+    """
+    prefix = _git("rev-parse", "--show-prefix")
+    if prefix is None:
+        return []  # not a git work tree -> nothing to reconcile
+    prefix = prefix.strip()
+    index_rel = prefix + "MEMORY.md"
+
+    head_index = _git("show", "HEAD:" + index_rel)
+    if head_index is None:
+        return []  # no HEAD, or MEMORY.md not committed -> nothing committed to be wrong
+
+    # NON-recursive ls-tree (no -r), and pathspec "." with cwd=MEM: list only the entries
+    # in the memory dir's OWN level, which is exactly where the index's bare-basename links
+    # (`](reference_x.md)`) must resolve. A recursive tree would flatten in a namesake from a
+    # subdir -- e.g. HEAD holding `_archive/reference_x.md` but not root `reference_x.md`
+    # would look satisfied while a clone's root link is broken (adversarial review, 2026-07-17).
+    # (Pathspec "." not `prefix`: ls-tree resolves pathspecs against the CURRENT directory,
+    # and we run with cwd=MEM; passing the repo-root-relative prefix matched 0 files and once
+    # flagged all 132 memory files as orphans -- only the fixtures caught it.)
+    tree = _git("ls-tree", "--name-only", "HEAD", "--", ".")
+    if tree is None:
+        return []
+    # Non-recursive output is one name per line; subdir entries appear as the dir name (e.g.
+    # "_archive"), which .endswith(".md") already excludes.
+    head_files = {os.path.basename(p) for p in tree.splitlines() if p.endswith(".md")}
+    head_files.discard("MEMORY.md")
+
+    head_linked = {os.path.basename(p)
+                   for p in re.findall(r"\]\(([A-Za-z0-9_./-]+\.md)\)", head_index)}
+    return sorted(head_linked - head_files)
+
+
 def main():
     if not os.path.isdir(MEM):
         sys.stderr.write("[ACTION] memory-integrity-probe: memory dir not found: %s\n" % MEM)
@@ -153,6 +232,12 @@ def main():
         issues.append("orphan index link (file missing): %s" % o)
     for u in unlisted:
         issues.append("unlisted file (present but not in MEMORY.md): %s" % u)
+
+    # --- 1b. the same reconciliation, as GIT sees it (added 2026-07-17) ---
+    for o in head_orphans():
+        issues.append(
+            "orphan index link IN GIT (HEAD's MEMORY.md links it; HEAD's tree lacks it -- "
+            "a clone gets a broken pointer): %s" % o)
 
     # --- 2a. governor contradiction (delegate) ---
     if os.path.isfile(GOV_PROBE):
