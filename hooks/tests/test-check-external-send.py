@@ -45,15 +45,24 @@ def mint(sessions_dir, session_id=SESSION_A, recipients=None, reason="Gabriel ap
     return path
 
 
-def run(session, recipients, sessions_dir=None, extra_args=None):
+def run(session, recipients, sessions_dir=None, extra_args=None, stdin_override=None):
+    """`recipients` is a comma-separated string (test-call convenience); it is sent to the
+    script as one-recipient-per-line on stdin, matching the real interface -- recipients
+    are NEVER passed as a CLI argument (adversarial review, 2026-07-17: PowerShell's
+    native-argument marshaling can silently mangle a CLI arg, e.g. stripping an embedded
+    double-quote, so the checked value could differ from the actual send value)."""
     env = dict(os.environ)
     env["ORA_OVERRIDE_SESSIONS_DIR"] = sessions_dir if sessions_dir is not None else fresh_sessions_dir()
     args = [sys.executable, SCRIPT]
     if extra_args is not None:
         args += extra_args
     else:
-        args += ["--session", session, "--recipients", recipients]
-    proc = subprocess.run(args, capture_output=True, text=True, env=env)
+        args += ["--session", session]
+    if stdin_override is not None:
+        stdin_text = stdin_override
+    else:
+        stdin_text = "\n".join(r.strip() for r in recipients.split(",") if r.strip())
+    proc = subprocess.run(args, input=stdin_text, capture_output=True, text=True, env=env)
     return proc.returncode, proc.stdout, proc.stderr
 
 
@@ -133,7 +142,7 @@ def test_single_use_consumption():
 
 
 def test_usage_error_missing_session_arg():
-    rc, out, err = run(None, None, extra_args=["--recipients", "broker@example.com"])
+    rc, out, err = run(None, None, extra_args=[], stdin_override="broker@example.com")
     assert rc == 3, "missing --session must be a usage error (exit 3), got %s (%s)" % (rc, err)
     print("PASS test_usage_error_missing_session_arg")
 
@@ -142,8 +151,23 @@ def test_usage_error_empty_recipients():
     d = fresh_sessions_dir()
     mint(d, recipients=["broker@example.com"])
     rc, out, err = run(SESSION_A, "", sessions_dir=d)
-    assert rc == 3, "empty --recipients must be a usage error (exit 3), got %s (%s)" % (rc, err)
+    assert rc == 3, "empty stdin must be a usage error (exit 3), got %s (%s)" % (rc, err)
     print("PASS test_usage_error_empty_recipients")
+
+
+def test_recipient_with_double_quote_survives_stdin_intact():
+    """The exact regression that motivated moving recipients off the CLI entirely:
+    PowerShell's native-argument marshaling silently stripped an embedded double-quote
+    from a --recipients value before python ever saw it, so the checked value could differ
+    from what actually reached $Mail.To. Over stdin the byte is never argument-parsed."""
+    d = fresh_sessions_dir()
+    tricky = 'ev"il@example.com'
+    mint(d, recipients=[tricky])
+    rc, out, err = run(SESSION_A, None, sessions_dir=d, extra_args=["--session", SESSION_A],
+                       stdin_override=tricky)
+    assert rc == 0, "a token naming the exact quoted address must allow it, got %s (%s)" % (rc, err)
+    assert tricky in err, "the exact quoted address must appear unmangled in the ALLOW log, got: %s" % err
+    print("PASS test_recipient_with_double_quote_survives_stdin_intact")
 
 
 def test_deny_case_insensitive_still_matches():
