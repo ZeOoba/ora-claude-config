@@ -60,6 +60,16 @@ obsidian-fleet-mirror/session-state.json
 # declassified (confidential-terms.json e_fulton active:false, §7b). All scheduled-task
 # SKILL.mds are now versioned; runtime state (_state/ _unsent/ logs/.bak) stays ignored below.
 
+# (2026-07-17, Gabriel-authorized) 2b covered live task SKILL.mds but not retired ones: a
+# _archive_*_retired/<id>/SKILL.md sits one level deeper than */SKILL.md matches, so EVERY
+# retired task spec has been silently untracked since 2b shipped -- the identical failure
+# mode 2b/2c exist to prevent, just one directory layer down. Same durability rationale,
+# same ladder shape, one level deeper, scoped to _archive_* only (does not widen anything
+# else under scheduled-tasks/, e.g. _shared/ stays exactly as untracked as before).
+!/scheduled-tasks/_archive_*/*/
+/scheduled-tasks/_archive_*/*/*
+!/scheduled-tasks/_archive_*/*/SKILL.md
+
 # 2c) Memory (projects/.../memory/) — versioned 2026-07-15 for durability, same rationale
 #     as 2b: this /* default-deny (introduced in the SAME 2026-07-12 commit as 2b) never
 #     got a matching opt-in for memory, so every memory file except rules.md (already
