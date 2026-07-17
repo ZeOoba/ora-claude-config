@@ -11,6 +11,45 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-17 — Session close-out: OI-006/008 completed, canonical tracker fully closed
+
+Continuation of the Tenant DB remediation session. Closed the remainder of the OI-003–008 arc:
+
+- **OI-006** completed: read all 5 primary executed lease documents via SharePoint for the 4
+  turnovers + Soldier Trucking property conflict. Soldier Trucking confirmed via a Gabriel-signed
+  Second Addendum (1100 Rarig Ave Unit G&H, not Zettler Rd 301 as Notion had it). Wrote and
+  verified 6 Notion corrections.
+- Ran down the 7 remaining WORKBOOK-NEWER rows + Masala Bazaar/Azad Shah dedup at Gabriel's
+  follow-up request: 5 of 6 date corrections confirmed against primary lease/addendum documents;
+  Pedro Ulate corrected on pattern-inference only (no lease document locatable — flagged as the
+  one weaker-evidence write). Surfaced a second, distinct systematic bug: several Notion rows had
+  the workbook's Escalation Date miscopied into Lease Expiration at the original March import.
+- **OI-008 opened and closed same-day**: swept the full 79-pair Notion↔workbook reconciliable
+  overlap for the Escalation-Date bug. Zero new instances found beyond the ones already fixed —
+  confirms the defect was fully contained to the 7 originally-flagged rows.
+- **OI-007** (owned by a concurrent session, not this one): independently verified rather than
+  taken on faith — confirmed via `git fetch`/`pull` on `website-canonical` that PR #30 (netlify
+  deploy guard) is genuinely merged at `b25a70d`, with real 113+149-line guard files, not a
+  placeholder claim. Both Gate 1 (email) and Gate 2a (netlify) are closed.
+- **Canonical tracker (`open-items-tracker.md`) now has zero open items** — OI-001 through
+  OI-008 all CLOSED with evidence.
+- Two shared-checkout commits landed this session using the `commit-provenance-guard` override
+  after independently verifying (via `git diff --cached`) that the flagged co-edit was a
+  recency-heuristic false positive, not real foreign content — the guard behaved as designed.
+- Git state at close: `main` in sync with `origin/main`, nothing of this session's uncommitted or
+  unpushed. Concurrent session `3fc20af9` remained active throughout with its own WIP, not
+  touched.
+
+**Workflow/systematization candidates surfaced, not yet actioned:**
+- The commit-provenance-guard's recency-heuristic false-positive rate on `open-items-tracker.md`
+  was 3-for-3 this session (every co-edit flag was already safely in `HEAD`). Worth checking
+  whether the guard's TTL window is longer than it needs to be, or whether it should re-diff
+  against `HEAD` before flagging instead of relying purely on a recency timestamp.
+- OI-008's residual scope note (93 Notion Tenant DB rows with no workbook counterpart, never
+  independently verified against primary leases) is real but was explicitly out of scope tonight
+  — worth a deliberate decision on whether it's worth pursuing, not a silent drop.
+
+
 ## 2026-07-16 — Shipped commit-provenance guard; Tenant DB open items canonicalized (session close-out)
 
 Two new hooks landed and pushed (`0b81232`, roster added to CLAUDE.md's Guards: line in
