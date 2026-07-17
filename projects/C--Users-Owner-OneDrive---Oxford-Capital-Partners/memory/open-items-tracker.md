@@ -32,6 +32,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
 | [OI-007](#OI-007) | 2026-07-17 | [project_autonomy_gate_indirection_ceiling_followup.md](project_autonomy_gate_indirection_ceiling_followup.md) | Enforce Gate 1/2a at the actual outbound action — value-indirection defeats shell-text detection |
+| [OI-008](#OI-008) | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Sweep the Notion Tenant DB for the Escalation-Date/Lease-Expiration column-mapping bug beyond the 7 rows already checked |
 
 ### OI-007
 **Status:** OPEN
@@ -42,6 +43,22 @@ deploy) can be defeated entirely, no override needed, via value/reference indire
 variable/file-sourced recipient, a renamed netlify binary, splitting a deploy across two Bash
 calls). Not fixable by another regex — needs enforcement moved to the actual outbound action.
 Gabriel-ratified as separate follow-up work, not tonight's scope.
+
+### OI-008
+**Status:** OPEN
+**Opened:** 2026-07-17
+**Source:** [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md)
+**Description:** A second, distinct Tenant DB defect from the "no sync exists" root cause: at the
+original March 2026 one-time import, several Notion rows had the workbook's `Escalation Date`
+column miscopied into the `Lease Expiration` field instead of `Lease End`. Confirmed on 5 of the 7
+WORKBOOK-NEWER rows closed under OI-003–006's follow-on remediation (Pedro Ulate, SAFE CONNECTION
+ELECTRIC LLC, TYM Wholesale LLC, Randy's Aquarium Service, Fully Equipped Cleaning Maintenance
+Services LLC — each verified against a primary lease/addendum document; a 6th, Carlton L. Handy,
+had a different stale-figure signature). **Only those 7 rows were checked** — the other ~165 live
+Notion Tenant DB rows have never been swept for this specific pattern. Needs: a targeted comparison
+of every live Notion `Lease Expiration` against the workbook's `Escalation Date` column (not just
+`Lease End`) to find any other miscopied rows, each confirmed against its executed lease (Invariant
+7) before correction, same fetch-verify-then-write discipline as OI-005/OI-006.
 
 ## Closed
 
