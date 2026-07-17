@@ -167,7 +167,10 @@ corrected 2026-07-17 (Code-surface verification):** `git branch -vv` on `ora-ski
 `board-last-activity-stamp` at `5dda2cd`, identical to `main`; `git log main..board-last-activity-stamp`
 returns zero commits (fully merged); `git log origin/main..main` also returns zero commits and
 `git rev-parse origin/main main` return the same SHA (`main` fully pushed). The branch is not a
-residual — this note was simply stale by the time of closure.
+residual — this note was simply stale by the time of closure. This correction itself committed to
+`~/.claude` `main` (commit `8c58559`) and pushed to `origin/main` (`ora-claude-config`, verified via
+`git status -sb` showing no ahead/behind and `git ls-remote origin main` matching local HEAD) —
+tracker text and remote now consistent, nothing further outstanding on OI-012.
 **Progress 2026-07-17 (reimport attempt, blocked):** Re-verified `_staging/PENDING_REIMPORT.md` still
 listed all 3 (`acquisition-underwriting`, `deal-execution`, `loi-generation`, pending since
 2026-07-17T18:17Z, commit `643dd9f`). Packaged `acquisition-underwriting.skill` successfully via
