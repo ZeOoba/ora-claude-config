@@ -32,6 +32,16 @@ captured (tested, not assumed); (2) if DELIBERATELY landing another session's or
 "land the backlog" janitor pattern, e.g. commits `c0272bb`/`4da5d26` from 2026-07-16),
 `touch hooks/sessions/<your-sid>/allow-foreign-commit`.
 
+**⚠ Pathspec safety has a scope condition (2026-07-17 near-miss).** "Use a pathspec" is safe when
+it names a WHOLE FILE that is entirely your own content (e.g. `-- mine.txt` where `theirs.txt` is
+a different file — the guard's own test suite validates exactly this). It is UNSAFE when the
+flagged file is one you only want to commit a PARTIAL, isolated patch from (e.g. `event_log.md`
+with several sessions' entries stacked in one uncommitted diff): `git commit -- <path>` silently
+re-adds the FULL WORKING-TREE version of that path before committing, overriding whatever you
+staged with `git apply --cached`. A bare `git commit` (no pathspec at all) commits exactly the
+staged index instead — that is the correct move once you have isolated a partial hunk. Full
+technique + the incident this was caught in: [[reference_event_log_uncommitted_backlog]].
+
 **Known gap:** only catches files touched via the Edit/Write tools or the Desktop Commander write
 aliases — a foreign file written by a Bash script/heredoc is invisible to the recorder and will
 NOT be caught. Accepted trade-off: a "block anything I didn't touch" design was rejected because

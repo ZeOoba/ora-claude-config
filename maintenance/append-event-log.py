@@ -43,6 +43,7 @@ actual harm -- the content was a pure duplicate both times.
 """
 import argparse
 import os
+import subprocess
 import sys
 import time
 
@@ -54,6 +55,10 @@ LOG = os.path.join(os.path.expanduser("~"), ".claude", "projects",
 # the in-place fallback on each remaining attempt (rather than waiting for every
 # attempt to exhaust before ever trying it).
 INPLACE_FALLBACK_AFTER = 3
+
+# Print a WARN (never blocks -- this script's whole design is "append must always
+# succeed") once this many uncommitted '## ' entries have piled up against HEAD.
+UNCOMMITTED_BACKLOG_WARN_AT = 4
 
 
 def insert_newest(content, entry):
@@ -219,6 +224,46 @@ def drain_spool(log, attempts=3):
     return drained
 
 
+def warn_if_uncommitted_backlog(log, threshold=UNCOMMITTED_BACKLOG_WARN_AT):
+    """Best-effort, NEVER-BLOCKING nudge: if `threshold`+ '## '-headed entries
+    are sitting uncommitted against HEAD, print a one-line WARN to stderr.
+
+    2026-07-17: multiple concurrent sessions each append-without-committing
+    over the same day, and the file accumulates into one large, tangled diff
+    spanning unrelated sessions' work by the time anyone commits it -- exactly
+    what made that day's own close-out entry hard to land cleanly (see
+    memory/reference_event_log_uncommitted_backlog.md). This only counts
+    '+## ' lines in `git diff HEAD -- <log>` (each is a newly appended entry
+    header; existing entries are never modified by this script) -- it does
+    NOT attempt to attribute lines to a specific session, and it never
+    fails the append: any error here (not a git repo, git unavailable, no
+    HEAD yet) is silently swallowed, matching this file's fail-open style
+    everywhere else."""
+    try:
+        repo = os.path.dirname(os.path.abspath(log))
+        # walk up to find a repo root cheaply -- git handles this natively
+        proc = subprocess.run(
+            ["git", "-C", repo, "diff", "HEAD", "--", log],
+            capture_output=True, text=True, timeout=5,
+        )
+        if proc.returncode != 0:
+            return
+        added_headers = sum(
+            1 for ln in proc.stdout.splitlines() if ln.startswith("+## ")
+        )
+        if added_headers >= threshold:
+            sys.stderr.write(
+                "WARN: %d entries appended since the last commit to %s -- "
+                "consider committing soon so it doesn't grow into one large, "
+                "multi-session diff (see the isolated-hunk technique in "
+                "memory/reference_event_log_uncommitted_backlog.md if other "
+                "sessions also have uncommitted entries mixed in).\n"
+                % (added_headers, os.path.basename(log))
+            )
+    except Exception:
+        pass  # best-effort only -- must never affect the append's own success
+
+
 def main(argv=None):
     # Windows consoles default to cp1252; entries routinely contain em-dashes / arrows / box
     # glyphs. Reconfigure the std streams to UTF-8 so the success + diagnostic prints never raise
@@ -266,6 +311,7 @@ def main(argv=None):
             with open(a.log, encoding="utf-8") as f:
                 if header in f.read():
                     print("appended: %s" % header)
+                    warn_if_uncommitted_backlog(a.log)
                     return 0
         except ValueError:
             raise

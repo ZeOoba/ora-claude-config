@@ -29,7 +29,22 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 
 ## Open
 
-*(none open as of 2026-07-17 — OI-007 closed this session)*
+| ID | Opened | Source | One-line |
+|----|--------|--------|----------|
+| [OI-009](#OI-009) | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Verify the 93 Notion Tenant DB rows with no workbook counterpart against primary leases (low priority) |
+
+### OI-009
+**Status:** OPEN
+**Opened:** 2026-07-17
+**Source:** [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md)
+**Description:** OI-008's sweep for the Escalation-Date/Lease-Expiration column-mapping bug could
+only check the 79-pair Notion↔workbook reconciliable overlap (a real workbook counterpart is
+required to compare against). 93 live Notion Tenant DB rows have no workbook counterpart at all
+(family-join miss, or genuinely off-workbook tenants/vacant slots) and have never been
+independently verified against primary lease documents. Gabriel confirmed (2026-07-17, via
+AskUserQuestion): worth tracking, low priority — not urgent, likely a future bulk
+lease-abstraction pass across ~93 tenants rather than a quick check. Deliberately NOT started this
+session.
 
 ## Closed
 

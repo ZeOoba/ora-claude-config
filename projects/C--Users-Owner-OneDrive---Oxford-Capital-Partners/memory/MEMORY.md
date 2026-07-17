@@ -79,7 +79,8 @@
 - [Tenant Name Mappings](reference_tenant_name_mappings.md) — PM platform → Notion Tenant DB reconciliation aliases
 - [ripgrep blind on scheduled-tasks](reference_ripgrep_scheduled_tasks_false_negative.md) — rg returns zero matches rooted at scheduled-tasks/; fixed via rg-only .ignore
 - [Hook systemMessage never reaches model](reference_hook_systemmessage_not_model_visible.md) — PreToolUse systemMessage is USER-only; use additionalContext
-- [Commit-provenance guard](reference_commit_provenance_guard.md) — blocks a commit sweeping another live session's work; use a pathspec or the override
+- [Commit-provenance guard](reference_commit_provenance_guard.md) — blocks a commit sweeping another live session's work; pathspec-vs-partial-hunk safety condition inside
+- [event_log.md uncommitted backlog](reference_event_log_uncommitted_backlog.md) — no single committer; whoever notices commits it, isolating only their own entry
 - [Fail-open + TTL beats mutex](feedback_fail_open_over_mutex_for_fleet_gates.md) — ratified default for cross-session coordination guards
 - [Property→LLC Signature Roster](reference_property_llc_signature_roster.md) — canonical property→signing-LLC lookup for landlord mail
 - [ora-pm-ledger Double-Fire](reference_ora_pm_ledger_double_fire.md) — RESOLVED 07-12: CC/MCP is sole registration, LAMS twin was an orphan
@@ -108,6 +109,7 @@
 - [setup-writing-style Platform Skill](reference_writing_style_platform_skill.md) — real gated skill, per-account; never on the filesystem
 
 ## Rules & governance
+- [Verify before repeating session claims](feedback_verify_before_repeating_session_claims.md) — confirmed 2x in one session; check ground truth before relaying another session's status claim
 - [Refute pass — proactive by default](feedback_refute_pass_proactive_default.md) — run before declaring done; caught 2 real defects first time
 - [Prompt-embedded current-state prose](feedback_prompt_current_state_prose.md) — baked shas/counts rot; refresh at runtime or tag `curated @` + VERIFY
 - [Workflow invocation gotchas](feedback_workflow_invocation_gotchas.md) — stale name resolution + stringified args; verify result post-run

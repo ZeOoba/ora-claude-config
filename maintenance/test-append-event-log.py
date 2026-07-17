@@ -326,6 +326,99 @@ finally:
             os.remove(os.path.join(pending_dir, n))
         os.rmdir(pending_dir)
 
+# --- warn_if_uncommitted_backlog(): 2026-07-17, the systematization follow-up
+# from a session that hit event_log.md piling up multi-session uncommitted
+# entries. Best-effort, never-blocking -- test both the WARN and the silent
+# paths, and confirm it never raises regardless of git/repo state. ---
+import io
+import subprocess
+
+
+def _run_git(args, cwd):
+    subprocess.run(["git"] + args, cwd=cwd, capture_output=True, text=True)
+
+
+def _make_temp_git_repo():
+    d = tempfile.mkdtemp(prefix="ael-warn-repo-")
+    _run_git(["init", "-q"], d)
+    _run_git(["config", "user.email", "t@t.t"], d)
+    _run_git(["config", "user.name", "t"], d)
+    return d
+
+
+def _captured_stderr_of(fn, *a, **kw):
+    old = sys.stderr
+    sys.stderr = io.StringIO()
+    try:
+        fn(*a, **kw)
+        return sys.stderr.getvalue()
+    finally:
+        sys.stderr = old
+
+
+repo = _make_temp_git_repo()
+log_path = os.path.join(repo, "event_log.md")
+with open(log_path, "w", encoding="utf-8") as f:
+    f.write(DOC)
+_run_git(["add", "event_log.md"], repo)
+_run_git(["commit", "-q", "-m", "base"], repo)
+
+# below threshold: append 1 entry (< UNCOMMITTED_BACKLOG_WARN_AT), expect silence
+content = open(log_path, encoding="utf-8").read()
+open(log_path, "w", encoding="utf-8").write(
+    ael.insert_newest(content, "## 2026-07-17 — entry 1\n- x"))
+err = _captured_stderr_of(ael.warn_if_uncommitted_backlog, log_path)
+expect("below threshold: no WARN", err == "", err)
+
+# at threshold: append enough more entries to reach UNCOMMITTED_BACKLOG_WARN_AT
+# total uncommitted headers, expect a WARN naming the count
+for i in range(2, ael.UNCOMMITTED_BACKLOG_WARN_AT + 1):
+    content = open(log_path, encoding="utf-8").read()
+    open(log_path, "w", encoding="utf-8").write(
+        ael.insert_newest(content, "## 2026-07-17 — entry %d\n- x" % i))
+err = _captured_stderr_of(ael.warn_if_uncommitted_backlog, log_path)
+expect("at threshold: WARN fires", "WARN" in err, err)
+expect("WARN names the actual count",
+       str(ael.UNCOMMITTED_BACKLOG_WARN_AT) in err, err)
+
+# committing clears the backlog -> silence again
+_run_git(["add", "event_log.md"], repo)
+_run_git(["commit", "-q", "-m", "land the backlog"], repo)
+err = _captured_stderr_of(ael.warn_if_uncommitted_backlog, log_path)
+expect("after commit: backlog cleared, no WARN", err == "", err)
+
+# mutation check: threshold math is not vacuous -- one entry short of
+# threshold must NOT warn, confirming the >= boundary is exercised for real
+content = open(log_path, encoding="utf-8").read()
+for i in range(1, ael.UNCOMMITTED_BACKLOG_WARN_AT):
+    content = ael.insert_newest(content, "## 2026-07-17 — pre-thresh %d\n- x" % i)
+open(log_path, "w", encoding="utf-8").write(content)
+err = _captured_stderr_of(ael.warn_if_uncommitted_backlog, log_path)
+expect("one short of threshold: still silent (boundary is real, not off-by-one)",
+       err == "", err)
+
+# never a git repo -> silent, never raises
+non_repo = tempfile.mkdtemp(prefix="ael-warn-norepo-")
+non_repo_log = os.path.join(non_repo, "event_log.md")
+with open(non_repo_log, "w", encoding="utf-8") as f:
+    f.write(DOC)
+try:
+    err = _captured_stderr_of(ael.warn_if_uncommitted_backlog, non_repo_log)
+    expect("non-repo path never raises and stays silent", err == "", err)
+except Exception as e:
+    expect("non-repo path never raises", False, str(e))
+
+# main() still returns 0 and still appends even when the warn path is exercised
+entry_fd, entry_path = tempfile.mkstemp(suffix=".md", text=True)
+with os.fdopen(entry_fd, "w", encoding="utf-8") as f:
+    f.write("## 2026-07-17 — via main()\n- x")
+rc = ael.main(["--entry-file", entry_path, "--log", log_path])
+expect("main() still exits 0 when the backlog warning also fires", rc == 0)
+with open(log_path, encoding="utf-8") as f:
+    expect("main() still appended the entry", "via main()" in f.read())
+os.remove(entry_path)
+
+
 passed = sum(1 for ok, _ in results if ok)
 print("\nappend-event-log tests: %d/%d passed" % (passed, len(results)))
 sys.exit(0 if passed == len(results) else 1)
