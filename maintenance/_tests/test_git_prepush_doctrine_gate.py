@@ -263,38 +263,53 @@ def test_gate_backcompat_int_probe_no_status_write():
     (the pre-existing hooks/tests/test-git-prepush-doctrine-gate.py stubs it as
     `lambda: 1`) AND a stubbed (non-real) probe run must NOT write a status snapshot --
     so a unit test never clobbers the real _state snapshot with a fake drift result.
-    Fully isolated: temp OVERRIDE_DIR + event_log + status seams."""
+
+    Fully isolated: the token lives under a temp sessions root via the
+    ORA_OVERRIDE_SESSIONS_DIR seam (2026-07-16: the flat OVERRIDE_DIR sentinel was retired
+    for a session-scoped, content-bound token -- see hooks/lib/override_tokens.py), plus the
+    event_log + status seams."""
+    session_id = "maint-test-session"
     tmpdir = tempfile.mkdtemp()
     status_path = os.path.join(tmpdir, "doctrine-status.json")  # must stay ABSENT
     event_log = os.path.join(tmpdir, "event_log.md")
     with open(event_log, "w", encoding="utf-8") as f:
         f.write("# test\n\n## 2000-01-01 - seed\n\n- seed\n")
-    override_dir = os.path.join(tmpdir, "overrides")
-    os.makedirs(override_dir)
-    prev = (gate.run_doctrine_probe, gate.OVERRIDE_DIR, gate.EVENT_LOG_OVERRIDE,
-            gate.STATUS_PATH_OVERRIDE)
+    sessions_root = os.path.join(tmpdir, "sessions")
+    token_dir = os.path.join(sessions_root, session_id, "overrides")
+    os.makedirs(token_dir)
+    prev = (gate.run_doctrine_probe, gate.EVENT_LOG_OVERRIDE, gate.STATUS_PATH_OVERRIDE)
+    prev_env = (os.environ.get("ORA_OVERRIDE_SESSIONS_DIR"),
+                os.environ.get("CLAUDE_CODE_SESSION_ID"))
     gate.run_doctrine_probe = lambda: 1  # legacy bare-int stub -> force drift
-    gate.OVERRIDE_DIR = override_dir
     gate.EVENT_LOG_OVERRIDE = event_log
     gate.STATUS_PATH_OVERRIDE = status_path  # a leaked write would land here (it must not)
+    os.environ["ORA_OVERRIDE_SESSIONS_DIR"] = sessions_root
+    os.environ["CLAUDE_CODE_SESSION_ID"] = session_id
     try:
-        rc = gate.main()  # drift + no override -> BLOCK
-        assert rc == 1, "legacy int stub, drift, no override -> exit 1, got %r" % rc
+        rc = gate.main()  # drift + no token -> BLOCK
+        assert rc == 1, "legacy int stub, drift, no token -> exit 1, got %r" % rc
         assert not os.path.exists(status_path), (
             "a stubbed (non-real) probe run must NOT write a status snapshot")
-        with open(os.path.join(override_dir, gate.OVERRIDE_NAME), "w") as f:
-            f.write("x")  # fresh sentinel
-        rc2 = gate.main()  # drift + fresh override -> allow + LOG
-        assert rc2 == 0, "legacy int stub, drift, fresh override -> exit 0, got %r" % rc2
+        with open(os.path.join(token_dir, gate.DOCTRINE_DRIFT.name), "w",
+                  encoding="utf-8") as f:
+            f.write("scope: doctrine-drift\nsession: %s\nreason: test\n" % session_id)
+        rc2 = gate.main()  # drift + valid token -> allow + LOG
+        assert rc2 == 0, "legacy int stub, drift, valid token -> exit 0, got %r" % rc2
         assert not os.path.exists(status_path), (
             "override path with a stubbed probe must still not write a status snapshot")
         logged = open(event_log, encoding="utf-8").read()
         assert "Pre-push proceeded DESPITE doctrine drift" in logged, (
             "override use should still be logged via the seam")
+        assert session_id in logged, (
+            "the override record must name the session that held the token")
         print("  PASS test_gate_backcompat_int_probe_no_status_write")
     finally:
-        (gate.run_doctrine_probe, gate.OVERRIDE_DIR, gate.EVENT_LOG_OVERRIDE,
-         gate.STATUS_PATH_OVERRIDE) = prev
+        (gate.run_doctrine_probe, gate.EVENT_LOG_OVERRIDE, gate.STATUS_PATH_OVERRIDE) = prev
+        for key, val in zip(("ORA_OVERRIDE_SESSIONS_DIR", "CLAUDE_CODE_SESSION_ID"), prev_env):
+            if val is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = val
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
