@@ -7,6 +7,7 @@ Warn-only / fail-open: the hook NEVER denies; it emits a systemMessage warning.
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -112,6 +113,42 @@ def test_malformed_stdin_fails_open():
     assert rc == 0, "malformed stdin must exit 0, got %s" % rc
     assert "systemMessage" not in out, "fail-open must be silent, got %r" % out
     print("PASS test_malformed_stdin_fails_open")
+
+
+def test_broken_sibling_import_still_warns_and_does_not_traceback():
+    """Regression, adversarial review 2026-07-17: session_liveness.py is imported at MODULE
+    LOAD, before main()'s try/except (or is_claude_md-style fast paths) even runs. This
+    hook never blocks either way (permissionDecision is always "allow"), so an import
+    failure here is not a security regression -- but it IS a reliability one: the crash
+    would traceback on EVERY Edit/Write/MultiEdit in every session, not just ones this hook
+    has something to say about. Proves TWO things: no traceback with the module missing,
+    AND the unrelated dirty-file warning still fires -- the stub degrades only the one
+    session-collision detail, not the whole hook."""
+    sandbox = tempfile.mkdtemp(prefix="scg-broken-")
+    shutil.copytree(HERE, os.path.join(sandbox, "hooks"))
+    broken_hook = os.path.join(sandbox, "hooks", "shared-checkout-guard.py")
+    os.remove(os.path.join(sandbox, "hooks", "lib", "session_liveness.py"))
+
+    repo = make_main_repo(dirty=True)
+    env = dict(os.environ)
+    env["SHARED_CHECKOUT_REPOS"] = repo
+    env["SHARED_CHECKOUT_SESSIONS_DIR"] = sessions_tmp()
+    proc = subprocess.run(
+        [sys.executable, broken_hook],
+        input=payload("s1", os.path.join(repo, "foreign-wip.txt")),
+        capture_output=True, text=True, env=env)
+
+    assert proc.returncode == 0, "must still exit 0, got %s\nstderr: %s" % (
+        proc.returncode, proc.stderr)
+    assert "Traceback" not in proc.stderr, (
+        "tracebacked with session_liveness.py missing -- the import guard did not "
+        "catch it\nstderr: %s" % proc.stderr)
+    assert "systemMessage" in proc.stdout, (
+        "the dirty-file warning itself must still fire -- only the session-collision "
+        "detail should degrade, not the whole hook. stdout: %r" % proc.stdout)
+
+    shutil.rmtree(sandbox, ignore_errors=True)
+    print("PASS test_broken_sibling_import_still_warns_and_does_not_traceback")
 
 
 def test_rearm_on_dirty_set_change():
@@ -237,6 +274,7 @@ if __name__ == "__main__":
     test_worktree_silent()
     test_main_clean_silent()
     test_main_dirty_warns()
+    test_broken_sibling_import_still_warns_and_does_not_traceback()
     test_dedupe_once_per_session()
     test_malformed_stdin_fails_open()
     test_rearm_on_dirty_set_change()
