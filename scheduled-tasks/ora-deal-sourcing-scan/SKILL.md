@@ -80,7 +80,7 @@ CANONICAL INPUTS
   CITATION CORRECTED 2026-07-14 — this task previously cited
   "20260517_ORA_Investment-Candidates-Ranking_v01.xlsx (Methodology sheet)". THAT FILE
   AND THAT SHEET DO NOT EXIST. The live workbook is
-  `OneDrive/Investment Candidates -- 2026/20260609_ORA_Investment-Candidates-Ranking_v05a-VintageVerified.xlsx`
+  `OneDrive/Business/Investment Candidates -- 2026/20260609_ORA_Investment-Candidates-Ranking_v05a-VintageVerified.xlsx` (path updated 2026-07-17 — `Investment Candidates -- 2026\` moved under `Business\` per the OneDrive Business/Personal split)
   and its doctrine lives on the "Assumptions & Sources" sheet.
   ⚠️ AND IT IS A DIFFERENT RUBRIC. The workbook (and the acquisition-underwriting
   skill) run "Buy Box & Scorecard v1.1": Basis 25 + Yield 20 + Product & Physical 20 +
