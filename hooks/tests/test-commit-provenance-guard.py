@@ -6,6 +6,7 @@ Fail-open BY CONSTRUCTION: blocking needs TWO affirmative signals (a foreign
 touched-set hit AND affirmative liveness). Anything else -> allow.
 """
 
+import importlib.util
 import json
 import os
 import subprocess
@@ -15,6 +16,15 @@ import time
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # hooks/
 HOOK = os.path.join(HERE, "commit-provenance-guard.py")
+
+# Load the guard module directly by file path so tests can call its
+# functions (is_git_commit, candidate_paths, repo_root) in-process.
+_spec = importlib.util.spec_from_file_location("commit_provenance_guard", HOOK)
+_cpg = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_cpg)
+is_git_commit = _cpg.is_git_commit
+candidate_paths = _cpg.candidate_paths
+repo_root = _cpg.repo_root
 
 
 def run_hook(cmd, cwd, sessions_dir, session_id="me", fleet_state=None, ttl_h=None):
@@ -123,10 +133,54 @@ def test_dry_run_allows():
     print("PASS test_dry_run_allows")
 
 
+# ---------- Regression cases: tokenization, not regex substring/split ----------
+
+def test_git_add_of_commit_named_file_is_not_a_commit():
+    """`is_git_commit` must key off the git SUBCOMMAND, not a substring match
+    -- a filename containing "commit" must never trigger the guard."""
+    assert is_git_commit("git add hooks/commit-provenance-guard.py") is False
+    assert is_git_commit("git log --oneline -- hooks/commit-provenance-guard.py") is False
+    assert is_git_commit('git commit -m "x"') is True
+    assert is_git_commit("cd /x && git commit -m y") is True
+    print("PASS test_git_add_of_commit_named_file_is_not_a_commit")
+
+
+def test_commit_message_with_dashdash_does_not_corrupt_pathspec():
+    """A ` -- ` sequence inside a quoted -m message must not be mistaken for
+    the pathspec separator; a REAL trailing `--` pathspec must still work."""
+    repo = make_repo()
+    mine = write_and_stage(repo, "mine.txt")
+    theirs = write_and_stage(repo, "theirs.txt")
+
+    no_real_pathspec = candidate_paths(repo, 'git commit -m "foo -- bar"')
+    assert no_real_pathspec == {mine, theirs}, (
+        "no real pathspec -> full staged set, got %r" % no_real_pathspec)
+
+    with_pathspec = candidate_paths(
+        repo, 'git commit -m "foo -- bar" -- mine.txt')
+    assert with_pathspec == {mine}, (
+        "real pathspec after a quoted -- must win, got %r" % with_pathspec)
+    print("PASS test_commit_message_with_dashdash_does_not_corrupt_pathspec")
+
+
+def test_pathspec_narrows_candidate_set():
+    repo = make_repo()
+    mine = write_and_stage(repo, "mine.txt")
+    theirs = write_and_stage(repo, "theirs.txt")
+
+    result = candidate_paths(repo, 'git commit -m "x" -- mine.txt')
+    assert result == {mine}, "pathspec must narrow to just mine.txt, got %r" % result
+    assert theirs not in result
+    print("PASS test_pathspec_narrows_candidate_set")
+
+
 if __name__ == "__main__":
     test_non_git_command_silent()
     test_git_commit_with_no_foreign_files_allows()
     test_malformed_stdin_fails_open()
     test_cwd_not_a_repo_allows()
     test_dry_run_allows()
+    test_git_add_of_commit_named_file_is_not_a_commit()
+    test_commit_message_with_dashdash_does_not_corrupt_pathspec()
+    test_pathspec_narrows_candidate_set()
     print("ALL COMMIT-PROVENANCE-GUARD TESTS PASS")
