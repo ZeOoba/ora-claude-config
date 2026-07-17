@@ -687,7 +687,7 @@ unreachable source is likewise recorded as a COVERAGE GAP, not dropped.
 the 2026-07-16 run declared the ORA Master Workbook "not locally resolvable
 from this surface" without trying either of two paths that do work from
 CC/MCP: (1) the workbook is OneDrive-synced locally at
-`C:\Users\Owner\OneDrive - Oxford Capital Partners\eric spreadsheets\Master Excel Template Company Wide -- Oxford.xlsx`
+`C:\Users\Owner\OneDrive - Oxford Capital Partners\eric spreadsheets\Master Excel Template Company Wide -- Oxford.xlsx` (2026-07-17: `eric spreadsheets\` is in the OneDrive Business/Personal split's Ambiguous bucket — deliberately NOT moved, still at OneDrive root — do not prepend `Business\` to this path)
 (same path `ora-master-workbook-ingest` reads directly — verified present
 2026-07-16, `lastModifiedDateTime` 2026-07-15) — read it cell-accurately via
 `mcp__Desktop_Commander__read_file`, exactly as that task does; (2) failing
@@ -823,7 +823,7 @@ missed run is itself surfaced by `automation-health-monitor`.
     call timed out (>15s).
 - **Fallback persistence (all three blocks, on any send failure):** write the
   block's HTML body to
-  `C:\Users\Owner\OneDrive - Oxford Capital Partners\ORA\Briefs\outputs\{TODAY}_<block>.html`
+  `C:\Users\Owner\OneDrive - Oxford Capital Partners\Business\ORA\Briefs\outputs\{TODAY}_<block>.html` (path updated 2026-07-17 — `ORA\` moved under `Business\` per the OneDrive Business/Personal split)
   — filenames used in practice: `{TODAY}_notion-daily-digest.html`,
   `{TODAY}_outbox-qc.html`, `{TODAY}_eod-action-ledger.html`. **Use this
   exact no-`"(1)"`-suffix OneDrive path** — the parallel folder
