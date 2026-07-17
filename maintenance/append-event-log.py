@@ -238,7 +238,11 @@ def main(argv=None):
             entry = f.read()
     else:
         entry = sys.stdin.read()
-    entry = entry.strip()
+    # Tolerate a leading UTF-8 BOM. PowerShell 5.1 `Set-Content -Encoding UTF8` prepends one
+    # (U+FEFF), which str.strip() does NOT remove -- so a BOM'd --entry-file used to fail the
+    # '## ' header check in insert_newest() (2026-07-17). lstrip it before validation; harmless
+    # on BOM-free input and on the stdin path.
+    entry = entry.lstrip("﻿").strip()
     if not entry:
         sys.stderr.write("empty entry\n")
         return 1
