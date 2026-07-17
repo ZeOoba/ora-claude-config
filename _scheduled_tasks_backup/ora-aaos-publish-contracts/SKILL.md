@@ -1,6 +1,6 @@
 ---
 name: ora-aaos-publish-contracts
-description: AAOS contracts-mirror publisher (CC/MCP fleet, filesystem/git tool) — republishes schemas/spec/registry/templates from the AAOS git tree to the seam's read-only contracts/ mirror on a 3x-daily cadence (08:00 / 11:00 / 14:00 ET) so it never drifts silently behind HEAD; silent on success, emails ggoldberg only on failure. v1.0 2026-07-10 (cadence changed hourly→3x/day 2026-07-10). [MODEL: UNVERIFIABLE | checked 2026-07-12]
+description: AAOS contracts-mirror publisher (CC/MCP fleet, filesystem/git tool) — republishes schemas/spec/registry/templates from the AAOS git tree to the seam's read-only contracts/ mirror on a 2x-daily cadence (09:00 / 15:00 ET) so it never drifts silently behind HEAD; silent on success, emails ggoldberg only on failure. v1.1 2026-07-16: cadence halved 3×→2×/day per Fleet Ledger v2 ruling C2. v1.0 2026-07-10 (cadence changed hourly→3x/day 2026-07-10). [MODEL: UNVERIFIABLE | checked 2026-07-12]
 ---
 
 Run the AAOS contracts-mirror publisher:
