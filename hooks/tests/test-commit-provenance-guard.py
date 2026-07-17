@@ -1,0 +1,132 @@
+"""Tests for commit-provenance-guard.py PreToolUse hook (matcher: Bash).
+
+Run: python test-commit-provenance-guard.py
+Stdlib only. ASCII-only. Self-contained (creates its own temp git repos).
+Fail-open BY CONSTRUCTION: blocking needs TWO affirmative signals (a foreign
+touched-set hit AND affirmative liveness). Anything else -> allow.
+"""
+
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import time
+
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # hooks/
+HOOK = os.path.join(HERE, "commit-provenance-guard.py")
+
+
+def run_hook(cmd, cwd, sessions_dir, session_id="me", fleet_state=None, ttl_h=None):
+    env = dict(os.environ)
+    env["COMMIT_PROVENANCE_SESSIONS_DIR"] = sessions_dir
+    if ttl_h is not None:
+        env["COMMIT_PROVENANCE_TTL_H"] = str(ttl_h)
+    env["ORA_FLEET_STATE"] = fleet_state or "C:/does/not/exist_cpg.json"
+    payload = json.dumps({
+        "session_id": session_id, "cwd": cwd,
+        "tool_input": {"command": cmd},
+    })
+    proc = subprocess.run([sys.executable, HOOK], input=payload,
+                          capture_output=True, text=True, env=env)
+    return proc.returncode, proc.stdout, proc.stderr
+
+
+def _git(args, cwd):
+    subprocess.run(["git"] + args, cwd=cwd, capture_output=True, text=True)
+
+
+def make_repo():
+    d = tempfile.mkdtemp(prefix="cpg-repo-")
+    _git(["init", "-q"], d)
+    _git(["config", "user.email", "t@t.t"], d)
+    _git(["config", "user.name", "t"], d)
+    return d
+
+
+def write_and_stage(repo, name, text="x"):
+    p = os.path.join(repo, name)
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    _git(["add", name], repo)
+    return os.path.normcase(os.path.abspath(p))
+
+
+def sessions_tmp():
+    return tempfile.mkdtemp(prefix="cpg-sess-")
+
+
+def seed_touched(sessions_dir, sid, paths, age_h=0):
+    d = os.path.join(sessions_dir, sid)
+    os.makedirs(d, exist_ok=True)
+    p = os.path.join(d, "touched-files.txt")
+    with open(p, "w", encoding="utf-8") as fh:
+        for x in paths:
+            fh.write(x + "\n")
+    if age_h:
+        old = time.time() - age_h * 3600
+        os.utime(p, (old, old))
+    return p
+
+
+def fleet_state_with(sids):
+    fd, path = tempfile.mkstemp(suffix="_fleet.json")
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump({"sessions": {s: {"status": "working", "cwd": "x", "lastAt": "t"}
+                                for s in sids}}, fh)
+    return path
+
+
+# ---------- Task 2 cases: detection + always-allow ----------
+
+def test_non_git_command_silent():
+    repo = make_repo()
+    rc, out, err = run_hook("ls -la", repo, sessions_tmp())
+    assert rc == 0, "non-git must allow, got %s" % rc
+    assert out == "" and err == "", "must be silent, got %r / %r" % (out, err)
+    print("PASS test_non_git_command_silent")
+
+
+def test_git_commit_with_no_foreign_files_allows():
+    repo = make_repo()
+    write_and_stage(repo, "mine.txt")
+    rc, out, err = run_hook('git commit -m "x"', repo, sessions_tmp())
+    assert rc == 0, "no foreign files -> allow, got %s (%s)" % (rc, err)
+    print("PASS test_git_commit_with_no_foreign_files_allows")
+
+
+def test_malformed_stdin_fails_open():
+    env = dict(os.environ)
+    env["COMMIT_PROVENANCE_SESSIONS_DIR"] = sessions_tmp()
+    proc = subprocess.run([sys.executable, HOOK], input="not json",
+                          capture_output=True, text=True, env=env)
+    assert proc.returncode == 0, "malformed stdin must exit 0, got %s" % proc.returncode
+    print("PASS test_malformed_stdin_fails_open")
+
+
+def test_cwd_not_a_repo_allows():
+    d = tempfile.mkdtemp(prefix="cpg-norepo-")
+    rc, out, err = run_hook('git commit -m "x"', d, sessions_tmp())
+    assert rc == 0, "not a git repo -> allow, got %s" % rc
+    print("PASS test_cwd_not_a_repo_allows")
+
+
+def test_dry_run_allows():
+    """--dry-run fixes no provenance, so it is never blocked."""
+    repo = make_repo()
+    foreign = write_and_stage(repo, "theirs.txt")
+    sess = sessions_tmp()
+    seed_touched(sess, "other", [foreign])
+    fs = fleet_state_with(["other"])
+    rc, out, err = run_hook('git commit --dry-run -m "x"', repo, sess, fleet_state=fs)
+    assert rc == 0, "--dry-run must always allow, got %s (%s)" % (rc, err)
+    print("PASS test_dry_run_allows")
+
+
+if __name__ == "__main__":
+    test_non_git_command_silent()
+    test_git_commit_with_no_foreign_files_allows()
+    test_malformed_stdin_fails_open()
+    test_cwd_not_a_repo_allows()
+    test_dry_run_allows()
+    print("ALL COMMIT-PROVENANCE-GUARD TESTS PASS")
