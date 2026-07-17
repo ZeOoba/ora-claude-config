@@ -1,6 +1,6 @@
 ---
 name: project-tenant-db-no-sync-rootcause
-description: "ROOT CAUSE 2026-07-16: there was NO workbook→Notion tenant sync — the DB was a frozen March-2026 import. CLOSED 2026-07-17: OI-003 through OI-006 all executed (schema property added, reconciliation run, Heritage Pool + 9620 State 350 dedups, 4 turnovers + Soldier Trucking property conflict corrected against executed leases)."
+description: "ROOT CAUSE 2026-07-16: there was NO workbook→Notion tenant sync — the DB was a frozen March-2026 import. CLOSED 2026-07-17: OI-003 through OI-006 executed, plus the 7 remaining WORKBOOK-NEWER rows + Masala Bazaar dedup. Found a second systematic bug: several Notion rows had Escalation Date miscopied into the Lease Expiration field at the original March import."
 metadata: 
   node_type: memory
   type: project
@@ -21,12 +21,42 @@ this was a one-time manual remediation, not a standing sync (OI-003's mirror is 
 report-only tool; nothing runs it automatically). The next `ora-master-workbook-ingest` or manual
 reconciliation run will re-surface any NEW drift since 2026-07-17.
 
-**Still open, deliberately out of scope for OI-003–006, not yet actioned:** Heritage Pool
-Supply's `Monthly Rent` ($8,540) vs. its lease amendment's Year-1 rate ($8,710.80/mo) — flagged in
-[OI-005](open-items-tracker.md#OI-005)'s evidence, not corrected. The 7 other WORKBOOK-NEWER rows
-surfaced by OI-003 (Pedro Ulate, Fully Equipped Cleaning, SAFE CONNECTION ELECTRIC, Carlton Handy,
-Randy's Aquarium Service, TYM Wholesale, Masala Bazaar/Azad Shah dedup) were not part of Gabriel's
-OI-003/004/005/006 instruction and were not touched.
+**Also closed same-session, same-day (not separate OI numbers — reactive follow-on, not part of
+Gabriel's original OI-003/004/005/006 instruction):**
+- **Heritage Pool Supply `Monthly Rent`** ($8,540 vs. its lease amendment's $8,710.80 Year-1 rate)
+  — Gabriel ratified $8,540 as correct, in-turn. See [[ops_decision_log]]. No write made.
+- **7 remaining WORKBOOK-NEWER rows from the OI-003 report**, run down and corrected:
+  - **Masala Bazaar/Azad Shah dedup** — resolved without needing lease documents. Notion already
+    had a correct row (`Azad Shah (M&N)`, exp 2030-09-30, matches the workbook exactly) sitting
+    alongside a stale duplicate (`Masala Bazaar (XPO Foods, LLC)`, exp 2027-12-31) — same
+    keep-one/retire-one pattern as Heritage Pool. Retired the stale duplicate.
+  - **5 of 6 remaining date corrections confirmed directly against primary lease/addendum
+    documents** (Fully Equipped Cleaning Maintenance Services LLC, SAFE CONNECTION ELECTRIC LLC,
+    Carlton L. Handy, Randy's Aquarium Service, TYM Wholesale LLC) — each addendum's termination
+    date and rent figure matched the live workbook's `Lease End`/`Monthly Rent` exactly, confirming
+    the workbook was right and Notion was wrong. Corrections written and verified.
+  - **International Mechanic - Pedro Ulate**: no dedicated lease document found in SharePoint
+    despite 3 targeted searches. Corrected anyway on **pattern inference, not document
+    confirmation** — its Notion/workbook signature was identical to the other 5 (see finding
+    below), and the correction only aligns Notion with the workbook's own `Lease End` field, which
+    is already a legitimate DSOR value. Flagged here as the one weaker-evidence write in this
+    batch; if a Pedro Ulate lease surfaces later, re-verify against it.
+
+## New finding: a second systematic Notion data-entry bug (distinct from the "no sync" root cause)
+
+Of the 7 WORKBOOK-NEWER rows, **5 shared an exact signature**: Notion's `Lease Expiration` value
+equaled the workbook's `Escalation Date` column, not its `Lease End` column, to the exact day
+(Pedro Ulate, SAFE CONNECTION ELECTRIC, TYM Wholesale, Randy's Aquarium — verified before reading
+any documents; Carlton Handy's Notion value didn't match either WB column, turned out to be a
+pre-2nd-addendum figure instead). Reading primary lease/addendum documents for 5 of the 7
+confirmed the workbook's `Lease End` was correct in every case — this was a **column-mapping bug
+at the original March 2026 one-time import**, not staleness and not a workbook error. **This
+pattern was NOT exhaustively swept** — only the 7 rows OI-003 happened to flag as WORKBOOK-NEWER
+were checked. Since the bug is a column-mapping defect, it could affect other rows where the
+current Escalation Date coincidentally still resembles a plausible Lease Expiration, or rows not
+caught by the street-family reconciliation join at all. **Candidate follow-up, not yet scoped or
+opened as an OI item:** a targeted sweep comparing every live Notion `Lease Expiration` against
+its workbook `Escalation Date` (not just `Lease End`) to find any other miscopied rows.
 
 ## The finding
 
