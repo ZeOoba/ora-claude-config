@@ -161,8 +161,13 @@ and all three are stamped; deal-comparison and owner-outreach correctly excluded
 complete:** the post-commit hook staged all 3 skills in `_staging/PENDING_REIMPORT.md`; going live in
 the Cowork runtime needs `package_skills.py` → present `.skill` → **manual Save-skill click** (GUI,
 not headless), then `pending_reimport.py clear <skill>`. Until then the Monday
-`ora-skill-store-drift-check` will flag repo↔store drift. (3) Branch `board-last-activity-stamp` is
-**committed locally, not merged to main or pushed** — awaiting Gabriel's review/merge.
+`ora-skill-store-drift-check` will flag repo↔store drift. (3) ~~Branch `board-last-activity-stamp` is
+committed locally, not merged to main or pushed — awaiting Gabriel's review/merge.~~ **Stale —
+corrected 2026-07-17 (Code-surface verification):** `git branch -vv` on `ora-skills` shows
+`board-last-activity-stamp` at `5dda2cd`, identical to `main`; `git log main..board-last-activity-stamp`
+returns zero commits (fully merged); `git log origin/main..main` also returns zero commits and
+`git rev-parse origin/main main` return the same SHA (`main` fully pushed). The branch is not a
+residual — this note was simply stale by the time of closure.
 **Progress 2026-07-17 (reimport attempt, blocked):** Re-verified `_staging/PENDING_REIMPORT.md` still
 listed all 3 (`acquisition-underwriting`, `deal-execution`, `loi-generation`, pending since
 2026-07-17T18:17Z, commit `643dd9f`). Packaged `acquisition-underwriting.skill` successfully via
