@@ -38,24 +38,48 @@ def git(*args):
     return proc.returncode, proc.stdout.strip()
 
 
-def test_no_override_token_is_tracked():
-    """No file under any overrides/ directory may be tracked by git. A tracked
-    token is a clone-mintable override -- the exact 2026-07-16 finding."""
-    rc, out = git("ls-files")
-    assert rc == 0, "git ls-files failed"
-    tracked = [
+def _override_paths_in(treeish):
+    rc, out = git("ls-tree", "-r", "--name-only", treeish)
+    if rc != 0:
+        return []
+    return [
         line
         for line in out.splitlines()
         if "/overrides/" in line.replace("\\", "/")
         or line.replace("\\", "/").startswith("overrides/")
     ]
-    assert not tracked, (
-        "override token(s) tracked by git -- a clone/checkout mints these with a\n"
-        "fresh mtime and self-grants a live override. Untrack with\n"
+
+
+def test_no_override_token_is_tracked_on_any_ref():
+    """No file under any overrides/ directory may be tracked by git ON ANY BRANCH.
+
+    Scans every ref, not just the current index. Cleaning main is NOT enough: .gitignore
+    does not protect ALREADY-TRACKED files, so a token still tracked on a side branch is
+    re-minted at age ~0 the moment anyone checks that branch out -- self-granting a live
+    override. That is not hypothetical: after b23a025 untracked the sentinel on main, an
+    adversarial review found the same token still tracked on `commit-provenance-guard`, and
+    demonstrated `git checkout` of that branch self-granting a 60-min prod-deploy window.
+    An index-only check (`git ls-files`) is blind to exactly that case (2026-07-16).
+    """
+    rc, out = git("for-each-ref", "--format=%(refname:short)", "refs/heads/", "refs/remotes/")
+    assert rc == 0, "git for-each-ref failed"
+    offenders = {}
+    for ref in out.splitlines():
+        ref = ref.strip()
+        if not ref:
+            continue
+        hits = _override_paths_in(ref)
+        if hits:
+            offenders[ref] = hits
+    assert not offenders, (
+        "override token(s) tracked by git -- a clone/checkout of these refs mints them with\n"
+        "a fresh mtime and self-grants a live override. .gitignore does NOT protect an\n"
+        "already-tracked file. Untrack on each ref with:\n"
         "  git rm --cached <path>\n"
-        "Tracked: %s" % tracked
+        "Offenders: %s" % offenders
     )
-    print("PASS test_no_override_token_is_tracked")
+    print("PASS test_no_override_token_is_tracked_on_any_ref (%d ref(s) scanned)"
+          % len(out.splitlines()))
 
 
 def test_overrides_dir_is_gitignored():
@@ -83,7 +107,7 @@ def test_session_override_home_is_gitignored():
 
 
 if __name__ == "__main__":
-    test_no_override_token_is_tracked()
+    test_no_override_token_is_tracked_on_any_ref()
     test_overrides_dir_is_gitignored()
     test_session_override_home_is_gitignored()
     print("ALL OVERRIDE-TOKEN-HYGIENE TESTS PASS")
