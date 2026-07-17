@@ -1,4 +1,4 @@
-"""Tests for ora-autonomy-gate.py PreToolUse hook (Gate 2 -- website writes).
+"""Tests for ora-autonomy-gate.py PreToolUse hook (Gates 1 and 2).
 
 Run: python test-ora-autonomy-gate.py
 Stdlib only. ASCII-only. Self-contained.
@@ -8,14 +8,18 @@ Written alongside the site-marker de-duplication fix (hooks/lib/site_markers.py)
 to lock in both the pre-existing legacy-marker behavior and the newly-closed
 domain-form-marker gap.
 
-Every call defaults OVERRIDE_DIR to a fresh, empty, isolated temp directory
-(systematization follow-up, 2026-07-12) -- without this, every block-expecting
-test here silently depended on the real ~/.claude/hooks/overrides/ directory's
-live contents: a legitimate active override (e.g. a real Gabriel-approved
-"allow-website-change" sentinel from a concurrent session) would flip
-test_blocks_legacy_markers from PASS to a false PASS-via-wrong-reason, or a
-future stricter assertion could fail the suite outright. Mirrors
-shared-checkout-guard.py's SHARED_CHECKOUT_REPOS env-var isolation pattern.
+2026-07-16 -- override-token hardening. The old flat `hooks/overrides/<name>`
+sentinel was mtime-only: content-blind, session-blind, one name for four gates,
+and (worst) git-tracked, so a plain `git clone` materialized the token with
+mtime=now and self-granted a live production-deploy window with no human
+involved. That was proven empirically: a fresh clone made the gate return exit 0
+for `netlify deploy --prod`, against an empty-dir control returning exit 2.
+
+Tokens now live in `hooks/sessions/<session_id>/overrides/<name>`, which is
+already gitignored -- a token is now structurally impossible to commit. Every
+test below drives that path through ORA_OVERRIDE_SESSIONS_DIR, isolated per
+test, so the suite never depends on (nor can be flipped by) a real live token
+from a concurrent session.
 """
 
 import json
@@ -23,22 +27,60 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOOK = os.path.join(HERE, "ora-autonomy-gate.py")
 
+SESSION_A = "aaaaaaaa-1111-2222-3333-444444444444"
+SESSION_B = "bbbbbbbb-5555-6666-7777-888888888888"
 
-def run_hook(payload_dict, override_dir=None):
+SITE_FILE = "C:/Users/Owner/website-canonical/src/index.html"
+PROD_DEPLOY = "netlify deploy --build --prod"
+
+
+def run_hook(payload_dict, sessions_dir=None, session_id=SESSION_A, omit_session=False):
     env = dict(os.environ)
-    env["OVERRIDE_DIR"] = override_dir if override_dir is not None else tempfile.mkdtemp(prefix="oag-ovr-")
+    env["ORA_OVERRIDE_SESSIONS_DIR"] = (
+        sessions_dir if sessions_dir is not None else tempfile.mkdtemp(prefix="oag-sess-")
+    )
+    payload = dict(payload_dict)
+    if not omit_session:
+        payload["session_id"] = session_id
     proc = subprocess.run(
         [sys.executable, HOOK],
-        input=json.dumps(payload_dict),
+        input=json.dumps(payload),
         capture_output=True,
         text=True,
         env=env,
     )
     return proc.returncode, proc.stdout, proc.stderr
+
+
+def fresh_sessions_dir():
+    return tempfile.mkdtemp(prefix="oag-sess-")
+
+
+def mint(sessions_dir, name, scope, session_id=SESSION_A, recipients=None,
+         reason="Gabriel approved in-turn", age_seconds=0, raw=None):
+    """Write an override token into the session-scoped override dir."""
+    d = os.path.join(sessions_dir, session_id, "overrides")
+    os.makedirs(d, exist_ok=True)
+    path = os.path.join(d, name)
+    if raw is not None:
+        body = raw
+    else:
+        lines = ["scope: %s" % scope, "session: %s" % session_id]
+        if recipients is not None:
+            lines.append("recipients: %s" % ", ".join(recipients))
+        lines.append("reason: %s" % reason)
+        body = "\n".join(lines) + "\n"
+    with open(path, "w", encoding="ascii") as fh:
+        fh.write(body)
+    if age_seconds:
+        old = time.time() - age_seconds
+        os.utime(path, (old, old))
+    return path
 
 
 def write_payload(file_path):
@@ -48,6 +90,19 @@ def write_payload(file_path):
 def bash_payload(command):
     return {"tool_name": "Bash", "tool_input": {"command": command}}
 
+
+def mcp_payload(tool_name):
+    return {"tool_name": tool_name, "tool_input": {}}
+
+
+def send_payload(recipient):
+    cmd = ('powershell -File send-via-outlook.ps1 -To %s -Subject "hi" -Body "hi"' % recipient)
+    return bash_payload(cmd)
+
+
+# --------------------------------------------------------------------------
+# Pre-existing behavior (must not regress)
+# --------------------------------------------------------------------------
 
 def test_blocks_legacy_markers():
     for marker_path in [
@@ -60,12 +115,6 @@ def test_blocks_legacy_markers():
 
 
 def test_domain_form_markers_do_not_block_via_this_hook():
-    """Gate 2's matching is whole-command/whole-path bare substring -- domain-form
-    aliases (oxfordra.net, oxfordra_net) are deliberately NOT part of this hook's
-    marker set, unlike confidentiality-guard.py's narrower path-only egress
-    classifier. An earlier version of this fix (2026-07-12) unioned them in and an
-    independent code review caught, empirically, that it caused false-positive hard
-    blocks on routine operations (see the test_allows_* cases below) -- reverted."""
     for marker_path in [
         "C:/some/other/tree/oxfordra.net/page.html",
         "C:/some/other/tree/oxfordra_net/page.html",
@@ -80,24 +129,18 @@ def test_domain_form_markers_do_not_block_via_this_hook():
 
 
 def test_allows_internal_email_with_redirect():
-    """Regression (2026-07-12 code review finding): an ordinary internal email
-    address followed by an output redirect must not trip Gate 2b."""
     rc, out, err = run_hook(bash_payload("echo notify ggoldberg@oxfordra.net > note.txt"))
     assert rc == 0, "internal email + redirect must not block, got %s (%s)" % (rc, err)
     print("PASS test_allows_internal_email_with_redirect")
 
 
 def test_allows_curl_fetch_of_site():
-    """A read/fetch of the live site (no write indicator applies to the site itself)
-    must not block."""
     rc, out, err = run_hook(bash_payload("curl -s https://oxfordra.net > page.html"))
     assert rc == 0, "fetching the live site to a local file must not block, got %s (%s)" % (rc, err)
     print("PASS test_allows_curl_fetch_of_site")
 
 
 def test_allows_internal_send_with_redirect():
-    """The pre-authorized internal fleet send (invariant 1 carve-out) must not be
-    blocked just because its own log redirect happens to contain the domain."""
     cmd = ('powershell -File send-via-outlook.ps1 -To ggoldberg@oxfordra.net '
            '-Subject "hi" -Body "hi" > send.log')
     rc, out, err = run_hook(bash_payload(cmd))
@@ -123,44 +166,321 @@ def test_malformed_stdin_fails_open():
     print("PASS test_malformed_stdin_fails_open")
 
 
-def test_override_dir_env_var_honors_isolated_override():
-    """Candidate 2: OVERRIDE_DIR must be env-overridable so an override sentinel
-    placed in an isolated test directory is honored, independent of the real
-    ~/.claude/hooks/overrides/ directory's live contents."""
-    isolated = tempfile.mkdtemp(prefix="oag-ovr-live-")
-    with open(os.path.join(isolated, "allow-website-change"), "w") as fh:
-        fh.write("test override")
-    rc, out, err = run_hook(
-        write_payload("C:/Users/Owner/website-canonical/src/index.html"), override_dir=isolated
-    )
-    assert rc == 0, (
-        "a fresh override sentinel in the isolated OVERRIDE_DIR must allow the "
-        "write, got %s (%s)" % (rc, err)
-    )
-    print("PASS test_override_dir_env_var_honors_isolated_override")
+def test_empty_session_override_dir_still_blocks():
+    """Proves the hook reads ORA_OVERRIDE_SESSIONS_DIR (not silently falling back
+    to a live default) and that isolation doesn't accidentally allow-by-default."""
+    rc, out, err = run_hook(write_payload(SITE_FILE), sessions_dir=fresh_sessions_dir())
+    assert rc == 2, "an empty isolated sessions dir must still block, got %s (%s)" % (rc, err)
+    print("PASS test_empty_session_override_dir_still_blocks")
 
 
-def test_override_dir_env_var_empty_dir_still_blocks():
-    """Same env var, but pointed at an empty isolated dir -- proves the hook
-    reads OVERRIDE_DIR (not silently falling back to the live default) and
-    that isolation doesn't accidentally allow-by-default."""
-    empty = tempfile.mkdtemp(prefix="oag-ovr-empty-")
-    rc, out, err = run_hook(
-        write_payload("C:/Users/Owner/website-canonical/src/index.html"), override_dir=empty
+# --------------------------------------------------------------------------
+# Happy paths -- a correctly-scoped token in the CURRENT session grants
+# --------------------------------------------------------------------------
+
+def test_write_token_allows_site_file_write():
+    d = fresh_sessions_dir()
+    mint(d, "allow-website-write", "website-write")
+    rc, out, err = run_hook(write_payload(SITE_FILE), sessions_dir=d)
+    assert rc == 0, "a fresh website-write token must allow the site write, got %s (%s)" % (rc, err)
+    print("PASS test_write_token_allows_site_file_write")
+
+
+def test_deploy_token_allows_prod_deploy():
+    d = fresh_sessions_dir()
+    mint(d, "allow-website-deploy", "website-deploy")
+    rc, out, err = run_hook(bash_payload(PROD_DEPLOY), sessions_dir=d)
+    assert rc == 0, "a fresh website-deploy token must allow the prod deploy, got %s (%s)" % (rc, err)
+    print("PASS test_deploy_token_allows_prod_deploy")
+
+
+def test_external_send_token_allows_named_recipient():
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=["broker@example.com"])
+    rc, out, err = run_hook(send_payload("broker@example.com"), sessions_dir=d)
+    assert rc == 0, "a token naming the recipient must allow that send, got %s (%s)" % (rc, err)
+    print("PASS test_external_send_token_allows_named_recipient")
+
+
+# --------------------------------------------------------------------------
+# FIX 2 -- severity split: a write grant must not open a deploy
+# --------------------------------------------------------------------------
+
+def test_write_token_does_not_authorize_prod_deploy():
+    """The headline severity bug: the routine case is a local file edit, but the
+    old single `allow-website-change` token also opened `netlify --prod`."""
+    d = fresh_sessions_dir()
+    mint(d, "allow-website-write", "website-write")
+    rc, out, err = run_hook(bash_payload(PROD_DEPLOY), sessions_dir=d)
+    assert rc == 2, "a website-write token must NOT authorize a prod deploy, got %s (%s)" % (rc, err)
+    print("PASS test_write_token_does_not_authorize_prod_deploy")
+
+
+def test_write_token_does_not_authorize_netlify_mcp_updater():
+    d = fresh_sessions_dir()
+    mint(d, "allow-website-write", "website-write")
+    rc, out, err = run_hook(mcp_payload("mcp__netlify__project-updater"), sessions_dir=d)
+    assert rc == 2, "a website-write token must NOT authorize a Netlify MCP updater, got %s (%s)" % (rc, err)
+    print("PASS test_write_token_does_not_authorize_netlify_mcp_updater")
+
+
+def test_deploy_token_does_not_authorize_site_file_write():
+    """Strict one-grant-one-tier: the split cuts both ways."""
+    d = fresh_sessions_dir()
+    mint(d, "allow-website-deploy", "website-deploy")
+    rc, out, err = run_hook(write_payload(SITE_FILE), sessions_dir=d)
+    assert rc == 2, "a website-deploy token must NOT authorize a site file write, got %s (%s)" % (rc, err)
+    print("PASS test_deploy_token_does_not_authorize_site_file_write")
+
+
+def test_legacy_token_name_grants_nothing():
+    """MIGRATION: the retired `allow-website-change` name must be inert. An
+    in-flight token from the old scheme fails CLOSED (blocks), never grants."""
+    d = fresh_sessions_dir()
+    mint(d, "allow-website-change", "website-deploy")
+    rc, out, err = run_hook(bash_payload(PROD_DEPLOY), sessions_dir=d)
+    assert rc == 2, "the retired allow-website-change name must grant nothing, got %s (%s)" % (rc, err)
+    rc, out, err = run_hook(write_payload(SITE_FILE), sessions_dir=d)
+    assert rc == 2, "the retired allow-website-change name must grant nothing, got %s (%s)" % (rc, err)
+    print("PASS test_legacy_token_name_grants_nothing")
+
+
+# --------------------------------------------------------------------------
+# FIX 1 -- session scoping
+# --------------------------------------------------------------------------
+
+def test_other_sessions_token_is_ignored():
+    """The cross-session leak. Session B's live token must not grant session A."""
+    d = fresh_sessions_dir()
+    mint(d, "allow-website-deploy", "website-deploy", session_id=SESSION_B)
+    rc, out, err = run_hook(bash_payload(PROD_DEPLOY), sessions_dir=d, session_id=SESSION_A)
+    assert rc == 2, "another session's token must not grant this one, got %s (%s)" % (rc, err)
+    print("PASS test_other_sessions_token_is_ignored")
+
+
+def test_missing_session_id_blocks():
+    """Fail CLOSED: no session_id means no override is reachable at all."""
+    d = fresh_sessions_dir()
+    mint(d, "allow-website-deploy", "website-deploy")
+    rc, out, err = run_hook(bash_payload(PROD_DEPLOY), sessions_dir=d, omit_session=True)
+    assert rc == 2, "a payload with no session_id must block, got %s (%s)" % (rc, err)
+    print("PASS test_missing_session_id_blocks")
+
+
+def test_session_id_path_traversal_blocks():
+    """A session_id of '..' shapes must not escape the sessions root and reach
+    the legacy flat overrides dir (or anything else)."""
+    d = fresh_sessions_dir()
+    legacy = os.path.join(d, "overrides")
+    os.makedirs(legacy, exist_ok=True)
+    with open(os.path.join(legacy, "allow-website-deploy"), "w") as fh:
+        fh.write("scope: website-deploy\nsession: ../x\n")
+    for evil in ["..", "../..", "../overrides", "a/../../overrides", "\\..\\overrides"]:
+        rc, out, err = run_hook(bash_payload(PROD_DEPLOY), sessions_dir=d, session_id=evil)
+        assert rc == 2, "traversal session_id %r must block, got %s (%s)" % (evil, rc, err)
+    print("PASS test_session_id_path_traversal_blocks")
+
+
+# --------------------------------------------------------------------------
+# FIX 3 -- content is load-bearing
+# --------------------------------------------------------------------------
+
+def test_contentless_token_blocks():
+    """The 2026-07-12 test wrote the literal string 'test override' and the gate
+    honored it. Any bytes used to work. Now they must not."""
+    d = fresh_sessions_dir()
+    mint(d, "allow-website-deploy", None, raw="test override")
+    rc, out, err = run_hook(bash_payload(PROD_DEPLOY), sessions_dir=d)
+    assert rc == 2, "a token with no parseable scope must block, got %s (%s)" % (rc, err)
+    print("PASS test_contentless_token_blocks")
+
+
+def test_not_a_deploy_token_cannot_deploy():
+    """Verbatim from the live incident: a token whose justification says it is
+    NOT a deploy must not be able to deploy."""
+    d = fresh_sessions_dir()
+    mint(d, "allow-website-deploy", "website-write",
+         reason="recompress 10 oversized WebP property-card images. Not a deploy.")
+    rc, out, err = run_hook(bash_payload(PROD_DEPLOY), sessions_dir=d)
+    assert rc == 2, "a 'Not a deploy' (website-write scope) token must not deploy, got %s (%s)" % (rc, err)
+    print("PASS test_not_a_deploy_token_cannot_deploy")
+
+
+def test_scope_mismatch_inside_token_blocks():
+    """Filename says deploy, content says write -> refuse. Catches a copied or
+    renamed token."""
+    d = fresh_sessions_dir()
+    mint(d, "allow-website-deploy", "website-write")
+    rc, out, err = run_hook(bash_payload(PROD_DEPLOY), sessions_dir=d)
+    assert rc == 2, "scope mismatch must block, got %s (%s)" % (rc, err)
+    print("PASS test_scope_mismatch_inside_token_blocks")
+
+
+def test_session_mismatch_inside_token_blocks():
+    """Token sits in session A's dir but its content names session B -> refuse."""
+    d = fresh_sessions_dir()
+    path = mint(d, "allow-website-deploy", "website-deploy")
+    with open(path, "w", encoding="ascii") as fh:
+        fh.write("scope: website-deploy\nsession: %s\nreason: copied\n" % SESSION_B)
+    rc, out, err = run_hook(bash_payload(PROD_DEPLOY), sessions_dir=d, session_id=SESSION_A)
+    assert rc == 2, "session mismatch inside the token must block, got %s (%s)" % (rc, err)
+    print("PASS test_session_mismatch_inside_token_blocks")
+
+
+def test_oversized_token_blocks():
+    d = fresh_sessions_dir()
+    mint(d, "allow-website-deploy", None,
+         raw="scope: website-deploy\nsession: %s\n" % SESSION_A + ("x" * 9000))
+    rc, out, err = run_hook(bash_payload(PROD_DEPLOY), sessions_dir=d)
+    assert rc == 2, "an oversized token must block, got %s (%s)" % (rc, err)
+    print("PASS test_oversized_token_blocks")
+
+
+# --------------------------------------------------------------------------
+# FIX 3 (Gate 1) -- the lender-style recipient mismatch
+# --------------------------------------------------------------------------
+
+def test_external_send_recipient_mismatch_blocks():
+    """The brief's named requirement: token approves a send to the broker; the
+    command sends to the lender. Must BLOCK."""
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=["broker@example.com"])
+    rc, out, err = run_hook(send_payload("lender@example.com"), sessions_dir=d)
+    assert rc == 2, "a send to an unnamed recipient must block, got %s (%s)" % (rc, err)
+    print("PASS test_external_send_recipient_mismatch_blocks")
+
+
+def test_external_send_extra_recipient_blocks():
+    """Token names the broker; command sends to broker AND lender -> block. One
+    approved recipient must not smuggle a second."""
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=["broker@example.com"])
+    cmd = ('powershell -File send-via-outlook.ps1 -To broker@example.com '
+           '-Cc lender@example.com -Subject "hi" -Body "hi"')
+    rc, out, err = run_hook(bash_payload(cmd), sessions_dir=d)
+    assert rc == 2, "an extra un-named recipient must block, got %s (%s)" % (rc, err)
+    print("PASS test_external_send_extra_recipient_blocks")
+
+
+def test_external_send_token_without_recipients_blocks():
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send")
+    rc, out, err = run_hook(send_payload("broker@example.com"), sessions_dir=d)
+    assert rc == 2, "an external-send token naming no recipients must block, got %s (%s)" % (rc, err)
+    print("PASS test_external_send_token_without_recipients_blocks")
+
+
+def test_website_token_does_not_authorize_external_send():
+    d = fresh_sessions_dir()
+    mint(d, "allow-website-deploy", "website-deploy")
+    rc, out, err = run_hook(send_payload("broker@example.com"), sessions_dir=d)
+    assert rc == 2, "a website token must not authorize an external send, got %s (%s)" % (rc, err)
+    print("PASS test_website_token_does_not_authorize_external_send")
+
+
+# --------------------------------------------------------------------------
+# FIX 4 -- deploy/send tier: single-use + short TTL
+# --------------------------------------------------------------------------
+
+def test_deploy_token_is_single_use():
+    """Ratified 2026-07-16: the deploy grant is consumed at gate-pass."""
+    d = fresh_sessions_dir()
+    path = mint(d, "allow-website-deploy", "website-deploy")
+    rc, out, err = run_hook(bash_payload(PROD_DEPLOY), sessions_dir=d)
+    assert rc == 0, "first deploy must pass, got %s (%s)" % (rc, err)
+    assert not os.path.exists(path), "token must be consumed (deleted) at gate-pass"
+    rc, out, err = run_hook(bash_payload(PROD_DEPLOY), sessions_dir=d)
+    assert rc == 2, "second deploy on a consumed token must block, got %s (%s)" % (rc, err)
+    print("PASS test_deploy_token_is_single_use")
+
+
+def test_external_send_token_is_single_use():
+    d = fresh_sessions_dir()
+    path = mint(d, "allow-external-send", "external-send", recipients=["broker@example.com"])
+    rc, out, err = run_hook(send_payload("broker@example.com"), sessions_dir=d)
+    assert rc == 0, "first send must pass, got %s (%s)" % (rc, err)
+    assert not os.path.exists(path), "send token must be consumed at gate-pass"
+    rc, out, err = run_hook(send_payload("broker@example.com"), sessions_dir=d)
+    assert rc == 2, "second send on a consumed token must block, got %s (%s)" % (rc, err)
+    print("PASS test_external_send_token_is_single_use")
+
+
+def test_write_token_is_multi_use():
+    """The write tier stays multi-use -- routine editing must not need a token
+    per keystroke."""
+    d = fresh_sessions_dir()
+    mint(d, "allow-website-write", "website-write")
+    for i in range(3):
+        rc, out, err = run_hook(write_payload(SITE_FILE), sessions_dir=d)
+        assert rc == 0, "write %d must pass on a multi-use token, got %s (%s)" % (i, rc, err)
+    print("PASS test_write_token_is_multi_use")
+
+
+def test_deploy_token_expires_at_300s():
+    d = fresh_sessions_dir()
+    mint(d, "allow-website-deploy", "website-deploy", age_seconds=400)
+    rc, out, err = run_hook(bash_payload(PROD_DEPLOY), sessions_dir=d)
+    assert rc == 2, "a 400s-old deploy token must be expired (TTL 300), got %s (%s)" % (rc, err)
+    print("PASS test_deploy_token_expires_at_300s")
+
+
+def test_deploy_token_valid_inside_300s():
+    d = fresh_sessions_dir()
+    mint(d, "allow-website-deploy", "website-deploy", age_seconds=120)
+    rc, out, err = run_hook(bash_payload(PROD_DEPLOY), sessions_dir=d)
+    assert rc == 0, "a 120s-old deploy token must still be valid, got %s (%s)" % (rc, err)
+    print("PASS test_deploy_token_valid_inside_300s")
+
+
+def test_write_token_expires_at_3600s():
+    d = fresh_sessions_dir()
+    mint(d, "allow-website-write", "website-write", age_seconds=4000)
+    rc, out, err = run_hook(write_payload(SITE_FILE), sessions_dir=d)
+    assert rc == 2, "a 4000s-old write token must be expired (TTL 3600), got %s (%s)" % (rc, err)
+    print("PASS test_write_token_expires_at_3600s")
+
+
+def test_write_token_valid_inside_3600s():
+    d = fresh_sessions_dir()
+    mint(d, "allow-website-write", "website-write", age_seconds=1800)
+    rc, out, err = run_hook(write_payload(SITE_FILE), sessions_dir=d)
+    assert rc == 0, "a 1800s-old write token must still be valid, got %s (%s)" % (rc, err)
+    print("PASS test_write_token_valid_inside_3600s")
+
+
+def test_future_dated_token_blocks():
+    """A token mtime in the future would otherwise read as 'negative age' and
+    sail past a naive `age < TTL` check forever."""
+    d = fresh_sessions_dir()
+    mint(d, "allow-website-deploy", "website-deploy", age_seconds=-9999)
+    rc, out, err = run_hook(bash_payload(PROD_DEPLOY), sessions_dir=d)
+    assert rc == 2, "a future-dated token must block, got %s (%s)" % (rc, err)
+    print("PASS test_future_dated_token_blocks")
+
+
+# --------------------------------------------------------------------------
+# FIX 5 -- git can never mint a token
+# --------------------------------------------------------------------------
+
+def test_token_dir_is_gitignored():
+    """The root cause of the clone self-grant: a token must be structurally
+    un-committable. hooks/sessions/ is gitignored; assert it stays that way."""
+    claude_dir = os.path.dirname(HERE)
+    probe = os.path.join(claude_dir, "hooks", "sessions", SESSION_A, "overrides", "allow-website-deploy")
+    proc = subprocess.run(
+        ["git", "check-ignore", "-q", probe],
+        cwd=claude_dir, capture_output=True, text=True,
     )
-    assert rc == 2, "an empty isolated OVERRIDE_DIR must still block, got %s (%s)" % (rc, err)
-    print("PASS test_override_dir_env_var_empty_dir_still_blocks")
+    assert proc.returncode == 0, (
+        "hooks/sessions/ must remain gitignored so an override token can never be "
+        "committed and re-materialized by a clone with a fresh mtime "
+        "(git check-ignore returned %s)" % proc.returncode
+    )
+    print("PASS test_token_dir_is_gitignored")
 
 
 if __name__ == "__main__":
-    test_blocks_legacy_markers()
-    test_domain_form_markers_do_not_block_via_this_hook()
-    test_allows_internal_email_with_redirect()
-    test_allows_curl_fetch_of_site()
-    test_allows_internal_send_with_redirect()
-    test_allows_file_mentioning_domain_in_name()
-    test_non_site_path_allows()
-    test_malformed_stdin_fails_open()
-    test_override_dir_env_var_honors_isolated_override()
-    test_override_dir_env_var_empty_dir_still_blocks()
-    print("ALL AUTONOMY-GATE TESTS PASS")
+    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
+    for t in tests:
+        t()
+    print("ALL AUTONOMY-GATE TESTS PASS (%d)" % len(tests))
