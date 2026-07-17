@@ -172,6 +172,40 @@ expect("retire: multiple ids resolve independently in one pass",
        rmp.retired_drops(_RLOG, ["ora-bullet-task", "ora-decomm-task", "ora-silent-victim"],
                          _TODAY2) == {"ora-bullet-task", "ora-decomm-task"})
 
+# --- completion-only gate (2026-07-17 residual-risk fix) -------------------------------
+# A line that merely PLANS / proposes / negates / is mid-flight must never reconcile a
+# genuine drop -- only accomplished-fact wording qualifies. This closes the forward-
+# looking 'should retire ora-X next quarter' hole the first cut of retired_drops carried.
+_PLAN = (
+    "\n## 2026-07-17 — planning + in-progress notes (must NOT reconcile)\n"
+    "- we should retire ora-plan-victim next quarter once the consumers migrate\n"
+    "- propose to decommission ora-prop-victim; awaiting Gabriel sign-off\n"
+    "- do not retire ora-neg-victim -- it is still load-bearing\n"
+    "2026-07-17: ora-inprog-victim registry entry still exists, pending deletion next session\n"
+    "2026-07-17: ora-done-victim retirement completed; registry entry deleted. Closed.\n"
+)
+expect("complete-gate: 'should retire ... next quarter' does NOT reconcile",
+       rmp.retired_drops(_PLAN, ["ora-plan-victim"], _TODAY2) == set())
+expect("complete-gate: 'propose to decommission' does NOT reconcile",
+       rmp.retired_drops(_PLAN, ["ora-prop-victim"], _TODAY2) == set())
+expect("complete-gate: negated 'do not retire' does NOT reconcile",
+       rmp.retired_drops(_PLAN, ["ora-neg-victim"], _TODAY2) == set())
+expect("complete-gate: in-progress 'still exists, pending deletion' does NOT reconcile",
+       rmp.retired_drops(_PLAN, ["ora-inprog-victim"], _TODAY2) == set())
+expect("complete-gate: accomplished completion line reconciles",
+       rmp.retired_drops(_PLAN, ["ora-done-victim"], _TODAY2) == {"ora-done-victim"})
+
+# _retirement_completed truth-table (the crux of the fix)
+expect("complete-helper: accomplished-fact wording -> True",
+       all(rmp._retirement_completed(s) for s in
+           ("ora-x retired this session", "ora-x decommissioned", "ora-x deregistered",
+            "retirement completed", "registry entry deleted", "removed from the registry")))
+expect("complete-helper: planned / hypothetical / negated / in-progress -> False",
+       not any(rmp._retirement_completed(s) for s in
+               ("we should retire ora-x", "plan to decommission ora-x", "do not retire ora-x",
+                "ora-x retirement (part 1/2)", "entry still exists, pending deletion",
+                "considering deleting the registry entry", "retirement incomplete")))
+
 # --- summary ---------------------------------------------------------------------------
 passed = sum(1 for ok, _ in results if ok)
 print("\nregistry-membership-probe tests: %d/%d passed" % (passed, len(results)))
