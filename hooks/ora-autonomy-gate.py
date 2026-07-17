@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""ORA autonomy gate (PreToolUse) — preserves the human gates under defaultMode=bypassPermissions.
+r"""ORA autonomy gate (PreToolUse) — preserves the human gates under defaultMode=bypassPermissions.
 
 With bypassPermissions, permission prompts never fire, so invariants 1 and 2 are enforced
 here instead (hooks run in every mode, including scheduled/headless sessions):
 
-  GATE 1 — external email: any send-via-outlook.ps1 invocation carrying a -To/-Cc/-Bcc
-           flag with a recipient outside @oxfordra.net is blocked. Internal fleet sends
-           (ggoldberg/egoldberg) pass untouched.
+  GATE 1 — external email: any send-via-outlook.ps1 invocation naming a recipient outside
+           @oxfordra.net anywhere in the command is blocked, regardless of which flag (or
+           flag alias/prefix) introduces it. Internal fleet sends (ggoldberg/egoldberg) pass
+           untouched.
            Override: allow-external-send  (scope external-send, 5 min, SINGLE-USE,
            and it must NAME every external recipient of the send)
   GATE 2 — website (oxfordra.net): blocked across every reachable path —
@@ -58,16 +59,128 @@ gate (e.g. `netlify deploy --prod --dir=oxford-site/dist > deploy.log`) needs BO
 is fail-closed and rare — the ordinary `netlify deploy --build --prod` run from inside the repo
 names no site marker and needs only allow-website-deploy.
 
-NOT IN SCOPE (deliberately): what the gate MATCHES. See
+MATCHER HARDENING (2026-07-17, Gabriel-ratified — five detection gaps, independent of any
+override token)
+-------------------------------------------------------------------------------------------
+Adversarial review of the token hardening above (four parallel lenses + personal spot-checks)
+found that the underlying DETECTION matchers -- not the token layer -- had five real,
+reproducible bypasses. Each let a real malicious command evade detection so completely that
+no override was ever even needed: exit 0, no block, nothing to log.
+  1. EMAIL_RE required a dot in the domain (`+` on the trailing group) -- `attacker@evilhost`
+     (no TLD) was invisible to it. Fixed: `*` (zero-or-more), so a dotless recipient is still
+     email-shaped and still caught.
+  2. RECIPIENT_FLAGS gated Gate 1 on the literal substrings -to/-cc/-bcc. send-via-outlook.ps1
+     has exactly one parameter starting with T ($To), so PowerShell's unambiguous-prefix
+     binder resolved a bare `-T` to `-To` while never containing "-to". Fixed by DROPPING the
+     flag precondition entirely: if send-via-outlook.ps1 appears in the command, scan for an
+     external-shaped recipient anywhere in it, full stop -- closes this AND every other
+     possible flag alias at once, and is strictly no looser (a command with no recipient text
+     still finds nothing).
+  3/4. NETLIFY_INVOKE_RE anchored "netlify" to a command-boundary position (start, after
+     ;/&/|/$() ) specifically so quoting/echoing wouldn't trip it -- but `cmd /c netlify
+     deploy --prod` and `powershell -Command "netlify deploy --prod"` both precede "netlify"
+     with a space or a quote, never the anchor set, and both reached exit 0. Fixed by
+     de-anchoring to a bare word-boundary match, same breadth-over-precision tradeoff Gate 2b's
+     site marker already makes deliberately (see check_bash's comment there): closes both
+     indirection forms and any future wrapper (bash -c, Invoke-Expression, a doskey macro) at
+     once, at the cost of also tripping on a commit message that merely mentions the phrase --
+     a false positive costs a retry; a false negative publishes to the live site.
+  5. check_file_write matched only the LITERAL file_path substring -- a directory
+     junction/symlink pointing INTO the site tree from an innocuous-looking name (whose own
+     path text names no site marker) evaded it entirely. Fixed: also check os.path.realpath()
+     (follows junctions/symlinks to their real target; works even for a not-yet-existing file,
+     the ordinary Write-a-new-file case). Residual, accepted gap: cannot help a relative
+     file_path evaluated against a different effective cwd than this hook process's -- but
+     Claude Code's Write/Edit/NotebookEdit tools are documented to always pass an absolute
+     path, so that shape is a tool-contract violation, not something this gate can close.
+
+All five were personally reproduced against the live gate with a passing control before the
+fix (the equivalent already-blocked form) and locked in as regression tests in
+hooks/tests/test-ora-autonomy-gate.py. Survived a 3-round independent adversarial gauntlet
+(each round explicitly tasked with trying to break the PRIOR round's fix) before landing --
+
+HONEST LIMIT (found by Round 1 of that gauntlet, Gabriel-acknowledged, follow-up scoped
+separately -- NOT fixed by the five patches above, and cannot be by better regexes on one
+command's text): a recipient or executable reference built via VALUE INDIRECTION --
+a PowerShell variable, string concatenation, `Get-Content` on a file, an environment
+variable set in an EARLIER Bash call -- is invisible to a detector that only scans the
+literal text of the CURRENT command. Proven live: `$to = $a + '@' + $b + '.' + $c; ...
+-To $to` reaches Gate 1 unblocked; splitting `$env:D = 'net'+'lify'` into one Bash call and
+`& $env:D deploy --prod` into a second reaches Gate 2a unblocked -- neither call's text ever
+contains all the required literal substrings together, though the two together perform a
+real deploy. This is NOT new: the ORIGINAL anchored NETLIFY_INVOKE_RE and the ORIGINAL
+flag-gated EMAIL_RE were equally blind to it before 2026-07-17 -- it is a structural ceiling
+of "detect by parsing shell text", not a regression these fixes caused or could have
+prevented. Closing it for real means enforcing at the actual outbound action (wrapping the
+netlify CLI/API call or the Outlook send itself) rather than the invoking shell command --
+a different architecture, scoped as separate follow-up work, not a patch to this file. See
+hooks/tests/ for the accumulated regression coverage from all three rounds.
+
+ALSO DEFERRED to the same follow-up (Round 2 of the gauntlet, same category: referring to a
+sensitive target via an alternate reference rather than its literal canonical form, not
+fixable by better regexes on literal text):
+  - Hardlinking (or an already-defined shell alias/function/profile wrapper for) another name
+    to send-via-outlook.ps1's content, then invoking THAT name -- the substring
+    "send-via-outlook.ps1" never appears in the command at all.
+  - Single-command string-BUILDING of "netlify" via concatenation evaluated by PowerShell
+    within one `-Command "..."` argument (e.g. `& ('net'+'lify') deploy --prod`) -- the literal
+    contiguous word never appears in the raw text for the word-boundary regex to match, even
+    though it is one Bash tool call, not two.
+  - A file-level HARDLINK from an innocuous-looking outside path to an existing file inside the
+    site tree: os.path.realpath() (fix #5) resolves symlinks/junctions by following a stored
+    target, but a hardlink has no target to resolve -- both names are equally "real" paths to
+    the same inode, and check_file_write only ever sees the outside one. Closing this would need
+    inode/`st_ino` comparison against the live site tree, not path resolution -- a different,
+    heavier mechanism, not a quick patch.
+
+ROUND 3 FIXES (final gauntlet round, 2026-07-17):
+  6b. NFKC (fix 6) folds compatibility forms (fullwidth, mathematical-alphanumeric) but does
+      NOT strip zero-width/format characters (Cf: ZWSP U+200B, RTL override U+202E, ...) or
+      combining marks (Mn: e.g. combining low line U+0332) inserted MID-WORD -- these break
+      the contiguous `\bnetlify\b` / EMAIL_RE match without being visible. Proven live: a ZWSP
+      inside "netlify" or inside "send-via-outlook.ps1" (breaking the trigger phrase itself)
+      or inside a recipient's local-part all reached exit 0. Fixed: strip Cf/Mn category
+      characters (after NFKC) before any matching -- legitimate infra command/path text has
+      no legitimate reason to contain them.
+  7b. check_mcp gated only tools ending in "-updater" (an allow-by-default deny-list of one
+      suffix) -- a hypothetical netlify MCP tool with any other mutating-shaped name would
+      evade it entirely (not proven against a currently-registered tool, but the matcher
+      itself is provably narrow). Fixed: invert to deny-by-default -- gate anything
+      containing "netlify" that does NOT end in "-reader", rather than allow anything that
+      doesn't end in "-updater". Every real reader tool in the current connector (deploy/
+      extension/project/team/user-services-reader) still passes; every current and any
+      future mutating tool is now gated regardless of its exact suffix.
+  8. FOUNDATIONAL, found while verifying fix 6b: main()'s `json.load(sys.stdin)` decoded
+     using sys.stdin's PLATFORM-DEFAULT encoding (cp1252 on this machine), not UTF-8. A real
+     multi-byte UTF-8 payload byte does not reliably raise under that decoder -- it SILENTLY
+     MOJIBAKES. Proven live: a UTF-8-encoded soft hyphen (2 bytes: 0xC2 0xAD) decoded as
+     cp1252 became TWO wrong characters, one of them a spurious VISIBLE character that broke
+     a `\bnetlify\b` match which should have blocked -- undermining every Unicode fix in this
+     file (6, 6b, 7b) for any invocation whose payload contains literal, non-\uXXXX-escaped
+     non-ASCII bytes. Every OTHER test in this suite is blind to this because Python's own
+     json.dumps(ensure_ascii=True) default already escapes non-ASCII to plain ASCII \uXXXX --
+     but a serializer that does NOT ascii-escape (e.g. JavaScript's JSON.stringify, plausibly
+     what the real harness uses) would not. Fixed: `sys.stdin.reconfigure(encoding="utf-8",
+     errors="strict")` before reading, same pattern as git-prepush-doctrine-gate.py's
+     stdout/stderr reconfigure. `errors="strict"` deliberately, not "replace" -- a genuinely
+     malformed (non-UTF-8) byte sequence should raise and hit the existing, already-documented
+     fail-open-on-unparseable-input path, not get silently replaced with U+FFFD (which could
+     reintroduce the same class of spurious-character corruption this fix closes).
+
+STILL NOT IN SCOPE (deliberately): Gate 2b's BREADTH itself -- SITE_PATH_MARKERS and
+SITE_WRITE_INDICATORS matching ANYWHERE in a command, unrelated occurrences included. See
 memory/feedback_autonomy_gate_matcher_cannot_be_safely_narrowed.md — three adversarial review
-rounds each found a real bypass in one attempt to narrow Gate 2b's matcher; the broad match is
-correct and stays. This file changes only WHO a granted override authorizes, for WHAT, and for
-how long.
+rounds each found a real bypass in one 2026-07-16 attempt to NARROW that specific matcher
+(make it require the marker and indicator to be related); the broad match there is correct
+and stays untouched. Today's fixes are the opposite direction (WIDENING detection to close
+false negatives elsewhere), which is a different risk profile, not a re-litigation of that
+finding.
 """
 import json
 import os
 import re
 import sys
+import unicodedata
 
 LIB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib")
 sys.path.insert(0, LIB_DIR)
@@ -128,7 +241,6 @@ except Exception:
         return None
 
 INTERNAL_DOMAIN = "@oxfordra.net"
-RECIPIENT_FLAGS = ("-to", "-cc", "-bcc")  # any one means the send has external reach
 
 WEBSITE_WRITE = Tier("allow-website-write", "website-write", 3600)
 WEBSITE_DEPLOY = Tier("allow-website-deploy", "website-deploy", 300, single_use=True)
@@ -145,7 +257,12 @@ SITE_WRITE_INDICATORS = (
     ">", "cp ", "copy ", "mv ", "move ", "rm ", "del ", "remove-item",
     "set-content", "add-content", "out-file", "tee ", "new-item",
 )
-EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", re.IGNORECASE)
+# Domain group is `*` (zero-or-more dot segments), not `+`: a `+` required at least one
+# dot, so a dotless recipient like `attacker@evilhost` was INVISIBLE to this regex --
+# findall() returned nothing, `external` was empty, and Gate 1 never fired at all: exit 0,
+# zero override needed. Proven live 2026-07-17 (adversarial review): attacker@evilhost ->
+# exit 0 unblocked; attacker@evilhost.com -> exit 2 blocked, as a control. `*` matches both.
+EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)*", re.IGNORECASE)
 # Matches fd-duplication redirects (2>&1, >&2, &>, &>>) so they don't get mistaken for a
 # write redirect by the bare ">" in SITE_WRITE_INDICATORS (2026-07-09 — false-blocked a
 # plain `ls ... 2>&1` read-only existence check).
@@ -157,11 +274,46 @@ FD_DUP_RE = re.compile(r"\d*>&\d*|&>{1,2}")
 # (e.g. `> ".../dev/null.html"`) is not exempted (2026-07-10 — false-blocked a read-only
 # grep with `2>/dev/null` against an oxford-site path).
 NULL_REDIRECT_RE = re.compile(r"\d*>\s*(?:/dev/null|nul)\b", re.IGNORECASE)
-# Matches netlify only as the leading token of a command segment (start, after ; & | or $( ),
-# optionally via npx — so quoting/echoing/logging the phrase does not trip the gate.
-NETLIFY_INVOKE_RE = re.compile(
-    r"(?:^|[;&|]|\$\()\s*(?:npx\s+(?:--yes\s+)?)?netlify(?:-cli)?(?:\.cmd|\.exe)?\s", re.IGNORECASE
-)
+# Matches "netlify" (or netlify-cli/.cmd/.exe) as a whole word ANYWHERE in the command --
+# no command-boundary anchor. The prior version anchored to a leading-token position
+# (start, after ;/&/|/$() ) specifically so quoting/echoing/logging the phrase wouldn't
+# trip the gate -- but that same anchor let `cmd /c netlify deploy --prod` and
+# `powershell -Command "netlify deploy --prod"` through completely unblocked (netlify is
+# preceded by a space or a quote in both, never by the anchor set). Proven live
+# 2026-07-17: both indirection forms reached exit 0 before this fix, against a plain
+# `netlify deploy --prod` control at exit 2. De-anchoring closes both AND any future
+# subshell/wrapper form (bash -c, sh -c, Invoke-Expression, a doskey macro, ...) without
+# having to enumerate each one -- the same breadth-over-precision tradeoff Gate 2b's site
+# marker already makes deliberately (see check_bash's own comment on that gate): a false
+# positive (a commit message or echo that merely mentions the phrase) costs a retry; a
+# false negative here publishes to the live site. Combined, as before, with `deploy` and
+# `--prod` also required anywhere in the command.
+NETLIFY_INVOKE_RE = re.compile(r"\bnetlify(?:-cli)?(?:\.cmd|\.exe)?\b", re.IGNORECASE)
+# Windows auto-generates an 8.3 short name for every long filename on an 8.3-enabled NTFS
+# volume (this one is) with ZERO setup -- confirmed live: send-via-outlook.ps1 -> SEND-V~1.PS1
+# (`dir /x`). Referencing the script by that alias reached exit 0 (Round 2 adversarial review,
+# 2026-07-17): the "send-via-outlook.ps1" substring check never saw it. Unlike a deliberately
+# hardlinked alias (deferred -- see the docstring's "ALSO DEFERRED" section), this is a
+# passive, standing alternate name for this ONE known, fixed script, worth naming directly.
+# Matches the known short-name family (~1, ~2, ... if a future colliding file bumps the digit).
+SEND_SHORTNAME_RE = re.compile(r"\bsend-v~\d\.ps1\b", re.IGNORECASE)
+# Unicode categories stripped by _normalize_for_matching, ON TOP OF NFKC: Cf (format --
+# zero-width space U+200B, RTL/LTR override U+202E/U+202D, soft hyphen, ...) and Mn
+# (nonspacing combining marks -- e.g. combining low line U+0332). NFKC folds COMPATIBILITY
+# forms (fullwidth, mathematical-alphanumeric) to ASCII but does NOT remove these -- a ZWSP
+# inserted mid-word (`net<ZWSP>lify`, or inside `send-via-outlook.ps1` itself, breaking the
+# Gate 1 trigger phrase) breaks a `\bword\b` match invisibly. Proven live 2026-07-17 (Round 3
+# adversarial review): both reached exit 0. Legitimate infra command/path text has no
+# legitimate reason to contain either category, so stripping them is a safe, targeted
+# hardening, not a breadth tradeoff like the site-marker/netlify de-anchoring above.
+_STRIP_CATEGORIES = ("Cf", "Mn")
+
+
+def _normalize_for_matching(text):
+    """NFKC-fold compatibility Unicode forms, then strip invisible format/combining
+    characters, so detection matches what a human reads rather than raw codepoints."""
+    folded = unicodedata.normalize("NFKC", text)
+    return "".join(ch for ch in folded if unicodedata.category(ch) not in _STRIP_CATEGORIES)
 
 
 def _recipients_authorized(fields, external):
@@ -235,11 +387,29 @@ def block_shape(tool_name, session_id):
 
 
 def check_bash(command, session_id):
-    lowered = command.lower()
-    # GATE 1 — any send-via-outlook.ps1 with a recipient flag (To, Cc, OR Bcc).
-    # Keying only on -To let a Bcc/Cc-only external send slip through (2026-06-13).
-    if "send-via-outlook.ps1" in lowered and any(f in lowered for f in RECIPIENT_FLAGS):
-        recipients = EMAIL_RE.findall(command)
+    # Normalize before any matching: a fullwidth Unicode "@" (U+FF20) is invisible to
+    # EMAIL_RE's literal ASCII "@", so `attacker＠evilhost.com` reached exit 0 (Round 2
+    # adversarial review, 2026-07-17); a zero-width space or RTL override inserted mid-word
+    # (`net<ZWSP>lify`, or inside the Gate 1 trigger phrase itself) breaks a `\bword\b` match
+    # invisibly and NFKC alone doesn't remove it (Round 3). _normalize_for_matching does
+    # both: NFKC-fold, then strip Cf/Mn characters. `command` (original, un-normalized) is
+    # kept for display in block messages; all matching uses `normalized`/`lowered` from here.
+    normalized = _normalize_for_matching(command)
+    lowered = normalized.lower()
+    # GATE 1 — any send-via-outlook.ps1 invocation naming an external recipient anywhere
+    # in the command. Previously gated on a RECIPIENT_FLAGS substring check (-to/-cc/-bcc)
+    # as a precondition -- but PowerShell resolves an unambiguous parameter-name PREFIX
+    # (send-via-outlook.ps1's param block has exactly one parameter starting with T: $To),
+    # so `-T attacker@x.com` bound to -To while never containing the substring "-to".
+    # Proven live 2026-07-17: reached exit 0 (unblocked) before this fix. Dropping the flag
+    # precondition entirely closes this AND every other possible flag spelling/alias at
+    # once: if send-via-outlook.ps1 appears in the command, just look for any external-
+    # shaped recipient anywhere in it. A command with no recipient text at all still finds
+    # nothing via EMAIL_RE and passes, same as before -- this is strictly no looser.
+    # ALSO checks the script's standing 8.3 short-name alias (SEND-V~1.PS1) -- see
+    # SEND_SHORTNAME_RE's own comment.
+    if "send-via-outlook.ps1" in lowered or SEND_SHORTNAME_RE.search(lowered):
+        recipients = EMAIL_RE.findall(normalized)
         external = sorted({r for r in recipients if not r.lower().endswith(INTERNAL_DOMAIN)})
         if external and not override_active(session_id, EXTERNAL_SEND, external):
             block("external email recipient(s): %s" % ", ".join(external), EXTERNAL_SEND,
@@ -247,7 +417,7 @@ def check_bash(command, session_id):
                   extra="The token must NAME each external recipient: a token approving a\n"
                         "send to one counterparty does not authorize a send to another.\n")
     # GATE 2a — production deploy via the netlify CLI.
-    if NETLIFY_INVOKE_RE.search(command) and "deploy" in lowered and "--prod" in lowered:
+    if NETLIFY_INVOKE_RE.search(normalized) and "deploy" in lowered and "--prod" in lowered:
         if not override_active(session_id, WEBSITE_DEPLOY):
             block("production deploy to oxfordra.net (netlify --prod)", WEBSITE_DEPLOY,
                   session_id)
@@ -285,8 +455,30 @@ def check_bash(command, session_id):
 
 
 def check_file_write(file_path, session_id):
-    normalized = file_path.replace("\\", "/").lower()
-    if any(marker in normalized for marker in SITE_PATH_MARKERS):
+    # Check both the literal path text AND its OS-resolved real path. A directory
+    # junction/symlink pointing INTO the site tree from an innocuous-looking name (whose
+    # own path text names no site marker) previously evaded this entirely -- the check was
+    # pure substring matching on file_path as given. realpath() follows junctions/symlinks
+    # to their real target even when the final path component doesn't exist yet (the
+    # ordinary case for Write creating a new file), so a junction is now caught via its
+    # resolved destination. Proven live 2026-07-17 (adversarial review): a write through a
+    # junction into a site-tree target reached exit 0 (unblocked) before this fix.
+    # Residual, accepted gap: this cannot help if file_path itself is relative AND the
+    # underlying tool's actual cwd differs from this hook process's cwd -- but Claude
+    # Code's Write/Edit/NotebookEdit tools are documented to always supply an absolute
+    # path, so that shape is a tool-contract violation, not a gap this gate can close.
+    # Normalize before matching too, for consistency with check_bash (a fullwidth/
+    # compatibility form or an invisible Cf/Mn character in a path component would otherwise
+    # evade the plain marker substring check the same way it did for EMAIL_RE/NETLIFY_INVOKE_RE
+    # -- not proven exploitable here, but cheap and closes the same class of gap defensively).
+    normalized_path = _normalize_for_matching(file_path)
+    normalized = normalized_path.replace("\\", "/").lower()
+    try:
+        resolved = os.path.realpath(normalized_path).replace("\\", "/").lower()
+    except OSError:
+        resolved = normalized
+    if any(marker in normalized for marker in SITE_PATH_MARKERS) or \
+            any(marker in resolved for marker in SITE_PATH_MARKERS):
         if not override_active(session_id, WEBSITE_WRITE):
             block("write to oxfordra.net site tree: %s" % file_path, WEBSITE_WRITE, session_id)
 
@@ -295,9 +487,18 @@ def check_mcp(tool_name, session_id):
     """GATE 2c — Netlify MCP mutating tools. The deploy/project/extension *-updater
     tools push to prod / change live project config + CSP/headers with no Bash and no
     prompt; under bypassPermissions nothing else stops them. This gate stands in for
-    the permission prompt they would otherwise raise (2026-06-13). Reader tools pass."""
+    the permission prompt they would otherwise raise (2026-06-13). Reader tools pass.
+
+    Deny-by-default, not allow-by-default: gate anything containing "netlify" that does
+    NOT end in "-reader", rather than gating only tools that DO end in "-updater". The
+    prior form was an allow-by-default deny-list of one exact suffix -- a mutating tool
+    with any other name (a future connector, or a differently-spelled write tool) would
+    have evaded it silently (Round 3 adversarial review, 2026-07-17). Every real reader
+    tool in the current connector (deploy/extension/project/team/user-services-reader)
+    still passes; every current AND any future mutating tool is now gated regardless of
+    its exact suffix."""
     lowered = tool_name.lower()
-    if "netlify" in lowered and lowered.endswith("-updater"):
+    if "netlify" in lowered and not lowered.endswith("-reader"):
         if not override_active(session_id, WEBSITE_DEPLOY):
             block("Netlify MCP mutating call (%s)" % tool_name, WEBSITE_DEPLOY, session_id)
 
@@ -306,6 +507,22 @@ FILE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 
 
 def main():
+    # sys.stdin.encoding defaults to the PLATFORM codepage (cp1252 on this Windows machine),
+    # not UTF-8. Reading a real multi-byte UTF-8 payload byte through that decoder does NOT
+    # reliably raise -- it SILENTLY MOJIBAKES: proven live 2026-07-17, a UTF-8-encoded soft
+    # hyphen (2 bytes: 0xC2 0xAD) decoded under cp1252 became TWO wrong characters (an
+    # injected 'Â' plus the soft hyphen), inserting a spurious VISIBLE character that broke a
+    # `\bnetlify\b` match which should have blocked. This silently undermines every Unicode
+    # fix in this file for any REAL invocation whose payload contains literal (non-\uXXXX-
+    # escaped) non-ASCII bytes -- which Python's own json.dumps(ensure_ascii=True) avoids
+    # (why the test suite's fullwidth-@/ZWSP/RTL/combining-mark tests all passed despite this
+    # bug), but a JSON serializer that does NOT ascii-escape (e.g. JavaScript's
+    # JSON.stringify, plausibly what the real harness uses) would not. Reconfigure BEFORE
+    # reading, same pattern as git-prepush-doctrine-gate.py's stdout/stderr reconfigure.
+    try:
+        sys.stdin.reconfigure(encoding="utf-8", errors="strict")  # type: ignore[attr-defined]
+    except Exception:
+        pass
     # ONLY an unparseable hook payload fails open -- blocking every tool call system-wide
     # when we cannot even read the hook input would brick the session; that availability
     # tradeoff is deliberate. Once we HAVE a parsed payload naming a gated tool, any
