@@ -16,10 +16,17 @@ Defense in depth, not a replacement: Gate 1 still runs first and catches the com
 literal case cheaply; this is the backstop that cannot be evaded by construction tricks.
 
 USAGE (called by send-via-outlook.ps1, not by a human):
-    python check_external_send.py --session <id> --recipients addr1,addr2,...
+    <one recipient per line on stdin> | python check_external_send.py --session <id>
 
 Recipients here are the ALREADY-RESOLVED external addresses PowerShell is about to send
 to -- the caller has already excluded internal (@oxfordra.net) addresses.
+
+Recipients arrive via STDIN, not a --recipients CLI argument, DELIBERATELY (adversarial
+review, 2026-07-17): PowerShell's native-argument marshaling to an external process can
+silently mangle certain characters (e.g. an embedded double-quote was stripped before
+python ever saw it) -- so a CLI-argument recipient value could differ from the value
+actually used in $Mail.To, breaking the check/send equivalence this whole script exists to
+guarantee. A pipe is not native-argument-parsed at all; bytes go through unmodified.
 
 Exit 0  = authorized (a valid, session-matched, single-use token named every recipient;
           it has been CONSUMED as a side effect of this check -- see override_tokens.py's
@@ -44,19 +51,17 @@ from email_send_tier import EXTERNAL_SEND, recipients_authorized  # noqa: E402
 def main():
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--session", required=True)
-    parser.add_argument("--recipients", required=True,
-                        help="comma-separated list of EXTERNAL recipients about to be sent to")
     try:
         args = parser.parse_args()
     except SystemExit:
         return 3
 
-    external = [r.strip() for r in args.recipients.split(",") if r.strip()]
+    external = [line.strip() for line in sys.stdin if line.strip()]
     if not external:
-        # Caller invoked this with an empty recipient list -- that's a caller bug (this
+        # Caller invoked this with no recipients on stdin -- that's a caller bug (this
         # script is only meant to run when there IS at least one external recipient), not
         # something this check can authorize. Refuse rather than guess.
-        sys.stderr.write("check_external_send: --recipients was empty; nothing to authorize\n")
+        sys.stderr.write("check_external_send: no recipients on stdin; nothing to authorize\n")
         return 3
 
     fields = token_grants(
