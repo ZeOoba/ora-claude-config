@@ -25,7 +25,7 @@ PRIMARY — Desktop Commander local read (cell-accurate, no truncation). The wor
 SECONDARY (fallback only) — Microsoft 365 connector read_resource with URI:
   file:///b!fogSrIGhzUeBSf98j4jg7JBJQDYJDw5Og7B2gKTH8HDkm61VkL_ZQYZmGfTNXL9f/01ABKEESVJPJNG6AC7F5DKUNFUHRCN5AUM
   Saved to a file with offset/limit paging — read fully in chunks; capture lastModifiedDateTime via sharepoint_search "Master Excel Template Company Wide Oxford". WARNING: this render truncates at ~100K chars; treat any tab past the cutoff as MISSING — flag it, do NOT silently reconstruct or carry forward.
-Source-of-truth tabs: 00_Home, Property NOI, Master Tenant Rent Roll, Cash Balances, Cash Data, Loan Index, External Loans Summary, Portfolio Summary — Internal, Insurance Renewals, Assumptions.
+Source-of-truth tabs: 00_Home, Property NOI, Master Tenant Rent Roll, Cash Balances, Cash Data, Loan Index, External Loans Summary, Portfolio Summary — Internal, Insurance Renewals, Assumptions, Monthly Checklist (added 2026-07-16 — the 31/59-item close checklist lives as an in-workbook sheet, not a separate file; `ora-pm-ledger`'s EOD Ledger already reads it live daily, this weekly ingest should carry it into the Notion mirror too).
 
 STEP 2 — NO-OP GUARD
 Fetch DSOR page §5. If the workbook lastModifiedDateTime is unchanged since the last recorded ingest, log a one-line no-op to the Operations Hub (32b6ecd8-9e59-81f2-b329-df3fd0e25062) and STOP — do not rewrite the dashboard or send email.
