@@ -126,3 +126,31 @@ Year-1 escalation rate implied by the lease amendment, deliberately left uncorre
 Gabriel's call rather than silently overwritten. Gabriel confirmed the live figure stands — no
 Notion or workbook write needed. **Do not re-flag this specific $8,540 vs. $8,710.80 delta**;
 treat it as resolved, not as residual drift.
+
+### 2026-07-17 — Should the Claude Code setup-audit cadence continue on its recent every-few-days rhythm?
+**Answer (Gabriel, per the 2026-07-17 ROI-brief evaluation): no — freeze for 60 days (until
+~2026-09-15).** Three read-only diagnostic sweeps landed in 8 days (07-09, 07-16, 07-17), each
+producing small in-session fixes and a fresh tier of follow-ups — a self-sustaining meta-work loop
+competing with the firm's #1 priority (acquisition velocity) for attention. No scheduled or
+ad-hoc full setup audit before ~2026-09-15 unless triggered by an actual failure, not the calendar.
+Does not affect the already-scheduled quarterly fleet review (2026-09-09) or any individual guard
+probe (governor-drift, doctrine-integrity, etc.), which keep running as designed.
+
+### 2026-07-17 — Is disambiguating "GitHub MCP connector vs. lighter Web Integration" worth investigating now?
+**Answer: no — closed/ignored until it actually matters.** Zero present consequence; repo work
+runs fully via `gh` CLI on the Code surface today. Revisit only if Cowork-side PR/CI visibility
+becomes a genuine, concrete need — do not spend session time on this speculatively.
+
+### 2026-07-17 — Does `ora-setup-review-closeout-recheck` (fires 2026-07-17 20:10 UTC) need any action beyond reading its output?
+**Answer: no.** It's a self-contained one-time check of three other 07-17 gate conditions
+(task-integrity-guard 12:45 ET, automation-health-monitor beacon 11:05 ET, and the
+now-retired northridge-brockton deadline). Read its output when it fires; no build, no
+registry mutation, no follow-up task required either way.
+
+### 2026-07-17 — Do Tier 3 (hooks/settings/plugin hygiene) and Tier 4 (memory/event-log hygiene) of the 2026-07-16 setup-review plan still need building?
+**Answer (Gabriel, per the 2026-07-17 ROI-brief evaluation): no — deliberately DROPPED, not
+deferred.** Only the Tier-2 acquisition-velocity items (deal-first weekly board, LOI-throughput
+line, broker touch cadence) were carried forward into the 2026-07-17 implementation pass. Tier 3
+and Tier 4 are meta-work on the tooling itself with no near-term payoff toward acquisition
+velocity — do not "helpfully" pick them up from the 07-16 report's open-items framing; that
+report's plan is superseded on this point.
