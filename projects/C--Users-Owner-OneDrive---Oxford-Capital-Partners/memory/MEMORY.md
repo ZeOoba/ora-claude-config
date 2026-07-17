@@ -34,6 +34,7 @@
 - [oxfordra.net SEO Audit 2026-07](project_oxfordra_seo_audit_2026-07.md) — 11-part Searchfit audit 2026-07-10: overall C- (59/100); technical strong, content/market coverage weak. Report + action list in file
 - [Owner-Outreach Stale-Guard Watch](project_owner_outreach_stale_guard_watch.md) — CLOSED 2026-07-14: guard re-tripped 07-13 correctly (real staleness); Gabriel ratified vintage same-day, SKILL.md v1.3 now remembers it per-vintage
 - [Ops Decision Log](ops_decision_log.md) — standing log of small recurring operational yes/no calls, so they aren't re-litigated each session; companion to deal-decision-ledger.md
+- [Tenant DB — the sync is ABSENT, not stale](project_tenant_db_no_sync_rootcause.md) — ROOT CAUSE 2026-07-16: no workbook→Notion sync ever existed; frozen March-2026 import, demoted 04-29, still read by 6 consumers. Mirror spec written, build deferred on contention. ⚠ workbook is WRONG on Heritage Pool (renewed to 2031-09-30)
 
 ## Markets
 - [Market Intelligence](markets.md) — Cross-market snapshots, macro (FRED), replacement cost, comps, Columbus submarket
@@ -69,6 +70,8 @@
 - [Scheduled-Task Model Standard](reference_scheduled_task_model_standard.md) — standard = claude-sonnet-5; `[MODEL: …]` tag per task; CC/MCP model is observable but NOT settable (server-pinned)
 - [CC Scheduler filePath Mechanism](reference_cc_scheduler_filepath_mechanism.md) — registry stores only `filePath`, not prompt text → editing a task's SKILL.md IS authoritative; specs are NOT git-versioned
 - [Tenant Name Mappings](reference_tenant_name_mappings.md) — PM platform → Notion Tenant DB reconciliation aliases (operational data)
+- [ripgrep blind on scheduled-tasks](reference_ripgrep_scheduled_tasks_false_negative.md) — rg/Grep returned ZERO matches for the whole fleet SKILL.md corpus when the search root was `scheduled-tasks/`; fixed via a `.ignore` (NOT .gitignore — already opted in, don't loosen it)
+- [Hook systemMessage never reaches the model](reference_hook_systemmessage_not_model_visible.md) — PreToolUse `systemMessage` is USER-only; shared-checkout-guard fired ~168× over 7 days into a void. Use `additionalContext`. Firing ≠ delivery — test the channel
 - [Property→LLC Signature Roster](reference_property_llc_signature_roster.md) — canonical property→signing-LLC lookup; fixes recurring Outbox QC Check-D (landlord mail signed with personal block)
 - [ora-pm-ledger Double-Fire](reference_ora_pm_ledger_double_fire.md) — RESOLVED 2026-07-12: CC/MCP copy is the sole live registration; the LAMS "twin" was a misfiled orphan folder, never registered
 - [QuickBooks & Entity Financials](reference_quickbooks_financials.md) — CloudVara RDP, .QBB un-parseable, where statements live, per-property P&L basis
