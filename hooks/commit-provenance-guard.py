@@ -13,15 +13,30 @@ chokepoint where provenance is fixed. Full rationale + rejected alternatives:
 docs/superpowers/specs/2026-07-16-commit-provenance-guard-design.md
 
 SAFETY INVARIANT -- fail-open BY CONSTRUCTION, not by exception handling. It
-blocks only on TWO affirmative signals: (a) a candidate file appears in another
-session's touched-set, AND (b) session_liveness affirmatively reports that
-session open, AND that set is within TTL. Missing/stale/unreadable data yields
-"no information" -> ALLOW. This honours session_liveness.py's explicit contract
-("ENRICHMENT ONLY, never a hard gate ... treat a read failure, or a stale/empty
-result, the same as 'no information'"). NO LOCK IS EVER HELD, so a crashed
-session cannot wedge the fleet -- the deadlock class does not exist here.
+blocks only on THREE affirmative signals: (a) a candidate file appears in
+another session's touched-set, AND (b) session_liveness affirmatively reports
+that session open, AND that set is within TTL, AND (c) the path has NOT
+already been committed since that recorded touch. Missing/stale/unreadable
+data yields "no information" -> ALLOW. This honours session_liveness.py's
+explicit contract ("ENRICHMENT ONLY, never a hard gate ... treat a read
+failure, or a stale/empty result, the same as 'no information'"). NO LOCK IS
+EVER HELD, so a crashed session cannot wedge the fleet -- the deadlock class
+does not exist here.
 The same invariant now covers an IMPORT-time failure of either sibling module too
 (2026-07-17): guarded at load, main() returns immediately if either failed to load.
+
+RECENCY-HEURISTIC FIX (2026-07-17): the original design blocked on touched-set
+membership + liveness + a whole-file TTL alone, with no check for whether the
+flagged edit had since been safely committed -- by the other session, or by
+anyone. That produced 3 false positives in one session the same day: another
+session's edit to the same file had already landed in HEAD by the time this
+guard ran, but the touched-set entry (and the live-session signal) persisted
+for the full TTL regardless. `already_committed_since()` closes this: given the
+per-path touch timestamp now recorded by the recorder (see commit_provenance.py's
+touch_line()/read_touched()), a hit is suppressed if the path's last commit is
+NEWER than (or equal to) that touch time -- the content is provably already
+safe, not just probably. An unknown touch time (old-format line, or the path
+was never committed) keeps the ORIGINAL conservative behaviour: still a hit.
 
 Deliberately narrow (precision over recall, same philosophy as
 registry-write-guard.py): it does NOT catch foreign files written by a script
@@ -52,7 +67,7 @@ sys.path.insert(0, LIB_DIR)
 # guard's own documented invariant (missing information -> allow) without the system-wide
 # traceback noise, and without silently blocking commits it was never meant to touch.
 try:
-    from commit_provenance import norm, sessions_dir, ttl_h, TOUCHED_BASENAME  # noqa: E402,F401
+    from commit_provenance import norm, sessions_dir, ttl_h, read_touched, TOUCHED_BASENAME  # noqa: E402,F401
     from session_liveness import other_active_sessions  # noqa: E402,F401
     PROVENANCE_CONTRACT_LOADED = True
 except Exception:
@@ -127,6 +142,42 @@ def repo_root(cmd, cwd):
     return out[0] if out else None
 
 
+def last_commit_time(repo, abs_path):
+    """Epoch seconds of the most recent commit touching `abs_path` in `repo`,
+    or None if it has never been committed (or git could not answer)."""
+    out = _git_lines(repo, ["log", "-1", "--format=%ct", "--", abs_path])
+    if not out:
+        return None
+    try:
+        return float(out[0])
+    except ValueError:
+        return None
+
+
+def already_committed_since(repo, abs_path, touch_ts):
+    """True iff `abs_path` was committed at or after `touch_ts` -- i.e. the
+    content that was touched at `touch_ts` is provably already safe in HEAD.
+
+    `touch_ts is None` means "unknown touch time" (old-format touched-files.txt
+    line, or a hand-written entry): the conservative original behaviour, so
+    this always returns False for it, matching the pre-fix "always a hit"
+    outcome. A file that has NEVER been committed also returns False -- there
+    is nothing in git history that could make it safe.
+
+    ACCEPTED LIMITATION: trusts git's own commit timestamp (`%ct`), which
+    `--date`/`GIT_COMMITTER_DATE` can set arbitrarily. A deliberately
+    forward-dated commit could make an unsafe path look already-committed.
+    Same threat model as the rest of this guard (single-operator cooperative
+    fleet, not an adversarial boundary -- see the override sentinel, which is
+    an even more direct bypass by design) -- not hardened against."""
+    if touch_ts is None:
+        return False
+    ct = last_commit_time(repo, abs_path)
+    if ct is None:
+        return False
+    return ct >= touch_ts
+
+
 def _has_all_flag(cmd):
     """True for `-a`, `-am`, `--all`. False for `-m` and `--amend`
     (`^-[a-zA-Z]+$` cannot match a double-dash flag)."""
@@ -168,11 +219,14 @@ def candidate_paths(repo, cmd):
     return {norm(os.path.join(repo, p)) for p in rel}
 
 
-def foreign_hits(candidates, my_sid):
-    """[(path, other_sid, status)] for candidates owned by ANOTHER LIVE session.
+def foreign_hits(candidates, my_sid, repo):
+    """[(path, other_sid, status)] for candidates owned by ANOTHER LIVE session
+    whose recorded touch has NOT already been safely committed.
 
-    Requires TWO affirmative signals per hit: the other session is affirmatively
-    reported open by session_liveness, AND its touched-set is within TTL. Any
+    Requires THREE affirmative signals per hit: the other session is
+    affirmatively reported open by session_liveness, AND its touched-set is
+    within TTL, AND the path's last commit is not already at-or-after that
+    session's recorded touch time for it (see already_committed_since()). Any
     read failure, missing file, or stale set is treated as NO INFORMATION and
     yields no hit -- never a block. This is session_liveness.py's documented
     contract, and it is what makes this guard fail-open by construction.
@@ -195,10 +249,12 @@ def foreign_hits(candidates, my_sid):
             if not os.path.exists(path) or os.path.getmtime(path) < cutoff:
                 continue
             with open(path, encoding="utf-8") as fh:
-                touched = {ln.strip() for ln in fh if ln.strip()}  # dedupe on read
+                touched = read_touched(fh)  # {norm_path: last_touch_ts | None}
         except Exception:
             continue  # unreadable -> no information -> no hit
-        for p in sorted(candidates & touched):
+        for p in sorted(candidates & set(touched)):
+            if already_committed_since(repo, p, touched[p]):
+                continue  # provably already safe -- not a hit
             hits.append((p, sid, (entry.get("status") or "")))
     return hits
 
@@ -231,7 +287,7 @@ def main():
     if os.path.exists(os.path.join(sessions_dir(), session_id, OVERRIDE_BASENAME)):
         return
 
-    hits = foreign_hits(cands, session_id)
+    hits = foreign_hits(cands, session_id, repo)
     if not hits:
         return
 

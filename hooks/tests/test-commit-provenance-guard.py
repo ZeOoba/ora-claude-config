@@ -67,13 +67,21 @@ def sessions_tmp():
     return tempfile.mkdtemp(prefix="cpg-sess-")
 
 
-def seed_touched(sessions_dir, sid, paths, age_h=0):
+def seed_touched(sessions_dir, sid, paths, age_h=0, touch_ts=None, no_timestamp=False):
+    """Write a touched-files.txt for `sid`. `touch_ts` (default: now) is the
+    per-path touch time written into the new tab-separated format; pass
+    `no_timestamp=True` to write the pre-2026-07-17 bare-path format instead
+    (exercises the "unknown touch time -> conservative" fallback).
+    `age_h` ages the FILE's own mtime, independent of the per-path timestamp
+    -- it drives the existing whole-set TTL check, not the new per-path one.
+    """
     d = os.path.join(sessions_dir, sid)
     os.makedirs(d, exist_ok=True)
     p = os.path.join(d, "touched-files.txt")
+    ts = touch_ts if touch_ts is not None else time.time()
     with open(p, "w", encoding="utf-8") as fh:
         for x in paths:
-            fh.write(x + "\n")
+            fh.write(x + "\n" if no_timestamp else "%s\t%.6f\n" % (x, ts))
     if age_h:
         old = time.time() - age_h * 3600
         os.utime(p, (old, old))
@@ -307,6 +315,105 @@ def test_commit_dash_a_picks_up_foreign_tracked_modification():
     print("PASS test_commit_dash_a_picks_up_foreign_tracked_modification")
 
 
+# ---------- Recency-heuristic fix (2026-07-17): re-diff against HEAD, don't
+# just trust the touched-set + TTL. 3 false positives in one session the same
+# day were all this exact shape: another session's edit had already landed in
+# HEAD by commit time, but the touched-set entry (and liveness) persisted. ----
+
+def test_foreign_edit_already_committed_since_touch_allows():
+    """THE false-positive case from 2026-07-17: `other` touched shared.txt an
+    hour ago; that content is already safely committed; `me` now has its OWN
+    separate, later edit staged on the same path. Must ALLOW -- `other`'s
+    contribution is provably already safe, and blocking here would attribute
+    only MY OWN new work to a foreign hit."""
+    repo = make_repo()
+    p = os.path.join(repo, "shared.txt")
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write("v1 base")
+    _git(["add", "shared.txt"], repo)
+    _git(["commit", "-m", "base"], repo)
+    shared = os.path.normcase(os.path.abspath(p))
+
+    sess = sessions_tmp()
+    an_hour_ago = time.time() - 3600
+    seed_touched(sess, "other", [shared], touch_ts=an_hour_ago)
+
+    # `other`'s edit lands (committed just now, i.e. AFTER their recorded touch).
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write("v2 -- other's edit, now committed")
+    _git(["add", "shared.txt"], repo)
+    _git(["commit", "-m", "other's edit lands"], repo)
+
+    # `me` now makes a separate, later edit of my own on the SAME path.
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write("v3 -- my own separate edit")
+    _git(["add", "shared.txt"], repo)
+
+    fs = fleet_state_with(["other"])
+    rc, out, err = run_hook('git commit -m "my change"', repo, sess, fleet_state=fs)
+    assert rc == 0, (
+        "other's already-committed touch must not block my own later edit, "
+        "got %s (%s)" % (rc, err))
+    print("PASS test_foreign_edit_already_committed_since_touch_allows")
+
+
+def test_foreign_touch_after_last_commit_still_blocks():
+    """The genuinely risky case: `other` touched shared.txt AFTER the last
+    commit that includes it -- their edit could still be sitting uncommitted
+    on their side. Must still BLOCK."""
+    repo = make_repo()
+    p = os.path.join(repo, "shared.txt")
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write("v1 base")
+    _git(["add", "shared.txt"], repo)
+    _git(["commit", "-m", "base"], repo)
+    shared = os.path.normcase(os.path.abspath(p))
+
+    sess = sessions_tmp()
+    an_hour_from_now = time.time() + 3600  # safely after the base commit above
+    seed_touched(sess, "other", [shared], touch_ts=an_hour_from_now)
+
+    # `me` stages a change to the same path -- `other`'s (newer) touch is
+    # unaccounted for by any commit.
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write("v2 -- my edit, but other touched it more recently, unlanded")
+    _git(["add", "shared.txt"], repo)
+
+    fs = fleet_state_with(["other"])
+    rc, out, err = run_hook('git commit -m "x"', repo, sess, fleet_state=fs)
+    assert rc == 2, (
+        "a touch newer than the last commit must still block, got %s (%s)" % (rc, err))
+    print("PASS test_foreign_touch_after_last_commit_still_blocks")
+
+
+def test_unknown_touch_time_still_blocks_even_if_committed():
+    """Backward-compat / conservative-default check: an old-format bare-path
+    touched-files.txt line (no timestamp) must keep the ORIGINAL behaviour --
+    always a hit -- even when the path has since been committed. Unknown
+    touch time must never be treated as 'safe'."""
+    repo = make_repo()
+    p = os.path.join(repo, "shared.txt")
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write("v1 base")
+    _git(["add", "shared.txt"], repo)
+    _git(["commit", "-m", "base"], repo)
+    shared = os.path.normcase(os.path.abspath(p))
+
+    sess = sessions_tmp()
+    seed_touched(sess, "other", [shared], no_timestamp=True)  # old format
+
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write("v2 -- my edit")
+    _git(["add", "shared.txt"], repo)
+
+    fs = fleet_state_with(["other"])
+    rc, out, err = run_hook('git commit -m "x"', repo, sess, fleet_state=fs)
+    assert rc == 2, (
+        "unknown touch time must stay conservative (always a hit), got %s (%s)"
+        % (rc, err))
+    print("PASS test_unknown_touch_time_still_blocks_even_if_committed")
+
+
 if __name__ == "__main__":
     test_non_git_command_silent()
     test_git_commit_with_no_foreign_files_allows()
@@ -324,4 +431,7 @@ if __name__ == "__main__":
     test_override_sentinel_allows()
     test_own_touched_set_never_blocks_self()
     test_commit_dash_a_picks_up_foreign_tracked_modification()
+    test_foreign_edit_already_committed_since_touch_allows()
+    test_foreign_touch_after_last_commit_still_blocks()
+    test_unknown_touch_time_still_blocks_even_if_committed()
     print("ALL COMMIT-PROVENANCE-GUARD TESTS PASS")
