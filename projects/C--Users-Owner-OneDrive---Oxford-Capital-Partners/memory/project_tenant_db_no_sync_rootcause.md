@@ -1,21 +1,32 @@
 ---
 name: project-tenant-db-no-sync-rootcause
-description: "ROOT CAUSE 2026-07-16: there is NO workbook→Notion tenant sync and never was — the DB is a frozen March-2026 import, demoted from write-source 2026-04-29, still read by 6 live consumers. Gabriel approved a read-only mirror from EXPORT_RentRoll; spec written, implementation deferred on write contention."
+description: "ROOT CAUSE 2026-07-16: there was NO workbook→Notion tenant sync — the DB was a frozen March-2026 import. CLOSED 2026-07-17: OI-003 through OI-006 all executed (schema property added, reconciliation run, Heritage Pool + 9620 State 350 dedups, 4 turnovers + Soldier Trucking property conflict corrected against executed leases)."
 metadata: 
   node_type: memory
   type: project
   originSessionId: 0888c827-119f-4877-98ae-23ac7c404a27
 ---
 
-# Notion Tenant DB — the sync is ABSENT, not stale (root-caused 2026-07-16)
+# Notion Tenant DB — the sync is ABSENT, not stale (root-caused 2026-07-16, remediated 2026-07-17)
 
-**Spec (implementation-ready, not yet built):**
-`Claude_Workspace/01_Workspace/outputs/2026-07-16_TenantDB-Workbook-Mirror_Spec_v01.md`
+**Spec:** `Claude_Workspace/01_Workspace/outputs/2026-07-16_TenantDB-Workbook-Mirror_Spec_v01.md`
 
-**Open items (canonical list, do not restate here):** [OI-003](open-items-tracker.md#OI-003) build
-the mirror · [OI-004](open-items-tracker.md#OI-004) add `Archived` property ·
-[OI-005](open-items-tracker.md#OI-005) dedup Heritage Pool rows ·
-[OI-006](open-items-tracker.md#OI-006) confirm 4 turnovers + Soldier Trucking
+**Items — all CLOSED 2026-07-17 (full evidence lives only in the tracker, not restated here):**
+[OI-003](open-items-tracker.md#OI-003) built the mirror/reconciliation ·
+[OI-004](open-items-tracker.md#OI-004) added `Row Retired` property ·
+[OI-005](open-items-tracker.md#OI-005) deduped Heritage Pool rows ·
+[OI-006](open-items-tracker.md#OI-006) confirmed 4 turnovers + Soldier Trucking against executed
+leases and wrote the corrections. **Notion Tenant DB is no longer stale on any of these rows** —
+this was a one-time manual remediation, not a standing sync (OI-003's mirror is still a
+report-only tool; nothing runs it automatically). The next `ora-master-workbook-ingest` or manual
+reconciliation run will re-surface any NEW drift since 2026-07-17.
+
+**Still open, deliberately out of scope for OI-003–006, not yet actioned:** Heritage Pool
+Supply's `Monthly Rent` ($8,540) vs. its lease amendment's Year-1 rate ($8,710.80/mo) — flagged in
+[OI-005](open-items-tracker.md#OI-005)'s evidence, not corrected. The 7 other WORKBOOK-NEWER rows
+surfaced by OI-003 (Pedro Ulate, Fully Equipped Cleaning, SAFE CONNECTION ELECTRIC, Carlton Handy,
+Randy's Aquarium Service, TYM Wholesale, Masala Bazaar/Azad Shah dedup) were not part of Gabriel's
+OI-003/004/005/006 instruction and were not touched.
 
 ## The finding
 

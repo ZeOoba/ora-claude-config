@@ -118,3 +118,11 @@ WERE backfilled against the full `e_fulton` term list (SIJ, Nutis, Columbus Stam
 chlorinated solvent, vinyl chloride — not just "fulton") before finalizing: clean, nothing else
 leaked. **Do not re-open this without new information** (e.g. the lender matter actually closing)
 — check here first.
+
+### 2026-07-17 — Heritage Pool Supply `Monthly Rent`: workbook/Notion $8,540 vs. lease amendment Year-1 rate $8,710.80 — which is correct?
+**Answer (Gabriel, in-turn): the current $8,540 figure is correct.** Flagged during
+[OI-005](open-items-tracker.md#OI-005) (Heritage Pool row dedup) as a discrepancy against the
+Year-1 escalation rate implied by the lease amendment, deliberately left uncorrected pending
+Gabriel's call rather than silently overwritten. Gabriel confirmed the live figure stands — no
+Notion or workbook write needed. **Do not re-flag this specific $8,540 vs. $8,710.80 delta**;
+treat it as resolved, not as residual drift.

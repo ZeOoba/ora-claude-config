@@ -119,8 +119,9 @@ Gabriel 2026-07-16 and matched by the corrected Master Workbook).
 **Evidence:** Correct row `32b6ecd8-9e59-8115-9c01-fe0126f3f4b7` left untouched. Two duplicate rows
 (`32c6ecd8-9e59-8125-979b-cafe5e648089`, `32b6ecd8-9e59-8161-ab6b-ddc6b708e464`) set to `Row
 Retired = __YES__` via `notion-update-page`, verified by fresh SQL query post-write. Separately
-flagged (not part of this item's scope, not yet corrected): Heritage Pool's current `Monthly Rent`
-($8,540) doesn't match its own lease amendment's Year-1 rate ($8,710.80/mo).
+flagged (not part of this item's scope): Heritage Pool's `Monthly Rent` ($8,540) vs. its lease
+amendment's Year-1 rate ($8,710.80/mo) — **Gabriel ratified $8,540 as correct 2026-07-17**, no
+write needed. See [[ops_decision_log]].
 
 ### OI-006
 **Status:** CLOSED
