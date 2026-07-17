@@ -75,6 +75,7 @@
 - [Standards — Financial & Communication](standards.md) — Modeling conventions (DSCR 1.25×/LTV 40%) + comms tone by audience
 - [Scheduled-Task Model Standard](reference_scheduled_task_model_standard.md) — standard = claude-sonnet-5; model is observable but not settable
 - [CC Scheduler filePath Mechanism](reference_cc_scheduler_filepath_mechanism.md) — registry stores only filePath; editing a task's SKILL.md IS authoritative
+- [Scheduled-Task approvedPermissions](reference_scheduled_task_approved_permissions.md) — dispatch ≠ completion; a task missing its tool grant makes unattended writes silently fail (lastRunAt still advances)
 - [Tenant Name Mappings](reference_tenant_name_mappings.md) — PM platform → Notion Tenant DB reconciliation aliases
 - [ripgrep blind on scheduled-tasks](reference_ripgrep_scheduled_tasks_false_negative.md) — rg returns zero matches rooted at scheduled-tasks/; fixed via rg-only .ignore
 - [Hook systemMessage never reaches model](reference_hook_systemmessage_not_model_visible.md) — PreToolUse systemMessage is USER-only; use additionalContext
