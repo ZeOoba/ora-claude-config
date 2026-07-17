@@ -24,6 +24,7 @@ from a concurrent session.
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -158,6 +159,59 @@ def test_non_site_path_allows():
     rc, out, err = run_hook(write_payload("C:/proj/src/index.html"))
     assert rc == 0, "expected exit 0, got %s (%s)" % (rc, err)
     print("PASS test_non_site_path_allows")
+
+
+def test_broken_token_module_fails_closed():
+    """A broken/missing hooks/lib/override_tokens.py must still BLOCK every gated action.
+
+    Regression, adversarial review 2026-07-17: when this gate adopted the shared token
+    contract, the import had no fallback -- on ImportError the gate exited 1, and a
+    PreToolUse hook exiting 1 is a NON-BLOCKING error, so the tool call PROCEEDS. A broken
+    shared module therefore disabled Gate 1 AND Gate 2 (prod deploy, site write, external
+    send all passed through) leaving only a traceback the model never sees. The module is
+    now SHARED with git-prepush-doctrine-gate.py, so an edit made for that gate's benefit
+    can break this one -- this is the test that keeps that from being a silent bypass.
+
+    Note the gate must still exit 0 for UNGATED calls even with the module broken: exiting 2
+    at import time would brick every tool call in the session (confidentiality-guard
+    self-deadlock). Fail closed on gated actions, stay available otherwise.
+    """
+    sandbox = tempfile.mkdtemp(prefix="oag-broken-")
+    shutil.copytree(os.path.dirname(HOOK), os.path.join(sandbox, "hooks"))
+    gate = os.path.join(sandbox, "hooks", "ora-autonomy-gate.py")
+    os.remove(os.path.join(sandbox, "hooks", "lib", "override_tokens.py"))
+
+    def run_broken(payload):
+        env = dict(os.environ)
+        env["ORA_OVERRIDE_SESSIONS_DIR"] = tempfile.mkdtemp(prefix="oag-broken-sess-")
+        payload = dict(payload)
+        payload["session_id"] = SESSION_A
+        proc = subprocess.run([sys.executable, gate], input=json.dumps(payload),
+                              capture_output=True, text=True, env=env)
+        return proc.returncode, proc.stderr
+
+    for label, payload in (
+        ("prod deploy", bash_payload(PROD_DEPLOY)),
+        ("site write", write_payload(SITE_FILE)),
+        ("external send", bash_payload(
+            "powershell -File send-via-outlook.ps1 -To broker@example.com -Subject x -Body y")),
+        ("netlify MCP updater", {"tool_name": "mcp__netlify__netlify-deploy-services-updater",
+                                 "tool_input": {}}),
+    ):
+        rc, err = run_broken(payload)
+        assert rc == 2, (
+            "%s must BLOCK (exit 2) when override_tokens.py is unimportable, got exit %s. "
+            "Exit 1 is NON-BLOCKING for PreToolUse -- the action would proceed.\n%s"
+            % (label, rc, err))
+
+    # ...and an UNGATED call must still pass: import-time exit 2 would brick the session.
+    rc, err = run_broken(write_payload("C:/proj/src/index.html"))
+    assert rc == 0, (
+        "an ungated call must still pass with the module broken (got exit %s) -- blocking "
+        "every tool call would brick the session\n%s" % (rc, err))
+
+    shutil.rmtree(sandbox, ignore_errors=True)
+    print("PASS test_broken_token_module_fails_closed")
 
 
 def test_malformed_stdin_fails_open():

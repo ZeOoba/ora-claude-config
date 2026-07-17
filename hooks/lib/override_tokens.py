@@ -1,9 +1,13 @@
 """Shared override-token contract for the ORA human-authorization gates.
 
 One token format, one validator, for every gate that can be overridden by Gabriel's
-explicit in-turn confirmation. Today: git-prepush-doctrine-gate.py (allow-doctrine-drift).
-ora-autonomy-gate.py implements this same contract inline (c6f3936) and SHOULD be
-refactored onto this module -- see "Adoption" below.
+explicit in-turn confirmation. Both gates use it:
+  - git-prepush-doctrine-gate.py -- allow-doctrine-drift
+  - ora-autonomy-gate.py         -- allow-website-write / allow-website-deploy /
+                                    allow-external-send (adopted 2026-07-17)
+
+A gate keeps only what this module cannot know: its own tiers and TTLs, and any binding
+specific to its domain (Gate 1's recipient naming rides in as token_grants' extra_check).
 
 A token lives at:  hooks/sessions/<session_id>/overrides/<name>
 
@@ -62,11 +66,12 @@ Everything fails CLOSED. No session_id, no token, unreadable, oversized, non-UTF
 duplicate keys, wrong scope, wrong session, future-dated, aged out, un-consumable -> no
 grant. A false positive costs a retry; a false negative bypasses a human gate.
 
-Adoption: ora-autonomy-gate.py currently carries an equivalent inline implementation with
-its own Tier class and tiered TTL/single-use/recipient rules. It should import from here so
-the contract cannot drift between the two gates. That refactor is deliberately NOT bundled
-with this module's introduction -- that gate was being actively edited in another session
-when this landed, and a security gate is the wrong place to race a merge.
+Adoption history: ora-autonomy-gate.py carried an equivalent inline implementation (927f6d0)
+while this module was written for the doctrine gate (a64f2e5) -- two gates enforcing the same
+security-critical rules from two copies. They were written hours apart by two sessions and
+had already begun to diverge: one returned a bool, the other the parsed fields so `reason:`
+could reach the audit trail. The gate adopted this module on 2026-07-17, deleting ~88 lines
+of duplicate validation. If a third gate ever needs an override, it imports from here.
 """
 import os
 import re
@@ -87,13 +92,21 @@ SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 class Tier(object):
-    """One override name == one severity tier. No name may key two tiers."""
+    """One override name == one severity tier. No name may key two tiers.
 
-    def __init__(self, name, scope, ttl, single_use=False):
+    requires_extra_check marks a tier whose token carries a binding this module cannot
+    evaluate on its own -- today only allow-external-send, whose token must name every
+    external recipient of the send. That check is EMAIL domain logic and belongs to the
+    gate, not to a generic token contract; the tier flag exists so token_grants can REFUSE
+    to grant when a caller omits it, rather than silently skipping the binding.
+    """
+
+    def __init__(self, name, scope, ttl, single_use=False, requires_extra_check=False):
         self.name = name
         self.scope = scope
         self.ttl = ttl
         self.single_use = single_use
+        self.requires_extra_check = requires_extra_check
 
 
 def sessions_root():
@@ -167,7 +180,7 @@ def consume(path):
         return False
 
 
-def token_grants(session_id, tier):
+def token_grants(session_id, tier, extra_check=None):
     """The validated token's fields when a valid, fresh, correctly-scoped, session-matched
     token authorizes `tier` for `session_id` -- otherwise None. Consumes the token first
     when the tier is single-use.
@@ -176,10 +189,19 @@ def token_grants(session_id, tier):
     A granting token always carries scope+session, so the dict is always truthy; callers
     wanting a bool should compare `is not None` explicitly.
 
+    extra_check, when given, is called with the parsed fields and must return truthy for the
+    grant to stand. It is for a binding this module cannot evaluate itself -- e.g. Gate 1's
+    rule that an allow-external-send token must name every external recipient of the send.
+    It runs BEFORE consumption, so a token that fails it is refused WITHOUT being burned.
+    A tier declaring requires_extra_check REFUSES to grant when no extra_check is supplied,
+    so forgetting one fails closed instead of silently dropping the binding.
+
     CONSUMES on validation, so call it ONLY when a grant would actually be used. Evaluating
     it speculatively (e.g. before checking whether there is anything to override) would burn
     a single-use token on an action that never needed one.
     """
+    if tier.requires_extra_check and extra_check is None:
+        return None
     path = token_path(session_id, tier.name)
     if not path or not os.path.isfile(path):
         return None
@@ -191,6 +213,10 @@ def token_grants(session_id, tier):
     if fields.get("scope") != tier.scope:
         return None
     if fields.get("session") != session_id:
+        return None
+    # BEFORE consuming: a token that fails the caller's binding must not be burned -- it may
+    # be a legitimate token being tested against the wrong action.
+    if extra_check is not None and not extra_check(fields):
         return None
     # Consume BEFORE granting: if we granted first and the delete then failed, the token
     # would silently become multi-use.
