@@ -72,11 +72,13 @@ MISSING_STORE_GRACE_RUNS = 2
 def ratified_drops(log_text, ids, today, window_days=RATIFY_WINDOW_DAYS):
     """Subset of `ids` ratified by a recent event_log entry.
 
-    An entry = a '### YYYY-MM-DD ...' header section. Requires the literal
-    token 'RATIFIED' (case-sensitive) AND the exact task id in the same entry,
-    with the entry dated within `window_days` of `today`. Pure function."""
+    An entry = a '## YYYY-MM-DD ...' header section (append-event-log.py's
+    enforced header level -- this previously read '### ' and so never matched
+    a real entry; fixed 2026-07-16). Requires the literal token 'RATIFIED'
+    (case-sensitive) AND the exact task id in the same entry, with the entry
+    dated within `window_days` of `today`. Pure function."""
     out = set()
-    for chunk in log_text.split("\n### ")[1:]:
+    for chunk in log_text.split("\n## ")[1:]:
         try:
             d = datetime.date.fromisoformat(chunk[:10])
         except ValueError:

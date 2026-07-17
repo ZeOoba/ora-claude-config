@@ -11,6 +11,18 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-16 — CC/MCP residuals closed for LAMS ora-am-brief retirement; registry-membership-probe.py ratification bug fixed
+
+Closed out the CC/MCP-surface residuals from the same-day LAMS ora-am-brief retirement (see prior entry "RATIFIED: LAMS ora-am-brief retired" and `memory/project_ora_am_brief_lams_retirement_blocked.md`, now RETIRED + VERIFIED). Concurrent-writer check clear (registry-membership.log latest entry complete, not mid-edit; `~/.claude` git tree clean at `242fd6f`).
+
+1. **CC/MCP copy verified healthy** — `list_scheduled_tasks` on this CC surface: `ora-am-brief` `enabled:true`, cron `0 6 * * *`, path `~\.claude\scheduled-tasks\ora-am-brief\SKILL.md`.
+2. **LAMS drop confirmed live (not just Cowork-view)** — `fleet-status.py` (reads both registries regardless of surface): `ora-am-brief` appears exactly once, cc-only, `on`; absent from lams.
+3. **Roster refresh** — re-ran `registry-membership-probe.py`. It raised a false `[ACTION]` on the LAMS drop instead of auto-ratifying, despite this file's RATIFIED token being present and within the 14-day window. Root cause: `ratified_drops()` split event_log text on the literal `"\n### "` (three `#`), but `append-event-log.py` enforces and every real entry uses `"## "` (two `#`) headers — auto-ratification had never matched a real entry against this file's actual format. Fixed the split token to `"\n## "` (`~/.claude/maintenance/registry-membership-probe.py`); re-ran and directly unit-tested `ratified_drops()` against the live file — now correctly resolves `ora-am-brief` as ratified. Re-ran the probe again: `OK -- no actionable drift`, roster regenerated (cc 21 / lams 20 enabled recurring, session-context.md fleet block current).
+4. **Ledgers updated** — `Claude_Workspace/00_Governance/outputs/2026-06-10_fleet-disposition-ledger.md` and `memory/oxford-cc-repo-health.md` both got a dated entry recording the retirement + this fix.
+5. **Integrity guard check** — confirmed `ora-task-integrity-guard`'s STEP 1.5 runs this same probe daily; with the fix in place its next run will report the LAMS drop as an auto-ratified INFO (already consumed as this run's snapshot baseline), not a false alarm.
+
+No registry-JSON edits. No re-registration of the LAMS copy (per do-NOT-re-register note). `~/.claude` is git-tracked to private `ZeOoba/ora-claude-config` — the probe fix is a plain code change, no deal terms touched.
+
 ## 2026-07-16 — event_log.md rolled over (3083 → 604 lines) via new rollover-event-log.py script
 
 Live log had grown to 3083 lines (~3x the ~1000-line soft cap) with no dedicated rollover tool — the 2026-07-09 rollover was done by hand. Built `~/.claude/maintenance/rollover-event-log.py`, mirroring `append-event-log.py`'s mtime-guard + atomic-replace + pre-write backup + post-write verify pattern, since this is a structural single-writer edit on a file multiple concurrent sessions were actively appending to today. Dry-run first (`--dry-run`), confirmed the cut landed cleanly on a `## ` entry boundary, then ran for real.
@@ -608,3 +620,12 @@ Added `args.forceModel` to `~/.claude/workflows/cc-audit-army.js` (no-op unless 
 ---
 
 *Entries at and before “2026-07-16 — cc-audit-army generalized to repo-generic audits (Gabriel-directed)” rolled over 2026-07-16 to [_archive/event_log_2026-07-16.md](_archive/event_log_2026-07-16.md) per memory-policy.md's rollover rule.*
+
+
+## 2026-07-16 — disposition-analysis v1.0 + oxford-cc-strategic-audit v1.1 Save-skill installs CONFIRMED (Entry point B)
+
+- **What:** Gabriel clicked **Save skill** on two pre-built `.skill` packages handed off from a prior session's `ora-skills-reimport-watch` drift finding — `disposition-analysis` v1.0 and `oxford-cc-strategic-audit` v1.1. Both installs confirmed by Gabriel at 2026-07-16T22:47 -04:00. This entry records the **Save-skill click** (the install), not merely an upstream repo commit — a commit is evidence the fix was authored, not that anyone installed it.
+- **How:** `package-and-stage-skill` **Entry point B** (pre-packaged install, steps 5–8 only — NO repackaging). Per-package integrity pre-check ran first: file exists; single zip entry each (`disposition-analysis/SKILL.md`, `oxford-cc-strategic-audit/SKILL.md`), forward-slash paths, no backslashes; both single-file skills (no `references/`/`templates/`/`scripts/`); neither a `SHARED_ROOT_DEPS`/`target-markets.json` consumer, so no shared-dep freshness check applied. Packaged SKILL.md hash-matched the current repo copy (raw + EOL-normalized) for both — packages not stale, no reject-to-Entry-A.
+- **Post-install verify:** runtime cache mirror at `…\skills-plugin\583f08bc-…\a6ad2c61-…\skills\<skill>\SKILL.md` hash-matches the packaged `.skill` for both (raw AND EOL-normalized True), no extra/missing files — full single-file sync, install did not silently drop content. Routed via Cowork Save-skill button per the skill's default (single-file, so desktop Settings→Capabilities would also have been safe).
+- **Ledger note:** neither skill was present in the post-commit `_staging/PENDING_REIMPORT.md` ledger (they came from a drift-finding handoff, not the post-commit hook). Ran `python tools/pending_reimport.py clear disposition-analysis oxford-cc-strategic-audit` per instruction — idempotent no-op for these two. Ledger's actual open entries remain `deal-retirement` (commit 75d85ca) and `submarket-spatial-analysis` (commit 876b8ee), both still pending a Save-skill click.
+- **No writes to the runtime cache; no external send.**
