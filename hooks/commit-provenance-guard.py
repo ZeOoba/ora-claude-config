@@ -36,10 +36,14 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 
 LIB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib")
 sys.path.insert(0, LIB_DIR)
 from commit_provenance import norm, sessions_dir, ttl_h, TOUCHED_BASENAME  # noqa: E402
+from session_liveness import other_active_sessions  # noqa: E402
+
+OVERRIDE_BASENAME = "allow-foreign-commit"
 
 GIT_C_RE = re.compile(r"""\bgit\b\s+-C\s+(?:"([^"]+)"|'([^']+)'|([^\s&|;]+))""")
 CD_RE = re.compile(r"""\bcd\s+(?:"([^"]+)"|'([^']+)'|([^\s&|;]+))\s*&&""")
@@ -149,6 +153,41 @@ def candidate_paths(repo, cmd):
     return {norm(os.path.join(repo, p)) for p in rel}
 
 
+def foreign_hits(candidates, my_sid):
+    """[(path, other_sid, status)] for candidates owned by ANOTHER LIVE session.
+
+    Requires TWO affirmative signals per hit: the other session is affirmatively
+    reported open by session_liveness, AND its touched-set is within TTL. Any
+    read failure, missing file, or stale set is treated as NO INFORMATION and
+    yields no hit -- never a block. This is session_liveness.py's documented
+    contract, and it is what makes this guard fail-open by construction.
+    """
+    try:
+        live = other_active_sessions(my_sid) or []
+    except Exception:
+        return []  # no information -> allow
+    if not live:
+        return []
+    cutoff = time.time() - ttl_h() * 3600.0
+    base = sessions_dir()
+    hits = []
+    for entry in live:
+        sid = (entry or {}).get("sid")
+        if not sid or sid == my_sid:
+            continue
+        path = os.path.join(base, sid, TOUCHED_BASENAME)
+        try:
+            if not os.path.exists(path) or os.path.getmtime(path) < cutoff:
+                continue
+            with open(path, encoding="utf-8") as fh:
+                touched = {ln.strip() for ln in fh if ln.strip()}  # dedupe on read
+        except Exception:
+            continue  # unreadable -> no information -> no hit
+        for p in sorted(candidates & touched):
+            hits.append((p, sid, (entry.get("status") or "")))
+    return hits
+
+
 def main():
     payload = json.loads(sys.stdin.read())
     if not isinstance(payload, dict):
@@ -166,8 +205,42 @@ def main():
     cands = candidate_paths(repo, cmd)
     if not cands:
         return  # nothing to commit, or unknown -> allow
-    # Task 3 adds the foreign-hit check here.
-    return
+
+    session_id = payload.get("session_id")
+    if not isinstance(session_id, str) or not session_id:
+        session_id = "nosession"
+
+    # Deliberate backlog-landing (the c0272bb janitor workflow) stays possible.
+    if os.path.exists(os.path.join(sessions_dir(), session_id, OVERRIDE_BASENAME)):
+        return
+
+    hits = foreign_hits(cands, session_id)
+    if not hits:
+        return
+
+    shown = hits[:5]
+    detail = "\n".join(
+        "  - %s  (edited by session %s%s)"
+        % (os.path.basename(p), sid[:8], (" -- " + st) if st else "")
+        for p, sid, st in shown
+    )
+    more = "" if len(hits) <= 5 else "\n  ... and %d more" % (len(hits) - 5)
+    reason = (
+        "This `git commit` would capture %d file(s) that ANOTHER LIVE SESSION "
+        "edited:\n%s%s\n\n"
+        "Committing them here attributes their work to you and can strand or "
+        "clobber it (2026-07-16: a staged edit was swept into another session's "
+        "commit inside a 30s window). Two ways forward:\n"
+        "  1. Commit only your own files with an explicit pathspec:\n"
+        "     git commit -m \"...\" -- <your/file> <your/other-file>\n"
+        "  2. If you are DELIBERATELY landing another session's orphaned work, "
+        "declare it:\n"
+        "     touch \"%s\"\n"
+        % (len(hits), detail, more,
+           os.path.join(sessions_dir(), session_id, OVERRIDE_BASENAME).replace("\\", "/"))
+    )
+    sys.stderr.write("BLOCKED (commit-provenance-guard): " + reason + "\n")
+    sys.exit(2)
 
 
 if __name__ == "__main__":
