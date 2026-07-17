@@ -83,12 +83,38 @@ they aren't databases. If a fetch ever errors again, record a COVERAGE GAP, do
 not silently drop the source, and re-verify the ID before the next run.
 
 **⚠ The "Native last-edited column" column below states a SCHEMA FACT, not a
-working mechanism — do not infer trustworthy edit-detection from it.** Tested
-live 2026-07-16: the Tenant DB's `Last Updated` is correctly typed
-`last_edited_time` and is nonetheless **frozen at 2026-03-30** — it does not
-bump, so its zero is a false negative (full evidence in A.2 step 2). A column
-existing and being typed correctly proved nothing about whether it advances.
-Per-source status must be established at RUN TIME, not read off this table.
+working mechanism — do not infer trustworthy edit-detection from it.** A column
+existing and being typed `last_edited_time` proves nothing about whether it
+advances. Measured per-source truth, established over the Notion REST API
+2026-07-16 (supersedes every earlier guess in this file):
+
+**All six ARE reachable and all six A.1 ids below are CORRECT** — they are
+**data-source ids**, which is why they 404 against `/v1/databases/{id}`. Query
+them at `POST /v1/data_sources/{id}/query` with **`Notion-Version: 2025-09-03`**.
+The older `2022-06-28` returns `400 — "Databases with multiple data sources are
+not supported in this API version"` on Acquisition Pipeline. (A 2026-07-16 pass
+briefly mis-read those 400/404s as "not shared / wrong id" and accused the A.1
+table of being wrong. It was not. Version + endpoint, not permissions.)
+
+| Source | Newest last_edited | Oldest | Reality |
+|---|---|---|---|
+| Acquisition Pipeline Tracker | 2026-07-15 | 2026-03-22 | ✅ **LIVE — varies.** |
+| Deal Sourcing Log | 2026-07-15 | 2026-03-22 | ✅ **LIVE — varies.** |
+| Broker Relationships | 2026-04-05 21:03 | 2026-04-05 20:06 | ✅ **LIVE — varies.** |
+| Tenant Database | 2026-03-30 | 2026-03-22 | ❌ **FROZEN.** Notion itself reports `last_edited_time == created_time`. A zero is a false negative. |
+| Property Register | 2026-07-12 | 2026-07-12 | ❌ **Uniform stamp** — all 14 rows share ONE identical timestamp. That is a batch write, not editing. An earlier read of this as "live" was WRONG. |
+| CapEx & Maintenance Log | — | — | ⚠ **0 rows. The table is EMPTY** — it can never report an edit, and never could. |
+
+**Net: Section A (Deal Pipeline) has fully trustworthy, precise, quota-free edit
+detection via REST. Section B does not, and no read path will fix it** — Tenant
+DB is frozen at the source, Property Register only ever shows its last bulk sync,
+and CapEx has no rows at all.
+
+**The uniform-date tell:** when newest == oldest across every row, the column is
+reporting a bulk sync, not edits. Only trust a source whose dates VARY.
+
+Per-source status must still be established at RUN TIME — this table is dated
+evidence (2026-07-16), not a standing guarantee.
 
 | # | Section heading | Notion target | ID | Kind | Native last-edited column |
 |---|---|---|---|---|---|
@@ -197,22 +223,41 @@ Use all of the following signals and merge, deduping by page ID:
    (`2026-07-15T13:56`, `2026-07-09T18:55`) — i.e. over REST the field behaves
    correctly, unlike the frozen values the SQL bridge reports for the Tenant DB.
 
-   **⚠ BLOCKED ON ONE PERMISSION GRANT (Gabriel, one-time, ~6 clicks, free).**
-   The token currently reaches only 14 pages and **zero databases** — every
-   database query returns HTTP 404, which in Notion means "integration not
-   shared", not "missing". Until Gabriel adds the **ORA Command Center**
-   connection to the Ops Hub / 📂 Databases parent (connections cascade to child
-   databases) — Notion UI: `⋯ → Connections → ORA Command Center` — this path is
-   unavailable and the run must fall back. Re-test with
-   `GET /v1/databases/8dbbaec0-611a-4617-be07-6a77d0d0307a`: a 200 means the
-   grant landed and this becomes the primary mechanism for ALL SIX databases.
+   **✅ GRANT LANDED 2026-07-16 ~23:00 ET.** Gabriel added the **ORA Command
+   Center** connection to the Ops Hub via `⋯ → Connections`. Capabilities are
+   **read-only** ("Can read content"; cannot insert/update/comment) and cascade
+   to child pages — so this path can never write to the workspace. Verified:
+   `GET /v1/databases/8dbbaec0…` now returns 200. **Two of the six sit OUTSIDE
+   the Ops Hub tree and still 404 — Acquisition Pipeline Tracker and Broker
+   Relationships need their own connection grant** (same 3 clicks, on each).
 
-   **This grant also settles DEFECT 1's open mechanism.** Once the Tenant DB is
-   reachable over REST, fetch page `3336ecd8-9e59-8108-9287-cd14dd363233` (the
-   `⛔ ARCHIVED 2026-07-12 — TWO MEN AND A TRUCK` row) and read its
-   `last_edited_time`. **07-12 ⇒ the MCP bridge is the defect and REST is simply
-   correct. 03-30 ⇒ Notion itself is frozen for that collection.** Read-only,
-   costs nothing, and answers it definitively.
+   **⚠ WHAT THE GRANT DID AND DID NOT BUY — read before relying on rung 1.**
+   It removes the MCP quota (real, verified) and gives true server-side
+   filtering. **It does NOT rescue a frozen column.** Measured immediately after
+   the grant: a REST query for `last_edited_time on_or_after 2026-04-01` against
+   the Tenant DB returns **0 rows**, when 124 rows were provably retitled
+   2026-07-12 and 16 written 2026-07-10. REST is exactly as blind as the SQL
+   bridge there. Use rung 1 for the quota win and for the sources whose dates
+   VARY — not as a fix for DEFECT 1.
+
+   **✅ DEFECT 1's MECHANISM IS SETTLED (2026-07-16) — stop investigating it.**
+   Notion's own REST API reports, for page `3336ecd8-9e59-8108-9287-cd14dd363233`
+   (`⛔ ARCHIVED 2026-07-12 — TWO MEN AND A TRUCK`):
+   `created_time = 2026-03-30T11:50:00Z` and
+   `last_edited_time = 2026-03-30T11:50:00Z` — **identical**, on a page whose own
+   title records a 2026-07-12 edit. **The MCP bridge was faithful; it reported
+   exactly what Notion holds.** The freeze is inside Notion, upstream of every
+   read path, and no client-side change can fix it. (An earlier `[SPECULATIVE]`
+   note in this file guessed the column tracked "when the bulk sync last wrote
+   the row" — that is now REFUTED and should not be repeated.) WHY Notion does
+   this for one database and not another is unresolved and is NOT worth further
+   read-only digging: every read path agrees. If it ever matters, it is a Notion
+   support question or a controlled-write experiment, not a code change.
+
+   **Consequence — the only mechanism that can detect Tenant DB edits is a
+   SNAPSHOT + DIFF**, which the grant now makes affordable: unlimited REST reads
+   mean a nightly full pull of the DB, hashed and diffed against yesterday's,
+   detects real changes regardless of the broken timestamp. Not built — proposed.
 
    **⚠ DEFECT 2 — `notion-query-data-sources` is ENTITLEMENT-GATED and will
    hard-fail mid-run.** Measured live 2026-07-16: after ~5 queries the tool
