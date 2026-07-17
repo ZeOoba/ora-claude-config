@@ -175,6 +175,63 @@ def test_no_other_session_generic_message():
     print("PASS test_no_other_session_generic_message")
 
 
+def test_warning_reaches_the_model_via_additional_context():
+    """REGRESSION (2026-07-16): the warning must reach CLAUDE, not just the user.
+
+    `systemMessage` is documented as "Warning message shown to the USER" and is
+    never injected into the model's context. This guard shipped 2026-07-09 emitting
+    ONLY systemMessage (+ stderr, which PreToolUse feeds to Claude only on exit 2 --
+    and this hook exits 0 by design). Net effect: it fired correctly for 7 days
+    (168 session markers) while the agent it exists to steer never received a single
+    warning -- proven live 2026-07-16, when a session edited a file another live
+    session was concurrently writing and got no hook warning at all.
+
+    Per the PreToolUse contract, `hookSpecificOutput.additionalContext` is the ONLY
+    field that is both model-visible and decoupled from blocking."""
+    repo = make_main_repo(dirty=True)
+    fp = os.path.join(repo, "server", "x.ts")
+    rc, out, err = run_hook(payload("s10", fp), [repo], sessions_tmp())
+    assert rc == 0, "must stay non-blocking, got %s" % rc
+    data = json.loads(out)
+    hso = data.get("hookSpecificOutput") or {}
+    assert hso.get("hookEventName") == "PreToolUse", (
+        "must declare hookEventName PreToolUse, got %r" % out)
+    assert hso.get("permissionDecision") == "allow", (
+        "warn-only invariant: must explicitly ALLOW, never deny/ask, got %r" % out)
+    assert hso.get("additionalContext"), (
+        "the warning must reach the MODEL via additionalContext, got %r" % out)
+    assert "is open right now" in hso["additionalContext"] or "uncommitted" in hso["additionalContext"], (
+        "additionalContext must carry the actual collision warning, got %r" % hso)
+    assert data.get("systemMessage"), "must STILL warn the user via systemMessage too"
+    print("PASS test_warning_reaches_the_model_via_additional_context")
+
+
+def test_silent_cases_emit_no_additional_context():
+    """The delivery fix must not make silent cases chatty: a clean tree still
+    emits nothing at all (no systemMessage AND no additionalContext)."""
+    repo = make_main_repo(dirty=False)
+    fp = os.path.join(repo, "server", "x.ts")
+    rc, out, err = run_hook(payload("s11", fp), [repo], sessions_tmp())
+    assert rc == 0
+    assert "additionalContext" not in out, "clean tree must stay fully silent, got %r" % out
+    assert "systemMessage" not in out, "clean tree must stay fully silent, got %r" % out
+    print("PASS test_silent_cases_emit_no_additional_context")
+
+
+def test_never_denies_even_when_warning():
+    """Explicit guard on the stated SAFETY INVARIANT: warn-only. Adding
+    permissionDecision must never introduce deny/ask."""
+    repo = make_main_repo(dirty=True)
+    fp = os.path.join(repo, "server", "x.ts")
+    rc, out, err = run_hook(payload("s12", fp), [repo], sessions_tmp())
+    data = json.loads(out)
+    decision = (data.get("hookSpecificOutput") or {}).get("permissionDecision")
+    assert decision == "allow", "must be allow, got %r" % decision
+    assert decision not in ("deny", "ask"), "must never block or prompt"
+    assert rc == 0, "must exit 0"
+    print("PASS test_never_denies_even_when_warning")
+
+
 if __name__ == "__main__":
     test_outside_repo_silent()
     test_worktree_silent()
@@ -186,4 +243,7 @@ if __name__ == "__main__":
     test_same_dirty_set_stays_silent_after_warning()
     test_other_active_session_named_in_message()
     test_no_other_session_generic_message()
+    test_warning_reaches_the_model_via_additional_context()
+    test_silent_cases_emit_no_additional_context()
+    test_never_denies_even_when_warning()
     print("ALL SHARED-CHECKOUT-GUARD TESTS PASS")

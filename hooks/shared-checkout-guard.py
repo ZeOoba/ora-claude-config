@@ -13,9 +13,37 @@ When another Claude Code session is currently open (per
 hooks/lib/session_liveness.py, itself a fail-open enrichment signal), the
 warning names it specifically.
 
-SAFETY INVARIANT: warn-only. It NEVER denies a tool call, and the whole body is
-wrapped in try/except -- on ANY error it prints nothing and exits 0 (ALLOW).
-A bug here must never block or slow an edit.
+DELIVERY (fixed 2026-07-16 -- this hook was silently useless to the agent for 7
+days). v1 emitted ONLY `systemMessage` + stderr. Per the PreToolUse contract,
+`systemMessage` is "shown to the USER" and is NEVER injected into the model's
+context; and stderr is fed to Claude ONLY on exit 2 (a block), while this hook
+exits 0 by design. Net: from 2026-07-09 it fired correctly ~168 times across
+sessions while the agent it exists to steer received nothing. Found 2026-07-16
+when a session hit two shared-file collisions in one hour, caught BOTH by manual
+mtime inspection, and got no hook warning -- then reproduced it directly (marker
+written 20:08:43, zero warning surfaced). Fix: also emit
+`hookSpecificOutput.additionalContext`, the only PreToolUse field that is both
+model-visible and non-blocking. Verified end-to-end: the warning landed in the
+agent's context on the very Edit that applied this fix. Do NOT "simplify" this
+back to systemMessage-only.
+
+Why `permissionDecision: "allow"` is SAFE here and does NOT weaken anything
+(verified 2026-07-16 against the docs AND empirically -- do not "harden" it away):
+  * It cannot grant permission. Per permissions.md: "Hook decisions don't bypass
+    permission rules. Claude Code evaluates deny and ask rules regardless of what
+    a PreToolUse hook returns: a matching deny rule blocks the call, and a
+    matching ask rule still prompts even when the hook returned 'allow'."
+  * It does not short-circuit later hooks. All matching PreToolUse hooks run and
+    deny wins. Proven live: with this hook (#6 in settings.json) returning "allow",
+    registry-write-guard (#7) still blocked a registry write.
+  * `permissionDecision` is REQUIRED in hookSpecificOutput -- it cannot be omitted.
+    "defer" would be the semantic no-op, but whether additionalContext is still
+    delivered under "defer" is UNDOCUMENTED, so "allow" is the supported shape.
+
+SAFETY INVARIANT: warn-only. It NEVER denies a tool call (permissionDecision is
+always "allow" -- never "deny"/"ask"), and the whole body is wrapped in
+try/except -- on ANY error it prints nothing and exits 0 (ALLOW). A bug here must
+never block or slow an edit.
 
 Stdlib only. ASCII-only. Windows (`python`).
 """
@@ -156,8 +184,23 @@ def main():
         " Editing here risks co-mingling their hunks. Consider an isolated worktree "
         "(npm run worktree / EnterWorktree) and verify `git status` before committing."
     )
-    # Non-blocking warning: `systemMessage` surfaces to the user; stderr is a fallback.
-    sys.stdout.write(json.dumps({"systemMessage": msg}))
+    # Delivery (fixed 2026-07-16 -- see DELIVERY note in the module docstring):
+    #   systemMessage     -> the USER (transcript warning). Never reaches the model.
+    #   additionalContext -> CLAUDE. The ONLY PreToolUse field that is both
+    #                        model-visible AND decoupled from blocking.
+    #   permissionDecision "allow" -> explicit non-block, preserving the warn-only
+    #                        SAFETY INVARIANT above (never deny, never ask).
+    #   stderr            -> debug log only on exit 0 (PreToolUse feeds stderr to
+    #                        Claude ONLY on exit 2, which would block). Kept as a
+    #                        breadcrumb, NOT relied on as the delivery channel.
+    sys.stdout.write(json.dumps({
+        "systemMessage": msg,
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "additionalContext": msg,
+        },
+    }))
     sys.stderr.write(msg + "\n")
 
 
