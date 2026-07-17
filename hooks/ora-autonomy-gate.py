@@ -218,6 +218,13 @@ except Exception:
 # made for its benefit can break this gate -- which is precisely why it must degrade safely.
 try:
     from override_tokens import Tier, token_grants, token_path  # noqa: E402
+    # EXTERNAL_SEND is SHARED with check_external_send.py (send-via-outlook.ps1's own
+    # outbound-action check, 2026-07-17 -- see email_send_tier.py's module docstring for
+    # why: the two enforcement points must never diverge on what "authorized" means).
+    # Imported in the SAME try so a broken email_send_tier.py degrades exactly as fail-
+    # closed as a broken override_tokens.py -- see the fallback block below.
+    from email_send_tier import EXTERNAL_SEND, INTERNAL_DOMAIN, is_external, \
+        recipients_authorized as _recipients_authorized  # noqa: E402
     TOKEN_CONTRACT_LOADED = True
 except Exception:
     TOKEN_CONTRACT_LOADED = False
@@ -240,15 +247,18 @@ except Exception:
     def token_path(session_id, name):
         return None
 
-INTERNAL_DOMAIN = "@oxfordra.net"
+    INTERNAL_DOMAIN = "@oxfordra.net"
+    EXTERNAL_SEND = Tier("allow-external-send", "external-send", 300, single_use=True,
+                         requires_extra_check=True)
+
+    def is_external(address):
+        return not address.lower().endswith(INTERNAL_DOMAIN)
+
+    def _recipients_authorized(fields, external):
+        return False  # no validator -> no grant, ever (mirrors token_grants above)
 
 WEBSITE_WRITE = Tier("allow-website-write", "website-write", 3600)
 WEBSITE_DEPLOY = Tier("allow-website-deploy", "website-deploy", 300, single_use=True)
-# requires_extra_check: an external-send token must NAME every external recipient. That
-# binding is email domain logic (see _recipients_authorized), so the shared contract cannot
-# evaluate it -- the flag makes token_grants refuse rather than skip it if a caller forgets.
-EXTERNAL_SEND = Tier("allow-external-send", "external-send", 300, single_use=True,
-                     requires_extra_check=True)
 
 # Mutating shell ops; if one of these co-occurs with a site-path marker in a Bash
 # command, treat it as a write into the oxfordra.net tree (Gate 2). Read-only verbs
@@ -314,23 +324,6 @@ def _normalize_for_matching(text):
     characters, so detection matches what a human reads rather than raw codepoints."""
     folded = unicodedata.normalize("NFKC", text)
     return "".join(ch for ch in folded if unicodedata.category(ch) not in _STRIP_CATEGORIES)
-
-
-def _recipients_authorized(fields, external):
-    """Every external recipient of the send must be named in the token.
-
-    Gate 1's own binding, kept here rather than in the shared contract: override_tokens.py
-    validates a token generically and knows nothing about email. Passed to token_grants as
-    its extra_check, so it runs before a single-use token is consumed -- a token that fails
-    it is refused WITHOUT being burned.
-    """
-    raw = fields.get("recipients")
-    if not raw:
-        return False
-    allowed = {r.strip().lower() for r in raw.split(",") if r.strip()}
-    if not allowed:
-        return False
-    return all(r.lower() in allowed for r in external)
 
 
 def override_active(session_id, tier, external=None):
@@ -410,7 +403,7 @@ def check_bash(command, session_id):
     # SEND_SHORTNAME_RE's own comment.
     if "send-via-outlook.ps1" in lowered or SEND_SHORTNAME_RE.search(lowered):
         recipients = EMAIL_RE.findall(normalized)
-        external = sorted({r for r in recipients if not r.lower().endswith(INTERNAL_DOMAIN)})
+        external = sorted({r for r in recipients if is_external(r)})
         if external and not override_active(session_id, EXTERNAL_SEND, external):
             block("external email recipient(s): %s" % ", ".join(external), EXTERNAL_SEND,
                   session_id,
