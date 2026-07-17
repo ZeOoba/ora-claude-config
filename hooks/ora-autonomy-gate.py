@@ -225,6 +225,12 @@ try:
     # closed as a broken override_tokens.py -- see the fallback block below.
     from email_send_tier import EXTERNAL_SEND, INTERNAL_DOMAIN, is_external, \
         recipients_authorized as _recipients_authorized  # noqa: E402
+    # WEBSITE_DEPLOY is SHARED with check_website_deploy.py (the netlify CLI wrapper's own
+    # outbound-action check, website-canonical/scripts/netlify-guard.js, 2026-07-17 -- same
+    # rationale as EXTERNAL_SEND/email_send_tier.py above: the two enforcement points must
+    # never diverge on what "authorized" means). Imported in the SAME try so a broken
+    # website_deploy_tier.py degrades exactly as fail-closed as a broken override_tokens.py.
+    from website_deploy_tier import WEBSITE_DEPLOY  # noqa: E402
     TOKEN_CONTRACT_LOADED = True
 except Exception:
     TOKEN_CONTRACT_LOADED = False
@@ -250,6 +256,7 @@ except Exception:
     INTERNAL_DOMAIN = "@oxfordra.net"
     EXTERNAL_SEND = Tier("allow-external-send", "external-send", 300, single_use=True,
                          requires_extra_check=True)
+    WEBSITE_DEPLOY = Tier("allow-website-deploy", "website-deploy", 300, single_use=True)
 
     def is_external(address):
         return not address.lower().endswith(INTERNAL_DOMAIN)
@@ -258,7 +265,6 @@ except Exception:
         return False  # no validator -> no grant, ever (mirrors token_grants above)
 
 WEBSITE_WRITE = Tier("allow-website-write", "website-write", 3600)
-WEBSITE_DEPLOY = Tier("allow-website-deploy", "website-deploy", 300, single_use=True)
 
 # Mutating shell ops; if one of these co-occurs with a site-path marker in a Bash
 # command, treat it as a write into the oxfordra.net tree (Gate 2). Read-only verbs

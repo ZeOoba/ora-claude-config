@@ -253,6 +253,44 @@ def test_broken_email_send_tier_fails_closed():
     print("PASS test_broken_email_send_tier_fails_closed")
 
 
+def test_broken_website_deploy_tier_fails_closed():
+    """A broken/missing hooks/lib/website_deploy_tier.py (added 2026-07-17 for the netlify
+    CLI wrapper's outbound-action check, OI-007) must ALSO still block every gated action.
+    Same failure shape as the email_send_tier / override_tokens variants above."""
+    sandbox = tempfile.mkdtemp(prefix="oag-broken-wdt-")
+    shutil.copytree(os.path.dirname(HOOK), os.path.join(sandbox, "hooks"))
+    gate = os.path.join(sandbox, "hooks", "ora-autonomy-gate.py")
+    os.remove(os.path.join(sandbox, "hooks", "lib", "website_deploy_tier.py"))
+
+    def run_broken(payload):
+        env = dict(os.environ)
+        env["ORA_OVERRIDE_SESSIONS_DIR"] = tempfile.mkdtemp(prefix="oag-broken-wdt-sess-")
+        payload = dict(payload)
+        payload["session_id"] = SESSION_A
+        proc = subprocess.run([sys.executable, gate], input=json.dumps(payload),
+                              capture_output=True, text=True, env=env)
+        return proc.returncode, proc.stderr
+
+    for label, payload in (
+        ("prod deploy", bash_payload(PROD_DEPLOY)),
+        ("site write", write_payload(SITE_FILE)),
+        ("external send", bash_payload(
+            "powershell -File send-via-outlook.ps1 -To broker@example.com -Subject x -Body y")),
+        ("netlify MCP updater", mcp_payload("mcp__netlify__project-updater")),
+    ):
+        rc, err = run_broken(payload)
+        assert rc == 2, (
+            "%s must BLOCK (exit 2) when website_deploy_tier.py is unimportable, got exit %s.\n%s"
+            % (label, rc, err))
+
+    rc, err = run_broken(write_payload("C:/proj/src/index.html"))
+    assert rc == 0, (
+        "an ungated call must still pass with the module broken (got exit %s)\n%s" % (rc, err))
+
+    shutil.rmtree(sandbox, ignore_errors=True)
+    print("PASS test_broken_website_deploy_tier_fails_closed")
+
+
 def test_malformed_stdin_fails_open():
     proc = subprocess.run([sys.executable, HOOK], input="not json", capture_output=True, text=True)
     assert proc.returncode == 0, "malformed stdin must exit 0, got %s" % proc.returncode
