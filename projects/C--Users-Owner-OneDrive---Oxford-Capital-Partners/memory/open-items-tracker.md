@@ -32,7 +32,6 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
 | [OI-007](#OI-007) | 2026-07-17 | [project_autonomy_gate_indirection_ceiling_followup.md](project_autonomy_gate_indirection_ceiling_followup.md) | Enforce Gate 1/2a at the actual outbound action — value-indirection defeats shell-text detection |
-| [OI-008](#OI-008) | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Sweep the Notion Tenant DB for the Escalation-Date/Lease-Expiration column-mapping bug beyond the 7 rows already checked |
 
 ### OI-007
 **Status:** OPEN
@@ -44,22 +43,6 @@ variable/file-sourced recipient, a renamed netlify binary, splitting a deploy ac
 calls). Not fixable by another regex — needs enforcement moved to the actual outbound action.
 Gabriel-ratified as separate follow-up work, not tonight's scope.
 
-### OI-008
-**Status:** OPEN
-**Opened:** 2026-07-17
-**Source:** [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md)
-**Description:** A second, distinct Tenant DB defect from the "no sync exists" root cause: at the
-original March 2026 one-time import, several Notion rows had the workbook's `Escalation Date`
-column miscopied into the `Lease Expiration` field instead of `Lease End`. Confirmed on 5 of the 7
-WORKBOOK-NEWER rows closed under OI-003–006's follow-on remediation (Pedro Ulate, SAFE CONNECTION
-ELECTRIC LLC, TYM Wholesale LLC, Randy's Aquarium Service, Fully Equipped Cleaning Maintenance
-Services LLC — each verified against a primary lease/addendum document; a 6th, Carlton L. Handy,
-had a different stale-figure signature). **Only those 7 rows were checked** — the other ~165 live
-Notion Tenant DB rows have never been swept for this specific pattern. Needs: a targeted comparison
-of every live Notion `Lease Expiration` against the workbook's `Escalation Date` column (not just
-`Lease End`) to find any other miscopied rows, each confirmed against its executed lease (Invariant
-7) before correction, same fetch-verify-then-write discipline as OI-005/OI-006.
-
 ## Closed
 
 | ID | Opened | Closed | Source | One-line |
@@ -70,6 +53,7 @@ of every live Notion `Lease Expiration` against the workbook's `Escalation Date`
 | [OI-003](#OI-003) | 2026-07-16 | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Build the Notion Tenant DB workbook mirror (`EXPORT_RentRoll` → Notion) |
 | [OI-005](#OI-005) | 2026-07-16 | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Dedup 2 stale Notion Heritage Pool Supply rows against the correct SRS row |
 | [OI-006](#OI-006) | 2026-07-16 | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Confirm 4 tenant turnovers + Soldier Trucking property conflict against executed leases |
+| [OI-008](#OI-008) | 2026-07-17 | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Sweep the Tenant DB for the Escalation-Date/Lease-Expiration column-mapping bug beyond the 7 rows already checked |
 
 ### OI-001
 **Status:** CLOSED
@@ -167,3 +151,26 @@ Banwick 2814 `32f6ecd8-9e59-8106-b4d9-f6da8fb7cec0`, State 350 #110 kept
 flagged as an error: Zettler/Morrison/Banwick all lease under landlord entity "Fairground Village
 Center, LLC" at the same Potomac, MD address — a consistent multi-property holding entity, not a
 data anomaly.
+
+### OI-008
+**Status:** CLOSED
+**Opened:** 2026-07-17
+**Closed:** 2026-07-17
+**Source:** [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md)
+**Description:** Sweep every live Notion Tenant DB row's `Lease Expiration` against the workbook's
+`Escalation Date` column (not just `Lease End`) to find any rows beyond the 7 already checked where
+the original March 2026 import miscopied the wrong workbook column.
+**Evidence:** Ran a script (`sweep_escalation_bug.py`) joining every non-archived, non-retired
+Notion row against `EXPORT_RentRoll` via the same street-family+unit key used throughout this
+reconciliation, flagging any pair where `Notion Lease Expiration == WB Escalation Date != WB Lease
+End`. This is the full reconciliable overlap (79 joined pairs — matches OI-003's original
+match+workbook-newer+conflict count exactly, confirming no join coverage was lost). **Result: 4
+hits, all 4 already fixed** under the OI-003–006 follow-on remediation earlier tonight (TYM
+Wholesale LLC/Zettler 2006, Pedro Ulate/4595 5th Ave, SAFE CONNECTION ELECTRIC LLC/Banwick 2824,
+Randy's Aquarium Service/Banwick 2804) — the sweep ran against a pre-fix data cache, which is why
+they still show as hits in the script output; live Notion already carries the corrected values
+(verified under OI-003–006's own evidence). **No new instances of this bug exist anywhere the
+comparison is possible.** Scope boundary, not a gap in the sweep: 93 live Notion rows have no
+workbook counterpart at all (family-join miss or genuinely off-workbook tenants), so this
+column-mapping check cannot apply to them — verifying those 93 independently against primary lease
+documents would be a much larger, separate undertaking, not implied by this item's description.

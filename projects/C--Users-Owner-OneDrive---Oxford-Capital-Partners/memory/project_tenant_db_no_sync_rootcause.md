@@ -1,6 +1,6 @@
 ---
 name: project-tenant-db-no-sync-rootcause
-description: "ROOT CAUSE 2026-07-16: there was NO workbook→Notion tenant sync — the DB was a frozen March-2026 import. CLOSED 2026-07-17: OI-003 through OI-006 executed, plus the 7 remaining WORKBOOK-NEWER rows + Masala Bazaar dedup. Found a second systematic bug: several Notion rows had Escalation Date miscopied into the Lease Expiration field at the original March import."
+description: "ROOT CAUSE 2026-07-16: there was NO workbook→Notion tenant sync — the DB was a frozen March-2026 import. CLOSED 2026-07-17: OI-003 through OI-008 all executed — reconciliation, dedups, turnovers, and a full sweep for a second systematic bug (Escalation Date miscopied into Lease Expiration at the March import) confirming no undiscovered instances remain."
 metadata: 
   node_type: memory
   type: project
@@ -51,12 +51,15 @@ any documents; Carlton Handy's Notion value didn't match either WB column, turne
 pre-2nd-addendum figure instead). Reading primary lease/addendum documents for 5 of the 7
 confirmed the workbook's `Lease End` was correct in every case — this was a **column-mapping bug
 at the original March 2026 one-time import**, not staleness and not a workbook error. **This
-pattern was NOT exhaustively swept** — only the 7 rows OI-003 happened to flag as WORKBOOK-NEWER
-were checked. Since the bug is a column-mapping defect, it could affect other rows where the
-current Escalation Date coincidentally still resembles a plausible Lease Expiration, or rows not
-caught by the street-family reconciliation join at all. **Candidate follow-up, not yet scoped or
-opened as an OI item:** a targeted sweep comparing every live Notion `Lease Expiration` against
-its workbook `Escalation Date` (not just `Lease End`) to find any other miscopied rows.
+pattern was NOT exhaustively swept** at the time this was written — only the 7 rows OI-003 happened
+to flag as WORKBOOK-NEWER were checked.
+
+**✅ SWEPT 2026-07-17, same day, as [OI-008](open-items-tracker.md#OI-008) (CLOSED).** Ran every
+non-archived, non-retired Notion row against `EXPORT_RentRoll` on the same street-family+unit join
+— the full 79-pair reconciliable overlap. Result: no new instances. The 4 rows the sweep script
+flagged were all already-fixed (script ran against a pre-fix data cache). **Residual, explicitly
+out of this bug's checkable scope:** 93 live Notion rows have no workbook counterpart at all, so
+this column-mapping check can't apply to them — see OI-008's evidence for the reasoning.
 
 ## The finding
 
