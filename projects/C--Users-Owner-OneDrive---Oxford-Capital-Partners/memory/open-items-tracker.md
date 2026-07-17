@@ -31,46 +31,17 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
-| [OI-003](#OI-003) | 2026-07-16 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Build the Notion Tenant DB workbook mirror (`EXPORT_RentRoll` → Notion) |
-| [OI-004](#OI-004) | 2026-07-16 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Add a real `Archived` property to the Tenant DB schema (blocks OI-003) |
-| [OI-005](#OI-005) | 2026-07-16 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Dedup 2 stale Notion Heritage Pool Supply rows against the correct SRS row |
-| [OI-006](#OI-006) | 2026-07-16 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Confirm 4 tenant turnovers + Soldier Trucking property conflict against executed leases |
+| [OI-007](#OI-007) | 2026-07-17 | [project_autonomy_gate_indirection_ceiling_followup.md](project_autonomy_gate_indirection_ceiling_followup.md) | Enforce Gate 1/2a at the actual outbound action — value-indirection defeats shell-text detection |
 
-### OI-003
+### OI-007
 **Status:** OPEN
-**Opened:** 2026-07-16
-**Source:** [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md)
-**Description:** Build the Notion Tenant DB workbook mirror: `EXPORT_RentRoll` (137 rows, live
-formulas, join key Property+Unit) → Notion Tenant DB, extending `ora-master-workbook-ingest`.
-Spec: `Claude_Workspace/01_Workspace/outputs/2026-07-16_TenantDB-Workbook-Mirror_Spec_v01.md`.
-First run must be a reconciliation REPORT only, never a blind overwrite — see OI-006 and the
-Heritage Pool counterexample in the source file (the workbook itself was wrong on that lease).
-
-### OI-004
-**Status:** OPEN
-**Opened:** 2026-07-16
-**Source:** [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md)
-**Description:** Add a real `Archived` property to the Notion Tenant DB schema. No native
-archive/status field exists today — the 2026-07-12 remediation archived rows by title-prefix
-(`⛔ ARCHIVED …`), so all 296 rows (124 tombstoned) remain live and queryable. Blocks OI-003: the
-mirror cannot distinguish live from tombstoned rows without it.
-
-### OI-005
-**Status:** OPEN
-**Opened:** 2026-07-16
-**Source:** [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md)
-**Description:** Dedup the two stale Notion `Heritage Pool Supply` rows (both dated 2026-09-30)
-against the correct `SRS Distribution / Heritage Pool Supply` row (2031-09-30 — confirmed by
-Gabriel 2026-07-16 and now also matched by the corrected Master Workbook). Notion is untouched.
-
-### OI-006
-**Status:** OPEN
-**Opened:** 2026-07-16
-**Source:** [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md)
-**Description:** Confirm against the executed lease (Invariant 7) before any mirror write touches
-them: 4 tenant-turnover rows (Zettler 2016, 9620 State 350 #110, Morrison 390, Banwick 2814)
-where Notion still names the predecessor tenant, plus the Soldier Trucking property conflict
-(Notion: 2018 Zettler Rd unit 301; workbook: 1100 Rarig G&H).
+**Opened:** 2026-07-17
+**Source:** [project_autonomy_gate_indirection_ceiling_followup.md](project_autonomy_gate_indirection_ceiling_followup.md)
+**Description:** `ora-autonomy-gate.py`'s Gate 1 (external email) and Gate 2a (oxfordra.net prod
+deploy) can be defeated entirely, no override needed, via value/reference indirection (a
+variable/file-sourced recipient, a renamed netlify binary, splitting a deploy across two Bash
+calls). Not fixable by another regex — needs enforcement moved to the actual outbound action.
+Gabriel-ratified as separate follow-up work, not tonight's scope.
 
 ## Closed
 
@@ -78,6 +49,10 @@ where Notion still names the predecessor tenant, plus the Soldier Trucking prope
 |----|--------|--------|--------|----------|
 | [OI-001](#OI-001) | 2026-07-08 | 2026-07-16 | [oxford-cc-repo-health.md](oxford-cc-repo-health.md) | Purge 2 dangling disabled LAMS scheduled-task entries |
 | [OI-002](#OI-002) | 2026-07-08 | 2026-07-16 | [oxford-cc-repo-health.md](oxford-cc-repo-health.md) | Decide `ora-cam-reconciliation-annual` year-round vs. seasonal timing |
+| [OI-004](#OI-004) | 2026-07-16 | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Add a real `Archived` property to the Tenant DB schema (blocked OI-003) |
+| [OI-003](#OI-003) | 2026-07-16 | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Build the Notion Tenant DB workbook mirror (`EXPORT_RentRoll` → Notion) |
+| [OI-005](#OI-005) | 2026-07-16 | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Dedup 2 stale Notion Heritage Pool Supply rows against the correct SRS row |
+| [OI-006](#OI-006) | 2026-07-16 | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Confirm 4 tenant turnovers + Soldier Trucking property conflict against executed leases |
 
 ### OI-001
 **Status:** CLOSED
@@ -99,3 +74,78 @@ where Notion still names the predecessor tenant, plus the Soldier Trucking prope
 
 ---
 *Both entries above were discovered already-closed during the 2026-07-16/17 dead-pointer incident (the `oxford-cc-repo-health.md` → `session-context.md` chain had gone stale) rather than closed in the normal course of work — hence identical opened/closed dates and no intermediate history. See [[event_log]] 2026-07-16 for the full incident writeup.*
+
+### OI-004
+**Status:** CLOSED
+**Opened:** 2026-07-16
+**Closed:** 2026-07-17
+**Source:** [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md)
+**Description:** Add a real `Archived` property to the Notion Tenant DB schema. No native
+archive/status field existed — the 2026-07-12 remediation archived rows by title-prefix
+(`⛔ ARCHIVED …`) only, so all rows remained live and queryable.
+**Evidence:** Added `Row Retired` CHECKBOX property via `notion-update-data-source` (`ALTER
+COLUMN`). Both single-word reserved names (`Archived`, `Retired`) failed with `validation_error`
+before the two-word name succeeded. Property confirmed live and in active use: 2 Heritage Pool
+duplicate rows retired under OI-005 and 1 duplicate `9620 State 350` Unit 110 row retired under
+OI-006, all queryable via `"Row Retired" = '__YES__'`.
+
+### OI-003
+**Status:** CLOSED
+**Opened:** 2026-07-16
+**Closed:** 2026-07-17
+**Source:** [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md)
+**Description:** Build the Notion Tenant DB workbook mirror: `EXPORT_RentRoll` (137 rows, live
+formulas, join key Property+Unit) → Notion Tenant DB (172 rows), extending
+`ora-master-workbook-ingest`. Spec:
+`Claude_Workspace/01_Workspace/outputs/2026-07-16_TenantDB-Workbook-Mirror_Spec_v01.md`.
+**Evidence:** Live pull of both sides (`export_rentroll.json`, `notion_tenants_raw.json`) joined
+via a street-family bucket key (plain naive property-string normalization produced an implausible
+117/148-orphan result on the first attempt — rebuilt with the family-bucket approach, see
+[[reference_tenant_db_no_sync_rootcause]]). Result: 23 match, 7 workbook-newer, 0 notion-newer, 49
+conflict (mostly a `date:Lease Expiration:start` NULL artifact — Notion's field genuinely empty on
+most active rows, not a real mismatch), 64 workbook-only, 93 notion-only. Report posted to Notion
+page `3a06ecd8-9e59-81d2-9e71-d630fcc5b448`. Per the spec's own mandate, this run was report-only —
+no blind overwrite; the confirmed corrections it surfaced were executed individually under OI-005
+and OI-006 once each was checked against its executed lease.
+
+### OI-005
+**Status:** CLOSED
+**Opened:** 2026-07-16
+**Closed:** 2026-07-17
+**Source:** [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md)
+**Description:** Dedup the two stale Notion `Heritage Pool Supply` rows (both dated 2026-09-30)
+against the correct `SRS Distribution / Heritage Pool Supply` row (2031-09-30 — confirmed by
+Gabriel 2026-07-16 and matched by the corrected Master Workbook).
+**Evidence:** Correct row `32b6ecd8-9e59-8115-9c01-fe0126f3f4b7` left untouched. Two duplicate rows
+(`32c6ecd8-9e59-8125-979b-cafe5e648089`, `32b6ecd8-9e59-8161-ab6b-ddc6b708e464`) set to `Row
+Retired = __YES__` via `notion-update-page`, verified by fresh SQL query post-write. Separately
+flagged (not part of this item's scope, not yet corrected): Heritage Pool's current `Monthly Rent`
+($8,540) doesn't match its own lease amendment's Year-1 rate ($8,710.80/mo).
+
+### OI-006
+**Status:** CLOSED
+**Opened:** 2026-07-16
+**Closed:** 2026-07-17
+**Source:** [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md)
+**Description:** Confirm against the executed lease (Invariant 7) before any mirror write touches
+them: 4 tenant-turnover rows (Zettler 2016, 9620 State 350 #110, Morrison 390, Banwick 2814) where
+Notion still named the predecessor tenant, plus the Soldier Trucking property conflict (Notion:
+2018 Zettler Rd unit 301; workbook: 1100 Rarig G&H).
+**Evidence:** Read all 5 primary executed lease documents via SharePoint (`read_resource`) —
+Soldier Trucking original lease + Second Addendum (DocuSign-executed, Gabriel Goldberg's own
+signature 2026-03-30: confirms 1100 Rarig Ave Unit G&H, $3,183/mo, term → 2026-10-31), Columbus
+Diamonds Elite Cheer (2016 Zettler Rd, term 2026-05-01→2029-04-30), Triple Threat Kansas City
+(9620 E State Rte 350 Unit 110, Raytown MO), Pact Containers LLC (390 Morrison Rd, term
+2026-05-05→2029-04-30), AI Thomas LLC d.b.a. AIT Environmental Technology (2814 Banwick Rd, term
+2026-06-01→2029-05-31). All 5 confirmed the workbook/audit's claims exactly. `9620 State 350` Unit
+110 turned out to carry 2 duplicate stale Notion rows (both "Square Cow Movers/BHIL Enterprises");
+handled with the same keep-one/retire-one pattern as OI-005. Wrote 6 `notion-update-page` calls
+(4 turnovers + 1 property-conflict correction + 1 duplicate retirement), verified via a fresh SQL
+query by page ID post-write — all 6 rows match the intended values exactly. Page IDs: Soldier
+Trucking `32b6ecd8-9e59-8192-9427-c1fcc2e803f3`, Zettler 2016
+`32f6ecd8-9e59-8192-8c73-f69c14122253`, Morrison 390 `32c6ecd8-9e59-8171-a432-c8a5adbba8c4`,
+Banwick 2814 `32f6ecd8-9e59-8106-b4d9-f6da8fb7cec0`, State 350 #110 kept
+`32b6ecd8-9e59-8105-8d7e-ea9a94b603f8` / retired `32c6ecd8-9e59-815b-9a67-da8c147292a7`. Noted, not
+flagged as an error: Zettler/Morrison/Banwick all lease under landlord entity "Fairground Village
+Center, LLC" at the same Potomac, MD address — a consistent multi-property holding entity, not a
+data anomaly.
