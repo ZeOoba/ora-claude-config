@@ -87,14 +87,275 @@ systemic bug classes discovered beyond OI-008's Escalation-Date pattern.**
   (`32b6ecd8-9e59-8115-b8fa-f3c924846355`, $1,802.50 = Unit 306), Palmer's Plumbing LLC
   (`32b6ecd8-9e59-8175-ac37-c4485ea0910e`, $2,980.36 = combined Units 301+302, stale dates on the
   Red-Branch-tagged copy). All 3 retired (`Row Retired = __YES__`), verified post-write.
-- **Genuinely not yet examined:** Eastern Shore Entrepreneurship Center INC. (name also matches an
-  Information Lane tenant — likely a 4th duplicate, not yet retired); PRO REPAIR LLC, Chesapeake
-  Communications LLC, Bay-Care Heating & Air LLC, Baltimore Dialysis LLC (Fresenius) — the
-  remaining 4 of the original Red Branch 8, no match found yet against Info Lane or Red Branch,
-  need individual tracing (PRO REPAIR LLC's contact name pattern suggests it may actually belong
-  at 1100 Rarig, a THIRD property — not confirmed). Zettler (8), Northwood (7), Sunburst (3), and
+- **Remaining Red Branch 5 — resolved 2026-07-17 (later session): 4 of 5 confirmed real tenants at
+  OTHER properties (wrong Property Address, not duplicates — no second correctly-filed row existed
+  to retire against, unlike the first 3). All 4 corrected via `notion-update-page` and verified by
+  fresh fetch:**
+  - **Eastern Shore Entrepreneurship Center, INC.** (`32b6ecd8-9e59-81f0-bbee-ea6a25e770cd`):
+    confirmed via executed lease (`Lease Unit 504-507 EASTERN SHORE ENTREPRENEURSHIP CENTER, INC.
+    29000 Information Lane 01-24.docx`) — 29000 Information Lane LLC landlord, Suite 504-507,
+    6,000 SF, term 7/1/2024-6/30/2029, exact match to SF/Lease Start/Lease Expiration. Corrected
+    Property Address → `29000 Information Ln — Easton MD`, Suite/Unit → `504-507`. Monthly Rent
+    ($7,750) left unchanged — corroborated by a second independent source (`Current Rent all
+    properties 1.13.2026.xlsx`) even though it didn't map cleanly to the lease's own Base Rent
+    schedule ($6,250-$6,900 across Years 1-5); not flagged further.
+  - **PRO REPAIR LLC** (`32b6ecd8-9e59-8151-9044-f813bd32c4cd`): confirmed via executed lease
+    (`Lease 1100 Rarig Ave Unit M & N PRO REPAIR LLC & Abdullah Mamun 02.24.docx`) — 1100 Rarig Ave,
+    LLC landlord (Ohio LLC), Unit M & N, Columbus OH 43219, 3,600 SF, term 2/26/2024-4/30/2027,
+    exact match to SF/Lease Start/Lease Expiration; contact Abdullah Mamun is a lease co-tenant.
+    Corrected Property Address → `1100 Rarig Ave — Columbus OH`, Suite/Unit → `M & N`. Monthly Rent
+    ($3,750) left unchanged — matches a second independent source exactly (`Current Rent all
+    properties 1.13.2026.xlsx`) despite a ~1-year-stale reading against the lease's own escalation
+    schedule; not acted on given two-source agreement.
+  - **Bay-Care Heating & Air LLC** (`32b6ecd8-9e59-817b-8125-d86be72b9dad`): the row's own Notes
+    field already flagged "HubSpot shows 2207 Northwood Suite B12, not Red Branch" — confirmed via
+    04.2025 lease addendum (landlord 2900 Loch Raven LLC succeeded by 2203 Northwood LLC): rent
+    $1,029/mo effective 7/1/2025, termination 6/30/2027 — exact match to Monthly Rent and Lease
+    Expiration; Estoppel confirms 1,200 SF. Corrected Property Address →
+    `2203-2207 Northwood — Columbus OH`, Suite/Unit → `B12`, Notes updated to resolved status.
+  - **Baltimore Dialysis, LLC (Fresenius)** (`32b6ecd8-9e59-81ec-9ed5-ddf28682a9de`): confirmed via
+    First Amendment to Lease (`1900 North Broadway, LLC` landlord; tenant `Baltimore County
+    Dialysis, LLC d/b/a Fresenius Kidney Care`) — original lease 3/31/2016, 9,030 SF at 1900 North
+    Broadway, Baltimore MD, extended term 9/1/2026-8/31/2031; SF and Lease Expiration exact match;
+    Monthly Rent ($16,555) corroborated by `Current Rent all properties 1.13.2026.xlsx`. Corrected
+    Property Address → `1900 N Broadway — Baltimore MD` (canonical select-option string).
+  - **Chesapeake Communications LLC** (`32b6ecd8-9e59-8173-8d78-de14796381e0`) — **left unresolved,
+    NOT written.** Exhaustive search found no primary lease/estoppel/addendum anywhere in
+    SharePoint (7+ targeted queries incl. contact "David Hume" and the domain
+    `chesapeakecommunications.com`), no match in the live Red Branch Leases folder (~150 files
+    listed, none named Chesapeake Communications — only the unrelated, already-correctly-filed
+    "Chesapeake Bay Movers / Two Men and a Truck"), and no entry in the company-wide
+    `Current Rent all properties 1.13.2026.xlsx` roster (which does list every other Red Branch-5
+    tenant + `Chesapeake Brands, LLC`, a different entity, at Information Lane). Per Invariant 7,
+    left as-is rather than guessed; genuinely unresolved, needs a human check (possible former
+    tenant outside current-only exports, or a fabricated/phantom row per the documented HubSpot
+    ID-collision batch).
+  Zettler (8), Northwood (7, distinct from the Bay-Care Northwood dedup above), Sunburst (3), and
   6 no-address-but-Active tenants (Eurosort, Upgraded Roofing, Childs Play Diesel Performance,
-  Gator Roofing, I Dig Ditches, Scarlet Covering) — not yet touched at all this pass.
+  Gator Roofing, I Dig Ditches, Scarlet Covering) — still not touched at all.
+**Progress 2026-07-17 (later same day): Sunburst cluster (3 tenants) checked, 3 writes made,
+1 new bug variant found.**
+- Queried Notion for all rows tagged `Property Address` containing "Sunburst" — 5 rows, not 3:
+  2 "Seafire Properties LLC" stubs, 1 "THE BAY AREA CORPORATION" (real data), 1 already-archived
+  "⛔ ARCHIVED 2026-07-12 — THE BAY AREA CORPORATION" duplicate (pre-flagged "safe to delete" in
+  its own Notes, from an earlier pass — not one of the 3 targets but retired in passing), and 1
+  "Ironclad Fitness, LLC".
+- **NEW BUG VARIANT — landlord entity in Tenant Name field (not Property Address this time):**
+  both "Seafire Properties LLC" rows (`32b6ecd8-9e59-8108-ae54-f9a05c6df597`,
+  `32c6ecd8-9e59-818f-b2e3-c082d284bf9e`) are phantom tenants. Confirmed via 2 independent
+  executed Tenant Estoppel Certificates + the Jan-2026 Third Amendment to Agreement of Lease
+  (401 Sunburst) that "SEAFIRE PROPERTIES, LLC" is the **landlord** entity for 401 Sunburst
+  (predecessor to Fairground Village Center, LLC) — not a tenant. Both rows carried no rent/date
+  data. Retired (`Row Retired = __YES__`), verified post-write. Also retired the pre-flagged
+  archived Bay Area Corp duplicate (`32c6ecd8-9e59-8117-a236-c1d659abf558`) since its data was
+  cross-confirmed identical to the real row.
+- **THE BAY AREA CORPORATION** (`32b6ecd8-9e59-817c-8311-dce0194cd4e8`) — confirmed CORRECT
+  as-is: Monthly Rent $6,412.50, Lease Start 2019-12-23, Expiration 2033-03-31 all match the
+  executed estoppel + Third Amendment exactly (5,130 SF, 401 Sunburst Highway, Cambridge MD
+  21613). No write needed.
+- **Ironclad Fitness, LLC** (`32b6ecd8-9e59-81c3-a2f0-f2d7036b09f0`) — another instance of the
+  address-mislabeling bug class: tagged 401 Sunburst Hwy, but Monthly Rent ($3,244.50), SF
+  (3,000), Lease Expiration (2027-08-31), and contact name (Danielle Dressel) are an exact match
+  to Unit 103 in `RentRoll 10.2025 -- 29000 Information Lane.xlsx` (tenant listed there as
+  "Danielle Olsen Dressel"). Corrected Property Address to "29000 Information Ln — Easton MD"
+  and populated Suite/Unit "103"; financial/date fields left untouched (already correct).
+- Sunburst cluster now fully resolved (3/3 checked, 0 unresolved).
+**Progress 2026-07-17 (later same day): the 6 no-address-but-Active tenants checked, 5 writes made,
+1 duplicate retired, 1 left open pending a schema decision.**
+- Confirmed via SQL query (`Lease Status = Active AND Property Address IS NULL`) that all 6 named
+  rows (Eurosort, Upgraded Roofing, Childs Play Diesel Performance, Gator Roofing, I Dig Ditches,
+  Scarlet Covering) were still live, un-retired, no-address rows as described — distinct from, and
+  not to be confused with, the ⛔-ARCHIVED-2026-07-12 fabricated HubSpot-collision phantom copies
+  of the same names that also exist in the DB (left untouched, per Gabriel's 2026-07-12 ruling).
+- **Childs Play Diesel Performance** (`32c6ecd8-9e59-81d1-8900-d1de717c08a7`): confirmed via
+  executed lease (`Lease Suite C5-6 Ian Blake Childs DBA Childs Play Diesel Performance --
+  2203-2207 Northwood 3.2026.docx`, March 2026) — exact match to HubSpot Address "2207 Northwood
+  Suite C5+C6". Corrected Property Address → `2203-2207 Northwood — Columbus OH`, Suite/Unit →
+  `C5+C6`.
+- **Gator Roofing LLC** (`32c6ecd8-9e59-81e9-b064-c86b7bc0cc0f`): confirmed via executed lease
+  (`2024 Zettler Road Lease-- RONY N ZELAYA GUTIERRES & GATOR ROOFING LLC 04-25.docx/.pdf`, April
+  2025) — contact name exact match. Zettler Rd has only ONE Property Address select option
+  (`2018 Zettler Rd — Columbus OH`) covering the whole street-number range (confirmed against TYM
+  Wholesale LLC's already-correct row, unit 2006 at the same option) — mapped accordingly, Suite/
+  Unit → `2024`. Consistent with the pre-existing alias in `reference_tenant_name_mappings.md`.
+- **I Dig Ditches** (`32c6ecd8-9e59-81d8-942d-d455f1bc8ed0`): confirmed via current rent roll
+  (`Rent Roll -- 1100 Rarig Ave 04-26-2024.xlsx` and `03-19-2024.xls`) listing "I Dig Ditches, 1100
+  Rarig Ave #D" — exact match to existing Suite/Unit "Unit D". Corrected Property Address →
+  `1100 Rarig Ave — Columbus OH`.
+- **Upgraded Roofing** (`32c6ecd8-9e59-8118-9134-d8dc145988eb`): confirmed via executed lease
+  (`412 Morrison Road Lease Upgraded Roofing & Richard Henry Parrish, III --02-24.docx`) + matching
+  Estoppel (Banwick + Morrison Loan Symetra, suite 412). Morrison Rd has only ONE Property Address
+  select option (`392 Morrison Rd — Columbus OH`) — same convention already used for Columbus
+  Suburban Construction (units 386+388 at the same option, per that row's own Notes). Corrected
+  Property Address → `392 Morrison Rd — Columbus OH`, Suite/Unit → `412`.
+- **Scarlet Covering, Inc.** (`32c6ecd8-9e59-811f-9582-e72dc5caa023`) — **cross-property-duplicate
+  bug class, not an address gap:** identical Monthly Rent ($10,790.41) and Suite/Unit (100) to the
+  already-reconciled row `3336ecd8-9e59-812d-b123-e95be3f871ba` (`1900 N Broadway — Baltimore MD`,
+  verified 2026-04-27 from Rent Roll 04.20.2026). This row's own HubSpot Address ("1900 North
+  Broadway Unit 100") and primary lease documents (1900 North Broadway 2012 lease + Addendum #2,
+  2022; `Rent Roll 12.17.2025 -- 1900 N Broadway.xlsx`) confirm same tenant/lease. Retired
+  (`Row Retired = __YES__`) rather than given its own address, per the Red Branch/Sunburst
+  duplicate-handling pattern.
+- **Eurosort, INC., a Delaware Corporation** (`32c6ecd8-9e59-8102-8c1b-e60fdc83ac06`) — **confirmed
+  but NOT written, blocked on a schema decision.** Executed lease (`Lease Eursort -- EG comments
+  8-17-22.docx`, Eric Goldberg Family, LLC landlord, Aug 2022) plus the Notion Property Register
+  page "55 New Plant Ct, Owings Mills MD" and the Portfolio Intelligence Dashboard ("Largest Tenant
+  by ARR Eurosort, Inc. (55 New Plant Court) — $452,835/8.03%") confirm this is a real, distinct
+  ORA property — just one with no existing `Property Address` select option in the Tenant DB
+  (`notion-update-page` rejected the write: select properties are a closed enum; Notion's
+  `notion-update-data-source` DDL tool could add the option but requires restating all 19 existing
+  options to avoid dropping any — a schema change to a live production database not taken
+  unilaterally). Needs Gabriel's go-ahead to add the `55 New Plant Court — Owings Mills MD` option
+  (or a decision to fold it into an existing option), then a one-line `notion-update-page` write.
+- Net: 4/6 fully resolved with a new Property Address; 1/6 resolved as a duplicate-retire; 1/6
+  (Eurosort) confirmed but blocked on a schema-option decision, not a data gap.
+**Progress 2026-07-17 (Northwood cluster, concurrent session): NEW BUG CLASS — property-wide
+city/state mislabeling. 5 of the "Northwood (7)" rows checked and corrected; 2 unresolved; 1
+anomaly flagged.**
+- Note for whoever next touches this file: the live Notion query for "Northwood" returns far more
+  rows (~80, mostly already-archived 2026-07-12 or exact-duplicate stale copies) than "7" —
+  that count was a same-day running snapshot, not a recoverable exact list. Rebuilt from the
+  active, non-duplicate rows instead.
+- Confirmed via the Master Workbook (zero "Northwood" rows in `EXPORT_RentRoll` — genuinely
+  off-workbook) and via SharePoint (multiple executed leases, a sale OM, rent rolls) that the
+  property is real — "Northwood Business Center", 2203-2207 Northwood Drive, **Salisbury, MD
+  21801**, landlord "2203 Northwood, LLC" — but every row (including this session's own
+  Bay-Care Heating & Air and Childs Play Diesel Performance fixes above, and the ~35+ other active
+  Northwood rows not yet touched) carries the WRONG select option `"2203-2207 Northwood —
+  Columbus OH"`. Same bug class as the Fairground Village Center address mislabel, different
+  manifestation (city/state wrong, not an entity name in the field).
+- Added a new correct select option `"2203-2207 Northwood Dr — Salisbury MD"` via
+  `notion-update-data-source` (ALTER COLUMN, all 19 pre-existing options + colors restated
+  unchanged, re-fetched the schema first to get exact colors — an initial attempt with guessed
+  colors was rejected). Did NOT rename the existing wrong option in place — that would touch every
+  row using it at once without individual per-row confirmation, too broad a unilateral action.
+- **5 rows confirmed via primary lease documents and corrected** (`notion-update-page`, each
+  verified by a fresh `notion-fetch` immediately after):
+  - Evans Gymnastics and Dance LLC `32b6ecd8-9e59-816c-9181-e15f117efb2e` — address corrected;
+    Monthly Rent $700→$750 (addendum: step to $750 effective 2026-06-01, already in effect).
+  - Andres Pacay Sr. `32b6ecd8-9e59-81dc-9df1-edff9cfdefd5` — address corrected only; a 2024
+    estoppel's rent/date ($2,360, exp. 2025-06-30) is superseded and Notion's current values
+    ($2,430.80 = $2,360×1.03; exp. 2026-03-31) are internally consistent with an escalation but
+    not confirmed by a newer document — left as-is.
+  - Patrick Betz `32b6ecd8-9e59-81dc-9230-c822f9aa6e73` — address corrected only; full lease
+    confirmed Monthly Rent $999 and Lease Expiration 2027-10-31 exactly as already shown.
+  - Itron `32c6ecd8-9e59-8172-981a-cdf58b1984a5` — address corrected; Lease Expiration null→
+    2026-12-31 (Second Addendum); Monthly Rent $1,265 already correct.
+  - Robert and Kesha Best `32c6ecd8-9e59-8196-938e-f75e36fb22ed` — address corrected; Monthly Rent
+    $1,157→$2,058 and Lease Expiration null→2026-08-31 (addendum: "Rent shall stay the same
+    ($2058.00/month)... Lease Termination will now be August 31, 2026" — prior $1,157 matched
+    nothing in this tenant's history).
+- **2 rows left unresolved** (document located but insufficient, or contradictory):
+  - Harold Palmer `32c6ecd8-9e59-8183-b5e5-e497d53c7c12` — signed addendum exists but SharePoint
+    extraction returned only its DocuSign completion-certificate page, not the rent/date terms.
+  - Maryland Hospital Association `32c6ecd8-9e59-819a-aaa5-f393ef49a999` — the one addendum found
+    names the tenant "MARYLAND HOSPITAL INC" (entity match unconfirmed), states rent $2,263.73 vs.
+    Notion's $1,483.39, termination 2026-05-31 (already past today) — too many open threads
+    without a more current document.
+- **1 anomaly flagged — RESOLVED 2026-07-17 (Gabriel-confirmed):** "Restoration Church Trust"
+  `32b6ecd8-9e59-81ed-b571-dfc871ab9f25` is not a Northwood tenant — it is a $2M loan counterparty
+  (ORA/Eric Goldberg as lender, per the Master Workbook's own "Restoration Church Trust"
+  loan-amortization tab and SharePoint's `5600 Sunnyside Ave` loan-document folder, being paid off
+  per a July 2026 payoff statement). The Notion row's Monthly Rent ($14,135.38) and Lease
+  Expiration (2027-02-20) exactly match this loan's Phase-1 payment and balloon maturity — a
+  categorical data-entry error, not a correctable field. Gabriel confirmed: retire, not delete.
+  Set `Row Retired = __YES__` via `notion-update-page`, Notes annotated with the full rationale,
+  verified by fresh `notion-fetch` immediately after. Property Address/Monthly Rent/Lease
+  Expiration left untouched (retirement excludes it from active queries; no need to also scrub the
+  now-irrelevant tenant-shaped fields).
+- Spawned a follow-up chip (`task_6719632a`) covering: the ~35 remaining Northwood rows still on
+  the wrong address option, the 2 unresolved rows above, and the Restoration Church Trust anomaly.
+**Progress 2026-07-17 (Zettler cluster, concurrent session): 8 rows checked, 7 corrected, 1
+partially resolved; 8 archived duplicates retired.**
+- Queried Notion for all `Property Address = "2018 Zettler Rd — Columbus OH"` rows (32 total,
+  active + archived); excluded rows already reconciled elsewhere (exact Property+Unit workbook
+  match — Schottenstein Roofing, TYM Wholesale, Virgin Landscape, Stone Crest Counters, Home
+  Performance, Columbus Diamonds Elite Cheer, The Perez Company — all genuinely at Zettler, no
+  action) to isolate the family-join-miss rows.
+- **Same address-mislabeling bug class as FVC/Red-Branch/Northwood, found independently here** —
+  6 rows each already carried an internal contradiction (a "verify correct property" Notes flag or
+  a HubSpot Address field pointing elsewhere, never actioned) plus a same-named archived duplicate
+  whose Notes said "DUPLICATE... Safe to delete" but whose `Row Retired` checkbox was never set.
+  Corrected via `notion-update-page`, verified by fresh fetch:
+  - **PEDRO'S FLOORING, LLC** (`32b6ecd8-9e59-8124-baff-db3530be845c`) → 1100 Rarig Ave Unit B;
+    executed lease (`Lease 1100 Rarig Ave Unit B Pedro's Flooring LLC 10.24`) + HubSpot Address +
+    exact rent/date match to Master Workbook.
+  - **GT INDUSTRIAL SUPPLY, INC.** (`32b6ecd8-9e59-81dd-8b18-c4df6bc6f7a4`) → 1100 Rarig Ave Unit
+    F & I + J; signed Lease Addendum (06.2025) rent schedule ($4,832.70 for 11/1/25-10/31/26) —
+    **reverses this same item's earlier "fuzzy match, untrustworthy, not acted on" call** now that
+    a signed addendum was located. Retired 2 archived duplicate copies (one had already correctly
+    carried this data via an auto-sync, unused).
+  - **Modular Component Systems, LLC** (`32b6ecd8-9e59-8196-8a47-c9bff2ba9d71`) → 29000 Information
+    Ln Unit 402; executed Second Addendum (06.2025) + exact rent/date match.
+  - **Buckeye Rock Tops** (`32b6ecd8-9e59-813b-967b-d21830674a43`) → 392 Morrison Rd Suite 398 (not
+    Zettler Suite 113); **also the Escalation-Date-as-Lease-Expiration bug (OI-008's pattern,
+    recurring)** — Lease Expiration corrected 2026-06-01→2027-05-31 via Rent Roll Banwick +
+    Morrison 2.23.2026 (rent $1,854 already correct, no change).
+  - **Hobart Services, A Division of ITW Food Equipment Group, LLC**
+    (`32b6ecd8-9e59-8192-a085-fa93dc26665e`) → 2203-2207 Northwood Dr — Salisbury MD (this session's
+    own address correction — see the concurrent Northwood-cluster finding above that the older
+    "Columbus OH" option was itself wrong; this row was written once to the old option, then
+    re-corrected to the new Salisbury MD option the same pass) Suite A7; rent corrected
+    $1,183.47→$1,218.97 (one 3% escalation behind) per the 2024 HubSpot tenant list + Master
+    Workbook's current rent; Lease Expiration null→2029-06-30.
+  - **Reddish Fire Protection, LLC** (`32b6ecd8-9e59-81d5-a8b4-ecd2bc4c2c57`) → 2203-2207 Northwood
+    Dr — Salisbury MD (same old-option→new-option correction as Hobart, same pass) Suite B14;
+    executed Second Addendum (09.2025) + exact rent/date match.
+  - **Atomic Auto Salon LLC** (`32b6ecd8-9e59-81f3-b3e3-d144c07785a6`) → 9050 Red Branch Rd Suite P
+    (a distinct tenant from the already-reconciled Red Branch cluster, not a duplicate — no HubSpot
+    Address flag existed on this row, confirmed instead via 4 independent exact matches: contact
+    David Perry, SF 10,000, Lease Start 2021-10-01, Lease End 2026-11-30); rent corrected
+    $1,113.94→$8,910.29 (stale/pre-escalation figure) per the current property Rent Roll
+    (04.15.2026).
+  - Retired 8 archived duplicate rows total (`Row Retired=__YES__`, verified): 2× GT Industrial
+    Supply, plus one each for Pedro's Flooring, Reddish Fire Protection, Buckeye Rock Tops, Hobart
+    Services, American Tower, Granite Tops & More.
+- **Confirmed correct as-is, no write:** American Tower (`32b6ecd8-9e59-818e-89c0-eeb92fd6c45a`) —
+  its own HubSpot Address field says "Zettler Cell Tower"; genuinely a ground/tower lease absent
+  from `EXPORT_RentRoll` (family-join miss only, not an error).
+- **Partially resolved:** Granite Tops & More (`32b6ecd8-9e59-81b0-90f7-fc8c610b609f`) — Suite
+  corrected 112→2000-2002 (HubSpot Address + archived duplicate + the original signed 2023 lease
+  all agree; Property Address itself was already correct). Monthly Rent ($16,713.65, unexplained
+  by any source found) and Lease Expiration (2026-05-31, superseded) deliberately left unwritten —
+  a 2026-05-28 lease addendum proposes $8,750/mo through 2029-05-31, but the copy on file shows
+  blank/unexecuted signature blocks, so its terms aren't confirmable as controlling.
+- **Left entirely unresolved, no write:** InSite Build, LLC (`32b6ecd8-9e59-810e-83d0-e2881e7d4391`)
+  — the only primary document found (a Fourth Addendum dated 2026-07-09) shows the actual unit
+  lease at Northwood terminated 12/31/2025 and was replaced by a $50/month digital-pylon
+  signage-only license, wholly different from Notion's $2,225/mo Suite 304 record. A change in the
+  nature of the relationship, not a field-level fix — needs Gabriel's judgment on whether the row
+  should be corrected, converted to reflect the signage license, or archived.
+- Zettler cluster now fully examined (8/8 checked): 7 corrected, 1 (Granite Tops) partially
+  corrected with a flagged residual, 1 (InSite Build) left open pending a human decision.
+**Gabriel decisions 2026-07-17 (6 items surfaced across all 5 clusters) — all executed same session:**
+- **Eurosort, INC.** (`32c6ecd8-9e59-8102-8c1b-e60fdc83ac06`) — confirmed real (55 New Plant Court,
+  Owings Mills MD), but that address wasn't one of the 19 existing `Property Address` select options.
+  Gabriel: add it. Added via `notion-update-data-source` (`ALTER COLUMN ... SET SELECT(...)`,
+  restating all 19 existing options + the Northwood-Salisbury option added earlier this session, so
+  nothing was dropped — 21 options total now). Row written to the new option, verified.
+- **InSite Build, LLC** (`32b6ecd8-9e59-810e-83d0-e2881e7d4391`) — Gabriel: update in place to the
+  license terms. `Monthly Rent` 2225→50; `Notes` documents the space-lease termination and signage
+  license, explicitly flags that exact license term dates weren't located and the Lease
+  Start/Expiration/SF/Suite fields are left as the historical space-lease record, not current terms.
+  Verified.
+- **Restoration Church Trust** (`32b6ecd8-9e59-81ed-b571-dfc871ab9f25`) — not a tenant at all, a
+  $2M loan counterparty (ORA is lender) whose loan payment/balloon maturity had been data-entered as
+  rent/lease-expiration. Gabriel: remove from the Tenant DB. `Row Retired=__YES__`, `Notes` records
+  full evidence (Master Workbook loan-amortization tab + SharePoint payoff statement). Verified.
+- **Chesapeake Communications, LLC** (`32b6ecd8-9e59-8173-8d78-de14796381e0`) — zero trace in any
+  primary document after exhaustive search. Gabriel: retire as likely bad data. `Row Retired=__YES__`.
+  Verified.
+- **Granite Tops & More** — Gabriel: leave unwritten, flag for follow-up (no action taken; matches
+  what was already done).
+- **Harold Palmer / Maryland Hospital Association** (Northwood, unresolved) — Gabriel: leave both
+  open for now (no action taken; matches what was already done).
+**Cluster tally:** 26 of 29 originally-targeted tenants resolved (corrected or confirmed-correct)
+this pass, across Red Branch (4/5, 1 unresolved), Zettler (7/8 + 1 partial), Northwood (5/7 checked
+individually — cluster turned out to be ~80 rows total, not 7; ~35 more still on the wrong
+Columbus-OH address option, follow-up chip `task_6719632a` spawned), Sunburst (3/3), and the 6
+no-address tenants (6/6, one required the Eurosort schema addition above). Real scope still remains
+(the ~35 Northwood stragglers, Chesapeake Communications now retired rather than traced, Granite
+Tops rent/date, Harold Palmer, Maryland Hospital Association) — this item stays OPEN, not closed.
 **Auto-check:** none (not a fleet-registry item).
 
 ## Closed
