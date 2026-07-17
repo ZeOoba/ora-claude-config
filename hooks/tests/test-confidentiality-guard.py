@@ -18,11 +18,28 @@ use is allowed, and that the guard fails CLOSED on an unparseable payload.
 
 Run: python test-confidentiality-guard.py   (exit 0 = all pass; exit 1 = any fail)
 """
-import os, sys, json, subprocess, tempfile, datetime, atexit
+import os, sys, json, subprocess, tempfile, datetime, atexit, io, importlib.util
 
 HOOK_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # hooks/ (this test lives in hooks/tests/)
 GUARD = os.path.join(HOOK_DIR, "confidentiality-guard.py")
 TERMS_FILE = os.path.join(HOOK_DIR, "confidential-terms.json")
+
+
+def _load_guard_module():
+    """Import confidentiality-guard.py as a module so a unit test can call its
+    internal stdin-decode helper directly, without a subprocess. Needed for the
+    same reason eos-claude-md-guard.py's fix required this: the cp1252-vs-UTF-8
+    stdin mis-decode this hook shares with it (both did bare sys.stdin.read())
+    is an OS/parent-process codepage quirk that a subprocess spawned from this
+    dev shell does not reliably reproduce, even though sys.stdin.encoding
+    reports 'cp1252' in synthetic attempts too (see
+    reference_windows_hook_stdin_cp1252_encoding_gap.md). Module-level code
+    (site_markers import, TERMS_FILE resolution) runs on import but has no
+    stdin dependency, so this is safe."""
+    spec = importlib.util.spec_from_file_location("confidentiality_guard", GUARD)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 NOTION = "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-create-pages"
 NOTION_UPD = "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-update-page"
@@ -357,6 +374,79 @@ with tempfile.TemporaryDirectory() as td2:
     expect("site_markers import failure: block reason names the fixture deal (proves the "
            "fallback SITE_MARKERS worked, not a generic/unrelated block)",
            True, "Grommet Fallback Industries" in iso_err, iso_err)
+
+# --- stdin decode: must be explicit UTF-8, not sys.stdin's own (locale-dependent) encoding
+# 2026-07-17: eos-claude-md-guard.py had this exact bug -- a harness-spawned hook process
+# resolved sys.stdin.encoding to cp1252 (Windows ANSI codepage), silently corrupting any
+# non-ASCII byte in the payload before json.loads ever ran. confidentiality-guard.py shares
+# the same bare `sys.stdin.read()` pattern. It is NOT exploitable against the live roster
+# today (every current term is pure ASCII -- an ASCII term's own byte sequence survives
+# cp1252 corruption of OTHER non-ASCII bytes elsewhere in scan_text, verified empirically),
+# but it silently defeats the fail-closed leak scanner for ANY future confidential term that
+# itself contains a non-ASCII character (an accented name, a curly quote, an em-dash copied
+# from Notion/Word) -- exactly the dangerous under-block case this hook's own docstring
+# calls out as the one fail-closed cannot catch on its own. Fixed proactively before it bites.
+guard_module = _load_guard_module()
+expect("guard exposes _read_stdin_text() (explicit UTF-8 decode off sys.stdin.buffer)",
+       True, hasattr(guard_module, "_read_stdin_text"))
+
+if hasattr(guard_module, "_read_stdin_text"):
+    # ensure_ascii=False is required: the default True would \\u-escape the non-ASCII
+    # character into pure ASCII before .encode(), so the payload bytes would never
+    # actually contain a multi-byte UTF-8 sequence and this test would pass even against
+    # the unfixed sys.stdin.read() -- the exact test-quality defect an adversarial review
+    # caught in eos-claude-md-guard.py's first version of this same test.
+    nonascii_payload = json.dumps({"probe": "Café Roastery — deal notes"}, ensure_ascii=False)
+    utf8_bytes = nonascii_payload.encode("utf-8")
+
+    class _FakeStdin:
+        def __init__(self, data):
+            self.buffer = io.BytesIO(data)
+
+        def read(self):
+            # Emulates the exact live failure mode: text-mode .read() using a
+            # non-UTF-8 codepage silently corrupts multi-byte characters instead
+            # of raising -- this must NOT be what the fix relies on.
+            return self.buffer.getvalue().decode("cp1252")
+
+    real_stdin = sys.stdin
+    sys.stdin = _FakeStdin(utf8_bytes)
+    try:
+        decoded_text = guard_module._read_stdin_text()
+    finally:
+        sys.stdin = real_stdin
+    decoded = json.loads(decoded_text)
+    expect("_read_stdin_text() round-trips a non-ASCII confidential-term-shaped string "
+           "correctly regardless of sys.stdin's own (locale-dependent) encoding",
+           True, decoded.get("probe") == "Café Roastery — deal notes",
+           "got %r" % decoded.get("probe"))
+
+# --- BLOCK: end-to-end, a confidential term containing a non-ASCII character must still be
+# caught crossing an egress surface. Uses a synthetic terms file (never a real deal
+# identifier) since this test is git-tracked. This is defense-in-depth wiring coverage --
+# it does not reliably reproduce the cp1252 mis-decode on every dev machine (subprocess
+# pipes here happened to decode correctly even before the fix), so it is not proof of the
+# fix by itself; the direct _read_stdin_text() unit test above is the primary regression
+# guard.
+nonascii_terms_path = _write_synthetic_terms_file()
+with open(nonascii_terms_path, encoding="utf-8") as f:
+    nonascii_terms_data = json.load(f)
+nonascii_terms_data["synthetic_test_deal"]["always"].append("Café Roastery Holdings")
+with open(nonascii_terms_path, "w", encoding="utf-8") as f:
+    json.dump(nonascii_terms_data, f, ensure_ascii=False)
+
+nonascii_env = dict(os.environ, CONFIDENTIAL_TERMS_FILE_OVERRIDE=nonascii_terms_path)
+nonascii_payload_raw = json.dumps(
+    write_payload(SITE, "Announcing the Café Roastery Holdings partnership"),
+    ensure_ascii=False,
+)
+p_nonascii = subprocess.run(
+    [sys.executable, GUARD], input=nonascii_payload_raw.encode("utf-8"),
+    stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=nonascii_env,
+)
+nonascii_err = p_nonascii.stderr.decode("utf-8", "replace")
+expect("BLOCK egress write containing a non-ASCII confidential term (end-to-end)",
+       2, p_nonascii.returncode, nonascii_err)
 
 # --- summary ---------------------------------------------------------------------------
 passed = sum(1 for ok, _ in results if ok)
