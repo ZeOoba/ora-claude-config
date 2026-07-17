@@ -32,59 +32,6 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
 | [OI-009](#OI-009) | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Verify the 93 Notion Tenant DB rows with no workbook counterpart against primary leases (low priority) |
-| [OI-012](#OI-012) | 2026-07-17 | ora-deal-command-board SKILL.md STEP 2 | Stamp `Last Activity` from deal-touching skills so the board's stall flag is authoritative — field+board+3 skills done (commit 643dd9f, unmerged); residual: owner-outreach has no repo source + Save-skill reimport not done |
-
-### OI-012
-**Status:** OPEN
-**Opened:** 2026-07-17
-**Source:** ora-deal-command-board SKILL.md STEP 2 (raised during the 2026-07-17 board run)
-**Description:** `ora-deal-command-board`'s STALLED flag keyed on Notion's system last-edited
-timestamp (`Last Updated`), which both (a) conflated any edit with real deal progress and (b) froze
-when deal work happened off-Notion — on 2026-07-17 the 754 Old SR 74 row false-flagged STALLED (36d)
-while its PSA was in active negotiation, purely because `Last Updated` hadn't moved since 6/11.
-**Already landed this session (NOT the open part):** added a `Last Activity` DATE property to the
-Acquisition Pipeline Tracker (`bcfe4a03-...`, via `notion-update-data-source`); backfilled all 7 open
-rows; rewrote board STEP 1/STEP 2 to read `Last Activity` with a `Last Updated` → `createdTime`
-fallback chain and to tag any row still running on the fallback. **The open part:** the field is only
-authoritative once the deal-touching skills stamp `Last Activity = today` when they act on a tracked
-row. Update these 5 (Cowork skills — supervised single-writer pass, verify `git log`/`git status` on
-`ora-skills` before editing each SKILL.md): `deal-execution` (PSA turns), `loi-generation` (LOI
-sent/countered), `acquisition-underwriting` (screen/underwrite), `deal-comparison`, `owner-outreach`.
-Same one-line stamp pattern each. Do NOT add the stamp to `ora-deal-command-board` itself — it is
-read-only by charter; a board that stamped activity would reset its own stall clock merely by
-surfacing a deal. Acceptance: a deal under active off-Notion work does not flag STALLED; a genuinely
-dormant deal still flags at 30d; the board never writes `Last Activity`.
-**Progress 2026-07-17 (skills pass executed):** Ground truth on which skills actually WRITE the
-tracker corrected the original 5-skill list. Edited + committed the source in `ora-skills`
-(authoritative repo, single-writer verified clean before start), branch `board-last-activity-stamp`,
-commit `643dd9f`, additive only:
-- **loi-generation** — stamps `Last Activity=today` when logging "LOI Out".
-- **deal-execution** — new standing "NOTION PIPELINE STAMPING" rule covering PSA generation (WF1),
-  inbound-PSA/redline review (WF2A), and closing. This was the actual 754 gap: deal-execution
-  previously touched the tracker ONLY at closing, so weeks of live PSA turns never bumped the row.
-- **acquisition-underwriting** — stamps when it updates an existing tracker row in-place (it
-  primarily logs to the Deal Sourcing Log, not the pipeline tracker, so this is its only tracker write).
-- **deal-comparison — NOT edited (scope correction):** it is read-only, never writes the tracker;
-  inventing a write just to stamp would be scope creep. Dropped from the stamp list.
-**Residuals (why still OPEN):** (1) **owner-outreach is an ORPHANED skill — live at runtime but
-source-lost.** Exhaustively searched 2026-07-17: NOT in the `ora-skills` repo, NOT in the Cowork
-workspace, NOT in `~/.claude/skills`, NOT in AppData, and NEVER in `ora-skills` git history
-(`git log --all -- 'owner-outreach/**'` empty); a frontmatter grep `^name:\s*owner-outreach` across
-all skill homes returns nothing (control: the same grep finds `deal-execution` correctly, so the
-method is sound). It still loads as `anthropic-skills:owner-outreach` and memory records a SKILL.md
-v1.3 as of ~07-14 ([[project_owner_outreach_stale_guard_watch]]), so the content existed and lives
-only in the packed Desktop runtime store (not filesystem-traversable — `deal-execution`'s runtime
-copy is equally invisible). It CANNOT be edited for the stamp until its source is recovered into the
-repo. Recovery path: extract from the runtime store or transcript archaeology (`orphaned-task-forensics`
-/ the [[reference_skill_home_loss_2026-07-09]] precedent), then commit to `ora-skills` — a decision
-for Gabriel (recover vs. re-author). This is a standalone defect independent of OI-012's stamping
-goal and may warrant its own OI. (2) **Deployment not
-complete:** the post-commit hook staged all 3 skills in `_staging/PENDING_REIMPORT.md`; going live in
-the Cowork runtime needs `package_skills.py` → present `.skill` → **manual Save-skill click** (GUI,
-not headless), then `pending_reimport.py clear <skill>`. Until then the Monday
-`ora-skill-store-drift-check` will flag repo↔store drift. (3) Branch `board-last-activity-stamp` is
-**committed locally, not merged to main or pushed** — awaiting Gabriel's review/merge.
-**Auto-check:** none (not a fleet-registry item).
 
 ### OI-009
 **Status:** OPEN (substantial progress made 2026-07-17, real scope remains)
@@ -154,6 +101,7 @@ systemic bug classes discovered beyond OI-008's Escalation-Date pattern.**
 
 | ID | Opened | Closed | Source | One-line |
 |----|--------|--------|--------|----------|
+| [OI-012](#OI-012) | 2026-07-17 | 2026-07-17 | ora-deal-command-board SKILL.md STEP 2 | Stamp `Last Activity` from deal-touching skills so the board's stall flag is authoritative — field+board+3 skills stamped, Save-skill reimport of all 3 confirmed by Gabriel, PENDING_REIMPORT.md cleared |
 | [OI-011](#OI-011) | 2026-07-17 | 2026-07-17 | [project_bash_guard_indirection_gap.md](project_bash_guard_indirection_gap.md) | bash-guard.mjs: core.hooksPath read/write + cp guard-path source/dest false positives fixed |
 | [OI-010](#OI-010) | 2026-07-17 | 2026-07-17 | [project_bash_guard_indirection_gap.md](project_bash_guard_indirection_gap.md) | bash-guard.mjs: closed git-alias/wrapper-script indirection across all 7 blocked command classes |
 | [OI-007](#OI-007) | 2026-07-17 | 2026-07-17 | [project_autonomy_gate_indirection_ceiling_followup.md](project_autonomy_gate_indirection_ceiling_followup.md) | Enforce Gate 1/2a at the actual outbound action — value-indirection defeats shell-text detection |
@@ -164,6 +112,94 @@ systemic bug classes discovered beyond OI-008's Escalation-Date pattern.**
 | [OI-005](#OI-005) | 2026-07-16 | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Dedup 2 stale Notion Heritage Pool Supply rows against the correct SRS row |
 | [OI-006](#OI-006) | 2026-07-16 | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Confirm 4 tenant turnovers + Soldier Trucking property conflict against executed leases |
 | [OI-008](#OI-008) | 2026-07-17 | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Sweep the Tenant DB for the Escalation-Date/Lease-Expiration column-mapping bug beyond the 7 rows already checked |
+
+### OI-012
+**Status:** CLOSED
+**Opened:** 2026-07-17
+**Closed:** 2026-07-17
+**Source:** ora-deal-command-board SKILL.md STEP 2 (raised during the 2026-07-17 board run)
+**Description:** `ora-deal-command-board`'s STALLED flag keyed on Notion's system last-edited
+timestamp (`Last Updated`), which both (a) conflated any edit with real deal progress and (b) froze
+when deal work happened off-Notion — on 2026-07-17 the 754 Old SR 74 row false-flagged STALLED (36d)
+while its PSA was in active negotiation, purely because `Last Updated` hadn't moved since 6/11.
+**Already landed this session (NOT the open part):** added a `Last Activity` DATE property to the
+Acquisition Pipeline Tracker (`bcfe4a03-...`, via `notion-update-data-source`); backfilled all 7 open
+rows; rewrote board STEP 1/STEP 2 to read `Last Activity` with a `Last Updated` → `createdTime`
+fallback chain and to tag any row still running on the fallback. **The open part:** the field is only
+authoritative once the deal-touching skills stamp `Last Activity = today` when they act on a tracked
+row. Update these 5 (Cowork skills — supervised single-writer pass, verify `git log`/`git status` on
+`ora-skills` before editing each SKILL.md): `deal-execution` (PSA turns), `loi-generation` (LOI
+sent/countered), `acquisition-underwriting` (screen/underwrite), `deal-comparison`, `owner-outreach`.
+Same one-line stamp pattern each. Do NOT add the stamp to `ora-deal-command-board` itself — it is
+read-only by charter; a board that stamped activity would reset its own stall clock merely by
+surfacing a deal. Acceptance: a deal under active off-Notion work does not flag STALLED; a genuinely
+dormant deal still flags at 30d; the board never writes `Last Activity`.
+**Progress 2026-07-17 (skills pass executed):** Ground truth on which skills actually WRITE the
+tracker corrected the original 5-skill list. Edited + committed the source in `ora-skills`
+(authoritative repo, single-writer verified clean before start), branch `board-last-activity-stamp`,
+commit `643dd9f`, additive only:
+- **loi-generation** — stamps `Last Activity=today` when logging "LOI Out".
+- **deal-execution** — new standing "NOTION PIPELINE STAMPING" rule covering PSA generation (WF1),
+  inbound-PSA/redline review (WF2A), and closing. This was the actual 754 gap: deal-execution
+  previously touched the tracker ONLY at closing, so weeks of live PSA turns never bumped the row.
+- **acquisition-underwriting** — stamps when it updates an existing tracker row in-place (it
+  primarily logs to the Deal Sourcing Log, not the pipeline tracker, so this is its only tracker write).
+- **deal-comparison — NOT edited (scope correction):** it is read-only, never writes the tracker;
+  inventing a write just to stamp would be scope creep. Dropped from the stamp list.
+**Residuals (why still OPEN):** (1) **owner-outreach — RESOLVED 2026-07-17 (source recovered; needs
+no stamp).** It had been orphaned (loadable as `anthropic-skills:owner-outreach` but no source in the
+repo/workspace/`~/.claude`/git history). Recovered byte-exact from the live runtime store — invoking
+the skill surfaced its base dir `AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/…/skills/owner-outreach`
+(the runtime IS on disk, just under a nested session path an earlier `find` missed) — and committed
+to `ora-skills` (`owner-outreach/SKILL.md`, v1.0 2026-07-11, desc 1012/1024, commit `5dda2cd`).
+Reading the recovered source settled the stamping question: **owner-outreach writes the Notion Owner
+Outreach Queue DB (off-market first-touch), NOT the Acquisition Pipeline Tracker — so the
+`Last Activity` stamp does not apply to it, same as deal-comparison.** Repo now matches the runtime,
+so it was cleared from `_staging/PENDING_REIMPORT.md` (no reimport needed). **Stamping scope is thus
+fully resolved:** only loi-generation / deal-execution / acquisition-underwriting write the tracker
+and all three are stamped; deal-comparison and owner-outreach correctly excluded. (2) **Deployment not
+complete:** the post-commit hook staged all 3 skills in `_staging/PENDING_REIMPORT.md`; going live in
+the Cowork runtime needs `package_skills.py` → present `.skill` → **manual Save-skill click** (GUI,
+not headless), then `pending_reimport.py clear <skill>`. Until then the Monday
+`ora-skill-store-drift-check` will flag repo↔store drift. (3) Branch `board-last-activity-stamp` is
+**committed locally, not merged to main or pushed** — awaiting Gabriel's review/merge.
+**Progress 2026-07-17 (reimport attempt, blocked):** Re-verified `_staging/PENDING_REIMPORT.md` still
+listed all 3 (`acquisition-underwriting`, `deal-execution`, `loi-generation`, pending since
+2026-07-17T18:17Z, commit `643dd9f`). Packaged `acquisition-underwriting.skill` successfully via
+`package_skills.py` (fresh file confirmed in `_staging/out/`). Then found this machine
+(LAPTOP-CSHSCBE6) has **no Claude Desktop app installed** — absent from the computer-use
+`request_access` allowlist and from `AppData\Local\Programs`, `AppData\Local\AnthropicClaude`,
+`Program Files`, `Program Files (x86)`, and Start Menu shortcuts. Gabriel confirmed (2026-07-17, via
+AskUserQuestion): **stop here** — do not guess an alternate app name or assume the Desktop app is on
+another device. `deal-execution` and `loi-generation` were NOT packaged (no point building `.skill`
+files with the GUI step unreachable). All 3 remain pending; none cleared. **Open part now includes:**
+locate which device/session actually hosts the Cowork Claude Desktop app's Save-skill flow before
+retrying this residual.
+**Closure 2026-07-17 (Cowork session, Desktop app located on the Cowork-hosting machine):**
+Re-verified `_staging/PENDING_REIMPORT.md` still listed all 3 skills unchanged (pending since
+2026-07-17T18:17Z, commit `643dd9f`) before starting — confirmed no other session had cleared any of
+them. Packaged all 3 via `tools/package_skills.py C:\Users\Owner\ora-skills\_staging\out
+<skill-name>`, each verified fresh via `get_file_info` immediately after build:
+`acquisition-underwriting.skill` (50,017 bytes, 2 entries: SKILL.md + target-markets.json, built
+18:42Z), `deal-execution.skill` (42-point QC gate confirmed by the packager, 1 entry: SKILL.md, built
+18:45Z), `loi-generation.skill` (2,782,431 bytes, 5 entries incl. the 16-point QC gate and the
+condensed LOI template, built 18:46Z). The GUI Save-skill click itself could not be performed by the
+agent — computer-use's `request_access` refused control of Claude's own window outright (a hard,
+non-overridable guard against an agent operating its own interface/permissions), confirming this
+step is manual regardless of session type. Handed off the 3 `.skill` files and import instructions to
+Gabriel; Gabriel confirmed all 3 imported ("all done"). On that confirmation, ran
+`python tools/pending_reimport.py clear <skill>` for all 3 in sequence — each returned
+`pending_reimport: cleared <skill>` — then re-read `_staging/PENDING_REIMPORT.md`: the file no longer
+exists (the clear script deletes it once the pending list empties), the definitive zero-pending
+state. Stamping scope (loi-generation/deal-execution/acquisition-underwriting) was already committed
+at `643dd9f`; only the runtime-cache resync remained, and that is now closed. **Residual outside this
+item's scope, not blocking closure — since resolved:** branch `board-last-activity-stamp`'s
+merge-to-main-and-push status was flagged as not re-verified this session; separately confirmed later
+the same session (`ora-skills` `main` HEAD `5dda2cd` == `origin/main` `5dda2cd` via `git fetch` +
+`git rev-parse`) — already merged to main and already pushed, nothing outstanding.
+**Auto-check:** none (not a fleet-registry item; closure evidence is the cleared
+`pending_reimport.py` runs plus the deleted `PENDING_REIMPORT.md`, both reproducible by re-running
+`python tools/pending_reimport.py clear <skill>` — a no-op / "already cleared" result confirms state).
 
 ### OI-011
 **Status:** CLOSED
