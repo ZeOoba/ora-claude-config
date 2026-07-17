@@ -166,6 +166,80 @@ def test_malformed_stdin_fails_open():
     print("PASS test_malformed_stdin_fails_open")
 
 
+# --------------------------------------------------------------------------
+# Gate 2c coverage: NotebookEdit is enrolled in the dispatch, so it must
+# actually be gated. Its tool param is `notebook_path`, NOT `file_path`
+# (adversarial review, 2026-07-16) -- reading only `file_path` left a live
+# invariant-2 bypass: a notebook write into the site tree resolved to "" and
+# passed.
+# --------------------------------------------------------------------------
+
+def test_notebook_edit_into_site_tree_blocks():
+    payload = {"tool_name": "NotebookEdit",
+               "tool_input": {"notebook_path": "C:/Users/Owner/oxford-site/x.ipynb",
+                              "new_source": "y"}}
+    rc, out, err = run_hook(payload)
+    assert rc == 2, "NotebookEdit into the site tree must block, got %s (%s)" % (rc, err)
+    print("PASS test_notebook_edit_into_site_tree_blocks")
+
+
+def test_notebook_edit_outside_site_tree_allows():
+    payload = {"tool_name": "NotebookEdit",
+               "tool_input": {"notebook_path": "C:/proj/analysis.ipynb", "new_source": "y"}}
+    rc, out, err = run_hook(payload)
+    assert rc == 0, "a notebook edit outside the site tree must not block, got %s (%s)" % (rc, err)
+    print("PASS test_notebook_edit_outside_site_tree_allows")
+
+
+def test_notebook_edit_into_site_tree_allowed_with_write_token():
+    d = fresh_sessions_dir()
+    mint(d, "allow-website-write", "website-write")
+    payload = {"tool_name": "NotebookEdit",
+               "tool_input": {"notebook_path": "C:/Users/Owner/website-canonical/x.ipynb",
+                              "new_source": "y"}}
+    rc, out, err = run_hook(payload, sessions_dir=d)
+    assert rc == 0, "a write token must authorize a site notebook edit, got %s (%s)" % (rc, err)
+    print("PASS test_notebook_edit_into_site_tree_allowed_with_write_token")
+
+
+# --------------------------------------------------------------------------
+# Fail CLOSED on a malformed payload SHAPE for a gated tool. A parseable-JSON
+# payload whose tool_input is not a dict, or whose gated field is not a string,
+# must never fall through to exit 0 for a gated tool (adversarial review,
+# 2026-07-16). Note: an UNPARSEABLE payload still fails OPEN (that is the
+# deliberate don't-brick-every-tool-call behavior, covered above).
+# --------------------------------------------------------------------------
+
+def test_gated_bash_with_nondict_tool_input_blocks():
+    payload = {"tool_name": "Bash", "tool_input": ["netlify", "deploy", "--prod"]}
+    rc, out, err = run_hook(payload)
+    assert rc == 2, "a gated Bash call with non-dict tool_input must fail closed, got %s (%s)" % (rc, err)
+    print("PASS test_gated_bash_with_nondict_tool_input_blocks")
+
+
+def test_gated_write_with_nonstring_path_blocks():
+    payload = {"tool_name": "Write", "tool_input": {"file_path": ["a", "b"], "content": "x"}}
+    rc, out, err = run_hook(payload)
+    assert rc == 2, "a gated Write with a non-string file_path must fail closed, got %s (%s)" % (rc, err)
+    print("PASS test_gated_write_with_nonstring_path_blocks")
+
+
+def test_gated_bash_with_nonstring_command_blocks():
+    payload = {"tool_name": "Bash", "tool_input": {"command": {"nested": "obj"}}}
+    rc, out, err = run_hook(payload)
+    assert rc == 2, "a gated Bash with a non-string command must fail closed, got %s (%s)" % (rc, err)
+    print("PASS test_gated_bash_with_nonstring_command_blocks")
+
+
+def test_non_gated_tool_with_nondict_input_passes():
+    """A tool the gate does not police (e.g. Read) must not be blocked by the
+    fail-closed shape guard -- that guard is only for gated tools."""
+    payload = {"tool_name": "Read", "tool_input": ["whatever"]}
+    rc, out, err = run_hook(payload)
+    assert rc == 0, "a non-gated tool must pass regardless of input shape, got %s (%s)" % (rc, err)
+    print("PASS test_non_gated_tool_with_nondict_input_passes")
+
+
 def test_empty_session_override_dir_still_blocks():
     """Proves the hook reads ORA_OVERRIDE_SESSIONS_DIR (not silently falling back
     to a live default) and that isolation doesn't accidentally allow-by-default."""

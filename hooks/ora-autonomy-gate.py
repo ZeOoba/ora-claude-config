@@ -279,6 +279,19 @@ def block(reason, tier, session_id, extra=""):
     sys.exit(2)
 
 
+def block_shape(tool_name, session_id):
+    """Fail-closed exit for a gated tool whose input shape we cannot inspect. This is
+    NOT an override-gated block (no token could make a malformed payload safe) -- it is a
+    refusal to let an un-evaluable gated action proceed."""
+    sys.stderr.write(
+        "BLOCKED by ORA autonomy gate: %s call with an uninspectable input shape "
+        "(tool_input not a dict, or the gated field not a string).\n"
+        "This is a gated tool (hard invariant 1/2); its input could not be evaluated, so it "
+        "fails closed. Re-issue the call with a well-formed tool_input.\n" % tool_name
+    )
+    sys.exit(2)
+
+
 def check_bash(command, session_id):
     lowered = command.lower()
     # GATE 1 — any send-via-outlook.ps1 with a recipient flag (To, Cc, OR Bcc).
@@ -347,27 +360,56 @@ def check_mcp(tool_name, session_id):
             block("Netlify MCP mutating call (%s)" % tool_name, WEBSITE_DEPLOY, session_id)
 
 
+FILE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
+
+
 def main():
+    # ONLY an unparseable hook payload fails open -- blocking every tool call system-wide
+    # when we cannot even read the hook input would brick the session; that availability
+    # tradeoff is deliberate. Once we HAVE a parsed payload naming a gated tool, any
+    # anomaly in it fails CLOSED (below): a false positive costs a retry, a false negative
+    # publishes to the live site.
     try:
         payload = json.load(sys.stdin)
-        tool_name = payload.get("tool_name", "")
-        tool_input = payload.get("tool_input", {}) or {}
-        session_id = payload.get("session_id", "")
     except Exception:
-        return  # fail open on malformed input
+        return
+    if not isinstance(payload, dict):
+        return  # a non-object payload names no tool we can evaluate -> fail open
 
-    # A missing/invalid session_id is NOT fatal here: it simply means _token_path() can
-    # never resolve, so no override is reachable and every gated action blocks. Fail-closed
-    # by construction -- including in scheduled/headless contexts, where a prod deploy or an
+    tool_name = payload.get("tool_name", "")
+    tool_input = payload.get("tool_input", {})
+    session_id = payload.get("session_id", "")
+
+    # A missing/invalid session_id is NOT fatal: it simply means _token_path() can never
+    # resolve, so no override is reachable and every gated action blocks. Fail-closed by
+    # construction -- including in scheduled/headless contexts, where a prod deploy or an
     # external send should never be self-authorizing anyway.
     if not isinstance(session_id, str):
         session_id = ""
 
     if tool_name == "Bash":
-        check_bash(tool_input.get("command", "") or "", session_id)
-    elif tool_name in ("Edit", "Write", "MultiEdit", "NotebookEdit"):
-        check_file_write(tool_input.get("file_path", "") or "", session_id)
-    elif tool_name.startswith("mcp__"):
+        # A gated action whose input we cannot inspect must fail CLOSED, not error through
+        # to exit 1 (which a PreToolUse hook treats as non-blocking). A real Bash call
+        # always carries a dict tool_input with a string command, so this never over-blocks
+        # a legitimate call (adversarial review, 2026-07-16).
+        if not isinstance(tool_input, dict):
+            block_shape("Bash", session_id)
+        command = tool_input.get("command", "")
+        if not isinstance(command, str):
+            block_shape("Bash", session_id)
+        check_bash(command, session_id)
+    elif tool_name in FILE_TOOLS:
+        if not isinstance(tool_input, dict):
+            block_shape(tool_name, session_id)
+        # NotebookEdit's tool param is `notebook_path`, not `file_path`; every other file
+        # tool uses `file_path`. Read both so an enrolled tool is actually gated (a
+        # notebook write into the site tree was a live invariant-2 bypass before this).
+        file_path = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
+        if not isinstance(file_path, str):
+            block_shape(tool_name, session_id)
+        check_file_write(file_path, session_id)
+    elif isinstance(tool_name, str) and tool_name.startswith("mcp__"):
+        # check_mcp reads only tool_name, so a malformed tool_input cannot affect it.
         check_mcp(tool_name, session_id)
 
 
