@@ -73,6 +73,8 @@
 - [Tenant Name Mappings](reference_tenant_name_mappings.md) — PM platform → Notion Tenant DB reconciliation aliases (operational data)
 - [ripgrep blind on scheduled-tasks](reference_ripgrep_scheduled_tasks_false_negative.md) — rg returns ZERO matches over the fleet SKILL.md corpus when rooted at `scheduled-tasks/`; fixed via an rg-only `.ignore` — do not loosen .gitignore
 - [Hook systemMessage never reaches the model](reference_hook_systemmessage_not_model_visible.md) — PreToolUse `systemMessage` is USER-only — the guard fired ~168× into a void. Use `additionalContext`; firing ≠ delivery, test the channel
+- [Commit-provenance guard](reference_commit_provenance_guard.md) — blocks a git commit that would sweep another live session's uncommitted work; hit BLOCKED? use a pathspec or the override sentinel
+- [Fail-open + TTL beats mutex for fleet gates](feedback_fail_open_over_mutex_for_fleet_gates.md) — Gabriel's ratified default for cross-session coordination guards; commit-provenance-guard is the reference build
 - [Property→LLC Signature Roster](reference_property_llc_signature_roster.md) — canonical property→signing-LLC lookup; fixes recurring Outbox QC Check-D (landlord mail signed with personal block)
 - [ora-pm-ledger Double-Fire](reference_ora_pm_ledger_double_fire.md) — RESOLVED 2026-07-12: CC/MCP copy is the sole live registration; the LAMS "twin" was a misfiled orphan folder, never registered
 - [QuickBooks & Entity Financials](reference_quickbooks_financials.md) — CloudVara RDP, .QBB un-parseable, where statements live, per-property P&L basis

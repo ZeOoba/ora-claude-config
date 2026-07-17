@@ -29,7 +29,48 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 
 ## Open
 
-*(none as of 2026-07-17 — table appears once the first item opens)*
+| ID | Opened | Source | One-line |
+|----|--------|--------|----------|
+| [OI-003](#OI-003) | 2026-07-16 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Build the Notion Tenant DB workbook mirror (`EXPORT_RentRoll` → Notion) |
+| [OI-004](#OI-004) | 2026-07-16 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Add a real `Archived` property to the Tenant DB schema (blocks OI-003) |
+| [OI-005](#OI-005) | 2026-07-16 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Dedup 2 stale Notion Heritage Pool Supply rows against the correct SRS row |
+| [OI-006](#OI-006) | 2026-07-16 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Confirm 4 tenant turnovers + Soldier Trucking property conflict against executed leases |
+
+### OI-003
+**Status:** OPEN
+**Opened:** 2026-07-16
+**Source:** [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md)
+**Description:** Build the Notion Tenant DB workbook mirror: `EXPORT_RentRoll` (137 rows, live
+formulas, join key Property+Unit) → Notion Tenant DB, extending `ora-master-workbook-ingest`.
+Spec: `Claude_Workspace/01_Workspace/outputs/2026-07-16_TenantDB-Workbook-Mirror_Spec_v01.md`.
+First run must be a reconciliation REPORT only, never a blind overwrite — see OI-006 and the
+Heritage Pool counterexample in the source file (the workbook itself was wrong on that lease).
+
+### OI-004
+**Status:** OPEN
+**Opened:** 2026-07-16
+**Source:** [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md)
+**Description:** Add a real `Archived` property to the Notion Tenant DB schema. No native
+archive/status field exists today — the 2026-07-12 remediation archived rows by title-prefix
+(`⛔ ARCHIVED …`), so all 296 rows (124 tombstoned) remain live and queryable. Blocks OI-003: the
+mirror cannot distinguish live from tombstoned rows without it.
+
+### OI-005
+**Status:** OPEN
+**Opened:** 2026-07-16
+**Source:** [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md)
+**Description:** Dedup the two stale Notion `Heritage Pool Supply` rows (both dated 2026-09-30)
+against the correct `SRS Distribution / Heritage Pool Supply` row (2031-09-30 — confirmed by
+Gabriel 2026-07-16 and now also matched by the corrected Master Workbook). Notion is untouched.
+
+### OI-006
+**Status:** OPEN
+**Opened:** 2026-07-16
+**Source:** [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md)
+**Description:** Confirm against the executed lease (Invariant 7) before any mirror write touches
+them: 4 tenant-turnover rows (Zettler 2016, 9620 State 350 #110, Morrison 390, Banwick 2814)
+where Notion still names the predecessor tenant, plus the Soldier Trucking property conflict
+(Notion: 2018 Zettler Rd unit 301; workbook: 1100 Rarig G&H).
 
 ## Closed
 

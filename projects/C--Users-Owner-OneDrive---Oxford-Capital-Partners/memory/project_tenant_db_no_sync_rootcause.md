@@ -12,6 +12,11 @@ metadata:
 **Spec (implementation-ready, not yet built):**
 `Claude_Workspace/01_Workspace/outputs/2026-07-16_TenantDB-Workbook-Mirror_Spec_v01.md`
 
+**Open items (canonical list, do not restate here):** [OI-003](open-items-tracker.md#OI-003) build
+the mirror · [OI-004](open-items-tracker.md#OI-004) add `Archived` property ·
+[OI-005](open-items-tracker.md#OI-005) dedup Heritage Pool rows ·
+[OI-006](open-items-tracker.md#OI-006) confirm 4 turnovers + Soldier Trucking
+
 ## The finding
 
 **There is no workbook→Notion tenant sync. There never was one.** The framing "the sync is one
@@ -57,15 +62,14 @@ Expiring Soon → Active · `L143` portfolio counters 127A|7S|3E → **128A|6S|3
 **portfolio WALT 2.36 → 2.45 yrs** · `EXPORT_RentRoll` I77/L77 propagated. Cell-level diff vs
 backup across all 49 tabs: **exactly 1 formula/literal change** (I81); all other deltas are
 `TODAY()`-volatile recalcs. Backup: `Documents\Claude\_backups\…_pre-HeritagePool-leaseend-fix_20260716.xlsx`.
-**Still open:** dedup the two stale Notion Heritage Pool rows (2026-09-30) against the correct
-SRS row — Notion is untouched.
+**Still open:** [open-items-tracker.md#OI-005](open-items-tracker.md#OI-005).
 
 ## Corrections to the 2026-07-16 audit brief (do not re-derive)
 
 - **The 07-12 "archival never archived" is NOT a bug.** Prepending `⛔ ARCHIVED 2026-07-12 — ` to
   the title was a deliberate, Gabriel-approved, reversible mechanism chosen because no native
   archive/status field exists. See [[reference_tenant_db_completeness_gap]]:117. The *consequence*
-  (filters read all 296) is real — fix by adding a real `Archived` property.
+  (filters read all 296) is real → [open-items-tracker.md#OI-004](open-items-tracker.md#OI-004).
 - **The ~20 "seed/demo" rows are already decided.** They are the documented fabricated phantom
   batch (HubSpot contact-ID collisions, IDs 11751–13051). Gabriel 2026-07-12: *"leave the ~18-25
   unconfirmed singletons for individual review."* Deliberately preserved — do not re-triage.
@@ -87,7 +91,8 @@ Start · Lease End · Escalation Date · Escalation % · Status · Vacant · Ann
 built; only the consumer was never written.** (`Sync Queue` tab is a red herring —
 Cash↔Monthly-Interest companion-workbook sync.)
 
-Also: the workbook has **49 tabs**, but `ora-master-workbook-ingest` STEP 1 still asserts 34.
+Also: the workbook has **49 tabs** — `ora-master-workbook-ingest` STEP 1 asserted 34 until this
+session corrected it (commit `d5a1006`, 2026-07-16), verified live against the workbook.
 
 Related: [[reference_tenant_db_completeness_gap]] · [[reference_tenant_name_mappings]] ·
 [[reference_ripgrep_scheduled_tasks_false_negative]] · [[00_system_of_record]]

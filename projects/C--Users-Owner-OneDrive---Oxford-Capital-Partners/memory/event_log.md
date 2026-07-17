@@ -11,6 +11,28 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-16 — Shipped commit-provenance guard; Tenant DB open items canonicalized (session close-out)
+
+Two new hooks landed and pushed (`0b81232`, roster added to CLAUDE.md's Guards: line in
+`de63351`): `commit-provenance-guard.py` + `commit-provenance-recorder.py` block a `git commit`
+that would sweep another live session's uncommitted work into it. Fail-open, requires TWO
+affirmative signals (foreign touched-set hit + live session within TTL), no lock ever held.
+Gabriel explicitly rejected a hard claim-lock/mutex in favor of this shape — see
+`feedback_fail_open_over_mutex_for_fleet_gates.md`, now the house default for future cross-session
+coordination guards. Motivating incident: 4 concurrency collisions in one hour in this same
+checkout, the worst being a staged MEMORY.md edit swept into another session's commit inside a
+~30s window. Spec: `docs/superpowers/specs/2026-07-16-commit-provenance-guard-design.md`. Quick
+reference for hitting the block: `reference_commit_provenance_guard.md`.
+
+Separately, the Notion Tenant DB no-sync root-cause investigation's 4 residual action items moved
+into `open-items-tracker.md` as OI-003 through OI-006 (build the workbook mirror from
+`EXPORT_RentRoll`, add a real `Archived` property to the Tenant DB schema, dedup 2 stale Heritage
+Pool Supply rows, confirm 4 tenant turnovers + the Soldier Trucking property conflict against
+executed leases) — canonical descriptions live there now, `project_tenant_db_no_sync_rootcause.md`
+carries only pointers. Also closed a stale claim in that file: `ora-master-workbook-ingest`'s
+"should be 34 tabs" assertion was corrected to 49 earlier this session (`d5a1006`) and the memory
+file had not caught up.
+
 ## 2026-07-17 — Built canonical open-items tracker (`open-items-tracker.md`), closing the dead-pointer incident that motivated it
 
 Motivating incident: `oxford-cc-repo-health.md`'s "residual open items" line pointed at `session-context.md` as carrying "the live list" of two unresolved items (purge 2 dangling disabled LAMS entries; `ora-cam-reconciliation-annual` year-round-vs-seasonal timing). One sibling item (automation-health-monitor canonicalization) got a RESOLVED update logged inline in the same file same-day (2026-07-09); these two never did, and by 2026-07-16/17 `session-context.md` no longer mentioned either — the pointer had gone dead with nobody closing the loop. Both turned out to already be resolved (verified live, not assumed): `fleet-status.py` shows zero disabled LAMS entries fleet-wide; `ora-cam-reconciliation-annual`'s live cron `0 7 15 1 *` confirms the seasonal decision. Confirming that required a from-scratch investigation because the item text lived in two places (the source file's prose and the target file it pointed to) and only needed to rot in one for the trail to go cold.
