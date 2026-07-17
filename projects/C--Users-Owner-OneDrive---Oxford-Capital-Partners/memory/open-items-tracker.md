@@ -32,21 +32,58 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
 | [OI-009](#OI-009) | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Verify the 93 Notion Tenant DB rows with no workbook counterpart against primary leases (low priority) |
-| [OI-010](#OI-010) | 2026-07-17 | [project_bash_guard_indirection_gap.md](project_bash_guard_indirection_gap.md) | oxford-command-center's bash-guard.mjs: all 7 blocked command classes defeated by git-alias/wrapper-script indirection |
+| [OI-012](#OI-012) | 2026-07-17 | ora-deal-command-board SKILL.md STEP 2 | Stamp `Last Activity` from deal-touching skills so the board's stall flag is authoritative — field+board+3 skills done (commit 643dd9f, unmerged); residual: owner-outreach has no repo source + Save-skill reimport not done |
 
-### OI-010
+### OI-012
 **Status:** OPEN
 **Opened:** 2026-07-17
-**Source:** [project_bash_guard_indirection_gap.md](project_bash_guard_indirection_gap.md)
-**Description:** `oxford-command-center/.claude/hooks/bash-guard.mjs` is a stateless, per-invocation
-text scanner with no cross-invocation memory. Confirmed (empirically, against the live hook logic
-plus one real end-to-end proof) that a two-step disk-persisted indirection — a git alias or a
-wrapper script written in step 1, invoked by name in step 2 — defeats all 7 blocked command classes
-(`git add -A`, `git commit --no-verify`, `git push --force`, `core.hooksPath` tampering, sqlite3
-warehouse DML, `rm` of the warehouse, writes to `.claude/settings*.json`/`hooks/`), whether the two
-steps are one `&&`-joined command or genuinely separate Bash tool calls. No code changed — audit
-only. Root cause and full evidence in the source file; remediation approach (extend git's own
-hooks vs. rewrite the scanner to resolve indirection) is Gabriel's call, not yet decided.
+**Source:** ora-deal-command-board SKILL.md STEP 2 (raised during the 2026-07-17 board run)
+**Description:** `ora-deal-command-board`'s STALLED flag keyed on Notion's system last-edited
+timestamp (`Last Updated`), which both (a) conflated any edit with real deal progress and (b) froze
+when deal work happened off-Notion — on 2026-07-17 the 754 Old SR 74 row false-flagged STALLED (36d)
+while its PSA was in active negotiation, purely because `Last Updated` hadn't moved since 6/11.
+**Already landed this session (NOT the open part):** added a `Last Activity` DATE property to the
+Acquisition Pipeline Tracker (`bcfe4a03-...`, via `notion-update-data-source`); backfilled all 7 open
+rows; rewrote board STEP 1/STEP 2 to read `Last Activity` with a `Last Updated` → `createdTime`
+fallback chain and to tag any row still running on the fallback. **The open part:** the field is only
+authoritative once the deal-touching skills stamp `Last Activity = today` when they act on a tracked
+row. Update these 5 (Cowork skills — supervised single-writer pass, verify `git log`/`git status` on
+`ora-skills` before editing each SKILL.md): `deal-execution` (PSA turns), `loi-generation` (LOI
+sent/countered), `acquisition-underwriting` (screen/underwrite), `deal-comparison`, `owner-outreach`.
+Same one-line stamp pattern each. Do NOT add the stamp to `ora-deal-command-board` itself — it is
+read-only by charter; a board that stamped activity would reset its own stall clock merely by
+surfacing a deal. Acceptance: a deal under active off-Notion work does not flag STALLED; a genuinely
+dormant deal still flags at 30d; the board never writes `Last Activity`.
+**Progress 2026-07-17 (skills pass executed):** Ground truth on which skills actually WRITE the
+tracker corrected the original 5-skill list. Edited + committed the source in `ora-skills`
+(authoritative repo, single-writer verified clean before start), branch `board-last-activity-stamp`,
+commit `643dd9f`, additive only:
+- **loi-generation** — stamps `Last Activity=today` when logging "LOI Out".
+- **deal-execution** — new standing "NOTION PIPELINE STAMPING" rule covering PSA generation (WF1),
+  inbound-PSA/redline review (WF2A), and closing. This was the actual 754 gap: deal-execution
+  previously touched the tracker ONLY at closing, so weeks of live PSA turns never bumped the row.
+- **acquisition-underwriting** — stamps when it updates an existing tracker row in-place (it
+  primarily logs to the Deal Sourcing Log, not the pipeline tracker, so this is its only tracker write).
+- **deal-comparison — NOT edited (scope correction):** it is read-only, never writes the tracker;
+  inventing a write just to stamp would be scope creep. Dropped from the stamp list.
+**Residuals (why still OPEN):** (1) **owner-outreach is an ORPHANED skill — live at runtime but
+source-lost.** Exhaustively searched 2026-07-17: NOT in the `ora-skills` repo, NOT in the Cowork
+workspace, NOT in `~/.claude/skills`, NOT in AppData, and NEVER in `ora-skills` git history
+(`git log --all -- 'owner-outreach/**'` empty); a frontmatter grep `^name:\s*owner-outreach` across
+all skill homes returns nothing (control: the same grep finds `deal-execution` correctly, so the
+method is sound). It still loads as `anthropic-skills:owner-outreach` and memory records a SKILL.md
+v1.3 as of ~07-14 ([[project_owner_outreach_stale_guard_watch]]), so the content existed and lives
+only in the packed Desktop runtime store (not filesystem-traversable — `deal-execution`'s runtime
+copy is equally invisible). It CANNOT be edited for the stamp until its source is recovered into the
+repo. Recovery path: extract from the runtime store or transcript archaeology (`orphaned-task-forensics`
+/ the [[reference_skill_home_loss_2026-07-09]] precedent), then commit to `ora-skills` — a decision
+for Gabriel (recover vs. re-author). This is a standalone defect independent of OI-012's stamping
+goal and may warrant its own OI. (2) **Deployment not
+complete:** the post-commit hook staged all 3 skills in `_staging/PENDING_REIMPORT.md`; going live in
+the Cowork runtime needs `package_skills.py` → present `.skill` → **manual Save-skill click** (GUI,
+not headless), then `pending_reimport.py clear <skill>`. Until then the Monday
+`ora-skill-store-drift-check` will flag repo↔store drift. (3) Branch `board-last-activity-stamp` is
+**committed locally, not merged to main or pushed** — awaiting Gabriel's review/merge.
 **Auto-check:** none (not a fleet-registry item).
 
 ### OI-009
@@ -117,6 +154,8 @@ systemic bug classes discovered beyond OI-008's Escalation-Date pattern.**
 
 | ID | Opened | Closed | Source | One-line |
 |----|--------|--------|--------|----------|
+| [OI-011](#OI-011) | 2026-07-17 | 2026-07-17 | [project_bash_guard_indirection_gap.md](project_bash_guard_indirection_gap.md) | bash-guard.mjs: core.hooksPath read/write + cp guard-path source/dest false positives fixed |
+| [OI-010](#OI-010) | 2026-07-17 | 2026-07-17 | [project_bash_guard_indirection_gap.md](project_bash_guard_indirection_gap.md) | bash-guard.mjs: closed git-alias/wrapper-script indirection across all 7 blocked command classes |
 | [OI-007](#OI-007) | 2026-07-17 | 2026-07-17 | [project_autonomy_gate_indirection_ceiling_followup.md](project_autonomy_gate_indirection_ceiling_followup.md) | Enforce Gate 1/2a at the actual outbound action — value-indirection defeats shell-text detection |
 | [OI-001](#OI-001) | 2026-07-08 | 2026-07-16 | [oxford-cc-repo-health.md](oxford-cc-repo-health.md) | Purge 2 dangling disabled LAMS scheduled-task entries |
 | [OI-002](#OI-002) | 2026-07-08 | 2026-07-16 | [oxford-cc-repo-health.md](oxford-cc-repo-health.md) | Decide `ora-cam-reconciliation-annual` year-round vs. seasonal timing |
@@ -125,6 +164,79 @@ systemic bug classes discovered beyond OI-008's Escalation-Date pattern.**
 | [OI-005](#OI-005) | 2026-07-16 | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Dedup 2 stale Notion Heritage Pool Supply rows against the correct SRS row |
 | [OI-006](#OI-006) | 2026-07-16 | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Confirm 4 tenant turnovers + Soldier Trucking property conflict against executed leases |
 | [OI-008](#OI-008) | 2026-07-17 | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Sweep the Tenant DB for the Escalation-Date/Lease-Expiration column-mapping bug beyond the 7 rows already checked |
+
+### OI-011
+**Status:** CLOSED
+**Opened:** 2026-07-17
+**Closed:** 2026-07-17
+**Source:** [project_bash_guard_indirection_gap.md](project_bash_guard_indirection_gap.md)
+**Description:** Found during OI-010's adversarial review, deliberately NOT fixed there to keep that
+change scoped to the indirection fix. Both were pre-existing (present before OI-010 touched the
+file), false-positive-only (annoyance, not a security gap at the time): (1) `git config --get
+core.hooksPath` (a pure read) was denied identically to an actual write — check (d) never
+distinguished read from set. (2) `cp .claude/settings.json /tmp/backup.json` (reading FROM the
+guard file to back it up) was denied identically to overwriting it — the mv/cp check matched the
+guard path anywhere in the segment, not just as the destination, despite its own comment saying
+"as an argument (destination)".
+**Evidence:** Fixed on `oxford-command-center` `main`, commit `8006a15`. Check (d) now
+distinguishes mutation from read: any trailing token after `core.hooksPath`'s position counts as a
+value being set (regardless of leading dash — no `--` separator required by real git) UNLESS the
+command carries an explicit `--get`/`--get-all`/`--get-regexp`/`--get-urlmatch` flag, where a
+trailing token is git's own value-pattern filter, not a value. `--unset`/`--add`/`--replace-all`
+and the `-c core.hooksPath=` inline form still always deny. Check (g)'s mv/cp guard now treats `mv`
+and `cp` differently: `mv` still denies the guard path in either argument position (source-position
+mv removes/neutralizes the file, same severity as `rm`), while `cp` denies only the destination
+argument via a new `cpGuardWrite()` helper covering the plain 2-arg form and all 3
+`-t`/`--target-directory` shapes (short flag, `=`-attached, space-separated) plus unambiguous
+long-option abbreviations. **3 rounds of adversarial review** (mandatory per CLAUDE.md for
+`hooks/**` security-gate code) found and fixed 3 real bypasses before landing, each confirmed
+against the live hook and then regression-tested: a dash-prefixed `core.hooksPath` value (`git
+config core.hooksPath -evilhooks`) defeating the initial read/write classifier; `cp
+--target-dir=.claude/hooks/ evil.mjs` (GNU abbreviation) missed by the initial destination-only
+detection; `cp --target-directory .claude/hooks/ evil.mjs` (space-separated, real GNU cp behavior)
+missed by the round-1 fix. Round 3 found nothing further. 68 tests in `bash-guard.test.ts` (was 64),
+full project suite 231 files/2792 tests green, typecheck 0, lint 0. Landed via isolated worktree,
+fast-forward merge (matching the OI-010 convention), verified zero collateral impact on the main
+checkout.
+**Auto-check:** none (not a fleet-registry item; closure evidence is the landed commit above,
+externally verifiable via `git log`).
+
+### OI-010
+**Status:** CLOSED
+**Opened:** 2026-07-17
+**Closed:** 2026-07-17
+**Source:** [project_bash_guard_indirection_gap.md](project_bash_guard_indirection_gap.md)
+**Description:** `oxford-command-center/.claude/hooks/bash-guard.mjs` is a stateless, per-invocation
+text scanner with no cross-invocation memory. A two-step disk-persisted indirection — a git alias or
+a wrapper script written in step 1, invoked by name in step 2 — defeated all 7 blocked command
+classes, whether the two steps were one `&&`-joined command or genuinely separate Bash tool calls.
+**Evidence:** Fixed on `oxford-command-center` `main`, commit `60c45ed`. Resolves both indirection
+layers into one expanded text every existing check scans: git aliases via `git config --get`
+(skipping known builtins), inline `git -c alias.X=value` one-shot overrides, and script content read
+through a widened set of invocation forms (sh/bash/zsh/dash/ksh, source/dot, stdin redirection,
+direct execution, case-insensitive, quoted paths with spaces) with best-effort positional-parameter
+and simple-variable substitution inside that content. Three rounds of independent adversarial review
+(3 parallel agents, each personally re-verified) found and fixed real bugs before landing: git global
+options (`-c`/`-C`/`--git-dir=`/`-p`/`--no-pager`) breaking alias-candidate detection entirely; an
+exponential subprocess-spawn blowup from a plausible chained-alias config (4-8s+ stalls on every
+Bash call, fixed via a 16-lookup shared budget); a backtracking-prone lazy regex costing ~10s on a
+crafted unterminated-quote payload (fixed via length-bounded `{0,4096}?` matches, applied
+consistently including to the pre-existing `sh -c`/`$()`/backtick extraction whose exposure this fix
+increased); and a quote-handling bug where substituting a variable inside double quotes left stale
+quote characters, hiding the result from the downstream commit-message quote-blanking logic. Proved
+several bypasses end-to-end (not just hook-logic-level) before fixing: a git alias genuinely staged
+an untracked file via `add -A`; a direct-executable and a variable-built-verb wrapper genuinely
+deleted a `data/warehouse` test directory. 59 new/updated tests (regression + adversarial-finding
+coverage + timing guards locking in both DoS fixes); full project suite 231 files/2783 tests green,
+typecheck 0, lint 0. Landed via isolated worktree, fast-forward merge, verified zero collateral
+impact on the main checkout. Accepted, documented limits (same architectural ceiling as OI-007):
+arbitrary shell constructs beyond simple literal variable assignment — command substitution,
+arithmetic, exported variables, control flow, >3-level nested wrappers, >64KB scripts — are not
+resolved, since closing those for real needs the same shift OI-007 used (verify the actual outbound
+action/repo state), not another regex. 2 unrelated pre-existing false positives found during review,
+deliberately not fixed here to keep scope tight: tracked as [OI-011](#OI-011).
+**Auto-check:** none (not a fleet-registry item; closure evidence is the landed commit above,
+externally verifiable via `git log`).
 
 ### OI-007
 **Status:** CLOSED
