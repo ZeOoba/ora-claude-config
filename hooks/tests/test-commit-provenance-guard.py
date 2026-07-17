@@ -174,6 +174,104 @@ def test_pathspec_narrows_candidate_set():
     print("PASS test_pathspec_narrows_candidate_set")
 
 
+# ---------- Task 3 cases: the block predicate ----------
+
+def test_foreign_file_from_live_session_blocks():
+    """THE case this guard exists for -- 2026-07-16's 4da5d26 sweep."""
+    repo = make_repo()
+    foreign = write_and_stage(repo, "theirs.txt")
+    sess = sessions_tmp()
+    seed_touched(sess, "other", [foreign])
+    fs = fleet_state_with(["other"])
+    rc, out, err = run_hook('git commit -m "x"', repo, sess, fleet_state=fs)
+    assert rc == 2, "must BLOCK a foreign-file commit, got %s (%s)" % (rc, err)
+    assert "theirs.txt" in err, "stderr must name the file, got %r" % err
+    assert "other" in err, "stderr must name the owning session, got %r" % err
+    print("PASS test_foreign_file_from_live_session_blocks")
+
+
+def test_foreign_file_but_session_not_live_allows():
+    """Liveness contract: no affirmative 'open' signal -> no information -> allow."""
+    repo = make_repo()
+    foreign = write_and_stage(repo, "theirs.txt")
+    sess = sessions_tmp()
+    seed_touched(sess, "other", [foreign])
+    rc, out, err = run_hook('git commit -m "x"', repo, sess,
+                            fleet_state="C:/does/not/exist_cpg.json")
+    assert rc == 0, "dead/unknown session must not block, got %s (%s)" % (rc, err)
+    print("PASS test_foreign_file_but_session_not_live_allows")
+
+
+def test_foreign_touched_set_older_than_ttl_allows():
+    repo = make_repo()
+    foreign = write_and_stage(repo, "theirs.txt")
+    sess = sessions_tmp()
+    seed_touched(sess, "other", [foreign], age_h=99)
+    fs = fleet_state_with(["other"])
+    rc, out, err = run_hook('git commit -m "x"', repo, sess, fleet_state=fs, ttl_h=6)
+    assert rc == 0, "stale touched-set must not block, got %s (%s)" % (rc, err)
+    print("PASS test_foreign_touched_set_older_than_ttl_allows")
+
+
+def test_explicit_pathspec_excluding_foreign_allows():
+    """The remediation the block message recommends MUST actually work."""
+    repo = make_repo()
+    foreign = write_and_stage(repo, "theirs.txt")
+    write_and_stage(repo, "mine.txt")
+    sess = sessions_tmp()
+    seed_touched(sess, "other", [foreign])
+    fs = fleet_state_with(["other"])
+    rc, out, err = run_hook('git commit -m "x" -- mine.txt', repo, sess, fleet_state=fs)
+    assert rc == 0, "pathspec excluding the foreign file must allow, got %s (%s)" % (rc, err)
+    print("PASS test_explicit_pathspec_excluding_foreign_allows")
+
+
+def test_override_sentinel_allows():
+    """The deliberate 'land the orphaned backlog' janitor workflow (c0272bb)."""
+    repo = make_repo()
+    foreign = write_and_stage(repo, "theirs.txt")
+    sess = sessions_tmp()
+    seed_touched(sess, "other", [foreign])
+    fs = fleet_state_with(["other"])
+    d = os.path.join(sess, "me")
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, "allow-foreign-commit"), "w", encoding="ascii") as fh:
+        fh.write("landing backlog")
+    rc, out, err = run_hook('git commit -m "x"', repo, sess, fleet_state=fs)
+    assert rc == 0, "override sentinel must allow, got %s (%s)" % (rc, err)
+    print("PASS test_override_sentinel_allows")
+
+
+def test_own_touched_set_never_blocks_self():
+    """Self-recognition is structural: only other_sid != my_sid is consulted."""
+    repo = make_repo()
+    mine = write_and_stage(repo, "mine.txt")
+    sess = sessions_tmp()
+    seed_touched(sess, "me", [mine])
+    fs = fleet_state_with(["me"])
+    rc, out, err = run_hook('git commit -m "x"', repo, sess, session_id="me", fleet_state=fs)
+    assert rc == 0, "a session must never block itself, got %s (%s)" % (rc, err)
+    print("PASS test_own_touched_set_never_blocks_self")
+
+
+def test_commit_dash_a_picks_up_foreign_tracked_modification():
+    repo = make_repo()
+    p = os.path.join(repo, "theirs.txt")
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write("v1")
+    _git(["add", "theirs.txt"], repo)
+    _git(["commit", "-m", "base"], repo)
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write("v2 -- their uncommitted edit")   # tracked-modified, NOT staged
+    foreign = os.path.normcase(os.path.abspath(p))
+    sess = sessions_tmp()
+    seed_touched(sess, "other", [foreign])
+    fs = fleet_state_with(["other"])
+    rc, out, err = run_hook('git commit -am "x"', repo, sess, fleet_state=fs)
+    assert rc == 2, "-a must capture tracked-modified foreign files, got %s (%s)" % (rc, err)
+    print("PASS test_commit_dash_a_picks_up_foreign_tracked_modification")
+
+
 if __name__ == "__main__":
     test_non_git_command_silent()
     test_git_commit_with_no_foreign_files_allows()
@@ -183,4 +281,11 @@ if __name__ == "__main__":
     test_git_add_of_commit_named_file_is_not_a_commit()
     test_commit_message_with_dashdash_does_not_corrupt_pathspec()
     test_pathspec_narrows_candidate_set()
+    test_foreign_file_from_live_session_blocks()
+    test_foreign_file_but_session_not_live_allows()
+    test_foreign_touched_set_older_than_ttl_allows()
+    test_explicit_pathspec_excluding_foreign_allows()
+    test_override_sentinel_allows()
+    test_own_touched_set_never_blocks_self()
+    test_commit_dash_a_picks_up_foreign_tracked_modification()
     print("ALL COMMIT-PROVENANCE-GUARD TESTS PASS")
