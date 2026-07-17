@@ -18,14 +18,19 @@ recent (<=14d) event_log.md signals, so a planned retirement never raises a
 one-time false [ACTION]:
   1. ratified_drops -- the ceremonial token 'RATIFIED' anywhere in the drop's
      '## ' section (2026-06-11); and
-  2. retired_drops  -- a deliberate-retirement verb (retire*/decommission*) on
-     the SAME LINE as the task id (2026-07-17). ORA documents most retirements
-     in plain prose ('... retirement ...', 'Retirement started ...'), never the
+  2. retired_drops  -- COMPLETED-retirement language on the SAME LINE as the task
+     id (2026-07-17). ORA documents most retirements in plain prose, never the
      uppercase token -- ora-skills-reimport-watch's 2026-07-17 retirement was
-     twice-logged yet still raised a false [ACTION] because only 'RATIFIED'
-     was honored. retired_drops matches only deliberate-removal verbs, never
-     incident words ('disappeared'/'dropped'/'dark'/'missing'), so a report
-     ABOUT a silent drop can never auto-reconcile the drop it is flagging.
+     twice-logged yet still raised a false [ACTION] because only 'RATIFIED' was
+     honored. Requires accomplished-fact wording ('retired', 'decommissioned',
+     'retirement completed', 'registry entry deleted/removed') and NEVER a merely
+     planned, hypothetical, or in-progress mention ('should retire', 'plan to
+     decommission', 'pending deletion'). Two payoffs: (a) a forward-looking note
+     that names a task cannot reconcile a genuine drop of it, and neither can an
+     incident report ABOUT a silent drop ('disappeared'/'dropped'/'dark'); and
+     (b) a two-part retirement reconciles only on its completion line, not on the
+     part-1 line that still says the entry exists. Completion-only wording makes
+     tense/negation parsing unnecessary.
 One-time fireAt tasks are ignored -- they expire by design.
 
 An enabled->DISABLED task (still registered, just paused) is a WARN regression,
@@ -72,14 +77,6 @@ EVENT_LOG = os.path.join(os.path.expanduser("~"), ".claude", "projects",
                          "memory", "event_log.md")
 RATIFY_WINDOW_DAYS = 14
 
-# Deliberate-retirement verbs (case-insensitive stems) for retired_drops. Kept
-# minimal and unambiguous: every entry denotes an INTENTIONAL removal, and none
-# occurs in silent-drop incident language ('disappeared'/'dropped'/'dark'/
-# 'missing'/'vanished') -- that asymmetry is what lets a retirement reconcile a
-# drop while a report ABOUT a drop never can. Add a verb here only if it is
-# unambiguously an intentional-removal word.
-RETIRE_TOKENS = ("retire", "decommission")
-
 # A whole registry FILE vanishing is treated as transient (reinstall / session-dir
 # rotation / app-not-yet-initialized) until it persists across this many consecutive
 # probe runs -- the 2026-07-05 reinstall's mid-recovery probe cried CRITICAL on a
@@ -121,20 +118,48 @@ def _leading_date(line):
         return None
 
 
+def _retirement_completed(low):
+    """True iff a lowercased event_log line asserts a COMPLETED retirement/removal
+    (accomplished fact), not a planned, hypothetical, or in-progress one.
+
+    Every clause is past-tense/perfect, so contemplation never qualifies:
+      - 'retired'/'decommissioned'/'deregistered' -- past-participle verbs. The
+        infinitive/present forms ('retire', 'decommission') are deliberately NOT
+        matched, so 'should retire', 'plan to decommission', 'do not retire' all
+        fail.
+      - 'retirement' + 'completed' -- the noun alone is ambiguous ('retirement
+        plan'); pairing it with 'completed' pins it to done. ('complete' is
+        avoided -- it is a substring of 'incomplete'.)
+      - 'registry' + 'deleted'/'removed' -- the registry entry is gone. Note
+        'deleted'/'removed' (past) exclude 'deletion'/'deleting'/'pending
+        deletion'/'removing', so a part-1 'entry still exists, pending deletion'
+        line does NOT qualify -- only the part-2 completion line does.
+    Requiring completion wording is what makes tense/negation parsing
+    unnecessary. Pure."""
+    if "retired" in low or "decommissioned" in low or "deregistered" in low:
+        return True
+    if "retirement" in low and "completed" in low:
+        return True
+    if "registry" in low and ("deleted" in low or "removed" in low):
+        return True
+    return False
+
+
 def retired_drops(log_text, ids, today, window_days=RATIFY_WINDOW_DAYS):
-    """Subset of `ids` reconciled by a recent event_log LINE naming the task id
-    alongside a deliberate-retirement verb (RETIRE_TOKENS) on the SAME line.
+    """Subset of `ids` reconciled by a recent event_log LINE that names the task
+    id AND asserts a COMPLETED retirement (_retirement_completed) on the SAME line.
 
     Complements ratified_drops: that requires the ceremonial 'RATIFIED' token in
     a '## ' section, but ORA usually documents a retirement in plain prose
-    ('... retirement ...', 'Retirement started ...'). Same-line coupling of id +
-    verb keeps it tight -- a section that merely mentions task A in one line and
-    retires task B in another does NOT reconcile A.
+    ('... retirement completed ...', 'registry entry deleted ...'). Same-line
+    coupling keeps it tight -- a section that merely mentions task A in one line
+    and retires task B in another does NOT reconcile A -- and the completion-only
+    gate keeps a forward-looking 'should retire ora-A next quarter' or an
+    in-progress 'ora-A pending deletion' from reconciling a genuine drop of A.
 
     Date per line, newest-wins: an inline leading 'YYYY-MM-DD' wins; otherwise the
     line inherits the nearest '## YYYY-MM-DD' header above it. Eligible only if
-    that date is within `window_days` of `today`. Conservative by design (only
-    intentional-removal verbs, never incident words). Pure."""
+    that date is within `window_days` of `today`. Pure."""
     ids = [i for i in ids if i]
     if not ids:
         return set()
@@ -147,7 +172,7 @@ def retired_drops(log_text, ids, today, window_days=RATIFY_WINDOW_DAYS):
                 header_date = datetime.date.fromisoformat(stripped[3:13])
             except ValueError:
                 header_date = None
-        if not any(tok in stripped.lower() for tok in RETIRE_TOKENS):
+        if not _retirement_completed(stripped.lower()):
             continue
         d = header_date if is_header else (_leading_date(stripped) or header_date)
         if d is None or (today - d).days > window_days:
