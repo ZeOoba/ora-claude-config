@@ -11,6 +11,37 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-17 — OneDrive Business/Personal physical split executed; machine migration B3 closed
+
+**OneDrive split:** Gabriel authorized the full coordinated execution of the 2026-07-09 proposal (`2026-07-09_OneDrive-Business-Personal-Split_Proposal_v01.md`). All Business-bucket and Personal-bucket items physically moved into new `Business\`/`Personal\` folders at the OneDrive root; Ambiguous-bucket items (incl. `eric spreadsheets\`, `eric documents\`) and the "not filed either way" housekeeping items were left at root, unresolved, per the proposal's own fallback. 4 hardcoded automation paths updated in the same pass (`ora-am-brief`, `ora-master-workbook-ingest`, `ora-pm-ledger` ×2, `ora-deal-sourcing-scan`), all verified reachable post-move via `Test-Path`. **Near-miss caught and fixed same session:** an initial pass mistakenly also redirected the Master Workbook path (`eric spreadsheets\`) under `Business\` even though that folder was correctly left un-moved in the Ambiguous bucket — caught via verification before any automation next ran, reverted. One real omission from the original proposal (`Toledo Sale`, named in the proposal's own Business list) was initially missed in the move, caught via a post-move root-listing diff, and moved. Several items not covered by the 2026-07-09 proposal at all were discovered at root during this pass (`Loans External/`, `GFU/`, `Muirkirk 2013 Refinancing/`, and assorted loose files/scripts) — left unclassified for a future pass rather than guessed at. Detail: `reference_onedrive_business_scope.md`.
+
+**Machine migration B3 (48h burn-in) — CLOSED.** All 10 checklist boxes verified with command-output evidence in one session, including a one-time COM test send to ggoldberg@oxfordra.net (Gabriel's explicit in-session confirmation), confirmed via `send-log.txt`. Detail: `project_claude-setup-audit-2026-07-09.md`.
+
+## 2026-07-17 — bash-guard.mjs (oxford-command-center): OI-011 read/write + cp source-dest false positives closed
+
+- **Closed by a concurrent session the same night**, working in its own git worktree
+  (`fix/bash-guard-read-write-oi011`) off this session's OI-010 commit — landed on
+  `oxford-command-center` `main`, commit `8006a15`, on top of `60c45ed`. Fixes the 2 pre-existing
+  false positives flagged (not fixed) during OI-010's adversarial review: `git config --get
+  core.hooksPath` (a pure read) was denied identically to an actual write; `cp` reading FROM a
+  guardrail file (e.g. a benign backup) was denied identically to overwriting it.
+- Check (d) now distinguishes mutation from read: a trailing token after `core.hooksPath` counts as
+  a value being set unless the command carries an explicit `--get`/`--get-all`/`--get-regexp`/
+  `--get-urlmatch` flag; `--unset`/`--add`/`--replace-all` and inline `-c core.hooksPath=` still
+  always deny. Check (g)'s `mv`/`cp` guard now treats them differently: `mv` still denies the guard
+  path in either argument position (source-position `mv` removes/neutralizes the file, same
+  severity as `rm` — no pure-read form exists for `mv`), while a new `cpGuardWrite()` helper denies
+  `cp` only on its destination argument, covering the plain form plus all 3 `-t`/`--target-directory`
+  shapes.
+- **3 rounds of adversarial review** (mandatory per CLAUDE.md for `hooks/**` security-gate code)
+  found and fixed 3 real bypasses before landing: a dash-prefixed `core.hooksPath` value defeating
+  the initial read/write classifier; `--target-dir=` (GNU abbreviation) and `--target-directory`
+  (space-separated) both missed by earlier destination-detection passes. 68 tests in
+  `bash-guard.test.ts` (was 64), full project suite 231 files/2792 tests green, typecheck 0, lint 0.
+  Landed via isolated worktree, fast-forward merge (matching the OI-010 convention), verified zero
+  collateral impact.
+- Full detail in `open-items-tracker.md#OI-011` (closed) and `project_bash_guard_indirection_gap.md`.
+
 ## 2026-07-17 — registry-membership-probe: retired_drops added + hardened (plain-prose retirement reconciliation, completion-only)
 
 - **Trigger:** the 2026-07-17 `ora-task-integrity-guard` run had to hand-reconcile a false `[ACTION]`/exit-1 from `registry-membership-probe.py`. `ora-skills-reimport-watch` was retired earlier that day (twice-logged: paused+archived, then registry entry deleted — see the two `2026-07-17:` lines under the `## 2026-07-16` plugin-reimport entry), yet the probe still alarmed on the drop.
@@ -20,6 +51,78 @@ Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (fir
 - **Verification:** suite 41/41 (was 24/25). Verified against the real event_log — `ora-skills-reimport-watch` reconciles via its completion line; planted "should retire … next quarter" and "do NOT retire" lines both → ∅; a planted genuine completion → reconciles. Live probe runs exit 0, no regression.
 - **Shipped:** both commits pushed to `ZeOoba/ora-claude-config` `main` (HEAD 8b2acbd); pre-push doctrine gate clean. Two files only: `maintenance/registry-membership-probe.py` + `maintenance/test-registry-membership-probe.py`; no other session's WIP swept.
 - **Residual (documented, not fixed):** if a future planning note ever uses accomplished-fact phrasing about a not-yet-removed task, it could reconcile prematurely — vanishingly unlikely given the completion-only gate; guard remains defense-in-depth (task-folder-registration-probe + membership-guard.ps1 + integrity-guard cross-checks).
+
+## 2026-07-17 — Weekly punch-list review: 754 corrected, reference-library governance ratified, deal re-screens launched
+
+Gabriel reviewed the week's open items (open-items-tracker + deal pipeline + reference-library governance + machine migration) via interactive multiple-choice questions:
+- **754 Old State Route 74:** corrected projects.md — deal is NOT stalled; LOI agreed, ORA sole purchaser, Eric negotiating PSA directly (live email thread 2026-07-16 re: parking easement not previously logged here).
+- **Reference-library governance — all 3 open decisions ratified:** (1) subject-first naming schema (Style Guide §3.1) is canonical over date-first; (2) DocType controlled vocabulary locked to exactly ICMemo/LOI/PSA/RentRoll/Deck; (3) Naming Standard v1.1 ratified provisionally pending Eric's formal sign-off.
+- **511 Industrial Mile Rd** and **275 Old County Line Rd:** Gabriel authorized fresh `verified-deal-recon` re-screens from scratch (511: re-screen before re-engaging broker Noah Kahkonen; 275: full redo, treating the 6/12 WAIT-FOR-DILIGENCE plan's diligence as never having happened given 27 days of zero Notion movement). Both launched as background Workflows same session.
+- **2040 S Hamilton Rd:** parked — Gabriel will supply the OM/rent-roll/financials location later.
+- **Machine migration B3 burn-in:** Gabriel asked for the checklist to actually be run this session (separate from this entry — see its own result once complete).
+- **OneDrive Business/Personal split:** Gabriel authorized executing the physical folder move (previously only a non-destructive classification reference existed) — see separate entry once complete.
+
+## 2026-07-17 — setup-review-closeout chip: recheck fired ~2h20m early, ABORTED (not DONE); item (c) northridge not yet fired
+
+- **`ora-setup-review-closeout-recheck` executed prematurely** at ~13:50 ET (17:50Z) while its own
+  registry `fireAt` is 20:10Z (16:10 ET) — the entry still shows `enabled:true`, `nextRunAt 20:10Z`,
+  no `lastRunAt`, so the proper run is still pending. Because it ran early, item (c) — the one-time
+  `ora-uw-northridge-brockton-full` acquisition-underwriting re-run scheduled for **16:01 ET** — had
+  not yet fired. Verified: task absent from the live CC/MCP registry; backup folder
+  `_scheduled_tasks_backup/ora-uw-northridge-brockton-full/` holds only its SKILL.md (Jul 15) with
+  **no `outputs/` and zero run artifacts**. Blocker for the DONE-gate.
+- **DONE-gate now 3 clear / 1 blocked / 2 unconfirmed — NOT 6/6:**
+  - (a) `ora-task-integrity-guard` — **fired** 12:55 ET (`lastRunAt 2026-07-17T16:55:18Z`, after its
+    12:45 target); STEP-1.5 emitters confirmed to have run (see item d). Caveat: membership-probe
+    logged one LAMS drop today (`ora-skills-reimport-watch`); its STEP-3 alarm status was NOT
+    independently confirmed from the guard's Notion post — treated as unconfirmed, not clean.
+  - (b) `automation-health-monitor` v1.8 beacon — **not verifiable from the CC/MCP surface** (LAMS
+    task; not in this fleet's `list_scheduled_tasks`). Left unconfirmed.
+  - (c) `ora-uw-northridge-brockton-full` (16:01 ET) — **NOT fired** (decisive blocker, above).
+  - (d) State timestamps — **all advanced past the 2026-07-16 baseline**:
+    registry-membership.log `2026-07-17T13:01:45` (was 07-16T13:50:00); fleet-heartbeat.json `ts
+    2026-07-17T17:02:20Z` (was 07-16T17:50:00Z); push-fleet-heartbeat.log `2026-07-17T17:02:24Z OK`
+    (was 07-16T17:50:02Z).
+- **STEP 0 concurrent-writer check:** clean — no running session with an overlapping
+  chip/"northridge"/"closeout" title; chip-claims.log CLAIMED (Code/c3a1e79e 2026-07-16) still open,
+  no prior DONE/ABORTED.
+- **Outcome:** chip left OPEN. Appended `ABORTED` to chip-claims.log (Code/30222b1d) citing the early
+  fire + unfired item (c). The recheck's proper 16:10 ET run (still pending in the registry) should
+  re-verify after northridge's 16:01 ET fire and can legitimately close the chip DONE then. No email
+  (internal bookkeeping; any real watch alarm has its own notify path).
+
+## 2026-07-17 — bash-guard.mjs (oxford-command-center): git-alias/wrapper-script indirection closed, OI-010
+
+- **Audited then closed a real, confirmed gap in oxford-command-center's `bash-guard.mjs`** (its
+  Bash PreToolUse guard), following up on an unconfirmed hypothesis raised while checking that repo
+  for anything resembling the same-night `ora-autonomy-gate.py` OI-007 indirection work. Confirmed:
+  a two-step disk-persisted indirection (a git alias, or a wrapper script deferring its verb/path to
+  a positional or shell variable) defeated all 7 blocked command classes, with neither step's own
+  text containing the trigger pattern. Proved end-to-end (not just at the hook-logic level): a git
+  alias genuinely staged a file via `add -A` in a disposable repo; a wrapper script genuinely
+  deleted a `data/warehouse` test directory.
+- **Fixed and landed** on `oxford-command-center` `main`, commit `60c45ed`, via isolated worktree +
+  TDD + fast-forward merge. Resolves both indirection layers into one expanded text every existing
+  check scans: git aliases via `git config --get` (plus inline `-c alias.X=value` one-shot
+  overrides), and script content read through a widened set of invocation forms (sh/bash/zsh/dash/
+  ksh, source/dot, stdin redirection, direct execution) with best-effort positional-parameter and
+  simple-variable substitution.
+- **Three rounds of independent adversarial review (3 parallel agents) found and fixed 4 real bugs**
+  before landing, most severe first: (1) git global options (`-c`/`-C`/`--git-dir=`/`-p`/
+  `--no-pager`) before the alias name broke candidate detection entirely; (2) a DoS-class
+  exponential subprocess-spawn blowup from a plausible chained-alias config (4-8s+ stalls on every
+  Bash call, fixed via a shared 16-lookup budget); (3) a DoS-class backtracking regex costing ~10s
+  on a crafted payload (fixed via a length bound, applied consistently to 3 similarly-shaped
+  regexes); (4) a quote-handling bug hiding a substituted value from the downstream commit-message
+  quote-blanking logic. 59 new/updated tests including timing guards on both DoS fixes; full project
+  suite 231 files/2783 tests green, typecheck 0, lint 0.
+- **Accepted, documented limits (same architectural ceiling as OI-007)**: arbitrary shell constructs
+  beyond simple literal variable assignment (command substitution, arithmetic, exported variables,
+  control flow, >3-level nested wrappers, >64KB scripts) are not resolved — closing those for real
+  needs the same shift OI-007 used (verify the actual outbound action/state), not another regex.
+- **2 unrelated, pre-existing false positives found during review, deliberately not fixed here** to
+  keep scope tight — tracked separately as `open-items-tracker.md#OI-011`.
+- Full detail in `project_bash_guard_indirection_gap.md` and `open-items-tracker.md#OI-010` (closed).
 
 ## 2026-07-17 — ora-autonomy-gate.py hardening: override tokens, 8 matcher bypasses, OI-007 (indirection ceiling) fully closed
 
