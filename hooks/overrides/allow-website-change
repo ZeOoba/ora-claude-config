@@ -1,1 +1,0 @@
-Gabriel confirmed in-turn via direct chat instruction this session ("Deploy it to prod") to ship commit fe1e271 (404.html mobile-nav horizontal-scroll fix) live to oxfordra.net. Scope: `netlify deploy --build --prod` from website-canonical.

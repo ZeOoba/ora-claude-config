@@ -80,6 +80,15 @@ obsidian-fleet-mirror/session-state.json
 # 3) Re-ignore secrets, caches & transient state INSIDE opted-in dirs
 hooks/confidential-terms.json
 hooks/sessions/
+# Human-authorization override sentinels (allow-external-send / allow-website-change /
+# allow-doctrine-drift). NEVER track one: the gates validate a sentinel by mtime age, and
+# git stamps a checked-out file with CHECKOUT time -- so a tracked token is re-minted with
+# age ~0 by every clone/checkout/pull, self-granting a live 60-min override with no human
+# in the loop. Not theoretical: 668f9d4 swept a live allow-website-change into the repo and
+# a fresh clone was empirically shown to let `netlify deploy --prod` through ora-autonomy-gate
+# (exit 0; empty-dir control exit 2) -- an invariant-2 bypass on the MIGRATION_RUNBOOK
+# restore path. Guarded by hooks/tests/test-override-token-hygiene.py (2026-07-16).
+hooks/overrides/
 # generated probe-state snapshot (doctrine-integrity-probe.py / ora-doctrine-integrity-guard);
 # rewritten on every run -> was showing as a tracked modification on every single probe fire,
 # recurring dirty-tree noise with no review value (2026-07-12 systematization follow-up)
