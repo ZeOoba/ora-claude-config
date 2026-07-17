@@ -13,8 +13,10 @@ fewer than 3 always-terms, so an empty roster can never produce a vacuous pass.
 Asserts every derived identifier variant (mixed-case + no-space) is blocked on every
 egress surface (site write, .pptx/.docx/.pdf/.csv/.html artifacts, Notion write, Outlook
 send, the live COM send path), that context-term sentences block when an identifier is
-present (the pure context-only branch needs fixture injection — Phase C), that INTERNAL
-use is allowed, and that the guard fails CLOSED on an unparseable payload.
+present, that the pure context-only branch (context_requires_any + context, no always-term
+in the payload) is covered via a dedicated synthetic fixture whose trigger term is
+deliberately absent from always — Phase C, closed 2026-07-17 — that INTERNAL use is
+allowed, and that the guard fails CLOSED on an unparseable payload.
 
 Run: python test-confidentiality-guard.py   (exit 0 = all pass; exit 1 = any fail)
 """
@@ -239,6 +241,89 @@ expect("ALLOW clean git push", 0, run(bash_payload("git push origin main"))[0])
 if CONTEXT:
     expect("ALLOW context-term generic (no deal)", 0,
            run(write_payload(SITE, "%s is a common industrial contaminant nationwide" % CONTEXT[0]))[0])
+
+# --- Phase C: pure context-only branch (find_hit()'s context_requires_any + context loop) --
+# 2026-07-17: closes the gap this file's own docstring flagged since 2026-06-11. In BOTH the
+# synthetic fixture above (context_requires_any == SYNTHETIC_ALWAYS) and every real deal seen
+# so far, every context_requires_any trigger is ALSO an always-term -- so any text that could
+# satisfy context_requires_any necessarily contains an always-term too, and find_hit()'s
+# always-loop (checked first) short-circuits before the context-loop ever runs. The context-only
+# branch has therefore never been exercised by this suite. Fix: a dedicated fixture whose
+# context_requires_any trigger is deliberately ABSENT from always, so a payload can satisfy
+# context_requires_any without also tripping the always-loop -- the only shape that reaches the
+# context loop in isolation. Uses its own run_ctx() (not the module-global run()/ACTIVE_TERMS_FILE)
+# so this fixture never leaks into the rest of the suite's subprocess calls.
+CTX_ALWAYS = "Marlowe Holdings Trust"           # this fixture's always-term (positive control only)
+CTX_CONTEXT = "synthetic contaminant plume"     # context term
+CTX_TRIGGER = "projectcodeq7"                   # context_requires_any trigger -- deliberately NOT in always
+
+
+def _write_context_only_fixture():
+    """Synthetic terms file whose context_requires_any trigger is absent from always, so a
+    payload containing CTX_CONTEXT + CTX_TRIGGER (no always-term) reaches the context loop
+    without the always loop pre-empting it. Fake placeholders only -- never a real deal."""
+    fd, path = tempfile.mkstemp(prefix="synthetic-context-only-terms-", suffix=".json")
+    data = {
+        "_meta": {
+            "purpose": "synthetic fixture for the context-only branch (Phase C) -- no real deal data",
+            "roster_last_verified": datetime.date.today().isoformat(),
+        },
+        "context_only_fixture_deal": {
+            "active": True,
+            "label": "Context-Only Fixture Deal (fixture, not real)",
+            "always": [CTX_ALWAYS],
+            "context": [CTX_CONTEXT],
+            "context_requires_any": [CTX_TRIGGER],
+        },
+    }
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+    atexit.register(lambda: os.path.exists(path) and os.remove(path))
+    return path
+
+
+_CTX_FIXTURE_PATH = _write_context_only_fixture()
+
+
+def run_ctx(payload_obj, tool_name_override=None):
+    """Like run(), but always points the guard subprocess at the context-only fixture,
+    independent of ACTIVE_TERMS_FILE -- isolates this section from the rest of the suite."""
+    raw = json.dumps(payload_obj)
+    env = dict(os.environ, CONFIDENTIAL_TERMS_FILE_OVERRIDE=_CTX_FIXTURE_PATH)
+    p = subprocess.run([sys.executable, GUARD], input=raw.encode("utf-8"),
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    return p.returncode, p.stderr.decode("utf-8", "replace")
+
+
+# 1) POSITIVE -- the gap itself: context term + trigger present, NO always-term. Must BLOCK,
+#    and the block reason must name the CONTEXT term (not the always-term) -- proving the
+#    context loop fired, not the always loop.
+code, err = run_ctx(write_payload(SITE, "Regional overview: %s identified near %s parcel" % (CTX_CONTEXT, CTX_TRIGGER)))
+expect("BLOCK context-only (Phase C): context+trigger, no always-term", 2, code, err)
+expect("BLOCK context-only (Phase C): reason names the context term (proves context loop fired)",
+       True, CTX_CONTEXT in err and CTX_ALWAYS not in err, err)
+
+# 2) NEGATIVE -- context term alone, no trigger, no always-term. Must ALLOW: proves
+#    context_requires_any is genuinely required, not decorative.
+code, err = run_ctx(write_payload(SITE, "%s is a common industrial contaminant nationwide" % CTX_CONTEXT))
+expect("ALLOW context-only (Phase C): context term alone (no trigger)", 0, code, err)
+
+# 3) NEGATIVE -- trigger alone, no context term, no always-term. Must ALLOW: proves the
+#    AND-semantics of the branch (context_requires_any present but no context term => no hit).
+code, err = run_ctx(write_payload(SITE, "%s kickoff meeting notes" % CTX_TRIGGER))
+expect("ALLOW context-only (Phase C): trigger alone (no context term)", 0, code, err)
+
+# 4) POSITIVE control -- the fixture's always-term still blocks on its own, proving the
+#    fixture is live/correctly-shaped (so the exit-0s above are attributable to branch logic,
+#    not to an inert or mis-loaded fixture).
+code, err = run_ctx(write_payload(SITE, "Press release: %s update" % CTX_ALWAYS))
+expect("BLOCK context-only (Phase C): fixture's always-term still blocks (control)", 2, code, err)
+
+# 5) Surface-independence -- re-run case 1's payload on a non-Write egress surface (Notion),
+#    confirming the context branch isn't accidentally coupled to the Write path.
+code, err = run_ctx(notion_payload(NOTION, "%s identified near %s parcel" % (CTX_CONTEXT, CTX_TRIGGER)))
+expect("BLOCK context-only (Phase C): same gap on a non-Write surface (notion-create)", 2, code, err)
+
 
 # --- load_terms(): linked-worktree fallback to the main checkout's terms file ----------
 # 2026-07-12: hooks/confidential-terms.json is gitignored, so `git worktree add` never
