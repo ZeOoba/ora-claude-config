@@ -32,6 +32,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
 | [OI-009](#OI-009) | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Verify the 93 Notion Tenant DB rows with no workbook counterpart against primary leases (low priority) |
+| [OI-013](#OI-013) | 2026-07-17 | [reference_onedrive_business_scope.md](reference_onedrive_business_scope.md) | A live `oxford-site` git clone sits inside OneDrive sync scope, distinct from the documented `C:\Users\Owner\oxford-site` deploy copy — surfaced incidentally during the OI-012 sweep, not yet investigated |
 
 ### OI-009
 **Status:** OPEN (substantial progress made 2026-07-17, real scope remains)
@@ -358,6 +359,21 @@ no-address tenants (6/6, one required the Eurosort schema addition above). Real 
 Tops rent/date, Harold Palmer, Maryland Hospital Association) — this item stays OPEN, not closed.
 **Auto-check:** none (not a fleet-registry item).
 
+### OI-013
+**Status:** OPEN
+**Opened:** 2026-07-17
+**Source:** [reference_onedrive_business_scope.md](reference_onedrive_business_scope.md) — surfaced incidentally during the OI-014 ora-pm sweep
+**Description:** An exhaustive `.git`-marker sweep of all three OneDrive roots (run for OI-014,
+scoped to `ora-pm`) also turned up a live git clone at `Claude_Workspace/01_Workspace/oxford-site/.git`
+inside the business OneDrive root. CLAUDE.md documents `C:\Users\Owner\oxford-site` as *the*
+no-git deploy copy (`website-canonical` is the canonical repo). This second, git-tracked
+`oxford-site` sitting inside OneDrive sync scope is a different location than what's documented,
+and — per the same git-internals-vs-consumer-sync-client concern that flagged the ora-pm and
+stale website clones before it — is worth a look: is it a stray clone, an intentional second
+deploy copy, or leftover from an old workflow? Not investigated further this pass (out of WS-7's
+ora-pm-specific scope); no destructive action taken.
+**Auto-check:** none.
+
 ## Closed
 
 | ID | Opened | Closed | Source | One-line |
@@ -373,6 +389,7 @@ Tops rent/date, Harold Palmer, Maryland Hospital Association) — this item stay
 | [OI-005](#OI-005) | 2026-07-16 | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Dedup 2 stale Notion Heritage Pool Supply rows against the correct SRS row |
 | [OI-006](#OI-006) | 2026-07-16 | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Confirm 4 tenant turnovers + Soldier Trucking property conflict against executed leases |
 | [OI-008](#OI-008) | 2026-07-17 | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Sweep the Tenant DB for the Escalation-Date/Lease-Expiration column-mapping bug beyond the 7 rows already checked |
+| [OI-014](#OI-014) | 2026-07-17 | 2026-07-17 | [reference_onedrive_business_scope.md](reference_onedrive_business_scope.md) | Confirm no ora-pm git clone inside any OneDrive sync root (real repo at C:\Users\Owner\ora-pm) |
 
 ### OI-012
 **Status:** CLOSED
@@ -694,3 +711,24 @@ comparison is possible.** Scope boundary, not a gap in the sweep: 93 live Notion
 workbook counterpart at all (family-join miss or genuinely off-workbook tenants), so this
 column-mapping check cannot apply to them — verifying those 93 independently against primary lease
 documents would be a much larger, separate undertaking, not implied by this item's description.
+
+### OI-014
+**Status:** CLOSED
+**Opened:** 2026-07-17
+**Closed:** 2026-07-17
+**Source:** [reference_onedrive_business_scope.md](reference_onedrive_business_scope.md) — migration Phase B4 unsynced-export check
+**Description:** Confirm no `ora-pm` git clone lives inside OneDrive sync scope (business root,
+its `(1)`-suffixed twin, and the plain personal OneDrive root) — superseding an earlier depth-4-only
+Glob negative, which per [[feedback_verify_negative_glob_results]] isn't sufficient proof on its own.
+**Evidence:** Exhaustive `.git`-marker search, no depth cap, hidden entries included, across all
+three OneDrive roots, via two independently-implemented tools (Bash `find -name .git`, PowerShell
+`Get-ChildItem -Recurse -Force -Filter .git`) — both agreed exactly: zero `ora-pm` hits anywhere.
+Two unrelated `.git` markers turned up (an already-archived third ora-skills clone at
+`Claude_Workspace/01_Workspace/_archive/2026-07-09_third-ora-skills-clone/skills/.git`, expected
+and already resolved; and a **live** `oxford-site` clone at
+`Claude_Workspace/01_Workspace/oxford-site/.git`, distinct from the documented no-git deploy copy
+at `C:\Users\Owner\oxford-site` — flagged separately, out of this item's ora-pm scope, tracked as
+[OI-013](#OI-013)). `Claude_Workspace/00_Governance/Scheduled/ora-pm-ledger`
+confirmed NOT a repo (task folder only, no `.git`). Real `ora-pm` repo confirmed live at
+`C:\Users\Owner\ora-pm`.
+**Auto-check:** none (not a fleet-registry item).
