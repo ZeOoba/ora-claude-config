@@ -137,15 +137,17 @@ Does not affect the already-scheduled quarterly fleet review (2026-09-09) or any
 probe (governor-drift, doctrine-integrity, etc.), which keep running as designed.
 
 ### 2026-07-17 — Is disambiguating "GitHub MCP connector vs. lighter Web Integration" worth investigating now?
-**Answer: no — closed/ignored until it actually matters.** Zero present consequence; repo work
-runs fully via `gh` CLI on the Code surface today. Revisit only if Cowork-side PR/CI visibility
-becomes a genuine, concrete need — do not spend session time on this speculatively.
+**Answer (agent operational call, low-risk default — not a Gabriel ruling): no — closed/ignored
+until it actually matters.** Zero present consequence; repo work runs fully via `gh` CLI on the
+Code surface today. Revisit only if Cowork-side PR/CI visibility becomes a genuine, concrete
+need — do not spend session time on this speculatively.
 
 ### 2026-07-17 — Does `ora-setup-review-closeout-recheck` (fires 2026-07-17 20:10 UTC) need any action beyond reading its output?
-**Answer: no.** It's a self-contained one-time check of three other 07-17 gate conditions
-(task-integrity-guard 12:45 ET, automation-health-monitor beacon 11:05 ET, and the
-now-retired northridge-brockton deadline). Read its output when it fires; no build, no
-registry mutation, no follow-up task required either way.
+**Answer (agent operational call, low-risk default — not a Gabriel ruling): no.** It's a
+self-contained one-time check of three other 07-17 gate conditions (task-integrity-guard
+12:45 ET, automation-health-monitor beacon 11:05 ET, and the now-retired northridge-brockton
+deadline). Read its output when it fires; no build, no registry mutation, no follow-up task
+required either way.
 
 ### 2026-07-17 — Do Tier 3 (hooks/settings/plugin hygiene) and Tier 4 (memory/event-log hygiene) of the 2026-07-16 setup-review plan still need building?
 **Answer (Gabriel, per the 2026-07-17 ROI-brief evaluation): no — deliberately DROPPED, not
