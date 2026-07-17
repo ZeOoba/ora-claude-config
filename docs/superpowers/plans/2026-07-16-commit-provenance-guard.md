@@ -27,19 +27,25 @@
 
 | File | Responsibility |
 |---|---|
-| `hooks/commit-provenance-recorder.py` | CREATE. PostToolUse. Append one absolute normcase path per write to this session's touched-files.txt. Nothing else. |
-| `hooks/tests/test-commit-provenance-recorder.py` | CREATE. 4 cases. |
-| `hooks/commit-provenance-guard.py` | CREATE. PreToolUse/Bash. Detect `git commit`, resolve repo, compute candidates, intersect vs live others, block or allow. |
+| `hooks/lib/commit_provenance.py` | CREATE. Shared helpers `norm()`, `sessions_dir()`, `ttl_h()`, `TOUCHED_BASENAME`. Both hooks import these via the existing `LIB_DIR`/`sys.path` pattern (as `session_liveness.py` consumers already do). This is the single source of the touched-file path contract — centralised so the recorder and guard cannot drift into a silent no-op. |
+| `hooks/commit-provenance-recorder.py` | CREATE. PostToolUse. Import from lib; append one absolute normcase path per write to this session's touched-files.txt. Nothing else. |
+| `hooks/tests/test-commit-provenance-recorder.py` | CREATE. 5 cases. |
+| `hooks/commit-provenance-guard.py` | CREATE. PreToolUse/Bash. Import from lib; detect `git commit`, resolve repo, compute candidates, intersect vs live others, block or allow. |
 | `hooks/tests/test-commit-provenance-guard.py` | CREATE. 12 cases. |
 | `settings.json` | MODIFY. Register recorder (PostToolUse) + guard (PreToolUse/Bash). |
 
-**Single-writer warning:** `~/.claude` is a shared checkout with ~8 concurrent sessions. Before each commit run `git status --short` and stage **only** the exact paths named in that task's commit step. Never `git add -A`. If a file you did not touch appears modified, leave it.
+**Isolation:** this plan executes in an ISOLATED WORKTREE (`.claude/worktrees/commit-provenance-guard`, branch `commit-provenance-guard`, off main HEAD), chosen because 14 sessions are concurrently writing the shared `~/.claude` checkout. Work freely on this branch; the plan's original shared-main pathspec discipline does not apply here. Merge back to main via pathspec at the end (`finishing-a-development-branch`). Absolute paths in code/tests still point at `C:/Users/Owner/.claude/...` because that is where the files LAND after merge and where the live hooks run — but during development they resolve inside the worktree, which shares those same relative subpaths.
+
+**DEVIATION FROM SPEC §4 (Gabriel-approved, pre-flight):** the spec wrote `norm()` + constants duplicated byte-for-byte in both hooks. This plan instead EXTRACTS them to `hooks/lib/commit_provenance.py` and both hooks import them. Same behaviour, but the byte-identical invariant becomes structural instead of copy-paste, and it follows the established `hooks/lib/` precedent. Spec §7's pathspec logic and §5's predicate are unchanged.
 
 ---
 
-### Task 1: Recorder
+### Task 1: Shared lib + Recorder
+
+> **APPROVED DEVIATION (read first):** create `hooks/lib/commit_provenance.py` holding `norm()`, `sessions_dir()`, `ttl_h()`, `TOUCHED_BASENAME`, and the recorder IMPORTS them instead of defining them locally. The controller dispatch gives the exact lib content and the import stanza. Everything else below stands as written. This replaces the plan's original "define norm/sessions_dir locally in the recorder" with an import — same behaviour, one shared source of truth.
 
 **Files:**
+- Create: `C:/Users/Owner/.claude/hooks/lib/commit_provenance.py`
 - Create: `C:/Users/Owner/.claude/hooks/commit-provenance-recorder.py`
 - Test: `C:/Users/Owner/.claude/hooks/tests/test-commit-provenance-recorder.py`
 
@@ -259,6 +265,8 @@ git commit -m "feat(hooks): add commit-provenance recorder (append-only touched-
 ---
 
 ### Task 2: Guard skeleton — detects `git commit`, blocks nothing
+
+> **APPROVED DEVIATION (read first):** `norm()`, `sessions_dir()`, `ttl_h()`, `TOUCHED_BASENAME` are NOT defined locally in the guard — import them from `hooks/lib/commit_provenance.py` (created in Task 1) via the `LIB_DIR`/`sys.path` stanza the controller dispatch provides. `OVERRIDE_BASENAME`, `GIT_COMMIT_RE`, `is_git_commit`, `repo_root`, `candidate_paths`, and the regexes stay local to the guard. Everything else below stands.
 
 **Files:**
 - Create: `C:/Users/Owner/.claude/hooks/commit-provenance-guard.py`
