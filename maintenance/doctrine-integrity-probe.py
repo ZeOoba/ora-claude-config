@@ -672,11 +672,14 @@ def parse_args(argv):
 # Why this is a fix-PRESENCE check, not an anti-pattern grep: the hard rule
 # legitimately QUOTES the forbidden phrases ("carried forward", "SOFR ... Index")
 # in order to forbid them, so a co-occurrence scan would flag the very fix that
-# prevents the defect. Narrow by design -- one task, WARN-only, fail-open on the
-# OneDrive/LAMS cloud path (this probe otherwise scans only the CC/MCP fleet, so
-# ora-am-brief is invisible to every other check here). ---
-AM_BRIEF_SKILL = (HOME / "OneDrive - Oxford Capital Partners" / "Documents" /
-                  "Claude" / "Scheduled" / "ora-am-brief" / "SKILL.md")
+# prevents the defect. Narrow by design -- one task, WARN-only, fail-open.
+# Repointed 2026-07-16: ora-am-brief migrated LAMS/Cowork -> CC/MCP (LAMS sandbox
+# had no local COM, so its email leg structurally couldn't send -- event_log.md
+# 2026-07-16 "RATIFIED: LAMS ora-am-brief retired"). The retired LAMS folder was
+# archived to Documents\Claude\Scheduled\_archive_2026-07-16_retired-to-ccmcp\ and
+# is no longer live; all 3 sentinels verified present in the CC/MCP copy (carried
+# over verbatim from the LAMS spec) before repointing. ---
+AM_BRIEF_SKILL = (HOME / ".claude" / "scheduled-tasks" / "ora-am-brief" / "SKILL.md")
 AM_BRIEF_SENTINELS = (
     "CALLOUT TEMPLATE (assemble",
     "There is deliberately NO clause for the SOFR 30/90/180-day averages",
