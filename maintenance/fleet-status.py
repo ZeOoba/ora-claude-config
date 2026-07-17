@@ -252,6 +252,11 @@ def main():
             "registries": {lbl: p for lbl, p in regs},
             "per_fleet_enabled": {lbl: sum(1 for t in enabled if t.get("_fleet") == lbl)
                                   for lbl, _ in regs},
+            "disabled_by_fleet": {lbl: sum(1 for t in disabled if t.get("_fleet") == lbl)
+                                  for lbl, _ in regs},
+            "tasks": [{"id": t.get("id"), "fleet": t.get("_fleet"),
+                       "enabled": t.get("enabled", True),
+                       "cron": t.get("cronExpression")} for t in tasks],
             "total": len(tasks), "enabled": len(enabled), "disabled": len(disabled),
             "never_ran": [t.get("id") for t in never_ran],
             "never_ran_overdue": [t.get("id") for t in never_ran_overdue],

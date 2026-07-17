@@ -34,6 +34,7 @@
 - [oxfordra.net SEO Audit 2026-07](project_oxfordra_seo_audit_2026-07.md) — 11-part Searchfit audit 2026-07-10: overall C- (59/100); technical strong, content/market coverage weak. Report + action list in file
 - [Owner-Outreach Stale-Guard Watch](project_owner_outreach_stale_guard_watch.md) — CLOSED 2026-07-14: guard re-tripped 07-13 correctly (real staleness); Gabriel ratified vintage same-day, SKILL.md v1.3 now remembers it per-vintage
 - [Ops Decision Log](ops_decision_log.md) — standing log of small recurring operational yes/no calls, so they aren't re-litigated each session; companion to deal-decision-ledger.md
+- [Open Items Tracker](open-items-tracker.md) — canonical punch-list, one row per open/residual item system-wide; other files POINT here, never restate item text
 - [Tenant DB — the sync is ABSENT, not stale](project_tenant_db_no_sync_rootcause.md) — ROOT CAUSE: no workbook→Notion tenant sync ever existed — frozen March-2026 import, demoted 04-29. Spec written, not built; DSOR not infallible
 
 ## Markets
