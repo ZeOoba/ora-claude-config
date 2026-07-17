@@ -9,6 +9,7 @@ touched-set hit AND affirmative liveness). Anything else -> allow.
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -112,6 +113,40 @@ def test_malformed_stdin_fails_open():
                           capture_output=True, text=True, env=env)
     assert proc.returncode == 0, "malformed stdin must exit 0, got %s" % proc.returncode
     print("PASS test_malformed_stdin_fails_open")
+
+
+def test_broken_sibling_import_allows_and_does_not_traceback_on_non_commits():
+    """Regression, adversarial review 2026-07-17: commit_provenance.py / session_liveness.py
+    are imported at MODULE LOAD, before main()'s first line -- so an import failure used to
+    crash the hook on EVERY Bash call, not just git commits (the traceback fires before
+    is_git_commit()'s fast-path check is even reached). Reproduced pre-fix: a plain `ls -la`
+    tracebacked and exited 1. This guard's own SAFETY INVARIANT is "no information -> ALLOW"
+    for missing/stale data; an import failure must degrade the same way, on ANY command."""
+    sandbox = tempfile.mkdtemp(prefix="cpg-broken-")
+    shutil.copytree(HERE, os.path.join(sandbox, "hooks"))
+    broken_hook = os.path.join(sandbox, "hooks", "commit-provenance-guard.py")
+    os.remove(os.path.join(sandbox, "hooks", "lib", "commit_provenance.py"))
+
+    for label, command in (
+        ("a plain non-git command", "ls -la"),
+        ("an actual git commit", 'git commit -m "x"'),
+    ):
+        env = dict(os.environ)
+        env["COMMIT_PROVENANCE_SESSIONS_DIR"] = sessions_tmp()
+        proc = subprocess.run(
+            [sys.executable, broken_hook],
+            input=json.dumps({"session_id": "me", "cwd": tempfile.mkdtemp(),
+                              "tool_input": {"command": command}}),
+            capture_output=True, text=True, env=env)
+        assert proc.returncode == 0, (
+            "%s with the sibling module missing must ALLOW (exit 0), got %s\nstderr: %s"
+            % (label, proc.returncode, proc.stderr))
+        assert "Traceback" not in proc.stderr, (
+            "%s tracebacked with the sibling module missing -- the import guard did not "
+            "catch it\nstderr: %s" % (label, proc.stderr))
+
+    shutil.rmtree(sandbox, ignore_errors=True)
+    print("PASS test_broken_sibling_import_allows_and_does_not_traceback_on_non_commits")
 
 
 def test_cwd_not_a_repo_allows():
@@ -276,6 +311,7 @@ if __name__ == "__main__":
     test_non_git_command_silent()
     test_git_commit_with_no_foreign_files_allows()
     test_malformed_stdin_fails_open()
+    test_broken_sibling_import_allows_and_does_not_traceback_on_non_commits()
     test_cwd_not_a_repo_allows()
     test_dry_run_allows()
     test_git_add_of_commit_named_file_is_not_a_commit()

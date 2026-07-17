@@ -20,6 +20,8 @@ session open, AND that set is within TTL. Missing/stale/unreadable data yields
 ("ENRICHMENT ONLY, never a hard gate ... treat a read failure, or a stale/empty
 result, the same as 'no information'"). NO LOCK IS EVER HELD, so a crashed
 session cannot wedge the fleet -- the deadlock class does not exist here.
+The same invariant now covers an IMPORT-time failure of either sibling module too
+(2026-07-17): guarded at load, main() returns immediately if either failed to load.
 
 Deliberately narrow (precision over recall, same philosophy as
 registry-write-guard.py): it does NOT catch foreign files written by a script
@@ -40,8 +42,21 @@ import time
 
 LIB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib")
 sys.path.insert(0, LIB_DIR)
-from commit_provenance import norm, sessions_dir, ttl_h, TOUCHED_BASENAME  # noqa: E402
-from session_liveness import other_active_sessions  # noqa: E402
+# Guarded import (adversarial review, 2026-07-17): this guard's own SAFETY INVARIANT is
+# "no information -> ALLOW" for missing/stale/unreadable DATA -- but an unguarded import
+# is a different failure mode entirely. It crashes at MODULE LOAD, before main()'s first
+# line runs, so it fires on EVERY Bash call in EVERY session -- not just git commits,
+# since the traceback happens before is_git_commit()'s fast-path check is even reached.
+# Reproduced: with commit_provenance.py absent, a plain `ls -la` (not a commit at all)
+# tracebacks and exits 1. Degrading to an immediate allow on import failure keeps the
+# guard's own documented invariant (missing information -> allow) without the system-wide
+# traceback noise, and without silently blocking commits it was never meant to touch.
+try:
+    from commit_provenance import norm, sessions_dir, ttl_h, TOUCHED_BASENAME  # noqa: E402,F401
+    from session_liveness import other_active_sessions  # noqa: E402,F401
+    PROVENANCE_CONTRACT_LOADED = True
+except Exception:
+    PROVENANCE_CONTRACT_LOADED = False
 
 OVERRIDE_BASENAME = "allow-foreign-commit"
 
@@ -192,6 +207,8 @@ def main():
     payload = json.loads(sys.stdin.read())
     if not isinstance(payload, dict):
         return
+    if not PROVENANCE_CONTRACT_LOADED:
+        return  # no information -> allow (see the import guard above)
     tool_input = payload.get("tool_input") or {}
     if not isinstance(tool_input, dict):
         return
