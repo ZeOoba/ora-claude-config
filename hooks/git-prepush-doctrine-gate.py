@@ -10,13 +10,26 @@ non-zero (drift found), UNLESS a valid `allow-doctrine-drift` override sentinel 
 present. It is INDEPENDENT of and does NOT modify the confidentiality scan — that
 FAIL-CLOSED scan (git-prepush-confidential-scan.py) still runs after this one.
 
-OVERRIDE (same family + 60-min window as ora-autonomy-gate.py's allow-external-send /
-allow-website-change; protocol in memory/rules.md §10): sentinel file
-  ~/.claude/hooks/overrides/allow-doctrine-drift
-valid for 60 minutes from its mtime. Create it ONLY after Gabriel's explicit in-turn
-confirmation; scheduled/headless sessions must NEVER self-create one — flag and stop.
-Every use of the override to bypass a doctrine-drift block is LOGGED (newest-first) to
+OVERRIDE (hardened 2026-07-16; shared contract in hooks/lib/override_tokens.py, which
+carries the full rationale; protocol in memory/rules.md §10). A token lives at
+  ~/.claude/hooks/sessions/<session_id>/overrides/allow-doctrine-drift
+valid 60 minutes from its mtime, and its content must declare `scope: doctrine-drift` and a
+`session:` matching the pushing session. Create it ONLY after Gabriel's explicit in-turn
+confirmation; scheduled/headless sessions must NEVER self-create one — flag and stop. Every
+use of the override to bypass a doctrine-drift block is LOGGED (newest-first) to
 memory/event_log.md via maintenance/append-event-log.py.
+
+The RETIRED flat `hooks/overrides/allow-doctrine-drift` sentinel is no longer consulted at
+all. It was content-blind (any bytes, or none, granted the bypass), global across every
+concurrent session, and — fatally — mintable by git: a tracked token is materialized by a
+clone/checkout at age ~0, and mtime alone was the whole check. `hooks/sessions/` is
+gitignored, so a token there cannot be committed. See override_tokens.py.
+
+SESSION IDENTITY: unlike a PreToolUse hook, a git hook gets no payload, so the session is
+read from CLAUDE_CODE_SESSION_ID in the environment. A push from a bare terminal carries no
+such variable and therefore CANNOT be overridden — it must fix the drift instead. That is
+deliberate and fail-closed: the override exists for a live session in which Gabriel has just
+said yes, and a bare terminal cannot evidence that.
 
 FAIL-CLOSED on the probe: if the probe cannot be launched at all, that is treated as a
 non-zero (drift) result — a probe we cannot run cannot prove doctrine is intact. This
@@ -46,9 +59,20 @@ from datetime import datetime
 
 HOOK_DIR = os.path.dirname(os.path.abspath(__file__))
 CLAUDE_DIR = os.path.dirname(HOOK_DIR)
-OVERRIDE_DIR = os.path.join(HOOK_DIR, "overrides")
-OVERRIDE_NAME = "allow-doctrine-drift"
-OVERRIDE_TTL_SECONDS = 3600  # 60 min — same window as ora-autonomy-gate.py sentinels
+LIB_DIR = os.path.join(HOOK_DIR, "lib")
+sys.path.insert(0, LIB_DIR)
+# NO fallback on this import, deliberately — unlike ora-autonomy-gate.py's SITE_PATH_MARKERS
+# (whose gate is fail-open-on-malfunction by design), a missing override_tokens module here
+# must NOT degrade to some looser local check. It raises, the pre-push hook exits non-zero,
+# and the push is blocked. A validator we cannot load cannot validate an override.
+from override_tokens import Tier, token_grants, describe_token  # noqa: E402
+
+# One name, one tier. 60 min, multi-use: unchanged from the retired flat sentinel, so this
+# hardening changes WHO a token authorizes and WHETHER its content is load-bearing — not how
+# long a push stays authorized. (Single-use was considered and rejected for now: this gate
+# runs BEFORE the confidentiality scan, so consuming the token here would burn it whenever
+# that later scan blocks, forcing a re-mint to retry a push Gabriel already approved.)
+DOCTRINE_DRIFT = Tier("allow-doctrine-drift", "doctrine-drift", 3600, single_use=False)
 PROBE_SCRIPT = os.path.join(CLAUDE_DIR, "maintenance", "doctrine-integrity-probe.py")
 APPEND_LOG_SCRIPT = os.path.join(CLAUDE_DIR, "maintenance", "append-event-log.py")
 # Layer-2 durable status file (audit Phase 3): the hyphenated sibling module is imported
@@ -63,14 +87,24 @@ EVENT_LOG_OVERRIDE = None
 STATUS_PATH_OVERRIDE = None
 
 
-def override_active(name=OVERRIDE_NAME):
-    """True iff the named sentinel exists AND its mtime is < 60 min old. Mirrors
-    ora-autonomy-gate.py.override_active exactly (existence alone is NOT enough)."""
-    path = os.path.join(OVERRIDE_DIR, name)
-    try:
-        return (time.time() - os.path.getmtime(path)) < OVERRIDE_TTL_SECONDS
-    except OSError:
-        return False
+def current_session_id():
+    """The session this push is running under, or None. A git hook receives no payload, so
+    the environment is the only channel. Absent -> no override is possible (fail closed)."""
+    return os.environ.get("CLAUDE_CODE_SESSION_ID") or None
+
+
+def override_token(session_id):
+    """The validated allow-doctrine-drift token's fields for `session_id`, or None: it must
+    sit at the session-scoped path, be fresh within the TTL, be non-empty, declare
+    `scope: doctrine-drift`, and carry a `session:` matching `session_id`. Delegates to the
+    shared contract so this gate and ora-autonomy-gate.py cannot drift apart."""
+    return token_grants(session_id, DOCTRINE_DRIFT)
+
+
+def override_active(session_id):
+    """Bool form of override_token(), for the pure decision table. Every failure mode is
+    False -- there is no path on which an unreadable or ambiguous token grants anything."""
+    return override_token(session_id) is not None
 
 
 def run_doctrine_probe():
@@ -173,27 +207,35 @@ def decide(probe_rc, override_is_active):
     return 1, False
 
 
-def build_override_entry(now=None):
-    """Newest-first event_log entry (must start '## ') recording an override use."""
+def build_override_entry(now=None, session_id=None, reason=None):
+    """Newest-first event_log entry (must start '## ') recording an override use. Names the
+    session that held the token AND the reason written into it: content-binding only pays
+    for itself if the content reaches the audit trail.
+
+    The session id is self-asserted (see override_tokens.py, HONEST LIMITS b) -- it records
+    which id was presented, which is not the same as proving who pushed."""
     now = now or datetime.now()
+    reason = (reason or "").strip() or "<none given in the token>"
     return (
         "## %s — Pre-push proceeded DESPITE doctrine drift (allow-doctrine-drift override used)\n\n"
         "- The `~/.claude` git pre-push doctrine gate (`hooks/git-prepush-doctrine-gate.py`) ran "
-        "`doctrine-integrity-probe.py`, which reported drift (non-zero exit), but a valid "
-        "`allow-doctrine-drift` override sentinel (< 60 min from mtime) was present, so the push was "
-        "ALLOWED rather than blocked.\n"
-        "- Mechanical record only, per the rules.md §10 override protocol (sentinel created only after "
+        "`doctrine-integrity-probe.py`, which reported drift (non-zero exit), but session `%s` held a "
+        "valid `allow-doctrine-drift` token (session-scoped, `scope: doctrine-drift`, < 60 min from "
+        "mtime), so the push was ALLOWED rather than blocked.\n"
+        "- Reason recorded in the token: %s\n"
+        "- Mechanical record only, per the rules.md §10 override protocol (token created only after "
         "Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override "
-        "consumed at %s local.\n"
-        % (now.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d %H:%M:%S"))
+        "used at %s local.\n"
+        % (now.strftime("%Y-%m-%d"), session_id or "<unknown>", reason,
+           now.strftime("%Y-%m-%d %H:%M:%S"))
     )
 
 
-def log_override_use():
+def log_override_use(session_id=None, reason=None):
     """Append the override-use record to event_log.md via the canonical, collision-safe
     appender. Best-effort: a logging failure must not itself block a push Gabriel has
     already authorized to proceed."""
-    entry = build_override_entry()
+    entry = build_override_entry(session_id=session_id, reason=reason)
     cmd = [sys.executable, APPEND_LOG_SCRIPT]
     if EVENT_LOG_OVERRIDE:
         cmd += ["--log", EVENT_LOG_OVERRIDE]
@@ -222,23 +264,35 @@ def main():
     # with a fake drift result (it does not redirect STATUS_PATH_OVERRIDE).
     real_run = isinstance(probe_result, tuple)
     probe_rc, probe_stdout = probe_result if real_run else (probe_result, "")
-    exit_code, log_override = decide(probe_rc, override_active())
+    session_id = current_session_id()
+    # Look for a token ONLY when there is drift to override. decide() ignores the override
+    # on a clean run anyway, and token_grants() CONSUMES a single-use token at validation
+    # time -- so evaluating this eagerly would burn a token on a push that never needed one.
+    # DOCTRINE_DRIFT is multi-use today, which makes this latent rather than live; the
+    # short-circuit is what keeps adopting a single-use tier here safe instead of subtly
+    # wrong (independent review, 2026-07-16).
+    fields = override_token(session_id) if probe_rc != 0 else None
+    exit_code, log_override = decide(probe_rc, fields is not None)
     # Layer-2 durable trace on every REAL gate run (both the drift AND no-drift paths).
     # Best-effort: a status-file failure never changes the gate's decision or exit code.
     if real_run:
         write_status_snapshot(probe_rc, probe_stdout)
     if log_override:
-        log_override_use()
+        log_override_use(session_id, (fields or {}).get("reason"))
         sys.stderr.write(
-            "pre-push: doctrine drift present but OVERRIDDEN - a valid allow-doctrine-drift "
-            "sentinel (< 60 min) was found. Push ALLOWED; the override was logged to "
-            "event_log.md.\n")
+            "pre-push: doctrine drift present but OVERRIDDEN - session %s holds a valid "
+            "allow-doctrine-drift token. Push ALLOWED; the override was logged to "
+            "event_log.md.\n" % session_id)
     elif exit_code != 0:
         sys.stderr.write(
-            "pre-push BLOCKED: doctrine-integrity-probe.py reported drift. Fix the "
-            "drift first. If Gabriel has just explicitly authorized pushing anyway, create the "
-            "override sentinel (valid 60 min) and retry:\n  %s\n"
-            % os.path.join(OVERRIDE_DIR, OVERRIDE_NAME))
+            "pre-push BLOCKED: doctrine-integrity-probe.py reported drift. Fix the drift "
+            "first. If Gabriel has just explicitly authorized pushing anyway, write this "
+            "override token and retry:\n%s"
+            % describe_token(session_id, DOCTRINE_DRIFT))
+        if not session_id:
+            sys.stderr.write(
+                "  NOTE: this push carries no CLAUDE_CODE_SESSION_ID, so no override can be "
+                "honored here at all. Fix the drift -- do not try to mint a token.\n")
     return exit_code
 
 
