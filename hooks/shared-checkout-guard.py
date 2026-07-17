@@ -56,7 +56,18 @@ import sys
 
 LIB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib")
 sys.path.insert(0, LIB_DIR)
-from session_liveness import other_active_sessions  # noqa: E402
+# Guarded import (adversarial review, 2026-07-17). This hook is warn-only -- it never
+# blocks either way, so an unguarded import crashing here is not a security regression the
+# way it was for ora-autonomy-gate.py. But it IS a reliability one: the crash happens at
+# MODULE LOAD, before main()'s own try/except (below) or any Edit/Write-specific logic runs,
+# so a broken session_liveness.py would traceback on EVERY Edit/Write/MultiEdit/Desktop
+# Commander write across every session, not just ones this hook actually has something to
+# say about. Same bug class, same fix, applied for reliability rather than security here.
+try:
+    from session_liveness import other_active_sessions  # noqa: E402,F401
+except Exception:
+    def other_active_sessions(_session_id):
+        return []
 
 DEFAULT_REPOS = [
     "C:/Users/Owner/oxford-command-center",
