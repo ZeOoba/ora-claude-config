@@ -11,7 +11,7 @@
 - [People](people.md) — Eric, Gabriel, Philip Collins (counsel), Tamara Lucas (title); brokers/lenders/vendors
 
 ## Projects & system
-- [Autonomy-gate indirection ceiling — OPEN](project_autonomy_gate_indirection_ceiling_followup.md) — Gate 1/2a defeated by value indirection (variables/files/renamed binaries/split calls); needs outbound-action enforcement. [OI-007](open-items-tracker.md#OI-007)
+- [Autonomy-gate indirection ceiling — CLOSED 07-17](project_autonomy_gate_indirection_ceiling_followup.md) — outbound-action checks landed both sides (email on `main`, netlify via merged PR #30); [OI-007](open-items-tracker.md#OI-007)
 - [ora-am-brief LAMS retirement — BLOCKED](project_ora_am_brief_lams_retirement_blocked.md) — Code can't reach LAMS registry writes; both fleets double-firing 0 6 * * *
 - [ORA Notion Daily Digest gaps](project_notion_daily_digest_coverage_gaps_2026-07-16.md) — CLOSED 07-16: edit-detection upgraded, 3 wrong lease-exp dates fixed
 - [BrainVault vault-backup fix](project_brainvault_vault_backup_failure_2026-07-16.md) — CLOSED 07-16, 6 commits; PR #2 tie-break bullet still needs separate landing
@@ -68,6 +68,7 @@
 - [npm test intermittent access violation](feedback_npm_test_intermittent_access_violation.md) — spurious 0xC0000005 ~30-50% of runs; just rerun
 - [OneDrive Business/Personal Scope](reference_onedrive_business_scope.md) — classification only; consult before broad OneDrive-root searches
 - [Model Release Checklist](reference_model_release_checklist.md) — where hardcoded model IDs live + sweep process for new releases
+- [Windows Hook Stdin cp1252 Gap](reference_windows_hook_stdin_cp1252_encoding_gap.md) — harness-spawned hooks can decode stdin as cp1252; 4/16 hooks fixed, 12 confirmed low-risk, audit CLOSED
 - [Tech Stack & Paths](tech.md) — Paths, MCP connectors, secrets index, scheduler, machine constraints
 - [ORA PM App](reference_ora_pm.md) — ZeOoba/ora-pm; 07-16 audit (3 criticals) + confidential-terms purge status
 - [oxfordra.net Deploy Canon](reference_oxfordra_deploy_canon.md) — netlify-cli from website-canonical is THE path; a merged PR auto-deploys PROD

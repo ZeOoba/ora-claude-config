@@ -29,24 +29,13 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 
 ## Open
 
-| ID | Opened | Source | One-line |
-|----|--------|--------|----------|
-| [OI-007](#OI-007) | 2026-07-17 | [project_autonomy_gate_indirection_ceiling_followup.md](project_autonomy_gate_indirection_ceiling_followup.md) | Enforce Gate 1/2a at the actual outbound action — value-indirection defeats shell-text detection |
-
-### OI-007
-**Status:** OPEN
-**Opened:** 2026-07-17
-**Source:** [project_autonomy_gate_indirection_ceiling_followup.md](project_autonomy_gate_indirection_ceiling_followup.md)
-**Description:** `ora-autonomy-gate.py`'s Gate 1 (external email) and Gate 2a (oxfordra.net prod
-deploy) can be defeated entirely, no override needed, via value/reference indirection (a
-variable/file-sourced recipient, a renamed netlify binary, splitting a deploy across two Bash
-calls). Not fixable by another regex — needs enforcement moved to the actual outbound action.
-Gabriel-ratified as separate follow-up work, not tonight's scope.
+*(none open as of 2026-07-17 — OI-007 closed this session)*
 
 ## Closed
 
 | ID | Opened | Closed | Source | One-line |
 |----|--------|--------|--------|----------|
+| [OI-007](#OI-007) | 2026-07-17 | 2026-07-17 | [project_autonomy_gate_indirection_ceiling_followup.md](project_autonomy_gate_indirection_ceiling_followup.md) | Enforce Gate 1/2a at the actual outbound action — value-indirection defeats shell-text detection |
 | [OI-001](#OI-001) | 2026-07-08 | 2026-07-16 | [oxford-cc-repo-health.md](oxford-cc-repo-health.md) | Purge 2 dangling disabled LAMS scheduled-task entries |
 | [OI-002](#OI-002) | 2026-07-08 | 2026-07-16 | [oxford-cc-repo-health.md](oxford-cc-repo-health.md) | Decide `ora-cam-reconciliation-annual` year-round vs. seasonal timing |
 | [OI-004](#OI-004) | 2026-07-16 | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Add a real `Archived` property to the Tenant DB schema (blocked OI-003) |
@@ -54,6 +43,38 @@ Gabriel-ratified as separate follow-up work, not tonight's scope.
 | [OI-005](#OI-005) | 2026-07-16 | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Dedup 2 stale Notion Heritage Pool Supply rows against the correct SRS row |
 | [OI-006](#OI-006) | 2026-07-16 | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Confirm 4 tenant turnovers + Soldier Trucking property conflict against executed leases |
 | [OI-008](#OI-008) | 2026-07-17 | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Sweep the Tenant DB for the Escalation-Date/Lease-Expiration column-mapping bug beyond the 7 rows already checked |
+
+### OI-007
+**Status:** CLOSED
+**Opened:** 2026-07-17
+**Closed:** 2026-07-17
+**Source:** [project_autonomy_gate_indirection_ceiling_followup.md](project_autonomy_gate_indirection_ceiling_followup.md)
+**Description:** `ora-autonomy-gate.py`'s Gate 1 (external email) and Gate 2a (oxfordra.net prod
+deploy) could be defeated entirely, no override needed, via value/reference indirection (a
+variable/file-sourced recipient, a renamed netlify binary, splitting a deploy across two Bash
+calls). Not fixable by another regex — needed enforcement moved to the actual outbound action.
+**Evidence:** Two enforcement points built, each checking the value AFTER a shell has already
+resolved any indirection, so there is no more text left to obfuscate by the time either runs:
+  - **Email side** (`~/.claude`, landed on `main`): `hooks/lib/email_send_tier.py` +
+    `hooks/lib/check_external_send.py`, invoked by `send-via-outlook.ps1` itself right before
+    Outlook COM. Adversarial review found and fixed 3 real bugs pre-landing (a suffix-match
+    domain-classification bypass, a PowerShell CLI-argument quote-stripping bug breaking the
+    checked/sent value equivalence, and a BOM-encoding bug in the shared token parser). Verified
+    via 6+ `-WhatIf` scenarios against the live script, including the exact indirection trick
+    (variable-concatenation-built recipient) that defeated Gate 1 — now correctly denied.
+  - **Netlify side** (`website-canonical`, PR [#30](https://github.com/ZeOoba/Website/pull/30),
+    MERGED by Gabriel 2026-07-17 — merge commit `b25a70d9`): `scripts/netlify-guard.js` +
+    `scripts/patch-netlify-shim.js` (postinstall-patches `node_modules/.bin/netlify*` to route
+    through the guard). Adversarial review found and fixed 2 real bugs pre-PR (an exact-array
+    argv check that let `--prod=true` and the documented `--prod-if-unlocked` flag bypass
+    authorization entirely, and a postinstall patcher that silently exited 0 even when zero
+    shims were patched). Verified via the wrapper's own dry-run switch across 9+ scenarios,
+    including a real `npm install` proving the postinstall hook re-patches a reverted shim, and
+    the same indirection trick (shim path + flag built via shell variable concatenation) —
+    still caught. Post-merge, confirmed the live site (`oxfordra.net`) renders correctly and
+    unaffected (the PR touches only dev tooling, no site content).
+**Auto-check:** none (not a fleet-registry item; closure evidence is the merged PR + landed
+commits above, both externally verifiable).
 
 ### OI-001
 **Status:** CLOSED
