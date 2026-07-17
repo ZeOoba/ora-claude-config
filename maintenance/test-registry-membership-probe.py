@@ -103,12 +103,15 @@ finally:
 # --- ratified_drops (2026-06-11 auto-ratification) -------------------------------------
 import datetime as _dt
 _TODAY = _dt.date(2026, 6, 11)
+# event_log.md entries are '## YYYY-MM-DD' sections (append-event-log.py's
+# enforced header level). This fixture previously used '### ' and silently stopped
+# matching after the probe's 2026-07-16 split fix ('### '->'## '); realigned here.
 _LOG = ("# Event log\nintro prose\n"
-        "\n### 2026-06-11 — LAMS registry cleanup (RATIFIED) + lesson\n"
+        "\n## 2026-06-11 — LAMS registry cleanup (RATIFIED) + lesson\n"
         "Removed scheduled-task-integrity-guard and others.\n"
-        "\n### 2026-05-01 — old cleanup (RATIFIED)\n"
+        "\n## 2026-05-01 — old cleanup (RATIFIED)\n"
         "Removed ora-ancient-task.\n"
-        "\n### 2026-06-10 — unrelated note, no keyword\n"
+        "\n## 2026-06-10 — unrelated note, no keyword\n"
         "Mentions ora-unratified-task but never the magic word.\n")
 expect("ratify: named in recent RATIFIED entry",
        rmp.ratified_drops(_LOG, ["scheduled-task-integrity-guard"], _TODAY)
@@ -121,9 +124,53 @@ expect("ratify: id absent from log -> not ratified",
        rmp.ratified_drops(_LOG, ["ora-never-mentioned"], _TODAY) == set())
 expect("ratify: empty/garbage log -> empty set",
        rmp.ratified_drops("", ["x"], _TODAY) == set()
-       and rmp.ratified_drops("\n### not-a-date (RATIFIED) x\nx\n", ["x"], _TODAY) == set())
+       and rmp.ratified_drops("\n## not-a-date (RATIFIED) x\nx\n", ["x"], _TODAY) == set())
 expect("ratify: empty id never matches",
        rmp.ratified_drops(_LOG, [""], _TODAY) == set())
+
+# --- retired_drops (2026-07-17 retirement-prose reconciliation) ------------------------
+# The real regression: ora-skills-reimport-watch was retired 2026-07-17 in two
+# inline-dated prose lines that live under an OLDER '## 2026-07-16' header and use
+# 'retirement'/'Retirement', never the ceremonial 'RATIFIED' token -- so it raised a
+# false [ACTION]. Fixture mirrors that exact shape plus the must-NOT-reconcile cases.
+_TODAY2 = _dt.date(2026, 7, 17)
+_RLOG = (
+    "# Event log\n"
+    "\n## 2026-07-16 — plugin bundle work (section header predates the retirement)\n"
+    "- plugin prose that merely mentions ora-keep-task in passing\n"
+    "2026-07-17: ora-skills-reimport-watch retirement (part 1/2) — paused, folder archived.\n"
+    "2026-07-17: ora-skills-reimport-watch registry entry deleted. Retirement completed. Closed.\n"
+    "\n## 2026-07-17 — bullet-style retirement, no inline date (inherits header date)\n"
+    "- **ora-bullet-task** retired this session; registry entry removed.\n"
+    "2026-07-17: ora-decomm-task decommissioned and removed from the registry.\n"
+    "\n## 2026-07-10 — incident report — must NOT reconcile\n"
+    "- ora-silent-victim disappeared from the registry — the 2026-06-09 silent-drop "
+    "failure mode; investigating.\n"
+    "\n## 2026-06-20 — old retirement, outside the 14d window\n"
+    "2026-06-20: ora-old-retiree retirement completed.\n"
+)
+expect("retire: inline-dated prose line under an older header reconciles (real case)",
+       rmp.retired_drops(_RLOG, ["ora-skills-reimport-watch"], _TODAY2)
+       == {"ora-skills-reimport-watch"})
+expect("retire: bullet line inherits '## ' header date when no inline date",
+       rmp.retired_drops(_RLOG, ["ora-bullet-task"], _TODAY2) == {"ora-bullet-task"})
+expect("retire: 'decommission' verb also reconciles",
+       rmp.retired_drops(_RLOG, ["ora-decomm-task"], _TODAY2) == {"ora-decomm-task"})
+expect("retire: incident/silent-drop line (no retire verb) does NOT reconcile",
+       rmp.retired_drops(_RLOG, ["ora-silent-victim"], _TODAY2) == set())
+expect("retire: id merely mentioned (no retire verb on its line) does NOT reconcile",
+       rmp.retired_drops(_RLOG, ["ora-keep-task"], _TODAY2) == set())
+expect("retire: retirement outside 14d window does NOT reconcile",
+       rmp.retired_drops(_RLOG, ["ora-old-retiree"], _TODAY2) == set())
+expect("retire: same-line coupling — retire verb + id must share a line",
+       rmp.retired_drops("\n## 2026-07-17 — mix\n- ora-alpha noted here\n- ora-beta retired\n",
+                         ["ora-alpha"], _TODAY2) == set())
+expect("retire: empty log / empty id -> empty set",
+       rmp.retired_drops("", ["x"], _TODAY2) == set()
+       and rmp.retired_drops(_RLOG, [""], _TODAY2) == set())
+expect("retire: multiple ids resolve independently in one pass",
+       rmp.retired_drops(_RLOG, ["ora-bullet-task", "ora-decomm-task", "ora-silent-victim"],
+                         _TODAY2) == {"ora-bullet-task", "ora-decomm-task"})
 
 # --- summary ---------------------------------------------------------------------------
 passed = sum(1 for ok, _ in results if ok)
