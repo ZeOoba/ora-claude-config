@@ -32,9 +32,25 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
 | [OI-009](#OI-009) | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Verify the 93 Notion Tenant DB rows with no workbook counterpart against primary leases (low priority) |
+| [OI-010](#OI-010) | 2026-07-17 | [project_bash_guard_indirection_gap.md](project_bash_guard_indirection_gap.md) | oxford-command-center's bash-guard.mjs: all 7 blocked command classes defeated by git-alias/wrapper-script indirection |
+
+### OI-010
+**Status:** OPEN
+**Opened:** 2026-07-17
+**Source:** [project_bash_guard_indirection_gap.md](project_bash_guard_indirection_gap.md)
+**Description:** `oxford-command-center/.claude/hooks/bash-guard.mjs` is a stateless, per-invocation
+text scanner with no cross-invocation memory. Confirmed (empirically, against the live hook logic
+plus one real end-to-end proof) that a two-step disk-persisted indirection — a git alias or a
+wrapper script written in step 1, invoked by name in step 2 — defeats all 7 blocked command classes
+(`git add -A`, `git commit --no-verify`, `git push --force`, `core.hooksPath` tampering, sqlite3
+warehouse DML, `rm` of the warehouse, writes to `.claude/settings*.json`/`hooks/`), whether the two
+steps are one `&&`-joined command or genuinely separate Bash tool calls. No code changed — audit
+only. Root cause and full evidence in the source file; remediation approach (extend git's own
+hooks vs. rewrite the scanner to resolve indirection) is Gabriel's call, not yet decided.
+**Auto-check:** none (not a fleet-registry item).
 
 ### OI-009
-**Status:** OPEN
+**Status:** OPEN (substantial progress made 2026-07-17, real scope remains)
 **Opened:** 2026-07-17
 **Source:** [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md)
 **Description:** OI-008's sweep for the Escalation-Date/Lease-Expiration column-mapping bug could
@@ -43,8 +59,59 @@ required to compare against). 93 live Notion Tenant DB rows have no workbook cou
 (family-join miss, or genuinely off-workbook tenants/vacant slots) and have never been
 independently verified against primary lease documents. Gabriel confirmed (2026-07-17, via
 AskUserQuestion): worth tracking, low priority — not urgent, likely a future bulk
-lease-abstraction pass across ~93 tenants rather than a quick check. Deliberately NOT started this
-session.
+lease-abstraction pass across ~93 tenants rather than a quick check.
+**Progress 2026-07-17 (same session, later): 21 corrections written and verified, plus 2 new
+systemic bug classes discovered beyond OI-008's Escalation-Date pattern.**
+- **Triage first, cheap wins:** re-joined all 93 `notion_only` rows against the 64 `workbook_only`
+  rows by tenant name (not the street-family+unit key OI-003 used, which missed these on
+  unit-string formatting) — found 18 "free" matches. 14 already matched the workbook exactly (no
+  action). 3 Heritage Pool duplicates were stale cache, already resolved under OI-005. 1 fuzzy
+  match (GT Industrial Supply) was untrustworthy, not acted on. Of the ~20 remaining
+  no-address/no-status rows, matched the documented fabricated HubSpot-collision phantom batch
+  (Gabriel 2026-07-12: "leave the ~18-25 unconfirmed singletons... do not re-triage") — excluded,
+  not chased.
+- **2 direct lease-date corrections** (workbook `Lease Start`/`Escalation Date` miscopied into
+  Notion `Lease Expiration`, same root pattern as OI-008, just outside its 79-pair overlap):
+  Columbus Suburban Construction `32b6ecd8-9e59-8169-9c1b-c3407f38ebd5` 2026-09-01→2026-08-31;
+  Richwood Equipment Company LLC `32f6ecd8-9e59-8190-ab42-ce4ed3289340` 2026-05-01→2028-04-30
+  (confirmed via signed lease).
+- **1 real gap surfaced, deliberately NOT filled:** My Autonomous Transportation Co — only an
+  unsigned LOI locatable ("this letter is not a contract... neither party intends [it] to
+  represent the final agreement"), no executed lease found despite the workbook listing them as a
+  fully active $8,212.50/mo tenant. Left Notion's (null) dates alone rather than write from an
+  unconfirmed workbook claim.
+- **NEW BUG CLASS — address mislabeling:** all 16 rows tagged `Property Address: FVC — Fairground
+  Village Center` were never off-workbook tenants at all. "Fairground Village Center, LLC" is a
+  landlord/holding entity (confirmed via its 2020 Form 1065 and the PSAs for 7658 Fishel + 401
+  Sunburst), not a physical address — whoever entered these 16 rows put the entity name in the
+  Property Address field. Real address, confirmed via Airmaster's own signed lease naming it
+  directly: **29000 Information Ln — Easton MD**. Corrected all 16 rows' Property Address, then
+  cross-checked against a live property-specific rent roll (`RentRoll 10.2025 -- 29000 Information
+  Lane.xlsx`, 25 units) plus 2 individually-read primary documents (Airmaster's original lease for
+  a tenant-turnover case; Medspeed's Third Addendum, May 2026, for a $4,935.42 rent value that
+  matched nothing in this tenant's own history — corrected to $1,750, the addendum-confirmed
+  current rate). 15 of 16 fully resolved (address + date); 1 (CURREN SOLUTIONS, INC.) left
+  deliberately unresolved — the Oct 2025 roll shows its lease already expired 2025-12-31 with no
+  more-current source located, too ambiguous to write without further checking.
+- **NEW BUG CLASS — cross-property duplicates:** of an original 8-tenant "Red Branch" cluster, the
+  live Red Branch rent roll (April 2026, 13/13 units occupied) contains NONE of their names — all
+  13 current occupants were already reconciled in OI-003. Checked 2 tenant names directly against
+  Red Branch's lease folder: zero matching lease documents found. Cross-referenced against the
+  Information Lane roll instead: **3 of the 8 are exact-rent-match duplicates** of tenants already
+  correctly resolved there — Bay Area Exteriors LLC (`32b6ecd8-9e59-8110-8d4e-d2796469eacf`,
+  $3,700 = Info Lane Unit 502), Eastern Shore Karate & Fitness LLC
+  (`32b6ecd8-9e59-8115-b8fa-f3c924846355`, $1,802.50 = Unit 306), Palmer's Plumbing LLC
+  (`32b6ecd8-9e59-8175-ac37-c4485ea0910e`, $2,980.36 = combined Units 301+302, stale dates on the
+  Red-Branch-tagged copy). All 3 retired (`Row Retired = __YES__`), verified post-write.
+- **Genuinely not yet examined:** Eastern Shore Entrepreneurship Center INC. (name also matches an
+  Information Lane tenant — likely a 4th duplicate, not yet retired); PRO REPAIR LLC, Chesapeake
+  Communications LLC, Bay-Care Heating & Air LLC, Baltimore Dialysis LLC (Fresenius) — the
+  remaining 4 of the original Red Branch 8, no match found yet against Info Lane or Red Branch,
+  need individual tracing (PRO REPAIR LLC's contact name pattern suggests it may actually belong
+  at 1100 Rarig, a THIRD property — not confirmed). Zettler (8), Northwood (7), Sunburst (3), and
+  6 no-address-but-Active tenants (Eurosort, Upgraded Roofing, Childs Play Diesel Performance,
+  Gator Roofing, I Dig Ditches, Scarlet Covering) — not yet touched at all this pass.
+**Auto-check:** none (not a fleet-registry item).
 
 ## Closed
 
