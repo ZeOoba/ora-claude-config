@@ -9,6 +9,8 @@ allow == empty stdout (the hook stays silent)
 
 Stdlib only; Windows (`python`).
 """
+import importlib.util
+import io
 import json
 import os
 import subprocess
@@ -17,6 +19,21 @@ import tempfile
 
 HOOK = os.path.normpath(os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "memory-index-guard.py"))
+
+
+def _load_hook_module():
+    """Import the hook script as a module so a unit test can call its stdin
+    decode helper directly, without a subprocess -- see
+    reference_windows_hook_stdin_cp1252_encoding_gap.md: a harness-spawned
+    hook process can resolve sys.stdin.encoding to cp1252 (Windows ANSI
+    codepage) instead of UTF-8, corrupting any non-ASCII byte in the payload
+    before json.loads ever runs. MEMORY.md's own prose is full of non-ASCII
+    punctuation (em-dashes etc.), so a real old_string/new_string trips this
+    exactly like it did in eos-claude-md-guard.py (2026-07-17)."""
+    spec = importlib.util.spec_from_file_location("memory_index_guard", HOOK)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 SHORT = "- [A](a.md) - short hook\n"
 LONG = "- [B](b.md) - " + ("x" * 200) + "\n"          # 200-char hook, way over the 150 cap
@@ -155,6 +172,54 @@ for name in DC_EDIT_BLOCK_NAMES:
     denied, _ = run({"tool_name": name,
                      "tool_input": {"range": "Sheet1!A1:B2", "content": [["x", "y"]]}}, SHORT)
     check("%s Excel/Word range mode -> allow (fail open, not text)" % name, not denied)
+
+# 16. stdin decode: must be explicit UTF-8, not sys.stdin's own (locale-dependent)
+# encoding. See reference_windows_hook_stdin_cp1252_encoding_gap.md.
+guard_module = _load_hook_module()
+check("guard exposes _read_stdin_text() (explicit UTF-8 decode off sys.stdin.buffer)",
+      hasattr(guard_module, "_read_stdin_text"))
+
+if hasattr(guard_module, "_read_stdin_text"):
+    nonascii_payload = json.dumps({"probe": "em dash — test"}, ensure_ascii=False)
+    utf8_bytes = nonascii_payload.encode("utf-8")
+
+    class _FakeStdin:
+        def __init__(self, data):
+            self.buffer = io.BytesIO(data)
+
+        def read(self):
+            return self.buffer.getvalue().decode("cp1252")
+
+    real_stdin = sys.stdin
+    sys.stdin = _FakeStdin(utf8_bytes)
+    try:
+        decoded_text = guard_module._read_stdin_text()
+    finally:
+        sys.stdin = real_stdin
+    decoded = json.loads(decoded_text)
+    check("_read_stdin_text() round-trips a non-ASCII string correctly "
+          "regardless of sys.stdin's own (locale-dependent) encoding",
+          decoded.get("probe") == "em dash — test")
+
+# 17. End-to-end: an Edit whose old_string contains a non-ASCII character (an
+# em-dash, as ubiquitous in real MEMORY.md prose) must still be denied when it
+# introduces an over-length hook. Feeds raw UTF-8 bytes on stdin (no text=True)
+# so the payload's encoding on the wire is unambiguous.
+EMDASH_SHORT = "- [A](a.md) — short hook\n"
+EMDASH_LONG = "- [B](b.md) — " + ("x" * 200) + "\n"
+with tempfile.TemporaryDirectory() as _d:
+    _idx = os.path.join(_d, "MEMORY.md")
+    with open(_idx, "w", encoding="utf-8") as _fh:
+        _fh.write(EMDASH_SHORT)
+    _payload = {"tool_name": "Edit", "tool_input": {
+        "file_path": _idx, "old_string": EMDASH_SHORT, "new_string": EMDASH_SHORT + EMDASH_LONG}}
+    _env = dict(os.environ, ORA_MEMORY_INDEX=_idx)
+    _r = subprocess.run([sys.executable, HOOK], input=json.dumps(_payload, ensure_ascii=False).encode("utf-8"),
+                        capture_output=True, env=_env)
+    _out = (_r.stdout or b"").decode("utf-8", "replace").strip()
+    _denied = bool(_out) and json.loads(_out).get(
+        "hookSpecificOutput", {}).get("permissionDecision") == "deny"
+    check("Edit with non-ASCII context introducing an over-length hook -> DENY (end-to-end)", _denied)
 
 print()
 if failures:

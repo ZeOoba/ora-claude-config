@@ -155,8 +155,24 @@ def over_length_hooks(text, entry_re, maxlen):
     return over
 
 
+def _read_stdin_text():
+    """Decode stdin explicitly as UTF-8, off the raw buffer -- never trust
+    sys.stdin's own text-mode encoding. A hook spawned directly by the
+    harness (as opposed to a POSIX-locale shell) can get sys.stdin.encoding
+    resolved to the Windows ANSI codepage instead of UTF-8 -- confirmed live
+    in eos-claude-md-guard.py (2026-07-17): a harness-spawned process logged
+    sys.stdin.encoding == 'cp1252' and silently mangled a payload's em-dash
+    into 3-character mojibake before json.loads ever ran. MEMORY.md's own
+    prose is full of non-ASCII punctuation, so almost any real old_string
+    trips this: current_text.count(old) drops to 0, simulate_edit() returns
+    None, and the hook fails open. Reading the raw bytes and decoding them
+    ourselves makes this independent of whatever codepage the parent
+    process happened to inherit."""
+    return sys.stdin.buffer.read().decode("utf-8")
+
+
 def main():
-    payload = json.loads(sys.stdin.read())
+    payload = json.loads(_read_stdin_text())
     if not isinstance(payload, dict):
         return
 

@@ -9,6 +9,8 @@ allow == empty stdout (the hook stays silent)
 
 Stdlib only; Windows (`python`).
 """
+import importlib.util
+import io
 import json
 import os
 import subprocess
@@ -17,6 +19,21 @@ import tempfile
 
 HOOK = os.path.normpath(os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "rules-md-guard.py"))
+
+
+def _load_hook_module():
+    """Import the hook script as a module so a unit test can call its stdin
+    decode helper directly, without a subprocess -- see
+    reference_windows_hook_stdin_cp1252_encoding_gap.md: a harness-spawned
+    hook process can resolve sys.stdin.encoding to cp1252 (Windows ANSI
+    codepage) instead of UTF-8, corrupting any non-ASCII byte in the payload
+    before json.loads ever runs. rules.md's own prose is full of non-ASCII
+    punctuation (em-dashes etc.), so a real old_string/new_string trips this
+    exactly like it did in eos-claude-md-guard.py (2026-07-17)."""
+    spec = importlib.util.spec_from_file_location("rules_md_guard", HOOK)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 CLEAN = "## 1. Working style\n\n- some standing rule, no date.\n"
 DATED_NEW = CLEAN + "\n## 14. New rule (2026-07-15)\n\n- content\n"
@@ -109,6 +126,61 @@ check("unsimulatable edit shape -> allow (fail open)", not denied)
 H3_DATED = CLEAN + "\n### 14a. Sub-rule (2026-07-15)\n\n- content\n"
 denied, _ = run({"tool_name": "Write", "tool_input": {"content": H3_DATED}}, CLEAN)
 check("### h3 dated header -> DENY", denied)
+
+# 11. stdin decode: must be explicit UTF-8, not sys.stdin's own (locale-dependent)
+# encoding. See reference_windows_hook_stdin_cp1252_encoding_gap.md.
+guard_module = _load_hook_module()
+check("guard exposes _read_stdin_text() (explicit UTF-8 decode off sys.stdin.buffer)",
+      hasattr(guard_module, "_read_stdin_text"))
+
+if hasattr(guard_module, "_read_stdin_text"):
+    # ensure_ascii=False is required: the default True would \u-escape the
+    # em-dash into pure ASCII before .encode(), so the payload bytes would
+    # never actually contain a multi-byte UTF-8 sequence and this test would
+    # pass even against the unfixed sys.stdin.read().
+    nonascii_payload = json.dumps({"probe": "em dash — test"}, ensure_ascii=False)
+    utf8_bytes = nonascii_payload.encode("utf-8")
+
+    class _FakeStdin:
+        def __init__(self, data):
+            self.buffer = io.BytesIO(data)
+
+        def read(self):
+            # Emulates the exact live failure mode: text-mode .read() using
+            # a non-UTF-8 codepage silently corrupts multi-byte characters
+            # instead of raising -- this must NOT be what the fix relies on.
+            return self.buffer.getvalue().decode("cp1252")
+
+    real_stdin = sys.stdin
+    sys.stdin = _FakeStdin(utf8_bytes)
+    try:
+        decoded_text = guard_module._read_stdin_text()
+    finally:
+        sys.stdin = real_stdin
+    decoded = json.loads(decoded_text)
+    check("_read_stdin_text() round-trips a non-ASCII string correctly "
+          "regardless of sys.stdin's own (locale-dependent) encoding",
+          decoded.get("probe") == "em dash — test")
+
+# 12. End-to-end: an Edit whose old_string contains a non-ASCII character (an
+# em-dash, as ubiquitous in real rules.md prose) must still be denied when it
+# introduces a dated header. Feeds raw UTF-8 bytes on stdin (no text=True) so
+# the payload's encoding on the wire is unambiguous.
+EMDASH_CLEAN = "## 1. Working style — no date here\n\n- some standing rule\n"
+EMDASH_DATED = EMDASH_CLEAN + "\n## 14. New rule — added (2026-07-15)\n\n- content\n"
+with tempfile.TemporaryDirectory() as _d:
+    _p = os.path.join(_d, "rules.md")
+    with open(_p, "w", encoding="utf-8") as _fh:
+        _fh.write(EMDASH_CLEAN)
+    _payload = {"tool_name": "Edit", "tool_input": {
+        "file_path": _p, "old_string": EMDASH_CLEAN, "new_string": EMDASH_DATED}}
+    _env = dict(os.environ, ORA_RULES_MD=_p)
+    _r = subprocess.run([sys.executable, HOOK], input=json.dumps(_payload, ensure_ascii=False).encode("utf-8"),
+                        capture_output=True, env=_env)
+    _out = (_r.stdout or b"").decode("utf-8", "replace").strip()
+    _denied = bool(_out) and json.loads(_out).get(
+        "hookSpecificOutput", {}).get("permissionDecision") == "deny"
+    check("Edit with non-ASCII context introducing a dated header -> DENY (end-to-end)", _denied)
 
 print()
 if failures:
