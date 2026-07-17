@@ -57,6 +57,8 @@
 - [Autonomy Gate Blocks Writes, Not Reads](feedback_autonomy_gate_blocks_writes_not_reads.md) — a "blocked read" on website-canonical means the command carried a write indicator (`>`, `2>&1`); read the hook before the override sentinel
 - [Autonomy Gate Matcher Cannot Be Safely Narrowed](feedback_autonomy_gate_matcher_cannot_be_safely_narrowed.md) — 3 adversarial review rounds each found a real bypass in one 2026-07-16 attempt; reverted, the broad match stays
 - [Autonomy Gate Override Mechanism](reference_autonomy_gate_override_mechanism.md) — tokens are session-scoped + severity-split + content-bound; the old flat allow-website-change sentinel is RETIRED, grants nothing
+- [PreToolUse vs Git Hook Exit Codes](reference_pretooluse_vs_git_hook_exit_codes.md) — opposite conventions (PreToolUse exit 1 is non-blocking; git hooks, any non-zero blocks) — bit ora-autonomy-gate.py 07-17
+- [Concurrent Session Duplicate Hardening Work](reference_concurrent_session_duplicate_hardening_work.md) — 2 sessions built the same fix in 2 gates unknowingly; check `git worktree list` + active sessions first
 - [Confidentiality Guard Self-Deadlock](feedback_confidentiality_guard_selfdeadlock.md) — malformed confidential-terms.json fail-closes Write/Edit/Bash machine-wide; recover via desktop-commander edit_block
 - [Sed Windows path escapes](feedback_sed_windows_path_escapes.md) — never sed s/// with literal backslash paths in replacement; use Python
 - [append-event-log.py stdin encoding](feedback_append_event_log_stdin_encoding.md) — heredoc-to-stdin mangles UTF-8 on Windows; use --entry-file
