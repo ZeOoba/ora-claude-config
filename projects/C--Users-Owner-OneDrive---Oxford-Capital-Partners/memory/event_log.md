@@ -11,6 +11,54 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-17 — ora-autonomy-gate.py hardening: override tokens, 8 matcher bypasses, OI-007 (indirection ceiling) fully closed
+
+- **Override-token mechanism hardened.** The flat, mtime-only `hooks/overrides/<name>`
+  sentinel was content-blind, session-blind, and git-trackable — a plain `git clone` of
+  `~/.claude` could self-grant a live production-deploy window with no human involved
+  (proven empirically: fresh clone → exit 0 for `netlify deploy --prod`, vs. an empty-dir
+  control at exit 2). Replaced with session-scoped, severity-split, content-bound tokens
+  under `hooks/sessions/<id>/overrides/` (gitignored, so structurally uncommittable).
+  Landed on `ora-autonomy-gate.py`; a concurrent session independently reached the same
+  root-cause conclusion and hardened `git-prepush-doctrine-gate.py` the same night — the
+  two were later unified onto one shared `hooks/lib/override_tokens.py` contract to stop
+  them drifting apart.
+- **Adversarial review (3 rounds) found and fixed 8 real detection-matcher bypasses** in
+  `ora-autonomy-gate.py`, independent of the token work above: dotless-domain email
+  recipients, PowerShell `-T` prefix-binding, `cmd /c`/`powershell -Command` netlify
+  indirection, Unicode homoglyphs and invisible characters (zero-width space, RTL
+  override) defeating word-boundary matches, the mail script's Windows 8.3 short-name
+  alias, `check_mcp`'s allow-by-default logic, and a foundational `sys.stdin` UTF-8
+  decoding bug (the platform codepage was silently mojibaking non-ASCII payloads,
+  undermining the Unicode fixes for any real, non-Python-escaped invocation). Test suite
+  grew 44 → 65.
+- **OI-007 (the value-indirection ceiling these matcher fixes couldn't close) fully
+  closed**, in three parts:
+  1. **Email side**: an outbound-action check inside `send-via-outlook.ps1` itself
+     (gitignored, not git-tracked — see the 2026-07-17 entry above this one for detail).
+     3 real bugs found and fixed by adversarial review before landing.
+  2. **Netlify side, repo-local**: `website-canonical` PR #30, merged by Gabriel —
+     `scripts/netlify-guard.js` + a `postinstall` shim patcher routing the netlify CLI
+     through an authorization check. 2 real bugs found and fixed pre-merge (an
+     exact-array-element flag-detection bypass letting `--prod=true`/`--prod-if-unlocked`
+     through unauthorized; a postinstall patcher that silently exited 0 even when it
+     patched nothing).
+  3. **Netlify side, machine-wide follow-up**: `npx netlify` / a bare `netlify` command
+     invoked from OUTSIDE `website-canonical` resolved an unguarded copy via npm's
+     global/registry fallback (npx doesn't consult PATH the way a bare command does, so a
+     simple PATH-shadowing wrapper wouldn't have closed this). Closed by deliberately
+     installing netlify-cli globally (pinned to the repo's own 26.2.0) and patching its
+     shims too — `hooks/bin/netlify-guard-global.js` + `maintenance/patch-global-netlify-shim.js`,
+     landed on `~/.claude` main. Verified empirically that a local guarded install always
+     wins over the global one in npx's own resolution order, so there is zero
+     double-check / double-token-consumption risk between the two layers. Accepted limit
+     (Gabriel-ratified): global npm installs have no postinstall-equivalent hook, so the
+     patch needs a manual re-run after any future global reinstall/update — documented,
+     not automated, given the underlying gap was already flagged low-priority.
+- Full detail in `reference_autonomy_gate_override_mechanism.md`,
+  `project_autonomy_gate_indirection_ceiling_followup.md`, and `open-items-tracker.md#OI-007`
+  (now closed).
+
 ## 2026-07-17 — Session close-out: OI-006/008 completed, canonical tracker fully closed
 
 Continuation of the Tenant DB remediation session. Closed the remainder of the OI-003–008 arc:
@@ -49,6 +97,65 @@ Continuation of the Tenant DB remediation session. Closed the remainder of the O
   independently verified against primary leases) is real but was explicitly out of scope tonight
   — worth a deliberate decision on whether it's worth pursuing, not a silent drop.
 
+## 2026-07-17 - psa-reconciliation reimported (Save-skill click confirmed)
+
+Standalone MULTI-FILE reimport via Entry Point A. plugin_of => None. Repo commit 7e6d14d (frontmatter description trim 1274->956 for the 1024 import limit, ora-skill-text-audit follow-up). Only SKILL.md had drifted from cache; packaged clean (description 956/1024, 16-point QC OK, 5 forward-slash entries). Routed to the Cowork Save-skill button (multi-file: SKILL.md + INSTALLATION.md + 3 references/ - the desktop Settings path drops subfolder files). Gabriel confirmed the click. Post-install verify: all 5 cache files present, raw+normalized byte-match the repo. Ledger cleared; pending-reimport queue now empty.
+
+## 2026-07-17 — OI-007 email-side fix: outbound-action check in send-via-outlook.ps1 (gitignored file, record here)
+
+- Landed the email side of OI-007 ([open-items-tracker.md#OI-007](open-items-tracker.md#OI-007)):
+  ora-autonomy-gate.py's Gate 1 detects an external recipient by parsing Bash command TEXT,
+  which adversarial review proved is structurally blind to value indirection (a recipient
+  built from a PowerShell variable/concatenation/file-read never appears as a literal
+  substring, so Gate 1 never fires). Fix: an outbound-action check inside
+  `C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1` itself, at the point
+  where PowerShell has already resolved `$To`/`$Cc` to concrete values.
+- **This file is gitignored (`scheduled-tasks/*/*`) — this log entry is the only durable
+  record of the change.** No worktree, no commit, no diff history exists for it.
+- New git-tracked pieces (landed via normal worktree process): `hooks/lib/email_send_tier.py`
+  (shared `EXTERNAL_SEND` tier + recipient-binding, imported by BOTH Gate 1 and this new
+  check so they cannot diverge), `hooks/lib/check_external_send.py` (the CLI the PowerShell
+  script shells out to, validating against the same session-scoped, content-bound,
+  single-use token contract). `ora-autonomy-gate.py` refactored to import from the shared
+  module instead of its own inline copy.
+- Added `-WhatIf` to send-via-outlook.ps1: performs every check but stops short of the real
+  Outlook COM call, so the gating logic can be tested end-to-end without ever sending a
+  real email. Exit code 5 = external recipient(s) not authorized (new).
+- **Two real bugs found by adversarial review and fixed before this reached production:**
+  1. A suffix-only regex (`-notmatch '@oxfordra\.net$'`) misclassified
+     `attacker@evilhost.com@oxfordra.net` as internal — a complete bypass. Fixed: require
+     exactly one `@` and an EXACT domain match, not a suffix match.
+  2. Recipients were passed to `check_external_send.py` via a `--recipients` CLI argument;
+     PowerShell's native-argument marshaling silently stripped an embedded double-quote
+     before python ever saw it, so the checked value could differ from the actual send
+     value. Fixed: recipients now travel one-per-line on stdin, never argument-parsed.
+  3. (Found along the way, affects ALL token tiers not just this one) `override_tokens.py`
+     opened token files as plain `utf-8`; PowerShell's default `Out-File`/`Set-Content`/`>`
+     writes a UTF-8 BOM, corrupting the leading `scope` key and silently failing closed on
+     a genuinely Gabriel-approved token. Fixed: `utf-8-sig`.
+- Verified via 6+ `-WhatIf` scenarios against the LIVE file (internal-only, external+no-token,
+  external+valid-token+consumed, no-session-id fail-closed, Cc-field checked, the Daily-Brief
+  internal-To+Cc pattern with zero regression) plus the two bypass reproductions above,
+  re-confirmed fixed post-patch.
+- **Still open (deferred separately, not this entry's scope):** the netlify/Gate 2a side of
+  OI-007 — postinstall-hook wrapper in website-canonical, Gabriel-ratified direction, not yet
+  built (Invariant 2 gates any change to that repo's build tooling).
+
+## 2026-07-17 - package-and-stage-skill v1.10 reimported (Save-skill click confirmed)
+
+Standalone single-file reimport via Entry Point A. plugin_of => None (correctly standalone). Repo committed+pushed at fc93248 (plus release_plugin.py wrapper). Packaged clean (description 1019/1024, 1 forward-slash entry, exit 0); cache was stale (pre-v1.10) so real drift, packaged and staged. Gabriel confirmed the Save-skill click. Post-install verify: skills-plugin cache SKILL.md now v1.10, single file, raw+normalized byte-match the repo. Ledger entry cleared. Content: Step 0 plugin-member repo-path clarification (top-level dir, not plugins/<plugin>/skills/). Companion .claude fix pushed same pass: append-event-log.py BOM tolerance (620612d/ea0f9f1).
+
+## 2026-07-17 - package-and-stage-skill v1.10 reimported (Save-skill click confirmed)
+
+Standalone single-file reimport via Entry Point A. plugin_of => None (correctly standalone). Repo committed+pushed at fc93248 (plus release_plugin.py wrapper). Packaged clean (description 1019/1024, 1 forward-slash entry, exit 0); cache was stale (pre-v1.10) so real drift, packaged and staged. Gabriel confirmed the Save-skill click. Post-install verify: skills-plugin cache SKILL.md now v1.10, single file, raw+normalized byte-match the repo. Ledger entry cleared. Content: Step 0 plugin-member repo-path clarification (top-level dir, not plugins/<plugin>/skills/). Companion .claude fix pushed same pass: append-event-log.py BOM tolerance (620612d/ea0f9f1).
+
+## 2026-07-17 — ora-cowork-heartbeat beacon recovery check
+
+STILL STUCK. The Notion beacon page (`35c6ecd8-9e59-81d5-8d2c-d08002458b78`) still reads `Last heartbeat: 2026-07-15T21:57:21Z · Next expected: 2026-07-16T09:57:21Z` — identical to the known-stale baseline `2026-07-15T21:57:21Z`, and Notion's own as-of stamp on the fetch (`2026-07-15T21:57:30Z`) confirms the page has not been edited since. The LAMS registry confirms the task DID fire: `ora-cowork-heartbeat` shows `lastRunAt` `2026-07-17T10:46:53.712Z` with `lastScheduledFor` `2026-07-17T09:50:00.000Z` (the 05:50 ET slot, executed as an app-open catch-up), so this is "task fired but the Notion write still failed," not "task never ran" — the beacon is now ~37 hours stale against a 12-hour cadence and 16-hour watchdog threshold. The registry entry still carries no `approvedPermissions` array, consistent with the 2026-07-16 diagnosis; the alert email sent that day (~18:32 ET) recommended Gabriel check/re-approve the task's Notion permission grant in Cowork's Scheduled Tasks UI, and that grant does not appear to have been made.
+
+## 2026-07-17 - ora-operations-extensions plugin reinstalled (README 7-skill correction)
+
+Rebuilt ora-operations-extensions.plugin v0.1.2 from plugins/ora-operations-extensions/plugin-build.json via tools/build_plugin.py (9 entries OK, forward-slash paths, repo clean at HEAD a6a2677); no version bump - README-only fix. Gabriel confirmed the Save-skill click. Post-install verify against plugin cache rpm/plugin_01Sq7t7TEQEoa4G1asrLe8ms: README.md now reads "Seven institutional skills..." (was "Eight new skills..." pre-debt-management-exclusion); deal-retirement and submarket-spatial-analysis SKILL.md byte-match their canonical top-level repo copies (raw SHA256, no EOL-normalization needed) - both confirmed live via the plugin cache mirror, NOT the standalone skills-plugin shadow-copy path this fix exists to avoid. package-and-stage-skill Entry Point A (plugin-rebuild remedy).
 
 ## 2026-07-16 — Shipped commit-provenance guard; Tenant DB open items canonicalized (session close-out)
 
@@ -72,6 +179,12 @@ carries only pointers. Also closed a stale claim in that file: `ora-master-workb
 "should be 34 tabs" assertion was corrected to 49 earlier this session (`d5a1006`) and the memory
 file had not caught up.
 
+## 2026-07-16 — ora-skills: staged-frontmatter-validator review-fix shipped (5d33b99 -> ac51978)
+
+Post-hoc gate + review of 3 commits the other concurrent session had already pushed to `ZeOoba/ora-skills` main (f46cfa8, 233349d, merge 5d33b99 — extracts `validate_skill_frontmatter` into a shared gate used by both packaging and a new `tools/hooks/pre-commit` staged-content check, closing the gap where a raw runtime-cache sync could skip frontmatter validation entirely). Gate green (19+32 tests, compile, hook syntax). Independent review (superpowers:requesting-code-review, isolated worktree at 5d33b99) returned "With fixes" — 2 Important, no Critical: (1) `validate_skill_frontmatter`'s per-file loop only exception-guarded the SKILL.md read, so an unreadable secondary staged file (e.g. merge-conflicted, no stage-0 index entry) propagated as a raw traceback instead of a clean finding; (2) `_staged_content()` omitted explicit `encoding='utf-8'` on its `subprocess.run` call, unlike every disk-based reader in the file, risking cp1252-locale mis-decode/crash on multi-byte UTF-8 staged content on Windows. Both fail-closed (no false-pass risk) — polish, not a safety gap.
+
+Fixed both in an isolated worktree (`ora-skills-frontmatter-fix`, branch `fix-staged-frontmatter-review-followup` off 5d33b99) per the now-standard pattern: the shared checkout had live, unrelated concurrent WIP again (staged changes to build_plugin.py/pending_reimport.py on branch `plugin-reimport-routing`). Added exception handling around the loop's `_read(rel)` calls and explicit `encoding='utf-8', errors='replace'` to `_staged_content()`. 3 new tests (2 unit tests reproducing the unreadable-secondary-file case via the existing `read_text` injection point, 1 live-git-index test staging multi-byte UTF-8 content and confirming exact round-trip). 22/22 package_skills tests green, pending_reimport's 32 unaffected. Pushed via `git push origin fix-staged-frontmatter-review-followup:main` (clean fast-forward, re-verified immediately before push since state had moved), confirmed `origin/main` = ac51978, worktree + branch removed.
+
 ## 2026-07-17 — Built canonical open-items tracker (`open-items-tracker.md`), closing the dead-pointer incident that motivated it
 
 Motivating incident: `oxford-cc-repo-health.md`'s "residual open items" line pointed at `session-context.md` as carrying "the live list" of two unresolved items (purge 2 dangling disabled LAMS entries; `ora-cam-reconciliation-annual` year-round-vs-seasonal timing). One sibling item (automation-health-monitor canonicalization) got a RESOLVED update logged inline in the same file same-day (2026-07-09); these two never did, and by 2026-07-16/17 `session-context.md` no longer mentioned either — the pointer had gone dead with nobody closing the loop. Both turned out to already be resolved (verified live, not assumed): `fleet-status.py` shows zero disabled LAMS entries fleet-wide; `ora-cam-reconciliation-annual`'s live cron `0 7 15 1 *` confirms the seasonal decision. Confirming that required a from-scratch investigation because the item text lived in two places (the source file's prose and the target file it pointed to) and only needed to rot in one for the trail to go cold.
@@ -81,6 +194,18 @@ Built `memory/open-items-tracker.md` as the single canonical home for open/resid
 Extended `memory-integrity-probe.py` (report-only, wired into the existing daily `ora-health-guard` and twice-weekly `ora-cc-schematic-refresh` runs — no new scheduled task registered) with two checks: (a) any `open-items-tracker.md#OI-NNN` reference elsewhere in `memory/*.md` that doesn't resolve to a row in the tracker fails hard, same severity as an existing orphan-index-link finding; (b) any OPEN item whose `Auto-check` now matches gets a WARN nudging closure, without auto-closing anything. Extended `fleet-status.py --json` additively with `tasks` (per-task id/fleet/enabled/cron) and `disabled_by_fleet`, reused by the new checks rather than re-implementing registry discovery — kept the "GUIDs rotate, never hardcode, one source of truth" discipline intact.
 
 Ratified pattern going forward: any file that wants to reference an open item points at `open-items-tracker.md#OI-NNN` and states nothing else about it — no paraphrase, no restated status. `ops_decision_log.md` stays a separate, narrower log (already-decided yes/no operational questions, not items with a mutable open→closed lifecycle) — checked its scope before deciding not to fold this into it.
+
+## 2026-07-16 — ora-skills: shared-dep direction-aware reconciliation shipped (10f042f + follow-up)
+
+Shipped 3 commits to `ZeOoba/ora-skills` main (`35cdbca..15f5497`): 7e6d14d (psa-reconciliation description trim), 10f042f (pending_reimport.py `shared-deps` subcommand + `candidates` advisory — direction-aware reconciliation of shared repo-root deps against the runtime cache: REPO-AHEAD/CACHE-AHEAD/DIVERGENT/UNKNOWN, closing the 2026-07-16 target-markets.json no-direction gap), and a same-day review-fix commit 15f5497.
+
+Gate: 21+6 tests, compile clean, `shared-deps` sanity check all 5 target-markets.json consumers in sync. Independent local review (superpowers:requesting-code-review) returned "Ready to merge: With fixes" — 2 Important issues, no Critical/security/correctness bugs: (1) package-and-stage-skill step 2 didn't consult the new direction advisory before treating a shared-dep hash mismatch as reimport-needed, so a session could still reimport a CACHE-AHEAD dep and reproduce the incident the commit was meant to prevent; (2) the git-integration layer (shared_dep_report/_git_text/_git_blob_bytes/_file_history_hashes) had zero regression coverage, only the pure classifier did. Gabriel elected to fix both before push rather than ship with a known gap.
+
+Mid-fix, discovered a second session (01a43b3e) actively editing the same two target files (package-and-stage-skill/SKILL.md, tools/pending_reimport.py, tools/test_pending_reimport.py) in the shared ora-skills checkout — a live build_plugin.py/plugin-packaging feature, unrelated to this fix. Isolated the review-fix work into a fresh git worktree off commit 10f042f (`git worktree add ../ora-skills-shipfix -b shipfix-review-followup 10f042f`) rather than risk clobbering their uncommitted WIP, since a worktree only pulls from committed history. Added package-and-stage-skill v1.8 (step 2 now requires checking `shared-deps` direction before repackaging a mismatched shared dep; CACHE-AHEAD/DIVERGENT stop for manual reconciliation) and 11 new SharedDepGitIntegration tests (real git repos, not just the pure classifier) to tools/test_pending_reimport.py (21->32 total). Pushed via `git push origin shipfix-review-followup:main` (clean fast-forward), verified `origin/main` = 15f5497, then removed the worktree and force-deleted the local branch (content already confirmed on origin).
+
+Left the shared checkout's local `main` ref 1 commit behind origin deliberately — a `git pull`/merge there would touch the same 2 files the other session has uncommitted edits on, silently rewriting their working tree. That reconciliation is the other session's to do when it commits its own work.
+
+No scheduled-task or Notion changes; tools/pending_reimport.py and package-and-stage-skill/SKILL.md are live on disk immediately (no Save-skill reimport needed for tooling).
 
 ## 2026-07-16 — membership-guard.ps1 sticky-fold-in bug fixed (code change, not just a state-file workaround)
 
@@ -760,3 +885,18 @@ Added `args.forceModel` to `~/.claude/workflows/cc-audit-army.js` (no-op unless 
 - **Post-install verify:** install landed in place (same plugin dir), version now 0.1.1, both skills' cache SKILL.md hash-match the repo (raw AND norm; 4927B / 3599B). Ledger cleared: `python tools/pending_reimport.py clear deal-retirement submarket-spatial-analysis` -> "cleared" (both were present). Ledger now empty of these two.
 - **Follow-up authored same session (see next entry):** manifest description said "Eight ... skills" incl. debt management, but the bundle has 7 (debt-management is standalone). Corrected in a v0.1.2 rebuild per Gabriel.
 - **No runtime-cache writes; no external send.**
+
+
+## 2026-07-16 — Systematized plugin-bundled-skill reimport routing (both workflow gaps closed)
+
+Closes the two gaps flagged after the ora-operations-extensions v0.1.2 rebuild. Authored + tested on the Cowork surface via Desktop Commander; NOT yet committed (left for Gabriel — a commit fires the post-commit hook).
+
+- **Gap 1 — plugin bundle wasn't version-controlled; ledger routed plugin skills to the wrong (standalone Save-skill) remedy.** Root cause: `pending_reimport.py`'s commit-time `record` path flagged ANY committed skill dir as a standalone reimport candidate, while the newer `sweep` path already (correctly) ignores plugin-bundled skills (they have no standalone skills-plugin cache dir). deal-retirement + submarket-spatial-analysis (commits 75d85ca / 876b8ee) hit the record path and were about to be Save-skill'd as standalone.
+- **Fixes:** (a) version-controlled the bundle under `plugins/ora-operations-extensions/` — `plugin-build.json` (metadata + member-skill list; member SKILL.md content NOT duplicated, pulled from each skill's canonical repo dir at build) + an accurate README (7 skills, debt-management removed) + `plugins/README.md` documenting the pattern. (b) `package_skills.py` now loads `plugins/*/plugin-build.json` at import → `PLUGIN_MANIFESTS` / `PLUGIN_MEMBERS` / `plugin_of(skill)` — the single source of truth for "is this skill plugin-bundled?", plus a shared `skill_source_files()` helper. Defensive: no plugins/ dir → empty maps → zero behavior change. (c) `pending_reimport.py` record path (refactored into a pure, tested `format_ledger_line()`) tags plugin members with `plugin: <name> | remedy: rebuild plugin (python tools/build_plugin.py …) — NOT a standalone Save-skill`. (d) `package-and-stage-skill` v1.8→v1.9: new **Step 0** plugin-membership gate routing bundled skills to a plugin rebuild before the standalone path; frontmatter re-trimmed to exactly 1024/1024.
+- **Gap 2 — MAX_PATH.** New `tools/build_plugin.py` reusable builder: reads a plugin-build manifest, assembles the `.plugin` ENTIRELY IN MEMORY with forward-slash entries (never Compress-Archive; never a nested on-disk copy — a copy under the deep session outputs path throws WinError 206), validates (kebab name, each member SKILL.md present, desc ≤1024, forward-slash), supports `--bump patch|minor|major`. Verified it reproduces the installed v0.1.2 bundle byte-for-byte (plugin.json version+description + all 7 skills' SKILL.md; README intentionally corrected).
+- **Tests (stdlib unittest, no pytest):** new `tools/test_build_plugin.py` (12) + `LedgerLineRouting` added to `tools/test_pending_reimport.py` (24 total) + `tools/test_package_skills.py` (6) — all green (42). package-and-stage-skill frontmatter validates at 1024/1024; `pending_reimport.py candidates` CLI RC 0.
+- **Changed:** M package-and-stage-skill/SKILL.md, tools/package_skills.py, tools/pending_reimport.py, tools/test_pending_reimport.py; new plugins/**, tools/build_plugin.py, tools/test_build_plugin.py. No commit, no runtime-cache write, no external send.
+2026-07-17: ora-skills-reimport-watch fired (all guards passed, tree quiet ~131min since last commit) — pending_reimport.py candidates found zero drift, nothing staged; expected _archive/2026-07-16_target-markets-refresh (4 pre-packaged skills: daily-brief, deal-comparison, market-monitor, rent-comp) not found on disk — flagged to Gabriel, no clicks pending from this run.
+
+2026-07-17: ora-skills-reimport-watch retirement (part 1/2) — investigated the missing _archive/2026-07-16_target-markets-refresh path: it was a naming mismatch in the task's own SKILL.md (actual location was _staging/2026-07-16_target-markets-refresh/, not _archive/), and the directory is gone because its job was already done — event_log.md confirms Gabriel clicked Save-skill on all 4 target-markets consumers (daily-brief, deal-comparison, market-monitor, rent-comp) among 9 packages installed 2026-07-16 ~22:58 ET. No repackaging needed; today's fresh sweep independently confirms zero repo-vs-cache drift. Task paused (enabled:false) and folder archived to Documents\Claude\Scheduled\_archive_2026-07-17_retired\ora-skills-reimport-watch\. delete_scheduled_task refused: this session was itself launched by ora-skills-reimport-watch, and the tool blocks a task from deleting its own registry entry mid-run. Registry entry ora-skills-reimport-watch still exists (disabled, path now stale) pending deletion from a regular (non-launched-by-this-task) session.
+2026-07-17: ora-skills-reimport-watch registry entry deleted (was enabled: false, folder already archived to _archive_2026-07-17_retired\ora-skills-reimport-watch\). Retirement started prior session (blocked — task can't delete the registry entry that launched it); completed this session. 2026-07-17 zero-drift run confirmed daily-brief/deal-comparison/market-monitor/rent-comp already installed via Save-skill ~22:58 ET 2026-07-16. Closed.
