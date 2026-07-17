@@ -7,14 +7,16 @@ Bash) can recognise another live session's work and refuse to sweep it into a
 commit. Half of a two-part guard; useless alone. Full rationale:
 docs/superpowers/specs/2026-07-16-commit-provenance-guard-design.md
 
-Writes one absolute, normcase-normalised path per line to
+Writes one `<absolute, normcase-normalised path>\t<epoch-seconds>` line per
+touch to
   hooks/sessions/<session_id>/touched-files.txt
 
 APPEND-ONLY BY DESIGN. It never reads the file back and never rewrites it, so
 concurrent sessions cannot race here -- deliberately unlike
 fleet-session-hook.py's unlocked load-mutate-replace cycle, which its own
 session_liveness.py docstring flags as "a real, accepted, bounded race under
-concurrent writers". Duplicate lines are EXPECTED and are deduped by the reader.
+concurrent writers". Duplicate lines are EXPECTED and are deduped-to-latest by
+the reader.
 
 SAFETY INVARIANT: this hook has no opinions and no failure mode. It never blocks
 anything (PostToolUse cannot), and the whole body is wrapped in try/except -- on
@@ -33,7 +35,7 @@ import sys
 
 LIB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib")
 sys.path.insert(0, LIB_DIR)
-from commit_provenance import norm, sessions_dir, TOUCHED_BASENAME  # noqa: E402
+from commit_provenance import sessions_dir, touch_line, TOUCHED_BASENAME  # noqa: E402
 
 
 def main():
@@ -55,7 +57,7 @@ def main():
     sess_dir = os.path.join(sessions_dir(), session_id)
     os.makedirs(sess_dir, exist_ok=True)
     with open(os.path.join(sess_dir, TOUCHED_BASENAME), "a", encoding="utf-8") as fh:
-        fh.write(norm(file_path) + "\n")
+        fh.write(touch_line(file_path))
 
 
 if __name__ == "__main__":

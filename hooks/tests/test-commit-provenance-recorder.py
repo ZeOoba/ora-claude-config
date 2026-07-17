@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # hooks/
 HOOK = os.path.join(HERE, "commit-provenance-recorder.py")
@@ -29,12 +30,17 @@ def sessions_tmp():
     return tempfile.mkdtemp(prefix="cpr-sess-")
 
 
-def read_touched(sessions_dir, sid):
+def raw_lines(sessions_dir, sid):
     p = os.path.join(sessions_dir, sid, "touched-files.txt")
     if not os.path.exists(p):
         return []
     with open(p, encoding="utf-8") as fh:
         return [ln.strip() for ln in fh if ln.strip()]
+
+
+def read_touched(sessions_dir, sid):
+    """Just the path portion of each line (2026-07-17 format: path\\tepoch)."""
+    return [ln.partition("\t")[0] for ln in raw_lines(sessions_dir, sid)]
 
 
 def test_edit_payload_records_file_path():
@@ -90,10 +96,33 @@ def test_missing_path_is_noop():
     print("PASS test_missing_path_is_noop")
 
 
+def test_line_carries_a_recent_timestamp():
+    """2026-07-17: the recency-heuristic fix needs a per-touch timestamp, not
+    just a bare path. Mutation check: reverting touch_line() to write a bare
+    path (no tab) makes this test fail -- it is not a vacuous pass."""
+    sess = sessions_tmp()
+    target = "C:/Users/Owner/.claude/timed/file.md"
+    before = time.time()
+    rc, out, err = run_hook(
+        json.dumps({"session_id": "s5", "tool_input": {"file_path": target}}), sess)
+    after = time.time()
+    assert rc == 0
+    lines = raw_lines(sess, "s5")
+    assert len(lines) == 1, "got %r" % lines
+    assert "\t" in lines[0], "line must carry a tab-separated timestamp, got %r" % lines[0]
+    path, _, ts_str = lines[0].partition("\t")
+    assert path == os.path.normcase(os.path.abspath(target)), "got %r" % path
+    ts = float(ts_str)
+    assert before - 1 <= ts <= after + 1, (
+        "timestamp must be roughly 'now', got %s (window %s..%s)" % (ts, before, after))
+    print("PASS test_line_carries_a_recent_timestamp")
+
+
 if __name__ == "__main__":
     test_edit_payload_records_file_path()
     test_desktop_commander_payload_uses_path_field()
     test_repeated_writes_append_not_overwrite()
     test_malformed_stdin_fails_open()
     test_missing_path_is_noop()
+    test_line_carries_a_recent_timestamp()
     print("ALL COMMIT-PROVENANCE-RECORDER TESTS PASS")
