@@ -87,6 +87,17 @@ fact against live state first — this doc is as-of 2026-06-11. Full sprint cont
    `maintenance/ora-nightly-disk.ps1`.
 
 ## B3. Burn-in (48h) — all with command-output evidence
+
+> **STATUS 2026-07-17 — CLOSED.** A same-day concurrent session actually ran all 10 boxes below
+> with command-output evidence (confidentiality-guard 125/125, git-prepush-scan 14/14,
+> registry-membership-probe exit 0 + 41/41 its own suite, doctrine-integrity/governor-drift/
+> memory-integrity all exit 0, deps confirmed, heartbeat fresh, ora-am-brief self-recovery
+> confirmed, one-time COM test send confirmed) — superseding an earlier "closed as moot" framing
+> that assumed de-facto continuous-use burn-in instead. See project_claude-setup-audit-2026-07-09.md
+> for the full evidence trail (this file's boxes were not individually re-ticked here — the
+> evidence lives in that memory file, not duplicated into checkboxes on this page).
+> Guardrail: do NOT re-run B2 (fleet re-registration) — both fleets already live, would duplicate.
+
 - [ ] Heartbeat updates Notion page 35c6ecd8 at 05:50 + 17:50; GitHub
       `ZeOoba/ora-cowork-watchdog` green. The migration gap WILL trip the 16h alarm
       once — treat as a LIVE TEST of the dead-man chain: confirm the alert reaches
