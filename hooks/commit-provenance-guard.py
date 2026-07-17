@@ -41,10 +41,12 @@ LIB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib")
 sys.path.insert(0, LIB_DIR)
 from commit_provenance import norm, sessions_dir, ttl_h, TOUCHED_BASENAME  # noqa: E402
 
-# `git ... commit` within one shell segment (no |, ;, & between them).
-GIT_COMMIT_RE = re.compile(r"\bgit\b[^|;&]*\bcommit\b")
 GIT_C_RE = re.compile(r"""\bgit\b\s+-C\s+(?:"([^"]+)"|'([^']+)'|([^\s&|;]+))""")
 CD_RE = re.compile(r"""\bcd\s+(?:"([^"]+)"|'([^']+)'|([^\s&|;]+))\s*&&""")
+
+# git global options that consume the NEXT token as a value (when not given
+# as `--opt=value`), so that value must not be mistaken for the subcommand.
+GIT_ARG_OPTS_WITH_VALUE = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}
 
 
 def _first_group(m):
@@ -52,11 +54,38 @@ def _first_group(m):
 
 
 def is_git_commit(cmd):
+    """True iff `cmd` invokes git with `commit` as the SUBCOMMAND (tokenized,
+    not a substring match -- `git add commit-provenance-guard.py` is not a
+    commit)."""
     if not isinstance(cmd, str) or not cmd:
         return False
     if "--dry-run" in cmd:
         return False  # fixes no provenance
-    return bool(GIT_COMMIT_RE.search(cmd))
+    try:
+        tokens = shlex.split(cmd)
+    except ValueError:
+        tokens = cmd.split()
+    n = len(tokens)
+    i = 0
+    while i < n:
+        if tokens[i] != "git":
+            i += 1
+            continue
+        j = i + 1
+        while j < n:
+            t = tokens[j]
+            if t.startswith("-"):
+                if t in GIT_ARG_OPTS_WITH_VALUE:
+                    j += 2  # skip this option AND its value token
+                else:
+                    j += 1  # boolean flag or `--opt=value`
+                continue
+            # first non-option token after `git` is the subcommand
+            if t == "commit":
+                return True
+            break
+        i = j if j > i else i + 1
+    return False
 
 
 def _git_lines(repo, args):
@@ -98,12 +127,16 @@ def candidate_paths(repo, cmd):
     """Absolute normcase paths this commit would capture, or None if unknown."""
     # Explicit `-- <pathspec>` narrows the commit. This branch is load-bearing:
     # the block message tells the user to use a pathspec, so it MUST work.
-    m = re.search(r"\s--\s+(.+)$", cmd)
-    if m:
-        try:
-            given = shlex.split(m.group(1))
-        except Exception:
-            given = m.group(1).split()
+    # Tokenize rather than regex-search for " -- " -- a `-- ` sequence inside
+    # a quoted `-m` commit message (e.g. -m "foo -- bar") is NOT a standalone
+    # `--` token and must not be mistaken for the pathspec separator.
+    try:
+        tokens = shlex.split(cmd)
+    except ValueError:
+        tokens = cmd.split()
+    if "--" in tokens:
+        idx = tokens.index("--")
+        given = tokens[idx + 1:]
         return {norm(os.path.join(repo, p)) for p in given if p}
 
     staged = _git_lines(repo, ["diff", "--cached", "--name-only"])
