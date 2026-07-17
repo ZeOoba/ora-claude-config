@@ -13,9 +13,19 @@ versus the prior snapshot.
 Exit 0 = no drops (snapshot refreshed). Exit 1 = [ACTION] drop detected.
 The snapshot is refreshed even on a drop, so each drop alarms exactly once;
 re-register the task or ratify the retirement (and note it in event_log.md).
-Drops named in a recent (<=14d) event_log.md entry containing 'RATIFIED' are
-auto-ratified: reported INFO, exit stays 0 (2026-06-11 optimization -- planned
-retirements no longer raise a one-time false [ACTION]).
+A drop is auto-reconciled (reported INFO, exit stays 0) by EITHER of two
+recent (<=14d) event_log.md signals, so a planned retirement never raises a
+one-time false [ACTION]:
+  1. ratified_drops -- the ceremonial token 'RATIFIED' anywhere in the drop's
+     '## ' section (2026-06-11); and
+  2. retired_drops  -- a deliberate-retirement verb (retire*/decommission*) on
+     the SAME LINE as the task id (2026-07-17). ORA documents most retirements
+     in plain prose ('... retirement ...', 'Retirement started ...'), never the
+     uppercase token -- ora-skills-reimport-watch's 2026-07-17 retirement was
+     twice-logged yet still raised a false [ACTION] because only 'RATIFIED'
+     was honored. retired_drops matches only deliberate-removal verbs, never
+     incident words ('disappeared'/'dropped'/'dark'/'missing'), so a report
+     ABOUT a silent drop can never auto-reconcile the drop it is flagging.
 One-time fireAt tasks are ignored -- they expire by design.
 
 An enabled->DISABLED task (still registered, just paused) is a WARN regression,
@@ -62,6 +72,14 @@ EVENT_LOG = os.path.join(os.path.expanduser("~"), ".claude", "projects",
                          "memory", "event_log.md")
 RATIFY_WINDOW_DAYS = 14
 
+# Deliberate-retirement verbs (case-insensitive stems) for retired_drops. Kept
+# minimal and unambiguous: every entry denotes an INTENTIONAL removal, and none
+# occurs in silent-drop incident language ('disappeared'/'dropped'/'dark'/
+# 'missing'/'vanished') -- that asymmetry is what lets a retirement reconcile a
+# drop while a report ABOUT a drop never can. Add a verb here only if it is
+# unambiguously an intentional-removal word.
+RETIRE_TOKENS = ("retire", "decommission")
+
 # A whole registry FILE vanishing is treated as transient (reinstall / session-dir
 # rotation / app-not-yet-initialized) until it persists across this many consecutive
 # probe runs -- the 2026-07-05 reinstall's mid-recovery probe cried CRITICAL on a
@@ -87,6 +105,55 @@ def ratified_drops(log_text, ids, today, window_days=RATIFY_WINDOW_DAYS):
             continue
         for i in ids:
             if i and i in chunk:
+                out.add(i)
+    return out
+
+
+def _leading_date(line):
+    """Date from a line's inline 'YYYY-MM-DD' prefix (after stripping leading
+    '-', '*', whitespace), else None. ORA logs bullet/paragraph entries like
+    '2026-07-17: ...' and '- **2026-07-17 ...' under an older '## ' header, so a
+    line's own date can differ from its section header. Pure."""
+    s = line.lstrip("-* \t")
+    try:
+        return datetime.date.fromisoformat(s[:10])
+    except ValueError:
+        return None
+
+
+def retired_drops(log_text, ids, today, window_days=RATIFY_WINDOW_DAYS):
+    """Subset of `ids` reconciled by a recent event_log LINE naming the task id
+    alongside a deliberate-retirement verb (RETIRE_TOKENS) on the SAME line.
+
+    Complements ratified_drops: that requires the ceremonial 'RATIFIED' token in
+    a '## ' section, but ORA usually documents a retirement in plain prose
+    ('... retirement ...', 'Retirement started ...'). Same-line coupling of id +
+    verb keeps it tight -- a section that merely mentions task A in one line and
+    retires task B in another does NOT reconcile A.
+
+    Date per line, newest-wins: an inline leading 'YYYY-MM-DD' wins; otherwise the
+    line inherits the nearest '## YYYY-MM-DD' header above it. Eligible only if
+    that date is within `window_days` of `today`. Conservative by design (only
+    intentional-removal verbs, never incident words). Pure."""
+    ids = [i for i in ids if i]
+    if not ids:
+        return set()
+    out, header_date = set(), None
+    for raw in log_text.splitlines():
+        stripped = raw.strip()
+        is_header = stripped.startswith("## ")
+        if is_header:
+            try:
+                header_date = datetime.date.fromisoformat(stripped[3:13])
+            except ValueError:
+                header_date = None
+        if not any(tok in stripped.lower() for tok in RETIRE_TOKENS):
+            continue
+        d = header_date if is_header else (_leading_date(stripped) or header_date)
+        if d is None or (today - d).days > window_days:
+            continue
+        for i in ids:
+            if i in raw:
                 out.add(i)
     return out
 
@@ -307,21 +374,25 @@ def main():
                   "came back disabled? Re-enable via update_scheduled_task or note the "
                   "pause. (NOT a silent drop; no exit-1.)")
     if drops:
-        ratified = set()
+        reconciled = set()
         try:
             if os.path.isfile(EVENT_LOG):
                 all_ids = sorted({i for ids in drops.values() for i in ids})
-                ratified = ratified_drops(
-                    open(EVENT_LOG, encoding="utf-8").read(), all_ids,
-                    datetime.date.today())
-        except Exception as e:  # fail-loud: an unreadable log ratifies nothing
-            print(f"  WARN ratification check skipped: {e}")
+                today = datetime.date.today()
+                log_text = open(EVENT_LOG, encoding="utf-8").read()
+                # Two independent reconciliation signals (see module docstring):
+                # ceremonial 'RATIFIED' token, or plain-prose retirement verb.
+                reconciled = (ratified_drops(log_text, all_ids, today)
+                              | retired_drops(log_text, all_ids, today))
+        except Exception as e:  # fail-loud: an unreadable log reconciles nothing
+            print(f"  WARN reconciliation check skipped: {e}")
         for label, ids in drops.items():
-            rat = [i for i in ids if i in ratified]
-            hot = [i for i in ids if i not in ratified]
+            rat = [i for i in ids if i in reconciled]
+            hot = [i for i in ids if i not in reconciled]
             if rat:
-                print(f"  INFO ratified drop from {label} (event_log RATIFIED "
-                      f"entry <= {RATIFY_WINDOW_DAYS}d): {', '.join(rat)}")
+                print(f"  INFO reconciled drop from {label} (recent event_log "
+                      f"retirement/RATIFIED entry <= {RATIFY_WINDOW_DAYS}d): "
+                      f"{', '.join(rat)}")
             if hot:
                 print(f"  [ACTION] DROPPED from {label} registry: {', '.join(hot)} -- "
                       "re-register on the owning surface or ratify the retirement "
