@@ -21,8 +21,8 @@ here instead (hooks run in every mode, including scheduled/headless sessions):
 Exit 2 = block (stderr is shown to the model). Unparseable input fails open so a hook
 malfunction never bricks every tool call.
 
-OVERRIDE TOKENS (hardened 2026-07-16, Gabriel-ratified)
--------------------------------------------------------
+OVERRIDE TOKENS (hardened 2026-07-16, Gabriel-ratified; shared contract since 2026-07-17)
+-----------------------------------------------------------------------------------------
 A token lives at:  hooks/sessions/<session_id>/overrides/<name>
 
 and its content must be:
@@ -30,37 +30,28 @@ and its content must be:
     scope: website-deploy
     session: <the session_id it was minted in>
     recipients: a@x.com, b@y.com     # external-send ONLY; every external recipient
-    reason: <free text — for the human audit trail, not enforced>
+    reason: <free text — for the human audit trail>
 
 It may be created ONLY after Gabriel's explicit in-turn confirmation in a live session.
 
-The previous scheme was a flat `hooks/overrides/<name>` sentinel checked by mtime alone.
-Four defects compounded, all confirmed empirically before this rewrite:
-  1. Content-blind — a token reading "banana. Not a deploy. DO NOT DEPLOY ANYTHING."
-     authorized `netlify deploy --prod`. Justification text was pure theatre.
-  2. One name (`allow-website-change`) keyed all four gates, so approving a one-line CSS
-     edit silently also opened a production publish for an hour.
-  3. Session-blind and global — any concurrent session inherited any live token. Observed
-     live: 4 sessions running, one token's scope rewritten from "Not a deploy" to a prod
-     deploy mid-flight.
-  4. GIT-TRACKED. Because git sets mtime to checkout time and the gate trusted mtime alone,
-     a plain `git clone` of ~/.claude materialized the token with age ~0 and SELF-GRANTED a
-     live production-deploy window with no human involved. Proven: a fresh clone made this
-     gate return exit 0 for `netlify deploy --prod`, against an empty-dir control at exit 2.
+The contract itself -- path resolution and traversal defense, size cap, duplicate-key
+refusal, TTL/clock-skew/future-dating, single-use consumption -- lives in
+hooks/lib/override_tokens.py, SHARED with git-prepush-doctrine-gate.py. Read that module
+for WHY the token has this shape (the four defects of the retired flat mtime-only sentinel,
+each confirmed empirically) and for its HONEST LIMITS -- notably that session-scoping is
+scoping, NOT authentication. It was inline here until 2026-07-17; two gates enforcing the
+same security-critical rules from two copies is a drift hazard.
 
-Fixes, in the order they matter:
-  - Session-scoping (the eos-plan-gate.py pattern, same PreToolUse payload field) kills the
-    cross-session leak AND defect 4 for free: hooks/sessions/ is already gitignored, so a
-    token is now structurally impossible to commit. There is no ignore rule to forget.
-  - Severity split: a write grant cannot open a deploy, and vice versa.
-  - Content is load-bearing: scope and session must match, or the token is inert. NOTE the
-    honest limit — this cannot defend against the session that WRITES the token (it could
-    write any scope). It defends against mis-scoped reuse and makes the audit trail real.
+What stays THIS gate's own, because the shared contract cannot know it:
+  - Severity split: a write grant cannot open a deploy, and vice versa (defect 2).
+  - The recipient binding: an allow-external-send token must NAME every external recipient,
+    so a token approving one counterparty cannot reach another. Rides into token_grants as
+    its extra_check, and is evaluated BEFORE a single-use token is consumed.
   - Deploy/send tier: 5-minute TTL, consumed at gate-pass. "Gabriel just said yes" is short.
 
 Everything fails CLOSED. No session_id, no token, wrong scope, wrong session, unparseable,
-oversized, duplicate keys, future-dated, or un-consumable -> block. A false positive costs a
-retry; a false negative publishes to the live site.
+oversized, duplicate keys, future-dated, un-consumable, or an unnamed recipient -> block. A
+false positive costs a retry; a false negative publishes to the live site.
 
 Consequence of the split, by design: a command that trips BOTH a deploy gate and a site-write
 gate (e.g. `netlify deploy --prod --dir=oxford-site/dist > deploy.log`) needs BOTH tokens. That
@@ -77,7 +68,6 @@ import json
 import os
 import re
 import sys
-import time
 
 LIB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib")
 sys.path.insert(0, LIB_DIR)
@@ -90,43 +80,63 @@ except Exception:
     # rather than silently disabling it entirely.
     SITE_PATH_MARKERS = ("website-canonical", "oxford-site")
 
-# ORA_OVERRIDE_SESSIONS_DIR is a TEST SEAM ONLY -- it must never be set in settings.json's
-# env block or any production scheduled-task context. Setting it there would let a process
-# redirect this security gate's override lookup to an attacker-writable directory. It exists
-# purely so test-ora-autonomy-gate.py can isolate itself from whatever is live in the real
-# sessions folder (the 2026-07-12 OVERRIDE_DIR seam, re-pointed at the session-scoped path).
-DEFAULT_SESSIONS_DIR = r"C:\Users\Owner\.claude\hooks\sessions"
-OVERRIDE_SUBDIR = "overrides"
+# The token contract is SHARED with git-prepush-doctrine-gate.py (hooks/lib/override_tokens.py):
+# path resolution + traversal defense, size cap, UTF-8, duplicate-key refusal, TTL with
+# clock-skew tolerance and future-dating refusal, single-use consumption, and the
+# ORA_OVERRIDE_SESSIONS_DIR test seam. It lived here inline until 2026-07-17; two gates
+# enforcing the same security-critical rules from two copies is a drift hazard, and the
+# copies had already begun to diverge (this one returned a bool, that one returns the parsed
+# fields so `reason:` reaches the audit trail).
+#
+# The fallback below is NOT a looser local check -- it is the STRICTEST possible one: if the
+# validator cannot be loaded, no override is reachable at all, so every gated action blocks.
+#
+# Getting here wrong is subtle, and an earlier version of this refactor did (adversarial
+# review, 2026-07-17). Letting the ImportError propagate looks fail-closed and is NOT: a
+# PreToolUse hook that exits 1 is treated as a NON-BLOCKING error and the tool call PROCEEDS
+# -- so a broken shared module would have silently disabled Gates 1 and 2 and let a prod
+# deploy through, leaving only a traceback the model never sees. Nor can we sys.exit(2) at
+# import time: this hook runs on EVERY PreToolUse call, so that bricks the whole session
+# (cf. the confidentiality-guard self-deadlock).
+#
+# So: degrade to "no override exists". Ungated calls still pass (availability preserved);
+# every gated call finds no token, falls through to block(), and exits 2. Fail-closed exactly
+# where it matters. This coupling is new -- the doctrine gate shares this module, so an edit
+# made for its benefit can break this gate -- which is precisely why it must degrade safely.
+try:
+    from override_tokens import Tier, token_grants, token_path  # noqa: E402
+    TOKEN_CONTRACT_LOADED = True
+except Exception:
+    TOKEN_CONTRACT_LOADED = False
 
-# A token may not be older than its tier's TTL. Small negative ages (filesystem timestamp
-# granularity / clock skew) are tolerated; a genuinely future-dated token is refused, since
-# a naive `age < ttl` check would otherwise honor it forever.
-CLOCK_SKEW_TOLERANCE_SECONDS = 5
-MAX_TOKEN_BYTES = 8192
-# Only a filename-safe, traversal-free session_id may address a token directory. Rejects
-# "..", "../overrides", "a/../../overrides", "\\..\\overrides" -- anything that could escape
-# the sessions root and reach the retired flat overrides dir (or anywhere else).
-SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+    class Tier(object):
+        """Inert stand-in so the tier table below still builds and block() can still render
+        a message. Carries no validation logic -- token_grants is what refuses. If the real
+        Tier gains a field this drifts, but only on a path where everything already blocks."""
+
+        def __init__(self, name, scope, ttl, single_use=False, requires_extra_check=False):
+            self.name = name
+            self.scope = scope
+            self.ttl = ttl
+            self.single_use = single_use
+            self.requires_extra_check = requires_extra_check
+
+    def token_grants(session_id, tier, extra_check=None):
+        return None  # no validator -> no grant, ever
+
+    def token_path(session_id, name):
+        return None
 
 INTERNAL_DOMAIN = "@oxfordra.net"
 RECIPIENT_FLAGS = ("-to", "-cc", "-bcc")  # any one means the send has external reach
 
-
-class Tier(object):
-    """One override name == one severity tier. No name keys two tiers."""
-
-    def __init__(self, name, scope, ttl, single_use=False, needs_recipients=False):
-        self.name = name
-        self.scope = scope
-        self.ttl = ttl
-        self.single_use = single_use
-        self.needs_recipients = needs_recipients
-
-
 WEBSITE_WRITE = Tier("allow-website-write", "website-write", 3600)
 WEBSITE_DEPLOY = Tier("allow-website-deploy", "website-deploy", 300, single_use=True)
+# requires_extra_check: an external-send token must NAME every external recipient. That
+# binding is email domain logic (see _recipients_authorized), so the shared contract cannot
+# evaluate it -- the flag makes token_grants refuse rather than skip it if a caller forgets.
 EXTERNAL_SEND = Tier("allow-external-send", "external-send", 300, single_use=True,
-                     needs_recipients=True)
+                     requires_extra_check=True)
 
 # Mutating shell ops; if one of these co-occurs with a site-path marker in a Bash
 # command, treat it as a write into the oxfordra.net tree (Gate 2). Read-only verbs
@@ -154,64 +164,14 @@ NETLIFY_INVOKE_RE = re.compile(
 )
 
 
-def _sessions_root():
-    return os.environ.get("ORA_OVERRIDE_SESSIONS_DIR") or DEFAULT_SESSIONS_DIR
-
-
-def _token_path(session_id, name):
-    """Resolve a token path, or None if the session_id cannot safely address one."""
-    if not isinstance(session_id, str) or not SESSION_ID_RE.match(session_id):
-        return None
-    root = _sessions_root()
-    path = os.path.join(root, session_id, OVERRIDE_SUBDIR, name)
-    # Defense in depth: SESSION_ID_RE already forbids separators, but re-assert that the
-    # resolved path really sits under the sessions root before trusting it.
-    try:
-        root_abs = os.path.abspath(root)
-        if os.path.commonpath([os.path.abspath(path), root_abs]) != root_abs:
-            return None
-    except (ValueError, OSError):
-        return None
-    return path
-
-
-def _parse_token(path):
-    """Return the token's key/value fields, or None if it is unusable.
-
-    Fails closed on: unreadable, oversized, non-UTF-8, or DUPLICATE keys (a token with two
-    `scope:` lines is ambiguous, and ambiguity must never resolve in the grant's favor).
-    """
-    try:
-        if os.path.getsize(path) > MAX_TOKEN_BYTES:
-            return None
-        with open(path, "r", encoding="utf-8") as fh:
-            raw = fh.read()
-    except (OSError, UnicodeDecodeError):
-        return None
-    fields = {}
-    for line in raw.splitlines():
-        if ":" not in line:
-            continue
-        key, value = line.split(":", 1)
-        key = key.strip().lower()
-        if not key:
-            continue
-        if key in fields:
-            return None  # duplicate key -> ambiguous -> refuse
-        fields[key] = value.strip()
-    return fields
-
-
-def _fresh(path, ttl):
-    try:
-        age = time.time() - os.path.getmtime(path)
-    except OSError:
-        return False
-    return -CLOCK_SKEW_TOLERANCE_SECONDS <= age < ttl
-
-
 def _recipients_authorized(fields, external):
-    """Every external recipient of the send must be named in the token."""
+    """Every external recipient of the send must be named in the token.
+
+    Gate 1's own binding, kept here rather than in the shared contract: override_tokens.py
+    validates a token generically and knows nothing about email. Passed to token_grants as
+    its extra_check, so it runs before a single-use token is consumed -- a token that fails
+    it is refused WITHOUT being burned.
+    """
     raw = fields.get("recipients")
     if not raw:
         return False
@@ -221,47 +181,29 @@ def _recipients_authorized(fields, external):
     return all(r.lower() in allowed for r in external)
 
 
-def _consume(path):
-    """Burn a single-use token. If it cannot be removed we cannot promise single-use,
-    so the caller must treat failure as 'no override'."""
-    try:
-        os.remove(path)
-        return True
-    except OSError:
-        return False
-
-
 def override_active(session_id, tier, external=None):
-    path = _token_path(session_id, tier.name)
-    if not path or not os.path.isfile(path):
-        return False
-    if not _fresh(path, tier.ttl):
-        return False
-    fields = _parse_token(path)
-    if not fields:
-        return False
-    if fields.get("scope") != tier.scope:
-        return False
-    if fields.get("session") != session_id:
-        return False
-    if tier.needs_recipients and not _recipients_authorized(fields, external or []):
-        return False
-    # Consume BEFORE granting: if we granted first and the delete then failed, the token
-    # would silently become multi-use.
-    if tier.single_use and not _consume(path):
-        return False
-    return True
+    """True iff a valid token authorizes `tier` for `session_id`. The generic contract
+    (path, freshness, parse, scope, session, single-use consumption) is the shared module's;
+    the recipient binding is this gate's and rides along as extra_check."""
+    extra_check = None
+    if tier.requires_extra_check:
+        extra_check = lambda fields: _recipients_authorized(fields, external or [])  # noqa: E731
+    return token_grants(session_id, tier, extra_check=extra_check) is not None
 
 
 def block(reason, tier, session_id, extra=""):
-    token_path = _token_path(session_id, tier.name)
-    if token_path is None:
+    where = token_path(session_id, tier.name)
+    if not TOKEN_CONTRACT_LOADED:
+        # Say so explicitly: otherwise this looks like an ordinary block and someone burns
+        # ten minutes writing a token that can never be honored.
+        where = ("<hooks/lib/override_tokens.py could not be imported -- the token validator "
+                 "is unavailable, so NO override can be honored. This gate is failing closed. "
+                 "Fix the module; do not try to mint a token.>")
+    elif where is None:
         where = ("<no valid session_id in this hook payload -- an override cannot be "
                  "created or honored here>")
-    else:
-        where = token_path
     body = "  scope: %s\n  session: %s\n" % (tier.scope, session_id or "<none>")
-    if tier.needs_recipients:
+    if tier.requires_extra_check:
         body += "  recipients: <every external recipient, comma-separated>\n"
     body += "  reason: <why Gabriel approved this>\n"
     sys.stderr.write(
@@ -380,7 +322,7 @@ def main():
     tool_input = payload.get("tool_input", {})
     session_id = payload.get("session_id", "")
 
-    # A missing/invalid session_id is NOT fatal: it simply means _token_path() can never
+    # A missing/invalid session_id is NOT fatal: it simply means token_path() can never
     # resolve, so no override is reachable and every gated action blocks. Fail-closed by
     # construction -- including in scheduled/headless contexts, where a prod deploy or an
     # external send should never be self-authorizing anyway.
