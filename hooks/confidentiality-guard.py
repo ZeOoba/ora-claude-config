@@ -111,6 +111,26 @@ def block(reason):
     sys.exit(2)
 
 
+def _read_stdin_text():
+    """Decode stdin explicitly as UTF-8, off the raw buffer -- never trust
+    sys.stdin's own text-mode encoding. A hook spawned directly by the
+    harness (as opposed to a POSIX-locale shell) can get sys.stdin.encoding
+    resolved to the Windows ANSI codepage instead of UTF-8 -- confirmed live
+    in eos-claude-md-guard.py (2026-07-17) and reproduced here via a direct
+    decode unit test (a subprocess spawned from a dev shell does not reliably
+    reproduce this OS/codepage quirk -- see hooks/tests/test-confidentiality-
+    guard.py's _load_guard_module()). Not exploitable against
+    the current roster (every active term is pure ASCII, which survives
+    cp1252 corruption of other bytes in scan_text), but it silently defeats
+    this fail-closed leak scanner for ANY future confidential term containing
+    a non-ASCII character (an accented name, a curly quote, an em-dash) --
+    exactly the dangerous under-block case this hook's own docstring already
+    flags as invisible to fail-closed. Reading the raw bytes and decoding
+    them ourselves makes this independent of whatever codepage the parent
+    process happened to inherit."""
+    return sys.stdin.buffer.read().decode("utf-8")
+
+
 def _git_common_dir(start_dir):
     """Absolute path to the repo's shared .git dir (same for every worktree of
     the same repo), or None on any failure -- not a git repo, git missing, etc."""
@@ -299,8 +319,16 @@ def main():
     except Exception as e:
         block("confidential-terms.json unreadable (%s); cannot verify egress safety." % e)
 
-    raw = sys.stdin.read()
+    # _read_stdin_text() must be INSIDE the try: unlike the old sys.stdin.read()
+    # (which -- decoding via whatever the platform resolves, e.g. cp1252 --
+    # effectively never raises), an explicit .decode("utf-8") CAN raise
+    # UnicodeDecodeError on genuinely malformed input. This hook is
+    # FAIL-CLOSED: a read/decode failure must BLOCK via the same path as an
+    # unparseable payload, not propagate as an uncaught exception (which
+    # would exit 1 -- non-blocking, i.e. a silent fail-OPEN on this
+    # fail-closed gate).
     try:
+        raw = _read_stdin_text()
         data = json.loads(raw) if raw.strip() else {}
     except Exception:
         block("tool-call payload could not be parsed; cannot verify egress safety.")
