@@ -244,7 +244,10 @@ def warn_if_uncommitted_backlog(log, threshold=UNCOMMITTED_BACKLOG_WARN_AT):
         # walk up to find a repo root cheaply -- git handles this natively
         proc = subprocess.run(
             ["git", "-C", repo, "diff", "HEAD", "--", log],
-            capture_output=True, text=True, timeout=5,
+            # encoding pinned 2026-07-18: bare text=True decodes with the Windows
+            # locale codec (cp1252), which chokes on the log's UTF-8 em-dashes in a
+            # large diff (UnicodeDecodeError surfaced during the 07-18 rollover run).
+            capture_output=True, encoding="utf-8", errors="replace", timeout=5,
         )
         if proc.returncode != 0:
             return

@@ -137,6 +137,7 @@ ACTIVE-deal terms anywhere).
 - **Override protocol:** ONLY after Gabriel's explicit in-turn confirmation, `touch` the named sentinel in `~/.claude/hooks/overrides/` (`allow-external-send` / `allow-website-change`); valid 60 min from mtime. Scheduled/headless sessions must NEVER self-create a sentinel — flag and stop instead.
 - **Before requesting a sentinel:** quote the hook's actual block condition and the exact blocked command in the request. Reads of the site tree pass the gate untouched — a "blocked read" means the command carried a write indicator (`>`, `cp `, `rm `, …), so fix the command instead of overriding (2026-07-09; see memory `feedback_autonomy_gate_blocks_writes_not_reads.md`).
 - **`less-permission-prompts` allowlist upkeep (§6) is now moot under bypass** — keep the allowlist intact anyway as the fallback if the mode is ever reverted.
+- **Decision format — interactive multiple-choice with a researched recommendation, EVERY surface** (Gabriel standing rule 2026-07-18; detail: memory `feedback_interactive_decision_questions.md`): when a pause for a Gabriel ruling is warranted, present it as multiple-choice with the recommended option first. Code surface: AskUserQuestion tool. Cowork/Chat (no interactive tool): emulate with lettered options (a/b/c) + an explicit "Recommended: (x) — why" line, one message, all pending decisions batched. This governs HOW to ask, never expands WHEN to ask.
 
 ## 11. Edit-tool / bash-mount sync verification on large diffs
 
