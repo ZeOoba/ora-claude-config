@@ -106,7 +106,8 @@ except Exception:
 # quo), never a NEW hole, and the coverage meta-test pins the lib's presence.
 try:
     from tool_call_paths import (  # noqa: E402
-        SHELL_TOOLS, normalize_text, shell_analysis, write_targets)
+        GIT_MUTATE_RE, is_shell_tool, normalize_text, shell_analysis,
+        write_targets)
     TOOL_PATHS_LOADED = True
 except Exception:
     TOOL_PATHS_LOADED = False
@@ -196,6 +197,16 @@ def _shell_marker_sets():
     return exempt, governance, claim
 
 
+def _blank_exempt(text, exempt_markers):
+    """Blank the ENTIRE whitespace-delimited token containing an exempt marker, so
+    an exempted path (a worktree tree, a hooks/sessions token write) contributes
+    NOTHING to later marker/root matching -- not even its root prefix."""
+    import re as _re
+    for marker in exempt_markers:
+        text = _re.sub(r"\S*" + _re.escape(marker) + r"\S*", " <exempt> ", text)
+    return text
+
+
 def classify_shell(command):
     """('governance'|'claim', label) for a write-shaped shell command naming a
     protected path, else None."""
@@ -203,13 +214,21 @@ def classify_shell(command):
         return None
     text = normalize_text(command).replace("\\", "/").lower()
     exempt, governance, claim = _shell_marker_sets()
-    for marker in exempt:
-        text = text.replace(marker, " <exempt> ")
+    text = _blank_exempt(text, exempt)
     for marker, label in governance:
         if marker in text:
             return ("governance", label)
     if REGISTRY_BASENAME in text and (CC_SEGMENT in text or LAMS_SEGMENT in text):
         return ("governance", "scheduled-task registry")
+    # file-rewriting git aimed anywhere at the live checkout (REFUTE 2026-07-18:
+    # `git -C ~/.claude checkout main -- hooks/` rewrote the live hook layer with
+    # neither a classic write verb nor a contiguous ".claude/hooks" marker in its
+    # text -- live-proven). Read-only git passes; `git -C ~/.claude checkout -b
+    # feature` false-positives and costs a retry/token -- breadth over precision.
+    root_mentions = (_norm(guard_root()), "~/.claude", ".claude")
+    if GIT_MUTATE_RE.search(text) and any(r in text for r in root_mentions):
+        return ("governance",
+                "file-rewriting git command referencing the live ~/.claude checkout")
     for marker, label in claim:
         if marker in text:
             return ("claim", label)
@@ -318,13 +337,30 @@ def main():
         return  # nothing inspectable / no shape knowledge -> status quo, allow
 
     hits = []  # (kind, label, detail)
-    for target in write_targets(tool_name, tool_input):
+    targets = write_targets(tool_name, tool_input)
+    for target in targets:
         cls = classify_path(target.raw_path)
         if cls:
             hits.append((cls[0], cls[1],
                          "%s (%s via %s)" % (target.raw_path, target.operation,
                                              tool_name)))
-    if tool_name in SHELL_TOOLS:
+    if not targets and not is_shell_tool(tool_name):
+        # GENERIC PATH-FIELD SCAN (REFUTE 2026-07-18): a routed tool the shape
+        # registry does not model (an Excel MCP writer, a future connector's file
+        # tool) must not sail through just because nobody taught the registry its
+        # schema. Deny-by-default on path-shaped input fields, same direction as
+        # ora-autonomy-gate check_mcp's Round 3 fix: any string field that LOOKS
+        # like a path aimed at the governance layer gates the call.
+        for field in ("file_path", "path", "filepath", "notebook_path",
+                      "output_path", "source", "destination", "target", "dest"):
+            raw = tool_input.get(field)
+            if isinstance(raw, str) and raw:
+                cls = classify_path(raw)
+                if cls:
+                    hits.append((cls[0], cls[1],
+                                 "%s (field '%s' via %s)"
+                                 % (raw, field, tool_name)))
+    if is_shell_tool(tool_name):
         analysis = shell_analysis(tool_name, tool_input)
         if analysis is not None and analysis.may_write:
             cls = classify_shell(analysis.command)
