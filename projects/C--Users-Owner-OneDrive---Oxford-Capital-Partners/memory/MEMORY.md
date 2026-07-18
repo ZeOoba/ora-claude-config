@@ -115,6 +115,7 @@
 - [setup-writing-style Platform Skill](reference_writing_style_platform_skill.md) — real gated skill, per-account; never on the filesystem
 
 ## Rules & governance
+- [Interactive decision questions](feedback_interactive_decision_questions.md) — every Gabriel ruling → multiple-choice interactive with a researched recommendation (2026-07-18)
 - [Verify before repeating session claims](feedback_verify_before_repeating_session_claims.md) — confirmed 2x in one session; check ground truth before relaying another session's status claim
 - [Refute pass — proactive by default](feedback_refute_pass_proactive_default.md) — run before declaring done; caught 2 real defects first time
 - [Artifact citation requirement](feedback_artifact_citation_requirement.md) — Resolved/Closed claims in artifacts need a citation; 3/3 artifacts failed this 07-18

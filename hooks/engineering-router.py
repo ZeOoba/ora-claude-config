@@ -10,6 +10,18 @@ def main():
     if not prompt.strip():
         return
 
+    # Fix #2: only route/doctrine-check GENUINE user-prompt text. Background task-notification,
+    # system-reminder, and tool-result turns arrive in this same `prompt` field; scanning them
+    # produced a false DOCTRINE BLOCK (and L7 misroutes) when the notification text quoted
+    # '/code-review ultra <confidential-repo>'. Treat any such non-user text as out of scope.
+    system_markers = (
+        "[system notification", "not user input", "<task-notification", "</task-notification",
+        "task-notification>", "<system-reminder", "</system-reminder", "[background task",
+        "task-result", "<tool_result", "tool result:",
+    )
+    if any(m in prompt for m in system_markers):
+        return
+
     # Fix #1b: '/code-review ultra' is CLOUD review; doctrine forbids it on confidential repos.
     # The slash command itself can't be hooked, but catch the natural-language ask here.
     if any(t in prompt for t in ("code-review ultra", "ultrareview", "ultra review", "cloud review")):
@@ -59,6 +71,17 @@ def main():
     if has("build", "add", "create", "implement", "feature", "make a",
            "write a", "scaffold", "new "):
         lanes.append(("L3", "/build", "brainstorm -> /plan -> worktree -> TDD -> local review -> land"))
+
+    # Fix #1a: research/plan-dominant or explicit "don't code yet" prompts are NOT ship requests.
+    # A prompt whose dominant intent is investigate/plan/review must not route L7 (release/deploy),
+    # even when it name-drops deploy/ship/publish tokens (e.g. "...deployment patterns... before we
+    # ship anything"). Drop L7 so L5 (/research) or L3 (/plan-then-build) intent wins instead.
+    no_code = has("do not start coding", "don't start coding", "do not code", "don't code",
+                  "dont code", "do not write code", "no coding yet", "without writing code",
+                  "before you code", "before coding", "don't code yet")
+    research_plan = has("research", "plan", "review", "evaluate", "audit", "investigate", "assess")
+    if no_code or research_plan:
+        lanes = [l for l in lanes if l[0] != "L7"]
 
     if not lanes:
         return
