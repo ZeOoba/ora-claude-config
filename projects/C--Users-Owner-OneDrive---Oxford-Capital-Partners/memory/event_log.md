@@ -11,6 +11,14 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-18 — systematization-candidates branch PARKED (Gabriel-directed), not merged
+
+Investigated for a possible merge to unblock Plan 2 of the setup-improvement effort. Of its 3 substantive changes: (1) `hooks/ora-autonomy-gate.py`'s OVERRIDE_DIR test-seam fix is **obsolete** — main's 2026-07-17 refactor deleted the bare `OVERRIDE_DIR` constant entirely in favor of the shared `hooks/lib/override_tokens.py` module (`Tier`/`token_grants`/`token_path`); merging the branch's version would partially revert that adversarially-reviewed hardening. (2) its `.gitignore` addition for `maintenance/_state/doctrine-status.json` is **redundant** — main already ignores that path (line 105, landed via a different commit). (3) `agents/deal-recon.md` is already identical on main. Only `maintenance/model-currency-probe.py` (+ test) is genuinely new and non-conflicting, but not merged this pass per Gabriel's explicit choice to park rather than cherry-pick.
+
+**Decision: parked, not merged.** Branch/worktree left as-is at `.claude/worktrees/systematization-candidates` (430bf19) — do not re-attempt a wholesale merge without re-checking `hooks/ora-autonomy-gate.py` against whatever the current override-token architecture is by then, since it may drift further. If `model-currency-probe.py` is wanted later, cherry-pick that one file only.
+
+Plan 2 (effect-verification layer) was NOT actually blocked by this branch's unmerged state in practice — main's `.gitignore`/`_state` untracking convention already independently satisfies the compatibility concern that motivated waiting on it.
+
 ## 2026-07-18 — Architecture-refresh: 3 standing artifacts refreshed + G-batch executed (chip architecture-refresh-2026-07-18, Code/02323ec2)
 
 Fable-planned, Gabriel-ruled (interactive batch, all recommendations accepted), executed same session under the chip claim. Evidence dossier: `00_Governance/outputs/2026-07-18_Architecture-Refresh_FactsDossier_v01.md` (F-01..F-29); plan: `2026-07-18_Architecture-Refresh_ImplementationPlan_v01.md`.
