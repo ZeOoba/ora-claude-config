@@ -132,7 +132,9 @@ systemic bug classes discovered beyond OI-008's Escalation-Date pattern.**
     ID-collision batch).
   Zettler (8), Northwood (7, distinct from the Bay-Care Northwood dedup above), Sunburst (3), and
   6 no-address-but-Active tenants (Eurosort, Upgraded Roofing, Childs Play Diesel Performance,
-  Gator Roofing, I Dig Ditches, Scarlet Covering) — still not touched at all.
+  Gator Roofing, I Dig Ditches, Scarlet Covering) — still not touched at all. **STALE as of the rest
+  of this entry — corrected 2026-07-17 (same-day staleness check): all 4 clusters WERE subsequently
+  worked this same session; see the later progress blocks below for each.**
 **Progress 2026-07-17 (later same day): Sunburst cluster (3 tenants) checked, 3 writes made,
 1 new bug variant found.**
 - Queried Notion for all rows tagged `Property Address` containing "Sunburst" — 5 rows, not 3:
@@ -221,9 +223,10 @@ anomaly flagged.**
   property is real — "Northwood Business Center", 2203-2207 Northwood Drive, **Salisbury, MD
   21801**, landlord "2203 Northwood, LLC" — but every row (including this session's own
   Bay-Care Heating & Air and Childs Play Diesel Performance fixes above, and the ~35+ other active
-  Northwood rows not yet touched) carries the WRONG select option `"2203-2207 Northwood —
-  Columbus OH"`. Same bug class as the Fairground Village Center address mislabel, different
-  manifestation (city/state wrong, not an entity name in the field).
+  Northwood rows not yet touched **at the time this note was written — see the "Northwood bulk
+  address fix — CLOSED" block below for the completion**) carries the WRONG select option
+  `"2203-2207 Northwood — Columbus OH"`. Same bug class as the Fairground Village Center address
+  mislabel, different manifestation (city/state wrong, not an entity name in the field).
 - Added a new correct select option `"2203-2207 Northwood Dr — Salisbury MD"` via
   `notion-update-data-source` (ALTER COLUMN, all 19 pre-existing options + colors restated
   unchanged, re-fetched the schema first to get exact colors — an initial attempt with guessed
@@ -406,10 +409,24 @@ e33105ffe9e4`, `-81e2-9ea1-dc57b288caf3`, `-81ea-beb6-c3df9bc9575e`, `-81f6-9233
 the whole Tenant DB — other properties' title-archived rows may carry the same gap, unverified.
 Verified clean via a fresh `COUNT(*)` query (`Property Address` = the old option AND `Tenant Name
 LIKE '%ARCHIVED%'` AND `Row Retired='__NO__'`) returning 0.
+**Title-archived Row-Retired gap — swept DB-WIDE 2026-07-12, closed 2026-07-17 (Gabriel's explicit
+ask, same day as the Northwood-scoped closure above).** Queried the whole Tenant Database (not
+scoped to any one property) for `Tenant Name LIKE '%ARCHIVED%' AND Row Retired='__NO__'` — 73
+additional rows found (the Northwood 42 above were already closed and correctly excluded from this
+count), spanning 9620 State 350, Zettler, Red Branch, Morrison, FVC/Fairground Village Center, 1100
+Rarig, 1900 N Broadway, 29000 Information Ln, and many with a null Property Address entirely. Set
+`Row Retired=__YES__` on all 73 via `notion-update-page` (full page-ID list in
+`C:\Users\Owner\AppData\Local\Temp\claude\...\scratchpad\dbwide_archived_gap.json` from the
+authoring session, not reproduced here for length — each is independently re-derivable by re-running
+the same query, which now correctly returns empty). One of the 73 is the archived duplicate stub of
+Restoration Church Trust (`32c6ecd8-9e59-81a5-be70-c3902aa151c3`) — distinct page from the live row
+already retired earlier, same treatment applies. **Verified DB-wide clean:** re-running
+`Tenant Name LIKE '%ARCHIVED%' AND Row Retired='__NO__'` with no property filter returns 0 rows —
+**115 total** stale archived rows (42 Northwood + 73 rest-of-DB) now correctly flagged across the
+entire Tenant Database. This specific gap is now fully closed everywhere, not just Northwood.
 **Real scope still remaining:** Chesapeake Communications (retired rather than traced), Granite Tops
-rent/date, Harold Palmer, Maryland Hospital Association, the same title-archive/Row-Retired gap
-unverified across the rest of the Tenant DB beyond Northwood, and the original 93-row universe's
-untouched tenants beyond this session's 5 clusters. This item stays OPEN, not closed.
+rent/date, Harold Palmer, Maryland Hospital Association, and the original 93-row universe's untouched
+tenants beyond this session's 5 clusters. This item stays OPEN, not closed.
 **Auto-check:** none (not a fleet-registry item).
 
 
