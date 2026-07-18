@@ -11,6 +11,16 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-18 — oxford-command-center: NOI/value/rent reconciliation now live, not CI-only
+
+Closed a real gap flagged in ora-intelligence-platform-master-plan.md: reconcile-runtime.ts (the always-on brain.refresh() check feeding the Health module's Reconciliation card) only verified snapshot-internal invariants -- the cross-check against the workbook's own declared "Portfolio Total" row (NOI/value/rent) lived only in scripts/reconcile.ts, the CI-only gate that does a second independent workbook read. reconcile-runtime.ts's own doc comment explicitly named this as the intentional scope split.
+
+Extended parse.ts to capture that row's NOI/Value (Property NOI cols 13/10) and Annualized Rent (Master Tenant Rent Roll col 14) during the SAME single read that already skips it from the per-entity lists -- zero extra I/O. Added snapshot.workbookTotals (nullable per-field, defaults to null for legacy payloads/workbooks with no such row). reconcile-runtime.ts now cross-checks derived sums against these, plus a cash-history-latest-vs-current check that needed no plumbing at all. TDD (tests added to parse-workbook.test.ts + reconcile-runtime.test.ts), full gate:ci green (typecheck/lint/2819 tests/build/bundle-budget), and separately re-verified npm run reconcile against the REAL production Master Workbook (all values match).
+
+Mandatory adversarial REFUTE pass (financial-adjacent code) found one genuine defect before commit: the portfolio-total-row capture had no first-match-only guard, creating last-match-wins semantics inconsistent with reconcile.ts's own find() helper (which returns on first match) -- dormant today but a real latent fragility if a second matching row ever appeared. Fixed (first-match-wins in both parseProperties and parseLeases) with a regression test (two matching rows, asserts the first is kept), re-verified full gate green + real-workbook reconcile clean again.
+
+Committed 33c9aa6, pushed, GitHub Actions CI green (gate job; refute-required correctly skipped -- PR-only trigger, doesn't fire on a direct main push, and the REFUTE pass was performed manually per this org's doctrine regardless).
+
 ## 2026-07-18 — HubSpot Acquisitions-pipeline visibility gap: verified live, precisely scoped, reported to Gabriel
 
 Verified directly against live HubSpot data (Notion/HubSpot MCP connectors came online mid-session): oxford-command-center's HubSpot -> acq_candidates sync (PR #203, commit de23c8f, tested) is fully built and gracefully handles a missing HUBSPOT_TOKEN (400, not a crash) -- but the token was never set in .env, so acq_candidates has 0 rows. Queried HubSpot directly: 4 real deals sit in the Acquisitions pipeline (885606973) -- 6150 Avery Road (Sourced), 1333 Research Road (Screened), 2146 Enterprise Pkwy Twinsburg OH (Screened), Pendleton Trade Center (Screened) -- plus E Fulton Street (Due Diligence stage, but that's the already-declassified/terminated deal; HubSpot's stage just hasn't been updated to reflect that, a separate lower-priority item).
