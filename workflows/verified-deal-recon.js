@@ -9,6 +9,14 @@ export const meta = {
   ],
 }
 
+// v1.1 (2026-07-18, setup-improvement Plan 1 — deal-decision-ledger flywheel): this workflow
+// does NOT write memory/deal-decision-ledger.md itself and never will from inside a Workflow
+// script — ledger rows only get appended by a session AFTER Gabriel confirms the verdict
+// in-turn (never on a provisional/unconfirmed PURSUE/PASS/NEEDS_MORE result). The return value
+// below carries a pre-formatted `ledgerRowDraft` in the ledger's existing schema
+// (Date | Deal | Verdict | one-line reason | buy-box rule validated/refined) purely as a
+// convenience for the calling session to append verbatim once Gabriel ratifies the verdict.
+
 // Property brief arrives via args. Prefer a plain string; tolerate {property:"..."} or undefined.
 const PROPERTY =
   (typeof args === 'string' && args.trim()) ? args.trim()
@@ -101,4 +109,20 @@ ${JSON.stringify(verifs, null, 2)}`,
   { schema:BRIEF_SCHEMA, phase:'Synthesize', label:'synthesis' }
 )
 
-return { property: PROPERTY.split('\n')[0], reconSoloVerdict: recon.recommendation && recon.recommendation.verdict, verifierCount: verifs.length, anyFlip: verifs.some(v => v && v.flipsRecommendation), brief }
+// ---- Ledger-row draft (v1.1) — NOT written to disk; the calling session appends this only
+// after Gabriel confirms the verdict in-session. See the file-header note above.
+const dealName = PROPERTY.split('\n')[0].trim()
+const todayISO = new Date().toISOString().slice(0, 10)
+const ledgerRowDraft = brief
+  ? `| ${todayISO} | ${dealName} | ${brief.verdict} | ${brief.oneLineThesis || brief.preMortem || ''} | — |`
+  : null
+
+return {
+  property: dealName,
+  reconSoloVerdict: recon.recommendation && recon.recommendation.verdict,
+  verifierCount: verifs.length,
+  anyFlip: verifs.some(v => v && v.flipsRecommendation),
+  brief,
+  ledgerRowDraft,
+  ledgerAppendInstruction: 'DRAFT ONLY — on any PURSUE/PASS/NEEDS_MORE verdict Gabriel confirms in-session, append `ledgerRowDraft` (Date | Deal | Verdict | one-line reason | buy-box rule validated/refined) as one row to memory/deal-decision-ledger.md using the existing schema. This workflow never appends it itself.',
+}
