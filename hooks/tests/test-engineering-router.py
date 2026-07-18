@@ -54,4 +54,43 @@ assert cr.isascii(), f"warning must be ASCII, got: {cr!r}"
 cr2 = run("run /code-review ultra on my-public-sandbox")
 assert "confidential" not in cr2.lower(), f"should not flag a non-confidential repo, got: {cr2!r}"
 
+# --- Defect class 1 (2026-07-18 fixture): research/plan-dominant prompt MUST NOT route L7 /ship,
+# even when it name-drops deploy/ship tokens or says "do not start coding". Should route L5/L3-plan (or be silent).
+research_plan_fixture = (
+    "Perform deep research on AI coding architecture and agent deployment patterns. "
+    "Create a plan. Do not start coding yet. Present the detailed step by step plan before we ship anything."
+)
+rp = run(research_plan_fixture)
+assert "/ship" not in rp and "L7" not in rp, f"research/plan prompt must NOT route L7, got: {rp!r}"
+assert "DOCTRINE BLOCK" not in rp, f"research/plan prompt must not trip the doctrine block, got: {rp!r}"
+assert (rp == "") or ("/research" in rp) or ("/plan" in rp) or ("/build" in rp), \
+    f"research/plan prompt should be silent or suggest L5/L3-plan, got: {rp!r}"
+assert rp.isascii(), f"output must be ASCII, got: {rp!r}"
+
+# explicit "do not start coding" alone MUST never yield L7 even with a bare deploy token
+nocode = run("Outline the migration steps, do not start coding. We may deploy later.")
+assert "/ship" not in nocode and "L7" not in nocode, f"'do not start coding' must never yield L7, got: {nocode!r}"
+
+# --- Defect class 2 (2026-07-18 fixture): '/code-review ultra' inside a SYSTEM-NOTIFICATION /
+# task-result turn (agent notification text, NOT a user request) MUST NOT trip the DOCTRINE BLOCK.
+sysnotif = run(
+    "[SYSTEM NOTIFICATION - NOT USER INPUT] Background task completed. "
+    "The agent ran /code-review ultra on oxford-command-center and reported findings."
+)
+assert "DOCTRINE BLOCK" not in sysnotif, f"system-notification text must not trip the doctrine block, got: {sysnotif!r}"
+assert "/ship" not in sysnotif and "L7" not in sysnotif, f"system-notification text must not route a lane, got: {sysnotif!r}"
+
+# task-notification-shaped wrapper likewise ignored
+taskwrap = run("<task-notification>agent finished: /code-review ultra on oxford-command-center</task-notification>")
+assert "DOCTRINE BLOCK" not in taskwrap, f"task-notification wrapper must not trip the doctrine block, got: {taskwrap!r}"
+
+# --- Regression: a GENUINE deploy request still routes L7 /ship
+dep = run("deploy the site to production")
+assert "/ship" in dep, f"genuine deploy request must still route L7 /ship, got: {dep!r}"
+
+# --- Regression: a GENUINE user '/code-review ultra' on a confidential repo still BLOCKS
+genblock = run("run /code-review ultra on oxford-command-center")
+assert ("confidential" in genblock.lower()) and ("local" in genblock.lower()), \
+    f"genuine cloud review on confidential repo must still warn/block, got: {genblock!r}"
+
 print("ALL ROUTER TESTS PASS")
