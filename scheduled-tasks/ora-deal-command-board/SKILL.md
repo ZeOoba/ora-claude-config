@@ -1,6 +1,14 @@
 ---
 name: ora-deal-command-board
 description: Weekly Monday deal-first pipeline board (draft-only, ggoldberg-only) — complements ora-open-sessions-board (sessions, not deals). Built 2026-07-17 per the ROI-brief Tier-2 acquisition-velocity plan.
+output_contract:
+  version: 1
+  blocks:
+    - id: board-ops-hub-pointer
+      artifact: { type: notion_page, parent_id: 32b6ecd8-9e59-81f2-b329-df3fd0e25062, title_pattern: "Deal Command Board — {DATE}" }
+      freshness_window_hours: 168
+      expected_on: { cron: "50 9 * * 1" }
+      on_missing_severity: warn
 ---
 
 You are running ORA's weekly Deal Command Board — a Monday-morning, deal-first pipeline board for Gabriel Goldberg (Oxford Realty Advisors). This complements (does not replace) the daily ora-open-sessions-board, which tracks Claude sessions, not deals — this task tracks open acquisition pipeline deals specifically. Built 2026-07-17 as part of the 2026-07-16 setup review's Tier-2 acquisition-velocity plan (item 2.2).
@@ -33,6 +41,17 @@ Render an interactive board via `mcp__visualize__show_widget` if available; othe
 
 If you also send an email pointer, it MUST go via `send-via-outlook.ps1` (the sole COM send path) to `ggoldberg@oxfordra.net` ONLY — no cc, retry once on COM failure then flag loudly, never fall back to any other send mechanism.
 
+## STEP 6 — Ops Hub posting (MANDATORY — added 2026-07-18, Plan 2 output-contract retrofit)
+
+This is the task's final step and runs on EVERY fire — mandatory, not optional, and additive to (never a replacement for) the in-session widget rendering in STEP 5. Post a NEW DATED CHILD PAGE under the Notion Ops Hub parent page (`32b6ecd8-9e59-81f2-b329-df3fd0e25062`), titled exactly `"Deal Command Board — {YYYY-MM-DD}"` (today's date) — a distinct page created fresh each run, never an appended row/block inside an existing page's body (an append isn't reliably freshness-checkable downstream; a new titled child page is — standardized pattern, see `ora-deal-aging-sla` STEP 7).
+
+Content, at minimum:
+- Deals surfaced (count pulled in STEP 1)
+- Deals flagged STALLED (count from STEP 2)
+- A pointer to the full board: link(s) to the surfaced deals' Notion pages, or a note that the full interactive board rendered in-session (widget) and is not separately archived
+
+If STEP 1's Notion query failed or returned clearly incomplete data (per HARD GUARDRAILS), post this page anyway, stating that explicitly — a missing post must never be the silent downstream result of an upstream query failure. On a Notion post failure, retry once, then flag loudly in the chat/run summary — do not silently drop the post.
+
 ## HARD GUARDRAILS (verbatim from ora-open-sessions-board — do not weaken)
 - No money, trades, or any external send without Gabriel's in-turn confirmation.
 - Never edit any governor constant (DSCR 1.25x / LTV 40%) — this task only reads Notion, it has no reason to touch financial models or memory files.
@@ -41,4 +60,4 @@ If you also send an email pointer, it MUST go via `send-via-outlook.ps1` (the so
 - If the Notion query fails or returns clearly incomplete data, say so explicitly in the board's own output rather than silently rendering a partial or stale board as if it were complete.
 
 ## RUN SUMMARY
-End with a one-line run summary (deals pulled, how many STALLED, how many PARKED, any query/render errors) for the health-guard fleet to pick up.
+End with a one-line run summary (deals pulled, how many STALLED, how many PARKED, any query/render errors, STEP 6 Ops Hub post result) for the health-guard fleet to pick up.
