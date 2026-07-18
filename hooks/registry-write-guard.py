@@ -38,7 +38,23 @@ Stdlib only. ASCII-only. Windows (`python`).
 """
 
 import json
+import os
 import sys
+
+# Tool-call shape knowledge (which tool names write files, and under which path arg)
+# is SHARED via hooks/lib/tool_call_paths.py (2026-07-18) -- this guard and
+# memory-index-guard.py each independently rediscovered the same Desktop Commander
+# blind spot on 2026-07-14; the shared layer is the architectural fix. The fallback
+# preserves this guard's pre-refactor parsing verbatim, so a broken/missing lib
+# degrades to the OLD behavior, never to a new hole.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+try:
+    from tool_call_paths import primary_write_path  # noqa: E402
+except Exception:
+    def primary_write_path(tool_name, tool_input):
+        # pre-refactor parsing, verbatim: generic file_path-or-path for any tool
+        p = tool_input.get("file_path") or tool_input.get("path")
+        return p if isinstance(p, str) and p else None
 
 REGISTRY_BASENAME = "scheduled-tasks.json"
 # Path SEGMENTS (not substrings) that identify a session-registry directory. Segment
@@ -70,10 +86,11 @@ def main():
     tool_input = payload.get("tool_input") or {}
     if not isinstance(tool_input, dict):
         return
-    # Desktop Commander's write_file uses "path", not "file_path" -- edit_block
-    # already matches native Edit's "file_path", so this fallback only changes
-    # write_file's case.
-    file_path = tool_input.get("file_path") or tool_input.get("path")
+    # Path extraction is the shared layer's job (tool_call_paths.primary_write_path):
+    # it knows Desktop Commander's write_file uses "path" (not "file_path"), that
+    # edit_block matches native Edit's field names, and keeps the legacy generic
+    # fallback for any other tool name -- behavior-preserving by contract.
+    file_path = primary_write_path(payload.get("tool_name"), tool_input)
     fleet = registry_fleet(file_path)
     if fleet is None:
         return  # not a registry backing file -> allow
