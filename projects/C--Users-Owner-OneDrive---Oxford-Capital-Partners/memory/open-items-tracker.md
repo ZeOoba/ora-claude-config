@@ -351,11 +351,65 @@ partially resolved; 8 archived duplicates retired.**
   open for now (no action taken; matches what was already done).
 **Cluster tally:** 26 of 29 originally-targeted tenants resolved (corrected or confirmed-correct)
 this pass, across Red Branch (4/5, 1 unresolved), Zettler (7/8 + 1 partial), Northwood (5/7 checked
-individually — cluster turned out to be ~80 rows total, not 7; ~35 more still on the wrong
-Columbus-OH address option, follow-up chip `task_6719632a` spawned), Sunburst (3/3), and the 6
-no-address tenants (6/6, one required the Eurosort schema addition above). Real scope still remains
-(the ~35 Northwood stragglers, Chesapeake Communications now retired rather than traced, Granite
-Tops rent/date, Harold Palmer, Maryland Hospital Association) — this item stays OPEN, not closed.
+individually — cluster turned out to be ~80 rows total, not 7), Sunburst (3/3), and the 6
+no-address tenants (6/6, one required the Eurosort schema addition above).
+**Northwood bulk address fix — CLOSED 2026-07-17 (same day, later).** `task_6719632a` (spawned to
+cover the ~35 remaining wrong-address rows) ran on a Code surface with no Notion MCP access —
+correctly declined to guess, found this tracker entry instead of duplicating scope, and only
+executed the one decision within its reach: retiring Restoration Church Trust per Gabriel's
+instruction (redundant with, and consistent with, the retirement already landed earlier the same
+day — verified no corruption from the double write). The actual bulk fix required Notion's SQL
+`query_data_sources` tool, which hit an `entitlement_required` quota wall (all of today's parallel
+research agents had exhausted the workspace's free query allowance). Gabriel chose to wait; a
+`ScheduleWakeup` retry fired ~1h later, the quota had reset, and the fix ran clean:
+- Query returned 76 rows on the wrong `2203-2207 Northwood — Columbus OH` option, 42 of which
+  (re-counted precisely via a `Tenant Name LIKE '%ARCHIVED%'` filter — the initial "~45" was a rough
+  estimate) are pre-existing `⛔ ARCHIVED 2026-07-12 — ...` title-stub duplicates; each has a live,
+  non-archived counterpart row that WAS address-corrected below. These stubs still carried
+  `Row Retired=__NO__` despite the title prefix — the same title-archive/Row-Retired gap OI-004
+  originally closed for *other* rows had never been swept across the *whole* DB.
+- Corrected all 31 genuinely active rows' `Property Address` to
+  `2203-2207 Northwood Dr — Salisbury MD` via `notion-update-page` (page IDs: `32b6ecd8-9e59-8129-
+  b4af-ded1496b150a`, `-816f-99a8-e8a6ab5e8aa2`, `-817b-8125-d86be72b9dad`, `-819b-bb42-
+  f8010a8b7a9b`, `-81b8-845a-da4525250070`, `-81db-bda5-f6a2e7f5abdf`, `-81fa-84e5-f96603742c66`;
+  `32c6ecd8-9e59-810e-93c1-e8dbf00d50d8`, `-8126-b22b-cbf4a6a16415`, `-8129-9f36-dc1f8f3c2775`,
+  `-8137-ab7e-d81b45ae9a52`, `-813b-8fbc-cae3816393d9`, `-813e-8069-ea5e592d0f0b`, `-8145-aea3-
+  e4195d1e09fd`, `-8152-aee3-fe36e7a608b0`, `-8154-8af1-caa5eed0823c`, `-8169-af36-d84cd109c412`,
+  `-8183-b5e5-e497d53c7c12` [Harold Palmer], `-8195-a0f9-c24a18e82c36`, `-8197-b41e-e7d264c21a53`,
+  `-819a-aaa5-f393ef49a999` [Maryland Hospital Association], `-81ac-92e6-ec46a93b8a2c`, `-81b3-
+  a4f8-d9bb181085ff`, `-81bb-aff5-cb70c4649b27`, `-81c3-a892-f3c18df594a5`, `-81ca-8bea-
+  d5eda7a246d9`, `-81d0-a696-e38f5d5a8732`, `-81d1-8900-d1de717c08a7`, `-81d4-8d10-c06e5b966341`,
+  `-81e0-8570-f3af5bbf977a`; `32f6ecd8-9e59-8107-b967-c787ce72bf1f`). Note: 2 of these (Bay-Care
+  Heating & Air LLC, Childs Play Diesel Performance) had been written to the *old, wrong* Columbus-OH
+  option earlier today by the Red-Branch and no-address cluster passes respectively — those ran
+  before the address bug was discovered, so this closes that loop too. Address-only fix — did NOT
+  touch rent/dates on Harold Palmer or Maryland Hospital Association (both still need primary
+  documents before any content write, per Gabriel's explicit "leave both open" instruction).
+- **Verified clean:** re-query for the wrong address + `Row Retired=__NO__` + not-title-archived
+  returns zero rows; a count of rows on the correct Salisbury-MD option returns 38 (31 just fixed +
+  5 from the original Northwood pass + 2 from the Zettler pass — reconciles exactly).
+**Title-archived Row-Retired gap — CLOSED 2026-07-17 (same day, later, on Gabriel's explicit ask).**
+Set `Row Retired=__YES__` on all 42 stubs identified above via `notion-update-page` (page IDs:
+`32b6ecd8-9e59-8101-86c1-d7603cb3ad4e`, `-8102-8d47-fca88b0ef1a9`, `-8102-a1dd-ec7f2cd716c0`,
+`-8106-b9ab-c557acc9ba54`, `-8107-a825-da21139decc4`, `-810e-b533-e8c63c877dda`, `-8118-8cac-
+c4ee6c492f19`, `-8124-91ad-c559c307b741`, `-8127-9519-c7c56c851e54`, `-8129-8b51-f08158b01266`,
+`-812d-a525-e68ca2b9d8a7`, `-812e-b11c-fa229372a117`, `-8139-95fc-f3e01902910b`, `-813d-a4f4-
+c77d23a715fd`, `-813e-82f0-e19ef206e08a`, `-8143-a63e-f89b62260b35`, `-8145-bea9-e19c1fa29fd2`,
+`-8149-bb15-df2bf604e6f8`, `-8162-83d3-f463ff14ee8b`, `-8164-b103-e19ce2f3c614`, `-817d-a331-
+dd791d13fcec`, `-8187-ba83-f76a490497b6`, `-819a-9b10-c593fdab7a33`, `-819e-89b0-fbbad634f9d7`,
+`-81a2-813f-d93ddba18828`, `-81aa-8a57-c393ebc283d1`, `-81ab-83a9-c3f1110d22ab`, `-81ae-9f80-
+f81ddddc58cf`, `-81b4-9c48-f16f2b7e02c1`, `-81bf-aa43-d57f59bd3c48`, `-81c7-8fa6-f7c2b7af9b03`,
+`-81d3-9608-e0a4ccb061f8`, `-81d5-9b3a-eda044b49a3f`, `-81da-9364-f57b7e7833e4`, `-81de-8194-
+e33105ffe9e4`, `-81e2-9ea1-dc57b288caf3`, `-81ea-beb6-c3df9bc9575e`, `-81f6-9233-c8c0de65ba58`,
+`-81fb-8307-f7496ba02281`, `-81ff-8e98-eba0c1e77ab3`; `32c6ecd8-9e59-81e9-a44e-f6615941b18a`,
+`-81ea-bf89-eeca45958800`). Note: this closes the gap for the 42 Northwood-tagged stubs only, not
+the whole Tenant DB — other properties' title-archived rows may carry the same gap, unverified.
+Verified clean via a fresh `COUNT(*)` query (`Property Address` = the old option AND `Tenant Name
+LIKE '%ARCHIVED%'` AND `Row Retired='__NO__'`) returning 0.
+**Real scope still remaining:** Chesapeake Communications (retired rather than traced), Granite Tops
+rent/date, Harold Palmer, Maryland Hospital Association, the same title-archive/Row-Retired gap
+unverified across the rest of the Tenant DB beyond Northwood, and the original 93-row universe's
+untouched tenants beyond this session's 5 clusters. This item stays OPEN, not closed.
 **Auto-check:** none (not a fleet-registry item).
 
 
