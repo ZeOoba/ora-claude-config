@@ -1,6 +1,22 @@
 ---
 name: ora-broker-touch-cadence
 description: Monthly (2nd, 1:40 PM ET) broker relationship touch cadence — reads the Notion Broker Relationships DB, checks Outlook for recent contact, DRAFTS (never sends) personal pocket-listing check-ins to up to 5 brokers via Outlook COM .Save(); summary to ggoldberg only. Draft-only by design (Hard Invariant 1). Serves acquisition velocity (priority #1); Gabriel-ratified G4b 2026-07-16. v1.0. [MODEL: UNVERIFIABLE | checked 2026-07-16]
+output_contract:
+  version: 1
+  blocks:
+    - id: block-completion-row
+      artifact:
+        type: notion_page
+        page_id: 32b6ecd8-9e59-81f2-b329-df3fd0e25062
+      freshness_window_hours: 30
+      min_count: 1
+      count_semantics: at_least
+      expected_on:
+        cron: "40 13 2 * *"
+      skip_condition: "GUARD CONDITION (STEP 2): if the Broker Relationships DB is unreachable or zero brokers have a 30+ day stale touch, the task posts a shorter guard-exit row and exits early rather than running STEP 3-5 — but a row still posts to Ops Hub in both the normal and guard-exit paths, so absence of any write is still the alarm condition, not brevity of the write."
+      on_missing_severity: warn
+      is_primary_health_signal: true
+      notes: "This task posts an APPENDED row to the shared Ops Hub root page (STEP 5 / GUARD CONDITION), not a distinct dated child page — no per-run page ID exists to check more precisely. Checking this page's last_edited_time is therefore a coarse signal shared with every other task that writes to Ops Hub the same day (2026-08-02, its first scheduled fire, and monthly on the 2nd thereafter); treat freshness here as 'something wrote to Ops Hub that day,' not standalone proof this specific task ran — cross-check lastRunAt via list_scheduled_tasks for confirmation. ID itself (32b6ecd8-9e59-81f2-b329-df3fd0e25062) is verified, not guessed."
 ---
 
 ORA Broker Relationship Touch Cadence (v1.0, Gabriel-ratified G4b 2026-07-16)
