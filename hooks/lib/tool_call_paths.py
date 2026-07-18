@@ -63,20 +63,66 @@ def _dc_names(suffix):
 DC_WRITE_FILE_NAMES = _dc_names("write_file")
 DC_EDIT_BLOCK_NAMES = _dc_names("edit_block")
 DC_MOVE_FILE_NAMES = _dc_names("move_file")
+DC_WRITE_PDF_NAMES = _dc_names("write_pdf")
 DC_START_PROCESS_NAMES = _dc_names("start_process")
 DC_INTERACT_PROCESS_NAMES = _dc_names("interact_with_process")
 
 NATIVE_FILE_TOOLS = frozenset(("Write", "Edit", "MultiEdit"))
 NOTEBOOK_TOOLS = frozenset(("NotebookEdit",))
-SHELL_TOOLS = frozenset(("Bash",)) | DC_START_PROCESS_NAMES | DC_INTERACT_PROCESS_NAMES
 
-FILE_TOOLS = (NATIVE_FILE_TOOLS | NOTEBOOK_TOOLS
-              | DC_WRITE_FILE_NAMES | DC_EDIT_BLOCK_NAMES)
+
+# MCP tool-family recognition is SUFFIX-based, not an exact-name allowlist: the
+# 2026-07-14 gap was partly a PREFIX-coverage gap (mcp__Desktop_Commander__ vs
+# mcp__plugin_desktop-commander_desktop-commander__ -- both live), and a THIRD
+# prefix (a renamed/re-registered connector) would silently re-open an exact-name
+# matcher. Suffix matching closes the whole family at once; a false hit on some
+# unrelated future "..._write_file" tool merely subjects it to write-guard
+# scrutiny, which is the correct default for a tool named like a writer
+# (deny-by-default, same direction as ora-autonomy-gate check_mcp's Round 3 fix).
+def _mcp_family(tool_name, suffix):
+    return isinstance(tool_name, str) and tool_name.startswith("mcp__") \
+        and tool_name.endswith(suffix)
+
+
+def is_dc_write_file(tool_name):
+    return _mcp_family(tool_name, "write_file")
+
+
+def is_dc_edit_block(tool_name):
+    return _mcp_family(tool_name, "edit_block")
+
+
+def is_dc_move_file(tool_name):
+    return _mcp_family(tool_name, "move_file")
+
+
+def is_dc_write_pdf(tool_name):
+    return _mcp_family(tool_name, "write_pdf")
+
+
+def is_shell_tool(tool_name):
+    return tool_name == "Bash" or _mcp_family(tool_name, "start_process") \
+        or _mcp_family(tool_name, "interact_with_process")
+
+
+def is_file_tool(tool_name):
+    return tool_name in NATIVE_FILE_TOOLS or tool_name in NOTEBOOK_TOOLS \
+        or is_dc_write_file(tool_name) or is_dc_edit_block(tool_name) \
+        or is_dc_write_pdf(tool_name)
+
+
+# Exact-name sets kept for consumers that need enumeration (legacy guards' content
+# simulation, the SHAPES registry, settings matchers) -- recognition FUNCTIONS above
+# are what the normalization paths use.
+SHELL_TOOLS = frozenset(("Bash",)) | DC_START_PROCESS_NAMES | DC_INTERACT_PROCESS_NAMES
+FILE_TOOLS = (NATIVE_FILE_TOOLS | NOTEBOOK_TOOLS | DC_WRITE_FILE_NAMES
+              | DC_EDIT_BLOCK_NAMES | DC_WRITE_PDF_NAMES)
 WRITE_CAPABLE_TOOLS = FILE_TOOLS | DC_MOVE_FILE_NAMES | SHELL_TOOLS
 
 
 def is_write_capable(tool_name):
-    return tool_name in WRITE_CAPABLE_TOOLS
+    return tool_name in WRITE_CAPABLE_TOOLS or is_file_tool(tool_name) \
+        or is_dc_move_file(tool_name) or is_shell_tool(tool_name)
 
 
 # --------------------------------------------------------------------- normalization
@@ -138,6 +184,10 @@ def primary_write_path(tool_name, tool_input):
     if tool_name in NOTEBOOK_TOOLS:
         return _clean_str(tool_input.get("notebook_path")) \
             or _clean_str(tool_input.get("file_path"))
+    if is_dc_write_pdf(tool_name):
+        return _clean_str(tool_input.get("file_path")) \
+            or _clean_str(tool_input.get("path")) \
+            or _clean_str(tool_input.get("output_path"))
     # DC write_file: the live DC schema uses "path"; older payloads used "file_path"
     # -- accept both. Field ORDER is file_path-first for every branch below, because
     # that is the legacy guards' exact historical behavior (`file_path or path`) and
@@ -149,17 +199,12 @@ def primary_write_path(tool_name, tool_input):
         or _clean_str(tool_input.get("path"))
 
 
-_FILE_OPERATIONS = {}
-for _n in ("Write",):
-    _FILE_OPERATIONS[_n] = "write"
-for _n in ("Edit", "MultiEdit"):
-    _FILE_OPERATIONS[_n] = "edit"
-for _n in NOTEBOOK_TOOLS:
-    _FILE_OPERATIONS[_n] = "notebook-edit"
-for _n in DC_WRITE_FILE_NAMES:
-    _FILE_OPERATIONS[_n] = "write"
-for _n in DC_EDIT_BLOCK_NAMES:
-    _FILE_OPERATIONS[_n] = "edit"
+def _file_operation(tool_name):
+    if tool_name in ("Edit", "MultiEdit") or is_dc_edit_block(tool_name):
+        return "edit"
+    if tool_name in NOTEBOOK_TOOLS:
+        return "notebook-edit"
+    return "write"  # Write, DC write_file, DC write_pdf, anything else file-shaped
 
 
 def write_targets(tool_name, tool_input):
@@ -168,7 +213,7 @@ def write_targets(tool_name, tool_input):
     -- use shell_analysis() for those; they cannot be statically resolved."""
     if not isinstance(tool_input, dict):
         return []
-    if tool_name in DC_MOVE_FILE_NAMES:
+    if is_dc_move_file(tool_name):
         targets = []
         src = _clean_str(tool_input.get("source"))
         dst = _clean_str(tool_input.get("destination"))
@@ -179,10 +224,10 @@ def write_targets(tool_name, tool_input):
             targets.append(WriteTarget(tool_name, dst, resolve_path(dst),
                                        "move-dest"))
         return targets
-    if tool_name in SHELL_TOOLS:
+    if is_shell_tool(tool_name):
         return []
-    if tool_name in FILE_TOOLS:
-        op = _FILE_OPERATIONS.get(tool_name, "write")
+    if is_file_tool(tool_name):
+        op = _file_operation(tool_name)
         # DECOY DEFENSE: a payload may carry more than one plausible path field
         # (e.g. DC write_file with both "path" -- the live schema field the tool
         # actually honors -- and "file_path"). A gate checking only one of them can
@@ -190,7 +235,7 @@ def write_targets(tool_name, tool_input):
         # path-gating consumer gets a target for EVERY distinct candidate, not just
         # primary_write_path()'s single legacy-ordered answer.
         candidates = []
-        for field in ("file_path", "path", "notebook_path"):
+        for field in ("file_path", "path", "notebook_path", "output_path"):
             raw = _clean_str(tool_input.get(field))
             if raw is not None and raw not in candidates:
                 candidates.append(raw)
@@ -210,6 +255,9 @@ SHELL_WRITE_INDICATORS = (
     ">", "cp ", "copy ", "mv ", "move ", "rm ", "del ", "remove-item",
     "set-content", "add-content", "out-file", "tee ", "new-item", "mkdir ",
     "touch ", "ren ", "rename ", "sed -i", "dd ",
+    # PowerShell item cmdlets (REFUTE 2026-07-18: "move " never matches
+    # "move-item" -- a Move-Item onto settings.json reached exit 0 before this)
+    "move-item", "copy-item", "rename-item",
     # REPL / scripting writers
     "open(", "write_text", "write_bytes", "writefile", "shutil.", "os.remove",
     "os.rename", "os.replace", "unlink(", "rmtree",
@@ -218,12 +266,21 @@ SHELL_WRITE_INDICATORS = (
 # nothing -- must not trip the bare ">" indicator (autonomy-gate 2026-07-09/10 fixes).
 _FD_DUP_RE = re.compile(r"\d*>&\d*|&>{1,2}")
 _NULL_REDIRECT_RE = re.compile(r"\d*>\s*(?:/dev/null|nul)\b", re.IGNORECASE)
+# git verbs that REWRITE working-tree files (REFUTE 2026-07-18: `git -C ~/.claude
+# checkout main -- hooks/` rewrites the live governance layer with no classic write
+# verb in its text -- and the verb is NOT adjacent to "git", so a literal
+# "git checkout" substring also missed it; live-proven). Matches "git", then any
+# same-segment args (no |;&), then a mutating verb as a whole word. Read-only git
+# (log/diff/status/show/ls-files) is deliberately absent.
+GIT_MUTATE_RE = re.compile(
+    r"\bgit\b[^|;&\n]*?\b(checkout|restore|reset|apply|stash|merge|rebase|"
+    r"cherry-pick|clean|revert|pull|switch)\b", re.IGNORECASE)
 
 
 def _shell_text(tool_name, tool_input):
     if not isinstance(tool_input, dict):
         return None
-    if tool_name in DC_INTERACT_PROCESS_NAMES:
+    if _mcp_family(tool_name, "interact_with_process"):
         return tool_input.get("input")
     return tool_input.get("command")
 
@@ -239,6 +296,8 @@ def shell_may_write(command):
     lowered = normalize_text(command).lower()
     lowered = _FD_DUP_RE.sub(" ", lowered)
     lowered = _NULL_REDIRECT_RE.sub(" ", lowered)
+    if GIT_MUTATE_RE.search(lowered):
+        return True
     return any(ind in lowered for ind in SHELL_WRITE_INDICATORS)
 
 
@@ -249,7 +308,7 @@ def shell_analysis(tool_name, tool_input):
     to its file targets. A consumer guard must therefore do its own marker matching
     on the (normalized) command text and must NOT interpret may_write=True with no
     marker hit as "safe" -- it is merely "unresolvable", the honest limit."""
-    if tool_name not in SHELL_TOOLS:
+    if not is_shell_tool(tool_name):
         return None
     text = _shell_text(tool_name, tool_input)
     if not isinstance(text, str):
@@ -309,6 +368,8 @@ def _build_shapes():
             Shape("dc-move-file-source%s" % tag, prefix + "move_file", "move",
                   lambda p, c, o, n: {"source": p,
                                       "destination": "C:/Users/Owner/other/dst.tmp"}),
+            Shape("dc-write-pdf%s" % tag, prefix + "write_pdf", "file",
+                  lambda p, c, o, n: {"path": p, "content": c}),
             Shape("dc-start-process%s" % tag, prefix + "start_process", "shell",
                   lambda p, c, o, n: {"command": 'cmd /c echo %s > "%s"' % (c, p)}),
             Shape("dc-interact-with-process%s" % tag,
