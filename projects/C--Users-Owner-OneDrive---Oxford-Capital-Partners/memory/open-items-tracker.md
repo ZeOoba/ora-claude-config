@@ -32,7 +32,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
 | [OI-009](#OI-009) | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Verify the 93 Notion Tenant DB rows with no workbook counterpart against primary leases (low priority) |
-| [OI-013](#OI-013) | 2026-07-17 | [reference_onedrive_business_scope.md](reference_onedrive_business_scope.md) | A live `oxford-site` git clone sits inside OneDrive sync scope, distinct from the documented `C:\Users\Owner\oxford-site` deploy copy — surfaced incidentally during the OI-012 sweep, not yet investigated |
+| [OI-013](#OI-013) | 2026-07-17 | [reference_onedrive_business_scope.md](reference_onedrive_business_scope.md) | A live `oxford-site` git clone sits inside OneDrive sync scope, distinct from the documented `C:\Users\Owner\oxford-site` deploy copy — surfaced incidentally during the OI-014 sweep, not yet investigated |
 
 ### OI-009
 **Status:** OPEN (substantial progress made 2026-07-17, real scope remains)
