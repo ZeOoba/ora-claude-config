@@ -11,6 +11,14 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-18 — HubSpot Acquisitions-pipeline visibility gap: verified live, precisely scoped, reported to Gabriel
+
+Verified directly against live HubSpot data (Notion/HubSpot MCP connectors came online mid-session): oxford-command-center's HubSpot -> acq_candidates sync (PR #203, commit de23c8f, tested) is fully built and gracefully handles a missing HUBSPOT_TOKEN (400, not a crash) -- but the token was never set in .env, so acq_candidates has 0 rows. Queried HubSpot directly: 4 real deals sit in the Acquisitions pipeline (885606973) -- 6150 Avery Road (Sourced), 1333 Research Road (Screened), 2146 Enterprise Pkwy Twinsburg OH (Screened), Pendleton Trade Center (Screened) -- plus E Fulton Street (Due Diligence stage, but that's the already-declassified/terminated deal; HubSpot's stage just hasn't been updated to reflect that, a separate lower-priority item).
+
+**Real finding: 2146 Enterprise Pkwy, Twinsburg OH does not appear anywhere in projects.md, deal-decision-ledger.md, or recent event_log entries** -- sitting in HubSpot's Screened stage since 2026-03-22, touched 2026-07-17, with zero corresponding awareness in the memory system. Flagged prominently to Gabriel rather than silently noted.
+
+Sent a report to ggoldberg@oxfordra.net only (send-log confirms OK, 2026-07-18T18:29:06-04:00) with the precise deal table and the exact unblock step (add HUBSPOT_TOKEN to oxford-command-center/.env -- a credential, not something to be entered by an assistant). No code changes needed once the token is set; the sync is already tested and ready.
+
 ## 2026-07-18 — systematization-candidates branch PARKED (Gabriel-directed), not merged
 
 Investigated for a possible merge to unblock Plan 2 of the setup-improvement effort. Of its 3 substantive changes: (1) `hooks/ora-autonomy-gate.py`'s OVERRIDE_DIR test-seam fix is **obsolete** — main's 2026-07-17 refactor deleted the bare `OVERRIDE_DIR` constant entirely in favor of the shared `hooks/lib/override_tokens.py` module (`Tier`/`token_grants`/`token_path`); merging the branch's version would partially revert that adversarially-reviewed hardening. (2) its `.gitignore` addition for `maintenance/_state/doctrine-status.json` is **redundant** — main already ignores that path (line 105, landed via a different commit). (3) `agents/deal-recon.md` is already identical on main. Only `maintenance/model-currency-probe.py` (+ test) is genuinely new and non-conflicting, but not merged this pass per Gabriel's explicit choice to park rather than cherry-pick.
@@ -18,6 +26,23 @@ Investigated for a possible merge to unblock Plan 2 of the setup-improvement eff
 **Decision: parked, not merged.** Branch/worktree left as-is at `.claude/worktrees/systematization-candidates` (430bf19) — do not re-attempt a wholesale merge without re-checking `hooks/ora-autonomy-gate.py` against whatever the current override-token architecture is by then, since it may drift further. If `model-currency-probe.py` is wanted later, cherry-pick that one file only.
 
 Plan 2 (effect-verification layer) was NOT actually blocked by this branch's unmerged state in practice — main's `.gitignore`/`_state` untracking convention already independently satisfies the compatibility concern that motivated waiting on it.
+
+## 2026-07-18 — Open-sessions board dispatched; 10 items decided
+
+ora-open-sessions-board 2026-07-18 17:00 ET run: probed 292 unarchived sessions, 10 actionable items reached the board (7 NEEDS-ANSWER, 3 INTERRUPTED; 18 excluded as fleet runs / already-decided-and-unchanged / sub-30-min). Notion deal-stage reconciliation ran clean (0 transitions). Gabriel's decisions:
+
+- **Punch-list tracker "finish this" ask** (local_d0909d82) — Drop, nothing to finish.
+- **Northwood tenant-row fix commit** (local_ba9fbd75) — Leave the hunk uncommitted for the consolidation pass rather than isolating and committing now.
+- **Midwest expansion (Dayton/Fort Wayne/Omaha) target-markets.json draft** (local_54410484) — Not yet.
+- **package-and-stage-skill branch push/PR** (local_46a56789) — Wait; branch stays local, unpushed.
+- **Cowork EOD verification monitor midday check** (local_1f5d6000) — Drop; no second checkpoint added.
+- **acquisition-underwriting v4.0 upgrade prompt** (local_4eedbc94) — Drop; prompt stays in outputs/, not run in Code.
+- **Newsletter archive link-list save folder** (local_c7eb8de7) — Confirmed: Investment Candidates 2026 (its current location; no move needed).
+- **Cornerstone Tours SEO audit DOCX formatting QC** (local_95a563f2) — Drop; deliverable stands as-is, no further formatting pass.
+- **MEMORY.md lines 84-85 over-length trim** (local_b5d10619) — Drop; left over the 150-char policy cap, non-blocking.
+- **Catfish Court, WI (5515 Catfish Court) IC decision** (local_71295051) — Wait; LOI at $2,742,267 vs. Pass not decided. Notion Stage stays "Candidate" — no ledger row (not a terminal disposition).
+
+All ten sessionIds upserted into answered.json. No outbound counterparty communication triggered by any of these decisions.
 
 ## 2026-07-18 — Architecture-refresh: 3 standing artifacts refreshed + G-batch executed (chip architecture-refresh-2026-07-18, Code/02323ec2)
 
