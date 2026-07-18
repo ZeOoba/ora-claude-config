@@ -39,6 +39,7 @@
 - [Open Items Tracker](open-items-tracker.md) — canonical punch-list; other files POINT here, never restate item text
 - [Tenant DB sync](project_tenant_db_no_sync_rootcause.md) — CLOSED 07-17: OI-003–006 all executed
 - ROI-brief implementation 2026-07-17 — CLOSED, pushed `08c305c`; record in the schematic + 07-09/07-16 audit files above
+- [Artifact content — top-5 open items](project_artifact_content_top5_plan_2026-07-18.md) — PLANNED 07-18: northridge/brockton closeout, ora-pm /100 bug, LOI-throughput line, heartbeat fix, 511/275/monthly-close verify
 
 ## Markets
 - [Market Intelligence](markets.md) — Cross-market snapshots, macro (FRED), replacement cost, comps, Columbus submarket
