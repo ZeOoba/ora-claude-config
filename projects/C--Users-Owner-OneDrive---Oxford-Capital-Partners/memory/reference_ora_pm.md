@@ -1,6 +1,6 @@
 ---
 name: reference-ora-pm
-description: ORA PM app (ZeOoba/ora-pm) — local path & oxford-perfection disambiguation, Supabase magic-link redirect whitelist, UX-overhaul roadmap status (Phase 1+2a shipped+pushed, Stripe ACH payments built beyond original scope), and the 2026-07-16 audit findings pointer
+description: ORA PM app (ZeOoba/ora-pm) — local path & oxford-perfection disambiguation, Supabase magic-link redirect whitelist, UX-overhaul roadmap status (Phase 1+2a shipped+pushed, Stripe ACH payments built beyond original scope), 2026-07-16 audit findings pointer, and 2026-07-18 test-suite status
 metadata: 
   node_type: memory
   type: reference
@@ -48,3 +48,11 @@ Spec: `docs/superpowers/specs/2026-06-05-ora-pm-ux-overhaul-design.md` (benchmar
 **Repo state (verified 2026-07-16):** local `main` (`8418c44`) exactly matches `origin/main`; working tree clean; 110 commits total, spanning 2026-06-04–2026-07-08. No uncommitted or unpushed work of any kind. See [[projects]].
 
 **2026-07-16 cc-audit-army audit** (generic-mode, 33 confirmed findings: 3 critical/4 high/14 medium/12 low) — report: `Claude_Workspace/02_Outputs/2026-07-16_ora-pm_AuditReport_v01.md`. Criticals: an `ar_ledger` SQL view cartesian-fan-out corrupting AR balances past month two (feeds the late-fee cron), PortalDashboard dividing already-dollar values by 100 (tenants see 1/100th of balance owed), and real (declassified E. Fulton) deal terms committed in git-tracked `.env.example` — remediated same day: `.dev.vars` created locally with the real value (properly gitignored), `.env.example` line 8 needs a manual one-line placeholder swap (blocked for Claude by a machine-wide `.env`-pattern edit hook), and a git-history purge procedure was prepared but not run (Gabriel's call — the deal is declassified, so this is hygiene, not an active-invariant breach). Production secrets were confirmed already correctly provisioned via `wrangler pages secret put` — the leak never reached the live deployment.
+
+## Test-suite status (verified 2026-07-18)
+
+A task was raised to fix `npm test` pollution allegedly caused by a stray untracked `node_modules.bak_local/` directory (a local Stripe-package backup whose name didn't match `vitest.config.ts`'s `configDefaults.exclude` glob, so ~49 bundled `@stripe/*` vendor tests were being collected alongside the real suite). On investigation the directory did not exist — not at the repo root, not found anywhere under the user profile via search, and absent from `git status`. `npx vitest run` confirmed a clean run: exactly the repo's own 32 test files, 178 tests, all passing, no vendor-test noise. `vitest.config.ts` was left unmodified — no `test.exclude` entry was needed.
+
+**Why noted:** the directory must have been removed or moved out-of-band (untracked, so no commit trail) sometime before 2026-07-18 — the symptom had already self-resolved. If a similar "stray node_modules.bak* pollutes vitest" report recurs, check for the directory's actual presence first rather than assuming the prior fix regressed.
+
+**Also observed 2026-07-18 (contradicts the 2026-07-16 "clean working tree" note above):** `git status` showed in-progress uncommitted portal-charges work (`src/portal/lib/charges.ts` new, `portal-api.ts`/`PortalDashboard.tsx`/`PortalMyLease.tsx`/`PortalPayNow.tsx` modified, 3 new test files) — someone's active WIP, left untouched. The "no uncommitted or unpushed work" repo-state claim above is stale as of this date; treat `git status` as authoritative over that note going forward.
