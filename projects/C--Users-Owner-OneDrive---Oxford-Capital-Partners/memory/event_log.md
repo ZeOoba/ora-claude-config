@@ -11,6 +11,10 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-17 — OI-009: Harold Palmer resolved, Maryland Hospital / Granite Tops re-checked (OI-009 sub-item)
+
+Re-checked the 4 named 93-row-universe stragglers left open from earlier OI-009 passes. **Harold Palmer**: located the addendum's source `.docx` (prior pass only found the DocuSign completion-certificate page) plus its own DocuSign audit trail confirming full execution (signed by Eric Goldberg, 2025-03-26). Wrote `Monthly Rent` 1157→1166 and `Lease Expiration` null→2027-04-30 via `notion-update-page`, verified via fresh fetch. **Maryland Hospital Association**: found a newer Third Addendum resolving the earlier entity-name ambiguity (confirms "The Maryland Hospital Association, Incorporated" as the tenant's proper name) and giving Termination 5/31/2027 + Rent $2,332/mo effective 6/1/2026 — but no executed/signed copy located despite two targeted searches, so left unwritten pending confirmation. **Granite Tops**: re-confirmed still unresolved, same blank-signature addenda as before plus one previously undocumented smaller-footprint draft. **Chesapeake Communications**: already retired per Gabriel's prior decision, fresh search found nothing new. Detail: `open-items-tracker.md` OI-009.
+
 ## 2026-07-17 — ora-uw-northridge-brockton-full RE-ARMED (Gabriel-directed) — on CC/MCP, not LAMS
 
 - **Gabriel directed a clean scheduled re-arm** of the one-time northridge/brockton FULL underwriting that this morning's setup-review-closeout recheck found deleted from the registry (see prior entry — item (c) never fired). Registered via supervised `create_scheduled_task` (MCP, no JSON splice) with QC verified against `list_scheduled_tasks`: `enabled:true`, one-time `fireAt 2026-07-18T14:00:00Z` (10:00 ET), path `~\.claude\scheduled-tasks\ora-uw-northridge-brockton-full\SKILL.md`, id unique across both fleets.

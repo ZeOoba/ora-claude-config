@@ -424,9 +424,28 @@ already retired earlier, same treatment applies. **Verified DB-wide clean:** re-
 `Tenant Name LIKE '%ARCHIVED%' AND Row Retired='__NO__'` with no property filter returns 0 rows —
 **115 total** stale archived rows (42 Northwood + 73 rest-of-DB) now correctly flagged across the
 entire Tenant Database. This specific gap is now fully closed everywhere, not just Northwood.
-**Real scope still remaining:** Chesapeake Communications (retired rather than traced), Granite Tops
-rent/date, Harold Palmer, Maryland Hospital Association, and the original 93-row universe's untouched
-tenants beyond this session's 5 clusters. This item stays OPEN, not closed.
+**Harold Palmer — resolved 2026-07-17 (later, same day).** Gabriel asked to re-check the 93-row-universe
+stragglers. Found the source `.docx` of the Suite A14 addendum (not just the DocuSign completion-certificate
+page found previously) plus its own DocuSign audit trail: signed by Eric Goldberg 2025-03-26, "Agreement
+completed." Terms: Termination 4/30/2027; Rent $1,157/mo effective 5/1/2025 (already matched Notion),
+stepping to $1,166/mo effective 5/1/2026 (past-due, Notion was stale). Wrote via `notion-update-page`
+(`32c6ecd8-9e59-8183-b5e5-e497d53c7c12`): `Monthly Rent` 1157→1166, `Lease Expiration` null→2027-04-30.
+Verified via fresh fetch.
+**Maryland Hospital Association — better evidence found, still not written.** Located a Third Addendum
+(newer than the addendum previously on file) that resolves the earlier entity-name ambiguity outright —
+it states the tenant's proper name is "The Maryland Hospital Association, Incorporated", matching Notion's
+tenant name — and gives Termination extended to 5/31/2027 (resolves the earlier already-past date) and
+Rent $2,332/mo effective 6/1/2026 (vs. Notion's current $1,483.39). However this copy has blank signature
+blocks and two targeted searches for a DocuSign certificate / executed PDF came back empty — unlike Harold
+Palmer, execution is NOT confirmed. Left unwritten pending either a signed copy or Gabriel's explicit
+go-ahead to write from the unexecuted draft.
+**Granite Tops rent/date — re-checked, unchanged.** Re-found the same 5/28/2026 addendum ($8,750/mo,
+11,160 SF, through 5/31/2029) plus a second, smaller-footprint draft (6,200 SF, $5,000/mo) not previously
+documented — both still have blank, unsigned signature blocks; no executed/PDF version located. Genuinely
+still blocked, no change.
+**Real scope still remaining:** Chesapeake Communications (retired rather than traced, unchanged), Maryland
+Hospital Association (better data, unexecuted), Granite Tops rent/date (unchanged), and the original 93-row
+universe's untouched tenants beyond this session's 5 clusters. This item stays OPEN, not closed.
 **Auto-check:** none (not a fleet-registry item).
 
 
