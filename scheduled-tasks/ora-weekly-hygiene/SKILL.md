@@ -1,6 +1,44 @@
 ---
 name: ora-weekly-hygiene
 description: ORA Weekly Hygiene — single sequential Sunday session (20:00 ET) folding five hygiene tasks: A) Claude Workspace Hygiene → B) OneDrive Cleanup (reversible quarantine) → C) SharePoint Aging & Freshness → D) Artifact Staleness Scan → E) Session Pruner → F) legacy task-dir classification → G) EOS telemetry rollup → H) system inventory refresh → I) git repo ref integrity scan → J) Tenant DB completeness spot-check. v1.0 2026-06-03 Phase 3 merge, extended through 2026-07-09. Re-enabled 2026-07-09 (Gabriel-approved, post-recovery-stabilization confirmation). [MODEL: UNVERIFIABLE | checked 2026-07-09]
+output_contract:
+  version: 1
+  blocks:
+    - id: block-d-artifact-staleness
+      artifact: { type: file, path_glob: "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-weekly-hygiene\\_state\\block-D-last-run.json" }
+      freshness_window_hours: 192
+      expected_on: { cron: "15 20 * * 0" }
+      on_missing_severity: info
+    - id: block-e-session-pruner
+      artifact: { type: file, path_glob: "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-weekly-hygiene\\_state\\block-E-last-run.json" }
+      freshness_window_hours: 192
+      expected_on: { cron: "15 20 * * 0" }
+      on_missing_severity: info
+    - id: block-f-legacy-task-dir
+      artifact: { type: file, path_glob: "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-weekly-hygiene\\_state\\block-F-last-run.json" }
+      freshness_window_hours: 192
+      expected_on: { cron: "15 20 * * 0" }
+      on_missing_severity: info
+    - id: block-g-telemetry-rollup
+      artifact: { type: file, path_glob: "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-weekly-hygiene\\_state\\block-G-last-run.json" }
+      freshness_window_hours: 192
+      expected_on: { cron: "15 20 * * 0" }
+      on_missing_severity: info
+    - id: block-h-system-inventory
+      artifact: { type: file, path_glob: "C:\\Users\\Owner\\.claude\\docs\\system-inventory.md" }
+      freshness_window_hours: 192
+      expected_on: { cron: "15 20 * * 0" }
+      on_missing_severity: info
+    - id: block-i-git-ref-integrity
+      artifact: { type: file, path_glob: "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-weekly-hygiene\\_state\\block-I-last-run.json" }
+      freshness_window_hours: 192
+      expected_on: { cron: "15 20 * * 0" }
+      on_missing_severity: info
+    - id: block-k-session-env-retention
+      artifact: { type: file, path_glob: "C:\\Users\\Owner\\.claude\\maintenance\\session-env-retention.log" }
+      freshness_window_hours: 192
+      expected_on: { cron: "15 20 * * 0" }
+      on_missing_severity: info
 ---
 
 RE-ENABLE NOTE (2026-07-09): Gabriel confirmed re-enabling this task effective 2026-07-09 (post-recovery-stabilization). Re-enabled via the supervised `update_scheduled_task` MCP tool (no registry JSON edited directly) — verified live via `list_scheduled_tasks`: `enabled: true`, next fire 2026-07-12 (Sunday) ~20:00 ET. Supersedes the "re-enable only per Gabriel's direction" hold noted in the restoration note immediately below.
@@ -131,6 +169,8 @@ G. **Permission anomalies** — files shared externally or org-wide read; list s
 
 **Output:** Email **TO ggoldberg@oxfordra.net only** via the canonical send path. Subject: "ORA Artifact Staleness Scan — [Date]"; **[ACTION REQUIRED]** prefix for any Broken artifact. Body: artifact name, last-updated timestamp, status (Fresh / Stale / Broken), recommended action. Format: ORA Institutional Style Guide v1.0+. (No Notion write required; if one is added, apply the SHARED PUBLICATION GUARD.)
 
+**Block D state marker (added 2026-07-18, Plan 2 output-contract retrofit):** as this block's final action, EVERY run — including a run that finds nothing stale or broken — append one line to `C:\Users\Owner\.claude\scheduled-tasks\ora-weekly-hygiene\_state\block-D-last-run.json` (create the `_state\` folder if absent): `{"lastRun": "<ISO timestamp>", "outcome": "<N artifacts scanned, N stale, N broken>"}`. This does not change what the block does — it exists solely so a downstream contract check can see this block ran without needing the email's content.
+
 ---
 
 # BLOCK E — SESSION PRUNER (report-only, no auto-delete)
@@ -175,11 +215,15 @@ Complements E's automation-session sweep with the OTHER archive class: substanti
 3. **Calibration context (2026-07-12 — re-verify live, do not treat as permanent):** "Auto-archive after PR merge or close" is ON (Settings → Claude Code), so PR-linked sessions self-retire — do NOT surface PR-linked sessions here. `settings.json` `cleanupPeriodDays=14` deletes session files >14d at startup (bounds the long tail). `ora-aaos-expire-leases` cadence was cut 17→6/day the same day. These reduce but do not eliminate the daily trickle — hence this weekly reminder still earns its place.
 4. **Report-only — no autonomous archive exists.** `archive_session` ALWAYS prompts for confirmation; there is NO headless/board-archive API (confirmed 2026-07-12). This sub-block SURFACES the sweep list for Gabriel's one-click archival ONLY — it archives nothing, exactly like the rest of Block E.
 
+**Block E state marker (added 2026-07-18, Plan 2 output-contract retrofit):** as the final action of Block E (after E, E.2, and E.3 have all run) — EVERY run, including a "zero candidates, nothing delivered" run per E's step 7 — append one line to `C:\Users\Owner\.claude\scheduled-tasks\ora-weekly-hygiene\_state\block-E-last-run.json` (create the `_state\` folder if absent): `{"lastRun": "<ISO timestamp>", "outcome": "<N prune candidates / N open-session archive candidates / N high-freq duplicates; delivery path used (email/Notion/local-file/none)>"}`. This does not change what the block does — it exists solely so a downstream contract check can see this block ran, independent of which delivery fallback fired.
+
 ---
 
 # BLOCK F — LEGACY TASK-DIR CLASSIFICATION (bounded: max 5 dirs/week; never hard-delete)
 
 Read §7 of `C:\Users\Owner\OneDrive - Oxford Capital Partners\Claude_Workspace\00_Governance\outputs\2026-06-10_fleet-disposition-ledger.md` (pending dirs under `Documents\Claude\Scheduled`). For up to 5 dirs per week: check each dir's SKILL.md against the live registries (run `maintenance/fleet-status.py`) and the merged-blocks list in the ledger; classify ARCHIVE (move folder to `_archive_2026-06-09_retired\`) or KEEP (record why by updating the ledger's §7). Never hard-delete. Stop after 5/week; backlog clears in ~3 weeks. If the ledger file itself did not survive the migration, note this as a coverage gap and skip Block F this run rather than inventing a disposition list.
+
+**Block F state marker (added 2026-07-18, Plan 2 output-contract retrofit):** as this block's final action, EVERY run — including a "0 pending dirs this week" or "ledger file absent, block skipped" run — append one line to `C:\Users\Owner\.claude\scheduled-tasks\ora-weekly-hygiene\_state\block-F-last-run.json` (create the `_state\` folder if absent): `{"lastRun": "<ISO timestamp>", "outcome": "<N dirs classified (N archived / N kept) or reason skipped>"}`. This does not change what the block does — the block's own ledger write only happens when there's something to classify; this marker happens unconditionally so a downstream contract check can see the block ran at all.
 
 ---
 
@@ -194,6 +238,8 @@ Read §7 of `C:\Users\Owner\OneDrive - Oxford Capital Partners\Claude_Workspace\
 3. **Delivery — NO email.** This block sends nothing (routing canon: no new automated sends; ggoldberg-only canon unaffected). Its output is a short "EOS Telemetry & Meta-Work Ratio" section — the rollup output verbatim + the ratio line + the trend comment — placed in the END-OF-SESSION RUN SUMMARY below. Do not fold it into another block's email (blocks stay un-cross-wired).
 
 **Guards:** strictly read-only — this block mutates no files, registries, or memory. If the rollup script is missing or errors, record that in the run summary and continue; never halt the session over telemetry.
+
+**Block G state marker (added 2026-07-18, Plan 2 output-contract retrofit):** as this block's final action, EVERY run — including a "no telemetry recorded yet" or rollup-script-missing run — append one line to `C:\Users\Owner\.claude\scheduled-tasks\ora-weekly-hygiene\_state\block-G-last-run.json` (create the `_state\` folder if absent): `{"lastRun": "<ISO timestamp>", "outcome": "<META-WORK RATIO tooling:deal = N:M, or reason unavailable>"}`. This does not change what the block does — Block G's own output stays chat-log-only (no email, no Notion); this marker is the sole durable trace of the run, added purely so a downstream contract check can confirm it fired.
 
 ---
 
@@ -213,6 +259,8 @@ Read §7 of `C:\Users\Owner\OneDrive - Oxford Capital Partners\Claude_Workspace\
 
 **Guards:** strictly read-only except the single docs file; never halt the session if a probe errors — note it in the run summary and continue.
 
+**Output-contract note (added 2026-07-18, Plan 2 retrofit):** unlike D/E/F/G/I, this block does NOT get a new `_state\` marker — step 2's unconditional full overwrite of `system-inventory.md` on every run already satisfies the "durable artifact, every run including nothing-to-report" bar. The `output_contract` entry `block-h-system-inventory` in this file's frontmatter points directly at that doc; do not add a redundant state file.
+
 ---
 
 # BLOCK I — GIT REPO REF INTEGRITY SCAN (report-only; added 2026-07-07)
@@ -228,6 +276,8 @@ Read §7 of `C:\Users\Owner\OneDrive - Oxford Capital Partners\Claude_Workspace\
 4. **Delivery:** no new email (blocks stay un-cross-wired). Append one line to the END-OF-SESSION RUN SUMMARY: `Block I — Git Repo Ref Integrity: N repos scanned · N broken refs · N fsck errors`. If any broken refs are found, also append the repo path + full ref list so Gabriel can act without re-running the scan.
 
 **Guards:** strictly read-only — no ref deletion, no gc, no repair; never halt the session if a probe errors — note it in the run summary and continue.
+
+**Block I state marker (added 2026-07-18, Plan 2 output-contract retrofit):** as this block's final action, EVERY run — including a "0 repos scanned" or "0 broken refs" run — append one line to `C:\Users\Owner\.claude\scheduled-tasks\ora-weekly-hygiene\_state\block-I-last-run.json` (create the `_state\` folder if absent): `{"lastRun": "<ISO timestamp>", "outcome": "<N repos scanned, N broken refs, N fsck errors>"}`. This does not change what the block does — it exists solely so a downstream contract check can see this block ran.
 
 ---
 
@@ -260,6 +310,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\maint
 The script enforces every safety check itself (live-sessionId exclusion read fresh from `~/.claude\sessions\*.json`, 90-day LastWriteTime gate, `_archive\` never a candidate, non-empty candidates logged as ANOMALY but still archived — a move preserves content, fail-open exit 0) and logs to `maintenance\session-env-retention.log`.
 
 **Delivery:** no new email. Append to the END-OF-SESSION RUN SUMMARY the script's final summary line (`LIVE sweep done: … candidates-archived=N kept-in-window=N …`). If the script reports any `ANOMALY non-empty candidate`, surface that in the summary explicitly — it means the app started writing real content into these dirs and the policy needs re-review.
+
+**Output-contract note (added 2026-07-18, Plan 2 retrofit):** unlike D/E/F/G/I, this block does NOT get a new `_state\` marker — `session-env-retention.ps1` already logs to `maintenance\session-env-retention.log` unconditionally on every run. The `output_contract` entry `block-k-session-env-retention` in this file's frontmatter points directly at that log; do not add a redundant state file.
 
 ---
 
