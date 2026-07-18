@@ -11,6 +11,10 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-17 — OI-009: Granite Tops vacating, unsigned lease-extension addendum now moot (OI-009 sub-item)
+
+Gabriel confirmed Granite Tops & More is vacating end of month (2026-07-31), mooting the unsigned 5/28/2026 addendum that had proposed extending the lease to 2029-05-31 — the tenant isn't renewing, they're leaving. Wrote via `notion-update-page`: `Lease Status` → Notice Given, `Lease Expiration` → 2026-07-31 (vacate date). `Monthly Rent` ($16,713.65, still unexplained by any source found) left as-is — now a move-out reconciliation question rather than a lease-terms one. Verified via fresh fetch. This closes the last blocking item on OI-009's 4 named stragglers list — only Chesapeake Communications (already retired) and the untouched rest of the 93-row universe remain. Detail: `open-items-tracker.md` OI-009.
+
 ## 2026-07-17 — OI-009: Maryland Hospital Association tenant-rename question decided (OI-009 sub-item)
 
 Gabriel decided the LogicQual Research Institute reassignment flagged in the prior entry: keep `Tenant Name` as Maryland Hospital Association, no rename. Updated the row's `Notes` to record the decision. Closes the last open thread on this tenant. Detail: `open-items-tracker.md` OI-009.

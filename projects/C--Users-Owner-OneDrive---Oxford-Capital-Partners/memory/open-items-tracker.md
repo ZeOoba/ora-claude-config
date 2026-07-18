@@ -445,13 +445,16 @@ also reassigns the Tenant under the Prime Lease from Maryland Hospital Associati
 Institute, Inc." (an MHA affiliate per the tenant-termination-right clause), releasing MHA from all
 obligations. Gabriel confirmed: keep `Tenant Name` as Maryland Hospital Association, no rename. Decision
 recorded in the row's own `Notes`.
-**Granite Tops rent/date — re-checked, unchanged.** Re-found the same 5/28/2026 addendum ($8,750/mo,
-11,160 SF, through 5/31/2029) plus a second, smaller-footprint draft (6,200 SF, $5,000/mo) not previously
-documented — both still have blank, unsigned signature blocks; no executed/PDF version located. Genuinely
-still blocked, no change.
-**Real scope still remaining:** Chesapeake Communications (retired rather than traced, unchanged),
-Granite Tops rent/date (unchanged), and the original 93-row universe's untouched tenants beyond this
-session's 5 clusters. This item stays OPEN, not closed.
+**Granite Tops rent/date — moot, resolved 2026-07-17 (later, same day).** The 5/28/2026 addendum
+($8,750/mo, 11,160 SF, through 5/31/2029) was never executed and is now moot: Gabriel confirmed the
+tenant is vacating end of month (2026-07-31). Wrote via `notion-update-page` (`32b6ecd8-9e59-81b0-90f7-
+fc8c610b609f`): `Lease Status` → Notice Given, `Lease Expiration` 2026-05-31 (stale) → 2026-07-31 (vacate
+date). `Monthly Rent` ($16,713.65, still unexplained by any source found) deliberately left as-is —
+final figure is now a move-out reconciliation question, not a lease-terms question. Verified via fresh
+fetch. Note: AR Balance shows $180.19 at 90+ days aged — not chased further, outside this item's scope.
+**Real scope still remaining:** Chesapeake Communications (retired rather than traced, unchanged) and
+the original 93-row universe's untouched tenants beyond this session's 5 clusters. This item stays OPEN,
+not closed.
 **Auto-check:** none (not a fleet-registry item).
 
 
