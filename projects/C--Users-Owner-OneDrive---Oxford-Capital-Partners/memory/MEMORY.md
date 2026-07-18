@@ -116,6 +116,7 @@
 ## Rules & governance
 - [Verify before repeating session claims](feedback_verify_before_repeating_session_claims.md) — confirmed 2x in one session; check ground truth before relaying another session's status claim
 - [Refute pass — proactive by default](feedback_refute_pass_proactive_default.md) — run before declaring done; caught 2 real defects first time
+- [Artifact citation requirement](feedback_artifact_citation_requirement.md) — Resolved/Closed claims in artifacts need a citation; 3/3 artifacts failed this 07-18
 - [Prompt-embedded current-state prose](feedback_prompt_current_state_prose.md) — baked shas/counts rot; refresh at runtime or tag `curated @` + VERIFY
 - [Workflow invocation gotchas](feedback_workflow_invocation_gotchas.md) — stale name resolution + stringified args; verify result post-run
 - [Routines default model](feedback_routines_default_model.md) — all routines default to claude-sonnet-5 unless told otherwise

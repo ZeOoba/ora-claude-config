@@ -11,6 +11,16 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-18 — 3 most-recent artifacts remediated: schematic-working, review-v02-working.md, Setup Audit 2026-07-09
+
+Gabriel requested a deep review + fix plan for his 3 most recently updated Claude.ai artifacts (all touched 2026-07-18), then had it re-evaluated via Fable and executed via a subagent-driven remediation pipeline (fact-verification → 3 parallel draft writers → cross-artifact refute pass → 2 targeted fix passes → publish). All 3 republished in place, same URLs.
+
+**Most consequential finding:** review-v02's closeout claim that `ora-uw-northridge-brockton-full` "was retired rather than fired" was factually wrong per live `list_scheduled_tasks` + event_log evidence — the task's deadline was re-armed/slipped from 2026-07-17 16:01 ET to 2026-07-18 10:00 AM ET and it DID fire today (`lastRunAt` 2026-07-18T14:16:29Z), then auto-disabled per normal one-time-task lifecycle. Corrected in the artifact. **Open follow-up, not yet resolved:** whether the fired run's actual output (6-tab Excel workbook, summary email) completed successfully has not been confirmed by any artifact or memory entry — flagging for Gabriel or a follow-up session to verify directly.
+
+**10 facts verified against ground truth** (skill version, task KEEP/retired state, 754 Old State Route 74 pipeline stage, B3 migration closure, Apify/chrome-devtools disposition, confidentiality-guard test count, live fleet counts, live agent roster count, underwriting-defaults table fill-state, dropped-connector dispositions) — dossier at session scratchpad, not persisted. Several original review-pass "findings" (754 dual-classification, KEEP-ruling "reversal") turned out to be false positives on closer reading, not real contradictions — resolved via re-reading rather than a documentation fix.
+
+**Process gap identified and closed:** all 3 artifacts shared one root-cause defect — Resolved/Closed claims asserted without a citation. New standing memory: [[feedback_artifact_citation_requirement]]. No registry writes were needed or attempted; no `BLOCKED-NEEDS-COWORK` items surfaced.
+
 ## 2026-07-17 — OI-009: Granite Tops vacating, unsigned lease-extension addendum now moot (OI-009 sub-item)
 
 Gabriel confirmed Granite Tops & More is vacating end of month (2026-07-31), mooting the unsigned 5/28/2026 addendum that had proposed extending the lease to 2029-05-31 — the tenant isn't renewing, they're leaving. Wrote via `notion-update-page`: `Lease Status` → Notice Given, `Lease Expiration` → 2026-07-31 (vacate date). `Monthly Rent` ($16,713.65, still unexplained by any source found) left as-is — now a move-out reconciliation question rather than a lease-terms one. Verified via fresh fetch. This closes the last blocking item on OI-009's 4 named stragglers list — only Chesapeake Communications (already retired) and the untouched rest of the 93-row universe remain. Detail: `open-items-tracker.md` OI-009.
