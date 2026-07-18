@@ -32,7 +32,6 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
 | [OI-009](#OI-009) | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Verify the 93 Notion Tenant DB rows with no workbook counterpart against primary leases (low priority) |
-| [OI-013](#OI-013) | 2026-07-17 | [reference_onedrive_business_scope.md](reference_onedrive_business_scope.md) | A live `oxford-site` git clone sits inside OneDrive sync scope, distinct from the documented `C:\Users\Owner\oxford-site` deploy copy — surfaced incidentally during the OI-014 sweep, not yet investigated |
 
 ### OI-009
 **Status:** OPEN (substantial progress made 2026-07-17, real scope remains)
@@ -359,25 +358,12 @@ no-address tenants (6/6, one required the Eurosort schema addition above). Real 
 Tops rent/date, Harold Palmer, Maryland Hospital Association) — this item stays OPEN, not closed.
 **Auto-check:** none (not a fleet-registry item).
 
-### OI-013
-**Status:** OPEN
-**Opened:** 2026-07-17
-**Source:** [reference_onedrive_business_scope.md](reference_onedrive_business_scope.md) — surfaced incidentally during the OI-014 ora-pm sweep
-**Description:** An exhaustive `.git`-marker sweep of all three OneDrive roots (run for OI-014,
-scoped to `ora-pm`) also turned up a live git clone at `Claude_Workspace/01_Workspace/oxford-site/.git`
-inside the business OneDrive root. CLAUDE.md documents `C:\Users\Owner\oxford-site` as *the*
-no-git deploy copy (`website-canonical` is the canonical repo). This second, git-tracked
-`oxford-site` sitting inside OneDrive sync scope is a different location than what's documented,
-and — per the same git-internals-vs-consumer-sync-client concern that flagged the ora-pm and
-stale website clones before it — is worth a look: is it a stray clone, an intentional second
-deploy copy, or leftover from an old workflow? Not investigated further this pass (out of WS-7's
-ora-pm-specific scope); no destructive action taken.
-**Auto-check:** none.
 
 ## Closed
 
 | ID | Opened | Closed | Source | One-line |
 |----|--------|--------|--------|----------|
+| [OI-013](#OI-013) | 2026-07-17 | 2026-07-17 | [reference_onedrive_business_scope.md](reference_onedrive_business_scope.md) | Second `oxford-site` git clone was a known, already-repaired legacy checkout (Gabriel, 2026-07-16) — not a live risk; leaked deploy token already purged + rotated same day |
 | [OI-012](#OI-012) | 2026-07-17 | 2026-07-17 | ora-deal-command-board SKILL.md STEP 2 | Stamp `Last Activity` from deal-touching skills so the board's stall flag is authoritative — field+board+3 skills stamped, Save-skill reimport of all 3 confirmed by Gabriel, PENDING_REIMPORT.md cleared |
 | [OI-011](#OI-011) | 2026-07-17 | 2026-07-17 | [project_bash_guard_indirection_gap.md](project_bash_guard_indirection_gap.md) | bash-guard.mjs: core.hooksPath read/write + cp guard-path source/dest false positives fixed |
 | [OI-010](#OI-010) | 2026-07-17 | 2026-07-17 | [project_bash_guard_indirection_gap.md](project_bash_guard_indirection_gap.md) | bash-guard.mjs: closed git-alias/wrapper-script indirection across all 7 blocked command classes |
@@ -390,6 +376,47 @@ ora-pm-specific scope); no destructive action taken.
 | [OI-006](#OI-006) | 2026-07-16 | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Confirm 4 tenant turnovers + Soldier Trucking property conflict against executed leases |
 | [OI-008](#OI-008) | 2026-07-17 | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Sweep the Tenant DB for the Escalation-Date/Lease-Expiration column-mapping bug beyond the 7 rows already checked |
 | [OI-014](#OI-014) | 2026-07-17 | 2026-07-17 | [reference_onedrive_business_scope.md](reference_onedrive_business_scope.md) | Confirm no ora-pm git clone inside any OneDrive sync root (real repo at C:\Users\Owner\ora-pm) |
+
+### OI-013
+**Status:** CLOSED
+**Opened:** 2026-07-17
+**Closed:** 2026-07-17
+**Source:** [reference_onedrive_business_scope.md](reference_onedrive_business_scope.md) — surfaced incidentally during the OI-014 ora-pm sweep
+**Description:** An exhaustive `.git`-marker sweep of all three OneDrive roots (run for OI-014,
+scoped to `ora-pm`) also turned up a live git clone at `Claude_Workspace/01_Workspace/oxford-site/.git`
+inside the business OneDrive root. CLAUDE.md documents `C:\Users\Owner\oxford-site` as *the*
+no-git deploy copy (`website-canonical` is the canonical repo). This second, git-tracked
+`oxford-site` sitting inside OneDrive sync scope is a different location than what's documented —
+is it a stray clone, an intentional second deploy copy, or leftover from an old workflow?
+**Evidence:** Not a mystery — a known, already-resolved legacy artifact. `Claude_Workspace/
+01_Workspace/oxford-site` is a pre-`website-canonical` standalone working directory whose `.git`
+corrupted via a OneDrive sync issue (isolated to 2026-07-05, per directory mtimes). Gabriel
+personally repaired and closed this out **2026-07-16 — a full day before this item was opened**;
+the tracker was simply behind, not flagging a live risk. That day's work (2 commits, `git log`
+confirms `8c97652` then `9095cb7`, both authored `Gabriel Goldberg <ggoldberg@oxfordra.net>`):
+1. Re-initialized git from the intact working tree after confirming it byte-identical against an
+   external non-OneDrive backup (`C:\Users\Owner\_archive-non-onedrive\
+   oxford-site-workspace-backup-20260716`). Explicitly confirmed this checkout diverges materially
+   from `website-canonical` (275 vs 648 files) — not a live parallel source, deliberately left
+   unreconciled pending direction.
+2. Found a leaked, live Netlify MCP deploy token hardcoded in `run-deploy.bat` during the repair.
+   Fully remediated same day per `event_log.md`'s own dedicated "CLOSED" entry: purged from git
+   history via a clean re-clone (twice — a forensic-archive copy initially survived the first
+   pass), redacted on disk, and the actual token **rotated at Netlify** (revoked under Authorized
+   Applications, MCP connector reconnected and verified live).
+3. Archived all stale/superseded content into a gitignored `archive/` folder, leaving this
+   checkout "a thin config shell... `website-canonical` remains the actively maintained source for
+   oxfordra.net" (his own commit message).
+
+Independently re-verified this session, not just taken on the commit messages' word: `git remote
+-v` on the live checkout returns empty (no push target, can't accidentally deploy from here);
+`.netlify/` directory is empty (no deploy wiring); the redacted token is not recoverable from the
+live git object store (`git fsck --unreachable --no-reflogs` empty, no reflog, the commit hash the
+redaction message cites doesn't resolve), the corrupted store (`.git-corrupted-20260716`, per its
+own recovery-commit analysis its surviving pack held zero commit objects), or the archived
+filesystem copy of `run-deploy.bat` (shows `REDACTED`, confirmed via direct grep). Nothing
+outstanding — investigated and closed same session it was surfaced.
+**Auto-check:** none.
 
 ### OI-012
 **Status:** CLOSED
