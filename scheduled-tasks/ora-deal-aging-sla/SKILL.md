@@ -1,6 +1,19 @@
 ---
 name: ora-deal-aging-sla
 description: Weekday counterparty-aging SLA — computes days-since-last-outbound per open deal ask (broker/counsel/lender) via live Outlook search; drafts (never sends) a nudge past ratified per-class thresholds (broker 5bd/counsel 7bd/lender 7bd, ratified 2026-07-18). Draft-only, Hard Invariant 1. v1.0.
+output_contract:
+  version: 1
+  blocks:
+    - id: aging-nudge-drafts
+      artifact: { type: outlook_draft, folder: Drafts }
+      freshness_window_hours: 30
+      expected_on: { cron: "20 9 * * 1-5" }
+      on_missing_severity: info
+    - id: completion-row
+      artifact: { type: notion_page, parent_id: 32b6ecd8-9e59-81f2-b329-df3fd0e25062, title_pattern: "Deal Aging SLA — {DATE}" }
+      freshness_window_hours: 30
+      expected_on: { cron: "20 9 * * 1-5" }
+      on_missing_severity: warn
 ---
 
 # ORA Counterparty-Aging SLA (v1.0, ratified — 2026-07-18)
@@ -9,9 +22,7 @@ STATUS: Thresholds ratified by Gabriel 2026-07-18 (see STEP 4). Plan 3 of the 20
 
 AUTOMATION-BUDGET JUSTIFICATION: Closes a real, already-realized gap. On 2026-07-13 the ORA Monday Sync flagged 754 Old State Route 74 (Cincinnati) as "31 days stale" on a PSA draft awaiting counsel — a stall that reached 36-38 days before a weekly board caught it by chance, not by design. Deal-command-board (weekly, Monday) tracks days-in-STAGE against Notion timestamps; it does not track days-since-last-OUTBOUND-TOUCH against the actual counterparty thread, and it only runs once a week. This task is the daily (weekday) counterpart, keyed on the live Outlook thread rather than a Notion date field that can go stale exactly when work is happening off-Notion.
 
-GUARD CONDITION: If the Notion Acquisition Pipeline Tracker is unreachable, or zero deals have a qualifying open outbound ask (see STEP 2), post a Notion Ops Hub row stating so and exit silently — do not halt, do not fabricate a deal list or an aging number.
-
-output_contract: artifact = "Outlook Drafts (aging nudges) + Notion Ops Hub aging-summary row"; freshness_window_hours = 30.
+GUARD CONDITION: If the Notion Acquisition Pipeline Tracker is unreachable, or zero deals have a qualifying open outbound ask (see STEP 2), still post STEP 7's dated child page (stating the guard condition triggered) and exit — do not halt, do not fabricate a deal list or an aging number.
 
 ---
 
@@ -85,7 +96,7 @@ $mail.Save()
 
 ## STEP 7 — Completion reporting
 
-Post one row to the Notion Ops Hub (parent page `32b6ecd8-9e59-81f2-b329-df3fd0e25062`) listing: deals scanned, deals with a qualifying open ask, deals breaching by class, deals suppressed for confidentiality, deals flagged `[NO OUTBOUND FOUND — VERIFY MANUALLY]`, and how many nudges were drafted. Then email a one-paragraph summary to `ggoldberg@oxfordra.net` ONLY (no cc — routing canon) via `C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1`. On a COM failure for either the drafts or the summary send: retry once, then flag loudly in the Notion Ops Hub row if the retry also fails — do not halt the run.
+Post a NEW DATED CHILD PAGE under the Notion Ops Hub parent page (`32b6ecd8-9e59-81f2-b329-df3fd0e25062`), titled exactly `"Deal Aging SLA — {YYYY-MM-DD}"` (today's date) — a distinct page created fresh each run, never an appended row/block inside an existing page's body (an append isn't reliably freshness-checkable by a downstream contract-verification pass; a new titled child page is — this is the standard pattern for every task that posts a completion record to the Ops Hub, see `ora-deal-command-board` STEP 6). Its content lists: deals scanned, deals with a qualifying open ask, deals breaching by class, deals suppressed for confidentiality, deals flagged `[NO OUTBOUND FOUND — VERIFY MANUALLY]`, and how many nudges were drafted. Then email a one-paragraph summary to `ggoldberg@oxfordra.net` ONLY (no cc — routing canon) via `C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1`. On a COM failure for either the drafts or the summary send: retry once, then flag loudly in the Notion Ops Hub page if the retry also fails — do not halt the run.
 
 ---
 
