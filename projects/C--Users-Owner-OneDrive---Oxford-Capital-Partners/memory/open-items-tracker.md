@@ -440,16 +440,16 @@ signed by Gabriel Goldberg for Landlord, 2026-05-06, "Agreement completed." Term
 stated directly: Termination extended to **6/30/2027** (not the 5/31/2027 read off the earlier draft —
 the draft was not the final version); Rent **$2,332/mo effective 6/1/2026**. Wrote via `notion-update-page`
 (`32c6ecd8-9e59-819a-aaa5-f393ef49a999`): `Monthly Rent` 1483.39→2332, `Lease Expiration` null→2027-06-30.
-Verified via fresh fetch. **Flagged, not acted on:** this Third Addendum also reassigns the Tenant under
-the Prime Lease from Maryland Hospital Association to "LogicQual Research Institute, Inc." (an MHA
-affiliate per the tenant-termination-right clause), releasing MHA from all obligations — row left under
-the existing Tenant Name, flag recorded in the row's own `Notes`, pending Gabriel's call on renaming.
+Verified via fresh fetch. **Tenant-rename question — decided 2026-07-17, closed.** This Third Addendum
+also reassigns the Tenant under the Prime Lease from Maryland Hospital Association to "LogicQual Research
+Institute, Inc." (an MHA affiliate per the tenant-termination-right clause), releasing MHA from all
+obligations. Gabriel confirmed: keep `Tenant Name` as Maryland Hospital Association, no rename. Decision
+recorded in the row's own `Notes`.
 **Granite Tops rent/date — re-checked, unchanged.** Re-found the same 5/28/2026 addendum ($8,750/mo,
 11,160 SF, through 5/31/2029) plus a second, smaller-footprint draft (6,200 SF, $5,000/mo) not previously
 documented — both still have blank, unsigned signature blocks; no executed/PDF version located. Genuinely
 still blocked, no change.
-**Real scope still remaining:** Chesapeake Communications (retired rather than traced, unchanged), the
-Maryland Hospital Association / LogicQual tenant-rename decision (flagged, not yet Gabriel-decided),
+**Real scope still remaining:** Chesapeake Communications (retired rather than traced, unchanged),
 Granite Tops rent/date (unchanged), and the original 93-row universe's untouched tenants beyond this
 session's 5 clusters. This item stays OPEN, not closed.
 **Auto-check:** none (not a fleet-registry item).
