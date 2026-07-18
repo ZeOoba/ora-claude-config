@@ -1,6 +1,39 @@
 ---
 name: ora-task-integrity-guard
 description: Daily self-healing guard (CC fleet) — restores missing scheduled-task SKILL.mds + detects registry-membership drops across BOTH registries; emails only on alarm. Restored 2026-07-07 — this is the exact guard that should have caught the 2026-07-05 registry loss but died with it. v1.5 2026-07-16: added STEP 1.5 — runs registry-membership-probe.py + emit-fleet-heartbeat.py + push-fleet-heartbeat.ps1 daily (all three lost their sole scheduled host when ora-setup-audit was retired 2026-06-16; membership.log/session-context/external heartbeat froze — setup-review finding C1); probe [ACTION] lines and probe/emitter failures are now STEP-3 alarms, never silent STEP-4 notes. v1.4 2026-07-15: fixed Step 0.5 writing to the same bare _state-history\YYYY-MM-DD.json filename as automation-health-monitor's Step 0 (LAMS fleet) — whichever ran later clobbered the other and broke membership-guard.ps1's LAMS fold-in; Step 0.5 now writes .cc.json exclusively and membership-guard.ps1 reads .lams.json exclusively. v1.3 2026-07-12: added Step 2.75 task-folder-registration-probe.py (alarms) — catches a SKILL.md folder that was authored but never wired into the live registry via create_scheduled_task (registry-membership-probe.py only sees drops from its own prior snapshot, so a never-registered folder was invisible to every existing check; confirmed case: ora-calibration-snapshot missed its 2026-07-01 quarterly fire this way, fixed manually 2026-07-12). v1.2 2026-07-09: guard now self-writes its own daily MCP-fleet snapshot (Step 0.5), fixing a broken producer contract that had frozen the snapshot at 2026-06-22 and caused a stale-baseline false-positive replay. v1.1 2026-07-08: added informational model-currency check (Step 2.5). [MODEL: UNVERIFIABLE | checked 2026-07-08]
+output_contract:
+  version: 1
+  blocks:
+    - id: block-cc-fleet-snapshot
+      artifact:
+        type: file
+        path_pattern: "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\_state-history\\{DATE}.cc.json"
+      freshness_window_hours: 30
+      expected_on:
+        cron: "45 12 * * *"
+      on_missing_severity: alarm
+      is_primary_health_signal: true
+      notes: "Internal CC/MCP-fleet snapshot this task self-writes every run per STEP 0.5 (path + filename verified verbatim against SKILL.md STEP 0.5 body text) — the correct primary signal for a guard that is silent-by-design on a clean run (STEP 3: 'Email ONLY on an alarm... If NO alarm: send NOTHING'); checking the conditional alarm email itself would false-alarm every healthy day. Filename deliberately ends .cc.json, not the bare {DATE}.json, per the 2026-07-15 filename-collision fix that separates this from automation-health-monitor's own .lams.json snapshot in the same directory."
+    - id: block-registry-membership-log
+      artifact:
+        type: file
+        path: "C:\\Users\\Owner\\.claude\\maintenance\\_state\\registry-membership.log"
+      freshness_window_hours: 48
+      expected_on:
+        cron: "45 12 * * *"
+      on_missing_severity: alarm
+      is_primary_health_signal: false
+      notes: "Written daily by registry-membership-probe.py at STEP 1.5 of this SKILL.md. 48h threshold copied verbatim from automation-health-monitor's own live A2 freshness-beacon rule (that file's Step 0.55 table row, v1.8 2026-07-16: 'flag if registry-membership.log's newest line is > 48h old ... ALARM ⚠️, never ℹ️, overriding the [CC/MCP] downgrade note') — cross-checked against that file directly, not assumed."
+    - id: block-fleet-heartbeat-json
+      artifact:
+        type: file
+        path: "C:\\Users\\Owner\\.claude\\maintenance\\_state\\fleet-heartbeat.json"
+      freshness_window_hours: 48
+      expected_on:
+        cron: "45 12 * * *"
+      on_missing_severity: alarm
+      is_primary_health_signal: false
+      notes: "Written daily by emit-fleet-heartbeat.py at STEP 1.5 of this SKILL.md. Same 48h threshold and citation as block-registry-membership-log above (automation-health-monitor Step 0.55 A2 rule checks this file's ts field with the identical >48h test)."
 ---
 
 You are the ORA scheduled-task integrity guard, MIGRATED to the Claude Code fleet 2026-06-11 because the Cowork/LAMS twin could not execute PowerShell unattended (no Desktop Commander in unattended Cowork sessions). This surface has native shell access — use it.
