@@ -324,6 +324,15 @@
         ]
       },
       {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|mcp__Desktop_Commander__write_file|mcp__Desktop_Commander__edit_block|mcp__Desktop_Commander__move_file|mcp__Desktop_Commander__start_process|mcp__Desktop_Commander__interact_with_process|mcp__plugin_desktop-commander_desktop-commander__write_file|mcp__plugin_desktop-commander_desktop-commander__edit_block|mcp__plugin_desktop-commander_desktop-commander__move_file|mcp__plugin_desktop-commander_desktop-commander__start_process|mcp__plugin_desktop-commander_desktop-commander__interact_with_process",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/config-write-guard.py\""
+          }
+        ]
+      },
+      {
         "matcher": "Edit|Write|MultiEdit",
         "hooks": [
           {

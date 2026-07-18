@@ -41,14 +41,31 @@ DEFAULT_MEMORY_INDEX = (
     "C:/Users/Owner/.claude/projects/"
     "C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/MEMORY.md")
 
-DC_WRITE_FILE_NAMES = frozenset((
-    "mcp__Desktop_Commander__write_file",
-    "mcp__plugin_desktop-commander_desktop-commander__write_file",
-))
-DC_EDIT_BLOCK_NAMES = frozenset((
-    "mcp__Desktop_Commander__edit_block",
-    "mcp__plugin_desktop-commander_desktop-commander__edit_block",
-))
+# Tool-call shape knowledge (which tool names write files, and under which path arg)
+# is SHARED via hooks/lib/tool_call_paths.py (2026-07-18) -- this guard and
+# registry-write-guard.py each independently rediscovered the same Desktop Commander
+# blind spot on 2026-07-14, which is exactly the drift a shared normalization layer
+# prevents. The fallback below preserves this guard's pre-refactor parsing verbatim,
+# so a broken/missing lib degrades to the OLD behavior, never to a new hole -- and
+# this guard's fail-open posture is unchanged either way.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+try:
+    from tool_call_paths import (  # noqa: E402
+        DC_EDIT_BLOCK_NAMES, DC_WRITE_FILE_NAMES, primary_write_path)
+except Exception:
+    DC_WRITE_FILE_NAMES = frozenset((
+        "mcp__Desktop_Commander__write_file",
+        "mcp__plugin_desktop-commander_desktop-commander__write_file",
+    ))
+    DC_EDIT_BLOCK_NAMES = frozenset((
+        "mcp__Desktop_Commander__edit_block",
+        "mcp__plugin_desktop-commander_desktop-commander__edit_block",
+    ))
+
+    def primary_write_path(tool_name, tool_input):
+        # pre-refactor parsing, verbatim: generic file_path-or-path for any tool
+        p = tool_input.get("file_path") or tool_input.get("path")
+        return p if isinstance(p, str) and p else None
 
 
 def _norm(p):
@@ -178,10 +195,12 @@ def main():
 
     tool_name = payload.get("tool_name")
     tool_input = payload.get("tool_input") or {}
-    # Desktop Commander's write_file uses "path", not "file_path" -- edit_block already
-    # matches native Edit's "file_path", so this fallback only changes write_file's case.
-    file_path = tool_input.get("file_path") or tool_input.get("path")
-    if not isinstance(file_path, str) or not file_path:
+    # Path extraction is the shared layer's job (tool_call_paths.primary_write_path):
+    # it knows Desktop Commander's write_file uses "path" (not "file_path"), that
+    # edit_block matches native Edit's field names, and keeps the legacy generic
+    # fallback for any other tool name -- behavior-preserving by contract.
+    file_path = primary_write_path(tool_name, tool_input)
+    if file_path is None:
         return
     if not is_memory_index(file_path):
         return
