@@ -304,6 +304,45 @@ def test_shell_unicode_evasion_blocked():
     check("ZWSP-in-path shell write -> still blocked", rc == 2, "rc=%s" % rc)
 
 
+# ------------------------------------------------------------ REFUTE regressions
+def test_refute_shape_bypasses_closed():
+    """2026-07-18 adversarial REFUTE pass: five live-proven bypasses (each reached
+    exit 0 against a blocked control before the fix). Locked in as regressions."""
+    r = Rig()
+    hooks_t = r.path("hooks", "g.py")
+    cases = [
+        ("DC write_pdf onto a hook", DC + "write_pdf",
+         {"path": hooks_t, "content": "x"}),
+        ("excel MCP writer onto settings.json (generic path-field scan)",
+         "mcp__excel__write_data_to_excel",
+         {"filepath": r.path("settings.json"), "data": [["x"]]}),
+        ("hypothetical third-prefix DC write_file (suffix-family matching)",
+         "mcp__desktop-commander-v2__write_file",
+         {"path": hooks_t, "content": "x"}),
+        ("git checkout rewriting the live checkout", "Bash",
+         {"command": "git -C ~/.claude checkout main -- hooks/"}),
+        ("PowerShell Move-Item onto live settings.json", "Bash",
+         {"command": "Move-Item evil.json ~/.claude/settings.json"}),
+    ]
+    for label, tool, ti in cases:
+        rc, _, err = r.run(payload(tool, ti))
+        check("REFUTE: %s -> block" % label, rc == 2, "rc=%s" % rc)
+    # controls: the breadth must not swallow legitimate work
+    allows = [
+        ("read-only git on the live checkout", "Bash",
+         {"command": "git -C ~/.claude log --oneline -- hooks/"}),
+        ("mutating git inside an isolated worktree (full path named)", "Bash",
+         {"command": "git -C %s checkout -- hooks/g.py"
+          % r.path(".claude", "worktrees", "wg")}),
+        ("excel writer on an ordinary workbook", "mcp__excel__write_data_to_excel",
+         {"filepath": r.path("outputs", "model.xlsx"), "data": [["x"]]}),
+    ]
+    for label, tool, ti in allows:
+        rc, _, err = r.run(payload(tool, ti))
+        check("REFUTE control: %s -> allow" % label, rc == 0,
+              "rc=%s err=%r" % (rc, err))
+
+
 # ------------------------------------------------------------ claim-lock
 CLAIM_HEADER = "# ORA chip claim-lock\n"
 
@@ -451,6 +490,7 @@ if __name__ == "__main__":
     test_shell_reads_and_unrelated_writes_allow()
     test_shell_write_with_token_allows()
     test_shell_unicode_evasion_blocked()
+    test_refute_shape_bypasses_closed()
     test_claim_lock_fails_open_when_log_missing_or_malformed()
     test_claim_lock_blocks_without_open_claim()
     test_claim_lock_allows_with_open_claim()

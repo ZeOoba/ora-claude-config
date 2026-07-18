@@ -235,6 +235,36 @@ def test_is_write_capable():
     check("Glob is not write-capable", not tcp.is_write_capable("Glob"))
 
 
+def test_refute_family_suffix_matching_and_new_shapes():
+    """2026-07-18 REFUTE regressions at the lib layer."""
+    # a THIRD DC prefix (renamed/re-registered connector) must still be recognized
+    check("third-prefix write_file recognized",
+          tcp.primary_write_path("mcp__desktop-commander-v2__write_file",
+                                 {"path": P}) == P)
+    check("third-prefix write_file yields targets",
+          any(t.raw_path == P for t in
+              tcp.write_targets("mcp__desktop-commander-v2__write_file",
+                                {"path": P})))
+    check("third-prefix start_process is a shell tool",
+          tcp.shell_analysis("mcp__dc-v2__start_process",
+                             {"command": "echo x > f"}) is not None)
+    # write_pdf is a file-writing shape
+    for prefix in DC_PREFIXES:
+        t = tcp.write_targets(prefix + "write_pdf", {"path": P, "content": "x"})
+        check("%swrite_pdf yields a write target" % prefix,
+              len(t) == 1 and t[0].operation == "write")
+    check("SHAPES includes dc-write-pdf",
+          any("dc-write-pdf" in s.name for s in tcp.SHAPES))
+    # file-rewriting git and PS item cmdlets read as writes
+    for cmd in ("git -C ~/.claude checkout main -- hooks/",
+                "git restore hooks/x.py",
+                "Move-Item a.json b.json",
+                "Copy-Item a.json b.json"):
+        check("shell_may_write: %r" % cmd, tcp.shell_may_write(cmd))
+    check("read-only git is not write-shaped",
+          not tcp.shell_may_write("git -C ~/.claude log --oneline -- hooks/"))
+
+
 def test_resolve_path_absolute_and_casefolded():
     r = tcp.resolve_path("C:/Users/Owner/.claude/HOOKS/x.py")
     check("resolve_path absolute", os.path.isabs(r))
@@ -257,6 +287,7 @@ if __name__ == "__main__":
     test_shell_analysis_unicode_evasion_folded()
     test_shapes_registry_enumerates_all_write_capable_shapes()
     test_is_write_capable()
+    test_refute_family_suffix_matching_and_new_shapes()
     test_resolve_path_absolute_and_casefolded()
     if _failures:
         print("\n%d FAILURE(S): %s" % (len(_failures), ", ".join(_failures)))
