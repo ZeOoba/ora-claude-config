@@ -1,6 +1,6 @@
 ---
 name: project-claude-setup-audit-2026-07-09
-description: "9-agent audit of the ORA Claude Code setup (connectors/skills/hooks/memory/filing/terminal/tokens), 2026-07-09. 8 safe fixes applied + 2 exclusions caught on re-verification; 21 items await Gabriel's decision, headlined by the machine-migration status. Full report: artifact https://claude.ai/code/artifact/202c6ca3-05e2-4ded-991c-cbbaa326ece2"
+description: "9-agent audit of the ORA Claude Code setup (connectors/skills/hooks/memory/filing/terminal/tokens), 2026-07-09. 8 safe fixes applied same day; 15 of 21 open items now RESOLVED as of 2026-07-17 (machine-migration B3/B4 both closed), 2 mitigated-not-fixed, 2 genuinely open, 2 unverified. Full report + status addendum: artifact https://claude.ai/code/artifact/202c6ca3-05e2-4ded-991c-cbbaa326ece2"
 metadata:
   node_type: memory
   type: project

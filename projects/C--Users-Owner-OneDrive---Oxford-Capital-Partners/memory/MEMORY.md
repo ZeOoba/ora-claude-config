@@ -31,13 +31,14 @@
 - [oxford-command-center brand ratification](project_oxford-command-center-brand-ratification-ambiguity.md) — COMPLETE; repo has 2+ brand systems, grep whole repo
 - [oxford-command-center worktree gotchas](project_oxford-command-center_worktree_gotchas.md) — WORKBOOK_PATH not inherited per-worktree; warehouse:verify EPERM in worktrees only
 - [CLAUDE.md Formal Audit](project_claude-md-formal-audit-2026-07-08.md) — Phases 0-3 DONE; 4 deferred items in file
-- [Claude Code Setup Audit 2026-07-09](project_claude-setup-audit-2026-07-09.md) — machine-migration OPEN (needs Gabriel); 21 items pending, full report in an artifact
-- [Claude Setup Comprehensive Review 2026-07-16](project_claude-setup-audit-2026-07-16.md) — Tier 0 + Batch G1-G8 EXECUTED; close-out handoff in file
+- [Claude Code Setup Audit 2026-07-09](project_claude-setup-audit-2026-07-09.md) — migration CLOSED 07-17; 15/21 items resolved
+- [Claude Setup Comprehensive Review 2026-07-16](project_claude-setup-audit-2026-07-16.md) — G1-G8 done; chip TERMINAL, needs Gabriel
 - [oxfordra.net SEO Audit 2026-07](project_oxfordra_seo_audit_2026-07.md) — overall C- (59/100); action list in file
 - [Owner-Outreach Stale-Guard Watch](project_owner_outreach_stale_guard_watch.md) — CLOSED 07-14: guard confirmed correct, SKILL.md v1.3 remembers vintage
 - [Ops Decision Log](ops_decision_log.md) — recurring operational yes/no calls, so they aren't re-litigated; companion to deal-decision-ledger.md
 - [Open Items Tracker](open-items-tracker.md) — canonical punch-list; other files POINT here, never restate item text
 - [Tenant DB sync](project_tenant_db_no_sync_rootcause.md) — CLOSED 07-17: OI-003–006 all executed
+- ROI-brief implementation 2026-07-17 — CLOSED, pushed `08c305c`; record in the schematic + 07-09/07-16 audit files above
 
 ## Markets
 - [Market Intelligence](markets.md) — Cross-market snapshots, macro (FRED), replacement cost, comps, Columbus submarket
@@ -56,7 +57,9 @@
 - [Verify Probe Findings Before Acting](feedback_verify_probe_findings_before_acting.md) — a probe finding is a hypothesis, not a verdict; the defect can be in the probe
 - [fleet-status.py Dual-Fleet Read](reference_fleet_status_dual_read.md) — reads both registries off disk from either surface; only WRITES need the matching MCP tool
 - [Verify Negative Glob Results](feedback_verify_negative_glob_results.md) — a Glob "no files" isn't proof of absence; cross-check `git ls-files`
+- [Verify WIP Settled via mtime](feedback_verify_wip_settled_via_mtime.md) — isRunning isn't per-file; compare mtimes across spaced checks first
 - [Workflow named-args not delivered](feedback_workflow_named_args_not_delivered.md) — Workflow({name, args}) drops args on CC Desktop; hardcode via scriptPath
+- [Workflow synthesis ungrounded specifics](feedback_workflow_synthesis_ungrounded_specifics.md) — a planning workflow's own synthesis can invent a precise-sounding count/ID with no real artifact behind it; verify before handing off a write task
 - [Autonomy Gate: writes not reads](feedback_autonomy_gate_blocks_writes_not_reads.md) — a "blocked read" means a write indicator was present; read the hook before the override
 - [Autonomy Gate Matcher Cannot Be Narrowed](feedback_autonomy_gate_matcher_cannot_be_safely_narrowed.md) — 3 rounds each found a real bypass narrowing it; reverted, broad match stays
 - [Autonomy Gate Override Mechanism](reference_autonomy_gate_override_mechanism.md) — tokens session-scoped + severity-split + content-bound; old flat sentinel RETIRED
