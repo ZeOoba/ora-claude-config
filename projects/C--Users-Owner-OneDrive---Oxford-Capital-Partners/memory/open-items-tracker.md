@@ -431,21 +431,27 @@ completed." Terms: Termination 4/30/2027; Rent $1,157/mo effective 5/1/2025 (alr
 stepping to $1,166/mo effective 5/1/2026 (past-due, Notion was stale). Wrote via `notion-update-page`
 (`32c6ecd8-9e59-8183-b5e5-e497d53c7c12`): `Monthly Rent` 1157→1166, `Lease Expiration` null→2027-04-30.
 Verified via fresh fetch.
-**Maryland Hospital Association — better evidence found, still not written.** Located a Third Addendum
-(newer than the addendum previously on file) that resolves the earlier entity-name ambiguity outright —
-it states the tenant's proper name is "The Maryland Hospital Association, Incorporated", matching Notion's
-tenant name — and gives Termination extended to 5/31/2027 (resolves the earlier already-past date) and
-Rent $2,332/mo effective 6/1/2026 (vs. Notion's current $1,483.39). However this copy has blank signature
-blocks and two targeted searches for a DocuSign certificate / executed PDF came back empty — unlike Harold
-Palmer, execution is NOT confirmed. Left unwritten pending either a signed copy or Gabriel's explicit
-go-ahead to write from the unexecuted draft.
+**Maryland Hospital Association — resolved 2026-07-17 (later, same day).** The draft Third Addendum found
+earlier this session (unexecuted, entity-name only) turned out to be superseded — Gabriel supplied the
+actual fully-executed copy directly (`Lease Suite B2-3 MHA Third Addendum Fully Executed 05.2026 --
+2203-2207 Northwood.pdf`; standard PDF text extraction failed on broken font encoding, so pages were
+rendered to images via `pypdfium2` and read visually). Confirmed executed via Adobe Sign audit trail:
+signed by Gabriel Goldberg for Landlord, 2026-05-06, "Agreement completed." Terms match what Gabriel
+stated directly: Termination extended to **6/30/2027** (not the 5/31/2027 read off the earlier draft —
+the draft was not the final version); Rent **$2,332/mo effective 6/1/2026**. Wrote via `notion-update-page`
+(`32c6ecd8-9e59-819a-aaa5-f393ef49a999`): `Monthly Rent` 1483.39→2332, `Lease Expiration` null→2027-06-30.
+Verified via fresh fetch. **Flagged, not acted on:** this Third Addendum also reassigns the Tenant under
+the Prime Lease from Maryland Hospital Association to "LogicQual Research Institute, Inc." (an MHA
+affiliate per the tenant-termination-right clause), releasing MHA from all obligations — row left under
+the existing Tenant Name, flag recorded in the row's own `Notes`, pending Gabriel's call on renaming.
 **Granite Tops rent/date — re-checked, unchanged.** Re-found the same 5/28/2026 addendum ($8,750/mo,
 11,160 SF, through 5/31/2029) plus a second, smaller-footprint draft (6,200 SF, $5,000/mo) not previously
 documented — both still have blank, unsigned signature blocks; no executed/PDF version located. Genuinely
 still blocked, no change.
-**Real scope still remaining:** Chesapeake Communications (retired rather than traced, unchanged), Maryland
-Hospital Association (better data, unexecuted), Granite Tops rent/date (unchanged), and the original 93-row
-universe's untouched tenants beyond this session's 5 clusters. This item stays OPEN, not closed.
+**Real scope still remaining:** Chesapeake Communications (retired rather than traced, unchanged), the
+Maryland Hospital Association / LogicQual tenant-rename decision (flagged, not yet Gabriel-decided),
+Granite Tops rent/date (unchanged), and the original 93-row universe's untouched tenants beyond this
+session's 5 clusters. This item stays OPEN, not closed.
 **Auto-check:** none (not a fleet-registry item).
 
 
