@@ -4,6 +4,16 @@ description: ORA Weekly Hygiene — single sequential Sunday session (20:00 ET) 
 output_contract:
   version: 1
   blocks:
+    - id: workspace-hygiene-email
+      artifact: { type: sent_email, mailbox: ggoldberg@oxfordra.net, subject_pattern: "ORA Claude Workspace Hygiene — Week of {DATE}" }
+      freshness_window_hours: 192
+      expected_on: { cron: "15 20 * * 0" }
+      on_missing_severity: info
+    - id: sharepoint-audit-xlsx
+      artifact: { type: notion_page, parent_id: 32b6ecd8-9e59-81f2-b329-df3fd0e25062, title_pattern: "SharePoint Freshness Audit — {DATE}" }
+      freshness_window_hours: 192
+      expected_on: { cron: "15 20 * * 0" }
+      on_missing_severity: info
     - id: block-d-artifact-staleness
       artifact: { type: file, path_glob: "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-weekly-hygiene\\_state\\block-D-last-run.json" }
       freshness_window_hours: 192
@@ -31,6 +41,11 @@ output_contract:
       on_missing_severity: info
     - id: block-i-git-ref-integrity
       artifact: { type: file, path_glob: "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-weekly-hygiene\\_state\\block-I-last-run.json" }
+      freshness_window_hours: 192
+      expected_on: { cron: "15 20 * * 0" }
+      on_missing_severity: info
+    - id: tenant-db-state
+      artifact: { type: file, path_glob: "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-weekly-hygiene\\_state\\tenant-db-completeness-history.json" }
       freshness_window_hours: 192
       expected_on: { cron: "15 20 * * 0" }
       on_missing_severity: info
