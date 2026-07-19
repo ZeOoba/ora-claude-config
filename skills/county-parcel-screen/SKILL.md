@@ -13,8 +13,11 @@ description: >
   Cincinnati, Kansas City, Indianapolis, Maryland, Madison, Grand Rapids,
   Richmond, Des Moines, or a new county). Also trigger for "next market",
   "run the screen on X", or any request to build owner-level lead lists from
-  public property records. v1.0 - validated Franklin (Columbus) + Hamilton/
-  Butler/Clermont/Warren (Cincinnati), June 2026.
+  public property records. v1.1 (2026-07-19: added references/county-endpoints.v1.json,
+  a machine-readable parcel/CAMA-layer registry live-verified across all 22
+  documented counties, for cross-skill consumption — ora-flood-zoning-dd Step 1
+  now cross-links it for parcel-geometry lookups). v1.0 - validated Franklin
+  (Columbus) + Hamilton/Butler/Clermont/Warren (Cincinnati), June 2026.
 ---
 
 # county-parcel-screen
@@ -167,3 +170,27 @@ volume + quarterly re-runs + signal-led call order is the strategy.
   it after every market run.
 - references/county-endpoints.md - verified URLs, field names, ID formats,
   quirks for every county already discovered. Append new counties here.
+- references/county-endpoints.v1.json - machine-readable derived index (parcel/
+  CAMA layer URL + layer id/name + MD JURSCODE only) of county-endpoints.md, for
+  other skills to consume programmatically without parsing prose. county-endpoints.md
+  remains the source of truth on any conflict; regenerate the JSON from it.
+
+## Changelog
+- **v1.1 (2026-07-19):** Added references/county-endpoints.v1.json (schema_version
+  1.0) - live-verified (real `?f=json` requests, not re-cited from memory) against
+  all 22 counties already documented in county-endpoints.md. 19 VERIFIED, 2
+  VERIFIED-PARTIAL (Clay MO, Platte MO - geometry live but attribute-thin, matches
+  existing doc), 2 NOT-FOUND (Johnson KS paid-gate, Polk IA has no ArcGIS REST
+  parcel layer - CSV export only). Caught and corrected two live drifts since the
+  2026-06-09/11 source-doc runs: Dane County WI's statewide parcel service was
+  renamed (`Wisconsin_Statewide_Parcels` -> `Wisconsin_Statewide_Parcels_DB`, layer
+  rolled to the 2026 vintage) - fixed in county-endpoints.md same pass; Kent County
+  MI's primary Hosted/ParcelsWithCondos layer now requires a token (was public
+  2026-06-09) - registry points to the still-public OpenData mirror instead, flagged
+  for periodic re-check. Also resolved two URLs county-endpoints.md had left
+  truncated: Baltimore County MD's own polygon+owner-name GIS layer, and Richmond
+  City VA's parcel layer (`services1.arcgis.com`, not bare `services.arcgis.com`,
+  which 400s). Built to satisfy ora-flood-zoning-dd v1.2's Step 1 cross-link
+  (parcel-geometry lookup for the pad/yard flood split).
+- **v1.0:** initial - validated Franklin (Columbus) + Hamilton/Butler/Clermont/
+  Warren (Cincinnati), June 2026.

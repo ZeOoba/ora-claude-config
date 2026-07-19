@@ -220,9 +220,10 @@ Columbus/Cincinnati estate lists for the same contamination on next pass.
 # Dane County, WI (Madison market) — County Data Endpoints Reference
 ORA county-parcel-screen pipeline · verified 2026-06-09
 
-## 1. WI DOA Statewide Parcel Layer (V11, 2024 tax roll) — PRIMARY county-wide universe
-- **Service:** `https://services3.arcgis.com/n6uYoouQZW75n5WI/arcgis/rest/services/Wisconsin_Statewide_Parcels/FeatureServer/0`
-  (layer name `V1100_WisconsinParcels_2025_0925_2`; owner `djvogel2_WI_DOA` — official)
+## 1. WI DOA Statewide Parcel Layer (V12, 2026 tax roll) — PRIMARY county-wide universe
+- **Service (CORRECTED 2026-07-19 — see URL DRIFT note below):** `https://services3.arcgis.com/n6uYoouQZW75n5WI/arcgis/rest/services/Wisconsin_Statewide_Parcels_DB/FeatureServer/0`
+  (layer name `V1200_WisconsinParcels_2026`; owner `djvogel2_WI_DOA` — official)
+- **URL DRIFT (caught 2026-07-19):** the original service name `Wisconsin_Statewide_Parcels` (layer `V1100_WisconsinParcels_2025_0925_2`) verified 2026-06-09 now 400s (`Invalid URL`) — WI DOA renamed the service to `Wisconsin_Statewide_Parcels_DB` and rolled the layer to the 2026 vintage. Live-tested via county-endpoints.v1.json build; corrected URL above confirmed live. Re-verify this endpoint at least quarterly — it has already moved once in ~6 weeks.
 - **Filter for Dane:** `CONAME='DANE'` → 218,093 parcels. Class 2 (commercial) ~13,605; class 3 (manufacturing) 459 (`PROPCLASS LIKE '%2%'` etc. — PROPCLASS is a comma list, e.g. `4,5M`; split on comma before testing).
 - **Key fields:** `PARCELID` (12-digit, no dashes — joins 1:1 to City of Madison `Parcel`), `OWNERNME1/2`, `PSTLADRESS` (single string: `street, CITY ST  ZIP`), `SITEADRESS`, `PLACENAME`, `ZIPCODE`, `CNTASSDVALUE`, `LNDVALUE`, `IMPVALUE`, `ESTFMKVALUE` (DOR-equalized fair market est.), `PROPCLASS`, `AUXCLASS`, `DEEDACRES`, `LONGITUDE/LATITUDE`.
 - **Quirks:** maxRecordCount 2000 (page with `resultOffset` + `orderByFields=OBJECTID`); **no building SF, no sale date/price**; some Dane owner names = `NOT AVAILABLE` (~37 in industrial universe); `ESTFMKVALUE` null on ag/MFL parcels; values are 2024 roll (Madison city ran a 2025 reval — use city layer for current values inside Madison).
