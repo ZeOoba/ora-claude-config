@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-07-19T15:40:49.282Z
+  modified: 2026-07-19T15:55:08.177Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -489,6 +489,9 @@ defaults to wildcard, and AWS-Lambda-adapter Set-Cookie merging. Effective sever
 is Bearer-token (Authorization header), not cookie-based, which limits the CORS-credential vector; the
 Windows path-traversal is not reachable on the Linux edge. Fix available (upgrade hono). Route through
 the normal Engineering OS lane with its own gate — the sweep does not bump dependencies.
+**Resolved 2026-07-19:** hono bumped 4.12.23→4.12.31, commit `c300867` on `main` (already merged, landed
+by Gabriel directly). Verified via `npm audit` — this finding no longer appears.
+**Status:** CLOSED.
 **Auto-check:** none.
 
 ### OI-017
@@ -502,6 +505,18 @@ HIGH/MOD. oxford-command-center (SHA `306a67f`): concurrently→shell-quote CRIT
 vitest CRITICAL, @huggingface/transformers→onnxruntime-node→adm-zip HIGH (crafted-ZIP 4GB DoS; only the
 localhost-only brain server, reachable only on untrusted ZIP input), exceljs→uuid MOD. All fixes are
 semver-major. Effective operational risk LOW; tracked for a batched toolchain-bump pass, not urgent.
+**Progress 2026-07-19:** rather than the flagged semver-major top-level bumps, used targeted `overrides`
+on the specific vulnerable transitive packages only (adm-zip/uuid/esbuild in oxford-command-center,
+esbuild/undici/ws in ora-pm) — resolves 11 of 13 originally-flagged CVE instances with zero top-level
+version changes. Both verified: full `gate:ci` green in oxford-command-center (typecheck/lint/test/
+build/bundle-budget); `tsc --noEmit` clean + 185/185 tests in ora-pm. PRs: `ZeOoba/oxford-command-center#220`,
+`ZeOoba/ora-pm#5` (neither merged yet — pending review).
+**Residual, not fixed:** in both repos, `vitest@2.x`'s own internally-bundled `vite@5.x` (via `vite-node`)
+still carries 3 CVEs (path traversal, NTLM hash disclosure on Windows, `fs.deny` bypass on Windows). A
+scoped override forcing `vite@6.x` under `vitest` specifically was attempted in both repos and rejected
+by npm as an invalid tree — `vitest@2.x` doesn't tolerate `vite@6.x` internally. The only real fix is
+`vitest` 2.x→4.1.10 (semver-major), which needs its own dedicated cross-repo compatibility pass. Still
+dev-server-only, never reachable from production — kept LOW effective severity, still not urgent.
 **Auto-check:** none.
 
 ## Closed
