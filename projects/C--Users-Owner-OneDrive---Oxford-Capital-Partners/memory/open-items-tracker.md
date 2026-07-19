@@ -5,6 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
+  modified: 2026-07-19T15:40:49.282Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -32,6 +33,9 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
 | [OI-009](#OI-009) | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Verify the 93 Notion Tenant DB rows with no workbook counterpart against primary leases (low priority) |
+| [OI-015](#OI-015) | 2026-07-18 | ora-appsec-sweep first run (2026-07-18) | ora-pm: declassified E. Fulton deal terms persist in git history + external remote — deferred purge (Gabriel's timing); S-003 suppression candidate |
+| [OI-016](#OI-016) | 2026-07-18 | ora-appsec-sweep first run (2026-07-18) | ora-pm: upgrade `hono` (<=4.12.24) — direct runtime dep, HIGH CVEs (CORS/Set-Cookie/path-traversal); effective MED on Workers |
+| [OI-017](#OI-017) | 2026-07-18 | ora-appsec-sweep first run (2026-07-18) | ora-pm + oxford-command-center: build/test/deploy toolchain CVEs (vitest/vite/wrangler/concurrently→shell-quote/transformers→adm-zip) — no prod-reachable path, semver-major fixes |
 
 ### OI-009
 **Status:** OPEN (substantial progress made 2026-07-17, real scope remains)
@@ -457,11 +461,54 @@ the original 93-row universe's untouched tenants beyond this session's 5 cluster
 not closed.
 **Auto-check:** none (not a fleet-registry item).
 
+### OI-015
+**Status:** OPEN
+**Opened:** 2026-07-18
+**Source:** ora-appsec-sweep first run (2026-07-18, manual + supervised); Notion Ops Hub row `3a26ecd8-9e59-81e4-85d4-d08d0d5d920b`
+**Description:** ora-pm (pinned SHA `f47bbe0`) carries real (now-declassified) E. Fulton confidential
+deal identifiers in git history and on the external remote. The tokens
+(`fulton, e. fulton, efulton, 3520, sij, columbus stamping, nutis`) were committed to `.env.example`
+`CONFIDENTIAL_TERMS` at `c4c69a8` (2026-06-06) and pushed to `origin` (ZeOoba/ora-pm). The reachable
+history at `c4c69a8` now shows placeholders (a rewrite replaced the reachable value), but the real
+value survives locally as an unreachable/dangling blob `39b02f4585cc6357876423d04d5c3fcee65793b0`, and
+per fix-commit `866480f`'s own note it "still exists ... on the remote until a separate history purge
+is run" — a purge Gabriel deliberately deferred (declassified deal, his timing call). NOT a live
+credential. This is the predicted first-run item (SKILL FIRST-RUN NOTE) and the prime candidate for a
+new suppression entry (proposed S-003) once Gabriel triages — only Gabriel adds suppressions. Report-only:
+the sweep never rewrites history or touches the remote.
+**Auto-check:** none.
+
+### OI-016
+**Status:** OPEN
+**Opened:** 2026-07-18
+**Source:** ora-appsec-sweep first run (2026-07-18); Notion Ops Hub row `3a26ecd8-9e59-81e4-85d4-d08d0d5d920b`
+**Description:** ora-pm (pinned SHA `f47bbe0`) depends directly on `hono` <=4.12.24, which carries HIGH
+advisories: path-traversal via encoded backslash `%5C` on Windows (NOT reachable — the app runs on the
+Cloudflare Workers Linux edge), CORS middleware reflecting any Origin with credentials when `origin`
+defaults to wildcard, and AWS-Lambda-adapter Set-Cookie merging. Effective severity MEDIUM: portal auth
+is Bearer-token (Authorization header), not cookie-based, which limits the CORS-credential vector; the
+Windows path-traversal is not reachable on the Linux edge. Fix available (upgrade hono). Route through
+the normal Engineering OS lane with its own gate — the sweep does not bump dependencies.
+**Auto-check:** none.
+
+### OI-017
+**Status:** OPEN
+**Opened:** 2026-07-18
+**Source:** ora-appsec-sweep first run (2026-07-18); Notion Ops Hub row `3a26ecd8-9e59-81e4-85d4-d08d0d5d920b`
+**Description:** Build/test/deploy toolchain CVEs in both repos, none reachable from a production, tenant,
+or public request path. ora-pm (SHA `f47bbe0`): vitest CRITICAL (UI-server arbitrary file read/exec — only
+when the Vitest UI server is listening, i.e. local dev/test), plus vite/esbuild/wrangler/ws/undici
+HIGH/MOD. oxford-command-center (SHA `306a67f`): concurrently→shell-quote CRITICAL (dev script runner),
+vitest CRITICAL, @huggingface/transformers→onnxruntime-node→adm-zip HIGH (crafted-ZIP 4GB DoS; only the
+localhost-only brain server, reachable only on untrusted ZIP input), exceljs→uuid MOD. All fixes are
+semver-major. Effective operational risk LOW; tracked for a batched toolchain-bump pass, not urgent.
+**Auto-check:** none.
 
 ## Closed
 
 | ID | Opened | Closed | Source | One-line |
 |----|--------|--------|--------|----------|
+| [OI-018](#OI-018) | 2026-07-18 | 2026-07-19 | ora-appsec-sweep first run — supervised re-run (2026-07-18) | ora-pm HIGH IDOR on `/api/stripe/{customer,setup-intent,payment-intent}` RESOLVED — session-ownership guards (portal.ts/autopay pattern) landed in `c705531`, 185/185 green, adversarial refute pass run |
 | [OI-013](#OI-013) | 2026-07-17 | 2026-07-17 | [reference_onedrive_business_scope.md](reference_onedrive_business_scope.md) | Second `oxford-site` git clone was a known, already-repaired legacy checkout (Gabriel, 2026-07-16) — not a live risk; leaked deploy token already purged + rotated same day |
 | [OI-012](#OI-012) | 2026-07-17 | 2026-07-17 | ora-deal-command-board SKILL.md STEP 2 | Stamp `Last Activity` from deal-touching skills so the board's stall flag is authoritative — field+board+3 skills stamped, Save-skill reimport of all 3 confirmed by Gabriel, PENDING_REIMPORT.md cleared |
 | [OI-011](#OI-011) | 2026-07-17 | 2026-07-17 | [project_bash_guard_indirection_gap.md](project_bash_guard_indirection_gap.md) | bash-guard.mjs: core.hooksPath read/write + cp guard-path source/dest false positives fixed |
@@ -475,6 +522,38 @@ not closed.
 | [OI-006](#OI-006) | 2026-07-16 | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Confirm 4 tenant turnovers + Soldier Trucking property conflict against executed leases |
 | [OI-008](#OI-008) | 2026-07-17 | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Sweep the Tenant DB for the Escalation-Date/Lease-Expiration column-mapping bug beyond the 7 rows already checked |
 | [OI-014](#OI-014) | 2026-07-17 | 2026-07-17 | [reference_onedrive_business_scope.md](reference_onedrive_business_scope.md) | Confirm no ora-pm git clone inside any OneDrive sync root (real repo at C:\Users\Owner\ora-pm) |
+
+### OI-018
+**Status:** CLOSED (RESOLVED)
+**Opened:** 2026-07-18
+**Closed:** 2026-07-19
+**Source:** ora-appsec-sweep — supervised re-run (2026-07-18); Notion Ops Hub row `3a26ecd8-9e59-81be-8060-c83b9405e987`. Re-run re-pinned oxford-command-center at `01e288d` (prior first-run row `3a26ecd8-9e59-81e4-85d4-d08d0d5d920b` pinned the older `306a67f`); net-new finding not in OI-015/016/017.
+**Description:** ora-pm (pinned SHA `f47bbe0`) — HIGH broken object-level authorization (IDOR) on the
+tenant-facing Stripe router `server/routes/stripe.ts`. All three routes (`POST /api/stripe/customer`,
+`/setup-intent`, `/payment-intent`) apply `tenantAuthMiddleware` (authenticates the JWT, sets
+`tenantUserId`) but then read `tenant_id` (and `lease_id` on `/payment-intent`) from the request BODY and
+use them directly, with NO check that the resource belongs to the authenticated session. The DB client
+(`server/db/client.ts` `getDb`) uses `SUPABASE_SERVICE_ROLE_KEY`, so RLS is bypassed — there is no
+row-level safety net. `/api/stripe` is also in `index.ts` `ADMIN_EXEMPT`, so no admin gate either.
+Impact (attacker = any authenticated portfolio tenant): `/customer` discloses/creates another tenant's
+`stripe_customer_id`; `/setup-intent` returns a SetupIntent `client_secret` bound to a victim's Stripe
+customer; `/payment-intent` inserts a `payments` row against an arbitrary `lease_id`, corrupting AR
+ledger balances. Contrast the correct pattern already used elsewhere: `server/routes/portal.ts` derives
+the tenant via `.eq('auth_user_id', userId)`, and the `/portal/autopay` handler has an explicit
+"IDOR guard" (`lease.tenant_id !== tenant.id → 404`). The Stripe router is the inconsistent gap.
+NOTE: this directly CONTRADICTS the prior first-run's (d)-CLEAN / "no IDOR" claim (Notion row
+`3a26ecd8...`) — the prior run appears to have checked only the portal routes and missed the separate
+Stripe router.
+**Evidence:** RESOLVED 2026-07-19, ora-pm commit `c705531fa7f2e861199477ceb6db21ba6b57fc66` (`main`,
+local — not pushed). All 3 endpoints now resolve the authenticated tenant via
+`.eq('auth_user_id', tenantUserId)` and 403 a mismatched body `tenant_id` before any Stripe call/DB
+write; `/payment-intent` additionally verifies `leases.tenant_id === tenant.id` (404) — exactly the
+portal.ts / `/portal/autopay` convention. Router-wide `use('/*', tenantAuthMiddleware)` added. TDD
+red-first (5 rejection tests returned 200 pre-fix); 7 new tests; full suite 185/185 (was 178/178),
+tsc clean. Independent context-blind adversarial REFUTE pass found no runtime bypass; its 3 hardening
+findings (arg-blind test mock, missing route-wiring test, body-id reuse in writes) all landed in the
+same commit — regression-detection proven by temporarily reverting one guard (4 tests red).
+**Auto-check:** none.
 
 ### OI-013
 **Status:** CLOSED
