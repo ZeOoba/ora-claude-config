@@ -14,6 +14,11 @@ output_contract:
       freshness_window_hours: 192
       expected_on: { cron: "15 20 * * 0" }
       on_missing_severity: info
+    - id: block-b-onedrive-cleanup
+      artifact: { type: file, path_glob: "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Claude_Workspace\\00_Governance\\Scheduled\\onedrive-cleanup\\last_run_output.txt" }
+      freshness_window_hours: 192
+      expected_on: { cron: "15 20 * * 0" }
+      on_missing_severity: info
     - id: block-d-artifact-staleness
       artifact: { type: file, path_glob: "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-weekly-hygiene\\_state\\block-D-last-run.json" }
       freshness_window_hours: 192
@@ -140,6 +145,8 @@ The engine (`cleanup.ps1` — the authoritative logic; **do not reimplement it**
 **STEP 4 — Error detection** works off `last_run_output.txt`, not the exit code (a clean PowerShell run leaves `$LASTEXITCODE` empty/null — NORMAL, not a failure). Treat as failure only if the file is missing, has no parseable JSON object, or contains a PowerShell error/exception instead of the summary. On failure, **draft (do NOT send)** a failure email to Gabriel quoting the captured error text, and stop.
 
 Scope is intentionally limited to the two Claude folders; do not widen without explicit instruction.
+
+**Output-contract note (added 2026-07-18, Plan 2 retrofit):** like H/K, this block does NOT get a new `_state\` marker — STEP 1 already tees `last_run_output.txt` unconditionally on every normal run. The `output_contract` entry `block-b-onedrive-cleanup` in this file's frontmatter points directly at that file. Caveat: if the `onedrive-cleanup` engine is missing (STEP 1's "BLOCK B ENGINE ABSENT" skip path), the file is NOT rewritten that run — an already-known coverage gap (see STEP 1), not a new one introduced by this contract entry. A stale `last_run_output.txt` under that condition should read as "engine missing," not "block silently skipped."
 
 ---
 
