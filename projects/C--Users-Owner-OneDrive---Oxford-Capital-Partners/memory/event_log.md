@@ -11,6 +11,10 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-20 — Rent roll reconciliation residual spun off as OI-023
+
+Gabriel asked to check open-items-tracker.md for any lingering rent-roll gaps after the reconciliation. No tracker entry existed for the reconciliation's residuals yet. Investigated the one genuinely unmatched rent-roll row: IWNS LLC DBA Jasis Laboratory ($3,000/mo, 2203-2207 Northwood Suite A1+A2) -- confirmed via `notion-search` (no result) that it has zero Notion Tenant DB record, unlike the 4 tenants restored earlier this session which existed but were mistakenly retired. Lease Start of 2026-07-01 suggests a genuinely new, not-yet-onboarded tenant. Not written -- opened as OI-023 pending Gabriel's go-ahead. Also confirmed the other unmatched rent-roll rows (Hobart Services, Masala Bazaar/XPO Foods, Green Home Solutions) are naming variants only, not real gaps -- rent already matches Notion exactly. Detail: `open-items-tracker.md` OI-023.
+
 ## 2026-07-20 — Portfolio-wide rent roll reconciliation: 4 tenants restored, systemic escalation-drift fixed (60 rows)
 
 Gabriel asked to check the 7/20/2026 Rent Roll for discrepancies against the Notion Tenant Database, then to update Notion to match. Reconciled all 137 rent-roll rows against 160 non-retired Notion rows (SQL query mode hit the same free-plan quota wall documented in reference_tenant_db_completeness_gap.md mid-pull; page IDs for the write pass were gathered via `notion-search` instead, which was unaffected). Findings and actions:
