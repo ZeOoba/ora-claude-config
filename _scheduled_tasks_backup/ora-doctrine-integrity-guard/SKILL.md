@@ -1,6 +1,19 @@
 ---
 name: ora-doctrine-integrity-guard
 description: Daily doctrine/governor integrity guard (CC/MCP fleet) — push-independent backstop running BOTH doctrine-integrity-probe.py AND governor-drift-probe.py (Hard Invariant 4, DSCR&gt;=1.25/LTV&lt;=40), surfaces eos-telemetry-rollup, writes _state/doctrine-status.json, emails+posts to Notion ONLY on drift; clean run is silent. Supersedes retired "ORA EOS Health" Windows task. v1.0 2026-07-08. [MODEL: UNVERIFIABLE | checked 2026-07-09]
+output_contract:
+  version: 1
+  blocks:
+    - id: block-doctrine-status-json
+      artifact:
+        type: file
+        path: "C:\\Users\\Owner\\.claude\\maintenance\\_state\\doctrine-status.json"
+      freshness_window_hours: 30
+      expected_on:
+        cron: "55 12 * * *"
+      on_missing_severity: alarm
+      is_primary_health_signal: true
+      notes: "Internal state file written every run via write-doctrine-status.py's write_status(), atomically overwriting this exact path (STEP 2 of this SKILL.md, path verified verbatim against the STEP 2 body text) — written on BOTH the clean path (STEP 4: source='scheduled', doctrine_rc=0, governor_rc=0) and the alarm path, so it is the correct primary signal for a guard that is silent-by-design on a clean run (STEP 4: 'send NOTHING — no email, no Notion post'). Checking the conditional alarm email/Notion post instead would false-alarm every healthy day."
 ---
 
 You are the ORA doctrine/governor integrity guard, on the Claude Code (CC/MCP) fleet — this surface has native Bash/shell access, use it. You start fresh with no memory of prior runs; everything you need is below.

@@ -1,6 +1,58 @@
 ---
 name: ora-am-brief
 description: ORA Morning Brief — single sequential AM session (cron `0 6 * * *`). Four blocks in order — A) Treasury/Rate prefetch (weekdays) -> B) Daily Brief 9-section report via the installed daily-brief skill (every day) -> C) Inbox Pre-Brief triage (weekdays) -> D) Cash Position Snapshot (Mondays). MIGRATED to CC/MCP 2026-07-16 (Gabriel-directed): the LAMS/Cowork sandbox has no local COM access, so the email leg on this task structurally could not send (confirmed: no send for the 2026-07-16 edition despite 7/13-7/15 sending fine) — this fleet has proven COM sends today via the same `send-via-outlook.ps1` path (ora-pm-ledger, automation-health-monitor, Command Center Daily Brief all sent clean). Content carried over verbatim from the LAMS spec with three CC/MCP-surface adaptations: (1) Block B's critical-dates sub-section now cites the Command Center alerts engine as authoritative rather than independently deriving lease/debt dates from a live Notion read (Gabriel-ratified 2026-07-16, closing the recurring two-briefs-disagree defect); (2) Block D drops the Cowork-only `mcp__cowork__update_artifact` step and reads the Master Workbook directly at its confirmed local path; (3) NON-MUTATION GUARANTEE's output list drops "the Cowork cash artifact." The superseded LAMS registration is being retired separately. [MODEL: claude-sonnet-5 | set 2026-07-16]
+output_contract:
+  version: 1
+  blocks:
+    - id: block-a-rate-prefetch
+      artifact:
+        type: notion_page
+        page_id: 35e6ecd8-9e59-814f-ae22-fe99464084d1
+      freshness_window_hours: 30
+      min_count: 1
+      count_semantics: at_least
+      expected_on:
+        days_of_week: [Mon, Tue, Wed, Thu, Fri]
+      on_missing_severity: warn
+      is_primary_health_signal: false
+      notes: "Fixed overwrite page 'Rate Snapshot — Current' (STEP A.3); page_id verified against SKILL.md body text. Freshness proxy for prefetch_status/fetched_at header, not a parsed read of it."
+    - id: block-b-daily-brief
+      artifact:
+        type: notion_page
+        title_pattern: "Daily Brief — {DATE}"
+        parent_id: 32b6ecd8-9e59-81f2-b329-df3fd0e25062
+      freshness_window_hours: 26
+      min_count: 1
+      count_semantics: at_least
+      expected_on:
+        always: true
+      on_missing_severity: alarm
+      is_primary_health_signal: true
+      notes: "Primary signal for the whole task — Block B runs every day, no branching. A page title prefixed ⚠️/🗑️/[DUPLICATE] still counts as 'present' under this contract's existence check; that content-quality distinction is the existing Step 0.55 beacon's job, not this block's."
+    - id: block-c-inbox-pre-brief
+      artifact:
+        type: notion_page
+        title_pattern: "Inbox Pre-Brief — {DATE}"
+        parent_id: 32b6ecd8-9e59-81f2-b329-df3fd0e25062
+      freshness_window_hours: 30
+      min_count: 1
+      count_semantics: at_least
+      expected_on:
+        days_of_week: [Mon, Tue, Wed, Thu, Fri]
+      on_missing_severity: warn
+      is_primary_health_signal: false
+    - id: block-d-cash-snapshot
+      artifact:
+        type: notion_page
+        title_pattern: "Cash Position Snapshot — {DATE}"
+        parent_id: 32b6ecd8-9e59-81f2-b329-df3fd0e25062
+      freshness_window_hours: 30
+      min_count: 1
+      count_semantics: at_least
+      expected_on:
+        days_of_week: [Mon]
+      on_missing_severity: warn
+      is_primary_health_signal: false
 ---
 
 # ora-am-brief — Oxford Realty Advisors Morning Brief (merged)
@@ -208,7 +260,7 @@ Multi-entity cash consolidation across the Master Workbook with reserve threshol
 Email via the Outlook COM helper (`_shared\send-via-outlook.ps1`) — the SOLE send path.
 
 Sources:
-1. **ORA Master Workbook — Cash Data tab** (canonical cash SSOT). Read directly, cell-accurate, via `mcp__Desktop_Commander__read_file` (sheet="Cash Data") against the confirmed local path: `C:\Users\Owner\OneDrive - Oxford Capital Partners\eric spreadsheets\Master Excel Template Company Wide -- Oxford.xlsx` (verified present and OneDrive-synced 2026-07-16 — do NOT use a "(v3)"/"(1)"/"(2)"-suffix variant; re-verify with `get_file_info` if a sync collision reintroduces one). Cash Data's as-of date is MAX(header date row), NOT the Cash Balances summary A2 label (same gotcha `ora-master-workbook-ingest` already documents). If the local path is missing (sync gap), fall back to the Notion Portfolio Intelligence Dashboard (page `3396ecd8-9e59-819c-a598-e55dc5581504`, refreshed weekly by `ora-master-workbook-ingest`) and disclose staleness (dashboard "Last refreshed" date) in §B.
+1. **ORA Master Workbook — Cash Data tab** (canonical cash SSOT). Read directly, cell-accurate, via `mcp__Desktop_Commander__read_file` (sheet="Cash Data") against the confirmed local path: `C:\Users\Owner\OneDrive - Oxford Capital Partners\eric spreadsheets\Master Excel Template Company Wide -- Oxford.xlsx` (2026-07-17: `eric spreadsheets\` is in the OneDrive Business/Personal split's Ambiguous bucket — deliberately NOT moved, still at OneDrive root — do not prepend `Business\` to this path) (verified present and OneDrive-synced 2026-07-16 — do NOT use a "(v3)"/"(1)"/"(2)"-suffix variant; re-verify with `get_file_info` if a sync collision reintroduces one). Cash Data's as-of date is MAX(header date row), NOT the Cash Balances summary A2 label (same gotcha `ora-master-workbook-ingest` already documents). If the local path is missing (sync gap), fall back to the Notion Portfolio Intelligence Dashboard (page `3396ecd8-9e59-819c-a598-e55dc5581504`, refreshed weekly by `ora-master-workbook-ingest`) and disclose staleness (dashboard "Last refreshed" date) in §B.
 2. **Notion Operations Hub** (32b6ecd8-9e59-81f2-b329-df3fd0e25062) — reserve thresholds and target distribution policies.
 3. **Notion debt schedule** — upcoming debt service obligations (next 30 days).
 
