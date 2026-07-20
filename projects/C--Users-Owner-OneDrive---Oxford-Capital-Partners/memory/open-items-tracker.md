@@ -517,6 +517,20 @@ scoped override forcing `vite@6.x` under `vitest` specifically was attempted in 
 by npm as an invalid tree — `vitest@2.x` doesn't tolerate `vite@6.x` internally. The only real fix is
 `vitest` 2.x→4.1.10 (semver-major), which needs its own dedicated cross-repo compatibility pass. Still
 dev-server-only, never reachable from production — kept LOW effective severity, still not urgent.
+**Progress 2026-07-19 (later): ora-pm side FULLY resolved.** Bumped `vitest` 2.x→4.1.10 (added to PR #5) —
+clean migration, no config changes needed, `tsc --noEmit` clean, 185/185 tests unchanged, `npm audit`
+now 0 vulnerabilities (was 9 at OI-017's opening). **oxford-command-center side attempted, reverted.**
+The same bump surfaced a systemic incompatibility, not contained to one file: 24 of 41 tests in
+`tests/unit/governance-check.test.ts` failed across nearly every describe block, tracing to
+`vi.mock('node:fs')` automocking no longer producing usable mock functions under vitest 4. An explicit
+factory-function mock fixed the crash but surfaced a second-order issue — mocks set via a helper
+function (vs. inline in the test body) silently failed to reach the module under test. Given this
+repo's 2828 tests cover live financial-data reconciliation (NOI, capital allocation, warehouse sync),
+reverted rather than force an incompletely-understood mocking regression through; PR #220 stays scoped
+to its original, already-verified overrides-only fix. oxford-command-center's 3 residual CVEs need a
+dedicated vitest-4 migration pass across the whole test suite's mocking patterns — real follow-up work,
+not a drive-by fix. ora-pm: fully closed (0 vulnerabilities). oxford-command-center: 3 residual, LOW
+effective severity, not urgent.
 **Auto-check:** none.
 
 ## Closed

@@ -1,6 +1,26 @@
 ---
 name: ora-cowork-heartbeat
 description: Silent dead-man's-switch heartbeat — 05:50 + 17:50 ET daily. Updates hardcoded Notion page timestamp by ID; no search, no email, no page creation. Watched by external GitHub Actions watchdog (16h threshold). v03. [MODEL: claude-sonnet-5 | set 2026-07-08 | tool-grant re-approved 2026-07-17]
+output_contract:
+  version: 1
+  blocks:
+    - id: block-heartbeat-notion-page
+      artifact:
+        type: notion_page
+        page_id: 35c6ecd8-9e59-81d5-8d2c-d08002458b78
+      freshness_window_hours: 16
+      expected_on:
+        always: true
+      on_missing_severity: alarm
+      is_primary_health_signal: true
+      # Added Plan 2 retrofit (2026-07-18). 16h window matches this task's own header claim
+      # ("Watched by external GitHub Actions watchdog (16h threshold)") and automation-health-monitor's
+      # existing Step 0.55 producer-consumer table row for this task (last_edited_time within last 16
+      # hours). This in-fleet contract check COMPLEMENTS, not REPLACES, the external GitHub Actions
+      # dead-man watchdog — the external watchdog remains the authoritative outage detector for a
+      # total Cowork/LAMS-surface failure (including this task's own scheduler going dark, which an
+      # in-fleet check cannot observe); this contract adds earlier/redundant visibility from the CC/MCP
+      # side via automation-health-monitor's Step 0.56 additive contract-check pass.
 ---
 
 **Cowork Heartbeat — silent signal task** (v03, re-registered 2026-07-08 to standardize onto claude-sonnet-5; preserves v02 hardening of 2026-05-23 and v03 retiming of 2026-06-10. v02 root-cause: notion-search is semantic and unreliable for exact-title lookup; v01's create-if-missing branch produced duplicate pages. Therefore: hardcoded ID only, never search, never create.)

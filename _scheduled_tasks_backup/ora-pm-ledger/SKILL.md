@@ -1,6 +1,48 @@
 ---
 name: ora-pm-ledger
 description: ORA Evening Ledger — consolidated daily close. Runs three blocks in order at one cadence — A Notion Daily Digest (every day), B Outbox QC Sweep (weekdays only), C EOD Action Ledger (every day). Restored 2026-07-08 from three separately-archived block specs after the 2026-07-05 CC/MCP registry loss destroyed the original consolidated file; routing/send-path/paths corrected to current canon during restoration (see RESTORATION NOTE at bottom). CC canonical file inlined 2026-07-08 (second restoration same day) to remove a redirect-to-OneDrive pattern that had already broken twice. Re-enabled 2026-07-09 (Gabriel-approved, post-recovery-stabilization confirmation). Block A edit-detection coverage gaps fixed 2026-07-16 (see AMENDMENT NOTE at bottom). [MODEL: UNVERIFIABLE | checked 2026-07-08]
+output_contract:
+  version: 1
+  blocks:
+    - id: block-a-notion-digest
+      artifact:
+        type: sent_mail
+        mailbox: Sent Items
+        subject_pattern: "ORA Notion Daily Digest - {DATE}"
+        recipient: ggoldberg@oxfordra.net
+      freshness_window_hours: 30
+      min_count: 1
+      count_semantics: at_least
+      expected_on:
+        always: true
+      on_missing_severity: alarm
+      is_primary_health_signal: true
+      notes: "Subject pattern taken verbatim from §0.5 PRE-FLIGHT DE-DUPE GUARD step 1, which already greps Sent Items for this exact string — high confidence, not a guess. Primary signal: runs every day, no branching."
+    - id: block-b-outbox-qc
+      artifact:
+        type: notion_page
+        title_pattern: "Outbox QC — {DATE}"
+        parent_id: 32b6ecd8-9e59-81f2-b329-df3fd0e25062
+      freshness_window_hours: 30
+      min_count: 1
+      count_semantics: at_least
+      expected_on:
+        days_of_week: [Mon, Tue, Wed, Thu, Fri]
+      on_missing_severity: warn
+      is_primary_health_signal: false
+    - id: block-c-eod-ledger
+      artifact:
+        type: notion_page
+        title_pattern: "EOD Action Ledger — {DATE}"
+        parent_id: 32b6ecd8-9e59-81f2-b329-df3fd0e25062
+      freshness_window_hours: 30
+      min_count: 1
+      count_semantics: at_least
+      expected_on:
+        always: true
+      on_missing_severity: warn
+      is_primary_health_signal: false
+      notes: "Every-day cadence like Block A, but Block A is designated the task's primary signal to avoid two alarm-severity blocks firing redundantly off one late/failed run."
 ---
 
 # ORA EVENING LEDGER — Consolidated Daily Close (ora-pm-ledger)
@@ -687,7 +729,7 @@ unreachable source is likewise recorded as a COVERAGE GAP, not dropped.
 the 2026-07-16 run declared the ORA Master Workbook "not locally resolvable
 from this surface" without trying either of two paths that do work from
 CC/MCP: (1) the workbook is OneDrive-synced locally at
-`C:\Users\Owner\OneDrive - Oxford Capital Partners\eric spreadsheets\Master Excel Template Company Wide -- Oxford.xlsx`
+`C:\Users\Owner\OneDrive - Oxford Capital Partners\eric spreadsheets\Master Excel Template Company Wide -- Oxford.xlsx` (2026-07-17: `eric spreadsheets\` is in the OneDrive Business/Personal split's Ambiguous bucket — deliberately NOT moved, still at OneDrive root — do not prepend `Business\` to this path)
 (same path `ora-master-workbook-ingest` reads directly — verified present
 2026-07-16, `lastModifiedDateTime` 2026-07-15) — read it cell-accurately via
 `mcp__Desktop_Commander__read_file`, exactly as that task does; (2) failing
@@ -823,7 +865,7 @@ missed run is itself surfaced by `automation-health-monitor`.
     call timed out (>15s).
 - **Fallback persistence (all three blocks, on any send failure):** write the
   block's HTML body to
-  `C:\Users\Owner\OneDrive - Oxford Capital Partners\ORA\Briefs\outputs\{TODAY}_<block>.html`
+  `C:\Users\Owner\OneDrive - Oxford Capital Partners\Business\ORA\Briefs\outputs\{TODAY}_<block>.html` (path updated 2026-07-17 — `ORA\` moved under `Business\` per the OneDrive Business/Personal split)
   — filenames used in practice: `{TODAY}_notion-daily-digest.html`,
   `{TODAY}_outbox-qc.html`, `{TODAY}_eod-action-ledger.html`. **Use this
   exact no-`"(1)"`-suffix OneDrive path** — the parallel folder
