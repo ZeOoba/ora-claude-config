@@ -11,6 +11,10 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-17 — Granite Tops: AR collection flag added ahead of move-out (OI-009 sub-item)
+
+Gabriel asked to check the AR balance on Granite Tops given the confirmed 2026-07-31 vacate date: $180.19, aged 90+ days (per the 2026-07-15 AR data pull). Added a collection flag to the row's `Notes` via `notion-update-page` -- the balance becomes materially harder to collect once the tenant is out and the lease relationship ends; recommended the PM collect or apply against the security deposit at or before move-out. Verified via fresh fetch. No tracker change (informational addition to an already-closed OI-009 sub-item).
+
 ## 2026-07-19 — OI-015 closed as verified-clean (no history purge needed); real residual found and spun off as OI-022
 
 Gabriel asked to close out the ora-appsec-sweep's OI-015 finding (real E. Fulton deal terms allegedly "still in git history on the remote" for ora-pm) and investigate the theoretical residual further, implementing whatever solution followed.
