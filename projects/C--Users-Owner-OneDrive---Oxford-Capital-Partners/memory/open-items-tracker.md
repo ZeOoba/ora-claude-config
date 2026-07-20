@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-07-19T19:09:29.720Z
+  modified: 2026-07-20T22:48:20.493Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -510,7 +510,24 @@ session (Claude in Chrome) since this requires account login, not an API. **GitH
 fit; no dedicated "sensitive data removal" category exists in the structured form — full detail
 carried in the ticket body). GitHub's own AI triage on the request confirmed the diagnosis matches
 their documented "Removing sensitive data from a repository" process exactly (PR-ref dereference +
-server-side GC). Awaiting GitHub's response.
+server-side GC).
+**CORRECTION 2026-07-20 — original ticket cited the wrong SHA.** GitHub Support replied
+(2026-07-20) that their tooling found the cited commit `c4c69a8` still referenced on `main`,
+`chore/gitattributes-normalize-eol`, `recovery/2026-07-05-object-db-loss`, and PRs #5/#6 — which
+read as a new exposure. Re-verified before acting (fresh clone + `gh api .../contents/.env.example`,
+independently matching): `c4c69a8` has **only ever held placeholder text**; it's a clean squash-merge
+of PR #2 and is a legitimate ancestor of `main` (that's why it shows up everywhere — normal ancestry,
+not exposure). The real sensitive commit is a different SHA, **`6aed9a7`** (the pre-squash head of
+PR #2, found via `git log --find-object=39b02f4585...` against `refs/pull/2/head`), which is *not*
+reachable from `main`, any branch, or PR #5/#6 — confirmed via `git merge-base --is-ancestor`. The
+`c4c69a8` misattribution originated in fix-commit `866480f`'s own message (2026-07-16) and propagated
+into the original support-ticket text.
+**Net effect: no branch/PR cleanup needed anywhere — OI-015's "reachable history is genuinely clean"
+conclusion stands, confirmed a second time.** Replied to ticket #4584520 (2026-07-20, Gabriel
+authorized) correcting the SHA to `6aed9a7`, confirming `main`/branches/#5/#6 are unaffected, and
+asking GitHub to purge `6aed9a7` / blob `39b02f4585cc6357876423d04d5c3fcee65793b0` via the
+strip-internal-references option (preserves PR #2 comment history). Ticket reopened to **status:
+open**, 3 comments. Awaiting GitHub's action on the corrected SHA.
 **Auto-check:** none.
 
 ### OI-016
