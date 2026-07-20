@@ -11,6 +11,7 @@
 - [People](people.md) — Eric, Gabriel, Philip Collins (counsel), Tamara Lucas (title); brokers/lenders/vendors
 
 ## Projects & system
+- [Acquisition-Underwriting Doctrine Review — PLANNED 07-18](project_acquisition_underwriting_doctrine_review_2026-07-18.md) — 9-item research-grounded plan, Fable-adversarially-reviewed, awaiting Gabriel go/no-go; no edits made yet
 - [Autonomy-gate indirection ceiling — CLOSED 07-17](project_autonomy_gate_indirection_ceiling_followup.md) — outbound-action checks landed both sides (email on `main`, netlify via merged PR #30); [OI-007](open-items-tracker.md#OI-007)
 - [bash-guard.mjs indirection gap — CLOSED 07-17](project_bash_guard_indirection_gap.md) — indirection + read/write fixes landed; [OI-010](open-items-tracker.md#OI-010)/[OI-011](open-items-tracker.md#OI-011)
 - [ora-am-brief LAMS retirement — BLOCKED](project_ora_am_brief_lams_retirement_blocked.md) — Code can't reach LAMS registry writes; both fleets double-firing 0 6 * * *
@@ -40,6 +41,7 @@
 - [Tenant DB sync](project_tenant_db_no_sync_rootcause.md) — CLOSED 07-17: OI-003–006 all executed
 - ROI-brief implementation 2026-07-17 — CLOSED, pushed `08c305c`; record in the schematic + 07-09/07-16 audit files above
 - [Artifact content — top-5 open items](project_artifact_content_top5_plan_2026-07-18.md) — PLANNED 07-18: northridge/brockton closeout, ora-pm /100 bug, LOI-throughput line, heartbeat fix, 511/275/monthly-close verify
+- [Stale audit report reconciliation — 07-19](project_2026-07-19_stale_audit_report_reconciliation.md) — 7/8 pasted findings already resolved; only real gap (code-debugging-optimizations deploy-gate carve-out) fixed
 
 ## Markets
 - [Market Intelligence](markets.md) — Cross-market snapshots, macro (FRED), replacement cost, comps, Columbus submarket
@@ -50,6 +52,7 @@
 - [Basis Denominator — RCT v03 (RATIFIED)](project_replacement_cost_benchmark_unratified.md) — the ONE denominator; ORA buys at ~35-40% of true replacement
 
 ## Reference
+- [Deep-Research Synthesize-Stage Bug](reference_deep_research_synthesize_stage_bug.md) — FIXED 07-18: schema now built from real confirmed claims (enum+minLength) so a stub fails validation instead of silently passing
 - [ECC Repo Flagged](reference_ecc_repo_flagged.md) — affaan-m/ECC evaluated + rejected: documented malware-clone risk, fully redundant with existing skill stack
 - [Memory Scope Fragmentation](reference_memory_scope_fragmentation.md) — `(1)` folder = ggoldberg's account; canonical no-suffix = **egoldberg's**
 - [Subagent Anti-Delegation](feedback_subagent_anti_delegation.md) — `Tools:*` subagents may recurse via Agent/Task instead of working; forbid explicitly
@@ -59,6 +62,7 @@
 - [fleet-status.py Dual-Fleet Read](reference_fleet_status_dual_read.md) — reads both registries off disk from either surface; only WRITES need the matching MCP tool
 - [Verify Negative Glob Results](feedback_verify_negative_glob_results.md) — a Glob "no files" isn't proof of absence; cross-check `git ls-files`
 - [Verify WIP Settled via mtime](feedback_verify_wip_settled_via_mtime.md) — isRunning isn't per-file; compare mtimes across spaced checks first
+- [Shared-Checkout Guard Session Attribution Unreliable](feedback_shared_checkout_guard_session_attribution_unreliable.md) — named session IDs traced twice to no registry match; verify before treating as a live blocker
 - [Workflow named-args not delivered](feedback_workflow_named_args_not_delivered.md) — Workflow({name, args}) drops args on CC Desktop; hardcode via scriptPath
 - [Workflow synthesis ungrounded specifics](feedback_workflow_synthesis_ungrounded_specifics.md) — a planning workflow's own synthesis can invent a precise-sounding count/ID with no real artifact behind it; verify before handing off a write task
 - [Autonomy Gate: writes not reads](feedback_autonomy_gate_blocks_writes_not_reads.md) — a "blocked read" means a write indicator was present; read the hook before the override

@@ -1,0 +1,27 @@
+---
+name: reference-deep-research-synthesize-stage-bug
+description: "FIXED 2026-07-18 (task_5a4b89e4) — deep-research's Synthesize stage returned a placeholder stub instead of real findings; root cause was a tool-call-serialization glitch on a large argument, misdiagnosed by the Synthesize agent as a content bug, then 'fixed' by submitting a literal test stub that trivially passed an unconstrained schema. Fix: schema now built dynamically from real confirmed claims (URL enum + minLength/minItems) so a stub fails validation and falls back to the existing unmerged-claims salvage path instead of silently succeeding."
+metadata:
+  type: reference
+  originSessionId: bdc3588d-1d8d-43ca-8662-c2612278ea3e
+---
+
+**What happened.** Ran the `deep-research` named workflow (via the Workflow tool) on institutional CRE underwriting + shallow-bay industrial research. The workflow reported "completed" successfully, but its returned `result.findings` was a literal placeholder: `{"claim":"test claim","confidence":"high","sources":["https://example.com"],"evidence":"test evidence"}`. Its `result.refuted` array, oddly, contained the REAL well-sourced refuted claims — meaning the bug is specifically in how Synthesize merges/returns CONFIRMED claims, not a total failure.
+
+**How it was caught.** Did not trust the "completed" status or the synthesized result at face value — read the raw per-agent journal (`journal.jsonl` in the workflow's transcript dir) directly, which showed real, well-formed claims and 3-vote adversarial verification results (9 confirmed / 16 refuted / 0 unverified out of 25) all the way through the Verify stage. The break is specifically between Verify and the final returned Synthesize output.
+
+**Recovery method (works generally for any workflow with this failure mode):** parse `journal.jsonl` for `{"type":"result",...}` entries, cross-reference `agentId` against the `workflowProgress` array in the `.output` file (or tool result) to get each agent's phase/label, and reconstruct real findings from the Fetch-phase and Verify-phase raw results directly — bypassing the broken Synthesize step entirely.
+
+**Status: FIXED**, via a separate spawned session (`task_5a4b89e4`), reported back 2026-07-18.
+
+**Root cause (per the fixing session):** the Synthesize agent's FIRST StructuredOutput call was a real, complete, correct synthesis (~13KB, all 9 confirmed claims merged with real citations) — it failed schema validation for a reason unrelated to content: the tool call's serialization leaked literal parameter-tag fragments into a JSON string value instead of producing separate top-level keys, so the parsed object was genuinely missing `findings`/`caveats` (a host-side tool-call-serialization artifact on a large argument, not something the workflow script controls). The agent misdiagnosed this as a content/schema-keyword conflict, "tested" with a drastically simplified literal stub (`"test claim"`, `example.com`) as a debugging probe, and because `REPORT_SCHEMA` had no `minLength`/`minItems`/enum constraints, the stub trivially validated — ending the agent's turn and getting silently accepted as the final report. The real first-attempt synthesis was never recoverable (lost in the failed call); only the raw Fetch/Verify-stage claims survived in the journal, which is exactly what this session's manual recovery method (below) pulled from directly.
+
+**Fix:** `REPORT_SCHEMA` replaced with `buildReportSchema(confirmedClaims)`, built at the Synthesize call site from the actual confirmed claims: `sources` items constrained to an enum of the run's real fetched URLs (blocks both test-fixture and hallucinated citations), plus `minLength`/`minItems:1` on summary/caveats/claim/evidence/findings (blocks trivial placeholder text generally). A future low-effort stub now fails structural validation and correctly re-triggers the workflow's existing `if (!report)` salvage path (return unmerged verified claims) instead of silently returning corrupted output as success. Verified by hand against the real recorded corrupted-stub case (rejected on 4 independent grounds) and a realistic paraphrased real-finding (passes cleanly); not re-run as a full 102-agent workflow end-to-end.
+
+**Practical note:** this session's manual journal-recovery (below) was the right call, not just a workaround — the actual first-attempt synthesis is gone regardless of the fix; only fetch/verify raw data ever survived to reconstruct from, and this session's recovery already pulled a superset of that (full source extracts + per-claim vote reasoning, not just the 9-claim confirmed list).
+
+**Reproduction artifacts (kept for reference, not urgently needed now that the fix is verified):**
+- Journal: `C:\Users\Owner\.claude\projects\C--Users-Owner-OneDrive---Oxford-Capital-Partners\bdc3588d-1d8d-43ca-8662-c2612278ea3e\subagents\workflows\wf_332ddd4e-213\journal.jsonl`
+- Corrupted output: `C:\Users\Owner\AppData\Local\Temp\claude\C--Users-Owner-OneDrive---Oxford-Capital-Partners\bdc3588d-1d8d-43ca-8662-c2612278ea3e\tasks\wb058ekln.output`
+
+Related: [[feedback_workflow_synthesis_ungrounded_specifics]] (a related but distinct failure mode — synthesis inventing plausible-sounding specifics rather than returning a stub) · [[feedback_verify_before_repeating_session_claims]] (the general discipline this instance validates) · [[project_acquisition_underwriting_doctrine_review_2026-07-18]] (the task this was discovered during, already closed independently of this fix).

@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-07-19T15:55:08.177Z
+  modified: 2026-07-19T19:09:29.720Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -36,6 +36,9 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | [OI-015](#OI-015) | 2026-07-18 | ora-appsec-sweep first run (2026-07-18) | ora-pm: declassified E. Fulton deal terms persist in git history + external remote — deferred purge (Gabriel's timing); S-003 suppression candidate |
 | [OI-016](#OI-016) | 2026-07-18 | ora-appsec-sweep first run (2026-07-18) | ora-pm: upgrade `hono` (<=4.12.24) — direct runtime dep, HIGH CVEs (CORS/Set-Cookie/path-traversal); effective MED on Workers |
 | [OI-017](#OI-017) | 2026-07-18 | ora-appsec-sweep first run (2026-07-18) | ora-pm + oxford-command-center: build/test/deploy toolchain CVEs (vitest/vite/wrangler/concurrently→shell-quote/transformers→adm-zip) — no prod-reachable path, semver-major fixes |
+| [OI-019](#OI-019) | 2026-07-19 | [event_log.md](event_log.md#2026-07-19) | Gabriel must add `HUBSPOT_TOKEN` (Private App, `crm.objects.deals.read`) to `oxford-command-center/.env` — PR #221 (frontend trigger) ready, blocked only on the credential. Once live, re-verify 2146 Enterprise Pkwy Twinsburg OH (currently untracked in projects.md/deal-decision-ledger.md) lands correctly in acq_candidates |
+| [OI-020](#OI-020) | 2026-07-19 | [event_log.md](event_log.md#2026-07-19) | ora-cowork-heartbeat: LAMS registry entry has no `approvedPermissions` grant (root cause, 3x documented since 07-16). No MCP tool on either surface can write this — only fix is Gabriel manually approving the Notion-tool prompt during a live unattended fire in Cowork's own Scheduled Tasks UI (a manual "Run Now" doesn't count). GitHub watchdog issue open, needs manual closure once genuinely fixed |
+| [OI-021](#OI-021) | 2026-07-19 | [event_log.md](event_log.md#2026-07-19) | Restoration Church Trust: no borrower-side repayment/extension conversation logged since the Apr 2026 Covenant Watch call for lender outreach "by June 2026" (deadline passed); needs Gabriel's own outreach decision (outbound comms, not initiated here). Separately: HubSpot's "Lease Renewal — Restoration Church Trust" deal ($16,714, appointmentscheduled) is likely the same mis-entered-loan-counterparty error already fixed in the Tenant DB (OI-009) — needs a retirement decision. 49 other renewal-pipeline deals also stuck in appointmentscheduled from a 2026-03-27 bulk import with no stage-advancement wiring — needs a lease-renewal-pipeline batch pass |
 
 ### OI-009
 **Status:** OPEN (substantial progress made 2026-07-17, real scope remains)
@@ -462,20 +465,52 @@ not closed.
 **Auto-check:** none (not a fleet-registry item).
 
 ### OI-015
-**Status:** OPEN
+**Status:** CLOSED — verified clean, no purge needed
 **Opened:** 2026-07-18
+**Closed:** 2026-07-19
 **Source:** ora-appsec-sweep first run (2026-07-18, manual + supervised); Notion Ops Hub row `3a26ecd8-9e59-81e4-85d4-d08d0d5d920b`
-**Description:** ora-pm (pinned SHA `f47bbe0`) carries real (now-declassified) E. Fulton confidential
-deal identifiers in git history and on the external remote. The tokens
-(`fulton, e. fulton, efulton, 3520, sij, columbus stamping, nutis`) were committed to `.env.example`
-`CONFIDENTIAL_TERMS` at `c4c69a8` (2026-06-06) and pushed to `origin` (ZeOoba/ora-pm). The reachable
-history at `c4c69a8` now shows placeholders (a rewrite replaced the reachable value), but the real
-value survives locally as an unreachable/dangling blob `39b02f4585cc6357876423d04d5c3fcee65793b0`, and
-per fix-commit `866480f`'s own note it "still exists ... on the remote until a separate history purge
-is run" — a purge Gabriel deliberately deferred (declassified deal, his timing call). NOT a live
-credential. This is the predicted first-run item (SKILL FIRST-RUN NOTE) and the prime candidate for a
-new suppression entry (proposed S-003) once Gabriel triages — only Gabriel adds suppressions. Report-only:
-the sweep never rewrites history or touches the remote.
+**Original finding (superseded, see Evidence below):** the sweep + fix-commit `866480f`'s own note
+both claimed real E. Fulton `CONFIDENTIAL_TERMS` tokens (committed to `.env.example` at `c4c69a8`,
+2026-06-06) were "still in git history ... on the remote until a separate history purge is run."
+**Evidence (2026-07-19):** a completely fresh clone directly from `github.com/ZeOoba/ora-pm` (bypassing
+any local object cache) shows commit `c4c69a8` already contains only placeholders
+(`example-term,another-example,third-example`), and `git log -p --all` across every reachable commit
+and branch in that fresh clone returns zero matches for any real term variant. **The reachable,
+clonable, browsable history is genuinely clean — no history rewrite/force-push was needed or performed.**
+The original finding was based on a stale signal: a local dangling/unreachable blob
+(`39b02f4585cc6357876423d04d5c3fcee65793b0`) that was mistaken for "still in history" — it was never
+part of any current ref and has since been pruned locally. **No purge action was taken; none was needed.**
+**Residual (tracked separately, see OI-022):** that same blob IS still directly retrievable via GitHub's
+Git Data API (confirmed: `gh api repos/ZeOoba/ora-pm/git/blobs/39b02f45...` returns its content), because
+it's kept alive server-side by `refs/pull/2/head` (PR #2's GitHub-managed ref, which cannot be deleted
+via git push, the repo API, or repo settings — this is a documented GitHub platform limitation, not a
+per-repo config issue). This is a distinct problem from "is it in the history anyone would ever see" —
+it requires a GitHub Support request, not a git operation. Spun off as OI-022.
+**Auto-check:** none.
+
+### OI-022
+**Status:** OPEN — drafted, needs Gabriel to submit
+**Opened:** 2026-07-19
+**Source:** OI-015 investigation (2026-07-19)
+**Description:** the original (pre-rewrite) blob containing real E. Fulton `CONFIDENTIAL_TERMS` values
+is still directly retrievable via GitHub's Git Data API (`gh api repos/ZeOoba/ora-pm/git/blobs/<sha>`),
+even though it's unreachable from any current branch/tag and does not appear in any clone or the repo's
+normal browsable history. Root cause: it's kept alive by `refs/pull/2/head`, a GitHub-internal ref for
+the (closed, merged) PR #2 that originally carried the sensitive commit — these refs cannot be deleted
+by the repo owner via git push, the REST/GraphQL API, or repo settings; there is no self-service
+mechanism. The only documented remediation is a GitHub Support request asking them to purge the
+cached/orphaned objects tied to this PR. Repo confirmed private with 0 forks (via API), so a
+support-side purge should fully resolve the exposure.
+**Not a live credential** (E. Fulton declassified 2026-07-09) — low urgency, but a real residual
+exposure path (anyone who obtains the exact blob SHA, e.g. from an old CI log, webhook payload, or
+browser cache, can retrieve the real terms via the API regardless of the rewrite on `main`).
+**SUBMITTED 2026-07-19.** Gabriel authorized submission; sent via his own authenticated GitHub
+session (Claude in Chrome) since this requires account login, not an API. **GitHub Support ticket
+#4584520, status: open**, category Repositories → Repository features → Branches (closest available
+fit; no dedicated "sensitive data removal" category exists in the structured form — full detail
+carried in the ticket body). GitHub's own AI triage on the request confirmed the diagnosis matches
+their documented "Removing sensitive data from a repository" process exactly (PR-ref dereference +
+server-side GC). Awaiting GitHub's response.
 **Auto-check:** none.
 
 ### OI-016
