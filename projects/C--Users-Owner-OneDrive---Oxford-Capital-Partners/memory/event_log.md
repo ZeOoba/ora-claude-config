@@ -11,6 +11,10 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-20 — OI-023 closed: IWNS LLC DBA Jasis Laboratory added to Notion
+
+Gabriel confirmed adding the tenant found missing during the rent-roll reconciliation. Created via `notion-create-pages`: Tenant Name "IWNS LLC DBA Jasis Laboratory", Tenant Legal Entity Name "IWNS LLC", Property Address 2203-2207 Northwood Dr -- Salisbury MD, Suite A1+A2, 2,400 SF, $3,000/mo, Lease Status Active, Primary Contact Steven Johnson, Lease Start 2026-07-01, Lease Expiration 2031-06-30, Next Escalation Date 2027-07-01, Escalation Percent 3%. All fields sourced directly from the rent roll (no primary lease document read yet). Assigned Tenant ID ORA-T-299, verified via fresh fetch. Closes OI-023. Detail: `open-items-tracker.md` OI-023.
+
 ## 2026-07-20 — Rent roll reconciliation residual spun off as OI-023
 
 Gabriel asked to check open-items-tracker.md for any lingering rent-roll gaps after the reconciliation. No tracker entry existed for the reconciliation's residuals yet. Investigated the one genuinely unmatched rent-roll row: IWNS LLC DBA Jasis Laboratory ($3,000/mo, 2203-2207 Northwood Suite A1+A2) -- confirmed via `notion-search` (no result) that it has zero Notion Tenant DB record, unlike the 4 tenants restored earlier this session which existed but were mistakenly retired. Lease Start of 2026-07-01 suggests a genuinely new, not-yet-onboarded tenant. Not written -- opened as OI-023 pending Gabriel's go-ahead. Also confirmed the other unmatched rent-roll rows (Hobart Services, Masala Bazaar/XPO Foods, Green Home Solutions) are naming variants only, not real gaps -- rent already matches Notion exactly. Detail: `open-items-tracker.md` OI-023.
