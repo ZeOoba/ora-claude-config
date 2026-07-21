@@ -11,6 +11,7 @@
 - [People](people.md) — Eric, Gabriel, Philip Collins (counsel), Tamara Lucas (title); brokers/lenders/vendors
 
 ## Projects & system
+- [Tenant-HubSpot Reconciliation — CLOSED 07-21](project_tenant_hubspot_reconciliation_2026-07-21.md) — 7 stale deals corrected w/ evidence, exception-detection v1.2, new monthly task
 - [event_log.md IWNS block loss — UNATTRIBUTED](project_event_log_iwns_block_loss_unattributed_2026-07-21.md) — 6 entries recovered from git + committed; exhaustive session-transcript search found no culprit write, root cause open
 - [Acquisition-Underwriting Doctrine Review — PLANNED 07-18](project_acquisition_underwriting_doctrine_review_2026-07-18.md) — 9-item research-grounded plan, Fable-adversarially-reviewed, awaiting Gabriel go/no-go; no edits made yet
 - [Autonomy-gate indirection ceiling — CLOSED 07-17](project_autonomy_gate_indirection_ceiling_followup.md) — outbound-action checks landed both sides (email on `main`, netlify via merged PR #30); [OI-007](open-items-tracker.md#OI-007)
@@ -35,7 +36,7 @@
 - [CLAUDE.md Formal Audit](project_claude-md-formal-audit-2026-07-08.md) — Phases 0-3 DONE; 4 deferred items in file
 - [Claude Code Setup Audit 2026-07-09](project_claude-setup-audit-2026-07-09.md) — migration CLOSED 07-17; 15/21 items resolved
 - [Claude Setup Comprehensive Review 2026-07-16](project_claude-setup-audit-2026-07-16.md) — G1-G8 done; chip TERMINAL, needs Gabriel
-- [oxfordra.net SEO Audit 2026-07](project_oxfordra_seo_audit_2026-07.md) — overall C- (59/100); action list in file
+- [oxfordra.net SEO Audit 2026-07](project_oxfordra_seo_audit_2026-07.md) — 4th pass 07-21: B- (74/100), up from 67; PR #41/#42 confirmed merged, seller-hub still the gap
 - [Owner-Outreach Stale-Guard Watch](project_owner_outreach_stale_guard_watch.md) — CLOSED 07-14: guard confirmed correct, SKILL.md v1.3 remembers vintage
 - [Ops Decision Log](ops_decision_log.md) — recurring operational yes/no calls, so they aren't re-litigated; companion to deal-decision-ledger.md
 - [Open Items Tracker](open-items-tracker.md) — canonical punch-list; other files POINT here, never restate item text
@@ -44,7 +45,8 @@
 - [Artifact content — top-5 open items](project_artifact_content_top5_plan_2026-07-18.md) — PLANNED 07-18: northridge/brockton closeout, ora-pm /100 bug, LOI-throughput line, heartbeat fix, 511/275/monthly-close verify
 - [Stale audit report reconciliation — 07-19](project_2026-07-19_stale_audit_report_reconciliation.md) — 7/8 pasted findings already resolved; only real gap (code-debugging-optimizations deploy-gate carve-out) fixed
 - [open-items-tracker.md worktree/HEAD divergence — OPEN 07-20](project_open_items_tracker_worktree_head_divergence.md) — on-disk file missing session 15ec64e8's committed OI-023; check next session, don't force-resync over live WIP
-- [Sell-your-building page — SHELVED 07-20](project_sell_your_building_page_shelved_2026-07-20.md) — PR #31 closed unmerged, never live; full patch saved for easy replication, 2 known issues to fix first
+- [Sell-your-building page — LIVE 07-21](project_sell_your_building_page_shelved_2026-07-20.md) — PR #43 merged/deployed (hidden from nav, CTA on for-brokers.html), both known issues fixed
+- [Seller-intent resource hub — IN PROGRESS 07-21](project_seller_resource_hub_2026-07-21.md) — opus agent scoping/drafting 3-4 articles in wt-seller-resource-hub, PR not yet opened
 
 ## Markets
 - [Market Intelligence](markets.md) — Cross-market snapshots, macro (FRED), replacement cost, comps, Columbus submarket
@@ -55,6 +57,9 @@
 - [Basis Denominator — RCT v03 (RATIFIED)](project_replacement_cost_benchmark_unratified.md) — the ONE denominator; ORA buys at ~35-40% of true replacement
 
 ## Reference
+- [Skill args positional-substitution bug](reference_skill_args_positional_substitution_bug.md) — `args` corrupts $-amounts in SKILL.md; filed anthropics/claude-code#79859
+- [Skill reimport sync lag](reference_skill_reimport_sync_lag.md) — NEW 07-21: "Save skill" lags local disk by up to ~10min; verify via main.log, not PENDING_REIMPORT
+- [Tenant DB Cache & Notion Quota Myth](reference_tenant_db_cache_and_notion_quota_myth.md) — NEW 07-21: quota is an MCP-tool gate, not Notion; `ora-pm-ledger`'s daily snapshot already has the data
 - [Deep-Research Synthesize-Stage Bug](reference_deep_research_synthesize_stage_bug.md) — FIXED 07-18: schema now built from real confirmed claims (enum+minLength) so a stub fails validation instead of silently passing
 - [ECC Repo Flagged](reference_ecc_repo_flagged.md) — affaan-m/ECC evaluated + rejected: documented malware-clone risk, fully redundant with existing skill stack
 - [Memory Scope Fragmentation](reference_memory_scope_fragmentation.md) — `(1)` folder = ggoldberg's account; canonical no-suffix = **egoldberg's**

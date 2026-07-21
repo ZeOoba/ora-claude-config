@@ -40,36 +40,6 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | [OI-020](#OI-020) | 2026-07-19 | [event_log.md](event_log.md#2026-07-19) | ora-cowork-heartbeat: LAMS registry entry has no `approvedPermissions` grant (root cause, 3x documented since 07-16). No MCP tool on either surface can write this — only fix is Gabriel manually approving the Notion-tool prompt during a live unattended fire in Cowork's own Scheduled Tasks UI (a manual "Run Now" doesn't count). GitHub watchdog issue open, needs manual closure once genuinely fixed |
 | [OI-021](#OI-021) | 2026-07-19 | [event_log.md](event_log.md#2026-07-19) | Restoration Church Trust: no borrower-side repayment/extension conversation logged since the Apr 2026 Covenant Watch call for lender outreach "by June 2026" (deadline passed); needs Gabriel's own outreach decision (outbound comms, not initiated here). Separately: HubSpot's "Lease Renewal — Restoration Church Trust" deal ($16,714, appointmentscheduled) is likely the same mis-entered-loan-counterparty error already fixed in the Tenant DB (OI-009) — needs a retirement decision. 49 other renewal-pipeline deals also stuck in appointmentscheduled from a 2026-03-27 bulk import with no stage-advancement wiring — needs a lease-renewal-pipeline batch pass |
 
-### OI-023
-**Status:** CLOSED 2026-07-20
-**Opened:** 2026-07-20
-**Source:** [event_log.md](event_log.md#2026-07-20) (portfolio rent roll reconciliation)
-**Description:** The 2026-07-20 rent-roll-vs-Notion reconciliation (60 writes landed, 4 mistakenly-retired
-tenants restored, systemic escalation drift fixed) left exactly one genuine residual: **IWNS LLC DBA
-Jasis Laboratory** -- contact Steven Johnson, 2203-2207 Northwood Dr -- Salisbury MD, Suite A1+A2,
-2,400 SF, $3,000/mo, Lease Start 2026-07-01, Lease Expiration 2031-06-30, 3%/year escalation from
-2027-07-01 -- appears on the rent roll with a complete lease record but has **no matching Notion
-Tenant DB row at all** (confirmed via `notion-search`, no result). Lease Start of 2026-07-01 (3 weeks
-before the rent roll's date) suggests this is a genuinely new tenant simply not yet onboarded into
-Notion, not a data-corruption case like the 4 restored this session. Not written -- creating a
-net-new row wasn't in scope for a "check for gaps" pass. Needs Gabriel's go-ahead to add it.
-**Also checked and confirmed NOT gaps** (naming variants only, rent already matches Notion exactly):
-Hobart Services (truncated name in rent roll), Masala Bazaar/XPO Foods (alias to Notion's "Azad Shah
-(M&N)" -- already a known PM-platform alias per `reference_tenant_name_mappings.md`), Green Home
-Solutions "of Pickerington" (alias to Notion's "Greeen Home Solutions (Mueller)" -- possible
-franchise-ownership rename, not investigated further). Also **My Autonomous Transportation Co.** and
-**Lamar Advertising (Columbus)** remain on the rent roll unmatched -- both pre-existing, already-
-documented gaps (My Autonomous Transportation Co: no executed lease found, deliberately left null per
-OI-009; Lamar: likely ghost billboard charge, flagged since `reference_tenant_name_mappings.md`'s
-2026-04-14 pass).
-**Closed 2026-07-20:** Gabriel confirmed -- created the row via `notion-create-pages`. Tenant Name
-"IWNS LLC DBA Jasis Laboratory", Tenant Legal Entity Name "IWNS LLC", Property Address
-2203-2207 Northwood Dr -- Salisbury MD, Suite A1+A2, 2,400 SF, $3,000/mo, Lease Status Active,
-Primary Contact Steven Johnson, Lease Start 2026-07-01, Lease Expiration 2031-06-30, Next Escalation
-Date 2027-07-01, Escalation Percent 3%, Row Retired __NO__ -- all fields sourced directly from the
-rent roll (no primary lease document read). Assigned Tenant ID ORA-T-299. Verified via fresh fetch.
-**Auto-check:** none (not a fleet-registry item).
-
 ### OI-009
 **Status:** OPEN (substantial progress made 2026-07-17, real scope remains)
 **Opened:** 2026-07-17
@@ -619,7 +589,6 @@ effective severity, not urgent.
 
 | ID | Opened | Closed | Source | One-line |
 |----|--------|--------|--------|----------|
-| [OI-023](#OI-023) | 2026-07-20 | 2026-07-20 | [event_log.md](event_log.md#2026-07-20) | Portfolio rent roll reconciliation: IWNS LLC DBA Jasis Laboratory ($3,000/mo, 2203-2207 Northwood Suite A1+A2) had zero Notion record -- row created (ORA-T-299), Gabriel-confirmed |
 | [OI-018](#OI-018) | 2026-07-18 | 2026-07-19 | ora-appsec-sweep first run — supervised re-run (2026-07-18) | ora-pm HIGH IDOR on `/api/stripe/{customer,setup-intent,payment-intent}` RESOLVED — session-ownership guards (portal.ts/autopay pattern) landed in `c705531`, 185/185 green, adversarial refute pass run |
 | [OI-013](#OI-013) | 2026-07-17 | 2026-07-17 | [reference_onedrive_business_scope.md](reference_onedrive_business_scope.md) | Second `oxford-site` git clone was a known, already-repaired legacy checkout (Gabriel, 2026-07-16) — not a live risk; leaked deploy token already purged + rotated same day |
 | [OI-012](#OI-012) | 2026-07-17 | 2026-07-17 | ora-deal-command-board SKILL.md STEP 2 | Stamp `Last Activity` from deal-touching skills so the board's stall flag is authoritative — field+board+3 skills stamped, Save-skill reimport of all 3 confirmed by Gabriel, PENDING_REIMPORT.md cleared |
