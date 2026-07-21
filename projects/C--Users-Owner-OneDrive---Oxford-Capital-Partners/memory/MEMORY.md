@@ -31,7 +31,7 @@
 - [oxford-command-center worktree gotchas](project_oxford-command-center_worktree_gotchas.md) — WORKBOOK_PATH not inherited per-worktree
 - [Claude Code Setup Audit 2026-07-09](project_claude-setup-audit-2026-07-09.md) — migration CLOSED 07-17; 15/21 resolved, rest in file
 - [Claude Setup Comprehensive Review 2026-07-16](project_claude-setup-audit-2026-07-16.md) — G1-G8 done; chip TERMINAL, needs Gabriel
-- [oxfordra.net SEO Audit 2026-07](project_oxfordra_seo_audit_2026-07.md) — 4th pass 07-21: B- (74/100); seller-hub still the gap
+- [oxfordra.net SEO Audit 2026-07](project_oxfordra_seo_audit_2026-07.md) — 4th pass 07-21: B-(74); seller-hub closed same-day, PR #46 open for 3 warnings
 - [Owner-Outreach Stale-Guard Watch](project_owner_outreach_stale_guard_watch.md) — CLOSED 07-14: SKILL.md v1.3 remembers vintage
 - [Ops Decision Log](ops_decision_log.md) — recurring operational yes/no calls; companion to deal-decision-ledger.md
 - [Open Items Tracker](open-items-tracker.md) — canonical punch-list; other files POINT here, never restate item text
@@ -39,7 +39,8 @@
 - [Artifact content — top-5 open items](project_artifact_content_top5_plan_2026-07-18.md) — PLANNED 07-18: closeout/bug/verify punch-list
 - [open-items-tracker.md worktree/HEAD divergence — OPEN 07-20](project_open_items_tracker_worktree_head_divergence.md) — don't force-resync
 - [Sell-your-building page — LIVE 07-21](project_sell_your_building_page_shelved_2026-07-20.md) — PR #43 merged/deployed, both known issues fixed
-- [Seller-intent resource hub — IN PROGRESS 07-21](project_seller_resource_hub_2026-07-21.md) — 3-4 articles drafting in wt-seller-resource-hub
+- [Seller-intent resource hub — CLOSED 07-21](project_seller_resource_hub_2026-07-21.md) — PR #45 merged/live, 4 guides + hub index
+- [Lighthouse perf/CSP thread — CLOSED 07-21](reference_oxfordra_lighthouse_csp_fix_2026-07-21.md) — PRs #47-52/#54 merged+live; #54 fixed a silent build-pipeline break
 - Setup-improvement top-5 (07-18): [overview](project_setup_improvement_top5_plan_2026-07-18.md) · [Plan 2 design](project_plan2_effect_verification_design_2026-07-18.md) — PLANNED, awaiting approval
 
 ## Markets
@@ -53,6 +54,7 @@
 ## Reference
 - [Skill args positional-substitution bug](reference_skill_args_positional_substitution_bug.md) — `args` corrupts $-amounts; filed claude-code#79859
 - [Skill reimport sync lag](reference_skill_reimport_sync_lag.md) — "Save skill" lags disk ~10min; verify via main.log not PENDING_REIMPORT
+- [Skill description version-extraction gotcha](reference_skill_description_version_extraction_gotcha.md) — description `vX.Y` can be a sub-component version, not the file version; check body H1 first (acquisition-underwriting: desc said v1.1, file is v4.3)
 - [Tenant DB Cache & Notion Quota Myth](reference_tenant_db_cache_and_notion_quota_myth.md) — quota is an MCP-tool gate; `ora-pm-ledger`'s snapshot has the data
 - [Deep-Research Synthesize-Stage Bug](reference_deep_research_synthesize_stage_bug.md) — FIXED: schema requires real confirmed claims, stub now fails validation
 - [ECC Repo Flagged](reference_ecc_repo_flagged.md) — affaan-m/ECC rejected: malware-clone risk, redundant with skill stack

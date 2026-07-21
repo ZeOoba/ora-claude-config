@@ -12,3 +12,4 @@ Classification key: CURRENT = tag matches standard · STALE = tag present but mi
 2026-07-15 — 21 tasks: 19 MODEL-UNVERIFIABLE, 1 MODEL-CURRENT (ora-cc-schematic-refresh=claude-sonnet-5), 0 MODEL-STALE, 1 MODEL-UNTAGGED (canary-model-check-temp, disabled one-time), standard=claude-sonnet-5
 2026-07-17 — 24 tasks: 19 MODEL-UNVERIFIABLE, 2 MODEL-CURRENT (ora-cc-schematic-refresh + ora-am-brief = claude-sonnet-5), 0 MODEL-STALE, 3 MODEL-UNTAGGED (ora-setup-review-closeout-recheck enabled one-time; heartbeat-beacon-recovery-check + heartbeat-check-backup-verify disabled one-time), standard=claude-sonnet-5
 2026-07-19 — 23 tasks: 19 MODEL-UNVERIFIABLE, 2 MODEL-CURRENT (ora-cc-schematic-refresh + ora-am-brief = claude-sonnet-5), 0 MODEL-STALE, 2 MODEL-UNTAGGED (ora-deal-command-board + ora-deal-aging-sla), standard=claude-sonnet-5
+2026-07-21 — 27 tasks: CURRENT=2, STALE=0, UNTAGGED=5, UNVERIFIABLE=20, standard=claude-sonnet-5

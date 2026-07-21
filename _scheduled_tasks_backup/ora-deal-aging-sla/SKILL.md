@@ -1,18 +1,18 @@
 ---
 name: ora-deal-aging-sla
-description: Weekday counterparty-aging SLA — computes days-since-last-outbound per open deal ask (broker/counsel/lender) via live Outlook search; drafts (never sends) a nudge past ratified per-class thresholds (broker 5bd/counsel 7bd/lender 7bd, ratified 2026-07-18). Draft-only, Hard Invariant 1. v1.0.
+description: Weekday counterparty-aging SLA — computes days-since-last-outbound per open deal ask (broker/counsel/lender) via live Outlook search; drafts (never sends) a nudge past ratified per-class thresholds (broker 5bd/counsel 7bd/lender 7bd, ratified 2026-07-18). Draft-only, Hard Invariant 1. v1.0. [MODEL: UNVERIFIABLE | checked 2026-07-21]
 output_contract:
   version: 1
   blocks:
     - id: aging-nudge-drafts
       artifact: { type: outlook_draft, folder: Drafts }
       freshness_window_hours: 30
-      expected_on: { cron: "20 9 * * 1-5" }
+      expected_on: { cron: "25 9 * * 1-5" }
       on_missing_severity: info
     - id: completion-row
       artifact: { type: notion_page, parent_id: 32b6ecd8-9e59-81f2-b329-df3fd0e25062, title_pattern: "Deal Aging SLA — {DATE}" }
       freshness_window_hours: 30
-      expected_on: { cron: "20 9 * * 1-5" }
+      expected_on: { cron: "25 9 * * 1-5" }
       on_missing_severity: warn
 ---
 
@@ -46,6 +46,8 @@ For each qualifying deal, classify the open ask by counterparty class:
 ## STEP 3 — Compute days-since-last-outbound via Outlook
 
 For each deal with a qualifying open ask, use `outlook_email_search` to find the counterparty thread: search by the deal's street address and/or "[Address] PSA"/"[Address] LOI"-style subject terms, and, where a contact email or domain is known, narrow with the `recipient` filter rather than free-text `query` — free-text search on this connector is relevance-ranked, not literal, and returned unrelated daily-brief mail in testing when only a property-name query was used. Prefer recipient filtering whenever a counterparty email/domain is available.
+
+**Mandatory recipient-domain fallback before concluding anything (added 2026-07-20 after a real miss).** The live thread subject often does NOT contain the deal's full street address — a PSA thread may be titled with a truncated or informal property name. So an address-only subject search can silently miss the actual external-counterparty thread and either return only ORA-internal/digest/automated mail or land on a stale leg. Therefore: if the address/subject search returns only ORA-internal exchanges (ggoldberg@/egoldberg@/our own counsel), digest/brief/automated mail, or nothing external, you MUST re-search with a `recipient`-domain filter derived from every counterparty domain available for the deal — the Broker / Source, Key Attorney, and Lender field contacts, plus any counterparty domains named in the deal file — BEFORE flagging `[NO OUTBOUND FOUND — VERIFY MANUALLY]` or computing a stale-since date. Only after the domain-filtered search also comes up empty is a `[NO OUTBOUND FOUND]` flag or an aging figure legitimate. Real defect this prevents (2026-07-18 run): the "754 Old State PSA" thread with the seller's counsel at `kmklaw.com` was missed by a "754 Old State Route 74"-subject search, so the run reported a false 25-business-day counsel breach when the deal was in fact in active same-week negotiation; a `recipient:kmklaw.com` (or `recipient:gerth`) re-search surfaces it immediately.
 
 Within the matched thread, find the most recent message **sent by ORA (ggoldberg@ or egoldberg@) to the external counterparty** (not an internal cc, not a reply from the counterparty, not an ORA-internal exchange with our own counsel about the same deal — testing found Eric Goldberg emailing Phil Collins, ORA's OWN transaction counsel, in the same thread as the Seller's counsel exchange; only the outbound leg to the external party counts). Compute days-since as business days (Mon-Fri; do not count Sat/Sun) from that message's `sentDateTime` to today.
 

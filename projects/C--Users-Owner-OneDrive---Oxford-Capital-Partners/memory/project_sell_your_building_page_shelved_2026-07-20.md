@@ -1,12 +1,14 @@
 ---
 name: project-sell-your-building-page-shelved
-description: "Owner lead-gen page (sell-your-building.html) — shelved 2026-07-20, RESTORED 2026-07-21 as PR #43 (hidden from nav, discoverable via for-brokers.html CTA); awaiting Gabriel merge decision"
+description: "Owner lead-gen page (sell-your-building.html) — shelved 2026-07-20, RESTORED + MERGED + LIVE via PR #43; nav-hidden placement RATIFIED by Gabriel 2026-07-21"
 metadata: 
   node_type: memory
   type: project
   originSessionId: da248f6b-1229-46b7-8ba2-049922193bcc
-  modified: 2026-07-21T17:19:09.351Z
+  modified: 2026-07-21T18:05:25.149Z
 ---
+
+**Nav placement RATIFIED 2026-07-21** (in response to the fourth-pass SEO audit flagging it as a "now-questionable orphan"): Gabriel confirmed it stays out of primary nav, for-brokers.html CTA remains the sole on-site discovery path. Reasoning: it's a targeted seller-conversion landing page for the owner-outreach motion, not general-browsing content — surfacing it in primary nav would put a seller CTA in front of the tenant/broker audience the main nav serves. This decision also extends to [[project_seller_resource_hub_2026-07-21]]'s hub/guides, same rationale.
 
 **STATUS 2026-07-21: MERGED AND LIVE.** PR [#43](https://github.com/ZeOoba/Website/pull/43) (`feature/sell-your-building-hidden-page`, website-canonical) merged (squash, `6d62546`) to `main` 2026-07-21T17:17:18Z on Gabriel's explicit in-turn confirmation — deployed to oxfordra.net. `/sell-your-building` is live, hidden from primary nav, reachable via the for-brokers.html CTA. Branch and worktree cleaned up post-merge.
 

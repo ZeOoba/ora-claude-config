@@ -5,6 +5,7 @@ metadata:
   node_type: memory
   type: firm
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
+  modified: 2026-07-21T19:55:46.204Z
 ---
 
 # Oxford Realty Advisors — Firm Context
@@ -12,7 +13,7 @@ metadata:
 **Entity:** Oxford Realty Advisors (ORA) · oxfordra.net
 **Structure:** Private family office, 100% proprietary capital, no outside investors. Founded 2005.
 
-**Portfolio:** ~600,000 SF shallow-bay industrial & flex, ~140 tenants (~14 properties / ~513K SF Oxford-share).
+**Portfolio:** ~600,000 SF shallow-bay industrial & flex, ~140 tenants, **27+ properties** (~513K SF / 13 Oxford-share properties is a narrower subset, not the company-wide count — corrected 2026-07-21 per Gabriel direct confirmation during oxfordra.net content audit; the old "~14 properties" company-wide figure was stale/wrong).
 **Markets:** DC Metro/MD, Baltimore, Columbus OH, Indianapolis IN, Kansas City MO (+ expansion: WI, KS, TN).
 **AUM:** ~$60M current → **$700–800M target over 35+ years.**
 **Hold strategy:** Forever-hold on core assets.

@@ -160,9 +160,9 @@ evidence (2026-07-16), not a standing guarantee.
 
 | # | Section heading | Notion target | ID | Kind | Native last-edited column |
 |---|---|---|---|---|---|
-| A | **Deal Pipeline** | Acquisition Pipeline Tracker | `bcfe4a03-7e61-4ac1-a0bb-c44174fa138b` | database | `Last Updated` |
+| A | **Deal Pipeline** | Acquisition Pipeline Tracker — `bcfe4a03…` is the DATA-SOURCE id, NOT the database page id (db page = `46c8a5c6-8b37-4c53-a10d-0f55c97613e5`). This DB is **multi-source**, so `/v1/databases/{id}/query` 404s on the collection id and 400s on the db id @ Notion-Version 2022-06-28. **REST last-edited query MUST use `POST /v1/data_sources/bcfe4a03-7e61-4ac1-a0bb-c44174fa138b/query` @ Notion-Version 2025-09-03** — verified 200 (2026-07-20). This is why the 2026-07-05→07-20 runs recorded a false "REST 404 coverage gap": the digest code queried `/databases/bcfe4a03` instead of `/data_sources/bcfe4a03` @ the new version. | `bcfe4a03-7e61-4ac1-a0bb-c44174fa138b` (data source) | database | `Last Updated` |
 | A | **Deal Pipeline** | Deal Sourcing Log | `9a6ae219-85a3-4621-899c-c757fd062f8b` (canonical pair: database `8d2ddc5177e84cd7b1c0c0f6ef943479` / data source `9a6ae219-85a3-4621-899c-c757fd062f8b`) | database | `Last Updated` |
-| A | **Deal Pipeline** | Broker Relationships | `48e43778-b1f2-4b16-8f3c-0bf18f8642e9` | database | `Last Updated` |
+| A | **Deal Pipeline** | Broker Relationships — the old id `48e43778-b1f2-4b16-8f3c-0bf18f8642e9` was WRONG (404 on every endpoint). **Correct database page id = `dc5bda06-b0b8-4166-a07d-2f99cff8d936`** — single-source, so `POST /v1/databases/dc5bda06-b0b8-4166-a07d-2f99cff8d936/query` @ Notion-Version 2022-06-28 works — verified 200 (2026-07-20). | `dc5bda06-b0b8-4166-a07d-2f99cff8d936` | database | `Last Updated` |
 | B | **Tenants & Operations** | Tenant Database — query via data source, NOT the wrapper ID (wrapper `8dbbaec0…` throws "Aggregation property not found"; root cause was a tool-routing quirk, not a broken rollup — fixed 2026-04-27) | `collection://b12f4cfd-a995-4755-8341-6435ae8173b4` | database | `Last Updated` |
 | B | **Tenants & Operations** | Property Register | `19a61fc9-21ed-42d7-a0db-aa730d9a9683` (data source `24d6a531-f4b7-4c38-87fb-3b1be4a4f1f3`) | database | `Last Updated` |
 | B | **Tenants & Operations** | CapEx & Maintenance Log | `5dfcc3ad-532e-4e5f-bf8d-512e2b69e317` (data source `acd5102e-16bc-4171-9cde-19a2496b1429`) | database | `Last Edited` |
@@ -207,8 +207,11 @@ Use all of the following signals and merge, deduping by page ID:
    rows every run, forever**, and reporting that as "no edits today, precisely
    confirmed" is a confident false negative — strictly worse than the honest
    best-effort search it replaced. **For the Tenant DB: never present a zero
-   from this query as evidence of no edits. Record it as a COVERAGE GAP and
-   fall back to the step-3 semantic sweep.**
+   from this query as evidence of no edits. Do NOT even run the timestamp query
+   for the Tenant DB — use `tenant_db_snapshot_diff.py` instead (BUILT 2026-07-20;
+   see the ✅ BUILT block further down this section). Its snapshot+diff is the
+   authoritative detector; only if that SCRIPT errors does the Tenant DB revert to
+   a COVERAGE GAP.**
 
    **What the column actually appears to track (root-cause pass 2026-07-16 —
    behavior PROVEN, mechanism NOT).** Proven: three independent write events
@@ -299,7 +302,32 @@ Use all of the following signals and merge, deduping by page ID:
    **Consequence — the only mechanism that can detect Tenant DB edits is a
    SNAPSHOT + DIFF**, which the grant now makes affordable: unlimited REST reads
    mean a nightly full pull of the DB, hashed and diffed against yesterday's,
-   detects real changes regardless of the broken timestamp. Not built — proposed.
+   detects real changes regardless of the broken timestamp.
+
+   **✅ BUILT 2026-07-20 — `tenant_db_snapshot_diff.py` (in this task folder).**
+   This is now the AUTHORITATIVE Tenant DB edit detector; the frozen-timestamp
+   query is dead and must not be presented as "no edits". Every run, Block A's
+   Section B (Tenant Database) MUST invoke:
+   ```
+   C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \
+     C:/Users/Owner/.claude/scheduled-tasks/ora-pm-ledger/tenant_db_snapshot_diff.py \
+     --run --date {TODAY}
+   ```
+   It pulls all ~296 rows via REST (`/databases/8dbbaec0…/query` @ 2022-06-28,
+   single-source, paginated), normalizes each row's properties to plain values
+   (skipping the volatile created/last_edited metadata), sha256-fingerprints each
+   row, diffs against `state/tenant-db-latest.json`, then rewrites `latest` + a
+   dated archive `state/tenant-db-{TODAY}.json`. The last stdout line is
+   `RESULT_JSON={...}` with `added/removed/changed` (changed carries field-level
+   `old -> new`); parse that and fold it into Section B instead of the frozen
+   query. First-ever run reports a BASELINE (296 rows, no diff) — that is normal,
+   not a failure; real diffs start the next run. Verified end-to-end 2026-07-20:
+   baseline of 296 rows, then a second same-day pull correctly reported 0/0/0
+   changed / 296 unchanged (no false positives from volatile fields); a no-network
+   `--selftest` covers the diff engine (added/removed/changed + field-level +
+   first-run-baseline). Only if the SCRIPT itself errors (token unreadable, REST
+   down) does Tenant DB revert to a COVERAGE GAP — a clean 0-diff is now a REAL
+   "no edits today", no longer a false negative.
 
    **⚠ DEFECT 2 — `notion-query-data-sources` is ENTITLEMENT-GATED and will
    hard-fail mid-run.** Measured live 2026-07-16: after ~5 queries the tool

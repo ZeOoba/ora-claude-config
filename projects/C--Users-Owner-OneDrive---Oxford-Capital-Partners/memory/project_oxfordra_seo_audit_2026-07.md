@@ -1,11 +1,11 @@
 ---
 name: project-oxfordra-seo-audit-2026-07
-description: "Searchfit SEO audits of oxfordra.net — baseline 07-10 C- (59/100), 4 same-day 07-21 passes ending at B- (74/100); PR #41+#42 confirmed merged, content/seller-hub still the binding constraint"
+description: "Searchfit SEO audits of oxfordra.net — baseline 07-10 C- (59/100), 4 same-day 07-21 passes ending at B- (74/100); seller-hub CLOSED same-day (PR #45), PR #46 open for remaining 3 warnings, nav-placement ratified"
 metadata: 
   node_type: memory
   type: project
   originSessionId: 16672292-6559-4a80-a71f-a94dacb155d8
-  modified: 2026-07-21T17:32:41.115Z
+  modified: 2026-07-21T18:06:25.520Z
 ---
 
 Ran all Searchfit SEO skills/agents in parallel against oxfordra.net on 2026-07-10 (read-only — no edits/deploys, per Hard Invariant 2). Overall grade: **C- (59/100)**, weighted toward Content Strategy/Competitive Position/Keyword Opportunity. Full report (grading table, deduplicated pros/cons, 14-item ranked action list, flagged open items) published as an artifact: https://claude.ai/code/artifact/b2c6f7bb-88ac-4b3b-84c5-a5d1dd39abe1
@@ -81,3 +81,13 @@ Confirmed still open, unchanged, from the original 14-point list: sell-your-buil
 
 **Why:** Gabriel asked for another full Searchfit audit ("perform a searchaudit full SEO audit").
 **How to apply:** 74/100 is now the current baseline for "what's the current SEO grade" questions, superseding the 67/100 same-day figure. Next audit should re-verify: homepage meta MD/OH/MO/IN wording, sell-your-building nav placement, and whether the seller-resource-hub branch has landed — before assuming any of the three are still open.
+
+**FOLLOW-UP SAME DAY 2026-07-21, all three "new findings" from the 4th pass actioned within the hour:**
+1. **Seller-resource-hub was already CLOSED, not open** — PR #45 (github.com/ZeOoba/Website/pull/45) merged by Gabriel/ZeOoba at 17:59:39Z, live in production, confirmed via curl (`/resources/` and a guide URL both 200). It merged *during* this follow-up session's investigation — the 4th-pass audit's Critical "zero content" finding was already stale by the time it was read. Detail: [[project_seller_resource_hub_2026-07-21]].
+2. **Nav placement RATIFIED, no change:** Gabriel confirmed `/sell-your-building` and the resources hub both stay out of primary nav — targeted seller-conversion pages, not general-browsing content; for-brokers.html CTA remains the sole on-site discovery path. Detail: [[project_sell_your_building_page_shelved_2026-07-20]].
+3. **PR #46 opened** (not merged — awaiting Gabriel's in-turn confirmation per Hard Invariant 2), branch `fix/seo-warnings-2026-07-21b`, worktree `C:/Users/Owner/wt-seo-warnings-2026-07-21b`: https://github.com/ZeOoba/Website/pull/46
+   - Homepage `index.html`: dropped the false ", IN" coverage claim from all three copies of the description (`<meta name="description">`, `og:description`, `twitter:description` — the task only named the first tag, but all three carried the identical overstatement; fixing just one would have left it live in social-share previews). 146 chars, down from including "IN".
+   - `tenant-application.html` meta description: 192→156 chars (cosmetic only, page is noindexed and out of the sitemap).
+   - `llms.txt`: added `/sell-your-building` and `/resources/` to Key Pages.
+   - **Correction to this file's own 4th-pass "new finding" #3 above:** it claimed llms.txt was missing `/contact` — that was wrong, verified via `grep -n` before editing; `/contact` was already listed. `/privacy`/`/terms` deliberately left out (standard legal boilerplate, not typically curated into an llms.txt page list). **Lesson: this audit tool has produced at least one factually incorrect finding — spot-check specific claims (grep/curl) before acting on them, don't propagate verbatim.**
+   - Not merged/deployed — merging auto-deploys production per [[reference_oxfordra_deploy_canon]] and needs Invariant 2's separate per-deploy confirmation.

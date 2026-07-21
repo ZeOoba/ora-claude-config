@@ -5,7 +5,7 @@
   },
   "32b6ecd8-9e59-8117-9933-d7731f58f93d": {
     "deal": "1333 Research Road",
-    "stage": "Passed"
+    "stage": "Candidate"
   },
   "32b6ecd8-9e59-81d2-9d4e-f3fa02c379f7": {
     "deal": "E Fulton Street Portfolio — Columbus, OH",
@@ -54,5 +54,21 @@
   "39e6ecd8-9e59-81e6-a3a9-f11ac9f6b273": {
     "deal": "5515 Catfish Court — Westport (Waunakee), WI",
     "stage": "Candidate"
+  },
+  "3a46ecd8-9e59-813c-8478-c572683eba4b": {
+    "deal": "2900 Northridge Dr NW — Walker, MI (Kent County)",
+    "stage": "Passed"
+  },
+  "3a46ecd8-9e59-8150-918e-dbc80e16f3a0": {
+    "deal": "4331 Brockton Dr SE — Kentwood, MI (Airport Industrial Center)",
+    "stage": "Passed"
+  },
+  "3a46ecd8-9e59-81b8-bc73-ceb44e550697": {
+    "deal": "1150 Newark Road Industrial — Zanesville, OH",
+    "stage": "Candidate"
+  },
+  "3a46ecd8-9e59-81bb-8974-da9fd33ec8b7": {
+    "deal": "2196 Port Sheldon Street — Jenison, MI",
+    "stage": "Passed"
   }
 }
