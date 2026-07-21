@@ -1,6 +1,6 @@
 ---
 name: ora-weekly-hygiene
-description: ORA Weekly Hygiene — single sequential Sunday session (20:00 ET) folding five hygiene tasks: A) Claude Workspace Hygiene → B) OneDrive Cleanup (reversible quarantine) → C) SharePoint Aging & Freshness → D) Artifact Staleness Scan → E) Session Pruner → F) legacy task-dir classification → G) EOS telemetry rollup → H) system inventory refresh → I) git repo ref integrity scan → J) Tenant DB completeness spot-check. v1.0 2026-06-03 Phase 3 merge, extended through 2026-07-09. Re-enabled 2026-07-09 (Gabriel-approved, post-recovery-stabilization confirmation). [MODEL: UNVERIFIABLE | checked 2026-07-09]
+description: ORA Weekly Hygiene — single sequential Sunday session (20:00 ET) folding five hygiene tasks: A) Claude Workspace Hygiene → B) OneDrive Cleanup (reversible quarantine) → C) SharePoint Aging & Freshness → D) Artifact Staleness Scan → E) Session Pruner → F) legacy task-dir classification → G) EOS telemetry rollup → H) system inventory refresh → I) git repo ref integrity scan → J) Tenant DB completeness spot-check → K) session-env retention sweep → L) override-token sweep. v1.0 2026-06-03 Phase 3 merge, extended through 2026-07-21. Re-enabled 2026-07-09 (Gabriel-approved, post-recovery-stabilization confirmation). [MODEL: UNVERIFIABLE | checked 2026-07-09]
 output_contract:
   version: 1
   blocks:
@@ -59,6 +59,11 @@ output_contract:
       freshness_window_hours: 192
       expected_on: { cron: "15 20 * * 0" }
       on_missing_severity: info
+    - id: block-l-override-token-sweep
+      artifact: { type: file, path_glob: "C:\\Users\\Owner\\.claude\\maintenance\\override-token-sweep.log" }
+      freshness_window_hours: 192
+      expected_on: { cron: "15 20 * * 0" }
+      on_missing_severity: info
 ---
 
 RE-ENABLE NOTE (2026-07-09): Gabriel confirmed re-enabling this task effective 2026-07-09 (post-recovery-stabilization). Re-enabled via the supervised `update_scheduled_task` MCP tool (no registry JSON edited directly) — verified live via `list_scheduled_tasks`: `enabled: true`, next fire 2026-07-12 (Sunday) ~20:00 ET. Supersedes the "re-enable only per Gabriel's direction" hold noted in the restoration note immediately below.
@@ -75,7 +80,7 @@ You are `ora-weekly-hygiene`. You replace five previously-separate hygiene tasks
 
 ## CADENCE
 
-Fires **weekly: `0 20 * * 0`** (Sunday 20:00 ET). All ten blocks run every fire — no weekday/weekend branching.
+Fires **weekly: `0 20 * * 0`** (Sunday 20:00 ET). All twelve blocks run every fire — no weekday/weekend branching.
 - **Day-move note (2026-06-03):** Block A (`ora-claude-workspace-hygiene`) previously ran **Friday 17:15**; it moves to this Sunday 20:00 session. No Friday dependency exists (its weekly heartbeat-log rotation only needs to happen ~weekly; nothing reads it on a Friday-specific schedule). If a future watchdog ever expects the rotation on Fridays, re-split Block A — but none does today.
 - Blocks B–E retain their native Sunday cadence (were 21:00 / 20:00 / 23:00 / 22:00 — now sequential under the single 20:00 fire).
 
@@ -337,6 +342,22 @@ The script enforces every safety check itself (live-sessionId exclusion read fre
 
 ---
 
+# BLOCK L — OVERRIDE-TOKEN SWEEP (mechanical; added 2026-07-21)
+
+**WHY:** `C:\Users\Owner\.claude\hooks\sessions\<sessionId>\` accumulates three kinds of hook-bypass tokens that the hooks themselves never clean up: `override` (eos-plan-gate.py), `allow-foreign-commit` (commit-provenance-guard.py) — both presence-only checks with NO built-in expiry — and `overrides\allow-config-write` / `overrides\allow-website-write` (config-write-guard.py), which the hook itself already TTL-gates at 3600s (60min) but never removes from disk. A manual audit 2026-07-21 found 114 stale tokens accumulated across ~100 long-closed sessions, zero of which still granted any live bypass. Same pattern as Block K: policy windows chosen deliberately more conservative than the TTL-backed token type (24h default for the two no-TTL types, vs. the config-write-guard's own 60min for the TTL'd type) since sweeping a no-TTL token is a policy choice, not just matching existing hook semantics. Design + first-run verification in memory `project_event_log_iwns_block_loss_unattributed_2026-07-21.md`'s parent session — see `event_log.md` 2026-07-21 for the manual-audit incident that motivated this.
+
+**EXECUTION (one command, deterministic):**
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\maintenance\sweep-override-tokens.ps1
+```
+The script enforces every safety check itself (live-sessionId exclusion read fresh from `~/.claude\sessions\*.json` — same source as Block K, per-token-type age window, `_archive_override_tokens\` never a candidate, MOVE not delete — ORA archive invariant, fail-open exit 0) and logs to `maintenance\override-token-sweep.log`. Supports `-DryRun` for ad hoc verification without moving anything.
+
+**Delivery:** no new email. Append to the END-OF-SESSION RUN SUMMARY the script's final summary line (`LIVE sweep done: … tokens-archived=N kept-live-session=N kept-in-window=N …`).
+
+**Output-contract note:** same pattern as Block K — no new `_state\` marker; `sweep-override-tokens.ps1` already logs to `maintenance\override-token-sweep.log` unconditionally on every run.
+
+---
+
 # END-OF-SESSION RUN SUMMARY
 
-After all eleven blocks complete, emit a one-line-per-block status (block · files moved/quarantined or audit counts · email/Notion delivery result) to the session log so `ora-health-guard` can confirm the merged hygiene session fired cleanly. Blocks A/B may legitimately report "nothing to do" — that is NORMAL. A missed whole-session run is independently surfaced by the health guard.
+After all twelve blocks complete, emit a one-line-per-block status (block · files moved/quarantined or audit counts · email/Notion delivery result) to the session log so `ora-health-guard` can confirm the merged hygiene session fired cleanly. Blocks A/B may legitimately report "nothing to do" — that is NORMAL. A missed whole-session run is independently surfaced by the health guard.
