@@ -12,6 +12,20 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-21 — acquisition-underwriting re-click + ora-operations-extensions plugin reinstall confirmed (Gabriel)
+
+Follow-up to the same-day acquisition-underwriting/deal-retirement description-token disambiguation commits (`f2e452f`, `d701493`), which reintroduced pending-reimport status for both after the earlier 15-skill batch install. Packaged and staged both from a Code-surface session: `acquisition-underwriting.skill` (repackaged, standalone Save-skill path — multi-file, bundles `target-markets.json`) and `ora-operations-extensions.plugin` (rebuilt v0.1.4→v0.1.5 via `tools/build_plugin.py`, since `deal-retirement` is plugin-bundled and needs a plugin reinstall, not a standalone click).
+
+**Gabriel confirmed running the install** ("I ran this," 2026-07-21, in response to a direct question). Independently verified before this entry, not logged on trust alone:
+- `acquisition-underwriting`: cache SKILL.md SHA256-matches repo commit `f2e452f`.
+- `deal-retirement`: content SHA256-matches repo commit `d701493` at the actual **plugin cache mirror** (`...\rpm\plugin_01Sq7t7TEQEoa4G1asrLe8ms\skills\deal-retirement\`, not the standalone skills-plugin cache — confirmed the distinction matters, per the 2026-07-17 precedent of checking the wrong location).
+- Cache mtime on both: **18:06:40**, after staging (~17:01-17:02) — a fresh install, not stale pre-existing content.
+- `pending_reimport.py list` → "none pending" immediately after, consistent with a completed install triggering the ledger clear.
+
+Also committed the `plugin-build.json` 0.1.4→0.1.5 version bump that `build_plugin.py --bump patch` had left uncommitted in the repo (`3ce7631`) — repo now matches what's actually live.
+
+No files modified by this session beyond the event_log entry itself; the install action was Gabriel's own click, confirmed directly rather than inferred.
+
 ## 2026-07-21 (18:08 ET) — acquisition-underwriting + deal-retirement (ora-operations-extensions) CONFIRMED INSTALLED — Cowork session, package-and-stage-skill Entry point B
 
 Two pre-packaged, pre-verified artifacts staged from an earlier Code-surface session (`C:\Users\Owner\ora-skills\_staging\2026-07-21_index-unregistered-batch\`) — the only two entries `pending_reimport.py list` carried at session start — installed via distinct paths per Step 0's plugin-membership routing gate.
