@@ -39,6 +39,31 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | [OI-019](#OI-019) | 2026-07-19 | [event_log.md](event_log.md#2026-07-19) | Gabriel must add `HUBSPOT_TOKEN` (Private App, `crm.objects.deals.read`) to `oxford-command-center/.env` — PR #221 (frontend trigger) ready, blocked only on the credential. Once live, re-verify 2146 Enterprise Pkwy Twinsburg OH (currently untracked in projects.md/deal-decision-ledger.md) lands correctly in acq_candidates |
 | [OI-020](#OI-020) | 2026-07-19 | [event_log.md](event_log.md#2026-07-19) | ora-cowork-heartbeat: LAMS registry entry has no `approvedPermissions` grant (root cause, 3x documented since 07-16). No MCP tool on either surface can write this — only fix is Gabriel manually approving the Notion-tool prompt during a live unattended fire in Cowork's own Scheduled Tasks UI (a manual "Run Now" doesn't count). GitHub watchdog issue open, needs manual closure once genuinely fixed |
 | [OI-021](#OI-021) | 2026-07-19 | [event_log.md](event_log.md#2026-07-19) | Restoration Church Trust: no borrower-side repayment/extension conversation logged since the Apr 2026 Covenant Watch call for lender outreach "by June 2026" (deadline passed); needs Gabriel's own outreach decision (outbound comms, not initiated here). Separately: HubSpot's "Lease Renewal — Restoration Church Trust" deal ($16,714, appointmentscheduled) is likely the same mis-entered-loan-counterparty error already fixed in the Tenant DB (OI-009) — needs a retirement decision. 49 other renewal-pipeline deals also stuck in appointmentscheduled from a 2026-03-27 bulk import with no stage-advancement wiring — needs a lease-renewal-pipeline batch pass |
+| [OI-023](#OI-023) | 2026-07-20 | [event_log.md](event_log.md#2026-07-20) | Portfolio rent roll reconciliation (7/20/2026): IWNS LLC DBA Jasis Laboratory ($3,000/mo, 2203-2207 Northwood Suite A1+A2) is a real tenant per the rent roll with zero Notion Tenant DB record -- needs Gabriel's go-ahead to create the row |
+
+### OI-023
+**Status:** OPEN
+**Opened:** 2026-07-20
+**Source:** [event_log.md](event_log.md#2026-07-20) (portfolio rent roll reconciliation)
+**Description:** The 2026-07-20 rent-roll-vs-Notion reconciliation (60 writes landed, 4 mistakenly-retired
+tenants restored, systemic escalation drift fixed) left exactly one genuine residual: **IWNS LLC DBA
+Jasis Laboratory** -- contact Steven Johnson, 2203-2207 Northwood Dr -- Salisbury MD, Suite A1+A2,
+2,400 SF, $3,000/mo, Lease Start 2026-07-01, Lease Expiration 2031-06-30, 3%/year escalation from
+2027-07-01 -- appears on the rent roll with a complete lease record but has **no matching Notion
+Tenant DB row at all** (confirmed via `notion-search`, no result). Lease Start of 2026-07-01 (3 weeks
+before the rent roll's date) suggests this is a genuinely new tenant simply not yet onboarded into
+Notion, not a data-corruption case like the 4 restored this session. Not written -- creating a
+net-new row wasn't in scope for a "check for gaps" pass. Needs Gabriel's go-ahead to add it.
+**Also checked and confirmed NOT gaps** (naming variants only, rent already matches Notion exactly):
+Hobart Services (truncated name in rent roll), Masala Bazaar/XPO Foods (alias to Notion's "Azad Shah
+(M&N)" -- already a known PM-platform alias per `reference_tenant_name_mappings.md`), Green Home
+Solutions "of Pickerington" (alias to Notion's "Greeen Home Solutions (Mueller)" -- possible
+franchise-ownership rename, not investigated further). Also **My Autonomous Transportation Co.** and
+**Lamar Advertising (Columbus)** remain on the rent roll unmatched -- both pre-existing, already-
+documented gaps (My Autonomous Transportation Co: no executed lease found, deliberately left null per
+OI-009; Lamar: likely ghost billboard charge, flagged since `reference_tenant_name_mappings.md`'s
+2026-04-14 pass).
+**Auto-check:** none (not a fleet-registry item).
 
 ### OI-009
 **Status:** OPEN (substantial progress made 2026-07-17, real scope remains)
