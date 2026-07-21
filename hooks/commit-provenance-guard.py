@@ -44,6 +44,28 @@ rather than the Edit tool. That accepted false negative is what makes the guard
 survivable -- the naive "block anything I did not touch" design would have
 blocked 31ac61d, a legitimate script-generated commit.
 
+CASE-SENSITIVITY + PER-ENTRY TTL FIX (2026-07-20): two compounding bugs made
+the guard permanently block a still-open session's every past touch. (1)
+last_commit_time() ran `git log -- <pathspec>` against the norm()-ed path,
+which os.path.normcase lowercases wholesale on Windows; git's pathspec match
+against history is literal regardless of core.ignorecase, so a lowercased
+pathspec silently matched nothing for any real path with an uppercase
+character anywhere in it -- already_committed_since() always read "never
+committed" and the 2026-07-17 fix above was dead code in practice. Fixed by
+wrapping the pathspec as `:(literal,icase)<path>`. (2) foreign_hits() gated
+each session's touched-set entries on touched-files.txt's WHOLE-FILE mtime,
+not the per-entry touch_ts read() already returns -- so a live session that
+kept touching OTHER paths kept the file's mtime fresh, and a days-stale entry
+for an unrelated path never aged out via TTL. Fixed by checking each entry's
+own touch_ts against the TTL cutoff instead (unknown touch_ts still never
+ages out, per commit_provenance.py's documented "just touched" contract).
+ACCEPTED TRADEOFF: per-entry TTL narrows the block window for one shape the
+old (buggy) whole-file gate happened to also catch -- a still-live session
+that touched a path >TTL_H ago and left it uncommitted while staying active
+elsewhere now ages out and is allowed through. This is the intended effect of
+keying TTL to SESSION_PRUNE_H per-touch rather than per-file; already_committed_since()
+is the correctness backstop for genuinely-landed content, not TTL.
+
 Stdlib only. ASCII-only. Windows (`python`).
 """
 
@@ -144,8 +166,23 @@ def repo_root(cmd, cwd):
 
 def last_commit_time(repo, abs_path):
     """Epoch seconds of the most recent commit touching `abs_path` in `repo`,
-    or None if it has never been committed (or git could not answer)."""
-    out = _git_lines(repo, ["log", "-1", "--format=%ct", "--", abs_path])
+    or None if it has never been committed (or git could not answer).
+
+    BUG FIX (2026-07-20): `abs_path` is norm()-ed -- os.path.normcase'd, which
+    lowercases the ENTIRE path on Windows. `git log -- <pathspec>` matches
+    pathspecs literally against tree entries regardless of core.ignorecase
+    (that setting governs index/worktree stat lookups, not history pathspec
+    matching) -- so a lowercased pathspec silently fails (empty stdout, rc 0,
+    no error) against any real path whose true on-disk casing has an uppercase
+    character anywhere, in the filename OR any parent directory. Wrapping the
+    pathspec in `:(literal,icase)` makes the match case-insensitive (and
+    `literal` keeps any glob-metacharacters in the path from being
+    reinterpreted). Verified: an unwrapped lowercased pathspec against
+    C:\\Users\\...\\open-items-tracker.md returned nothing; the same path
+    wrapped in `:(literal,icase)` returned the correct commit timestamp.
+    """
+    pathspec = ":(literal,icase)" + abs_path
+    out = _git_lines(repo, ["log", "-1", "--format=%ct", "--", pathspec])
     if not out:
         return None
     try:
@@ -246,14 +283,27 @@ def foreign_hits(candidates, my_sid, repo):
             continue
         path = os.path.join(base, sid, TOUCHED_BASENAME)
         try:
-            if not os.path.exists(path) or os.path.getmtime(path) < cutoff:
+            if not os.path.exists(path):
                 continue
             with open(path, encoding="utf-8") as fh:
                 touched = read_touched(fh)  # {norm_path: last_touch_ts | None}
         except Exception:
             continue  # unreadable -> no information -> no hit
         for p in sorted(candidates & set(touched)):
-            if already_committed_since(repo, p, touched[p]):
+            # BUG FIX (2026-07-20): TTL must be evaluated per-entry, off this
+            # path's OWN touch_ts, not off touched-files.txt's whole-file
+            # mtime. A live session that keeps touching OTHER paths keeps
+            # rewriting (and re-mtime-ing) the same file, which kept THIS
+            # entry looking fresh indefinitely even when its own touch was
+            # days stale -- the file mtime and an individual entry's recency
+            # are different things. An unknown touch_ts (old-format line) has
+            # no per-path timestamp to age -- per commit_provenance.py's own
+            # documented contract, it stays "just touched" (never ages out),
+            # the same conservative default already_committed_since() uses.
+            ts = touched[p]
+            if ts is not None and ts < cutoff:
+                continue  # this specific touch aged out -- not a hit
+            if already_committed_since(repo, p, ts):
                 continue  # provably already safe -- not a hit
             hits.append((p, sid, (entry.get("status") or "")))
     return hits
