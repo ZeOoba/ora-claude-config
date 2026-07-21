@@ -42,6 +42,8 @@
 - ROI-brief implementation 2026-07-17 — CLOSED, pushed `08c305c`; record in the schematic + 07-09/07-16 audit files above
 - [Artifact content — top-5 open items](project_artifact_content_top5_plan_2026-07-18.md) — PLANNED 07-18: northridge/brockton closeout, ora-pm /100 bug, LOI-throughput line, heartbeat fix, 511/275/monthly-close verify
 - [Stale audit report reconciliation — 07-19](project_2026-07-19_stale_audit_report_reconciliation.md) — 7/8 pasted findings already resolved; only real gap (code-debugging-optimizations deploy-gate carve-out) fixed
+- [open-items-tracker.md worktree/HEAD divergence — OPEN 07-20](project_open_items_tracker_worktree_head_divergence.md) — on-disk file missing session 15ec64e8's committed OI-023; check next session, don't force-resync over live WIP
+- [Sell-your-building page — SHELVED 07-20](project_sell_your_building_page_shelved_2026-07-20.md) — PR #31 closed unmerged, never live; full patch saved for easy replication, 2 known issues to fix first
 
 ## Markets
 - [Market Intelligence](markets.md) — Cross-market snapshots, macro (FRED), replacement cost, comps, Columbus submarket
@@ -60,6 +62,7 @@
 - [Verify Registry Mutation Claims](feedback_verify_registry_mutation_claims.md) — a logged registry delete/update isn't confirmed without a same-fleet re-check
 - [Verify Probe Findings Before Acting](feedback_verify_probe_findings_before_acting.md) — a probe finding is a hypothesis, not a verdict; the defect can be in the probe
 - [fleet-status.py Dual-Fleet Read](reference_fleet_status_dual_read.md) — reads both registries off disk from either surface; only WRITES need the matching MCP tool
+- [Throttle-skip "global_limit" = catch-up burst](reference_fleet_throttle_skip_catchup_burst.md) — not a config bug; a lone task's repeated skips WOULD be suspicious
 - [Verify Negative Glob Results](feedback_verify_negative_glob_results.md) — a Glob "no files" isn't proof of absence; cross-check `git ls-files`
 - [Verify WIP Settled via mtime](feedback_verify_wip_settled_via_mtime.md) — isRunning isn't per-file; compare mtimes across spaced checks first
 - [Shared-Checkout Guard Session Attribution Unreliable](feedback_shared_checkout_guard_session_attribution_unreliable.md) — named session IDs traced twice to no registry match; verify before treating as a live blocker
