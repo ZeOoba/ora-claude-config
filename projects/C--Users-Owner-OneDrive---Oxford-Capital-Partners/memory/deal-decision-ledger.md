@@ -5,6 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: a744d8cf-2abe-4151-98ea-2bd224723db2
+  modified: 2026-07-21T21:17:15.642Z
 ---
 
 # Deal Decision Ledger
@@ -15,6 +16,9 @@ Companion to the "Active deal pipeline" table in [projects.md](projects.md) (whi
 
 | Date | Deal | Verdict | One-line reason | Buy-box rule validated / refined |
 |---|---|---|---|---|
+| 2026-07-21 | 4331 Brockton Dr SE — Kentwood, MI (Airport Industrial Center) | PASS | Notion Stage → Passed; reason not logged elsewhere — reconcile manually | — |
+| 2026-07-21 | 2196 Port Sheldon Street — Jenison, MI | PASS | Notion Stage → Passed; reason not logged elsewhere — reconcile manually | — |
+| 2026-07-21 | 2900 Northridge Dr NW — Walker, MI (Kent County) | PASS | Notion Stage → Passed; reason not logged elsewhere — reconcile manually | — |
 | 2026-07-08 | 470 McCormick Blvd, Columbus OH | PASS | LOI FINAL v2's 6/17/2026 expiration lapsed 21 days unshipped to broker KRG; Gabriel made an explicit in-session kill decision 7/8 rather than let it drift further | — |
 | 2026-07-09 | E. Fulton Street Portfolio, Columbus OH (5 bldgs, 202,164 SF) | ACQUISITION TERMINATED → note/foreclosure track | Confirmed chlorinated-solvent (TCE) release, soil/groundwater/soil-vapor, non-delineated, live indoor-air pathway (Phase II 2026-06-01) | Materially-impaired Phase II environmental findings → walk/re-trade, don't proceed on original terms blind |
 | 2026-07-09 | 11850 Hamilton Ave (Dollar General, "quasi-IOS"), Cincinnati OH | PARKED | A Cowork session self-underwrote to v03 and auto-staged the Notion card to Due Diligence; Gabriel parked it | Reinforces: dollar-store/DG net-lease reads as out-of-box standing retail regardless of a favorable self-underwriting result — see the OH 3-pack precedent below |

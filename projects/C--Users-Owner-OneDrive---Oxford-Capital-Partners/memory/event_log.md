@@ -12,6 +12,51 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-21 (18:08 ET) — acquisition-underwriting + deal-retirement (ora-operations-extensions) CONFIRMED INSTALLED — Cowork session, package-and-stage-skill Entry point B
+
+Two pre-packaged, pre-verified artifacts staged from an earlier Code-surface session (`C:\Users\Owner\ora-skills\_staging\2026-07-21_index-unregistered-batch\`) — the only two entries `pending_reimport.py list` carried at session start — installed via distinct paths per Step 0's plugin-membership routing gate.
+
+**acquisition-underwriting.skill** (standalone; `plugin_of()` → `None`): 4-item integrity pre-check run before surfacing — exists · 2 zip entries, forward-slash, expected set (SKILL.md + injected `target-markets.json`) · SKILL.md raw SHA256 byte-identical to repo commit `f2e452f` (`77e9763a...`), shared-root-dep `target-markets.json` byte-identical to repo-root copy (`28dba293...`) · staged to session outputs. No repackaging. **Gabriel confirmed the Save-skill click.** Post-install verify: runtime cache (`...\skills-plugin\...\skills\acquisition-underwriting\`) description now reads "schema rev 1.1" (was "v1.1") — the f2e452f fix is live; both files present. `pending_reimport.py clear acquisition-underwriting` run. This closes the item logged eight entries below today ("acquisition-underwriting skill staging — Not sure, recheck") as still needing a fresh click against f2e452f.
+
+**ora-operations-extensions.plugin v0.1.5** (deal-retirement is plugin-member-only; `plugin_of('deal-retirement')` → `ora-operations-extensions` — routed as plugin reinstall, NOT a standalone Save-skill, per Step 0). Verified before surfacing: 9 zip entries (`.claude-plugin/plugin.json` + README + 7 member SKILL.md files, matching the "seven institutional skills" manifest description) · `skills/deal-retirement/SKILL.md` raw SHA256 byte-identical to the repo's canonical top-level `deal-retirement/SKILL.md` (commit `d701493`, not the `plugins/.../skills/...` path — that resolves to a non-existent file per the 2026-07-17 false-mismatch precedent). **Gabriel confirmed the plugin install.** Post-install verify at the PLUGIN cache mirror specifically (`...\rpm\plugin_01Sq7t7TEQEoa4G1asrLe8ms\`, not the standalone skills-plugin cache): `.claude-plugin\plugin.json` version `0.1.5` ; `skills\deal-retirement\SKILL.md` description now reads "Prior rev 1.1 (...)" / "v1.2" (the d701493 disambiguation is live, was previously the stacked/ambiguous v1.1+v1.2 wording); all 7 member skill dirs present. `pending_reimport.py clear deal-retirement` run; ledger now reports "none pending (cache in sync with repo)".
+
+**Flagged, not actioned:** `plugins/ora-operations-extensions/plugin-build.json` carries an uncommitted working-tree change (`"version": "0.1.4"` → `"0.1.5"`) — the installed plugin content matches this uncommitted state, so the install is sound, but the repo will read as one version behind the shipped plugin until Gabriel commits the bump. Left for Gabriel rather than committed unprompted.
+
+Did not touch the unrelated staged `_event_entry.md` found in the same staging folder (a draft entry for a separate, already-completed 15-skill standalone Save-skill batch from an earlier session today — out of scope for this task, not logged here to avoid misattributing that batch's work to this session).
+
+No deploys, no scheduled-task changes, no email.
+
+## 2026-07-21 — Open-sessions board dispatched; 6 items decided
+
+ora-open-sessions-board 2026-07-21 17:00 ET run: probed 364 unarchived sessions, 6 actionable items reached the board (4 NEEDS-ANSWER, 1 STALLED, 1 INTERRUPTED; 27 excluded as fleet runs / already-decided-and-unchanged / sub-30-min). Notion deal-stage reconciliation ran clean (5 transitions logged — see separate 2026-07-21 deal-stage-sync entries — 3 with disposition PASS appended to deal-decision-ledger.md; flagged 1333 Research Road Passed → Candidate for Gabriel's awareness, not in the active-deal-pipeline table). Gabriel's decisions:
+
+- **Loans External covenant analysis / Red Branch Road register** (local_47ae43e6) — Add line item. Executed: added the Muirkirk Properties, LLC intercompany promissory note ($1,778,552.34 orig., $1,380,000 o/s 12/31/2025) as its own entry in `loans-external-register.html`, tagged as related-party/not-external-debt, JS syntax validated via node.
+- **ora-cowork-heartbeat beacon gap, thread A** (local_2674549c) — Check inbox now. Checked: no GitHub watchdog alert has landed today (2026-07-21) despite the 16-hr stale threshold having passed hours ago; last watchdog email was yesterday's Issue #6 thread (2026-07-20, still open). The external monitor appears not to have re-fired today — worth a look independent of the heartbeat task itself.
+- **ora-cowork-heartbeat beacon gap, thread B** (local_a67aca7d) — Spin off Cowork session. Cannot execute directly — confirmed via ccd_session_mgmt tooling that this Code-surface session has no cross-surface session-creation capability into Cowork/LAMS. Handoff prompt for the delete+recreate drafted and returned to Gabriel to paste into a Cowork session himself.
+- **acquisition-underwriting skill import** (local_8d6215b6) — Already done, drop.
+- **acquisition-underwriting skill staging** (local_0e4c2618) — Not sure, recheck. Checked `tools/pending_reimport.py list`: acquisition-underwriting is STILL pending reimport as of 2026-07-21T20:44Z, now against a newer commit (`f2e452f`, description-token disambiguation) than the v4.3/`34c0094` package this session staged. Whether that earlier Save-skill click took is now moot — a fresh Save-skill + ledger clear is needed regardless.
+- **Add confidential-deal egress guard to om-extract.ts** (local_41d96432) — Drop.
+
+## 2026-07-21 — Deal-stage sync: 2900 Northridge Dr NW — Walker, MI (Kent County) — (none) → Passed (Notion)
+
+Detected by ora-open-sessions-board's reconciliation step; no corresponding entry existed. Tripwire only — see Notion for the actual decision context.
+
+## 2026-07-21 — Deal-stage sync: 2196 Port Sheldon Street — Jenison, MI — (none) → Passed (Notion)
+
+Detected by ora-open-sessions-board's reconciliation step; no corresponding entry existed. Tripwire only — see Notion for the actual decision context.
+
+## 2026-07-21 — Deal-stage sync: 1150 Newark Road Industrial — Zanesville, OH — (none) → Candidate (Notion)
+
+Detected by ora-open-sessions-board's reconciliation step; no corresponding entry existed. Tripwire only — see Notion for the actual decision context.
+
+## 2026-07-21 — Deal-stage sync: 4331 Brockton Dr SE — Kentwood, MI (Airport Industrial Center) — (none) → Passed (Notion)
+
+Detected by ora-open-sessions-board's reconciliation step; no corresponding entry existed. Tripwire only — see Notion for the actual decision context.
+
+## 2026-07-21 — Deal-stage sync: 1333 Research Road — Passed → Candidate (Notion)
+
+Detected by ora-open-sessions-board's reconciliation step; no corresponding entry existed. Tripwire only — see Notion for the actual decision context.
+
 ## 2026-07-21 — Repo-wide sweep for the acquisition-underwriting version-token gotcha: one more instance found and fixed (deal-retirement)
 
 Follow-up Code-surface session to the same-day `acquisition-underwriting` description fix (commit `f2e452f`) and its companion memory file `reference_skill_description_version_extraction_gotcha.md`. Swept all 53 `SKILL.md` files in `ora-skills` for the same class of bug: a bare `vX.Y(` token in the frontmatter description that a naive version-extraction regex could misread as the skill's file version.
