@@ -11,6 +11,7 @@
 - [People](people.md) — Eric, Gabriel, Philip Collins (counsel), Tamara Lucas (title); brokers/lenders/vendors
 
 ## Projects & system
+- [event_log.md IWNS block loss — UNATTRIBUTED](project_event_log_iwns_block_loss_unattributed_2026-07-21.md) — 6 entries recovered from git + committed; exhaustive session-transcript search found no culprit write, root cause open
 - [Acquisition-Underwriting Doctrine Review — PLANNED 07-18](project_acquisition_underwriting_doctrine_review_2026-07-18.md) — 9-item research-grounded plan, Fable-adversarially-reviewed, awaiting Gabriel go/no-go; no edits made yet
 - [Autonomy-gate indirection ceiling — CLOSED 07-17](project_autonomy_gate_indirection_ceiling_followup.md) — outbound-action checks landed both sides (email on `main`, netlify via merged PR #30); [OI-007](open-items-tracker.md#OI-007)
 - [bash-guard.mjs indirection gap — CLOSED 07-17](project_bash_guard_indirection_gap.md) — indirection + read/write fixes landed; [OI-010](open-items-tracker.md#OI-010)/[OI-011](open-items-tracker.md#OI-011)
