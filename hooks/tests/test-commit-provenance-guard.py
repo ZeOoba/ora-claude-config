@@ -26,6 +26,7 @@ _spec.loader.exec_module(_cpg)
 is_git_commit = _cpg.is_git_commit
 candidate_paths = _cpg.candidate_paths
 repo_root = _cpg.repo_root
+last_commit_time = _cpg.last_commit_time
 
 
 def run_hook(cmd, cwd, sessions_dir, session_id="me", fleet_state=None, ttl_h=None):
@@ -246,14 +247,66 @@ def test_foreign_file_but_session_not_live_allows():
 
 
 def test_foreign_touched_set_older_than_ttl_allows():
+    """TTL is keyed off the ENTRY's own touch_ts (2026-07-20 fix) -- age the
+    per-path timestamp itself, not just the touched-files.txt file's mtime,
+    which no longer gates this check at all (see the compounding-bug test
+    below for why the old file-mtime gate was wrong)."""
     repo = make_repo()
     foreign = write_and_stage(repo, "theirs.txt")
     sess = sessions_tmp()
-    seed_touched(sess, "other", [foreign], age_h=99)
+    stale_ts = time.time() - 99 * 3600
+    seed_touched(sess, "other", [foreign], touch_ts=stale_ts)
     fs = fleet_state_with(["other"])
     rc, out, err = run_hook('git commit -m "x"', repo, sess, fleet_state=fs, ttl_h=6)
     assert rc == 0, "stale touched-set must not block, got %s (%s)" % (rc, err)
     print("PASS test_foreign_touched_set_older_than_ttl_allows")
+
+
+def test_stale_entry_ages_out_even_when_other_entries_in_same_file_are_fresh():
+    """Root cause 2 regression (2026-07-20): the OLD code gated TTL on
+    touched-files.txt's whole-file mtime, so a live session that keeps
+    touching OTHER paths keeps rewriting (and re-mtime-ing) the file, which
+    kept a days-stale entry for THIS path looking fresh forever. TTL must be
+    evaluated per-entry off that entry's own touch_ts, independent of
+    whatever else the session touched more recently in the same file."""
+    repo = make_repo()
+    foreign = write_and_stage(repo, "theirs.txt")
+    other_file = os.path.normcase(os.path.abspath(os.path.join(repo, "unrelated.txt")))
+    sess = sessions_tmp()
+    stale_ts = time.time() - 99 * 3600
+    d = os.path.join(sess, "other")
+    os.makedirs(d, exist_ok=True)
+    p = os.path.join(d, "touched-files.txt")
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write("%s\t%.6f\n" % (foreign, stale_ts))        # 99h-stale candidate
+        fh.write("%s\t%.6f\n" % (other_file, time.time()))  # fresh, unrelated --
+        # keeps the FILE's own mtime fresh even though `foreign`'s own touch is old.
+    fs = fleet_state_with(["other"])
+    rc, out, err = run_hook('git commit -m "x"', repo, sess, fleet_state=fs, ttl_h=6)
+    assert rc == 0, (
+        "a per-entry-stale touch must age out even while the session's "
+        "touched-files.txt mtime stays fresh from other activity, got %s (%s)"
+        % (rc, err))
+    print("PASS test_stale_entry_ages_out_even_when_other_entries_in_same_file_are_fresh")
+
+
+def test_unknown_touch_time_never_ages_out_via_ttl():
+    """Unknown touch time (pre-2026-07-17 bare-path format) has no per-path
+    timestamp to age -- per commit_provenance.py's documented contract it
+    stays 'just touched' and must never time out, even if the file's own
+    mtime is ancient (proving the file mtime is no longer consulted at all)."""
+    repo = make_repo()
+    foreign = write_and_stage(repo, "theirs.txt")
+    sess = sessions_tmp()
+    seed_touched(sess, "other", [foreign], no_timestamp=True)
+    old = time.time() - 99 * 3600
+    p = os.path.join(sess, "other", "touched-files.txt")
+    os.utime(p, (old, old))
+    fs = fleet_state_with(["other"])
+    rc, out, err = run_hook('git commit -m "x"', repo, sess, fleet_state=fs, ttl_h=6)
+    assert rc == 2, (
+        "unknown touch time must never age out via TTL, got %s (%s)" % (rc, err))
+    print("PASS test_unknown_touch_time_never_ages_out_via_ttl")
 
 
 def test_explicit_pathspec_excluding_foreign_allows():
@@ -414,6 +467,76 @@ def test_unknown_touch_time_still_blocks_even_if_committed():
     print("PASS test_unknown_touch_time_still_blocks_even_if_committed")
 
 
+# ---------- Case-sensitivity fix (2026-07-20): norm() lowercases the whole
+# absolute path (os.path.normcase on Windows); `git log -- <pathspec>` matches
+# literally regardless of core.ignorecase, so a lowercased pathspec silently
+# failed to match any real path with an uppercase character anywhere in it.
+# Every fixture filename elsewhere in this file happens to already be
+# lowercase, so normcase was a no-op there and never exercised the bug --
+# these tests deliberately use MixedCase names to force the mismatch. ----
+
+def test_last_commit_time_finds_commit_despite_normcased_path():
+    """Direct unit-level regression: last_commit_time() must resolve a
+    normcase'd (lowercased) pathspec against a commit whose real on-disk
+    path has uppercase characters in the directory AND the filename."""
+    repo = make_repo()
+    mixed_dir = os.path.join(repo, "MixedCase")
+    os.makedirs(mixed_dir, exist_ok=True)
+    p = os.path.join(mixed_dir, "SharedFile.TXT")
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write("v1")
+    _git(["add", "MixedCase/SharedFile.TXT"], repo)
+    _git(["commit", "-m", "base"], repo)
+    norm_path = os.path.normcase(os.path.abspath(p))
+    if os.name == "nt":
+        assert norm_path != os.path.abspath(p), (
+            "fixture assumption failed: normcase should lowercase this path "
+            "on Windows -- test would be vacuous otherwise")
+    ct = last_commit_time(repo, norm_path)
+    assert ct is not None, (
+        "last_commit_time must find the commit via a normcased (lowercased) "
+        "pathspec -- got None, the 2026-07-20 case-sensitivity regression is back")
+    print("PASS test_last_commit_time_finds_commit_despite_normcased_path")
+
+
+def test_mixed_case_foreign_edit_already_committed_since_touch_allows():
+    """Full-flow regression: a MixedCase path touched by another live session
+    an hour ago, but safely committed since -- must ALLOW. Same shape as
+    test_foreign_edit_already_committed_since_touch_allows above, but with a
+    path that actually stresses the normcase/pathspec-matching fix (that
+    earlier test's all-lowercase fixture name accidentally could not)."""
+    repo = make_repo()
+    mixed_dir = os.path.join(repo, "MixedCase")
+    os.makedirs(mixed_dir, exist_ok=True)
+    p = os.path.join(mixed_dir, "SharedFile.TXT")
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write("v1 base")
+    _git(["add", "MixedCase/SharedFile.TXT"], repo)
+    _git(["commit", "-m", "base"], repo)
+    shared = os.path.normcase(os.path.abspath(p))
+
+    sess = sessions_tmp()
+    an_hour_ago = time.time() - 3600
+    seed_touched(sess, "other", [shared], touch_ts=an_hour_ago)
+
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write("v2 -- other's edit, now committed")
+    _git(["add", "MixedCase/SharedFile.TXT"], repo)
+    _git(["commit", "-m", "other's edit lands"], repo)
+
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write("v3 -- my own separate edit")
+    _git(["add", "MixedCase/SharedFile.TXT"], repo)
+
+    fs = fleet_state_with(["other"])
+    rc, out, err = run_hook('git commit -m "my change"', repo, sess, fleet_state=fs, ttl_h=6)
+    assert rc == 0, (
+        "a mixed-case path safely committed since its touch must not "
+        "block (2026-07-20 case-sensitivity regression), got %s (%s)"
+        % (rc, err))
+    print("PASS test_mixed_case_foreign_edit_already_committed_since_touch_allows")
+
+
 if __name__ == "__main__":
     test_non_git_command_silent()
     test_git_commit_with_no_foreign_files_allows()
@@ -427,6 +550,10 @@ if __name__ == "__main__":
     test_foreign_file_from_live_session_blocks()
     test_foreign_file_but_session_not_live_allows()
     test_foreign_touched_set_older_than_ttl_allows()
+    test_stale_entry_ages_out_even_when_other_entries_in_same_file_are_fresh()
+    test_unknown_touch_time_never_ages_out_via_ttl()
+    test_last_commit_time_finds_commit_despite_normcased_path()
+    test_mixed_case_foreign_edit_already_committed_since_touch_allows()
     test_explicit_pathspec_excluding_foreign_allows()
     test_override_sentinel_allows()
     test_own_touched_set_never_blocks_self()
