@@ -51,3 +51,57 @@ Related: [[reference_hook_systemmessage_not_model_visible]] (same-day sibling fi
 `shared-checkout-guard.py`'s warning actually reach the model) ·
 [[shared-checkout-cofile-patch-hazard]] · [[project_tenant_db_no_sync_rootcause]] (the session
 that produced this).
+
+**⚠ 2026-07-20 — `already_committed_since()` never fires on Windows; two stacked bugs defeat
+both the TTL and the recency fix. CLOSED same day.** Hit a block committing `open-items-tracker.md`
+attributed to session `15ec64e8` as "working," even though: (a) that session's *only* touches to
+this exact path were six entries clustered 2026-07-17 23:03–23:15, three days stale, and (b) the
+path had already been safely committed since (`db5a8d4`, 2026-07-19 21:45:23 — newer than every
+one of those touches). The documented `already_committed_since()` fix (2026-07-17, same file)
+should have suppressed this outright. Root-caused empirically, not by reading the code alone:
+1. **`commit-provenance-guard.py:145-154` (`last_commit_time`) — the real defect.** It ran
+   `git log -1 --format=%ct -- <abs_path>` against the `norm()`-ed (normcase'd — lowercase,
+   backslash) absolute path pulled straight from `touched-files.txt`. On this Windows checkout that
+   query silently returned **empty stdout, rc 0** — no error, just no match — for a path git can find
+   fine as a repo-relative forward-slash pathspec (verified side-by-side: the normcased absolute
+   form returned nothing; the plain relative form returned the correct `%ct` immediately). Follow-up
+   root-causing (not just "backslash vs forward-slash," per the original hypothesis) isolated the
+   real mechanism: git's pathspec match against history is **literal, independent of
+   `core.ignorecase`** — a fully-lowercased pathspec matches only paths whose real on-disk casing is
+   already all-lowercase. Every fixture filename in the guard's own test suite happened to be
+   lowercase (`shared.txt`, `theirs.txt`, ...), so `normcase()` was a no-op there and the bug never
+   surfaced in tests — only against real repo paths with mixed-case components (`CLAUDE.md`,
+   `OneDrive`, `Oxford-Capital-Partners`, ...). So `already_committed_since()` read "never committed"
+   for files that plainly had been, and always returned `False` on this OS — the 2026-07-17 recency
+   fix was dead code in practice here, not just for this one file.
+2. **`commit-provenance-guard.py:249` — a compounding TTL bug.** The per-session TTL cutoff checked
+   `os.path.getmtime(<the whole touched-files.txt file>)`, not the timestamp of the specific entry
+   being evaluated. A long-lived session that keeps touching *anything* keeps its entire touched-set
+   file "fresh" indefinitely — so a 3-day-stale entry for one path never aged out on its own as long
+   as the owning session was still active on other files. This TTL was effectively per-session-activity,
+   not per-file-recency, despite being read that way at the call site.
+   Together: for any still-open session, any file it ever touched — no matter how long ago, even if
+   safely committed since — permanently blocked every other session from committing it. Worked
+   around at the time via the documented `allow-foreign-commit` override (verified the working-tree
+   diff was 100% mine before doing so), same as the 2026-07-16
+   `feedback_shared_checkout_guard_session_attribution_unreliable` pattern, but this was a distinct,
+   root-caused code defect rather than an attribution-log ambiguity.
+
+**Resolution (commit `ebb321f`, 2026-07-20, `claude/inspiring-pascal-d23945`):** both bugs fixed in
+`hooks/commit-provenance-guard.py`. (1) `last_commit_time()` now wraps the pathspec as
+`:(literal,icase)<abs_path>` before calling `git log` — case-insensitive match, `literal` guards
+against glob-metacharacters in real paths; verified against the exact production repro
+(`open-items-tracker.md` under `C--Users-Owner-OneDrive---Oxford-Capital-Partners`) and confirmed it
+now returns the correct commit timestamp instead of empty output. (2) `foreign_hits()` dropped the
+whole-file `os.path.getmtime()` TTL gate entirely and now checks each entry's own `touch_ts` (already
+returned by `read_touched()`) against the TTL cutoff — an unknown `touch_ts` (old-format line) still
+never ages out, per `commit_provenance.py`'s documented "just touched" contract. Added 5 regression
+tests to `hooks/tests/test-commit-provenance-guard.py` (2 case-sensitivity, 2 per-entry-TTL, 1 test
+corrected to exercise the new per-entry mechanism instead of the removed file-mtime one); confirmed
+each fails against the pre-fix code and passes against the fix. Full 23/23 guard suite + 6/6 recorder
+suite green. Independent adversarial refute pass (per this repo's `hooks/**` mandatory-REFUTE
+doctrine) found no confirmed flaws — one accepted, now-documented design tradeoff: per-entry TTL
+narrows the block window for a still-live session that touched a path >TTL_H ago and stayed active
+elsewhere, which now ages out and allows the commit (intended effect of keying TTL to
+`SESSION_PRUNE_H` per-touch rather than per-file-activity; `already_committed_since()` remains the
+correctness backstop for genuinely-landed content).
