@@ -1,28 +1,51 @@
 ---
 name: ora-appsec-sweep
-description: DRAFT — NOT REGISTERED. General application-security sweep of ora-pm (live tenant portal, Stripe ACH) and oxford-command-center — secret scan (working tree + full git history), lockfile CVE audit, AR-ledger/balance-display schema review, tenant-portal auth/injection pass, and OWASP-LLM checks scoped to ORA's actual agent surfaces (hooks, MCP connectors, scheduled-task registries). REPORT-ONLY: findings go to Notion Ops Hub + open-items-tracker.md; never rotates, never pushes, never auto-fixes. Reads suppressions.md before reporting. v0.1 draft 2026-07-18 (Plan 4b).
+description: Weekly report-only appsec sweep of ora-pm + oxford-command-center (secrets, CVEs, AR-ledger schema, tenant-portal auth/injection, OWASP-LLM). Fable-pinned. v1.0 registered 2026-07-20 after a manual, Gabriel-supervised first run (2026-07-19) — see STATUS note.
+---
+
+---
+name: ora-appsec-sweep
+description: General application-security sweep of ora-pm (live tenant portal, Stripe ACH) and oxford-command-center — secret scan (working tree + full git history), lockfile CVE audit, AR-ledger/balance-display schema review, tenant-portal auth/injection pass, and OWASP-LLM checks scoped to ORA's actual agent surfaces (hooks, MCP connectors, scheduled-task registries). REPORT-ONLY: findings go to Notion Ops Hub + open-items-tracker.md; never rotates, never pushes, never auto-fixes. Reads suppressions.md before reporting. v1.0 registered 2026-07-20 (Plan 4b/4a).
 model: fable
 ---
 
 <!--
-  STATUS: DRAFT (Plan 4b, 2026-07-18). Do NOT register via create_scheduled_task
-  until Gabriel has approved and the first run has been executed manually.
+  STATUS: REGISTERED v1.0, 2026-07-20 (Plan 4b). Cherry-picked `security-auditor`
+  agent + `security-and-hardening` skill (Plan 4a) landed 2026-07-18, same
+  session that drafted this file — both installed and verified present at
+  ~/.claude/agents/security-auditor.md and ~/.claude/skills/security-and-hardening/.
+
+  FIRST RUN: completed 2026-07-19, manual and Gabriel-supervised per the
+  FIRST-RUN NOTE below. It found OI-015 (alleged E. Fulton deal-terms
+  residual in ora-pm git history) and separately surfaced dependency-CVE
+  findings that were fixed and landed on oxford-command-center main the
+  same evening. OI-015 was triaged directly with Gabriel 2026-07-19: closed
+  as verified-clean (a fresh clone showed the reachable history is genuinely
+  clean; the original finding was a stale local git-object-cache artifact,
+  not a real leak). A real, separate residual was confirmed and spun off as
+  OI-022 (the same historical blob is still retrievable via GitHub's Git
+  Data API through a GitHub-internal `refs/pull/2/head` ref — no self-service
+  fix exists; a GitHub Support request is drafted but not yet submitted,
+  Gabriel's action, tracked in open-items-tracker.md). NOTE: OI-022 is still
+  OPEN — until the Support ticket resolves, this sweep's local-checkout
+  history scan (not a fresh clone) may re-surface the same blob. No
+  suppression entry has been added for it — only Gabriel adds suppressions,
+  and this needs his explicit call on scope/wording first.
 
   MODEL PIN: `model: fable` in frontmatter is deliberate and load-bearing.
   This task reviews security-gate-adjacent and payment-facing code
   (CLAUDE.md floor: confidential/financial/governor and security-gate code
   never below Fable). Never let this task inherit the caller's model.
 
-  FUTURE DISPATCH NOTE: Plan 4a proposes installing a `security-auditor`
-  agent (~/.claude/agents/) and a `security-and-hardening` skill
-  (~/.claude/skills/). That install has NOT landed (pending Gabriel's
-  approval), so this SKILL.md is fully self-contained — the methodology
-  below is adapted inline from the vetted security-and-hardening skill
-  rather than referenced. ONCE those are installed and verified present,
-  simplify this task: dispatch the per-repo review to the
+  FUTURE SIMPLIFICATION (not yet done): now that `security-auditor` +
+  `security-and-hardening` are installed and verified present, this task
+  could be simplified to dispatch the per-repo review to the
   security-auditor agent (model floor still fable) instead of duplicating
-  its checklist here, keeping only the ORA-specific scope, the pinned-SHA
-  worktree protocol, the suppression file, and the reporting canon.
+  its checklist inline here, keeping only the ORA-specific scope, the
+  pinned-SHA worktree protocol, the suppression file, and the reporting
+  canon. That rewrite has NOT been done — this SKILL.md is still fully
+  self-contained, adapted inline from the vetted security-and-hardening
+  skill, as originally drafted 2026-07-18.
 -->
 
 ORA AppSec Sweep — recurring application-security review of the two production ORA codebases. Self-contained; you start fresh with no memory of prior runs. Surface: Claude Code (CC/MCP fleet). This is a READ-ONLY review task.
@@ -76,7 +99,7 @@ Run all five per repo (scope adjustments noted). Severity scale: CRITICAL / HIGH
 The org has already had a leak reach an external remote via `.env.example`; a working-tree-only scan would have missed it once committed and "removed". Therefore:
 
 - Working tree (the pinned worktree): grep for credential patterns — `password|passwd|secret|api[_-]?key|token|private[_-]?key|BEGIN (RSA|EC|OPENSSH) PRIVATE KEY|sk_live|sk_test|pk_live|whsec_|client_secret|connectionstring|AKIA[0-9A-Z]{16}` (case-insensitive where sensible). Check `.env*` files specifically: `.env.example` must contain ONLY placeholder values; `.env`/`.env.local` must be gitignored AND absent from history.
-- Full history: `git -C <repo> log -p --all` piped through the same pattern set. A secret deleted in a later commit is STILL a finding — assume compromised the moment it reached a remote. Report the introducing commit, the file, and whether it ever reached `origin`.
+- Full history: `git -C <repo> log -p --all` piped through the same pattern set. A secret deleted in a later commit is STILL a finding — assume compromised the moment it reached a remote. Report the introducing commit, the file, and whether it ever reached `origin`. NOTE (2026-07-19): a candidate hit here may be a stale LOCAL dangling/unreachable object rather than something genuinely reachable from `origin` — cross-check any history hit found via `git -C <repo>` against a fresh clone (`git clone --bare <remote-url>` to a scratch temp dir, then the same log/grep against that clone) before reporting it as a live remote-history finding. See OI-015/OI-022 (2026-07-19) for the incident that motivated this cross-check.
 - Triage inline: distinguish (1) live-looking credentials → CRITICAL + same-day escalation, (2) historical/rotated/test-mode values → HIGH with "verify rotated" note, (3) variable names, type definitions, docs, and placeholder text → INFO or drop. Expect heavy noise from legitimate code (`tokenizer`, `SESSION_SECRET` as an env READ, Stripe `pk_test_` placeholders); the finding is the VALUE present, not the identifier name.
 
 ### (b) Dependency CVE audit — lockfile-based, no remediation
@@ -131,9 +154,9 @@ Not generic chatbot examples. The org's real LLM attack surface is the agent inf
 9. CLEANUP: remove both worktrees per the protocol. Verify with `git worktree list`.
 10. NEVER FABRICATE. If a check could not run, the report says so; an unrun check is never reported as clean.
 
-## FIRST-RUN NOTE (BLOCKS REGISTRATION)
+## FIRST-RUN NOTE — COMPLETED
 
-First run must be MANUAL and SUPERVISED, not cron-fired. Given ora-pm's defect history, expect a noisy first pass — secret-pattern greps over full history will surface dozens of benign identifier hits, and the historical `.env.example` leak WILL reappear as a finding (correctly — it should be triaged once, dispositioned, and suppressed or tracked, not rediscovered weekly). Triage the first pass with Gabriel, populate suppressions.md with the ratified dispositions, and only then register the cron (via the `register-scheduled-task` skill / supervised `create_scheduled_task` ONLY — never registry JSON splicing). Proposed cadence once registered: weekly, offset from the Monday 1:30 PM financial-code sweep to avoid RAM contention.
+First run occurred 2026-07-19, manual and Gabriel-supervised as required before registration. It surfaced OI-015 and dependency-CVE findings; OI-015 was triaged directly with Gabriel the same day (closed as verified-clean, real residual spun off as OI-022 — see STATUS note at top). Cron registered 2026-07-20 per the proposed cadence below. Proposed cadence: weekly, offset from the Monday 1:30 PM financial-code sweep to avoid RAM contention — now running Wednesday 1:30 PM ET.
 
 ## NOTES
 
@@ -141,3 +164,4 @@ First run must be MANUAL and SUPERVISED, not cron-fired. Given ora-pm's defect h
 - Single-writer discipline: this task reads the shared checkouts' git history via `git -C` and does all file-level work in its own disposable worktrees. It never mutates either working tree.
 - RAM: workstation ceiling ~5.7 GB. Run the two repos SEQUENTIALLY, not in parallel; `git log -p --all` on a large repo is memory-hungry — stream it through the pattern match, never load it whole.
 - Methodology adapted inline from the vetted `security-and-hardening` skill (agent-skills-main, reviewed clean 2026-07-18): threat-model-first, STRIDE at trust boundaries, the audit-triage reachability tree, "if a secret is ever committed, rotate it — deleting the line is not enough" (rotation = Gabriel, not this task), and the OWASP-LLM 2025 mapping.
+- FUTURE SIMPLIFICATION (not yet done, see STATUS note): dispatch the per-repo review to the `security-auditor` agent instead of duplicating its checklist inline, now that it and `security-and-hardening` are confirmed installed.

@@ -374,6 +374,23 @@ STEP 4 — DEDUPE / DIFF (price-cut detection is now MECHANICAL — use it)
 Fetch existing rows from the Deal Sourcing Log (Notion data source
 9a6ae219-85a3-4621-899c-c757fd062f8b). Match on address (normalized) + metro.
 
+*** DEDUPE GUARD — FETCH THE FULL ACTIVE SET, NOT A WINDOW (added 2026-07-21 after a real
+incident). *** The log holds 100+ active rows. On 2026-07-21 the dedupe baseline was pulled
+with `ORDER BY "Last Updated" DESC LIMIT 100`, which silently missed the OLDER half of the
+log — so 9 of that run's 21 "new" rows were in fact DUPLICATES of existing rows (5545 Fair
+Ln, 5027 Madison, 4612 Paddock, 84-100 Fornof, 620 Lindenwood, 6800 E Truman, 1020 W Pratt,
+2141 Kennedy, 2201 Advance). A LIMIT on the dedupe query is a duplicate-manufacturing bug.
+RULE: before writing ANY new row, fetch EVERY active row (Status NOT IN ('Dead','Passed'))
+with NO row limit — paginate if the result is truncated (the SQL result carries has_more;
+re-query with a `"Deal Name / Address" > '<last-seen-name>'` cursor and ORDER BY that column
+until has_more is false). Build the normalized-address set from the COMPLETE result, then
+match each candidate against it. Normalize by stripping the em-dash/comma city/ZIP suffix and
+lower-casing the street (e.g. "5545 Fair Ln" == "5545 Fair Lane — Fairfax (Cincinnati), OH
+45227"); match on street-number + street-name + (SF within 2%) as the dup key, since the
+same property is logged with varying submarket labels and dash/comma punctuation. If a
+candidate matches an existing row, UPDATE that row (per the rules below) — never create a
+second. A per-run sanity check: if >1 row shares a normalized street address, they are dups.
+
 The log now carries three fields (added 2026-07-14) that make price-cut detection a
 diff instead of a guess. Before they existed, this task could read a listing's CURRENT
 price but had no stored PRIOR price, so a quiet cut was structurally invisible — and

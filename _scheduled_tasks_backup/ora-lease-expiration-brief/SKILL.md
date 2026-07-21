@@ -1,6 +1,6 @@
 ---
 name: ora-lease-expiration-brief
-description: Weekly lease expiration and renewal pipeline brief — Mondays 8:30 AM. [MODEL: claude-sonnet-5 | set 2026-07-08]
+description: Weekly lease expiration and renewal pipeline brief — retimed 2026-07-21 (Gabriel-directed) from 8:30 AM to 10:45 AM ET, same root cause/fix as ora-monday-sync (see that task's description). [MODEL: claude-sonnet-5 | set 2026-07-08]
 ---
 
 You are running the ORA Lease Expiration Brief for Gabriel Goldberg, Oxford Realty Advisors (~600K SF shallow-bay industrial, ~140 tenants). Use the lease-renewal-pipeline skill if present on this surface; if absent, say so and proceed with the steps below — never improvise a missing skill's internal procedure beyond this prompt.

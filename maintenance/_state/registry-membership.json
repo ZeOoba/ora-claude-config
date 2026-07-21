@@ -1,10 +1,12 @@
 {
- "ts": "2026-07-19T12:56:28",
+ "ts": "2026-07-21T12:56:34",
  "fleets": {
   "cc": [
+   "check-dirty-files-session-pr",
    "ora-aaos-expire-leases",
    "ora-aaos-publish-contracts",
    "ora-am-brief",
+   "ora-appsec-sweep",
    "ora-broker-touch-cadence",
    "ora-calibration-snapshot",
    "ora-cc-schematic-refresh",
@@ -24,6 +26,7 @@
    "ora-site-exposure-probe",
    "ora-sofr-direct-prefetch",
    "ora-task-integrity-guard",
+   "ora-tenant-hubspot-reconciliation",
    "ora-weekly-hygiene"
   ],
   "lams": [
@@ -45,7 +48,8 @@
    "ora-session-sweep",
    "ora-skill-store-drift-check",
    "ora-skill-text-audit",
-   "ora-stale-pipeline-nudge"
+   "ora-stale-pipeline-nudge",
+   "ora-underwrite-doctrine-staleness-check"
   ]
  },
  "missing_streaks": {
