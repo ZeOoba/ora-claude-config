@@ -12,6 +12,18 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-21 — Repo-wide sweep for the acquisition-underwriting version-token gotcha: one more instance found and fixed (deal-retirement)
+
+Follow-up Code-surface session to the same-day `acquisition-underwriting` description fix (commit `f2e452f`) and its companion memory file `reference_skill_description_version_extraction_gotcha.md`. Swept all 53 `SKILL.md` files in `ora-skills` for the same class of bug: a bare `vX.Y(` token in the frontmatter description that a naive version-extraction regex could misread as the skill's file version.
+
+**22 skills carry a `vX.Y(` description token; 21 are clean** — each is a single, self-referential note matching its own changelog's latest entry (or the file's only version reference). `register-scheduled-task`'s H1 also states its version (`v2.7`), consistent with the description.
+
+**1 flagged and fixed: `deal-retirement`.** A different variant of the same risk — not a sub-component/schema version colliding with the file version (the acquisition-underwriting pattern), but two genuine file-version notes stacked back-to-back in the description (`v1.1 (2026-07-16: ...)`. `v1.2 (2026-07-18: ...)`) with no body changelog section to disambiguate. A naive first-match regex would have logged the superseded v1.1 instead of the true current v1.2 (visible only via inline `[v1.2]` tags in the Standard Workflows steps). Fixed the same way: reworded the superseded entry to `Prior rev 1.1 (...)` so it no longer matches a bare `vX.Y(` token, leaving v1.2 as the sole marker. Packager-validated (925/1024 chars, `python tools/package_skills.py` exit 0). Committed as `d701493`.
+
+Repo-first check (`git log -1` / `git status`) was clean before editing — HEAD was `f2e452f`, only untracked `_staging/` present (the expected `PENDING_REIMPORT.md` side effect from the acquisition-underwriting fix). No ruling, scorecard weight, governor constant, or substantive skill logic changed by either fix — description wording only.
+
+This closes the "was not exhaustively swept" gap the acquisition-underwriting memory entry flagged the same day — a future session does not need to re-run this audit from scratch unless new skills are added or existing descriptions are re-edited.
+
 ## 2026-07-21 — Correction: archiving 01_Workspace/outputs/ stale copies broke doctrine-integrity-probe.py; refreshed in place instead of allowlisting
 
 Follow-up to the same-day archive of 12 stale `01_Workspace/outputs/<skill>/SKILL.md` copies to `_archive/2026-07-21_stale-outputs-skills/`. That move removed the only Code/Cowork-surface resolution path `doctrine-integrity-probe.py`'s `collect_skill_dirs()` had for all 12 — re-ran the probe's own resolver post-archive and confirmed all 12 flipped to unresolvable.
