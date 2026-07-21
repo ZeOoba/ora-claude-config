@@ -7,12 +7,12 @@ output_contract:
     - id: aging-nudge-drafts
       artifact: { type: outlook_draft, folder: Drafts }
       freshness_window_hours: 30
-      expected_on: { cron: "20 9 * * 1-5" }
+      expected_on: { cron: "25 9 * * 1-5" }
       on_missing_severity: info
     - id: completion-row
       artifact: { type: notion_page, parent_id: 32b6ecd8-9e59-81f2-b329-df3fd0e25062, title_pattern: "Deal Aging SLA — {DATE}" }
       freshness_window_hours: 30
-      expected_on: { cron: "20 9 * * 1-5" }
+      expected_on: { cron: "25 9 * * 1-5" }
       on_missing_severity: warn
 ---
 
