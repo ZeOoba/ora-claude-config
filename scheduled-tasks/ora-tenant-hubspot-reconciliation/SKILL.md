@@ -1,0 +1,23 @@
+---
+name: ora-tenant-hubspot-reconciliation
+description: Monthly cross-reference of HubSpot Lease Renewal deals vs. the Notion Tenant DB — flags stage/date mismatches with quoted evidence, never auto-writes
+---
+
+Monthly reconciliation between HubSpot "Lease Renewals" pipeline deals and the Notion Tenant Database. This is a detection/reporting task only — it never writes to HubSpot or Notion.
+
+## Steps
+
+1. Read the Tenant DB cache `ora-pm-ledger` already maintains: `~\.claude\scheduled-tasks\ora-pm-ledger\state\tenant-db-latest.json` (JSON, ~296 rows, refreshed nightly by `ora-pm-ledger` — do NOT re-pull Notion yourself). Read it with Python; force UTF-8 stdout (`PYTHONIOENCODING=utf-8`) to avoid a cp1252 crash on tenant titles containing "⛔". If the file's `as_of` date is more than 3 days stale, note that as a WATCH item (ora-pm-ledger may be down) but proceed with whatever is there.
+2. Pull all HubSpot deals in the "Lease Renewals" pipeline via `search_crm_objects` (objectType: deals, query: "Lease Renewal", properties: dealname, dealstage, closedate, hs_lastmodifieddate, createdate).
+3. Cross-reference by tenant name (match the portion of `dealname` before " — Lease Renewal", or after "Lease Renewal — " for the reverse-order naming batch) against the cache's `Tenant Name` / `title` fields:
+   a. **ELEVATED** — HubSpot deal in `dealstage=appointmentscheduled` with `closedate` in the past, where the matching Notion row's `Lease Status` or `Notes` documents a vacate, termination, or executed renewal/addendum that the deal doesn't reflect. Recommend the specific stage/closedate correction and quote the exact Notion evidence — do not act on it yourself.
+   b. **WATCH** — same stale condition (past closedate, stage never advanced) but no corroborating Notion signal either way. List for Gabriel's manual review. Never guess an outcome.
+   c. **WATCH** — a HubSpot deal whose tenant name has no matching Notion Tenant DB row, or a Notion tenant row with no matching HubSpot deal. Flag as a naming/sync gap, don't guess which record is right.
+4. This cross-reference logic overlaps `exception-detection` skill Category 2's tenant-status rows (added 2026-07-21) — don't duplicate that scan's output verbatim if it already ran this cycle; this task's job is the dedicated monthly sweep with full evidence quotes, not a second copy of the same flag.
+5. **Never fabricate a renewal/vacate/termination outcome.** If Notion has no signal for a given stale deal, say so explicitly in the report as a question for Gabriel — do not infer one from silence or pattern-match to other tenants.
+6. Output: post a report to the Notion Ops Hub (same parent page `ora-pm-ledger` posts its daily ledger under) as a child page titled "HubSpot-Tenant Reconciliation — [Month Year]", listing ELEVATED items first (with recommended correction + quoted evidence), then WATCH items. Email a short summary via Outlook COM (`C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1`) — the sole send path — to `ggoldberg@oxfordra.net` ONLY, no cc (this is not the Daily Brief's sanctioned exception). On send failure: retry once, then flag loudly in the Notion page rather than halting the task.
+7. If either the cache file or the HubSpot pull is unreachable, state that plainly as a data gap in the report rather than presenting partial results as complete — never fabricate a clean reconciliation.
+
+## Precedent (2026-07-21)
+
+The first pass of this reconciliation (done ad hoc, not yet via this task) found 14 stale deals: 7 had clear primary-source evidence in Notion (Gabriel-confirmed vacate, executed addenda, terminated leases) and were corrected; 5 had no evidence either way and were left for manual review; 2 tenant names had no matching Notion row at all. That evidence bar — quote the specific Note, don't infer from a pattern — is the standard this task should hold to every month.

@@ -1,6 +1,6 @@
 ---
 name: ora-monday-sync
-description: Monday week-ahead operations sync — Mondays 7:30 AM. [MODEL: claude-sonnet-5 | set 2026-07-08]
+description: Monday week-ahead operations sync — retimed 2026-07-21 (Gabriel-directed) from 7:30 AM to 10:35 AM ET after 2 consecutive Monday/Tuesday mornings of Desktop-app-closed catch-up bursts pushed this task 3h+ late; new slot sits inside the window the app has reliably been open. [MODEL: claude-sonnet-5 | set 2026-07-08]
 ---
 
 You are running the ORA Monday Sync for Gabriel Goldberg, Oxford Realty Advisors. Purpose: one week-ahead operational picture before the week starts.

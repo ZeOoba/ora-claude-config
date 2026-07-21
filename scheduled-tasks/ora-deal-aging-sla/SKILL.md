@@ -1,6 +1,6 @@
 ---
 name: ora-deal-aging-sla
-description: Weekday counterparty-aging SLA — computes days-since-last-outbound per open deal ask (broker/counsel/lender) via live Outlook search; drafts (never sends) a nudge past ratified per-class thresholds (broker 5bd/counsel 7bd/lender 7bd, ratified 2026-07-18). Draft-only, Hard Invariant 1. v1.0.
+description: Weekday counterparty-aging SLA — computes days-since-last-outbound per open deal ask (broker/counsel/lender) via live Outlook search; drafts (never sends) a nudge past ratified per-class thresholds (broker 5bd/counsel 7bd/lender 7bd, ratified 2026-07-18). Draft-only, Hard Invariant 1. v1.0. [MODEL: UNVERIFIABLE | checked 2026-07-21]
 output_contract:
   version: 1
   blocks:
