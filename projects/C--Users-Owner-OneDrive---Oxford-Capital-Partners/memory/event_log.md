@@ -5,11 +5,31 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
+  modified: 2026-07-21T16:29:47.975Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-07-21 — Version tokens installed: lease-renewal-pipeline, personal-portfolio, website-perfection (v1.0 each)
+
+Closed the ora-skill-store-drift-check doctrine gap where these three SKILL.md files had no version token, breaking version-based drift comparison. Repo edit + commit `40e5a4d` (Code session); packaged via `tools/package_skills.py` (single-file skills, no plugin membership). **Gabriel confirmed the Save-skill install click** via Cowork. Runtime cache re-sync verified (EOL-normalized SHA256 match, repo vs `…\local-agent-mode-sessions\skills-plugin\583f08bc…\a6ad2c61…\skills\<skill>\`, post-install mtimes ~12:19 ET, all matching repo content). All three cleared from the post-commit PENDING-REIMPORT ledger (`_staging/PENDING_REIMPORT.md`, now empty/removed). A future `ora-skill-store-drift-check` run should read IN-SYNC for these three.
+
+## 2026-07-21 — ora-owner-outreach-queue-refresh: recurring path defect root-caused and closed across all 3 hosts; staleness heuristic de-coupled from frozen filename vintage
+
+Scheduled run halted at Step 1 with `[FATAL] queue script failed` → `can't open file '...owner_outreach_queue.py'`. Root cause: the 2026-07-05 machine migration nested `Investment Candidates -- 2026` one level deeper under a new `Business\` folder; the 2026-07-11 fix (documented inline in both scripts) addressed a *different* defect — a stray OneDrive `"(1)"` duplicate-folder suffix — and never caught the `Business\` nesting. Patched (with Gabriel's in-turn sign-off) in all three places the path was hardcoded:
+- `owner_outreach_weekly.py` — `FOLDER` constant
+- `owner_outreach_queue.py` — `_MASTER_FOLDER` constant
+- the scheduled task's own `SKILL.md` (Steps 1 and 3's literal `python "..."` invocation) — this is the one that would have kept failing next Monday even with the two scripts fixed, since the harness invokes this path literally.
+
+Swept the rest of the folder's `*.py` (`build_t1_letterpack.py`, `_check_addr_fields_20260712.py`) for the same broken-path string — clean, no other instances.
+
+**This is a recurrence, not a first occurrence.** `send-log.txt` shows an identical ALERT on 2026-07-12 13:16, a "corrected" successful send 8 minutes later, and a broader Cowork Automation Alert at 13:57 flagging 4 tasks including this one. It ran clean on 07-13, then broke again by today with the *identical* defect — meaning the 07-12 correction was very likely a manual override/workaround that session (e.g. an explicit master-path arg), not a persisted edit to the `FOLDER`/`_MASTER_FOLDER` constants: both scripts' content going into today's session still had the bug, and no event_log entry existed documenting a 07-12 fix. Logging this now specifically so the defect can't recur a third time without a paper trail.
+
+**Second, related finding while investigating "no refresh since 06-10":** the master workbook *has* been refreshed — `_v01` through `_v06` all sit in the correct folder, `v02`–`v06` all written 2026-07-12 (archive copies tagged `PREEDIT-cincy10-20260712` indicate a Hamilton/Cincinnati-area SF recovery pass, consistent with parcel-data-recovery's Iron rule 6: new version per pass, never overwrite). But `owner_outreach_queue.py`'s `stale` flag was computed as `(vintage_age > STALE_DAYS) OR (mtime_age > STALE_DAYS)`, where `vintage_age` derives from the filename's frozen `20260610` date prefix — a date recovery passes never rebump. That clause alone pins `stale=True` forever regardless of how fresh the data actually is (confirmed: a same-day-fresh master already read 41d "stale" by vintage). Fixed by gating `stale` on `mtime_age` alone; `vintage`/`vintage_age` still computed and printed (provenance, STANDING RATIFICATIONS matching) but no longer gate the flag. Verified against a disposable fresh-mtime copy of the real master (never touched the pinned master itself) — `STALE=no` with vintage still showing `2026-06-10 (41d)`, confirming the fix behaves as intended.
+
+Doctrine change made: `owner_outreach_queue.py`'s freshness-gating logic (mtime-only). No change to `STALE_DAYS=7` itself, the STANDING RATIFICATIONS mechanism, or the master/ledger data — none of those were in scope or at fault.
 
 ## 2026-07-20 — IWNS LLC primary lease verified: escalation date corrected, cannabis-use risk flagged
 
@@ -43,7 +63,16 @@ Gabriel supplied two executed documents directly. **Childs Play Diesel Performan
 
 ## 2026-07-17 — Granite Tops: AR collection flag added ahead of move-out (OI-009 sub-item)
 
-Gabriel asked to check the AR balance on Granite Tops given the confirmed 2026-07-31 vacate date: $180.19, aged 90+ days (per the 2026-07-15 AR data pull). Added a collection flag to the row's `Notes` via `notion-update-page` -- the balance becomes materially harder to collect once the tenant is out and the lease relationship ends; recommended the PM collect or apply against the security deposit at or before move-out. Verified via fresh fetch. No tracker change (informational addition to an already-closed OI-009 sub-item).
+Gabriel asked to check the AR balance on Granite Tops given the confirmed 2026-07-31 vacate date: $180.19, aged 90+ days (per the 2026-07-15 AR data pull). Added a collection flag to the row's `Notes` via `notion-update-page` — the balance becomes materially harder to collect once the tenant is out and the lease relationship ends; recommended the PM collect or apply against the security deposit at or before move-out. Verified via fresh fetch. No tracker change (informational addition to an already-closed OI-009 sub-item).
+
+## 2026-07-20 — ora-cc-schematic-refresh (Rev 2026-07-20a): fleet verdict flipped OK→ATTENTION
+
+Scheduled Mon-cadence refresh of the Claude Code System Schematic artifact. Material changes vs rev 2026-07-18d:
+- **Fleet VERDICT ATTENTION** (was OK): 13 throttle-skip events in the last 24h (ora-deal-aging-sla=5, automation-health-monitor=3, check-github-support-ticket-4584520=3, ora-deal-command-board=1, ora-sofr-direct-prefetch=1) + **1 new same-time collision at 09:20** (ora-site-exposure-probe ∥ ora-deal-aging-sla, both cc weekday-morning). 0 overdue, 0 missed/stuck. Candidate fix if the 09:20 overlap recurs: shift one task by 5–10 min.
+- Fleet enabled 43→44 (cc 22→23, lams steady 21); 3 disabled = spent EXPIRED one-time entries.
+- **ora-pm repo dirty→clean** (rev-d WIP committed/cleared by its owning session), HEAD 1b304e8; oxford-command-center clean @1cb8f1a.
+- memory-integrity now shows 2 present-but-unlisted files (project_plan2_effect_verification_design_2026-07-18.md, project_setup_improvement_top5_plan_2026-07-18.md) — non-fatal, index pointers owed by the authoring session.
+Probes otherwise green: governor-drift exit 0 (774 files), doctrine-integrity exit 0, confidentiality-guard 131/131. enabledPlugins unchanged (12 true).
 
 ## 2026-07-19 — OI-015 closed as verified-clean (no history purge needed); real residual found and spun off as OI-022
 
@@ -768,6 +797,17 @@ Closed the four items flagged after the Block A callout fix earlier today.
 **Open (not built, by decision):** general cross-task-narration detection across the LAMS fleet — deferred; would need a LAMS scan root (cloud/fail-open) + a field-ownership map to avoid false WARNs across 20 tasks. Check 12 can be generalized into it later if warranted.
 
 
+## 2026-07-13 — ora-lease-expiration-brief: re-hit the confirmed DC PowerShell $var-stripping bug; closing note corrected
+
+During the ORA Lease Expiration Brief scheduled-task run, the Outlook COM send (`send-via-outlook.ps1`) was first attempted with an inline `start_process` command of the form `$body = Get-Content ...; & send-via-outlook.ps1 ... -Body $body -Html` — this is exactly the failure mode already logged in [reference_desktop_commander_powershell_variable_stripping.md](reference_desktop_commander_powershell_variable_stripping.md) (confirmed engine-wide 2026-07-12): `$body` was silently stripped from the `-Command` string, producing a `The term '=' is not recognized` parse error immediately followed by a real (malformed, ~5-byte) send to ggoldberg@oxfordra.net. A second attempt wrote a `.ps1` file but hit the sibling nested-encoding issue from an em dash in an inline literal (`reference_desktop_commander_nested_quote_mangling.md`'s "quoting layer" family). Root-caused and fixed on the third attempt by writing the body to a file directly (`write_file`) and invoking `send-via-outlook.ps1 -BodyFile ... -BodyFormat html` from a `.ps1` script file (no inline `$var` in the `-Command` string) — this matches both the already-documented DC workaround and the pre-existing, actively-maintained doctrine in `_shared/README-SEND-PATTERN.md` (updated 2026-06-15) and `_shared/EMAIL_DELIVERY.md`, which already mandate exactly this file-based `-BodyFile` pattern fleet-wide.
+
+**Correction to my own initial framing:** the session's closing note characterized "prefer `-BodyFile` over inline `-Body $var`" as a new workflow-optimization recommendation. That was wrong — it's not a gap to fix, it's an existing, correctly-designed doctrine I failed to follow on the first two attempts. The actual miss was process discipline: not checking `reference_desktop_commander_powershell_variable_stripping.md` / `_shared/README-SEND-PATTERN.md` before building the send command, despite this bug being confirmed engine-wide the day before (2026-07-12). Logging here per Calibrate convention so the next scheduled-task-authoring or ad-hoc-send session checks the existing reference first rather than rediscovering it a fourth time.
+
+No doctrine change made (none needed) — this is a "read the existing reference first" miss, not a doctrine gap.
+
 ---
 
 *Entries at and before “2026-07-16 — ora-am-brief follow-ups (4) + doctrine-probe gains a LAMS-fleet regression guard” rolled over 2026-07-18 to [_archive/event_log_2026-07-18.md](_archive/event_log_2026-07-18.md) per memory-policy.md's rollover rule.*
+## 2026-07-21 - package-and-stage-skill: lease-renewal-pipeline, personal-portfolio, website-perfection v1.0 confirmed installed via Save-skill click
+Gabriel confirmed the Save-skill install click (Cowork session) for all three skills flagged repo-newer at commit 40e5a4d ("Add missing version tokens to lease-renewal-pipeline, personal-portfolio, website-perfection SKILL.md"). Procedure per package-and-stage-skill Entry point A: Step 0 plugin_of returned None for all three (standalone path, not plugin members). Step 1 confirmed C:\Users\Owner\ora-skills git-clean at 40e5a4d for the three skill paths. Step 2 hash pre-check (SHA256, EOL-normalized) found real drift on all three - both raw and normalized mismatches, confirming genuine content drift from the newly-added version tokens, not CRLF noise. Step 3 packaged via tools\package_skills.py (never Compress-Archive), exit 0, all three validated clean (description length OK, 1 entry OK each - single-file skills, SKILL.md only). Staged to session outputs and surfaced via present_files. After Gabriel's confirmed Save-skill click, post-install verification re-ran the same SHA256 comparison: all three now RAW-match and NORM-match between the repo and the runtime cache (skills-plugin\583f08bc-0123-4111-8158-8fe3d927e350\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\skills\<skill>\SKILL.md), cache file count = 1 for each, confirming the install landed cleanly. This entry records the confirmed Save-skill click itself, not merely the upstream repo commit - the ledger clear (tools\pending_reimport.py clear) that follows depends on this distinction.
+**Versions installed:** lease-renewal-pipeline v1.0, personal-portfolio v1.0, website-perfection v1.0.
