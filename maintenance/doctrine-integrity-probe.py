@@ -181,6 +181,14 @@ SKILL_TOKEN_RE = re.compile(r"`([a-z][a-z0-9-]*(?:\{[a-z0-9-]+\})?)`")
 # re-operations is currently the only such skill; the other anthropic-skills:*
 # business skills DO have real SKILL.md homes under 01_Workspace/outputs/ and must
 # resolve as real dirs, not via this list. Mirrors SLASH_SKILL_ALLOWLIST.
+# CAUTION (2026-07-21): do NOT add a skill here just because its outputs/ copy looks
+# stale -- test_real_doctrine_skills_resolve() deliberately asserts communication-
+# intelligence and deal-comparison resolve via a REAL dir, not this list, guarding
+# against the exact 2026-06-06 masking regression this list exists to avoid repeating.
+# If an outputs/ copy is stale, refresh its content from the ora-skills repo in place
+# (see 01_Workspace/_archive/2026-07-21_stale-outputs-skills/ for the audit that found
+# 12 stale copies, 2 governor-relevant, and the refreshed-in-place fix) -- don't paper
+# over the gap with an allowlist entry.
 PLUGIN_SKILL_ALLOWLIST = {"re-operations"}
 
 # The "Skill precedence" block names orchestration primitives that are NOT SKILL.md
