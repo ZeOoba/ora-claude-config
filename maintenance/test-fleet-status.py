@@ -202,6 +202,35 @@ def test_collision_still_flags():
           "same-time collision must still flag, got %r" % (data,))
 
 
+# 12. Same clock time, disjoint days-of-week -> NOT a real collision (added 2026-07-20
+# after cron_hm()-only grouping flagged ora-financial-code-integrity-sweep (Mon 13:30)
+# x ora-appsec-sweep (Wed 13:30) as a false-positive collision).
+def test_same_time_different_weekday_not_a_collision():
+    tasks = [
+        task("mon-task", cron="30 13 * * 1", created_days_ago=1, last_run="2026-01-01T00:00:00Z"),
+        task("wed-task", cron="30 13 * * 3", created_days_ago=1, last_run="2026-01-01T00:00:00Z"),
+    ]
+    data, _ = run(tasks)
+    check("test_same_time_different_weekday_not_a_collision",
+          data is not None and data.get("collisions") == {},
+          "Mon-only vs Wed-only at the same clock time must not collide, got %r" % (data,))
+    check("test_same_time_different_weekday_verdict_ok",
+          data is not None and data.get("verdict") == "OK",
+          "expected OK verdict with no genuine collision, got %r" % (data,))
+
+
+# 13. Same clock time, overlapping weekday RANGES -> still a real collision.
+def test_same_time_overlapping_weekday_range_still_collides():
+    tasks = [
+        task("weekday-task", cron="0 9 * * 1-5", created_days_ago=1, last_run="2026-01-01T00:00:00Z"),
+        task("wed-task2", cron="0 9 * * 3", created_days_ago=1, last_run="2026-01-01T00:00:00Z"),
+    ]
+    data, _ = run(tasks)
+    check("test_same_time_overlapping_weekday_range_still_collides",
+          data is not None and data.get("collisions"),
+          "Wed is inside Mon-Fri -- must still collide, got %r" % (data,))
+
+
 if __name__ == "__main__":
     test_all_healthy_is_ok()
     test_quarterly_not_yet_due_is_not_overdue()
@@ -214,6 +243,8 @@ if __name__ == "__main__":
     test_recent_skips_counted_old_skips_decay()
     test_old_skip_burst_alone_is_ok()
     test_collision_still_flags()
+    test_same_time_different_weekday_not_a_collision()
+    test_same_time_overlapping_weekday_range_still_collides()
     if _failures:
         print("\n%d FAILURE(S): %s" % (len(_failures), ", ".join(_failures)))
         sys.exit(1)

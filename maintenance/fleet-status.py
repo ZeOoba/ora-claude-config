@@ -94,6 +94,64 @@ def cron_hm(expr):
         return None  # ranges/lists/* -> not a single fixed time
 
 
+def _parse_cron_set(field, lo, hi):
+    """Parse one non-minute/hour cron field into the set of ints it matches.
+    '*' -> the full [lo, hi] range. Supports comma lists and a-b ranges (the
+    only forms used across the live fleet)."""
+    if field == "*":
+        return set(range(lo, hi + 1))
+    out = set()
+    for part in field.split(","):
+        if "-" in part:
+            a, b = part.split("-")
+            out.update(range(int(a), int(b) + 1))
+        else:
+            out.add(int(part))
+    return out
+
+
+def _cron_fires_on(dom_field, mon_field, dow_field, dom_val, mon_val, dow_val):
+    """Standard cron OR-semantics: if BOTH dom and dow are restricted (not '*'),
+    the field fires when EITHER matches; if only one is restricted, that one
+    alone governs; if neither, every day in-month matches."""
+    if mon_val not in _parse_cron_set(mon_field, 1, 12):
+        return False
+    dom_restricted = dom_field != "*"
+    dow_restricted = dow_field != "*"
+    if dom_restricted and dow_restricted:
+        return (dom_val in _parse_cron_set(dom_field, 1, 31)
+                or dow_val in _parse_cron_set(dow_field, 0, 6))
+    if dom_restricted:
+        return dom_val in _parse_cron_set(dom_field, 1, 31)
+    if dow_restricted:
+        return dow_val in _parse_cron_set(dow_field, 0, 6)
+    return True
+
+
+def crons_share_a_day(expr_a, expr_b):
+    """Two 5-field crons already known to share (hour, minute) -- do they also
+    share at least one calendar day, i.e. can they ever actually fire at once?
+    Walks a full leap year (366 days, covers every dom/month combination) with
+    stdlib datetime only. Two tasks at the same clock time on disjoint days
+    (e.g. Mon 13:30 vs Wed 13:30) are NOT a real collision -- this is the check
+    cron_hm()-only grouping was missing (added 2026-07-20 after fleet-status
+    flagged ora-financial-code-integrity-sweep x ora-appsec-sweep, Mon vs Wed,
+    as a false-positive same-time collision)."""
+    pa, pb = expr_a.split(), expr_b.split()
+    if len(pa) != 5 or len(pb) != 5:
+        return True  # can't parse -> don't suppress, fail toward flagging
+    _, _, dom_a, mon_a, dow_a = pa
+    _, _, dom_b, mon_b, dow_b = pb
+    d = datetime.date(2024, 1, 1)  # 2024 is a leap year
+    for offset in range(366):
+        cur = d + datetime.timedelta(days=offset)
+        dow_val = (cur.weekday() + 1) % 7  # cron: Sun=0..Sat=6; python: Mon=0..Sun=6
+        if (_cron_fires_on(dom_a, mon_a, dow_a, cur.day, cur.month, dow_val)
+                and _cron_fires_on(dom_b, mon_b, dow_b, cur.day, cur.month, dow_val)):
+            return True
+    return False
+
+
 def is_onetime(expr):
     """Legacy: a one-time task may carry an epoch-ms value in cronExpression."""
     if isinstance(expr, (int, float)):
@@ -220,13 +278,27 @@ def main():
             recent_skip_counts[tid] = n
     recent_skip_total = sum(recent_skip_counts.values())
 
-    # collisions: tasks sharing the same fixed (hour, minute)
+    # collisions: tasks sharing the same fixed (hour, minute) AND at least one
+    # actual calendar day (cron_hm() alone ignores dom/month/dow -- e.g. Mon 13:30
+    # vs Wed 13:30 used to false-positive as a collision; see crons_share_a_day()).
     hm = {}
     for t in tasks:
         key = cron_hm(t.get("cronExpression"))
         if key is not None:
-            hm.setdefault(key, []).append(t.get("id", "?"))
-    collisions = {("%02d:%02d" % k): v for k, v in hm.items() if len(v) > 1}
+            hm.setdefault(key, []).append((t.get("id", "?"), t.get("cronExpression")))
+    collisions = {}
+    for k, group in hm.items():
+        if len(group) < 2:
+            continue
+        real_ids = []
+        for i in range(len(group)):
+            for j in range(i + 1, len(group)):
+                if crons_share_a_day(group[i][1], group[j][1]):
+                    for tid in (group[i][0], group[j][0]):
+                        if tid not in real_ids:
+                            real_ids.append(tid)
+        if real_ids:
+            collisions["%02d:%02d" % k] = real_ids
 
     # AM pileup 05:00-09:30
     am_pileup = []
