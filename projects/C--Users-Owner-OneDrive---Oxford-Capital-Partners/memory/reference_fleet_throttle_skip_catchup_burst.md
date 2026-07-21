@@ -4,7 +4,7 @@ description: "recordedSkips 'global_limit' events are the Desktop scheduler's ow
 metadata:
   type: reference
   originSessionId: 41bfc8fa-2412-44b6-a527-f9a4631e86f5
-  modified: 2026-07-21T03:41:48.290Z
+  modified: 2026-07-21T14:16:59.149Z
 ---
 
 **What the metric means.** `recordedSkips[taskId]` entries with `reason: "global_limit"` are written by
@@ -59,6 +59,20 @@ open/awake through the business day (already documented) -- there is nothing to 
 timestamps cluster within seconds of OTHER tasks' skip timestamps (same burst) before assuming a
 config problem. A lone task skipping repeatedly with NO neighboring skips at the same instant would
 be a different, more suspicious pattern worth a fresh investigation.
+
+**RECURRED 2026-07-21, confirming the pattern rather than a new problem.** A routine fleet-status
+recheck the next day found the 24h count had moved 10->18. Same signature, different tasks and a
+shorter delay: at 2026-07-21 13:46:48 UTC (09:46:48 ET) -- only ~21 minutes after `ora-am-brief`'s
+06:00 ET slot and ~21 min after `ora-deal-aging-sla`'s 09:25 ET slot (both well overdue by then) --
+`ora-am-brief`, `ora-deal-aging-sla`, and `check-dirty-files-session-pr` (the 30-min dirty-file
+poller) all hit `global_limit` within 5 milliseconds of each other. `ora-am-brief` and
+`ora-deal-aging-sla`'s new event each recovered/stopped after that single hit; `check-dirty-files-
+session-pr` lost the race repeatedly instead -- 6 straight `global_limit` retries at ~60s intervals
+(13:46:48 through 13:51:48 UTC) before dropping out of the recorded window, the same "some task
+loses the race longer than the others" shape `ora-deal-aging-sla` showed on 07-20. Collisions stayed
+clean (`{}`) throughout -- confirms the collision-detector fix holds independently of this separate,
+expected throttle behavior. No new action taken; this entry exists precisely so a second occurrence
+doesn't trigger a fresh investigation from zero.
 
 Related: [[reference_fleet_status_dual_read]] (dual-registry read mechanics),
 [[reference_lean_ram_toolkit]] (the RAM ceiling this throttle protects).
