@@ -115,6 +115,7 @@
 - [Command Center CRLF Hazard](reference_command_center_crlf_hazard.md) — writeFileSync flips EOL and bloats diffs; prefer the Edit tool
 - [Shared-Checkout Co-File Patch Hazard](shared-checkout-cofile-patch-hazard.md) — `git diff -- <file>` grabs the other writer's hunks too
 - [event_log.md Partial-Commit Splice](reference_event_log_partial_commit_splice.md) — `hash-object`+`update-index` to commit only your entries from a co-mingled file
+- [Pathspec commit discards index splice](feedback_pathspec_commit_discards_index_splice.md) — `git commit -- <path>` re-reads the working tree, blowing away a staged splice
 - [session-env Retention Proposal](reference_session_env_retention_proposal.md) — PROPOSAL: age-gate session-env\ (763 empty dirs, growing)
 - [WebFetch Markdown False Negatives](feedback_webfetch_markdown_false_negatives.md) — HTML→markdown strips head/script; verify via raw curl
 - [workflows dir single-writer gap](reference_workflows_dir_single_writer_gap.md) — RESOLVED: workflows/ now git-tracked; mtime sweep still needed

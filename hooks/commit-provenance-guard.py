@@ -66,6 +66,22 @@ elsewhere now ages out and is allowed through. This is the intended effect of
 keying TTL to SESSION_PRUNE_H per-touch rather than per-file; already_committed_since()
 is the correctness backstop for genuinely-landed content, not TTL.
 
+REMEDIATION-TEXT PATHSPEC GOTCHA (2026-07-22): the "commit only your own
+files with an explicit pathspec" advice this guard prints on block is safe
+for genuinely separate files, but was being followed for a co-mingled
+single file (a hash-object + update-index surgical splice, per
+reference_event_log_partial_commit_splice.md) where it is NOT safe:
+`git commit -- <path>` re-reads the WORKING TREE for that path at commit
+time regardless of what is staged in the index, silently discarding the
+splice and re-sweeping the foreign hunks back in. Confirmed by a real
+incident: a MEMORY.md single-line edit, staged correctly via
+update-index --cacheinfo, was re-swept with another live session's four
+unrelated hunks when committed via `git commit -m "..." -- MEMORY.md`
+(commit 61facf4, amended to 62e5a35 once discovered). The remediation
+text now carries this caveat inline; the correct sequence for a partial
+same-file splice is update-index to stage only your content, then a BARE
+`git commit -m "..."` with NO pathspec at all.
+
 Stdlib only. ASCII-only. Windows (`python`).
 """
 
@@ -354,8 +370,17 @@ def main():
         "Committing them here attributes their work to you and can strand or "
         "clobber it (2026-07-16: a staged edit was swept into another session's "
         "commit inside a 30s window). Two ways forward:\n"
-        "  1. Commit only your own files with an explicit pathspec:\n"
+        "  1. Commit only your own SEPARATE files with an explicit pathspec:\n"
         "     git commit -m \"...\" -- <your/file> <your/other-file>\n"
+        "     CAVEAT (confirmed 2026-07-22): if a flagged file itself is\n"
+        "     co-mingled with your own partial edit (you want only SOME of\n"
+        "     its content), this pathspec form does NOT help -- `git commit\n"
+        "     -- <path>` re-reads the WORKING TREE for that path at commit\n"
+        "     time and silently discards any surgical index stage, sweeping\n"
+        "     the foreign hunks back in. For that case use hash-object +\n"
+        "     update-index to stage just your content, then a BARE `git\n"
+        "     commit -m \"...\"` with NO pathspec (see\n"
+        "     reference_event_log_partial_commit_splice.md).\n"
         "  2. If you are DELIBERATELY landing another session's orphaned work, "
         "declare it:\n"
         "     touch \"%s\"\n"

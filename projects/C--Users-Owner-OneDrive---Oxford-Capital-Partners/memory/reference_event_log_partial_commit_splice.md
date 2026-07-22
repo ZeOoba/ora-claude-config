@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: ac546aef-18b3-45a2-9a97-675c1f7135f4
-  modified: 2026-07-22T00:01:21.863Z
+  modified: 2026-07-22T19:51:43.792Z
 ---
 
 Companion technique to [[shared-checkout-cofile-patch-hazard]]: that note names the problem (a co-edited file's diff captures another writer's hunks too); this note is the concrete fix for the specific case of `event_log.md` — a single file, multiple sessions appending newest-first, no interactive `git add -p` available in a scripted/headless session.
@@ -24,7 +24,8 @@ Companion technique to [[shared-checkout-cofile-patch-hazard]]: that note names 
    ```
    This stages exactly the spliced content without running `git add` (which would re-read the working-tree file) and without modifying the working-tree file itself — the excluded entries stay visibly uncommitted in `git status`, exactly where the other session left them.
 5. **Verify staged content before committing:** `git diff --cached -- <file> | grep "^+## "` should list only your entries.
-6. Commit. The working tree is untouched; a later `git add` from the entry's actual author will pick up cleanly.
+6. Commit with a **BARE `git commit -m "..."` — NO pathspec, NO `-- <file>`.** The working tree is untouched; a later `git add` from the entry's actual author will pick up cleanly.
+   **CRITICAL (confirmed 2026-07-22):** `git commit -m "..." -- <file>` — the pathspec form commit-provenance-guard.py itself suggests as a remediation — does NOT commit what you staged via `update-index --cacheinfo`. It re-reads the **working tree** for that path at commit time and commits that instead, silently discarding the surgical splice and re-sweeping every foreign hunk back in. Real incident: a MEMORY.md single-line splice, staged correctly, was blown away this way and four unrelated hunks from another live session landed in the same commit under an unrelated message (commit 61facf4, caught and amended to 62e5a35). If anything else happens to be staged in the index for other paths when you run the bare commit, unstage it first (`git reset -- <other-path>`) so the commit captures only the splice.
 
 **Real instance, 2026-07-21:** `event_log.md` held 4 new entries — 3 written by the current session, 1 (`15-skill Save-skill batch confirmed installed`) written by a separate Cowork session mid-flight. Used this technique twice in the same session: once to commit the 3 own entries while leaving the 4th uncommitted, and again later (after independently verifying the 4th entry's claims — a hash-check against the actual runtime cache, not just trusting it) to commit that one too, once it was legitimately "mine to close." Neither commit touched the other session's untouched entries or the working-tree file directly.
 
