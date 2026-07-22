@@ -131,12 +131,27 @@ def claims_log_path():
 
 
 def _norm(p):
-    """Forward-slash, lower-cased, junction-resolved absolute form for matching."""
+    """Forward-slash, lower-cased, junction-resolved absolute form for matching.
+
+    REFUTE 2026-07-22: Win32's CreateFile silently strips trailing '.'/' '
+    characters from a path's FINAL component -- "CLAUDE.md." and "CLAUDE.md"
+    are the SAME file on disk, but os.path.realpath() does not replicate that
+    stripping, so a raw comparison sees them as different paths. Confirmed
+    this already bypassed the live hook for a plain structured Write call
+    (file_path="<root>/CLAUDE.md.") -- pre-existing, not introduced by any
+    single call site, so fixed once here for every caller (classify_path's
+    structured file-tool targets AND _shell_absolute_hits' shell-text
+    tokens)."""
     try:
         resolved = os.path.realpath(p)
     except (OSError, ValueError):
         resolved = os.path.abspath(p)
-    return resolved.replace("\\", "/").lower().rstrip("/")
+    normalized = resolved.replace("\\", "/").lower().rstrip("/")
+    head, sep, tail = normalized.rpartition("/")
+    stripped_tail = tail.rstrip(". ")
+    if stripped_tail and stripped_tail != tail:
+        normalized = head + sep + stripped_tail
+    return normalized
 
 
 # ------------------------------------------------------------------ path classifiers
@@ -219,7 +234,18 @@ def _blank_exempt(text, exempt_markers):
 # repo's own .claude/workflows/, which cannot resolve to the live root under
 # any shell cwd. Both are fixed by the same helper below.
 _PATH_WORD_RE = re.compile(r"[\w.-]")
-_ABS_PATH_TOKEN_RE = re.compile(r"[a-z]:/[^\s\"'<>|]*")
+# CODE REVIEW FINDING (2026-07-22): the excluded-character set stopped only at
+# whitespace/quotes/<>/| -- not at the shell sequencing/substitution/grouping
+# metacharacters (; & ` $ ( )) that ALSO terminate an unquoted token in both
+# POSIX shells and cmd.exe. `cp x.py <root>/CLAUDE.md;echo pwned` glued a
+# trailing shell construct directly onto the token, producing a corrupted
+# path that failed _classify's EXACT-EQUALITY check for the single-file
+# targets (settings.json/settings.local.json/CLAUDE.md) while _marker_matches
+# skipped it on the assumption the absolute-token path already handled it --
+# neither path fired. Confirmed a genuine regression (the original
+# bare-substring matcher was not fooled by this, since ";echo" doesn't change
+# whether "claude.md" is a substring of the corrupted string).
+_ABS_PATH_TOKEN_RE = re.compile(r"[a-z]:/[^\s\"'<>|;&`$()]*")
 
 
 def _boundary_ok(text, start, end):
