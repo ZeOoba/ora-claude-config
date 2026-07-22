@@ -10,6 +10,8 @@
 - [People](people.md) — Eric, Gabriel, Philip Collins (counsel), Tamara Lucas (title); brokers/lenders/vendors
 
 ## Projects & system
+- [Tenant DB Renewal Watch view — CLOSED 07-22](project_tenant_db_renewal_watch_view_2026-07-22.md) — Months to Expiry formula + ≤90d view; refresh wired into ora-lease-expiration-brief, diagnostic views trashed
+- [config-write-guard.py boundary fix — CLOSED 07-22](project_config_write_guard_boundary_fix_2026-07-21.md) — 3 FPs + 3 REFUTE-found regressions fixed, merged to main w/ Gabriel's token
 - [Tenant-HubSpot Reconciliation — CLOSED 07-21](project_tenant_hubspot_reconciliation_2026-07-21.md) — 7 deals corrected, exception-detection v1.2, new monthly task
 - [event_log.md IWNS block loss — UNATTRIBUTED](project_event_log_iwns_block_loss_unattributed_2026-07-21.md) — 6 entries recovered; root cause open
 - [Acquisition-Underwriting Doctrine Review — PLANNED 07-18](project_acquisition_underwriting_doctrine_review_2026-07-18.md) — 9-item plan, awaiting Gabriel go/no-go
@@ -31,7 +33,7 @@
 - [oxford-command-center worktree gotchas](project_oxford-command-center_worktree_gotchas.md) — WORKBOOK_PATH not inherited per-worktree
 - [Claude Code Setup Audit 2026-07-09](project_claude-setup-audit-2026-07-09.md) — migration CLOSED 07-17; 15/21 resolved, rest in file
 - [Claude Setup Comprehensive Review 2026-07-16](project_claude-setup-audit-2026-07-16.md) — G1-G8 done; chip TERMINAL, needs Gabriel
-- [oxfordra.net SEO Audit 2026-07](project_oxfordra_seo_audit_2026-07.md) — 4th pass 07-21: B-(74); seller-hub closed same-day, PR #46 open for 3 warnings
+- [oxfordra.net SEO Audit 2026-07](project_oxfordra_seo_audit_2026-07.md) — 6th pass 07-22: 84/100 (PR #56 live); 0 Criticals; open: portfolio SF/counts, FAQ order, /markets redirect
 - [Owner-Outreach Stale-Guard Watch](project_owner_outreach_stale_guard_watch.md) — CLOSED 07-14: SKILL.md v1.3 remembers vintage
 - [Ops Decision Log](ops_decision_log.md) — recurring operational yes/no calls; companion to deal-decision-ledger.md
 - [Open Items Tracker](open-items-tracker.md) — canonical punch-list; other files POINT here, never restate item text
@@ -52,9 +54,11 @@
 - [Basis Denominator — RCT v03 (RATIFIED)](project_replacement_cost_benchmark_unratified.md) — the ONE denominator; ORA buys at ~35-40% of true replacement
 
 ## Reference
+- [Notion view DSL formula-filter bug](reference_notion_view_dsl_formula_filter_bug.md) — formula-property filters silently become a no-op (rollup-shaped); relative dates also unsupported
+- [config-write-guard.py quote-split gap](reference_config_write_guard_quote_split_gap.md) — pre-existing shell-matcher bypass (`"root"/hooks/x`), NOT this session's regression, still open
 - [Skill args positional-substitution bug](reference_skill_args_positional_substitution_bug.md) — `args` corrupts $-amounts; filed claude-code#79859
 - [Skill reimport sync lag](reference_skill_reimport_sync_lag.md) — "Save skill" lags disk ~10min; verify via main.log not PENDING_REIMPORT
-- [Skill description version-extraction gotcha](reference_skill_description_version_extraction_gotcha.md) — description `vX.Y` can be a sub-component version, not the file version; check body H1 first (acquisition-underwriting: desc said v1.1, file is v4.3)
+- [Skill description version-extraction gotcha](reference_skill_description_version_extraction_gotcha.md) — description `vX.Y` can be a sub-component version, not the file version; check body H1 first
 - [Tenant DB Cache & Notion Quota Myth](reference_tenant_db_cache_and_notion_quota_myth.md) — quota is an MCP-tool gate; `ora-pm-ledger`'s snapshot has the data
 - [Deep-Research Synthesize-Stage Bug](reference_deep_research_synthesize_stage_bug.md) — FIXED: schema requires real confirmed claims, stub now fails validation
 - [ECC Repo Flagged](reference_ecc_repo_flagged.md) — affaan-m/ECC rejected: malware-clone risk, redundant with skill stack
@@ -79,6 +83,7 @@
 - [OneDrive Business/Personal Scope](reference_onedrive_business_scope.md) — consult before broad OneDrive-root searches
 - [Model Release Checklist](reference_model_release_checklist.md) — hardcoded model IDs + sweep process for new releases
 - [Windows Hook Stdin cp1252 Gap](reference_windows_hook_stdin_cp1252_encoding_gap.md) — hooks can decode stdin as cp1252; audit CLOSED
+- [Workflow scriptPath CRLF Rejection](reference_workflow_scriptpath_crlf_rejection.md) — CRLF .js fails scriptPath outright; refute-financial-change fixed 07-21
 - [Tech Stack & Paths](tech.md) — Paths, MCP connectors, secrets index, scheduler, machine constraints
 - [ORA PM App](reference_ora_pm.md) — ZeOoba/ora-pm; 07-16 audit (3 criticals) + confidential-terms purge status
 - [oxfordra.net Deploy Canon](reference_oxfordra_deploy_canon.md) — netlify-cli from website-canonical is THE path; merged PR auto-deploys PROD
