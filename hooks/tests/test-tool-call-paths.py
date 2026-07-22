@@ -271,6 +271,61 @@ def test_resolve_path_absolute_and_casefolded():
     check("resolve_path case-normalized", r == os.path.normcase(r))
 
 
+# ---------------------------------------------------------------- open() mode-awareness
+# BUG (2026-07-21, oxford-command-center worktree session): "open(" was an
+# unconditional write indicator regardless of mode -- `open(path, 'rb')` (an
+# ordinary READ) tripped the same signal as `open(path, 'w')`. Only an
+# UNAMBIGUOUS read-only call (no mode arg, or an explicit 'r'/'rb'/'rt' string
+# literal, and nothing else) is exempt; anything else -- a write-mode literal, a
+# variable/indirect mode, extra args, nested-paren arguments this module cannot
+# cleanly parse -- stays flagged. Fail-toward-block on any unresolved shape,
+# same posture as the rest of this module.
+def test_shell_may_write_open_readonly_not_flagged():
+    for label, cmd in [
+        ("open(path,'rb') read", "open(r'C:/x/y.json','rb').read()"),
+        ("open(path,'r') read", "open('C:/x/y.json','r').read()"),
+        ("open(path,'rt') read", "open('C:/x/y.json','rt').read()"),
+        ("open(path) no mode (defaults to read)", "open('C:/x/y.json').read()"),
+    ]:
+        check("%s -> not may_write" % label, not tcp.shell_may_write(cmd),
+              "cmd=%r" % cmd)
+
+
+def test_shell_may_write_open_write_modes_still_flagged():
+    for label, cmd in [
+        ("open(path,'w')", "open('C:/x/y.json','w').write('x')"),
+        ("open(path,'wb')", "open('C:/x/y.json','wb').write(b'x')"),
+        ("open(path,'a')", "open('C:/x/y.json','a').write('x')"),
+        ("open(path,'x')", "open('C:/x/y.json','x').write('x')"),
+        ("open(path,'r+')", "open('C:/x/y.json','r+').write('x')"),
+    ]:
+        check("%s -> may_write" % label, tcp.shell_may_write(cmd), "cmd=%r" % cmd)
+
+
+def test_shell_may_write_open_indirect_or_unparseable_stays_flagged():
+    # Fail-toward-block: any shape this module cannot cleanly resolve as an
+    # unambiguous read must still read as a possible write -- same "honest
+    # limit" posture as value indirection elsewhere in this module.
+    for label, cmd in [
+        ("mode via variable", "m = 'rb'\nopen('C:/x/y.json', m).read()"),
+        ("nested-paren path arg", "open(os.path.join(a, 'y.json'), 'rb').read()"),
+        ("extra keyword arg", "open('C:/x/y.json', 'rb', encoding='utf-8').read()"),
+    ]:
+        check("%s -> still may_write (unresolved)" % label,
+              tcp.shell_may_write(cmd), "cmd=%r" % cmd)
+
+
+def test_shell_may_write_open_readonly_does_not_mask_other_indicators():
+    # The open()-mode carve-out must only suppress the "open(" signal itself --
+    # a write indicator anywhere else in the same command must still fire.
+    cmd = "open('C:/x/y.json','rb').read(); os.remove('C:/x/other.txt')"
+    check("read-mode open + os.remove elsewhere -> still may_write",
+          tcp.shell_may_write(cmd), "cmd=%r" % cmd)
+    cmd2 = "echo hi > out.txt; open('C:/x/y.json','rb').read()"
+    check("read-mode open + unrelated redirect -> still may_write",
+          tcp.shell_may_write(cmd2), "cmd=%r" % cmd2)
+
+
 if __name__ == "__main__":
     test_primary_write_path_native()
     test_primary_write_path_dc_write_file_both_prefixes_both_arg_names()
@@ -289,6 +344,10 @@ if __name__ == "__main__":
     test_is_write_capable()
     test_refute_family_suffix_matching_and_new_shapes()
     test_resolve_path_absolute_and_casefolded()
+    test_shell_may_write_open_readonly_not_flagged()
+    test_shell_may_write_open_write_modes_still_flagged()
+    test_shell_may_write_open_indirect_or_unparseable_stays_flagged()
+    test_shell_may_write_open_readonly_does_not_mask_other_indicators()
     if _failures:
         print("\n%d FAILURE(S): %s" % (len(_failures), ", ".join(_failures)))
         sys.exit(1)
