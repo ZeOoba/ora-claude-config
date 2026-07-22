@@ -64,6 +64,7 @@ Stdlib only. ASCII-only. Windows (`python`).
 """
 import json
 import os
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -201,10 +202,110 @@ def _blank_exempt(text, exempt_markers):
     """Blank the ENTIRE whitespace-delimited token containing an exempt marker, so
     an exempted path (a worktree tree, a hooks/sessions token write) contributes
     NOTHING to later marker/root matching -- not even its root prefix."""
-    import re as _re
     for marker in exempt_markers:
-        text = _re.sub(r"\S*" + _re.escape(marker) + r"\S*", " <exempt> ", text)
+        text = re.sub(r"\S*" + re.escape(marker) + r"\S*", " <exempt> ", text)
     return text
+
+
+# BUG (2026-07-21, reproduced in the oxford-command-center worktree
+# fix-refute-workflow-em-dash): marker matching was a bare `marker in text`
+# substring check with no token-boundary awareness and no notion of "this
+# occurrence sits inside a provably-different absolute path." Two live
+# consequences: (1) the bare ".claude" root-mention matched as a text-prefix of
+# the unrelated ".claude-worktrees" directory (this environment's actual
+# repo-local worktree naming convention -- dash-joined, NOT the nested
+# "<root>/worktrees" form already exempted); (2) a generic ".claude/workflows"
+# marker fired on a fully drive-qualified absolute path under a DIFFERENT
+# repo's own .claude/workflows/, which cannot resolve to the live root under
+# any shell cwd. Both are fixed by the same helper below.
+_PATH_WORD_RE = re.compile(r"[\w.-]")
+_ABS_PATH_TOKEN_RE = re.compile(r"[a-z]:/[^\s\"'<>|]*")
+
+
+def _boundary_ok(text, start, end):
+    """True if `text[start:end]` is not glued to more path-word characters on
+    either side (so ".claude" does not match inside ".claude-worktrees")."""
+    before_ok = start == 0 or not _PATH_WORD_RE.match(text[start - 1])
+    after_ok = end == len(text) or not _PATH_WORD_RE.match(text[end])
+    return before_ok and after_ok
+
+
+def _absolute_token_containing(text, idx):
+    """The maximal drive-qualified absolute path token overlapping index `idx`,
+    or None if `idx` is not inside one (e.g. a bare relative or tilde form)."""
+    for m in _ABS_PATH_TOKEN_RE.finditer(text):
+        if m.start() <= idx < m.end():
+            return m.group(0)
+    return None
+
+
+def _shell_absolute_hits(text, root):
+    """Classify every drive-qualified absolute path token in `text` through
+    the SAME real-path resolution used for structured file-tool targets
+    (_norm + _classify) -- os.path.realpath, not a hand-rolled string-prefix
+    comparison. REFUTE 2026-07-21 (adversarial pass): an earlier version of
+    this fix compared token PREFIXES as strings, which a lexical '..' segment
+    defeats -- `<root>/nonexistent_dir/../hooks/evil.py` is a different
+    STRING than `<root>/hooks/evil.py` but the same live file (Windows/cmd
+    collapses '..' with no existence check on the intermediate segment,
+    live-proven by redirect). Reusing _norm()/_classify() sidesteps that
+    class of bug entirely: realpath() does the same collapsing the OS does,
+    so a token that lexically resolves onto the live root is caught, and a
+    token that genuinely resolves under a different root (an unrelated
+    repo's own .claude/workflows/) is correctly cleared -- exactly the
+    behavior already trusted for every native Write/Edit/DC file-tool call."""
+    hits = []
+    for m in _ABS_PATH_TOKEN_RE.finditer(text):
+        cls = _classify(_norm(m.group(0)), root)
+        if cls:
+            hits.append(cls)
+    return hits
+
+
+def _marker_matches(text, marker):
+    """True if some BOUNDARY-CORRECT occurrence of `marker` exists in `text`
+    that is NOT inside a drive-qualified absolute path token (those are
+    classified separately and more accurately by _shell_absolute_hits). A
+    bare-relative or tilde-form occurrence is genuinely ambiguous -- it
+    depends on an unknown shell cwd -- and stays armed (breadth over
+    precision). A glued-substring occurrence (fails the boundary check, e.g.
+    ".claude" inside ".claude-worktrees") is not a real occurrence."""
+    start = 0
+    while True:
+        idx = text.find(marker, start)
+        if idx == -1:
+            return False
+        end = idx + len(marker)
+        start = idx + 1
+        if not _boundary_ok(text, idx, end):
+            continue
+        if _absolute_token_containing(text, idx) is not None:
+            continue  # handled by _shell_absolute_hits instead
+        return True
+
+
+# BUG (2026-07-21, same session): classify_shell scanned an ENTIRE heredoc body
+# for markers, even though a heredoc body is DATA being written into a file
+# (e.g. a commit message authored via `cat <<'EOF' > msg.txt`), not a path any
+# command argument names. A commit message that merely MENTIONED hooks/** in
+# prose tripped the governance marker. The body is blanked before marker
+# scanning; the opening line (which carries any real `> target` redirect) and
+# everything after the closing delimiter are left untouched, so a heredoc
+# actually used to write INTO a governance path is still caught via its
+# redirect target.
+_HEREDOC_RE = re.compile(
+    r"<<-?\s*['\"]?([a-zA-Z0-9_]+)['\"]?[^\n]*\n"  # opening line, through \n
+    r".*?\n"                                        # body (non-greedy)
+    r"[ \t]*\1(?=[ \t\r\n]|$)",                     # closing delimiter line
+    re.DOTALL,
+)
+
+
+def _strip_heredoc_bodies(text):
+    def _blank(m):
+        opening_line = m.group(0).split("\n", 1)[0] + "\n"
+        return opening_line + " <heredoc-body> \n" + m.group(1)
+    return _HEREDOC_RE.sub(_blank, text)
 
 
 def classify_shell(command):
@@ -213,10 +314,22 @@ def classify_shell(command):
     if not TOOL_PATHS_LOADED:
         return None
     text = normalize_text(command).replace("\\", "/").lower()
+    text = _strip_heredoc_bodies(text)
     exempt, governance, claim = _shell_marker_sets()
     text = _blank_exempt(text, exempt)
+    live_root = _norm(guard_root())
+
+    # Every drive-qualified absolute path token gets classified through the
+    # real-path resolver first -- more accurate than lexical marker matching
+    # for anything absolute (handles '..', clears a genuinely different root).
+    abs_hits = _shell_absolute_hits(text, live_root)
+    gov_abs = [h for h in abs_hits if h[0] == "governance"]
+    claim_abs = [h for h in abs_hits if h[0] == "claim"]
+    if gov_abs:
+        return gov_abs[0]
+
     for marker, label in governance:
-        if marker in text:
+        if _marker_matches(text, marker):
             return ("governance", label)
     if REGISTRY_BASENAME in text and (CC_SEGMENT in text or LAMS_SEGMENT in text):
         return ("governance", "scheduled-task registry")
@@ -225,12 +338,18 @@ def classify_shell(command):
     # neither a classic write verb nor a contiguous ".claude/hooks" marker in its
     # text -- live-proven). Read-only git passes; `git -C ~/.claude checkout -b
     # feature` false-positives and costs a retry/token -- breadth over precision.
-    root_mentions = (_norm(guard_root()), "~/.claude", ".claude")
-    if GIT_MUTATE_RE.search(text) and any(r in text for r in root_mentions):
+    # (Absolute-path forms of this same case are already caught above via
+    # gov_abs -- this is the coarser "root mentioned anywhere, split across
+    # unrelated arguments" signal for forms like `-C ~/.claude ... hooks/`.)
+    root_mentions = (live_root, "~/.claude", ".claude")
+    if GIT_MUTATE_RE.search(text) and any(
+            _marker_matches(text, r) for r in root_mentions):
         return ("governance",
                 "file-rewriting git command referencing the live ~/.claude checkout")
+    if claim_abs:
+        return claim_abs[0]
     for marker, label in claim:
-        if marker in text:
+        if _marker_matches(text, marker):
             return ("claim", label)
     return None
 

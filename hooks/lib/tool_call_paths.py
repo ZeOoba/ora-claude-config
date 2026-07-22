@@ -258,10 +258,34 @@ SHELL_WRITE_INDICATORS = (
     # PowerShell item cmdlets (REFUTE 2026-07-18: "move " never matches
     # "move-item" -- a Move-Item onto settings.json reached exit 0 before this)
     "move-item", "copy-item", "rename-item",
-    # REPL / scripting writers
-    "open(", "write_text", "write_bytes", "writefile", "shutil.", "os.remove",
+    # REPL / scripting writers ("open(" excluded here -- see _open_may_write
+    # below; a bare substring check cannot tell open(p,'rb') from open(p,'w'))
+    "write_text", "write_bytes", "writefile", "shutil.", "os.remove",
     "os.rename", "os.replace", "unlink(", "rmtree",
 )
+# open() mode-awareness (BUG, 2026-07-21: "open(" as a bare substring flagged
+# open(p,'rb') -- an ordinary READ -- identically to open(p,'w')). Only an
+# UNAMBIGUOUS read-only call is exempt: a single simple (non-nested-paren,
+# non-comma) path argument, optionally followed by an explicit 'r'/'rb'/'rt'
+# string-literal mode and nothing else. Anything else -- a write-mode literal,
+# an indirect/variable mode, extra positional or keyword args, or a path
+# argument this regex cannot cleanly isolate (e.g. a nested call like
+# os.path.join(...)) -- stays flagged. Fail-toward-block on any unresolved
+# shape, the same posture as the rest of this module's static text analysis.
+_OPEN_CALL_RE = re.compile(r"open\(([^()]*)\)")
+_OPEN_SAFE_ARGS_RE = re.compile(r"^\s*[^,]*?\s*(?:,\s*['\"]r[bt]?['\"]\s*)?$")
+
+
+def _open_may_write(lowered):
+    """True if `lowered` contains an open() call that is write-shaped or whose
+    shape this module cannot cleanly resolve to an unambiguous read."""
+    if "open(" not in lowered:
+        return False
+    calls = list(_OPEN_CALL_RE.finditer(lowered))
+    if len(calls) != lowered.count("open("):
+        return True  # some open( call has a shape we can't cleanly isolate
+                     # (nested parens, etc.) -- unresolved, fail toward block
+    return any(not _OPEN_SAFE_ARGS_RE.match(m.group(1)) for m in calls)
 # fd-duplication (2>&1, >&2, &>) and null-device (2>/dev/null, >nul) redirects write
 # nothing -- must not trip the bare ">" indicator (autonomy-gate 2026-07-09/10 fixes).
 _FD_DUP_RE = re.compile(r"\d*>&\d*|&>{1,2}")
@@ -297,6 +321,8 @@ def shell_may_write(command):
     lowered = _FD_DUP_RE.sub(" ", lowered)
     lowered = _NULL_REDIRECT_RE.sub(" ", lowered)
     if GIT_MUTATE_RE.search(lowered):
+        return True
+    if _open_may_write(lowered):
         return True
     return any(ind in lowered for ind in SHELL_WRITE_INDICATORS)
 

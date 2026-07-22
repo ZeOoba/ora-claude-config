@@ -343,6 +343,173 @@ def test_refute_shape_bypasses_closed():
               "rc=%s err=%r" % (rc, err))
 
 
+# ------------------------------------------------------------ boundary-bug regressions
+# BUG (2026-07-21, oxford-command-center worktree session, fix-refute-workflow-em-dash):
+# classify_shell's marker matching was pure lexical substring scanning with no
+# path-segment boundaries and no notion of "this occurrence sits inside a
+# provably-different absolute path." Three confirmed false positives:
+#   1. ".claude" (a root_mentions entry) matched as a raw substring INSIDE the
+#      unrelated ".claude-worktrees" directory name (this environment's actual
+#      repo-local worktree convention, dash-joined -- NOT the nested
+#      "<root>/worktrees" form the module already exempts).
+#   2. The generic ".claude/workflows" / ".claude/hooks" markers fired on a
+#      fully drive-qualified absolute path under a DIFFERENT repo entirely
+#      (oxford-command-center's own repo-local .claude/workflows/), which can
+#      never resolve to the live root regardless of shell cwd.
+#   3. classify_shell scanned an ENTIRE heredoc body (commit-message prose,
+#      written to a temp file via `cat <<'EOF' > msg.txt`) for markers, even
+#      though that text is DATA being written into an unrelated file, not a
+#      path any command argument names.
+def test_shell_dot_claude_worktrees_dash_suffix_not_matched():
+    r = Rig()
+    # ".claude-worktrees" is a sibling dir name, not a "worktrees" subdir OF
+    # .claude -- the existing exemption list only covers the latter. The bare
+    # ".claude" substring must not fire just because it's a text-prefix of
+    # ".claude-worktrees".
+    cmd = ("git checkout -- C:/Users/Owner/oxford-command-center/"
+           ".claude-worktrees/fix-refute-workflow-em-dash/foo.py")
+    rc, _, err = r.run(payload("Bash", {"command": cmd}))
+    check("git checkout in an unrelated .claude-worktrees dir -> allow", rc == 0,
+          "rc=%s err=%r" % (rc, err))
+
+
+def test_shell_dot_claude_worktrees_regression_real_root_still_blocks():
+    # The boundary fix must not weaken the real case it exists to catch.
+    r = Rig()
+    cmd = 'git checkout -- "%s"' % r.path("hooks", "confidentiality-guard.py")
+    rc, _, err = r.run(payload("Bash", {"command": cmd}))
+    check("git checkout of a real live hooks/** file -> still blocks", rc == 2,
+          "rc=%s" % rc)
+    cmd2 = "git checkout -- ~/.claude/hooks/confidentiality-guard.py"
+    rc2, _, err2 = r.run(payload("Bash", {"command": cmd2}))
+    check("git checkout via tilde-form live root -> still blocks", rc2 == 2,
+          "rc=%s" % rc2)
+
+
+# NOTE: ".claude/workflows" is a CLAIM-lock marker, not a governance one -- the
+# claim-lock fails OPEN on a missing/malformed chip-claims.log (ratified
+# doctrine), so a Rig() with no log at all would "pass" these regardless of
+# classify_shell's marker logic. Write a log with a claim that is provably NOT
+# this session's (same shape as test_claim_lock_blocks_without_open_claim) so
+# these tests actually exercise the marker-matching fix, not fail-open.
+def _deny_claim_rig():
+    r = Rig()
+    r.write_log(CLAIM_HEADER +
+                "%s | CLAIMED | some-other-chip | Code/otherses1\n" % now_iso(5))
+    return r
+
+
+def test_shell_absolute_unrelated_repo_dot_claude_workflows_not_matched():
+    r = _deny_claim_rig()
+    # Fully drive-qualified absolute path under a DIFFERENT repo's own
+    # repo-local .claude/workflows/ -- cannot be the live root under any cwd.
+    cmd = ('cp x.json "C:/Users/Owner/oxford-command-center/.claude/'
+           'workflows/foo.json"')
+    rc, _, err = r.run(payload("Bash", {"command": cmd}))
+    check("write into an unrelated repo's own .claude/workflows/ -> allow",
+          rc == 0, "rc=%s err=%r" % (rc, err))
+
+
+def test_shell_absolute_unrelated_repo_regression_ambiguous_forms_still_block():
+    # Bare relative and tilde forms remain genuinely ambiguous (depend on an
+    # unknown shell cwd) -- the absolute-path carve-out must NOT extend to them.
+    for label, cmd in [
+        ("bare relative .claude/workflows",
+         'cp x.json ".claude/workflows/foo.json"'),
+        ("tilde-form ~/.claude/workflows",
+         'cp x.json "~/.claude/workflows/foo.json"'),
+    ]:
+        r = _deny_claim_rig()
+        rc, _, err = r.run(payload("Bash", {"command": cmd}))
+        check("%s -> still blocks" % label, rc == 2, "rc=%s err=%r" % (rc, err))
+    # true live-root workflows/** via an absolute path that matches guard_root()
+    r = _deny_claim_rig()
+    cmd = 'cp x.json "%s"' % r.path("workflows", "foo.json")
+    rc, _, err = r.run(payload("Bash", {"command": cmd}))
+    check("true live-root workflows/** (absolute, matches guard root) -> "
+          "still blocks", rc == 2, "rc=%s err=%r" % (rc, err))
+
+
+def test_shell_heredoc_body_prose_not_matched():
+    r = Rig()
+    cmd = ('cat <<\'EOF\' > msg.txt\n'
+           'Fix workflow script; .gitattributes already references '
+           '.claude/hooks/session-start.sh for line-ending handling\n'
+           'EOF\n'
+           'git commit -F msg.txt')
+    rc, _, err = r.run(payload("Bash", {"command": cmd}))
+    check("hooks/** merely mentioned in heredoc'd commit-message prose -> allow",
+          rc == 0, "rc=%s err=%r" % (rc, err))
+
+
+def test_shell_heredoc_regression_real_write_outside_body_still_blocks():
+    r = Rig()
+    # The redirect TARGET (outside the heredoc body) is a real write into
+    # hooks/** and must still block -- heredoc-body stripping must not blind
+    # the guard to the surrounding command structure.
+    cmd = ('cat <<\'EOF\' > "%s"\n'
+           'just some ordinary content\n'
+           'EOF' % r.path("hooks", "evil.py"))
+    rc, _, err = r.run(payload("Bash", {"command": cmd}))
+    check("heredoc redirected INTO hooks/** (target outside body) -> still blocks",
+          rc == 2, "rc=%s" % rc)
+
+
+def test_shell_open_readonly_end_to_end_allowed():
+    r = Rig()
+    # End-to-end repro of the exact reported pattern: a read-only open() whose
+    # path text happens to contain the generic ".claude/workflows" marker.
+    cmd = ("python3 -c \"open(r'C:/Users/Owner/oxford-command-center/.claude/"
+           "workflows/foo.json','rb').read()\"")
+    rc, _, err = r.run(payload("Bash", {"command": cmd}))
+    check("read-only open() of an unrelated repo path -> allow", rc == 0,
+          "rc=%s err=%r" % (rc, err))
+
+
+def test_shell_open_write_mode_end_to_end_still_blocks():
+    r = Rig()
+    cmd = "python3 -c \"open(r'%s','w').write('x')\"" % r.path("hooks", "g.py")
+    rc, _, err = r.run(payload("Bash", {"command": cmd}))
+    check("write-mode open() into real hooks/** -> still blocks", rc == 2,
+          "rc=%s" % rc)
+
+
+# REFUTE 2026-07-21 (adversarial pass on the boundary fix above): the
+# absolute-path-divergence exemption in _marker_reaches_live_root did a raw
+# STRING-PREFIX comparison, which a lexical `..` segment defeats -- a path
+# through a nonexistent intermediate directory that RESOLVES onto the live
+# root (Windows/cmd collapses ".." without requiring the intermediate
+# directory to exist -- confirmed empirically) looked like "a different
+# absolute root" and was wrongly exempted. Locked in as a regression: any
+# occurrence that lexically normalizes onto the live root must still block,
+# no token required.
+def test_shell_dotdot_traversal_onto_live_root_still_blocks():
+    r = Rig()
+    for label, cmd in [
+        ("dotdot through nonexistent dir onto hooks/**",
+         'cmd /c echo evil > "%s"' %
+         r.path("some_nonexistent_dir_xyz", "..", "hooks", "evil.py")),
+        ("dotdot through nonexistent dir onto settings.json",
+         'cmd /c echo {} > "%s"' % r.path("a", "b", "..", "..", "settings.json")),
+        ("double-dotdot onto CLAUDE.md",
+         'cmd /c echo x > "%s"' %
+         r.path("x", "y", "z", "..", "..", "..", "CLAUDE.md")),
+    ]:
+        rc, _, err = r.run(payload("Bash", {"command": cmd}))
+        check("%s -> still blocks" % label, rc == 2, "rc=%s err=%r" % (rc, err))
+    # the divergence exemption itself must still work for a GENUINE different
+    # root, even with an incidental ".." inside it (regression control;
+    # workflows/** is a CLAIM marker so use a deny-claim rig, not fail-open)
+    r2 = _deny_claim_rig()
+    rc2, _, err2 = r2.run(payload("Bash", {
+        "command": 'cp x.json "C:/Users/Owner/oxford-command-center/sub/'
+                   '../.claude/workflows/foo.json"'}))
+    # this dotdot resolves to oxford-command-center/.claude/workflows/foo.json
+    # -- still a different repo entirely, must still be exempt
+    check("dotdot resolving within a genuinely different repo -> still allow",
+          rc2 == 0, "rc=%s err=%r" % (rc2, err2))
+
+
 # ------------------------------------------------------------ claim-lock
 CLAIM_HEADER = "# ORA chip claim-lock\n"
 
@@ -491,6 +658,15 @@ if __name__ == "__main__":
     test_shell_write_with_token_allows()
     test_shell_unicode_evasion_blocked()
     test_refute_shape_bypasses_closed()
+    test_shell_dot_claude_worktrees_dash_suffix_not_matched()
+    test_shell_dot_claude_worktrees_regression_real_root_still_blocks()
+    test_shell_absolute_unrelated_repo_dot_claude_workflows_not_matched()
+    test_shell_absolute_unrelated_repo_regression_ambiguous_forms_still_block()
+    test_shell_heredoc_body_prose_not_matched()
+    test_shell_heredoc_regression_real_write_outside_body_still_blocks()
+    test_shell_open_readonly_end_to_end_allowed()
+    test_shell_open_write_mode_end_to_end_still_blocks()
+    test_shell_dotdot_traversal_onto_live_root_still_blocks()
     test_claim_lock_fails_open_when_log_missing_or_malformed()
     test_claim_lock_blocks_without_open_claim()
     test_claim_lock_allows_with_open_claim()
