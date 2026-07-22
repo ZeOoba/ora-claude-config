@@ -131,6 +131,43 @@ def test_blocks_settings_claude_md_registry_without_token():
         check("Write to %s without token -> block" % label, rc == 2, "rc=%s" % rc)
 
 
+# REFUTE round 3 (2026-07-22): Win32's CreateFile silently strips trailing
+# '.'/' ' characters from a path's final component -- "CLAUDE.md." and
+# "CLAUDE.md" are the SAME file on disk, but os.path.realpath() does NOT
+# replicate that stripping, so a raw string comparison sees them as
+# different. Confirmed this ALREADY bypassed the untouched, currently-live
+# hook for a plain structured Write call (file_path="<root>/CLAUDE.md.") --
+# a pre-existing gap in _norm()/_classify() far broader than this session's
+# shell-matcher scope. Fixed once, in _norm() (the single shared
+# normalizer), so both the pre-existing structured-file-tool gap and the
+# shell-text regression it caused via _shell_absolute_hits are closed
+# together.
+def test_trailing_dot_exact_match_targets_still_block_structured_tools():
+    r = Rig()
+    for label, p in [
+        ("CLAUDE.md trailing dot", r.path("CLAUDE.md") + "."),
+        ("CLAUDE.md trailing dots+space", r.path("CLAUDE.md") + ".. "),
+        ("settings.json trailing dot", r.path("settings.json") + "."),
+        ("settings.local.json trailing dot", r.path("settings.local.json") + "."),
+    ]:
+        rc, _, err = r.run(payload("Write", {"file_path": p, "content": "x"}))
+        check("Write to %s -> still blocks" % label, rc == 2,
+              "rc=%s err=%r" % (rc, err))
+
+
+def test_trailing_dot_exact_match_targets_still_block_shell():
+    r = Rig()
+    for label, target_suffix in [
+        ("CLAUDE.md trailing dot", "CLAUDE.md."),
+        ("settings.json trailing dot", "settings.json."),
+        ("settings.local.json trailing dot", "settings.local.json."),
+    ]:
+        cmd = "cmd /c copy /y x.json %s/%s" % (r.path(), target_suffix)
+        rc, _, err = r.run(payload("Bash", {"command": cmd}))
+        check("shell write to %s -> still blocks" % label, rc == 2,
+              "rc=%s cmd=%r err=%r" % (rc, cmd, err))
+
+
 def test_exempt_sessions_and_state_never_blocked():
     # SELF-DEADLOCK DEFENSE: the override token lives under hooks/sessions/ -- if
     # writing it were gated, no token could ever be created to satisfy the gate.
@@ -384,6 +421,42 @@ def test_shell_dot_claude_worktrees_regression_real_root_still_blocks():
     rc2, _, err2 = r.run(payload("Bash", {"command": cmd2}))
     check("git checkout via tilde-form live root -> still blocks", rc2 == 2,
           "rc=%s" % rc2)
+
+
+# CODE REVIEW FINDING (2026-07-22, review of commit 569ef4b): _ABS_PATH_TOKEN_RE
+# stopped only at whitespace/quotes/<>/| -- not at shell-sequencing/substitution
+# metacharacters (; & ` $ ( )). A command/path glued directly onto an absolute
+# governance path via one of those (`cp x.py <root>/CLAUDE.md;echo pwned`)
+# produced a CORRUPTED token ("...claude.md;echo") that (a) failed _classify's
+# EXACT-EQUALITY check for the three single-file targets (settings.json,
+# settings.local.json, CLAUDE.md -- unlike hooks/**/handoffs/**/workflows/**,
+# which are prefix-matched and so tolerate a corrupted trailing suffix), and
+# (b) was then SKIPPED by _marker_matches on the (wrong, in this case)
+# assumption that _shell_absolute_hits already handled it. Confirmed via `git
+# show` on the pre-session base SHA that the ORIGINAL bare-substring matcher
+# correctly blocked all of these -- this was a genuine regression introduced
+# by the absolute-token-classification redesign, not a pre-existing gap.
+def test_shell_metachar_glued_exact_match_targets_still_block():
+    r = Rig()
+    for label, suffix in [
+        ("semicolon", ';echo pwned'),
+        ("ampersand", '&echo pwned'),
+        ("closing paren", ')echo pwned'),
+        ("dollar-paren command substitution", '$(whoami)'),
+        ("backtick command substitution", '`whoami`'),
+    ]:
+        for target, marker in [
+            ("CLAUDE.md", "CLAUDE.md"),
+            ("settings.json", "settings.json"),
+            ("settings.local.json", "settings.local.json"),
+        ]:
+            # UNQUOTED path -- the metacharacter must be glued directly onto
+            # the token with nothing (no quote) delimiting it, matching the
+            # actual reported repro shape.
+            cmd = 'cp x.json %s%s' % (r.path(target), suffix)
+            rc, _, err = r.run(payload("Bash", {"command": cmd}))
+            check("%s glued onto %s -> still blocks" % (label, marker), rc == 2,
+                  "rc=%s cmd=%r err=%r" % (rc, cmd, err))
 
 
 # NOTE: ".claude/workflows" is a CLAIM-lock marker, not a governance one -- the
@@ -646,6 +719,8 @@ def test_exit_code_is_never_one():
 if __name__ == "__main__":
     test_blocks_hooks_write_without_token()
     test_blocks_settings_claude_md_registry_without_token()
+    test_trailing_dot_exact_match_targets_still_block_structured_tools()
+    test_trailing_dot_exact_match_targets_still_block_shell()
     test_exempt_sessions_and_state_never_blocked()
     test_allows_unrelated_and_worktree_paths()
     test_valid_token_allows_and_is_multi_use()
@@ -667,6 +742,7 @@ if __name__ == "__main__":
     test_shell_open_readonly_end_to_end_allowed()
     test_shell_open_write_mode_end_to_end_still_blocks()
     test_shell_dotdot_traversal_onto_live_root_still_blocks()
+    test_shell_metachar_glued_exact_match_targets_still_block()
     test_claim_lock_fails_open_when_log_missing_or_malformed()
     test_claim_lock_blocks_without_open_claim()
     test_claim_lock_allows_with_open_claim()
