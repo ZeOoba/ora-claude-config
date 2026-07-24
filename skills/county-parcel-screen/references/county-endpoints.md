@@ -11,7 +11,21 @@
   transfer history w/ OwnerName grantees; Sa.txt: special assessments; RentalContact.txt: OWNER PHONES;
   Payment2022-24: payment velocity — UNUSED yet). Tax-file IDs are '"010-104049-00"' — strip quotes, first 10 chars.
 - Calibration: 1.65 county-flat (n=57, 2024-26); ZIP-level ratios 1.04-1.99 — prefer ZIP-level.
-- 2026 folder may lag Tax Accounting (latest seen 2025-07-15) — check vintage, flag staleness.
+- Tax Accounting vintage: **CORRECTED 2026-07-24** — the 2026 folder does NOT lag any more. Live listing that day:
+  `2026/2026-07-15 Tax Accounting/` present (9 days old), alongside 05-15/06-15/07-15 Appraisal. The prior note
+  ("latest seen 2025-07-15") was stale by a full year and would have sent a run to the 2025 files. ALWAYS list
+  `/Outside_User_Files/{YYYY}/` and read the newest dated folder rather than trusting this doc's date.
+- Tax Accounting file set (2026-07-15 drop, sizes as pulled): TaxDetail.xlsx 86MB (506,988 rows — `Parcel Id`
+  '010-000001-00' + TotPrior/TotPenalty/TotInterest/TotSA/TotTotal; delinquency = TotPrior>0 or TotPenalty>0),
+  Transfer010.xlsx 43MB (Columbus 010- series, sellers-in-motion), Tab-Delimited.zip 117MB (all files),
+  RentalContact.xlsx 6MB (`PARCEL ID`/Owner_Name/Owner_BusinessName/Owner_Address* — NOTE: overwhelmingly
+  residential; only 20 of 1,154 industrial parcels matched, so do not plan on it for owner phones),
+  Sa.xlsx 6MB, Payment2023/24/25.xlsx, Parcel/Value/TaxDistribution.xlsx.
+- Join: GIS `PARCELID` '010-104049' vs tax `Parcel Id` '010-104049-00' → strip quotes, take first 10 chars.
+  Verified 1,154/1,154 = 100% on the 2026-07-24 run. Assert the match rate and abort below ~90%.
+- Parse with python-calamine (`CalamineWorkbook.from_path`); openpyxl is unusable on the 507K-row TaxDetail.
+- Franklin delinquency base rate (2026-07-15): 41,659 of 506,988 county parcels carry prior/penalty > 0 (~8.2%);
+  industrial 10–80K SF ran 171/1,154 (14.8%) — elevated vs the county base but not dramatically.
 
 ## Hamilton County OH (Cincinnati) — RICH REST, NO COMMERCIAL SF
 - REST: https://services.arcgis.com/JyZag7oO4NteHGiq/arcgis/rest/services/Open_Data/FeatureServer/51
