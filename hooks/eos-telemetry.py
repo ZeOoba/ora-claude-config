@@ -26,6 +26,12 @@ OUT_NAME = "lane-telemetry.jsonl"
 DEFAULT_SESSIONS_DIR = "C:/Users/Owner/.claude/hooks/sessions"
 
 EDIT_TOOLS = ("Edit", "Write", "MultiEdit")
+# Subagent-dispatch tools. EXACT match only -- never a prefix/substring test:
+# TaskCreate / TaskUpdate / TaskList / TaskGet / TaskOutput / TaskStop are
+# todo-management tools and must not be counted as dispatch. "Task" is kept
+# only as forward/backward insurance against a rename; it has never appeared
+# in a real transcript, which is why this signal read 0% until 2026-07-24.
+DISPATCH_TOOLS = frozenset(("Agent", "Task"))
 BASH_TEST_RE = re.compile(
     r"pytest|vitest|npm test|npm run gate|go test|cargo test| test-",
     re.IGNORECASE,
@@ -123,7 +129,7 @@ def main():
                     cmd = tinput.get("command")
                     if isinstance(cmd, str) and BASH_TEST_RE.search(cmd):
                         bash_test_ran = True
-                elif tname == "Task":
+                elif tname in DISPATCH_TOOLS:
                     task_dispatched = True
 
             for txt in iter_text(obj):
@@ -163,6 +169,12 @@ def main():
         pass  # a corrupt override file must not drop the rest of the record
 
     record = {
+        # Emission timestamp. Required to segment records written after the
+        # 2026-07-24 dispatch-detection fix from the blind-era backlog, which
+        # is uniformly task_dispatched=false and would otherwise depress the
+        # blended rate indefinitely. Specified in the EOS reliability-hardening
+        # design but never implemented.
+        "ts": datetime.now(timezone.utc).isoformat(),
         "session_id": session_id,
         "edits": edits,
         "files": sorted(files),
