@@ -26,6 +26,22 @@ Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (fir
 
 **STILL OPEN — Gabriel's call, unchanged:** `ora-appsec-sweep` reviews security-gate and payment-facing code while firing on opus-4-8, below CLAUDE.md's never-below-Fable floor, with no in-registry fix. Options: accept and document; migrate to LAMS where the pin is enforceable; or rely on the (still-unexercised) Fable-pinned subagent dispatch.
 
+## 2026-07-24 — ora-task-integrity-guard per_task_limit skip loop: first confirmed "lone task" pattern; disable→enable remedy TESTED AND FAILED
+
+**How it surfaced.** Follow-up to the 07:00 collision fix. The residual throttle-skips had been reported as the documented benign catch-up burst; running that reference's OWN prescribed check (do the skips cluster with other tasks, or is one task alone?) showed they were not.
+
+**Finding — genuinely a different pattern.** `ora-task-integrity-guard` skipping once per 60s, ALONE, no neighbouring tasks in the same instant, reason `per_task_limit` (same-task double-fire guard) rather than `global_limit`. Onset 12:21:22 ET. The same-day 10:34–10:43 events WERE the benign burst (3 tasks within one millisecond) — the two are distinguishable and were conflated in the prior report. All three historical `per_task_limit` cases cleared in 1–3 min (check-dirty-files-session-pr 3.0, ora-lease-expiration-brief 1.0, ora-pm-ledger 1.0); this one ran 20+ min.
+
+**Confound ruled out.** A concurrent session (`fdaf1f4e`) was dry-running this exact task via `dry-run-task-integrity-guard.ps1` — a plausible alternative cause of a double-fire rejection. Eliminated on timestamps: its first dry-run touch was 12:32:14, **11 minutes after** the 12:21:22 onset.
+
+**Remedy tested and FAILED (Gabriel-directed).** disable→enable re-arm. Disable demonstrably suppressed it — a clean 12:38:23 → 12:42:23 gap against an otherwise unbroken 60s cadence. Re-enable brought it straight back: 12:42:23, 12:43:23, 12:44:23 at 1/min. So stale re-arm state is NOT the mechanism; re-arming reproduces it. Recorded rather than retried.
+
+**Root cause NOT asserted.** Onset was ~60s after this session's `update_scheduled_task` retime (07:00→07:05), making the retime the obvious suspect. But the workstation had **36 claude.exe processes / ~13 live sessions** at the time — heavy saturation of the same concurrency ceiling this throttle protects. A reading that fits every observation equally well: the retime merely made the task *due*, and it joined a retry queue against a ceiling that stayed saturated for 20+ min from concurrent session load. The scheduler's arbitration is closed-source; the timestamps do not separate "retime-triggered" from "saturation-sustained." Per the standing reference, the documented lever is machine load, not per-task config. Captured in `reference_fleet_throttle_skip_catchup_burst.md` so this is not re-derived from scratch.
+
+**State left behind.** Task is ENABLED (verified) — it must stay so: it is the SOLE fleet-integrity runner (LAMS twin retired), and disabling it to silence the metric would blind the exact check that catches registry loss. `nextRunAt` remained correct (2026-07-25 07:14 ET) throughout, so scheduled execution was never at risk; only the skip metric is polluted, and those events age out of the 24h window.
+
+**Method correction carried in.** The prior turn judged a co-written file "settled" via mtime quiet. `feedback_positive_attribution_over_mtime.md` (written same day) rules that out — attribution was redone via `hooks/sessions/<sid>/touched-files.txt`, which corrected the file's owner from `53f57fbe` to `fdaf1f4e` and showed 4 further writes by them AFTER this session's edits. This session's three `output_contract` cron strings were re-verified intact afterward; the commit is left to that file's owner.
+
 ## 2026-07-24 — dry-run wrapper no longer forges the guard's liveness beacon; ora-appsec-sweep is NOT running on Fable (transcript canary)
 
 Follow-up actioning the three items left open by the v1.7 guard fix earlier today.
@@ -115,6 +131,24 @@ missing/stale/unreadable data, per its own documented safety invariant -- unaffe
 by this change.
 
 Related: [[reference_commit_provenance_guard]] · [[reference_event_log_partial_commit_splice]].
+
+## 2026-07-24 — 07:00 fleet collision cleared: ora-task-integrity-guard retimed 07:00 → 07:05 ET (Gabriel-directed)
+
+**Trigger.** Follow-up investigation into the 09:20 collision flagged by the 2026-07-20 schematic refresh. That one was already found, root-caused and fixed on 07-20 (ora-deal-aging-sla → 09:25, commit `b35a916`); re-verified live this session — no overlap remains. The investigation instead surfaced a *new* collision.
+
+**Finding.** `fleet-status.py` flagged `07:00:{ora-task-integrity-guard, ora-cam-reconciliation-annual}`. Verified NOT a false positive of the `cron_hm()` day-blind class fixed in `25088f7` — `crons_share_a_day()` is present (fleet-status.py:131, used :296) and the two genuinely share Jan 15 (guard daily `0 7 * * *`; CAM annual `0 7 15 1 *`).
+
+**Cause.** `ora-task-integrity-guard` was retimed 12:45 → 07:00 ET earlier the same day (v1.6, Gabriel-directed via automation-health-monitor's audit, commit `7c7117b`) to sit inside the 05:15–07:00 AM-cluster window. That move landed it on the annual CAM task's slot.
+
+**Severity assessment.** Real but near-inert — one overlap per year (next 2027-01-15). The material cost was that it pinned the fleet verdict at ATTENTION on *every* run, masking future genuine collisions. Risk asymmetry noted: the CAM task fires once a year, so losing a `global_limit` race costs it a full year; the daily guard shrugs off a single skip.
+
+**Ruling + fix (Gabriel, interactive).** Shift the guard 07:00 → **07:05 ET** — CC-side (writable from Code; the CAM task is LAMS and needs a Cowork-surface write), preserves the AM-cluster intent exactly, and protects the annual task's single fire. Applied via `update_scheduled_task` after a clean registry single-writer pre-flight (`registry-membership.log` latest 2026-07-24T12:13:15, no adds/drops, no concurrent writer).
+
+**Self-reference sweep (lesson carried from the 09:20 fix).** That fix had to correct two hardcoded cron self-references inside the task's own SKILL.md that would otherwise have silently disagreed with the live schedule. Same defect class found here: **three** `expected_on.cron: "0 7 * * *"` entries in the `output_contract` (blocks block-cc-snapshot / block-registry-membership-log / block-fleet-heartbeat-json, lines 13/23/33) plus one prose reference. All four corrected to 07:05.
+
+**Verified.** `same-time collisions 0`. Verdict remains ATTENTION but now driven *solely* by throttle skips (11/24h), which match the documented benign catch-up-burst pattern in `reference_fleet_throttle_skip_catchup_burst.md`.
+
+**NOT committed.** `scheduled-tasks/ora-task-integrity-guard/SKILL.md` carries another session's uncommitted v1.7 work (STEP 2.5 classifier retirement + Git Bash path-quoting fix); the shared-checkout hook flagged 16 uncommitted changes across 5 sessions in the .claude main checkout. My edits are surgical exact-string replacements that touch none of their hunks, but the commit is left to the v1.7 owner to avoid sweeping their work (commit-provenance-guard class).
 
 ## 2026-07-24 — ora-deal-aging-sla v1.1 (dashed-UUID fix + STEP 3b posture doctrine); landed via a foreign janitor commit with commit-provenance-guard silent
 
