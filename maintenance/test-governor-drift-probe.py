@@ -1041,8 +1041,110 @@ def test_event_log_excluded_e2e():
     print("  PASS test_event_log_excluded_e2e (exit 0, event_log.md not scanned)")
 
 
+def test_fleet_roots_are_scanned_unit():
+    """COVERAGE GAP closed 2026-07-24: build_targets() scanned neither scheduled-task fleet
+    root, yet 17 fleet SKILL.md files declare DSCR/LTV. A governor edit landing in
+    ora-am-brief or ora-monthly-portfolio-briefing was invisible to the Hard-Invariant-4
+    guard. Both roots must now be targets."""
+    m = _load_probe_module()
+    roots = [os.path.normcase(os.path.normpath(r)) for r, _ in m.build_targets()]
+    cc = os.path.normcase(os.path.normpath(os.path.join(m.CLAUDE, "scheduled-tasks")))
+    lams = os.path.normcase(os.path.normpath(os.path.join(
+        m.HOME, "OneDrive - Oxford Capital Partners", "Documents", "Claude", "Scheduled")))
+    assert cc in roots, "CC/MCP fleet root not scanned: %s" % cc
+    assert lams in roots, "LAMS/Cowork fleet root not scanned: %s" % lams
+    print("  PASS test_fleet_roots_are_scanned_unit")
+
+
+def test_dated_archive_dirs_pruned_unit():
+    """Pre-existing prune gap: iter_files() pruned a dir named EXACTLY '_archive', but the
+    live convention is '_archive_<date>[_suffix]' -- 26 such dirs exist, and the archived
+    '_archive_2026-04-28' SKILL.md (a 2026-04 draft carrying 'DSCR ... below 1.75 (ORA hard
+    governor)') would read as live drift the moment the fleet roots were added."""
+    m = _load_probe_module()
+    assert m._is_pruned_dir("_archive")
+    assert m._is_pruned_dir("_archive_2026-04-28")
+    assert m._is_pruned_dir("_archive_2026-07-16_retired-to-ccmcp")
+    assert m._is_pruned_dir("_staging")
+    assert m._is_pruned_dir("node_modules") and m._is_pruned_dir(".git")
+    # Tight: requires the '_archive_' separator, so a live dir merely starting with the
+    # letters must NOT be pruned (suppression is a false NEGATIVE on a governor guard).
+    assert not m._is_pruned_dir("_archives_live")
+    assert not m._is_pruned_dir("_archivedeals")
+    assert not m._is_pruned_dir("archive")
+    assert not m._is_pruned_dir("skills")
+    print("  PASS test_dated_archive_dirs_pruned_unit")
+
+
+def test_probe_self_description_prose_suppressed_unit():
+    """The probe's OWN exit-code documentation necessarily quotes its sentinel value:
+    ora-doctrine-integrity-guard/SKILL.md:35 reads '... or the 1.75 regression sentinel'.
+    That is prose ABOUT the detector, not a governor declaration. Suppressed by the term of
+    art only -- span-scoped, same pattern as the correction-note suppressors."""
+    m = _load_probe_module()
+    assert m.scan_line(
+        "- governor-drift-probe.py: exit 1 = governor DRIFT found (a DSCR threshold != 1.25x "
+        "or LTV ceiling != 40% somewhere, or the 1.75 regression sentinel) with the offending "
+        "file:line; exit 2 = PROBE ERROR.") == [], "probe self-description must not self-flag"
+    print("  PASS test_probe_self_description_prose_suppressed_unit")
+
+
+def test_sentinel_suppression_does_not_hide_real_drift_unit():
+    """ANTI-SUPPRESSION GUARD (the one that matters). Suppression on a governor guard is a
+    false NEGATIVE, so the 1.75-sentinel-prose exclusion must be inert against any real
+    declaration -- including a line that also mentions the sentinel."""
+    m = _load_probe_module()
+    assert m.scan_line("Acquisition governor: DSCR floor 1.75x.") != [], "bare drift must flag"
+    assert m.scan_line("DSCR governor is now 1.75 per the new policy.") != []
+    # sentinel prose on the SAME line must not launder a separate live declaration
+    assert m.scan_line(
+        "The 1.75 regression sentinel exists because the DSCR governor floor is 1.75x.") != [], \
+        "sentinel prose must not launder a real drift sharing the line"
+    # the phrase must be the probe's term of art, not any nearby 'sentinel' token
+    assert m.scan_line("DSCR governor 1.75 sentinel value for the portfolio floor.") != []
+    # REFUTE-pass finding (2026-07-24): appending the exact suppressed phrase to a real
+    # declaration is NOT an evasion -- the suppressor silences only branch 1 (the loose
+    # proximity sentinel); every explicit-declaration branch stays armed and catches it via
+    # "DSCR governor threshold 1.75x != canonical 1.25x". This asymmetry is the whole reason
+    # the suppression is safe; assert it so a future refactor cannot quietly remove it.
+    assert m.scan_line("DSCR governor floor 1.75 regression sentinel") != [], \
+        "explicit-declaration branches must stay armed through the sentinel suppressor"
+    print("  PASS test_sentinel_suppression_does_not_hide_real_drift_unit")
+
+
+def test_fleet_skill_drift_would_flag_e2e():
+    """End-to-end: a real drifted governor written into a fleet SKILL.md is now caught.
+    Uses a temp dir shaped like a fleet task folder, scanned through iter_files+scan_line
+    exactly as main() does."""
+    import tempfile
+    m = _load_probe_module()
+    root = tempfile.mkdtemp()
+    live = os.path.join(root, "ora-fake-task")
+    arch = os.path.join(root, "_archive_2026-04-28", "ora-old-task")
+    os.makedirs(live)
+    os.makedirs(arch)
+    drift = "Screen every deal against the DSCR floor of 1.10x and an LTV ceiling of 65%.\n"
+    for d in (live, arch):
+        with open(os.path.join(d, "SKILL.md"), "w", encoding="utf-8") as fh:
+            fh.write("---\nname: t\ndescription: d\n---\n\n" + drift)
+    seen = []
+    for path in m.iter_files(root, (".md",)):
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for raw in fh:
+                if m.scan_line(raw):
+                    seen.append(path)
+    assert any("ora-fake-task" in p for p in seen), "live fleet drift missed: %s" % seen
+    assert not any("_archive_2026-04-28" in p for p in seen), "archived copy must be pruned"
+    print("  PASS test_fleet_skill_drift_would_flag_e2e")
+
+
 def main():
     assert os.path.isfile(PROBE), "probe not found: %s" % PROBE
+    test_fleet_roots_are_scanned_unit()
+    test_dated_archive_dirs_pruned_unit()
+    test_probe_self_description_prose_suppressed_unit()
+    test_sentinel_suppression_does_not_hide_real_drift_unit()
+    test_fleet_skill_drift_would_flag_e2e()
     test_canonical_clean_unit()
     test_real_ltv_drift_still_flags_unit()
     test_real_dscr_drift_still_flags_unit()

@@ -8,7 +8,9 @@ Adds the checks the existing probes do NOT cover:
                            filePath resolves, and no live-store folder is registered in
                            NEITHER fleet (disk->registry orphan / dark task -- the one
                            direction no other probe checks).
-  2. SKILL FRONTMATTER  -- any SKILL.md with collapsed/unparseable frontmatter?
+  2. SKILL FRONTMATTER  -- STRUCTURAL check (deliberately NOT a strict YAML parse; see
+                           _frontmatter_ok) for the collapsed-frontmatter regression class
+                           across skill roots AND both scheduled-task fleet roots.
   3. SECRET SCAN        -- any live credential literal in config/backups/logs?
   4. CONNECTOR ALLOWLIST-- any non-Outlook (Gmail/Google/Drive) connector re-authed?
   5. MEMORY/FLEET DRIFT -- does SoR section 7 hardcode a task count that contradicts the
@@ -127,7 +129,30 @@ def check_fleet():
         add("fleet", "SKIP", f"error: {e}")
 
 # ---- Check 2: SKILL FRONTMATTER ----
+# Collapsed-onto-a-markdown-heading regression (`## name: X description: Y`) -- the real
+# failure class this check exists for (7 Cowork skills, fixed 2026-06-07). Anchored to the
+# start of a line: a bare `"## name:" in text` substring test false-positives on body prose
+# that merely QUOTES the pattern (proven: sched-lams/ora-skill-text-audit documents
+# `## name:` inside backticks at line 41 and was scored malformed).
+# `##`+ only, never a single `#`: `# name: ...` is a legal YAML comment, not the regression.
+COLLAPSED_FM_RE = re.compile(r"^\s{0,3}#{2,6}\s*name\s*:", re.M)
+
 def _frontmatter_ok(path):
+    """STRUCTURAL frontmatter check -- deliberately NOT `yaml.safe_load`.
+
+    Verifies only what the harness itself needs to route a skill: an opening `---`
+    fence, a closing fence, and `name:` / `description:` keys inside it -- plus the
+    absence of the collapsed-heading regression. It does NOT validate YAML.
+
+    This is intentional. The Claude Code frontmatter reader is line-wise/lenient
+    ("first colon splits key from value"), so descriptions containing `": "` -- e.g.
+    the trailing `[MODEL: <id> | checked YYYY-MM-DD]` convention carried by 44 fleet
+    SKILL.md files, and ordinary `Use when the user mentions: ...` trigger lists --
+    load correctly here while failing a strict YAML parse (`ScannerError: mapping
+    values are not allowed here`). Enforcing strict YAML would flag ~82/110 files that
+    the harness reads fine, and would pressure edits to load-bearing routing text.
+    Escalate that only if the harness's own reader ever becomes strict.
+    """
     # Read enough lines that a long multi-line description's closing fence is in range
     # (avoids false-positiving well-formed skills with verbose trigger descriptions).
     try:
@@ -135,16 +160,18 @@ def _frontmatter_ok(path):
             head = [next(f, "") for _ in range(80)]
     except Exception:
         return None  # unreadable -> skip
-    text = "".join(head)
-    if "## name:" in text:                        # collapsed-onto-markdown-heading regression (the real failure)
-        return False
     if not head or head[0].strip() != "---":      # must open with a YAML fence
         return False
-    # closing fence: a line that is exactly '---' after line 0
-    closing = any(l.strip() == "---" for l in head[1:])
-    has_name = any(re.match(r"\s*name\s*:", l) for l in head)
-    has_desc = any(re.match(r"\s*description\s*:", l) for l in head)
-    return has_name and has_desc and closing
+    # closing fence: the first line that is exactly '---' after line 0
+    close = next((i for i, l in enumerate(head[1:], 1) if l.strip() == "---"), None)
+    if close is None:
+        return False
+    block = head[1:close]                         # frontmatter only -- never body prose
+    if COLLAPSED_FM_RE.search("".join(block)):
+        return False
+    has_name = any(re.match(r"\s*name\s*:", l) for l in block)
+    has_desc = any(re.match(r"\s*description\s*:", l) for l in block)
+    return has_name and has_desc
 
 def check_skills():
     try:
@@ -159,16 +186,34 @@ def check_skills():
             add("skill-frontmatter", "SKIP",
                 "Cowork skills mirror present but 0 SKILL.md found -- likely mid-sync after app launch; re-run shortly")
             return
-        paths = cli_hits | mirror_hits
+        # Both scheduled-task fleet roots (2026-07-24): 53 fleet SKILL.md files were outside
+        # the scan set entirely, so the old "all 57 SKILL.md" line silently excluded them.
+        # Fleet tasks launch by registry filePath, not by description-routing, but a collapsed
+        # frontmatter there is still the corruption signal the 2026-07-08 deletion incident hit.
+        sched_hits = set()
+        if _sd is not None:
+            for label in ("cc", "lams"):
+                try:
+                    root = _sd.skill_folder_root(label)
+                except Exception:
+                    continue
+                if root:
+                    sched_hits |= set(glob.glob(os.path.join(root, "*", "SKILL.md")))
+        paths = cli_hits | mirror_hits | sched_hits
         if not paths:
             add("skill-frontmatter", "SKIP", "no SKILL.md found")
             return
         bad = sorted({os.path.basename(os.path.dirname(p)) for p in paths if _frontmatter_ok(p) is False})
+        census = (f"{len(mirror_hits)} Cowork + {len(cli_hits)} local + {len(sched_hits)} fleet"
+                  + ("" if _sd is not None else "; fleet roots UNSCANNED -- store_discovery unavailable"))
         if bad:
             add("skill-frontmatter", "CRIT", f"{len(bad)} skill(s) with malformed frontmatter (won't trigger reliably)", bad)
         else:
+            # Say what was actually verified. This is a structural check, not a YAML parse --
+            # see _frontmatter_ok. Do NOT restore the old "parse cleanly" wording.
             add("skill-frontmatter", "OK",
-                f"all {len(paths)} SKILL.md parse cleanly ({len(mirror_hits)} Cowork + {len(cli_hits)} local)")
+                f"{len(paths)} SKILL.md structurally sound -- fence + name/description present, "
+                f"no collapsed-heading regression ({census}); not a strict YAML parse")
     except Exception as e:
         add("skill-frontmatter", "SKIP", f"error: {e}")
 
