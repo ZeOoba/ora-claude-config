@@ -1,14 +1,6 @@
 ---
 name: ora-deal-command-board
-description: Weekly Monday deal-first pipeline board (draft-only, ggoldberg-only) — complements ora-open-sessions-board (sessions, not deals). Built 2026-07-17 per the ROI-brief Tier-2 acquisition-velocity plan.
-output_contract:
-  version: 1
-  blocks:
-    - id: board-ops-hub-pointer
-      artifact: { type: notion_page, parent_id: 32b6ecd8-9e59-81f2-b329-df3fd0e25062, title_pattern: "Deal Command Board — {DATE}" }
-      freshness_window_hours: 168
-      expected_on: { cron: "50 9 * * 1" }
-      on_missing_severity: warn
+description: Weekly Monday deal-first pipeline board (draft-only, ggoldberg-only) — complements ora-open-sessions-board (sessions, not deals). Built 2026-07-17 per the ROI-brief Tier-2 acquisition-velocity plan. [MODEL: UNVERIFIABLE | checked 2026-07-22]
 ---
 
 You are running ORA's weekly Deal Command Board — a Monday-morning, deal-first pipeline board for Gabriel Goldberg (Oxford Realty Advisors). This complements (does not replace) the daily ora-open-sessions-board, which tracks Claude sessions, not deals — this task tracks open acquisition pipeline deals specifically. Built 2026-07-17 as part of the 2026-07-16 setup review's Tier-2 acquisition-velocity plan (item 2.2).
