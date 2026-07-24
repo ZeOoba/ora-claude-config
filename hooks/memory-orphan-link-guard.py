@@ -82,8 +82,8 @@ def _git(repo, *args):
     return p.stdout.decode("utf-8", "replace")
 
 
-def _segment_is_git_commit(seg):
-    """True if this single command segment invokes `git commit`.
+def _segment_git_parts(seg):
+    """(subcommand, [args after it]) if this segment invokes git, else (None, []).
 
     Tokenized rather than regexed on purpose: the subcommand is the first token after
     `git` that is not an option (or an option's separate value). A substring match would
@@ -93,7 +93,7 @@ def _segment_is_git_commit(seg):
     try:
         toks = seg.split()
     except Exception:
-        return False
+        return None, []
     # Find the git executable token (allows `/usr/bin/git`, `git.exe`, and a leading
     # `sudo`/`env`-style prefix that we simply scan past).
     gi = None
@@ -103,7 +103,7 @@ def _segment_is_git_commit(seg):
             gi = i
             break
     if gi is None:
-        return False
+        return None, []
     i = gi + 1
     while i < len(toks):
         t = toks[i]
@@ -113,8 +113,73 @@ def _segment_is_git_commit(seg):
         if t.startswith("-"):
             i += 1          # `--foo`, `--foo=bar`, `-p` -- self-contained
             continue
-        return t == "commit"  # first non-option token IS the subcommand
+        return t, toks[i + 1:]  # first non-option token IS the subcommand
+    return None, []
+
+
+def _segment_is_git_commit(seg):
+    """True if this single command segment invokes `git commit`."""
+    return _segment_git_parts(seg)[0] == "commit"
+
+
+# ---------------------------------------------------------------------------------
+# PreToolUse TIMING (2026-07-24). This hook runs BEFORE the command does, so reading
+# the index alone judges a state the command is about to change. For a COMPOUND
+# command that produced two opposite failures, both verified against the live guard:
+#   * FALSE NEGATIVE -- `git add MEMORY.md && git commit`: unstaged at hook time, so the
+#     guard returned "not our business" and the orphan links landed. A straight BYPASS.
+#   * FALSE POSITIVE -- `git restore --staged MEMORY.md && git commit`: staged at hook
+#     time, so a commit that would NOT have included it was blocked.
+# Same class as the config-write-guard compound-add blind spot. Fix: walk the command's
+# segments in order and simulate whether MEMORY.md ends up in the commit.
+# ---------------------------------------------------------------------------------
+_STAGE_ALL_FLAGS = {"-A", "--all", "-u", "--update"}
+
+
+def _mentions_path(args, rel):
+    """True if any arg names MEMORY.md -- repo-relative, absolute, or bare basename."""
+    base = rel.rsplit("/", 1)[-1]
+    for a in args:
+        a2 = a.strip("\"'").replace("\\", "/")
+        if a2 == rel or a2.endswith("/" + rel) or a2 == base or a2.endswith("/" + base):
+            return True
     return False
+
+
+def _commit_would_include(cmd, rel, staged_now):
+    """(included, from_worktree) -- does MEMORY.md end up in this commit, and does its
+    content come from the working tree (because the command stages it) or the index?
+
+    Deliberately errs toward INCLUDED: a wrong 'included' costs a spurious block that a
+    human can inspect, while a wrong 'excluded' silently lands the orphan this guard
+    exists to stop.
+    """
+    staged, from_worktree = staged_now, False
+    for seg in re.split(r"(?:&&|\|\||;|\|)", cmd):
+        sub, args = _segment_git_parts(seg.strip())
+        if sub is None:
+            continue
+        if sub == "add":
+            bulk = any(a in _STAGE_ALL_FLAGS for a in args) or \
+                any(a.strip("\"'") == "." for a in args)
+            if bulk or _mentions_path(args, rel):
+                staged, from_worktree = True, True
+        elif sub == "restore" and "--staged" in args:
+            paths = [a for a in args if not a.startswith("-")]
+            if not paths or _mentions_path(args, rel):
+                staged, from_worktree = False, False
+        elif sub == "reset":
+            paths = [a for a in args if not a.startswith("-") and a != "HEAD"]
+            if not paths or _mentions_path(args, rel):
+                staged, from_worktree = False, False
+        elif sub == "commit":
+            # `-a` / `--all` stages every tracked modified file, including MEMORY.md --
+            # so it re-includes a file an earlier segment just unstaged.
+            if any(a in ("-a", "--all") or
+                   (a.startswith("-") and not a.startswith("--") and "a" in a[1:])
+                   for a in args):
+                staged, from_worktree = True, True
+    return staged, from_worktree
 
 
 def _is_git_commit(cmd):
@@ -174,25 +239,32 @@ def main():
     if staged is None:
         return
 
-    # Would this commit include MEMORY.md at all?
-    if _has_pathspec(cmd):
-        # A pathspec commit takes the WORKING TREE. We cannot reliably expand arbitrary
-        # pathspecs here, so only proceed when MEMORY.md is also staged -- the case that
-        # actually produces the orphan. If it is not staged, a pathspec commit that
-        # happens to name it is rare enough to let through (fail open).
-        if rel_index not in staged:
-            return
+    # Would this commit include MEMORY.md at all? Simulated from the command's segments,
+    # NOT read straight off the pre-command index -- see _commit_would_include.
+    included, from_worktree = _commit_would_include(cmd, rel_index, rel_index in staged)
+    if not included:
+        return  # MEMORY.md not part of this commit -- not our business
+
+    if _has_pathspec(cmd) or from_worktree:
+        # A pathspec commit takes the WORKING TREE, and so does anything the command
+        # stages itself.
         try:
             with open(index_abs, "r", encoding="utf-8") as fh:
                 content = fh.read()
         except Exception:
             return
     else:
-        if rel_index not in staged:
-            return  # MEMORY.md not part of this commit -- not our business
         content = _git(repo, "show", ":" + rel_index)
         if content is None:
             return
+
+    # If the version being committed is byte-identical to HEAD's, this commit lands no
+    # new index lines -- any orphan in it is pre-existing, and blocking here would be a
+    # permanent deadlock rather than a guard. (Reachable via `git add -A` when MEMORY.md
+    # happens to be unmodified.)
+    head_content = _git(repo, "show", "HEAD:" + rel_index)
+    if head_content is not None and head_content == content:
+        return
 
     mem_dir = os.path.dirname(rel_index)
     missing = []

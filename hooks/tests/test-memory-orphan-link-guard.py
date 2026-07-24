@@ -3,7 +3,11 @@ that mimics the memory/ layout, then drives the guard via stdin exactly as the h
 """
 import json, os, shutil, subprocess, sys, tempfile
 
-GUARD = r"C:\Users\Owner\.claude\hooks\memory-orphan-link-guard.py"
+# Resolved from THIS file's location, not hardcoded to the live tree: a worktree copy must
+# test the guard IT is about to land, not whatever is already deployed. (Was an absolute
+# live path, so worktree runs silently exercised the deployed guard instead.)
+GUARD = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "memory-orphan-link-guard.py")
 PY = sys.executable
 
 def git(repo, *a):
@@ -112,6 +116,75 @@ check("missing index file exits 0", p.returncode, 0)
 check("missing index file allows", p.stdout.decode().strip(), "")
 
 shutil.rmtree(root, ignore_errors=True)
+
+# ===================================================================================
+# PreToolUse TIMING (2026-07-24). A PreToolUse hook inspects the index BEFORE the
+# command runs, so for a COMPOUND command the guard judged a state the command was
+# about to change. Two opposite failure modes, verified against the live guard:
+#   * FALSE NEGATIVE (the dangerous one): `git add MEMORY.md && git commit` -- at hook
+#     time MEMORY.md is unstaged, the guard returns "not our business", and the orphan
+#     links land unchecked. This is a straight BYPASS of the guard.
+#   * FALSE POSITIVE: `git restore --staged MEMORY.md && git commit` -- at hook time it
+#     IS staged, so the guard blocks a commit that would not have included it.
+# Fix: derive whether MEMORY.md ends up in the commit by walking the command's segments
+# in order, instead of trusting the pre-command index.
+# ===================================================================================
+print()
+print("== PreToolUse timing: compound commands ==")
+root2, mem2 = setup()
+IDX2 = os.path.join(mem2, "MEMORY.md").replace("\\", "/")
+
+
+def set_orphan_index():
+    """Working-tree MEMORY.md links a body that is neither in HEAD nor staged."""
+    with open(os.path.join(mem2, "MEMORY.md"), "w", encoding="utf-8") as f:
+        f.write("# Index\n- [Good](good.md) - hook\n- [New](new.md) - orphan\n")
+    with open(os.path.join(mem2, "new.md"), "w", encoding="utf-8") as f:
+        f.write("body\n")
+
+
+MEMREL = "projects/proj/memory/MEMORY.md"
+
+# --- the BYPASS: stage-then-commit in one command ---
+set_orphan_index()
+git(root2, "reset", "-q")           # nothing staged at hook time
+check("BYPASS: `git add MEMORY.md && git commit` must DENY",
+      run_guard('git add "%s" && git commit -m x' % MEMREL, IDX2)[0], "DENY")
+check("BYPASS: `git add -A && git commit` must DENY",
+      run_guard("git add -A && git commit -m x", IDX2)[0], "DENY")
+check("BYPASS: `git add . && git commit` must DENY",
+      run_guard("git add . && git commit -m x", IDX2)[0], "DENY")
+check("BYPASS: `git commit -am` stages tracked files, must DENY",
+      run_guard("git commit -am x", IDX2)[0], "DENY")
+check("BYPASS: `git add -u && git commit` must DENY",
+      run_guard("git add -u && git commit -m x", IDX2)[0], "DENY")
+
+# --- the FALSE POSITIVE: unstage-then-commit in one command ---
+git(root2, "add", MEMREL)           # staged at hook time...
+check("FP: `git restore --staged MEMORY.md && git commit` must ALLOW",
+      run_guard('git restore --staged "%s" && git commit -m x' % MEMREL, IDX2)[0], "ALLOW")
+check("FP: `git reset HEAD MEMORY.md && git commit` must ALLOW",
+      run_guard('git reset HEAD "%s" && git commit -m x' % MEMREL, IDX2)[0], "ALLOW")
+
+# --- the narrowing must NOT open a hole: -a re-stages what was just unstaged ---
+check("unstage then `commit -a` still DENY (-a re-stages it)",
+      run_guard('git restore --staged "%s" && git commit -am x' % MEMREL, IDX2)[0], "DENY")
+check("unstage then re-add still DENY",
+      run_guard('git restore --staged "%s" && git add "%s" && git commit -m x'
+                % (MEMREL, MEMREL), IDX2)[0], "DENY")
+
+# --- unrelated paths must not change the verdict ---
+git(root2, "reset", "-q")
+check("adding an UNRELATED path then committing stays ALLOW",
+      run_guard('git add "projects/proj/memory/good.md" && git commit -m x', IDX2)[0], "ALLOW")
+
+# --- a clean index (no orphan) must stay ALLOW through all of it ---
+with open(os.path.join(mem2, "MEMORY.md"), "w", encoding="utf-8") as f:
+    f.write("# Index\n- [Good](good.md) - hook\n")
+check("no orphan link -> add-then-commit ALLOW",
+      run_guard("git add -A && git commit -m x", IDX2)[0], "ALLOW")
+
+shutil.rmtree(root2, ignore_errors=True)
 print()
 print(f"RESULT: {sum(results)}/{len(results)} passed")
 sys.exit(0 if all(results) else 1)
