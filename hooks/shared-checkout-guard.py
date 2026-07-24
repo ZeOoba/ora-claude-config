@@ -121,6 +121,44 @@ def is_linked_worktree(repo):
     return os.path.isfile(os.path.join(repo, ".git"))
 
 
+def nearest_git_root(file_path):
+    """The actual checkout that owns `file_path`: the nearest ancestor directory
+    (walking upward from its parent) containing a `.git` entry, file or dir.
+
+    BUG FIX (2026-07-24): find_repo() matches a file against a configured shared-repo
+    ROOT by plain path-prefix, so a file living inside a LINKED WORKTREE NESTED under
+    that root (e.g. a session isolation workspace at
+    `<repo>/.claude/worktrees/<name>/...` -- exactly where EnterWorktree/`git worktree
+    add` puts one for this very repo) still resolves `repo` to the OUTER shared root.
+    The guard then asked "is the OUTER root a linked worktree?" (no -- it's the main
+    checkout) and proceeded to warn about the outer checkout's dirty status, even
+    though the file being edited sits in an already-isolated nested worktree. Observed
+    live: every edit inside `.claude/worktrees/scg-attribution-test/` warned about
+    `.claude`'s ~30 unrelated uncommitted changes -- noise at the exact moment the
+    advice ("use an isolated worktree") had already been followed.
+
+    Callers check is_linked_worktree()/is_main_checkout() against THIS return value,
+    not against find_repo()'s match, so the isolation check reflects the file's real
+    checkout rather than whichever configured root happened to prefix-match first.
+
+    Returns None if no `.git` entry is found walking up to the filesystem root (should
+    not happen for a path find_repo() already matched, but degrades to None -- callers
+    then fall back to the outer repo match, preserving prior behavior instead of
+    raising).
+    """
+    d = os.path.dirname(os.path.abspath(file_path))
+    seen = set()
+    while d and d not in seen:
+        seen.add(d)
+        if os.path.exists(os.path.join(d, ".git")):
+            return d
+        parent = os.path.dirname(d)
+        if parent == d:
+            break
+        d = parent
+    return None
+
+
 def is_main_checkout(repo):
     return os.path.isdir(os.path.join(repo, ".git"))
 
@@ -251,8 +289,12 @@ def main():
     if repo is None:
         return  # fast path: not a shared-checkout repo -> no git call at all
 
-    if is_linked_worktree(repo):
-        return  # already isolated -- good, stay silent
+    # Check isolation against the file's OWN checkout, not the matched shared-repo
+    # root -- see nearest_git_root()'s docstring. Falls back to `repo` if no `.git`
+    # entry is found at all (preserves prior behavior instead of raising).
+    own_root = nearest_git_root(file_path) or repo
+    if is_linked_worktree(own_root):
+        return  # already isolated -- good, stay silent (nested or top-level worktree)
     if not is_main_checkout(repo):
         return  # not a git checkout we recognize -- fail-open
 
