@@ -537,6 +537,295 @@ def test_mixed_case_foreign_edit_already_committed_since_touch_allows():
     print("PASS test_mixed_case_foreign_edit_already_committed_since_touch_allows")
 
 
+# ---------- Compound `git add ... && git commit` blind spot (2026-07-24) ----------
+# PreToolUse fires BEFORE the command executes, so at hook-fire time the `git add`
+# in a compound command has NOT run yet -- `git diff --cached --name-only` sees an
+# EMPTY index, candidate_paths() returns an empty set, and main()'s
+# `if not cands: return` allows the commit before foreign_hits() is ever consulted.
+# Confirmed as the mechanism behind a real incident: 4 janitor commits of this exact
+# shape (`git add <paths> && git commit -q -F -`) swept 41 files including two other
+# live sessions' uncommitted edits, and commit-provenance-guard did not fire despite
+# every OTHER precondition for a block being met (recorder healthy, liveness healthy,
+# no override sentinel, touch well within TTL). See event_log.md 2026-07-24.
+
+def test_compound_explicit_add_then_commit_includes_unstaged_file():
+    """Direct unit check: an explicit `git add foo.txt` naming a file that is on
+    disk but NOT YET staged must appear in candidate_paths() -- simulating the
+    hook firing before the add actually runs."""
+    repo = make_repo()
+    p = os.path.join(repo, "foreign.txt")
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write("unstaged content")
+    # deliberately NOT `git add`-ed -- the whole point is the add hasn't run yet
+    expect = os.path.normcase(os.path.abspath(p))
+    result = candidate_paths(repo, 'git add foreign.txt && git commit -m "x"')
+    assert result is not None and expect in result, (
+        "an about-to-be-staged explicit path must be a candidate, got %r" % result)
+    print("PASS test_compound_explicit_add_then_commit_includes_unstaged_file")
+
+
+def test_compound_add_dash_capital_a_includes_modified_and_untracked():
+    """`git add -A` stages both modified-tracked and untracked files; the
+    pre-execution candidate set must include both kinds."""
+    repo = make_repo()
+    tracked = os.path.join(repo, "tracked.txt")
+    with open(tracked, "w", encoding="utf-8") as fh:
+        fh.write("v1")
+    _git(["add", "tracked.txt"], repo)
+    _git(["commit", "-m", "base"], repo)
+    with open(tracked, "w", encoding="utf-8") as fh:
+        fh.write("v2 -- unstaged modification")
+    untracked = os.path.join(repo, "new.txt")
+    with open(untracked, "w", encoding="utf-8") as fh:
+        fh.write("brand new")
+
+    result = candidate_paths(repo, 'git add -A && git commit -m "x"')
+    assert result is not None
+    assert os.path.normcase(os.path.abspath(tracked)) in result, (
+        "modified tracked file must be a candidate under -A, got %r" % result)
+    assert os.path.normcase(os.path.abspath(untracked)) in result, (
+        "untracked file must be a candidate under -A, got %r" % result)
+    print("PASS test_compound_add_dash_capital_a_includes_modified_and_untracked")
+
+
+def test_compound_add_dot_includes_untracked():
+    """`git add .` (bare dot) must behave like -A for candidate purposes."""
+    repo = make_repo()
+    untracked = os.path.join(repo, "new.txt")
+    with open(untracked, "w", encoding="utf-8") as fh:
+        fh.write("brand new")
+    result = candidate_paths(repo, 'git add . && git commit -m "x"')
+    assert result is not None
+    assert os.path.normcase(os.path.abspath(untracked)) in result, (
+        "untracked file must be a candidate under `add .`, got %r" % result)
+    print("PASS test_compound_add_dot_includes_untracked")
+
+
+def test_add_segment_after_commit_segment_is_not_collected():
+    """Precision check: a `git add` that comes AFTER the commit in the same
+    compound command could not possibly have been staged for THIS commit --
+    must not be treated as a candidate (guards against over-broad matching)."""
+    repo = make_repo()
+    later = os.path.join(repo, "later.txt")
+    with open(later, "w", encoding="utf-8") as fh:
+        fh.write("added after the commit fires")
+    result = candidate_paths(repo, 'git commit -m "x" && git add later.txt')
+    assert result == set() or os.path.normcase(os.path.abspath(later)) not in (result or set()), (
+        "an add AFTER the commit segment must not be collected, got %r" % result)
+    print("PASS test_add_segment_after_commit_segment_is_not_collected")
+
+
+def test_plain_commit_with_no_add_segment_unaffected():
+    """A bare `git commit` with no preceding `git add` anywhere must behave
+    exactly as before -- pure regression guard for the existing majority of
+    calls, which don't have this compound shape at all."""
+    repo = make_repo()
+    mine = write_and_stage(repo, "mine.txt")
+    result = candidate_paths(repo, 'git commit -m "x"')
+    assert result == {mine}, "unaffected by the new logic, got %r" % result
+    print("PASS test_plain_commit_with_no_add_segment_unaffected")
+
+
+def test_compound_add_and_commit_blocks_foreign_file_end_to_end():
+    """THE incident reproduction, full stack via run_hook(): another live
+    session's untracked file sits on disk; THIS session runs the exact
+    `git add <paths> && git commit ...` shape the janitor commits used.
+    Before the fix: candidate_paths() saw an empty staged set (add hadn't run
+    yet) -> `if not cands: return` -> silently ALLOWED (rc 0) -- reproducing
+    the real incident. After the fix: must BLOCK (rc 2)."""
+    repo = make_repo()
+    foreign_path = os.path.join(repo, "theirs.txt")
+    with open(foreign_path, "w", encoding="utf-8") as fh:
+        fh.write("another live session's uncommitted edit")
+    foreign = os.path.normcase(os.path.abspath(foreign_path))
+    mine_path = os.path.join(repo, "mine.txt")
+    with open(mine_path, "w", encoding="utf-8") as fh:
+        fh.write("my own file")
+
+    sess = sessions_tmp()
+    seed_touched(sess, "other", [foreign])
+    fs = fleet_state_with(["other"])
+
+    rc, out, err = run_hook(
+        'git add theirs.txt mine.txt && git commit -m "x"', repo, sess, fleet_state=fs)
+    assert rc == 2, (
+        "compound add+commit sweeping a foreign untracked file must BLOCK, "
+        "got %s (%s) -- this is the 2026-07-24 incident shape" % (rc, err))
+    assert "theirs.txt" in err, "stderr must name the foreign file, got %r" % err
+    print("PASS test_compound_add_and_commit_blocks_foreign_file_end_to_end")
+
+
+def test_compound_add_dash_capital_a_blocks_foreign_untracked_file_end_to_end():
+    """Same incident shape but via `git add -A` instead of explicit paths."""
+    repo = make_repo()
+    foreign_path = os.path.join(repo, "theirs.txt")
+    with open(foreign_path, "w", encoding="utf-8") as fh:
+        fh.write("another live session's uncommitted edit")
+    foreign = os.path.normcase(os.path.abspath(foreign_path))
+
+    sess = sessions_tmp()
+    seed_touched(sess, "other", [foreign])
+    fs = fleet_state_with(["other"])
+
+    rc, out, err = run_hook('git add -A && git commit -m "x"', repo, sess, fleet_state=fs)
+    assert rc == 2, (
+        "compound `git add -A` sweeping a foreign untracked file must BLOCK, "
+        "got %s (%s)" % (rc, err))
+    print("PASS test_compound_add_dash_capital_a_blocks_foreign_untracked_file_end_to_end")
+
+
+def test_compound_add_of_only_own_files_still_allows():
+    """No false positive: a compound add+commit that stages ONLY the caller's
+    own files (nothing in any other live session's touched-set) must ALLOW."""
+    repo = make_repo()
+    mine_path = os.path.join(repo, "mine.txt")
+    with open(mine_path, "w", encoding="utf-8") as fh:
+        fh.write("just mine")
+    sess = sessions_tmp()
+    # no touched-set entries at all -- nothing foreign in play
+    rc, out, err = run_hook('git add mine.txt && git commit -m "x"', repo, sess)
+    assert rc == 0, "compound add+commit of only own files must allow, got %s (%s)" % (rc, err)
+    print("PASS test_compound_add_of_only_own_files_still_allows")
+
+
+def test_compound_add_explicit_dir_expands_to_modified_files_inside():
+    """Directory expansion: `git add somedir` should be treated the same as
+    staging every modified/untracked file currently under that directory."""
+    repo = make_repo()
+    sub = os.path.join(repo, "subdir")
+    os.makedirs(sub, exist_ok=True)
+    inner = os.path.join(sub, "inner.txt")
+    with open(inner, "w", encoding="utf-8") as fh:
+        fh.write("untracked, inside subdir")
+    result = candidate_paths(repo, 'git add subdir && git commit -m "x"')
+    assert result is not None
+    assert os.path.normcase(os.path.abspath(inner)) in result, (
+        "a file inside an added directory must be a candidate, got %r" % result)
+    print("PASS test_compound_add_explicit_dir_expands_to_modified_files_inside")
+
+
+# ---------- REFUTE-pass follow-up (2026-07-24): the compound-add fix above
+# only caught the &&/;/||/|-joined, `git`-token-first shape. An adversarial
+# security-auditor pass found two ordinary, non-adversarial shapes that
+# reproduced the SAME incident: newline-separated statements (no operator
+# between the add and the commit) and env-var-prefixed invocations. Both
+# empirically verified against the pre-fix code before being closed. ----------
+
+def test_env_var_prefixed_add_still_detected():
+    """`FOO=bar git add x` -- a leading env-assignment token must not hide
+    the `git add` from the segment detector."""
+    repo = make_repo()
+    p = os.path.join(repo, "foreign.txt")
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write("unstaged")
+    expect = os.path.normcase(os.path.abspath(p))
+    result = candidate_paths(
+        repo, 'GIT_AUTHOR_NAME=x git add foreign.txt && git commit -m "x"')
+    assert result is not None and expect in result, (
+        "env-var-prefixed add must still be detected, got %r" % result)
+    print("PASS test_env_var_prefixed_add_still_detected")
+
+
+def test_newline_separated_add_then_commit_still_detected():
+    """`git add` and `git commit` on separate physical lines with NO shell
+    operator between them -- a bare newline is still a statement boundary."""
+    repo = make_repo()
+    p = os.path.join(repo, "foreign.txt")
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write("unstaged")
+    expect = os.path.normcase(os.path.abspath(p))
+    cmd = 'git add foreign.txt\ngit commit -m "x"'
+    result = candidate_paths(repo, cmd)
+    assert result is not None and expect in result, (
+        "newline-separated add+commit must still be detected, got %r" % result)
+    print("PASS test_newline_separated_add_then_commit_still_detected")
+
+
+def test_env_var_prefixed_add_blocks_foreign_file_end_to_end():
+    """Full stack reproduction of REFUTE PoC (1)."""
+    repo = make_repo()
+    foreign_path = os.path.join(repo, "theirs.txt")
+    with open(foreign_path, "w", encoding="utf-8") as fh:
+        fh.write("another live session's uncommitted edit")
+    foreign = os.path.normcase(os.path.abspath(foreign_path))
+    sess = sessions_tmp()
+    seed_touched(sess, "other", [foreign])
+    fs = fleet_state_with(["other"])
+    rc, out, err = run_hook(
+        'GIT_AUTHOR_NAME=x git add theirs.txt && git commit -m "sweep"',
+        repo, sess, fleet_state=fs)
+    assert rc == 2, (
+        "env-var-prefixed add sweeping a foreign file must BLOCK, got %s (%s)"
+        % (rc, err))
+    print("PASS test_env_var_prefixed_add_blocks_foreign_file_end_to_end")
+
+
+def test_newline_separated_add_blocks_foreign_file_end_to_end():
+    """Full stack reproduction of REFUTE PoC (2)."""
+    repo = make_repo()
+    foreign_path = os.path.join(repo, "theirs2.txt")
+    with open(foreign_path, "w", encoding="utf-8") as fh:
+        fh.write("another live session's uncommitted edit")
+    foreign = os.path.normcase(os.path.abspath(foreign_path))
+    sess = sessions_tmp()
+    seed_touched(sess, "other", [foreign])
+    fs = fleet_state_with(["other"])
+    cmd = 'cd .\ngit add theirs2.txt\ngit commit -m "sweep"'
+    rc, out, err = run_hook(cmd, repo, sess, fleet_state=fs)
+    assert rc == 2, (
+        "newline-separated add sweeping a foreign file must BLOCK, got %s (%s)"
+        % (rc, err))
+    print("PASS test_newline_separated_add_blocks_foreign_file_end_to_end")
+
+
+def test_heredoc_body_mentioning_git_add_in_single_commit_does_not_false_block():
+    """Accepted-gap safe-direction guarantee (2nd-round REFUTE, 2026-07-24): a
+    single `git commit -m "..."` whose heredoc-style body happens to contain
+    the literal words "git add" as prose must NOT be misread as a real add
+    segment -- there is no OTHER commit segment strictly AFTER that phantom
+    line (only the one real, opening `git commit` invocation exists in this
+    command), so _git_add_segments()'s own "needs a commit after it" rule
+    excludes it. Deliberately does NOT also mention "git commit" inside the
+    body text -- doing so would create a SECOND commit-shaped line, which is
+    the accepted-gap's own documented trigger condition (any add with some
+    commit segment after it, anywhere), not the safe case being locked in
+    here. This guards the "fails safe, never hides a real hit" property so a
+    future change can't quietly flip it to unsafe."""
+    repo = make_repo()
+    cmd = (
+        'git commit -m "$(cat <<\'EOF\'\n'
+        'fix: describe a workaround\n\n'
+        'For a partial splice, first run:\n'
+        'git add PHANTOM.md\n'
+        'then finish it by hand.\n'
+        'EOF\n'
+        ')"'
+    )
+    result = candidate_paths(repo, cmd)
+    phantom = os.path.normcase(os.path.abspath(os.path.join(repo, "PHANTOM.md")))
+    assert result is None or phantom not in result, (
+        "a heredoc body mentioning 'git add' as prose inside a SINGLE commit "
+        "must not be treated as a real candidate, got %r" % result)
+    print("PASS test_heredoc_body_mentioning_git_add_in_single_commit_does_not_false_block")
+
+
+def test_add_sandwiched_between_two_commits_is_collected_for_the_second():
+    """REFUTE PoC (3): `commit; add; commit` -- a naive 'stop at the FIRST
+    commit segment' rule drops the sandwiched add entirely, even though it
+    plainly gets staged for the SECOND commit. Must be collected."""
+    repo = make_repo()
+    p = os.path.join(repo, "sandwiched.txt")
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write("unstaged")
+    expect = os.path.normcase(os.path.abspath(p))
+    cmd = 'git commit -m "first"\ngit add sandwiched.txt\ngit commit -m "second"'
+    result = candidate_paths(repo, cmd)
+    assert result is not None and expect in result, (
+        "an add sandwiched between two commits must be collected for the "
+        "later one, got %r" % result)
+    print("PASS test_add_sandwiched_between_two_commits_is_collected_for_the_second")
+
+
 if __name__ == "__main__":
     test_non_git_command_silent()
     test_git_commit_with_no_foreign_files_allows()
@@ -561,4 +850,19 @@ if __name__ == "__main__":
     test_foreign_edit_already_committed_since_touch_allows()
     test_foreign_touch_after_last_commit_still_blocks()
     test_unknown_touch_time_still_blocks_even_if_committed()
+    test_compound_explicit_add_then_commit_includes_unstaged_file()
+    test_compound_add_dash_capital_a_includes_modified_and_untracked()
+    test_compound_add_dot_includes_untracked()
+    test_add_segment_after_commit_segment_is_not_collected()
+    test_plain_commit_with_no_add_segment_unaffected()
+    test_compound_add_and_commit_blocks_foreign_file_end_to_end()
+    test_compound_add_dash_capital_a_blocks_foreign_untracked_file_end_to_end()
+    test_compound_add_of_only_own_files_still_allows()
+    test_compound_add_explicit_dir_expands_to_modified_files_inside()
+    test_env_var_prefixed_add_still_detected()
+    test_newline_separated_add_then_commit_still_detected()
+    test_env_var_prefixed_add_blocks_foreign_file_end_to_end()
+    test_newline_separated_add_blocks_foreign_file_end_to_end()
+    test_add_sandwiched_between_two_commits_is_collected_for_the_second()
+    test_heredoc_body_mentioning_git_add_in_single_commit_does_not_false_block()
     print("ALL COMMIT-PROVENANCE-GUARD TESTS PASS")
