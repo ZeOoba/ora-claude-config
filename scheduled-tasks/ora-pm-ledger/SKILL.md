@@ -600,7 +600,16 @@ action/date) flag LOW.
 **Check D — Landlord Entity Signature.** If the message references a property
 by address or LLC name AND the signature uses generic "Oxford Realty
 Advisors" or the personal "Gabriel Goldberg, VP Acquisitions" block rather
-than the specific property LLC, flag MEDIUM.
+than the specific property LLC, flag MEDIUM. Root cause fixed 2026-07-24:
+`tenant-email` v1.1 and `communication-intelligence` v1.3 now resolve the
+LLC from the ratified roster and embed the signature block as literal draft
+text instead of depending on Outlook's manual signature picker — daily
+recurrence should drop sharply going forward. A message that still trips
+this check now most likely predates the fix, was drafted outside those two
+skills, or has the correct block overwritten by Outlook's own auto-inserted
+default signature (see the "delete the auto-inserted one" step in both
+skills) — do not silently downgrade this check on the strength of the fix
+alone.
 
 **Check E — LP Forward-Statement Framing.** If the recipient is in the LP
 class (cross-reference Notion LP Database) AND the body contains
