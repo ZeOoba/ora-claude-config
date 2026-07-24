@@ -41,4 +41,12 @@ RESTORATION NOTE: Re-registered 2026-07-07 after the 2026-07-05 machine migratio
    FROM ggoldberg@oxfordra.net TO ggoldberg@oxfordra.net ONLY (no egoldberg cc —
    routing canon: only the Daily Brief retains that exception),
    ending with a "QUESTIONS FOR GABRIEL" block for any unverifiable trades.
+   **Subject line (added 2026-07-21 — pm-ledger Check I, Frozen-Date Subject):** use the
+   date this email is actually sent (`YYYY-MM-DD`, today's real date at send time), e.g.
+   "ORA Passed-Deal Tracker — Monthly Sweep — 2026-07-21". Never use the nominal "15th"
+   schedule date from this task's own description/cron, and never carry forward a prior
+   run's date. Recurring/automated report subjects are never exempt from this — a subject
+   dateline differing from the actual send date by more than 1 day is a MEDIUM defect
+   under Check I and will keep recurring on every nominal-date run until this is fixed at
+   the source (here) rather than caught downstream.
 8. Never fabricate prices — unverified trades are listed as UNCONFIRMED with source link.

@@ -1,6 +1,6 @@
 ---
 name: ora-site-exposure-probe
-description: Weekly Wednesday 9:20 AM ET curl-matrix probe of oxfordra.net — asserts internal tooling paths (evals/, scripts/, netlify/) 404 and the prod security-header set matches _headers; emails ggoldberg only on alarm. v1.0 2026-07-10. [MODEL: UNVERIFIABLE | checked 2026-07-12]
+description: Weekly Wednesday 9:20 AM ET curl-matrix probe of oxfordra.net — asserts internal tooling paths (evals/, scripts/, netlify/) 404 and the prod security-header set matches _headers; emails ggoldberg only on alarm. v1.0 2026-07-10. [MODEL: claude-opus-4-8 (DRIFT — expected claude-sonnet-5) | checked 2026-07-22 via live-run transcript canary]
 ---
 
 ORA oxfordra.net Exposure Probe (CC/MCP fleet)
