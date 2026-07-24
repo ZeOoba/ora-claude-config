@@ -1,12 +1,52 @@
 ---
 name: reference-tenant-db-completeness-gap
-description: "Notion Tenant DB has major row-completeness gaps portfolio-wide (found 2026-07-09) AND a systemic HubSpot Contact reused-ID bug (found 2026-07-10, ~40+ affected rows incl. ~22-29 fabricated phantom tenants) — see both sections. 2026-07-12: live re-derivation found 91 duplicate groups (191 rows), 20 pre-flagged-never-removed, 12 stale-link-blanked — larger than the 07-10 baseline; one-time remediation plan with per-category options drafted, awaiting Gabriel's go-ahead."
+description: "FULLY RESOLVED 2026-07-24 — read the banner first. The 2026-07-09 'row-completeness gap' numbers (76 unlinked, 3347 McGregor zero-rows, 19 schema options) are superseded or falsified: current state is 138 live / 160 retired with ZERO live rows missing a Property Address, and the zero-row properties are simply absent from the rent roll. Split live-vs-retired on the `Row Retired` FIELD, never the ⛔ARCHIVED title prefix. Also documents the HubSpot Contact reused-ID bug (2026-07-10), the 07-12 duplicate remediation, and a near-miss where an in-session write briefly un-retired a correctly-retired duplicate (Patrick Betz) before its own Notes field was read — caught and reverted, net DB change zero. No open remediation item remains."
 metadata:
   type: project
   originSessionId: a744d8cf-2abe-4151-98ea-2bd224723db2
+  modified: 2026-07-24T17:05:32.003Z
 ---
 
 # Notion Tenant DB — Portfolio-Wide Row-Completeness Gap (found 2026-07-09)
+
+> ## ⚠️ LARGELY RESOLVED / PARTLY FALSIFIED 2026-07-24 — read this before acting on anything below
+>
+> A rent-roll-grounded re-derivation (2026-07-20 portfolio rent roll, 137 tenants / 17 properties, vs. the
+> `ora-pm-ledger` snapshot) overturned most of the numbers in this file. **Do not re-quote the 76-unlinked /
+> 19-option / McGregor figures as live.**
+>
+> - **"76 of 296 rows have no Property Address" — GONE.** Current state: **138 live / 160 retired, and ZERO
+>   LIVE rows with a blank Property Address.** The original count (and later 72/107 restatements) came from
+>   counting *all* rows, or from splitting live-vs-archived on the `⛔ ARCHIVED` title prefix. **The
+>   authoritative flag is the `Row Retired` field** (`__YES__`/`__NO__` via MCP SQL; `"true"`/`"false"` in the
+>   ledger JSON snapshot). Prefix-based filtering misclassifies, because the prefix was applied to only part of
+>   the retired set. This single methodology error produced wrong headline numbers in three separate reports.
+> - **"3347 McGregor Ln has zero rows" — NOT A DEFECT. Closed.** McGregor, plus `5333 Secor Rd`, `9901 River
+>   Rd` and `FVC — Fairground Village Center`, are **absent from the portfolio rent roll entirely** — they have
+>   no current tenants, so zero live rows is the correct state. A zero-live property is a question about the
+>   *asset* (vacant / disposed / stale schema option), never evidence of a Tenant DB gap.
+> - **Schema options 19 → 23** (added: `55 New Plant Court`, `4595 E. 5th Ave`, `4601 E. 5th Ave`,
+>   `9620 State 350 — Kansas City MO`). `2203-2207 Northwood` was relabelled Columbus OH → **Salisbury MD**.
+> - **"Duplicate Heritage Pool Supply rows" — explained:** a corporate rename. The live row is
+>   `SRS Distribution / Heritage Pool Supply`; the older Heritage rows are correctly retired.
+> - **A "$441K/yr of wrongly-retired active tenants" alarm was raised and then falsified TWICE in the same
+>   session.** First pass: matching retired-but-Active rows on (Property, Suite/Unit) only suggested 6–10
+>   orphans. Cross-checking names against the rent roll narrowed it to ~2 candidates at 2207 Northwood
+>   (Patrick Betz, Hobart Services) — the big-ticket names (First Student $15,000/mo, Insync Holdings, Ismael
+>   Montane) are simply absent from the rent roll = correctly retired former tenants. **Second pass caught a
+>   worse error: Patrick Betz's own `Notes` field said it had already been deliberately retired 2026-07-21 as
+>   a duplicate of a live "Online Auction" record at the same unit** — a considered decision made 3 days
+>   earlier against the identical rent roll. An in-session write un-retired Betz before the Notes field was
+>   read, briefly creating a live duplicate; caught and reverted within minutes (net DB change: zero). Hobart
+>   Services turned out to already have a correct live row under its full legal name. **Real residual: zero.**
+> - **Lesson (the durable one, now two-part):** unit-matching over-reports badly because retired duplicates
+>   often have blank property/unit, tenants get renamed or acquired, and properties get relabelled — **always
+>   cross-check tenant NAMES against the rent roll first.** Then, **before writing any un-retire, read the
+>   candidate's own `Notes` field** — a prior deliberate retirement documents itself there, and skipping this
+>   check turns a correctly-retired duplicate back into a live double-count.
+>
+> Standing detection for all of the above (rent-roll cross-check AND Notes-field check, both mandatory before
+> any write) now lives in `ora-weekly-hygiene` Block J steps 2 and 7. No open remediation item remains.
 
 Discovered by accident during the [1100 Rarig disposition analysis](deal_1100_rarig_disposition_2026-07.md) (only 3 of 14 real units had rows), then confirmed portfolio-wide via a full group-by-Property-Address query of `collection://b12f4cfd-a995-4755-8341-6435ae8173b4` (296 rows total):
 
