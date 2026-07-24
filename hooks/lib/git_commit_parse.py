@@ -84,39 +84,43 @@ def _first_group(m):
     return next((g for g in m.groups() if g), None) if m else None
 
 
+def find_commit_segment(cmd):
+    """The arg-list of the LAST `git commit ...` segment in `cmd`, or None if
+    there is none. "Last" matches this fleet's one-commit-per-Bash-call
+    convention (documented in git_add_segments) -- for a genuine multi-commit
+    chain it is the commit actually being gated (PreToolUse fires once per
+    Bash call, evaluating the whole string, and a later commit's flags/pathspec
+    are the ones in effect for what that call ultimately lands).
+
+    SEGMENT-SCOPED BY CONSTRUCTION (2026-07-24 fix): built on
+    tokenize_cmd_segments + _segment_git_subcommand_and_args, the same
+    segment-aware machinery git_add_segments already uses -- NOT a whole-string
+    shlex.split(). This closes two real bypasses found by independent review of
+    eos-review-gate.py, which reuses this module: (1) a trailing chained
+    command's own `--` (e.g. `git commit -m x && git log -1 -- hooks/`) was
+    previously read as the COMMIT's pathspec, discarding the real staged file
+    set entirely; (2) `--dry-run` was detected as a raw substring of the WHOLE
+    command, so a commit MESSAGE merely mentioning "--dry-run" (plausible in
+    this very hooks/ repo) silently zeroed out gating for a real, non-dry-run
+    commit. Both PoCs reproduced against the pre-fix code."""
+    result = None
+    for seg in tokenize_cmd_segments(cmd):
+        parsed = _segment_git_subcommand_and_args(seg)
+        if parsed and parsed[0] == "commit":
+            result = parsed[1]
+    return result
+
+
 def is_git_commit(cmd):
     """True iff `cmd` invokes git with `commit` as the SUBCOMMAND (tokenized,
     not a substring match -- `git add commit-provenance-guard.py` is not a
-    commit)."""
+    commit), and that commit segment does not itself carry `--dry-run`."""
     if not isinstance(cmd, str) or not cmd:
         return False
-    if "--dry-run" in cmd:
-        return False  # fixes no provenance, and reviews nothing
-    try:
-        tokens = shlex.split(cmd)
-    except ValueError:
-        tokens = cmd.split()
-    n = len(tokens)
-    i = 0
-    while i < n:
-        if tokens[i] != "git":
-            i += 1
-            continue
-        j = i + 1
-        while j < n:
-            t = tokens[j]
-            if t.startswith("-"):
-                if t in GIT_ARG_OPTS_WITH_VALUE:
-                    j += 2  # skip this option AND its value token
-                else:
-                    j += 1  # boolean flag or `--opt=value`
-                continue
-            # first non-option token after `git` is the subcommand
-            if t == "commit":
-                return True
-            break
-        i = j if j > i else i + 1
-    return False
+    args = find_commit_segment(cmd)
+    if args is None:
+        return False
+    return "--dry-run" not in args
 
 
 def git_lines(repo, args, timeout=5):
@@ -141,13 +145,23 @@ def repo_root(cmd, cwd):
     return out[0] if out else None
 
 
-def has_all_flag(cmd):
+def has_all_flag(tokens_or_cmd):
     """True for `-a`, `-am`, `--all`. False for `-m` and `--amend`
-    (`^-[a-zA-Z]+$` cannot match a double-dash flag)."""
-    try:
-        tokens = shlex.split(cmd)
-    except Exception:
-        tokens = cmd.split()
+    (`^-[a-zA-Z]+$` cannot match a double-dash flag).
+
+    Accepts EITHER a pre-tokenized arg list (the commit segment's own args --
+    the scoped, correct call site, used by candidate_paths) OR a raw command
+    string (re-tokenized here, kept for backward compatibility). Scoping to the
+    commit's own segment matters for the same reason find_commit_segment's `--`
+    handling does: a flag belonging to a DIFFERENT chained command must not be
+    read as this commit's own `-a`."""
+    if isinstance(tokens_or_cmd, str):
+        try:
+            tokens = shlex.split(tokens_or_cmd)
+        except Exception:
+            tokens = tokens_or_cmd.split()
+    else:
+        tokens = tokens_or_cmd
     for t in tokens:
         if t == "--all":
             return True
@@ -283,23 +297,26 @@ def pending_add_paths(repo, cmd):
 
 def candidate_paths(repo, cmd):
     """Absolute normcase paths this commit would capture, or None if unknown."""
-    # Explicit `-- <pathspec>` narrows the commit. Tokenize rather than
-    # regex-search for " -- " -- a `-- ` sequence inside a quoted `-m` commit
-    # message is NOT a standalone `--` token.
-    try:
-        tokens = shlex.split(cmd)
-    except ValueError:
-        tokens = cmd.split()
-    if "--" in tokens:
-        idx = tokens.index("--")
-        given = tokens[idx + 1:]
+    commit_args = find_commit_segment(cmd)
+    if commit_args is None:
+        return None  # not a commit call -- nothing to resolve
+
+    # Explicit `-- <pathspec>` narrows the commit. SCOPED TO THE COMMIT'S OWN
+    # SEGMENT (2026-07-24 fix, see find_commit_segment) -- a `--` belonging to
+    # a DIFFERENT chained command must not be mistaken for this commit's
+    # pathspec. Tokenize rather than regex-search for " -- " within the
+    # segment -- a `-- ` sequence inside a quoted `-m` commit message is NOT a
+    # standalone `--` token (shlex already kept it as one quoted token).
+    if "--" in commit_args:
+        idx = commit_args.index("--")
+        given = commit_args[idx + 1:]
         return {norm(os.path.join(repo, p)) for p in given if p}
 
     staged = git_lines(repo, ["diff", "--cached", "--name-only"])
     if staged is None:
         return None
     rel = set(staged)
-    if has_all_flag(cmd):
+    if has_all_flag(commit_args):
         tracked = git_lines(repo, ["diff", "--name-only"]) or []
         rel |= set(tracked)
     cands = {norm(os.path.join(repo, p)) for p in rel}
