@@ -218,6 +218,35 @@ def test_pathspec_narrows_candidate_set():
     print("PASS test_pathspec_narrows_candidate_set")
 
 
+def test_chained_command_dashdash_does_not_hijack_pathspec():
+    """2026-07-24 independent-review finding (M2, shared with eos-review-gate.py,
+    which reuses candidate_paths via git_commit_parse.py). A `--` belonging to a
+    DIFFERENT chained command must not be read as THIS commit's pathspec -- the
+    old whole-string `"--" in tokens` scan found the `--` in a trailing
+    `git log ... -- hooks/` and discarded the real staged set entirely."""
+    repo = make_repo()
+    mine = write_and_stage(repo, "mine.txt")
+    theirs = write_and_stage(repo, "theirs.txt")
+
+    result = candidate_paths(
+        repo, 'git commit -m "x" && git log -1 --format=%s -- hooks/')
+    assert result == {mine, theirs}, (
+        "a foreign segment's -- must not narrow this commit's candidates, got %r"
+        % result)
+    print("PASS test_chained_command_dashdash_does_not_hijack_pathspec")
+
+
+def test_dry_run_in_commit_message_does_not_blind_a_real_commit():
+    """2026-07-24 independent-review finding (m5). The old check was
+    `"--dry-run" in cmd` over the WHOLE raw string -- a commit message that
+    merely mentions the text "--dry-run" (plausible in this very hooks/ repo)
+    silently zeroed out is_git_commit for a real, non-dry-run commit."""
+    assert is_git_commit('git commit -m "docs: explain the --dry-run flag"') is True
+    assert is_git_commit('git commit --dry-run -m "x"') is False, (
+        "a REAL --dry-run flag on the commit segment must still be recognized")
+    print("PASS test_dry_run_in_commit_message_does_not_blind_a_real_commit")
+
+
 # ---------- Task 3 cases: the block predicate ----------
 
 def test_foreign_file_from_live_session_blocks():
@@ -836,6 +865,8 @@ if __name__ == "__main__":
     test_git_add_of_commit_named_file_is_not_a_commit()
     test_commit_message_with_dashdash_does_not_corrupt_pathspec()
     test_pathspec_narrows_candidate_set()
+    test_chained_command_dashdash_does_not_hijack_pathspec()
+    test_dry_run_in_commit_message_does_not_blind_a_real_commit()
     test_foreign_file_from_live_session_blocks()
     test_foreign_file_but_session_not_live_allows()
     test_foreign_touched_set_older_than_ttl_allows()
