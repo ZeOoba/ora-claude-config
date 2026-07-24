@@ -290,6 +290,72 @@ check("decoy ' -- ' in message, but a REAL trailing pathspec still wins -> ALLOW
                 '"projects/proj/memory/other4.md"' % MEMREL4, IDX4)[0], "ALLOW")
 
 shutil.rmtree(root4, ignore_errors=True)
+
+# ===================================================================================
+# CODE REVIEW FINDINGS (2026-07-24). Local review of the pathspec-exclusivity commit
+# above caught two further bypasses in that commit's OWN shlex-based "--" scan, both
+# verified end-to-end through this guard binary against real git before being closed
+# by _commit_pathspec()'s option-aware walk:
+#   * `git commit -m --`: `-m`'s value IS the literal string "--". A bare "is '--' a
+#     token" scan finds it and reads an EMPTY pathspec after it, which _mentions_path
+#     reports False for -- silently EXCLUDING MEMORY.md from a commit that (per real
+#     git) actually commits the WHOLE staged index. Real git verified: exit 0, message
+#     "--", the orphaned MEMORY.md lands.
+#   * `git commit -m x --` (normal message, bare trailing "--", nothing after it): real
+#     git treats an empty pathspec as NO restriction, not "matches nothing" -- it
+#     commits the entire staged index. Real git verified: exit 0, full index committed.
+# ===================================================================================
+print()
+print("== CODE REVIEW: empty-pathspec shapes must not fake an exclusion ==")
+root5, mem5 = setup()
+IDX5 = os.path.join(mem5, "MEMORY.md").replace("\\", "/")
+MEMREL5 = "projects/proj/memory/MEMORY.md"
+
+with open(os.path.join(mem5, "MEMORY.md"), "a", encoding="utf-8") as f:
+    f.write("- [Orphan](orphan5.md) - hook\n")
+with open(os.path.join(mem5, "orphan5.md"), "w", encoding="utf-8") as f:
+    f.write("body, not staged\n")
+
+git(root5, "add", MEMREL5)
+check('CRITICAL #1: `git commit -m --` (message IS "--") -> DENY',
+      run_guard("git commit -m --", IDX5)[0], "DENY")
+
+git(root5, "add", MEMREL5)
+check('CRITICAL #2: `git commit -m x --` (bare trailing "--", empty tail) -> DENY',
+      run_guard("git commit -m x --", IDX5)[0], "DENY")
+
+# same two shapes must still ALLOW when there is genuinely no orphan
+with open(os.path.join(mem5, "MEMORY.md"), "w", encoding="utf-8") as f:
+    f.write("# Index\n- [Good](good.md) - hook\n")
+git(root5, "add", MEMREL5)
+check("no orphan link -> `git commit -m --` stays ALLOW",
+      run_guard("git commit -m --", IDX5)[0], "ALLOW")
+
+shutil.rmtree(root5, ignore_errors=True)
+
+# a genuine trailing pathspec after -m's value must still correctly EXCLUDE
+print()
+print("== value-consuming options: a REAL trailing pathspec after them still excludes ==")
+root6, mem6 = setup()
+IDX6 = os.path.join(mem6, "MEMORY.md").replace("\\", "/")
+MEMREL6 = "projects/proj/memory/MEMORY.md"
+
+with open(os.path.join(mem6, "other6.md"), "w", encoding="utf-8") as f:
+    f.write("tracked\n")
+git(root6, "add", "projects/proj/memory/other6.md")
+git(root6, "commit", "-qm", "add other6")
+with open(os.path.join(mem6, "MEMORY.md"), "a", encoding="utf-8") as f:
+    f.write("- [Orphan](orphan6.md) - hook\n")
+with open(os.path.join(mem6, "orphan6.md"), "w", encoding="utf-8") as f:
+    f.write("body, not staged\n")
+with open(os.path.join(mem6, "other6.md"), "w", encoding="utf-8") as f:
+    f.write("edit\n")
+git(root6, "add", MEMREL6, "projects/proj/memory/other6.md")
+check('`git commit -m x -- other.md` (real pathspec after -m) -> ALLOW '
+      "(cannot touch MEMORY.md even though it's staged)",
+      run_guard('git commit -m x -- "projects/proj/memory/other6.md"', IDX6)[0], "ALLOW")
+
+shutil.rmtree(root6, ignore_errors=True)
 print()
 print(f"RESULT: {sum(results)}/{len(results)} passed")
 sys.exit(0 if all(results) else 1)
