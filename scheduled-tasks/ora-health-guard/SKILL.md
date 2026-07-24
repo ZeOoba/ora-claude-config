@@ -92,6 +92,12 @@ If the guard.ps1 script itself is missing, skip Block A gracefully this run, log
 
 *2-NOTION (Notion reachable):*
   (A) `rate_snapshot` — parse the Rate Snapshot page header (`prefetch_status`, `fetched_at`, `prior_trading_day`, `holiday_offset`) + the UST yield table, SOFR strip, spreads, FedWatch into a JSON object. Include a one-line freshness verdict (prefetch age vs `fetched_at`).
+
+  **STALENESS ESCALATION (added 2026-07-24 — this is an ALARM, not just a note).** Compute `rate_age_hours` = now(ET) − `fetched_at`, and `missed_sessions` = the number of completed weekday 06:00 ET `ora-am-brief` Block A slots between `fetched_at` and now. Emit BOTH into the `rate_snapshot` JSON. Then classify:
+      - `missed_sessions == 0` → **FRESH**. Note and move on.
+      - `missed_sessions >= 1` → **STALE**. This means Block A did not publish on at least one weekday it should have. Set `"mirror_status": "NOTION_LIVE_BUT_STALE"`, state the vintage prominently, and **carry a `RATE SNAPSHOT STALE` line into the Block C email as a probe-equivalent FAIL — it flips the C.3 subject to `[ACTION]`.**
+      Rationale: before this clause the age was recorded as prose and read by nobody, so a 45-hour gap on 2026-07-24 (Block A silently dropped its 07-23 slot) was found only incidentally by a human reading the mirror. Note that a dropped slot leaves **no** `recordedSkips` entry and `lastRunAt` is single-valued, so the registry cannot evidence it — `fetched_at` on this page is the only cheap signal that the rate producer missed a day. See `reference_fleet_throttle_skip_catchup_burst.md`.
+      Weekend/holiday guard: Block A legitimately skips Sat/Sun and US federal holidays, so `missed_sessions` must count **weekday non-holiday** slots only. A Monday 05:15 run reading Friday's `fetched_at` is FRESH, not stale — do not alarm on it.
   (B) `portfolio_watch` — pre-pull the same sources `ora-am-brief` Section 4 uses, into JSON keyed 4a/4b/4c/4d:
       - 4a: scheduled-task run status / errors on the Ops Hub (`32b6ecd8-…`) as of now.
       - 4b: the most recent **ORA Lease Expiration Dashboard** (`notion-search` the literal title; use newest) — the ≤30-day expirations and the 31–90-day rows with no HubSpot renewal activity. NOTE (2026-06-09): the producer task was RETIRED — the page no longer refreshes; pass it through as historical, do NOT flag its age as a missed run.
@@ -146,8 +152,8 @@ If any probe script is missing/absent this run (folders may not have survived th
 **C.2 — Compose ONE HTML email** — a one-screen consolidated table: one section per probe (probe · PASS/FAIL/ABSENT · key observed values / failing rows in red). Lead with a bold summary line `Health Guard: N/M probes PASS` and, if any FAIL, list the failing probe(s) + the specific failing check ids. Prepend the **Block A INTEGRITY REPAIR / ERROR** section if A acted or errored.
 
 **C.3 — Subject line:**
-- All probes pass AND Block A clean/repaired-OK: `[ORA] Health Guard — YYYY-MM-DD — ALL PASS`
-- Any probe FAIL/ABSENT, or any `missing_everywhere` SKILL, or integrity engine error: `[ACTION] Health Guard — YYYY-MM-DD — N FAIL`
+- All probes pass AND Block A clean/repaired-OK AND rate_snapshot FRESH: `[ORA] Health Guard — YYYY-MM-DD — ALL PASS`
+- Any probe FAIL/ABSENT, or any `missing_everywhere` SKILL, or integrity engine error, or a **B.2 `RATE SNAPSHOT STALE`** (see B.2 2-NOTION (A) staleness escalation): `[ACTION] Health Guard — YYYY-MM-DD — N FAIL`
 
 **C.4 — Deliver** to **ggoldberg@oxfordra.net only** via the SOLE send path `send-via-outlook.ps1` (Composio removed 2026-06-11; no fallback connector exists). Write the HTML to a temp file and `-BodyFile` it. On non-zero COM exit: retry once, then flag the failure via the B.4 last-resort local-log path — do not halt.
 
