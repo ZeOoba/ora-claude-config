@@ -1,3 +1,26 @@
-# Normalize line endings repo-wide: git stores LF; Windows working tree gets CRLF via core.autocrlf.
+# Normalize line endings repo-wide: git stores LF in the index for all text;
+# the Windows working tree gets CRLF via core.autocrlf.
 # Added 2026-07-12 to end perpetual phantom-modified flags from pre-existing CRLF blobs.
+#
+# VERIFIED WORKING 2026-07-24: 617 tracked files, only genuinely-edited files show
+# as modified despite a mixed LF/CRLF working tree (tools here write LF, checkout
+# writes CRLF). Diffs are therefore already EOL-immune -- `git diff --ignore-cr-at-eol`
+# on the 2026-07-24 backlog confirmed every reported change was real content.
+#
+# DELIBERATELY NOT setting a repo-wide `eol=lf`. It would not silence the cosmetic
+# "LF will be replaced by CRLF the next time Git touches it" notices unless every
+# file's line endings were also rewritten in the working tree -- and that mass
+# rewrite churns mtimes across the newest-wins guard mirrors
+# (ora-task-integrity-guard/guard.ps1 compares canonical vs mirror mtimes), risking
+# spurious mirror shuffling for zero diff benefit. The notices are noise, not drift.
 * text=auto
+
+# Windows script hosts are line-ending sensitive. These MUST land as CRLF on
+# checkout regardless of core.autocrlf or a future clone's local settings --
+# batch labels/goto and multi-line blocks can misbehave with bare LF.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.vbs text eol=crlf
+
+# POSIX shell must stay LF -- CRLF breaks the shebang under bash/WSL.
+*.sh text eol=lf
