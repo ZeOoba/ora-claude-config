@@ -1,8 +1,7 @@
 {
- "ts": "2026-07-21T12:56:34",
+ "ts": "2026-07-22T12:55:59",
  "fleets": {
   "cc": [
-   "check-dirty-files-session-pr",
    "ora-aaos-expire-leases",
    "ora-aaos-publish-contracts",
    "ora-am-brief",
@@ -10,6 +9,7 @@
    "ora-broker-touch-cadence",
    "ora-calibration-snapshot",
    "ora-cc-schematic-refresh",
+   "ora-cc-snapshot-refresh",
    "ora-command-center-mirror-drift-check",
    "ora-deal-aging-sla",
    "ora-deal-command-board",
