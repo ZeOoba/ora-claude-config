@@ -93,6 +93,58 @@ expect("no section 7 -> no claims", ssa.fleet_count_claims("## 3. x\n5 tasks\n")
 expect("count-free section 7 -> no claims",
        ssa.fleet_count_claims("## 7. Fleet\nroster is GENERATED daily\n## 8. y\n") == [])
 
+# ---- _frontmatter_ok: STRUCTURAL check, deliberately NOT a strict YAML parse (2026-07-24) ----
+import tempfile
+
+
+def _fm(text):
+    fp = os.path.join(tempfile.mkdtemp(), "SKILL.md")
+    with open(fp, "w", encoding="utf-8") as f:
+        f.write(text)
+    return ssa._frontmatter_ok(fp)
+
+
+GOOD = "---\nname: x\ndescription: does a thing\n---\n\n# Body\n"
+expect("well-formed frontmatter -> ok", _fm(GOOD) is True, _fm(GOOD))
+
+# REGRESSION this check shipped with: a bare `"## name:" in text` substring test scored a
+# file malformed when its BODY merely quoted the pattern. Real case, found 2026-07-24:
+# scheduled-tasks (lams)/ora-skill-text-audit documents `## name:` in backticks at line 41.
+QUOTED = GOOD + "\nThe frontmatter (or its inline `## name:` line) ends with a version.\n"
+expect("body prose quoting '## name:' is NOT malformed", _fm(QUOTED) is True, _fm(QUOTED))
+
+# ...while still catching the class it exists for: frontmatter collapsed onto a heading.
+COLLAPSED = "---\n## name: x description: y\n---\n\nbody\n"
+expect("collapsed '## name:' INSIDE the fence -> malformed", _fm(COLLAPSED) is False, _fm(COLLAPSED))
+expect("no opening fence -> malformed", _fm("## name: x description: y\n") is False)
+# A single '#' is a legal YAML comment, not the collapsed-heading regression.
+expect("YAML comment '# name:' in the fence is NOT malformed",
+       _fm("---\n# name: see below\nname: x\ndescription: y\n---\n\nbody\n") is True)
+expect("no closing fence -> malformed",
+       _fm("---\nname: x\ndescription: y\n\nbody, fence never closes\n") is False)
+expect("description only in body, not in the fence -> malformed",
+       _fm("---\nname: x\n---\n\ndescription: not frontmatter\n") is False)
+
+# Descriptions carrying ': ' MUST pass: the harness's own reader is line-wise/lenient, and
+# 44 fleet SKILL.md files use the trailing '[MODEL: <id> | checked <date>]' convention.
+# Tightening this to strict YAML would flag ~82/110 files the harness reads correctly.
+MODEL_TAG = ("---\nname: ora-sofr-direct-prefetch\n"
+             "description: Prefetch SOFR. Use when the user mentions: SOFR, rates. "
+             "[MODEL: UNVERIFIABLE | checked 2026-07-09]\n---\n\nbody\n")
+expect("unquoted ': ' / [MODEL: ...] description -> ok", _fm(MODEL_TAG) is True, _fm(MODEL_TAG))
+try:
+    import yaml
+except ImportError:
+    pass
+else:
+    try:
+        yaml.safe_load(MODEL_TAG.split("---", 2)[1])
+        strict_rejects = False
+    except Exception:
+        strict_rejects = True
+    expect("strict YAML rejects it -- so the leniency here is load-bearing, not an oversight",
+           strict_rejects)
+
 npass = sum(1 for ok, _ in results if ok)
 print(f"setup-self-audit tests: {npass}/{len(results)} pass")
 sys.exit(0 if npass == len(results) else 1)

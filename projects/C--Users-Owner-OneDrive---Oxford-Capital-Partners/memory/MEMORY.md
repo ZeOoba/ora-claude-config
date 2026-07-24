@@ -11,6 +11,7 @@
 
 ## Projects & system
 - [Tenant DB Renewal Watch view — CLOSED 07-22](project_tenant_db_renewal_watch_view_2026-07-22.md) — Months to Expiry formula + ≤90d view; refresh wired into ora-lease-expiration-brief, diagnostic views trashed
+- [setup-self-audit frontmatter probe — CLOSED 07-24](project_setup_self_audit_frontmatter_probe_2026-07-24.md) — "all 57 parse cleanly" overclaimed; 53 fleet SKILL.md were unscanned + a latent false positive
 - [config-write-guard.py boundary fix — CLOSED 07-22](project_config_write_guard_boundary_fix_2026-07-21.md) — 3 FPs + 3 REFUTE-found regressions fixed, merged to main w/ Gabriel's token
 - [Tenant-HubSpot Reconciliation — CLOSED 07-21](project_tenant_hubspot_reconciliation_2026-07-21.md) — 7 deals corrected, exception-detection v1.2, new monthly task
 - [event_log.md IWNS block loss — UNATTRIBUTED](project_event_log_iwns_block_loss_unattributed_2026-07-21.md) — 6 entries recovered; root cause open
@@ -54,6 +55,8 @@
 - [Basis Denominator — RCT v03 (RATIFIED)](project_replacement_cost_benchmark_unratified.md) — the ONE denominator; ORA buys at ~35-40% of true replacement
 
 ## Reference
+- [Probe scan sets](reference_probe_scan_sets.md) — what each `maintenance/*-probe.py` actually globs; governor-drift's fleet-root gap CLOSED 07-24 (643→704 files)
+- [SKILL.md frontmatter parse is lenient](reference_skill_frontmatter_lenient_parse.md) — harness splits on the first colon; ~82/110 fail strict YAML by design — do NOT mass-quote descriptions
 - [Notion query needs dashed UUIDs](reference_notion_query_requires_dashed_uuid.md) — undashed `collection://` id fails as "table not exposed"; fetch the db to get the dashed form
 - [Notion view DSL formula-filter bug](reference_notion_view_dsl_formula_filter_bug.md) — formula-property filters silently become a no-op (rollup-shaped); relative dates also unsupported
 - [config-write-guard.py quote-split gap](reference_config_write_guard_quote_split_gap.md) — pre-existing shell-matcher bypass (`"root"/hooks/x`), NOT this session's regression, still open
