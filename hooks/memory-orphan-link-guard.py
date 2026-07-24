@@ -47,8 +47,244 @@ Stdlib only. ASCII-only. Windows.
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
+
+# SHARED SAFE SEGMENTATION (2026-07-24, two rounds). Round A (local review): every
+# raw-string `re.split(r"(?:&&|\|\||;|\|)", cmd)` in this file (three call sites) was
+# quote-BLIND. A crafted quoted argument with an embedded ';'/'&&'/'|' could TEAR across
+# what the split treats as two "segments", and each torn fragment could independently
+# happen to shlex-parse cleanly alone (unbalanced quotes canceling out coincidentally
+# across the tear) -- fabricating a fake segment/subcommand. Live-verified: `git -c
+# core.foo="a;git -C <decoy-repo> commit -m y;b" commit -m "real msg"` fabricated a
+# decoy `git -C <decoy-repo> commit` segment, trusted over the REAL commit later in the
+# string; the decoy repo lacked a memory/ directory, so the guard ALLOWED while real git
+# genuinely landed the orphan.
+#
+# Round B (a SECOND local review, on Round A's own fix): a first fix tokenized PER LINE
+# (`for line in cmd.splitlines(): shlex.split(line)`) specifically to treat a bare
+# newline as a statement separator, the same semantics as ';'. That pre-split throws
+# away the very quote-context shlex needs before it ever sees a newline -- an OPEN
+# double-quote spanning multiple lines (a heredoc-style `-m "$(cat <<'EOF' ... EOF)"`,
+# THIS ENVIRONMENT'S OWN standard multi-line commit-message idiom) has its embedded
+# newlines torn apart into separate "lines" fed to shlex ONE AT A TIME, each missing the
+# other half of the still-open quote -- so `shlex.split` on the FIRST fragment alone
+# either raises (undoing the whole command, per-command None -> guard fully disabled)
+# or, worse, silently tokenizes something unintended. Live-verified: the exact heredoc
+# idiom above got ALLOW while real bash committed the orphan for real. A second, SEPARATE
+# defect in that same fix: `shlex.split()` in default whitespace-token mode does not
+# treat `&`, `|`, `;` as metacharacters at all -- `"MEMORY.md&&git"` (no space around the
+# operator, ordinary shell style) tokenizes as ONE token, so `&&` glued to a neighboring
+# word was invisible to the operator scan. Live-verified regression vs. even the
+# PRE-Round-A code: `git add "path/MEMORY.md"&&git commit -m y` got ALLOW.
+#
+# THE FIX: tokenize the WHOLE command ONCE with `shlex.shlex(cmd, posix=True,
+# punctuation_chars=True)` (NOT `shlex.split`, and NOT pre-split by line) --
+# `punctuation_chars=True` makes `&`/`|`/`;` real metacharacters exactly like a POSIX
+# shell (so `&&`/`||`/`;`/`|` are recognized as their own tokens REGARDLESS of adjacent
+# whitespace, verified: `'x&&y'` -> `['x','&&','y']`), while remaining fully quote-aware
+# (an operator INSIDE a quoted argument, or a `;` embedded in a quoted `-c key=value`,
+# stays part of that ONE token -- verified against both the Round A and Round B attack
+# strings). Because the WHOLE command is tokenized as one string, an open quote
+# correctly spans embedded newlines (the heredoc case collapses to ONE token, matching
+# real bash semantics for what a double-quoted argument is -- no heredoc-specific logic
+# needed, just not destroying the quote context by pre-splitting).
+#
+# A genuine BARE newline between two REAL, separate statements (no ';'/'&&' at all --
+# valid bash, and a real bypass path: `git add MEMORY.md\ngit commit -m x` would
+# otherwise get silently swallowed into `add`'s own argument list, and _is_git_commit
+# would never see a `commit` subcommand at all) is distinguished from a newline living
+# INSIDE a token's own text via the shlex.shlex `lineno` counter: for each token, if
+# `(lineno_after - lineno_before) > tok.count("\n")`, more newlines were crossed than
+# the token's own text accounts for -- a real separator newline sits immediately after
+# it. Verified against: two/three bare-newline-separated statements (correctly split),
+# a newline INSIDE a quoted arg at any position, and the heredoc case (both correctly
+# stay as one token/segment, no false split).
+# Round C (a THIRD local review, on Round B's own fix). Round B correctly closed the
+# heredoc/glued-operator regressions using `shlex.shlex(cmd, posix=True,
+# punctuation_chars=True)` over the WHOLE command, but its bare-newline detection
+# (comparing `lex.lineno` before/after each returned token) turned out to be
+# UNRELIABLE: whether a newline crossed while skipping to the NEXT token gets
+# attributed to the token that just finished or the token about to start depends on
+# WHICH internal shlex code path consumed it -- and a `#` comment uses a DIFFERENT path
+# than plain whitespace-skipping. Traced live: `echo hi # comment\ngit commit -m x`
+# split at the wrong token boundary entirely (`'git'` ended up glued to segment 1
+# instead of starting segment 2) -- not merely imprecise, actively wrong. Separately,
+# self-caught while stress-testing: comparing to the WRONG reference also let ONE
+# `_SEGMENT_OPERATORS`-exact-match check silently pass through a token like `'\n\n\n'`
+# (shlex groups REPEATED punctuation characters of the same kind into ONE token, same
+# as it correctly groups `&&`/`||`) as ordinary content instead of a separator --
+# `git add MEMORY.md\n\n\ngit commit -m x` (blank lines between statements, an entirely
+# ordinary thing to paste) would have reopened the exact same swallowed-add bypass.
+#
+# THE FIX: stop inferring newline-crossing after the fact. Make `\n` a REAL punctuation
+# character itself (added to `punctuation_chars`, removed from `whitespace` so that
+# classification doesn't silently win instead) -- shlex's OWN quote-tracking then
+# handles it exactly like `&`/`|`/`;` already are: a bare newline outside any quote
+# becomes its own token (grouped with adjacent bare newlines, same grouping rule as the
+# other operators -- closing the blank-line gap too, since the segment check now tests
+# whether a token consists ENTIRELY of operator characters, not an exact string match
+# against a fixed short list), while one living inside a quoted argument (a heredoc
+# body, a multi-line message) stays part of that ONE token, unaffected. This ALSO
+# requires disabling shlex's built-in `#`-comment handling (`lex.commenters = ""`):
+# by default a comment's own terminating newline is consumed internally as part of
+# discarding the comment, before punctuation-detection ever sees it -- so a real
+# `git commit` on the line AFTER a comment was silently swallowed into the PRECEDING
+# segment. With comments disabled, `#...text` simply becomes ordinary (harmless, inert)
+# extra tokens attached to whatever segment it's in, and the newline that follows is
+# free to be recognized as a real separator like any other -- the safe direction: more
+# noise in a segment's own token list, never a hidden/merged segment.
+#
+# Round D (a FOURTH local review, on Round C's own fix). `punctuation_chars` also
+# inherited `();<>` from the default set (harmless-seeming -- this file never treats
+# them as separators). But shlex groups ANY run of adjacent punctuation_chars
+# characters into ONE token regardless of which specific characters they are (the same
+# rule that correctly groups `&&`) -- so a real separator glued directly to one of these
+# inert characters with no whitespace (`;(`, `&(`, `);`) merged into ONE token like
+# `';('`. A check requiring EVERY character in a token to be a real operator
+# (`_SEGMENT_OP_CHARS`) fails on that mixed token, silently treating it as ordinary
+# content -- hiding a real `git commit` behind an earlier subcommand. Live-verified
+# full, silent bypass (zero deny output): `git add MEMORY.md;(git commit -m x)` --
+# an ordinary subshell idiom, not an exotic construct. The FIRST attempted fix for
+# THIS (dropping `();<>` from punctuation_chars entirely) traded this for a WORSE,
+# related bug: without them as their own punctuation tokens, `(` glues directly onto
+# the next word (`(git` instead of `(` + `git`), so `_segment_git_parts`'s exact
+# `token == "git"` match no longer recognizes the git executable at all -- same
+# bypass, different mechanism, self-caught by tracing through BEFORE it was ever
+# ported into this file. Correct fix: KEEP `();<>` in `punctuation_chars` (so they
+# stay their OWN clean tokens, never glued to "git"), and instead broaden the
+# separator test -- a token counts as a real separator if it is composed ENTIRELY of
+# punctuation_chars characters AND contains at least one character FROM the actual
+# operator set. A merged blob like `';('` then correctly splits (it is pure
+# punctuation and contains a real `;`); a purely-inert merged blob like `'()'` does
+# not (pure punctuation, but no real operator character present).
+_FULL_PUNCTUATION_CHARS = frozenset("();<>|&\n")
+_SEGMENT_OP_CHARS = frozenset("&|;\n")
+
+
+def _tokenize_segments(cmd):
+    """`cmd` as a list of segments, each a token list (shlex-tokenized, quote-aware,
+    metacharacter-aware regardless of whitespace, correctly split on a genuine bare
+    newline between two statements). Returns None if `cmd` cannot be tokenized at all
+    (unbalanced quoting) -- see the module comment above for the FOUR live-verified
+    bypasses this closes and why each of the three prior, simpler attempts failed."""
+    lex = shlex.shlex(cmd, posix=True, punctuation_chars="".join(_FULL_PUNCTUATION_CHARS))
+    lex.whitespace_split = True
+    lex.whitespace = lex.whitespace.replace("\n", "")
+    lex.commenters = ""
+    try:
+        toks = list(lex)
+    except ValueError:
+        return None
+    segs = []
+    cur = []
+    for tok in toks:
+        is_pure_punctuation = tok and all(c in _FULL_PUNCTUATION_CHARS for c in tok)
+        is_separator = is_pure_punctuation and any(c in _SEGMENT_OP_CHARS for c in tok)
+        if is_separator:
+            if cur:
+                segs.append(cur)
+            cur = []
+        else:
+            cur.append(tok)
+    if cur:
+        segs.append(cur)
+    return segs
+
+
+# `git -C <path>` / a leading `cd <path> &&` inside the command being judged, which the
+# ACTUAL command will honor for its own repo resolution. Conceptually the same shape as
+# commit-provenance-guard.py / eos-review-gate.py's shared hooks/lib/git_commit_parse.py
+# (repo_root()) -- but INLINED, not imported: at the time of this fix, that module is
+# only committed on the still-in-progress feat/eos-review-gate branch, not yet on main
+# (verified: `git show main:hooks/lib/git_commit_parse.py` fails -- what a plain
+# filesystem read finds in the live checkout is another session's UNCOMMITTED staged
+# merge of that branch, not landed history). Taking a hard import dependency on an
+# unmerged, still-changing branch would trade one fragility for a worse one. This is a
+# deliberately small, self-contained port of just the resolution algorithm this guard
+# needs -- not the whole shared library -- with the same directional-safety property
+# (fewer/no candidates on any resolution failure, never a false exclude).
+#
+# NOT a raw regex over the whole command string (an earlier version of this function
+# was exactly that, and was self-caught before shipping): a decoy `cd /x &&` or
+# `git -C /x` sitting inside an ORDINARY quoted commit message -- the same failure
+# class already closed twice elsewhere in this file (_commit_pathspec, the removed
+# _has_pathspec) -- resolved to a nonexistent path, which made the guard fail open and
+# silently ALLOW a commit that genuinely staged an orphaned MEMORY.md. Verified live
+# before this fix: `git commit -m "cd /nonexistent-decoy-path &&"` and `git commit -m
+# "run: git -C /nonexistent-decoy commit"` both got ALLOW. Quote-aware + segment-scoped
+# detection below closes both.
+
+
+def _global_dash_c(toks):
+    """The value of a GLOBAL `git -C <path>` override on this segment's ALREADY
+    tokenized (via _tokenize_segments) token list -- i.e. `-C` appearing BEFORE the
+    subcommand -- or None. Deliberately stops scanning at the subcommand token: `git
+    commit -C <ref>` is a DIFFERENT, real git-commit flag (reuse another commit's
+    message -- already in _COMMIT_VALUE_OPTS) with nothing to do with directories, and
+    must never be misread as this override."""
+    gi = None
+    for i, t in enumerate(toks):
+        base = t.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
+        if base in ("git", "git.exe"):
+            gi = i
+            break
+    if gi is None:
+        return None
+    i = gi + 1
+    dash_c = None
+    while i < len(toks):
+        t = toks[i]
+        if t == "-C" and i + 1 < len(toks):
+            dash_c = toks[i + 1]
+            i += 2
+            continue
+        if t in GIT_VALUE_OPTS and i + 1 < len(toks):
+            i += 2
+            continue
+        if t.startswith("-"):
+            i += 1
+            continue
+        break  # reached the subcommand -- stop, never scan ITS OWN args for this
+    return dash_c
+
+
+def _resolve_target_repo(cmd, cwd):
+    """The git toplevel of the repo the command being judged will ACTUALLY run in:
+    a GLOBAL `git -C <path>` on the segment that actually invokes `git commit` wins,
+    else a leading `cd <path> &&` (only the command's OWN first segment, and only when
+    it is EXACTLY `cd <path>` -- 2 tokens, no more, no less), else the PreToolUse
+    payload's own `cwd`. None if none of those resolve to a real git repo, OR if `cmd`
+    cannot be safely segmented at all (see _tokenize_segments).
+
+    KNOWN DESIGN BOUNDARY (flagged by the formal review gate, 2026-07-24, not merge-
+    blocking): the exact-2-token requirement deliberately does not recognize `cd --
+    <path> && ...` (3 tokens). A contrived compound command using that shape falls
+    through to the payload `cwd` instead of the real target -- narrower than a bare
+    `cd <path>`, and only reachable via a construction nobody has an ordinary reason to
+    type. Widening the match is a reasonable future enhancement, not a fix."""
+    d = None
+    segs = _tokenize_segments(cmd)
+    if segs is None:
+        segs = []
+
+    for seg_toks in segs:
+        sub, _ = _segment_git_parts(seg_toks)
+        if sub == "commit":
+            d = _global_dash_c(seg_toks)
+            break
+
+    if not d and len(segs) > 1 and len(segs[0]) == 2 and segs[0][0] == "cd":
+        d = segs[0][1]
+
+    if not d:
+        d = cwd
+    if not d:
+        return None
+    toplevel = _git(d, "rev-parse", "--show-toplevel")
+    return toplevel.strip() if toplevel else None
+
 
 DEFAULT_MEMORY_INDEX = (
     "C:/Users/Owner/.claude/projects/"
@@ -82,18 +318,15 @@ def _git(repo, *args):
     return p.stdout.decode("utf-8", "replace")
 
 
-def _segment_git_parts(seg):
-    """(subcommand, [args after it]) if this segment invokes git, else (None, []).
+def _segment_git_parts(toks):
+    """(subcommand, [args after it]) if this ALREADY-tokenized segment (a token list
+    from _tokenize_segments) invokes git, else (None, []).
 
-    Tokenized rather than regexed on purpose: the subcommand is the first token after
-    `git` that is not an option (or an option's separate value). A substring match would
+    Positional, not regexed, on purpose: the subcommand is the first token after `git`
+    that is not an option (or an option's separate value). A substring match would
     wrongly fire on `git log --grep=commit`, because `commit` sits on a word boundary
     inside that token.
     """
-    try:
-        toks = seg.split()
-    except Exception:
-        return None, []
     # Find the git executable token (allows `/usr/bin/git`, `git.exe`, and a leading
     # `sudo`/`env`-style prefix that we simply scan past).
     gi = None
@@ -117,9 +350,9 @@ def _segment_git_parts(seg):
     return None, []
 
 
-def _segment_is_git_commit(seg):
-    """True if this single command segment invokes `git commit`."""
-    return _segment_git_parts(seg)[0] == "commit"
+def _segment_is_git_commit(toks):
+    """True if this single ALREADY-tokenized segment invokes `git commit`."""
+    return _segment_git_parts(toks)[0] == "commit"
 
 
 # ---------------------------------------------------------------------------------
@@ -135,9 +368,83 @@ def _segment_is_git_commit(seg):
 # ---------------------------------------------------------------------------------
 _STAGE_ALL_FLAGS = {"-A", "--all", "-u", "--update"}
 
+# `git commit` options that consume the FOLLOWING token as their own value. A value of
+# exactly `--` (e.g. `git commit -m --`, a literal message of "--") must be consumed as
+# THAT option's value, never misread as the pathspec separator -- verified directly:
+# `git commit -m --` commits the message "--" and the WHOLE staged index, same as any
+# other `-m` value.
+_COMMIT_VALUE_OPTS = frozenset((
+    "-m", "--message", "-c", "--reedit-message", "-C", "--reuse-message",
+    "-F", "--file", "--author", "--date", "-t", "--template",
+    "--fixup", "--squash", "--trailer", "--cleanup", "--pathspec-from-file",
+))
+
+
+def _commit_pathspec(toks):
+    """The trailing pathspec token list for a `git commit ...` ALREADY-tokenized
+    segment (from _tokenize_segments), or None if there is no TRUSTWORTHY pathspec (no
+    real `--` found, or the pathspec would be empty).
+
+    Two failure modes found in an earlier version of this scan, both verified live
+    against the deployed guard before being closed here:
+      * `git commit -m --`: `-m`'s value is the literal string "--". A naive scan that
+        just looks for a "--" TOKEN finds this one and reads an EMPTY pathspec after
+        it, which `_mentions_path([], rel)` reports as False for any rel -- silently
+        excluding MEMORY.md from a commit that (per real git) actually includes the
+        whole staged index. Closed by walking `_COMMIT_VALUE_OPTS` and skipping the
+        option's value token unconditionally, whatever it is.
+      * `git commit -m x --` (a normal message, then a bare trailing `--` with nothing
+        after it): real git commits the ENTIRE staged index in this shape -- an empty
+        pathspec means "no restriction", not "matches nothing". Closed by treating an
+        empty tail as untrustworthy (returns None) rather than as an exclusion.
+    Falling through to None in both cases is intentionally the SAFE direction: the
+    caller's normal staged_now/-a handling can only ever set `included=True`, never
+    fabricate a False -- so an unrecognized shape over-blocks rather than bypasses.
+
+    KNOWN RESIDUAL LIMITATION (documented, not fixed here -- see docstring above this
+    function's caller): git also accepts a BARE positional pathspec with no `--` at all
+    when it isn't revision-like, e.g. `git commit -m -- real.md` (where `-m` consumes
+    the `--`, and `real.md` becomes a genuine restricting pathspec -- verified: only
+    real.md lands). This scanner does not attempt to recognize that shape and returns
+    None for it, which -- per the safe-direction guarantee above -- can only cause a
+    spurious over-block on that rare construction, never a bypass.
+    """
+    gi = None
+    for i, t in enumerate(toks):
+        base = t.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
+        if base in ("git", "git.exe"):
+            gi = i
+            break
+    if gi is None:
+        return None
+    i = gi + 1
+    while i < len(toks) and toks[i] != "commit":
+        if toks[i] in GIT_VALUE_OPTS:
+            i += 2
+        else:
+            i += 1
+    if i >= len(toks) or toks[i] != "commit":
+        return None
+    i += 1
+    while i < len(toks):
+        t = toks[i]
+        if t == "--":
+            pathspec = toks[i + 1:]
+            return pathspec if pathspec else None
+        if t in _COMMIT_VALUE_OPTS:
+            i += 2      # skip the option AND its value, whatever that value is
+            continue
+        i += 1
+    return None
+
 
 def _mentions_path(args, rel):
-    """True if any arg names MEMORY.md -- repo-relative, absolute, or bare basename."""
+    """True if any arg names MEMORY.md -- repo-relative, absolute, or bare basename.
+
+    `args` now always arrives pre-tokenized (shlex, quote-aware) via
+    _tokenize_segments, so the `.strip("\"'")` below is redundant on the common path
+    (shlex already strips surrounding quote characters) -- kept intentionally as cheap
+    defense-in-depth against any FUTURE caller that passes raw, un-tokenized text."""
     base = rel.rsplit("/", 1)[-1]
     for a in args:
         a2 = a.strip("\"'").replace("\\", "/")
@@ -153,10 +460,57 @@ def _commit_would_include(cmd, rel, staged_now):
     Deliberately errs toward INCLUDED: a wrong 'included' costs a spurious block that a
     human can inspect, while a wrong 'excluded' silently lands the orphan this guard
     exists to stop.
+
+    PATHSPEC EXCLUSIVITY (2026-07-24). `git commit -- <pathspec>` is EXCLUSIVE by git's
+    own semantics -- verified directly: `git add A.md B.md; git commit -- A.md` commits
+    ONLY A.md, leaving B.md staged and untouched even though it WAS staged at commit
+    time; `git commit -a -- A.md` is a hard git error ("fatal: paths ... with -a does
+    not make sense") and never commits at all. So once a `commit` segment carries a
+    `--` pathspec, whether `rel` is one of the named paths is the ONLY question -- any
+    staged_now state or earlier add/-a in this same command is moot, because the
+    pathspec is what git actually honors. Concretely: in a shared checkout, another
+    session's unrelated `git add` can leave MEMORY.md sitting staged in the index;
+    without this carve-out a plain `git commit -- unrelated/file.md`, which cannot
+    possibly touch MEMORY.md, was DENIED anyway.
+
+    QUOTE-AWARE `--` DETECTION (2026-07-24, REFUTE pass on the carve-out above; the
+    calling convention referenced below has since changed -- see _tokenize_segments'
+    module comment, this file no longer tokenizes ANYTHING with a naive `.split()`).
+    Segments now arrive here pre-tokenized (quote-aware) via _tokenize_segments, so an
+    ORDINARY commit message containing a standalone " -- " (e.g. "fix -- bug", "notes
+    -- see PR") can never be mistaken for a real pathspec separator -- reopening the
+    exact bypass the 2026-07-24 12:54 fix closed, just behind different bait, is what a
+    FIRST version of this carve-out did before that convention change. Verified live at
+    the time: `git add MEMORY.md && git commit -m "fix -- bug"` and `git commit -am
+    "fix -- bug"` both got ALLOW under that version. Only a standalone `--` TOKEN is
+    trusted here; one embedded inside a quoted argument is invisible to the tokenizer
+    and correctly ignored.
+    See _commit_pathspec() for the option-aware scan that replaced a still-too-naive
+    first shlex pass, which was itself caught misreading `git commit -m --` (an EMPTY
+    pathspec, since `-m`'s value IS the `--`) as "excludes everything" -- via LOCAL code
+    review before landing, not a second self-caught defect.
+
+    COMPOUND-COMMAND ORDERING (known limitation, documented not fixed -- flagged by
+    local code review). This function returns one CUMULATIVE (staged, from_worktree)
+    after walking every segment, not "what did the actual `git commit` segment itself
+    include". A `commit` segment carrying a pathspec can now set `staged=False` on its
+    own -- previously a `commit` segment could only ever push `staged` UP (via `-a`) --
+    so a LATER segment in the same compound command can flip a pathspec-exclusive
+    commit's verdict back after that commit already ran, e.g.
+    `git commit -m x -- other.md && git add MEMORY.md` reports included=True even though
+    the commit itself (per verified pathspec exclusivity) could not have touched
+    MEMORY.md; the trailing `add` only affects the WORKING directory's next commit, not
+    this one. This errs toward over-blocking (safe), not a bypass, and is a pre-existing
+    consequence of tracking one cumulative verdict rather than one per `commit`
+    invocation -- correctly fixing it means restructuring the return value to be keyed
+    per commit segment, out of scope for a minimal fix.
     """
     staged, from_worktree = staged_now, False
-    for seg in re.split(r"(?:&&|\|\||;|\|)", cmd):
-        sub, args = _segment_git_parts(seg.strip())
+    segs = _tokenize_segments(cmd)
+    if segs is None:
+        return staged, from_worktree  # can't safely segment -- fall back unchanged
+    for seg_toks in segs:
+        sub, args = _segment_git_parts(seg_toks)
         if sub is None:
             continue
         if sub == "add":
@@ -173,6 +527,11 @@ def _commit_would_include(cmd, rel, staged_now):
             if not paths or _mentions_path(args, rel):
                 staged, from_worktree = False, False
         elif sub == "commit":
+            pathspec = _commit_pathspec(seg_toks)
+            if pathspec is not None:
+                included_here = _mentions_path(pathspec, rel)
+                staged, from_worktree = included_here, included_here
+                continue
             # `-a` / `--all` stages every tracked modified file, including MEMORY.md --
             # so it re-includes a file an earlier segment just unstaged.
             if any(a in ("-a", "--all") or
@@ -187,18 +546,10 @@ def _is_git_commit(cmd):
     MENTION it -- e.g. an echo of advice text, or `git log --grep=commit`."""
     if not isinstance(cmd, str) or "commit" not in cmd:
         return False
-    # Split on shell separators so `cd x && git commit -m y` still matches, while a
-    # quoted mention inside a single argument does not get its own segment.
-    for seg in re.split(r"(?:&&|\|\||;|\|)", cmd):
-        if _segment_is_git_commit(seg.strip()):
-            return True
-    return False
-
-
-def _has_pathspec(cmd):
-    """True if a `--` pathspec separator is present, which makes git commit the WORKING
-    TREE for those paths rather than the index."""
-    return re.search(r"\s--\s", cmd) is not None
+    segs = _tokenize_segments(cmd)
+    if segs is None:
+        return False  # can't safely segment -- fail OPEN (allow), same as elsewhere
+    return any(_segment_is_git_commit(seg_toks) for seg_toks in segs)
 
 
 def _staged_paths(repo):
@@ -226,14 +577,37 @@ def main():
     if not os.path.isfile(index_abs):
         return
 
-    repo_dir = os.path.dirname(index_abs)
-    toplevel = _git(repo_dir, "rev-parse", "--show-toplevel")
-    if not toplevel:
-        return  # not a git repo -- nothing to guard
-    repo = toplevel.strip()
+    # REPO RESOLUTION (2026-07-24). `repo` is the ACTUAL target of the command being
+    # judged -- resolved via _resolve_target_repo(cmd, cwd) above (`git -C <p>` wins,
+    # else a leading `cd <p> &&`, else the PreToolUse payload's own `cwd` field) -- NOT
+    # walked up from the hardcoded ORA_MEMORY_INDEX/DEFAULT_MEMORY_INDEX path as before.
+    # That old approach always resolved to whichever repo the memory index physically
+    # lives in (the main checkout), regardless of where the command actually runs, so a
+    # `git commit` in an isolated worktree (its own independent index) was judged
+    # against the MAIN checkout's unrelated staged state -- live-verified to both
+    # over-block (a clean worktree commit denied over another session's staged
+    # main-checkout orphan) and under-block (a REAL orphan staged only in a worktree's
+    # own index was invisible, since the guard never looked at that index at all). A
+    # totally unrelated repo (no memory/ directory whatsoever) triggered the same
+    # over-block for the same reason.
+    repo = _resolve_target_repo(cmd, payload.get("cwd") or "")
+    if not repo:
+        return  # can't resolve the target repo -- nothing to guard
 
-    # Repo-relative path of MEMORY.md, forward-slashed the way git reports paths.
-    rel_index = os.path.relpath(index_abs, repo).replace(os.sep, "/")
+    # The canonical memory index's OWN repo-relative path -- derived from where
+    # DEFAULT_MEMORY_INDEX/ORA_MEMORY_INDEX physically lives, which identifies WHICH
+    # file this guard protects, independent of which working copy (main checkout or a
+    # worktree of the SAME underlying repo) the command being judged actually targets.
+    canon_repo = _git(os.path.dirname(index_abs), "rev-parse", "--show-toplevel")
+    if not canon_repo:
+        return
+    rel_index = os.path.relpath(index_abs, canon_repo.strip()).replace(os.sep, "/")
+
+    # Does the RESOLVED target repo even have this path on disk? A worktree of the
+    # SAME repo checks out the full tracked tree, so it does; an unrelated repo does
+    # not -- in which case this command cannot possibly touch the file we protect.
+    if not os.path.isfile(os.path.join(repo, rel_index)):
+        return
 
     staged = _staged_paths(repo)
     if staged is None:
@@ -245,11 +619,27 @@ def main():
     if not included:
         return  # MEMORY.md not part of this commit -- not our business
 
-    if _has_pathspec(cmd) or from_worktree:
+    # `from_worktree` (from _commit_would_include, above) is the single source of truth
+    # for whether THIS commit reads MEMORY.md from the working tree or the index -- it
+    # is already quote-aware via _commit_pathspec(). A second, independent raw-string
+    # `_has_pathspec(cmd)` check used to live here (`re.search(r"\s--\s", cmd)`) and was
+    # REMOVED (2026-07-24, second local-review round): it could fire on a decoy " -- "
+    # inside an ordinary quoted commit message even when `_commit_pathspec` correctly
+    # found no real pathspec, forcing a working-tree read for what is actually a plain
+    # staged commit. If the working tree had since been reverted to a clean MEMORY.md
+    # while the ORPHANED version stayed staged (real git commits the index here, not the
+    # working tree), the guard scanned the wrong, clean content and ALLOWED -- verified
+    # live: the orphaned index content landed. Two independent quote-aware scanners for
+    # the same fact is itself a hazard (this is exactly how they drifted); there is now
+    # only one.
+    if from_worktree:
         # A pathspec commit takes the WORKING TREE, and so does anything the command
-        # stages itself.
+        # stages itself -- read the RESOLVED repo's own copy (os.path.join(repo,
+        # rel_index)), NOT the hardcoded canonical index_abs path: for a command
+        # targeting a worktree, that is a DIFFERENT file on disk from the main
+        # checkout's copy, even though both are "MEMORY.md" at the same relative path.
         try:
-            with open(index_abs, "r", encoding="utf-8") as fh:
+            with open(os.path.join(repo, rel_index), "r", encoding="utf-8") as fh:
                 content = fh.read()
         except Exception:
             return
