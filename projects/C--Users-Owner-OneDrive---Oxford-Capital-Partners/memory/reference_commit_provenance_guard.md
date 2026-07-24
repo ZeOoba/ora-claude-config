@@ -5,6 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 0888c827-119f-4877-98ae-23ac7c404a27
+  modified: 2026-07-24T14:56:33.926Z
 ---
 
 **What it is:** two cooperating hooks, live in `~/.claude` since 2026-07-16 (registered in
@@ -105,3 +106,20 @@ narrows the block window for a still-live session that touched a path >TTL_H ago
 elsewhere, which now ages out and allows the commit (intended effect of keying TTL to
 `SESSION_PRUNE_H` per-touch rather than per-file-activity; `already_committed_since()` remains the
 correctness backstop for genuinely-landed content).
+
+**⚠ 2026-07-24 — the "land the backlog" janitor pattern sweeps LIVE in-flight edits, not just
+orphaned ones. Don't promise "it stays uncommitted, so it's still yours to commit."** During a
+scheduled `ora-command-center-mirror-drift-check` run, `shared-checkout-guard` warned that the
+`.claude` main checkout held ~41 uncommitted changes from open session `99aea6a4`, so this session
+deliberately edited-but-did-not-commit (SKILL.md v1.1 + an `event_log.md` entry) and told Gabriel it
+would splice them out later. ~5 minutes later that other session landed the whole backlog in three
+janitor commits (`44efc61` "land canonical SKILL.md backlog from prior sessions", `281b159` "land
+2-day backlog…") — which captured **both** of this session's edits, at their final content, before
+any splice could run. Nothing was lost or corrupted (verified marker-by-marker against `HEAD`), and
+the janitor pattern is sanctioned by this very note — but the direction is worth naming: the hazard
+is symmetric, and the guard is explicitly fail-open, holds no lock, and does not protect a live
+session's *unstaged* work from a foreign janitor commit. Practical consequence: **before executing a
+deferred commit/splice plan in this checkout, re-check `git status` and `git log -1` first** — the
+work may already be in `HEAD`, in which case the correct action is to verify content parity and
+report, not to construct a splice for a diff that no longer exists. Related:
+[[reference_event_log_partial_commit_splice]] · [[feedback_verify_registry_mutation_claims]].
