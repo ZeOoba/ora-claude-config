@@ -32,7 +32,7 @@ def run_hook(stdin_text, telemetry_dir, sessions_dir=None):
 
 def make_transcript(path):
     """Write a fake JSONL transcript with an Edit, a Bash 'npm run gate',
-    a Task tool_use, and an assistant text line containing 'Dispatch: Inline'."""
+    an Agent tool_use, and an assistant text line containing 'Dispatch: Inline'."""
     lines = [
         # assistant message with a tool_use Edit
         {
@@ -62,7 +62,9 @@ def make_transcript(path):
                 ],
             },
         },
-        # assistant message dispatching a Task
+        # assistant message dispatching a subagent. The tool is named
+        # "Agent" -- "Task" has never appeared in any real transcript, so a
+        # fixture built on that name certifies a dead branch.
         {
             "type": "assistant",
             "message": {
@@ -70,7 +72,7 @@ def make_transcript(path):
                 "content": [
                     {
                         "type": "tool_use",
-                        "name": "Task",
+                        "name": "Agent",
                         "input": {"description": "do thing"},
                     }
                 ],
@@ -184,6 +186,63 @@ def test_no_code_activity_skipped():
     print("PASS test_no_code_activity_skipped")
 
 
+def test_task_management_tools_are_not_dispatch():
+    """TaskCreate/TaskUpdate/TaskList are todo-management tools, NOT subagent
+    dispatch. A prefix or substring match on "Task" would silently inflate
+    task_dispatched with todo churn -- detection must be exact-match."""
+    tmp = tempfile.mkdtemp(prefix="eos-test-")
+    transcript = os.path.join(tmp, "t.jsonl")
+    tele_dir = os.path.join(tmp, "telemetry")
+    lines = [
+        # one real edit so the session still qualifies as a coding session
+        {
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "name": "Edit",
+                        "input": {"file_path": "C:/proj/bar.py"},
+                    }
+                ],
+            },
+        },
+    ]
+    # Real Task* management tools, plus two synthetic names that are proper
+    # SUBSTRINGS of "Agent". The latter pin exact-match semantics regardless of
+    # container type: if DISPATCH_TOOLS ever degrades to a bare string, `tname
+    # in DISPATCH_TOOLS` becomes substring containment and these two match.
+    for tool in ("TaskCreate", "TaskUpdate", "TaskList", "TaskGet",
+                 "TaskOutput", "TaskStop", "Age", "gen"):
+        lines.append(
+            {
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "tool_use", "name": tool, "input": {}}
+                    ],
+                },
+            }
+        )
+    with open(transcript, "w", encoding="ascii") as fh:
+        for ln in lines:
+            fh.write(json.dumps(ln) + "\n")
+
+    stdin = json.dumps({"session_id": "task-mgmt", "transcript_path": transcript})
+    rc, out, err = run_hook(stdin, tele_dir)
+    assert rc == 0, "expected exit 0, got %s (stderr=%s)" % (rc, err)
+
+    out_file = os.path.join(tele_dir, "lane-telemetry.jsonl")
+    with open(out_file, "r", encoding="ascii") as fh:
+        rec = json.loads(fh.read().splitlines()[-1])
+    assert rec["task_dispatched"] is False, (
+        "Task* management tools must NOT count as subagent dispatch: %r" % rec
+    )
+    print("PASS test_task_management_tools_are_not_dispatch")
+
+
 def test_override_used_surfaces_reason():
     tmp = tempfile.mkdtemp(prefix="eos-test-")
     transcript = os.path.join(tmp, "transcript.jsonl")
@@ -260,6 +319,7 @@ if __name__ == "__main__":
     test_empty_object_fails_open()
     test_missing_transcript_fails_open()
     test_no_code_activity_skipped()
+    test_task_management_tools_are_not_dispatch()
     test_override_used_surfaces_reason()
     test_override_used_no_reason_backward_compat()
     test_no_override_file()
