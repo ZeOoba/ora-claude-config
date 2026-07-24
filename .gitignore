@@ -70,6 +70,26 @@ obsidian-fleet-mirror/session-state.json
 /scheduled-tasks/_archive_*/*/*
 !/scheduled-tasks/_archive_*/*/SKILL.md
 
+# (2026-07-24, Gabriel-authorized) 2b/2c versioned task SPECS and memory, but left
+# `_shared/` untracked -- the note above even says so explicitly. That leaves
+# `send-via-outlook.ps1`, the SOLE automated send path for BOTH fleets, with no history
+# and no backup: every scheduled task's email leg depends on one unversioned file, and an
+# accidental truncation would be unrecoverable and silent. Same durability rationale as
+# 2b/2c, third occurrence of the same failure mode.
+#
+# ALLOW-LIST, NOT A DIRECTORY OPT-IN -- deliberately. `_shared/` is a working drawer that
+# also holds LIVE CREDENTIALS (`anthropic-key.dat`, `netlify-token.dat`), the full
+# `send-log.txt` (every recipient + subject ORA has ever auto-sent), and ~30 `_tmp_*` /
+# `hg-*` / dated `.html` email-body scratch files. This repo pushes to GitHub
+# (ZeOoba/ora-claude-config), so a directory-level `!` here would publish secrets. Verified
+# 2026-07-24: no `*.dat` has ever been committed on any ref. Name each durable file
+# individually; never negate the directory, and never add a glob that could catch `*.dat`.
+!/scheduled-tasks/_shared/send-via-outlook.ps1
+!/scheduled-tasks/_shared/Send-OraReport.ps1
+!/scheduled-tasks/_shared/Send-OutreachQueueEmail.ps1
+!/scheduled-tasks/_shared/EMAIL_DELIVERY.md
+!/scheduled-tasks/_shared/README-SEND-PATTERN.md
+
 # 2c) Memory (projects/.../memory/) — versioned 2026-07-15 for durability, same rationale
 #     as 2b: this /* default-deny (introduced in the SAME 2026-07-12 commit as 2b) never
 #     got a matching opt-in for memory, so every memory file except rules.md (already
