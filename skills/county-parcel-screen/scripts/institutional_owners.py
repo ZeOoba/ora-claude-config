@@ -62,6 +62,8 @@ TIER1 = [
     (r'\bSTEELCASE\b',                'Steelcase (GR owner-occupier institutional)'),
     (r'\b(MILLERKNOLL|HERMAN\s+MILLER)\b', 'MillerKnoll'),
     (r'\bAIC\s+(INCOME\s+)?FUND\b|\bAIC\s+VENTURES\b', 'AIC Ventures (Austin TX sale-leaseback funds; AIC INCOME FUND CROSSROADS had no numeral — caught retro-sweep 2026-06-10)'),
+    (r'\bNL\s+VENTURES\b',            'NL Ventures (AIC Ventures net-lease fund series; NL VENTURES XII GROVEPORT slipped the X&Y-only roman rule — Columbus 2026-07-24)'),
+    (r'\bMERITEX\b',                  'Meritex (Minneapolis institutional industrial owner — Columbus 2026-07-24)'),
 ]
 
 # ---- Fund-morphology patterns (generic): EXCLUDE tier, they exist only as fund vehicles ----
@@ -81,6 +83,8 @@ TIER2 = [
     (r'\bTPG\b',      'TPG (also common local initials)'),
     (r'\bEQT\b',      'bare EQT (also oil/gas and local initials)'),
     (r'\bGOODMAN\b',  'Goodman Group vs personal surname — verify'),
+    (r'\b(VENTURES|CAPITAL|PARTNERS|REALTY|PROPERTIES|HOLDINGS|INVESTORS|EQUITIES)\s+(?:[IVX]{2,5}|[0-9]{1,2})\b',
+     'fund-series morphology: entity-word + standalone series numeral (LIBERTY CAPITAL PARTNERS III, NL VENTURES XII — Columbus 2026-07-24; VERIFY not EXCLUDE, local sponsors also number their vehicles)'),
 ]
 
 # ---- Tax-agent mail (F9 flag — mail is agent, not principal; never an exclusion) ----
