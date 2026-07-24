@@ -54,6 +54,7 @@
 - [Basis Denominator — RCT v03 (RATIFIED)](project_replacement_cost_benchmark_unratified.md) — the ONE denominator; ORA buys at ~35-40% of true replacement
 
 ## Reference
+- [Notion query needs dashed UUIDs](reference_notion_query_requires_dashed_uuid.md) — undashed `collection://` id fails as "table not exposed"; fetch the db to get the dashed form
 - [Notion view DSL formula-filter bug](reference_notion_view_dsl_formula_filter_bug.md) — formula-property filters silently become a no-op (rollup-shaped); relative dates also unsupported
 - [config-write-guard.py quote-split gap](reference_config_write_guard_quote_split_gap.md) — pre-existing shell-matcher bypass (`"root"/hooks/x`), NOT this session's regression, still open
 - [Skill args positional-substitution bug](reference_skill_args_positional_substitution_bug.md) — `args` corrupts $-amounts; filed claude-code#79859
@@ -64,7 +65,7 @@
 - [ECC Repo Flagged](reference_ecc_repo_flagged.md) — affaan-m/ECC rejected: malware-clone risk, redundant with skill stack
 - [Memory Scope Fragmentation](reference_memory_scope_fragmentation.md) — `(1)` folder = ggoldberg's account; no-suffix = **egoldberg's**
 - [Subagent Anti-Delegation](feedback_subagent_anti_delegation.md) — `Tools:*` subagents may recurse via Agent instead of working; forbid it
-- Verify-before-trusting cluster: [subagent "safe" claims](feedback_verify_subagent_safe_claims.md) (grep-for-refs misses doctrine-in-prose) · [registry mutation claims](feedback_verify_registry_mutation_claims.md) (need a re-check) · [probe findings](feedback_verify_probe_findings_before_acting.md) (a hypothesis, not a verdict)
+- Verify-before-trusting cluster: [subagent "safe" claims](feedback_verify_subagent_safe_claims.md) (grep-for-refs misses doctrine-in-prose) · [registry mutation claims](feedback_verify_registry_mutation_claims.md) (need a re-check) · [probe findings](feedback_verify_probe_findings_before_acting.md) (a hypothesis, not a verdict) · [reflagging tooling gaps](feedback_recheck_before_reflagging_tooling_gaps.md) (check current state before repeating a "known gap" note)
 - [fleet-status.py Dual-Fleet Read](reference_fleet_status_dual_read.md) — reads both registries either surface; WRITES need matching MCP
 - [Throttle-skip "global_limit" = catch-up burst](reference_fleet_throttle_skip_catchup_burst.md) — not a bug; lone repeated skips WOULD be
 - More verify-first: [negative Glob results](feedback_verify_negative_glob_results.md) (cross-check `git ls-files`) · [WIP settled via mtime](feedback_verify_wip_settled_via_mtime.md) (isRunning isn't per-file)
@@ -93,6 +94,7 @@
 - [Scheduled-Task approvedPermissions](reference_scheduled_task_approved_permissions.md) — missing tool grant silently no-ops writes
 - [Tenant Name Mappings](reference_tenant_name_mappings.md) — PM platform → Notion Tenant DB reconciliation aliases
 - [ripgrep blind on scheduled-tasks](reference_ripgrep_scheduled_tasks_false_negative.md) — rg false-negatives rooted there; fixed via .ignore
+- [Schematic producer-clobber recurrence](reference_schematic_producer_clobber_recurrence.md) — 2nd occurrence 07-23; self-heals via pre-check, not escalated to a gate
 - [Hook systemMessage never reaches model](reference_hook_systemmessage_not_model_visible.md) — PreToolUse systemMessage is USER-only; use additionalContext
 - [Commit-provenance guard](reference_commit_provenance_guard.md) — blocks a commit sweeping another live session's work
 - [event_log.md uncommitted backlog](reference_event_log_uncommitted_backlog.md) — no single committer; whoever notices commits their own entry

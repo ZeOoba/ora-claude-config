@@ -12,6 +12,69 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-24 — Rate Snapshot staleness root-caused: catch-up-burst ordering, not an orphaned producer; ora-sofr-direct-prefetch v1.1 guard added
+
+SYMPTOM: During the 2026-07-24 ora-sofr-direct-prefetch run, the Rate Snapshot page (35e6ecd8) header read `fetched_at: 2026-07-22 13:25 ET` with §1/§3/§4 at 07-21/07-22 vintage, suggesting ora-am-brief Block A had not refreshed on 07-23 or 07-24.
+
+TRACE (orphaned-task-forensics Workflow A):
+- NOT an orphaning. ora-am-brief is enabled and live on CC/MCP (`0 6 * * *`, filePath resolves). Ran 07-17, 07-21, 07-22, 07-24.
+- 07-24 observation was a RACE, not a failure: am-brief started 14:35:28Z; the prefetch task read the page at 14:36:26Z (58s later) and saw pre-run state; am-brief finished writing at ~10:40 ET. Self-resolved.
+- 07-23 gap is REAL, confirmed three ways: (1) no run transcript (`scheduled-task name="ora-am-brief"` present in transcripts dated 07-17/07-21/07-22/07-24, absent 07-23); (2) no throttle-skip entry for 07-23 (its only skips 07-21 09:46, 07-22 09:20, 07-24 10:34 ET, all `global_limit`); (3) no "ORA Daily Brief" email 07-23. Page fetched_at jumped 07-22 13:25 ET -> 07-24 10:40 ET, ~45h stale.
+
+ROOT CAUSE (independently corroborated by ora-health-guard 2026-07-24 Block A.0): the Desktop app is offline overnight, so 05:00-06:00 ET slots depend on catch-up backfill. Health guard counts 5 late-wake bursts since 07-14 (07-14, 07-20, 07-21, 07-22, 07-24) and a 16-task pileup in the 05:00-09:30 window. On 07-24 the 06:00 slot was backfilled 4h35m late; on 07-23 it was not backfilled at all. Exact backfill cutoff UNRESOLVED [SPECULATIVE] — n=2, and the registry keeps only a single `lastRunAt`.
+
+SECOND FINDING: the catch-up burst does not preserve intra-cluster ordering (health guard's own wording). ora-sofr-direct-prefetch (10:10 ET) is built assuming ora-am-brief (06:00 ET) already ran; in a burst they fire seconds apart, inverting it. On 07-24 that produced a redundant SOFR patch that am-brief superseded ~4 min later with identical values at full precision (am-brief's §2 note records it cross-validated against the prefetch pull). Benign, but exposed a latent false-alarm path: a Block A write landing between STEP 2's read and STEP 3c's write would fail `old_str` and post a false failure to the Ops Hub.
+
+RESOLUTION (Gabriel approved option B, 2026-07-24): ora-sofr-direct-prefetch SKILL.md -> v1.1. STEP 2 now also reads Block A's `fetched_at` and sets `am_brief_pending`; STEP 3c treats an `old_str` mismatch that re-resolves to already-fresh as SUCCESS (no Ops Hub post) and retries once only if still stale; STEP 4 treats a supersede-by-am-brief as PASS with no re-patch; STEP 5 silent-success list extended. Fallback role preserved — a genuinely missed Block A day still gets patched. Also corrected a stale fact in the same file: it attributed ora-am-brief Block A to the LAMS/Cowork fleet, retired there 2026-07-16 and now CC/MCP.
+
+DEFERRED (Gabriel's call, not taken): option A — moving the 05:00-09:30 AM cluster later to match actual machine uptime. Root cause is machine uptime, not cron placement; rescheduling trades away the point of a 6am brief.
+
+OPEN: (1) exact catch-up backfill window rule unknown; (2) ora-health-guard's setup-self-audit reports "all 57 SKILL.md parse cleanly" but this file's frontmatter fails strict YAML at the pre-existing `[MODEL: UNVERIFIABLE` token — same failure in HEAD, so the audit uses a lenient parser or a different corpus; the assurance claim is weaker than it reads. (3) SKILL.md edit left UNCOMMITTED — .claude main checkout had ~39 uncommitted changes from live session 99aea6a4 at the time.
+
+## 2026-07-24 — ora-command-center-mirror-drift-check v1.1: baseline list replaced with ff-only abort tests
+**Trigger:** the 10:40 ET scheduled run posted HEALTHY (drift 0, `LastTaskResult` 0, `LastRunTime` 10:00:01, no merge markers) but had to make a judgment call: the working tree held one entry outside the SKILL.md known-benign baseline — untracked `docs/superpowers/plans/2026-07-22-brain-overlay-staleness-fix-plan.md`. The baseline was **stale in both directions**: none of its four documented entries (`.claude/launch.json.example`, `package.json`, `.wrangler/`, `scripts/dev-watchdog.cjs`) were present anymore, and 07-22's CRLF-dirty `.claude/workflows/refute-financial-change.js` was also resolved. Gabriel directed the fix in-turn.
+
+**Change (v1.0 → v1.1, `~/.claude/scheduled-tasks/ora-command-center-mirror-drift-check/SKILL.md`):**
+- **Step 3** no longer enumerates benign files. It now classifies each `git status --short` entry by running a test that answers the only question that matters — *can this entry abort `git pull --ff-only`?*: untracked with no counterpart on `origin/main` (`git ls-tree origin/main -- <path>` empty) → BENIGN · untracked that DOES exist on `origin/main` → FLAG (the case that genuinely aborts ff-only) · modified but EOL/whitespace-only (`git diff --ignore-all-space --ignore-cr-at-eol` empty) → BENIGN · modified with substantive content or any staged/conflicted status → FLAG · any merge/rebase marker → FLAG. Historic filenames are retained as illustrative context with an explicit "context, NOT an exemption — run the test" caveat.
+- **Step 5** ALARM condition reworded to key off those tests rather than "beyond the known-benign baseline"; BENIGN entries must be recorded in the Notion row **with their verification output**, never silently skipped.
+- **Step 6** corrected: the Ops Hub was described as a *database ID*; it is a **page**, and completion rows are child pages of `32b6ecd8-9e59-81f2-b329-df3fd0e25062` (parent type `page_id`, not `data_source_id`). Full dashed ID, parent type, and title convention now written into the file.
+
+**Verification:** new tests replayed against the live tree reproduce the run's verdict (plan doc → BENIGN); FLAG branch counterfactually confirmed against `package.json` / `README.md` (`ls-tree` non-empty → would FLAG).
+
+**Not committed** — the shared `~/.claude` checkout held ~41 uncommitted changes belonging to open session `99aea6a4`; committing would have swept their work in. SKILL.md on disk is authoritative for the CC/MCP scheduler (registry stores `filePath` only), so v1.1 is live regardless.
+
+**Generalizable lesson:** a monitoring check whose "known-benign" definition is a hardcoded file list rots in both directions and trains the reader to discount its own alarms. Prefer a test that names the failure mode.
+
+**Ops note (no action):** no Ops Hub rows of any producer exist for 2026-07-23 — Claude Desktop was closed Thursday. Expected per this task's KNOWN LIMITATION; the native Windows task was unaffected (`NumberOfMissedRuns` = 0).
+
+## 2026-07-24 — AR/delinquency invented-pointer defect closed (ora-am-brief §4c + ora-pm-ledger)
+
+**Defect.** The 2026-07-22 Command Center Daily Brief §4c told the reader to "refer to the latest **ora-pm-ledger** AR run (nightly 18:00 ET) for current balances." No such run exists — `ora-pm-ledger` has no AR-computation module and never has. The pointer was **model-generated at run time**, not a hardcoded string (confirmed: the phrase appears nowhere under `~/.claude`), so this was a fabrication in the same class as the 2026-07-16 date defect — it sent Gabriel to a nonexistent artifact for a financial figure. Surfaced by the 2026-07-22 ora-pm-ledger Block C run.
+
+**Design decision — did NOT build an AR module.** Investigated `ora-ar-export-freshness-nudge` (LAMS) first. Per the 2026-04-28 QuickBooks-Scrub Master Change Set (Notion `3506ecd8-9e59-815b-b6a8-cff24fa5b926`): AR's canonical source is the PM platforms (Rent Manager/Yardi/AppFolio) **manually** exported to SharePoint `Cowork OS / QB Exports / AR Aging`; QuickBooks Desktop AR is explicitly NOT primary; **no live connector exists** for QB Desktop or any PM platform; and the only importer (`scripts/ar-import.ts`, oxford-command-center PR #81) is **interactive-CLI-only by design** because a human must confirm ambiguous tenant matches. A nightly AR job would therefore have to auto-write fuzzy-matched arrears to a financial overlay unconfirmed. Rejected on data-integrity grounds; corrected the pointer instead.
+
+**Fix (2 files, content-only, no registry change).**
+- `~/.claude/scheduled-tasks/ora-am-brief/SKILL.md` — added **"4c — AR / DELINQUENCY SOURCE OF RECORD"** clause inside the 2026-07-16 critical-dates OVERRIDE block, between list items 4 and 5. Documents the real chain, and requires §4c to record a COVERAGE GAP naming that chain (or "current AR exposure not verifiable — awaiting export") and to never invent/promise an automated AR run. Deliberately inserted WITHOUT renumbering — "step 5" is cross-referenced in surrounding prose.
+- `~/.claude/scheduled-tasks/ora-pm-ledger/SKILL.md` — added **"AR / DELINQUENCY — THIS TASK DOES NOT PRODUCE IT"** to §C.2, closing the reverse confusion (a future ledger run "helpfully" building the module the Brief implied).
+
+**Verified.** Both clauses present; am-brief items 4/5 intact and ordered with the clause between them; `step 5` cross-ref resolves; frontmatter intact in both. Registry `path` for ora-am-brief confirmed = the edited file (`list_scheduled_tasks`), so the scheduler reads it; file-is-authoritative means no commit needed to take effect. Self-heal direction checked (`guard.ps1` = newest-wins, restores only if canonical is missing/stale) — the edit propagates to mirrors rather than being reverted at the next 12:45 guard fire.
+
+**NOT committed.** `.claude` main checkout had 37 uncommitted changes belonging to another live session (`99aea6a4`); per shared-checkout single-writer rule the commit was left to that session's owner.
+
+## 2026-07-23 — ora-cc-schematic-refresh (2026-07-23a): producer-clobber resync + memory-integrity EXIT 1
+
+Scheduled 2×/week schematic refresh (Thu 14:15 ET slot), first FULL probe-suite re-run since the durable source diverged from the published artifact.
+
+- **Producer-clobber caught & resolved.** Durable source `~/.claude/artifacts/claude-code-schematic.html` was at REV 2026-07-20a while the *published* artifact had advanced to REV 2026-07-21b via three ad-hoc fleet-only rechecks (07-20b / 07-21a / 07-21b) that never synced back to the source file. Per the refresh SKILL's pre-edit check, pulled the artifact's authoritative content into the source BEFORE applying this run's edits (would otherwise have wiped 3 revisions). No data lost.
+- **memory-integrity-probe.py flipped exit 0 → EXIT 1** (was clean at the prior full pass). 132/132 files present on disk (working-tree reconcile 1:1), but MEMORY.md at git HEAD links 5 files not committed to HEAD's tree: project_config_write_guard_boundary_fix_2026-07-21.md, project_tenant_db_renewal_watch_view_2026-07-22.md, reference_config_write_guard_quote_split_gap.md, reference_notion_view_dsl_formula_filter_bug.md, reference_workflow_scriptpath_crlf_rejection.md. Commit-hygiene gap (a fresh clone would get 5 broken index pointers), not lost data — the owning session should commit the 5 files. Left untouched (not this session's WIP).
+- Other 4 probes green: governor-drift exit 0 (638 files, DSCR 1.25x / LTV 40%), doctrine-integrity exit 0 (8/8 guards, CLAUDE.md 1694 words), confidentiality-guard 131/131.
+- Fleet VERDICT ATTENTION — 52 tracked / 49 enabled (27 CC/MCP + 22 LAMS) / 3 disabled; 13 throttle skips/24h all ora-pm-ledger (documented catch-up-burst, expected); 0 collisions/overdue/missed.
+- Repos clean: oxford-command-center main==origin/main @e6aba59; ora-pm clean @1b304e8. enabledPlugins unchanged (14 keys / 12 true).
+
+## 2026-07-22 — OI-023 (snapshot provenance asOf) closed: PR #231 opened on oxford-command-center
+
+The Command Center snapshot's provenance labels (`meta.asOf`/`cash.asOf`/`assumptions.asOf`) no longer pin to the June `WORKBOOK_AS_OF` constant — `parse.ts` now reads each sheet's own cached "As of ..." dateline (rent roll 2026-07-17, cash 2026-07-10 live-verified; missing dateline falls back with a DataQualityFlag warn, never silently). `parseTasks` monthCol deliberately stays on `WORKBOOK_AS_OF` (test-locked). Day-count `?? s.meta.asOf` fallback audit: all production alerting paths pass explicit run dates; last omitting caller (`brain.setTenantNote`) wired to `referenceDate()`. TDD (9 new tests), full gate green (2,964 tests, typecheck 0, lint 0), adversarial REFUTE pass run (caught one real break: brain.test.ts partial config mock). PR: https://github.com/ZeOoba/oxford-command-center/pull/231 (merge = Gabriel). Tracker row moved to Closed. NOTE: this OI-023 (opened 07-21, snapshot asOf) is distinct from the 07-20 event-log entries' "OI-023" (IWNS LLC rent-roll gap, closed same day) — apparent ID recycle during the 07-20 tracker worktree/HEAD divergence incident (see project_open_items_tracker_worktree_head_divergence.md).
+
 ## 2026-07-22 — Doctrine-guard WARN fixed; pathspec-commit-discards-splice gotcha found and documented
 
 Triggered by the scheduled `ora-doctrine-integrity-guard` run (12:55 ET): clean overall (doctrine exit 0, governor exit 0, telemetry exit 0), but the doctrine probe flagged a fail-open WARN — a `MEMORY.md` index entry (skill description-version-extraction gotcha, line 61) exceeded the 150-char hook-description cap by one character. Gabriel asked for it fixed, then to commit just that file.
@@ -1008,3 +1071,16 @@ No doctrine change made (none needed) — this is a "read the existing reference
 ---
 
 *Entries at and before “2026-07-16 — ora-am-brief follow-ups (4) + doctrine-probe gains a LAMS-fleet regression guard” rolled over 2026-07-18 to [_archive/event_log_2026-07-18.md](_archive/event_log_2026-07-18.md) per memory-policy.md's rollover rule.*
+
+
+## 2026-07-22 (cont.) — automation-health-monitor workflow-optimization follow-through (Gabriel-directed, in-session)
+
+Two of the 2026-07-22 Automation Health report's workflow-optimization candidates were implemented same-day, in the same session, on Gabriel's explicit instruction:
+
+1. **`ora-health-guard` v1.1 — Block A.0 wake-lateness immediate alert.** New first step: on every fire, compare actual start time to the 05:15 ET cron target; if >45min late, immediately send a standalone `🌙 Overnight machine-offline detected` email (ggoldberg-only) rather than waiting for `automation-health-monitor`'s ~11:05 ET run to discover the same catch-up burst 3-6h later. **Known limitation, stated explicitly to Gabriel:** this is NOT a true pre-9am external ping — no on-machine scheduled task (any fleet) can fire before the machine itself wakes, so this only front-runs the *previous* 11:05 detection, it doesn't beat the wake event itself. A true independent-of-machine watchdog would require extending the existing GitHub Actions/Power Automate dead-man's-switch pattern (same one already watching `ora-cowork-heartbeat`'s 16h threshold) — out of reach from this Cowork session (no GitHub/Power Automate connector available here). Flagged as a follow-up requiring a session with that access; external dead-man issue `ora-claude-config#11` (referenced in the A2 beacon note) is the likely home for it.
+
+2. **`ora-health-guard` v1.1 — Block B.3.5 cross-fleet beacon.** New Notion page `3a56ecd8-9e59-8152-83b6-c61cec736f2b` ("🔌 Connector Pre-Flight — Status", under Ops Hub `32b6ecd8`), written every Block B run (pass or fail) with `status`/`last_run_et`/`failed_connectors`/`subject_sent`. Closes a real gap found during the 2026-07-22 audit: `automation-health-monitor`'s only prior check for this block was an Outlook Sent Items subject search, which came up empty that day despite the block having actually fired — forcing an unnecessary ℹ️ informational downgrade. `automation-health-monitor` v1.14 Step 0.55 table repoints this row to the new beacon as PRIMARY, keeping the Sent Items search as secondary/backup.
+
+Both changes are additive-only to both SKILL.mds — no prior logic, table rows, or rules were removed or reordered. `automation-health-monitor`'s frontmatter description and end-of-file changelog were bumped to v1.14 with matching notes.
+
+**SELF-CORRECTION, same session:** the first attempt to log this entry used Desktop Commander `write_file` without `mode: 'append'`, which defaults to `mode: 'rewrite'` — this overwrote the entire file (990→11 lines, ~183KB of history destroyed) before the append-vs-rewrite default was caught. Recovered via `git restore -- memory/event_log.md` (this file is tracked in the `.claude/projects/...` git repo, last commit `afc1334`, working tree was otherwise only CRLF/LF-different from HEAD — confirmed via `git diff --stat` before restoring, so nothing beyond the errant write itself was lost). Logging per Calibrate convention: **`write_file` calls against any file under `memory/` (or any tracked/historical file) must always pass `mode: 'append'` explicitly when the intent is to append — never rely on the tool's default.**
