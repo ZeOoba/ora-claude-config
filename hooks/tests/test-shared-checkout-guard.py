@@ -57,6 +57,18 @@ def make_worktree_repo():
     return d
 
 
+def make_nested_worktree(main_repo, rel="server-side/.claude/worktrees/nested"):
+    """A linked worktree living INSIDE `main_repo`'s own directory tree -- the real
+    layout `EnterWorktree`/`git worktree add` produces for a session isolating itself
+    within a shared repo (e.g. `<repo>/.claude/worktrees/<name>/`). Returns the nested
+    worktree's root path."""
+    d = os.path.join(main_repo, rel)
+    os.makedirs(d)
+    with open(os.path.join(d, ".git"), "w") as fh:
+        fh.write("gitdir: /somewhere/.git/worktrees/nested\n")
+    return d
+
+
 def sessions_tmp():
     return tempfile.mkdtemp(prefix="scg-sess-")
 
@@ -99,6 +111,34 @@ def test_worktree_silent():
     assert rc == 0, "worktree expected exit 0, got %s" % rc
     assert "systemMessage" not in out, "linked worktree must be silent, got %r" % out
     print("PASS test_worktree_silent")
+
+
+def test_nested_worktree_silent_even_when_outer_repo_dirty():
+    """BUG FIX (2026-07-24): a linked worktree NESTED inside a shared repo's own tree
+    (e.g. `<repo>/.claude/worktrees/<name>/`, the actual layout EnterWorktree/`git
+    worktree add` produces) must stay silent, even while the OUTER shared repo itself
+    is dirty with unrelated WIP -- find_repo() matches the file against the outer root
+    by prefix, so without checking the file's OWN nearest .git, the guard used to warn
+    about the outer checkout's dirty status for a file that was already isolated.
+    Observed live: every edit inside .claude/worktrees/scg-attribution-test/ warned
+    about .claude's ~30 unrelated uncommitted changes."""
+    main = make_main_repo(dirty=True)  # outer repo IS dirty -- must not matter
+    nested = make_nested_worktree(main)
+    fp = os.path.join(nested, "server", "x.ts")
+    rc, out, err = run_hook(payload("s15", fp), [main], sessions_tmp())
+    assert rc == 0, "expected exit 0, got %s (%s)" % (rc, err)
+    assert "systemMessage" not in out, (
+        "file inside a nested linked worktree must stay silent regardless of the "
+        "outer repo's dirty status, got %r" % out)
+    # Sanity: a file in the OUTER main checkout (NOT inside the nested worktree) must
+    # still warn -- proves the fix narrows to the file's own checkout, it doesn't
+    # blanket-silence the whole repo just because ONE nested worktree exists somewhere
+    # inside it.
+    outer_fp = os.path.join(main, "server", "y.ts")
+    rc2, out2, err2 = run_hook(payload("s16", outer_fp), [main], sessions_tmp())
+    assert "systemMessage" in out2, (
+        "a file in the OUTER main checkout must still warn, got %r" % out2)
+    print("PASS test_nested_worktree_silent_even_when_outer_repo_dirty")
 
 
 def test_main_clean_silent():
@@ -360,6 +400,7 @@ def test_never_denies_even_when_warning():
 if __name__ == "__main__":
     test_outside_repo_silent()
     test_worktree_silent()
+    test_nested_worktree_silent_even_when_outer_repo_dirty()
     test_main_clean_silent()
     test_main_dirty_warns()
     test_broken_sibling_import_still_warns_and_does_not_traceback()
