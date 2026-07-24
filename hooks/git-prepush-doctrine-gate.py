@@ -36,15 +36,17 @@ non-zero (drift) result — a probe we cannot run cannot prove doctrine is intac
 gate reads NOTHING from stdin, so git's ref payload is preserved intact for the
 confidentiality scan that the shim exec's after it.
 
-Install (done 2026-07-08; re-do after any fresh clone — the .git/hooks/pre-push shim is
-NOT version-controlled, this script and the confidentiality scan ARE. See
-docs/MIGRATION_RUNBOOK.md). The shim must run BOTH tracked checks, doctrine gate first:
+Install (done 2026-07-08, extended 2026-07-24; re-do after any fresh clone — the
+.git/hooks/pre-push shim is NOT version-controlled, this script and its siblings ARE.
+See docs/MIGRATION_RUNBOOK.md). The shim must run THREE tracked checks in order —
+this doctrine gate first, then the hook-test-suite gate, then the confidentiality scan:
   .git/hooks/pre-push  ->  #!/bin/sh
                            ROOT="$(git rev-parse --show-toplevel)"
                            python "$ROOT/hooks/git-prepush-doctrine-gate.py" "$@" </dev/null || exit $?
+                           python "$ROOT/hooks/git-prepush-hook-tests-gate.py" "$@" </dev/null || exit $?
                            exec python "$ROOT/hooks/git-prepush-confidential-scan.py" "$@"
-  (doctrine gate takes </dev/null so it never consumes git's ref stdin; the exec hands
-   that stdin to the confidentiality scan unchanged.)
+  (this gate and the hook-test gate both take </dev/null so neither consumes git's ref
+   stdin; the final exec hands that stdin to the confidentiality scan unchanged.)
 
 Exit 0 = allow push (no drift, or drift with a valid logged override).
 Exit 1 = block (drift, no valid override) — git pre-push convention.

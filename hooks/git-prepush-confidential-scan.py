@@ -17,17 +17,20 @@ the MAIN worktree's copy (resolved via `git rev-parse --git-common-dir`, shared 
 every worktree of the same repo) when this checkout's own copy is missing or
 unreadable. Still fail-closed if the file is unreadable in BOTH places (2026-07-12).
 
-Install (done 2026-06-11; re-do after any fresh clone — see docs/MIGRATION_RUNBOOK.md).
-The .git/hooks/pre-push shim is NOT version-controlled, so it must be recreated on every
-fresh clone. It runs BOTH tracked checks — the doctrine-drift gate FIRST, then this
-fail-closed confidentiality scan (the doctrine gate takes </dev/null so it never consumes
-git's ref stdin; the exec hands that stdin to this scan unchanged):
+Install (done 2026-06-11, extended 2026-07-24; re-do after any fresh clone — see
+docs/MIGRATION_RUNBOOK.md). The .git/hooks/pre-push shim is NOT version-controlled, so
+it must be recreated on every fresh clone. It runs THREE tracked checks in order — the
+doctrine-drift gate, then the hook-test-suite gate, then this fail-closed
+confidentiality scan LAST (the first two take </dev/null so neither consumes git's ref
+stdin; the final exec hands that stdin to this scan unchanged):
   .git/hooks/pre-push  ->  #!/bin/sh
                            ROOT="$(git rev-parse --show-toplevel)"
                            python "$ROOT/hooks/git-prepush-doctrine-gate.py" "$@" </dev/null || exit $?
+                           python "$ROOT/hooks/git-prepush-hook-tests-gate.py" "$@" </dev/null || exit $?
                            exec python "$ROOT/hooks/git-prepush-confidential-scan.py" "$@"
-  (The doctrine-drift check lives in hooks/git-prepush-doctrine-gate.py; THIS scan's own
-   logic is unchanged — the doctrine gate was added ahead of it, not merged into it.)
+  (The doctrine-drift check lives in hooks/git-prepush-doctrine-gate.py, the hook-test
+   check in hooks/git-prepush-hook-tests-gate.py; THIS scan's own logic is unchanged —
+   the other two gates were added ahead of it, not merged into it.)
 
 Exit 0 = allow push. Exit 1 = block (git pre-push convention).
 """
