@@ -27,7 +27,7 @@ Design rules (mirror the EOS reliability spec):
 
 Usage:  python setup-self-audit.py [--json] [--strict]
 """
-import os, sys, json, re, glob, datetime, traceback
+import os, sys, json, re, glob, datetime, traceback, subprocess
 
 HOME = os.path.expanduser("~")
 CLAUDE = os.path.join(HOME, ".claude")
@@ -218,13 +218,21 @@ def check_skills():
         add("skill-frontmatter", "SKIP", f"error: {e}")
 
 # ---- Check 3: SECRET SCAN ----
-SECRET_PATTERNS = [
-    re.compile(r"sk-ant-[A-Za-z0-9_\-]{8,}"),
-    re.compile(r"\bak_[A-Za-z0-9]{12,}"),
-    re.compile(r"x-api-key\s*[:=]\s*['\"]?[A-Za-z0-9_\-]{12,}"),
-    re.compile(r"Bearer\s+[A-Za-z0-9_\-\.]{16,}"),
-    re.compile(r"(FRED_API_KEY|API_KEY|APIKEY|SECRET|TOKEN)\s*[:=]\s*['\"]?[A-Za-z0-9_\-]{12,}"),
-]
+# Patterns now come from hooks/lib/secret_patterns.py -- ONE source shared with the pre-push
+# gate and scrub-before-optin (Gabriel ruling 2026-07-24). The 5 patterns previously inlined
+# here and the 8 in scrub-before-optin had already diverged, with NEITHER a superset of the
+# other; the shared module is their union. Fail-open (this probe is advisory, unlike the
+# pre-push gate which fails closed): if the module is unreachable the check reports SKIP.
+# Resolved from THIS file's location, not from CLAUDE: the probe must scan with the pattern
+# set from its own checkout. A worktree copy importing the live tree's module would test
+# something other than what it is about to land.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(_REPO_ROOT, "hooks", "lib"))
+try:
+    import secret_patterns as _secrets
+except Exception:
+    _secrets = None
+
 SECRET_TARGETS = [
     os.path.join(HOME, ".claude.json"),
     os.path.join(ROAMING, "claude_desktop_config.json"),
@@ -233,7 +241,33 @@ SECRET_TARGETS = [
     os.path.join(CLAUDE, "mcp-servers"),
     os.path.join(ROAMING, "logs"),
 ]
-EXCLUDE_DIR_PARTS = ("_archive", "subagents", "node_modules", "file-history", "tool-results", os.sep + "tasks" + os.sep)
+# `_archive` REMOVED from the exclusions 2026-07-24 (Gabriel ruling). A credential does not
+# become safe by being archived, and archives are exactly where a rotated-away key lingers.
+# The other entries stay: they are transient/regenerable app state (session transcripts,
+# tool results), not a place a durable credential lives.
+EXCLUDE_DIR_PARTS = ("subagents", "node_modules", "file-history", "tool-results", os.sep + "tasks" + os.sep)
+
+
+def _tracked_files():
+    """Every git-tracked file under ~/.claude -- i.e. exactly what gets PUSHED to
+    ZeOoba/ora-claude-config.
+
+    Added 2026-07-24 to fix an inversion: the scan's original six targets were almost
+    entirely artifacts that never leave the machine (backups/ has 0 tracked files, logs/
+    is local), while the 292+ tracked files that ARE pushed -- memory/, scheduled-tasks/,
+    workflows/, prompts/ -- had no scheduled credential scan at all. Derived from
+    `git ls-files` rather than a hardcoded directory list so it cannot drift as dirs are
+    opted into tracking. Fail-open: no git, no repo, or any error -> empty list.
+    """
+    try:
+        p = subprocess.run(["git", "-C", _REPO_ROOT, "ls-files"],
+                           capture_output=True, text=True, timeout=30)
+        if p.returncode != 0:
+            return []
+        return [os.path.join(_REPO_ROOT, rel.replace("/", os.sep))
+                for rel in p.stdout.splitlines() if rel.strip()]
+    except Exception:
+        return []
 
 def _iter_files(target):
     if os.path.isfile(target):
@@ -245,6 +279,12 @@ def _iter_files(target):
             for fn in files:
                 yield os.path.join(root, fn)
 
+
+def _iter_targets():
+    for tgt in SECRET_TARGETS:
+        for fp in _iter_files(tgt):
+            yield fp
+
 # claude_desktop_config.json / .claude.json are the LEGITIMATE homes for an MCP key -> not a leak.
 # mcp-builder reference docs carry example "x-api-key:" strings -> documentation, not real keys.
 LEGIT_KEY_HOMES = {"claude_desktop_config.json", ".claude.json"}
@@ -252,29 +292,38 @@ DOC_FALSE_POSITIVE_PARTS = ("mcp-builder", "/reference/", "evaluation.md")
 
 def check_secrets():
     try:
+        if _secrets is None:
+            add("secret-scan", "SKIP",
+                "hooks/lib/secret_patterns.py unreachable -- no patterns to scan with")
+            return
         crit, applog = {}, {}
         scanned = 0
-        for tgt in SECRET_TARGETS:
-            for fp in _iter_files(tgt):
-                low = fp.replace("\\", "/").lower()
-                if any(x in low for x in DOC_FALSE_POSITIVE_PARTS):
-                    continue  # documentation examples, not real credentials
-                try:
-                    if os.path.getsize(fp) > 3_000_000:
-                        continue
-                    with open(fp, encoding="utf-8", errors="ignore") as f:
-                        data = f.read()
-                except Exception:
+        seen = set()
+        # Local artifacts (never pushed) + the git-tracked set (what IS pushed).
+        for fp in list(_iter_targets()) + _tracked_files():
+            key = os.path.normcase(os.path.abspath(fp))
+            if key in seen:
+                continue                               # tracked set overlaps mcp-servers/
+            seen.add(key)
+            low = fp.replace("\\", "/").lower()
+            if any(x in low for x in DOC_FALSE_POSITIVE_PARTS) or _secrets.is_exempt_path(fp):
+                continue  # documentation examples and test fixtures, not real credentials
+            try:
+                if os.path.getsize(fp) > 3_000_000:
                     continue
-                scanned += 1
-                if any(p.search(data) for p in SECRET_PATTERNS):
-                    base = os.path.basename(fp)
-                    if base in LEGIT_KEY_HOMES:
-                        continue                       # expected key home
-                    elif base.endswith(".log"):
-                        applog[base] = True            # app's own logs echo the active MCP key by design; local-only, rotate out
-                    else:
-                        crit[base] = True              # real leak: backup/memory/transcript/etc.
+                with open(fp, encoding="utf-8", errors="ignore") as f:
+                    data = f.read()
+            except Exception:
+                continue
+            scanned += 1
+            if _secrets.scan_text(data):
+                base = os.path.basename(fp)
+                if base in _secrets.LEGIT_KEY_HOMES:
+                    continue                       # expected key home
+                elif base.endswith(".log"):
+                    applog[base] = True            # app's own logs echo the active MCP key by design; local-only, rotate out
+                else:
+                    crit[base] = True              # real leak: backup/memory/transcript/etc.
         if crit:
             add("secret-scan", "CRIT",
                 f"credential literals in {len(crit)} non-legitimate file(s) of {scanned} scanned -- scrub these + confirm the key is rotated",
