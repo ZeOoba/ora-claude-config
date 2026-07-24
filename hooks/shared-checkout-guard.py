@@ -69,6 +69,25 @@ except Exception:
     def other_active_sessions(_session_id):
         return []
 
+# Provenance is what turns "a session is open" into "a session touched THESE files".
+# Same guarded-import posture and same reason as above (warn-only hook: a missing
+# module must degrade, never traceback on every write). Degrading here costs only
+# attribution PRECISION -- _attribute_wip() then reports the WIP as unattributed,
+# which is the honest answer when there is no evidence to attribute it with.
+try:
+    from commit_provenance import TOUCHED_BASENAME, read_touched  # noqa: E402,F401
+    from commit_provenance import norm as prov_norm  # noqa: E402,F401
+    PROVENANCE_LOADED = True
+except Exception:
+    PROVENANCE_LOADED = False
+    TOUCHED_BASENAME = "touched-files.txt"
+
+    def prov_norm(p):
+        return _norm(p)  # resolved at call time; _norm is defined below
+
+    def read_touched(_fh):
+        return {}
+
 DEFAULT_REPOS = [
     "C:/Users/Owner/oxford-command-center",
     "C:/Users/Owner/ora-skills",
@@ -128,6 +147,93 @@ def status_fingerprint(lines):
     return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:16]
 
 
+def _status_paths(repo, lines):
+    """Absolute, provenance-normalized paths named by `git status --porcelain`.
+
+    Porcelain v1 shape: 2 status chars + space + path. A rename/copy is
+    `R  old -> new`; attribute the NEW path, since that is what exists on disk
+    now. core.quotePath double-quotes non-ASCII paths, so unquote best-effort.
+    Any unparseable line is skipped -- attribution is enrichment and is never
+    worth raising inside a warn-only hook.
+    """
+    out = set()
+    for ln in lines:
+        if len(ln) < 4:
+            continue
+        rest = ln[3:].strip()
+        if " -> " in rest:
+            rest = rest.split(" -> ", 1)[1].strip()
+        if len(rest) >= 2 and rest.startswith('"') and rest.endswith('"'):
+            try:
+                rest = json.loads(rest)
+            except Exception:
+                rest = rest[1:-1]
+        if rest:
+            out.add(prov_norm(os.path.join(repo, rest)))
+    return out
+
+
+def _sessions_touching(paths, others, sessions_dir):
+    """[(sid, status)] for live sessions whose RECORDED touched-set intersects
+    `paths`. Returns [] when provenance is unavailable or unreadable -- absence
+    of evidence, which the caller reports as unattributed rather than guessing.
+    """
+    if not PROVENANCE_LOADED or not paths:
+        return []
+    found = []
+    for entry in others:
+        sid = (entry or {}).get("sid")
+        if not sid:
+            continue
+        tf = os.path.join(sessions_dir, sid, TOUCHED_BASENAME)
+        try:
+            if not os.path.isfile(tf):
+                continue
+            with open(tf, encoding="utf-8") as fh:
+                touched = read_touched(fh)
+        except Exception:
+            continue  # unreadable -> no evidence from this session
+        if paths & set(touched):
+            found.append((sid, entry.get("status") or ""))
+    return found
+
+
+def _attribute_wip(repo, lines, others, sessions_dir):
+    """Evidence-based attribution clause, or an honest unattributed one.
+
+    BUG FIX (2026-07-24): this used to name `others[0]` -- an ARBITRARY index
+    into the liveness dict -- and assert it was "likely the source of this
+    WIP", with nothing whatsoever tying that session to the dirty files.
+    Observed live during the ora-deal-aging-sla run with ELEVEN sessions
+    concurrently registered: it named the same session across ~8 consecutive
+    warnings when that session had been idle for 16 minutes and had no
+    provenance dir at all, while the session that actually made the commits
+    went unnamed. A confidently WRONG name is worse than no name -- it sends
+    the reader to reconcile with an uninvolved session and, worse, invites
+    "that WIP is not mine" reasoning about files that are. See
+    feedback_shared_checkout_guard_session_attribution_unreliable.md.
+
+    Now a session is named ONLY when its own recorded touched-set intersects
+    the dirty paths. With no such evidence the clause states how many other
+    sessions are open and calls the WIP unattributed.
+    """
+    if not others:
+        return ""
+    hits = _sessions_touching(_status_paths(repo, lines), others, sessions_dir)
+    if hits:
+        who = ", ".join(
+            "`%s`%s" % (sid[:8], (" (" + st + ")") if st else "")
+            for sid, st in hits[:3])
+        more = "" if len(hits) <= 3 else " and %d more" % (len(hits) - 3)
+        verb = " has" if len(hits) == 1 else " have"
+        return (" Session " + who + more + verb + " recorded edit(s) to file(s)"
+                " in this dirty set -- reconcile with it before committing.")
+    return (" " + str(len(others)) + " other session(s) are open, but none has"
+            " a recorded edit to these files -- this WIP is UNATTRIBUTED."
+            " Do not assume a specific session; check `git log -1` and"
+            " `git status` yourself before committing.")
+
+
 def main():
     payload = json.loads(sys.stdin.read())
     if not isinstance(payload, dict):
@@ -180,14 +286,7 @@ def main():
 
     n = len(lines)
     others = other_active_sessions(session_id)
-    if others:
-        who = others[0]["sid"][:8]
-        status = others[0].get("status") or ""
-        collision_note = (" Session `" + who + "` is open right now" +
-                          (" (" + status + ")" if status else "") +
-                          " -- likely the source of this WIP.")
-    else:
-        collision_note = ""
+    collision_note = _attribute_wip(repo, lines, others, sessions_dir)
 
     msg = (
         "Shared-checkout hygiene: the " + repo_key + " MAIN checkout has " + str(n) +
