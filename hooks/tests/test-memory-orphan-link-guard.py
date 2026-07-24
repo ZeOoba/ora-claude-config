@@ -185,6 +185,111 @@ check("no orphan link -> add-then-commit ALLOW",
       run_guard("git add -A && git commit -m x", IDX2)[0], "ALLOW")
 
 shutil.rmtree(root2, ignore_errors=True)
+
+# ===================================================================================
+# PATHSPEC EXCLUSIVITY (2026-07-24). `git commit -- <pathspec>` is EXCLUSIVE: only the
+# named paths land, no matter what else is staged in the index -- verified directly:
+#   `git add A.md B.md; git commit -m x -- A.md` commits ONLY A.md; B.md stays staged,
+#   untouched. `git commit -a -- A.md` is a hard git error ("does not make sense") and
+#   never commits at all -- so -a can never smuggle an unnamed file past a pathspec.
+# Bug: _commit_would_include() seeded `included` from `staged_now` (is MEMORY.md
+# anywhere in the CURRENT shared index) even when a `--` pathspec was present and did
+# not name MEMORY.md. In a shared checkout another session's unrelated `git add` on
+# MEMORY.md left it sitting staged, and a plain `git commit -- other/file.md` -- which
+# cannot possibly touch MEMORY.md -- was DENIED anyway.
+# ===================================================================================
+print()
+print("== pathspec exclusivity: staged-elsewhere must not leak into a pathspec commit ==")
+root3, mem3 = setup()
+IDX3 = os.path.join(mem3, "MEMORY.md").replace("\\", "/")
+MEMREL3 = "projects/proj/memory/MEMORY.md"
+
+with open(os.path.join(mem3, "other.md"), "w", encoding="utf-8") as f:
+    f.write("unrelated tracked file\n")
+git(root3, "add", "projects/proj/memory/other.md")
+git(root3, "commit", "-qm", "add other.md")
+
+with open(os.path.join(mem3, "MEMORY.md"), "a", encoding="utf-8") as f:
+    f.write("- [Orphan](orphan3.md) - hook\n")
+with open(os.path.join(mem3, "orphan3.md"), "w", encoding="utf-8") as f:
+    f.write("body, not staged\n")
+with open(os.path.join(mem3, "other.md"), "w", encoding="utf-8") as f:
+    f.write("unrelated edit\n")
+git(root3, "add", MEMREL3)                        # MEMORY.md staged by "another session"
+git(root3, "add", "projects/proj/memory/other.md")  # other.md also modified+staged
+
+check("pathspec naming an UNRELATED file, MEMORY.md staged elsewhere -> ALLOW",
+      run_guard('git commit -m x -- "projects/proj/memory/other.md"', IDX3)[0], "ALLOW")
+
+check("pathspec explicitly naming MEMORY.md (relpath) -> still DENY",
+      run_guard('git commit -m x -- "%s"' % MEMREL3, IDX3)[0], "DENY")
+
+check("pathspec naming MEMORY.md by bare basename -> still DENY",
+      run_guard('git commit -m x -- "MEMORY.md"', IDX3)[0], "DENY")
+
+check("pathspec naming BOTH files (one is MEMORY.md) -> still DENY",
+      run_guard('git commit -m x -- "%s" "projects/proj/memory/other.md"' % MEMREL3, IDX3)[0],
+      "DENY")
+
+# clean index (no orphan) behind an unrelated pathspec must stay ALLOW throughout
+git(root3, "checkout", "--", MEMREL3)
+git(root3, "add", MEMREL3)
+check("no orphan link, pathspec unrelated -> ALLOW",
+      run_guard('git commit -m x -- "projects/proj/memory/other.md"', IDX3)[0], "ALLOW")
+
+shutil.rmtree(root3, ignore_errors=True)
+
+# ===================================================================================
+# REFUTE PASS (2026-07-24). A first version of the pathspec carve-out above trusted
+# ANY "--" found via the naive .split() used elsewhere in this file, including one
+# sitting INSIDE a quoted commit message ("fix -- bug", "notes -- see PR" are ordinary
+# things to write). That reopened the exact bypass the 12:54 same-day fix closed, just
+# behind a decoy message instead of a bare `git add && git commit`. Verified live
+# before the shlex fix: all three attacks below got ALLOW. Only a shlex-tokenized
+# (quote-aware) standalone `--` may now be trusted as a real pathspec separator.
+# ===================================================================================
+print()
+print("== REFUTE: a decoy ' -- ' inside the commit message must not fake a pathspec ==")
+root4, mem4 = setup()
+IDX4 = os.path.join(mem4, "MEMORY.md").replace("\\", "/")
+MEMREL4 = "projects/proj/memory/MEMORY.md"
+
+with open(os.path.join(mem4, "MEMORY.md"), "a", encoding="utf-8") as f:
+    f.write("- [Orphan](orphan4.md) - hook\n")
+with open(os.path.join(mem4, "orphan4.md"), "w", encoding="utf-8") as f:
+    f.write("body, not staged\n")
+
+git(root4, "reset", "-q")
+check('BYPASS ATTEMPT: add-then-commit, double-quoted msg has " -- " -> DENY',
+      run_guard('git add "%s" && git commit -m "fix -- bug"' % MEMREL4, IDX4)[0], "DENY")
+
+git(root4, "reset", "-q")
+check('BYPASS ATTEMPT: `commit -am` with " -- " in the message -> DENY',
+      run_guard('git commit -am "fix -- bug"', IDX4)[0], "DENY")
+
+git(root4, "reset", "-q")
+check("BYPASS ATTEMPT: single-quoted message containing ' -- ' -> DENY",
+      run_guard("git add \"%s\" && git commit -m 'fix -- bug'" % MEMREL4, IDX4)[0], "DENY")
+
+git(root4, "reset", "-q")
+check("unbalanced quoting -> shlex fails, must not fail OPEN -> DENY",
+      run_guard('git add "%s" && git commit -m "unbalanced \\"quote' % MEMREL4, IDX4)[0],
+      "DENY")
+
+# a REAL trailing pathspec must still correctly exclude, even with a decoy " -- "
+# earlier in the same segment's (quoted) commit message.
+with open(os.path.join(mem4, "other4.md"), "w", encoding="utf-8") as f:
+    f.write("tracked\n")
+git(root4, "add", "projects/proj/memory/other4.md")
+git(root4, "commit", "-qm", "add other4")
+with open(os.path.join(mem4, "other4.md"), "w", encoding="utf-8") as f:
+    f.write("edit\n")
+git(root4, "reset", "-q")
+check("decoy ' -- ' in message, but a REAL trailing pathspec still wins -> ALLOW",
+      run_guard('git add "%s" && git commit -m "notes -- decoy" -- '
+                '"projects/proj/memory/other4.md"' % MEMREL4, IDX4)[0], "ALLOW")
+
+shutil.rmtree(root4, ignore_errors=True)
 print()
 print(f"RESULT: {sum(results)}/{len(results)} passed")
 sys.exit(0 if all(results) else 1)
