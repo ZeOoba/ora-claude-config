@@ -136,6 +136,79 @@ def _segment_is_git_commit(seg):
 # ---------------------------------------------------------------------------------
 _STAGE_ALL_FLAGS = {"-A", "--all", "-u", "--update"}
 
+# `git commit` options that consume the FOLLOWING token as their own value. A value of
+# exactly `--` (e.g. `git commit -m --`, a literal message of "--") must be consumed as
+# THAT option's value, never misread as the pathspec separator -- verified directly:
+# `git commit -m --` commits the message "--" and the WHOLE staged index, same as any
+# other `-m` value.
+_COMMIT_VALUE_OPTS = frozenset((
+    "-m", "--message", "-c", "--reedit-message", "-C", "--reuse-message",
+    "-F", "--file", "--author", "--date", "-t", "--template",
+    "--fixup", "--squash", "--trailer",
+))
+
+
+def _commit_pathspec(seg):
+    """The trailing pathspec token list for a `git commit ...` segment, quote-aware, or
+    None if there is no TRUSTWORTHY pathspec (no real `--` found, quoting could not be
+    parsed, or the pathspec would be empty).
+
+    Two failure modes found in an earlier version of this scan, both verified live
+    against the deployed guard before being closed here:
+      * `git commit -m --`: `-m`'s value is the literal string "--". A naive scan that
+        just looks for a "--" TOKEN finds this one and reads an EMPTY pathspec after
+        it, which `_mentions_path([], rel)` reports as False for any rel -- silently
+        excluding MEMORY.md from a commit that (per real git) actually includes the
+        whole staged index. Closed by walking `_COMMIT_VALUE_OPTS` and skipping the
+        option's value token unconditionally, whatever it is.
+      * `git commit -m x --` (a normal message, then a bare trailing `--` with nothing
+        after it): real git commits the ENTIRE staged index in this shape -- an empty
+        pathspec means "no restriction", not "matches nothing". Closed by treating an
+        empty tail as untrustworthy (returns None) rather than as an exclusion.
+    Falling through to None in both cases is intentionally the SAFE direction: the
+    caller's normal staged_now/-a handling can only ever set `included=True`, never
+    fabricate a False -- so an unrecognized shape over-blocks rather than bypasses.
+
+    KNOWN RESIDUAL LIMITATION (documented, not fixed here -- see docstring above this
+    function's caller): git also accepts a BARE positional pathspec with no `--` at all
+    when it isn't revision-like, e.g. `git commit -m -- real.md` (where `-m` consumes
+    the `--`, and `real.md` becomes a genuine restricting pathspec -- verified: only
+    real.md lands). This scanner does not attempt to recognize that shape and returns
+    None for it, which -- per the safe-direction guarantee above -- can only cause a
+    spurious over-block on that rare construction, never a bypass.
+    """
+    try:
+        toks = shlex.split(seg)
+    except ValueError:
+        return None
+    gi = None
+    for i, t in enumerate(toks):
+        base = t.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
+        if base in ("git", "git.exe"):
+            gi = i
+            break
+    if gi is None:
+        return None
+    i = gi + 1
+    while i < len(toks) and toks[i] != "commit":
+        if toks[i] in GIT_VALUE_OPTS:
+            i += 2
+        else:
+            i += 1
+    if i >= len(toks) or toks[i] != "commit":
+        return None
+    i += 1
+    while i < len(toks):
+        t = toks[i]
+        if t == "--":
+            pathspec = toks[i + 1:]
+            return pathspec if pathspec else None
+        if t in _COMMIT_VALUE_OPTS:
+            i += 2      # skip the option AND its value, whatever that value is
+            continue
+        i += 1
+    return None
+
 
 def _mentions_path(args, rel):
     """True if any arg names MEMORY.md -- repo-relative, absolute, or bare basename."""
@@ -177,6 +250,25 @@ def _commit_would_include(cmd, rel, staged_now):
     git commit -m "fix -- bug"` and `git commit -am "fix -- bug"` both got ALLOW under
     that version. Only a `shlex`-tokenized (quote-aware) standalone `--` is trusted here;
     one embedded inside a quoted argument is invisible to shlex and correctly ignored.
+    See _commit_pathspec() for the option-aware scan that replaced a still-too-naive
+    first shlex pass, which was itself caught misreading `git commit -m --` (an EMPTY
+    pathspec, since `-m`'s value IS the `--`) as "excludes everything" -- via LOCAL code
+    review before landing, not a second self-caught defect.
+
+    COMPOUND-COMMAND ORDERING (known limitation, documented not fixed -- flagged by
+    local code review). This function returns one CUMULATIVE (staged, from_worktree)
+    after walking every segment, not "what did the actual `git commit` segment itself
+    include". A `commit` segment carrying a pathspec can now set `staged=False` on its
+    own -- previously a `commit` segment could only ever push `staged` UP (via `-a`) --
+    so a LATER segment in the same compound command can flip a pathspec-exclusive
+    commit's verdict back after that commit already ran, e.g.
+    `git commit -m x -- other.md && git add MEMORY.md` reports included=True even though
+    the commit itself (per verified pathspec exclusivity) could not have touched
+    MEMORY.md; the trailing `add` only affects the WORKING directory's next commit, not
+    this one. This errs toward over-blocking (safe), not a bypass, and is a pre-existing
+    consequence of tracking one cumulative verdict rather than one per `commit`
+    invocation -- correctly fixing it means restructuring the return value to be keyed
+    per commit segment, out of scope for a minimal fix.
     """
     staged, from_worktree = staged_now, False
     for seg in re.split(r"(?:&&|\|\||;|\|)", cmd):
@@ -197,13 +289,7 @@ def _commit_would_include(cmd, rel, staged_now):
             if not paths or _mentions_path(args, rel):
                 staged, from_worktree = False, False
         elif sub == "commit":
-            pathspec = None
-            try:
-                quoted = shlex.split(seg)
-            except ValueError:
-                quoted = None  # unbalanced quoting -- do not trust a pathspec read here
-            if quoted is not None and "--" in quoted:
-                pathspec = quoted[quoted.index("--") + 1:]
+            pathspec = _commit_pathspec(seg)
             if pathspec is not None:
                 included_here = _mentions_path(pathspec, rel)
                 staged, from_worktree = included_here, included_here
