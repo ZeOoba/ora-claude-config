@@ -5,6 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 0888c827-119f-4877-98ae-23ac7c404a27
+  modified: 2026-07-24T23:36:59.723Z
 ---
 
 **Symptom (2026-07-16):** `rg -l "Tenant" ~/.claude/scheduled-tasks` → **zero matches**, no error —
@@ -44,3 +45,29 @@ over any `~/.claude` subtree is **not** evidence of absence. Cross-check with `-
 `grep -r`, or `git ls-files` before concluding something does not exist. Generalizes
 [[feedback_verify_negative_glob_results]] — that one was about Glob; this is the same failure mode
 in content search, with a concrete mechanism. Related: [[project_tenant_db_no_sync_rootcause]].
+
+**Related false-negative, different mechanism, same class — the `ora-skills` scan-root exclusion
+(2026-07-09/10).** Not a ripgrep quirk this time: the doctrine-integrity-probe's skill check only
+resolves a skill if it finds a `SKILL.md` under one of three hardcoded scan roots
+(`~/.claude/skills`, `~/.claude/plugins`, `OneDrive…/Claude_Workspace`) — it never scans the
+authoritative source-of-record repo `C:\Users\Owner\ora-skills` at all. A skill living only there
+(or only in an archived clone with no redundant `outputs/` copy) reads as `[MISSING]` even though
+it's alive and still serving via the plugin runtime — which is exactly what happened to 4 skills
+(`acquisition-underwriting`, `loi-generation`, `psa-reconciliation`, `tenant-email`) after the
+2026-07-09 clone-archival swept their last on-disk copy. Full detail:
+[[reference_skill_home_loss_2026-07-09]]. **The generalized lesson this file's "how to apply"
+already states holds across both:** a tool reporting "not found" over part of `~/.claude` (or its
+satellite repos) is reporting its own scan-root/exclusion boundary, not ground truth — verify
+against `git ls-files`, a different tool, or the actual repo before concluding something doesn't
+exist.
+
+**A third instance, same class, found 2026-07-24:** `Glob` returned "No files found" for
+`hooks/sessions/*` in the live `~/.claude` checkout despite the directory holding hundreds of
+per-session provenance folders (`hooks/sessions/<uuid>/touched-files.txt` etc., read by
+`shared-checkout-guard.py`) — confirmed populated via plain `ls`/`find` over Bash immediately
+after. Never rooted out to a specific ignore rule (unlike the two cases above), but the blind
+Glob-negative-then-fallback-to-a-raw-shell-listing pattern is now the third confirmed case of this
+failure mode inside `~/.claude`. When a Glob/rg negative over a `~/.claude` subtree matters (i.e.
+you're about to act on "this doesn't exist"), cross-check with `ls`/`find`/`git ls-files` first —
+don't assume the negative is reliable just because this specific path isn't one of the two
+already-diagnosed exclusion mechanisms above.
