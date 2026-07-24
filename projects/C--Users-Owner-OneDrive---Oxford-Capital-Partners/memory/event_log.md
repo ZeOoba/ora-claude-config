@@ -12,6 +12,65 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-24 — commit-provenance-guard compound-command blind spot: root cause CONFIRMED (was SPECULATIVE) and fixed
+
+CLOSES the open question in `44efc61`'s durable-record entry (this same file, earlier
+today): *"LEADING HYPOTHESIS [SPECULATIVE -- the janitor's literal command was not
+recoverable]... the compound form is the blind spot."* That janitor was this session
+(`53f57fbe`). The literal commands ARE recoverable from this session's own history:
+all four backlog-landing commits (`44efc61`, `5b347d2`, `281b159`, and a fourth) used
+the exact shape `git add <paths> && git commit -q -F -`. Root cause is now CONFIRMED,
+not speculative, and matches the other session's hypothesis precisely:
+`candidate_paths()` derived candidates only from `git diff --cached --name-only`;
+PreToolUse fires BEFORE the command executes, so at hook-fire time the index is still
+empty of whatever the `git add` half of the compound is about to stage;
+`candidate_paths()` returned `set()`; `main()`'s `if not cands: return` allowed the
+commit before `foreign_hits()` (the actual liveness/TTL check) was ever consulted --
+despite every OTHER precondition for a block being met.
+
+FIXED, TDD + isolated worktree (`fix-provenance-guard-compound-add`, merged `485a62d`,
+commit `f6de17d`): new `pending_add_paths(repo, cmd)` resolves what a preceding `git
+add` in the same compound command is about to stage, WITHOUT ever running `git add`,
+by querying the pre-add working-tree state the pending add is about to consume.
+
+TWO ROUNDS of the mandatory adversarial REFUTE pass (security-auditor agent, required
+for `hooks/**` override/auth-logic per Engineering OS) — this is worth recording
+because both rounds found REAL, non-cosmetic gaps in what looked like a complete fix:
+
+- Round 1 [HIGH]: the first version of the fix only recognized `&&`/`;`/`||`/`|`-
+  joined, `git`-token-FIRST segments. Two ordinary (not adversarial) shapes bypassed
+  it entirely and reproduced the exact incident: newline-separated statements (no
+  operator between the add and the commit -- `shlex.split()` treats a bare newline as
+  whitespace) and env-var-prefixed invocations (`FOO=bar git add x`). Both empirically
+  verified as false-allows against the round-1 code before being closed in round 2.
+- Round 1 also surfaced (mid-fix, not a numbered finding) that "stop collecting adds
+  at the FIRST commit segment" silently drops an add sandwiched between two commits
+  in one command (`commit1; add; commit2`) even though it's genuinely staged for the
+  second one -- corrected to "collect any add segment with at least one commit
+  segment somewhere after it."
+- Round 2 (verifying round 1's fixes) found one NEW gap the fix itself introduced:
+  per-line tokenization loses quote context, so a multi-line heredoc commit-message
+  BODY whose prose happens to start a line with the literal words "git add ..." can
+  be mistaken for a real segment. Verified this fails SAFE ONLY (adds a spurious
+  candidate, never hides a real one) and requires an unrealistic shape (2+ chained
+  `git commit` invocations in one Bash call) this fleet doesn't use -- accepted and
+  documented inline rather than fixed, same threat-model framing as the pre-existing
+  git-alias-blindness gap.
+
+38 tests (23 pre-existing regression + 9 round-1 + 5 round-2), including full
+end-to-end reproductions of all 3 real audit PoCs and a locked-in safe-direction
+guarantee for the accepted heredoc gap. Full detail in the merge commit `485a62d`.
+
+WHY THIS MATTERS BEYOND THIS ONE BUG: `git add X && git commit` is the idiomatic,
+default way to write a commit -- not a special janitor-only pattern. This guard was
+therefore likely blind to a large fraction of ordinary Claude-authored commits, not
+just sweeping backlogs, whenever a foreign hit existed. The guard now covers that
+shape (plus the two round-1 variants); it remains fail-open by construction on
+missing/stale/unreadable data, per its own documented safety invariant -- unaffected
+by this change.
+
+Related: [[reference_commit_provenance_guard]] · [[reference_event_log_partial_commit_splice]].
+
 ## 2026-07-24 — ora-deal-aging-sla v1.1 (dashed-UUID fix + STEP 3b posture doctrine); landed via a foreign janitor commit with commit-provenance-guard silent
 
 CHANGE (Gabriel-directed, from the 09:25 ora-deal-aging-sla run): SKILL.md -> v1.1, two fixes.
