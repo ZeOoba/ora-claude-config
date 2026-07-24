@@ -58,7 +58,29 @@ def build_targets():
     brain = os.path.join(HOME, "oxford-command-center")
     for sub in ("src", "server", "scripts", "data"):
         targets.append((os.path.join(brain, sub), (".ts", ".tsx", ".js", ".json", ".md")))
+    # Scheduled-task fleet SKILL.mds, BOTH fleets (coverage gap closed 2026-07-24). 17 fleet
+    # SKILL.md files declare DSCR/LTV (ora-am-brief, ora-monthly-portfolio-briefing,
+    # ora-master-workbook-ingest, ora-underwrite-doctrine-staleness-check, ...), so a governor
+    # edit landing in one was invisible to this guard. Roots are the fixed skillFolderRoots from
+    # _shared/scheduler-stores.json -- hardcoded here rather than imported because this probe is
+    # deliberately dependency-free (pure stdlib, no _shared import) so it stays runnable when
+    # store_discovery is broken. A root that does not exist is skipped silently, as with all others.
+    targets.append((os.path.join(CLAUDE, "scheduled-tasks"), (".md",)))
+    targets.append((os.path.join(HOME, "OneDrive - Oxford Capital Partners",
+                                 "Documents", "Claude", "Scheduled"), (".md",)))
     return targets
+
+_PRUNE_EXACT = ("node_modules", "dist", ".git", "__pycache__", "_archive", "_staging")
+# Archive dirs are named "_archive_<date>[_suffix]" in practice (26 such dirs live across the
+# fleet roots, memory, hooks/sessions and the brain warehouse) -- the exact-name test above
+# matched NONE of them, so every dated archive was being scanned as live content. Fixed
+# 2026-07-24; the archived 2026-04 draft carrying "DSCR ... below 1.75 (ORA hard governor)"
+# was the trigger. Requires the trailing separator so the match stays TIGHT: suppression on a
+# governor guard is a false NEGATIVE, and "_archives_live" must still be scanned.
+_PRUNE_PREFIX = ("_archive_", "_staging_")
+
+def _is_pruned_dir(name):
+    return name in _PRUNE_EXACT or name.startswith(_PRUNE_PREFIX)
 
 def iter_files(root, exts):
     if os.path.isfile(root):
@@ -68,8 +90,7 @@ def iter_files(root, exts):
         return
     for dirpath, dirnames, filenames in os.walk(root):
         # never descend into dependency / build trees, or retired/in-progress skill content
-        dirnames[:] = [d for d in dirnames
-                       if d not in ("node_modules", "dist", ".git", "__pycache__", "_archive", "_staging")]
+        dirnames[:] = [d for d in dirnames if not _is_pruned_dir(d)]
         for fn in filenames:
             if exts is None or fn.lower().endswith(exts):
                 yield os.path.join(dirpath, fn)
@@ -225,6 +246,15 @@ RE_LTV_CORRECTION = re.compile(
 RE_DSCR_CORRECTION = re.compile(
     r"corrected[^0-9\n]{0,20}from\s+[0-9]+\.[0-9]+\s*[x×]?\s*(?:\bto\b|→|->|=>)\s*"
     + re.escape(CANON_DSCR) + r"(?![0-9])", re.I)  # (?![0-9]) not \b: a trailing x ("→ 1.25x") must still suppress
+# Probe SELF-DESCRIPTION suppressor (2026-07-24): documentation of THIS probe's own detection
+# semantics must quote the sentinel value to be useful -- ora-doctrine-integrity-guard/SKILL.md
+# reads "...or the 1.75 regression sentinel". That is prose ABOUT the detector, not a governor
+# declaration, and it surfaced the moment the fleet roots were added to build_targets().
+# Deliberately bound to the probe's TERM OF ART ("regression sentinel"), not to a bare nearby
+# "sentinel" token, and SPAN-SCOPED like the correction notes: branch 1 keeps scanning past a
+# suppressed 1.75, so a real declaration sharing the line still flags. Anything looser would
+# hand a drifting editor a one-word evasion on a Hard-Invariant-4 guard.
+RE_SENTINEL_PROSE = re.compile(r"1\.75\s*[x×]?\s+regression\s+sentinel", re.I)
 # --- CODE-AWARE governor check (2026-06-14) -------------------------------------------------
 # Prose proximity is WRONG for code: a camelCase identifier (`dscrFloor`) embeds the keyword,
 # and the real governor is the ENFORCEMENT COMPARISON, not an error-string. `.ts/.tsx/.js` files
@@ -625,6 +655,9 @@ def scan_line(raw):
     # <X> to/→ canonical" note suppresses ONLY the corrected-away old value (the span), never the
     # whole branch -- so a live drift sharing the line still flags. DSCR and LTV are independent.
     dscr_corr_spans = [mm.span() for mm in RE_DSCR_CORRECTION.finditer(low)]
+    # Probe self-description ("...the 1.75 regression sentinel") -- span-scoped exactly like the
+    # correction notes above, so only the quoted sentinel token is skipped, never the branch.
+    sentinel_prose_spans = [mm.span() for mm in RE_SENTINEL_PROSE.finditer(low)]
     ltv_corr_spans = [mm.span() for mm in RE_LTV_CORRECTION.finditer(low)]
     is_gov = any(k in low for k in GOV_KEYWORDS)
     # refi-sizing construct MEMBER-VALUE spans (2026-07-11): member-scoped suppression for the
@@ -652,6 +685,7 @@ def scan_line(raw):
         idx = low.find("1.75")
         while idx != -1:
             safe = (any(s <= idx < e for (s, e) in dscr_corr_spans)
+                    or any(s <= idx < e for (s, e) in sentinel_prose_spans)
                     or _portfolio_qualified(low, idx))
             if not safe:
                 out.append("DSCR governor appears as 1.75 (canonical is %sx)" % CANON_DSCR)
