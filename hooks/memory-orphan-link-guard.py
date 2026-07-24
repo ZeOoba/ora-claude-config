@@ -47,6 +47,7 @@ Stdlib only. ASCII-only. Windows.
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 
@@ -153,6 +154,29 @@ def _commit_would_include(cmd, rel, staged_now):
     Deliberately errs toward INCLUDED: a wrong 'included' costs a spurious block that a
     human can inspect, while a wrong 'excluded' silently lands the orphan this guard
     exists to stop.
+
+    PATHSPEC EXCLUSIVITY (2026-07-24). `git commit -- <pathspec>` is EXCLUSIVE by git's
+    own semantics -- verified directly: `git add A.md B.md; git commit -- A.md` commits
+    ONLY A.md, leaving B.md staged and untouched even though it WAS staged at commit
+    time; `git commit -a -- A.md` is a hard git error ("fatal: paths ... with -a does
+    not make sense") and never commits at all. So once a `commit` segment carries a
+    `--` pathspec, whether `rel` is one of the named paths is the ONLY question -- any
+    staged_now state or earlier add/-a in this same command is moot, because the
+    pathspec is what git actually honors. Concretely: in a shared checkout, another
+    session's unrelated `git add` can leave MEMORY.md sitting staged in the index;
+    without this carve-out a plain `git commit -- unrelated/file.md`, which cannot
+    possibly touch MEMORY.md, was DENIED anyway.
+
+    QUOTE-AWARE `--` DETECTION (2026-07-24, REFUTE pass on the carve-out above). The
+    rest of this file tokenizes segments with a naive `.split()`, which is fine for
+    finding a subcommand name but is NOT safe for spotting a pathspec separator: an
+    ORDINARY commit message containing a standalone " -- " (e.g. "fix -- bug", "notes
+    -- see PR") naive-splits into its OWN "--" token, which a first version of this
+    carve-out trusted as a real pathspec -- reopening the exact bypass the 2026-07-24
+    12:54 fix closed, just behind different bait. Verified live: `git add MEMORY.md &&
+    git commit -m "fix -- bug"` and `git commit -am "fix -- bug"` both got ALLOW under
+    that version. Only a `shlex`-tokenized (quote-aware) standalone `--` is trusted here;
+    one embedded inside a quoted argument is invisible to shlex and correctly ignored.
     """
     staged, from_worktree = staged_now, False
     for seg in re.split(r"(?:&&|\|\||;|\|)", cmd):
@@ -173,6 +197,17 @@ def _commit_would_include(cmd, rel, staged_now):
             if not paths or _mentions_path(args, rel):
                 staged, from_worktree = False, False
         elif sub == "commit":
+            pathspec = None
+            try:
+                quoted = shlex.split(seg)
+            except ValueError:
+                quoted = None  # unbalanced quoting -- do not trust a pathspec read here
+            if quoted is not None and "--" in quoted:
+                pathspec = quoted[quoted.index("--") + 1:]
+            if pathspec is not None:
+                included_here = _mentions_path(pathspec, rel)
+                staged, from_worktree = included_here, included_here
+                continue
             # `-a` / `--all` stages every tracked modified file, including MEMORY.md --
             # so it re-includes a file an earlier segment just unstaged.
             if any(a in ("-a", "--all") or
