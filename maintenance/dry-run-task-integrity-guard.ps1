@@ -272,6 +272,20 @@ if ($tfrpActionLines -or $tfrp.exit -ne 0) {
 }
 
 # ---------------------------------------------------------------------------
+# STEP 2.8 -- task-folder-backup-completeness-probe.py (added 2026-07-24)
+# ---------------------------------------------------------------------------
+Write-Section 'STEP 2.8 -- task-folder-backup-completeness-probe.py'
+$tfbc = Invoke-Engine 'tfbc' $pyExe @((Join-Path $maintDir 'task-folder-backup-completeness-probe.py'))
+Write-Output $tfbc.stdout
+Write-Output "exit=$($tfbc.exit)"
+$raw['task_folder_backup_completeness_probe'] = $tfbc
+$tfbcActionLines = ($tfbc.stdout -split "`n") | Where-Object { $_ -match '\[ACTION\] UNBACKED' }
+if ($tfbcActionLines -or $tfbc.exit -ne 0) {
+    $joined = if ($tfbcActionLines) { ($tfbcActionLines -join ' | ') } else { '(no matching [ACTION] line captured, but exit was non-zero)' }
+    $reasons.Add("task-folder-backup-completeness-probe.py: $joined")
+}
+
+# ---------------------------------------------------------------------------
 # VERDICT
 # ---------------------------------------------------------------------------
 Write-Section 'VERDICT'

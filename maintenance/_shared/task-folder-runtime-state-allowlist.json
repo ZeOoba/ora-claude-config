@@ -1,0 +1,11 @@
+{
+  "_doc": "Files intentionally left git-ignored inside scheduled-tasks/<id>/ (CC/MCP fleet only -- the only tree covered by the ora-claude-config git backup) -- reviewed and judged to be genuine runtime state, not a durability gap. Consumed by task-folder-backup-completeness-probe.py. Adding an entry here is a per-file judgment call, same bar as ora-appsec-sweep/suppressions.md: only Gabriel adds entries. A finding NOT on this list means either allow-list it in .gitignore (durable fix -- the probe then stops flagging it automatically, since git check-ignore will report it as no-longer-ignored) or add it here with a dated reason.",
+  "exempt": [
+    {
+      "path": "scheduled-tasks/ora-open-sessions-board/answered.json",
+      "reason": "Per-run decision-history state the task writes to itself. Loss re-surfaces already-decided sessions (annoying, recoverable via re-decision) rather than losing ratified content (suppressions.md class) or an engine (guard.ps1 class) -- correctly excluded under the existing 2b rationale ('runtime state ... stays ignored').",
+      "reviewed": "2026-07-24",
+      "reviewer": "Gabriel"
+    }
+  ]
+}
