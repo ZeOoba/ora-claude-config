@@ -1,29 +1,9 @@
 ---
 name: ora-cowork-heartbeat
-description: Silent dead-man's-switch heartbeat — 05:50 + 17:50 ET daily. Updates hardcoded Notion page timestamp by ID; no search, no email, no page creation. Watched by external GitHub Actions watchdog (16h threshold). v03. [MODEL: claude-sonnet-5 | set 2026-07-08 | tool-grant re-approved 2026-07-17]
-output_contract:
-  version: 1
-  blocks:
-    - id: block-heartbeat-notion-page
-      artifact:
-        type: notion_page
-        page_id: 35c6ecd8-9e59-81d5-8d2c-d08002458b78
-      freshness_window_hours: 16
-      expected_on:
-        always: true
-      on_missing_severity: alarm
-      is_primary_health_signal: true
-      # Added Plan 2 retrofit (2026-07-18). 16h window matches this task's own header claim
-      # ("Watched by external GitHub Actions watchdog (16h threshold)") and automation-health-monitor's
-      # existing Step 0.55 producer-consumer table row for this task (last_edited_time within last 16
-      # hours). This in-fleet contract check COMPLEMENTS, not REPLACES, the external GitHub Actions
-      # dead-man watchdog — the external watchdog remains the authoritative outage detector for a
-      # total Cowork/LAMS-surface failure (including this task's own scheduler going dark, which an
-      # in-fleet check cannot observe); this contract adds earlier/redundant visibility from the CC/MCP
-      # side via automation-health-monitor's Step 0.56 additive contract-check pass.
+description: Silent dead-man's-switch heartbeat — 05:50 + 17:50 ET daily. Updates hardcoded Notion page timestamp by ID; no search, no email, no page creation. Watched by external GitHub Actions watchdog (16h threshold). v04 — deleted and re-registered fresh 2026-07-21 to force a first-run permission prompt after the registry entry's approvedPermissions array was found empty for notion-fetch/notion-update-page (confirmed root cause of the 2026-07-15/16 ~42h stale beacon; a 2026-07-17 re-approval attempt and a 2026-07-18 attended Run Now both failed to populate it — see ora-heartbeat-fix-verify-0718am). [MODEL: claude-sonnet-5 | set 2026-07-21]
 ---
 
-**Cowork Heartbeat — silent signal task** (v03, re-registered 2026-07-08 to standardize onto claude-sonnet-5; preserves v02 hardening of 2026-05-23 and v03 retiming of 2026-06-10. v02 root-cause: notion-search is semantic and unreliable for exact-title lookup; v01's create-if-missing branch produced duplicate pages. Therefore: hardcoded ID only, never search, never create.)
+**Cowork Heartbeat — silent signal task** (v04, deleted and re-registered fresh 2026-07-21 to force a first-run tool-permission prompt for notion-fetch/notion-update-page. Preserves v03 restoration of 2026-07-08, v02 hardening of 2026-05-23, v03 retiming of 2026-06-10. v02 root-cause: notion-search is semantic and unreliable for exact-title lookup; v01's create-if-missing branch produced duplicate pages. Therefore: hardcoded ID only, never search, never create.)
 
 ## Purpose
 You are emitting a heartbeat signal that an external watchdog (GitHub Actions) reads to detect Cowork outages. Output goes to ONE specific Notion page identified by ID. Do NOT send email. Do NOT create new pages. Do NOT print verbose chat. Total runtime under 5 seconds.
@@ -43,4 +23,4 @@ You are emitting a heartbeat signal that an external watchdog (GitHub Actions) r
 ## Manual recovery — if the canonical page is destroyed
 Restore from Notion trash (preserves page ID). If unrestorable: create a new page under parent `32b6ecd8-9e59-81f2-b329-df3fd0e25062` titled `Cowork Heartbeat — 2x/day signal` (icon 💓) with the standard 4-line body ending `Last heartbeat: <now_utc> · Next expected: <next_utc>`, then update this task's Canonical target block AND repoint the external watchdog in the same maintenance window.
 
-**Restoration note:** Re-registered 2026-07-08 to standardize execution model onto claude-sonnet-5 (previously re-registered 2026-07-07 after the 2026-07-05 machine migration orphaned it). Content restored verbatim from the surviving SKILL.md. Re-approved 2026-07-17 to grant this task's unattended runs a standing tool-approval for `notion-fetch` and `notion-update-page` — the missing grant was the confirmed root cause of the 2026-07-15/16 ~42h beacon stale incident (dispatch succeeded per registry `lastRunAt`, but the unattended notion-update-page call could not complete without an approved permission, so the write silently failed).
+**Restoration note:** Deleted and re-registered fresh 2026-07-21 (Gabriel-directed) specifically to trigger a clean first-run permission prompt on this session, after the registry entry was confirmed on 2026-07-17/18 to carry no approvedPermissions grant for notion-fetch/notion-update-page despite a prior re-approval attempt and an attended Run Now — both failed to fix the unattended write path (see archived ora-heartbeat-fix-verify-0718am). If this run also fails to establish the permission grant, the fix is not achievable via MCP re-registration alone — escalate to checking Cowork's Scheduled Tasks UI directly for a manual per-task tool-permission control, since no MCP tool exists to write that registry field and hand-editing scheduled-tasks.json is prohibited by standing doctrine.

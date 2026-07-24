@@ -1,6 +1,6 @@
 ---
 name: check-dirty-files-session-pr
-description: Poll every 30 min for the "Dirty files from active session" session to push/open a PR; notify Gabriel once, then self-retire.
+description: PAUSED 2026-07-21 — event overtaken (tracked session's work superseded by PR #20, conflict resolved). Retire fully from a regular session.
 ---
 
 One-off event-triggered check (NOT a standing automation — self-retire once the event fires).
