@@ -1,14 +1,45 @@
 ---
 name: project-orphan-guard-timing-2026-07-24
-description: "CLOSED 2026-07-24 — investigating a memory-orphan-link-guard false positive uncovered a straight bypass underneath it; both fixed, merged, verified against the deployed guard."
+description: "REOPENED 2026-07-24 — the compound-command bypass fix below was real but incomplete: a SECOND bypass (decoy ' -- ' inside an ordinary -m message) landed 1687fbc 13 min after this file's 'CLOSED' fix, orphaning 2 links. A fix for the second bypass is in progress on fix/orphan-guard-pathspec-exclusivity (52/52 tests passing as of 13:53, uncommitted WIP) — not yet merged to main."
 metadata: 
   node_type: memory
   type: project
   originSessionId: d6635568-ae53-453c-9bd7-ec8551f96c73
-  modified: 2026-07-24T17:01:07.456Z
+  modified: 2026-07-24T17:58:33.749Z
 ---
 
-**CLOSED 2026-07-24.** Started as "document an annoying false positive", ended as a
+**REOPENED 2026-07-24, ~13:56.** This file originally read "CLOSED" after the
+compound-command bypass fix below (landed 12:54). That fix was real and is not in
+question. But `1687fbc` (13:07 — 13 minutes *after* the "CLOSED" fix was deployed)
+still landed 2 orphaned index links, proving a distinct hole survived.
+
+**The second bypass:** `_has_pathspec(cmd)` used `re.search(r"\s--\s", cmd)` against
+the raw Bash command string — including the `-m` message text. A commit message
+containing an ordinary standalone " -- " (`1687fbc`'s own message has three) makes
+the guard misread a plain staged commit as a pathspec commit, so it validates the
+WORKING TREE instead of the INDEX. If the working tree had since reverted to a clean
+MEMORY.md while the orphaned version stayed staged (real git commits the index here,
+not the tree), the guard sees clean content and ALLOWs — the orphan lands unchecked.
+Confirmed live via an isolated harness (throwaway repo + `ORA_MEMORY_INDEX`, positive
+control verified — first pass falsely read the guard's stdout-JSON DENY as an
+exit-code ALLOW; corrected before trusting the result).
+
+**Status as of 2026-07-24 13:56:** a fix already exists — `bb02f5e` /
+`475d360` on worktree `fix-orphan-guard-pathspec` (branch
+`fix/orphan-guard-pathspec-exclusivity`), replacing the raw-string `_has_pathspec`
+regex with a `shlex`-tokenized, option-aware pathspec scan (`_commit_pathspec`), so a
+`--` embedded inside a quoted `-m` argument is no longer visible as a standalone
+token. That branch's own test suite (`hooks/tests/test-memory-orphan-link-guard.py`,
+52/52 passing) includes this exact scenario verbatim (line ~392: "staged=orphan,
+worktree=clean, decoy ' -- ' in message, plain commit -> DENY") and passes. As of
+this edit the branch carries further uncommitted WIP on top of `475d360` (mtimes
+~13:52–13:53) — still an active session, not yet merged to `main`. Do not duplicate
+this fix; if picking this up later, check whether that branch has since merged
+before starting fresh.
+
+## Original entry (12:54 fix — real, but not the whole story)
+
+Started as "document an annoying false positive", ended as a
 security-gate fix.
 
 ## What was wrong
