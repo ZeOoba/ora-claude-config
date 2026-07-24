@@ -21,11 +21,27 @@ SCOPE is the risk list CLAUDE.md already defines -- no new list was invented:
   scoring, benchmarking, capital-allocation/NOI).
 
 WHAT MAKES THIS NOT THEATER: the review artifact is keyed by a CONTENT HASH of
-the exact risk-file versions that were reviewed. Edit a reviewed file by one
-character and its key changes, the artifact no longer matches, and the gate
-blocks again. A review cannot be earned once and spent forever, and a review of
-{a.py} does not cover a later commit of {a.py, b.py}. See
-test_stale_review_blocks -- that test IS the feature.
+the exact bytes THIS commit invocation would actually land for each risk file --
+not just "whatever is on disk right now". Edit a reviewed file by one character
+and its key changes, the artifact no longer matches, and the gate blocks again.
+A review cannot be earned once and spent forever, and a review of {a.py} does
+not cover a later commit of {a.py, b.py}. See test_stale_review_blocks -- that
+test IS the feature.
+
+PROVENANCE FIX (2026-07-24, independent review finding M1). "The bytes this
+commit would land" is NOT always the working-tree file: a plain `git commit`
+(no `-a`) commits the INDEX (whatever was `git add`ed), which can differ from a
+since-further-edited working copy. The original version hashed working-tree
+bytes unconditionally, so staging v1, having it reviewed, then editing to v2
+WITHOUT re-staging, and running a bare `git commit` -- which lands v1 -- keyed
+against v2 and let v1 land unreviewed. `_origin_content_digest` now hashes the
+INDEX blob for plainly-staged paths and the WORKING TREE only for paths sourced
+via `-a`/`--all` (which re-stages from the working tree), a pending `git add` in
+the same compound command (which is about to stage current working-tree bytes),
+or an explicit `-- pathspec` commit (which re-reads the working tree for those
+paths regardless of the index -- see commit-provenance-guard.py's own
+REMEDIATION-TEXT PATHSPEC GOTCHA for the precedent). Reproduced and closed by
+test_index_vs_worktree_divergence_is_not_satisfied_by_worktree_review.
 
 THE AUTO-DISPATCH CARVE-OUT (Gabriel, 2026-07-24). This gate is only satisfiable
 because Gabriel granted an explicit carve-out to the standing session instruction
@@ -68,6 +84,15 @@ raises the floor from "review silently skipped" to "review deliberately
 falsified", and leaves an audit trail either way. It is not an adversarial
 boundary and does not pretend to be.
 
+A second honest limit (2026-07-24 review finding n8): a Bash call that mutates a
+reviewed file AND commits it IN THE SAME COMMAND (e.g. `echo x >> hooks/g.py &&
+git add -A && git commit ...`) defeats the content key by construction --
+PreToolUse evaluates the command before any of it has run, so the key is
+necessarily computed against pre-mutation bytes. This is the same TOCTOU class
+every hook here accepts (repo_freshness.py, ora-autonomy-gate.py's text-matching
+ceiling): the gate can only ever evaluate the state that exists at the moment it
+fires, not the state a not-yet-executed command is about to create.
+
 CLI (this is how the gate is actually satisfiable):
   python eos-review-gate.py --key
       -> {"key", "paths", "repo"} for the current risk diff. Give this to the
@@ -82,6 +107,8 @@ Stdlib only. ASCII-only. Windows (`python`).
 import hashlib
 import json
 import os
+import re
+import subprocess
 import sys
 import time
 
@@ -92,7 +119,10 @@ sys.path.insert(0, LIB_DIR)
 # would traceback on EVERY Bash call in EVERY session -- not just commits.
 try:
     import override_tokens
-    from git_commit_parse import candidate_paths, is_git_commit, repo_root
+    from git_commit_parse import (
+        candidate_paths, find_commit_segment, git_lines, has_all_flag,
+        is_git_commit, pending_add_paths, repo_root,
+    )
     PARSE_CONTRACT_LOADED = True
 except Exception:
     PARSE_CONTRACT_LOADED = False
@@ -128,16 +158,40 @@ _CONFIG_EXTS = {".json", ".toml", ".yaml", ".yml", ".ini", ".cfg"}
 # capital-allocation/NOI" plus the named governor constants. Tokens are
 # deliberately specific -- a bare "score"/"engine" would drag in search engines
 # and UI scores, and a gate that cries wolf gets switched off.
-_FINANCE_TOKENS = (
-    "governor", "dscr", "ltv", "hurdle", "cap_rate", "caprate", "noi",
+#
+# Split into two groups (2026-07-24 review finding m6, PoC 5): plain substring
+# matching let the 3-letter fragment "noi" match "noise_filter.py". Long,
+# already-distinctive tokens (e.g. "capital_alloc", which is a deliberate
+# PREFIX match for capital_allocation.py/capital_allocator.py) stay substring --
+# a boundary requirement would break that intentional prefix use. Only the
+# short fragments actually prone to colliding with ordinary English/code words
+# get boundary protection.
+_FINANCE_TOKENS_SUBSTR = (
+    "governor", "dscr", "hurdle", "cap_rate", "caprate",
     "underwrit", "valuation", "capital_config", "capital_alloc", "capital-alloc",
     "replacement_cost", "replacement-cost", "benchmark", "scoring", "waterfall",
-    "amortiz", "/engine/", "engine_", "_engine", "_irr", "irr_",
+    "amortiz",
+)
+# "engine" stays boundary-protected, not substring -- it is an ordinary English
+# word ("search engine", "template engine", "game engine") the original design
+# already avoided via delimited variants ("/engine/", "engine_", "_engine");
+# folding those into a bare substring here would have reintroduced exactly the
+# false-positive class the original comment above warns against.
+_FINANCE_TOKENS_BOUNDARY = ("noi", "irr", "ltv", "engine")
+_FINANCE_BOUNDARY_RE = re.compile(
+    r"(?<![a-z0-9])(?:%s)(?![a-z0-9])"
+    % "|".join(re.escape(t) for t in _FINANCE_TOKENS_BOUNDARY)
 )
 _FINANCE_CODE_EXTS = {
     ".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".go", ".rs", ".java",
     ".rb", ".php", ".sql", ".json",
 }
+
+
+def _has_finance_token(rel):
+    if any(t in rel for t in _FINANCE_TOKENS_SUBSTR):
+        return True
+    return bool(_FINANCE_BOUNDARY_RE.search(rel))
 
 
 def risk_reason(rel):
@@ -156,7 +210,11 @@ def risk_reason(rel):
 
     if base == "claude.md":
         return "CLAUDE.md doctrine"
-    if "hooks" in parts[:-1]:
+    # ROOT-anchored (2026-07-24 review finding M4): a bare "hooks somewhere in
+    # the path" match flagged idiomatic React/Vue `src/hooks/useX.ts` as
+    # enforcement code. CLAUDE.md's "hooks/**" means THIS repo's own top-level
+    # hooks/ directory, not any directory that happens to be named hooks.
+    if parts[0] == "hooks":
         return "hooks/** enforcement code"
     if ".env" in base:
         return "environment file"
@@ -174,7 +232,7 @@ def risk_reason(rel):
         return "CSP/headers"
     if ".claude" in parts[:-1] and ext in _CONFIG_EXTS:
         return "~/.claude config"
-    if ext in _FINANCE_CODE_EXTS and any(t in rel for t in _FINANCE_TOKENS):
+    if ext in _FINANCE_CODE_EXTS and _has_finance_token(rel):
         return "financial-decision / governor code"
     return None
 
@@ -213,10 +271,15 @@ def risk_files(repo, cmd):
 
 
 def _content_digest(repo, rel):
-    """sha256 of the working-tree bytes of `rel`, or DELETED. Hashing content
+    """sha256 of the WORKING-TREE bytes of `rel`, or DELETED. Hashing content
     directly rather than shelling out to `git hash-object` keeps this total: a
     path staged-for-deletion, or one git cannot address, still yields a stable
-    token instead of a subprocess failure."""
+    token instead of a subprocess failure.
+
+    Used unconditionally by the CLI (--key/--record are answering "what is at
+    risk in the working tree right now", not simulating a specific future
+    command) and, by the hook, only for paths whose origin resolves to the
+    working tree -- see _origin_content_digest."""
     path = os.path.join(repo, rel)
     try:
         with open(path, "rb") as fh:
@@ -225,18 +288,91 @@ def _content_digest(repo, rel):
         return "DELETED"
 
 
-def review_key(repo, rels):
-    """A stable key over the exact CONTENT of the risk files under review.
+def _index_digest(repo, rel):
+    """sha256 of the STAGED (index) blob for `rel`, or None if `rel` is not in
+    the index (untracked, or removed from the index) or git cannot answer."""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", repo, "show", ":" + rel],
+            capture_output=True, timeout=5)
+    except Exception:
+        return None
+    if proc.returncode != 0:
+        return None
+    return hashlib.sha256(proc.stdout).hexdigest()
+
+
+def _worktree_sourced_rels(repo, cmd):
+    """Repo-relative (lowercased) paths that THIS commit invocation would read
+    from the WORKING TREE rather than the index -- see the module docstring's
+    PROVENANCE FIX note. Real git semantics, not a heuristic:
+      - an explicit `-- pathspec` commit RE-READS the working tree for those
+        paths regardless of what is staged (commit-provenance-guard.py's own
+        documented REMEDIATION-TEXT PATHSPEC GOTCHA);
+      - `-a`/`--all` re-stages every tracked-modified path from the working
+        tree before committing;
+      - a `git add` pending in the same compound command (not yet run at
+        hook-fire time) is about to stage current working-tree bytes.
+    Everything else is index-sourced: exactly what a plain `git commit` with
+    nothing already covering it actually lands.
+    Degrades toward the EMPTY set on any git-query failure -- see
+    _origin_content_digest's fallback, which biases any resulting uncertainty
+    toward MISMATCHING a previously-recorded key (more review required), never
+    toward silently matching one that covered different bytes."""
+    out = set()
+    commit_args = find_commit_segment(cmd)
+    if commit_args is None:
+        return out
+    if "--" in commit_args:
+        idx = commit_args.index("--")
+        for p in commit_args[idx + 1:]:
+            if not p:
+                continue
+            rel = _rel(repo, os.path.join(repo, p))
+            if rel:
+                out.add(rel)
+        return out  # pathspec form: ONLY these paths, all worktree-sourced
+    if has_all_flag(commit_args):
+        for p in (git_lines(repo, ["diff", "--name-only"]) or []):
+            rel = _rel(repo, os.path.join(repo, p))
+            if rel:
+                out.add(rel)
+    for abs_path in pending_add_paths(repo, cmd):
+        rel = _rel(repo, abs_path)
+        if rel:
+            out.add(rel)
+    return out
+
+
+def _origin_content_digest(repo, cmd, rel, worktree_sourced):
+    """sha256 of whichever bytes THIS commit invocation would actually land for
+    `rel` -- the working tree for a path in `worktree_sourced`, else the index.
+    Falls back to the working-tree digest when the index has no entry (a path
+    that is only reachable there is, by definition, worktree-sourced) -- this
+    fallback can only make the key diverge from a stale review, never cause a
+    stale review to validate."""
+    if rel in worktree_sourced:
+        return _content_digest(repo, rel)
+    digest = _index_digest(repo, rel)
+    return digest if digest is not None else _content_digest(repo, rel)
+
+
+def review_key(repo, rels, digest_fn=None):
+    """A stable key over the exact CONTENT of the risk files under review, as
+    resolved by `digest_fn(rel)` (defaults to _content_digest, i.e. plain
+    working-tree bytes -- the CLI's view of "what is at risk right now").
 
     Keyed on content, not on a commit range: at PreToolUse time there is no
     commit to name yet, and a range would not change when the implementer keeps
     editing after the review. Content does. That is precisely the staleness
     property the gate needs -- edit one reviewed byte and the key moves."""
+    if digest_fn is None:
+        digest_fn = lambda r: _content_digest(repo, r)  # noqa: E731
     h = hashlib.sha256()
     for rel in rels:
         h.update(rel.encode("utf-8"))
         h.update(b"\0")
-        h.update(_content_digest(repo, rel).encode("ascii"))
+        h.update(digest_fn(rel).encode("ascii"))
         h.update(b"\n")
     return h.hexdigest()
 
@@ -363,6 +499,34 @@ def _arg(argv, name, default=None):
     return default
 
 
+def _worktree_risk_rels(root):
+    """Every currently at-risk repo-relative path -- staged, tracked-and-
+    modified-but-unstaged, AND untracked. Union, not a guess at which specific
+    future commit invocation the operator will type.
+
+    UNTRACKED-FILE FIX (2026-07-24 review finding M3): the previous version
+    tried two synthetic commands ("git commit", "git commit -a") to discover
+    what to key on -- neither sees a brand-new, never-`git add`ed risk file,
+    because staged/`-a` are both meaningless for a path with no index entry at
+    all. That is precisely this fleet's own committing shape
+    (`git add <paths> && git commit -q -F -`, memory-documented): a session
+    creates hooks/new-guard.py and commits it in one compound call. Under the
+    old logic the HOOK correctly blocked it (via pending_add_paths) while
+    `--record` refused with "nothing at risk in the working tree" -- an
+    unsatisfiable loop with no exit but the override token, reproducing the
+    exact plan-gate failure (76/79 empty overrides) this gate exists to avoid.
+    `git ls-files --others --exclude-standard` closes the gap."""
+    staged = git_lines(root, ["diff", "--cached", "--name-only"]) or []
+    modified = git_lines(root, ["diff", "--name-only"]) or []
+    untracked = git_lines(root, ["ls-files", "--others", "--exclude-standard"]) or []
+    out = set()
+    for p in staged + modified + untracked:
+        rel = p.replace("\\", "/").lower()
+        if risk_reason(rel):
+            out.add(rel)
+    return sorted(out)
+
+
 def _cli_context(argv):
     repo = _arg(argv, "--repo") or os.getcwd()
     root = repo_root("", repo)
@@ -376,11 +540,7 @@ def _cli_context(argv):
             "eos-review-gate: no usable session id (set CLAUDE_CODE_SESSION_ID "
             "or pass --session); a review artifact cannot be addressed.\n")
         return None, None, None
-    # `git commit` with no flags: the plain staged set, plus anything a pending
-    # add would bring -- the same view the hook will take.
-    rels = risk_files(root, "git commit")
-    if not rels:
-        rels = risk_files(root, "git commit -a")
+    rels = _worktree_risk_rels(root)
     return root, session_id, rels
 
 
@@ -478,19 +638,30 @@ def main():
     if not isinstance(session_id, str):
         session_id = ""
 
-    key = review_key(repo, rels)
+    # Origin-aware digest (see module docstring's PROVENANCE FIX / M1): the key
+    # must reflect whatever bytes THIS specific commit invocation actually
+    # lands per path -- index for a plainly-staged path, working tree for one
+    # sourced via -a/pending-add/explicit pathspec.
+    worktree_sourced = _worktree_sourced_rels(repo, cmd)
+    digest_fn = lambda r: _origin_content_digest(repo, cmd, r, worktree_sourced)  # noqa: E731
+    key = review_key(repo, rels, digest_fn)
     if valid_review(session_id, key):
         return  # reviewed, and the review matches THIS content -> allow
 
-    # Only now is a grant actually needed, so it is safe to evaluate (and burn)
-    # the single-use token. Checking it earlier would consume Gabriel's approval
-    # on a commit that had a valid review anyway.
-    tier = override_tokens.Tier(*OVERRIDE_TIER_ARGS, single_use=True)
-    if override_tokens.token_grants(session_id, tier) is not None:
-        sys.stderr.write(
-            "eos-review-gate: proceeding UNREVIEWED on %d blast-radius file(s) "
-            "under a single-use override token (consumed).\n" % len(rels))
-        return
+    # Only in BLOCK mode is a grant actually needed, so the single-use token is
+    # evaluated (and burned) ONLY here -- not in warn mode, which never blocks
+    # and must never spend Gabriel's approval on a commit that didn't need one
+    # (2026-07-24 review finding m7: the token was previously consumed before
+    # the mode branch, so a live token silently vanished under warn mode with
+    # no warning, no block, and the approval wasted).
+    if mode == "block":
+        tier = override_tokens.Tier(*OVERRIDE_TIER_ARGS, single_use=True)
+        if override_tokens.token_grants(session_id, tier) is not None:
+            sys.stderr.write(
+                "eos-review-gate: proceeding UNREVIEWED on %d blast-radius "
+                "file(s) under a single-use override token (consumed).\n"
+                % len(rels))
+            return
 
     message = build_message(repo, rels, session_id, key,
                             artifact_state_note(session_id, key))
