@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: a744d8cf-2abe-4151-98ea-2bd224723db2
-  modified: 2026-07-21T21:17:15.642Z
+  modified: 2026-07-24T16:33:00.542Z
 ---
 
 # Deal Decision Ledger
@@ -16,6 +16,9 @@ Companion to the "Active deal pipeline" table in [projects.md](projects.md) (whi
 
 | Date | Deal | Verdict | One-line reason | Buy-box rule validated / refined |
 |---|---|---|---|---|
+| 2026-07-24 | 1150 Newark Road Industrial — Zanesville, OH | PASS | Gabriel: "remove" on the 07-24 Deal Command Board review. The IC memo's PROCEED (LOI $2.0–2.1M vs $2.5M ask) sat unlogged on SharePoint from 2026-03-28 until a 07-21 backfill — ~4 months stale by the time it surfaced, and not re-underwritten | Refines: a PROCEED recommendation that has aged months without action is not a live recommendation — re-underwrite or pass, don't act on it as found |
+| 2026-07-24 | 5515 Catfish Court — Westport (Waunakee), WI | PARK (lean pass, keep open) | Not proceeding at the $2,742,267 asking basis — 6-yr IRR floor fails (13.4% vs 15%) even though 10-yr clears (13.9% vs 12%). Gabriel: let it sit, re-approach lower if unsold ~3 weeks. Re-check 2026-08-14 | Reinforces: a split verdict where the SHORT-hold floor fails is a price problem, not a pass — hold the position and re-offer lower rather than closing the row |
+| 2026-07-24 | 1333 Research Road — Columbus, OH | PARK (price ceiling set) | Gabriel set the buy price at $1.25M vs the v05 GO at $1.4M; posture is wait-for-seller-desperation, no active pursuit and no LOI at the v05 number | Establishes: a reopened deal can carry a Gabriel-set price ceiling below its own underwriting verdict — the ceiling controls, and the stale verdict does not authorize an offer |
 | 2026-07-21 | 4331 Brockton Dr SE — Kentwood, MI (Airport Industrial Center) | PASS | Notion Stage → Passed; reason not logged elsewhere — reconcile manually | — |
 | 2026-07-21 | 2196 Port Sheldon Street — Jenison, MI | PASS | Notion Stage → Passed; reason not logged elsewhere — reconcile manually | — |
 | 2026-07-21 | 2900 Northridge Dr NW — Walker, MI (Kent County) | PASS | Notion Stage → Passed; reason not logged elsewhere — reconcile manually | — |
