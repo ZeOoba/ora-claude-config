@@ -67,7 +67,7 @@
 - [Subagent Anti-Delegation](feedback_subagent_anti_delegation.md) — `Tools:*` subagents may recurse via Agent instead of working; forbid it
 - Verify-before-trusting cluster: [subagent "safe" claims](feedback_verify_subagent_safe_claims.md) (grep-for-refs misses doctrine-in-prose) · [registry mutation claims](feedback_verify_registry_mutation_claims.md) (need a re-check) · [probe findings](feedback_verify_probe_findings_before_acting.md) (a hypothesis, not a verdict) · [reflagging tooling gaps](feedback_recheck_before_reflagging_tooling_gaps.md) (check current state before repeating a "known gap" note)
 - [fleet-status.py Dual-Fleet Read](reference_fleet_status_dual_read.md) — reads both registries either surface; WRITES need matching MCP
-- [Throttle-skip "global_limit" = catch-up burst](reference_fleet_throttle_skip_catchup_burst.md) — not a bug; lone repeated skips WOULD be
+- [Throttle-skip "global_limit" = catch-up burst](reference_fleet_throttle_skip_catchup_burst.md) — not a bug; lone repeated skips WOULD be. Also: a burst inverts producer/consumer ORDER, and can drop a slot with no skip logged at all
 - More verify-first: [negative Glob results](feedback_verify_negative_glob_results.md) (cross-check `git ls-files`) · [WIP settled via mtime](feedback_verify_wip_settled_via_mtime.md) (isRunning isn't per-file)
 - [Shared-Checkout Guard Session Attribution Unreliable](feedback_shared_checkout_guard_session_attribution_unreliable.md) — named IDs traced to no match; verify first
 - [Workflow named-args not delivered](feedback_workflow_named_args_not_delivered.md) — Workflow({name,args}) drops args on CC Desktop; hardcode scriptPath

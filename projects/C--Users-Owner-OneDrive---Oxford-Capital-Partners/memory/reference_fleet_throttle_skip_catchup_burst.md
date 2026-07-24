@@ -4,7 +4,7 @@ description: "recordedSkips 'global_limit' events are the Desktop scheduler's ow
 metadata:
   type: reference
   originSessionId: 41bfc8fa-2412-44b6-a527-f9a4631e86f5
-  modified: 2026-07-21T14:16:59.149Z
+  modified: 2026-07-24T14:52:13.817Z
 ---
 
 **What the metric means.** `recordedSkips[taskId]` entries with `reason: "global_limit"` are written by
@@ -74,5 +74,33 @@ clean (`{}`) throughout -- confirms the collision-detector fix holds independent
 expected throttle behavior. No new action taken; this entry exists precisely so a second occurrence
 doesn't trigger a fresh investigation from zero.
 
+**RECURRED 2026-07-24, and surfaced a SECOND, distinct consequence: a burst does not preserve
+intra-cluster ORDERING.** Everything above is about *whether* a task fires. This is about *what order*
+two tasks fire in when both are overdue — which matters whenever one task's spec assumes another
+already ran. `ora-sofr-direct-prefetch` (10:10 ET) is written assuming `ora-am-brief` (06:00 ET) wrote
+the Rate Snapshot page hours earlier, so its idempotency check normally finds the page fresh and
+no-ops. In the 07-24 burst both backfilled within ~90 seconds: am-brief started 14:35:28Z, the
+prefetch read the page at 14:36:26Z, saw the *previous* day's values, patched them, and am-brief
+superseded that patch ~4 minutes later with identical values at full precision. Harmless that run —
+but the latent failure is a Block A write landing between the consumer's read and its write, failing
+`old_str` and posting a FALSE failure alert. Fixed in `ora-sofr-direct-prefetch` v1.1 (STEP 2 reads
+Block A's `fetched_at`; a mismatch that re-resolves to already-fresh is SUCCESS, not failure).
+**Generalize before assuming this is one task's problem:** any producer/consumer pair inside the
+05:00–09:30 AM cluster (`ora-health-guard` counted 16 tasks there on 07-24) carries the same
+assumption risk. `ora-health-guard`'s own 2026-07-24 Block A.0 independently reached the same
+conclusion — "the catch-up burst does not preserve the intended intra-cluster ordering" — after its
+Block B mirror went out 40 min AFTER the am-brief Daily Brief it is supposed to precede.
+
+**Also 2026-07-24: a burst can drop a slot entirely, with NO throttle-skip logged.** `ora-am-brief`
+did not run at all on 2026-07-23 — confirmed by absence of a run transcript, absence of any
+`recordedSkips` entry for that date, and no Daily Brief email; the Rate Snapshot's `fetched_at`
+jumped 07-22 13:25 ET → 07-24 10:40 ET (~45h stale). On 07-24 the same 06:00 ET slot WAS backfilled
+4h35m late. So "no skip entry" does NOT mean "the task ran" — a silently dropped slot leaves no
+trace in `recordedSkips` at all, and `lastRunAt` is single-valued so it cannot evidence a prior day.
+The exact backfill cutoff is UNKNOWN and should not be asserted (n=2). To establish whether a task
+ran on a given past date, use run transcripts (`scheduled-task name="<id>"` in
+`~/.claude/projects/<project>/*.jsonl`) or its email/page output — not the registry.
+
 Related: [[reference_fleet_status_dual_read]] (dual-registry read mechanics),
-[[reference_lean_ram_toolkit]] (the RAM ceiling this throttle protects).
+[[reference_lean_ram_toolkit]] (the RAM ceiling this throttle protects),
+[[reference_cc_scheduler_filepath_mechanism]] (editing SKILL.md is the authoritative fix path).
