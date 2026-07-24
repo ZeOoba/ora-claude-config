@@ -14,3 +14,24 @@ Classification key: CURRENT = tag matches standard · STALE = tag present but mi
 2026-07-19 — 23 tasks: 19 MODEL-UNVERIFIABLE, 2 MODEL-CURRENT (ora-cc-schematic-refresh + ora-am-brief = claude-sonnet-5), 0 MODEL-STALE, 2 MODEL-UNTAGGED (ora-deal-command-board + ora-deal-aging-sla), standard=claude-sonnet-5
 2026-07-21 — 27 tasks: CURRENT=2, STALE=0, UNTAGGED=5, UNVERIFIABLE=20, standard=claude-sonnet-5
 2026-07-22 — 29 tasks: CURRENT=2, STALE=0, UNTAGGED=7, UNVERIFIABLE=20, standard=claude-sonnet-5
+2026-07-24 — 28 tasks: MODEL-CURRENT 2, MODEL-STALE 1 (ora-site-exposure-probe: claude-opus-4-8), MODEL-UNTAGGED 4 (check-dirty-files-session-pr, ora-appsec-sweep, ora-tenant-hubspot-reconciliation, ora-override-sweep-dryrun-check), MODEL-UNVERIFIABLE 21, standard=claude-sonnet-5
+
+## CLASSIFICATION KEY REVISED 2026-07-24 (ora-task-integrity-guard v1.7)
+The original key above (CURRENT = tag matches standard / STALE = tag present but mismatched) was the
+LAMS match-the-standard test mis-applied to this fleet. CC/MCP is server-pinned and NOT settable, so an
+id mismatch is not actionable and must not be graded "stale" (reference_scheduled_task_model_standard.md,
+"CC/MCP fleet — model is NOT settable, but IS observable": the CC/MCP check is tag-presence +
+observation-freshness). Prior dated lines are left byte-intact per append-only; read every pre-07-24
+"STALE" / "CURRENT" count under the OLD key. New key, effective 2026-07-24:
+  OBSERVED = real model id, checked/set on or after reference_model_release_checklist.md's
+             "Current lineup as of <date>" line — the BEST state; a non-Sonnet id here is the
+             documented #48976 server-pin outcome, not a defect
+  OBSERVATION-STALE = real model id, but checked/set predates that lineup date -> re-observe, never recreate
+  UNVERIFIABLE = tag literally reads UNVERIFIABLE (expected baseline; not fixable via recreate)
+  UNTAGGED = no tag at all (the only real coverage gap)
+
+2026-07-24 (CORRECTED, supersedes the 2026-07-24 line above) — 28 tasks: MODEL-OBSERVED 3 (ora-am-brief=claude-sonnet-5 set 07-16; ora-cc-schematic-refresh=claude-sonnet-5 checked 07-16; ora-site-exposure-probe=claude-opus-4-8 checked 07-22 via live-run transcript canary — reclassified from MODEL-STALE, no action), MODEL-OBSERVATION-STALE 0, MODEL-UNVERIFIABLE 21, MODEL-UNTAGGED 4 (check-dirty-files-session-pr [disabled], ora-appsec-sweep [intentional Fable pin per CLAUDE.md security floor — tag it, do not flip], ora-tenant-hubspot-reconciliation, ora-override-sweep-dryrun-check [one-time]), lineup-anchor=2026-07-10, LAMS standard (not applied to this fleet)=claude-sonnet-5
+
+2026-07-24 (2nd correction, same day) — ora-appsec-sweep moved MODEL-UNTAGGED -> MODEL-OBSERVED via transcript canary on its 2026-07-22 17:38Z run (session 4b66d74c): main loop = claude-opus-4-8 x163 + claude-sonnet-5 x86, ZERO claude-fable-5. Its frontmatter `model: fable` is INERT on CC/MCP (first direct evidence that frontmatter model: is not read for this fleet). Revised 07-24 counts: MODEL-OBSERVED 4, MODEL-OBSERVATION-STALE 0, MODEL-UNVERIFIABLE 21, MODEL-UNTAGGED 3 (check-dirty-files-session-pr [disabled], ora-tenant-hubspot-reconciliation, ora-override-sweep-dryrun-check [one-time]). NOTE: prior 07-22/07-24 lines called appsec an "intentional Fable pin" — that was a conflation of declared intent with actual firing model; see reference_scheduled_task_model_standard.md CORRECTION 2026-07-24. GOVERNANCE GAP (Gabriel's call): this security-gate task runs below CLAUDE.md's never-below-Fable floor, no in-registry fix exists.
+
+2026-07-24 (3rd correction, same day — precision fix) — ora-appsec-sweep's tag narrowed to [MODEL: claude-opus-4-8]. The earlier "claude-opus-4-8 + claude-sonnet-5" reading aggregated the WHOLE session 4b66d74c; that session began as the scheduled fire (17:38:32Z, all 163 msgs opus) and later went INTERACTIVE when Gabriel ran /model at 19:54:12Z (the 86 sonnet msgs). Only the pre-first-human-turn portion is fleet evidence. CANARY METHOD RULE: always cut the transcript at the first human-authored turn before counting models. Classification unchanged (MODEL-OBSERVED); counts unchanged (OBSERVED 4 / OBSERVATION-STALE 0 / UNVERIFIABLE 21 / UNTAGGED 3).

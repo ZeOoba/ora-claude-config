@@ -1,5 +1,5 @@
 # dry-run-task-integrity-guard.ps1 (2026-07-17) -- read-mostly diagnostic that answers
-# "would ora-task-integrity-guard's next 12:45 ET run alarm or report GUARD OK?" without
+# "would ora-task-integrity-guard's next scheduled run alarm or report GUARD OK?" without
 # waiting for the schedule.
 #
 # WHY: confirming this by hand on 2026-07-16/17 required running 5 separate engines in
@@ -30,10 +30,24 @@
 # Usage:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File dry-run-task-integrity-guard.ps1 [-SnapshotJsonPath <path>]
 #
-# Idempotent / safe to run anytime: writes only today's _state-history\<date>.cc.json
-# snapshot (same file the real guard writes, harmlessly overwritable) and reads/executes
-# the same read-mostly engines the real 12:45 ET run does. Does not touch scheduled-task
-# registration. Not a replacement for the real scheduled run -- a genuine diagnostic only.
+# Idempotent / safe to run anytime: writes only today's _state-history\<date>.cc.DRYRUN.json
+# and reads/executes the same read-mostly engines the real scheduled run does. Does not touch
+# scheduled-task registration. Not a replacement for the real scheduled run -- a diagnostic only.
+#
+# FIXED 2026-07-24 -- this wrapper used to write the REAL '<date>.cc.json', described here as
+# "harmlessly overwritable". It was not harmless, for two independent reasons:
+#   1. FORGED LIVENESS BEACON (the serious one). ora-task-integrity-guard\SKILL.md declares
+#      '{DATE}.cc.json' in its output_contract as is_primary_health_signal:true /
+#      on_missing_severity:alarm -- it is the ONLY evidence that a guard which is silent-by-design
+#      on a clean run actually fired. automation-health-monitor Step 0.56 consumes it. A dry-run
+#      writing that exact filename makes a DARK guard look alive, masking precisely the
+#      failure class this whole chain exists to catch.
+#   2. FIDELITY DOWNGRADE. Without -SnapshotJsonPath this wrapper falls back to the on-disk
+#      registry rather than a live list_scheduled_tasks round-trip, so it would replace the
+#      real run's authoritative snapshot with a lower-fidelity one.
+# The '.cc.dryrun.json' suffix is deliberately NOT matched by the output_contract's
+# '{DATE}.cc.json' pattern, nor by membership-guard.ps1's '.lams.json' filter. Do not "simplify"
+# it back to .cc.json.
 
 param(
     [string]$SnapshotJsonPath = $null
@@ -67,12 +81,20 @@ function Invoke-Engine([string]$Label, [string]$FilePath, [string[]]$ArgList) {
 }
 
 # ---------------------------------------------------------------------------
-# STEP 0.5 -- refresh today's CC/MCP _state-history\<date>.cc.json BEFORE membership-guard.ps1
+# STEP 0.5 -- write a DRY-RUN-ONLY copy of the CC/MCP snapshot (<date>.cc.dryrun.json)
+#
+# NOTE (corrected 2026-07-24): the old comment here claimed this had to run "BEFORE
+# membership-guard.ps1" because that engine reads the snapshot. It does not, and has not
+# since the 2026-07-15 filename split -- membership-guard.ps1 folds in the LAMS baseline
+# ONLY, filtering '20*-*.lams.json' (membership-guard.ps1:78-79) and explicitly excluding
+# .cc.json (its own line 63). So this write feeds NOTHING downstream in this wrapper; it is
+# kept purely as a diagnostic record of the task list this dry-run actually saw, under a
+# filename that cannot be mistaken for the real run's output_contract artifact.
 # ---------------------------------------------------------------------------
-Write-Section 'STEP 0.5 -- refresh _state-history CC/MCP snapshot'
+Write-Section 'STEP 0.5 -- write dry-run CC/MCP snapshot (.cc.dryrun.json -- NOT the real .cc.json)'
 
 $today = (Get-Date).ToString('yyyy-MM-dd')
-$ccSnapPath = Join-Path $snapDir "$today.cc.json"
+$ccSnapPath = Join-Path $snapDir "$today.cc.dryrun.json"
 $tasks = $null
 $source = $null
 
@@ -133,7 +155,10 @@ if (-not $tasks) {
 
 if (-not $tasks) {
     Write-Output "STEP 0.5 FAILED -- no CC/MCP task list obtained from -SnapshotJsonPath or on-disk fallback."
-    $reasons.Add("STEP 0.5 could not refresh today's .cc.json snapshot -- membership-guard.ps1 below may read a stale/wrong baseline (this is the exact gotcha this wrapper exists to prevent)")
+    # NOT a WOULD-ALARM reason: this dry-run-only snapshot feeds nothing (see the STEP 0.5
+    # header note -- membership-guard.ps1 reads .lams.json only). Failing to write it says
+    # nothing about whether the real run would alarm, so it must not poison the verdict.
+    Write-Output "NOTE -- could not write the dry-run snapshot. Diagnostic only; does not affect the verdict below (membership-guard.ps1 does not read this file)."
     $raw['step0_5'] = [ordered]@{ ok = $false; error = 'no data source available' }
 } else {
     $snapshotTasks = @()
@@ -177,6 +202,11 @@ if ($guardJson) {
     if ($checkedIsZero) { $reasons.Add('guard.ps1 reports checked==0 (store discovery broken -- self-check for the self-healer)') }
     if ($restoredNonEmpty) { $reasons.Add("guard.ps1 restored[] non-empty: $($guardJson.restored -join ', ')") }
     if ($missingNonEmpty) { $reasons.Add("guard.ps1 missing_everywhere[] non-empty: $($guardJson.missing_everywhere -join ', ')") }
+    # churn_suppressed is INFORMATIONAL, never a WOULD-ALARM reason (guard.ps1 content-equality
+    # gate, 2026-07-24) -- surface it so the suppressor stays observable, but do not escalate.
+    if (@($guardJson.churn_suppressed).Count -gt 0) {
+        Write-Output "INFO churn_suppressed (mtime-newer but byte-identical, NOT an alarm): $($guardJson.churn_suppressed -join ', ')"
+    }
 } else {
     Write-Output "WARN guard.ps1 stdout did not parse as JSON -- engine error, not itself a STEP-3 alarm unless it's the checked==0 case (STEP 4 failure note territory); flagging as inconclusive."
     $reasons.Add('guard.ps1 output unparseable -- inconclusive, treat as a guard failure needing manual look (STEP 4 territory)')
@@ -254,6 +284,6 @@ if ($reasons.Count -gt 0) {
 
 Write-Output ''
 Write-Output '(Reminder: this is a diagnostic dry-run, not the real scheduled run -- the actual'
-Write-Output '12:45 ET ora-task-integrity-guard execution is still the authoritative one, and it'
+Write-Output 'scheduled ora-task-integrity-guard execution is still the authoritative one, and it'
 Write-Output 'also runs STEP 2.5 model-currency (informational-only, never alarms) and the real'
 Write-Output 'push-fleet-heartbeat.ps1 pulse, neither of which this wrapper attempts.)'

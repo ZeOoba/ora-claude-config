@@ -1,6 +1,6 @@
 ---
 name: ora-appsec-sweep
-description: General application-security sweep of ora-pm (live tenant portal, Stripe ACH) and oxford-command-center — secret scan (working tree + full git history), lockfile CVE audit, AR-ledger/balance-display schema review, tenant-portal auth/injection pass, and OWASP-LLM checks scoped to ORA's actual agent surfaces (hooks, MCP connectors, scheduled-task registries). REPORT-ONLY: findings go to Notion Ops Hub + open-items-tracker.md; never rotates, never pushes, never auto-fixes. Reads suppressions.md before reporting. Dispatches the per-repo review to the security-auditor agent (Fable-pinned). v1.1 (2026-07-22: dispatch-to-agent simplification + fixed a duplicate-YAML-frontmatter defect that predated this version; see STATUS note). v1.0 registered 2026-07-20 (Plan 4b/4a) after a manual, Gabriel-supervised first run (2026-07-19).
+description: General application-security sweep of ora-pm (live tenant portal, Stripe ACH) and oxford-command-center — secret scan (working tree + full git history), lockfile CVE audit, AR-ledger/balance-display schema review, tenant-portal auth/injection pass, and OWASP-LLM checks scoped to ORA's actual agent surfaces (hooks, MCP connectors, scheduled-task registries). REPORT-ONLY: findings go to Notion Ops Hub + open-items-tracker.md; never rotates, never pushes, never auto-fixes. Reads suppressions.md before reporting. Dispatches the per-repo review to the security-auditor agent (Fable-pinned). v1.2 (2026-07-24: MODEL PIN claim corrected — a transcript canary on the 2026-07-22 run DISPROVED the assumption that this task runs on Fable; see MODEL PIN note. Documentation only, no procedural change). v1.1 (2026-07-22: dispatch-to-agent simplification + fixed a duplicate-YAML-frontmatter defect that predated this version; see STATUS note). v1.0 registered 2026-07-20 (Plan 4b/4a) after a manual, Gabriel-supervised first run (2026-07-19). [MODEL: claude-opus-4-8 — frontmatter `model: fable` NOT honored on CC/MCP (server-pin) | checked 2026-07-24 via live-run transcript canary]
 model: fable
 ---
 
@@ -47,13 +47,39 @@ model: fable
   suppression entry has been added for it — only Gabriel adds suppressions,
   and this needs his explicit call on scope/wording first.
 
-  MODEL PIN: `model: fable` in frontmatter is deliberate and load-bearing.
-  This task reviews security-gate-adjacent and payment-facing code
-  (CLAUDE.md floor: confidential/financial/governor and security-gate code
-  never below Fable). Never let this task inherit the caller's model. This
-  applies to the `security-auditor` dispatch too — the Agent call in the
-  PER-REPO REVIEW section below MUST pass `model: 'fable'` explicitly, never
-  omit it and rely on inheritance (CLAUDE.md dispatch invariant).
+  MODEL PIN — CLAIM CORRECTED 2026-07-24, THE FRONTMATTER PIN IS NOT IN EFFECT.
+  `model: fable` in frontmatter is deliberate INTENT, and this task does review
+  security-gate-adjacent and payment-facing code (CLAUDE.md floor:
+  confidential/financial/governor and security-gate code never below Fable).
+  But a transcript canary on this task's own 2026-07-22 17:38 UTC scheduled run
+  (session 4b66d74c-b948-49c1-8f8d-883d821e7aa3, whose first timestamp matches
+  the registry's lastRunAt to within 2s) shows the scheduled portion fired on
+  **claude-opus-4-8 — all 163 assistant messages from 17:38:32Z up to the first
+  human turn, with zero claude-fable-5**. (That session later became interactive:
+  Gabriel ran `/model` at 19:54:12Z and the subsequent 86 messages are
+  claude-sonnet-5. Those are a deliberate human switch, NOT scheduled-task
+  behaviour — do not read them as fleet evidence.) CC/MCP scheduled tasks are server-pinned at
+  registration and do NOT read this file's frontmatter `model:` field, so the
+  v1.1 STATUS note's inference ("a cleanliness fix, not evidence the Fable pin
+  had actually been failing") is now disproven: the pin was, and is, inert.
+  ==> This task is presently running BELOW the CLAUDE.md security-gate floor.
+  That is a live governance gap, not a tagging cosmetic, and it has no
+  in-registry fix (no settable model field on this fleet) — it needs Gabriel's
+  call. Do NOT "fix" it by deleting the frontmatter pin (it records intent and
+  costs nothing) and do NOT flip anything to Sonnet.
+  The `security-auditor` dispatch is a SEPARATE mechanism and its pin IS
+  honored — the Agent call in the PER-REPO REVIEW section below MUST keep
+  passing `model: 'fable'` explicitly, never omitting it and relying on
+  inheritance (CLAUDE.md dispatch invariant).
+  DISPATCH NOT YET EXERCISED (resolved 2026-07-24, no defect): the 2026-07-22
+  run made ZERO Agent/Task calls and wrote zero subagent transcripts. That is
+  NOT a skipped dispatch — v1.1, which introduced the dispatch, was authored
+  DURING that same session (the run's own Edit calls to this file are visible
+  in its transcript), so the fire executed the v1.0 inline-CHECKS spec, which
+  had no dispatch to make. The `security-auditor` dispatch has therefore never
+  actually run; its first real opportunity is the next scheduled fire. Treat
+  that fire as the dispatch's first live test and verify a subagent transcript
+  is produced — do not assume the path works until it has.
 -->
 
 ORA AppSec Sweep — recurring application-security review of the two production ORA codebases. Self-contained; you start fresh with no memory of prior runs. Surface: Claude Code (CC/MCP fleet). This is a READ-ONLY review task.
