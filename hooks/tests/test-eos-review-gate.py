@@ -545,6 +545,200 @@ def test_record_cli_refuses_when_nothing_is_at_risk():
     print("PASS test_record_cli_refuses_when_nothing_is_at_risk")
 
 
+# --------------------------------------------------------------------------
+# 2026-07-24 independent-review findings (M1-M4, m5-m7, n8) -- each test here
+# is the closure proof for one confirmed PoC from the mandatory review this
+# gate itself required before it could be merged. See
+# hooks/eos-review-gate.py's module docstring (PROVENANCE FIX) for the M1
+# narrative.
+# --------------------------------------------------------------------------
+
+def test_index_vs_worktree_divergence_is_not_satisfied_by_worktree_review():
+    """M1. Stage v1, get it reviewed (CLI reads the working tree, which at
+    record time still equals v1), THEN edit the working tree to v2 WITHOUT
+    re-staging. A bare `git commit` lands v1 (the index), not v2 -- so the
+    hook must key on v1 and find the v1 review a MATCH (this is now the
+    CORRECT outcome: v1 really is what's reviewed and what lands).
+    Confirms the fix doesn't just move WHERE it breaks -- it must actually
+    make the gate track committed reality, not just working-tree state."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "hooks/g.py", "v1\n")
+    git(repo, "add", "-A")
+    record_review(repo, tmp)  # reviews v1 (working tree == index right now)
+    write(repo, "hooks/g.py", "v2 unstaged edit\n")  # index still v1
+    rc, out, err = run_hook('git commit -m "x"', repo, tmp)
+    assert_allowed(rc, err, "plain commit lands v1, which was genuinely reviewed")
+    print("PASS test_index_vs_worktree_divergence_is_not_satisfied_by_worktree_review")
+
+
+def test_index_vs_worktree_divergence_blocks_when_review_covers_the_edit():
+    """M1, the actual PoC 1 shape. Stage v1, THEN edit to v2 and record a
+    review AFTER the edit (so the CLI captures v2, not v1). A bare `git
+    commit` still lands v1 (the index) -- the review covered bytes that will
+    NEVER be committed, so the gate must block."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "hooks/g.py", "v1 staged, will be committed\n")
+    git(repo, "add", "-A")
+    write(repo, "hooks/g.py", "v2 working tree, what the reviewer sees\n")
+    record_review(repo, tmp)  # keys on v2 (CLI reads working tree)
+    rc, out, err = run_hook('git commit -m "x"', repo, tmp)  # lands v1
+    assert_blocked(rc, err, "review of v2 must not authorize landing v1")
+    print("PASS test_index_vs_worktree_divergence_blocks_when_review_covers_the_edit")
+
+
+def test_all_flag_reviews_worktree_content_correctly():
+    """M1 counterpart: `-a` re-stages from the working tree, so a review of
+    the CURRENT working tree DOES cover what `commit -a` will land, even with
+    a divergent (older) index."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "hooks/g.py", "v1\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "baseline")
+    write(repo, "hooks/g.py", "v2\n")  # unstaged; index still has v1
+    record_review(repo, tmp)  # CLI reviews v2 (working tree)
+    rc, out, err = run_hook('git commit -am "x"', repo, tmp)  # -a lands v2
+    assert_allowed(rc, err, "commit -a lands the reviewed working-tree content")
+    print("PASS test_all_flag_reviews_worktree_content_correctly")
+
+
+def test_chained_trailing_dashdash_does_not_hijack_pathspec():
+    """M2. A `--` belonging to a DIFFERENT chained command must not be read as
+    this commit's pathspec and used to discard the real staged risk file."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "hooks/g.py", "x = 1\n")
+    git(repo, "add", "-A")
+    rc, out, err = run_hook(
+        'git commit -m "x" && git log -1 --format=%s -- hooks/', repo, tmp)
+    assert_blocked(rc, err, "chained `-- pathspec` in a later command")
+    print("PASS test_chained_trailing_dashdash_does_not_hijack_pathspec")
+
+
+def test_own_pathspec_still_narrows_correctly():
+    """M2 regression guard: the commit's OWN `-- pathspec` must still work
+    exactly as before -- only a FOREIGN segment's `--` should stop counting."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "src/ui/button.tsx", "export const B = 1\n")
+    write(repo, "hooks/unrelated.py", "y = 1\n")
+    git(repo, "add", "-A")
+    rc, out, err = run_hook('git commit -m "ui only" -- src/ui/button.tsx', repo, tmp)
+    assert_allowed(rc, err, "own pathspec excludes the risk file")
+    print("PASS test_own_pathspec_still_narrows_correctly")
+
+
+def test_commit_message_mentioning_dry_run_still_gates():
+    """m5. `--dry-run` must be recognized as a real FLAG of the commit
+    segment, not a substring anywhere in the command -- a commit message that
+    merely mentions the text "--dry-run" must not blind the gate."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "hooks/g.py", "x = 1\n")
+    git(repo, "add", "-A")
+    rc, out, err = run_hook(
+        'git commit -m "docs: explain the --dry-run flag"', repo, tmp)
+    assert_blocked(rc, err, "commit message mentioning --dry-run")
+    print("PASS test_commit_message_mentioning_dry_run_still_gates")
+
+
+def test_react_hooks_directory_not_falsely_flagged():
+    """M4. `src/hooks/useAuth.ts` is idiomatic React, not this repo's
+    hooks/** enforcement code -- only a REPO-ROOT hooks/ path is in scope."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "src/hooks/useAuth.ts", "export const useAuth = () => null\n")
+    git(repo, "add", "-A")
+    rc, out, err = run_hook('git commit -m "feat: auth hook"', repo, tmp)
+    assert_allowed(rc, err, "src/hooks/ (React convention) must not trigger the gate")
+    print("PASS test_react_hooks_directory_not_falsely_flagged")
+
+
+def test_root_hooks_directory_still_flagged():
+    """M4 regression guard: the repo's OWN top-level hooks/ must still gate."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "hooks/new-guard.py", "x = 1\n")
+    git(repo, "add", "-A")
+    rc, out, err = run_hook('git commit -m "x"', repo, tmp)
+    assert_blocked(rc, err, "root hooks/ must still gate")
+    print("PASS test_root_hooks_directory_still_flagged")
+
+
+def test_noise_filter_not_falsely_flagged_as_financial():
+    """m6. "noi" as a bare substring matched "noise" -- a financial token must
+    require a word boundary, not just containment."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "src/audio/noise_filter.py", "def denoise(): pass\n")
+    git(repo, "add", "-A")
+    rc, out, err = run_hook('git commit -m "x"', repo, tmp)
+    assert_allowed(rc, err, "noise_filter.py must not be flagged as financial")
+    print("PASS test_noise_filter_not_falsely_flagged_as_financial")
+
+
+def test_noi_engine_still_flagged_as_financial():
+    """m6 regression guard: a genuine NOI engine path must still gate --
+    the boundary fix must not blind real financial-decision code."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "src/engine/noi_engine.py", "def noi(): return 0\n")
+    git(repo, "add", "-A")
+    rc, out, err = run_hook('git commit -m "x"', repo, tmp)
+    assert_blocked(rc, err, "noi_engine.py must still be flagged as financial")
+    print("PASS test_noi_engine_still_flagged_as_financial")
+
+
+def test_capital_allocation_prefix_still_flagged():
+    """m6 regression guard: intentional PREFIX tokens like "capital_alloc"
+    (matching capital_allocation.py, capital_allocator.py, ...) must not be
+    broken by the new word-boundary handling -- only the short, genuinely
+    collision-prone fragments (noi/irr/ltv/engine) got boundary-restricted."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "src/capital_allocation.py", "x = 1\n")
+    git(repo, "add", "-A")
+    rc, out, err = run_hook('git commit -m "x"', repo, tmp)
+    assert_blocked(rc, err, "capital_allocation.py must still be flagged")
+    print("PASS test_capital_allocation_prefix_still_flagged")
+
+
+def test_search_engine_ui_not_falsely_flagged():
+    """m6 regression guard: "engine" as an ordinary English word (search
+    engine, template engine) must not trigger the gate -- this is the false
+    positive the ORIGINAL delimited-substring design already avoided; the
+    boundary-token consolidation must preserve that, not regress it."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "src/hooks/useSearchEngine.ts", "export const x = 1\n")
+    git(repo, "add", "-A")
+    rc, out, err = run_hook('git commit -m "x"', repo, tmp)
+    assert_allowed(rc, err, "useSearchEngine.ts must not be flagged as financial")
+    print("PASS test_search_engine_ui_not_falsely_flagged")
+
+
+def test_compound_add_commit_is_satisfiable_via_record():
+    """M3. The fleet's own default committing shape -- `git add <untracked> &&
+    git commit` -- must be satisfiable through --record, not just blockable
+    by the hook. An untracked (never staged) risk file is the exact case that
+    made --record refuse with "nothing at risk" while the hook still blocked:
+    an unsatisfiable loop with no exit but the override token."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "hooks/g.py", "x = 1\n")  # untracked, never staged
+    record_review(repo, tmp)  # must NOT refuse "nothing at risk"
+    rc, out, err = run_hook(
+        'git add hooks/g.py && git commit -m "x"', repo, tmp)
+    assert_allowed(rc, err, "compound add+commit of an untracked risk file, reviewed")
+    print("PASS test_compound_add_commit_is_satisfiable_via_record")
+
+
+def test_warn_mode_does_not_consume_override_token():
+    """m7. token_grants() CONSUMES a single-use token. Under warn mode the
+    gate never blocks, so it must never even LOOK at the token -- doing so
+    silently burns Gabriel's approval on a commit that didn't need one, with
+    no warning that it happened."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "hooks/g.py", "x = 1\n")
+    git(repo, "add", "-A")
+    path = write_override(tmp, "sess1")
+    rc, out, err = run_hook('git commit -m "x"', repo, tmp,
+                            extra_env={"EOS_REVIEW_GATE_MODE": "warn"})
+    assert rc == 0, "warn mode must exit 0, got %s" % rc
+    assert os.path.exists(path), (
+        "warn mode must NOT consume the override token -- it never needed one")
+    print("PASS test_warn_mode_does_not_consume_override_token")
+
+
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
 
 if __name__ == "__main__":
