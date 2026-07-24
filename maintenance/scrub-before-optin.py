@@ -46,21 +46,18 @@ TERMS_JSON = HERE.parent / "hooks" / "confidential-terms.json"
 # scoped to "skip while walking a candidate tree", not "skip the whole dir".
 SKIP_DIR_NAMES = {".git", "__pycache__", "node_modules", ".venv"}
 
-# Advisory secret-shape patterns. Each is (label, compiled regex); the MATCHED
-# TEXT is never printed, only the label + file:line, so a false positive
-# costs a glance at the line, not a leaked value in the report itself.
-SECRET_PATTERNS = [
-    ("generic API key assignment",
-     re.compile(r'(?i)\b(?:api[_-]?key|apikey)\b\s*[:=]\s*["\']?[A-Za-z0-9_\-]{16,}')),
-    ("AWS access key ID", re.compile(r'\bAKIA[0-9A-Z]{16}\b')),
-    ("GitHub token", re.compile(r'\bgh[pousr]_[A-Za-z0-9]{20,}\b')),
-    ("Slack token", re.compile(r'\bxox[baprs]-[A-Za-z0-9-]{10,}\b')),
-    ("Anthropic API key", re.compile(r'\bsk-ant-[A-Za-z0-9_-]{20,}\b')),
-    ("generic bearer token", re.compile(r'(?i)\bbearer\s+[A-Za-z0-9._-]{20,}')),
-    ("password assignment", re.compile(r'(?i)\bpassword\b\s*[:=]\s*["\']?[^\s"\']{6,}')),
-    ("PEM private-key block",
-     re.compile(r'-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----')),
-]
+# Advisory secret-shape patterns -- now IMPORTED, not redefined (Gabriel ruling
+# 2026-07-24). This list and setup-self-audit.py's had already diverged, with neither a
+# superset of the other; hooks/lib/secret_patterns.py is their union and the single source
+# the pre-push gate also uses. This mirrors what this file already does for confidential
+# terms (it imports doctrine-integrity-probe's matcher rather than copying it) -- the
+# stated reason there was that the two must never drift apart, and the same applies here.
+# The MATCHED TEXT is still never printed, only the label + file:line.
+_LIB = HERE.parent / "hooks" / "lib"
+sys.path.insert(0, str(_LIB))
+import secret_patterns as _secret_lib  # noqa: E402
+
+SECRET_PATTERNS = _secret_lib.SECRET_PATTERNS
 
 
 def iter_scannable_files(paths):
