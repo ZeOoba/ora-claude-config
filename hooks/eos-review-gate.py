@@ -1,0 +1,519 @@
+"""Engineering OS review gate -- PreToolUse hook for Bash. BLOCKING.
+
+Blocks a `git commit` that would land BLAST-RADIUS or FINANCIAL-DECISION code
+with no independent code-review artifact tied to THAT SPECIFIC DIFF.
+
+RATIFIED BY GABRIEL 2026-07-24 (scope + blocking enforcement). Rationale and the
+measured cost basis live in memory/feedback_auto_review_blast_radius_gate.md:
+one reviewer pass cost ~108k subagent tokens / ~6.5 min on an EIGHT-LINE diff and
+found a `major` defect the implementer had missed. Worth it on risky code; pure
+waste on typos and docs -- hence a scoped gate, not a universal one.
+
+WHY A HOOK AND NOT DOCTRINE. The Engineering OS "Done" criteria ALREADY required
+an independent review, and it was skipped in the very session that wrote them.
+`eos-plan-gate` is what actually stopped work that day; the prose did not. This
+gate is the same mechanism applied to review.
+
+SCOPE is the risk list CLAUDE.md already defines -- no new list was invented:
+  hooks/** . *.env* . *credentials* . confidential-terms.json . settings.json .
+  CLAUDE.md and ~/.claude config . scheduled-task registries . CSP/headers .
+  financial-constant/governor files . financial-decision code (engine math,
+  scoring, benchmarking, capital-allocation/NOI).
+
+WHAT MAKES THIS NOT THEATER: the review artifact is keyed by a CONTENT HASH of
+the exact risk-file versions that were reviewed. Edit a reviewed file by one
+character and its key changes, the artifact no longer matches, and the gate
+blocks again. A review cannot be earned once and spent forever, and a review of
+{a.py} does not cover a later commit of {a.py, b.py}. See
+test_stale_review_blocks -- that test IS the feature.
+
+THE AUTO-DISPATCH CARVE-OUT (Gabriel, 2026-07-24). This gate is only satisfiable
+because Gabriel granted an explicit carve-out to the standing session instruction
+"Do not call the AgentTool unless the user requested it": a reviewer subagent MAY
+be dispatched without asking, SOLELY to review a blast-radius / financial-decision
+diff for this gate. Without that carve-out this gate would deny commits with no
+permitted way to clear them -- a deadlock, not a guardrail. The carve-out is
+narrow: it authorizes review dispatch, nothing else.
+
+REVIEWER MODEL TIER. Doctrine is reviewer >= implementer, and financial/governor
+code never below the top tier. Gabriel's 2026-07-24 amendment: do NOT hardcode a
+single id -- "Fable might go away, just use highest intelligence available."
+So this file carries a LADDER of acceptable top-tier ids rather than one constant;
+a retired id degrades to the next entry instead of wedging the gate. The ladder is
+a sweep target for reference_model_release_checklist.md, and EOS_REVIEW_MODELS
+overrides it without a code change. Every dispatch must still PIN an explicit
+`model` -- inheritance can yield an unusable id.
+
+SAFETY INVARIANT, two-sided and deliberately asymmetric:
+  - The gate's OWN machinery fails OPEN. Bad stdin, no git, unreadable repo,
+    import failure, any unexpected exception -> exit 0, allow. A bug in a gate
+    must never wedge the fleet.
+  - A GRANT fails CLOSED. A missing, corrupt, stale, mis-keyed, cross-session, or
+    under-tier artifact is not an approval. Ambiguity never resolves in the
+    grant's favour -- same stance as lib/override_tokens.py.
+  Concretely: "I cannot tell what this commit touches" -> allow. "I can tell it
+  touches risk code and I cannot find a valid review" -> block.
+
+ESCAPE HATCH: the shared session-scoped override-token contract
+(lib/override_tokens.py), tier `allow-unreviewed-commit`, SINGLE-USE. Single-use
+on purpose -- a multi-use token would let one approval cover an entire session of
+unreviewed blast-radius commits, which is how the plan-gate ended up with 76 of 79
+override markers empty. The token is checked ONLY after the gate has decided it
+would otherwise block, because token_grants() CONSUMES: evaluating it
+speculatively would burn Gabriel's approval on a commit that never needed one.
+
+HONEST LIMIT. Same cooperative threat model as every other gate here: the session
+being gated can also write its own review artifact via `--record`. This gate
+raises the floor from "review silently skipped" to "review deliberately
+falsified", and leaves an audit trail either way. It is not an adversarial
+boundary and does not pretend to be.
+
+CLI (this is how the gate is actually satisfiable):
+  python eos-review-gate.py --key
+      -> {"key", "paths", "repo"} for the current risk diff. Give this to the
+         reviewer so it reviews exactly what the gate will hash.
+  python eos-review-gate.py --record --verdict approved --model <pinned-id> \
+      --notes "<summary>"
+      -> writes the artifact for the CURRENT key.
+
+Stdlib only. ASCII-only. Windows (`python`).
+"""
+
+import hashlib
+import json
+import os
+import sys
+import time
+
+LIB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib")
+sys.path.insert(0, LIB_DIR)
+# Guarded import, same reasoning as commit-provenance-guard.py: an unguarded
+# import crashes at MODULE LOAD, before main()'s fast-path check runs, so it
+# would traceback on EVERY Bash call in EVERY session -- not just commits.
+try:
+    import override_tokens
+    from git_commit_parse import candidate_paths, is_git_commit, repo_root
+    PARSE_CONTRACT_LOADED = True
+except Exception:
+    PARSE_CONTRACT_LOADED = False
+
+DEFAULT_SESSIONS_DIR = "C:/Users/Owner/.claude/hooks/sessions"
+REVIEWS_SUBDIR = "reviews"
+
+# Acceptable reviewer model ids, highest intelligence first. NOT a single
+# hardcoded constant, by Gabriel's 2026-07-24 amendment -- a retired id must
+# degrade to the next entry rather than make the gate unsatisfiable. Sweep target
+# for reference_model_release_checklist.md.
+REVIEWER_MODEL_LADDER = ("claude-fable-5", "claude-opus-4-8")
+
+APPROVED_VERDICTS = ("approved", "pass", "no-blocking-findings")
+
+OVERRIDE_TIER_ARGS = ("allow-unreviewed-commit", "unreviewed-blast-radius-commit",
+                      30 * 60)
+
+# ---------------------------------------------------------------------------
+# risk classification -- CLAUDE.md's list, transcribed. Nothing invented here.
+# ---------------------------------------------------------------------------
+
+# Checked FIRST. A path matching any of these is never risk code, even if a risk
+# rule below would otherwise match it.
+_EXCLUDED_DIR_PARTS = {
+    "node_modules", "__pycache__", ".git", "archive", "memory", "sessions",
+    "site-packages", "dist", "build", ".venv", "venv",
+}
+
+_CONFIG_EXTS = {".json", ".toml", ".yaml", ".yml", ".ini", ".cfg"}
+
+# Financial-decision code: "engine math, scoring, benchmarking,
+# capital-allocation/NOI" plus the named governor constants. Tokens are
+# deliberately specific -- a bare "score"/"engine" would drag in search engines
+# and UI scores, and a gate that cries wolf gets switched off.
+_FINANCE_TOKENS = (
+    "governor", "dscr", "ltv", "hurdle", "cap_rate", "caprate", "noi",
+    "underwrit", "valuation", "capital_config", "capital_alloc", "capital-alloc",
+    "replacement_cost", "replacement-cost", "benchmark", "scoring", "waterfall",
+    "amortiz", "/engine/", "engine_", "_engine", "_irr", "irr_",
+)
+_FINANCE_CODE_EXTS = {
+    ".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".go", ".rs", ".java",
+    ".rb", ".php", ".sql", ".json",
+}
+
+
+def risk_reason(rel):
+    """Why `rel` (repo-relative, forward-slashed, lowercased) is blast-radius or
+    financial-decision code -- or None if it is not."""
+    parts = rel.split("/")
+    base = parts[-1]
+    ext = os.path.splitext(base)[1]
+
+    if any(p in _EXCLUDED_DIR_PARTS for p in parts[:-1]):
+        return None
+    # Documentation is not enforcement code. CLAUDE.md is the one .md that IS
+    # doctrine, and stays in scope.
+    if ext == ".md" and base != "claude.md":
+        return None
+
+    if base == "claude.md":
+        return "CLAUDE.md doctrine"
+    if "hooks" in parts[:-1]:
+        return "hooks/** enforcement code"
+    if ".env" in base:
+        return "environment file"
+    if "credential" in rel:
+        return "credentials"
+    if base == "confidential-terms.json":
+        return "confidential-terms roster"
+    if base in ("settings.json", "settings.local.json"):
+        return "settings.json harness config"
+    if "scheduled-tasks" in rel or "scheduled_tasks" in rel:
+        return "scheduled-task registry"
+    if base in ("_headers", "netlify.toml", "vercel.json") or base.endswith(".headers"):
+        return "CSP/headers"
+    if "csp" in base:
+        return "CSP/headers"
+    if ".claude" in parts[:-1] and ext in _CONFIG_EXTS:
+        return "~/.claude config"
+    if ext in _FINANCE_CODE_EXTS and any(t in rel for t in _FINANCE_TOKENS):
+        return "financial-decision / governor code"
+    return None
+
+
+# ---------------------------------------------------------------------------
+# the review key: a content hash of exactly the risk files at stake
+# ---------------------------------------------------------------------------
+
+def _rel(repo, abs_path):
+    try:
+        rel = os.path.relpath(abs_path, repo)
+    except ValueError:
+        return None  # different drive -- not in this repo
+    rel = rel.replace("\\", "/")
+    if rel.startswith("../"):
+        return None
+    return rel.lower()
+
+
+def risk_files(repo, cmd):
+    """Sorted repo-relative risk paths this commit would capture.
+
+    Returns [] when the command captures nothing risky AND when the parser could
+    not determine what it captures -- both mean "nothing to gate on". That is the
+    fail-open half of the safety invariant: this gate can only police what it can
+    see, and every degradation in git_commit_parse biases toward fewer paths."""
+    cands = candidate_paths(repo, cmd)
+    if not cands:
+        return []
+    out = set()
+    for abs_path in cands:
+        rel = _rel(repo, abs_path)
+        if rel and risk_reason(rel):
+            out.add(rel)
+    return sorted(out)
+
+
+def _content_digest(repo, rel):
+    """sha256 of the working-tree bytes of `rel`, or DELETED. Hashing content
+    directly rather than shelling out to `git hash-object` keeps this total: a
+    path staged-for-deletion, or one git cannot address, still yields a stable
+    token instead of a subprocess failure."""
+    path = os.path.join(repo, rel)
+    try:
+        with open(path, "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
+    except OSError:
+        return "DELETED"
+
+
+def review_key(repo, rels):
+    """A stable key over the exact CONTENT of the risk files under review.
+
+    Keyed on content, not on a commit range: at PreToolUse time there is no
+    commit to name yet, and a range would not change when the implementer keeps
+    editing after the review. Content does. That is precisely the staleness
+    property the gate needs -- edit one reviewed byte and the key moves."""
+    h = hashlib.sha256()
+    for rel in rels:
+        h.update(rel.encode("utf-8"))
+        h.update(b"\0")
+        h.update(_content_digest(repo, rel).encode("ascii"))
+        h.update(b"\n")
+    return h.hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# the review artifact
+# ---------------------------------------------------------------------------
+
+def sessions_dir():
+    return os.environ.get("EOS_SESSIONS_DIR") or DEFAULT_SESSIONS_DIR
+
+
+def accepted_models():
+    raw = os.environ.get("EOS_REVIEW_MODELS")
+    if raw:
+        vals = tuple(v.strip() for v in raw.split(",") if v.strip())
+        if vals:
+            return vals
+    return REVIEWER_MODEL_LADDER
+
+
+def artifact_path(session_id, key):
+    """Session-scoped, mirroring the override-token layout: hooks/sessions/ is
+    gitignored, so an artifact cannot be swept into a commit by `git add -A` and
+    cannot be re-minted at age ~0 by a fresh clone (the 2026-07-16 defect that
+    self-granted a live override). Session scoping also means one session's
+    review does not silently authorize another's commit -- a real constraint
+    with 4+ sessions routinely running here."""
+    if not override_tokens.SESSION_ID_RE.match(session_id or ""):
+        return None
+    return os.path.join(sessions_dir(), session_id, REVIEWS_SUBDIR, key + ".json")
+
+
+def valid_review(session_id, key):
+    """The artifact's fields if a valid review authorizes `key` for this session,
+    else None. Every failure mode -- absent, unreadable, malformed, wrong key,
+    wrong session, non-approving verdict, under-tier reviewer -- is NOT a grant."""
+    path = artifact_path(session_id, key)
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8-sig") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError, UnicodeDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    if data.get("key") != key:
+        return None
+    if data.get("session") != session_id:
+        return None
+    if str(data.get("verdict", "")).strip().lower() not in APPROVED_VERDICTS:
+        return None
+    if data.get("reviewer_model") not in accepted_models():
+        return None
+    return data
+
+
+# ---------------------------------------------------------------------------
+# messaging
+# ---------------------------------------------------------------------------
+
+def build_message(repo, rels, session_id, key, artifact_state):
+    listing = "\n".join(
+        "  - %s   [%s]" % (r, risk_reason(r)) for r in rels[:8])
+    more = "" if len(rels) <= 8 else "\n  ... and %d more" % (len(rels) - 8)
+    hook = os.path.abspath(__file__).replace("\\", "/")
+    tier = override_tokens.Tier(*OVERRIDE_TIER_ARGS, single_use=True)
+    return (
+        "This `git commit` would land %d blast-radius / financial-decision "
+        "file(s) with %s:\n%s%s\n\n"
+        "Ratified by Gabriel 2026-07-24: this class of code gets an INDEPENDENT "
+        "review before it lands -- an implementer re-reading their own diff does "
+        "not count. One measured pass found a `major` defect in an 8-line diff.\n\n"
+        "To clear this gate:\n"
+        "  1. Dispatch an independent reviewer on exactly these files. Gabriel's "
+        "carve-out permits dispatching it WITHOUT asking, for this purpose only. "
+        "PIN the model explicitly -- one of: %s.\n"
+        "  2. Record its verdict:\n"
+        "     python \"%s\" --record --verdict approved --model <pinned-id> "
+        "--notes \"<what was reviewed and found>\"\n"
+        "     (`--key` prints the exact key + path list to hand the reviewer.)\n"
+        "  3. The artifact is keyed to this exact content. Edit any of these "
+        "files afterward and it stops matching -- re-review, do not re-record.\n\n"
+        "If Gabriel has approved landing this UNREVIEWED, write a single-use "
+        "override token:\n%s\n"
+        "Current review state: %s\n"
+        % (len(rels), "no matching review artifact", listing, more,
+           ", ".join(accepted_models()), hook,
+           override_tokens.describe_token(session_id, tier),
+           artifact_state)
+    )
+
+
+def artifact_state_note(session_id, key):
+    """Distinguish 'never reviewed' from 'reviewed, but the artifact no longer
+    matches' -- the second is the common case and the confusing one."""
+    path = artifact_path(session_id, key)
+    if path and os.path.isfile(path):
+        return "an artifact exists for this key but did not validate (verdict, " \
+               "reviewer model, or session mismatch) -- see the fields above."
+    base = os.path.join(sessions_dir(), session_id or "", REVIEWS_SUBDIR)
+    try:
+        existing = [f for f in os.listdir(base) if f.endswith(".json")]
+    except OSError:
+        existing = []
+    if existing:
+        return ("%d earlier review(s) recorded this session, none matching the "
+                "current content (key %s). The files changed after they were "
+                "reviewed -- that is this gate working as designed."
+                % (len(existing), key[:12]))
+    return "no review recorded this session (key %s)." % key[:12]
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def _arg(argv, name, default=None):
+    if name in argv:
+        i = argv.index(name)
+        if i + 1 < len(argv):
+            return argv[i + 1]
+    return default
+
+
+def _cli_context(argv):
+    repo = _arg(argv, "--repo") or os.getcwd()
+    root = repo_root("", repo)
+    if not root:
+        sys.stderr.write("eos-review-gate: not a git repo: %s\n" % repo)
+        return None, None, None
+    session_id = (_arg(argv, "--session")
+                  or os.environ.get("CLAUDE_CODE_SESSION_ID") or "")
+    if not override_tokens.SESSION_ID_RE.match(session_id):
+        sys.stderr.write(
+            "eos-review-gate: no usable session id (set CLAUDE_CODE_SESSION_ID "
+            "or pass --session); a review artifact cannot be addressed.\n")
+        return None, None, None
+    # `git commit` with no flags: the plain staged set, plus anything a pending
+    # add would bring -- the same view the hook will take.
+    rels = risk_files(root, "git commit")
+    if not rels:
+        rels = risk_files(root, "git commit -a")
+    return root, session_id, rels
+
+
+def cli_key(argv):
+    root, session_id, rels = _cli_context(argv)
+    if root is None:
+        return 1
+    sys.stdout.write(json.dumps({
+        "repo": root.replace("\\", "/"),
+        "paths": rels,
+        "reasons": {r: risk_reason(r) for r in rels},
+        "key": review_key(root, rels) if rels else "",
+    }, indent=2))
+    return 0
+
+
+def cli_record(argv):
+    root, session_id, rels = _cli_context(argv)
+    if root is None:
+        return 1
+    if not rels:
+        sys.stderr.write(
+            "eos-review-gate: nothing at risk in the working tree -- there is no "
+            "blast-radius diff to review, so no artifact is needed or written.\n")
+        return 1
+    model = _arg(argv, "--model")
+    if model not in accepted_models():
+        sys.stderr.write(
+            "eos-review-gate: reviewer model %r is not in the accepted tier "
+            "(%s). Reviewer must be >= implementer; pin one explicitly.\n"
+            % (model, ", ".join(accepted_models())))
+        return 1
+    verdict = (_arg(argv, "--verdict") or "").strip().lower()
+    if verdict not in APPROVED_VERDICTS:
+        sys.stderr.write(
+            "eos-review-gate: verdict %r recorded as NON-approving; the gate will "
+            "keep blocking. Approving verdicts: %s\n"
+            % (verdict, ", ".join(APPROVED_VERDICTS)))
+    key = review_key(root, rels)
+    path = artifact_path(session_id, key)
+    if not path:
+        sys.stderr.write("eos-review-gate: session id cannot address an artifact.\n")
+        return 1
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    record = {
+        "key": key,
+        "session": session_id,
+        "verdict": verdict,
+        "reviewer_model": model,
+        "paths": rels,
+        "repo": root.replace("\\", "/"),
+        "notes": _arg(argv, "--notes") or "",
+        "ts": int(time.time()),
+    }
+    with open(path, "w", encoding="ascii", newline="\n") as fh:
+        json.dump(record, fh, indent=2)
+    record["artifact_path"] = path
+    sys.stdout.write(json.dumps(record, indent=2))
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# hook
+# ---------------------------------------------------------------------------
+
+def main():
+    if not PARSE_CONTRACT_LOADED:
+        return  # no information -> allow (see the guarded import above)
+
+    payload = json.loads(sys.stdin.read())
+    if not isinstance(payload, dict):
+        return
+    tool_input = payload.get("tool_input") or {}
+    if not isinstance(tool_input, dict):
+        return
+    cmd = tool_input.get("command")
+    if not is_git_commit(cmd):
+        return  # fast path: not a commit -> no git calls at all
+
+    mode = (os.environ.get("EOS_REVIEW_GATE_MODE") or "block").strip().lower()
+    if mode == "off":
+        return
+    if mode not in ("block", "warn"):
+        mode = "block"  # a typo must never silently disable a security gate
+
+    repo = repo_root(cmd, payload.get("cwd") or "")
+    if not repo:
+        return  # cannot resolve a repo -> no information -> allow
+
+    rels = risk_files(repo, cmd)
+    if not rels:
+        return  # nothing blast-radius in this commit -> allow silently
+
+    session_id = payload.get("session_id")
+    if not isinstance(session_id, str):
+        session_id = ""
+
+    key = review_key(repo, rels)
+    if valid_review(session_id, key):
+        return  # reviewed, and the review matches THIS content -> allow
+
+    # Only now is a grant actually needed, so it is safe to evaluate (and burn)
+    # the single-use token. Checking it earlier would consume Gabriel's approval
+    # on a commit that had a valid review anyway.
+    tier = override_tokens.Tier(*OVERRIDE_TIER_ARGS, single_use=True)
+    if override_tokens.token_grants(session_id, tier) is not None:
+        sys.stderr.write(
+            "eos-review-gate: proceeding UNREVIEWED on %d blast-radius file(s) "
+            "under a single-use override token (consumed).\n" % len(rels))
+        return
+
+    message = build_message(repo, rels, session_id, key,
+                            artifact_state_note(session_id, key))
+    if mode == "warn":
+        sys.stderr.write("WARNING (eos-review-gate, warn mode -- not blocking): "
+                         + message + "\n")
+        return
+    sys.stderr.write("BLOCKED (eos-review-gate): " + message + "\n")
+    sys.exit(2)
+
+
+if __name__ == "__main__":
+    argv = sys.argv[1:]
+    if "--key" in argv or "--record" in argv:
+        try:
+            sys.exit(cli_key(argv) if "--key" in argv else cli_record(argv))
+        except Exception as exc:  # CLI errors are the operator's to see
+            sys.stderr.write("eos-review-gate: %s\n" % exc)
+            sys.exit(1)
+    try:
+        main()
+    except SystemExit:
+        raise  # a real block (exit 2) must propagate
+    except Exception:
+        pass  # fail open: a bug in this gate must never block a tool call
+    sys.exit(0)
