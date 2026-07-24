@@ -60,6 +60,19 @@ obsidian-fleet-mirror/session-state.json
 # declassified (confidential-terms.json e_fulton active:false, §7b). All scheduled-task
 # SKILL.mds are now versioned; runtime state (_state/ _unsent/ logs/.bak) stays ignored below.
 
+# (2026-07-24, Gabriel-authorized) 2b's ONLY-SKILL.md rule caught two non-runtime-state
+# files by pattern accident: `ora-task-integrity-guard`'s `guard.ps1`/`membership-guard.ps1`
+# engines (found with ZERO backup anywhere, same loss class 2b exists to prevent — fixed via
+# force-add, not this rule, since they live one level up from a normal task's structure) and
+# these two, found in the same audit: `ora-appsec-sweep/suppressions.md` (Gabriel-ratified
+# suppression list — "only Gabriel adds entries here") and `ora-pm-ledger`'s 294-line engine
+# script. Per-file allow-list, same shape as the `_shared/` ladder below — NOT a widened
+# directory or extension pattern (a `*.ps1`/`*.py` negation here would also sweep in ~40
+# deliberately-scratch `_tmp_*`/dated files that live inside individual task folders in
+# other contexts and are meant to stay untracked). Name each durable file individually.
+!/scheduled-tasks/ora-appsec-sweep/suppressions.md
+!/scheduled-tasks/ora-pm-ledger/tenant_db_snapshot_diff.py
+
 # (2026-07-17, Gabriel-authorized) 2b covered live task SKILL.mds but not retired ones: a
 # _archive_*_retired/<id>/SKILL.md sits one level deeper than */SKILL.md matches, so EVERY
 # retired task spec has been silently untracked since 2b shipped -- the identical failure
