@@ -5,142 +5,87 @@
 > **Scope:** canonical = cwd `...Oxford Capital Partners\` (no "(1)") — syncs **egoldberg's** account; `(1)` = Gabriel's. Detail: [Memory Scope Fragmentation](reference_memory_scope_fragmentation.md).
 
 ## Firm & people
-- [Firm Context](firm.md) — Entity, portfolio, team, investment criteria/governor, ops footprint
-- [Gabriel Goldberg — Profile](user.md) — Role, expertise, working style, contact, surfaces
+- [Firm Context](firm.md) — entity, portfolio, team, investment criteria/governor, ops footprint
+- [Gabriel Goldberg — Profile](user.md) — role, expertise, working style, contact, surfaces
 - [People](people.md) — Eric, Gabriel, Philip Collins (counsel), Tamara Lucas (title); brokers/lenders/vendors
 
 ## Projects & system
-- [Tenant DB Renewal Watch view — CLOSED 07-22](project_tenant_db_renewal_watch_view_2026-07-22.md) — Months to Expiry formula + ≤90d view; refresh wired into ora-lease-expiration-brief, diagnostic views trashed
-- [setup-self-audit frontmatter probe — CLOSED 07-24](project_setup_self_audit_frontmatter_probe_2026-07-24.md) — "all 57 parse cleanly" overclaimed; 53 fleet SKILL.md were unscanned + a latent false positive
-- [config-write-guard.py boundary fix — CLOSED 07-22](project_config_write_guard_boundary_fix_2026-07-21.md) — 3 FPs + 3 REFUTE-found regressions fixed, merged to main w/ Gabriel's token
-- [Tenant-HubSpot Reconciliation — CLOSED 07-21](project_tenant_hubspot_reconciliation_2026-07-21.md) — 7 deals corrected, exception-detection v1.2, new monthly task
-- [event_log.md IWNS block loss — UNATTRIBUTED](project_event_log_iwns_block_loss_unattributed_2026-07-21.md) — 6 entries recovered; root cause open
-- [Acquisition-Underwriting Doctrine Review — PLANNED 07-18](project_acquisition_underwriting_doctrine_review_2026-07-18.md) — 9-item plan, awaiting Gabriel go/no-go
-- [Autonomy-gate indirection ceiling — CLOSED 07-17](project_autonomy_gate_indirection_ceiling_followup.md) — [OI-007](open-items-tracker.md#OI-007)
-- [bash-guard.mjs indirection gap — CLOSED 07-17](project_bash_guard_indirection_gap.md) — [OI-010](open-items-tracker.md#OI-010)/[OI-011](open-items-tracker.md#OI-011)
-- [ora-am-brief LAMS retirement — BLOCKED](project_ora_am_brief_lams_retirement_blocked.md) — both fleets double-firing 0 6 * * *
-- [Active Projects](projects.md) — deal pipeline · E. Fulton (declassified) · React brain · oxfordra.net · PM/lease/governance
-- [AAOS Agent Coordination Layer](project_aaos_agent_coordination_layer.md) — real infra, v1.0 shipped 07-10
 - [System of Record](00_system_of_record.md) — architecture + cold-start runbook + fleet/connector/secret inventory
 - [Event Log](event_log.md) — append-only system changes, deal milestones, decisions (newest first)
-- [CC Build State](cc-build-state.md) — PR #200-204 MERGED; HUBSPOT_TOKEN needed ([OI-019](open-items-tracker.md))
-- [brain.oxfordra.net Access Finding](brain-oxfordra-access-finding.md) — LIVE via Pages mirror; tunnel path is DEAD END
-- [Command Center Mirror Deploy Gap](reference_command_center_mirror_deploy_gap.md) — hourly deploy never pulls
-- [PFI Build Canon](pfi-build-canon.md) — ratified 14-unit roster, PM assignments, accounting rulings
-- [Intelligence Platform Master Plan](ora-intelligence-platform-master-plan.md) — Phase 0→3; remaining gaps in file
-- [PFI Warehouse Systematization Backlog](pfi-warehouse-systematization-backlog.md) — 3 queued basis-recovery follow-ups
-- [CC Autonomous Audit — PR #28](cc-autonomous-audit-pr28.md) — MERGED; open B2/B3/B5
-- [GitHub CI Auto-Fix Rollout](github_ci_autofix_rollout.md) — claude-code-action@v1 LIVE on 2 repos; #7 awaits sign-off
-- [oxford-command-center worktree gotchas](project_oxford-command-center_worktree_gotchas.md) — WORKBOOK_PATH not inherited per-worktree
-- [Claude Code Setup Audit 2026-07-09](project_claude-setup-audit-2026-07-09.md) — migration CLOSED 07-17; 15/21 resolved, rest in file
-- [Claude Setup Comprehensive Review 2026-07-16](project_claude-setup-audit-2026-07-16.md) — G1-G8 done; chip TERMINAL, needs Gabriel
-- [oxfordra.net SEO Audit 2026-07](project_oxfordra_seo_audit_2026-07.md) — 6th pass 07-22: 84/100 (PR #56 live); 0 Criticals; open: portfolio SF/counts, FAQ order, /markets redirect
-- [Owner-Outreach Stale-Guard Watch](project_owner_outreach_stale_guard_watch.md) — CLOSED 07-14: SKILL.md v1.3 remembers vintage
-- [Ops Decision Log](ops_decision_log.md) — recurring operational yes/no calls; companion to deal-decision-ledger.md
 - [Open Items Tracker](open-items-tracker.md) — canonical punch-list; other files POINT here, never restate item text
-- [Tenant DB sync](project_tenant_db_no_sync_rootcause.md) — CLOSED 07-17: OI-003–006 executed
-- [Artifact content — top-5 open items](project_artifact_content_top5_plan_2026-07-18.md) — PLANNED 07-18: closeout/bug/verify punch-list
-- [open-items-tracker.md worktree/HEAD divergence — OPEN 07-20](project_open_items_tracker_worktree_head_divergence.md) — don't force-resync
-- [Sell-your-building page — LIVE 07-21](project_sell_your_building_page_shelved_2026-07-20.md) — PR #43 merged/deployed, both known issues fixed
-- [Seller-intent resource hub — CLOSED 07-21](project_seller_resource_hub_2026-07-21.md) — PR #45 merged/live, 4 guides + hub index
-- [Lighthouse perf/CSP thread — CLOSED 07-21](reference_oxfordra_lighthouse_csp_fix_2026-07-21.md) — PRs #47-52/#54 merged+live; #54 fixed a silent build-pipeline break
-- Setup-improvement top-5 (07-18): [overview](project_setup_improvement_top5_plan_2026-07-18.md) · [Plan 2 design](project_plan2_effect_verification_design_2026-07-18.md) — PLANNED, awaiting approval
+- [Ops Decision Log](ops_decision_log.md) — recurring operational yes/no calls; companion to deal-decision-ledger.md
+- [Active Projects](projects.md) — deal pipeline · E. Fulton (declassified) · React brain · oxfordra.net · PM/lease/governance
+- **OPEN/BLOCKED:** [FRED API key exposure 07-24](project_fred_key_exposure_2026-07-24.md) (cleartext in 21 local files, never pushed — ROTATE first, then scrub) · [ora-am-brief LAMS retirement](project_ora_am_brief_lams_retirement_blocked.md) (both fleets double-firing) · [open-items-tracker worktree/HEAD divergence 07-20](project_open_items_tracker_worktree_head_divergence.md) (don't force-resync) · [event_log IWNS block loss](project_event_log_iwns_block_loss_unattributed_2026-07-21.md) (recovered; cause open)
+- **PLANNED, awaiting Gabriel:** [acquisition-underwriting doctrine review](project_acquisition_underwriting_doctrine_review_2026-07-18.md) (9 items) · [artifact-content top-5](project_artifact_content_top5_plan_2026-07-18.md) · [setup-improvement top-5](project_setup_improvement_top5_plan_2026-07-18.md) + [Plan 2 design](project_plan2_effect_verification_design_2026-07-18.md)
+- [oxfordra.net SEO Audit](project_oxfordra_seo_audit_2026-07.md) — 84/100 at 6th pass; open: portfolio SF/counts, FAQ order, /markets redirect
+- [CC Build State](cc-build-state.md) — PR #200-204 merged; HUBSPOT_TOKEN needed (OI-019)
+- [CC Autonomous Audit — PR #28](cc-autonomous-audit-pr28.md) — merged; open B2/B3/B5
+- [Intelligence Platform Master Plan](ora-intelligence-platform-master-plan.md) — Phase 0→3; remaining gaps in file
+- [PFI Build Canon](pfi-build-canon.md) — ratified 14-unit roster, PM assignments, accounting rulings
+- [PFI Warehouse Backlog](pfi-warehouse-systematization-backlog.md) — 3 queued basis-recovery follow-ups
+- [AAOS Agent Coordination Layer](project_aaos_agent_coordination_layer.md) — real infra, v1.0 shipped 07-10
+- [brain.oxfordra.net Access](brain-oxfordra-access-finding.md) — LIVE via Pages mirror; tunnel path is a DEAD END
+- [Command Center Mirror Deploy Gap](reference_command_center_mirror_deploy_gap.md) — hourly deploy never pulls
+- [GitHub CI Auto-Fix Rollout](github_ci_autofix_rollout.md) — claude-code-action@v1 live on 2 repos; #7 awaits sign-off
+- [oxford-cc worktree gotchas](project_oxford-command-center_worktree_gotchas.md) — WORKBOOK_PATH not inherited per-worktree
+- Claude Code setup audits: [07-09](project_claude-setup-audit-2026-07-09.md) (migration CLOSED 07-17; 15/21 resolved) · [07-16](project_claude-setup-audit-2026-07-16.md) (G1-G8 done; chip TERMINAL, needs Gabriel)
+- CLOSED threads (detail in each file + [event_log](event_log.md)): [Tenant DB renewal-watch view](project_tenant_db_renewal_watch_view_2026-07-22.md) · [Tenant DB sync](project_tenant_db_no_sync_rootcause.md) · [setup-self-audit frontmatter probe](project_setup_self_audit_frontmatter_probe_2026-07-24.md) · [config-write-guard boundary fix](project_config_write_guard_boundary_fix_2026-07-21.md) · [tenant-HubSpot reconciliation](project_tenant_hubspot_reconciliation_2026-07-21.md) · [autonomy-gate indirection ceiling](project_autonomy_gate_indirection_ceiling_followup.md) · [bash-guard indirection gap](project_bash_guard_indirection_gap.md) · [owner-outreach stale-guard](project_owner_outreach_stale_guard_watch.md) · [sell-your-building page](project_sell_your_building_page_shelved_2026-07-20.md) · [seller resource hub](project_seller_resource_hub_2026-07-21.md) · [Lighthouse perf/CSP](reference_oxfordra_lighthouse_csp_fix_2026-07-21.md)
 
 ## Markets
-- [Market Intelligence](markets.md) — Cross-market snapshots, macro (FRED), replacement cost, comps, Columbus submarket
+- [Market Intelligence](markets.md) — cross-market snapshots, macro (FRED), replacement cost, comps, Columbus submarket
+- [Basis Denominator — RCT v03 (RATIFIED)](project_replacement_cost_benchmark_unratified.md) — the ONE denominator; ORA buys at ~35-40% of true replacement
+- [Deal Decision Ledger](deal-decision-ledger.md) — one row per decided PASS/SKIP/DROP/PARK/CLOSE/TERMINATE + buy-box rule validated
 - [DG Portfolio OH — PASS](deal_dg_portfolio_oh_2026-06.md) — Matthews 3-store Dollar General net-lease + DG cap stratification
 - [1100 Rarig Ave — Disposition (HOLD)](deal_1100_rarig_disposition_2026-07.md) — sourced basis/NOI/cost-seg; open gaps in file
-- [Notion Tenant DB Completeness Gap](reference_tenant_db_completeness_gap.md) — 124/296 rows archived (reversible); 3 exceptions in file
-- [Deal Decision Ledger](deal-decision-ledger.md) — one row per decided PASS/SKIP/DROP/PARK/CLOSE/TERMINATE + buy-box rule validated
-- [Basis Denominator — RCT v03 (RATIFIED)](project_replacement_cost_benchmark_unratified.md) — the ONE denominator; ORA buys at ~35-40% of true replacement
+- [Delinquency collection-status blind spot](reference_delinquency_report_collection_status_blindspot.md) — "no action taken" is inferred from a static 90+ balance; wrong for 4 of 6 tenants on 07-24
+- [Notion Tenant DB Completeness Gap](reference_tenant_db_completeness_gap.md) — LARGELY RESOLVED 07-24; split on `Row Retired`, not the ⛔ARCHIVED prefix
 
 ## Reference
-- [Probe scan sets](reference_probe_scan_sets.md) — what each `maintenance/*-probe.py` actually globs; governor-drift's fleet-root gap CLOSED 07-24 (643→704 files)
-- [SKILL.md frontmatter parse is lenient](reference_skill_frontmatter_lenient_parse.md) — harness splits on the first colon; ~82/110 fail strict YAML by design — do NOT mass-quote descriptions
-- [Notion query needs dashed UUIDs](reference_notion_query_requires_dashed_uuid.md) — undashed `collection://` id fails as "table not exposed"; fetch the db to get the dashed form
-- [Notion view DSL formula-filter bug](reference_notion_view_dsl_formula_filter_bug.md) — formula-property filters silently become a no-op (rollup-shaped); relative dates also unsupported
-- [config-write-guard.py quote-split gap](reference_config_write_guard_quote_split_gap.md) — pre-existing shell-matcher bypass (`"root"/hooks/x`), NOT this session's regression, still open
-- [Skill args positional-substitution bug](reference_skill_args_positional_substitution_bug.md) — `args` corrupts $-amounts; filed claude-code#79859
-- [Skill reimport sync lag](reference_skill_reimport_sync_lag.md) — "Save skill" lags disk ~10min; verify via main.log not PENDING_REIMPORT
-- [Skill description version-extraction gotcha](reference_skill_description_version_extraction_gotcha.md) — description `vX.Y` can be a sub-component version, not the file version; check body H1 first
-- [Tenant DB Cache & Notion Quota Myth](reference_tenant_db_cache_and_notion_quota_myth.md) — quota is an MCP-tool gate; `ora-pm-ledger`'s snapshot has the data
-- [Deep-Research Synthesize-Stage Bug](reference_deep_research_synthesize_stage_bug.md) — FIXED: schema requires real confirmed claims, stub now fails validation
-- [ECC Repo Flagged](reference_ecc_repo_flagged.md) — affaan-m/ECC rejected: malware-clone risk, redundant with skill stack
+- [Tech Stack & Paths](tech.md) — paths, MCP connectors, secrets index, scheduler, machine constraints
+- [Standards — Financial & Communication](standards.md) — modeling conventions (DSCR 1.25×/LTV 40%) + comms tone
+- [Lean-RAM Toolkit](reference_lean_ram_toolkit.md) — RAM-saver commands (ram/ora/heavy/handoff/solo) + auto-park watchdog
 - [Memory Scope Fragmentation](reference_memory_scope_fragmentation.md) — `(1)` folder = ggoldberg's account; no-suffix = **egoldberg's**
-- [Subagent Anti-Delegation](feedback_subagent_anti_delegation.md) — `Tools:*` subagents may recurse via Agent instead of working; forbid it
-- Verify-before-trusting cluster: [subagent "safe" claims](feedback_verify_subagent_safe_claims.md) (grep-for-refs misses doctrine-in-prose) · [registry mutation claims](feedback_verify_registry_mutation_claims.md) (need a re-check) · [probe findings](feedback_verify_probe_findings_before_acting.md) (a hypothesis, not a verdict) · [reflagging tooling gaps](feedback_recheck_before_reflagging_tooling_gaps.md) (check current state before repeating a "known gap" note)
-- [fleet-status.py Dual-Fleet Read](reference_fleet_status_dual_read.md) — reads both registries either surface; WRITES need matching MCP
-- [Throttle-skip "global_limit" = catch-up burst](reference_fleet_throttle_skip_catchup_burst.md) — not a bug; lone repeated skips WOULD be. Also: a burst inverts producer/consumer ORDER, and can drop a slot with no skip logged at all
-- More verify-first: [negative Glob results](feedback_verify_negative_glob_results.md) (cross-check `git ls-files`) · [WIP settled via mtime](feedback_verify_wip_settled_via_mtime.md) (isRunning isn't per-file)
-- [Shared-Checkout Guard Session Attribution Unreliable](feedback_shared_checkout_guard_session_attribution_unreliable.md) — named IDs traced to no match; verify first
-- [Workflow named-args not delivered](feedback_workflow_named_args_not_delivered.md) — Workflow({name,args}) drops args on CC Desktop; hardcode scriptPath
-- [Workflow synthesis ungrounded specifics](feedback_workflow_synthesis_ungrounded_specifics.md) — synthesis can invent precise-sounding IDs
-- Autonomy gate cluster: [writes not reads](feedback_autonomy_gate_blocks_writes_not_reads.md) ("blocked read" = a write indicator was present) · [matcher can't be narrowed](feedback_autonomy_gate_matcher_cannot_be_safely_narrowed.md) (3 rounds found bypasses) · [override mechanism](reference_autonomy_gate_override_mechanism.md) (session-scoped tokens, old sentinel RETIRED)
-- [PreToolUse vs Git Hook Exit Codes](reference_pretooluse_vs_git_hook_exit_codes.md) — PreToolUse exit 1 non-blocking; git hooks any non-zero blocks
-- [Concurrent Session Duplicate Hardening](reference_concurrent_session_duplicate_hardening_work.md) — 2 sessions built the same fix unknowingly
-- [Confidentiality Guard Self-Deadlock](feedback_confidentiality_guard_selfdeadlock.md) — malformed confidential-terms.json fail-closes Write/Edit/Bash
-- [Sed Windows path escapes](feedback_sed_windows_path_escapes.md) — never sed with literal backslash paths; use Python
-- [append-event-log.py stdin encoding](feedback_append_event_log_stdin_encoding.md) — heredoc-to-stdin mangles UTF-8; use --entry-file
-- [event_log app-handle lock](reference_event_log_app_handle_lock.md) — Claude.exe can block os.replace; drain in-place with backup
-- [Destructive git deny stays hard](feedback_destructive_git_deny_stays_hard.md) — reset --hard/push --force are a categorical deny
-- [npm test intermittent access violation](feedback_npm_test_intermittent_access_violation.md) — spurious 0xC0000005 ~30-50%; just rerun
 - [OneDrive Business/Personal Scope](reference_onedrive_business_scope.md) — consult before broad OneDrive-root searches
-- [Model Release Checklist](reference_model_release_checklist.md) — hardcoded model IDs + sweep process for new releases
-- [Windows Hook Stdin cp1252 Gap](reference_windows_hook_stdin_cp1252_encoding_gap.md) — hooks can decode stdin as cp1252; audit CLOSED
-- [Workflow scriptPath CRLF Rejection](reference_workflow_scriptpath_crlf_rejection.md) — CRLF .js fails scriptPath outright; refute-financial-change fixed 07-21
-- [Tech Stack & Paths](tech.md) — Paths, MCP connectors, secrets index, scheduler, machine constraints
+- [QuickBooks & Entity Financials](reference_quickbooks_financials.md) — CloudVara RDP, .QBB unparseable, where statements live
+- [Warehouse Basis Parsing](reference_warehouse_basis_parsing.md) — where each PM platform states accounting basis
+- [Tenant Name Mappings](reference_tenant_name_mappings.md) — PM platform → Notion Tenant DB aliases
+- [Property→LLC Signature Roster](reference_property_llc_signature_roster.md) — property → signing-LLC for landlord mail
 - [ORA PM App](reference_ora_pm.md) — ZeOoba/ora-pm; 07-16 audit (3 criticals) + confidential-terms purge status
 - [oxfordra.net Deploy Canon](reference_oxfordra_deploy_canon.md) — netlify-cli from website-canonical is THE path; merged PR auto-deploys PROD
-- [Standards — Financial & Communication](standards.md) — Modeling conventions (DSCR 1.25×/LTV 40%) + comms tone
-- [Scheduled-Task Model Standard](reference_scheduled_task_model_standard.md) — standard = claude-sonnet-5; observable, not settable
-- [CC Scheduler filePath Mechanism](reference_cc_scheduler_filepath_mechanism.md) — registry stores filePath only; editing SKILL.md IS authoritative
-- [Scheduled-Task approvedPermissions](reference_scheduled_task_approved_permissions.md) — missing tool grant silently no-ops writes
-- [Tenant Name Mappings](reference_tenant_name_mappings.md) — PM platform → Notion Tenant DB reconciliation aliases
-- [ripgrep blind on scheduled-tasks](reference_ripgrep_scheduled_tasks_false_negative.md) — rg false-negatives rooted there; fixed via .ignore
-- [Schematic producer-clobber recurrence](reference_schematic_producer_clobber_recurrence.md) — 2nd occurrence 07-23; self-heals via pre-check, not escalated to a gate
-- [Hook systemMessage never reaches model](reference_hook_systemmessage_not_model_visible.md) — PreToolUse systemMessage is USER-only; use additionalContext
-- [Commit-provenance guard](reference_commit_provenance_guard.md) — blocks a commit sweeping another live session's work
-- [event_log.md uncommitted backlog](reference_event_log_uncommitted_backlog.md) — no single committer; whoever notices commits their own entry
-- [Fail-open + TTL beats mutex](feedback_fail_open_over_mutex_for_fleet_gates.md) — ratified default for cross-session coordination guards
-- [Property→LLC Signature Roster](reference_property_llc_signature_roster.md) — canonical property→signing-LLC lookup for landlord mail
-- [ora-pm-ledger Double-Fire](reference_ora_pm_ledger_double_fire.md) — RESOLVED: CC/MCP is sole registration, LAMS twin was orphaned
-- [QuickBooks & Entity Financials](reference_quickbooks_financials.md) — CloudVara RDP, .QBB unparseable, where statements live
-- [Warehouse Basis Parsing](reference_warehouse_basis_parsing.md) — where each PM platform states accounting basis; accrual vs cash
-- [Lean-RAM Toolkit](reference_lean_ram_toolkit.md) — RAM-saver commands (ram/ora/heavy/handoff/solo) + auto-park watchdog
-- [Claude Code Setups](reference_claude_code_setups.md) — best public CC setups: obra/superpowers, Anthropic docs, disler hooks
-- [Skill Surfaces](reference_skill_surfaces.md) — skills split Code (plugins) vs Cowork (OneDrive)
-- [Skill Home Loss 2026-07-09](reference_skill_home_loss_2026-07-09.md) — probe scan excludes ora-skills; 4 skills lost outputs/, restored
-- Desktop Commander gotchas: [slow-init](reference_desktop_commander_extension_slow_init.md) (~36s cold-start, not a failure) · [$var stripping](reference_desktop_commander_powershell_variable_stripping.md) (start_process; use cmd) · [nested-quote mangling](reference_desktop_commander_nested_quote_mangling.md) (write a .bat instead)
-- [Scheduled-Task Staleness-Guard False Positives](reference_scheduled_task_staleness_guard_trips.md) — case log; check new trips here first
-- [Worktree node_modules Junction Hazard](reference_worktree_node_modules_junction_hazard.md) — never junction node_modules then worktree remove --force
-- [GitHub Credential Path](reference_github_credential_path.md) — gh.exe-scoped helper overrides GCM; GCM -c fallback + re-seed procedure
-- [oxford-command-center Repo Health](oxford-cc-repo-health.md) — tombstones + stale branches pruned; ~90 unmerged need review
-- [gate vs gate:ci divergence](feedback_command_center_gate_vs_gate_ci_divergence.md) — gate:ci runs a real vite build that gate skips
-- [Piped gate exit masking](feedback_piped_gate_exit_masking.md) — `gate | tail` returns tail's exit code; redirect to file instead
-- [Command Center CRLF Hazard](reference_command_center_crlf_hazard.md) — writeFileSync flips EOL and bloats diffs; prefer the Edit tool
-- [Shared-Checkout Co-File Patch Hazard](shared-checkout-cofile-patch-hazard.md) — `git diff -- <file>` grabs the other writer's hunks too
-- [event_log.md Partial-Commit Splice](reference_event_log_partial_commit_splice.md) — `hash-object`+`update-index` to commit only your entries from a co-mingled file
-- [Pathspec commit discards index splice](feedback_pathspec_commit_discards_index_splice.md) — `git commit -- <path>` re-reads the working tree, blowing away a staged splice
-- [session-env Retention Proposal](reference_session_env_retention_proposal.md) — PROPOSAL: age-gate session-env\ (763 empty dirs, growing)
+- [Model Release Checklist](reference_model_release_checklist.md) — hardcoded model IDs + sweep process for new releases
+- [Claude Code Setups](reference_claude_code_setups.md) — best public setups: obra/superpowers, Anthropic docs, disler hooks
+- [ECC Repo Flagged](reference_ecc_repo_flagged.md) — affaan-m/ECC rejected: malware-clone risk, redundant with skill stack
+- [setup-writing-style Platform Skill](reference_writing_style_platform_skill.md) — gated, per-account; never on the filesystem
+- [Obsidian Copilot Keychain Gap](reference_obsidian_copilot_keychain_migration_gap.md) — post-migration "Needs API key" = re-enter keys
+- [NY Fed API 403 to Hosted Fetch](reference_newyorkfed_api_403_hosted_fetch.md) — pull SOFR locally via Desktop Commander
 - [WebFetch Markdown False Negatives](feedback_webfetch_markdown_false_negatives.md) — HTML→markdown strips head/script; verify via raw curl
-- [workflows dir single-writer gap](reference_workflows_dir_single_writer_gap.md) — RESOLVED: workflows/ now git-tracked; mtime sweep still needed
-- [Obsidian Copilot Keychain Migration Gap](reference_obsidian_copilot_keychain_migration_gap.md) — post-migration "Needs API key" = re-enter keys
-- [NY Fed API 403 to Hosted Fetch](reference_newyorkfed_api_403_hosted_fetch.md) — SOFR API 403s hosted fetch; pull locally via Desktop Commander
-- [setup-writing-style Platform Skill](reference_writing_style_platform_skill.md) — real gated skill, per-account; never on the filesystem
+- [session-env Retention Proposal](reference_session_env_retention_proposal.md) — PROPOSAL: age-gate session-env\ (763 empty dirs, growing)
+- [Subagent Anti-Delegation](feedback_subagent_anti_delegation.md) — `Tools:*` subagents may recurse via Agent instead of working; forbid it
+- [Concurrent Session Duplicate Hardening](reference_concurrent_session_duplicate_hardening_work.md) — 2 sessions built the same fix unknowingly
+- **Fleet & scheduler:** [probe scan sets](reference_probe_scan_sets.md) (what each probe actually globs) · [dual-fleet read](reference_fleet_status_dual_read.md) (WRITES need matching MCP) · [throttle-skip = catch-up burst](reference_fleet_throttle_skip_catchup_burst.md) (inverts producer/consumer order) · [model standard](reference_scheduled_task_model_standard.md) (sonnet-5; observable, not settable) · [filePath mechanism](reference_cc_scheduler_filepath_mechanism.md) (editing SKILL.md IS authoritative) · [approvedPermissions](reference_scheduled_task_approved_permissions.md) (missing grant silently no-ops writes) · [staleness-guard trips](reference_scheduled_task_staleness_guard_trips.md) (case log) · [ora-pm-ledger double-fire](reference_ora_pm_ledger_double_fire.md) (RESOLVED) · [ripgrep blind spot](reference_ripgrep_scheduled_tasks_false_negative.md) (fixed via .ignore) · [schematic producer-clobber](reference_schematic_producer_clobber_recurrence.md) (self-heals via pre-check)
+- **Skill gotchas:** [lenient frontmatter parse](reference_skill_frontmatter_lenient_parse.md) (do NOT mass-quote descriptions) · [args corrupts $-amounts](reference_skill_args_positional_substitution_bug.md) (claude-code#79859) · [reimport sync lag](reference_skill_reimport_sync_lag.md) (verify via main.log) · [description version gotcha](reference_skill_description_version_extraction_gotcha.md) (check body H1 first) · [skill surfaces](reference_skill_surfaces.md) (Code plugins vs Cowork OneDrive) · [skill home loss 07-09](reference_skill_home_loss_2026-07-09.md) (probe excludes ora-skills)
+- **Notion gotchas:** [dashed UUIDs required](reference_notion_query_requires_dashed_uuid.md) · [view-DSL formula filters are a silent no-op](reference_notion_view_dsl_formula_filter_bug.md) · [cache & quota myth](reference_tenant_db_cache_and_notion_quota_myth.md) (quota is an MCP-tool gate)
+- **Workflow gotchas:** [named args dropped](feedback_workflow_named_args_not_delivered.md) (hardcode scriptPath) · [CRLF scriptPath rejection](reference_workflow_scriptpath_crlf_rejection.md) · [synthesis invents specifics](feedback_workflow_synthesis_ungrounded_specifics.md) · [workflows dir single-writer](reference_workflows_dir_single_writer_gap.md) (RESOLVED; mtime sweep still needed) · [deep-research synthesize bug](reference_deep_research_synthesize_stage_bug.md) (FIXED)
+- **Git & shared-checkout hazards:** [commit-provenance guard](reference_commit_provenance_guard.md) · [compound-add blind spot FIXED 07-24](feedback_positive_attribution_over_mtime.md) (commit only your own touched-set) · [claim mechanism already exists](reference_provenance_claim_mechanism_already_exists.md) (don't build a 2nd) · [co-file patch hazard](shared-checkout-cofile-patch-hazard.md) · [partial-commit splice](reference_event_log_partial_commit_splice.md) · [pathspec discards the splice](feedback_pathspec_commit_discards_index_splice.md) · [destructive git = hard deny](feedback_destructive_git_deny_stays_hard.md) · [worktree node_modules junction](reference_worktree_node_modules_junction_hazard.md) · [GitHub credential path](reference_github_credential_path.md)
+- **event_log.md hazards:** [uncommitted backlog](reference_event_log_uncommitted_backlog.md) (whoever notices commits their own entry) · [app-handle lock](reference_event_log_app_handle_lock.md) (drain in-place with backup) · [stdin encoding](feedback_append_event_log_stdin_encoding.md) (use --entry-file)
+- **Windows/shell gotchas:** [path escape corruption](feedback_sed_windows_path_escapes.md) (sed `s///` AND Python non-raw literals both mangle `C:\...` silently — raw strings or forward slashes) · [unquoted paths collapse](feedback_bash_unquoted_windows_paths_collapse.md) (the INTERPRETER path breaks too) · [hook stdin cp1252](reference_windows_hook_stdin_cp1252_encoding_gap.md) · [npm test access violation](feedback_npm_test_intermittent_access_violation.md) (spurious; just rerun) · Desktop Commander: [slow init](reference_desktop_commander_extension_slow_init.md) · [$var stripping](reference_desktop_commander_powershell_variable_stripping.md) · [nested-quote mangling](reference_desktop_commander_nested_quote_mangling.md)
+- **Command Center:** [repo health](oxford-cc-repo-health.md) (~90 unmerged branches need review) · [gate vs gate:ci](feedback_command_center_gate_vs_gate_ci_divergence.md) (gate:ci runs a real vite build) · [piped gate exit masking](feedback_piped_gate_exit_masking.md) · [CRLF hazard](reference_command_center_crlf_hazard.md) (prefer the Edit tool)
+- **Hooks & guards:** [PreToolUse vs git-hook exit codes](reference_pretooluse_vs_git_hook_exit_codes.md) · [systemMessage never reaches the model](reference_hook_systemmessage_not_model_visible.md) (use additionalContext) · [confidentiality guard self-deadlock](feedback_confidentiality_guard_selfdeadlock.md) · [config-write-guard quote-split gap](reference_config_write_guard_quote_split_gap.md) (still open) · [fail-open + TTL beats mutex](feedback_fail_open_over_mutex_for_fleet_gates.md) · autonomy gate: [blocks writes not reads](feedback_autonomy_gate_blocks_writes_not_reads.md) · [matcher can't be narrowed](feedback_autonomy_gate_matcher_cannot_be_safely_narrowed.md) · [override mechanism](reference_autonomy_gate_override_mechanism.md)
+- **Verify before trusting:** [subagent "safe" claims](feedback_verify_subagent_safe_claims.md) · [registry mutation claims](feedback_verify_registry_mutation_claims.md) · [probe findings](feedback_verify_probe_findings_before_acting.md) (a hypothesis, not a verdict) · [reflagging known gaps](feedback_recheck_before_reflagging_tooling_gaps.md) · [negative Glob results](feedback_verify_negative_glob_results.md) (cross-check `git ls-files`) · [WIP settled via mtime](feedback_verify_wip_settled_via_mtime.md) · [fixture-shaped tests](feedback_fixture_shaped_tests_certify_dead_branches.md) (0%/100% ⇒ suspect the emitter) · [guard session attribution](feedback_shared_checkout_guard_session_attribution_unreliable.md)
 
 ## Rules & governance
-- [Interactive decision questions](feedback_interactive_decision_questions.md) — every Gabriel ruling → multiple-choice with a researched recommendation
-- [Verify before repeating session claims](feedback_verify_before_repeating_session_claims.md) — check ground truth before relaying another session's claim
-- [Refute pass — proactive by default](feedback_refute_pass_proactive_default.md) — run before declaring done; caught 2 real defects first time
-- [Artifact citation requirement](feedback_artifact_citation_requirement.md) — Resolved/Closed claims in artifacts need a citation
-- [Prompt-embedded current-state prose](feedback_prompt_current_state_prose.md) — baked shas/counts rot; refresh at runtime or tag `curated @` + VERIFY
-- [Workflow invocation gotchas](feedback_workflow_invocation_gotchas.md) — stale name resolution + stringified args; verify result post-run
-- [Routines default model](feedback_routines_default_model.md) — all routines default to claude-sonnet-5 unless told otherwise
-- [Website work — always highest-intelligence model](feedback_website_model_tier.md) — Gabriel override: opus for all oxfordra.net work
-- [External AI Governance Proposals](feedback_external_ai_governance_proposals.md) — ChatGPT proposals merged selectively; Hard Invariants supreme
 - [Standing Rules & Preferences](rules.md) — working-style, Outlook-only email, QB Desktop, Netlify, CSP, confidentiality
-- [Memory Policy](memory-policy.md) — Storage rules, naming, staleness, archival
-- [Procurement Stance — Deepen, Don't Migrate](procurement-stance-deepen-not-migrate.md) — below $150M AUM, spend goes to Claude/agent stack
+- [Memory Policy](memory-policy.md) — storage rules, naming, staleness, archival
+- [Procurement Stance — Deepen, Don't Migrate](procurement-stance-deepen-not-migrate.md) — below $150M AUM, spend goes to the Claude/agent stack
+- [Interactive decision questions](feedback_interactive_decision_questions.md) — every Gabriel ruling → multiple-choice with a researched recommendation
+- [Refute pass — proactive by default](feedback_refute_pass_proactive_default.md) — run before declaring done
+- [Verify before repeating session claims](feedback_verify_before_repeating_session_claims.md) — check ground truth before relaying another session's claim
+- [Artifact citation requirement](feedback_artifact_citation_requirement.md) — Resolved/Closed claims in artifacts need a citation
+- [Prompt-embedded current-state prose](feedback_prompt_current_state_prose.md) — baked shas/counts rot; tag `curated @` + VERIFY
+- [Workflow invocation gotchas](feedback_workflow_invocation_gotchas.md) — stale name resolution + stringified args; verify post-run
+- Model tiers: [routines default to sonnet-5](feedback_routines_default_model.md) · [oxfordra.net work = opus always](feedback_website_model_tier.md) (Gabriel override)
+- [External AI Governance Proposals](feedback_external_ai_governance_proposals.md) — ChatGPT proposals merged selectively; Hard Invariants supreme
+- [Auto-review blast-radius gate](feedback_auto_review_blast_radius_gate.md) — 07-24 ruling: auto-review for hooks/financial code, blocking; needs an AgentTool carve-out first
 
 ---
-*Index holds pointers, not narration — history in [event_log.md](event_log.md). Last compacted 2026-07-21.*
+*Index holds pointers, not narration — history in [event_log.md](event_log.md). Last compacted 2026-07-24.*
