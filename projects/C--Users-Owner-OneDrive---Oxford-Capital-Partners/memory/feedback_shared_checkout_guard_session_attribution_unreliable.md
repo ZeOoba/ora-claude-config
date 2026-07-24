@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: feedback
   originSessionId: 0d9560cc-b5e5-4b44-bd5c-e7af834db249
-  modified: 2026-07-24T15:16:04.614Z
+  modified: 2026-07-24T16:36:36.283Z
 ---
 
 On 2026-07-19, editing `~/.claude/projects/.../memory/MEMORY.md` (a covered path in `shared-checkout-guard.py`'s `DEFAULT_REPOS`), the guard twice fired a warning naming session `eda91426-76a8-493b-9111-eb4250c3f6c7` as "open right now (working)" — before and after the edit, unchanged. Direct verification found no evidence this session was live:
@@ -27,6 +27,8 @@ Fourth instance, then the actual cause. During the 2026-07-24 `ora-deal-aging-sl
 **Root cause (read at `shared-checkout-guard.py`, pre-fix):** the attribution was `others[0]` — literally the FIRST element of `session_liveness.other_active_sessions()`, an arbitrary index into a dict — asserted as *"likely the source of this WIP."* There was never any link between the named session and the dirty files. With ELEVEN sessions concurrently registered that day, the name was close to a coin flip. All four instances above are the same one-line defect, not four separate stale-data flukes.
 
 **Fix:** `_attribute_wip()` now names a session ONLY when that session's own recorded touched-set (`commit_provenance.read_touched`, the same data `commit-provenance-guard.py` consumes) intersects the paths from `git status --porcelain`. With no such evidence it reports the count of open sessions and calls the WIP **UNATTRIBUTED**, telling the reader to check `git log -1`/`git status` themselves. Degrades honestly: missing/unreadable provenance, a bogus sessions dir, or a failed import all yield "unattributed" rather than a guess. Verified by an adversarial REFUTE pass (uninvolved sessions cannot be blamed under any input shape incl. `[{}]`/`[None]`; malformed porcelain lines cannot raise; the warn-only invariant is intact).
+
+**Test suite realigned 2026-07-24 (branch `fix/scg-attribution-test`, commit b599432).** The fix left `test-shared-checkout-guard.py` stale — its `test_other_active_session_named_in_message` still asserted the *pre-fix* contract (an open session must be named), so the suite failed at `~/.claude` HEAD. The guard was right, the test was not: the test file's last touch predates the guard rewrite. Replaced with three tests pinning the evidence-based contract (liveness alone -> UNATTRIBUTED and NOT named · intersecting touched-set -> named · non-intersecting provenance -> UNATTRIBUTED), the middle one mutation-verified so the naming branch isn't certified dead ([[feedback_fixture_shaped_tests_certify_dead_branches]]). **If you see this test fail again, check you're not on a pre-b599432 tree before re-diagnosing the guard.**
 
 **What still applies from below:** if the guard now DOES name a session, that is evidence-backed and worth reconciling with — but it is still enrichment, not proof, and the verification habits below remain correct. What no longer applies: treating a *named* session as noise by default. An UNATTRIBUTED message is now the honest signal that nobody's provenance matches, which is itself informative (e.g. a script-generated or externally-made change, which the recorder never sees).
 

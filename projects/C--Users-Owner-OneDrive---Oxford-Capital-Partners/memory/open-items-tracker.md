@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-07-22T22:24:52.223Z
+  modified: 2026-07-24T16:42:10.735Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -38,6 +38,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | [OI-017](#OI-017) | 2026-07-18 | ora-appsec-sweep first run (2026-07-18) | ora-pm + oxford-command-center: build/test/deploy toolchain CVEs (vitest/vite/wrangler/concurrently→shell-quote/transformers→adm-zip) — no prod-reachable path, semver-major fixes |
 | [OI-019](#OI-019) | 2026-07-19 | [event_log.md](event_log.md#2026-07-19) | Gabriel must add `HUBSPOT_TOKEN` (Private App, `crm.objects.deals.read`) to `oxford-command-center/.env` — PR #221 (frontend trigger) ready, blocked only on the credential. Once live, re-verify 2146 Enterprise Pkwy Twinsburg OH (currently untracked in projects.md/deal-decision-ledger.md) lands correctly in acq_candidates |
 | [OI-020](#OI-020) | 2026-07-19 | [event_log.md](event_log.md#2026-07-19) | ora-cowork-heartbeat: LAMS registry entry has no `approvedPermissions` grant (root cause, 3x documented since 07-16). No MCP tool on either surface can write this — only fix is Gabriel manually approving the Notion-tool prompt during a live unattended fire in Cowork's own Scheduled Tasks UI (a manual "Run Now" doesn't count). GitHub watchdog issue open, needs manual closure once genuinely fixed |
+| [OI-024](#OI-024) | 2026-07-24 | `hooks/shared-checkout-guard.py` (attribution test realignment, commit b599432) | Guard reads provenance from `SHARED_CHECKOUT_SESSIONS_DIR`, not `commit_provenance.sessions_dir()` — inert today (neither env var set, both resolve to `hooks/sessions`), but setting `COMMIT_PROVENANCE_SESSIONS_DIR` alone would silently degrade attribution to UNATTRIBUTED forever. Gabriel's call 2026-07-24: log, don't fix |
 | [OI-021](#OI-021) | 2026-07-19 | [event_log.md](event_log.md#2026-07-19) | Restoration Church Trust: no borrower-side repayment/extension conversation logged since the Apr 2026 Covenant Watch call for lender outreach "by June 2026" (deadline passed); needs Gabriel's own outreach decision (outbound comms, not initiated here). Separately: HubSpot's "Lease Renewal — Restoration Church Trust" deal ($16,714, appointmentscheduled) is likely the same mis-entered-loan-counterparty error already fixed in the Tenant DB (OI-009) — needs a retirement decision. 49 other renewal-pipeline deals also stuck in appointmentscheduled from a 2026-03-27 bulk import with no stage-advancement wiring — needs a lease-renewal-pipeline batch pass |
 
 ### OI-009
@@ -594,6 +595,30 @@ HIGH) is the same vitest-4 migration blocker documented above; plus js-yaml / br
 HIGH (transitive, DoS/host-confusion, `fixAvailable`) and `@huggingface/transformers`→sharp/libvips HIGH
 (**no fix available yet** — monitor). All bounded by occ's localhost-only (`127.0.0.1`) bind; none
 tenant- or network-reachable. No new OI opened — same repo+check bucket as this item.
+**Auto-check:** none.
+
+### OI-024
+**Status:** OPEN (logged, deliberately not fixed)
+**Opened:** 2026-07-24
+**Source:** `hooks/shared-checkout-guard.py`; found while realigning its attribution tests (commit b599432,
+see [feedback_shared_checkout_guard_session_attribution_unreliable.md](feedback_shared_checkout_guard_session_attribution_unreliable.md))
+**Description:** `_attribute_wip()` resolves the provenance directory from `SHARED_CHECKOUT_SESSIONS_DIR`
+(falling back to a hardcoded `hooks/sessions`) rather than importing `commit_provenance.sessions_dir()`,
+which resolves `COMMIT_PROVENANCE_SESSIONS_DIR`. `hooks/lib/commit_provenance.py`'s own docstring states
+the recorder and every reader MUST agree on the storage location "or every comparison silently misses" —
+this third consumer agrees only by coincidence of defaults.
+**Why inert today:** neither env var is set anywhere in `settings.json`; both resolve to
+`C:/Users/Owner/.claude/hooks/sessions`, and 35 live `touched-files.txt` confirm the recorder writes there.
+The naming branch is verified working in production.
+**Failure mode if it ever bites:** setting `COMMIT_PROVENANCE_SESSIONS_DIR` alone (or the reverse) points
+the guard at an empty directory. It degrades honestly — always UNATTRIBUTED, never a *wrong* name — but
+permanently and silently, with no signal that attribution has stopped working.
+**Fix if taken up:** import `sessions_dir` from `commit_provenance` and use it for the provenance read
+only, keeping `SHARED_CHECKOUT_SESSIONS_DIR` for the warn-marker (two different concerns currently sharing
+one variable). Note the tests rely on the current coupling to stay self-contained, so they'd need the
+provenance var set too. Being security-gate code, this needs the mandatory adversarial REFUTE pass.
+**Decision:** Gabriel 2026-07-24 — log, don't fix. Fails open, unreachable in the current configuration,
+and not worth a guard edit inside a test-only change.
 **Auto-check:** none.
 
 ## Closed
