@@ -34,6 +34,13 @@ MEM = os.environ.get("ORA_MEMORY_DIR") or os.path.join(
 INDEX = os.path.join(MEM, "MEMORY.md")
 GOV_PROBE = os.path.join(HOME, ".claude", "maintenance", "governor-drift-probe.py")
 
+# MEMORY.md size gates. WARN at the compaction target (still readable, but the next
+# session should compact rather than keep appending) -- a hard issue only at the read
+# limit, where the file can no longer be read in one Read call and index maintenance
+# itself becomes unreliable. Bytes, not KiB, to match how du/wc report it.
+MEMORY_WARN_BYTES = 17100     # 17.1KB compaction target
+MEMORY_HARD_BYTES = 24400     # 24.4KB Read-tool limit
+
 CANON_RECIPIENTS = {"ggoldberg@oxfordra.net", "egoldberg@oxfordra.net"}
 RETIRED_DOCS = ("reference_tech.md", "reference_financial.md", "reference_communication.md",
                 "reference_optimization_log.md", "ORA_SetupReference.md", "feedback_",
@@ -214,6 +221,26 @@ def main():
         sys.exit(2)
 
     issues, warnings = [], []
+
+    # --- 0. size gate --- MEMORY.md is read whole into every session's context, so its
+    # byte size (not line count -- `·` separators and other non-ASCII are multi-byte in
+    # UTF-8) is bounded on both ends: WARN past the compaction target, hard-fail only if
+    # it would no longer fit in one Read call.
+    try:
+        idx_bytes = os.path.getsize(INDEX)
+    except OSError as e:
+        sys.stderr.write("[ACTION] cannot stat MEMORY.md: %s\n" % e)
+        sys.exit(2)
+    if idx_bytes > MEMORY_HARD_BYTES:
+        issues.append(
+            "MEMORY.md is %d bytes, over the %d-byte Read-tool limit -- it no longer "
+            "fits in one Read call; compact now, not on the next pass" % (idx_bytes, MEMORY_HARD_BYTES))
+    elif idx_bytes > MEMORY_WARN_BYTES:
+        warnings.append(
+            "MEMORY.md is %d bytes, over the %d-byte compaction target (%d bytes of "
+            "headroom left before the %d-byte hard limit) -- compact before the next "
+            "several index lines land" % (
+                idx_bytes, MEMORY_WARN_BYTES, MEMORY_HARD_BYTES - idx_bytes, MEMORY_HARD_BYTES))
 
     # --- 1. index reconciliation ---
     try:
