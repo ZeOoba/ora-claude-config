@@ -973,8 +973,56 @@ def test_no_active_deal_runs_selfcheck_and_passes():
     print("  PASS test_no_active_deal_runs_selfcheck_and_passes")
 
 
+def test_dated_archive_dirs_pruned_from_skill_scan():
+    """FALSE-NEGATIVE gap closed 2026-07-24 (same class as governor-drift-probe's).
+    SKILL_PRUNE_DIRS matched a dir named EXACTLY '_archive', but the live convention is
+    '_archive_<date>[_suffix]'. Claude_Workspace/00_Governance/Scheduled/ holds four such
+    dirs with 11 SKILL.md files, so RETIRED skills resolved as PRESENT -- defeating the
+    documented intent ("a deleted skill that lingers only in a backup still reports
+    MISSING"). Direction matters: on a resolver, an unpruned archive is a false NEGATIVE."""
+    m = _load_probe_module()
+    assert m._is_pruned_skill_dir("_archive")
+    assert m._is_pruned_skill_dir("_ARCHIVE")                      # walk lowercases; be explicit
+    assert m._is_pruned_skill_dir("_archive_2026-06-09_retired")
+    assert m._is_pruned_skill_dir("_archive_2026-07-12_orphans")
+    assert m._is_pruned_skill_dir("_staging_2026-01-01")
+    assert m._is_pruned_skill_dir("backups")
+    assert m._is_pruned_skill_dir("node_modules")
+    # TIGHT: requires the separator, so a live skill dir must NOT be pruned. Over-pruning a
+    # resolver is ALSO a false negative (skill reads MISSING when it is present), so both
+    # directions are unsafe here -- keep the match anchored to the archive convention.
+    assert not m._is_pruned_skill_dir("_archives_live")
+    assert not m._is_pruned_skill_dir("archive")
+    assert not m._is_pruned_skill_dir("acquisition-underwriting")
+    assert not m._is_pruned_skill_dir("loi-generation")
+    print("  PASS test_dated_archive_dirs_pruned_from_skill_scan")
+
+
+def test_archived_skill_no_longer_resolves_e2e():
+    """A retired skill living ONLY under _archive_<date>/ must not resolve, while an
+    identically-named LIVE skill still does. Built as a temp tree so the assertion does not
+    depend on the real workspace's archive contents."""
+    m = _load_probe_module()
+    import pathlib
+    root = pathlib.Path(tempfile.mkdtemp())
+    for rel in ("live-skill", "_archive_2026-06-09_retired/retired-skill",
+                "_archive_2026-07-12_orphans/nested/deep-retired-skill",
+                "_staging_wip/wip-skill", "backups/backed-up-skill"):
+        d = root / rel
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text("---\nname: x\ndescription: y\n---\n", encoding="utf-8")
+    known, errs, absent = m.collect_skill_dirs([root], m.SKILL_PRUNE_DIRS)
+    assert not errs and not absent, (errs, absent)
+    assert "live-skill" in known, known
+    for gone in ("retired-skill", "deep-retired-skill", "wip-skill", "backed-up-skill"):
+        assert gone not in known, "%s resolved out of an archive/backup tree: %s" % (gone, known)
+    print("  PASS test_archived_skill_no_longer_resolves_e2e")
+
+
 def main():
     assert os.path.isfile(REAL_CLAUDE_MD), "real CLAUDE.md not found: %s" % REAL_CLAUDE_MD
+    test_dated_archive_dirs_pruned_from_skill_scan()
+    test_archived_skill_no_longer_resolves_e2e()
     test_real_doctrine_valid()
     test_missing_command_fails()
     test_missing_section_fails()

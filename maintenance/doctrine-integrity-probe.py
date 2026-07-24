@@ -168,6 +168,19 @@ SKILL_SCAN_ROOTS = (CLAUDE_DIR / "skills", CLAUDE_DIR / "plugins", WORKSPACE)
 # only via the allowlist (review of c9dcdb9, finding #1).
 SKILL_PRUNE_DIRS = {".git", "__pycache__", "node_modules", "backups", "_archive",
                     "02_outputs", "_state", "_manifest", ".obsidian"}
+# The exact-name set above missed the LIVE archive convention, "_archive_<date>[_suffix]"
+# (fixed 2026-07-24, same class as governor-drift-probe's iter_files gap). Four such dirs sit
+# under Claude_Workspace/00_Governance/Scheduled/ holding 11 SKILL.md files, so RETIRED skills
+# resolved as PRESENT -- exactly defeating this scan's stated intent that "a deleted skill that
+# lingers only in a backup still reports MISSING". On a RESOLVER both directions are unsafe:
+# an unpruned archive hides retired-skill drift (false negative), and an over-broad prune makes
+# a live skill read MISSING (also false negative). So the match requires the "_" separator --
+# "_archives_live" and a bare "archive" dir are deliberately NOT pruned.
+SKILL_PRUNE_PREFIXES = ("_archive_", "_staging_", "backups_")
+
+def _is_pruned_skill_dir(name):
+    low = str(name).lower()
+    return low in SKILL_PRUNE_DIRS or low.startswith(SKILL_PRUNE_PREFIXES)
 # Case-insensitive: a recase like "## Skill Precedence" must still be parsed, else
 # a one-line header edit silently disables this whole check (review finding #2).
 # v2.1 renamed the section "## Skill tie-breaks"; accept both forms.
@@ -359,7 +372,12 @@ def collect_skill_dirs(roots, prune):
             absent_roots.append(str(root))
             continue
         for dirpath, dirnames, filenames in os.walk(root, onerror=errs.append):
-            dirnames[:] = [d for d in dirnames if d.lower() not in prune]
+            # Honours the caller's exact-name `prune` set AND the module-level dated-archive
+            # prefixes (see SKILL_PRUNE_PREFIXES) -- the latter are a property of the on-disk
+            # naming convention, not of any one caller's set.
+            dirnames[:] = [d for d in dirnames
+                           if d.lower() not in prune
+                           and not d.lower().startswith(SKILL_PRUNE_PREFIXES)]
             if "SKILL.md" in filenames:
                 names.add(os.path.basename(dirpath).lower())
     return names, errs, absent_roots

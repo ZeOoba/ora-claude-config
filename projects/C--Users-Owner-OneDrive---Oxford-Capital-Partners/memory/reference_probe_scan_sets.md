@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: d6635568-ae53-453c-9bd7-ec8551f96c73
-  modified: 2026-07-24T15:26:52.437Z
+  modified: 2026-07-24T15:37:41.517Z
 ---
 
 Audited 2026-07-24, all 11 probes. A probe's `[OK]` is only as good as its scan set, and
@@ -56,5 +56,47 @@ Three changes, all in `governor-drift-probe.py`; **no governor constant was touc
 
 Evidence: governor tests 5 new + all pre-existing pass; all 8 maintenance probe suites pass;
 live probe `OK -- 704 files scanned` exit 0; `doctrine-integrity-probe` exit 0.
+
+## The `_archive_<date>` prune-convention bug class (swept 2026-07-24)
+
+Archive dirs on this machine are named **`_archive_<date>[_suffix]`**, but several tools
+prune a dir named **exactly** `_archive`. Every exact-match prune list is a candidate.
+**Direction decides severity — do not blanket-widen:**
+
+- On a **drift detector** (governor-drift), an unpruned archive is a *false positive* (noise).
+- On a **resolver** (doctrine-integrity skill scan), it is a *false negative* — a retired
+  skill lingering in an archive resolves as PRESENT. Over-pruning is *also* a false negative
+  there (a live skill reads MISSING), so the match must stay anchored to the convention.
+- On a **secret/confidentiality scanner**, pruning archives at all is a false negative —
+  those tools should scan archives, not skip them.
+
+Swept `hooks/` + `maintenance/`, every `*.py` / `*.ps1` / `*.mjs`:
+
+| Site | State |
+|---|---|
+| `governor-drift-probe.py` `iter_files` | FIXED 07-24 — 26 dated dirs were unpruned |
+| `doctrine-integrity-probe.py` `SKILL_PRUNE_DIRS` | FIXED 07-24 — see below |
+| `doctrine-integrity-probe.py:1158` (guard-liveness) | Already `startswith("_archive")` — correct |
+| `setup-self-audit.py:63` (fleet folders) | Already `startswith("_")` — correct |
+| `setup-self-audit.py` `EXCLUDE_DIR_PARTS` (secret scan) | Substring match, so no gap. Separate question flagged below. |
+| `memory-integrity-probe.py` | Globs `MEM/*.md` one level; archives sit in a subdir. No gap. |
+| `session-env-retention.ps1` / `sweep-override-tokens.ps1` | Exact-match `-ne`, but **zero** `_archive_*` variants exist under either root, and the consequence would be a reversible move. Inert — left alone. |
+| `hooks/**` | **No `_archive` prune logic at all.** Clean of this class. |
+
+### doctrine-integrity-probe — CLOSED 2026-07-24
+
+`Claude_Workspace/00_Governance/Scheduled/` holds four `_archive_<date>` dirs with 11
+SKILL.md files, so **11 retired skill names resolved as PRESENT**, defeating the scan's own
+stated intent ("a deleted skill that lingers only in a backup still reports MISSING").
+Fixed by `SKILL_PRUNE_PREFIXES` + `_is_pruned_skill_dir()`; `collect_skill_dirs` still
+honours the caller's exact-name set, with the prefixes applied on top.
+
+**Latent, not masking active drift** — the live probe was exit 0 before and after.
+
+**REFUTE pass:** resolved 274 → 264; **0 names added** (a widened prune must never add);
+each of the 10 removed verified archive-only with no live copy anywhere; `ora-pm-ledger`
+correctly **retained** because it is a live task. All 22 CLAUDE.md skill tokens resolve
+identically before and after — including 7 that resolve via agents / a workflow / the
+subsumed-skill allowlist rather than the skill set.
 
 Related: [[skill-frontmatter-lenient-parse]], [[reference_scheduled_task_staleness_guard_trips]].
