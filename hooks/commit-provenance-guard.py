@@ -246,6 +246,200 @@ def _has_all_flag(cmd):
     return False
 
 
+SHELL_SEGMENT_OPERATORS = {"&&", "||", ";", "|"}
+
+# A leading `NAME=value` token (env-var-prefixed invocation, e.g.
+# `GIT_AUTHOR_NAME=x git add foo`) must not stop `git` from being recognized
+# as the segment's actual command. REFUTE finding, 2026-07-24: without this,
+# an env-var-prefixed `git add` was silently invisible to the detector below,
+# reproducing the exact incident this fix exists to close.
+_ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def _split_segments(tokens):
+    """Split a flat token stream into sub-command segments at top-level shell
+    control operators. shlex.split does not treat `&&`/`;`/`||`/`|` as syntax
+    -- when whitespace-separated they simply come through as their own plain
+    tokens (verified: is_git_commit() above already relies on exactly this to
+    find `git` anywhere in a `cd /x && git commit ...` chain). This does not
+    handle subshells, command substitution, or operators glued to a token
+    with no surrounding whitespace -- accepted, same precision-over-recall
+    scope as the rest of this file."""
+    segs = []
+    cur = []
+    for t in tokens:
+        if t in SHELL_SEGMENT_OPERATORS:
+            if cur:
+                segs.append(cur)
+            cur = []
+        else:
+            cur.append(t)
+    if cur:
+        segs.append(cur)
+    return segs
+
+
+def _tokenize_cmd_segments(cmd):
+    """Tokenize `cmd` LINE BY LINE, not as one shlex.split() call, so a bare
+    newline (bash's statement separator, same semantics as `;`) also acts as
+    a segment boundary. REFUTE finding, 2026-07-24: shlex.split() treats a
+    newline as ordinary whitespace, so a multi-line script with `git add` on
+    one physical line and `git commit` on the next -- no `&&`/`;` between
+    them -- was silently merged into one token stream, hiding the add behind
+    whatever preceded it. Each line is independently run through
+    _split_segments() too, since operators can still appear within a line.
+    A line that fails to tokenize (e.g. an unterminated quote spanning
+    physical lines) falls back to a plain whitespace split for that line only
+    -- consistent with every other shlex-fallback in this file.
+
+    ACCEPTED GAP (2nd-round REFUTE finding, 2026-07-24, LOW, fails SAFE):
+    per-line tokenization loses quote context across lines, so a multi-line
+    `-m "$(cat <<'EOF' ...)"` heredoc commit-message BODY whose own prose
+    happens to start a line with the literal words "git add ..." can be
+    mistaken for a real add segment (whole-command single-shlex.split(), as
+    is_git_commit() and the `--`-pathspec branch below still use, would keep
+    that heredoc body as one opaque quoted token and never see this). Verified
+    this can only ever ADD a spurious candidate, never hide a real one -- and
+    per _git_add_segments()'s "needs a commit segment strictly after it" rule,
+    it only bites when 2+ `git commit` invocations are chained in one Bash
+    call with the phantom line inside a MIDDLE commit's heredoc body and a
+    real commit after it. This fleet's convention is one commit per Bash
+    call (every commit in this repo's own history is issued that way) --
+    accepted rather than fixed; fixing precisely would need re-tokenizing the
+    whole command with quote context preserved and then splitting the
+    resulting stream on segment operators/newlines, which bash's real
+    heredoc/quote grammar cannot be fully represented by shlex.split() alone
+    anyway. Same "single-operator cooperative fleet, not an adversarial
+    boundary" threat model already used for the alias-blindness gap above."""
+    segs = []
+    for line in cmd.splitlines():
+        if not line.strip():
+            continue
+        try:
+            tokens = shlex.split(line)
+        except ValueError:
+            tokens = line.split()
+        segs.extend(_split_segments(tokens))
+    return segs
+
+
+def _segment_git_subcommand_and_args(seg):
+    """If `seg` is (after skipping any leading `NAME=value` env-assignment
+    tokens) a `git <subcommand> ...` invocation, return
+    (subcommand, args-after-subcommand). Else None. Skips global git options
+    that consume a value, same table as is_git_commit()."""
+    if not seg:
+        return None
+    i = 0
+    n = len(seg)
+    while i < n and _ENV_ASSIGN_RE.match(seg[i]):
+        i += 1
+    if i >= n or seg[i] != "git":
+        return None
+    j = i + 1
+    while j < n:
+        t = seg[j]
+        if t.startswith("-"):
+            j += 2 if t in GIT_ARG_OPTS_WITH_VALUE else 1
+            continue
+        return (t, seg[j + 1:])
+    return None
+
+
+def _git_add_segments(cmd):
+    """arg-lists for every `git add ...` invocation in `cmd` that has AT
+    LEAST ONE `git commit` invocation somewhere after it (positionally, left
+    to right across segments -- matches execution order for &&/;/||/newline).
+
+    NOT simply "before the FIRST commit": a multi-commit sequence in one
+    command (`git commit -m first; git add sandwiched.txt; git commit -m
+    second`) has an add that a "stop at the first commit" rule would drop
+    entirely, even though it plainly gets staged for the SECOND commit
+    (REFUTE finding, 2026-07-24, PoC 3). Conversely an add with NO commit
+    anywhere after it (`git commit -m x && git add later.txt`) is correctly
+    excluded -- nothing in this command ever commits it.
+
+    ACCEPTED GAP (REFUTE finding, 2026-07-24, LOW): a user-defined git ALIAS
+    for `add` or `commit` (e.g. `git config alias.a add`) is invisible here
+    -- this matches only the literal subcommand text `add`/`commit`, same as
+    is_git_commit()'s own alias blindness elsewhere in this file. Fixing one
+    without the other would be inconsistent and misleading; same threat
+    model as already_committed_since()'s documented stance: single-operator
+    cooperative fleet, not an adversarial boundary, not hardened against."""
+    segs = _tokenize_cmd_segments(cmd)
+    parsed = [_segment_git_subcommand_and_args(seg) for seg in segs]
+    commit_idx = [i for i, p in enumerate(parsed) if p and p[0] == "commit"]
+    if not commit_idx:
+        return []
+    add_arglists = []
+    for i, p in enumerate(parsed):
+        if p and p[0] == "add" and any(ci > i for ci in commit_idx):
+            add_arglists.append(p[1])
+    return add_arglists
+
+
+def pending_add_paths(repo, cmd):
+    """Absolute normcase paths that `git add` invocation(s) PRECEDING a `git
+    commit` in the same compound command would stage, resolved WITHOUT ever
+    running `git add` -- PreToolUse fires before the real command executes,
+    so at hook-fire time the index is still whatever it was before this add.
+    We instead query the pre-add working-tree state (git diff / ls-files)
+    that the pending add is about to consume.
+
+    THE BUG THIS CLOSES (2026-07-24): candidate_paths() previously read only
+    `git diff --cached`, which is empty for a `git add X && git commit`
+    one-liner at hook-fire time -- `if not cands: return` then allowed the
+    commit before foreign_hits() was ever consulted. Confirmed as the
+    mechanism behind a real incident: 4 janitor commits of exactly this shape
+    swept 41 files, including two other live sessions' uncommitted edits,
+    with commit-provenance-guard never firing despite every OTHER
+    precondition for a block being met. See event_log.md 2026-07-24.
+
+    Degrades toward FEWER candidates on any git-query failure (an unreadable
+    dir, a repo mid-something) -- consistent with this guard's fail-open
+    safety invariant: missing information biases toward allow, never block.
+    `-u`/`--update` is treated as an alias for `-A` here -- it actually stages
+    a narrower set (modified+deleted TRACKED files only, no untracked) but
+    over-inclusion in a candidate SET can only ever widen who gets flagged as
+    possibly-foreign, never cause a false allow; a caller who hits a false
+    block from this over-approximation has the pathspec/override remediation
+    the guard already prints."""
+    add_arglists = _git_add_segments(cmd)
+    if not add_arglists:
+        return set()
+
+    paths = set()
+    wants_all = False
+    explicit = []
+    for args in add_arglists:
+        for a in args:
+            if a in ("-A", "--all", "--no-ignore-removal", "-u", "--update", "."):
+                wants_all = True
+            elif a.startswith("-"):
+                continue  # unrecognized flag (-v, -f, -p, -N, --dry-run, ...): skip
+            else:
+                explicit.append(a)
+
+    if wants_all:
+        modified = _git_lines(repo, ["diff", "--name-only"]) or []
+        untracked = _git_lines(repo, ["ls-files", "--others", "--exclude-standard"]) or []
+        paths |= {norm(os.path.join(repo, p)) for p in modified}
+        paths |= {norm(os.path.join(repo, p)) for p in untracked}
+
+    for p in explicit:
+        abs_p = os.path.join(repo, p)
+        if os.path.isdir(abs_p):
+            scoped_mod = _git_lines(repo, ["diff", "--name-only", "--", p]) or []
+            scoped_unt = _git_lines(
+                repo, ["ls-files", "--others", "--exclude-standard", "--", p]) or []
+            paths |= {norm(os.path.join(repo, x)) for x in scoped_mod}
+            paths |= {norm(os.path.join(repo, x)) for x in scoped_unt}
+        else:
+            paths.add(norm(abs_p))
+
+    return paths
+
+
 def candidate_paths(repo, cmd):
     """Absolute normcase paths this commit would capture, or None if unknown."""
     # Explicit `-- <pathspec>` narrows the commit. This branch is load-bearing:
@@ -269,7 +463,12 @@ def candidate_paths(repo, cmd):
     if _has_all_flag(cmd):
         tracked = _git_lines(repo, ["diff", "--name-only"]) or []
         rel |= set(tracked)
-    return {norm(os.path.join(repo, p)) for p in rel}
+    cands = {norm(os.path.join(repo, p)) for p in rel}
+    # Compound-command blind spot fix (2026-07-24): a `git add` PRECEDING this
+    # commit in the same command hasn't run yet at hook-fire time, so it can't
+    # show up in `git diff --cached` -- union in what it's about to stage.
+    cands |= pending_add_paths(repo, cmd)
+    return cands
 
 
 def foreign_hits(candidates, my_sid, repo):
