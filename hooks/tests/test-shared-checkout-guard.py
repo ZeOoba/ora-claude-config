@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # hooks/ (test in hooks/tests/)
 HOOK = os.path.join(HERE, "shared-checkout-guard.py")
@@ -58,6 +59,29 @@ def make_worktree_repo():
 
 def sessions_tmp():
     return tempfile.mkdtemp(prefix="scg-sess-")
+
+
+def write_liveness_state(sid_cwd_pairs):
+    """A session-state.json fixture (the shape hooks/lib/session_liveness.py reads).
+    Caller owns the returned path and must remove it."""
+    fd, path = tempfile.mkstemp(suffix="_session-state.json")
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump({"sessions": {sid: {"status": "working", "cwd": cwd, "lastAt": "t"}
+                                for sid, cwd in sid_cwd_pairs}}, fh)
+    return path
+
+
+def record_touched(sessions_dir, sid, paths):
+    """Write `sid`'s provenance touched-set exactly as commit-provenance-recorder.py
+    does -- `normcase(abspath(path))\\t<epoch>` per line, under
+    <sessions_dir>/<sid>/touched-files.txt. The recorder and every reader must agree
+    byte-for-byte on this format or the intersection silently misses and attribution
+    degrades to unattributed forever (see hooks/lib/commit_provenance.py)."""
+    d = os.path.join(sessions_dir, sid)
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, "touched-files.txt"), "w", encoding="utf-8") as fh:
+        for p in paths:
+            fh.write("%s\t%.6f\n" % (os.path.normcase(os.path.abspath(p)), time.time()))
 
 
 def test_outside_repo_silent():
@@ -181,21 +205,85 @@ def test_same_dirty_set_stays_silent_after_warning():
     print("PASS test_same_dirty_set_stays_silent_after_warning")
 
 
-def test_other_active_session_named_in_message():
-    """When session_liveness reports another open session, the warning names it."""
+def test_other_session_without_provenance_is_unattributed():
+    """Liveness ALONE must never name a session -- it is not attribution evidence.
+
+    Supersedes test_other_active_session_named_in_message, which asserted the
+    opposite ("other-se" in out) and was left stale by 7d01eff. That commit
+    deliberately removed the behavior the old test pinned: _attribute_wip used
+    to name others[0], an arbitrary index into the liveness dict, with nothing
+    tying that session to the dirty files -- observed live naming an idle,
+    provenance-less session across ~8 consecutive warnings while the session
+    that made the commits went unnamed. A confidently WRONG name is worse than
+    no name. See feedback_shared_checkout_guard_session_attribution_unreliable.md.
+
+    This fixture is exactly that case: a session is open, but has recorded no
+    touched-set at all, so the honest output is the UNATTRIBUTED fallback."""
     repo = make_main_repo(dirty=True)
     sess = sessions_tmp()
     fp = os.path.join(repo, "server", "x.ts")
-    fd, state_path = tempfile.mkstemp(suffix="_session-state.json")
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        json.dump({"sessions": {"other-session-99": {"status": "working", "cwd": repo, "lastAt": "t"}}}, fh)
+    state_path = write_liveness_state([("other-session-99", repo)])
     try:
-        rc, out, err = run_hook(payload("s8", fp), [repo], sess, extra_env={"ORA_FLEET_STATE": state_path})
-        assert "other-se" in out, (
-            "expected the other session's (truncated) id in the warning, got %r" % out)
+        rc, out, err = run_hook(payload("s8", fp), [repo], sess,
+                                extra_env={"ORA_FLEET_STATE": state_path})
+        assert "UNATTRIBUTED" in out, (
+            "open session with no recorded touched-set must be reported as "
+            "unattributed, got %r" % out)
+        assert "other-se" not in out, (
+            "must NOT name a session on liveness alone -- that is the 7d01eff "
+            "bug, got %r" % out)
+        assert "1 other session(s) are open" in out, (
+            "the count of open sessions is still useful context, got %r" % out)
     finally:
         os.remove(state_path)
-    print("PASS test_other_active_session_named_in_message")
+    print("PASS test_other_session_without_provenance_is_unattributed")
+
+
+def test_other_session_with_provenance_is_named():
+    """The naming branch is LIVE: recorded provenance intersecting the dirty set
+    does name the session. Without this the 7d01eff rewrite would leave
+    _attribute_wip's hits-branch entirely uncovered -- the test suite would
+    certify a dead branch (feedback_fixture_shaped_tests_certify_dead_branches.md)."""
+    repo = make_main_repo(dirty=True)
+    sess = sessions_tmp()
+    fp = os.path.join(repo, "server", "x.ts")
+    record_touched(sess, "other-session-99", [os.path.join(repo, "foreign-wip.txt")])
+    state_path = write_liveness_state([("other-session-99", repo)])
+    try:
+        rc, out, err = run_hook(payload("s13", fp), [repo], sess,
+                                extra_env={"ORA_FLEET_STATE": state_path})
+        assert "other-se" in out, (
+            "a session whose recorded touched-set intersects the dirty set MUST "
+            "be named, got %r" % out)
+        assert "recorded edit(s)" in out, (
+            "the named-session clause must state the evidence, got %r" % out)
+        assert "UNATTRIBUTED" not in out, (
+            "evidence exists -- must not fall back to unattributed, got %r" % out)
+    finally:
+        os.remove(state_path)
+    print("PASS test_other_session_with_provenance_is_named")
+
+
+def test_provenance_for_unrelated_file_stays_unattributed():
+    """Proves the naming test above is not fixture-shaped: the guard intersects
+    the touched-set against the DIRTY PATHS, it does not merely check that a
+    provenance file exists. Same open session, same provenance file, but the
+    recorded path is not in the dirty set -> unattributed."""
+    repo = make_main_repo(dirty=True)
+    sess = sessions_tmp()
+    fp = os.path.join(repo, "server", "x.ts")
+    record_touched(sess, "other-session-99", [os.path.join(repo, "some-other-file.txt")])
+    state_path = write_liveness_state([("other-session-99", repo)])
+    try:
+        rc, out, err = run_hook(payload("s14", fp), [repo], sess,
+                                extra_env={"ORA_FLEET_STATE": state_path})
+        assert "UNATTRIBUTED" in out, (
+            "provenance that does not intersect the dirty set is not evidence, "
+            "got %r" % out)
+        assert "other-se" not in out, "must not name on non-intersecting provenance, got %r" % out
+    finally:
+        os.remove(state_path)
+    print("PASS test_provenance_for_unrelated_file_stays_unattributed")
 
 
 def test_no_other_session_generic_message():
@@ -279,7 +367,9 @@ if __name__ == "__main__":
     test_malformed_stdin_fails_open()
     test_rearm_on_dirty_set_change()
     test_same_dirty_set_stays_silent_after_warning()
-    test_other_active_session_named_in_message()
+    test_other_session_without_provenance_is_unattributed()
+    test_other_session_with_provenance_is_named()
+    test_provenance_for_unrelated_file_stays_unattributed()
     test_no_other_session_generic_message()
     test_warning_reaches_the_model_via_additional_context()
     test_silent_cases_emit_no_additional_context()
