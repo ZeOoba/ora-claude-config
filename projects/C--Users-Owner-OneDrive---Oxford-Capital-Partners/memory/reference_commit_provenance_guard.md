@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 0888c827-119f-4877-98ae-23ac7c404a27
-  modified: 2026-07-24T14:56:33.926Z
+  modified: 2026-07-24T15:03:11.518Z
 ---
 
 **What it is:** two cooperating hooks, live in `~/.claude` since 2026-07-16 (registered in
@@ -123,3 +123,20 @@ deferred commit/splice plan in this checkout, re-check `git status` and `git log
 work may already be in `HEAD`, in which case the correct action is to verify content parity and
 report, not to construct a splice for a diff that no longer exists. Related:
 [[reference_event_log_partial_commit_splice]] · [[feedback_verify_registry_mutation_claims]].
+
+**⚠ 2026-07-24, addendum from the swept session (`44efc61`) — "unstaged" is probably NOT the exemption; the
+guard's preconditions were all MET and it still did not fire.** Measured on the same incident as the note
+above, from the other side: the recorder was healthy (every touch recorded with timestamps), the swept
+session was present in `session-state.json` as `status=working` so liveness would have reported it, the
+touch was **73 seconds** old (commit ct=1784904663 vs last touch 1784904590), `already_committed_since()`
+would return False, the `Bash` PreToolUse wiring is intact, and **no `allow-foreign-commit` sentinel exists
+anywhere under `hooks/sessions/`** — the sanctioned bypass was not used. So a block was the correct
+outcome and something suppressed it silently. Staged-vs-unstaged cannot be the explanation: `-a/--all` is
+handled by `_has_all_flag()`, and a `git add` in an *earlier* Bash call leaves the index already populated.
+LEADING HYPOTHESIS [SPECULATIVE — the janitor's literal command was not recoverable]: `candidate_paths()`
+reads `git diff --cached --name-only`, but **PreToolUse fires BEFORE the command runs**, so a compound
+`git add -A && git commit -m "..."` presents an index that does not yet contain those paths → empty
+candidate set → line 344's `if not cands: return` allows it. Not excluded: an internal exception hitting
+the deliberate `except Exception: pass` (silent by construction). Practical consequence until fixed: **do
+not treat this guard as protection when the other party may commit via a compound add+commit one-liner** —
+that is the most natural way to write a janitor sweep. Full evidence chain: [[event_log]] 2026-07-24.
