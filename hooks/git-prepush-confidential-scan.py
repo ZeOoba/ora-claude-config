@@ -40,6 +40,23 @@ HOOK_DIR = os.path.dirname(os.path.abspath(__file__))
 TERMS_FILE = os.path.join(HOOK_DIR, "confidential-terms.json")
 ZERO_RE = "0"
 
+# CREDENTIAL SCAN (Gabriel ruling, 2026-07-24). Until now this gate blocked confidential
+# DEAL TERMS only -- it carried zero credential patterns, so nothing stopped an API key
+# reaching ZeOoba/ora-claude-config. The detection logic existed in
+# maintenance/scrub-before-optin.py but only ran when a human remembered to invoke it; its
+# own docstring records that the FRED key hardcoded in a retired SKILL.md was caught "only
+# because that grep happened to be written that day".
+#
+# FAIL-CLOSED like the terms check: if the pattern module cannot be imported we block,
+# because we cannot prove the push is clean. (The terms scan already fails closed on an
+# unreadable terms file -- same principle, same reason.)
+sys.path.insert(0, os.path.join(HOOK_DIR, "lib"))
+try:
+    import secret_patterns as _sp
+except Exception as _e:  # pragma: no cover - exercised via the import-failure test
+    _sp = None
+    _SP_ERR = str(_e)
+
 
 def _read_json(path):
     """Parsed JSON from path, or None on any read/parse error."""
@@ -135,13 +152,22 @@ def scan_text(text, terms):
 
 
 def main():
+    # Fail closed on a broken pattern module, exactly as for an unreadable terms file:
+    # an unprovable push is a blocked push.
+    if _sp is None:
+        sys.stderr.write("pre-push BLOCKED (fail-closed): hooks/lib/secret_patterns.py "
+                         "could not be imported (%s) -- cannot scan for credentials.\n"
+                         % _SP_ERR)
+        return 1
     terms = load_terms()
     if terms is None:
         sys.stderr.write("pre-push BLOCKED (fail-closed): confidential-terms.json "
                          "unreadable — cannot prove the push is clean.\n")
         return 1
-    if not terms:
-        return 0  # no active deals
+    # NOTE: there is deliberately NO `if not terms: return 0` early exit any more. It used
+    # to short-circuit the whole hook whenever no deal was active -- which is the state
+    # TODAY -- so a credential scan placed after it would have been dead on arrival. The
+    # two scans are independent: an empty terms list disables the TERMS check only.
     bad = False
     for local_ref, local_sha, remote_ref, remote_sha in parse_pushrefs(sys.stdin.read()):
         if set(local_sha) == {ZERO_RE}:
@@ -155,13 +181,28 @@ def main():
                              % (rng, local_ref))
             bad = True
             continue
-        hits = scan_text(p.stdout.decode("utf-8", "ignore"), terms)
-        if hits:
-            sys.stderr.write("pre-push BLOCKED: %d confidential term(s) (indices %s) "
-                             "found in the HISTORY being pushed on %s (range %s). A "
-                             "clean HEAD does not mean a clean push — purge or rebase "
-                             "the history first (see docs/MIGRATION_RUNBOOK.md).\n"
-                             % (len(hits), hits, local_ref, rng))
+        body = p.stdout.decode("utf-8", "ignore")
+        if terms:
+            hits = scan_text(body, terms)
+            if hits:
+                sys.stderr.write("pre-push BLOCKED: %d confidential term(s) (indices %s) "
+                                 "found in the HISTORY being pushed on %s (range %s). A "
+                                 "clean HEAD does not mean a clean push — purge or rebase "
+                                 "the history first (see docs/MIGRATION_RUNBOOK.md).\n"
+                                 % (len(hits), hits, local_ref, rng))
+                bad = True
+        # Credential scan over the SAME body -- per file, so a test fixture in the history
+        # cannot block every push (see secret_patterns.scan_diff). Reports path + label
+        # only; the matched value is never echoed into the terminal or a CI log.
+        leaks = _sp.scan_diff(body)
+        if leaks:
+            detail = "; ".join("%s -> %s" % (path, ", ".join(labels))
+                               for path, labels in leaks)
+            sys.stderr.write("pre-push BLOCKED: credential-shaped string(s) in the HISTORY "
+                             "being pushed on %s (range %s): %s. Values are not echoed. "
+                             "Rotate the credential FIRST, then purge or rebase the "
+                             "history -- a force-push alone does not un-leak it.\n"
+                             % (local_ref, rng, detail))
             bad = True
     return 1 if bad else 0
 
