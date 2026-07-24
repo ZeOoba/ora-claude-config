@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 99bbd3a1-ff6c-4785-a3ac-ae6560909a70
-  modified: 2026-07-24T15:10:00.741Z
+  modified: 2026-07-24T15:18:41.881Z
 ---
 
 **The false signal.** The Delinquency Aging report (monthly, sourced from PM-platform A/R exports —
@@ -47,11 +47,41 @@ matter. The 2026-05-26 thread by that exact name was Caroline Van Fleet (Tower A
 whether Philip Collins would take on an American Tower landlord as a client — unrelated to
 delinquency. Read the body, not the subject.
 
-**Proposed durable fix (NOT built — needs Gabriel's call):** add a `Collection Status` +
-`Collection Last Activity` field to the Notion Tenant DB, populated from the PM threads, and have the
-delinquency cycle cite it instead of inferring. Until then the report should say "collection status
-not visible to this report — verify in Outlook before acting," in the same spirit as the §4c
-coverage-gap language.
+**The fix is NOT a new field — verified 2026-07-24, and this corrects an earlier draft of this note.**
+The Tenant DB (data source `collection://b12f4cfd-a995-4755-8341-6435ae8173b4`) **already carries the
+exact schema needed**, and has for some time:
+
+- `Lease Default / Cure Status` — a select whose options are precisely the collection ladder:
+  `None` · `Notice Given` · `Cure Period Active` · `Default Declared` · `Legal Proceedings` · `Resolved`
+- `Notice Given Date` (date) · `Notice Sent` · `Required Notice Period (Days)`
+- `Interaction Log` (relation) · `Last Interaction Date` · `Interaction Count`
+
+**Every one of those fields is empty for every flagged tenant.** Live query, 2026-07-24:
+PRO REPAIR, Columbus Suburban, GT Industrial, Masala Bazaar (XPO), New Benevis, TYM Wholesale, and
+Fully Equipped all return `cure_status: null` and `notice_date: null`. Only Columbus Suburban has a
+single `Interaction Log` entry. So the gap is **populate + read**, not **create** — and adding a
+`Collection Status` property (the obvious-looking fix) would have produced a SECOND empty field
+sitting beside an already-empty one, making the problem harder to see, not easier.
+
+Two things must change, neither of which is a schema edit:
+1. **Something must write it.** The A/R cycle is the natural owner: when reconciling the PM export it
+   already touches each tenant row (37 updated in the July cycle), and the PM threads that hold the
+   status are the same ones being reconciled.
+2. **The report must read it** before ever writing "no evidence of action," and say
+   *"collection status not recorded — verify in Outlook before acting"* when it is null, in the same
+   spirit as the §4c coverage-gap language. Null must read as *unknown*, never as *no action*.
+
+**Do not back-fill these fields from email inference.** `Lease Default / Cure Status` is a legal-status
+field on the system of record; an email subject line reading "Eviction Notice …" evidences that a
+notice was *drafted or discussed*, not that it was *served*, and the distinction is exactly what the
+field exists to record. Populating it needs the PM's confirmation per tenant (Invariant 7).
+
+**Also noted in the same query:** archived duplicates co-exist with live rows for several of these
+tenants (e.g. two `GT Industrial Supply, INC.` rows, one `⛔ ARCHIVED 2026-07-12 —` prefixed, BOTH
+carrying `AR Balance 3279.2`). See [[reference_tenant_db_completeness_gap]]. And `AR Balance` here is
+the **furthest-aged-tier subtotal, not the tenant total** — PRO REPAIR shows 6322.86 (its 90+ figure),
+not its 11886.39 total. That matches Data-Quality Finding 4 in the July report; do not read the two as
+inconsistent.
 
 Related: [[reference_warehouse_basis_parsing]], [[reference_tenant_name_mappings]],
 [[people]] (PM contacts), [[reference_tenant_db_completeness_gap]].
