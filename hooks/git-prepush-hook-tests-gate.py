@@ -96,6 +96,18 @@ APPEND_LOG_SCRIPT = os.path.join(CLAUDE_DIR, "maintenance", "append-event-log.py
 PER_TEST_TIMEOUT_SECONDS = 90
 ENV_SKIP_SENTINEL = "CANNOT RUN:"
 
+# git sets these in a hook process's own environment so IT can operate on the outer
+# repo. Every test file is spawned as a subprocess of THIS gate, so without stripping
+# them here, each test would inherit them too -- silently redirecting any `git -C
+# <tempdir>` call a test makes (against its own throwaway fixture repo) back onto the
+# outer repo instead. Same bug class as commit 337a7af, which patched each affected
+# test file's own os.environ individually; fixing it here at the spawn point covers
+# every test file, including ones not touched by that commit.
+GIT_ENV_LEAK_VARS = (
+    "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+    "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_PREFIX",
+)
+
 # Every tracked python test tree, as ~/.claude-relative path parts. See the module
 # docstring for why hooks/ itself is excluded and why these are listed rather than walked.
 TEST_ROOTS = (
@@ -157,10 +169,11 @@ def run_test_file(path, timeout=None):
     with a synthetic message — classify() below always treats this as FAIL, never
     ENV-SKIP, since a hang is not the same claim as a declared environmental absence."""
     timeout = timeout if timeout is not None else PER_TEST_TIMEOUT_SECONDS
+    env = {k: v for k, v in os.environ.items() if k not in GIT_ENV_LEAK_VARS}
     try:
         proc = subprocess.run(
             [sys.executable, path],
-            capture_output=True, text=True, timeout=timeout,
+            capture_output=True, text=True, timeout=timeout, env=env,
         )
         return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
     except subprocess.TimeoutExpired as e:
