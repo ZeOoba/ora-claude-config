@@ -22,6 +22,15 @@ Run: python test-confidentiality-guard.py   (exit 0 = all pass; exit 1 = any fai
 """
 import os, sys, json, subprocess, tempfile, datetime, atexit, io, importlib.util
 
+# This test spins up its own throwaway git repos in temp dirs. When invoked as part of
+# the real pre-push hook chain, git sets GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE (etc.) in
+# this process's environment so IT can operate on the outer repo -- but those same vars
+# leak into every subprocess git call below and silently redirect them at the outer repo
+# instead of the temp one, breaking `git -C <tempdir> add/commit` with pathspec/128 errors.
+for _v in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+           "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_PREFIX"):
+    os.environ.pop(_v, None)
+
 HOOK_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # hooks/ (this test lives in hooks/tests/)
 GUARD = os.path.join(HOOK_DIR, "confidentiality-guard.py")
 TERMS_FILE = os.path.join(HOOK_DIR, "confidential-terms.json")
