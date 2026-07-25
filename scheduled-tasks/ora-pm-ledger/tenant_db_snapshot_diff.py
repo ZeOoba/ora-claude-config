@@ -243,41 +243,55 @@ def load_token():
     raise RuntimeError("NOTION_TOKEN not found in %s" % ENV_PATH)
 
 
-def pull_all(db_id, token):
-    pages, cursor = [], None
-    while True:
-        body = {"page_size": 100}
-        if cursor:
-            body["start_cursor"] = cursor
-        req = urllib.request.Request(
+def _http_page(db_id, token, body):
+    """One POST to Notion's query endpoint, with bounded retry. Split out from pull_all so
+    the pagination loop can be exercised offline by --selftest via the `fetch` seam."""
+    req = urllib.request.Request(
             "https://api.notion.com/v1/databases/%s/query" % db_id,
             data=json.dumps(body).encode(),
             headers={"Authorization": "Bearer " + token,
                      "Notion-Version": "2022-06-28",
                      "Content-Type": "application/json"},
             method="POST")
-        # Bounded retry on rate-limit/transient server errors. Unattended at 18:00, one
-        # Notion hiccup would otherwise be an unhandled HTTPError and a lost run.
-        d = None
-        for attempt in range(3):
-            try:
-                with urllib.request.urlopen(req, timeout=60) as r:
-                    d = json.load(r)
-                break
-            except urllib.error.HTTPError as e:
-                if e.code in (429, 500, 502, 503, 504) and attempt < 2:
-                    time.sleep(2 * (attempt + 1))
-                    continue
-                raise
-            except urllib.error.URLError:
-                if attempt < 2:
-                    time.sleep(2 * (attempt + 1))
-                    continue
-                raise
+    # Bounded retry on rate-limit/transient server errors. Unattended at 18:00, one
+    # Notion hiccup would otherwise be an unhandled HTTPError and a lost run.
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            if e.code in (429, 500, 502, 503, 504) and attempt < 2:
+                time.sleep(2 * (attempt + 1))
+                continue
+            raise
+        except urllib.error.URLError:
+            if attempt < 2:
+                time.sleep(2 * (attempt + 1))
+                continue
+            raise
+
+
+def pull_all(db_id, token, fetch=None):
+    """All rows, following pagination. `fetch(db_id, token, body) -> dict` is injectable
+    for offline testing; it defaults to the real HTTP call."""
+    fetch = fetch or _http_page
+    pages, cursor, guard = [], None, 0
+    while True:
+        guard += 1
+        if guard > 200:   # ~20k rows; a hard backstop against any unforeseen loop shape
+            raise RuntimeError("pull_all exceeded %d pages - aborting suspected loop" % guard)
+        body = {"page_size": 100}
+        if cursor:
+            body["start_cursor"] = cursor
+        d = fetch(db_id, token, body)
         pages.extend(d.get("results", []))
-        if d.get("has_more"):
-            cursor = d.get("next_cursor")
-        else:
+        if not d.get("has_more"):
+            break
+        cursor = d.get("next_cursor")
+        # Notion's contract says next_cursor is non-null whenever has_more is true. If it
+        # ever isn't, re-sending the same body would refetch page 1 forever — an infinite
+        # loop in an unattended 18:00 job. Stop and let the collapse guard judge a short pull.
+        if not cursor:
             break
     return pages
 
@@ -381,6 +395,65 @@ def selftest():
     check(any("'Rent'" in w for w in dhalf["warnings"]),
           "bulk guard fires at exactly 50pct (>= threshold)")
 
+    # --- REVIEW-PASS REGRESSIONS (independent review cycle 2, 2026-07-24) ---
+
+    # Pagination: has_more=true with a null next_cursor must STOP, not refetch page 1
+    # forever. Driven through the injectable fetch seam, no network.
+    calls = {"n": 0}
+
+    def bad_fetch(db_id, token, body):
+        calls["n"] += 1
+        return {"results": [{"id": "p%d" % calls["n"], "properties": {}}],
+                "has_more": True, "next_cursor": None}
+    got = pull_all("db", "tok", fetch=bad_fetch)
+    check(calls["n"] == 1 and len(got) == 1, "null next_cursor with has_more stops after 1 page")
+
+    # Normal pagination still follows the cursor and concatenates every page.
+    seq = [{"results": [{"id": "a"}], "has_more": True, "next_cursor": "c1"},
+           {"results": [{"id": "b"}], "has_more": True, "next_cursor": "c2"},
+           {"results": [{"id": "c"}], "has_more": False, "next_cursor": None}]
+    seen_cursors = []
+
+    def good_fetch(db_id, token, body):
+        seen_cursors.append(body.get("start_cursor"))
+        return seq[len(seen_cursors) - 1]
+    allrows = pull_all("db", "tok", fetch=good_fetch)
+    check([r["id"] for r in allrows] == ["a", "b", "c"], "pagination concatenates all pages")
+    check(seen_cursors == [None, "c1", "c2"], "pagination forwards each next_cursor exactly once")
+
+    # load_prev(): a corrupt LATEST falls back to the newest readable dated archive rather
+    # than reporting "no baseline" (which would disable the collapse guard and let a
+    # simultaneously-collapsed pull overwrite the baseline with an empty snapshot).
+    global STATE_DIR, LATEST
+    real_dir, real_latest = STATE_DIR, LATEST
+    tmpdir = os.path.join(real_dir, "_selftest_tmp")
+    try:
+        os.makedirs(tmpdir, exist_ok=True)
+        STATE_DIR, LATEST = tmpdir, os.path.join(tmpdir, "tenant-db-latest.json")
+        good = {"as_of": "2026-07-22", "db_id": "x", "count": 1,
+                "rows": {"A": {"title": "Acme", "hash": "h", "fields": {"Rent": "1"}}}}
+        with open(os.path.join(tmpdir, "tenant-db-2026-07-22.json"), "w", encoding="utf-8") as f:
+            json.dump(good, f)
+        with open(LATEST, "w", encoding="utf-8") as f:
+            f.write("{ truncated")
+        prev, warn = load_prev()
+        check(prev is not None and prev.get("count") == 1,
+              "corrupt LATEST falls back to newest dated archive")
+        check(warn and "archive" in warn, "archive fallback is reported, not silent")
+
+        # With no archive either, it degrades to no-baseline (and run()'s 0-row refusal is
+        # what then protects the file).
+        os.remove(os.path.join(tmpdir, "tenant-db-2026-07-22.json"))
+        prev2, warn2 = load_prev()
+        check(prev2 is None and warn2 and "no readable archive" in warn2,
+              "no archive -> honest no-baseline with a warning")
+    finally:
+        for n in os.listdir(tmpdir) if os.path.isdir(tmpdir) else []:
+            os.remove(os.path.join(tmpdir, n))
+        if os.path.isdir(tmpdir):
+            os.rmdir(tmpdir)
+        STATE_DIR, LATEST = real_dir, real_latest
+
     print("SELFTEST:", "PASS" if ok else "FAIL")
     return 0 if ok else 1
 
@@ -407,20 +480,48 @@ def atomic_write_json(path, obj):
     os.replace(tmp, path)
 
 
+def _read_snapshot(path):
+    with open(path, encoding="utf-8") as f:
+        snap = json.load(f)
+    if not isinstance(snap, dict) or not isinstance(snap.get("rows"), dict):
+        raise ValueError("unexpected shape")
+    return snap
+
+
+def newest_archive():
+    """Newest dated archive, or (None, None). Archives are the audit trail and are written
+    alongside LATEST, so they are the natural fallback when LATEST is damaged."""
+    try:
+        names = sorted(n for n in os.listdir(STATE_DIR)
+                       if n.startswith("tenant-db-2") and n.endswith(".json"))
+    except OSError:
+        return None, None
+    for name in reversed(names):
+        try:
+            return _read_snapshot(os.path.join(STATE_DIR, name)), name
+        except Exception:
+            continue
+    return None, None
+
+
 def load_prev():
-    """Previous snapshot, or None. A corrupt/unreadable file degrades to a fresh baseline
-    with a loud warning rather than raising and killing every future 18:00 run."""
+    """Previous snapshot, or None.
+
+    A corrupt/unreadable LATEST degrades gracefully rather than raising and killing every
+    future 18:00 run. It falls back to the newest dated archive BEFORE giving up: without
+    that, corruption masquerades as 'no baseline', which disables the collapse guard below
+    and lets a simultaneously-collapsed pull overwrite the baseline with an empty snapshot.
+    """
     if not os.path.exists(LATEST):
         return None, None
     try:
-        with open(LATEST, encoding="utf-8") as f:
-            prev = json.load(f)
-        if not isinstance(prev, dict) or not isinstance(prev.get("rows"), dict):
-            return None, "previous snapshot has unexpected shape - treated as no baseline"
-        return prev, None
+        return _read_snapshot(LATEST), None
     except Exception as e:
-        return None, "previous snapshot unreadable (%s: %s) - treated as no baseline" % (
-            type(e).__name__, e)
+        why = "previous snapshot unreadable (%s: %s)" % (type(e).__name__, e)
+        arch, name = newest_archive()
+        if arch is not None:
+            return arch, why + " - fell back to archive %s for the diff baseline" % name
+        return None, why + " - and no readable archive; treated as no baseline"
 
 
 def run(as_of):
@@ -438,7 +539,17 @@ def run(as_of):
     # Persist — unless the pull looks like a collapse, in which case KEEP the old baseline.
     persisted = True
     prev_count = (prev or {}).get("count", 0)
-    if prev and (curr["count"] == 0 or curr["count"] < prev_count * COLLAPSE_FLOOR_RATIO):
+    if curr["count"] == 0:
+        # Independent of any baseline: the Tenant DB is never legitimately empty, so a
+        # 0-row pull is an access/scope failure. This also covers the case where LATEST was
+        # corrupt AND no archive existed, which leaves prev=None and would otherwise skip
+        # the comparison guard below entirely.
+        persisted = False
+        warnings.append(
+            "REFUSED to persist snapshot: pull returned 0 rows. The Tenant DB is never "
+            "legitimately empty - check the Notion integration's database access. Prior "
+            "snapshot (if any) kept.")
+    elif prev and curr["count"] < prev_count * COLLAPSE_FLOOR_RATIO:
         persisted = False
         warnings.append(
             "REFUSED to persist snapshot: row count collapsed %d -> %d (below %.0f%% of prior). "

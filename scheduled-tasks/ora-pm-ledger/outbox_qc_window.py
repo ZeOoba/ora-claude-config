@@ -118,10 +118,23 @@ def load_state():
             st = json.load(f)
         if not isinstance(st, dict) or not isinstance(st.get("covered"), dict):
             return empty_state(), "coverage state had unexpected shape - reset to empty"
-        # Validate every span parses before trusting the file.
+        # Validate every span parses AND is correctly ordered. commit() rejects inverted
+        # spans at the entry point, but a hand-edited or legacy file can still carry one,
+        # and the interval algebra turns it into permanently overlapping gaps (a 1440-min
+        # day reporting >1440 uncovered minutes, re-sweeping the same hours forever).
+        # Drop them and say so — dropping over-sweeps, which is the safe direction.
+        dropped = []
         for d, spans in st["covered"].items():
+            good = []
             for a, b in spans:
-                parse_dt(a), parse_dt(b)
+                if parse_dt(b) <= parse_dt(a):
+                    dropped.append("%s %s->%s" % (d, a, b))
+                else:
+                    good.append([a, b])
+            st["covered"][d] = good
+        if dropped:
+            return st, ("dropped %d malformed (non-increasing) coverage span(s), those "
+                        "windows will be re-swept: %s" % (len(dropped), "; ".join(dropped[:5])))
         return st, None
     except Exception as e:
         return empty_state(), "coverage state unreadable (%s: %s) - reset to empty" % (
@@ -336,15 +349,36 @@ def selftest():
 
     # 12. save_state prunes against the INJECTED now, not the wall clock — otherwise a
     #     just-accepted commit for an out-of-window date is silently discarded on write.
+    #     The date is derived as (real today - 200d) so this test DISCRIMINATES whenever it
+    #     runs: under the wall clock that span is 200 days old and gets pruned (fail);
+    #     under the injected now it is age 0 and survives (pass). An earlier version of
+    #     this test committed *today's* date, which both clocks keep — it passed with the
+    #     fix reverted and therefore certified nothing.
     global STATE_PATH
     real_path = STATE_PATH
     STATE_PATH = os.path.join(STATE_DIR, "_selftest-coverage.json")
     try:
-        s12 = commit(empty_state(), "2026-07-24",
-                     "2026-07-24T00:00:00-04:00", "2026-07-24T18:00:00-04:00")
-        save_state(s12, now=now)
+        old_day = (datetime.now(ET) - timedelta(days=200)).date().isoformat()
+        old_now = parse_dt(old_day + "T18:00:00")
+        s12 = commit(empty_state(), old_day, old_day + "T00:00:00", old_day + "T18:00:00")
+        save_state(s12, now=old_now)
         back, warn = load_state()
-        check(warn is None and "2026-07-24" in back.get("covered", {}),
+        check(warn is None and old_day in back.get("covered", {}),
+              "prune honors injected now, not the wall clock (200d-old span survives)")
+
+        # Same span written with the REAL clock is correctly pruned — proves the prune
+        # still works and the test above is measuring the clock source, not a no-op prune.
+        s12b = commit(empty_state(), old_day, old_day + "T00:00:00", old_day + "T18:00:00")
+        save_state(s12b)  # now=None -> wall clock
+        back2, _ = load_state()
+        check(old_day not in back2.get("covered", {}),
+              "prune still drops genuinely stale spans under the wall clock")
+
+        s12c = commit(empty_state(), "2026-07-24",
+                      "2026-07-24T00:00:00-04:00", "2026-07-24T18:00:00-04:00")
+        save_state(s12c, now=now)
+        back3, warn3a = load_state()
+        check(warn3a is None and "2026-07-24" in back3.get("covered", {}),
               "committed span survives save/load round-trip")
 
         # 13. Corrupt state degrades to empty WITH a warning instead of raising — an
@@ -361,6 +395,20 @@ def selftest():
         # 14. Atomic write leaves no .tmp behind.
         save_state(empty_state(), now=now)
         check(not os.path.exists(STATE_PATH + ".tmp"), "atomic write leaves no .tmp residue")
+
+        # 14b. A legacy/hand-edited INVERTED span in the stored file is dropped with a
+        #      warning. Left in place it yields overlapping gaps forever (>1440 uncovered
+        #      minutes in a 1440-minute day), re-sweeping the same hours indefinitely.
+        with open(STATE_PATH, "w", encoding="utf-8") as f:
+            json.dump({"version": 1, "tracking_since": "2026-07-24", "covered": {
+                "2026-07-24": [["2026-07-24T18:00:00-04:00", "2026-07-24T06:00:00-04:00"]]}}, f)
+        inv, warn_inv = load_state()
+        check(warn_inv is not None and "non-increasing" in warn_inv,
+              "stored inverted span is dropped with a warning")
+        check(inv["covered"]["2026-07-24"] == [], "inverted span removed from coverage")
+        pinv = plan(inv, now)
+        mins = pinv["days_to_sweep"][0]["uncovered_minutes"]
+        check(mins <= 1440, "no overlapping gaps after sanitising (%d min <= 1440)" % mins)
     finally:
         for p in (STATE_PATH, STATE_PATH + ".tmp"):
             if os.path.exists(p):
