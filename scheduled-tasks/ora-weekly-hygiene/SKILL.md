@@ -1,6 +1,6 @@
 ---
 name: ora-weekly-hygiene
-description: ORA Weekly Hygiene — single sequential Sunday session (20:00 ET) folding five hygiene tasks: A) Claude Workspace Hygiene → B) OneDrive Cleanup (reversible quarantine) → C) SharePoint Aging & Freshness → D) Artifact Staleness Scan → E) Session Pruner → F) legacy task-dir classification → G) EOS telemetry rollup → H) system inventory refresh → I) git repo ref integrity scan → J) Tenant DB completeness spot-check → K) session-env retention sweep → L) override-token sweep. v1.0 2026-06-03 Phase 3 merge, extended through 2026-07-21. Re-enabled 2026-07-09 (Gabriel-approved, post-recovery-stabilization confirmation). [MODEL: UNVERIFIABLE | checked 2026-07-09]
+description: ORA Weekly Hygiene — single sequential Sunday session (20:00 ET) folding five hygiene tasks: A) Claude Workspace Hygiene → B) OneDrive Cleanup (reversible quarantine) → C) SharePoint Aging & Freshness → D) Artifact Staleness Scan → E) Session Pruner → F) legacy task-dir classification → G) EOS telemetry rollup → H) system inventory refresh → I) git repo ref integrity scan → J) Tenant DB completeness spot-check → K) session-env retention sweep → L) override-token sweep → M) unsigned draft-to-signature nudge. v1.1 2026-06-03 Phase 3 merge, extended through 2026-07-25 (Block M added). Re-enabled 2026-07-09 (Gabriel-approved, post-recovery-stabilization confirmation). [MODEL: UNVERIFIABLE | checked 2026-07-25]
 output_contract:
   version: 1
   blocks:
@@ -64,6 +64,11 @@ output_contract:
       freshness_window_hours: 192
       expected_on: { cron: "15 20 * * 0" }
       on_missing_severity: info
+    - id: block-m-unsigned-draft-nudge
+      artifact: { type: file, path_glob: "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-weekly-hygiene\\_state\\block-M-last-run.json" }
+      freshness_window_hours: 192
+      expected_on: { cron: "15 20 * * 0" }
+      on_missing_severity: info
 ---
 
 RE-ENABLE NOTE (2026-07-09): Gabriel confirmed re-enabling this task effective 2026-07-09 (post-recovery-stabilization). Re-enabled via the supervised `update_scheduled_task` MCP tool (no registry JSON edited directly) — verified live via `list_scheduled_tasks`: `enabled: true`, next fire 2026-07-12 (Sunday) ~20:00 ET. Supersedes the "re-enable only per Gabriel's direction" hold noted in the restoration note immediately below.
@@ -76,11 +81,11 @@ RESTORATION NOTE 2 (2026-07-07, later): This file was found deleted from disk du
 
 # ora-weekly-hygiene — Oxford Realty Advisors Weekly Hygiene (merged)
 
-You are `ora-weekly-hygiene`. You replace five previously-separate hygiene tasks (four ran Sunday 20:00–23:00; one ran Friday 17:15) with **one sequential Sunday session**. Run the blocks **in order A→B→C→D→E→F→G→H→I→J→K** — the order is intentional: do filesystem **consolidation** (A) and **cleanup/quarantine** (B) FIRST so the downstream **audits** (C SharePoint, D artifacts) and the **session report** (E) observe the post-cleanup state; the bounded **legacy task-dir classification** (F, added 2026-06-10), the report-only **EOS telemetry rollup + meta-work ratio** (G, added 2026-06-11), the report-only **system inventory refresh** (H, added 2026-07-07), the report-only **git repo ref integrity scan** (I, added 2026-07-07), the report-only **Tenant DB completeness spot-check** (J, added 2026-07-09), and the mechanical **session-env retention sweep** (K, added 2026-07-09) run last. Each block keeps its own output target, email send path, and guardrails **exactly as before** — do not cross-wire them.
+You are `ora-weekly-hygiene`. You replace five previously-separate hygiene tasks (four ran Sunday 20:00–23:00; one ran Friday 17:15) with **one sequential Sunday session**. Run the blocks **in order A→B→C→D→E→F→G→H→I→J→K→L→M** — the order is intentional: do filesystem **consolidation** (A) and **cleanup/quarantine** (B) FIRST so the downstream **audits** (C SharePoint, D artifacts) and the **session report** (E) observe the post-cleanup state; the bounded **legacy task-dir classification** (F, added 2026-06-10), the report-only **EOS telemetry rollup + meta-work ratio** (G, added 2026-06-11), the report-only **system inventory refresh** (H, added 2026-07-07), the report-only **git repo ref integrity scan** (I, added 2026-07-07), the report-only **Tenant DB completeness spot-check** (J, added 2026-07-09), the mechanical **session-env retention sweep** (K, added 2026-07-09), the mechanical **override-token sweep** (L, added 2026-07-21), and the report-only **unsigned draft-to-signature nudge** (M, added 2026-07-25) run last. Each block keeps its own output target, email send path, and guardrails **exactly as before** — do not cross-wire them.
 
 ## CADENCE
 
-Fires **weekly: `0 20 * * 0`** (Sunday 20:00 ET). All twelve blocks run every fire — no weekday/weekend branching.
+Fires **weekly: `0 20 * * 0`** (Sunday 20:00 ET). All thirteen blocks run every fire — no weekday/weekend branching.
 - **Day-move note (2026-06-03):** Block A (`ora-claude-workspace-hygiene`) previously ran **Friday 17:15**; it moves to this Sunday 20:00 session. No Friday dependency exists (its weekly heartbeat-log rotation only needs to happen ~weekly; nothing reads it on a Friday-specific schedule). If a future watchdog ever expects the rotation on Fridays, re-split Block A — but none does today.
 - Blocks B–E retain their native Sunday cadence (were 21:00 / 20:00 / 23:00 / 22:00 — now sequential under the single 20:00 fire).
 
@@ -373,6 +378,23 @@ The script enforces every safety check itself (live-sessionId exclusion read fre
 **Delivery:** no new email. Append to the END-OF-SESSION RUN SUMMARY the script's final summary line (`LIVE sweep done: … tokens-archived=N kept-live-session=N kept-in-window=N …`).
 
 **Output-contract note:** same pattern as Block K — no new `_state\` marker; `sweep-override-tokens.ps1` already logs to `maintenance\override-token-sweep.log` unconditionally on every run.
+
+---
+
+# BLOCK M — UNSIGNED DRAFT-TO-SIGNATURE NUDGE (report-only; added 2026-07-25)
+
+**WHY THIS BLOCK EXISTS:** on 2026-07-25, a diligence email surfaced that Kareem's Cricket DC LLC lease amendment had sat as an unsigned draft since 2026-07-17 with no follow-up logged anywhere — eight days invisible to every existing sweep (Block C's Orphaned-Drafts check only fires at >30 days and scans SharePoint/Claude_Workspace file age, not signature status). This block is the standing weekly catch for that narrower, faster-moving failure mode: an outbound document that was drafted but never got a nudge to actually go out for signature. Gabriel-set threshold: 5 business days. Detection only — this block never sends anything to a counterparty (Hard Invariant 1).
+
+**EXECUTION**
+1. Build the candidate set from documents that read as "meant to go out for signature": filename or title matching `Amendment|Addendum|LOI|Letter of Intent|Lease|Renewal|Estoppel` under the known draft-output locations — `Claude_Workspace\02_Phase_Outputs\`, `Claude_Workspace\03_Tool_Outputs\`, `Claude_Workspace\05_Loose_Outputs\`, and a `sharepoint_search` sweep for recently-touched (`lastModifiedDateTime` within 30 days) documents matching the same keywords — modified 5+ business days ago and not already flagged by Block C's own >30-day Orphaned-Drafts check (don't double-report the same file once it crosses that longer threshold).
+2. For each candidate, cross-check for a newer signal that supersedes the "still just a draft" read: a Notion Tenant DB row's `Notes` field mentioning sent/executed/signed for that tenant/deal; a HubSpot deal-stage advance past the drafting stage; or a DocuSign/Adobe Sign completion marker in the same folder. If any of these post-date the draft's own mtime, drop the candidate — it moved, this block just hasn't been told.
+3. **Never fabricate a sent/signed status.** If no corroborating signal exists either way, the candidate stays flagged — silence is not evidence of progress, matching this task's existing evidence-bar convention (Block J step 4, the reconciliation skill's own rule).
+4. **Coverage caveat — state it every run, don't silently imply completeness.** This scan only reaches document-assembly/deal-execution output locations and a keyword-based SharePoint sweep; a draft emailed directly, drafted in a third-party portal, or named without one of the matched keywords will not be caught. Report this as a known gap, not a clean bill of health.
+5. **Output — write into `open-items-tracker.md`, not a new email or Notion page** (same consolidation rationale as the `ora-tenant-hubspot-reconciliation` skill's 2026-07-25 change — a standalone output here would be exactly the kind of thing that goes undiscovered until someone nearly redoes the work by hand). For each surviving candidate: read the tracker's current highest `OI-NNN`, assign the next ID, append an Open-table row (`Opened` = today, `Source` = this block's run, one-line `Description` naming the document + days-idle), and a full `### OI-NNN` entry with the file path/title, days since last modification, and what was (and wasn't) found in the cross-check. Do not email — this stays inside the existing no-new-send convention for detection blocks (G/H/I/J).
+
+**Guards:** strictly read-only against SharePoint/Notion/HubSpot and the local filesystem — never sends, signs, or advances anything; never invents a signature status. If a data source (SharePoint search, Notion, HubSpot) is unreachable, note it in the run summary and continue — never halt the session over this block.
+
+**Block M state marker:** as this block's final action, EVERY run — including a "zero candidates" run — append one line to `C:\Users\Owner\.claude\scheduled-tasks\ora-weekly-hygiene\_state\block-M-last-run.json` (create the `_state\` folder if absent): `{"lastRun": "<ISO timestamp>", "outcome": "<N candidates scanned, N flagged, N tracker rows added>"}`.
 
 ---
 
