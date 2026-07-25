@@ -1,16 +1,42 @@
 """Standalone test for hooks/memory-orphan-link-guard.py. Builds a throwaway git repo
 that mimics the memory/ layout, then drives the guard via stdin exactly as the harness does.
 """
-import json, os, shutil, subprocess, sys, tempfile
+import json, os, shutil, subprocess, sys, tempfile, uuid
 
 # This test spins up its own throwaway git repos in temp dirs. When invoked as part of
 # the real pre-push hook chain, git sets GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE (etc.) in
 # this process's environment so IT can operate on the outer repo -- but those same vars
 # leak into every subprocess git call below and silently redirect them at the outer repo
 # instead of the temp one, breaking git operations against the temp fixtures.
-for _v in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
-           "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_PREFIX"):
+_GIT_LEAK_VARS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+                   "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_PREFIX")
+for _v in _GIT_LEAK_VARS:
     os.environ.pop(_v, None)
+
+
+def _clean_env():
+    """A fresh env dict with the leak vars stripped, built PER CALL rather than relying
+    on the one-time os.environ mutation above -- so a git call stays hermetic even if
+    something re-populates one of these vars in this process later (e.g. another
+    library, or a future test added to this same file). See test_env_leak_immunity."""
+    env = dict(os.environ)
+    for _v in _GIT_LEAK_VARS:
+        env.pop(_v, None)
+    return env
+
+
+def _unique_branch_name(prefix="wt-branch"):
+    """A hardcoded branch name is a REAL repo-level collision risk, not just a
+    same-process one: `git worktree add -b <name>` registers the branch and worktree
+    admin entry in the repo's shared common dir. If GIT_DIR/GIT_COMMON_DIR ever leaks
+    into this process (the exact bug this file's env-stripping above guards against),
+    the branch lands in the SHARED real repo instead of the throwaway one -- and then
+    PERSISTS there, so every later run (this file or any other using the same bare
+    name) hits `fatal: a branch named '<name>' already exists`. Live-verified 2026-07-25:
+    a leaked run left a real `wt-branch` ref + worktree checkout sitting in ~/.claude's
+    own .git for hours, colliding with unrelated later test runs. A unique suffix per
+    call means even a leaked run can never collide with another."""
+    return "%s-%s" % (prefix, uuid.uuid4().hex[:12])
 
 # Resolved from THIS file's location, not hardcoded to the live tree: a worktree copy must
 # test the guard IT is about to land, not whatever is already deployed. (Was an absolute
@@ -20,7 +46,7 @@ GUARD = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PY = sys.executable
 
 def git(repo, *a):
-    return subprocess.run(("git",)+a, cwd=repo, capture_output=True, text=True)
+    return subprocess.run(("git",)+a, cwd=repo, capture_output=True, text=True, env=_clean_env())
 
 def run_guard(cmd, index_path, tool="Bash", cwd=None):
     # Real harness usage ALWAYS populates payload["cwd"] with wherever the Bash command
@@ -756,7 +782,7 @@ IDXM = os.path.join(memM, "MEMORY.md").replace("\\", "/")
 
 wt_dir = tempfile.mkdtemp(prefix="orphan-guard-wt-")
 shutil.rmtree(wt_dir, ignore_errors=True)  # `git worktree add` must create this itself
-r = git(rootM, "worktree", "add", "-b", "wt-branch", wt_dir, "HEAD")
+r = git(rootM, "worktree", "add", "-b", _unique_branch_name(), wt_dir, "HEAD")
 if r.returncode != 0:
     check("(worktree setup failed -- skipping worktree-specific cases: %s)"
           % r.stderr.strip()[:200], "SKIPPED", "SKIPPED")
@@ -797,6 +823,78 @@ else:
     git(rootM, "worktree", "remove", "--force", wt_dir)
 
 shutil.rmtree(rootM, ignore_errors=True)
+
+# ===================================================================================
+# BRANCH-NAME COLLISION (2026-07-25). `_unique_branch_name()` replaces the bare literal
+# "wt-branch" formerly passed to `git worktree add -b`. That branch is registered in the
+# repo's SHARED common dir (not scoped to the throwaway tempdir), so if this process's
+# git calls ever leak into a real repo (the exact failure class the env-stripping at the
+# top of this file guards against), the branch persists there across runs -- live-
+# verified 2026-07-25: a leaked run left a real `wt-branch` ref sitting in ~/.claude's
+# own .git, which then collided with the NEXT test run that also asked for "wt-branch".
+# A per-call unique suffix means two runs (or two callers) can never collide.
+# ===================================================================================
+print()
+print("== BRANCH-NAME COLLISION: worktree branch names must not be a shared literal ==")
+_n1, _n2 = _unique_branch_name(), _unique_branch_name()
+check("two calls produce DIFFERENT branch names", _n1 != _n2, True)
+check("generated name is not the bare literal 'wt-branch'",
+      _n1 != "wt-branch" and _n2 != "wt-branch", True)
+check("generated name still carries the readable prefix",
+      _n1.startswith("wt-branch-") and _n2.startswith("wt-branch-"), True)
+
+# ===================================================================================
+# GIT_DIR/GIT_WORK_TREE HERMETICITY (2026-07-25). The env-stripping block at the top of
+# this file only runs ONCE, at import time. It cannot protect a call made after
+# something in this SAME process re-populates os.environ["GIT_DIR"] (e.g. it inherited
+# a real leak from a caller, or a later addition to this file sets it for its own
+# purposes and forgets to clean up). `git()` must stay hermetic on its OWN, per call --
+# proven here by re-injecting GIT_DIR/GIT_WORK_TREE pointed at a DECOY repo immediately
+# before a `git()` call and confirming the decoy is untouched while the intended
+# tempdir repo receives the commit.
+# ===================================================================================
+print()
+print("== GIT_DIR/GIT_WORK_TREE HERMETICITY: a call stays isolated even if the ambient env "
+      "is re-contaminated AFTER import ==")
+decoy = tempfile.mkdtemp(prefix="orphan-guard-decoy-")
+git(decoy, "init", "-q")
+git(decoy, "config", "user.email", "t@t.t")
+git(decoy, "config", "user.name", "t")
+with open(os.path.join(decoy, "seed.txt"), "w", encoding="utf-8") as f:
+    f.write("decoy seed\n")
+git(decoy, "add", "-A")
+git(decoy, "commit", "-qm", "decoy seed")
+decoy_commits_before = git(decoy, "rev-list", "--count", "HEAD").stdout.strip()
+
+targetH, memH = setup()
+target_commits_before = git(targetH, "rev-list", "--count", "HEAD").stdout.strip()
+
+_saved_env = {v: os.environ.get(v) for v in _GIT_LEAK_VARS}
+os.environ["GIT_DIR"] = os.path.join(decoy, ".git")
+os.environ["GIT_WORK_TREE"] = decoy
+try:
+    with open(os.path.join(memH, "hermetic.txt"), "w", encoding="utf-8") as f:
+        f.write("hermetic check\n")
+    git(targetH, "add", "-A")
+    git(targetH, "commit", "-qm", "hermetic check commit")
+finally:
+    for _v, _val in _saved_env.items():
+        if _val is None:
+            os.environ.pop(_v, None)
+        else:
+            os.environ[_v] = _val
+
+decoy_commits_after = git(decoy, "rev-list", "--count", "HEAD").stdout.strip()
+target_commits_after = git(targetH, "rev-list", "--count", "HEAD").stdout.strip()
+
+check("decoy repo received NO extra commit despite ambient GIT_DIR pointing at it",
+      decoy_commits_after, decoy_commits_before)
+check("intended tempdir repo DID receive the commit",
+      target_commits_after, str(int(target_commits_before) + 1))
+
+shutil.rmtree(decoy, ignore_errors=True)
+shutil.rmtree(targetH, ignore_errors=True)
+
 print()
 print(f"RESULT: {sum(results)}/{len(results)} passed")
 sys.exit(0 if all(results) else 1)

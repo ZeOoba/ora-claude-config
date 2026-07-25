@@ -11,15 +11,38 @@ import os
 import subprocess
 import sys
 import tempfile
+import uuid
 
 # This test spins up its own throwaway git repos in temp dirs. When invoked as part of
 # the real pre-push hook chain, git sets GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE (etc.) in
 # this process's environment so IT can operate on the outer repo -- but those same vars
 # leak into every subprocess git call below and silently redirect them at the outer repo
 # instead of the temp one, breaking `git -C <tempdir> add/commit` with pathspec/128 errors.
-for _v in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
-           "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_PREFIX"):
+_GIT_LEAK_VARS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+                   "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_PREFIX")
+for _v in _GIT_LEAK_VARS:
     os.environ.pop(_v, None)
+
+
+def _clean_env():
+    """A fresh env dict with the leak vars stripped, built PER CALL rather than relying
+    on the one-time os.environ mutation above -- so a git call stays hermetic even if
+    something re-populates one of these vars in this process later."""
+    env = dict(os.environ)
+    for _v in _GIT_LEAK_VARS:
+        env.pop(_v, None)
+    return env
+
+
+def _unique_branch_name(prefix="wt-branch"):
+    """A hardcoded branch name is a real repo-level collision risk: `git worktree add -b
+    <name>` registers the branch + worktree admin entry in the repo's SHARED common dir,
+    not scoped to the throwaway tempdir. If GIT_DIR/GIT_COMMON_DIR ever leaks into this
+    process, the branch lands in the shared real repo and PERSISTS there across runs --
+    live-verified 2026-07-25: a leaked run left a real `wt-branch` ref sitting in
+    ~/.claude's own .git for hours, colliding with later unrelated test runs. A unique
+    suffix per call means even a leaked run can never collide with another."""
+    return "%s-%s" % (prefix, uuid.uuid4().hex[:12])
 
 HOOKS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 spec = importlib.util.spec_from_file_location(
@@ -71,9 +94,10 @@ expect("load_terms: returns list or None (fail-closed contract)",
 with tempfile.TemporaryDirectory() as td:
     main_repo = os.path.join(td, "main-repo")
     os.makedirs(os.path.join(main_repo, "hooks"))
-    subprocess.run(["git", "init", "-q", main_repo], check=True)
-    subprocess.run(["git", "-C", main_repo, "config", "user.email", "t@example.com"], check=True)
-    subprocess.run(["git", "-C", main_repo, "config", "user.name", "t"], check=True)
+    subprocess.run(["git", "init", "-q", main_repo], check=True, env=_clean_env())
+    subprocess.run(["git", "-C", main_repo, "config", "user.email", "t@example.com"],
+                    check=True, env=_clean_env())
+    subprocess.run(["git", "-C", main_repo, "config", "user.name", "t"], check=True, env=_clean_env())
     with open(os.path.join(main_repo, "README.md"), "w") as f:
         f.write("seed\n")
     # A tracked file under hooks/ so the directory itself is materialized into a
@@ -81,8 +105,9 @@ with tempfile.TemporaryDirectory() as td:
     # tracked files and only confidential-terms.json is gitignored out of it.
     with open(os.path.join(main_repo, "hooks", "placeholder.py"), "w") as f:
         f.write("# tracked placeholder\n")
-    subprocess.run(["git", "-C", main_repo, "add", "README.md", "hooks/placeholder.py"], check=True)
-    subprocess.run(["git", "-C", main_repo, "commit", "-q", "-m", "seed"], check=True)
+    subprocess.run(["git", "-C", main_repo, "add", "README.md", "hooks/placeholder.py"],
+                    check=True, env=_clean_env())
+    subprocess.run(["git", "-C", main_repo, "commit", "-q", "-m", "seed"], check=True, env=_clean_env())
 
     # Never committed -- mirrors the real file being gitignored (present in the
     # main checkout's working tree, absent from anything `git worktree add` creates).
@@ -91,8 +116,8 @@ with tempfile.TemporaryDirectory() as td:
         json.dump({"synthetic_deal": {"active": True, "always": ["zephyr corp"]}}, f)
 
     linked_wt = os.path.join(td, "linked-wt")
-    subprocess.run(["git", "-C", main_repo, "worktree", "add", linked_wt, "-b", "wt-branch"],
-                    check=True, capture_output=True)
+    subprocess.run(["git", "-C", main_repo, "worktree", "add", linked_wt, "-b", _unique_branch_name()],
+                    check=True, capture_output=True, env=_clean_env())
 
     expect("setup: linked worktree genuinely lacks a local terms file (proves the repro)",
            not os.path.isfile(os.path.join(linked_wt, "hooks", "confidential-terms.json")))
