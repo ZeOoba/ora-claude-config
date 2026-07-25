@@ -92,6 +92,12 @@ If the guard.ps1 script itself is missing, skip Block A gracefully this run, log
 
 *2-NOTION (Notion reachable):*
   (A) `rate_snapshot` — parse the Rate Snapshot page header (`prefetch_status`, `fetched_at`, `prior_trading_day`, `holiday_offset`) + the UST yield table, SOFR strip, spreads, FedWatch into a JSON object. Include a one-line freshness verdict (prefetch age vs `fetched_at`).
+
+  **STALENESS ESCALATION (added 2026-07-24 — this is an ALARM, not just a note).** Compute `rate_age_hours` = now(ET) − `fetched_at`, and `missed_sessions` = the number of completed weekday 06:00 ET `ora-am-brief` Block A slots between `fetched_at` and now. Emit BOTH into the `rate_snapshot` JSON. Then classify:
+      - `missed_sessions == 0` → **FRESH**. Note and move on.
+      - `missed_sessions >= 1` → **STALE**. This means Block A did not publish on at least one weekday it should have. Set `"mirror_status": "NOTION_LIVE_BUT_STALE"`, state the vintage prominently, and **carry a `RATE SNAPSHOT STALE` line into the Block C email as a probe-equivalent FAIL — it flips the C.3 subject to `[ACTION]`.**
+      Rationale: before this clause the age was recorded as prose and read by nobody, so a 45-hour gap on 2026-07-24 (Block A silently dropped its 07-23 slot) was found only incidentally by a human reading the mirror. Note that a dropped slot leaves **no** `recordedSkips` entry and `lastRunAt` is single-valued, so the registry cannot evidence it — `fetched_at` on this page is the only cheap signal that the rate producer missed a day. See `reference_fleet_throttle_skip_catchup_burst.md`.
+      Weekend/holiday guard: Block A legitimately skips Sat/Sun and US federal holidays, so `missed_sessions` must count **weekday non-holiday** slots only. A Monday 05:15 run reading Friday's `fetched_at` is FRESH, not stale — do not alarm on it.
   (B) `portfolio_watch` — pre-pull the same sources `ora-am-brief` Section 4 uses, into JSON keyed 4a/4b/4c/4d:
       - 4a: scheduled-task run status / errors on the Ops Hub (`32b6ecd8-…`) as of now.
       - 4b: the most recent **ORA Lease Expiration Dashboard** (`notion-search` the literal title; use newest) — the ≤30-day expirations and the 31–90-day rows with no HubSpot renewal activity. NOTE (2026-06-09): the producer task was RETIRED — the page no longer refreshes; pass it through as historical, do NOT flag its age as a missed run.
@@ -132,6 +138,8 @@ Purpose: `automation-health-monitor` (LAMS/Cowork fleet) previously had no relia
 
 Run the deterministic probes below, then send **ONE consolidated `[ORA] Health Guard` email**. This block is **read-only verification** — every probe REPORTS; none fixes. Capture each probe's stdout table + exit code.
 
+**READ THE SCAN SET, NOT JUST THE STATUS (standing rule, added 2026-07-24).** When a probe reports an aggregate — `all N files`, `N scanned`, `N/N pass` — carry **N and what N is drawn from** into the email, not the `[OK]` alone. A green line over the wrong scan set is a *silent* coverage gap: it reads as assurance while verifying nothing. Live case that motivated this rule: `setup-self-audit`'s `skill-frontmatter` reported *"all 57 SKILL.md parse cleanly"* for months while (a) never parsing YAML at all and (b) globbing only the skills roots — **all 53 scheduled-task SKILL.md files, both fleets, were outside its scan set**, including every file hit by the 2026-07-08 deletion incident that check exists to detect. If a probe's aggregate does not state its roots, treat that as a probe defect and flag it; do not infer coverage from a passing status. Current per-probe scan-set map: `memory/reference_probe_scan_sets.md`.
+
 **C.1 — Run each probe** (full Python path; record exit code 0=pass / non-zero=fail):
 1. **Fleet status** — `…\python.exe "C:/Users/Owner/.claude/maintenance/fleet-status.py" --summary` — task counts, never-ran, throttle-skips, collisions. *(Canonical fleet health. STORE MODEL: the claude-code-sessions registry written by the `scheduled-tasks` MCP IS the live store — fleet-status.py auto-discovers it; a 0-task MCP result is a REAL failure, not by-design. The old LAMS registry is orphaned/dark — NOTE: as of 2026-07-07 this task itself runs from the LAMS/Cowork fleet post-migration; if fleet-status.py cannot find this registry, record as a coverage gap, not a fabricated pass.)*
 2. **Governor drift** — `…\python.exe "C:/Users/Owner/.claude/maintenance/governor-drift-probe.py"` — flags any DSCR/LTV declaration off the canonical 1.25× / 40%.
@@ -146,8 +154,8 @@ If any probe script is missing/absent this run (folders may not have survived th
 **C.2 — Compose ONE HTML email** — a one-screen consolidated table: one section per probe (probe · PASS/FAIL/ABSENT · key observed values / failing rows in red). Lead with a bold summary line `Health Guard: N/M probes PASS` and, if any FAIL, list the failing probe(s) + the specific failing check ids. Prepend the **Block A INTEGRITY REPAIR / ERROR** section if A acted or errored.
 
 **C.3 — Subject line:**
-- All probes pass AND Block A clean/repaired-OK: `[ORA] Health Guard — YYYY-MM-DD — ALL PASS`
-- Any probe FAIL/ABSENT, or any `missing_everywhere` SKILL, or integrity engine error: `[ACTION] Health Guard — YYYY-MM-DD — N FAIL`
+- All probes pass AND Block A clean/repaired-OK AND rate_snapshot FRESH: `[ORA] Health Guard — YYYY-MM-DD — ALL PASS`
+- Any probe FAIL/ABSENT, or any `missing_everywhere` SKILL, or integrity engine error, or a **B.2 `RATE SNAPSHOT STALE`** (see B.2 2-NOTION (A) staleness escalation): `[ACTION] Health Guard — YYYY-MM-DD — N FAIL`
 
 **C.4 — Deliver** to **ggoldberg@oxfordra.net only** via the SOLE send path `send-via-outlook.ps1` (Composio removed 2026-06-11; no fallback connector exists). Write the HTML to a temp file and `-BodyFile` it. On non-zero COM exit: retry once, then flag the failure via the B.4 last-resort local-log path — do not halt.
 

@@ -1,6 +1,6 @@
 ---
 name: ora-appsec-sweep
-description: General application-security sweep of ora-pm (live tenant portal, Stripe ACH) and oxford-command-center — secret scan (working tree + full git history), lockfile CVE audit, AR-ledger/balance-display schema review, tenant-portal auth/injection pass, and OWASP-LLM checks scoped to ORA's actual agent surfaces (hooks, MCP connectors, scheduled-task registries). REPORT-ONLY: findings go to Notion Ops Hub + open-items-tracker.md; never rotates, never pushes, never auto-fixes. Reads suppressions.md before reporting. Dispatches the per-repo review to the security-auditor agent (Fable-pinned). v1.2 (2026-07-24: MODEL PIN claim corrected — a transcript canary on the 2026-07-22 run DISPROVED the assumption that this task runs on Fable; see MODEL PIN note. Documentation only, no procedural change). v1.1 (2026-07-22: dispatch-to-agent simplification + fixed a duplicate-YAML-frontmatter defect that predated this version; see STATUS note). v1.0 registered 2026-07-20 (Plan 4b/4a) after a manual, Gabriel-supervised first run (2026-07-19). [MODEL: claude-opus-4-8 — frontmatter `model: fable` NOT honored on CC/MCP (server-pin) | checked 2026-07-24 via live-run transcript canary]
+description: General application-security sweep of ora-pm (live tenant portal, Stripe ACH) and oxford-command-center — secret scan (working tree + full git history), lockfile CVE audit, AR-ledger/balance-display schema review, tenant-portal auth/injection pass, and OWASP-LLM checks scoped to ORA's actual agent surfaces (hooks, MCP connectors, scheduled-task registries). REPORT-ONLY: findings go to Notion Ops Hub + open-items-tracker.md; never rotates, never pushes, never auto-fixes. Reads suppressions.md before reporting. Dispatches the per-repo review to the security-auditor agent (Fable-pinned). v1.3 (2026-07-24: Gabriel ratified Option C — the never-below-Fable floor is carried by the `security-auditor` Agent dispatch, not this task's own model; adds a MANDATORY DISPATCH INTEGRITY GATE that alarms rather than silently falling back to inline review, since inline review runs at the orchestrator's below-floor model). v1.2 (2026-07-24: MODEL PIN claim corrected — a transcript canary on the 2026-07-22 run DISPROVED the assumption that this task runs on Fable; see MODEL PIN note. Documentation only, no procedural change). v1.1 (2026-07-22: dispatch-to-agent simplification + fixed a duplicate-YAML-frontmatter defect that predated this version; see STATUS note). v1.0 registered 2026-07-20 (Plan 4b/4a) after a manual, Gabriel-supervised first run (2026-07-19). [MODEL: claude-opus-4-8 — frontmatter `model: fable` NOT honored on CC/MCP (server-pin) | checked 2026-07-24 via live-run transcript canary]
 model: fable
 ---
 
@@ -62,11 +62,21 @@ model: fable
   registration and do NOT read this file's frontmatter `model:` field, so the
   v1.1 STATUS note's inference ("a cleanliness fix, not evidence the Fable pin
   had actually been failing") is now disproven: the pin was, and is, inert.
-  ==> This task is presently running BELOW the CLAUDE.md security-gate floor.
-  That is a live governance gap, not a tagging cosmetic, and it has no
-  in-registry fix (no settable model field on this fleet) — it needs Gabriel's
-  call. Do NOT "fix" it by deleting the frontmatter pin (it records intent and
-  costs nothing) and do NOT flip anything to Sonnet.
+  ==> RESOLVED 2026-07-24, Gabriel-ratified: **Option C — the floor is carried by
+  the `security-auditor` Agent dispatch, not by this task's own model.** The
+  orchestrator runs at the server-pinned tier (observed opus-4-8); the actual
+  security judgment runs at Fable inside the subagent, which is a real, honored
+  mechanism. Rejected alternatives: (A) accept-and-document alone — leaves the
+  judgment itself below the floor; (B) migrate to LAMS where the frontmatter pin
+  IS enforceable — but LAMS has no local COM/shell, which this sweep's
+  full-git-history scanning depends on, so it trades a model-tier gap for a
+  capability gap. (A) stands only as the INTERIM position until the dispatch is
+  proven live on the 2026-07-29 fire.
+  Because the pin now lives entirely in the dispatch, a silent dispatch failure
+  would breach the floor invisibly — see the DISPATCH INTEGRITY GATE in the
+  PER-REPO REVIEW section, which is mandatory and alarms on failure.
+  Do NOT "fix" this by deleting the frontmatter pin (it records intent and costs
+  nothing) and do NOT flip anything to Sonnet.
   The `security-auditor` dispatch is a SEPARATE mechanism and its pin IS
   honored — the Agent call in the PER-REPO REVIEW section below MUST keep
   passing `model: 'fable'` explicitly, never omitting it and relying on
@@ -137,6 +147,35 @@ Agent({
   prompt: <the template below, with <worktree-path>/<sha>/<repo-name> filled in>
 })
 ```
+
+### DISPATCH INTEGRITY GATE (MANDATORY — added 2026-07-24, Gabriel-ratified Option C)
+
+The Fable pin on this task now lives ENTIRELY in the Agent call above. The orchestrating session
+itself runs on the CC/MCP server-pinned model (observed `claude-opus-4-8`, 2026-07-24 canary) — the
+frontmatter `model: fable` is inert. So if this dispatch silently fails to happen, the security
+judgment quietly drops to the orchestrator's model and the CLAUDE.md never-below-Fable floor is
+breached with no visible signal. That is exactly the failure this gate exists to prevent.
+
+After EACH per-repo Agent call, assert ALL of the following before using its output:
+1. The Agent call actually returned a subagent result. A `null`/empty return (user skip, terminal
+   API error after retries, agent type unresolvable) is a FAILURE, not "no findings."
+2. The findings you report for that repo came FROM the subagent. **You must NEVER substitute your
+   own inline review for a failed dispatch** — inline review is precisely the v1.0 behaviour this
+   design replaced, and it runs below the floor.
+3. `model: "fable"` was passed explicitly on the call (never omitted, never inherited).
+
+If ANY assertion fails for a repo: do NOT silently continue. Mark that repo's section
+`DISPATCH FAILED — FINDINGS NOT PRODUCED AT THE REQUIRED MODEL FLOOR`, omit any inline substitute
+findings, and email ggoldberg@oxfordra.net (subject prefix `⚠️ ORA AppSec Sweep — DISPATCH FAILURE`)
+via the standard Outlook COM path, in addition to the normal reporting. A dispatch failure is a
+first-class alarm even when the sweep finds nothing.
+
+**FIRST LIVE TEST — the 2026-07-29 fire.** This dispatch has never actually executed: the 2026-07-22
+run made zero Agent calls because v1.1 (which introduced the dispatch) was authored during that very
+session, so the fire ran the v1.0 inline spec. On the next run, explicitly confirm a subagent
+transcript was produced (`~/.claude/projects/<project>/<session-id>/subagents/*.jsonl` non-empty) and
+state that confirmation in the completion report. Until that has been observed once, treat the
+Fable-via-dispatch path as UNPROVEN and say so in the report rather than assuming it worked.
 
 `security-auditor`'s own Review Scope (input handling, auth/authz + IDOR, data protection, infra/CORS/headers,
 third-party/webhook-signature integrations, AI/LLM features) already covers checks (d) and most of (e) — do not
