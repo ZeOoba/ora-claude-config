@@ -1,15 +1,33 @@
 #!/usr/bin/env python3
-"""Native git pre-push gate for ~/.claude — scans the FULL HISTORY being pushed.
+"""Native git pre-push gate for ~/.claude — scans every commit genuinely NEW to the
+remote, across the full diff of each (not just the tree at HEAD).
 
 Lesson 2026-06-11 (incident, same-day remediation): the first push of this repo
 carried pre-scrub commits with confidential deal terms in their diffs. A clean HEAD
 does not mean a clean push. This hook runs `git log -p` over every ref range being
 pushed and BLOCKS if any active always-term from hooks/confidential-terms.json
-appears anywhere in that history. Terms are never echoed — only deal-relative
+appears anywhere in that range. Terms are never echoed — only deal-relative
 indices are reported.
 
+Range computation (fixed 2026-07-25 — see rev_range()/_resolve_default_baseline()):
+an EXISTING remote ref scans remote_sha..local_sha (the delta), same as always. A
+BRAND-NEW remote ref (the normal case for a new branch's first push) scans
+origin/<default-branch>..local_sha — commits not yet reachable from the repo's
+default/trunk branch — NOT the unbounded `git log -p local_sha` this gate used
+before that date, which dumped the ENTIRE history reachable from local_sha and
+re-flagged commits already public on origin/main on every single first push of any
+new branch (confirmed repro: a6f0689, an origin/main ancestor, re-flagged forever on
+a documented placeholder API-key value in server/secrets.env.example -- not spelled
+out here verbatim, since this gate scans its own source too). An
+orphan branch (no merge-base with the default branch) is scanned in FULL by this same
+range, because none of its history is reachable from a baseline it shares no ancestry
+with — intentional, not a gap, since none of that history was ever public.
+
 FAIL-CLOSED: terms file unreadable -> block; git log fails (e.g. unknown remote
-sha — run `git fetch` first) -> block. No active terms (all deals closed) -> allow.
+sha — run `git fetch` first) -> block; a brand-new ref whose default-branch baseline
+can't be resolved (no origin remote, nothing fetched) -> block, not a silent
+full-history rescan and not a silent skip. No active terms (all deals closed) plus
+no credential hits -> allow.
 
 Linked worktrees: hooks/confidential-terms.json is gitignored, so `git worktree
 add` never checks it out into a fresh linked worktree. load_terms() falls back to
@@ -141,11 +159,94 @@ def parse_pushrefs(text):
     return refs
 
 
-def rev_range(local_sha, remote_sha):
-    """Full local history for a new remote ref; otherwise just the delta."""
-    if set(remote_sha) == {ZERO_RE}:
-        return local_sha
-    return "%s..%s" % (remote_sha, local_sha)
+_DEFAULT_BRANCH_CANDIDATES = ("refs/remotes/origin/main", "refs/remotes/origin/master")
+
+
+def _resolve_default_baseline(start_dir="."):
+    """Best-effort commit-ish for the remote's default/trunk branch (e.g.
+    'refs/remotes/origin/main'), used to bound the history scan on a brand-new remote
+    ref. Prefers the tracked refs/remotes/origin/HEAD symref (set by a real `git
+    clone` or `git remote set-head`); falls back to the common trunk names since a
+    plain `git fetch` alone does not set that symref. Returns None if nothing
+    resolves -- no `origin` remote, nothing fetched yet, or not a git repo at all --
+    so the caller can fail closed instead of silently rescanning full history or
+    silently skipping the scan.
+
+    start_dir defaults to "." (the process's own cwd) DELIBERATELY, not HOOK_DIR --
+    it must resolve against the SAME repo the `git log -p` scan itself operates on
+    (which also relies on inherited cwd, not `-C`). git invokes pre-push hooks with
+    cwd already at the top of the repo being pushed, so in real installs this and
+    HOOK_DIR's parent are the same directory anyway -- but conflating the two is a
+    live bug the moment they diverge (caught in review: it silently baselined
+    against the wrong repo and produced a tautologically-passing test).
+
+    ALWAYS fully-qualified (refs/remotes/origin/... , never the short 'origin/main').
+    A short name is subject to git's ref-disambiguation order, which checks
+    refs/heads/ before refs/remotes/ -- a LOCAL branch literally named 'origin/main'
+    would silently shadow the real remote-tracking ref and could exclude genuinely
+    new, unpushed commits from the scan (a demonstrated false negative caught in
+    review). Fully-qualified refs cannot be shadowed."""
+    candidates = []
+    try:
+        p = subprocess.run(
+            ["git", "-C", start_dir, "symbolic-ref", "-q", "refs/remotes/origin/HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except Exception:
+        p = None
+    if p is not None and p.returncode == 0 and p.stdout.strip():
+        symref_target = p.stdout.strip()
+        # `git remote set-head` always yields a refs/remotes/... target, but the
+        # lower-level `git symbolic-ref refs/remotes/origin/HEAD <anything>` doesn't
+        # enforce that -- it would happily point this at a refs/heads/... branch,
+        # which reopens exactly the shadowing class the fully-qualified-refs fix
+        # above closes (caught in review). Only trust it if it's actually still
+        # under refs/remotes/; otherwise fall through to the default candidates.
+        if symref_target.startswith("refs/remotes/"):
+            candidates.append(symref_target)
+    for c in _DEFAULT_BRANCH_CANDIDATES:
+        if c not in candidates:
+            candidates.append(c)
+    for ref in candidates:
+        try:
+            v = subprocess.run(
+                ["git", "-C", start_dir, "rev-parse", "-q", "--verify", ref + "^{commit}"],
+                capture_output=True, text=True, timeout=5,
+            )
+        except Exception:
+            continue
+        if v.returncode == 0 and v.stdout.strip():
+            return ref
+    return None
+
+
+def rev_range(local_sha, remote_sha, baseline):
+    """Range of commits to scan for one pushed ref.
+
+    - Existing remote ref (remote_sha not all-zero): unchanged -- the delta,
+      remote_sha..local_sha.
+    - Brand-new remote ref (remote_sha all-zero, the normal case for a new branch's
+      first push): bounded to baseline..local_sha, i.e. only commits NOT already
+      reachable from the repo's default/trunk branch (baseline, e.g. origin/main).
+      This is the 2026-07-25 fix: the old behavior returned local_sha alone (no range
+      at all), which makes `git log -p` dump the ENTIRE history reachable from
+      local_sha -- re-scanning commits already public on origin/main on every first
+      push of any new branch.
+    - Orphan branch (no merge-base with baseline at all): baseline..local_sha then
+      naturally covers the branch's FULL history, because none of it is excluded by
+      a baseline it shares no ancestry with. This is intentional, not a gap: an
+      orphan branch's history was never reachable from the trunk, so none of it is
+      "already public" and all of it must be scanned.
+    - baseline is None (can't resolve the repo's default branch -- no origin remote,
+      nothing fetched, not a repo): returns None to signal the caller must fail
+      closed rather than silently falling back to a full-history rescan or silently
+      skipping the scan.
+    """
+    if set(remote_sha) != {ZERO_RE}:
+        return "%s..%s" % (remote_sha, local_sha)
+    if baseline is None:
+        return None
+    return "%s..%s" % (baseline, local_sha)
 
 
 def scan_text(text, terms):
@@ -171,11 +272,28 @@ def main():
     # to short-circuit the whole hook whenever no deal was active -- which is the state
     # TODAY -- so a credential scan placed after it would have been dead on arrival. The
     # two scans are independent: an empty terms list disables the TERMS check only.
+    # No start_dir arg -- resolves against THIS PROCESS's cwd, same as the `git log -p`
+    # scan below (which also has no explicit -C/cwd). git invokes pre-push hooks with
+    # cwd at the top of the repo being pushed, so this is the repo actually being
+    # scanned -- deliberately NOT HOOK_DIR, which is fixed to wherever this script
+    # file happens to live and would silently diverge from the repo being pushed.
+    # Always resolved against the "origin" remote -- matches every other assumption
+    # in this file (confidential-terms.json fallback, install docs) that ~/.claude
+    # has exactly one remote; a push to a second remote would still be scanned, just
+    # bounded against origin/main rather than that remote's own trunk.
+    baseline = _resolve_default_baseline()
     bad = False
     for local_ref, local_sha, remote_ref, remote_sha in parse_pushrefs(sys.stdin.read()):
         if set(local_sha) == {ZERO_RE}:
             continue  # ref deletion — nothing new is pushed
-        rng = rev_range(local_sha, remote_sha)
+        rng = rev_range(local_sha, remote_sha, baseline)
+        if rng is None:
+            sys.stderr.write("pre-push BLOCKED (fail-closed): %s is a brand-new remote "
+                             "ref and the repo's default branch (origin/main) could not "
+                             "be resolved to bound the history scan -- run `git fetch` "
+                             "first.\n" % local_ref)
+            bad = True
+            continue
         p = subprocess.run(["git", "log", "-p", "--no-color", rng],
                            capture_output=True)
         if p.returncode != 0:
