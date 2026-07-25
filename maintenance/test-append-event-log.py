@@ -14,6 +14,18 @@ import os
 import sys
 import tempfile
 
+# This test spins up its own throwaway git repos in temp dirs (_make_temp_git_repo
+# below). When invoked as part of the real pre-push hook chain, git sets
+# GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE (etc.) in this process's environment so IT can
+# operate on the outer repo -- but those same vars leak into every subprocess git call
+# below and silently redirect them at the outer repo instead of the temp one (proven:
+# the outer repo's own core.bare briefly flips to true, and later git operations there
+# fail with "must be run in a work tree" -- see hooks/tests/test-eos-review-gate.py's
+# identical comment, where this was first diagnosed 2026-07-25). Same fix, same list.
+for _v in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+           "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_PREFIX"):
+    os.environ.pop(_v, None)
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 spec = importlib.util.spec_from_file_location(
     "ael", os.path.join(HERE, "append-event-log.py"))
