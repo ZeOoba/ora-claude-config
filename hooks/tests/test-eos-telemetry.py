@@ -125,6 +125,51 @@ def test_happy_path():
     print("PASS test_happy_path")
 
 
+def test_record_carries_schema_and_detectors():
+    """Every emitted record must self-describe its detection capability.
+
+    `ts` presence is only a PROXY for "this emitter could see subagent
+    dispatch". A regressed DISPATCH_TOOLS that still stamped `ts` would be
+    silently trusted by the rollup and report a wrongly-low dispatch rate --
+    the exact failure the 2026-07-24 fix was written to stop. The schema
+    version plus a detectors block derived from the LIVE constant make that
+    regression self-reporting instead of invisible."""
+    tmp = tempfile.mkdtemp(prefix="eos-test-")
+    transcript = os.path.join(tmp, "transcript.jsonl")
+    tele_dir = os.path.join(tmp, "telemetry")
+    make_transcript(transcript)
+
+    stdin = json.dumps({"session_id": "schema-test", "transcript_path": transcript})
+    rc, out, err = run_hook(stdin, tele_dir)
+    assert rc == 0, "expected exit 0, got %s (stderr=%s)" % (rc, err)
+
+    out_file = os.path.join(tele_dir, "lane-telemetry.jsonl")
+    with open(out_file, "r", encoding="ascii") as fh:
+        rec = json.loads(fh.read().splitlines()[-1])
+
+    assert rec.get("schema") == 2, "expected schema version 2, got %r" % rec.get("schema")
+    detectors = rec.get("detectors")
+    assert isinstance(detectors, dict), "expected a detectors dict, got %r" % detectors
+    dispatch = detectors.get("dispatch")
+    assert isinstance(dispatch, list), "expected detectors.dispatch list, got %r" % dispatch
+    assert "Agent" in dispatch, (
+        "detectors.dispatch must advertise the real subagent tool name: %r" % dispatch
+    )
+    print("PASS test_record_carries_schema_and_detectors")
+
+
+def test_detectors_are_derived_from_live_constant():
+    """The detectors block must be DERIVED from DISPATCH_TOOLS, not a
+    hand-maintained literal. A literal would keep advertising "Agent" after
+    the constant regressed, defeating the whole mechanism."""
+    with open(HOOK, "r", encoding="ascii") as fh:
+        src = fh.read()
+    assert "sorted(DISPATCH_TOOLS)" in src, (
+        "detectors.dispatch must be computed from DISPATCH_TOOLS, not hardcoded"
+    )
+    print("PASS test_detectors_are_derived_from_live_constant")
+
+
 def test_malformed_stdin_fails_open():
     tmp = tempfile.mkdtemp(prefix="eos-test-")
     tele_dir = os.path.join(tmp, "telemetry")
@@ -315,6 +360,8 @@ def test_no_override_file():
 
 if __name__ == "__main__":
     test_happy_path()
+    test_record_carries_schema_and_detectors()
+    test_detectors_are_derived_from_live_constant()
     test_malformed_stdin_fails_open()
     test_empty_object_fails_open()
     test_missing_transcript_fails_open()
