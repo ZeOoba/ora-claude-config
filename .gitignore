@@ -46,6 +46,9 @@
 # live runtime state rewritten every few minutes by write-fleet.ps1 -- tracking it
 # would recreate the doctrine-status.json perpetual-dirty-tree noise; scripts only.
 obsidian-fleet-mirror/session-state.json
+# 2026-07-25: fleet-session-hook.py migrated session-state.json (one shared file) to
+# one file per session under this directory -- same live-runtime-noise reasoning.
+obsidian-fleet-mirror/session-state.d/
 !/_scheduled_tasks_backup/
 
 # 2b) Scheduled-task SPECS (SKILL.md only) — versioned 2026-07-12 for durability.
