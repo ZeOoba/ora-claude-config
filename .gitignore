@@ -72,6 +72,11 @@ obsidian-fleet-mirror/session-state.json
 # other contexts and are meant to stay untracked). Name each durable file individually.
 !/scheduled-tasks/ora-appsec-sweep/suppressions.md
 !/scheduled-tasks/ora-pm-ledger/tenant_db_snapshot_diff.py
+# (2026-07-24) Same loss class, same per-file rule: ora-pm-ledger's Block B sweep-window
+# planner. Durable engine, not scratch — Block B's coverage tracking is unusable without
+# it. Its `state/` sibling stays untracked on purpose: that is per-run data that churns
+# daily, and losing it degrades safely to the old today-only window rather than breaking.
+!/scheduled-tasks/ora-pm-ledger/outbox_qc_window.py
 
 # (2026-07-17, Gabriel-authorized) 2b covered live task SKILL.mds but not retired ones: a
 # _archive_*_retired/<id>/SKILL.md sits one level deeper than */SKILL.md matches, so EVERY

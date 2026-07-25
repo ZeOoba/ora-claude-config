@@ -321,11 +321,38 @@ Use all of the following signals and merge, deduping by page ID:
    `RESULT_JSON={...}` with `added/removed/changed` (changed carries field-level
    `old -> new`); parse that and fold it into Section B instead of the frozen
    query. First-ever run reports a BASELINE (296 rows, no diff) — that is normal,
-   not a failure; real diffs start the next run. Verified end-to-end 2026-07-20:
-   baseline of 296 rows, then a second same-day pull correctly reported 0/0/0
-   changed / 296 unchanged (no false positives from volatile fields); a no-network
-   `--selftest` covers the diff engine (added/removed/changed + field-level +
-   first-run-baseline). Only if the SCRIPT itself errors (token unreadable, REST
+   not a failure; real diffs start the next run.
+
+   **⚠ CORRECTED 2026-07-24 — the original "Verified end-to-end 2026-07-20" claim here was
+   WRONG; it is quoted below only as a record of what failed.** That verification was a
+   **same-day second pull** (baseline of 296 rows, then a second pull the same day
+   reporting 0/0/0), so it never crossed a date boundary. On the first genuine cross-day
+   run (2026-07-24) the detector reported **267 of 298 rows changed when only 5 had really
+   been edited** — it was fingerprinting five *date-derived formula fields*
+   (`Days to Expiration`, `Months Remaining`, `WALT Contribution (Years)`,
+   `Tenant Tenure (Months)`, `Months to Expiry`) that recompute from the calendar on every
+   read.
+
+   **FIXED 2026-07-24.** Those five are excluded by name via `TIME_DERIVED_FIELDS`
+   (by name, not by type — a formula over static inputs is still a real change signal);
+   the diff now compares *filtered* fields on both sides instead of the stored hash, so
+   snapshots written before the fix still compare cleanly; and a **bulk-field guard** adds
+   a `warnings[]` entry whenever a non-excluded field moves on >50% of rows — that guard
+   caught `Months to Expiry` on its own first run. Re-verified against the real archived
+   snapshots: 07-22→07-24 now **5 changed / 293 unchanged** (was 267), 07-21→07-22 now
+   **20** (was 298), 07-20→07-21 **164** — all substantive, no spurious warnings.
+
+   **`RESULT_JSON` now also carries `warnings`. Surface it in Section B whenever it is
+   non-empty** — a bulk-field warning means a new derived or bulk-written column has
+   appeared and that run's changed-count is not trustworthy until the field is triaged.
+
+   The no-network `--selftest` covers added/removed/changed + field-level + first-run
+   baseline, **plus cross-day (date-derived-only movement ⇒ 0 changed; a real edit
+   alongside it still detected), pre-fix→post-fix migration, and the bulk-field guard** —
+   13 assertions, all passing. Any future change to this script MUST keep the cross-day
+   cases: a same-day rerun is not a valid test for a date-sensitive diff.
+
+   Only if the SCRIPT itself errors (token unreadable, REST
    down) does Tenant DB revert to a COVERAGE GAP — a clean 0-diff is now a REAL
    "no edits today", no longer a false negative.
 
@@ -561,12 +588,60 @@ workflow (typically pane-direct sends from the Claude for Outlook add-in).
 Generate a defect report for next-day review so Gabriel can correct patterns
 and, where material, send corrective follow-ups himself.
 
-### B.2 SENT ITEMS SWEEP
+### B.2 SENT ITEMS SWEEP — RETRO-SWEEP MODE (rebuilt 2026-07-24)
 
-Use the Outlook MCP to retrieve all messages in Gabriel's Sent Items folder
-with `sentDateTime` today, window 00:00 through this run's fire time (nominal
-18:00 ET — messages sent after the sweep runs land in next day's window;
-acceptable defect-detection latency). Exclude:
+**The old single-window design ("today 00:00 → run time") is RETIRED. It left two
+permanent holes, and its own stated rationale was factually wrong:**
+
+1. **Missed days.** If the task doesn't fire (machine offline overnight), that day's
+   outbound mail was never audited and nothing retried it. Confirmed twice in one week:
+   **2026-07-17 and 2026-07-23** have no Outbox QC page or send-log entry.
+2. **Evening tails.** The old text claimed mail sent after the ~18:00 fire "land[s] in
+   next day's window." **It does not.** The next day's window is
+   `[D+1 00:00 → D+1 18:00]`, and a message sent 18:30 on day D carries `sentDateTime`
+   on day D — so it fell in NO window, ever. Every single day silently lost its
+   ~18:00→24:00 tail. Measured at rebuild time: 07-20/21/22/24 tails plus the whole of
+   07-23 = **~46.6 hours of unaudited outbound mail in five days.**
+
+Both are the same bug: coverage was modelled as *"did we run today?"* instead of
+*"which spans of time have actually been swept?"* Block B now tracks **covered
+intervals** and sweeps whatever is uncovered, which closes both holes with one
+mechanism.
+
+**Step 1 — plan the windows.** Run:
+```
+C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \
+  C:/Users/Owner/.claude/scheduled-tasks/ora-pm-ledger/outbox_qc_window.py --plan
+```
+The last stdout line is `RESULT_JSON={...}` with `days_to_sweep[]` (each carrying
+`date`, `is_today`, `weekend`, `gaps[[from,to]]`, `uncovered_minutes`),
+`retro_days[]`, and `dropped_beyond_lookback[]`. State lives in
+`state/outbox-qc-coverage.json`; lookback is 7 days.
+
+**Step 2 — sweep each gap.** For every entry in `days_to_sweep`, query Sent Items with
+`sentDateTime` inside that entry's gap interval(s) — NOT "today". A retro day's gap is
+usually the full 24h (missed day) or the evening tail (~18:00→24:00). Run the same
+Checks A–I against each gap's messages.
+
+**Step 3 — commit coverage, FAIL-CLOSED.** After a gap's report has *actually* been
+delivered (its Notion page posted, and for today, the email sent), record it:
+```
+outbox_qc_window.py --commit --date <YYYY-MM-DD> --from <iso> --to <iso>
+```
+**Never commit a gap whose page or send failed** — leave it uncovered so the next run
+retries it. Committing on plan rather than on success would silently swallow a day whose
+report never reached Gabriel, which is the exact failure class this rebuild exists to
+kill.
+
+**`dropped_beyond_lookback` must be surfaced in the report whenever non-empty** — those
+are days still uncovered but older than the 7-day reach. They are reported, never
+silently lost (no silent caps).
+
+**Weekend days:** Block B itself is Mon–Fri, so Saturday/Sunday mail is never swept
+same-day. The Monday run picks Sat/Sun up as retro gaps (flagged `weekend: true`) —
+this is intended, and is how Friday-evening-onward mail finally gets audited.
+
+Within each gap, exclude:
 - Internal Eric/Gabriel/ORA-only threads
 - Out-of-office auto-replies
 - Calendar acceptances/declines
@@ -655,7 +730,10 @@ otherwise):**
 
 ```
 ORA OUTBOX QC SWEEP — [YYYY-MM-DD]
-Window: 00:00 -> [run time] ET
+Window: [gap start] -> [gap end] ET   (per B.2; today's gap normally 00:00 -> run time.
+                                       A retro gap states its own interval, e.g.
+                                       "2026-07-23 00:00 -> 23:59 (missed run)" or
+                                       "2026-07-22 18:25 -> 23:59 (evening tail)".)
 Messages sent: [n total]
 External counterparty messages: [n filtered]
 
@@ -686,6 +764,26 @@ PATTERN OBSERVATIONS (week-rolling):
 - If zero defects: send a single-line confirmation — "Outbox QC clean — [n]
   messages, no defects."
 
+**Retro gaps (added 2026-07-24) — one email, pages only where there is something to
+report:**
+- **Do NOT send a separate email per retro day.** Fold them into today's single email as
+  a **"Retro coverage"** section, one line per gap: date · window · messages found ·
+  defects · page link (or "no messages"). Reserve the subject line for today's counts,
+  appending `· +N retro day(s)` when any retro gap was swept.
+- **Only create a Notion page for a retro gap that actually contains messages.** Most
+  evening tails are empty; minting near-blank pages for them buries the real ones. An
+  empty gap is still **committed** as covered and still reported in the Retro coverage
+  line as "0 messages" — coverage is closed either way.
+- A retro page is titled `Outbox QC — YYYY-MM-DD` (same format, so the §0.5 de-dupe guard
+  and future planner runs both see it) with a first line stating it was a **RETRO sweep**,
+  the exact gap interval, and why it was owed (missed run vs. evening tail). If a page for
+  that date already exists (a partial same-day sweep), title the new one
+  `Outbox QC — YYYY-MM-DD (retro: HH:MM–HH:MM)` rather than overwriting it — the earlier
+  page is the audit record of what was checked at the time.
+- Retro findings are **reported, never acted on**: a defect found in mail sent days ago is
+  a pattern note, not a prompt for a corrective send. B.6's read-only constraint applies
+  unchanged.
+
 ### B.6 CONSTRAINTS
 - Read-only audit. Never modify, recall, resend, or alter sent emails.
 - LP-flagged HIGH-severity messages additionally trigger a
@@ -700,10 +798,22 @@ PATTERN OBSERVATIONS (week-rolling):
 - Notion MCP error: still deliver the email report; flag the Notion failure.
 - Zero outbound messages today (e.g., Gabriel out of office): no-op with a
   single-line log entry, still post/send the zero-defect confirmation.
+- **Coverage commit is fail-closed (see B.2 step 3).** On ANY failure affecting a gap —
+  Outlook query error, Notion post failure, send failure — do NOT `--commit` that gap.
+  An uncommitted gap is simply re-planned next run, so a bad run costs a retry, never a
+  silent hole. Never batch-commit all gaps up front "and then report": commit each gap
+  only after its own delivery succeeded.
+- If `outbox_qc_window.py --plan` itself errors (state file corrupt or unreadable), fall
+  back to the legacy single-day window (`today 00:00 → now`), record a COVERAGE GAP by
+  name in Block C, and commit NOTHING — the planner must be repaired before coverage
+  tracking can be trusted again.
 
 ### B.8 DEPENDENCIES
 - Outlook M365 connector · Notion MCP (LP Database for Check E; Ops Hub for
   posting) · ORA Voice Register v1.0+ (canonical Strike list).
+- `outbox_qc_window.py` + `state/outbox-qc-coverage.json` (sweep-window planner,
+  retro-sweep mode — B.2). No network; pure local state. `--selftest` covers the
+  interval algebra with 20 assertions.
 
 ---
 
@@ -1062,3 +1172,39 @@ Three coverage gaps flagged this date, all fixed in §A.1/§A.2/§A.4 above:
 
 No block logic, routing, or send-path changed — this was a coverage-quality
 and documentation fix to Block A only.
+
+## AMENDMENT NOTE (2026-07-24 — Block B retro-sweep mode)
+
+**Block B's sweep window was rebuilt from "did we run today?" to interval coverage.**
+Two permanent holes were closed, one of which the spec had explicitly (and wrongly)
+denied:
+
+1. **Missed days.** A day the task didn't fire was never audited and nothing retried it.
+   Two occurrences confirmed in one week from the send-log: **2026-07-17** and
+   **2026-07-23** have no Outbox QC send or Ops Hub page.
+2. **Evening tails.** The old B.2 asserted that mail sent after the ~18:00 fire "land[s]
+   in next day's window." It does not — the next day's window is
+   `[D+1 00:00 → D+1 18:00]`, so a message sent at 18:30 on day D fell in no window ever.
+   **Every day silently lost its ~18:00→24:00 tail.** Measured at rebuild time across
+   07-20/21/22/24 tails plus all of 07-23: **~46.6 hours of unaudited outbound mail in
+   five days.**
+
+**What shipped:** `outbox_qc_window.py` (`--plan` / `--commit` / `--selftest`) tracking
+covered intervals in `state/outbox-qc-coverage.json`; 7-day lookback; `--commit` is a
+separate fail-closed step so a gap whose report failed to deliver stays open and retries;
+`dropped_beyond_lookback` is reported rather than silently truncated; weekend gaps are
+surfaced (flagged) so the Monday run finally audits Friday-evening-onward mail. B.2, B.4,
+B.5, B.7, B.8 updated accordingly; retro results fold into ONE email and only mint a
+Notion page when the gap actually contains messages.
+
+State was seeded from the real send-log times (07-20 18:20:59, 07-21 18:21:45,
+07-22 18:25:37, 07-24 18:15:00; `tracking_since` 2026-07-20), so the next run's plan
+correctly shows 07-23 as a full missed day plus four evening tails.
+
+`--selftest` is 20 assertions covering the interval algebra, the missed-day and
+evening-tail cases, today-capped-at-now, idempotent re-commit, the lookback clamp with
+explicit dropped reporting, the `tracking_since` floor, out-of-order/overlapping commit
+merges, weekend flagging, and sub-minute sliver suppression. All passing.
+
+**Not changed:** Block B remains read-only and Mon–Fri; routing and send-path unchanged;
+retro findings are pattern notes only and never trigger a corrective send.
