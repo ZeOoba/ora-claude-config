@@ -95,6 +95,46 @@ expect("classify: rc != 0 WITH 'CANNOT RUN:' sentinel -> env-skip",
 expect("classify: a timeout (no sentinel) is a real failure, not env-skip",
        gt.classify(124, "TIMEOUT after 90s\n") == "fail")
 
+# --- run_test_file(): must not leak git hook env vars into the test subprocess --------
+# Simulates git's own pre-push hook environment: git sets GIT_DIR/GIT_WORK_TREE (and
+# friends) in the hook process's env so IT can operate on the outer repo. Bug: this
+# gate's run_test_file() spawned each test file via subprocess.run() with no env=
+# override, so every discovered test inherited these vars too -- silently redirecting
+# any `git -C <tempdir>` call a test makes back onto the outer repo instead of its own
+# temp fixture (same bug class fixed per-test-file in commit 337a7af; never fixed here).
+leak_probe_root = tempfile.mkdtemp(prefix="gt-leak-probe-")
+leak_probe = write_dummy_test(
+    leak_probe_root, "test-leak-probe.py",
+    "import os, sys\n"
+    "leaked = [v for v in ('GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR',\n"
+    "                       'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES',\n"
+    "                       'GIT_PREFIX') if v in os.environ]\n"
+    "if leaked:\n"
+    "    print('LEAKED: %r' % leaked)\n"
+    "    sys.exit(1)\n"
+    "print('clean')\n"
+    "sys.exit(0)\n")
+
+_leak_env_vars = {
+    "GIT_DIR": r"C:\fake\.git", "GIT_WORK_TREE": r"C:\fake",
+    "GIT_INDEX_FILE": r"C:\fake\.git\index", "GIT_COMMON_DIR": r"C:\fake\.git",
+    "GIT_OBJECT_DIRECTORY": r"C:\fake\.git\objects",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES": r"C:\fake\.git\alt", "GIT_PREFIX": "",
+}
+_saved_env = {k: os.environ.get(k) for k in _leak_env_vars}
+os.environ.update(_leak_env_vars)
+try:
+    rc_leak, out_leak = gt.run_test_file(leak_probe)
+finally:
+    for k, v in _saved_env.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+
+expect("run_test_file: parent's GIT_DIR/GIT_WORK_TREE/etc. do not leak into the "
+       "test subprocess", rc_leak == 0, "got rc=%r out=%r" % (rc_leak, out_leak))
+
 # --- run_suite() ---------------------------------------------------------------------
 suite = gt.run_suite(fixture_root)
 by_file = {r["file"]: r["status"] for r in suite}
