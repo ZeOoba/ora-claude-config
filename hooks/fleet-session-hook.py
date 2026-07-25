@@ -11,33 +11,86 @@ Each invocation:
 Extended 2026-06-11: per-session notes + task tracking.
 Always exits 0 — never blocks a tool call.
 
-STATE-FILE RACE (fixed 2026-07-24). Every invocation does a full read-modify-write of
-the SHARED session-state.json: load, mutate only THIS session's own entry, write the
-WHOLE file back. Atomic rename (temp file + os.replace) protects against a torn/partial
-write, but not against two concurrent readers each working from a stale snapshot --
-many Claude Code sessions across different worktrees all fire this same hook, and two
-racing invocations could each load before the other's save, then the second save
-silently overwrites the first session's fresh update with a stale snapshot that never
-had it. Live-verified before the fix: 10 of 12 real concurrent hook subprocesses,
-each creating a distinct session, lost their own session on save. Closed with
-state_lock() -- a short-timeout, stdlib-only mutex around the load-modify-save cycle.
-render() and the post-block write_session_note() call sit OUTSIDE it: they only touch
-the LOCAL `state` already in hand and are fully derived/self-correcting on the next
-event, so a race there is transient staleness, not a permanent lost update. The ONE
-write_session_note() call that DOES run inside the lock (SessionEnd's own note, right
-before that session is popped from state) is a necessary exception -- it needs the
-about-to-be-discarded entry, not a race concern -- and only adds a millisecond-scale
-file write to the hold time (2026-07-24 formal review, flagged as a doc-accuracy gap
-in an earlier draft of this comment, not a behavioral one; verified: DELIBERATELY on
-POSIX the stale-lock-clear below can dual-hold under a specific interleave, defused
-here only because Windows CRT `os.remove()` of an fd another process still holds
-raises PermissionError (probed live) -- this file is Windows-only by design (see the
-hardcoded Windows-path defaults below), so that is a real platform dependency, not a
-latent bug.
-"""
-import sys, os, json, datetime, time, contextlib
+PER-SESSION-FILE STORAGE (2026-07-24, replaces a shared-file + lock design). Every
+invocation used to do a full read-modify-write of ONE shared session-state.json:
+load, mutate only THIS session's own entry, write the WHOLE file back. Even with an
+atomic rename, that meant every session's hook invocation raced every OTHER session's
+invocation over the SAME file -- fixed for one release with a short-timeout mutex
+(state_lock()), but a lock is a workaround for a shared-file design, not the actual
+fix. The actual fix: each session gets its OWN file
+(SESSIONS_STATE_DIR/<sanitized-sid>.json). A hook invocation only ever reads and
+writes ITS OWN session's STATE file -- there is no shared STATE file left to race
+over CROSS session, which was the actual, measured, production bug (10 of 12
+concurrent sessions lost data under the old design; this fix's own test drives 20
+concurrent distinct sessions and loses none). render() (the aggregated dashboard)
+becomes a READ-ONLY aggregation across all current session files at render time,
+computed fresh on every invocation; a partially-written file is never visible thanks
+to the same atomic-rename pattern already used elsewhere in this file. Scoped claim,
+not absolute: render()'s own OUT file and write_session_note()'s per-session NOTE
+file still go through a fixed (not per-invocation-unique) ".tmp" path each -- unlike
+the state files above, these are cosmetic OUTPUT artifacts (the dashboard / a
+per-session note), not this hook's source of truth, so a torn or dropped write there
+self-heals on the very next invocation and was equally possible under the old
+locked design (render() ran outside state_lock() there too) -- not a regression, and
+deliberately not hardened further here.
 
-STATE        = os.environ.get("ORA_FLEET_STATE") or r"C:\Users\Owner\.claude\obsidian-fleet-mirror\session-state.json"
+KNOWN, ACCEPTED RESIDUAL (formal review, 2026-07-24) -- "there is nothing left to
+lock" is true CROSS-session but NOT same-session: two hook invocations for the SAME
+session_id (realistic here -- parallel subagent tool completions and a background
+Bash task's own events can fire while the parent session's foreground events also
+fire, all under one session_id) still do a load-modify-save on that ONE session's
+OWN file, and CAN race each other. Live-verified: 11 of 12 concurrent same-session
+TaskCreate events lost their own task entry. Deliberately NOT fixed with a
+per-session lock (that would partially reopen exactly what this redesign exists to
+close, and the blast radius here is strictly smaller and different in kind than the
+bug this redesign fixes): consequence is bounded to lost/stale task, activity, or
+feed entries in a COSMETIC observability mirror -- `status`/`lastAt`/`cwd` (the
+fields hooks/lib/session_liveness.py's two consumers actually depend on) always
+reflect at least ONE recent write and self-correct on the very next event; nothing
+here is durable data, and neither downstream guard reads task-level detail. Two
+concrete correctness risks this DOES carry, beyond the accepted stale-overwrite race,
+are closed below (see save_session()): two same-session writers racing on the SAME
+"path + '.tmp'" name (which could corrupt a write rather than merely lose one) is
+closed via a per-invocation-unique tmp name; and two same-session writers' os.replace()
+calls landing on the SAME destination path at nearly the same moment -- empirically
+observed as a transient WinError under 12-way same-session concurrency, which without
+mitigation silently drops that writer's update AND leaves its tmp file behind as
+litter -- is closed via a short bounded retry, with the tmp file removed on the rare
+case every retry is exhausted.
+
+SessionEnd does NOT delete its own file (an earlier version of this fix did, which
+had two problems found in the same review: it destroyed that session's
+recent-activity feed contribution INSTANTLY on every ordinary clean exit rather than
+after the same SESSION_PRUNE_H window every other session gets, and closing the file
+immediately is also just unnecessary -- the file's "ended" status is already exactly
+what a reader needs). Instead it marks status="ended" and lets the SAME
+SESSION_PRUNE_H-based cleanup that already runs (as a side effect of render()'s
+directory scan) delete it later, same as any other session. Both render()'s own
+"Active sessions" table AND hooks/lib/session_liveness.py's reader explicitly
+exclude status="ended" sessions -- an ended session's file persisting a while longer
+for feed/history purposes must never make it look ACTIVE to the two guards that
+depend on file-presence meaning "still open". KNOWN EXCEPTION (same review pass):
+a same-session straggler write landing AFTER SessionEnd's -- the accepted
+stale-overwrite race two paragraphs up -- can flip status back away from "ended",
+making that already-finished session look open again to both consumers until the
+next SESSION_PRUNE_H sweep notices its stale lastAt. Same bounded-blast-radius
+reasoning as the rest of this residual: commit-provenance-guard.py's hard block has
+its own override escape hatch, shared-checkout-guard.py is warn-only, and this
+exact resurrection was equally possible under the old locked design (a serialized
+straggler event's own load-modify-save would resurrect a just-deleted entry there
+too) -- not a regression introduced by this redesign.
+
+Two OTHER hooks (commit-provenance-guard.py, shared-checkout-guard.py) read this
+mirror's output via hooks/lib/session_liveness.py's other_active_sessions() -- that
+module's PUBLIC function signature and return shape are UNCHANGED by this migration;
+only its internal storage format preference changed (prefers this new per-session
+directory when present, falls back to the old single-file format otherwise), so
+neither guard nor their existing tests needed any changes.
+"""
+import sys, os, json, datetime, time
+
+SESSIONS_STATE_DIR = os.environ.get("ORA_FLEET_SESSIONS_DIR") or \
+    r"C:\Users\Owner\.claude\obsidian-fleet-mirror\session-state.d"
 OUT          = os.environ.get("ORA_OBSIDIAN_OUT") or r"C:\Users\Owner\Obsidian\BrainVault\_Claude\Claude Session Tasks.md"
 SESSIONS_DIR = os.environ.get("ORA_OBSIDIAN_SESSIONS") or r"C:\Users\Owner\Obsidian\BrainVault\_Claude\Sessions"
 
@@ -46,71 +99,8 @@ SESSION_PRUNE_H = 6
 WORKING_MIN     = 5
 RECENT_MIN      = 15
 ACTIVITY_CAP    = 50
-
-LOCK_PATH       = STATE + ".lock"
-LOCK_TIMEOUT_S  = 8.0    # measured (2026-07-24, concurrent stress tests, see below):
-                          # a single hook invocation's OWN Python-interpreter-startup
-                          # overhead alone is ~0.75-1.5s under load on this machine --
-                          # far more than the JSON-mutation critical section itself, so
-                          # a "few ms" estimate for this budget is wrong; it must cover
-                          # realistic total per-call latency under contention, not just
-                          # the critical section's own work. 0/50 lost at 30-way
-                          # concurrency, occasionally 1-2/50 lost at 50-way (confirmed
-                          # via ORA_FLEET_LOCK_DEBUG=1 to be genuine lock-acquisition
-                          # timeouts, not a logic bug -- the fail-open path is working
-                          # exactly as designed). 50 simultaneous SessionStart events
-                          # is beyond this environment's realistic worst case (even a
-                          # bad "catch-up burst" -- see event_log.md -- fires well under
-                          # that many at once); this is a best-effort mirror, not a
-                          # security gate, so an occasional single-session miss under
-                          # genuinely extreme concurrency is an accepted residual, not
-                          # something worth trading further for a longer worst-case
-                          # per-tool-call stall.
-LOCK_POLL_S     = 0.05
-LOCK_STALE_S    = 10.0   # a legitimate hold is milliseconds; older = an abandoned lock
-                          # from a killed process, safe to clear rather than jam every
-                          # future call for LOCK_TIMEOUT_S forever
-
-
-@contextlib.contextmanager
-def state_lock():
-    """Best-effort mutex around the state-file read-modify-write cycle (exclusive-create
-    lock file, portable, stdlib-only). NEVER blocks longer than LOCK_TIMEOUT_S -- on
-    timeout or any unexpected OS error, proceeds WITHOUT the lock: the same race that
-    existed before this fix, never worse, and this hook must always exit fast."""
-    fd = None
-    deadline = time.time() + LOCK_TIMEOUT_S
-    while fd is None and time.time() < deadline:
-        try:
-            fd = os.open(LOCK_PATH, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError:
-            try:
-                if time.time() - os.path.getmtime(LOCK_PATH) > LOCK_STALE_S:
-                    os.remove(LOCK_PATH)  # abandoned lock -- clear and retry immediately
-                    continue
-            except Exception:
-                pass
-            time.sleep(LOCK_POLL_S)
-        except Exception:
-            break  # unexpected OS error -- proceed without the lock
-    # Off by default (stderr is not surfaced in normal hook operation); set
-    # ORA_FLEET_LOCK_DEBUG=1 to diagnose whether a lost session under contention was a
-    # genuine lock-acquisition timeout (this line) vs. some other bug -- this is
-    # exactly how the LOCK_TIMEOUT_S calibration above was verified.
-    if os.environ.get("ORA_FLEET_LOCK_DEBUG"):
-        sys.stderr.write("LOCK_DEBUG acquired=%s\n" % (fd is not None))
-    try:
-        yield
-    finally:
-        if fd is not None:
-            try:
-                os.close(fd)
-            except Exception:
-                pass
-            try:
-                os.remove(LOCK_PATH)
-            except Exception:
-                pass
+RENAME_RETRIES    = 6
+RENAME_RETRY_S    = 0.05
 
 
 def now():
@@ -141,22 +131,103 @@ def rel(dt):
     return "%dd ago" % int(secs // 86400)
 
 
-def load_state():
+def _safe_filename(sid):
+    """Filesystem-safe encoding of a session_id for use as a per-session filename.
+    Claude Code session_ids are UUID-shaped (already filesystem-safe) -- this is
+    defense-in-depth, not a format assumption."""
+    safe = "".join(c if (c.isalnum() or c in "-_") else "_" for c in (sid or "unknown"))
+    return safe + ".json"
+
+
+def session_file_path(sid):
+    return os.path.join(SESSIONS_STATE_DIR, _safe_filename(sid))
+
+
+def load_session(sid):
+    """This session's OWN state -- its own file, never touched by any other session's
+    hook invocation, so there is nothing to race over. A missing/unreadable file (first
+    event of a new session, or any corruption) starts fresh -- same fail-open posture
+    as the rest of this hook."""
     try:
-        with open(STATE, "r", encoding="utf-8") as f:
-            d = json.load(f)
-        d.setdefault("sessions", {})
-        d.setdefault("feed", [])
-        return d
+        with open(session_file_path(sid), "r", encoding="utf-8") as f:
+            s = json.load(f)
+        s.setdefault("tasks", [])
+        s.setdefault("activity", [])
+        s.setdefault("feed_events", [])
+        return s
     except Exception:
-        return {"sessions": {}, "feed": []}
+        return {"started": iso(now()), "tasks": [], "activity": [], "feed_events": []}
 
 
-def save_state(d):
-    tmp = STATE + ".tmp"
+def save_session(sid, s):
+    """Write THIS session's own file. No shared file, no lock: only processes handling
+    THIS session's hook events ever write this specific path -- but that CAN be more
+    than one process at once (see the module docstring's KNOWN, ACCEPTED RESIDUAL: a
+    parallel subagent's tool completion and the parent's own foreground event, both
+    tagged with the same session_id). The tmp filename includes this process's own PID
+    so two such concurrent writers never share one tmp path -- a torn/corrupt tmp file
+    is no longer possible. os.replace(tmp, path) itself can still hit a transient
+    WinError (another same-session writer's own os.replace onto the SAME destination
+    path, mid-flight) -- empirically observed under 12-way same-session concurrency, so
+    it is retried a few times with a short delay rather than assumed to always succeed
+    outright. If every retry is exhausted the tmp file is removed rather than left
+    behind as litter, and this writer's update is lost -- the accepted, bounded part of
+    the residual (see module docstring); the exception is re-raised so the caller's own
+    fail-open `except Exception: pass` remains the single place that decision is made."""
+    os.makedirs(SESSIONS_STATE_DIR, exist_ok=True)
+    s["_sid"] = sid  # let list_all_sessions() recover the true id even if _safe_filename
+                      # ever had to alter it (defense-in-depth, not a format assumption)
+    path = session_file_path(sid)
+    tmp = "%s.tmp.%d" % (path, os.getpid())
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(d, f)
-    os.replace(tmp, STATE)
+        json.dump(s, f)
+    last_err = None
+    for attempt in range(RENAME_RETRIES):
+        try:
+            os.replace(tmp, path)
+            return
+        except OSError as e:
+            last_err = e
+            if attempt < RENAME_RETRIES - 1:
+                time.sleep(RENAME_RETRY_S)
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+    raise last_err
+
+
+def delete_session_file(sid):
+    try:
+        os.remove(session_file_path(sid))
+    except Exception:
+        pass
+
+
+def list_all_sessions():
+    """(sid, s) for every session file currently on disk -- a live, read-only
+    snapshot. Never raises: a missing directory (no session has ever run) or an
+    unreadable/mid-write individual file (skipped, not fatal -- the NEXT render picks
+    it up once the writer's atomic rename completes) both degrade gracefully."""
+    out = []
+    try:
+        names = os.listdir(SESSIONS_STATE_DIR)
+    except Exception:
+        return out
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        path = os.path.join(SESSIONS_STATE_DIR, name)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                s = json.load(f)
+        except Exception:
+            continue
+        if not isinstance(s, dict):
+            continue
+        sid = s.get("_sid") or name[:-5]
+        out.append((sid, s))
+    return out
 
 
 def short(sid):
@@ -168,11 +239,15 @@ def trunc(s, n=70):
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
-def add_feed(state, sid, kind, detail):
-    state["feed"].insert(0, {
-        "at": iso(now()), "sid": short(sid), "kind": kind, "detail": trunc(detail),
+def add_feed_local(s, kind, detail):
+    """This session's own contribution to the GLOBAL recent-activity feed, stored
+    INSIDE this session's own file (not a separate shared list) -- render() aggregates
+    every session's feed_events at render time, so this never touches another
+    session's data or a shared file."""
+    s.setdefault("feed_events", []).insert(0, {
+        "at": iso(now()), "kind": kind, "detail": trunc(detail),
     })
-    del state["feed"][FEED_CAP:]
+    del s["feed_events"][FEED_CAP:]
 
 
 def add_activity(s, detail):
@@ -278,7 +353,7 @@ def write_session_note(sid, s):
         pass
 
 
-def render(state):
+def render():
     n = now()
     lines = []
     lines.append("---")
@@ -287,10 +362,23 @@ def render(state):
     lines.append("# Claude Sessions — Live Activity")
     lines.append("")
 
-    active = []
-    for sid, s in state["sessions"].items():
+    # Prune stale session FILES as a side effect of this same directory scan (matches
+    # the original design's cadence -- once per invocation -- without a second pass).
+    cutoff = n - datetime.timedelta(hours=SESSION_PRUNE_H)
+    kept = []
+    for sid, s in list_all_sessions():
         last = parse(s.get("lastAt", ""))
-        if last is None:
+        if last is None or last < cutoff:
+            delete_session_file(sid)
+            continue
+        kept.append((sid, s, last))
+
+    # A status="ended" session's file persists (not deleted -- see module docstring)
+    # so its recent-activity feed survives, but it must NEVER show as "active": that
+    # would misrepresent a cleanly-finished session as still open.
+    active = []
+    for sid, s, last in kept:
+        if s.get("status") == "ended":
             continue
         mins = (n - last).total_seconds() / 60.0
         if mins <= RECENT_MIN:
@@ -321,7 +409,18 @@ def render(state):
         lines.append("> No active Claude Code sessions in the last %d minutes." % RECENT_MIN)
         lines.append("")
 
-    feed = state.get("feed", [])
+    # Recent-activity feed: aggregated fresh, every render, from every KEPT (not yet
+    # pruned) session's own feed_events -- no shared list to maintain incrementally.
+    feed_entries = []
+    for sid, s, last in kept:
+        for e in s.get("feed_events", []):
+            feed_entries.append({
+                "at": e.get("at", ""), "sid": short(sid),
+                "kind": e.get("kind", ""), "detail": e.get("detail", ""),
+            })
+    feed_entries.sort(key=lambda e: e.get("at", ""), reverse=True)
+    feed = feed_entries[:FEED_CAP]
+
     if feed:
         lines.append("## Recent activity")
         lines.append("")
@@ -358,96 +457,94 @@ def main():
     event = data.get("hook_event_name", "")
     sid = data.get("session_id", "")
     cwd = data.get("cwd", "")
+    note_already_written = False
 
-    with state_lock():
-        state = load_state()
+    if sid:
+        s = load_session(sid)
+        s["lastAt"] = iso(now())
+        if cwd:
+            s["cwd"] = cwd
 
-        # prune stale sessions
-        cutoff = now() - datetime.timedelta(hours=SESSION_PRUNE_H)
-        for k in list(state["sessions"].keys()):
-            last = parse(state["sessions"][k].get("lastAt", ""))
-            if last is None or last < cutoff:
-                del state["sessions"][k]
+        if event == "SessionStart":
+            s.setdefault("started", iso(now()))
+            s["status"] = "working"
+            s["lastTool"] = "(session start)"
+            cwd_label = os.path.basename(cwd.rstrip("/\\")) if cwd else ""
+            add_feed_local(s, "session", "session started")
+            add_activity(s, "Session started" + (" in %s" % cwd_label if cwd_label else ""))
 
-        if sid:
-            s = state["sessions"].setdefault(sid, {
-                "started": iso(now()), "tasks": [], "activity": [],
-            })
-            s["lastAt"] = iso(now())
-            if cwd:
-                s["cwd"] = cwd
+        elif event == "Stop":
+            s["status"] = "idle"
+            s["lastTool"] = "(awaiting input)"
+            add_activity(s, "Session paused — awaiting input")
 
-            if event == "SessionStart":
-                s["status"] = "working"
-                s["lastTool"] = "(session start)"
-                cwd_label = os.path.basename(cwd.rstrip("/\\")) if cwd else ""
-                add_feed(state, sid, "session", "session started")
-                add_activity(s, "Session started" + (" in %s" % cwd_label if cwd_label else ""))
+        elif event == "SessionEnd":
+            s["status"] = "ended"
+            add_activity(s, "Session ended")
+            write_session_note(sid, s)
+            note_already_written = True
+            # File is NOT deleted here -- see the module docstring's "SessionEnd does
+            # NOT delete its own file" section. It's saved below like any other event
+            # (status="ended" persisted) and cleaned up later by the same
+            # SESSION_PRUNE_H pruning every other session gets, so its feed_events
+            # survive for that window instead of vanishing the instant this event
+            # fires. render() and session_liveness.py both explicitly exclude
+            # status="ended" sessions from anything that means "still active".
 
-            elif event == "Stop":
-                s["status"] = "idle"
-                s["lastTool"] = "(awaiting input)"
-                add_activity(s, "Session paused — awaiting input")
+        elif event == "PostToolUse":
+            s["status"] = "working"
+            tool = data.get("tool_name", "")
+            ti = data.get("tool_input", {}) or {}
+            tr = data.get("tool_response", {}) or {}
+            s["lastTool"] = tool
 
-            elif event == "SessionEnd":
-                s["status"] = "ended"
-                add_activity(s, "Session ended")
-                write_session_note(sid, s)
-                state["sessions"].pop(sid, None)
+            if tool == "Bash" and ti.get("run_in_background"):
+                cmd = ti.get("command", "")
+                add_feed_local(s, "bg-bash", cmd)
+                add_activity(s, "[bg] %s" % trunc(cmd, 60))
 
-            elif event == "PostToolUse":
-                s["status"] = "working"
-                tool = data.get("tool_name", "")
-                ti = data.get("tool_input", {}) or {}
-                tr = data.get("tool_response", {}) or {}
-                s["lastTool"] = tool
+            elif tool == "Task":
+                desc = ti.get("description") or ti.get("subagent_type") or "subagent"
+                add_feed_local(s, "subagent", desc)
+                add_activity(s, "[agent] %s" % trunc(desc, 60))
 
-                if tool == "Bash" and ti.get("run_in_background"):
-                    cmd = ti.get("command", "")
-                    add_feed(state, sid, "bg-bash", cmd)
-                    add_activity(s, "[bg] %s" % trunc(cmd, 60))
+            elif tool == "TaskCreate":
+                title = (ti.get("title") or ti.get("description") or "(task)")
+                # ID may come from the tool response or we generate one from timestamp
+                task_id = (tr.get("id") or tr.get("task_id") or
+                           ti.get("id") or ("task-%s" % iso(now()).replace(":", "")))
+                status_val = ti.get("status", "pending")
+                upsert_task(s, task_id, title=title, status=status_val)
+                add_feed_local(s, "task-create", title)
+                add_activity(s, "[task+] %s" % trunc(title, 60))
 
-                elif tool == "Task":
-                    desc = ti.get("description") or ti.get("subagent_type") or "subagent"
-                    add_feed(state, sid, "subagent", desc)
-                    add_activity(s, "[agent] %s" % trunc(desc, 60))
-
-                elif tool == "TaskCreate":
-                    title = (ti.get("title") or ti.get("description") or "(task)")
-                    # ID may come from the tool response or we generate one from timestamp
-                    task_id = (tr.get("id") or tr.get("task_id") or
-                               ti.get("id") or ("task-%s" % iso(now()).replace(":", "")))
-                    status_val = ti.get("status", "pending")
-                    upsert_task(s, task_id, title=title, status=status_val)
-                    add_feed(state, sid, "task-create", title)
-                    add_activity(s, "[task+] %s" % trunc(title, 60))
-
-                elif tool == "TaskUpdate":
-                    task_id = (ti.get("id") or ti.get("task_id") or "")
-                    status_val = ti.get("status")
-                    title_val = ti.get("title")
-                    if task_id:
-                        upsert_task(s, task_id, title=title_val, status=status_val)
-                        existing_title = next(
-                            (t.get("title", task_id[:8]) for t in s.get("tasks", [])
-                             if t.get("id") == task_id),
-                            task_id[:8]
-                        )
-                        action = status_val or "updated"
-                        add_feed(state, sid, "task-update", "%s: %s" % (action, existing_title))
-                        add_activity(s, "[task~] %s: %s" % (action, trunc(existing_title, 55)))
+            elif tool == "TaskUpdate":
+                task_id = (ti.get("id") or ti.get("task_id") or "")
+                status_val = ti.get("status")
+                title_val = ti.get("title")
+                if task_id:
+                    upsert_task(s, task_id, title=title_val, status=status_val)
+                    existing_title = next(
+                        (t.get("title", task_id[:8]) for t in s.get("tasks", [])
+                         if t.get("id") == task_id),
+                        task_id[:8]
+                    )
+                    action = status_val or "updated"
+                    add_feed_local(s, "task-update", "%s: %s" % (action, existing_title))
+                    add_activity(s, "[task~] %s: %s" % (action, trunc(existing_title, 55)))
 
         try:
-            save_state(state)
+            save_session(sid, s)
         except Exception:
             pass
+
     try:
-        render(state)
+        render()
     except Exception:
         pass
-    # Write per-session note for sessions still active after this event
-    if sid and sid in state.get("sessions", {}):
-        write_session_note(sid, state["sessions"][sid])
+
+    if sid and not note_already_written:
+        write_session_note(sid, s)
 
     sys.exit(0)
 
