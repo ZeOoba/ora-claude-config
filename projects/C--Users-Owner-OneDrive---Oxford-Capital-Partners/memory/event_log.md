@@ -12,6 +12,22 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-25 — Shared-checkout investigation: wrong-file edit found and corrected, orphaned skill-mirror tree discovered (OI-025)
+Investigating the dirty-`~/.claude`-checkout flag raised at the end of the prior turn surfaced a real defect: this session's earlier HubSpot-idle-flag and tracker-output changes to `ora-tenant-hubspot-reconciliation` had been applied to `Claude_Workspace\00_Governance\Scheduled\ora-tenant-hubspot-reconciliation\SKILL.md`, which `list_scheduled_tasks` confirms is NOT the registered path (`~\.claude\scheduled-tasks\ora-tenant-hubspot-reconciliation\SKILL.md` is canonical) — the edit had no effect. Also found a separate, already-live, uncommitted edit on the canonical file (from an earlier session that day, ~11:19 AM) adding a DATE-MISMATCH check (HubSpot closedate vs. `oxford-command-center`'s `portfolio.json` leaseEnd) for the Stone Crest/Chesapeake/J&R lease-date drift, and a third session's ~2:10 PM edit to `open-items-tracker.md` OI-021 that had already triaged the original "~49 stuck HubSpot deals" down to 8 real items (7 resolved) and flagged the remaining ~37 as a policy gap — the same finding this session's punch-list had surfaced independently.
+Re-verified no further changes to the canonical file/tracker since discovery, then merged the IDLE category (re-lettered to 3e to avoid colliding with the other session's 3d) and the tracker-output redirect into the canonical file on top of the other session's DATE-MISMATCH work, preserving it. Archived the orphaned Claude_Workspace mirror folder to `_archive_2026-07-25_orphans\` in place (moved, not deleted).
+Discovered in passing: `Claude_Workspace\00_Governance\Scheduled\` holds 100+ scheduled-task folders of unverified live/dead status, including apparent name-collisions with live CC tasks. Logged as `open-items-tracker.md#OI-025` rather than audited in full — out of scope for this pass.
+No git commit made — the `~/.claude` checkout still has multiple sessions' uncommitted work; left for reconciliation rather than a blanket commit.
+
+## 2026-07-25 — Systematization punch-list actioned (4 items)
+Gabriel ruled on the session's "worth systematizing (≤5)" list via AskUserQuestion:
+1. **Master workbook single-writer protocol** — RATIFIED as the recommended package (new `_active_sessions` sheet claim marker, documented-convention enforcement, scoped to the 4 highest-blast-radius sheets: Rent Roll, External Loans Summary, Property NOI, Portfolio Summary). Canonical text moved from the proposal file into `tech.md` §3d; proposal file marked RATIFIED and cross-links there. See `project_master_workbook_single_writer_proposal_2026-07-25.md`.
+2. **HubSpot renewal-deal idle-stage flag** — Gabriel set flag-only, 6-month lease-expiration / 30-day-idle threshold. Added as category (d) IDLE to `ora-tenant-hubspot-reconciliation` SKILL.md (Claude_Workspace/00_Governance/Scheduled), output folded into item 3 below.
+3. **ora-tenant-hubspot-reconciliation output relocation** — step 6 changed from a standalone Notion Ops Hub child page to direct `open-items-tracker.md` rows (own `OI-NNN` per finding), closing the discoverability gap that nearly caused a redundant hand-redo.
+4. **Unsigned-draft-to-signature nudge** — Gabriel set 5-business-day threshold, housed inside the existing `ora-weekly-hygiene` cadence rather than a new cron entry. Added as Block M (report-only, output also routed to `open-items-tracker.md`), catalyzed by the Kareem/Cricket DC LLC amendment sitting unsigned 07-17→07-25 undetected.
+
+Files touched: `tech.md`, `MEMORY.md`, `project_master_workbook_single_writer_proposal_2026-07-25.md`, `~/.claude/scheduled-tasks/ora-weekly-hygiene/SKILL.md`, `Claude_Workspace/00_Governance/Scheduled/ora-tenant-hubspot-reconciliation/SKILL.md`. No workbook, HubSpot, or Notion data touched — documentation/skill-spec changes only, nothing executed live this session.
+
+
 ## 2026-07-24 — ora-pm-ledger: Block B retro-sweep mode built; snapshot-diff cross-day defect fixed; alerts-engine "wrong dates" misdiagnosis corrected
 
 Evening `ora-pm-ledger` run delivered A/B/C on time (18:17/18:19/18:23 ET, all exit 0). Three durable changes came out of it, plus one correction to a claim this session itself had made hours earlier.
