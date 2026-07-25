@@ -35,6 +35,16 @@ def run_hook(cmd, cwd, sessions_dir, session_id="me", fleet_state=None, ttl_h=No
     if ttl_h is not None:
         env["COMMIT_PROVENANCE_TTL_H"] = str(ttl_h)
     env["ORA_FLEET_STATE"] = fleet_state or "C:/does/not/exist_cpg.json"
+    # This test suite's fixtures speak the LEGACY single-file liveness format.
+    # other_active_sessions()'s no-override production path (which this guard
+    # always uses) prefers the NEW per-session directory over ORA_FLEET_STATE
+    # whenever that directory exists -- and fleet-session-hook.py's 2026-07-25
+    # per-session-file redesign means it now genuinely exists on any machine
+    # that has actually run the live hook. Without this override these fixtures
+    # would silently stop exercising the legacy branch (and these tests would
+    # pass or fail depending on unrelated real machine state) the moment that
+    # directory first appears on disk.
+    env["ORA_FLEET_SESSIONS_DIR"] = "C:/does/not/exist_cpg_sessions_dir"
     payload = json.dumps({
         "session_id": session_id, "cwd": cwd,
         "tool_input": {"command": cmd},
