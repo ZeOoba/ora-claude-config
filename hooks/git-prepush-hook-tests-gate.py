@@ -11,9 +11,26 @@ it sat broken at HEAD until the next session happened to run the suite by hand. 
 behavior-changing hook fix landing without its own test updated in the SAME commit is
 exactly the failure class this gate exists to catch at push time, not by luck later.
 
-WHAT IT RUNS: every hooks/tests/test-*.py file, each as its own subprocess (matching
-how a human runs them: `python <file>`, exit 0 = pass). Aggregates PASS/FAIL/ENV-SKIP
-and BLOCKS the push if any test genuinely fails.
+WHAT IT RUNS: every python test file in the three tracked test trees, each as its own
+subprocess (matching how a human runs them: `python <file>`, exit 0 = pass). Aggregates
+PASS/FAIL/ENV-SKIP and BLOCKS the push if any test genuinely fails.
+
+DISCOVERY ROOTS (TEST_ROOTS below) and the two-pattern glob: the gate originally swept
+hooks/tests/test-*.py ONLY, which silently left both maintenance test trees — 17 files —
+outside every gate in the repo, free to rot exactly as described above. The repo carries
+two long-standing naming conventions that are NOT worth unifying (renaming files just to
+satisfy a glob churns history for no behavioral gain): hooks/tests/ uses "test-*.py"
+(hyphen), maintenance/_tests/ uses "test_*.py" (underscore), and maintenance/ itself has
+BOTH. So discovery globs both patterns in every root. glob is non-recursive, hence
+maintenance/ and maintenance/_tests/ are listed separately rather than walked — a walk
+would also drag in unrelated fixture subtrees. All 17 newly-covered files were verified
+green (max 14.3s each, well inside PER_TEST_TIMEOUT_SECONDS) before being made blocking.
+
+NOT a discovery root: hooks/ itself. It contains hooks/test-ora-autonomy-gate.py, a
+STALE duplicate of the hooks/tests/ copy (different content, last touched an earlier
+commit) — a gate must not certify an orphan as live. Nor is test-stuck-session-watchdog.ps1
+covered: this runner is `python <file>`, and a PowerShell test needs a different runner.
+Both are tracked as separate cleanups, not silently absorbed here.
 
 ENV-SKIP, not FAIL: a test can print a line containing the literal sentinel
 `CANNOT RUN:` and exit non-zero to declare "I cannot execute in this environment" --
@@ -79,19 +96,59 @@ APPEND_LOG_SCRIPT = os.path.join(CLAUDE_DIR, "maintenance", "append-event-log.py
 PER_TEST_TIMEOUT_SECONDS = 90
 ENV_SKIP_SENTINEL = "CANNOT RUN:"
 
+# Every tracked python test tree, as ~/.claude-relative path parts. See the module
+# docstring for why hooks/ itself is excluded and why these are listed rather than walked.
+TEST_ROOTS = (
+    ("hooks", "tests"),
+    ("maintenance",),
+    ("maintenance", "_tests"),
+)
+# Both repo naming conventions, applied to every root (see docstring).
+TEST_FILE_PATTERNS = ("test-*.py", "test_*.py")
+
 # Test seam only (mirrors the doctrine gate's EVENT_LOG_OVERRIDE/STATUS_PATH_OVERRIDE):
-# when set, discovery reads from here instead of the real hooks/tests/. None -> canonical.
+# when set, discovery reads from THIS directory alone instead of the real TEST_ROOTS.
+# None -> canonical.
 TESTS_DIR_OVERRIDE = None
 EVENT_LOG_OVERRIDE = None
 
 
 def default_tests_dir():
+    """The primary tree. Kept as the single-root accessor for callers that want one
+    directory; discovery itself goes through default_test_dirs()."""
     return TESTS_DIR_OVERRIDE or os.path.join(CLAUDE_DIR, "hooks", "tests")
 
 
+def default_test_dirs():
+    """Every directory discovery sweeps. The override seam collapses this to one dir so
+    a test can point the gate at a throwaway fixture tree."""
+    if TESTS_DIR_OVERRIDE:
+        return [TESTS_DIR_OVERRIDE]
+    return [os.path.join(CLAUDE_DIR, *parts) for parts in TEST_ROOTS]
+
+
 def discover_test_files(root=None):
-    """Every hooks/tests/test-*.py, sorted for stable, deterministic run order."""
-    return sorted(glob.glob(os.path.join(root or default_tests_dir(), "test-*.py")))
+    """Every test file across the discovery roots (or `root` alone, when given), both
+    naming styles, de-duplicated and sorted for stable, deterministic run order."""
+    found = set()
+    for directory in ([root] if root else default_test_dirs()):
+        for pattern in TEST_FILE_PATTERNS:
+            found.update(glob.glob(os.path.join(directory, pattern)))
+    return sorted(found)
+
+
+def display_name(path):
+    """Label for reports. Repo-relative (posix) when the file lives under ~/.claude, so
+    same-named files in different trees stay distinguishable — maintenance/_tests/ and
+    hooks/tests/ both carry a doctrine-gate test. Bare basename for anything outside the
+    repo (fixture files in a tempdir have no meaningful repo-relative form)."""
+    try:
+        rel = os.path.relpath(os.path.abspath(path), CLAUDE_DIR)
+    except ValueError:  # different drive on Windows -- not under CLAUDE_DIR
+        return os.path.basename(path)
+    if rel.startswith(os.pardir):
+        return os.path.basename(path)
+    return rel.replace(os.sep, "/")
 
 
 def run_test_file(path, timeout=None):
@@ -128,7 +185,7 @@ def run_suite(root=None):
     for path in discover_test_files(root):
         rc, output = run_test_file(path)
         out.append({
-            "file": os.path.basename(path),
+            "file": display_name(path),
             "rc": rc,
             "status": classify(rc, output),
             "output": output,
@@ -186,7 +243,8 @@ def build_override_entry(now=None, session_id=None, reason=None):
     return (
         "## %s — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)\n\n"
         "- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the "
-        "full `hooks/tests/` suite and found a real failure, but session `%s` held a valid "
+        "full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real "
+        "failure, but session `%s` held a valid "
         "`allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from "
         "mtime), so the push was ALLOWED rather than blocked.\n"
         "- Reason recorded in the token: %s\n"
@@ -218,6 +276,44 @@ def main():
         except Exception:
             pass
     results = run_suite()
+    # Fail-closed floor (code review finding, 2026-07-25): discovery now sweeps three
+    # independently-vanishable roots instead of one. glob.glob() on a missing directory
+    # returns [] rather than raising, so a miscomputed CLAUDE_DIR or an accidentally
+    # emptied/renamed root would otherwise silently produce "0 pass, 0 fail, 0 env-skip"
+    # and exit 0 -- a fully neutered, silently-passing gate. That is a DIFFERENT failure
+    # class than "a discovered test failed" (this is "we found no tests to run at all"),
+    # so it is deliberately NOT eligible for the allow-hook-test-failure override token
+    # (wrong scope) and blocks unconditionally, even with no session id.
+    if not results:
+        sys.stdout.write(
+            "hook-tests-gate: 0 tests discovered across %d root(s) -- treating as a "
+            "gate failure, not a clean run.\n" % len(default_test_dirs()))
+        sys.stderr.write(
+            "pre-push BLOCKED: git-prepush-hook-tests-gate.py discovered ZERO test files "
+            "(expected roots: %s). This means the gate itself is broken (missing "
+            "directory, bad CLAUDE_DIR, or discovery regression) -- fix discovery, do not "
+            "override; no allow-hook-test-failure token can bypass this, it is the wrong "
+            "scope for an empty suite.\n" % ", ".join(default_test_dirs()))
+        return 1
+    # Same floor, per-root (independent review finding, 2026-07-25): the check above only
+    # catches TOTAL emptiness across all three roots. If exactly one root silently vanished
+    # (e.g. hooks/tests/ itself -- which also carries this gate's OWN sentinel test, so its
+    # loss would otherwise be invisible: the other two roots still yield files, any_fail
+    # stays False, and the gate would exit 0 having quietly dropped a third of its coverage)
+    # that must block too, for the same "broken gate, not a failing test" reason, and for
+    # the same reason it is NOT eligible for the hook-test-failure override token.
+    empty_roots = [d for d in default_test_dirs() if not discover_test_files(d)]
+    if empty_roots:
+        sys.stdout.write(
+            "hook-tests-gate: %d/%d root(s) discovered 0 tests -- treating as a gate "
+            "failure, not a clean run.\n" % (len(empty_roots), len(default_test_dirs())))
+        sys.stderr.write(
+            "pre-push BLOCKED: git-prepush-hook-tests-gate.py found test files overall, "
+            "but these discovery root(s) yielded ZERO: %s. That silently drops a slice of "
+            "coverage rather than exercising it -- fix discovery, do not override; no "
+            "allow-hook-test-failure token can bypass this, it is the wrong scope for a "
+            "vanished root.\n" % ", ".join(empty_roots))
+        return 1
     sys.stdout.write(format_summary(results) + "\n")
     any_fail = any_real_failure(results)
     session_id = current_session_id()
@@ -234,7 +330,7 @@ def main():
             "event_log.md.\n" % session_id)
     elif exit_code != 0:
         sys.stderr.write(
-            "pre-push BLOCKED: the hooks/tests/ suite has a real failure (see report above). "
+            "pre-push BLOCKED: the tracked test suite has a real failure (see report above). "
             "Fix it first. If Gabriel has just explicitly authorized pushing anyway, write "
             "this override token and retry:\n%s"
             % describe_token(session_id, HOOK_TEST_FAILURE))
