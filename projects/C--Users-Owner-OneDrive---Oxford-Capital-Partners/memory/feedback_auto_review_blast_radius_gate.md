@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: feedback
   originSessionId: c076bce0-c979-485c-b83b-e41c9f6c4155
-  modified: 2026-07-24T16:47:15.029Z
+  modified: 2026-07-24T18:28:14.493Z
 ---
 
 **Ruling (Gabriel, 2026-07-24):** the Engineering OS independent-reviewer
@@ -37,12 +37,19 @@ typo and doc edits. And prose alone demonstrably fails: the EOS Done criteria
   `frozenset` caught the missing-comma typo but NOT wholesale replacement with a
   bare string. See [[feedback-verify-probe-findings-before-acting]].
 
-**UNRESOLVED DEPENDENCY:** the standing session instruction *"Do not call the
-AgentTool unless the user requested it"* directly blocks auto-dispatch — it is
-why the reviewer was skipped on 07-24 until Gabriel asked for it explicitly.
-Auto-review cannot fire until that instruction carries an explicit carve-out for
-the blast-radius gate. Building the gate without the carve-out yields a gate that
-blocks commits with no permitted way to satisfy it.
+**RESOLVED 2026-07-24 (same day):** Gabriel granted the carve-out in-turn
+("Carve-out + ship blocking") when asked directly — auto-dispatch of a
+reviewer for a blast-radius/financial-decision diff, for this gate only, is
+standing-authorized. Reviewer model tier: a LADDER
+(`claude-fable-5`, `claude-opus-4-8`), not one hardcoded id — Gabriel's
+mid-build correction ("Fable might go away, use highest intelligence
+available"). `hooks/eos-review-gate.py` shipped the same session, committed to
+main at `c53c69c`. Full build detail, review-round history (4 rounds, 3
+genuine blocking findings caught and fixed — M1-M4/m5-m7/n8, then B1
+case-sensitivity, then B2 autocrlf), and the shared-checkout collision hit
+mid-merge: [[project-eos-review-gate-shipped-2026-07-24]].
 
 Related: [[feedback-fixture-shaped-tests-certify-dead-branches]] ·
-[[feedback-refute-pass-proactive-default]] · [[feedback-interactive-decision-questions]]
+[[feedback-refute-pass-proactive-default]] · [[feedback-interactive-decision-questions]] ·
+[[reference-stale-merge-head-poisons-graph]] ·
+[[reference-autocrlf-defeats-content-hash-gates]]

@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 86ec9edd-63ac-49e3-a01a-f5729bf946ca
-  modified: 2026-07-22T13:50:05.242Z
+  modified: 2026-07-24T20:20:09.997Z
 ---
 
 Confirmed by direct testing 2026-07-22 while building the Tenant DB "Renewal Watch" view ([project_tenant_db_renewal_watch_view_2026-07-22.md](project_tenant_db_renewal_watch_view_2026-07-22.md)): any `FILTER "<formula property>" <op> <value>` — tried with `<=`, `=`, on both a number-output formula and a checkbox-output formula — gets encoded as:
@@ -19,5 +19,7 @@ This is the Notion API's ROLLUP filter shape (`any`/`every`/`none` + `resultFilt
 Plain NUMBER/DATE/SELECT/CHECKBOX native-type properties filter correctly through the same DSL (`number_less_than_or_equal_to`, `date_is_on_or_before`, `enum_is_not`, `checkbox_is_not` all worked as expected).
 
 Native DATE properties also do NOT support relative offsets through this DSL — `<= "+90d"` and `<= "next 90 days"` are silently accepted (no error) but function as invalid/unparseable literals and return zero matching rows. Only absolute ISO date literals (`"2026-10-20"`) work, and arithmetic syntax (`today()+90`) is a hard parse error ("Unexpected character: +").
+
+**Corollary confirmed 2026-07-24 (Acquisition Pipeline "Stale Deal Watch"):** the same silent-zero-match failure also occurs with an **empty/blank date literal**. That view carried `{"operator":"date_is","propertyType":"date","value":{"type":"exact","value":""}}` — evidently an attempt to express "Target Close Date is empty" — and had been returning **zero rows** for an unknown period while appearing correctly configured in the view JSON. Nine open deals should have surfaced; none did. Same root shape as the relative-offset case above: an unparseable date literal is accepted at write time and matches nothing at read time, with no error at either end. **Always query the view after editing it** (`notion-query-database-view`) and confirm the row count against an equivalent SQL query on the data source — a view that validates is not a view that works. Fix applied there: drop the malformed filter, express staleness as `date_is_on_or_before "<absolute ISO date>"` on the real date property, keep the ascending sort.
 
 **How to apply:** Never build a saved-view filter directly on a formula-output property (Months Remaining, Days to Expiration, Risk Flag, etc.) via this tool — it will silently pass validation and then match everything. Filter on the underlying native property instead (e.g. the source date/number/select field), using an absolute date threshold recomputed at build time. A view built this way needs periodic re-editing to keep the threshold current — see [project_tenant_db_renewal_watch_view_2026-07-22.md](project_tenant_db_renewal_watch_view_2026-07-22.md) for the recommended follow-up (piggyback the refresh on an existing scheduled task rather than a new one). Also: no programmatic view-delete tool exists in this MCP — throwaway/test views must be manually trashed in the Notion UI (rename them clearly first so they're identifiable).

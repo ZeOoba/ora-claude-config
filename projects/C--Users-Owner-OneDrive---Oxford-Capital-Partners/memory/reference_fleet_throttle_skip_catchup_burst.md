@@ -4,7 +4,7 @@ description: "recordedSkips 'global_limit' events are the Desktop scheduler's ow
 metadata:
   type: reference
   originSessionId: 41bfc8fa-2412-44b6-a527-f9a4631e86f5
-  modified: 2026-07-24T14:52:13.817Z
+  modified: 2026-07-24T16:45:11.470Z
 ---
 
 **What the metric means.** `recordedSkips[taskId]` entries with `reason: "global_limit"` are written by
@@ -100,6 +100,37 @@ trace in `recordedSkips` at all, and `lastRunAt` is single-valued so it cannot e
 The exact backfill cutoff is UNKNOWN and should not be asserted (n=2). To establish whether a task
 ran on a given past date, use run transcripts (`scheduled-task name="<id>"` in
 `~/.claude/projects/<project>/*.jsonl`) or its email/page output — not the registry.
+
+**2026-07-24: the FIRST confirmed instance of the "lone task, no neighbours" pattern this file
+flags as worth a fresh investigation — and it is `per_task_limit`, not `global_limit`.**
+`ora-task-integrity-guard` began skipping once every 60s at 12:21:22 ET, alone, with no other task
+skipping in the same instant. Distinguishing marks vs the catch-up burst above: (a) reason code is
+`per_task_limit` (same-task double-fire guard), not `global_limit`; (b) single task, not a cluster;
+(c) it did NOT self-clear — it ran 20+ min, where all three prior `per_task_limit` cases on record
+cleared in 1-3 min (`check-dirty-files-session-pr` 3.0 min, `ora-lease-expiration-brief` 1.0,
+`ora-pm-ledger` 1.0).
+
+Onset was ~60s after an `update_scheduled_task` cron retime (07:00 -> 07:05), which made the retime
+the obvious suspect. A concurrent session dry-running this exact task was ruled OUT as the cause —
+its first dry-run touch was 11 min AFTER onset. **Disable -> enable was tested as a remedy and
+FAILED:** skips stopped dead during the disabled window (12:38:23 -> 12:42:23 gap, confirming
+disable suppresses the attempt) and resumed at 1/min immediately on re-enable. So a stale re-arm
+state is NOT the mechanism — re-arming reproduces it.
+
+**Do not conclude "the retime caused it" without weighing machine load.** At the time of this
+episode the workstation had **36 `claude.exe` processes and ~13 live sessions** — heavy saturation
+of the same ceiling described at the top of this file. A plausible reading that fits every
+observation equally well: the retime merely made the task *due*, and it then joined the retry queue
+against a ceiling that stayed saturated for 20+ min because of concurrent session load. The
+scheduler's arbitration is closed-source (see the "why some tasks recover in 1 retry" caveat above)
+— the timestamps do not separate "retime-triggered" from "saturation-sustained," so do not assert
+either as root cause. Per the top-of-file verdict, the documented lever remains machine load
+([[reference_lean_ram_toolkit]]), not per-task config.
+
+**Operational note:** `ora-task-integrity-guard` must stay ENABLED regardless — it is the SOLE
+fleet-integrity runner (LAMS twin retired), so disabling it to silence the metric would blind the
+exact check that catches registry loss. Its `nextRunAt` stayed correct (next day 07:14 ET)
+throughout, so scheduled execution was never at risk; only the skip metric was polluted.
 
 Related: [[reference_fleet_status_dual_read]] (dual-registry read mechanics),
 [[reference_lean_ram_toolkit]] (the RAM ceiling this throttle protects),
