@@ -1,0 +1,16 @@
+---
+name: check-shared-checkout-settled-140pm
+description: One-time 2:00 PM ET check on whether a concurrent session's activity in ~/.claude has settled, and whether the ora-task-integrity-guard retime housekeeping files are safe to commit. Self-disables after firing.
+---
+
+Read-only investigation. Do NOT run git add, git commit, or edit any files — this task only reports status back to Gabriel.
+
+Background: Earlier on 2026-07-24, a Gabriel-approved retime fix was made to ora-task-integrity-guard (12:45 ET -> 07:00 ET) and committed to the ~/.claude git repo (C:\Users\Owner\.claude) as commit 7c7117b. Some downstream housekeeping/mirror byproducts of that edit were identified as worth committing too: `_scheduled_tasks_backup/ora-task-integrity-guard/SKILL.md`, `_scheduled_tasks_backup/automation-health-monitor/SKILL.md`, and `maintenance/_state/registry-membership.json`. Before that commit could happen, a separate concurrent session started actively editing the same repo, landing several real commits (13a62ec, c2e122c, a merge b651a9e, dc442ac, b599432 were the newest at last check) that fixed genuine bugs (an unquoted-Windows-backslash-path bug in ora-task-integrity-guard's STEP 1/1.5/2.75/DRY-RUN commands, and a stale characterization in ora-am-brief about ora-sofr-direct-prefetch). The working tree kept growing across checks: more scheduled-task SKILL.md files, more memory files, and even a brand-new task folder `ora-511-industrial-fallout-check` appeared mid-session. Gabriel asked to hold off touching anything and check back at 2:00 PM ET.
+
+Steps:
+1. `cd "C:\Users\Owner\.claude"` and run `git status --short` and `git log --oneline -10`.
+2. Confirm `7c7117b` is still an ancestor of HEAD (`git merge-base --is-ancestor 7c7117b HEAD`) — i.e. that commit wasn't rebased away.
+3. Determine whether the working tree has gone quiet (compare current `git status --short` output to the description above — is it the same set of files, or still growing / different) versus still-active concurrent editing.
+4. If it looks quiet: for each of `_scheduled_tasks_backup/ora-task-integrity-guard/SKILL.md`, `_scheduled_tasks_backup/automation-health-monitor/SKILL.md`, and `maintenance/_state/registry-membership.json`, if still dirty, run `git diff -- <file>` and check whether its content is a clean byproduct of the original 07:00 ET retime (look for "v1.6" / "0 7 * * *" / no unrelated content) or whether it has since been overtaken by the other session's v1.7+ changes (look for "v1.7" or later, or other unrelated content) — do not assume, verify by reading the actual diff content, the same way this was verified earlier in the session.
+5. Do NOT stage or commit anything.
+6. Report a concise chat summary: (a) settled or still active, with evidence, (b) which of the three original housekeeping files (if any) are still clean/attributable to the retime vs overtaken by other work, (c) a recommendation on whether it's now safe for a future session to commit them, or whether to keep waiting.

@@ -5,6 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: local_3a091e05-9759-4627-93c2-c948e6c29e71
+  modified: 2026-07-25T18:52:38.117Z
 ---
 
 **Purpose:** a lightweight companion to [deal-decision-ledger.md](deal-decision-ledger.md) (which
@@ -15,6 +16,26 @@ update in place (don't duplicate) if a later session re-confirms or overturns an
 the overturn explicitly rather than silently replacing.
 
 ## Log
+
+### 2026-07-25 — Should oxford-command-center's lease-snapshot drift check's >25% anomaly floor gate on raw id-level removals or business-key-reconciled removals?
+**Answer (Gabriel, via AskUserQuestion): keep the raw id-level gate — no code change.** PR #234
+(`ff23bd2`) added business-key pairing (propertyKey+unit+tenant) to `computeDrift()` in
+`scripts/lease-snapshot-drift-check.ts`, which could distinguish a pure id-rekeying event from a
+genuine mass disposition. The floor could have been changed to gate on the business-key-reconciled
+`genuinelyRemoved` count instead of raw `removedIds`, which would let a future id-scheme migration
+(like PR #232, which caused the 2026-07-24 re-baseline incident) write through automatically instead
+of requiring a manual `--force`.
+**Ruling: don't.** The floor stays gated on raw id-level removals — any future id-scheme change will
+require a manual `--force` again, same as this week. Reasoning given: trusting the newer business-key
+pairing logic to gate a safety-critical write path would mean a blind spot in that logic (the review
+of PR #234 surfaced one candidate — an unescaped `" | "` delimiter in `businessKey()` — that scored
+40/100, real in principle, not observed in live data) could silently misclassify a genuine mass
+disposition as safe rekeying and let it through unattended, defeating the exact failure mode the
+floor exists to catch. The `--force` path already prints the business-key breakdown
+(re-keyed/genuinely-new/genuinely-removed) for the human forcing through, so no information is lost
+by keeping the gate itself simple.
+Related: [[project_lease_snapshot_id_rebaseline_pending_2026-07-24]] (the incident this decision
+followed), PR #234 review comment (no code issues found, scored below the 80-point bar).
 
 ### 2026-07-12 — How many `.skill` packages are staged for Settings → Capabilities import?
 **Answer: 10, not 4.** communication-intelligence, market-monitor, rent-comp, tax-appeal,

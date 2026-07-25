@@ -600,7 +600,16 @@ action/date) flag LOW.
 **Check D — Landlord Entity Signature.** If the message references a property
 by address or LLC name AND the signature uses generic "Oxford Realty
 Advisors" or the personal "Gabriel Goldberg, VP Acquisitions" block rather
-than the specific property LLC, flag MEDIUM.
+than the specific property LLC, flag MEDIUM. Root cause fixed 2026-07-24:
+`tenant-email` v1.1 and `communication-intelligence` v1.3 now resolve the
+LLC from the ratified roster and embed the signature block as literal draft
+text instead of depending on Outlook's manual signature picker — daily
+recurrence should drop sharply going forward. A message that still trips
+this check now most likely predates the fix, was drafted outside those two
+skills, or has the correct block overwritten by Outlook's own auto-inserted
+default signature (see the "delete the auto-inserted one" step in both
+skills) — do not silently downgrade this check on the strength of the fix
+alone.
 
 **Check E — LP Forward-Statement Framing.** If the recipient is in the LP
 class (cross-reference Notion LP Database) AND the body contains
@@ -743,6 +752,22 @@ C. Outlook — flagged mail, unanswered inbound >24h old, and any morning
    pre-brief output surfaced for GG.
 D. Automated scans — newest `exception-detection` anomalies and any
    `automation-health-monitor` missed-task findings from today.
+
+**AR / DELINQUENCY — THIS TASK DOES NOT PRODUCE IT (added 2026-07-24).** This
+ledger has no AR-computation module and must not claim or imply one. On
+2026-07-22 the Command Center Daily Brief's §4c told readers to "refer to the
+latest ora-pm-ledger AR run (nightly 18:00 ET)" — that run has never existed;
+the pointer was invented at generation time and has been corrected in
+`ora-am-brief`'s SKILL.md. Do not "helpfully" build one here: AR's canonical
+source is the PM platforms (Rent Manager/Yardi/AppFolio) manually exported to
+SharePoint `Cowork OS / QB Exports / AR Aging` (QuickBooks Desktop AR is
+explicitly NOT primary; no live connector exists for either), freshness is
+gated by `ora-ar-export-freshness-nudge` (1st & 15th), and arrears reach the
+Command Center only through the **interactive** `scripts/ar-import.ts`, which
+has no automatic trigger BY DESIGN because a human must confirm ambiguous
+tenant matches. Auto-running it unattended would write fuzzy-matched arrears
+to a financial overlay without confirmation. If a run wants AR, it cites the
+last dated export or records a COVERAGE GAP — nothing else.
 
 Freshness guard: if a Notion mirror is >7d behind workbook
 `lastModifiedDateTime`, read live; never present stale figures as current.

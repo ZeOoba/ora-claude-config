@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-07-21T16:29:47.975Z
+  modified: 2026-07-25T00:59:46.598Z
 ---
 
 # ORA Event Log (append-only, newest first)
@@ -27,6 +27,9 @@ Gabriel ruled on the session's "worth systematizing (≤5)" list via AskUserQues
 
 Files touched: `tech.md`, `MEMORY.md`, `project_master_workbook_single_writer_proposal_2026-07-25.md`, `~/.claude/scheduled-tasks/ora-weekly-hygiene/SKILL.md`, `Claude_Workspace/00_Governance/Scheduled/ora-tenant-hubspot-reconciliation/SKILL.md`. No workbook, HubSpot, or Notion data touched — documentation/skill-spec changes only, nothing executed live this session.
 
+## 2026-07-24 — Governor-LTV false-clearance remediation shipped (PR #233)
+
+ The weekly ora-financial-code-integrity-sweep found 7 defects (2 HIGH: negative-balance aggregate deflation + empty-snapshot book wipe, both false clearances of the Hard-Invariant-4 40% ceiling). Gabriel ordered fixes; 4 rounds of independent adversarial review then found 4 MORE real defects in the fixes themselves (id-overlap shrinkage guard froze refis; collision-padding masked a total wipe; preserved-id double-count over-triggered; shared-schema LTV bound failed whole-snapshot parse). Final state: net-shrinkage guard on writeDebtSnapshot with allowEmptySupersede confirmation, emptyCohort null-verdict, Zod-validated POST /snapshot, persisted-column updated_at gates on both acq sync writers ('archived' now no-clobber-locked), inclusive-ceiling float epsilon, and a round-7 ltv==rate collision defense (aggregate function only). Commit 50ffdec, branch fix/governor-ltv-false-clearance, Refute-Reviewed trailer. 3062/3062 tests. OPEN residuals: (1) debt-scoring.ts per-property signals still consume raw ltv unguarded — spawned task task_fe4b5d56; (2) refusedEmptySupersede is surfaced in POST /snapshot response + backfill CLI but the automated server/index.ts reload path only console.warns a refusal — a frozen book still looks healthy downstream; (3) pre-existing lease-count reconcile mismatch (exp 137 got 138) on origin/main, unrelated, unfixed. Process lesson: two guards built same-day each needed outside adversarial review to catch a real defect — refute passes on financial code are load-bearing, not ceremony.
 
 ## 2026-07-24 — ora-pm-ledger: Block B retro-sweep mode built; snapshot-diff cross-day defect fixed; alerts-engine "wrong dates" misdiagnosis corrected
 
@@ -223,6 +226,10 @@ Related: [[reference_commit_provenance_guard]] · [[reference_event_log_partial_
 **Verified.** `same-time collisions 0`. Verdict remains ATTENTION but now driven *solely* by throttle skips (11/24h), which match the documented benign catch-up-burst pattern in `reference_fleet_throttle_skip_catchup_burst.md`.
 
 **NOT committed.** `scheduled-tasks/ora-task-integrity-guard/SKILL.md` carries another session's uncommitted v1.7 work (STEP 2.5 classifier retirement + Git Bash path-quoting fix); the shared-checkout hook flagged 16 uncommitted changes across 5 sessions in the .claude main checkout. My edits are surgical exact-string replacements that touch none of their hunks, but the commit is left to the v1.7 owner to avoid sweeping their work (commit-provenance-guard class).
+
+## 2026-07-24 — acquisition-underwriting v4.4 installed (STAGE 2.8 — FORG v1.0, Save-skill click confirmed)
+
+Adds Functional Obsolescence & Durability Grade (proposed/pilot; BDS-5 ratified at 10 pts by Gabriel 2026-07-23). Source: ora-skills commit `4a29470` (local main; not yet pushed to origin as of this entry — origin/main still at `979b12d`). Packaged via Entry Point A on Code (repo-direct, after two failed Entry Point B chat-attachment handoffs — root cause: the Cowork session had real-filesystem Desktop Commander access and never needed a chat "attachment," just the real path); installed via Entry Point B on Cowork reading the `.skill` directly off disk once redirected. Post-install verified from Code: runtime cache (`skills-plugin\...\acquisition-underwriting\`) SHA256-identical to repo on both `SKILL.md` and `target-markets.json`, H1 reads v4.4, `STAGE 2.8` present, BDS-5 ratification line present, cache mtime 2026-07-24 11:31.
 
 ## 2026-07-24 — ora-deal-aging-sla v1.1 (dashed-UUID fix + STEP 3b posture doctrine); landed via a foreign janitor commit with commit-provenance-guard silent
 
@@ -1323,3 +1330,29 @@ Two of the 2026-07-22 Automation Health report's workflow-optimization candidate
 Both changes are additive-only to both SKILL.mds — no prior logic, table rows, or rules were removed or reordered. `automation-health-monitor`'s frontmatter description and end-of-file changelog were bumped to v1.14 with matching notes.
 
 **SELF-CORRECTION, same session:** the first attempt to log this entry used Desktop Commander `write_file` without `mode: 'append'`, which defaults to `mode: 'rewrite'` — this overwrote the entire file (990→11 lines, ~183KB of history destroyed) before the append-vs-rewrite default was caught. Recovered via `git restore -- memory/event_log.md` (this file is tracked in the `.claude/projects/...` git repo, last commit `afc1334`, working tree was otherwise only CRLF/LF-different from HEAD — confirmed via `git diff --stat` before restoring, so nothing beyond the errant write itself was lost). Logging per Calibrate convention: **`write_file` calls against any file under `memory/` (or any tracked/historical file) must always pass `mode: 'append'` explicitly when the intent is to append — never rely on the tool's default.**
+
+
+## 2026-07-24 — acquisition-underwriting v4.4 (STAGE 2.8 / FORG v1.0) installed via package-and-stage-skill Entry Point B
+
+- Built on the Code surface via Entry Point A from `ora-skills` local `main` @ `4a29470e0f2e5370e4cc1bd4ebb0cd2f108d2f2d` ("ratify BDS-5 at 10 pts (Gabriel ruling 2026-07-23)"). NOT yet pushed to origin (`origin/main` = `979b12d480495f84e60b11cf110e74ad940ed02c`, which itself already carries STAGE 2.8/FORG — only the final BDS-5 10-pt ratification commit is ahead of origin).
+- Handoff to Cowork took three attempts. First two failed silently: the referenced chat attachment never landed (`uploads/`, `uploads-tmp/`, and a full recursive filesystem sweep for the filename all came back empty, both times). Third attempt corrected course to a direct Desktop Commander real-filesystem path (`ora-skills\_staging\2026-07-24_acq-uw-v4.4-entrypointA\acquisition-underwriting.skill`), which succeeded.
+- Entry Point B integrity pre-check: exists (62,148 bytes) confirmed · SHA256 `E77F37A8A12C4B9D312473B5BC8F05EE6EABDE4E91EEA6361451A4C97736199B` matched the handoff-supplied hash exactly · zip entries = `acquisition-underwriting/SKILL.md` + `acquisition-underwriting/target-markets.json` only, forward-slash paths · freshness: both files byte-identical (raw SHA256) to repo `acquisition-underwriting/SKILL.md` and repo-root `target-markets.json` at HEAD — no drift found.
+- Staged to session outputs, `present_files`'d, Gabriel confirmed the **Save-skill click** (Cowork button, not desktop Settings→Capabilities — multi-file package).
+- Post-install verification: runtime cache mirror (`...\skills-plugin\583f08bc-0123-4111-8158-8fe3d927e350\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\skills\acquisition-underwriting\`) contains both files, byte-identical (SHA256 match) to the packaged copy. SKILL.md header now reads **v4.4 — Buy Box & Scorecard v1.1**; STAGE 2.8 — Functional Obsolescence & Durability Grade (FORG v1.0, PROPOSED) confirmed present in the installed copy. Remaining "v4.3" hits are changelog history only, not the current header — expected, not drift.
+- `python tools\pending_reimport.py clear acquisition-underwriting` → `not pending (nothing to clear)`; `_staging/PENDING_REIMPORT.md` does not exist on disk. No open ledger entry existed to close for this skill.
+- Governance note: FORG v1.0 / STAGE 2.8 remains tagged PROPOSED/pilot in the installed SKILL.md (recommended, not yet mandatory outside FULL mode) — only BDS-5's 10-pt value is ratified, not the stage's mandatory status.
+
+
+## 2026-07-24 (cont.) — register-scheduled-task v2.8 already in sync, no reimport needed (package-and-stage-skill short-circuit)
+
+Invoked to close the register-scheduled-task v2.8 (commit 609164f, "require dated [MODEL:] tag at registration + PAUSE re-enable precondition") gap in `_staging/PENDING_REIMPORT.md` (pending since 2026-07-24T18:25Z) ahead of Monday's `ora-skill-store-drift-check` run.
+
+**Step 0 (plugin-membership gate):** `plugin_of('register-scheduled-task')` -> `None` — standalone skill, not a plugin member.
+
+**Step 1 (source confirm):** `git status --short -- register-scheduled-task/` clean; HEAD for the path = `609164f` (matches the ledger commit exactly).
+
+**Step 2 (runtime-cache pre-check, single file — SKILL.md only, no subfolders):** repo `ora-skills\register-scheduled-task\SKILL.md` vs runtime cache `...\skills-plugin\583f08bc-0123-4111-8158-8fe3d927e350\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\skills\register-scheduled-task\SKILL.md` — file count 1=1, zero RAW SHA256 mismatch, zero missing-in-cache. Both copies read v2.8 header and identical body text (spot-checked, then confirmed by whole-file hash match — no EOL-normalization pass was needed since raw already matched). **Conclusion: the runtime cache is already at v2.8. A Save-skill install evidently already occurred for this commit; it was never logged and the ledger entry was never cleared** — the same unlogged-click pattern the skill's own v1.5 changelog (2026-07-15 near-miss) exists to catch.
+
+**Per Step 2's short-circuit rule: STOPPED before packaging — no `.skill` was built, no Save-skill click was requested of Gabriel.** `python tools\pending_reimport.py clear register-scheduled-task` run to close the now-stale ledger line (cache re-sync is the qualifying event per the ledger's own clear-condition, regardless of which session's click produced it). `monthly-close` and `ora-flood-zoning-dd` ledger lines left untouched (out of scope this pass).
+
+**Flag for Gabriel:** the install that produced this sync was not captured in this log by whichever session performed it — worth a quick check of other recent Cowork/Code session transcripts if attribution matters, but the cache content itself is unambiguous and correct at v2.8.
