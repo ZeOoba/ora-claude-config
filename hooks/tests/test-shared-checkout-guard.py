@@ -21,6 +21,15 @@ def run_hook(stdin_text, repos, sessions_dir, extra_env=None):
     env = dict(os.environ)
     env["SHARED_CHECKOUT_REPOS"] = os.pathsep.join(repos)
     env["SHARED_CHECKOUT_SESSIONS_DIR"] = sessions_dir
+    # This suite's ORA_FLEET_STATE fixtures speak the LEGACY single-file liveness
+    # format. other_active_sessions()'s no-override production path (which this
+    # guard always uses) prefers the NEW per-session directory over ORA_FLEET_STATE
+    # whenever that directory exists -- and now genuinely does on any machine that
+    # has run the live 2026-07-25 fleet-session-hook.py redesign. Default it to a
+    # guaranteed-nonexistent path so these fixtures keep exercising the legacy
+    # branch regardless of real machine state; extra_env below can still override
+    # this for a test that wants the new-format path instead.
+    env["ORA_FLEET_SESSIONS_DIR"] = "C:/does/not/exist_scg_sessions_dir"
     if extra_env:
         env.update(extra_env)
     proc = subprocess.run(
