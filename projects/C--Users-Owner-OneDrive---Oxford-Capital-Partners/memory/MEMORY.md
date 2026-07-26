@@ -90,6 +90,7 @@
 - [Refute pass — proactive by default](feedback_refute_pass_proactive_default.md) — run before declaring done
 - [Verify before repeating session claims](feedback_verify_before_repeating_session_claims.md) — check ground truth before relaying another session's claim
 - [Artifact citation requirement](feedback_artifact_citation_requirement.md) — Resolved/Closed claims in artifacts need a citation
+- [Session-retro evidence rule](reference_session_retro_evidence_rule.md) — retro templates need citation + null-result path or they fabricate on thin sessions
 - [Prompt-embedded current-state prose](feedback_prompt_current_state_prose.md) — baked shas/counts rot; tag `curated @` + VERIFY
 - [Workflow invocation gotchas](feedback_workflow_invocation_gotchas.md) — stale name resolution + stringified args; verify post-run
 - Model tiers: [routines default to sonnet-5](feedback_routines_default_model.md) · [oxfordra.net work = opus always](feedback_website_model_tier.md) (Gabriel override)
