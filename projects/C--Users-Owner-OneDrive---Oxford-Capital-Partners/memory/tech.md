@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-07-25T18:20:03.259Z
+  modified: 2026-07-26T18:32:16.387Z
 ---
 
 # ORA Tech Stack & Reference
@@ -71,6 +71,11 @@ The old VERDICT logic flagged ATTENTION on ANY never-ran task, ANY expired one-t
 - **NOT a hard lock** (same doctrine as §3d): 2-hour TTL, fail-open on any error, no `PreToolUse` block. `release <slug>` is best-effort, not required — an unreleased claim just ages out.
 - **Slugs (free-form, not a hardcoded enum):** `hooks-override-auth` (the originally-escalated case) · `open-items-tracker` (claim before appending an `OI-NNN` entry — does NOT replace re-deriving the next-free ID fresh, that tactical fix stays) · `oxford-command-center-data` (structural writes to `data/overlay.json` / `data/snapshots/portfolio.json`, mirroring §3d's structural-vs-single-cell scope cut) · `repo-housekeeping` (ADDED 2026-07-26 — claim before any `git worktree`/branch cleanup sweep of `~/.claude`; two sessions independently ran the identical sweep in parallel and raced deleting the same remote branch, invisible to the original 3 slugs since none covers general repo maintenance — see `reference_concurrent_session_duplicate_hardening_work.md`'s 2026-07-25/26 entry).
 - **Convention, not enforcement:** claiming is a manual step the agent takes at the start of non-trivial work — a `PreToolUse` auto-claim was explicitly rejected (too high a false-positive/negative rate from a single tool call). `session-context.md`'s "Ad-hoc hook/security work" bullet updated 2026-07-26 to match (that file is untracked, per-machine state — this edit lands separately, outside this PR's diff).
+
+## 3f. Engineering OS calibration guards — bypass/check detail (trimmed from CLAUDE.md, word-budget pass 2026-07-26)
+- CLAUDE.md's Engineering OS "Calibrate" line names 8 guards but, as of this trim, no longer spells out two operational details, kept here instead: **`eos-plan-gate`** blocks after 4+ unplanned edits in a session; bypass by writing a non-empty one-line reason to `hooks/sessions/<id>/override` (e.g. `echo reason: <why> > hooks/sessions/<id>/override` — an empty/whitespace-only file is rejected, presence alone no longer counts, per `eos-plan-gate.py`). **`eos-claude-md-guard`** is the PreToolUse deny that enforces CLAUDE.md's word-budget and bare-date rules (gates CLAUDE.md's own edits specifically, by path match).
+- All 8 named guards fail open on internal error, same posture as the write-guards in §3b above.
+- Note: CLAUDE.md's guard-liveness check (`doctrine-integrity-probe.py` Check 11) requires the literal 8 backtick-quoted guard names to stay inline on that line — do not relocate the names themselves out of CLAUDE.md, only their explanatory detail.
 
 ## 4. MCP connectors
 
