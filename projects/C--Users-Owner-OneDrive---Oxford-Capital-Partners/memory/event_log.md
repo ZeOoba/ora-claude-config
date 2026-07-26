@@ -12,6 +12,32 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## Stale-worktree exposure check after wt-branch-collision-fix merge (2026-07-25)
+
+After merging/pushing the wt-branch collision fix (`f0bf1b2`, merging `1172cec`), checked all
+active session worktrees for whether they still carry the old vulnerable copies of
+test-memory-orphan-link-guard.py / test-confidentiality-guard.py / test-git-prepush-scan.py.
+
+**All 5 active worktrees + fix/telemetry-rollup-cohort-segmentation are stale and still
+vulnerable**: `amazing-lamarr-c659bb` and `blissful-nash-783df1` (8 commits behind main, have
+the sibling `c1f5601` test-doctrine-integrity-probe.py fix but not this one); `goofy-hopper-44e430`
+(7 behind), `gracious-pascal-8cbe91` (15 behind), `relaxed-goldberg-98b9d3` (10 behind) -- these
+three predate BOTH fixes (`337a7af`/`be82a87` GIT_DIR-leak AND `c1f5601`), so they're exposed to
+the original leak too, not just the branch-naming issue. `amazing-lamarr-c659bb` is the exact
+worktree already implicated in re-triggering this corruption once (see the prior entry above).
+
+Did not touch any of these worktrees (single-writer caution, [[reference_concurrent_session_duplicate_hardening_work]]).
+
+**Why:** a stale worktree running its own pre-push hook chain can still corrupt the real repo's
+git state even though main is now fully patched -- the fix only protects code that has actually
+been pulled into the worktree running it.
+
+**How to apply:** before starting hooks/tests/ work in any of these 5 worktrees (or any other
+worktree older than `f0bf1b2`), rebase/merge main first. If one of them pushes without doing so
+and the hook-tests-gate runs test-memory-orphan-link-guard.py's worktree-resolution case, treat
+any resulting `wt-branch` collision or stray ref in ~/.claude's .git as this same root cause, not
+a new bug.
+
 ## Corruption-recurrence root cause closed; concurrent-session collision found mid-fix (2026-07-25)
 
 Root-caused the "corruption still recurring" report (t <t@t.t> authorship + phantom `wt-branch` worktree): `amazing-lamarr-c659bb` forked from main at `1fe2ae3`, before `337a7af`/`be82a87` (the GIT_DIR/GIT_WORK_TREE env-leak fixes) landed — so its copies of those 8 test files never got the guard. Building `8b45f67` in that stale worktree re-triggered the already-fixed leak, corrupting the worktree's own git identity and, via `test-memory-orphan-link-guard.py`'s worktree-resolution case, registering a real `wt-branch` branch/worktree against the live repo. No new/undiscovered vulnerable file was needed to explain it — confirmed `test-config-write-guard.py` (an earlier inconclusive catch) doesn't spin up a real git repo at all, ruling it out.

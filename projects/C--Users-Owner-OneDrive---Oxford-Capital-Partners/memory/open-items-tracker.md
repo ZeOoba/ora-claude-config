@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-07-25T22:28:59.597Z
+  modified: 2026-07-26T01:00:36.792Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -623,15 +623,21 @@ and not worth a guard edit inside a test-only change.
 **Auto-check:** none.
 
 ### OI-021
-**Status:** OPEN — Restoration Church Trust sub-items remain; the renewal-pipeline batch pass is CLOSED
+**Status:** OPEN — Restoration Church Trust lender-outreach decision remains; both HubSpot sub-item and the renewal-pipeline batch pass are CLOSED
 **Opened:** 2026-07-19
 **Source:** [event_log.md](event_log.md#2026-07-19)
-**Restoration Church Trust (still open, unchanged):** no borrower-side repayment/extension conversation
-logged since the Apr 2026 Covenant Watch call for lender outreach "by June 2026" (deadline passed) —
-needs Gabriel's own outreach decision, not initiated here. HubSpot's "Lease Renewal — Restoration
-Church Trust" deal ($16,714, still `appointmentscheduled`) — deliberately NOT touched in the 2026-07-25
-batch pass below (same mis-entered-loan-counterparty pattern as OI-009, needs Gabriel's retirement
-call).
+**Restoration Church Trust lender outreach (still open):** draft outreach letter prepared 2026-07-25
+(confirms repayment/extension intent ahead of the 2027-02-20 balloon, closing the missed June-2026
+Covenant Watch checkpoint) — send blocked on a real recipient contact. Checked Notion (Loan Portfolio
+Tracker, Critical Deadlines Tracker), the one associated HubSpot deal, and Outlook mail history: no
+borrower contact name or email exists anywhere in the system, only internal loan-tracking data. Needs
+Gabriel to supply the actual contact before send (not guessed, per Invariant 7).
+**HubSpot mis-entered deal — CLOSED 2026-07-25 (Gabriel's explicit go-ahead).** "Lease Renewal —
+Restoration Church Trust" ($16,714, was `appointmentscheduled`) confirmed as the same
+mis-entered-loan-counterparty pattern as OI-009 (a loan, not a lease, entered as a tenant renewal
+deal). Retired via `manage_crm_objects`: `dealstage` → `closedlost`, `dealname` prefixed
+`RETIRED (data-entry error, see open-items-tracker.md OI-021) —`. Verified post-write via
+`get_crm_objects`.
 **Renewal-pipeline batch pass — CLOSED 2026-07-25.** A `/debug` pass on Command Center's lease-alert
 bug (separate incident, see [[project_master_workbook_no_single_writer_2026-07-24]]) surfaced this
 item; chased it down the same session. Before touching anything, found the monthly
