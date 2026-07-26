@@ -44,9 +44,19 @@ confidential-terms.json in the MAIN checkout is caught independently by
 git-prepush-confidential-scan.py's own fail-closed check, so this gate does not need
 to special-case that overlap.
 
-A subprocess TIMEOUT (PER_TEST_TIMEOUT_SECONDS) is classified FAIL, never ENV-SKIP — a
-hung test signals a real problem (e.g. an infinite loop introduced by a change), not an
-environmental absence.
+A subprocess TIMEOUT (PER_TEST_TIMEOUT_SECONDS) is never ENV-SKIP, but it earns exactly
+ONE rerun of that file at a doubled budget (TIMEOUT_RETRY_MULTIPLIER) before it can
+block. WHY (found 2026-07-26): during a push with three other live sessions,
+test-eos-review-gate.py — the suite's outlier at 48 subprocess spawns — blew the flat
+90s budget (exit 124) and blocked the push, then passed all 48 of its tests quickly
+when rerun in isolation moments later: an environmental load flake (same class as the
+known intermittent npm-test access-violation flake), not a regression. The rerun's
+result is authoritative — a second timeout, or any non-timeout failure surfaced by the
+rerun, is a real blocking FAIL, since a test that cannot finish inside DOUBLE the
+budget even once signals a genuine hang, not load. A non-timeout failure is NEVER
+retried: a deterministic assertion failure must not get two bites at the gate. A file
+that recovered on the rerun is disclosed in the summary ("timeout-retry ... not
+blocking") so flakes stay visible instead of being silently eaten.
 
 OVERRIDE (shared contract, hooks/lib/override_tokens.py — same shape as the doctrine
 gate's allow-doctrine-drift). A token lives at
@@ -94,6 +104,10 @@ from override_tokens import Tier, token_grants, describe_token  # noqa: E402
 HOOK_TEST_FAILURE = Tier("allow-hook-test-failure", "hook-test-failure", 3600, single_use=False)
 APPEND_LOG_SCRIPT = os.path.join(CLAUDE_DIR, "maintenance", "append-event-log.py")
 PER_TEST_TIMEOUT_SECONDS = 90
+# One rerun at PER_TEST_TIMEOUT_SECONDS * this, for first-run timeouts ONLY (load-flake
+# policy — see the module docstring). A doubled budget covers the 48-spawn outlier
+# generically; deliberately NOT a per-file known-slow roster, which would rot.
+TIMEOUT_RETRY_MULTIPLIER = 2
 ENV_SKIP_SENTINEL = "CANNOT RUN:"
 
 # git sets these in a hook process's own environment so IT can operate on the outer
@@ -165,9 +179,11 @@ def display_name(path):
 
 def run_test_file(path, timeout=None):
     """Run one test file exactly as a human would (`python <file>`). Returns (rc,
-    combined_output). A timeout is reported as rc 124 (shell convention for timeout)
-    with a synthetic message — classify() below always treats this as FAIL, never
-    ENV-SKIP, since a hang is not the same claim as a declared environmental absence."""
+    combined_output, timed_out). A timeout is reported as rc 124 (shell convention)
+    with a synthetic message, PLUS timed_out=True — the retry policy in run_suite()
+    keys on that flag, never on the rc, so a child that merely EXITS 124 by itself is
+    a deterministic failure and earns no retry (review finding, 2026-07-26). See the
+    module docstring for how a first genuine timeout is retried before it can block."""
     timeout = timeout if timeout is not None else PER_TEST_TIMEOUT_SECONDS
     env = {k: v for k, v in os.environ.items() if k not in GIT_ENV_LEAK_VARS}
     try:
@@ -175,12 +191,12 @@ def run_test_file(path, timeout=None):
             [sys.executable, path],
             capture_output=True, text=True, timeout=timeout, env=env,
         )
-        return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
+        return proc.returncode, (proc.stdout or "") + (proc.stderr or ""), False
     except subprocess.TimeoutExpired as e:
         partial = (e.stdout or "") if isinstance(e.stdout, str) else ""
-        return 124, partial + "\nTIMEOUT after %ss\n" % timeout
+        return 124, partial + "\nTIMEOUT after %ss\n" % timeout, True
     except Exception as e:  # pragma: no cover - defensive
-        return 1, "COULD NOT LAUNCH: %s\n" % e
+        return 1, "COULD NOT LAUNCH: %s\n" % e, False
 
 
 def classify(rc, output):
@@ -193,15 +209,26 @@ def classify(rc, output):
 
 
 def run_suite(root=None):
-    """[{"file", "rc", "status", "output"}] for every discovered test file, in order."""
+    """[{"file", "rc", "status", "output", "timeout_retried"}] for every discovered
+    test file, in order. A first-run timeout (the timed_out flag from run_test_file,
+    NOT the rc — so a child that merely exits 124 is a deterministic failure, no
+    retry) gets one rerun at the doubled budget; the rerun's rc/output replace the
+    first run's and are what classify() judges. timeout_retried records that the
+    rerun happened, whatever its outcome, so the summary can disclose it."""
     out = []
     for path in discover_test_files(root):
-        rc, output = run_test_file(path)
+        rc, output, timed_out = run_test_file(path)
+        timeout_retried = False
+        if timed_out:
+            timeout_retried = True
+            rc, output, _ = run_test_file(
+                path, timeout=PER_TEST_TIMEOUT_SECONDS * TIMEOUT_RETRY_MULTIPLIER)
         out.append({
             "file": display_name(path),
             "rc": rc,
             "status": classify(rc, output),
             "output": output,
+            "timeout_retried": timeout_retried,
         })
     return out
 
@@ -220,9 +247,15 @@ def format_summary(results):
              % (len(passed), len(failed), len(skipped), len(results))]
     for r in failed:
         tail = "\n".join((r["output"] or "").splitlines()[-8:])
-        lines.append("--- FAIL: %s (exit %s) ---\n%s" % (r["file"], r["rc"], tail))
+        # .get(): stubbed/legacy result dicts may predate the timeout_retried key.
+        note = ", after a timeout retry" if r.get("timeout_retried") else ""
+        lines.append("--- FAIL: %s (exit %s%s) ---\n%s" % (r["file"], r["rc"], note, tail))
     if skipped:
         lines.append("env-skip (not blocking): " + ", ".join(r["file"] for r in skipped))
+    recovered = [r for r in passed if r.get("timeout_retried")]
+    if recovered:
+        lines.append("timeout-retry (timed out under load, passed on the doubled-budget "
+                     "rerun; not blocking): " + ", ".join(r["file"] for r in recovered))
     return "\n".join(lines)
 
 
