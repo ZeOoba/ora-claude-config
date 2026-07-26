@@ -716,6 +716,70 @@ def pending_add_paths(repo, cmd):
     return paths
 
 
+# A directory / repo-root / glob / pathspec-magic ARGUMENT matches MANY files,
+# not one. Treating it as a single literal candidate collapses risk_files()/
+# candidate_paths() to a degenerate set: _content_digest() on a DIRECTORY path
+# hits OSError and returns the constant "DELETED", so review_key() becomes
+# content-independent -- confirmed by adversarial review (2026-07-26, REFUTE
+# F1/F2): a review recorded once for `git commit -- hooks/` validated FOREVER,
+# regardless of what any file under hooks/ actually contained, in ANY repo
+# (the key is not even repo-specific). `git commit -- .` similarly emptied
+# candidate_paths()/risk_files() entirely (_rel(repo, repo) == "." ->
+# risk_reason(".") == None) and bypassed eos-review-gate.py with no review
+# recorded at all.
+#
+# ROUND 2 (same day, follow-up REFUTE pass): the first fix's predicate --
+# "expand only if currently a directory or one of five hardcoded repo-root
+# strings" -- still left the literal-path fast path reachable for `-- '*'`,
+# `-- ':(top)'`, `-- ':(glob)hooks/**'`, `-- ':(icase)HOOKS'`, and a DELETED
+# directory (`os.path.isdir` is False for a path with no working-tree entry
+# left, even though `git diff --cached -- <it>` still correctly resolves the
+# files being removed) -- every one of these confirmed to reproduce F1/F2
+# verbatim, `'*'` being a one-character bypass of a BLOCKING gate. The fix
+# inverts the predicate: take the fast (unexpanded, no extra git calls) path
+# ONLY for an unambiguous, currently-existing REGULAR FILE with no leading
+# `:` (git's pathspec-magic prefix) and no shell-glob metacharacter -- every
+# other shape, including one git can find nothing for, goes through git
+# resolution. Also added `ls-files --others --exclude-standard` to the union
+# (round-2 finding R3): a directory pathspec that also matches a brand-new
+# UNTRACKED file was under-counted, missing exactly the compound
+# `git add <paths> && git commit -- <dir>` shape this fleet actually uses.
+_PATHSPEC_MAGIC_CHARS = frozenset("*?[]")
+
+
+def pathspec_arg_paths(repo, p):
+    """Absolute normcase file paths a single commit `-- <p>` pathspec argument
+    resolves to right now. The common, unambiguous case (an existing regular
+    file, no glob/magic syntax) is returned unchanged, unexpanded -- no extra
+    git calls, no behaviour change from before this fix existed. Every other
+    shape -- a directory, a repo-root form, a glob, git pathspec magic
+    (':(top)', ':(icase)', ':(glob)', ...), or a path git can find nothing
+    for on disk right now (e.g. a just-deleted directory whose removal is
+    itself what would be committed) -- is resolved through git instead of
+    trusted as a literal. Errs toward OVER-inclusion on any ambiguity (more
+    candidates flagged), the safe direction for both consumer gates -- never
+    toward silently narrowing what a pathspec actually covers.
+    ACCEPTED GAP: does not fully PARSE git's pathspec-magic grammar (it
+    detects the presence of magic via a leading ':' and defers to git's own
+    resolution rather than interpreting the magic itself) -- same single-
+    operator-cooperative threat model as the rest of this module. A form git
+    itself resolves to nothing real falls back to the literal path rather
+    than being dropped."""
+    abs_p = os.path.join(repo, p)
+    if (os.path.isfile(abs_p) and not p.startswith(":")
+            and not (_PATHSPEC_MAGIC_CHARS & set(p))):
+        return {abs_p}
+    staged = git_lines(repo, ["diff", "--cached", "--name-only", "--", p]) or []
+    modified = git_lines(repo, ["diff", "--name-only", "--", p]) or []
+    tracked = git_lines(repo, ["ls-files", "--", p]) or []
+    untracked = git_lines(
+        repo, ["ls-files", "--others", "--exclude-standard", "--", p]) or []
+    rels = set(staged) | set(modified) | set(tracked) | set(untracked)
+    if not rels:
+        return {abs_p}  # nothing git can resolve this to -- fall back, don't drop it
+    return {os.path.join(repo, r) for r in rels}
+
+
 def candidate_paths(repo, cmd):
     """Absolute normcase paths this commit would capture, or None if unknown."""
     commit_args = find_commit_segment(cmd)
@@ -731,7 +795,12 @@ def candidate_paths(repo, cmd):
     if "--" in commit_args:
         idx = commit_args.index("--")
         given = commit_args[idx + 1:]
-        return {norm(os.path.join(repo, p)) for p in given if p}
+        out = set()
+        for p in given:
+            if not p:
+                continue
+            out |= pathspec_arg_paths(repo, p)
+        return {norm(p) for p in out}
 
     staged = git_lines(repo, ["diff", "--cached", "--name-only"])
     if staged is None:
