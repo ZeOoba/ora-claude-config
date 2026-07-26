@@ -178,6 +178,8 @@ def test_exempt_sessions_and_state_never_blocked():
         ("hooks/sessions plan-gate override",
          r.path("hooks", "sessions", SID, "override")),
         ("hooks/state breadcrumb", r.path("hooks", "state", "roster.json")),
+        ("hooks/active-work claim broadcast (2026-07-26 fix)",
+         r.path("hooks", "active-work", "hooks-override-auth.json")),
     ]:
         rc, out, err = r.run(payload("Write", {"file_path": p, "content": "x"}))
         check("%s -> allow (exempt)" % label, rc == 0, "rc=%s err=%r" % (rc, err))
@@ -315,6 +317,9 @@ def test_shell_reads_and_unrelated_writes_allow():
         ("Bash token write into hooks/sessions (exempt)",
          'echo "scope: config-write" > "%s"'
          % r.path("hooks", "sessions", SID, "overrides", "allow-config-write")),
+        ("Bash claim_work.py claim (writes hooks/active-work, 2026-07-26 fix)",
+         'python "%s" claim hooks-override-auth "test claim"'
+         % r.path("hooks", "lib", "claim_work.py")),
         ("Bash python running a hook TEST (read/exec, no write verb)",
          'python "%s"' % r.path("hooks", "tests", "test-config-write-guard.py")),
     ]
