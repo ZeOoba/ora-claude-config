@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tests for git-prepush-hook-tests-gate.py — the pre-push gate that runs the FULL
-`hooks/tests/` suite and blocks a push when any test genuinely fails.
+tracked test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and blocks a
+push when any test genuinely fails.
 
 Fully isolated: TESTS_DIR_OVERRIDE points discovery at a throwaway fixture directory
 (never the real hooks/tests/), and the override-token sessions root is redirected via
@@ -13,7 +14,9 @@ fix landed without its test updated in the same commit, and nothing but a human
 manually running the suite would ever have caught it. Run: python
 test-git-prepush-hook-tests-gate.py (exit 0 = pass)
 """
+import contextlib
 import importlib.util
+import io
 import os
 import stat
 import sys
@@ -70,12 +73,73 @@ write_dummy_test(fixture_root, "test-envskip.py",
 # A non-matching file (no test- prefix) must NOT be discovered.
 write_dummy_test(fixture_root, "helper.py", "print('not a test')\n")
 
-# --- discover_test_files() ----------------------------------------------------------
+# --- discover_test_files(), explicit root -------------------------------------------
 found = gt.discover_test_files(fixture_root)
 found_names = sorted(os.path.basename(p) for p in found)
 expect("discover: finds exactly the 3 test-*.py fixtures",
        found_names == ["test-bad.py", "test-envskip.py", "test-good.py"],
        "got %r" % found_names)
+
+# Both naming styles are honored in any root: hooks/tests/ uses "test-*.py" (hyphen)
+# but maintenance/ and maintenance/_tests/ use "test_*.py" (underscore), and
+# maintenance/ itself carries BOTH. A single-pattern glob is what left the maintenance
+# trees unreachable in the first place.
+write_dummy_test(fixture_root, "test_underscore.py", "print('ok')\n")
+found_both = sorted(os.path.basename(p) for p in gt.discover_test_files(fixture_root))
+expect("discover: picks up test_*.py (underscore) alongside test-*.py",
+       found_both == ["test-bad.py", "test-envskip.py", "test-good.py",
+                      "test_underscore.py"],
+       "got %r" % found_both)
+expect("discover: still excludes non-test files (helper.py)",
+       "helper.py" not in found_both)
+os.remove(os.path.join(fixture_root, "test_underscore.py"))
+
+# --- discover_test_files(), CANONICAL roots (no explicit root) -----------------------
+# The gate must sweep all three real trees. Asserted by MEMBERSHIP of known-tracked
+# files, never by count, so landing or retiring an unrelated test never breaks this.
+canonical = gt.discover_test_files()
+canonical_rel = {gt.display_name(p) for p in canonical}
+for expected in ("hooks/tests/test-secret-patterns.py",          # hyphen style
+                 "hooks/tests/test-git-prepush-hook-tests-gate.py",
+                 "maintenance/test-append-event-log.py",          # hyphen style
+                 "maintenance/test_open_sessions_probe.py",       # underscore style
+                 "maintenance/_tests/test_hardening.py",          # nested tree
+                 "maintenance/_tests/test_fleet_contract_check.py"):
+    expect("discover (canonical): covers %s" % expected,
+           expected in canonical_rel,
+           "not in discovered set of %d" % len(canonical_rel))
+
+expect("discover (canonical): no duplicate paths across roots/patterns",
+       len(canonical) == len(set(canonical)),
+       "%d paths, %d unique" % (len(canonical), len(set(canonical))))
+# glob is non-recursive, so the maintenance/ sweep must NOT re-collect maintenance/_tests/
+# entries under a second path spelling, and must not reach into hooks/tests/ subdirs.
+expect("discover (canonical): deterministic ordering (sorted)",
+       canonical == sorted(canonical))
+# hooks/ ROOT is deliberately NOT a discovery root: hooks/test-ora-autonomy-gate.py is a
+# stale duplicate of the hooks/tests/ copy, and the gate must not certify an orphan.
+expect("discover (canonical): hooks/ root itself is not swept",
+       "hooks/test-ora-autonomy-gate.py" not in canonical_rel)
+
+# --- display_name(): repo-relative inside ~/.claude, bare basename outside ------------
+# Two trees can hold same-named files, so FAIL lines must be unambiguous; but fixture
+# files in a tempdir have no meaningful repo-relative form, so they fall back to basename.
+expect("display_name: repo file -> posix repo-relative path",
+       gt.display_name(os.path.join(gt.CLAUDE_DIR, "maintenance", "_tests",
+                                    "test_hardening.py"))
+       == "maintenance/_tests/test_hardening.py")
+expect("display_name: file outside ~/.claude -> bare basename",
+       gt.display_name(os.path.join(fixture_root, "test-good.py")) == "test-good.py")
+
+# --- TESTS_DIR_OVERRIDE seam still narrows discovery to exactly one directory ---------
+gt.TESTS_DIR_OVERRIDE = fixture_root
+try:
+    narrowed = {os.path.basename(p) for p in gt.discover_test_files()}
+    expect("TESTS_DIR_OVERRIDE: discovery is confined to the override dir",
+           narrowed == {"test-bad.py", "test-envskip.py", "test-good.py"},
+           "got %r" % sorted(narrowed))
+finally:
+    gt.TESTS_DIR_OVERRIDE = None
 
 # --- run_test_file() + classify() ---------------------------------------------------
 rc_good, out_good = gt.run_test_file(os.path.join(fixture_root, "test-good.py"))
@@ -94,6 +158,46 @@ expect("classify: rc != 0 WITH 'CANNOT RUN:' sentinel -> env-skip",
 
 expect("classify: a timeout (no sentinel) is a real failure, not env-skip",
        gt.classify(124, "TIMEOUT after 90s\n") == "fail")
+
+# --- run_test_file(): must not leak git hook env vars into the test subprocess --------
+# Simulates git's own pre-push hook environment: git sets GIT_DIR/GIT_WORK_TREE (and
+# friends) in the hook process's env so IT can operate on the outer repo. Bug: this
+# gate's run_test_file() spawned each test file via subprocess.run() with no env=
+# override, so every discovered test inherited these vars too -- silently redirecting
+# any `git -C <tempdir>` call a test makes back onto the outer repo instead of its own
+# temp fixture (same bug class fixed per-test-file in commit 337a7af; never fixed here).
+leak_probe_root = tempfile.mkdtemp(prefix="gt-leak-probe-")
+leak_probe = write_dummy_test(
+    leak_probe_root, "test-leak-probe.py",
+    "import os, sys\n"
+    "leaked = [v for v in ('GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR',\n"
+    "                       'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES',\n"
+    "                       'GIT_PREFIX') if v in os.environ]\n"
+    "if leaked:\n"
+    "    print('LEAKED: %r' % leaked)\n"
+    "    sys.exit(1)\n"
+    "print('clean')\n"
+    "sys.exit(0)\n")
+
+_leak_env_vars = {
+    "GIT_DIR": r"C:\fake\.git", "GIT_WORK_TREE": r"C:\fake",
+    "GIT_INDEX_FILE": r"C:\fake\.git\index", "GIT_COMMON_DIR": r"C:\fake\.git",
+    "GIT_OBJECT_DIRECTORY": r"C:\fake\.git\objects",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES": r"C:\fake\.git\alt", "GIT_PREFIX": "",
+}
+_saved_env = {k: os.environ.get(k) for k in _leak_env_vars}
+os.environ.update(_leak_env_vars)
+try:
+    rc_leak, out_leak = gt.run_test_file(leak_probe)
+finally:
+    for k, v in _saved_env.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+
+expect("run_test_file: parent's GIT_DIR/GIT_WORK_TREE/etc. do not leak into the "
+       "test subprocess", rc_leak == 0, "got rc=%r out=%r" % (rc_leak, out_leak))
 
 # --- run_suite() ---------------------------------------------------------------------
 suite = gt.run_suite(fixture_root)
@@ -159,6 +263,8 @@ with tempfile.TemporaryDirectory() as td:
         f.write("# test log\n\n## 2000-01-01 — seed\n\n- seed entry\n")
     gt.EVENT_LOG_OVERRIDE = tmp_log
 
+    real_run_suite = gt.run_suite
+
     # (a) pass + env-skip only -> exit 0, nothing logged.
     gt.run_suite = lambda root=None: [
         {"file": "test-good.py", "status": "pass", "rc": 0, "output": "ok\n"},
@@ -173,9 +279,20 @@ with tempfile.TemporaryDirectory() as td:
     gt.run_suite = lambda root=None: [
         {"file": "test-bad.py", "status": "fail", "rc": 1, "output": "boom\n"},
     ]
-    rc_noSession = gt.main()
+    captured = io.StringIO()
+    with contextlib.redirect_stdout(captured):
+        rc_noSession = gt.main()
     expect("main: real failure + no session id -> exit 1 (BLOCK)",
            rc_noSession == 1, "got %r" % rc_noSession)
+    # Regression guard: main() must actually WRITE the format_summary() report before
+    # blocking -- a prior draft of this gate silently dropped that write while adding the
+    # discovery floor below, so a blocked push showed a stderr "(see report above)" with
+    # nothing above it. Assert the real report content lands on stdout, not just the exit
+    # code, so that class of regression fails this suite instead of surviving it.
+    summary_out = captured.getvalue()
+    expect("main: failing run actually PRINTS the summary report to stdout",
+           "1 fail" in summary_out and "test-bad.py" in summary_out,
+           "captured stdout was %r" % summary_out)
 
     # (c) real failure, session id present, no token -> BLOCK, nothing logged.
     os.environ["CLAUDE_CODE_SESSION_ID"] = SESSION
@@ -216,8 +333,46 @@ with tempfile.TemporaryDirectory() as td:
     expect("main: clean run never looks for a token (no speculative consume)",
            probed == [], "override_token consulted on a clean run: %r" % probed)
 
+    # (f) discovery floor: zero discovered tests is a gate failure in its own right,
+    # NOT eligible for the hook-test-failure override (wrong scope -- "no tests found"
+    # is a broken gate, not a failing test). Must block even with a valid token present
+    # and even with no session id at all.
+    gt.run_suite = lambda root=None: []
+    mint(td, SESSION, good_token())
+    os.environ["CLAUDE_CODE_SESSION_ID"] = SESSION
+    rc_empty_with_token = gt.main()
+    expect("main: zero discovered tests -> BLOCK even with a valid override token",
+           rc_empty_with_token == 1, "got %r" % rc_empty_with_token)
+
+    os.environ.pop("CLAUDE_CODE_SESSION_ID", None)
+    rc_empty_no_session = gt.main()
+    expect("main: zero discovered tests -> BLOCK with no session id too",
+           rc_empty_no_session == 1, "got %r" % rc_empty_no_session)
+
+    # (g) per-root discovery floor: the TOTAL-emptiness check above misses the case where
+    # SOME roots still yield files but one silently doesn't (e.g. hooks/tests/ itself
+    # vanishing -- which also carries this very gate's own sentinel test, so its loss
+    # would otherwise be invisible). Fake a non-empty root + a genuinely empty real
+    # directory as the discovery roots, but stub run_suite to return non-empty results
+    # (bypassing the total-emptiness branch), and confirm the per-root check still blocks.
+    real_default_test_dirs = gt.default_test_dirs
+    empty_root = tempfile.mkdtemp(prefix="gt-emptyroot-")
+    nonempty_root = tempfile.mkdtemp(prefix="gt-nonemptyroot-")
+    write_dummy_test(nonempty_root, "test-x.py", "print('ok')\n")
+    gt.default_test_dirs = lambda: [nonempty_root, empty_root]
+    gt.run_suite = lambda root=None: [
+        {"file": "test-x.py", "status": "pass", "rc": 0, "output": "ok\n"},
+    ]
+    rc_partial_empty = gt.main()
+    gt.default_test_dirs = real_default_test_dirs
+    expect("main: one silently-empty root -> BLOCK even though overall results non-empty",
+           rc_partial_empty == 1, "got %r" % rc_partial_empty)
+
     os.environ.pop("ORA_OVERRIDE_SESSIONS_DIR", None)
     os.environ.pop("CLAUDE_CODE_SESSION_ID", None)
+    # Restore run_suite so nothing after this point in a future edit silently inherits a
+    # gate that discovers zero tests (code review finding, 2026-07-25).
+    gt.run_suite = real_run_suite
 
 passed = sum(1 for ok, _ in results if ok)
 print("\ngit-prepush-hook-tests-gate tests: %d/%d passed" % (passed, len(results)))
