@@ -419,6 +419,16 @@
         "hooks": [
           {
             "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/active-work-broadcast.py\"",
+            "timeout": 10,
+            "statusMessage": "Checking for cross-session claims"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
             "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/fleet-session-hook.py\"",
             "async": true
           }

@@ -1,0 +1,206 @@
+"""Cross-session claim/broadcast primitive for ad-hoc work on shared ~/.claude
+subsystems that have no per-path single-writer rule (unlike ora-skills,
+scheduled-task registries, workflows/).
+
+WHY (2026-07-25, task_17998414): reference_concurrent_session_duplicate_hardening_work.md
+logs 6 recorded collisions where two sessions independently duplicated work on the same
+shared subsystem without knowing about each other -- most severely, two sessions each
+hardening the same override-token defect in different gate files on 2026-07-16, found
+only by chance via `git worktree list`. The existing mitigation (manually run
+`git worktree list` + check `list_sessions` before starting hook/security work) already
+failed to catch that exact collision. This module is the "touch a marker file naming the
+subsystem you're about to fix" convention the same reference file predicted, generalized
+to a small free-form vocabulary of subsystem slugs (see docs/superpowers/specs/
+2026-07-25-cross-session-claim-broadcast-design.md for the full design and why each
+choice below matches an already-ratified pattern elsewhere in this codebase).
+
+DESIGN, one line each:
+  * One JSON file per claim (hooks/active-work/<slug>.json), never a shared file --
+    same no-lock-needed argument fleet-session-hook.py's 2026-07-24 per-session-file
+    rewrite already proved out (it moved OFF a shared session-state.json + mutex after
+    that measurably lost data under concurrency).
+  * Fail-open, TTL-expired (2 hours), NOT a hard lock -- matches tech.md Sec3d's ratified
+    Master Workbook doctrine ("a crashed session holding a hard claim would wedge every
+    other session -- a worse failure than an occasional missed collision").
+  * Written by hand (via this module's CLI), not auto-detected by a PreToolUse hook --
+    classifying "non-trivial hook work" from a single tool call has too high a false
+    positive/negative rate; stays a documented convention, like the two existing named
+    single-writer rules.
+
+NOT a security boundary: any session can release or overwrite any claim file (no
+ownership enforcement). It is a courtesy broadcast, not an access-control mechanism --
+matching the existing single-writer rules, which are also conventions, not gates.
+
+Stdlib only. ASCII-only. Windows (`python`).
+"""
+import argparse
+import datetime
+import json
+import os
+import sys
+
+CLAIMS_DIR = os.environ.get("ORA_ACTIVE_WORK_DIR") or \
+    r"C:\Users\Owner\.claude\hooks\active-work"
+DEFAULT_TTL_MINUTES = 120  # headroom above the 90-min stuck-session-watchdog kill
+                            # threshold, so a legitimately long task's claim survives
+                            # while a genuinely stuck session's claim goes stale before
+                            # it can mislead anyone for long
+
+
+def _safe_filename(slug):
+    """Filesystem-safe encoding of a subsystem slug, mirroring
+    fleet-session-hook.py's _safe_filename() for session ids -- defense-in-depth,
+    not a format assumption (slugs are free-form, agent-supplied strings)."""
+    safe = "".join(c if (c.isalnum() or c in "-_") else "_" for c in (slug or "unknown"))
+    return safe + ".json"
+
+
+def claim_path(slug, base_dir=None):
+    return os.path.join(base_dir or CLAIMS_DIR, _safe_filename(slug))
+
+
+def _now_iso(now=None):
+    return (now or datetime.datetime.now()).strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def _parse_iso(s):
+    try:
+        return datetime.datetime.strptime(s, "%Y-%m-%dT%H:%M:%S")
+    except Exception:
+        return None
+
+
+def own_session_id():
+    return (os.environ.get("CLAUDE_CODE_SESSION_ID") or
+            os.environ.get("CLAUDE_CODE_HOST_SESSION_ID") or "unknown")
+
+
+def write_claim(slug, session_id, description, title=None, cwd=None, base_dir=None,
+                 now=None):
+    """Write (or overwrite) this session's claim on `slug`. Atomic rename + a
+    pid-unique tmp name, same pattern as fleet-session-hook.py's save_session() --
+    closes the exact same "two writers share one tmp path" hazard that pattern was
+    built to avoid, even though here only one process should ever be claiming a
+    given slug at a time (two sessions racing to claim the SAME slug at the SAME
+    instant is the collision this module exists to make visible after the fact,
+    not something it needs to prevent at write time)."""
+    base_dir = base_dir or CLAIMS_DIR
+    os.makedirs(base_dir, exist_ok=True)
+    data = {
+        "session_id": session_id,
+        "title": title or slug,
+        "description": description,
+        "claimed_at": _now_iso(now),
+        "cwd": cwd or os.getcwd(),
+    }
+    path = claim_path(slug, base_dir)
+    tmp = "%s.tmp.%d" % (path, os.getpid())
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+    os.replace(tmp, path)
+    return path
+
+
+def release_claim(slug, base_dir=None):
+    """Best-effort delete. Not required for correctness -- an unreleased claim
+    simply ages out past DEFAULT_TTL_MINUTES -- but keeps the broadcast quiet
+    sooner when a session remembers to call it."""
+    path = claim_path(slug, base_dir or CLAIMS_DIR)
+    try:
+        os.remove(path)
+        return True
+    except Exception:
+        return False
+
+
+def read_active_claims(base_dir=None, ttl_minutes=DEFAULT_TTL_MINUTES, now=None):
+    """Every non-expired claim currently on disk. Fail-open throughout: a missing
+    directory, an unreadable/malformed individual file, or a non-dict payload are
+    all skipped rather than raised -- mirrors session_liveness.py's
+    other_active_sessions() contract (never raise, degrade to "no information").
+    A claim with an unparseable or future `claimed_at` is also dropped rather than
+    trusted, since a caller cannot age-order a claim it can't parse."""
+    base_dir = base_dir or CLAIMS_DIR
+    now = now or datetime.datetime.now()
+    out = []
+    try:
+        names = os.listdir(base_dir)
+    except Exception:
+        return out
+    for name in names:
+        if not name.endswith(".json"):
+            continue  # excludes "<slug>.json.tmp.<pid>" leftovers too -- they don't
+                       # end in ".json"
+        path = os.path.join(base_dir, name)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                d = json.load(f)
+        except Exception:
+            continue
+        if not isinstance(d, dict):
+            continue
+        claimed_at = _parse_iso(d.get("claimed_at", ""))
+        if claimed_at is None:
+            continue
+        age_minutes = (now - claimed_at).total_seconds() / 60.0
+        if age_minutes > ttl_minutes or age_minutes < 0:
+            continue
+        out.append({
+            "slug": name[:-5],
+            "session_id": d.get("session_id", "?"),
+            "title": d.get("title", "?"),
+            "description": d.get("description", ""),
+            "claimed_at": d.get("claimed_at", ""),
+            "cwd": d.get("cwd", ""),
+            "age_minutes": age_minutes,
+        })
+    out.sort(key=lambda c: c["age_minutes"])
+    return out
+
+
+def main():
+    p = argparse.ArgumentParser(
+        description="Claim or release a shared ~/.claude subsystem for ad-hoc work, "
+                     "so other sessions' SessionStart hook broadcasts it automatically. "
+                     "See docs/superpowers/specs/2026-07-25-cross-session-claim-broadcast-design.md")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    c = sub.add_parser("claim", help="Register a claim on a subsystem slug")
+    c.add_argument("slug", help="e.g. hooks-override-auth, open-items-tracker, "
+                                 "oxford-command-center-data")
+    c.add_argument("description", help="One line: what you're doing and why")
+    c.add_argument("--title")
+
+    r = sub.add_parser("release", help="Clear a claim you previously made")
+    r.add_argument("slug")
+
+    sub.add_parser("list", help="List all currently live (non-expired) claims")
+
+    args = p.parse_args()
+
+    if args.cmd == "claim":
+        sid = own_session_id()
+        path = write_claim(args.slug, sid, args.description, title=args.title)
+        print("Claimed '%s' as session %s -> %s" % (args.slug, sid, path))
+        return 0
+
+    if args.cmd == "release":
+        ok = release_claim(args.slug)
+        print(("Released '%s'" % args.slug) if ok else
+              ("No claim found for '%s' (already released or expired)" % args.slug))
+        return 0
+
+    if args.cmd == "list":
+        claims = read_active_claims()
+        if not claims:
+            print("No active claims.")
+        for cl in claims:
+            print("%s: session %s, %.0fm ago -- %s" % (
+                cl["slug"], cl["session_id"][:8], cl["age_minutes"], cl["description"]))
+        return 0
+
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
