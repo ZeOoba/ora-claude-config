@@ -25,6 +25,14 @@ DEFAULT_DIR = "C:/Users/Owner/.claude/telemetry"
 OUT_NAME = "lane-telemetry.jsonl"
 DEFAULT_SESSIONS_DIR = "C:/Users/Owner/.claude/hooks/sessions"
 
+# Record schema version. Bump ONLY when the record shape or a detector's
+# meaning changes in a way the rollup must segment on.
+#   1 (implicit, no field) -- blind era. Records predate `ts`; the dispatch
+#     detector could not see the real `Agent` tool name, so task_dispatched
+#     is uniformly false and MEANINGLESS. ~766 such records exist on disk.
+#   2 -- dispatch detection fixed (2026-07-24) and capability self-declared.
+SCHEMA_VERSION = 2
+
 EDIT_TOOLS = ("Edit", "Write", "MultiEdit")
 # Subagent-dispatch tools. EXACT match only -- never a prefix/substring test:
 # TaskCreate / TaskUpdate / TaskList / TaskGet / TaskOutput / TaskStop are
@@ -169,11 +177,18 @@ def main():
         pass  # a corrupt override file must not drop the rest of the record
 
     record = {
-        # Emission timestamp. Required to segment records written after the
-        # 2026-07-24 dispatch-detection fix from the blind-era backlog, which
-        # is uniformly task_dispatched=false and would otherwise depress the
-        # blended rate indefinitely. Specified in the EOS reliability-hardening
-        # design but never implemented.
+        # Explicit capability declaration. `ts` presence was only ever a PROXY
+        # for "this emitter could detect subagent dispatch" -- a future change
+        # that regressed a detector while still stamping `ts` would be silently
+        # trusted by the rollup, reproducing the wrongly-low rate this whole
+        # mechanism exists to prevent. The schema version is the direct signal.
+        "schema": SCHEMA_VERSION,
+        # DERIVED from the live constant, never a hand-maintained literal: a
+        # literal would keep advertising "Agent" after DISPATCH_TOOLS lost it.
+        # Sorted for stable, diffable output.
+        "detectors": {"dispatch": sorted(DISPATCH_TOOLS)},
+        # Emission timestamp. Retained as the backward-compatible cohort key
+        # for the ~766 records written before `schema` existed.
         "ts": datetime.now(timezone.utc).isoformat(),
         "session_id": session_id,
         "edits": edits,
