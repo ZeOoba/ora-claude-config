@@ -12,6 +12,15 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-26 — CLAUDE.md Engineering OS spec citations corrected (2 stale pointers)
+
+While rewriting an external "brutally nitpicky code reviewer" prompt and comparing it against the actual local review stack (`pr-review-toolkit`, `security-auditor`, `coderabbit`), a survey of `docs/superpowers/specs/2026-06-05-engineering-operating-system-design.md` found two doctrine/spec mismatches in CLAUDE.md's Engineering OS section:
+
+1. Line 67 cited "Full detail: Engineering OS spec §7" for the mandatory adversarial REFUTE pass on financial-decision/security-gate code — grep of the spec found no "REFUTE" text anywhere in it. Spec §7 does hold the general Done bar (TDD, typecheck, lint, suite, repo gate, independent review), just not the REFUTE clause specifically.
+2. Line 69 cited "Model-tier assignment: spec §8" — on disk, model-tier content actually lives at §7.1; §8 is "Confidentiality gates the review tool."
+
+Fix applied (Gabriel-approved in-turn, `allow-config-write` token minted for this session): line 67's citation now reads "Engineering OS spec §7 (general Done bar; the REFUTE-pass clause is CLAUDE.md-only — not yet mirrored in spec)"; line 69's citation corrected to "spec §7.1". No content/requirement changed — citations only. Root cause not investigated further (spec vs. CLAUDE.md have likely drifted independently across edits); if the REFUTE-pass clause should be grafted into the spec itself, that's separate follow-up work, not done here.
+
 ## 2026-07-26 — Master Workbook lease-date correction + oxford-command-center brain-mirror deploy
 
 Gate failure on `npm run gate`'s reconcile step (`Count: Leases exp 137 got 138`) traced through several layers, not a simple baseline staleness:
