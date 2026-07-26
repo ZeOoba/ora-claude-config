@@ -544,6 +544,223 @@ def test_record_cli_rejects_under_tier_model():
     print("PASS test_record_cli_rejects_under_tier_model")
 
 
+def test_record_cli_cmd_scopes_pathspec_commit_and_validates_against_main():
+    """2026-07-26 fix: without --cmd, --record scores every at-risk path in the
+    WHOLE working tree -- so in a busy shared checkout with an unrelated risk
+    file staged elsewhere (another session's work), a review recorded for a
+    pathspec-scoped commit could never validate against what main() actually
+    gates on for that commit (main() correctly narrows via risk_files/
+    candidate_paths). Passing --cmd makes the CLI compute the EXACT same
+    scope+digest as main(), so the recorded review validates."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "hooks/mine.py", "x = 1\n")
+    git(repo, "add", "hooks/mine.py")
+    write(repo, "hooks/theirs.py", "y = 1\n")  # another session's file, also staged
+    git(repo, "add", "hooks/theirs.py")
+
+    cmd = 'git commit -m "my scoped change" -- hooks/mine.py'
+
+    # Whole-tree --record (no --cmd) sees BOTH files...
+    rc, out, err = run_cli(
+        ["--record", "--verdict", "approved", "--model", LADDER_TOP,
+         "--notes", "n"], repo, tmp)
+    assert rc == 0, "whole-tree --record failed: %s" % err
+    assert set(json.loads(out)["paths"]) == {"hooks/mine.py", "hooks/theirs.py"}
+
+    # ...and does NOT satisfy the narrower pathspec-scoped commit's gate.
+    rc, out, err = run_hook(cmd, repo, tmp)
+    assert_blocked(rc, err, "whole-tree review must not satisfy a narrower pathspec commit")
+
+    # --cmd-scoped --record sees ONLY what that commit will land...
+    rc, out, err = run_cli(
+        ["--record", "--cmd", cmd, "--verdict", "approved", "--model", LADDER_TOP,
+         "--notes", "n"], repo, tmp)
+    assert rc == 0, "--cmd-scoped --record failed: %s" % err
+    assert json.loads(out)["paths"] == ["hooks/mine.py"]
+
+    # ...and NOW the pathspec-scoped commit is allowed.
+    rc, out, err = run_hook(cmd, repo, tmp)
+    assert_allowed(rc, err, "cmd-scoped review must satisfy the matching commit")
+    print("PASS test_record_cli_cmd_scopes_pathspec_commit_and_validates_against_main")
+
+
+def test_key_cli_cmd_matches_hook_key_for_all_flag_commit():
+    """--cmd scoping must also match main() for a NON-pathspec commit shape
+    (`-a`), not just the pathspec case -- scope_for_cmd is the single source
+    of truth for both, so this is really pinning that main() and the CLI never
+    diverge for any cmd shape, not just the one that motivated the fix. The
+    unrelated file stays UNTRACKED (never staged): -a only re-stages already-
+    TRACKED modified files, so an untracked file is correctly excluded from
+    this commit regardless of --cmd scoping -- this is not the same "staged
+    but unrelated" scenario the pathspec test above covers."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "hooks/tracked.py", "x = 1\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "baseline")
+    write(repo, "hooks/tracked.py", "x = 2  # unstaged edit\n")
+    write(repo, "hooks/other-live-session.py", "z = 1\n")  # untracked, unrelated
+
+    cmd = 'git commit -am "tweak"'
+    rc, out, err = run_cli(["--key", "--cmd", cmd], repo, tmp)
+    assert rc == 0, err
+    cmd_scoped = json.loads(out)
+    assert cmd_scoped["paths"] == ["hooks/tracked.py"], (
+        "-a must see the unstaged tracked edit but not the untracked, "
+        "never-staged unrelated file: %r" % cmd_scoped["paths"])
+
+    rc, out, err = run_cli(
+        ["--record", "--cmd", cmd, "--verdict", "approved", "--model", LADDER_TOP,
+         "--notes", "n"], repo, tmp)
+    assert rc == 0, err
+    rc, out, err = run_hook(cmd, repo, tmp)
+    assert_allowed(rc, err, "cmd-scoped review of an -a commit must satisfy main()")
+    print("PASS test_key_cli_cmd_matches_hook_key_for_all_flag_commit")
+
+
+def test_directory_pathspec_does_not_collapse_to_constant_key():
+    """2026-07-26 adversarial-review finding F1 (CRITICAL). `_content_digest`
+    on a DIRECTORY path hits OSError and returns the constant "DELETED" --
+    treating a directory pathspec argument as one literal candidate path made
+    review_key() content-independent: a review recorded once for
+    `git commit -- hooks/` validated FOREVER regardless of what any file
+    under hooks/ actually contained. Confirmed reproducible pre-fix; this
+    pins the fix -- the key MUST change when the directory's contents change,
+    and a NEW file added under the directory MUST also change it."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "hooks/a.py", "SAFE = 1\n")
+    git(repo, "add", "hooks/a.py")
+    cmd = 'git commit -m "scoped" -- hooks/'
+
+    rc, out, err = run_cli(["--key", "--cmd", cmd], repo, tmp)
+    assert rc == 0, err
+    first = json.loads(out)
+    assert first["paths"] == ["hooks/a.py"], (
+        "directory pathspec must expand to real files, not stay a literal "
+        "'hooks' candidate: %r" % first["paths"])
+    key1 = first["key"]
+
+    write(repo, "hooks/a.py", "BACKDOOR = True\n")
+    git(repo, "add", "hooks/a.py")
+    rc, out, err = run_cli(["--key", "--cmd", cmd], repo, tmp)
+    key2 = json.loads(out)["key"]
+    assert key2 != key1, "key must change when the directory's content changes"
+
+    write(repo, "hooks/b.py", "NEW_RISK = True\n")
+    git(repo, "add", "hooks/b.py")
+    rc, out, err = run_cli(["--key", "--cmd", cmd], repo, tmp)
+    third = json.loads(out)
+    assert set(third["paths"]) == {"hooks/a.py", "hooks/b.py"}
+    assert third["key"] != key2, "key must change when a new file is added under the directory"
+
+    # A review recorded for the directory pathspec at the earlier (2-file) state
+    # must not satisfy the live hook for the current (2-file, different content) commit.
+    rc, out, err = run_cli(
+        ["--record", "--cmd", cmd, "--verdict", "approved", "--model", LADDER_TOP,
+         "--notes", "n"], repo, tmp)
+    assert rc == 0, err
+    rc, out, err = run_hook(cmd, repo, tmp)
+    assert_allowed(rc, err, "review matching the CURRENT directory content must satisfy the commit")
+
+    # Now mutate a file WITHOUT re-recording -- the stale review must not satisfy it.
+    write(repo, "hooks/a.py", "BACKDOOR 2 = True\n")
+    git(repo, "add", "hooks/a.py")
+    rc, out, err = run_hook(cmd, repo, tmp)
+    assert_blocked(rc, err, "mutating a file under the reviewed directory must invalidate the review")
+    print("PASS test_directory_pathspec_does_not_collapse_to_constant_key")
+
+
+def test_bare_dot_pathspec_still_gates():
+    """2026-07-26 adversarial-review finding F2 (HIGH, same root cause as F1).
+    `git commit -- .` resolved to the repo-root literal path "." via _rel(),
+    whose risk_reason() is None (it is not itself a named risk file) --
+    risk_files() came back EMPTY and the gate allowed a real hooks/**
+    landing with NO review at all, not even an unsatisfiable one. Confirmed
+    reproducible pre-fix (git show --name-only HEAD showed the risk file
+    actually landed). Also exercises './' and ':/' (git's other repo-root
+    pathspec forms) and, per the ROUND-2 follow-up REFUTE pass, the forms
+    the FIRST fix attempt (an isdir-or-hardcoded-string predicate) still
+    missed: a shell glob ('*'), and git's own pathspec-magic long/short
+    forms (':(top)' == ':/' spelled out, ':(glob)hooks/**', ':(icase)HOOKS')
+    -- each confirmed pre-round-2-fix to allow (rc=0) with risk_files() empty."""
+    for root_form in (".", "./", ":/", ":", "*",
+                      ":(top)", ":(glob)hooks/**", ":(icase)HOOKS"):
+        repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+        write(repo, "hooks/new-guard.py", "x = 1\n")
+        git(repo, "add", "-A")
+        rc, out, err = run_hook('git commit -m "x" -- \'%s\'' % root_form, repo, tmp)
+        assert_blocked(rc, err, "pathspec %r must still gate" % root_form)
+    print("PASS test_bare_dot_pathspec_still_gates")
+
+
+def test_glob_pathspec_key_is_not_a_constant():
+    """ROUND-2 REFUTE finding R2: `git commit -- 'hooks/*.py'` (a glob, not a
+    bare directory) still hit the SAME literal-path fast path as the
+    unfixed-round-1 code, because round 1's predicate only special-cased
+    os.path.isdir() and five hardcoded strings -- a glob is neither. Content
+    digest on the non-existent literal path "hooks/*.py" returned the
+    constant DELETED, exactly reproducing F1 for any glob pathspec."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "hooks/a.py", "SAFE = 1\n")
+    git(repo, "add", "hooks/a.py")
+    cmd = "git commit -m x -- 'hooks/*.py'"
+    rc, out, err = run_cli(["--key", "--cmd", cmd], repo, tmp)
+    assert rc == 0, err
+    first = json.loads(out)
+    assert first["paths"] == ["hooks/a.py"], first["paths"]
+    key1 = first["key"]
+    write(repo, "hooks/a.py", "BACKDOOR = True\n")
+    git(repo, "add", "hooks/a.py")
+    rc, out, err = run_cli(["--key", "--cmd", cmd], repo, tmp)
+    key2 = json.loads(out)["key"]
+    assert key2 != key1, "glob pathspec key must not be a content-independent constant"
+    print("PASS test_glob_pathspec_key_is_not_a_constant")
+
+
+def test_deleted_directory_pathspec_still_resolves_via_git():
+    """ROUND-2 REFUTE finding R2 (deleted-dir variant): round 1's predicate
+    used os.path.isdir(), which is False for a directory whose last tracked
+    file was just `git rm`'d -- even though `git diff --cached -- <it>`
+    still correctly reports the deletion. Round 1 fell through to the
+    literal-path fast path, producing the same constant DELETED digest."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "hooks/old/critical-guard.py", "GUARD = 1\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "baseline")
+    git(repo, "rm", "-q", "-r", "hooks/old")
+    cmd = "git commit -m x -- hooks/old"
+    rc, out, err = run_cli(["--key", "--cmd", cmd], repo, tmp)
+    assert rc == 0, err
+    rels = json.loads(out)["paths"]
+    assert rels == ["hooks/old/critical-guard.py"], (
+        "deleted-directory pathspec must resolve to the real deleted path, not "
+        "a literal 'hooks/old' candidate: %r" % rels)
+    print("PASS test_deleted_directory_pathspec_still_resolves_via_git")
+
+
+def test_untracked_file_under_directory_pathspec_is_covered():
+    """ROUND-2 REFUTE finding R3: pathspec_arg_paths' directory expansion
+    unioned staged + unstaged-tracked-modified + tracked, but NOT untracked
+    (ls-files --others --exclude-standard) -- so a review recorded for
+    `-- hooks/` before a brand-new untracked file existed under it did not
+    account for that file, yet `git add hooks/ && git commit -- hooks/`
+    (this fleet's own documented committing shape) lands it anyway."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "hooks/a.py", "SAFE = 1\n")
+    git(repo, "add", "hooks/a.py")
+    record_cmd = "git commit -m x -- hooks/"
+    rc, out, err = run_cli(
+        ["--record", "--cmd", record_cmd, "--verdict", "approved",
+         "--model", LADDER_TOP, "--notes", "n"], repo, tmp)
+    assert rc == 0, err
+
+    write(repo, "hooks/evil.py", "EVIL = True\n")  # brand-new, untracked at record time
+    rc, out, err = run_hook(
+        'git add hooks/ && git commit -m x -- hooks/', repo, tmp)
+    assert_blocked(rc, err,
+        "a new untracked file under the reviewed directory must invalidate the review")
+    print("PASS test_untracked_file_under_directory_pathspec_is_covered")
+
+
 def test_record_cli_refuses_when_nothing_is_at_risk():
     repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
     write(repo, "src/ui/button.tsx", "export const B = 1\n")

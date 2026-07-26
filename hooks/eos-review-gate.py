@@ -100,6 +100,14 @@ CLI (this is how the gate is actually satisfiable):
   python eos-review-gate.py --record --verdict approved --model <pinned-id> \
       --notes "<summary>"
       -> writes the artifact for the CURRENT key.
+  --cmd "<exact git commit invocation>" (2026-07-26, either subcommand):
+      scope --key/--record to ONLY what that specific commit would land,
+      identically to how main() will gate it -- required for a PATHSPEC-
+      SCOPED commit (`git commit ... -- <path>`) in a busy shared checkout:
+      without --cmd, --key/--record score every at-risk path anywhere in the
+      working tree, which can never match main()'s narrower per-commit key
+      whenever another session has unrelated risk files staged/modified/
+      untracked elsewhere. See scope_for_cmd()'s docstring.
 
 Stdlib only. ASCII-only. Windows (`python`).
 """
@@ -121,7 +129,7 @@ try:
     import override_tokens
     from git_commit_parse import (
         candidate_paths, find_commit_segment, git_lines, has_all_flag,
-        is_git_commit, pending_add_paths, repo_root,
+        is_git_commit, pathspec_arg_paths, pending_add_paths, repo_root,
     )
     PARSE_CONTRACT_LOADED = True
 except Exception:
@@ -392,12 +400,20 @@ def _worktree_sourced_rels(repo, cmd):
         return out
     if "--" in commit_args:
         idx = commit_args.index("--")
+        # DIRECTORY-PATHSPEC EXPANSION (2026-07-26, REFUTE F1/F2 fix): must
+        # mirror candidate_paths' own pathspec_arg_paths() expansion exactly.
+        # Without this, a directory pathspec's expanded FILES (from
+        # risk_files/candidate_paths) would not appear in this set at all --
+        # _origin_content_digest would then treat them as index-sourced
+        # instead of worktree-sourced, missing the same re-reads-the-
+        # working-tree behavior this function exists to capture.
         for p in commit_args[idx + 1:]:
             if not p:
                 continue
-            rel = _rel(repo, os.path.join(repo, p))
-            if rel:
-                out.add(rel)
+            for abs_path in pathspec_arg_paths(repo, p):
+                rel = _rel(repo, abs_path)
+                if rel:
+                    out.add(rel)
         return out  # pathspec form: ONLY these paths, all worktree-sourced
     if has_all_flag(commit_args):
         for p in (git_lines(repo, ["diff", "--name-only"]) or []):
@@ -422,6 +438,27 @@ def _origin_content_digest(repo, cmd, rel, worktree_sourced):
         return _content_digest(repo, rel)
     digest = _index_digest(repo, rel)
     return digest if digest is not None else _content_digest(repo, rel)
+
+
+def scope_for_cmd(repo, cmd):
+    """(rels, digest_fn) for the exact bytes a specific `git commit` invocation
+    `cmd` would land -- the SAME computation main() uses to decide whether to
+    block. Single source of truth for both call sites (2026-07-26 fix): before
+    this, --key/--record used _worktree_risk_rels (every at-risk path in the
+    WHOLE working tree) while main() used this narrower, cmd-scoped
+    computation. For a pathspec-scoped commit (`git commit ... -- <path>`) in
+    a busy shared checkout with OTHER risk files staged/modified/untracked
+    elsewhere, those two scopes differ -- so a review recorded via --record
+    keyed over the wider set could never validate against main()'s narrower
+    key for that same commit. The operator's only paths forward were
+    unstaging the foreign files or burning the single-use override token,
+    for a commit that was already correctly scoped and needed neither.
+    Passing this cmd to --key/--record now produces a key GUARANTEED to
+    match what main() will check for that exact invocation."""
+    rels = risk_files(repo, cmd)
+    worktree_sourced = _worktree_sourced_rels(repo, cmd)
+    digest_fn = lambda r: _origin_content_digest(repo, cmd, r, worktree_sourced)  # noqa: E731
+    return rels, digest_fn
 
 
 def review_key(repo, rels, digest_fn=None):
@@ -522,6 +559,12 @@ def build_message(repo, rels, session_id, key, artifact_state):
         "     python \"%s\" --record --verdict approved --model <pinned-id> "
         "--notes \"<what was reviewed and found>\"\n"
         "     (`--key` prints the exact key + path list to hand the reviewer.)\n"
+        "     If this commit is PATHSPEC-SCOPED (`git commit ... -- <path>`), "
+        "pass `--cmd \"<the exact git commit invocation>\"` to both --key and "
+        "--record so the review scopes to only what THIS commit lands -- "
+        "otherwise, in a busy shared checkout, other sessions' unrelated "
+        "staged/modified/untracked risk files get scored into the key too and "
+        "it will never match.\n"
         "  3. The artifact is keyed to this exact content. Edit any of these "
         "files afterward and it stops matching -- re-review, do not re-record.\n\n"
         "If Gabriel has approved landing this UNREVIEWED, write a single-use "
@@ -595,37 +638,52 @@ def _worktree_risk_rels(root):
 
 
 def _cli_context(argv):
+    """(root, session_id, rels, digest_fn) for the --key/--record CLI.
+
+    CMD-SCOPING (2026-07-26 fix): if `--cmd "<git commit ...>"` is given, rels
+    and digest_fn come from scope_for_cmd -- the exact same computation main()
+    will use to gate THAT invocation, so the resulting key is guaranteed to
+    validate against it. Without --cmd, falls back to the original behaviour
+    (_worktree_risk_rels: every at-risk path anywhere in the working tree,
+    plain working-tree-byte digest) -- still correct for an operator who has
+    not yet decided their exact commit invocation, or intends a plain
+    `git commit` covering everything currently staged."""
     repo = _arg(argv, "--repo") or os.getcwd()
     root = repo_root("", repo)
     if not root:
         sys.stderr.write("eos-review-gate: not a git repo: %s\n" % repo)
-        return None, None, None
+        return None, None, None, None
     session_id = (_arg(argv, "--session")
                   or os.environ.get("CLAUDE_CODE_SESSION_ID") or "")
     if not override_tokens.SESSION_ID_RE.match(session_id):
         sys.stderr.write(
             "eos-review-gate: no usable session id (set CLAUDE_CODE_SESSION_ID "
             "or pass --session); a review artifact cannot be addressed.\n")
-        return None, None, None
-    rels = _worktree_risk_rels(root)
-    return root, session_id, rels
+        return None, None, None, None
+    cmd = _arg(argv, "--cmd")
+    if cmd:
+        rels, digest_fn = scope_for_cmd(root, cmd)
+    else:
+        rels = _worktree_risk_rels(root)
+        digest_fn = None
+    return root, session_id, rels, digest_fn
 
 
 def cli_key(argv):
-    root, session_id, rels = _cli_context(argv)
+    root, session_id, rels, digest_fn = _cli_context(argv)
     if root is None:
         return 1
     sys.stdout.write(json.dumps({
         "repo": root.replace("\\", "/"),
         "paths": rels,
         "reasons": {r: risk_reason(r) for r in rels},
-        "key": review_key(root, rels) if rels else "",
+        "key": review_key(root, rels, digest_fn) if rels else "",
     }, indent=2))
     return 0
 
 
 def cli_record(argv):
-    root, session_id, rels = _cli_context(argv)
+    root, session_id, rels, digest_fn = _cli_context(argv)
     if root is None:
         return 1
     if not rels:
@@ -646,7 +704,7 @@ def cli_record(argv):
             "eos-review-gate: verdict %r recorded as NON-approving; the gate will "
             "keep blocking. Approving verdicts: %s\n"
             % (verdict, ", ".join(APPROVED_VERDICTS)))
-    key = review_key(root, rels)
+    key = review_key(root, rels, digest_fn)
     path = artifact_path(session_id, key)
     if not path:
         sys.stderr.write("eos-review-gate: session id cannot address an artifact.\n")
@@ -697,7 +755,12 @@ def main():
     if not repo:
         return  # cannot resolve a repo -> no information -> allow
 
-    rels = risk_files(repo, cmd)
+    # Origin-aware, cmd-scoped rels + digest (see module docstring's PROVENANCE
+    # FIX / M1, and scope_for_cmd's own docstring for the 2026-07-26 CLI-parity
+    # fix): the key must reflect whatever bytes THIS specific commit invocation
+    # actually lands per path -- index for a plainly-staged path, working tree
+    # for one sourced via -a/pending-add/explicit pathspec -- and nothing else.
+    rels, digest_fn = scope_for_cmd(repo, cmd)
     if not rels:
         return  # nothing blast-radius in this commit -> allow silently
 
@@ -705,12 +768,6 @@ def main():
     if not isinstance(session_id, str):
         session_id = ""
 
-    # Origin-aware digest (see module docstring's PROVENANCE FIX / M1): the key
-    # must reflect whatever bytes THIS specific commit invocation actually
-    # lands per path -- index for a plainly-staged path, working tree for one
-    # sourced via -a/pending-add/explicit pathspec.
-    worktree_sourced = _worktree_sourced_rels(repo, cmd)
-    digest_fn = lambda r: _origin_content_digest(repo, cmd, r, worktree_sourced)  # noqa: E731
     key = review_key(repo, rels, digest_fn)
     if valid_review(session_id, key):
         return  # reviewed, and the review matches THIS content -> allow
