@@ -11,11 +11,17 @@ mtime-only sentinel stays dead; see that module's docstring for the four defects
 that killed it).
 
 WHAT IT GATES (token tier allow-config-write, scope config-write, 60 min, multi-use):
-  * <root>/hooks/**            EXCEPT hooks/sessions/** and hooks/state/**
-                               (SELF-DEADLOCK DEFENSE: the override token itself
-                               lives at hooks/sessions/<sid>/overrides/ -- gating it
-                               would make the gate unsatisfiable; hooks/state/ is a
-                               runtime breadcrumb dir, not governance code)
+  * <root>/hooks/**            EXCEPT hooks/sessions/**, hooks/state/**, and
+                               hooks/active-work/** (SELF-DEADLOCK DEFENSE: the
+                               override token itself lives at
+                               hooks/sessions/<sid>/overrides/ -- gating it would
+                               make the gate unsatisfiable; hooks/state/ is a
+                               runtime breadcrumb dir, not governance code;
+                               hooks/active-work/ is claim_work.py's claim-broadcast
+                               file (2026-07-26 fix) -- CLAUDE.md's own "claim ad-hoc
+                               hook work before starting" doctrine was unsatisfiable
+                               without this, since the claim write itself named
+                               hooks/ and tripped this same gate)
   * <root>/settings.json, <root>/settings.local.json
   * <root>/CLAUDE.md
   * either fleet's scheduled-task registry backing file (defense-in-depth on top of
@@ -161,8 +167,9 @@ def _classify(norm_path, root):
     if norm_path == hooks_root or norm_path.startswith(hooks_root + "/"):
         rel = norm_path[len(hooks_root):]
         if rel.startswith("/sessions/") or rel == "/sessions" \
-                or rel.startswith("/state/") or rel == "/state":
-            return None  # exempt: token/runtime state -- self-deadlock defense
+                or rel.startswith("/state/") or rel == "/state" \
+                or rel.startswith("/active-work/") or rel == "/active-work":
+            return None  # exempt: token/runtime state/claim-broadcast -- self-deadlock defense
         return ("governance", "hooks/** (live governance code)")
     for base, label in (("settings.json", "settings.json"),
                         ("settings.local.json", "settings.local.json"),
@@ -200,7 +207,7 @@ def _shell_marker_sets():
     generic_roots = {root, "~/.claude", ".claude"}
     exempt, governance, claim = [], [], []
     for g in generic_roots:
-        exempt += [g + "/hooks/sessions", g + "/hooks/state"]
+        exempt += [g + "/hooks/sessions", g + "/hooks/state", g + "/hooks/active-work"]
         governance += [(g + "/hooks", "hooks/**"),
                        (g + "/settings.json", "settings.json"),
                        (g + "/settings.local.json", "settings.local.json"),
