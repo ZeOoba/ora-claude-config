@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-07-22T22:01:14.788Z
+  modified: 2026-07-25T18:20:03.259Z
 ---
 
 # ORA Tech Stack & Reference
@@ -56,6 +56,14 @@ The old VERDICT logic flagged ATTENTION on ANY never-ran task, ANY expired one-t
 - **Alarm:** file-only (`Desktop\STUCK-SESSION-ALERT.txt` + `maintenance\stuck-session-watchdog.log`) when it actually kills something; silent log-only on a clean run. No email, no toast — same convention as fleet-deadman.ps1. Manual dry run: `-WhatIf` (logs what would be killed, kills nothing).
 - **Open follow-up:** this cleans up after the hang, it doesn't prevent it. The actual fix is adding a timeout to whichever specific step in `ora-health-guard`/`ora-site-exposure-probe` (or elsewhere) is hanging — not yet root-caused to a single step, just to "some step in Block B or C lacks one." Worth a dedicated investigation next time the alert file fires with a fresh, still-diagnosable process tree.
 - All three guards fail OPEN on any internal error or unsimulatable edit shape — a bug here must never block a legitimate write (same posture as every other PreToolUse guard in this stack). Full guard inventory + TDD suites: `~/.claude/hooks/*.py` + `~/.claude/hooks/tests/test-*.py` (one test file per guard). The `fleet-deadman.ps1` Windows task (registered as "ORA Fleet Dead-Man") was likewise lost in the 2026-07 machine migration and was re-registered 2026-07-16 (Gabriel ruling G7).
+
+## 3d. Master Workbook single-writer protocol (RATIFIED 2026-07-25)
+- **Why:** the live ORA Master Workbook's own "Claude Log" sheet showed ~140 turns on 2026-07-24 from what read as multiple uncoordinated agent sessions writing to the same file — a botched rent-roll sort that corrupted formula references (Turns 108/111/112, caught in 115) and a debt-balance cell (`External Loans Summary!E10`) that flip-flopped 5× in immediate succession (Turns 132–136). Unlike `ora-skills` or the scheduled-task registries, this workbook had no analogous single-writer gate — the one file CLAUDE.md names as FIRST for firm figures. Full incident + rationale: memory `project_master_workbook_no_single_writer_2026-07-24.md`, `project_master_workbook_single_writer_proposal_2026-07-25.md`.
+- **NOT a hard lock.** [[feedback_fail_open_over_mutex_for_fleet_gates]] is the ratified house default — a crashed session holding a hard claim on the ONE master workbook would wedge every other session and every scheduled brief/reconciliation job, a worse failure than an occasional missed collision.
+- **Scope:** applies only before STRUCTURAL writes (sorts, row insert/delete, mass formula rewrite — the actual failure category in Turns 108/111/112) to the 4 highest-blast-radius sheets: **Master Tenant Rent Roll, External Loans Summary, Property NOI, Portfolio Summary.** Single-cell value edits (the vast majority of turns, e.g. one lease-date correction) are lower blast-radius and skip the claim entirely, matching Engineering OS's existing blast-radius calibration.
+- **Claim protocol (documented convention, no shared script — mirrors the ora-skills `git log -1` pattern):** before a STRUCTURAL write to one of the 4 sheets above, (1) stamp `{sessionId, startedAt, expiresAt}` — TTL ~15 min — into a dedicated `_active_sessions` sheet in the workbook; (2) read the Claude Log's own last row — if its timestamp is within the TTL window and its logged actor isn't this session, that's a second affirmative signal: STOP and surface the conflict rather than silently proceeding or overwriting. Two independent affirmative signals are required before treating a write as unsafe — absence of information is never license to block.
+- **Fail-open:** if the claim area is unreadable, malformed, or the check itself errors, proceed anyway (log a warning to the Claude Log) rather than block.
+- **On completion:** clear (or let expire) the claim; log the turn to Claude Log as already happens.
 
 ## 4. MCP connectors
 

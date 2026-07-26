@@ -17,6 +17,25 @@ Set at creation/recreation time. `automation-health-monitor`'s **Model-currency 
 
 > **CORRECTION 2026-07-12:** this file previously asserted the check was "Step 0.07" and already live. In fact the automation-health-monitor SKILL.md carried NO model-currency step at all until 2026-07-12 — the methodology was documented here but never implemented in the skill body (which only had Steps 1–4). The step was authored on 2026-07-12 (needs a Cowork Save-skill re-upload to deploy; see [[reference_scheduled_task_model_standard]] usage in the health monitor).
 
+## Tag scope & required fields (ratified 2026-07-24)
+
+Two gaps surfaced by `ora-task-integrity-guard`'s 2026-07-24 13:01 ET run: an undated tag that no classifier bucket fit cleanly, and one-time/paused tasks accumulating as permanent `MODEL-UNTAGGED` noise in the daily count. Both are settled here — this is the one home for the rules; the guard's STEP 2.5 and `register-scheduled-task` cite this section rather than restating it.
+
+**The date half is REQUIRED, on both fleets.** `[MODEL: <id>]` with no `| set YYYY-MM-DD` or `| checked YYYY-MM-DD` is NOT a valid tag — freshness is unassertable, so the value cannot be aged against the "Current lineup as of" anchor in [[reference_model_release_checklist]]. Classify an undated tag as the stale bucket for its fleet (CC/MCP → `MODEL-OBSERVATION-STALE`; LAMS → `MODEL-STALE`) and re-observe / re-set at the next supervised touch. Precedent: `ora-511-industrial-fallout-check` shipped a bare `[MODEL: claude-sonnet-5]`.
+
+**Who must carry a tag** — scope follows the MECHANISM, not the fleet:
+
+| Task state | Tag required? | Verb | Why |
+|---|---|---|---|
+| LAMS/Cowork, enabled — recurring **or** one-time | YES | `set` | Model binds at creation and IS settable. A one-time task created on a superseded model will fire on that model, so the assertion is real and forward-looking. |
+| CC/MCP, enabled recurring | YES | `checked` | Not settable, but observable; a recurring task has future fires the observation informs. |
+| CC/MCP, one-time (`fireAt`) | NO — exempt | — | Here the tag is an OBSERVATION of a server pin. Before the task fires there is nothing to observe; after it fires it self-disables, so there is no future run the observation could inform. Bucket as `MODEL-N/A (one-time)`, never `MODEL-UNTAGGED`. |
+| Disabled/paused, either fleet | NO — exempt while paused | — | A task that is not firing cannot be observed and needs no set-value. Bucket as `MODEL-N/A (paused)`. **Re-tagging is a precondition of re-enabling** — see `register-scheduled-task`'s PAUSE section. |
+
+`MODEL-N/A` is an exemption, not a finding: it never counts as a gap and never implies an action. `MODEL-UNTAGGED` is reserved for tasks genuinely in scope per the table above and missing a tag — that bucket, and only that bucket, is the real coverage gap. This supersedes the ad-hoc handling in the 2026-07-13 and 2026-07-15 entries below ("2 disabled tasks remain untagged — low priority while disabled" was directionally right but never stated as a rule; the 07-15 entry's parenthetical treating a future LAMS one-time fire as in-scope-and-already-tagged is CORRECT and is now the ratified LAMS row above).
+
+**Applied at ratification (CC/MCP, 2026-07-24):** `ora-tenant-hubspot-reconciliation` was the only genuinely in-scope untagged task — tagged `[MODEL: UNVERIFIABLE | checked 2026-07-24]`. `check-dirty-files-session-pr` (disabled), `ora-override-sweep-dryrun-check` + `check-shared-checkout-settled-140pm` (one-time) reclassified UNTAGGED → `MODEL-N/A`; `ora-511-industrial-fallout-check` (one-time) exempted, its undated tag left in place as harmless.
+
 ## To bump the standard
 
 1. Update the **Current standard** line above.

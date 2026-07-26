@@ -5,12 +5,51 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-07-21T16:29:47.975Z
+  modified: 2026-07-25T00:59:46.598Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## Corruption-recurrence root cause closed; concurrent-session collision found mid-fix (2026-07-25)
+
+Root-caused the "corruption still recurring" report (t <t@t.t> authorship + phantom `wt-branch` worktree): `amazing-lamarr-c659bb` forked from main at `1fe2ae3`, before `337a7af`/`be82a87` (the GIT_DIR/GIT_WORK_TREE env-leak fixes) landed — so its copies of those 8 test files never got the guard. Building `8b45f67` in that stale worktree re-triggered the already-fixed leak, corrupting the worktree's own git identity and, via `test-memory-orphan-link-guard.py`'s worktree-resolution case, registering a real `wt-branch` branch/worktree against the live repo. No new/undiscovered vulnerable file was needed to explain it — confirmed `test-config-write-guard.py` (an earlier inconclusive catch) doesn't spin up a real git repo at all, ruling it out.
+
+Found one genuinely still-open instance of the same class: `maintenance/test-doctrine-integrity-probe.py`'s `git init`/`git -C <tmp> add` calls had no env-clearing guard, and `8b45f67` was about to wire it into the blocking pre-push gate. Reproduced (contaminated GIT_DIR/GIT_WORK_TREE -> exit 128), fixed with the same guard pattern as the other 8 files, verified clean under both conditions, full 50-file hook-tests-gate green. Merged to main and pushed: `c1f5601`.
+
+`8b45f67` itself turned out already merged to main via PR #22 (`5f4c7b0`, author "ZE OOBA <ggoldberg@oxfordra.net>") by the time this session checked — not by this session. Per Gabriel's ruling, left the `t <t@t.t>` authorship on `337a7af`/`be82a87` (and the "ZE OOBA" naming on `5f4c7b0`) uncorrected: fixing it needs a force-push, which is hard-denied in settings.json, on a private solo backup repo where it's cosmetic-only. Also per Gabriel's ruling, skipped adding a settings.json guard against `git worktree add -b` — the vulnerable-file class is now closed, and a blanket rule risks false-positives on legitimate worktree creation.
+
+**Collision found while cleaning up:** by the time the phantom `wt-branch` worktree/branch needed removing, ANOTHER session had already deleted it and stood up its own worktree `C:\Users\Owner\.claude\.claude\worktrees\wt-branch-collision-fix` (branch `worktree-wt-branch-collision-fix`, off `5f4c7b0`) with **uncommitted** edits in progress to `hooks/tests/test-confidentiality-guard.py`, `test-git-prepush-scan.py`, and `test-memory-orphan-link-guard.py` — the same bug class, likely hardening the worktree-add fixture pattern itself. This session did NOT touch those 3 files (only `test-doctrine-integrity-probe.py`, untouched by the other session). Per [[reference_concurrent_session_duplicate_hardening_work]], flagging here rather than guessing at or duplicating that in-progress work — whoever picks this up next should read that worktree's diff before touching the same 3 files.
+
+**Why:** recurring "corruption" reports without a session-collision check risk chasing a phantom 9th bug or duplicating a fix another session is already mid-way through.
+
+**How to apply:** if `test-confidentiality-guard.py`/`test-git-prepush-scan.py`/`test-memory-orphan-link-guard.py` need the same env-leak/isolation treatment again, check `wt-branch-collision-fix`'s worktree diff and whether it merged before starting fresh.
+
+## 2026-07-25 â€” Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `ef02eb35-61f8-4ac2-beb4-f2aa0c774bc6` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel confirmed in-turn ("open the pr now") after two rounds of diagnosis showing all failures are pre-existing hooks/tests/ files unrelated to this diff, root-caused to a GIT_DIR/GIT_WORK_TREE env-leak in run_test_file() (subprocess.run has no env= override) that only manifests under a real git pre-push hook invocation, not under standalone runs. Not caused by or related to the two files this diff touches.
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-07-25 17:03:27 local.
+
+## 2026-07-25 — Shared-checkout investigation: wrong-file edit found and corrected, orphaned skill-mirror tree discovered (OI-025)
+Investigating the dirty-`~/.claude`-checkout flag raised at the end of the prior turn surfaced a real defect: this session's earlier HubSpot-idle-flag and tracker-output changes to `ora-tenant-hubspot-reconciliation` had been applied to `Claude_Workspace\00_Governance\Scheduled\ora-tenant-hubspot-reconciliation\SKILL.md`, which `list_scheduled_tasks` confirms is NOT the registered path (`~\.claude\scheduled-tasks\ora-tenant-hubspot-reconciliation\SKILL.md` is canonical) — the edit had no effect. Also found a separate, already-live, uncommitted edit on the canonical file (from an earlier session that day, ~11:19 AM) adding a DATE-MISMATCH check (HubSpot closedate vs. `oxford-command-center`'s `portfolio.json` leaseEnd) for the Stone Crest/Chesapeake/J&R lease-date drift, and a third session's ~2:10 PM edit to `open-items-tracker.md` OI-021 that had already triaged the original "~49 stuck HubSpot deals" down to 8 real items (7 resolved) and flagged the remaining ~37 as a policy gap — the same finding this session's punch-list had surfaced independently.
+Re-verified no further changes to the canonical file/tracker since discovery, then merged the IDLE category (re-lettered to 3e to avoid colliding with the other session's 3d) and the tracker-output redirect into the canonical file on top of the other session's DATE-MISMATCH work, preserving it. Archived the orphaned Claude_Workspace mirror folder to `_archive_2026-07-25_orphans\` in place (moved, not deleted).
+Discovered in passing: `Claude_Workspace\00_Governance\Scheduled\` holds 100+ scheduled-task folders of unverified live/dead status, including apparent name-collisions with live CC tasks. Logged as `open-items-tracker.md#OI-025` rather than audited in full — out of scope for this pass.
+No git commit made — the `~/.claude` checkout still has multiple sessions' uncommitted work; left for reconciliation rather than a blanket commit.
+
+## 2026-07-25 — Systematization punch-list actioned (4 items)
+Gabriel ruled on the session's "worth systematizing (≤5)" list via AskUserQuestion:
+1. **Master workbook single-writer protocol** — RATIFIED as the recommended package (new `_active_sessions` sheet claim marker, documented-convention enforcement, scoped to the 4 highest-blast-radius sheets: Rent Roll, External Loans Summary, Property NOI, Portfolio Summary). Canonical text moved from the proposal file into `tech.md` §3d; proposal file marked RATIFIED and cross-links there. See `project_master_workbook_single_writer_proposal_2026-07-25.md`.
+2. **HubSpot renewal-deal idle-stage flag** — Gabriel set flag-only, 6-month lease-expiration / 30-day-idle threshold. Added as category (d) IDLE to `ora-tenant-hubspot-reconciliation` SKILL.md (Claude_Workspace/00_Governance/Scheduled), output folded into item 3 below.
+3. **ora-tenant-hubspot-reconciliation output relocation** — step 6 changed from a standalone Notion Ops Hub child page to direct `open-items-tracker.md` rows (own `OI-NNN` per finding), closing the discoverability gap that nearly caused a redundant hand-redo.
+4. **Unsigned-draft-to-signature nudge** — Gabriel set 5-business-day threshold, housed inside the existing `ora-weekly-hygiene` cadence rather than a new cron entry. Added as Block M (report-only, output also routed to `open-items-tracker.md`), catalyzed by the Kareem/Cricket DC LLC amendment sitting unsigned 07-17→07-25 undetected.
+
+Files touched: `tech.md`, `MEMORY.md`, `project_master_workbook_single_writer_proposal_2026-07-25.md`, `~/.claude/scheduled-tasks/ora-weekly-hygiene/SKILL.md`, `Claude_Workspace/00_Governance/Scheduled/ora-tenant-hubspot-reconciliation/SKILL.md`. No workbook, HubSpot, or Notion data touched — documentation/skill-spec changes only, nothing executed live this session.
+
+## 2026-07-24 — Governor-LTV false-clearance remediation shipped (PR #233)
+
+ The weekly ora-financial-code-integrity-sweep found 7 defects (2 HIGH: negative-balance aggregate deflation + empty-snapshot book wipe, both false clearances of the Hard-Invariant-4 40% ceiling). Gabriel ordered fixes; 4 rounds of independent adversarial review then found 4 MORE real defects in the fixes themselves (id-overlap shrinkage guard froze refis; collision-padding masked a total wipe; preserved-id double-count over-triggered; shared-schema LTV bound failed whole-snapshot parse). Final state: net-shrinkage guard on writeDebtSnapshot with allowEmptySupersede confirmation, emptyCohort null-verdict, Zod-validated POST /snapshot, persisted-column updated_at gates on both acq sync writers ('archived' now no-clobber-locked), inclusive-ceiling float epsilon, and a round-7 ltv==rate collision defense (aggregate function only). Commit 50ffdec, branch fix/governor-ltv-false-clearance, Refute-Reviewed trailer. 3062/3062 tests. OPEN residuals: (1) debt-scoring.ts per-property signals still consume raw ltv unguarded — spawned task task_fe4b5d56; (2) refusedEmptySupersede is surfaced in POST /snapshot response + backfill CLI but the automated server/index.ts reload path only console.warns a refusal — a frozen book still looks healthy downstream; (3) pre-existing lease-count reconcile mismatch (exp 137 got 138) on origin/main, unrelated, unfixed. Process lesson: two guards built same-day each needed outside adversarial review to catch a real defect — refute passes on financial code are load-bearing, not ceremony.
 
 ## 2026-07-24 — ora-pm-ledger: Block B retro-sweep mode built; snapshot-diff cross-day defect fixed; alerts-engine "wrong dates" misdiagnosis corrected
 
@@ -207,6 +246,10 @@ Related: [[reference_commit_provenance_guard]] · [[reference_event_log_partial_
 **Verified.** `same-time collisions 0`. Verdict remains ATTENTION but now driven *solely* by throttle skips (11/24h), which match the documented benign catch-up-burst pattern in `reference_fleet_throttle_skip_catchup_burst.md`.
 
 **NOT committed.** `scheduled-tasks/ora-task-integrity-guard/SKILL.md` carries another session's uncommitted v1.7 work (STEP 2.5 classifier retirement + Git Bash path-quoting fix); the shared-checkout hook flagged 16 uncommitted changes across 5 sessions in the .claude main checkout. My edits are surgical exact-string replacements that touch none of their hunks, but the commit is left to the v1.7 owner to avoid sweeping their work (commit-provenance-guard class).
+
+## 2026-07-24 — acquisition-underwriting v4.4 installed (STAGE 2.8 — FORG v1.0, Save-skill click confirmed)
+
+Adds Functional Obsolescence & Durability Grade (proposed/pilot; BDS-5 ratified at 10 pts by Gabriel 2026-07-23). Source: ora-skills commit `4a29470` (local main; not yet pushed to origin as of this entry — origin/main still at `979b12d`). Packaged via Entry Point A on Code (repo-direct, after two failed Entry Point B chat-attachment handoffs — root cause: the Cowork session had real-filesystem Desktop Commander access and never needed a chat "attachment," just the real path); installed via Entry Point B on Cowork reading the `.skill` directly off disk once redirected. Post-install verified from Code: runtime cache (`skills-plugin\...\acquisition-underwriting\`) SHA256-identical to repo on both `SKILL.md` and `target-markets.json`, H1 reads v4.4, `STAGE 2.8` present, BDS-5 ratification line present, cache mtime 2026-07-24 11:31.
 
 ## 2026-07-24 — ora-deal-aging-sla v1.1 (dashed-UUID fix + STEP 3b posture doctrine); landed via a foreign janitor commit with commit-provenance-guard silent
 
@@ -1307,3 +1350,29 @@ Two of the 2026-07-22 Automation Health report's workflow-optimization candidate
 Both changes are additive-only to both SKILL.mds — no prior logic, table rows, or rules were removed or reordered. `automation-health-monitor`'s frontmatter description and end-of-file changelog were bumped to v1.14 with matching notes.
 
 **SELF-CORRECTION, same session:** the first attempt to log this entry used Desktop Commander `write_file` without `mode: 'append'`, which defaults to `mode: 'rewrite'` — this overwrote the entire file (990→11 lines, ~183KB of history destroyed) before the append-vs-rewrite default was caught. Recovered via `git restore -- memory/event_log.md` (this file is tracked in the `.claude/projects/...` git repo, last commit `afc1334`, working tree was otherwise only CRLF/LF-different from HEAD — confirmed via `git diff --stat` before restoring, so nothing beyond the errant write itself was lost). Logging per Calibrate convention: **`write_file` calls against any file under `memory/` (or any tracked/historical file) must always pass `mode: 'append'` explicitly when the intent is to append — never rely on the tool's default.**
+
+
+## 2026-07-24 — acquisition-underwriting v4.4 (STAGE 2.8 / FORG v1.0) installed via package-and-stage-skill Entry Point B
+
+- Built on the Code surface via Entry Point A from `ora-skills` local `main` @ `4a29470e0f2e5370e4cc1bd4ebb0cd2f108d2f2d` ("ratify BDS-5 at 10 pts (Gabriel ruling 2026-07-23)"). NOT yet pushed to origin (`origin/main` = `979b12d480495f84e60b11cf110e74ad940ed02c`, which itself already carries STAGE 2.8/FORG — only the final BDS-5 10-pt ratification commit is ahead of origin).
+- Handoff to Cowork took three attempts. First two failed silently: the referenced chat attachment never landed (`uploads/`, `uploads-tmp/`, and a full recursive filesystem sweep for the filename all came back empty, both times). Third attempt corrected course to a direct Desktop Commander real-filesystem path (`ora-skills\_staging\2026-07-24_acq-uw-v4.4-entrypointA\acquisition-underwriting.skill`), which succeeded.
+- Entry Point B integrity pre-check: exists (62,148 bytes) confirmed · SHA256 `E77F37A8A12C4B9D312473B5BC8F05EE6EABDE4E91EEA6361451A4C97736199B` matched the handoff-supplied hash exactly · zip entries = `acquisition-underwriting/SKILL.md` + `acquisition-underwriting/target-markets.json` only, forward-slash paths · freshness: both files byte-identical (raw SHA256) to repo `acquisition-underwriting/SKILL.md` and repo-root `target-markets.json` at HEAD — no drift found.
+- Staged to session outputs, `present_files`'d, Gabriel confirmed the **Save-skill click** (Cowork button, not desktop Settings→Capabilities — multi-file package).
+- Post-install verification: runtime cache mirror (`...\skills-plugin\583f08bc-0123-4111-8158-8fe3d927e350\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\skills\acquisition-underwriting\`) contains both files, byte-identical (SHA256 match) to the packaged copy. SKILL.md header now reads **v4.4 — Buy Box & Scorecard v1.1**; STAGE 2.8 — Functional Obsolescence & Durability Grade (FORG v1.0, PROPOSED) confirmed present in the installed copy. Remaining "v4.3" hits are changelog history only, not the current header — expected, not drift.
+- `python tools\pending_reimport.py clear acquisition-underwriting` → `not pending (nothing to clear)`; `_staging/PENDING_REIMPORT.md` does not exist on disk. No open ledger entry existed to close for this skill.
+- Governance note: FORG v1.0 / STAGE 2.8 remains tagged PROPOSED/pilot in the installed SKILL.md (recommended, not yet mandatory outside FULL mode) — only BDS-5's 10-pt value is ratified, not the stage's mandatory status.
+
+
+## 2026-07-24 (cont.) — register-scheduled-task v2.8 already in sync, no reimport needed (package-and-stage-skill short-circuit)
+
+Invoked to close the register-scheduled-task v2.8 (commit 609164f, "require dated [MODEL:] tag at registration + PAUSE re-enable precondition") gap in `_staging/PENDING_REIMPORT.md` (pending since 2026-07-24T18:25Z) ahead of Monday's `ora-skill-store-drift-check` run.
+
+**Step 0 (plugin-membership gate):** `plugin_of('register-scheduled-task')` -> `None` — standalone skill, not a plugin member.
+
+**Step 1 (source confirm):** `git status --short -- register-scheduled-task/` clean; HEAD for the path = `609164f` (matches the ledger commit exactly).
+
+**Step 2 (runtime-cache pre-check, single file — SKILL.md only, no subfolders):** repo `ora-skills\register-scheduled-task\SKILL.md` vs runtime cache `...\skills-plugin\583f08bc-0123-4111-8158-8fe3d927e350\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\skills\register-scheduled-task\SKILL.md` — file count 1=1, zero RAW SHA256 mismatch, zero missing-in-cache. Both copies read v2.8 header and identical body text (spot-checked, then confirmed by whole-file hash match — no EOL-normalization pass was needed since raw already matched). **Conclusion: the runtime cache is already at v2.8. A Save-skill install evidently already occurred for this commit; it was never logged and the ledger entry was never cleared** — the same unlogged-click pattern the skill's own v1.5 changelog (2026-07-15 near-miss) exists to catch.
+
+**Per Step 2's short-circuit rule: STOPPED before packaging — no `.skill` was built, no Save-skill click was requested of Gabriel.** `python tools\pending_reimport.py clear register-scheduled-task` run to close the now-stale ledger line (cache re-sync is the qualifying event per the ledger's own clear-condition, regardless of which session's click produced it). `monthly-close` and `ora-flood-zoning-dd` ledger lines left untouched (out of scope this pass).
+
+**Flag for Gabriel:** the install that produced this sync was not captured in this log by whichever session performed it — worth a quick check of other recent Cowork/Code session transcripts if attribution matters, but the cache content itself is unambiguous and correct at v2.8.

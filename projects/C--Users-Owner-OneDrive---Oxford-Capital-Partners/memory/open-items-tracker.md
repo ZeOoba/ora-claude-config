@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-07-24T16:42:10.735Z
+  modified: 2026-07-25T22:28:59.597Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -33,13 +33,14 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
 | [OI-009](#OI-009) | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Verify the 93 Notion Tenant DB rows with no workbook counterpart against primary leases (low priority) |
-| [OI-015](#OI-015) | 2026-07-18 | ora-appsec-sweep first run (2026-07-18) | ora-pm: declassified E. Fulton deal terms persist in git history + external remote — deferred purge (Gabriel's timing); S-003 suppression candidate |
 | [OI-016](#OI-016) | 2026-07-18 | ora-appsec-sweep first run (2026-07-18) | ora-pm: upgrade `hono` (<=4.12.24) — direct runtime dep, HIGH CVEs (CORS/Set-Cookie/path-traversal); effective MED on Workers |
 | [OI-017](#OI-017) | 2026-07-18 | ora-appsec-sweep first run (2026-07-18) | ora-pm + oxford-command-center: build/test/deploy toolchain CVEs (vitest/vite/wrangler/concurrently→shell-quote/transformers→adm-zip) — no prod-reachable path, semver-major fixes |
+| [OI-022](#OI-022) | 2026-07-19 | OI-015 investigation (2026-07-19) | GitHub Data API still serves the pre-rewrite E. Fulton blob (`39b02f4585...`, kept alive by PR #2's internal `refs/pull/2/head`, not deletable via git/API/settings) — Support ticket #4584520 reopened 2026-07-20 with the corrected SHA (`6aed9a7`), awaiting GitHub's purge |
 | [OI-019](#OI-019) | 2026-07-19 | [event_log.md](event_log.md#2026-07-19) | Gabriel must add `HUBSPOT_TOKEN` (Private App, `crm.objects.deals.read`) to `oxford-command-center/.env` — PR #221 (frontend trigger) ready, blocked only on the credential. Once live, re-verify 2146 Enterprise Pkwy Twinsburg OH (currently untracked in projects.md/deal-decision-ledger.md) lands correctly in acq_candidates |
 | [OI-020](#OI-020) | 2026-07-19 | [event_log.md](event_log.md#2026-07-19) | ora-cowork-heartbeat: LAMS registry entry has no `approvedPermissions` grant (root cause, 3x documented since 07-16). No MCP tool on either surface can write this — only fix is Gabriel manually approving the Notion-tool prompt during a live unattended fire in Cowork's own Scheduled Tasks UI (a manual "Run Now" doesn't count). GitHub watchdog issue open, needs manual closure once genuinely fixed |
 | [OI-024](#OI-024) | 2026-07-24 | `hooks/shared-checkout-guard.py` (attribution test realignment, commit b599432) | Guard reads provenance from `SHARED_CHECKOUT_SESSIONS_DIR`, not `commit_provenance.sessions_dir()` — inert today (neither env var set, both resolve to `hooks/sessions`), but setting `COMMIT_PROVENANCE_SESSIONS_DIR` alone would silently degrade attribution to UNATTRIBUTED forever. Gabriel's call 2026-07-24: log, don't fix |
-| [OI-021](#OI-021) | 2026-07-19 | [event_log.md](event_log.md#2026-07-19) | Restoration Church Trust: no borrower-side repayment/extension conversation logged since the Apr 2026 Covenant Watch call for lender outreach "by June 2026" (deadline passed); needs Gabriel's own outreach decision (outbound comms, not initiated here). Separately: HubSpot's "Lease Renewal — Restoration Church Trust" deal ($16,714, appointmentscheduled) is likely the same mis-entered-loan-counterparty error already fixed in the Tenant DB (OI-009) — needs a retirement decision. 49 other renewal-pipeline deals also stuck in appointmentscheduled from a 2026-03-27 bulk import with no stage-advancement wiring — needs a lease-renewal-pipeline batch pass |
+| [OI-021](#OI-021) | 2026-07-19 | [event_log.md](event_log.md#2026-07-19) | Restoration Church Trust: no borrower-side repayment/extension conversation logged since the Apr 2026 Covenant Watch call for lender outreach "by June 2026" (deadline passed); needs Gabriel's own outreach decision (outbound comms, not initiated here). Separately: HubSpot's "Lease Renewal — Restoration Church Trust" deal ($16,714, appointmentscheduled) is likely the same mis-entered-loan-counterparty error already fixed in the Tenant DB (OI-009) — needs a retirement decision. The other 49-stuck-deals batch pass CLOSED 2026-07-25, see below |
+| [OI-025](#OI-025) | 2026-07-25 | shared-checkout investigation, this session | `Claude_Workspace\00_Governance\Scheduled\` holds 100+ scheduled-task folders (incl. several `_archive_*` subfolders already in that same directory) whose live/dead status vs. the two documented fleet registries is unverified — one instance (`ora-tenant-hubspot-reconciliation`) was confirmed orphaned and archived this session; the rest (including apparent name-collisions with live CC tasks like `ora-am-brief`, `ora-weekly-hygiene`, `ora-health-guard`) are unaudited |
 
 ### OI-009
 **Status:** OPEN (substantial progress made 2026-07-17, real scope remains)
@@ -490,7 +491,7 @@ it requires a GitHub Support request, not a git operation. Spun off as OI-022.
 **Auto-check:** none.
 
 ### OI-022
-**Status:** OPEN — drafted, needs Gabriel to submit
+**Status:** OPEN — submitted, awaiting GitHub Support action (ticket #4584520, reopened 2026-07-20 with corrected SHA)
 **Opened:** 2026-07-19
 **Source:** OI-015 investigation (2026-07-19)
 **Description:** the original (pre-rewrite) blob containing real E. Fulton `CONFIDENTIAL_TERMS` values
@@ -621,6 +622,60 @@ provenance var set too. Being security-gate code, this needs the mandatory adver
 and not worth a guard edit inside a test-only change.
 **Auto-check:** none.
 
+### OI-021
+**Status:** OPEN — Restoration Church Trust sub-items remain; the renewal-pipeline batch pass is CLOSED
+**Opened:** 2026-07-19
+**Source:** [event_log.md](event_log.md#2026-07-19)
+**Restoration Church Trust (still open, unchanged):** no borrower-side repayment/extension conversation
+logged since the Apr 2026 Covenant Watch call for lender outreach "by June 2026" (deadline passed) —
+needs Gabriel's own outreach decision, not initiated here. HubSpot's "Lease Renewal — Restoration
+Church Trust" deal ($16,714, still `appointmentscheduled`) — deliberately NOT touched in the 2026-07-25
+batch pass below (same mis-entered-loan-counterparty pattern as OI-009, needs Gabriel's retirement
+call).
+**Renewal-pipeline batch pass — CLOSED 2026-07-25.** A `/debug` pass on Command Center's lease-alert
+bug (separate incident, see [[project_master_workbook_no_single_writer_2026-07-24]]) surfaced this
+item; chased it down the same session. Before touching anything, found the monthly
+`ora-tenant-hubspot-reconciliation` sweep (2026-07-22, Notion "HubSpot-Tenant Reconciliation — July
+2026") had already evidence-checked all 50 deals and narrowed the real open set to 8 items (down from
+"49 stuck") — re-doing that work by hand was avoided. Chased the 8 via primary documents
+(SharePoint leases/addenda, Adobe Sign audit trails, Gabriel's direct confirmation for one) and wrote
+7 of the 8 to HubSpot (`closedwon`/`closedlost` + corrected `closedate`), each independently verified
+post-write via `get_crm_objects`:
+- **William D. Smith** → `closedwon` 2031-04-30 (Adobe Sign fully executed 2026-04-20, both parties).
+- **State of MO, Dept. of Agriculture** → `closedwon` 2026-12-31 (official state renewal letter,
+  2026-07-10, confirms both the date and — via its own return address — that the CHURN
+  geo-mislabel flagged by the 07-22 reconciliation had already self-corrected; verified live, no write
+  needed).
+- **Cosmic Spice & Specialty Foods** → `closedwon` 2028-06-30 (Third Addendum, terms match live
+  records exactly).
+- **MLC Academy Maryland** → `closedwon` 2029-09-30 (Sixth Addendum, Adobe Sign fully executed
+  2026-04-09 — NOT the 2031-09-30 figure from an unsigned draft found earlier the same session; that
+  draft is Kareem Syed's still-pending Cricket DC LLC amendment request, 07-17, currently stalled on
+  Gabriel's own diligence ask re: the entity's Inactive SDAT status).
+- **FIRST STUDENT** → `closedlost` (turnover, confirmed by Gabriel directly: replaced by My Autonomous
+  Transportation Co — matches the DSOR canonical page's own "single-tenant turnover" note; MATCo's own
+  lease remains a separate, already-tracked gap under OI-009, unsigned LOI only).
+- **Velcani Construction** → `closedlost` (turnover, replaced by Richwood Equipment Co LLC 2026-05-01,
+  confirmed via 3 independent Notion sources).
+- **Consult and Management** → `closedlost` (defaulted on rent, vacated end of March 2026, escalated
+  to collections).
+The 8th item, MLC's tenant-identity/term question, resolved to the same MLC row above once the
+executed-vs-draft distinction was sorted — no separate action needed.
+The other ~37 deals still sitting in `appointmentscheduled` are NOT a data problem — their embedded
+dates match current lease-ends exactly, they're just legitimately not-yet-due (furthest out to 2027)
+with no automated stage-advancement. That's a policy/tooling gap (when should a deal leave
+`appointmentscheduled`?), not a data item — not fixed here, would need Gabriel's terms first.
+**Auto-check:** none.
+
+### OI-025
+**Status:** OPEN — one instance confirmed and remediated; full population unaudited
+**Opened:** 2026-07-25
+**Source:** shared-checkout investigation, this session (Gabriel asked to investigate the dirty-`~/.claude`-checkout flag raised at the end of the prior turn)
+**Description:** while porting two skill-spec changes (HubSpot idle-deal flag + tracker-output redirect) into `ora-tenant-hubspot-reconciliation`, discovered the edit had first landed on `C:\Users\Owner\OneDrive - Oxford Capital Partners\Claude_Workspace\00_Governance\Scheduled\ora-tenant-hubspot-reconciliation\SKILL.md` — a path that is NOT one of the two documented live registry locations (`tech.md` §3: CC/MCP = `~\.claude\scheduled-tasks\`, LAMS = `OneDrive…\Documents\Claude\Scheduled\`). Confirmed via `list_scheduled_tasks` that the task's real registered `path` is the CC/MCP copy; the Claude_Workspace copy drives nothing. Listing that directory found **100+ task folders** — active-looking names matching live CC registry tasks (`ora-am-brief`, `ora-weekly-hygiene`, `ora-health-guard`, `ora-pm-ledger`, etc.), clearly one-off/completed check-* and investigate-* folders, and four pre-existing `_archive_2026-0[6-7]-*` subfolders already inside this same directory — i.e. someone has been using this location as a working/archival area for some time, but no memory file documents its relationship to the two-fleet doctrine.
+**Action taken 2026-07-25:** archived the confirmed-orphaned `ora-tenant-hubspot-reconciliation` folder to a new `_archive_2026-07-25_orphans\` subfolder in place (moved, not deleted, matching the directory's own existing convention). Did NOT touch or audit the other 100+ folders — that's a materially larger task than this session's scope (a single-skill investigation), and several of the plausible-looking "live" names need a careful diff-against-canonical pass, not a bulk move.
+**Not yet done:** a dedicated audit determining, per folder, whether it's (a) a stale orphan safe to archive, (b) a legitimate secondary reference/documentation copy someone relies on, or (c) itself the canonical copy for some task not accounted for in `tech.md`'s dual-fleet doctrine (which would mean `tech.md` §3 is the thing that's wrong, not the folder). Recommend a bounded weekly sweep (5-10 folders/pass, mirroring `ora-weekly-hygiene` Block F's bounded legacy-task-dir classification pattern) rather than a single large pass.
+**Auto-check:** none.
+
 ## Closed
 
 | ID | Opened | Closed | Source | One-line |
@@ -640,6 +695,7 @@ and not worth a guard edit inside a test-only change.
 | [OI-006](#OI-006) | 2026-07-16 | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Confirm 4 tenant turnovers + Soldier Trucking property conflict against executed leases |
 | [OI-008](#OI-008) | 2026-07-17 | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Sweep the Tenant DB for the Escalation-Date/Lease-Expiration column-mapping bug beyond the 7 rows already checked |
 | [OI-014](#OI-014) | 2026-07-17 | 2026-07-17 | [reference_onedrive_business_scope.md](reference_onedrive_business_scope.md) | Confirm no ora-pm git clone inside any OneDrive sync root (real repo at C:\Users\Owner\ora-pm) |
+| [OI-015](#OI-015) | 2026-07-18 | 2026-07-19 | ora-appsec-sweep first run (2026-07-18); Notion Ops Hub row `3a26ecd8-9e59-81e4-85d4-d08d0d5d920b` | Reachable/clonable ora-pm git history confirmed genuinely clean of real E. Fulton terms — no history rewrite needed; residual (a dangling blob still served via GitHub's Data API) spun off as OI-022 |
 
 ### OI-023
 **Status:** CLOSED

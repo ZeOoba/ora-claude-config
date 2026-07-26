@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 99bbd3a1-ff6c-4785-a3ac-ae6560909a70
-  modified: 2026-07-24T15:18:41.881Z
+  modified: 2026-07-25T15:11:26.026Z
 ---
 
 **The false signal.** The Delinquency Aging report (monthly, sourced from PM-platform A/R exports —
@@ -85,3 +85,5 @@ inconsistent.
 
 Related: [[reference_warehouse_basis_parsing]], [[reference_tenant_name_mappings]],
 [[people]] (PM contacts), [[reference_tenant_db_completeness_gap]].
+
+**Follow-up 2026-07-25 — Columbus Suburban Construction + Fully Equipped Cleaning reconciled, and the "2802 Banwick eviction thread" row above needed a correction.** Both tenants turned out to be the SAME live turnover process, not two separate matters: the Outlook thread "Eviction 2802 Banwick" covers Fully Equipped Cleaning (2802 Banwick — Gabriel told Paul Trautman/KRG 07-21 to begin eviction, then 07-22 confirmed tenant Malik is voluntarily vacating and asked for marketing materials) AND, via a 07-22 message from Eric in the same thread ("Still need to have second Morrison unit measured as well, right?"), Columbus Suburban Construction's unit (386+388 Morrison) — implying it's also being taken back for re-marketing, not renewed. Paul Trautman was hospitalized 07-22/07-23 and the thread went quiet; Gabriel only caught up 07-24. Gabriel's decisions 2026-07-25: (1) stood down Columbus Suburban's April attorney referral to Philip Collins (Notion Email Response Queue pages `33c6ecd8` and `3426ecd8`, both never confirmed dispatched — set to `Skipped` with a note, not forwarded) since the PM-led track supersedes it; (2) closed HubSpot deal 58522276430 ("Columbus Suburban Construction — Lease Renewal 2026-08-31") as `closedlost` — it was tracking a renewal that isn't happening; (3) held off sending a drafted check-in to Paul Trautman for now. Both tenants' Notion Tenant DB `Lease Expiration` fields also corrected to the true 2026-06-30 (were stale at 2027-04-30 / 2026-08-31 respectively, per [[reference_lease_date_detector_defects_2026-07-24]]'s id-scheme fix). **Lesson for reading Outlook-thread evidence in this report's method**: a thread's SUBJECT LINE names only one property/tenant, but the BODY can cover a second one entirely — read full thread content, not just the subject, before attributing an "active" status to a specific tenant row.
