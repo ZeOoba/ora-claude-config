@@ -131,6 +131,12 @@ obsidian-fleet-mirror/session-state.d/
 # 3) Re-ignore secrets, caches & transient state INSIDE opted-in dirs
 hooks/confidential-terms.json
 hooks/sessions/
+# Cross-session claim broadcast markers (task_17998414, 2026-07-25) -- ephemeral,
+# TTL-expired, agent-declared state naming an in-progress subsystem claim. Same
+# reasoning as hooks/sessions/ above: this is per-machine runtime state, not
+# durable config, and MUST never be re-minted with a stale mtime/timestamp by a
+# clone/checkout the way the override sentinels were (668f9d4).
+hooks/active-work/
 # Human-authorization override sentinels (allow-external-send / allow-website-change /
 # allow-doctrine-drift). NEVER track one: the gates validate a sentinel by mtime age, and
 # git stamps a checked-out file with CHECKOUT time -- so a tracked token is re-minted with
