@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: feedback
   originSessionId: d6635568-ae53-453c-9bd7-ec8551f96c73
-  modified: 2026-07-26T17:59:40.013Z
+  modified: 2026-07-26T18:28:24.198Z
 ---
 
 `~/.claude` is one working copy driven by many concurrent sessions, so **the index is
@@ -63,6 +63,11 @@ against a co-mingled non-append-only file would not be as forgiving.
    pending in the index. Genuinely separate, not-touched-by-you dirty files (the common
    case, including this 2026-07-26 incident) are exactly what pathspec protects against —
    don't default to bare commit out of over-general caution from that one caveat.
+   **Untracked-file caveat (confirmed 2026-07-26):** `git commit -m "..." -- <path>`'s
+   implicit-add only works for already-tracked files. For a brand-new untracked file it
+   fails outright (`error: pathspec '<path>' did not match any file(s) known to git`) —
+   run an explicit `git add <path>` first, then the same pathspec commit. Still safe: the
+   `git add` only touches the one path you named.
 
 Attribute positively; never infer ownership from mtime quiet
 ([[positive-attribution-over-mtime]]).
