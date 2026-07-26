@@ -41,13 +41,20 @@ The accumulated fixes now shared by both gates:
     even in multi-commit chains where the add sits between two commits
   - pending-add resolution via pre-add working-tree state (2026-07-24: the missing
     piece behind 4 janitor commits that swept 41 files past the provenance guard)
+  - a recognized heredoc's body (matched by its own literal terminator line, bash's
+    lexically distinct rule) is excised as opaque content before any tokenization,
+    so a stray quote/comment/`git add`/`--dry-run`/`-- path` inside a commit
+    message's heredoc body can never be misread as real command structure
+    (2026-07-26, three-round incident -- see tokenize_cmd_segments' own docstring
+    for the full history; this also closes the "spurious candidate" gap this note
+    used to accept below)
 
 ACCEPTED GAPS (unchanged from the origin file, documented there in full): git
-aliases are invisible; subshells, command substitution, and operators glued to a
-token without surrounding whitespace are not parsed; a multi-line heredoc commit
-message whose prose starts a line with `git add` can add a spurious candidate.
-Threat model throughout is a single-operator cooperative fleet, not an adversarial
-boundary.
+aliases are invisible; subshells and command substitution OTHER than a recognized
+heredoc are not parsed (e.g. arbitrary `$(...)` content can still affect quote
+parity outside a heredoc); operators glued to a token without surrounding
+whitespace are not parsed. Threat model throughout is a single-operator
+cooperative fleet, not an adversarial boundary.
 
 DIRECTIONAL SAFETY. Every degradation here biases toward FEWER candidates on any
 git-query failure. Callers must therefore treat an empty/None candidate set as "no
@@ -197,13 +204,104 @@ def _split_segments(tokens):
     return segs
 
 
-def tokenize_cmd_segments(cmd):
-    """Tokenize `cmd` LINE BY LINE, not as one shlex.split() call, so a bare
-    newline (bash's statement separator, same semantics as `;`) also acts as a
-    segment boundary. A line that fails to tokenize falls back to a plain
-    whitespace split for that line only."""
-    segs = []
-    for line in cmd.splitlines():
+_HEREDOC_MARKER_RE = re.compile(
+    r"(?<!<)<<(-)?\s*(['\"]?)([^\s'\"\\<>|&;()`]+)\2")
+
+
+def _scan_quote_state(text, state):
+    """Incremental, O(len(text)) scan of one line's worth of shell-level text
+    (never a heredoc BODY -- see tokenize_cmd_segments), given the quote
+    `state` carried in from a prior line (None = unquoted, "'" or '"' = a
+    still-open quote of that kind). Returns the ending state after this line.
+
+    Deliberately has NO `#`-comment handling (see tokenize_cmd_segments'
+    ROUND 3 note for why removing it, rather than trying to get it exactly
+    bash-correct, is what actually closes that finding) and no `$(...)`
+    awareness (the heredoc-recognition in tokenize_cmd_segments exists
+    precisely so this function is only ever asked to track quotes across
+    the small, simple shell fragments immediately before/after a heredoc,
+    never across a heredoc's own opaque body content)."""
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if state == "'":
+            if c == "'":
+                state = None
+            i += 1
+            continue
+        if state == '"':
+            if c == "\\" and i + 1 < n and text[i + 1] in ("$", "`", '"', "\\"):
+                i += 2
+                continue
+            if c == '"':
+                state = None
+            i += 1
+            continue
+        # state is None (unquoted)
+        if c == "\\":
+            i += 2  # unquoted backslash escapes the next character
+            continue
+        if c == "'":
+            state = "'"
+            i += 1
+            continue
+        if c == '"':
+            state = '"'
+            i += 1
+            continue
+        i += 1
+    return state
+
+
+def _in_open_subshell_or_backtick(text):
+    """Round-5 fix (was a bare `"$(" in before` substring check): a `$(` or
+    backtick command substitution re-enters a fresh, independently-parsed
+    command context where `<<` is a real operator again despite an
+    enclosing quote -- exactly this fleet's own `-m "$(cat <<'EOF'`
+    pattern. The substring check alone was foolable: `echo "$(date +%Y)
+    note <<EOF here"` has a `$(` earlier on the line, but it is ALREADY
+    CLOSED by its own `)` before the `<<` -- bash-verified the marker there
+    is still just quoted text, not a real heredoc. This depth-counts
+    `$(`/`)` pairs and unescaped backticks instead of checking mere
+    presence, so an already-closed substitution no longer counts. Does NOT
+    track quotes INSIDE the substitution itself (good enough for this
+    narrow purpose: deciding whether a following `<<` sits in a live
+    substitution) -- full shell-grammar matching is the same accepted gap
+    the rest of this module already documents."""
+    depth = 0
+    backticks = 0
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == "$" and i + 1 < n and text[i + 1] == "(":
+            depth += 1
+            i += 2
+            continue
+        if c == ")" and depth > 0:
+            depth -= 1
+            i += 1
+            continue
+        if c == "`":
+            backticks += 1
+            i += 1
+            continue
+        i += 1
+    return depth > 0 or (backticks % 2 == 1)
+
+
+def _fallback_tokenize_lines(lines, lo, hi, segs):
+    """The ORIGINAL (pre-2026-07-26) per-line-independent tokenization,
+    applied to lines[lo:hi]: each line tried through shlex.split() alone,
+    falling back to a naive whitespace split on failure, each becoming its
+    own segment -- exactly the long-proven-safe behaviour for anything that
+    isn't a recognized heredoc (see tokenize_cmd_segments)."""
+    for k in range(lo, hi):
+        line = lines[k]
         if not line.strip():
             continue
         try:
@@ -211,6 +309,320 @@ def tokenize_cmd_segments(cmd):
         except ValueError:
             tokens = line.split()
         segs.extend(_split_segments(tokens))
+
+
+def tokenize_cmd_segments(cmd):
+    """Tokenize `cmd` LINE BY LINE, not as one whole-string shlex.split() call,
+    so a bare newline (bash's statement separator, same semantics as `;`) acts
+    as a segment boundary for ordinary lines. The ONE exception is a
+    recognized heredoc (`<<[-]DELIM` or `<<[-]'DELIM'`/`<<[-]"DELIM"`): bash
+    reads everything from the line after the marker through the first line
+    that is EXACTLY `DELIM` as opaque body content, a lexically distinct rule
+    from quote-nesting and independent of it -- so that span is located by
+    matching the literal terminator line, NEVER by scanning its content for
+    quote/comment characters, and is excised before any tokenization is
+    attempted. Everything else in this function is the ORIGINAL, long-proven
+    per-line-independent behaviour, UNCHANGED.
+
+    THREE ROUNDS TO GET HERE (2026-07-26, all on real-incident reproductions
+    caught by independent review before landing -- see
+    test-commit-provenance-guard.py for every PoC below as a regression test):
+
+    ROUND 1 (the original bug): the very first version of this function
+    called shlex.split() on EACH line in total isolation, treating any
+    ValueError (unterminated quote) as "this line alone doesn't tokenize,
+    naive-split JUST this line" and moving on -- silently discarding every
+    following line as unrelated, disconnected segments. A heredoc-fed `-m`
+    value (the pattern this fleet's own commit instructions REQUIRE for
+    every commit message) opens a `"` on its first line that isn't closed
+    for several lines; a trailing `-- <pathspec>` on the line after the
+    heredoc closes landed in one of those disconnected segments and was
+    invisible to find_commit_segment(). candidate_paths() then fell back to
+    "no pathspec -> the whole staged index" -- a confirmed false BLOCK on a
+    real, correctly-scoped commit, on both gates that share this module.
+
+    ROUND 2 (first fix attempt, itself wrong): accumulating lines on a
+    ValueError and, on end-of-input, naive-splitting the WHOLE merged buffer
+    as one token stream converted the bug into a false ALLOW. An apostrophe
+    inside a `#` shell comment (`# don't add theirs`) reads to plain shlex as
+    an unterminated quote; the merged-buffer fallback then swallowed a REAL,
+    later `git commit` line into that one meaningless token stream instead of
+    recognizing it as its own segment, silently disabling both gates for a
+    command that unambiguously does commit. A second PoC showed a LATER
+    line's own comment apostrophe could spuriously "close" an EARLIER one,
+    burying a real commit in between inside what shlex then read as
+    valid-but-wrong quoted content. Also independently measured at O(n^2) in
+    input size (repeated full shlex re-tokenization of the ever-growing
+    buffer on every accumulated line) -- 13s at 500 lines, 55s at 1000,
+    against a hook budget other gates in this codebase treat as ~5s.
+
+    ROUND 3 (second fix attempt -- incremental quote-state scanning instead
+    of repeated re-tokenization, closing round 2's false-allow and its O(n^2)
+    cost -- STILL had two gaps, both from trying to generally emulate bash
+    quoting for arbitrary content instead of narrowly recognizing the one
+    construct this fleet actually needs): (a) the scanner had no `$(...)`
+    awareness (an accepted, pre-existing gap for this whole module), so a
+    stray `"` inside a heredoc BODY could flip the OUTER quote-state parity,
+    ending the segment early and exposing later body prose as commit
+    args -- confirmed to leak a decoy `-- <path>` as the real pathspec, and
+    separately confirmed to leak a decoy `--dry-run` into args, hiding a real
+    commit; this diff's own docstring at the time falsely claimed degradation
+    could only ever produce MORE candidates, never fewer -- it could. (b) the
+    scanner (and shlex's own `comments=True`) treated ANY unquoted `#` as a
+    comment, not just one at the START of a word as bash actually requires --
+    `${#arr[@]}` and `sed s/#/x/` both hid a real, same-line-following commit,
+    and `git commit -m x -- readme#old.md` had its pathspec truncated to
+    `readme`.
+
+    ACTUAL FIX (this version): stop trying to track quotes/comments through
+    arbitrary content at all. Recognize the ONE construct that actually needs
+    multi-line handling -- a heredoc -- via its own unambiguous, quote-
+    independent terminator-line rule, and treat its body as fully opaque:
+    never quote-scanned, never comment-scanned, never tokenized, so nothing
+    inside it (a stray `"`, a `#`, a decoy `-- path` or `--dry-run`) can ever
+    affect anything outside it. `_scan_quote_state` is still used, but only
+    to track quotes across the small, simple shell-level fragments
+    immediately before a heredoc marker and immediately after its terminator
+    (e.g. the `"` opened by `-m "` and closed by the `)"` on the line right
+    after `EOF`) -- text that, in every real pattern this fleet uses, never
+    itself contains a `#` or a `$(...)`. EVERY other line (no heredoc marker
+    present) goes through `_fallback_tokenize_lines`, which is byte-for-byte
+    the ORIGINAL, pre-2026-07-26, already-proven-safe per-line-independent
+    logic -- restoring exactly the behaviour that made round 2's PoCs
+    impossible in the first place, since there is no cross-line accumulation
+    at all for anything that isn't a recognized heredoc.
+    ROUND 4 (the excise-the-body architecture was correct; three edges of
+    the RECOGNITION logic itself still diverged from real bash, each with a
+    reproduced false-allow): (a) the terminator was matched via
+    `line.strip() == delim`, tolerating surrounding whitespace bash does not
+    -- a body line that is merely an INDENTED or trailing-whitespace variant
+    of the delimiter (not an exact match) ended the heredoc early to this
+    parser while bash keeps reading it as body, re-exposing the remaining
+    body as shell-level text (bash-verified); `<<-` only strips LEADING TABS
+    before comparing, not arbitrary whitespace, and the old code didn't
+    distinguish `<<` from `<<-` at all. (b) the marker regex had no quote
+    awareness, so a `<<WORD` appearing INSIDE a quote (`echo "see <<EOF
+    docs"`) was read as a real marker; if some later line coincidentally
+    equalled that fake delimiter, a real intervening `git commit` got excised
+    as "body" (bash-verified the quoted `<<EOF` is plain text to bash, not a
+    marker). (c) the `not closed` fallback re-tokenized the ENTIRE consumed
+    range including the heredoc BODY and its terminator, contradicting the
+    "never over-collects" claim right above it -- body prose could still
+    surface as a fabricated final segment whenever the trailing quote-close
+    check never closed (e.g. a stray comment apostrophe after the pathspec).
+    Fixed by: (a) exact-match terminator comparison, tab-stripped only when
+    the marker was `<<-`; (b) rejecting a marker match when
+    `_scan_quote_state` says the text before it on that line is not
+    currently unquoted; (c) the fallback now only re-tokenizes the marker
+    line and whatever trailing lines were pulled in AFTER the terminator --
+    never the excised body+terminator range itself, regardless of path.
+
+    ROUND 5 (the recognition logic itself, not the architecture, again --
+    all four reproduced against real bash): (a) the delimiter regex only
+    matched a plain word character class ([A-Za-z0-9_]+), but bash's
+    delimiter is a full shell WORD (`END-OF-MSG`, `EOF.txt` are both legal)
+    -- a delimiter outside that narrow class never matched its own real
+    terminator, degrading the ENTIRE heredoc to the per-line fallback
+    (round-1's original false-block, still live for any such delimiter) --
+    and if the truncated prefix (`END`, `EOF`) coincidentally appeared as a
+    body line, THAT ended the heredoc early instead, re-exposing later body
+    prose as shell text (a false-allow, the same class round 4 (a) fixed
+    for indentation). (b) the marker-acceptance check used a bare `"$(" in
+    before` substring test, foolable by an ALREADY-CLOSED substitution
+    earlier on the line (`echo "$(date +%Y) note <<EOF here"` -- the `$(`
+    is there, but its own `)` closed before the `<<`) and structurally blind
+    to a quote opened on an EARLIER line (the check always started
+    scanning from state=None). Both bash-verified to excise a real,
+    intervening `git commit` as fake heredoc "body" when a coincidental
+    bare-delimiter line followed. Fixed by: (a) widening the delimiter
+    character class to bash's actual word syntax (anything but whitespace,
+    quotes, backslash, and shell metacharacters); (b) replacing the
+    substring check with `_in_open_subshell_or_backtick`, which depth-counts
+    `$(`/`)` pairs and backticks instead of checking mere presence, AND
+    threading a `carry_state` across every non-heredoc line (updated via
+    the same `_scan_quote_state` already used elsewhere) so a quote left
+    open by an earlier line is not forgotten by the time a `<<` is seen on
+    a later one. carry_state is used ONLY to gate marker acceptance --
+    every non-heredoc line is still tokenized completely independently via
+    `_fallback_tokenize_lines`, so this does not reintroduce round 2's
+    cross-line-accumulation regression (verified: both round-2 PoCs still
+    pass). (c) `<<<WORD` (bash's here-STRING operator -- an entirely
+    different, single-line construct with no body/terminator at all) was
+    matched by the marker regex via its middle `<<`, and if some later,
+    unrelated line coincidentally equalled the "delimiter" (really just the
+    here-string's own word), everything in between -- including a real
+    `git commit` -- was excised as fake body. Fixed with a negative
+    lookbehind (`(?<!<)`) rejecting a `<<` immediately preceded by another
+    `<`; a genuine `cat<<EOF` (no space, immediately preceded by a
+    non-`<` character) is unaffected.
+
+    ACCEPTED GAP, documented honestly rather than claimed safe-direction
+    (round-5 reviewer finding): `_in_open_subshell_or_backtick` and
+    carry_state are heuristics, not full shell-grammar matching. A
+    sufficiently adversarial input (quotes and substitutions deliberately
+    interleaved across several lines specifically to fool the depth-count,
+    or multiple heredoc markers chained on one line via `<<A ... <<B`, which
+    bash reads back-to-back but this parser only recognizes the first of)
+    can still misidentify a marker. Round-6 verification also surfaced a
+    narrower, concrete instance of the same class: a SPURIOUS carried-open
+    quote (e.g. an ordinary comment apostrophe, `# don't forget`, on some
+    earlier line with no heredoc involved at all) can cause a genuine,
+    non-`$(`-wrapped heredoc marker on a LATER line to be wrongly rejected
+    -- degrading that heredoc to the per-line fallback and exposing its
+    body as shell text, a false-ALLOW if the body happens to contain
+    decoy commit-shaped prose. This module's threat model has always been
+    a single-operator COOPERATIVE fleet, not an adversarial boundary (see
+    ACCEPTED GAPS above) -- these residual holes are real, are a
+    false-ALLOW risk if hit, and are recorded here rather than glossed
+    over, but closing them fully would mean implementing real bash
+    parsing, which is out of scope for a PreToolUse heuristic gate. The
+    fleet's actual, single-line `-m "$(cat <<'EOF'` commit-message pattern
+    is immune to all of the above via the `$(` escape hatch.
+
+    Verified against: the original heredoc bug, both round-2 false-allow
+    PoCs, both round-3 `$(...)`-body-parity PoCs, all three round-3
+    `#`-word-start PoCs, all three round-4 recognition-edge PoCs (indented
+    fake terminator, quoted fake marker, fallback body re-exposure), a
+    2000-line heredoc body (effectively instant, since the body is now
+    excised before tokenization rather than being part of it -- versus
+    round 2's multi-second-to-minute blowup at a fraction of that size), a
+    3000-line never-closing-quote input with no heredoc at all (still fast,
+    still finds the real trailing commit via the per-line
+    fallback), and every pre-existing regression test in this module's two
+    consumer test suites (test-commit-provenance-guard.py,
+    test-eos-review-gate.py), all green."""
+    segs = []
+    lines = cmd.splitlines()
+    i = 0
+    n = len(lines)
+    # ROUND 5 fix: quote state now carries across lines that have NO
+    # recognized heredoc marker, purely to gate heredoc-marker acceptance --
+    # see the marker-rejection check below. This does NOT reintroduce
+    # round 2's regression: non-heredoc lines are still tokenized
+    # completely independently, one at a time, via _fallback_tokenize_lines;
+    # carry_state is consulted ONLY when a `<<` is actually found on a line,
+    # never used to merge lines for tokenization.
+    carry_state = None
+    while i < n:
+        start = i
+        line = lines[i]
+        i += 1
+        if not line.strip():
+            continue
+
+        m = _HEREDOC_MARKER_RE.search(line)
+        # A `<<WORD` appearing INSIDE a quote (e.g. `echo "see <<EOF docs"`,
+        # or a quote left open by an EARLIER line -- carry_state) is not a
+        # real heredoc marker to bash -- quotes suppress operator meaning
+        # for everything except `$`/backtick/`\`. Reject it using the quote
+        # scanner (seeded with carry_state, so a quote opened on a PRIOR
+        # line is not forgotten), UNLESS the text is currently inside a live
+        # `$(...)` or backtick substitution: bash re-enters a fresh,
+        # independently-parsed command context there, where `<<` IS a real
+        # operator again despite an enclosing quote -- exactly this fleet's
+        # own `-m "$(cat <<'EOF'` pattern. `_in_open_subshell_or_backtick`
+        # depth-counts rather than just checking substring presence, so an
+        # ALREADY-CLOSED `$(...)` earlier on the line no longer counts
+        # (round-5 finding: `echo "$(date +%Y) note <<EOF here"` used to
+        # pass the old bare `"$(" in before` check even though its `$(...)`
+        # had already closed before the `<<`). A rejected match here just
+        # means "no marker on this line" (falls through to ordinary
+        # per-line handling below), the same safe degradation as never
+        # matching.
+        if m is not None:
+            before = line[:m.start()]
+            if (not _in_open_subshell_or_backtick(before)
+                    and _scan_quote_state(before, carry_state) is not None):
+                m = None
+        if m is None:
+            carry_state = _scan_quote_state(line, carry_state)
+            _fallback_tokenize_lines(lines, start, i, segs)
+            continue
+
+        # Locate the terminator: bash requires a line that IS the delimiter
+        # -- no surrounding whitespace tolerated -- except that `<<-` (the
+        # dash captured in group 1) strips LEADING TABS ONLY before
+        # comparing, not arbitrary whitespace. Getting this exact match
+        # matters: a body line that merely LOOKS like the delimiter under a
+        # looser rule (indented, trailing spaces) would end the heredoc
+        # early to this parser while bash keeps reading it as body --
+        # re-exposing the rest of the body as shell-level text, exactly the
+        # false-allow/false-block class this function exists to prevent.
+        # Deliberately NOT found by scanning for quote characters, so
+        # nothing inside the body can spoof it via quote content.
+        strip_tabs_only = m.group(1) is not None
+        delim = m.group(3)
+        term = None
+        j = i
+        while j < n:
+            candidate = lines[j].lstrip("\t") if strip_tabs_only else lines[j]
+            if candidate == delim:
+                term = j
+                break
+            j += 1
+
+        if term is None:
+            # No terminator within what this Bash call actually included
+            # (truncated heredoc, or not really a heredoc) -- do not guess
+            # at where an absent terminator would have been; fall back to
+            # the safe, original per-line handling for just this one line.
+            carry_state = _scan_quote_state(line, carry_state)
+            _fallback_tokenize_lines(lines, start, i, segs)
+            continue
+
+        # The body (lines[i:term], EXCLUSIVE of the terminator) is opaque --
+        # excised entirely, never scanned or tokenized. Track quote-balance
+        # only for the marker line (starting FRESH at None here, not
+        # carry_state -- this fleet's real pattern always opens its `-m "`
+        # quote fresh on the marker line itself, and tracking a quote that
+        # spans from an earlier line THROUGH a recognized heredoc marker is
+        # an accepted, narrower gap than the one this carry_state exists to
+        # close), then (jumping past the body+terminator) whatever
+        # shell-level text follows, until it balances -- e.g. the `"`
+        # opened by `-m "` on the marker line, closed by a `)"` on the line
+        # right after the terminator.
+        state = _scan_quote_state(line, None)
+        i = term + 1
+        shell_lines = [line]
+        while state is not None and i < n:
+            nxt = lines[i]
+            state = _scan_quote_state(nxt, state)
+            shell_lines.append(nxt)
+            i += 1
+
+        closed = False
+        if state is None:
+            try:
+                tokens = shlex.split("\n".join(shell_lines))
+                segs.extend(_split_segments(tokens))
+                closed = True
+            except ValueError:
+                pass
+        if not closed:
+            # Quote never balanced by end-of-input, or somehow still failed
+            # to tokenize -- fall back to the original per-line handling,
+            # but EXCLUDING the heredoc body and its terminator line
+            # (lines[start+1:term+1]): those were already committed to being
+            # opaque the moment a real heredoc was recognized, and must
+            # never be re-tokenized as shell syntax even on this path --
+            # doing so would let body prose (a decoy `--dry-run` sitting
+            # next to a stray apostrophe that keeps this whole branch from
+            # ever closing) surface as if it were real commit args, exactly
+            # the false-allow this function exists to prevent. Only the
+            # marker line itself and whatever trailing lines were pulled in
+            # AFTER the terminator get the per-line fallback.
+            _fallback_tokenize_lines(lines, start, start + 1, segs)
+            _fallback_tokenize_lines(lines, term + 1, i, segs)
+        # Propagate the ending quote-parity forward regardless of path --
+        # if it never closed, subsequent lines correctly keep seeing an
+        # open quote, rejecting more heredoc markers rather than fewer --
+        # USUALLY the safe direction (degrading toward the per-line
+        # fallback), but see the ROUND 5 accepted-gap paragraph above: a
+        # SPURIOUS carried-open state (e.g. a comment apostrophe on an
+        # earlier line) can also reject a genuine, non-`$(`-wrapped
+        # heredoc, which is a false-allow, not a false-block, if that
+        # heredoc's body happens to contain decoy commit-shaped text.
+        carry_state = state
     return segs
 
 
