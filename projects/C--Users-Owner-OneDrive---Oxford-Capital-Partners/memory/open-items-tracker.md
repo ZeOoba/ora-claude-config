@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-07-26T17:42:50.527Z
+  modified: 2026-07-26T18:52:14.856Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -33,7 +33,6 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
 | [OI-009](#OI-009) | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Verify the 93 Notion Tenant DB rows with no workbook counterpart against primary leases (low priority) |
-| [OI-017](#OI-017) | 2026-07-18 | ora-appsec-sweep first run (2026-07-18) | ora-pm + oxford-command-center: build/test/deploy toolchain CVEs (vitest/vite/wrangler/concurrently→shell-quote/transformers→adm-zip) — no prod-reachable path, semver-major fixes |
 | [OI-022](#OI-022) | 2026-07-19 | OI-015 investigation (2026-07-19) | GitHub Data API still serves the pre-rewrite E. Fulton blob (`39b02f4585...`, kept alive by PR #2's internal `refs/pull/2/head`, not deletable via git/API/settings) — Support ticket #4584520 reopened 2026-07-20 with the corrected SHA (`6aed9a7`), awaiting GitHub's purge |
 | [OI-019](#OI-019) | 2026-07-19 | [event_log.md](event_log.md#2026-07-19) | Gabriel must add `HUBSPOT_TOKEN` (Private App, `crm.objects.deals.read`) to `oxford-command-center/.env` — PR #221 (frontend trigger) ready, blocked only on the credential. Once live, re-verify 2146 Enterprise Pkwy Twinsburg OH (currently untracked in projects.md/deal-decision-ledger.md) lands correctly in acq_candidates |
 | [OI-020](#OI-020) | 2026-07-19 | [event_log.md](event_log.md#2026-07-19) | ora-cowork-heartbeat: LAMS registry entry has no `approvedPermissions` grant (root cause, 3x documented since 07-16). No MCP tool on either surface can write this — only fix is Gabriel manually approving the Notion-tool prompt during a live unattended fire in Cowork's own Scheduled Tasks UI (a manual "Run Now" doesn't count). GitHub watchdog issue open, needs manual closure once genuinely fixed |
@@ -611,7 +610,7 @@ by Gabriel directly). Verified via `npm audit` — this finding no longer appear
 **Auto-check:** none.
 
 ### OI-017
-**Status:** OPEN
+**Status:** CLOSED
 **Opened:** 2026-07-18
 **Source:** ora-appsec-sweep first run (2026-07-18); Notion Ops Hub row `3a26ecd8-9e59-81e4-85d4-d08d0d5d920b`
 **Description:** Build/test/deploy toolchain CVEs in both repos, none reachable from a production, tenant,
@@ -686,6 +685,112 @@ real fix is semver-major 6→7, needs its own pass (SSR-hydration advisory not a
 client-rendered; open redirect is the live one, MOD); (2) oxford-command-center's 9 advisories —
 unchanged, still blocked on the dedicated vitest-4 mocking-migration pass documented above, NOT
 touched this session (out of scope).
+**Progress 2026-07-26 (later): occ vitest-4 blocker ROOT-CAUSED and fixed in a branch — ready to ship
+pending REFUTE pass, deliberately NOT merged.** L5 investigation in isolated worktree
+`../oxford-command-center-oi017-vitest4-investigation`, branch `investigate/oi017-vitest4-migration`
+(PUSHED to origin, commit `a7a5ad7` on base `ac34d88`). The 07-19 "systemic mocking regression" was
+neither systemic nor a mocking regression: under vitest 4, `vi.mock()` of Node builtins (`node:fs`)
+is a **silent no-op in the jsdom environment** (this repo's global default) — the module under test
+receives the REAL fs, so mocks never intercept. Isolated by controlled experiment: same test, same
+setup file, both pools (forks/threads) — `--environment=node` works (both `fs` and `node:fs`
+namespaces become mocks), jsdom never does; even `{ spy: true }` and factory variants no-op under
+jsdom. This retroactively explains BOTH 07-19 symptoms: "automock produces unusable mock functions"
+(the exports were the real, un-mockable fs functions → `mockReturnValue is not a function`) and
+"helper-set mocks silently not reaching the module under test" (they were set on mock objects the
+real-fs-importing module never saw — never a hoisting/helper-timing issue). Entire fix: bump
+vitest+@vitest/coverage-v8 to 4.1.10 and add `// @vitest-environment node` to
+`tests/unit/governance-check.test.ts` (a pure Node-script test where jsdom was wrong anyway) —
+zero mock restructuring, 5 lines + deps. governance-check.test.ts is the ONLY builtin-mocking test
+file in the repo (verified by grep; the other 13 `vi.mock` users mock local modules and are
+unaffected). **Evidence:** baseline 41/41 green under v2 at `ac34d88` → 41/41 fail under 4.1.10
+unpatched (same TypeError as 07-19) → 41/41 green with pragma; **full suite 244 files / 3101 tests
+green** (suite grew from 2828 since 07-19); tsc clean · eslint clean · check:dev-css clean · vite
+build green · bundle budget green. Two failures appeared once under a concurrent-load gate run
+(capital-allocation-api `beforeAll` 10s import timeout; bash-guard perf assertion 2009 ms vs 2000 ms
+— a 9 ms miss) and both re-ran green in isolation: load flakes, not vitest-4 regressions.
+**Security effect:** `npm audit` in the branch: vitest CRITICAL + all 3 vitest→vite HIGHs GONE, 0
+criticals remain. Remaining 9 advisories are UNRELATED chains: brace-expansion/fast-uri/js-yaml/
+postcss (all `fixAvailable` via plain `npm audit fix`), react-router MOD ×2 + @hono/node-server MOD
+(semver-major), sharp/libvips HIGH (no fix — monitor). **Decision: small, well-understood,
+safely-shippable — but per doctrine this is financial-decision-repo test infrastructure, so it needs
+the mandatory adversarial REFUTE pass before merge; not merged by the investigating session. Next
+step: REFUTE pass on branch `investigate/oi017-vitest4-migration`, then PR + merge, then a plain
+`npm audit fix` pass for the 4 non-breaking advisories.** Item stays OPEN.
+**Progress 2026-07-26 (later still): ora-pm react-router residual RESOLVED-pending-merge — PR
+`ZeOoba/ora-pm#9` open, awaiting Gabriel's merge. DECISION: proceed now, but to v8.3.0, not v7.**
+L5 investigation in isolated worktree (`../ora-pm-oi017-rr7-investigation`, branch
+`investigate/oi017-react-router-7`, base `92b4b45` = merged #7; main untouched). Baseline
+re-verified first: tsc clean, 185/185, `npm audit` 2 MOD. Why not v7 (every option tested
+empirically in the worktree, not guessed): HEAD's lockfile already resolves ^6.26.0 to **6.30.4**
+(latest 6.x) — still flagged, no in-range escape; the 2 MOD advisories are patched only at ≥7.17.1;
+but react-router ≥7.12.0 carries **GHSA-qwww-vcr4-c8h2** (HIGH, RSC-mode CSRF, published 07-24,
+patched ONLY in react-router@8.3.0 per the GitHub advisory API — and never in any react-router-dom
+release, since that package was removed in v8). Installing react-router-dom@7.18.1 was tried:
+audit trades 2 MOD for 2 HIGH. v8.3.0 is the only 0-findings endpoint. The HIGH is inapplicable
+here ("only affects... unstable RSC APIs" — ora-pm has no RSC/SSR/loaders/actions), but the
+dashboard fix and the real fix coincide at v8. Migration cost trivial by construction (context7
+v7/v8 upgrade docs + code recon): no `future` flags anywhere, all `Link`/`navigate` targets
+absolute (v7_relativeSplatPath flip has nothing to bite), so the whole diff is imports —
+`'react-router-dom'`→`'react-router'` in 20 files + `RouterProvider` from `'react-router/dom'`
+(22 files, 39+/53−, zero behavior lines). **Evidence on the final tree:** tsc clean · 185/185
+(vitest 4.1.10) · vite prod build green · `wrangler pages functions build` compiles (functions/
+has zero react-router usage) · `npm audit` **0 vulnerabilities** · browser smoke on the built app:
+`/login` renders identical to the v6 baseline, zero console errors. Worktree removed after push;
+branch lives locally + on origin; PR #9 notes the first v8 deploy fires on merge (watch the Pages
+Action, per #7 precedent).
+**NEW DEFECT FOUND (separate follow-up, NOT caused by the bump): the tenant portal is blank in
+PRODUCTION today.** `https://ora-pm.pages.dev/portal/login` renders an empty `#root` — reproduced
+identically on v6 local build, v8 local build, and live prod (admin `/login` renders fine, so not
+env-specific). Root cause: descendant `<Routes>` in `src/portal/PortalRouter.tsx` use absolute
+`/portal/...` paths that can never match the splat remainder under the `/portal/*` parent, so the
+subtree renders null with no console error; the 185-test suite never renders the router, so nothing
+caught it. Spawned as its own task chip (fix relative paths + add a router-rendering test).
+Tenant-payment revenue path — high priority. Item stays OPEN: ora-pm PR #9 unmerged; portal
+blank-render defect open; occ side per the block above.
+**Progress 2026-07-26 (REFUTE pass): occ vitest-4 fix CONFIRMED SAFE — PR
+`ZeOoba/oxford-command-center#238` open, awaiting Gabriel's merge.** Independent adversarial REFUTE
+pass (reviewer did not write the fix) actively tried to break `investigate/oi017-vitest4-migration`
+and failed on every axis. (1) **Rebased** onto current main `f511d5f` (clean, `a7a5ad7`→`99a63e9`;
+main had grown 19 new brain/anomaly-floor tests written under vitest 2) and re-ran everything fresh:
+**245 files / 3120 tests, 3119 green**; sole failure was bash-guard's wall-clock perf assertion
+(3464 ms vs 2000 ms) — the same pre-existing load flake `f511d5f`'s own commit message documents
+under vitest 2; 68/68 green in isolation, exit 0. typecheck 0 · lint 0 · vite build green · bundle
+budget green (entry 92.5 kB < 250 kB). (2) **jsdom-masking refuted:** `scripts/governance-check.ts`
+imports only `node:fs`+`node:path`, zero DOM references in 481 lines; the pragma matches the ~45
+test files already carrying `@vitest-environment node`. (3) **Other-mock spot-check refuted:**
+governance-check is the ONLY builtin-mocking file; the two jsdom-default local-module mockers were
+positively verified to still INTERCEPT, not merely pass (`brain.test.ts` injects `parseError`
+through the mocked parse module + asserts mock-captured overlay writes; `topbar.test.tsx` asserts
+`data-testid` markers that exist only in the mock components). (4) **Audit re-verified fresh, not
+trusted:** branch = 9 vulns (3 MOD / 6 HIGH), **0 critical**, no vitest/vite chain; main baseline
+re-run same day = 30 vulns incl. 1 CRITICAL + the vitest/vite advisories. **Residual flagged in the
+PR (not blocking):** the pragma fixes the file, not the class — a future bare-automock of a Node
+builtin under jsdom could silently run real fs and pass for the wrong reason (configured mocks fail
+loudly with the TypeError); recommended follow-up: ESLint rule or vitest.config comment requiring
+the node pragma for `vi.mock('node:*')` files. **Mechanics:** force-push of the rebased branch is
+guard-denied (destructive-git hard deny), so the rebased state was pushed as new branch
+`oi017-vitest4-migration-rebased` (original branch preserved on origin); PR #238 targets main from
+it. NOT merged — financial-decision repo, Gabriel merges. After merge: the plain `npm audit fix`
+pass for the 4 fixAvailable advisories (brace-expansion/fast-uri/js-yaml/postcss) remains queued
+per the 07-26 investigation block.
+**CLOSED-OUT 2026-07-26 (both PRs merged same day, Gabriel):** `ZeOoba/ora-pm#9` merged (`68fe84d`) —
+deploy verified (production confirmed serving `68fe84d` via `wrangler pages deployment list`, `/api`
+401 auth-gated, admin `/login` 200, no regression); ora-pm side of OI-017 is now fully clear, **0
+vulnerabilities**. `ZeOoba/oxford-command-center#238` merged (`e7446cc`) — no auto-deploy exists for
+this repo (verified: `ci.yml`/`full-gate-selfhosted.yml`/`order-fragility.yml` are gate/canary jobs
+only, no deploy step; the brain mirror ships only via a separate manual `scripts/deploy-mirror.ps1`
+run per the `/ship` doctrine), so this merge is main-only, nothing went live. **Item's original CVE
+scope is now resolved: the vitest/vite CRITICAL+HIGH chain that blocked this item since 07-18 is
+gone in both repos.** Two things remain, deliberately NOT rolled into this item's closure: (1) occ's
+queued non-breaking `npm audit fix` pass (4 advisories: brace-expansion/fast-uri/js-yaml/postcss) —
+trivial but still real financial-repo code, needs its own small PR+gate, not done unprompted this
+session; (2) the ora-pm blank tenant-portal defect — tracked as its own task chip, already running
+in a separate Gabriel-directed session, not part of this CVE item's scope to begin with.
+**Closed:** 2026-07-26
+**Evidence:** `npm audit` on ora-pm main (post-#9) = 0 vulnerabilities; `npm audit` on oxford-command-center
+main (post-#238) = 9 vulns / 0 critical (down from 30 incl. 1 CRITICAL pre-merge), with the vitest/vite
+chain that opened this item entirely gone. Both PRs confirmed MERGED via `gh pr view --json state`;
+ora-pm deploy confirmed live via `wrangler pages deployment list` + a 401/200 health check.
 **Auto-check:** none.
 
 ### OI-024
@@ -807,6 +912,7 @@ with no automated stage-advancement. That's a policy/tooling gap (when should a 
 | [OI-008](#OI-008) | 2026-07-17 | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Sweep the Tenant DB for the Escalation-Date/Lease-Expiration column-mapping bug beyond the 7 rows already checked |
 | [OI-014](#OI-014) | 2026-07-17 | 2026-07-17 | [reference_onedrive_business_scope.md](reference_onedrive_business_scope.md) | Confirm no ora-pm git clone inside any OneDrive sync root (real repo at C:\Users\Owner\ora-pm) |
 | [OI-015](#OI-015) | 2026-07-18 | 2026-07-19 | ora-appsec-sweep first run (2026-07-18); Notion Ops Hub row `3a26ecd8-9e59-81e4-85d4-d08d0d5d920b` | Reachable/clonable ora-pm git history confirmed genuinely clean of real E. Fulton terms — no history rewrite needed; residual (a dangling blob still served via GitHub's Data API) spun off as OI-022 |
+| [OI-017](#OI-017) | 2026-07-18 | 2026-07-26 | ora-appsec-sweep first run (2026-07-18) | ora-pm + oxford-command-center toolchain CVEs — both repos' vitest/vite CRITICAL+HIGH chain cleared (ora-pm 0 vulns; occ 30→9, 0 critical); wrangler/sharp and react-router (v8.3.0) also resolved on ora-pm. Residual npm-audit-fix pass on occ and the unrelated blank-tenant-portal defect tracked separately, not part of this item |
 | [OI-016](#OI-016) | 2026-07-18 | 2026-07-19 | ora-appsec-sweep first run (2026-07-18) | ora-pm: `hono` bumped 4.12.23→4.12.31 (commit `c300867`), resolved HIGH CORS/Set-Cookie/path-traversal advisories; verified via `npm audit` |
 
 ### OI-023
