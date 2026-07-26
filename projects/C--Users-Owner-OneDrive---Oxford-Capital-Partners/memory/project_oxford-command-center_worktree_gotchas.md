@@ -1,11 +1,11 @@
 ---
 name: oxford-command-center-worktree-gotchas
-description: WORKBOOK_PATH isn't inherited per-worktree (still true). warehouse:verify EPERM-on-cleanup was corrected 2026-07-08 (unguarded rmSync, now fixed, verified still intact) — don't confuse with the separate same-day dev:server hang fix (dev-watchdog.cjs). Also: status.json has a real recurring concurrent-merge corruption history; current dev-watchdog work is uncommitted directly on the main checkout, not a worktree.
+description: WORKBOOK_PATH isn't inherited per-worktree (still true). warehouse:verify EPERM-on-cleanup was corrected 2026-07-08 (unguarded rmSync, now fixed, verified still intact) — don't confuse with the separate same-day dev:server hang fix (dev-watchdog.cjs). Also: status.json has a real recurring concurrent-merge corruption history; current dev-watchdog work is uncommitted directly on the main checkout, not a worktree. 2026-07-26: gov-ltv-toloansignal worktree is STACKED on gov-ltv-hardening's unmerged tip (50ffdec), not independent — flags a real amend/rebase + merge-order collision risk between them.
 metadata:
   node_type: memory
   type: project
   originSessionId: 70f9b684-041c-4849-9383-0c2a9f2c4ac1
-  modified: 2026-07-19T15:54:41.602Z
+  modified: 2026-07-26T03:03:19.111Z
 ---
 
 Found while running the full `npm run gate` chain from an isolated worktree
@@ -237,3 +237,36 @@ inspection, (2) a write-free listing-only pass (`collectDocChunks()` via a throw
 `scripts/`, deleted immediately after) against the LIVE `.env` config for a real before/after count
 — never run the actual `npm run index:docs` for verification purposes, it overwrites the 179MB
 production `data/doc-index.sqlite`.
+
+## 2026-07-26 — `gov-ltv-toloansignal` worktree is stacked on `gov-ltv-hardening`'s unmerged commit, not an independent branch: real amend/merge-order collision risk
+
+Routine worktree-staleness sweep (of `.claude/worktrees/` inside this repo, prompted by a separate
+same-evening `~/.claude` corruption investigation) found `.claude/worktrees/gov-ltv-toloansignal`
+(branch `fix/governor-ltv-toloansignal-guard`) contains `50ffdec` — the exact same commit that is
+`.claude/worktrees/gov-ltv-hardening`'s (branch `fix/governor-ltv-false-clearance`) own only
+unmerged commit — as its earliest ancestor (`git log` shows `e092787` -> `157ac1d` -> `50ffdec`, all
+three "ahead of main" for `gov-ltv-toloansignal`). So `toloansignal` was branched from `hardening`'s
+tip, not from `main` directly — a stacked pair, not two independent worktrees, even though nothing
+in `git worktree list` surfaces that relationship.
+
+**The hazard:** `gov-ltv-hardening` has live uncommitted changes to the exact files `50ffdec`
+touched (`server/index.ts`, `debt-maturity.ts`, `debt-snapshot.ts`, `debt.ts`), plus new scope
+(`check-refute-required.ts`, a new migration, a new hostile-repro test). A normal next commit on
+top of `50ffdec` is safe — `toloansignal` is unaffected by commits added *after* the commit it
+depends on. But an amend or rebase of `50ffdec` itself would rewrite the commit `toloansignal`'s
+other two commits are built on, orphaning them. Separately, even without any amend: both branches
+independently extend `debt-maturity.ts`/`debt-api.ts`/`debt-snapshot.ts`/`server/index.ts` from the
+same base, so whichever of the two merges to `main` second is likely to hit real content conflicts
+in those files, not just a git-mechanics one.
+
+Not fixed or touched — both worktrees have real, substantial in-progress work not caused by (or
+belonging to) the investigating session; this is a decision for whoever owns them: pick a merge
+order, and whichever lands second should rebase onto the first rather than the first getting
+amended out from under the second.
+
+**How to apply:** `git worktree list` alone never reveals a stacked-branch relationship — before
+assuming two worktrees under `.claude/worktrees/` are independent siblings, diff each one's own
+commit range (`git log --oneline $(git merge-base main HEAD)..HEAD`) and check for a shared, unmerged
+commit hash appearing in more than one. Same general risk class as
+[[reference_concurrent_session_duplicate_hardening_work]], but a distinct variant: stacked
+dependency, not duplicate independent effort.
