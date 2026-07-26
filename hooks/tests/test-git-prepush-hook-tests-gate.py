@@ -142,16 +142,18 @@ finally:
     gt.TESTS_DIR_OVERRIDE = None
 
 # --- run_test_file() + classify() ---------------------------------------------------
-rc_good, out_good = gt.run_test_file(os.path.join(fixture_root, "test-good.py"))
+rc_good, out_good, to_good = gt.run_test_file(os.path.join(fixture_root, "test-good.py"))
 expect("run: good test exits 0", rc_good == 0, "got %r" % rc_good)
+expect("run: good test is not flagged timed_out", to_good is False)
 expect("classify: rc 0 -> pass", gt.classify(rc_good, out_good) == "pass")
 
-rc_bad, out_bad = gt.run_test_file(os.path.join(fixture_root, "test-bad.py"))
+rc_bad, out_bad, to_bad = gt.run_test_file(os.path.join(fixture_root, "test-bad.py"))
 expect("run: bad test exits 1", rc_bad == 1, "got %r" % rc_bad)
+expect("run: bad test is not flagged timed_out", to_bad is False)
 expect("classify: rc != 0, no CANNOT RUN sentinel -> fail",
        gt.classify(rc_bad, out_bad) == "fail")
 
-rc_skip, out_skip = gt.run_test_file(os.path.join(fixture_root, "test-envskip.py"))
+rc_skip, out_skip, _ = gt.run_test_file(os.path.join(fixture_root, "test-envskip.py"))
 expect("run: env-skip test exits 1", rc_skip == 1, "got %r" % rc_skip)
 expect("classify: rc != 0 WITH 'CANNOT RUN:' sentinel -> env-skip",
        gt.classify(rc_skip, out_skip) == "env-skip")
@@ -188,7 +190,7 @@ _leak_env_vars = {
 _saved_env = {k: os.environ.get(k) for k in _leak_env_vars}
 os.environ.update(_leak_env_vars)
 try:
-    rc_leak, out_leak = gt.run_test_file(leak_probe)
+    rc_leak, out_leak, _ = gt.run_test_file(leak_probe)
 finally:
     for k, v in _saved_env.items():
         if v is None:
@@ -206,6 +208,105 @@ expect("run_suite: 3 results, one per fixture", len(suite) == 3, "got %r" % suit
 expect("run_suite: statuses match", by_file == {
     "test-good.py": "pass", "test-bad.py": "fail", "test-envskip.py": "env-skip",
 }, "got %r" % by_file)
+
+# --- timeout-retry policy (load-flake evidence, 2026-07-26) ---------------------------
+# During a push with three other live sessions, test-eos-review-gate.py (48 subprocess
+# spawns, the suite's outlier) blew the flat 90s budget (exit 124) and blocked the push;
+# rerun in isolation moments later it passed all 48 quickly. Policy under test: a FIRST
+# timeout earns exactly ONE rerun of that file at a doubled budget; the rerun's result
+# is authoritative (a second timeout, or a non-timeout failure on the rerun, is a real
+# blocking FAIL). A non-timeout failure is NEVER retried — a deterministic assertion
+# failure must not get two bites at the gate.
+retry_root = tempfile.mkdtemp(prefix="gt-retry-")
+retry_marker = os.path.join(retry_root, "flaky-first-run.marker")
+write_dummy_test(retry_root, "test-flaky-timeout.py",
+                 "import os, sys, time\n"
+                 "marker = %r\n"
+                 "if not os.path.exists(marker):\n"
+                 "    open(marker, 'w').close()\n"
+                 "    time.sleep(30)\n"
+                 "print('ok on rerun')\n"
+                 "sys.exit(0)\n" % retry_marker)
+write_dummy_test(retry_root, "test-hung.py",
+                 "import time\ntime.sleep(30)\nprint('never reached')\n")
+write_dummy_test(retry_root, "test-plain-fail.py",
+                 "print('boom: deterministic failure')\nimport sys; sys.exit(1)\n")
+# A child that EXITS 124 by itself (no hang): rc alone must not trigger the retry —
+# the policy keys on run_test_file()'s timed_out flag, not on the exit code (REFUTE
+# review finding, 2026-07-26).
+write_dummy_test(retry_root, "test-fake-124.py",
+                 "print('deterministically exiting 124')\nimport sys; sys.exit(124)\n")
+
+# Record every run_test_file() call (file + timeout arg) while still really running the
+# subprocess, so retry COUNT and the retry's enlarged BUDGET are asserted directly
+# instead of via wall-clock timing (which would itself be load-flaky).
+_rtf_calls = []
+_real_rtf = gt.run_test_file
+def _recording_rtf(path, timeout=None):
+    _rtf_calls.append((os.path.basename(path), timeout))
+    return _real_rtf(path, timeout)
+gt.run_test_file = _recording_rtf
+_real_budget = gt.PER_TEST_TIMEOUT_SECONDS
+gt.PER_TEST_TIMEOUT_SECONDS = 3
+try:
+    retry_suite = gt.run_suite(retry_root)
+finally:
+    gt.PER_TEST_TIMEOUT_SECONDS = _real_budget
+    gt.run_test_file = _real_rtf
+retry_by_file = {r["file"]: r for r in retry_suite}
+
+flaky = retry_by_file.get("test-flaky-timeout.py", {})
+expect("timeout-retry: first-run timeout + passing rerun -> pass (not blocking)",
+       flaky.get("status") == "pass", "got %r" % (flaky,))
+expect("timeout-retry: the recovered pass is marked timeout_retried",
+       flaky.get("timeout_retried") is True, "got %r" % (flaky,))
+
+hung = retry_by_file.get("test-hung.py", {})
+expect("timeout-retry: a second timeout is still a real FAIL (rc 124)",
+       hung.get("status") == "fail" and hung.get("rc") == 124, "got %r" % (hung,))
+expect("timeout-retry: the twice-timed-out file is marked timeout_retried",
+       hung.get("timeout_retried") is True, "got %r" % (hung,))
+
+plain = retry_by_file.get("test-plain-fail.py", {})
+expect("timeout-retry: non-timeout failure stays FAIL",
+       plain.get("status") == "fail", "got %r" % (plain,))
+expect("timeout-retry: non-timeout failure is not marked retried",
+       plain.get("timeout_retried") is False, "got %r" % (plain,))
+
+fake124 = retry_by_file.get("test-fake-124.py", {})
+expect("timeout-retry: a child that itself EXITS 124 stays FAIL",
+       fake124.get("status") == "fail" and fake124.get("rc") == 124,
+       "got %r" % (fake124,))
+expect("timeout-retry: a deterministic exit-124 is NOT marked retried",
+       fake124.get("timeout_retried") is False, "got %r" % (fake124,))
+
+flaky_calls = [c for c in _rtf_calls if c[0] == "test-flaky-timeout.py"]
+hung_calls = [c for c in _rtf_calls if c[0] == "test-hung.py"]
+plain_calls = [c for c in _rtf_calls if c[0] == "test-plain-fail.py"]
+fake124_calls = [c for c in _rtf_calls if c[0] == "test-fake-124.py"]
+expect("timeout-retry: a timed-out file is run exactly TWICE, never more",
+       len(flaky_calls) == 2 and len(hung_calls) == 2,
+       "got flaky=%r hung=%r" % (flaky_calls, hung_calls))
+expect("timeout-retry: a non-timeout failure is run exactly ONCE",
+       len(plain_calls) == 1, "got %r" % (plain_calls,))
+expect("timeout-retry: a deterministic exit-124 is run exactly ONCE (flag, not rc, "
+       "triggers the retry)", len(fake124_calls) == 1, "got %r" % (fake124_calls,))
+expect("timeout-retry: the rerun gets a DOUBLED budget (base 3 -> retry 6)",
+       len(flaky_calls) == 2 and flaky_calls[0][1] is None and flaky_calls[1][1] == 6,
+       "got %r" % (flaky_calls,))
+
+expect("any_real_failure: a timeout-retried PASS does not block",
+       gt.any_real_failure([flaky]) is False)
+
+# Visibility: a flake that recovered must be DISCLOSED in the report, not silently
+# eaten, and the twice-timed-out FAIL block must still appear with its exit code.
+retry_summary = gt.format_summary(retry_suite)
+expect("format_summary: discloses the timeout-retried pass by name",
+       "timeout-retry" in retry_summary and "test-flaky-timeout.py" in retry_summary,
+       "got %r" % retry_summary)
+expect("format_summary: twice-timed-out FAIL block survives with exit 124",
+       "test-hung.py" in retry_summary and "124" in retry_summary,
+       "got %r" % retry_summary)
 
 # --- any_real_failure() ---------------------------------------------------------------
 expect("any_real_failure: pass+env-skip only -> False",
