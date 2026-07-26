@@ -65,6 +65,13 @@ The old VERDICT logic flagged ATTENTION on ANY never-ran task, ANY expired one-t
 - **Fail-open:** if the claim area is unreadable, malformed, or the check itself errors, proceed anyway (log a warning to the Claude Log) rather than block.
 - **On completion:** clear (or let expire) the claim; log the turn to Claude Log as already happens.
 
+## 3e. Cross-session claim/broadcast (RATIFIED 2026-07-25, `task_17998414`)
+- **Why:** `reference_concurrent_session_duplicate_hardening_work.md` logs 6 recorded collisions (2026-07-16 through 2026-07-24) of concurrent sessions independently duplicating work on a shared subsystem that has no per-path single-writer rule — narrower than a file-level conflict (the sessions may never touch the same file), so git alone can't catch it. The prior mitigation (manually run `git worktree list` + check `list_sessions`) already failed to catch the worst incident. Full design: `docs/superpowers/specs/2026-07-25-cross-session-claim-broadcast-design.md`.
+- **Mechanism:** `hooks/lib/claim_work.py claim <slug> "<description>"` writes `hooks/active-work/<slug>.json` (session id from `$CLAUDE_CODE_SESSION_ID`, atomic rename, one file per claim — no shared file to race, same argument as `fleet-session-hook.py`'s 2026-07-24 per-session-file rewrite). A new `SessionStart` hook, `hooks/active-work-broadcast.py`, reads all non-expired claims and surfaces any NOT belonging to the starting session via `additionalContext` — automatic, replacing the manual pre-check for this signal.
+- **NOT a hard lock** (same doctrine as §3d): 2-hour TTL, fail-open on any error, no `PreToolUse` block. `release <slug>` is best-effort, not required — an unreleased claim just ages out.
+- **Slugs (free-form, not a hardcoded enum):** `hooks-override-auth` (the originally-escalated case) · `open-items-tracker` (claim before appending an `OI-NNN` entry — does NOT replace re-deriving the next-free ID fresh, that tactical fix stays) · `oxford-command-center-data` (structural writes to `data/overlay.json` / `data/snapshots/portfolio.json`, mirroring §3d's structural-vs-single-cell scope cut).
+- **Convention, not enforcement:** claiming is a manual step the agent takes at the start of non-trivial work — a `PreToolUse` auto-claim was explicitly rejected (too high a false-positive/negative rate from a single tool call). `session-context.md`'s "Ad-hoc hook/security work" bullet needs a manual update once this ships to the live checkout (not done in the same PR — that file is untracked, per-machine state, and shouldn't describe not-yet-merged functionality as live).
+
 ## 4. MCP connectors
 
 <!--BEGIN-CONNECTOR-ROSTER-->
