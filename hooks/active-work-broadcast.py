@@ -52,6 +52,41 @@ except Exception:
         return []
 
 
+_MAX_FIELD_CHARS = 200
+
+
+def _sanitize_field(text) -> str:
+    """Collapse a claim's free-form description/title field to a single
+    printable-ASCII line before it is interpolated into additionalContext.
+
+    WHY (2026-07-26, adversarial review of the config-write-guard.py
+    hooks/active-work/ exemption landed alongside this fix): claim_work.py's
+    own docstring is explicit that claims are "NOT a security boundary -- any
+    session can release or overwrite any claim file" -- the write path is
+    deliberately open. That is fine for the claim mechanism's own purpose
+    (a courtesy broadcast, not access control), but this hook is the ONE place
+    a claim's free-form text becomes MODEL-VISIBLE context for every future
+    session via additionalContext (unlike systemMessage, which is user-visible
+    but invisible to the model -- see the module docstring's DELIVERY note).
+    An unsanitized description is therefore a prompt-injection vector: text a
+    session ingested from an untrusted source (a scraped page, an email) and
+    then passed to `claim_work.py claim <slug> "<desc>"` would be replayed
+    verbatim, embedded in newlines and blank lines, into every subsequent
+    session's context -- confirmed reproducible via adversarial review.
+    Collapsing to one line and stripping control characters does not make the
+    TEXT trustworthy (it is still untrusted, observed data, same as any other
+    hook/tool output -- see the instruction-source-boundary rule), but it
+    removes the structural cues (blank lines, fake headers) an injection
+    attempt needs to visually pass as separate, authoritative system text
+    rather than one clearly-bounded line inside a claim listing."""
+    s = str(text or "")
+    s = "".join(c if (c.isprintable() and c not in "\r\n\t") else " " for c in s)
+    s = " ".join(s.split())
+    if len(s) > _MAX_FIELD_CHARS:
+        s = s[:_MAX_FIELD_CHARS].rstrip() + "...(truncated)"
+    return s or "(no description)"
+
+
 def emit(ctx: str) -> None:
     print(json.dumps({
         "hookSpecificOutput": {
@@ -91,10 +126,16 @@ def main() -> None:
     ]
     for c in others:
         lines.append("- %s: session %s claimed %.0fm ago -- %s" % (
-            c.get("slug", "?"),
-            str(c.get("session_id", "?"))[:8],
+            _sanitize_field(c.get("slug", "?")),
+            # session_id is attacker-controlled claim JSON same as description --
+            # ROUND 2 REFUTE finding R4: the slug field (already sanitized above)
+            # can never actually carry a newline (it comes from a Windows
+            # filename via claim_work.py's _safe_filename()), so the ORIGINAL
+            # sanitization pass wrapped the one field that structurally could not
+            # break, and skipped this one, which can.
+            _sanitize_field(str(c.get("session_id", "?"))[:8]),
             c.get("age_minutes", 0.0),
-            c.get("description") or c.get("title") or "(no description)",
+            _sanitize_field(c.get("description") or c.get("title")),
         ))
     emit("\n".join(lines))
 
