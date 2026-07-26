@@ -34,6 +34,7 @@ _cpg = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_cpg)
 is_git_commit = _cpg.is_git_commit
 candidate_paths = _cpg.candidate_paths
+find_commit_segment = _cpg.find_commit_segment
 repo_root = _cpg.repo_root
 last_commit_time = _cpg.last_commit_time
 
@@ -237,6 +238,45 @@ def test_pathspec_narrows_candidate_set():
     print("PASS test_pathspec_narrows_candidate_set")
 
 
+def test_heredoc_message_with_trailing_pathspec_narrows_candidate_set():
+    """2026-07-26 real-incident reproduction. `tokenize_cmd_segments()` split the
+    command LINE BY LINE with no cross-line quote tracking, so a heredoc-style
+    `-m "$(cat <<'EOF' ... EOF)"` -- the pattern this fleet's own commit
+    instructions REQUIRE for every commit message -- opens a `"` on its first
+    line that isn't closed until several lines later. Each line was shlex-split
+    independently; line 1 hit an unterminated-quote ValueError and fell back to
+    a bare whitespace split, capping the recognized commit args at that one
+    line. A trailing `-- <pathspec>` on the line AFTER the heredoc closes
+    landed in its own disconnected, non-"git ..." segment and was silently
+    dropped -- candidate_paths() then fell through to "no pathspec -> the
+    WHOLE staged index", exactly the false positive that blocked a real,
+    correctly-pathspec-scoped commit on both commit-provenance-guard.py and
+    eos-review-gate.py (which share this module). A single-line `-m` with the
+    same trailing pathspec already worked fine (test_pathspec_narrows_
+    candidate_set above) -- this is specifically the heredoc/multi-line case."""
+    repo = make_repo()
+    mine = write_and_stage(repo, "mine.txt")
+    theirs = write_and_stage(repo, "theirs.txt")
+
+    cmd = (
+        'git commit -m "$(cat <<\'EOF\'\n'
+        'fix: a real multi-line commit message\n\n'
+        'Body paragraph explaining the change in more than one line,\n'
+        'the way this fleet'"'"'s own commit convention requires.\n\n'
+        'Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n'
+        'EOF\n'
+        ')" -- mine.txt'
+    )
+    result = candidate_paths(repo, cmd)
+    assert result == {mine}, (
+        "a heredoc commit message with a trailing pathspec must narrow to "
+        "just the pathspec'd file, same as the single-line case -- got %r "
+        "(theirs.txt leaking in means the pathspec was silently dropped and "
+        "the whole staged index was used instead)" % result)
+    assert theirs not in result
+    print("PASS test_heredoc_message_with_trailing_pathspec_narrows_candidate_set")
+
+
 def test_chained_command_dashdash_does_not_hijack_pathspec():
     """2026-07-24 independent-review finding (M2, shared with eos-review-gate.py,
     which reuses candidate_paths via git_commit_parse.py). A `--` belonging to a
@@ -368,6 +408,359 @@ def test_explicit_pathspec_excluding_foreign_allows():
     rc, out, err = run_hook('git commit -m "x" -- mine.txt', repo, sess, fleet_state=fs)
     assert rc == 0, "pathspec excluding the foreign file must allow, got %s (%s)" % (rc, err)
     print("PASS test_explicit_pathspec_excluding_foreign_allows")
+
+
+def test_heredoc_pathspec_excluding_foreign_allows_end_to_end():
+    """2026-07-26 real-incident reproduction, full hook subprocess this time (not
+    just candidate_paths() in-process). The block message's OWN recommended
+    remediation is `git commit -m "..." -- <your/file>` -- but this fleet's
+    commit convention REQUIRES a heredoc for that `-m`, and combining the two
+    is exactly the shape that silently lost the pathspec and blocked a
+    legitimate, correctly-scoped commit. Companion to
+    test_heredoc_message_with_trailing_pathspec_narrows_candidate_set, which
+    checks candidate_paths() directly -- this checks the actual hook exit
+    code, the thing that matters operationally."""
+    repo = make_repo()
+    foreign = write_and_stage(repo, "theirs.txt")
+    write_and_stage(repo, "mine.txt")
+    sess = sessions_tmp()
+    seed_touched(sess, "other", [foreign])
+    fs = fleet_state_with(["other"])
+    cmd = (
+        'git commit -m "$(cat <<\'EOF\'\n'
+        'fix: a real multi-line commit message\n\n'
+        'Body paragraph explaining the change.\n'
+        'EOF\n'
+        ')" -- mine.txt'
+    )
+    rc, out, err = run_hook(cmd, repo, sess, fleet_state=fs)
+    assert rc == 0, (
+        "a heredoc-message commit with a pathspec excluding the foreign file "
+        "must allow, got %s (%s) -- if this blocks, the pathspec was silently "
+        "dropped and the guard saw (and flagged) the foreign file instead" %
+        (rc, err))
+    print("PASS test_heredoc_pathspec_excluding_foreign_allows_end_to_end")
+
+
+def test_apostrophe_in_comment_does_not_hide_a_real_commit():
+    """Adversarial-review finding (2026-07-26, same-day as the heredoc fix
+    above): the FIRST fix attempt for the heredoc bug accumulated lines on an
+    unterminated-quote ValueError and, on end-of-input, naive-split the WHOLE
+    merged buffer as one token stream. An apostrophe inside a `#` shell
+    comment (`# don't add theirs`) reads to plain shlex (without
+    comments=True) as an unterminated single-quote -- the merged-buffer
+    fallback then swallowed a REAL, later `git commit` line into that one
+    meaningless token stream instead of recognizing it as its own segment,
+    making is_git_commit() return False for a command that unambiguously
+    does commit. That is a false ALLOW on both commit-provenance-guard.py
+    and eos-review-gate.py -- worse than the bug being fixed, since it
+    silently disables enforcement rather than merely over-blocking. Caught
+    by independent review before landing; this locks the fix in."""
+    assert is_git_commit(
+        "git add mine.txt  # don't add theirs\n"
+        'git commit -am "sweep"'
+    ) is True, "a real trailing commit must still be detected past a comment apostrophe"
+    print("PASS test_apostrophe_in_comment_does_not_hide_a_real_commit")
+
+
+def test_cascading_comment_apostrophes_do_not_hide_a_real_commit():
+    """Second half of the same adversarial-review finding: a comment
+    apostrophe on one line can be spuriously "closed" by an UNRELATED
+    comment apostrophe on a LATER line, making the merged buffer look
+    quote-balanced to plain shlex while actually burying a real, intervening
+    `git commit` inside what shlex then reads as literal quoted content."""
+    assert is_git_commit(
+        "git add a.txt # don't\n"
+        "git commit -am x\n"
+        "echo ok # can't"
+    ) is True, "a real commit sandwiched between two comment-apostrophe lines must still be detected"
+    print("PASS test_cascading_comment_apostrophes_do_not_hide_a_real_commit")
+
+
+def test_large_heredoc_body_tokenizes_in_linear_not_quadratic_time():
+    """Adversarial-review finding (2026-07-26): the FIRST fix attempt called
+    shlex.split() on the ENTIRE growing buffer on every accumulated line --
+    O(n^2) in input size. Independently measured at 13s for a 500-line
+    heredoc body and 55s for 1000 lines, against the ~5s budget other gates
+    in this codebase assume for a hook call; both commit-provenance-guard.py
+    and eos-review-gate.py call tokenize_cmd_segments() on every Bash
+    PreToolUse with no size pre-filter, so this was a real per-commit stall
+    risk, not just a benchmark curiosity. The actual fix tracks quote state
+    incrementally per line (_scan_quote_state, O(line length)) instead of
+    re-tokenizing the whole buffer each time, so total cost is O(total input
+    length). A 2000-line body -- 4x the size that took the old approach 55s
+    -- must complete in low single-digit seconds with wide margin."""
+    body = "\n".join("line %d of a very long commit message body" % i for i in range(2000))
+    cmd = "git commit -m \"$(cat <<'EOF'\n" + body + "\nEOF\n)\" -- mine.txt"
+    start = time.time()
+    args = find_commit_segment(cmd)
+    elapsed = time.time() - start
+    assert args is not None and "--" in args, (
+        "a 2000-line heredoc must still tokenize correctly, not just quickly")
+    assert elapsed < 5.0, (
+        "2000-line heredoc took %.2fs -- expected sub-second, this smells like "
+        "the old O(n^2) re-tokenization behavior again" % elapsed)
+    print("PASS test_large_heredoc_body_tokenizes_in_linear_not_quadratic_time "
+          "(%.3fs)" % elapsed)
+
+
+def test_heredoc_body_with_decoy_dashdash_does_not_leak_as_pathspec():
+    """Round-3 adversarial-review finding (2026-07-26, on the round-2 fix
+    attempt): with no `$(...)` awareness, an ODD count of `"` inside the
+    heredoc BODY flipped the round-2 scanner's outer quote-state parity,
+    ending the segment early and exposing later body prose as commit args --
+    reproduced there to leak a decoy `-- decoy.txt` as if it were the REAL
+    pathspec, silently dropping the actual `-- mine.txt` into a discarded
+    tail segment. The current fix excises the heredoc body as opaque content
+    (matched by its literal terminator line, never quote-scanned at all), so
+    nothing inside it -- including a stray, unbalanced `"` -- can affect
+    anything outside it."""
+    cmd = (
+        'git commit -m "$(cat <<\'EOF\'\n'
+        'use "safe -- decoy.txt as the fix\n'
+        'EOF\n'
+        ')" -- mine.txt'
+    )
+    args = find_commit_segment(cmd)
+    assert args is not None, "the real commit must still be detected"
+    assert "--" in args, args
+    idx = args.index("--")
+    assert args[idx + 1:] == ["mine.txt"], (
+        "the pathspec must be mine.txt, not decoy content leaked from the "
+        "heredoc body: %r" % args)
+    print("PASS test_heredoc_body_with_decoy_dashdash_does_not_leak_as_pathspec")
+
+
+def test_heredoc_body_with_decoy_dry_run_does_not_blind_the_commit():
+    """Same round-3 finding, second shape: a decoy `--dry-run` leaked from an
+    odd-quote-count heredoc body into the real commit's args, making
+    is_git_commit() return False for a command that unambiguously commits."""
+    cmd = (
+        'git commit -m "$(cat <<\'EOF\'\n'
+        'try "safe mode with --dry-run first\n'
+        'EOF\n'
+        ')" -- mine.txt'
+    )
+    assert is_git_commit(cmd) is True, "a real commit must not be hidden by heredoc body prose"
+    args = find_commit_segment(cmd)
+    assert "--dry-run" not in args, (
+        "a decoy --dry-run from the heredoc body must not leak into real args: %r" % args)
+    print("PASS test_heredoc_body_with_decoy_dry_run_does_not_blind_the_commit")
+
+
+def test_mid_word_hash_does_not_hide_a_same_line_commit():
+    """Round-3 adversarial-review finding: bash only starts a `#` comment at
+    the START of a word; the round-2 fix (and shlex's own comments=True)
+    treated ANY unquoted `#` as a comment-start, so `${#arr[@]}` -- a bash
+    parameter-expansion length operator, `#` mid-word -- hid a real,
+    same-line-following `git commit` entirely. The current fix removes
+    comment-handling from the quote scanner altogether (comments are no
+    longer relevant once the heredoc body is excised via its own literal
+    terminator-line rule instead of quote/comment scanning), so a bare `#`
+    anywhere is just an ordinary character for quote-parity purposes."""
+    assert is_git_commit("echo ${#arr[@]} && git commit -am x") is True
+    assert is_git_commit("sed s/#/x/ f && git commit -am x") is True
+    print("PASS test_mid_word_hash_does_not_hide_a_same_line_commit")
+
+
+def test_pathspec_containing_hash_is_not_truncated():
+    """Same finding, third shape: a real pathspec containing `#` (a real,
+    if unusual, filename character) must not be truncated at the `#` by an
+    overly aggressive comment rule."""
+    args = find_commit_segment('git commit -m x -- readme#old.md')
+    assert args is not None
+    assert args[-1] == "readme#old.md", args
+    print("PASS test_pathspec_containing_hash_is_not_truncated")
+
+
+def test_heredoc_unrelated_to_commit_message_is_not_misread():
+    """A heredoc used for something OTHER than a commit message (e.g.
+    writing a file) must still be recognized and excised correctly, and must
+    not itself be mistaken for a commit segment; the real `git commit` after
+    it must still be detected as its own segment."""
+    cmd = "cat <<'EOF' > file.txt\nsome content\nEOF\ngit commit -m x"
+    args = find_commit_segment(cmd)
+    assert args == ["-m", "x"], args
+    print("PASS test_heredoc_unrelated_to_commit_message_is_not_misread")
+
+
+def test_indented_decoy_terminator_does_not_end_the_heredoc_early():
+    """Round-4 adversarial-review finding (2026-07-26, on the round-3 fix):
+    bash requires the terminator line to be an EXACT match for the
+    delimiter -- no surrounding whitespace tolerated (unless `<<-` is used,
+    which strips only LEADING TABS before comparing). The round-3 version
+    matched via `line.strip() == delim`, so a body line that is merely an
+    INDENTED variant of the delimiter (`  EOF`) ended the heredoc early to
+    this parser while bash keeps reading it as body -- re-exposing the rest
+    of the body, including a decoy `-- decoy.txt`, as shell-level text.
+    Bash-verified: a body line `  EOF` is body, not a terminator."""
+    cmd = (
+        "git commit -m \"$(cat <<'EOF'\n"
+        "  EOF\n"
+        'use "safe -- decoy.txt as the fix\n'
+        "EOF\n"
+        ')" -- mine.txt'
+    )
+    args = find_commit_segment(cmd)
+    assert args is not None, "the real commit must still be detected"
+    assert "--" in args, args
+    idx = args.index("--")
+    assert args[idx + 1:] == ["mine.txt"], (
+        "an indented decoy 'EOF' in the body must not end the heredoc early "
+        "and leak decoy content as the pathspec: %r" % args)
+    print("PASS test_indented_decoy_terminator_does_not_end_the_heredoc_early")
+
+
+def test_quoted_fake_marker_does_not_excise_a_real_intervening_commit():
+    """Round-4 adversarial-review finding: the marker regex had no quote
+    awareness, so `<<WORD` appearing INSIDE a quote (`echo "see <<EOF
+    docs"`) was read as a real heredoc marker. If some later, unrelated line
+    coincidentally equals that fake delimiter, a real intervening `git
+    commit` between them got excised as if it were heredoc "body". Bash-
+    verified: the quoted `<<EOF` is plain text to bash, not a marker, so the
+    commit runs for real."""
+    cmd = 'echo "see <<EOF docs"\ngit commit -am sweep\nEOF'
+    assert is_git_commit(cmd) is True, (
+        "a real commit between a quoted fake marker and a coincidental "
+        "matching line must still be detected, not excised as fake body")
+    print("PASS test_quoted_fake_marker_does_not_excise_a_real_intervening_commit")
+
+
+def test_fallback_never_re_exposes_the_excised_heredoc_body():
+    """Round-4 adversarial-review finding: when the shell-level quote never
+    balances by end-of-input (e.g. a trailing comment-apostrophe after the
+    pathspec keeps the scanner open forever, since it has no comment
+    handling by design), the fallback used to re-tokenize the ENTIRE
+    consumed range -- including the excised heredoc BODY -- as ordinary
+    shell lines. A body line containing real-looking commit flags
+    (`git commit --dry-run -m example`) then surfaced as a fabricated final
+    segment, making is_git_commit() return False for a command that
+    unambiguously does commit. The body and its terminator must never be
+    re-tokenized on ANY path, including this one."""
+    cmd = (
+        "git commit -m \"$(cat <<'EOF'\n"
+        "git commit --dry-run -m example\n"
+        "EOF\n"
+        ")\" -- mine.txt  # don't forget"
+    )
+    assert is_git_commit(cmd) is True, (
+        "the real commit must be detected even when the fallback path fires; "
+        "if this returns False, heredoc body prose leaked back into args")
+    print("PASS test_fallback_never_re_exposes_the_excised_heredoc_body")
+
+
+def test_non_word_delimiter_still_narrows_pathspec():
+    """Round-5 adversarial-review finding: the delimiter regex only matched
+    a plain word-character class, but bash's heredoc delimiter is a full
+    shell WORD (`END-OF-MSG`, `EOF.txt` are both legal). A delimiter outside
+    the narrow class never matched its own real terminator line, silently
+    reproducing round 1's original false-block (whole staged index) for any
+    such delimiter."""
+    repo = make_repo()
+    mine = write_and_stage(repo, "mine.txt")
+    theirs = write_and_stage(repo, "theirs.txt")
+    cmd = (
+        "git commit -m \"$(cat <<'END-OF-MSG'\n"
+        "body text\n"
+        "END-OF-MSG\n"
+        ')" -- mine.txt'
+    )
+    result = candidate_paths(repo, cmd)
+    assert result == {mine}, (
+        "a non-word delimiter (END-OF-MSG) must still correctly narrow to "
+        "the pathspec, got %r" % result)
+    assert theirs not in result
+    print("PASS test_non_word_delimiter_still_narrows_pathspec")
+
+
+def test_truncated_delimiter_prefix_as_body_line_does_not_end_heredoc_early():
+    """Round-5 companion to the above: with the delimiter widened, a body
+    line matching the OLD truncated word-only prefix (`END` for a real
+    `END-OF-MSG` delimiter) must not be mistaken for the real terminator --
+    that was the false-allow direction of the same narrow-charset bug."""
+    cmd = (
+        "git commit -m \"$(cat <<'END-OF-MSG'\n"
+        'use "safe -- decoy.txt as the fix\n'
+        "END-OF-MSG\n"
+        ')" -- mine.txt'
+    )
+    args = find_commit_segment(cmd)
+    assert args is not None and "--" in args, args
+    idx = args.index("--")
+    assert args[idx + 1:] == ["mine.txt"], (
+        "decoy content must not leak as the pathspec: %r" % args)
+    print("PASS test_truncated_delimiter_prefix_as_body_line_does_not_end_heredoc_early")
+
+
+def test_already_closed_subshell_does_not_grant_the_marker_escape_hatch():
+    """Round-5 adversarial-review finding: the `$(` escape hatch for the
+    marker-quote-rejection check used to be a bare substring test, foolable
+    by a `$(...)` that closes its OWN `)` before the `<<` appears --
+    `echo "$(date +%Y) note <<EOF here"` has a `$(` earlier on the line, but
+    it's already closed, so the `<<EOF` is genuinely still just quoted text
+    to bash, not a real marker. If a later, unrelated line coincidentally
+    equals that fake delimiter, a real intervening `git commit` must still
+    be detected, not excised as fake heredoc body."""
+    cmd = (
+        'echo "$(date +%Y) note <<EOF here"\n'
+        'git commit -am sweep\n'
+        'EOF'
+    )
+    assert is_git_commit(cmd) is True, (
+        "a real commit after an already-closed-subshell decoy marker must "
+        "still be detected")
+    print("PASS test_already_closed_subshell_does_not_grant_the_marker_escape_hatch")
+
+
+def test_quote_opened_on_an_earlier_line_is_not_forgotten():
+    """Round-5 adversarial-review finding: the marker-rejection check always
+    started scanning from state=None, so it was structurally blind to a
+    quote opened on an EARLIER, non-heredoc line. A quote spanning two plain
+    lines (no heredoc involved at all) whose second line happens to contain
+    `<<DELIM` must still correctly reject that as a real marker -- and the
+    real, later `git commit` must still be found. `carry_state` threads the
+    quote parity across non-heredoc lines (gating marker acceptance only,
+    never merging lines for tokenization) to close this."""
+    cmd = (
+        'echo "line one\n'
+        'see <<EOF docs"\n'
+        'git commit -am sweep\n'
+        'EOF'
+    )
+    assert is_git_commit(cmd) is True, (
+        "a real commit after a marker inside a quote opened on an earlier "
+        "line must still be detected, not excised as fake heredoc body")
+    print("PASS test_quote_opened_on_an_earlier_line_is_not_forgotten")
+
+
+def test_carry_state_does_not_reintroduce_the_round_2_regression():
+    """Guard against carry_state (round 5) reintroducing round 2's
+    cross-line-accumulation false-allow: a comment apostrophe on one
+    (non-heredoc) line must still never hide a real commit on a later
+    line -- carry_state only gates heredoc-marker acceptance, it must never
+    cause non-heredoc lines to be merged for tokenization."""
+    cmd = "git add mine.txt  # don't add theirs\ngit commit -am \"sweep\""
+    assert is_git_commit(cmd) is True
+    print("PASS test_carry_state_does_not_reintroduce_the_round_2_regression")
+
+
+def test_herestring_operator_is_not_mistaken_for_a_heredoc_marker():
+    """Round-5 adversarial-review finding: `<<<WORD` is bash's here-STRING
+    operator -- an entirely different, single-line construct with no body
+    or terminator at all. The marker regex matched it anyway via its middle
+    `<<`, and if a later, unrelated line coincidentally equalled the
+    here-string's own word, everything in between (including a real `git
+    commit`) was excised as fake heredoc body. A genuine `cat<<EOF` (no
+    space before the operator) must remain unaffected by the fix."""
+    cmd = "grep -q x <<<hello\ngit commit -am sweep\nhello"
+    assert is_git_commit(cmd) is True, (
+        "a real commit after a here-string operator must still be "
+        "detected, not excised as fake heredoc body")
+    cmd2 = "cat<<EOF\nbody\nEOF\ngit commit -m x"
+    args2 = find_commit_segment(cmd2)
+    assert args2 == ["-m", "x"], (
+        "a genuine no-space heredoc marker must still be recognized: %r" % args2)
+    print("PASS test_herestring_operator_is_not_mistaken_for_a_heredoc_marker")
 
 
 def test_override_sentinel_allows():
@@ -884,6 +1277,7 @@ if __name__ == "__main__":
     test_git_add_of_commit_named_file_is_not_a_commit()
     test_commit_message_with_dashdash_does_not_corrupt_pathspec()
     test_pathspec_narrows_candidate_set()
+    test_heredoc_message_with_trailing_pathspec_narrows_candidate_set()
     test_chained_command_dashdash_does_not_hijack_pathspec()
     test_dry_run_in_commit_message_does_not_blind_a_real_commit()
     test_foreign_file_from_live_session_blocks()
@@ -894,6 +1288,24 @@ if __name__ == "__main__":
     test_last_commit_time_finds_commit_despite_normcased_path()
     test_mixed_case_foreign_edit_already_committed_since_touch_allows()
     test_explicit_pathspec_excluding_foreign_allows()
+    test_heredoc_pathspec_excluding_foreign_allows_end_to_end()
+    test_apostrophe_in_comment_does_not_hide_a_real_commit()
+    test_cascading_comment_apostrophes_do_not_hide_a_real_commit()
+    test_large_heredoc_body_tokenizes_in_linear_not_quadratic_time()
+    test_heredoc_body_with_decoy_dashdash_does_not_leak_as_pathspec()
+    test_heredoc_body_with_decoy_dry_run_does_not_blind_the_commit()
+    test_mid_word_hash_does_not_hide_a_same_line_commit()
+    test_pathspec_containing_hash_is_not_truncated()
+    test_heredoc_unrelated_to_commit_message_is_not_misread()
+    test_indented_decoy_terminator_does_not_end_the_heredoc_early()
+    test_quoted_fake_marker_does_not_excise_a_real_intervening_commit()
+    test_fallback_never_re_exposes_the_excised_heredoc_body()
+    test_non_word_delimiter_still_narrows_pathspec()
+    test_truncated_delimiter_prefix_as_body_line_does_not_end_heredoc_early()
+    test_already_closed_subshell_does_not_grant_the_marker_escape_hatch()
+    test_quote_opened_on_an_earlier_line_is_not_forgotten()
+    test_carry_state_does_not_reintroduce_the_round_2_regression()
+    test_herestring_operator_is_not_mistaken_for_a_heredoc_marker()
     test_override_sentinel_allows()
     test_own_touched_set_never_blocks_self()
     test_commit_dash_a_picks_up_foreign_tracked_modification()
