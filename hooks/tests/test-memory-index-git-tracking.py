@@ -23,6 +23,15 @@ Working-tree-only state is fine; a COMMITTED pointer to an UNCOMMITTED file is n
 import os
 import subprocess
 import sys
+
+# This test spins up its own throwaway git repos in temp dirs. When invoked as part of
+# the real pre-push hook chain, git sets GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE (etc.) in
+# this process's environment so IT can operate on the outer repo -- but those same vars
+# leak into every subprocess git call below and silently redirect them at the outer repo
+# instead of the temp one, breaking git operations against the temp fixtures.
+for _v in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+           "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_PREFIX"):
+    os.environ.pop(_v, None)
 import tempfile
 
 PROBE = os.path.normpath(os.path.join(
