@@ -12,6 +12,13 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-26 — Pre-push hook-tests gate: timeout-retry policy for load flakes (hooks/git-prepush-hook-tests-gate.py)
+
+- **Trigger:** during a `git push origin main` with three other live sessions, the gate killed `hooks/tests/test-eos-review-gate.py` (48 subprocess spawns, the suite's outlier) at the flat 90s per-file budget (exit 124) and blocked the push; the same file passed all 48 tests quickly rerun in isolation, and a second full gate run went 53/53. Environmental load flake — same class as `feedback_npm_test_intermittent_access_violation.md` — not a regression.
+- **Fix:** `run_test_file()` now returns an explicit `timed_out` flag (True only from the `TimeoutExpired` path); `run_suite()` gives a first genuine timeout exactly ONE rerun at `PER_TEST_TIMEOUT_SECONDS * TIMEOUT_RETRY_MULTIPLIER` (90s → 180s), and the rerun's result is authoritative. A second timeout, any non-timeout failure, or a child that merely *exits* 124 (flag, not rc, keys the retry) still BLOCKS; non-timeout failures are never retried. Recovered flakes are disclosed in the gate summary ("timeout-retry … not blocking") instead of being silently eaten.
+- **Not touched:** doctrine gate, confidentiality scan, override-token mechanism, both fail-closed discovery floors — verified hunk-free by the independent review.
+- **Process:** blast-radius claim (`hooks-override-auth`) taken; built in isolated worktree `eos-gate-timeout-retry` (config-write-guard's preferred path; main checkout had 16 foreign uncommitted changes); TDD (8 new assertions red first, then green); test file 71/71; full 53-file suite 52 pass / 0 fail / 1 by-design worktree env-skip; independent adversarial REFUTE review (pinned claude-fable-5) returned NOT REFUTED — it also found the change *stricter* in one corner (a first-run timeout whose partial stdout contained the `CANNOT RUN:` sentinel used to classify env-skip and pass silently; the rerun-is-authoritative rule closes half that soft spot). Reviewer's Minor findings (explicit `timed_out` flag; stale docstring; test load-margin) folded in and delta re-reviewed; eos-review-gate artifact recorded before commit.
+
 ## 2026-07-26 — ora-pm shipped: wrangler 3->4.114.0 CVE fix (OI-017), CI Node-version fallout fixed same day
 
 Merged PR #7 (`92b4b45`, squash) bumping wrangler 3.114.17->4.114.0 to clear the sharp/libvips HIGH CVEs
