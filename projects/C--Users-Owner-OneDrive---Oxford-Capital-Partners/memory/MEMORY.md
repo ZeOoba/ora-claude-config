@@ -24,7 +24,7 @@
 - [Intelligence Platform Master Plan](ora-intelligence-platform-master-plan.md) — Phase 0→3; remaining gaps in file
 - [PFI Build Canon](pfi-build-canon.md) — ratified 14-unit roster, PM assignments, accounting rulings
 - [PFI Warehouse Backlog](pfi-warehouse-systematization-backlog.md) — 3 queued basis-recovery follow-ups
-- [AAOS Agent Coordination Layer](project_aaos_agent_coordination_layer.md) — real infra, v1.0 shipped 07-10
+- [AAOS Agent Coordination Layer](project_aaos_agent_coordination_layer.md) — real infra, v1.0 self-assessed 07-10; Cowork round-trip unreachable from Code + no gate sign-off (07-26)
 - [brain.oxfordra.net Access](brain-oxfordra-access-finding.md) — LIVE via Pages mirror; tunnel path is a DEAD END
 - [Command Center Mirror Deploy Gap](reference_command_center_mirror_deploy_gap.md) — hourly deploy never pulls
 - [GitHub CI Auto-Fix Rollout](github_ci_autofix_rollout.md) — claude-code-action@v1 live on 2 repos; #7 awaits sign-off
