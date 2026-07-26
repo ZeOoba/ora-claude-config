@@ -113,11 +113,12 @@ try:
     from commit_provenance import norm, sessions_dir, ttl_h, read_touched, TOUCHED_BASENAME  # noqa: E402,F401
     from session_liveness import other_active_sessions  # noqa: E402,F401
     # Re-exported deliberately: hooks/tests/test-commit-provenance-guard.py loads
-    # this module by path and calls is_git_commit/candidate_paths/repo_root on it
-    # directly, so they must remain attributes of THIS module after the extraction.
+    # this module by path and calls is_git_commit/candidate_paths/repo_root/
+    # find_commit_segment on it directly, so they must remain attributes of THIS
+    # module after the extraction.
     from git_commit_parse import (  # noqa: E402,F401
-        candidate_paths, git_lines, has_all_flag, is_git_commit, pending_add_paths,
-        repo_root,
+        candidate_paths, find_commit_segment, git_lines, has_all_flag, is_git_commit,
+        pending_add_paths, repo_root,
     )
     PROVENANCE_CONTRACT_LOADED = True
 except Exception:
