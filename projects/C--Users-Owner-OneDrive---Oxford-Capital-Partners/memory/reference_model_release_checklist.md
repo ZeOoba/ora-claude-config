@@ -5,9 +5,12 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 8e3f40ea-05cc-48c4-9e6b-49cd7ec8ee9e
+  modified: 2026-07-26T15:55:34.165Z
 ---
 
-Current lineup as of 2026-07-10: Fable 5 (`claude-fable-5`, hardest tier) · Opus 4.8 (`claude-opus-4-8`, standard high-capability) · Sonnet 5 (`claude-sonnet-5`, standard implementation — succeeded Sonnet 4.6) · Haiku 4.5 (`claude-haiku-4-5-20251001`, mechanical). CLAUDE.md's tier doctrine (Fable/opus/sonnet/haiku by role) is alias-based and needs NO edit on a release — confirmed zero hardcoded model IDs in CLAUDE.md or the 6 `~/.claude/agents/*.md` files.
+Current lineup as of 2026-07-26: Fable 5 (`claude-fable-5`, hardest tier) · Opus 5 (`claude-opus-5`, standard high-capability — succeeded Opus 4.8) · Sonnet 5 (`claude-sonnet-5`, standard implementation — succeeded Sonnet 4.6) · Haiku 4.5 (`claude-haiku-4-5-20251001`, mechanical). CLAUDE.md's tier doctrine (Fable/opus/sonnet/haiku by role) is alias-based and needs NO edit on a release — confirmed zero hardcoded model IDs in CLAUDE.md or the 6 `~/.claude/agents/*.md` files.
+
+**PRIOR (superseded 2026-07-26):** lineup as of 2026-07-10 had Opus 4.8 (`claude-opus-4-8`) in the high-capability slot. Detected via ora-task-integrity-guard's 2026-07-26 07:14 ET run reading this session's own system-prompt model-lineup statement (`claude-opus-5` present, not in the recorded set) — flagged in-turn by Gabriel same day rather than waiting for this task's next 2026-07-27 11:27 ET scheduled fire. Every `[MODEL: claude-opus-4-8 ...]` CC/MCP observation tag logged before 2026-07-26 (`ora-site-exposure-probe`, `ora-appsec-sweep`) reflects the OLD pin and needs re-observation, not automatic correction — canary method per `reference_scheduled_task_model_standard.md`.
 
 **Where exact IDs live (full sweep 2026-07-10):**
 

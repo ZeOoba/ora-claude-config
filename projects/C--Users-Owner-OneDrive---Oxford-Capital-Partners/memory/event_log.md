@@ -12,14 +12,36 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
-## 2026-07-26 — CLAUDE.md Engineering OS spec citations corrected (2 stale pointers)
+## 2026-07-26 — ora-pm shipped: wrangler 3->4.114.0 CVE fix (OI-017), CI Node-version fallout fixed same day
 
-While rewriting an external "brutally nitpicky code reviewer" prompt and comparing it against the actual local review stack (`pr-review-toolkit`, `security-auditor`, `coderabbit`), a survey of `docs/superpowers/specs/2026-06-05-engineering-operating-system-design.md` found two doctrine/spec mismatches in CLAUDE.md's Engineering OS section:
+Merged PR #7 (`92b4b45`, squash) bumping wrangler 3.114.17->4.114.0 to clear the sharp/libvips HIGH CVEs
+(CVE-2026-33327/33328/35590/35591). The merge-triggered CI deploy failed cleanly (no live impact): wrangler
+4.114 requires Node >=22, `ci.yml` was pinned to Node 20. Fixed via PR #8 (`f534d01`, squash):
+`actions/setup-node` node-version '20'->'22'. Re-triggered deploy succeeded — wrangler compiled and
+uploaded cleanly, production confirmed serving `f534d01` via `wrangler pages deployment list` (prior
+production `809fbe3` retained as the rollback target if ever needed). Post-verify: `/api` on both
+`ora-pm.pages.dev` and the deployment-specific hash returns 401 (Bearer-token auth correctly enforced —
+expected healthy response, not a failure). `npm audit` now 2 MOD (react-router 6.x, needs its own 6->7
+pass, logged as an OI-017 residual) vs. 5 (3 HIGH/2 MOD) before this pass. Full detail:
+open-items-tracker.md OI-017.
 
-1. Line 67 cited "Full detail: Engineering OS spec §7" for the mandatory adversarial REFUTE pass on financial-decision/security-gate code — grep of the spec found no "REFUTE" text anywhere in it. Spec §7 does hold the general Done bar (TDD, typecheck, lint, suite, repo gate, independent review), just not the REFUTE clause specifically.
-2. Line 69 cited "Model-tier assignment: spec §8" — on disk, model-tier content actually lives at §7.1; §8 is "Confidentiality gates the review tool."
+## 2026-07-26 — `chore/archive-retired-scheduled-tasks-0726` fast-forwarded into `main` (Gabriel-directed)
 
-Fix applied (Gabriel-approved in-turn, `allow-config-write` token minted for this session): line 67's citation now reads "Engineering OS spec §7 (general Done bar; the REFUTE-pass clause is CLAUDE.md-only — not yet mirrored in spec)"; line 69's citation corrected to "spec §7.1". No content/requirement changed — citations only. Root cause not investigated further (spec vs. CLAUDE.md have likely drifted independently across edits); if the REFUTE-pass clause should be grafted into the spec itself, that's separate follow-up work, not done here.
+Per Gabriel's explicit in-turn instruction, fast-forwarded the isolated-worktree archive-rename commit (see entry above) into `main`. Between preparing and landing it, `main` had already advanced twice from concurrent sessions (`7b44254`→`f364bd6` Gabriel's own CLAUDE.md doctrine-citation fix, then `f364bd6`→`d0eeec0` a `/build` doctrine graft) — re-verified each time; both were disjoint from the 3 renamed paths. Rebased the branch onto `f364bd6` in a fresh isolated worktree (clean, no conflicts) to `e38afa7`, then landed it via `git update-ref refs/heads/main e38afa7` — a pure ref move, not `checkout`/`reset`/`merge`, so the shared checkout's live index/working-tree churn from other sessions was never touched. Confirmed zero content drift via direct blob-hash comparison (on-disk files byte-identical to `main`'s tree) rather than trusting `git diff`, which gave a misleading "deleted" reading due to a stale index entry left by the original memory-consolidation session's now-superseded `git add`. `main` has since advanced again to `d0eeec0`; confirmed `e38afa7` is a clean ancestor.
+
+**Residual (not fixed, not blocking):** the shared checkout's index still carries a stale rename entry for the 3 archived paths (predates this merge) — cosmetic only, working tree already matches HEAD exactly; will self-resolve whenever a session next runs `git add`/`git status` cleanup there. Left untouched per single-writer protocol (not this session's file to fix).
+
+Branch `chore/archive-retired-scheduled-tasks-0726` deleted locally (fully merged). `repo-housekeeping` claim (`b9d863d9`) was not touched — unrelated to this action.
+
+## 2026-07-26 — `repo-housekeeping` claim (`b9d863d9`) reconciled: scope creep confirmed live, not abandoned; archive-rename committed in isolation
+
+Re-verified the scope-creep observation logged above (11:55 ET claim, "Survey all local git repos... draft an evaluation+commit plan"). `b9d863d9` is NOT abandoned — its files in `oxford-command-center`'s `gov-ltv-hardening` worktree (`server/warehouse/debt-snapshot.ts`, `tests/unit/debt-snapshot.test.ts`) had a last-write timestamp of 13:44 ET, ~3 minutes before this check at 13:47 ET, mid-implementation on hostile-repro round 13+ governor-LTV work, 2 commits ahead of origin. It simply redirected onto different work and never returned to the claimed `~/.claude` survey; the claim (2h TTL from 11:55:21) expires naturally around 13:55 ET regardless.
+
+Did not release/dismiss the claim (the session is live, not stuck — releasing another active session's claim out from under it wasn't warranted here). Instead did the narrow low-risk part directly: verified the 3 staged renames from the memory-consolidation entry above (`check-dirty-files-session-pr`, `check-shared-checkout-settled-140pm`, `ora-daily-brief-followup-0724`) are genuinely retired one-time tasks by reading each archived SKILL.md's own self-description (all three explicitly self-describe as PAUSED/retire-fully or self-disabling one-time tasks — matches the fleet-advisory-remediation confirmation already in the entry above).
+
+Found the shared `~/.claude` checkout's git index changing between two consecutive `git status` calls seconds apart (the 3 renames flipped from staged `R` to unstaged `D`+untracked, and `MEMORY.md` gained a new staged hunk) — live proof another concurrent session was actively touching the index during this investigation, on top of the already-known multi-session dirty-file backlog. Did not commit in the shared checkout. Instead created an isolated worktree off `main` HEAD (`7b44254`), redid the 3 `git mv` renames there independently, and committed as `c9998ca` on branch `chore/archive-retired-scheduled-tasks-0726` — a clean fast-forward of `main` touching only those 3 files, no interaction with any other session's WIP. Worktree removed after commit (branch/commit persist in the repo). `main` itself left untouched at `7b44254`, matching this repo's established pattern of parking ready-to-merge branches (e.g. `fix/extract-workbook-anomaly-floor`) pending a quiet window or Gabriel's go-ahead rather than force-landing into a live shared checkout.
+
+**Open:** branch `chore/archive-retired-scheduled-tasks-0726` (commit `c9998ca`) is ready for a fast-forward merge into `main` next time the `~/.claude` checkout is quiet — no conflict expected since it only touches the 3 already-renamed paths.
 
 ## 2026-07-26 — Master Workbook lease-date correction + oxford-command-center brain-mirror deploy
 
@@ -35,6 +57,89 @@ Gate failure on `npm run gate`'s reconcile step (`Count: Leases exp 137 got 138`
 
 This was chained directly off the same-session Opus 5 model-ID bump work (see the entry above) -- the reconcile gate failure surfaced only because that work's deploy step ran `npm run gate` for the first time in a while.
 
+## 2026-07-26 — CLAUDE.md Engineering OS spec citations corrected (2 stale pointers)
+
+While rewriting an external "brutally nitpicky code reviewer" prompt and comparing it against the actual local review stack (`pr-review-toolkit`, `security-auditor`, `coderabbit`), a survey of `docs/superpowers/specs/2026-06-05-engineering-operating-system-design.md` found two doctrine/spec mismatches in CLAUDE.md's Engineering OS section:
+
+1. Line 67 cited "Full detail: Engineering OS spec §7" for the mandatory adversarial REFUTE pass on financial-decision/security-gate code — grep of the spec found no "REFUTE" text anywhere in it. Spec §7 does hold the general Done bar (TDD, typecheck, lint, suite, repo gate, independent review), just not the REFUTE clause specifically.
+2. Line 69 cited "Model-tier assignment: spec §8" — on disk, model-tier content actually lives at §7.1; §8 is "Confidentiality gates the review tool."
+
+Fix applied (Gabriel-approved in-turn, `allow-config-write` token minted for this session): line 67's citation now reads "Engineering OS spec §7 (general Done bar; the REFUTE-pass clause is CLAUDE.md-only — not yet mirrored in spec)"; line 69's citation corrected to "spec §7.1". No content/requirement changed — citations only. Root cause not investigated further (spec vs. CLAUDE.md have likely drifted independently across edits); if the REFUTE-pass clause should be grafted into the spec itself, that's separate follow-up work, not done here.
+
+## 2026-07-26 — /build Lane L3 doctrine graft: bottleneck derivation + design pre-mortem (Gabriel-ratified)
+
+Compared an external "Principal Software Architect" interview prompt against the Engineering OS design pipeline; verdict: pipeline dominates except two gaps. Ratified via multiple-choice: (1) load/bottleneck derivation with visible arithmetic for service/runtime components ("nothing bottlenecks" acceptable), (2) 3-item production pre-mortem (software twin of the deal pipeline's mandatory pre-mortem). Both grafted into commands/build.md Chain step 1; apply to Small-path inline brainstorms too; skipped for scripts/hooks/CLI. Assumptions-register (A1/A2 F-id style) offered, declined. Graft placed in build.md rather than the superpowers plugin cache (v6.1.1 — updates clobber local edits).
+
+## 2026-07-26 — oxford-command-center: extract-workbook.ts anomaly-floor fix MERGED to main + pushed
+
+`fix/extract-workbook-anomaly-floor` (4 commits: 1c08a24, b21180e, 6fedd78, 0b3b006) merged to `main` via fast-forward (Gabriel-approved) — main was still at the branch point (`5c43ff8`), no divergence. Pushed to `origin/main` (`github.com/ZeOoba/oxford-command-center`, Gabriel-approved separately). Local worktree and branch cleaned up.
+
+Full context in same-day entries above ("orphaned-task-forensics", "extract-workbook.ts anomaly-floor port", "portfolio-regression fix COMPLETE"). Net effect: `scripts/extract-workbook.ts` (the raw `npm run extract` / manual-run path, weekly `ora-cc-snapshot-refresh` backstop) now has the same anomaly floor AND drift report as `scripts/lease-snapshot-drift-check.ts` (the weekday-scheduled protected path) — closes the specific gap that let a 2026-07-25 manual run write corrupted lease-end dates unvalidated. `ora-cc-snapshot-refresh/SKILL.md` and `ora-lease-snapshot-refresh/SKILL.md` updated to match the new exit-code contract (left uncommitted in `~/.claude`, per that repo's normal handling).
+
+Follow-up already in motion, independent of this session: a worktree `fix/brain-persist-anomaly-floor` now exists in oxford-command-center, presumably from `task_92bb8958` ("Guard Brain.persist() writes to portfolio.json") having been started.
+
+## 2026-07-26 — `repo-housekeeping` session (`b9d863d9`) scope creep observed, blocking a pending commit
+
+Claimed `hooks/active-work/repo-housekeeping.json` at 11:55 ET for "Survey all local git repos for loose/uncommitted/unpushed commits and draft an evaluation+commit plan" (read-only survey + plan). This claim is a live dependency: the 2026-07-26 memory-consolidation entry above left 3 archived scheduled-task renames (`check-dirty-files-session-pr`, `check-shared-checkout-settled-140pm`, `ora-daily-brief-followup-0724`) staged-not-committed in the shared `~/.claude` checkout specifically pending `b9d863d9` clearing its survey of this same checkout.
+
+Its actual recent activity (touched-files log, through ~13:34 ET) is live implementation in `oxford-command-center`'s `gov-ltv-hardening` worktree — editing `server/warehouse/debt-snapshot.ts` and adding hostile-repro test files (`__hostile_repro_r14.test.ts`, `__hostile_r14_probe.test.ts`, `__hostile_r14_numeric_probe.test.ts`) — not surveying or drafting a plan, and it never touched `~/.claude` at all. No file-level collision resulted (it simply isn't working in this checkout), but the survey+plan deliverable it was claimed for is not progressing, and other sessions' pending commits here are nominally waiting on it.
+
+Flagged in-turn by Gabriel after a `git status` review of `~/.claude` surfaced multiple sessions' concurrent WIP. Not yet reconciled with that session or with Gabriel on next steps — logged as observation only.
+
+## 2026-07-26 — CLAUDE.md Autonomy doctrine amended: taxonomy tags + task-hygiene pass on close-out
+
+Evaluated a generic `/wrap-up` skill prompt against ORA's actual setup. Most of it (auto-commit/push to main, auto-deploy, auto-file-move in OneDrive folders, auto-apply-and-commit findings) was rejected as violating Invariant 2/5/6 and the standing never-auto-commit-unless-asked rule. Two reporting-only pieces were kept and merged into CLAUDE.md's Autonomy section (line 61): the end-of-session ≤5-bullet workflow-optimization close-out now tags each finding as skill gap · friction · knowledge · automation, and is followed by a reporting-only task-hygiene pass (mark resolved open items done, flag orphaned/stale ones — no auto-apply). Gabriel confirmed the edit in-turn; landed via the `allow-config-write` override token (config-write-guard), since CLAUDE.md itself was clean (not part of the concurrent-session dirty set in the shared `.claude` checkout at edit time).
+
+## 2026-07-26 — oxford-command-center: portfolio.json snapshot-regression fix COMPLETE (branch fix/extract-workbook-anomaly-floor, still NOT merged)
+
+Closes out the two prior same-day entries ("orphaned-task-forensics: portfolio.json snapshot regression" and "extract-workbook.ts anomaly-floor port"). Per Gabriel's direction, extended the fix to also close the date-corruption gap the count-based floor alone missed, then ran a second adversarial local review and fixed everything it found.
+
+**Final state of branch `fix/extract-workbook-anomaly-floor` (commits 1c08a24, b21180e, 6fedd78, 0b3b006):**
+- `scripts/extract-workbook.ts` now shares BOTH the anomaly floor (`evaluateAnomalyFloor`) AND the drift report (`formatDriftReport`) with `scripts/lease-snapshot-drift-check.ts` — both writers now protected identically, and both now surface individual lease-date corruption (the actual 2026-07-25 incident shape), not just count anomalies.
+- Fixed a real bug the second review caught: a first-run (or any run after the snapshot file goes missing) was reporting the entire portfolio as "138 leases of drift" instead of recognizing it as a baseline — would have caused a false [ALERT] email on every fresh bootstrap. Now correctly reported as "Baseline established (N leases)", exit 0.
+- `formatDriftReport`'s API was tightened (takes raw previous/current arrays, not a caller-derived map+count that could silently disagree with the underlying diff) and `extract-workbook.ts`'s crash handler now exits 3 (not 1) to stay distinguishable from a deliberate refusal.
+- Updated `ora-cc-snapshot-refresh/SKILL.md` (new exit-code branching: 0 clean / 1 refused+alert / 2 drift-found+Notion-only / 3 crashed+alert) and `ora-lease-snapshot-refresh/SKILL.md` (corrected a now-false "ora-cc-snapshot-refresh has no floor, no drift reporting" claim). Both edited in the shared `~/.claude` checkout — verified no file-level collision with the 14 other uncommitted changes from idle sessions 241e489e/275e801c/2d77bb37 present at edit time; left uncommitted, matching this repo's established multi-session pattern (not committed by this session).
+- 36 unit tests (was 16 before any of this work), two full local adversarial code-review passes (pr-review-toolkit:code-reviewer) with every Critical/Important finding fixed and verified, `gate:ci` green after every commit (typecheck, lint, dev-css, full 3090+-test suite, build, bundle budget).
+
+**Still open, by design — separate follow-up already spawned:** `server/brain.ts`'s `Brain.persist()` remains a third, unprotected writer of `portfolio.json` (file-watcher + UI write-back). Task `task_92bb8958` ("Guard Brain.persist() writes to portfolio.json") queued for Gabriel to start when ready.
+
+**Status: branch NOT yet merged to main.** Awaiting Gabriel's go-ahead to merge `fix/extract-workbook-anomaly-floor` into `main`.
+
+## 2026-07-26 — Memory consolidation pass: FRED residual re-verified and closed, MEMORY.md partially compacted
+
+Two items from this morning's `ora-health-guard` run addressed:
+
+1. **FRED key exposure (`project_fred_key_exposure_2026-07-24.md`) fully CLOSED.** The last open residual — "restart Claude Desktop to reload the FRED MCP env" — was re-verified and found to rest on a wrong mental model: `~/.claude.json`'s `fred` MCP entry is `"type": "stdio"`, spawned per-session via `uv run`, so every new session (including every scheduled task, which spawns fresh per firing) already reads the current key at its own startup — no shared daemon to restart. Confirmed empirically: `fred_latest`/`fred_series_info` both succeeded live from this session (itself spawned by `ora-health-guard`'s post-rotation fire). File rewritten and condensed to a closed-incident summary with the durable lesson preserved (stdio MCP servers spawn fresh per session — check transport type before assuming a rotation needs an app restart).
+2. **MEMORY.md compacted 20,062 → 19,312 bytes** (target 17,100, hard limit 24,400 — 5,088 bytes headroom now vs 4,338 this morning). Removed the now-fully-redundant "ora-am-brief LAMS retirement" stale-index-story line (the underlying fact already lives in tech.md/session-start context, and the general lesson is already covered by `feedback_verify_before_repeating_session_claims.md`); trimmed narration off the CLOSED-threads line and several gotcha-compilation lines (Git hazards, Windows/shell, Verify-before-trusting) without dropping any pointers. **Not fully to target** — further compaction would need actual file merges (several small single-lesson gotcha files could combine), not just index-line trimming; left as a follow-up, not urgent given the current headroom.
+
+Also, per Gabriel's ask: triaged and archived (not registered) 3 dark scheduled-task folders via `fleet-advisory-remediation` (`check-dirty-files-session-pr`, `check-shared-checkout-settled-140pm`, `ora-daily-brief-followup-0724` — all confirmed resolved/completed one-time tasks, moved to `scheduled-tasks/_archive_2026-07-26_retired/`) — staged, not committed, pending a concurrent `repo-housekeeping` session (`b9d863d9`) clearing its survey of this same checkout.
+
+## 2026-07-26 — oxford-command-center: extract-workbook.ts anomaly-floor port (branch fix/extract-workbook-anomaly-floor, NOT yet merged)
+
+Implemented the fix Gabriel ratified for the portfolio.json snapshot regression (see same-day "orphaned-task-forensics" entry above): ported the lease anomaly floor from `scripts/lease-snapshot-drift-check.ts` (the protected weekday path) into `scripts/extract-workbook.ts` (the raw `npm run extract` / manual-run path that had none).
+
+**Work done** (worktree `.claude/worktrees/extract-anomaly-floor`, branch `fix/extract-workbook-anomaly-floor`, commits `1c08a24` + `b21180e`):
+- Extracted the corrupt-previous-snapshot refusal, 0-lease refusal, and >25% mass-removal refusal out of `lease-snapshot-drift-check.ts`'s `main()` into a pure, exported `evaluateAnomalyFloor()` (discriminated-union return type) + exported `loadPrevious()`. Previously inline, untested logic.
+- `extract-workbook.ts` now imports and calls the same functions, so both writers refuse on identical conditions.
+- 29 unit tests (was 16 before this work; 8 for evaluateAnomalyFloor, 5 for loadPrevious added after a local code-review pass).
+- `npm run gate:ci` green: typecheck, lint, full suite (3090+ tests), build, bundle budget.
+- Local review via `pr-review-toolkit:code-reviewer` run before declaring done (adversarial, not confirmatory, per this class of data-integrity code).
+
+**Two findings from that review, NOT fixed in this branch — need Gabriel's decision:**
+1. **The ported floor is count-based only (0-lease / >25%-removed) and would NOT have caught the actual 2026-07-25 incident** — Granite Tops & More and Columbus Suburban Construction were never added or removed, only their `leaseEnd` values corrupted. `removedIds` stays empty in that scenario, so `evaluateAnomalyFloor` returns `refuse: false` and the corrupted dates would still write through. Only `lease-snapshot-drift-check.ts`'s DRIFT REPORT (Notion post on exit 2, deliberately not ported per the original scope decision) would have surfaced a date-only change — and even that only *reports* it for human review, it never refuses. Closing the actual incident's vector would mean deciding whether `extract-workbook.ts` should also get some form of date-change surfacing, not just the count floor.
+2. **`server/brain.ts`'s `Brain.persist()` is a third, completely unguarded writer of `portfolio.json`** — no floor, no corrupt check, non-atomic `writeFileSync`, swallowed catch — reached from the workbook file-watcher (300ms debounce) and every UI write-back. Pre-existing, out of this branch's stated scope, but means the "both writers refuse on identical conditions" framing in commit 1c08a24 is incomplete (there are three writers, two now protected).
+
+**Status:** branch NOT merged to main. Awaiting Gabriel's decision on (1) whether to extend this fix to address the date-corruption gap now vs. defer, and (2) how to handle the Brain.persist() finding (separate task vs. fold in vs. accept as known risk).
+
+## 2026-07-26 — fleet-advisory-remediation: 3 dark task folders triaged, all archived (retired, none registered)
+
+Surfaced by this morning's ora-health-guard setup-self-audit run (folders registered in NEITHER fleet registry):
+- `check-dirty-files-session-pr` — self-documented PAUSED/superseded (PR #20 merged, fixed the tracked conflict); verified via `gh pr list` that #20 is MERGED and no newer PR/branch matches the tracked session's work. Retired.
+- `check-shared-checkout-settled-140pm` — one-time 07-24 2PM ET check on whether the `.claude` shared checkout had settled around commit `7c7117b`. Verified `7c7117b` is still an ancestor of HEAD, and 2 of the 3 housekeeping files it was watching (`_scheduled_tasks_backup/ora-task-integrity-guard/SKILL.md`, `_scheduled_tasks_backup/automation-health-monitor/SKILL.md`) are already committed and clean; the 3rd (`registry-membership.json`) is a normal always-dirty operational log, not the conflict this task was scoped to. Situation resolved/overtaken by 7+ subsequent PRs (#21-26). Retired.
+- `ora-daily-brief-followup-0724` — one-time 07-24 4:01PM run of 4 Daily Brief follow-up items. Confirmed it already fired: the Acquisition Pipeline's "Stale Deal Watch" view is sorted/filtered on `Last Activity`, exactly matching this task's Item 1 fix (repoint from `Last Updated`). Retired as completed.
+
+All 3 moved via `git mv` into `scheduled-tasks/_archive_2026-07-26_retired/` (archive-first, nothing deleted) — staged but **not committed**, since a concurrent `repo-housekeeping` claim (session `b9d863d9`, surveying uncommitted/unpushed work across repos) is live on this same checkout; flagged to Gabriel to reconcile before either session commits.
+
 ## 2026-07-26 — Opus 5 model release: detected, checklist run, ora-pm shipped
 
 Opus 5 (`claude-opus-5`) detected this session via the system-prompt lineup statement, superseding Opus 4.8. Ran ora-model-release-watch's Step 3 procedure in-turn (Gabriel-directed) rather than waiting for the 2026-07-27 scheduled fire: bumped `reference_model_release_checklist.md`'s lineup line, posted to Notion Ops Hub, emailed ggoldberg. `settings.json`/`reference_scheduled_task_model_standard.md` needed no edit (Sonnet tier unaffected) — instead logged a canary re-check there showing the CC/MCP server pin had already moved to Opus 5 by 2026-07-25 19:07 UTC, and that the pin is per-session/non-deterministic, not a fixed per-task property as previously documented.
@@ -43,9 +148,42 @@ Code migration (Gabriel-directed, "proceed with the string swap now"): bumped ha
 
 Both commits pushed to origin/main (plain fast-forward, no force). ora-pm then deployed live via `/ship`: `vitest run` (185/185 pass) + build green -> `wrangler pages deploy` -> https://fa8779c6.ora-pm.pages.dev -> post-verify `curl /api/health` = 200 `{"status":"ok"}`. oxford-command-center's brain-mirror deploy was NOT run (not requested).
 
-## 2026-07-26 — CLAUDE.md Autonomy doctrine amended: taxonomy tags + task-hygiene pass on close-out
+## 2026-07-26 — orphaned-task-forensics: portfolio.json snapshot regression (Granite Tops & More, Columbus Suburban Construction lease dates)
 
-Evaluated a generic `/wrap-up` skill prompt against ORA's actual setup. Most of it (auto-commit/push to main, auto-deploy, auto-file-move in OneDrive folders, auto-apply-and-commit findings) was rejected as violating Invariant 2/5/6 and the standing never-auto-commit-unless-asked rule. Two reporting-only pieces were kept and merged into CLAUDE.md's Autonomy section (line 61): the end-of-session ≤5-bullet workflow-optimization close-out now tags each finding as skill gap · friction · knowledge · automation, and is followed by a reporting-only task-hygiene pass (mark resolved open items done, flag orphaned/stale ones — no auto-apply). Gabriel confirmed the edit in-turn; landed via the `allow-config-write` override token (config-write-guard), since CLAUDE.md itself was clean (not part of the concurrent-session dirty set in the shared `.claude` checkout at edit time).
+**Symptom:** `oxford-command-center\data\snapshots\portfolio.json` regenerated 2026-07-25T17:44:19Z (13:44 ET, a Saturday) carries wrong lease-end dates for two Sepich Portfolio tenants, regressed from the correct 2026-07-22 snapshot:
+- Granite Tops & More (Zettler 2000/2002): 07-22 snapshot = correct `Expired 2026-05-31`; 07-25 snapshot = wrong `Expiring Soon, 2026-07-31`.
+- Columbus Suburban Construction (Morrison 386/388): 07-22 snapshot = correct `Active, 2026-08-31`; 07-25 snapshot = wrong `Expired 2026-06-30`.
+
+Both confirmed against the actual PM platform (Rent Manager) — `Columbus Rent Roll 04.14.2026.xlsx` (Sepich Portfolio Rent Roll Analysis sheet): Granite Tops Lease End 2026-05-31 (annual rent $89,952, exact match), Columbus Suburban Construction Lease End 2026-08-31 (annual rent $42,024, exact match). Both tenants also confirmed as "current tenants as of 07/15/26" in the Sepich Portfolio AR export, ruling out an intervening real lease-status change between 07-22 and 07-25.
+
+**Root cause — traced via Workflow A (orphaned-task-forensics skill):**
+1. Pulled both fleets' full task list (`fleet-status.py --json`, 52 tasks). Zero scheduled tasks — on either fleet — have a cron that fires on a Saturday and touches `portfolio.json`.
+2. Only two tasks write this file at all: `ora-lease-snapshot-refresh` (CC, weekdays 07/13/19, runs `scripts/lease-snapshot-drift-check.ts` — the PR #232 anomaly-floor-protected path) and `ora-cc-snapshot-refresh` (CC, Monday-only 06:15, runs `npm run extract` / `scripts/extract-workbook.ts` — documented in its own SKILL.md as "no anomaly floor, no drift reporting, just a raw regen," a lower-frequency backstop). Neither's cron matches Saturday.
+3. Grepped both scripts for anomaly/validation logic: `lease-snapshot-drift-check.ts` has multiple `process.exit(1)` refusal points gated on an anomaly floor (introduced by PR #232, 2026-07-24, specifically to prevent this class of defect). `extract-workbook.ts` has **zero** matches for anomaly/refuse/floor/validate/sanity — confirmed no safety net exists in the raw extract path.
+4. Conclusion: the 07-25 snapshot was almost certainly produced by a manual/ad hoc `npm run extract` invocation outside any registered schedule — the only code path capable of writing this file on an off-cadence Saturday. Because that path has none of PR #232's protections, a misparse or misalignment in the Master Workbook read for these two Sepich tenants wrote through uncaught.
+5. Could not identify the specific actor/session that ran it — `data/snapshots/portfolio.json` is git-ignored (no commit trail), and no session-transcript search was run for this ticket. That is the one open thread if this recurs.
+
+**Resolution status:** Both tenants' correct dates confirmed and corrected in the published 2026-07-26 Daily Brief (Notion page `3a96ecd8-9e59-81b1-9f2b-f3a669ccb27e`, correction callout added 11:35 ET). The underlying `portfolio.json` file itself was NOT edited (read-only investigation; a snapshot file is meant to be regenerated, not hand-patched).
+
+**Process gap flagged, not yet fixed (Gabriel to decide remediation):** PR #232's anomaly floor protects only the scheduled weekday drift-check path. Any other invocation of `extract-workbook.ts` — the Monday backstop task, or a manual `npm run extract` — has zero protection and can silently reintroduce exactly the class of corruption PR #232 was built to prevent. Options for Gabriel: (a) port the anomaly-floor checks into `extract-workbook.ts` itself so every invocation is protected regardless of caller: (b) leave as-is but add a repo-level guard/warning against running `npm run extract` directly outside the scheduled backstop; (c) no code change, rely on the daily-brief's per-row PM-platform verification (as just demonstrated) as the catch mechanism.
+
+## Cross-repo worktree staleness/collision sweep wrapped up (2026-07-26)
+
+Follow-on to the `~/.claude` corruption-recurrence closure ([[project_config_corruption_recurrence_closed_2026-07-25]]): extended the same "check worktrees for staleness/collision" discipline to the other repos on this machine (`oxford-command-center`, `ora-pm`, `website-canonical`, `ora-skills`) after Gabriel asked to check the wider "fleet roster" of git worktrees, not just `~/.claude`.
+
+**`oxford-command-center`** was the only repo with anything to find:
+- One genuinely idle worktree, `elastic-leakey-c44fa1` (detached HEAD, sitting exactly at `main`'s tip, zero uncommitted work) — leftover clutter from a finished agent session, same pattern as the `~/.claude` cleanup. Pruned via `git worktree remove`.
+- Found `gov-ltv-toloansignal` (`fix/governor-ltv-toloansignal-guard`) is **stacked** on `gov-ltv-hardening`'s (`fix/governor-ltv-false-clearance`) unmerged commit `50ffdec`, not an independent sibling — `git worktree list` never surfaces this; it took diffing each worktree's own commit range and spotting the shared unmerged hash. Real hazard: an amend/rebase of `50ffdec` would orphan `toloansignal`'s two commits on top; even without that, both branches independently extend the same files (`debt-maturity.ts`, `debt-api.ts`, `debt-snapshot.ts`, `server/index.ts`) from the same base, so whichever merges to `main` second risks real conflicts. Logged in [[project_oxford-command-center_worktree_gotchas]] with the general lesson (diff commit ranges for shared hashes, don't trust `git worktree list` alone to reveal stacking).
+- Attempted `git rebase fix/governor-ltv-false-clearance` from `gov-ltv-toloansignal` at Gabriel's request — genuine no-op, since `gov-ltv-hardening`'s newer work is still uncommitted (nothing past `50ffdec` exists yet to rebase onto). Gabriel's call: leave both worktrees exactly as-is, not this session's branches to finish or merge-order for.
+- `rm-delinquency-parser` (unrelated AR/rent-manager scope) confirmed clean of overlap.
+
+**`ora-pm`, `website-canonical`, `ora-skills`**: zero additional worktrees beyond their main checkout at every check — no stacking, no staleness, nothing to log.
+
+Re-checked the full set three times over the session; state was stable each time (only the one prune changed anything).
+
+**Why:** the same collision-detection discipline that closed out the `~/.claude` corruption saga (check `git worktree list`, diff commit ranges, don't assume independence) generalizes cleanly to any repo with `.claude/worktrees/`-style parallel development — this is the second repo in one evening where it caught something real.
+
+**How to apply:** for a repo using isolated worktrees for parallel Claude sessions, a periodic sweep is just: `git worktree list`, then for each entry `git log --oneline $(git merge-base main HEAD)..HEAD` and cross-check for shared commit hashes across worktrees (stacking) or zero-behind-and-clean (idle/prunable).
 
 ## Stale-worktree exposure check after wt-branch-collision-fix merge (2026-07-25)
 

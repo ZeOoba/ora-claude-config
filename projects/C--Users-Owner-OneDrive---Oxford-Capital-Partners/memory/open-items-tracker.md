@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-07-26T01:00:36.792Z
+  modified: 2026-07-26T17:42:50.527Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -33,7 +33,6 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
 | [OI-009](#OI-009) | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Verify the 93 Notion Tenant DB rows with no workbook counterpart against primary leases (low priority) |
-| [OI-016](#OI-016) | 2026-07-18 | ora-appsec-sweep first run (2026-07-18) | ora-pm: upgrade `hono` (<=4.12.24) — direct runtime dep, HIGH CVEs (CORS/Set-Cookie/path-traversal); effective MED on Workers |
 | [OI-017](#OI-017) | 2026-07-18 | ora-appsec-sweep first run (2026-07-18) | ora-pm + oxford-command-center: build/test/deploy toolchain CVEs (vitest/vite/wrangler/concurrently→shell-quote/transformers→adm-zip) — no prod-reachable path, semver-major fixes |
 | [OI-022](#OI-022) | 2026-07-19 | OI-015 investigation (2026-07-19) | GitHub Data API still serves the pre-rewrite E. Fulton blob (`39b02f4585...`, kept alive by PR #2's internal `refs/pull/2/head`, not deletable via git/API/settings) — Support ticket #4584520 reopened 2026-07-20 with the corrected SHA (`6aed9a7`), awaiting GitHub's purge |
 | [OI-019](#OI-019) | 2026-07-19 | [event_log.md](event_log.md#2026-07-19) | Gabriel must add `HUBSPOT_TOKEN` (Private App, `crm.objects.deals.read`) to `oxford-command-center/.env` — PR #221 (frontend trigger) ready, blocked only on the credential. Once live, re-verify 2146 Enterprise Pkwy Twinsburg OH (currently untracked in projects.md/deal-decision-ledger.md) lands correctly in acq_candidates |
@@ -461,9 +460,72 @@ fc8c610b609f`): `Lease Status` → Notice Given, `Lease Expiration` 2026-05-31 (
 date). `Monthly Rent` ($16,713.65, still unexplained by any source found) deliberately left as-is —
 final figure is now a move-out reconciliation question, not a lease-terms question. Verified via fresh
 fetch. Note: AR Balance shows $180.19 at 90+ days aged — not chased further, outside this item's scope.
-**Real scope still remaining:** Chesapeake Communications (retired rather than traced, unchanged) and
-the original 93-row universe's untouched tenants beyond this session's 5 clusters. This item stays OPEN,
-not closed.
+**Progress 2026-07-26 (bounded batch, 12 tenants): the never-doc-verified remainder of the Northwood
+bulk-address-fix population checked; 12/12 resolved (11 confirmed correct as-is, 1 corrected —
+a NEW bug variant: cross-row contact-field contamination); 2 writes made, both verified by fresh fetch.**
+- **Batch scope:** the 2026-07-17 Northwood bulk fix corrected `Property Address` only on 31 active
+  rows — rent/dates/contacts on most had never been checked against any document. Queried the live
+  DB (`Property Address LIKE '%Northwood%Salisbury%' AND Row Retired='__NO__'` → 31 rows), excluded
+  the 9 already individually verified on 07-17 (Bay-Care, Childs Play, Evans, Harold Palmer, Hobart,
+  Itron, MHA, Reddish, Robert & Kesha Best) and IWNS LLC (new 2026-07 row, outside the 93-row
+  universe), and took 12 of the remaining 21: Online Auction, Adkins Towing, Anibal Morales,
+  Peninsula Pressure Systems, William D. Smith, BEK General Contracting, BRITMAN CORPORATION,
+  Sky Shield, Carlton L. Handy, Complete Cleaning, Louis Foxwell, Taron Tyree Walker.
+- **Verification sources:** two independent rolls — `Current Rent all properties 1.13.2026.xlsx`
+  (HubSpot-derived, read in full) and **`Rent Roll 7.20.2026.xlsx`** (egoldberg OneDrive root,
+  Master-Workbook export, "As of July 20 2026 · 137 tenants · Active Scenario: Base" — 6 days old
+  at check time) — plus primary documents where the rolls diverged.
+- **NOTE FOR NEXT PASS — the notion_only premise has shifted:** Rent Roll 7.20.2026 (workbook
+  lineage) now CONTAINS all 30 occupied 2207 Northwood units. The Master Workbook appears to have
+  gained Northwood rows since the 07-17 "zero Northwood rows in EXPORT_RentRoll" finding — the
+  93-row universe should be RE-DERIVED against the current workbook before the next batch.
+- **9 confirmed correct, no write (exact match in BOTH rolls):** Adkins Towing (`32c6ecd8-9e59-8169-af36-d84cd109c412`,
+  $835 / 1993-12-01 / exp 2024-09-01, genuinely Expired), Anibal Morales (`-813e-8069-ea5e592d0f0b`,
+  $399 / exp 2024-09-01, Expired), Peninsula Pressure (`-8145-aea3-e4195d1e09fd`, $3,999 / exp
+  2026-12-31 / 6,500 SF), BEK (`-81ca-8bea-d5eda7a246d9`), BRITMAN (`-8195-a0f9-c24a18e82c36`;
+  executed-lease file also on record, 06.2025), Sky Shield (`-81bb-aff5-cb70c4649b27`; 09.2025 lease
+  on record), Taron Walker (`-8137-ab7e-d81b45ae9a52`), Complete Cleaning (`-81c3-a892-f3c18df594a5`,
+  $1,165.96 = Jan's $1,132 x1.03, escalation 2026-07-01 passed — 7.20 roll confirms exactly), Louis
+  Foxwell (`-81ac-92e6-ec46a93b8a2c`, $1,854 = $1,800 x1.03, same pattern, 7.20 roll confirms).
+- **2 confirmed correct via primary document (Jan roll was stale, no write needed):**
+  - **Carlton L. Handy** (`32f6ecd8-9e59-8107-b967-c787ce72bf1f`): Second Addendum (`Lease Suite A4
+    Carlton Handy Addendum #2 -- 2203-2207 Northwood 04.2025.docx`) states termination 2027-02-28,
+    rent $1,166 effective 2026-06-01 — exact match to Notion and the 7.20 roll (docx copy has blank
+    signature blocks, but terms are live in the workbook roll).
+  - **William D. Smith** (`32c6ecd8-9e59-813b-8fbc-cae3816393d9`): Addendum (`Lease Suite A11-12 + C3
+    William Smith Addendum`) confirms A11-12 extended to 2031-04-30, $1,925 + $725 (C3) = $2,650/mo
+    effective 2026-05-01, 3% from 2027-05-01 — exact match to Notion/7.20 roll; Jan roll ($2,568.40 /
+    exp 2026-04-30 / 2,400 SF) was pre-addendum. Notes annotated (verified by fresh fetch) with the
+    nuance that **Unit C3 is month-to-month** — the 2031 expiration covers A11-12 only. Data fields
+    untouched.
+- **1 corrected — NEW BUG VARIANT, cross-row contact-field contamination:** **Online Auction**
+  (`32c6ecd8-9e59-8197-b41e-e7d264c21a53`, Suite B5). Lease fields ($999 / 2025-11-01 / 2027-10-31)
+  exact-match both rolls AND the primary lease (`Lease Suite B5 Patrick Andre Betz -- 2203-2207
+  Northwood 10.2025(2).docx`, signed date 10/9/2025, term 11/1/2025-10/31/2027, $11,988/yr) — but the
+  row's Primary Contact / Contact Email / Contact Phone / HubSpot Address / HubSpot Contact all
+  belonged to **Styled + Staged Interiors** (Lauren Meikle, Morrison 420 — a different tenant with
+  its own correct row `32b6ecd8-9e59-817f-afce-dc12f510cc62`). Corrected to Patrick Betz
+  (schoolbetz@gmail.com, +14436141854, HubSpot contact 162494267501, HubSpot Address "2207 Northwood
+  Suite B5") on two agreeing independent sources: the Jan-2026 HubSpot-derived export and the retired
+  duplicate row `Patrick Betz` (`32b6ecd8-9e59-81dc-9230-c822f9aa6e73`, retired 2026-07-21, which
+  carried the same email/phone + the real Betz HubSpot record). Verified by fresh fetch. (That
+  duplicate's 07-21 retirement also resolves what would otherwise be a same-property duplicate pair.)
+- **FLAG, not actioned — A3/A4 turnover in progress:** draft (unexecuted, blank-dated) leases created
+  7/20-7/22/2026 in the Northwood Leases folder show Sky Shield (Lagana) moving A3→A4 and Grails TCG,
+  LLC taking A3 — implying a Carlton Handy departure ahead of his 2027-02-28 term. Notion's Sky Shield
+  (A3, exp 2026-09-30) and Carlton Handy (A4, exp 2027-02-28) rows reflect the currently-executed
+  state and were left as-is; re-check once those leases execute.
+- **Incidental (not claimed as resolved):** the other 9 live never-verified Northwood rows (Austin
+  Walter Ventures, Cosmic Spice, DDR Enterprise, Delmarva Business Solutions, Delmarva Riders,
+  Hermiston, STOIC FARMS, Terrone White, Tony Kevin Davis) were roll-diffed in passing — all 9 agree
+  with the 7.20.2026 roll (4 reflect 2026 renewals/escalations vs the stale Jan roll: Cosmic Spice
+  $1,215/2028-06-30, DDR $1,183/2027-04-30, Delmarva Business 2029-06-30, Terrone White
+  $1,050/2027-03-31). Easy wins for the next batch, but not individually doc-confirmed here.
+**Real scope still remaining:** Chesapeake Communications (retired rather than traced, unchanged);
+CURREN SOLUTIONS (Information Lane, still unresolved from 07-17); My Autonomous Transportation Co
+(no executed lease located, gap unfilled); the 9 roll-diffed-only Northwood rows above; and whatever
+the re-derived notion_only universe (see the 07-26 note — the workbook now carries Northwood) still
+contains outside the worked clusters. This item stays OPEN, not closed.
 **Auto-check:** none (not a fleet-registry item).
 
 ### OI-015
@@ -596,6 +658,34 @@ HIGH) is the same vitest-4 migration blocker documented above; plus js-yaml / br
 HIGH (transitive, DoS/host-confusion, `fixAvailable`) and `@huggingface/transformers`→sharp/libvips HIGH
 (**no fix available yet** — monitor). All bounded by occ's localhost-only (`127.0.0.1`) bind; none
 tenant- or network-reachable. No new OI opened — same repo+check bucket as this item.
+**Progress 2026-07-26: ora-pm wrangler/sharp side RESOLVED — PR `ZeOoba/ora-pm#7` open, awaiting
+Gabriel's merge.** On arrival, verified reality first: PR #5 (overrides + vitest 4.1.10) and #6
+(undici 7.28.0 downgrade) both already MERGED, main at `809fbe3`, tree clean — the wrangler bump was
+genuinely new work, done in an isolated worktree (`../ora-pm-oi017-wrangler`, branch
+`fix/oi-017-wrangler-bump`), main checkout untouched. Bumped `wrangler` ^3.78.0 (3.114.17) →
+^4.114.0; miniflare 4 pulls **sharp 0.35.2** (patched — advisory range <0.35.0), clearing all 4
+libvips CVEs (2026-33327/33328/35590/35591). Two knock-ons handled: `@cloudflare/workers-types`
+^4→^5.20260722.1 (wrangler 4 peerOptional hard-fails npm resolution on v4; typecheck clean against
+v5) and the `esbuild ^0.25.0` override REMOVED — it existed solely to lift wrangler 3's pinned
+esbuild 0.17.19 past its CVE (#5's fix); wrangler 4 pins its own 0.28.1 and vite resolves 0.25.12,
+so no consumer <0.25 remains (verified via `npm ls esbuild`). undici/ws overrides kept as-is
+(deploy-safe pin from #6; miniflare 4 resolves undici 7.29.0 / ws 8.21.1 under them).
+**Audit evidence:** baseline at `809fbe3` was actually **5 vulns (3 HIGH / 2 MOD)**, not the sweep's
+2 — two NEW advisories published since 07-22: postcss ≤8.5.17 HIGH (GHSA-r28c-9q8g-f849, vite
+transitive) and react-router 6.0.0–7.17.0 MOD ×2 (GHSA-wrjc-x8rr-h8h6 open redirect +
+GHSA-337j-9hxr-rhxg SSR hydration). postcss fixed in the same PR via in-range lockfile refresh
+8.5.15→8.5.23 (no package.json change). **After: 2 MOD** (react-router only).
+**Verification (all in the worktree, wrangler 4 tree):** `tsc --noEmit` clean · 185/185 tests
+(32 files, vitest 4.1.10 — matches last known-good) · vite production build green · `npx wrangler
+pages functions build` compiles the `functions/` worker under 4.114.0 (closest local proxy for the
+CI `pages deploy` step, chosen deliberately given #6's undici-broke-deploy history). `wrangler.toml`
+needs no changes. Flagged in the PR: first wrangler-4 deploy fires on merge (CI deploys main to
+Cloudflare Pages) — watch that Actions step.
+**Residuals, item stays OPEN:** (1) react-router 6.x MOD ×2 — prod dependency of the tenant portal,
+real fix is semver-major 6→7, needs its own pass (SSR-hydration advisory not applicable, app is
+client-rendered; open redirect is the live one, MOD); (2) oxford-command-center's 9 advisories —
+unchanged, still blocked on the dedicated vitest-4 mocking-migration pass documented above, NOT
+touched this session (out of scope).
 **Auto-check:** none.
 
 ### OI-024
@@ -679,7 +769,13 @@ with no automated stage-advancement. That's a policy/tooling gap (when should a 
 **Source:** shared-checkout investigation, this session (Gabriel asked to investigate the dirty-`~/.claude`-checkout flag raised at the end of the prior turn)
 **Description:** while porting two skill-spec changes (HubSpot idle-deal flag + tracker-output redirect) into `ora-tenant-hubspot-reconciliation`, discovered the edit had first landed on `C:\Users\Owner\OneDrive - Oxford Capital Partners\Claude_Workspace\00_Governance\Scheduled\ora-tenant-hubspot-reconciliation\SKILL.md` — a path that is NOT one of the two documented live registry locations (`tech.md` §3: CC/MCP = `~\.claude\scheduled-tasks\`, LAMS = `OneDrive…\Documents\Claude\Scheduled\`). Confirmed via `list_scheduled_tasks` that the task's real registered `path` is the CC/MCP copy; the Claude_Workspace copy drives nothing. Listing that directory found **100+ task folders** — active-looking names matching live CC registry tasks (`ora-am-brief`, `ora-weekly-hygiene`, `ora-health-guard`, `ora-pm-ledger`, etc.), clearly one-off/completed check-* and investigate-* folders, and four pre-existing `_archive_2026-0[6-7]-*` subfolders already inside this same directory — i.e. someone has been using this location as a working/archival area for some time, but no memory file documents its relationship to the two-fleet doctrine.
 **Action taken 2026-07-25:** archived the confirmed-orphaned `ora-tenant-hubspot-reconciliation` folder to a new `_archive_2026-07-25_orphans\` subfolder in place (moved, not deleted, matching the directory's own existing convention). Did NOT touch or audit the other 100+ folders — that's a materially larger task than this session's scope (a single-skill investigation), and several of the plausible-looking "live" names need a careful diff-against-canonical pass, not a bulk move.
-**Not yet done:** a dedicated audit determining, per folder, whether it's (a) a stale orphan safe to archive, (b) a legitimate secondary reference/documentation copy someone relies on, or (c) itself the canonical copy for some task not accounted for in `tech.md`'s dual-fleet doctrine (which would mean `tech.md` §3 is the thing that's wrong, not the folder). Recommend a bounded weekly sweep (5-10 folders/pass, mirroring `ora-weekly-hygiene` Block F's bounded legacy-task-dir classification pattern) rather than a single large pass.
+**Action taken 2026-07-26 (batch 1 of the recommended bounded sweep):** re-verified the live CC/MCP roster directly via `list_scheduled_tasks` (27 entries incl. 2 pending one-time) rather than trusting a pasted snapshot. Audited 10 NOT-yet-audited folders, all with names that don't match either fleet's live roster:
+- **Archived to new `_archive_2026-07-26_orphans\`** (all (a) STALE ORPHAN — each folder's SKILL.md self-describes as a one-time/self-disabling diagnostic or reconnaissance task, none appear in the live CC/MCP registry, and the underlying subject matter is independently confirmed resolved elsewhere): `canary-model-check-temp` (one-time model-ID canary, result already consumed), `check-appsec-sweep-beacon-pickup` (one-time LAMS-fleet SKILL.md-edit-pickup check, dated 2026-07-20/21), `check-code-audit-image-pass` (one-time check-in on a since-concluded concurrent website-image session), `check-dirty-files-session-pr` (self-described "PAUSED — event overtaken... retire fully"; also independently confirmed as a "resolved/completed one-time task" and archived under the *separate* `~/.claude/scheduled-tasks/` canonical location per `event_log.md` line ~41, same date), `check-shared-checkout-settled-140pm` (one-time 2026-07-24 checkout-settlement check tied to the now-CLOSED `project_config_corruption_recurrence_closed_2026-07-25.md` thread; also independently archived under the canonical `~/.claude/scheduled-tasks/` location per the same `event_log.md` line), `continue-cc-setup-optimization-batch-2c-3` (one-time continuation of Batches 2c/3 of the `spicy-crunching-starlight.md` plan; confirmed shipped — `registry-write-guard` and `connector-drift-probe.py` both exist and are documented live in `tech.md` §3b / the connector-roster markers), `investigate-plan-gate-worktree` (one-time reconnaissance of the `plan-gate-and-site-markers` worktree; confirmed the worktree no longer exists on disk — already torn down), `heartbeat-beacon-recovery-check` and `heartbeat-check-backup-verify` (one-time 2026-07-17 Cowork-heartbeat diagnostics; both independently confirmed already deleted from the registry and archived under the canonical `~/.claude/scheduled-tasks/_archive_2026-07-18_retired/` location per `event_log.md` line ~854 — these Claude_Workspace copies were leftover duplicates never cleaned up here).
+- **Flagged (c) AMBIGUOUS — left untouched, needs Gabriel's call:** `linkedin-insight-tag-followup` — a one-time reminder task (name matches no live-fleet entry, so not a canonical-copy question) whose underlying subject — retrieving the real LinkedIn Insight Tag Partner ID for oxfordra.net, blocked on a LinkedIn Campaign Manager 2FA propagation gate — is confirmed STILL open per `event_log.md` ("LinkedIn Insight partner ID is still the placeholder `XXXXXXX` across all 16 analytics snippets") and is NOT tracked anywhere else in this tracker. This folder may be the only remaining pointer to that open item; recommend Gabriel decide whether to (i) fold it into a proper OI/tracker entry and then archive this folder, or (ii) leave the folder as the tracking mechanism for now. Not archived.
+- **No (b) legitimate-secondary-copy cases in this batch** — none of the 10 audited names matched a live registry task.
+**Incidental finding 2026-07-26 (not part of this batch, flagged not acted on):** the previously-archived `ora-tenant-hubspot-reconciliation` folder (see 2026-07-25 action above) has **reappeared at the top level** of this same directory, with content that hashes differently from (and is larger than) the archived copy in `_archive_2026-07-25_orphans\` — most likely a OneDrive Files-on-Demand sync artifact from this canonical (egoldberg-account-syncing) checkout catching up after the prior move, consistent with the documented [Memory Scope Fragmentation](reference_memory_scope_fragmentation.md) pattern, but not confirmed. Per this task's explicit instruction, did NOT re-touch or re-archive it this pass. Flagging for a follow-up session to (a) confirm whether this is a transient sync artifact that will self-resolve, or a genuine re-write from another account/session, and (b) reconcile which content (archived 7,028-byte copy vs. reappeared 11,656-byte copy) is actually current before taking any action.
+**Running total:** 10 of ~100+ folders audited across 2 passes (1 on 2026-07-25, 9 archived + 1 flagged on 2026-07-26); 9 folders now archived total (1 + 9)  across `_archive_2026-07-25_orphans\` and `_archive_2026-07-26_orphans\`. Further bounded batches (5-10/pass) remain — do NOT close this item until the full population is classified. Good next-batch candidates surfaced incidentally (not yet audited): `ora-setup-review-closeout-recheck` and `ora-uw-northridge-brockton-full` are independently confirmed already-retired/deleted-from-registry per `event_log.md` line ~854, making them likely quick (a) cases for the next pass.
+**Not yet done:** the remaining ~90 folders (including all names that DO match a live registry task — `ora-am-brief`, `ora-pm-ledger`, `ora-health-guard`, etc. — which need the more careful (b)-vs-(c) diff-against-canonical treatment this pass deliberately deferred) still need classification. Recommend continuing the bounded weekly sweep (5-10 folders/pass, mirroring `ora-weekly-hygiene` Block F's pattern), and prioritizing the still-unresolved `ora-pm-ledger` question specifically: a same-named folder was archived as an orphan in `_archive_2026-07-12_orphans\` yet a new `ora-pm-ledger` folder reappeared at top level the very next day (2026-07-13) — the same reappearance pattern just observed for `ora-tenant-hubspot-reconciliation` above — which should be treated as (c) AMBIGUOUS, not re-archived on autopilot, until that recurrence pattern itself is understood.
 **Auto-check:** none.
 
 ## Closed
@@ -702,6 +798,7 @@ with no automated stage-advancement. That's a policy/tooling gap (when should a 
 | [OI-008](#OI-008) | 2026-07-17 | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Sweep the Tenant DB for the Escalation-Date/Lease-Expiration column-mapping bug beyond the 7 rows already checked |
 | [OI-014](#OI-014) | 2026-07-17 | 2026-07-17 | [reference_onedrive_business_scope.md](reference_onedrive_business_scope.md) | Confirm no ora-pm git clone inside any OneDrive sync root (real repo at C:\Users\Owner\ora-pm) |
 | [OI-015](#OI-015) | 2026-07-18 | 2026-07-19 | ora-appsec-sweep first run (2026-07-18); Notion Ops Hub row `3a26ecd8-9e59-81e4-85d4-d08d0d5d920b` | Reachable/clonable ora-pm git history confirmed genuinely clean of real E. Fulton terms — no history rewrite needed; residual (a dangling blob still served via GitHub's Data API) spun off as OI-022 |
+| [OI-016](#OI-016) | 2026-07-18 | 2026-07-19 | ora-appsec-sweep first run (2026-07-18) | ora-pm: `hono` bumped 4.12.23→4.12.31 (commit `c300867`), resolved HIGH CORS/Set-Cookie/path-traversal advisories; verified via `npm audit` |
 
 ### OI-023
 **Status:** CLOSED
