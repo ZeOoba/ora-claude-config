@@ -12,6 +12,10 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-26 — CLAUDE.md Autonomy doctrine amended: taxonomy tags + task-hygiene pass on close-out
+
+Evaluated a generic `/wrap-up` skill prompt against ORA's actual setup. Most of it (auto-commit/push to main, auto-deploy, auto-file-move in OneDrive folders, auto-apply-and-commit findings) was rejected as violating Invariant 2/5/6 and the standing never-auto-commit-unless-asked rule. Two reporting-only pieces were kept and merged into CLAUDE.md's Autonomy section (line 61): the end-of-session ≤5-bullet workflow-optimization close-out now tags each finding as skill gap · friction · knowledge · automation, and is followed by a reporting-only task-hygiene pass (mark resolved open items done, flag orphaned/stale ones — no auto-apply). Gabriel confirmed the edit in-turn; landed via the `allow-config-write` override token (config-write-guard), since CLAUDE.md itself was clean (not part of the concurrent-session dirty set in the shared `.claude` checkout at edit time).
+
 ## Stale-worktree exposure check after wt-branch-collision-fix merge (2026-07-25)
 
 After merging/pushing the wt-branch collision fix (`f0bf1b2`, merging `1172cec`), checked all

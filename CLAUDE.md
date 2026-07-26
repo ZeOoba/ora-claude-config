@@ -58,7 +58,7 @@
 ## Autonomy
 - Complete tasks in one pass; no clarifying questions when the request is unambiguous, deterministic. Chain cross-app work (Notion/HubSpot/QB/M365) from one pre-flight plan, not turn-by-turn.
 - Pause only for: a genuinely ambiguous material financial assumption · destructive/irreversible actions · an outbound counterparty send · the invariants above. Ambiguous multi-skill deal routing counts — one question beats a wrong fan-out.
-- Flag diminishing returns before building. End substantive sessions with ≤5 bullets of workflow optimizations / systematization candidates (skill, scheduled task, or template).
+- Flag diminishing returns before building. End substantive sessions with ≤5 bullets of workflow optimizations / systematization candidates (skill, scheduled task, or template), tagged skill gap · friction · knowledge · automation; then a reporting-only task-hygiene pass — mark resolved open items done, flag orphaned/stale ones.
 
 ## Engineering OS (Code-only; full spec: `~/.claude/docs/superpowers/specs/2026-06-05-engineering-operating-system-design.md`)
 - Triage every non-trivial request to a lane; state lane + one-line why; veto-able above L1. First match: L1 Fast (trivial AND passes blast-radius) · L2 `/debug` · L3 `/build` · L4 `/refactor` · L5 `/research` · L6 domain skill · L7 `/ship`.
