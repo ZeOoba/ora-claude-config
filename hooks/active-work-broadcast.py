@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """SessionStart hook -- broadcast any live cross-session claims on shared ~/.claude
-subsystems (hooks-override-auth, open-items-tracker, oxford-command-center-data, and
-any other slug a session chooses to claim -- see hooks/lib/claim_work.py).
+subsystems (hooks-override-auth, open-items-tracker, oxford-command-center-data,
+repo-housekeeping, and any other slug a session chooses to claim -- see
+hooks/lib/claim_work.py).
 
 WHY: reference_concurrent_session_duplicate_hardening_work.md logs 6 recorded
 collisions where two sessions independently duplicated work on the same shared
@@ -11,6 +12,14 @@ remember to run. This makes the signal automatic: if another session has claimed
 subsystem within the last 2 hours, the starting session sees it immediately, the same
 way hooks/repo-freshness.py (this hook's template) auto-surfaces oxford-command-center
 git staleness instead of relying on the agent to remember `git fetch`.
+
+`repo-housekeeping` ADDED 2026-07-26: two sessions independently ran the identical
+worktree/branch cleanup sweep on this repo in parallel (one raced the other deleting
+the same remote branch) -- invisible to the original 3 slugs, all scoped to hooks/
+override/auth work, not general repo maintenance. See reference_concurrent_session_
+duplicate_hardening_work.md's 2026-07-25/26 entry. The mechanism itself needed no
+code change (slugs are already free-form, see claim_work.py); only the documented,
+named vocabulary grew.
 
 DELIVERY: emits ONLY via hookSpecificOutput.additionalContext, never systemMessage --
 per reference_hook_systemmessage_not_model_visible.md, systemMessage is user-visible

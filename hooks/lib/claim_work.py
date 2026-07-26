@@ -167,7 +167,7 @@ def main():
 
     c = sub.add_parser("claim", help="Register a claim on a subsystem slug")
     c.add_argument("slug", help="e.g. hooks-override-auth, open-items-tracker, "
-                                 "oxford-command-center-data")
+                                 "oxford-command-center-data, repo-housekeeping")
     c.add_argument("description", help="One line: what you're doing and why")
     c.add_argument("--title")
 
