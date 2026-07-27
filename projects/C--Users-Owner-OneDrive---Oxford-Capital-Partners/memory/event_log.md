@@ -12,6 +12,45 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-27 — Telemetry rollup cohort-segmentation fix + wt-branch/GIT_DIR corruption incident: closed out
+
+Followed up on the daily `ora-doctrine-integrity-guard` run (both probes clean). Investigated two items flagged in that summary:
+
+**CLAUDE.md word budget** — turned out to be a non-issue: `eos-claude-md-guard.py`'s actual deny threshold is `WORD_BUDGET_FAIL=1850`, not the 1700 warn-floor I'd cited; at 1,694 words there was ~156 words of headroom, not 6. No action needed.
+
+**Telemetry dispatch-rate under-reporting** — root-caused: the 2026-07-24 dispatch-detection fix patched `hooks/eos-telemetry.py`'s emitter (matching the real `Agent` tool name, stamping a `ts` field) but never updated `maintenance/eos-telemetry-rollup.py`, which blended 766 structurally-blind pre-fix records with 50 valid ones and reported `task_dispatched` at 2.2% against a true post-fix rate of 38.0% (19/50). Fixed with TDD (9 new tests, 4 of which fail against the pre-fix code), independently reviewed twice (`claude-fable-5`, approved both passes), committed as `886038c` on `fix/telemetry-rollup-cohort-segmentation` in an isolated worktree.
+
+**Mid-session, hit a live instance of the `t <t@t.t>`/`wt-branch` corruption saga** (root-caused and closed the next day in [[project_config_corruption_recurrence_closed_2026-07-25]], archived): `core.bare` on the shared `~/.claude/.git/config` was oscillating true/false, and the feature branch's own ref got hijacked by ~26 foreign fixture commits. Traced live via `faulthandler` stack dumps + `git merge-base --is-ancestor` (confirmed `886038c` was an unbroken ancestor — nothing lost, just buried), recovered via `git update-ref` after Gabriel's explicit sign-off at each step (`git reset --hard` was correctly settings.json-denied; used the surgical ref-only alternative instead). This session did not find the root cause on its own — that came later from a stale worktree (`amazing-lamarr-c659bb`, forked before the GIT_DIR-leak fix existed) whose own concurrently-running tests leaked `GIT_DIR`/`GIT_WORK_TREE` into `git init --bare`/`worktree add` calls, writing directly into the shared repo's real `.git`.
+
+Spawned 3 out-of-scope follow-up tasks rather than expanding this session further; all 3 landed and independently verified against current `main`:
+1. **Wire `maintenance/` tests into the pre-push gate** — done. `git-prepush-hook-tests-gate.py` now discovers `hooks/tests/`, `maintenance/`, and `maintenance/_tests/` (both `test-*.py` and `test_*.py` naming conventions), closing a 17-file blind spot.
+2. **Replace the `ts`-presence proxy with an explicit schema field** — done, and better than proposed: `70edcf9` ("version-key dispatch-cohort segmentation instead of ts-proxy") adds a `schema`/`detectors` block with a new DEGRADED state that loudly flags a *future* dispatch-detector regression instead of silently trusting a stale `ts` stamp. This supersedes `886038c`.
+3. **Fix the `wt-branch` collision / git-fixture-isolation bug** — done. `1172cec`/`f0bf1b2` gave `wt-branch` a per-call uuid suffix and, more importantly, moved `GIT_DIR`-family env stripping to `git-prepush-hook-tests-gate.py`'s own subprocess-spawn point (PR #23, `92961ac`) — every test file it runs now gets a clean environment regardless of whether that file protects itself, closing the actual structural vulnerability.
+
+Per Gabriel's request, `886038c` (the abandoned worktree's own commit, superseded but reviewed/tested) was preserved via a pushed annotated tag, `archive/telemetry-rollup-segment-886038c`, rather than left to `git gc`.
+
+**Verified this session, current `main`:** full hook-tests-gate 59 pass / 0 fail / 0 env-skip (up from 33/34/1-skip at session start). Rollup against live telemetry: 894 total records, 128 dispatch-capable (43.0% task_dispatched, 55/128), 766 blind-era backlog correctly excluded, 0 detector-regressed. No outstanding items remain from this investigation.
+
+## 2026-07-27 — solar-lease-underwriting cache-only capture (REPO-FIRST VIOLATION remediation)
+
+`ora-skill-store-drift-check` on-demand run flagged `solar-lease-underwriting` CACHE-ONLY (built 2026-07-26 directly on the Cowork platform, never committed to `ora-skills`). Per the ratified CACHE→REPO RECOVERY PROCEDURE: probed Store B, SHA256-verified the cache copy, byte-exact copied to repo (zero edits, hash match confirmed 9b757b2...), committed on branch `capture/solar-lease-underwriting-cache-pull`, opened [PR #24](https://github.com/ZeOoba/ora-skills/pull/24) — not merged to main pending Gabriel's review. Post-commit hook auto-recorded the skill to `_staging/PENDING_REIMPORT.md`; expected, will self-clear once reconciled.
+
+**Same run, separate finding — NOT auto-remediated, awaiting Gabriel:** 9 skills (automation-health-monitor, code-debugging-optimizations, debt-management, deploy-site, lease-abstraction-pipeline, maintenance-analytics, re-operations, rent-roll-qc, tax-appeal) are content-clean (repo/cache hash match) but carry no confirmed Save-skill install log line in this file — step 2g REIMPORT-PENDING (index-unregistered), a fresh cohort distinct from the 21 resolved 2026-07-21. Doctrine requires confirming with Gabriel whether a Save-skill click actually occurred before treating these as registered; not something this session can verify unilaterally. Question posed to Gabriel in-session.
+
+## 2026-07-27 — Health Guard 07-27 "2 FAIL" remediation prompt: both lanes already moot, no fix applied
+
+Handoff prompt (Cowork-generated, citing the 13:10:23 ET "[ACTION] Health Guard — 2026-07-27 — 2 FAIL" email) asked Code to fix a `memory-integrity-probe.py` exit-1 (167 indexed/168 present: 1 unlisted file, 1 dead `OI-028` pointer, 1 non-canonical `evilhost.com` recipient) and a `setup-self-audit.py` secret-scan CRIT (3x `api_key=` FRED literal in `~/.claude/backups/scheduled-skills-20260603T170933/ora-debt-maturity-snapshot__SKILL.md` + 2 mirrors). Per `/debug`'s pre-flight-failure-analysis, re-ran both probes fresh before touching anything.
+
+**Result: both already clean.** `memory-integrity-probe.py` → 161/161, 0 failing checks (only the pre-existing MEMORY.md size advisory). `setup-self-audit.py` → secret-scan OK, 0 critical/warn.
+
+**Root-caused each named item individually, not just the aggregate count:**
+- Unlisted file `project_ora_am_brief_lams_retirement_blocked.md` no longer exists on disk — already archived in today's memory-consolidation passes (this file's earlier index-drift was in fact already corrected 07-24, see event_log's "Open-sessions board: FRED key cleanup decided" entry; today's consolidation removed the file itself).
+- `OI-028` is not a dead pointer — `open-items-tracker.md` carries a full closed row (`#OI-028`, closed 2026-07-26, `git-prepush-hook-tests-gate.py` parallelization fix) and `event_log.md`'s link to it resolves correctly.
+- `evilhost.com` is not a live/non-canonical recipient — it's prose in `project_autonomy_gate_indirection_ceiling_followup.md` and this file documenting an *already-fixed* 2026-07-17 vulnerability (`attacker@evilhost.com@oxfordra.net` defeating a suffix-only domain regex). Historical example text, not send-path config.
+- The FRED "credential literal" is `api_key={{FRED_API_KEY}}` — a template placeholder, present in the named backup path + one true mirror (`_scheduled_tasks_backup/...`; the second candidate mirror is a 9-line stub redirect with no FRED section at all). `hooks/lib/secret_patterns.py`'s "generic API key assignment" pattern requires 16+ literal chars in `[A-Za-z0-9_\-]` immediately after `=` — `{{...}}` cannot match by construction, so this was never a live-secret false negative. The real FRED key exposure (`project_fred_key_exposure_2026-07-24.md`) was already closed 2026-07-26.
+
+**Disposition:** no file changes made; both `open-items-tracker` and `repo-housekeeping` work-claims taken then released clean. Treat as a confirmed instance of [[feedback_verify_before_repeating_session_claims]] / [[reference_recheck_before_reflagging_tooling_gaps]] — a Cowork-surface handoff citing a same-day report had already been superseded by same-day fixes (memory consolidation + prior FRED scrub) by the time it reached Code. **Open question for a future session, not pursued here:** why the 07-26 AND 07-27 predecessor setup-self-audit reports (per the handoff's paraphrase) allegedly flagged the FRED placeholder as CRIT at all, given the current shared `secret_patterns.py` regex structurally cannot match it — either those reports predate the shared-module refactor (07-24 ruling) and used a cruder ad hoc pattern, or the handoff's paraphrase of them was itself inaccurate. Not re-verified against the actual historical email/report text directly.
+
 ## 2026-07-27 -- Two new scheduled tasks registered (Gabriel: "fix all workflow optimization candidates")
 
 Registered via supervised create_scheduled_task MCP (Cowork/LAMS surface),
