@@ -45,6 +45,8 @@ import sys
 
 CLAIMS_DIR = os.environ.get("ORA_ACTIVE_WORK_DIR") or \
     r"C:\Users\Owner\.claude\hooks\active-work"
+MAX_CLAIM_FILES = 512    # see read_active_claims(): hot-path scan bound
+MAX_CLAIM_BYTES = 64 * 1024
 DEFAULT_TTL_MINUTES = 120  # headroom above the 90-min stuck-session-watchdog kill
                             # threshold, so a legitimately long task's claim survives
                             # while a genuinely stuck session's claim goes stale before
@@ -167,12 +169,27 @@ def read_active_claims(base_dir=None, ttl_minutes=DEFAULT_TTL_MINUTES, now=None)
         names = os.listdir(base_dir)
     except Exception:
         return out
+    # HARD CAPS (2026-07-26, adversarial review). This directory is world-writable
+    # by design and nothing ever deletes from it -- release_claim is opt-in and
+    # best-effort, so it only grows. Since this module is now read on the Edit/Write
+    # hot path (not just at SessionStart), an unbounded scan is a self-DoS: measured
+    # 100 files -> 2.5x hook latency, 2,000 -> 17x, 20,000 -> 217x (~33 s per edit,
+    # under the 60 s hook timeout, so it degrades silently rather than erroring).
+    # Sorted for determinism: which claims survive the cap must not depend on
+    # filesystem enumeration order.
+    names = sorted(n for n in names if n.endswith(".json"))
+    if len(names) > MAX_CLAIM_FILES:
+        names = names[:MAX_CLAIM_FILES]
     for name in names:
-        if not name.endswith(".json"):
-            continue  # excludes "<slug>.json.tmp.<pid>" leftovers too -- they don't
-                       # end in ".json"
+        # ".json" filter applied above; that also excludes "<slug>.json.tmp.<pid>"
+        # leftovers, which do not end in ".json".
         path = os.path.join(base_dir, name)
         try:
+            # Size gate BEFORE open(): a claim is a handful of short fields, so
+            # anything large is either corrupt or hostile. Cheap stat beats reading
+            # a 200 MB "claim" into memory on every edit.
+            if os.path.getsize(path) > MAX_CLAIM_BYTES:
+                continue
             with open(path, "r", encoding="utf-8") as f:
                 d = json.load(f)
         except Exception:
@@ -204,6 +221,32 @@ def read_active_claims(base_dir=None, ttl_minutes=DEFAULT_TTL_MINUTES, now=None)
     return out
 
 
+def _path_overlap(wanted, declared):
+    """Paths in `wanted` covered by `declared` -- exact match OR inside a declared
+    DIRECTORY.
+
+    WHY prefix matching (2026-07-26, found by both reviewers): the CLI advertises
+    "Files/dirs this claim covers", but the first cut did a plain set intersection,
+    so `--paths scheduled-tasks/ora-weekly-hygiene` (the natural granularity for
+    directory-scoped work, and exactly the shape of the incident that motivated all
+    of this) matched the directory itself and NOTHING inside it -- while still
+    printing "covering 1 path(s) -- other sessions editing them will be warned".
+    A silent no-op behind an affirmative confirmation is worse than no feature.
+
+    Prefix comparison is on a separator-terminated string so `/foo/bar` never
+    matches the sibling `/foo/barbecue`."""
+    declared = set(declared or [])
+    if not declared:
+        return set()
+    out = set(wanted) & declared
+    for d in declared:
+        pref = d.rstrip("\\/") + os.sep
+        for w in wanted:
+            if w.startswith(pref):
+                out.add(w)
+    return out
+
+
 def claims_touching(paths, base_dir=None, ttl_minutes=DEFAULT_TTL_MINUTES, now=None,
                     exclude_session=None):
     """Live claims whose declared `paths` intersect `paths`.
@@ -224,7 +267,7 @@ def claims_touching(paths, base_dir=None, ttl_minutes=DEFAULT_TTL_MINUTES, now=N
     for c in read_active_claims(base_dir=base_dir, ttl_minutes=ttl_minutes, now=now):
         if exclude_session and c.get("session_id") == exclude_session:
             continue
-        overlap = wanted & set(c.get("paths") or [])
+        overlap = _path_overlap(wanted, c.get("paths") or [])
         if overlap:
             c = dict(c)
             c["matched_paths"] = sorted(overlap)
@@ -246,7 +289,8 @@ def main():
     c.add_argument("description", help="One line: what you're doing and why")
     c.add_argument("--title")
     c.add_argument("--paths", nargs="*", default=None,
-                   help="Files/dirs this claim covers. Slugs are work-TYPE scoped, so "
+                   help="Files and/or DIRECTORIES this claim covers (a directory "
+                        "covers everything beneath it). Slugs are work-TYPE scoped, so "
                         "two honest slugs can collide on one file (observed 2026-07-26: "
                         "three sessions, one SKILL.md, zero warnings). Declaring paths "
                         "makes shared-checkout-guard.py warn any other session that "
