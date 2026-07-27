@@ -97,6 +97,34 @@ expect("orphan: OI-099 (has a row, no section) is NOT flagged as orphaned",
 report = codc.format_report(r, "fixture-path")
 expect("orphan: report says ORPHANED_SECTION", "ORPHANED_SECTION" in report, "got %r" % report)
 
+# --- missing section: table row with NO matching detail section (mirror of orphaned) -
+# Real-world case found 2026-07-27: OI-028 and OI-030 each had a table row but no
+# '### OI-NNN' section, so an external '#OI-NNN' link (from event_log.md) resolved to
+# nothing. Report-only, like the other three checks -- but NOT part of any_finding(),
+# since most closed rows never get a detail section by design (a one-line row is
+# often the whole story) and that must not itself start failing every daily run.
+missing = "## Open\n\n" + row("028") + row("030") + "\n" + section("028")
+r = codc.check(missing)
+expect("missing: OI-030 flagged (row with no section)",
+       r["missing_sections"] == ["OI-030"], "got %r" % r["missing_sections"])
+expect("missing: OI-028 (has both a row and a section) is NOT flagged as missing",
+       "OI-028" not in r["missing_sections"])
+expect("missing: any_finding() stays False -- a missing section alone is not a collision",
+       codc.any_finding(r) is False, "got %r" % r)
+report = codc.format_report(r, "fixture-path")
+expect("missing: report mentions OI-030 without an [ACTION] tag (informational only)",
+       "OI-030" in report and "[ACTION] MISSING_SECTION" not in report, "got %r" % report)
+
+# missing_sections must not mask (or be masked by) a genuine collision in the same run.
+missing_plus_dup = "## Open\n\n" + row("040") + row("040") + row("050")
+r = codc.check(missing_plus_dup)
+expect("missing+dup: OI-040 still reported as a duplicate row",
+       r["duplicate_rows"] == [{"id": "OI-040", "count": 2}], "got %r" % r["duplicate_rows"])
+expect("missing+dup: OI-050 (row, no section) reported as missing",
+       "OI-050" in r["missing_sections"], "got %r" % r["missing_sections"])
+expect("missing+dup: any_finding() True because of the real duplicate, not the missing section",
+       codc.any_finding(r) is True)
+
 # --- a row referencing an id is not itself confused with a section header ----------
 # (regression guard: the row regex must not accidentally match a '### OI-NNN' line,
 # and vice versa -- e.g. if someone loosens either regex later.)
