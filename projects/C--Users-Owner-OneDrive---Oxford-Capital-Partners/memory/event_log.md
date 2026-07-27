@@ -12,6 +12,74 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-27 — RETIMED ora-calibration-snapshot 08:00 → 15:30 ET (clears the 08:00 collision); 3 LAMS tasks reconciled into the schematic
+
+Gabriel-directed follow-up to the same-day `ora-cc-schematic-refresh` rev 2026-07-27a, which had flagged both items. Schematic republished as rev 2026-07-27b.
+
+**Retime (CC/MCP registry write).** `ora-calibration-snapshot`: `0 8 1 1,4,7,10 *` → `30 15 1 1,4,7,10 *`. Applied via supervised `update_scheduled_task` only — no JSON splice (register-scheduled-task Rule 2).
+
+- **Why it needed moving:** genuine same-minute overlap with LAMS `ora-tenant-contact-gap-sweep` (`0 8 * * 1`). `crons_share_a_day()` correctly flagged it — not the false-positive class it was built to suppress — though the two could only actually co-fire on a quarter-start falling on a Monday. Next such date walking 2026–2031: **2029-01-01** (then 2029-10-01, 2030-04-01, 2030-07-01). Real but remote; fixed now rather than carried.
+- **Why the CC side moved, not the newer LAMS task** (doctrine normally says the newer task yields, per the 07-20b `ora-deal-aging-sla` precedent): `list_scheduled_tasks` from Claude Code returns ONLY the CC/MCP fleet — the LAMS entry is not writable from this surface, and a Cowork handoff for a 2029 collision is not worth the round-trip. It is also the better choice on merits: quarterly vs weekly, and it sat inside the congested 05:00–09:30 window, so the move drops the AM pileup 21 → 20.
+- **Slot selection:** surveyed every in-use hh:mm across BOTH fleets. 08:00 / 08:15 / 09:00 / 09:05 all occupied; 15:30 is clear, bracketed by `ora-aaos-publish-contracts` (15:00) and `ora-friday-closeout` (16:30), and well outside the AM window.
+- **Single-writer pre-check ran first** (register-scheduled-task v2.5+ primary check): `list_sessions` showed two running siblings — "ORa financial code integrity sweep review" and "Health Guard probe FAILs remediation" — neither touching the registry. `registry-membership.log` last wrote 2026-07-27T09:04:15 with no cron-edit activity (and per doctrine is inconclusive for cron-only edits anyway).
+- **Verified three ways:** the MCP tool's own confirmation ("At 03:30 PM, on day 1 of the month, only in January, April, July, and October"), a live registry read (`30 15 1 1,4,7,10 *`, `enabled: true`), and a `fleet-status.py` re-run now reporting `same-time collisions 0` with the collision clause dropped from the VERDICT line. Next two fires: **2026-10-01** and **2027-01-01**, both 15:30 ET.
+- **MODEL tag deliberately NOT date-bumped.** Left as `[MODEL: UNVERIFIABLE | checked 2026-07-12]` — no model was re-observed this pass, and bumping the date would fabricate an observation. Description gained a retime note ahead of the tag (tag kept trailing, per ora-task-integrity-guard v1.8's bracket-match rule).
+- Remaining fleet ATTENTION driver is now the throttle-skip count alone (69/24h).
+
+**LAMS reconciliation (artifact only).** `ora-dd-critical-tracker` (Thu 09:35, open DD-Critical items in the pipeline), `ora-health-guard-fail-aging-nudge` (weekdays 09:00, escalates a probe FAIL unresolved 48h+), and `ora-tenant-contact-gap-sweep` (Mon 08:00, Tenant DB contact gaps) were live in the LAMS registry but missing from the schematic's fleet item list. Each is now described from its own SKILL.md rather than inferred from its cron. All three were built 2026-07-27 off a workflow-optimization list. Worth noting: `ora-health-guard-fail-aging-nudge` exists to catch exactly the class of stale probe failure the schematic has now reported two refreshes running (memory-integrity EXIT 1 on both 07-23a and 07-27a).
+
+**Gotcha recorded:** `config-write-guard.py` correctly blocked a `python -c` one-liner that only READ the registry JSON — the matcher is write-indicator + governance-path, deliberately not narrowed. Per the guard's own guidance, no override token was minted; Grep (ungated) was used instead. Worth remembering: read the registry with Read/Grep, never with an interpreter one-liner that names the path.
+
+## 2026-07-27 (cont.) — tax-appeal confirmed-install (batch2 index-unregistered)
+
+2026-07-27 | tax-appeal v1.1 | confirmed-install (Save-skill click, Gabriel) | source: ora-skills/_staging/2026-07-27_index-unregistered-batch2
+
+## 2026-07-27 (cont.) — rent-roll-qc confirmed-install (batch2 index-unregistered)
+
+2026-07-27 | rent-roll-qc v1.0 | confirmed-install (Save-skill click, Gabriel) | source: ora-skills/_staging/2026-07-27_index-unregistered-batch2
+
+## 2026-07-27 (cont.) — re-operations confirmed-install (batch2 index-unregistered)
+
+2026-07-27 | re-operations v1.0 | confirmed-install (Save-skill click, Gabriel) | source: ora-skills/_staging/2026-07-27_index-unregistered-batch2
+
+## 2026-07-27 (cont.) — maintenance-analytics confirmed-install (batch2 index-unregistered)
+
+2026-07-27 | maintenance-analytics v1.1 | confirmed-install (Save-skill click, Gabriel) | source: ora-skills/_staging/2026-07-27_index-unregistered-batch2
+
+## 2026-07-27 (cont.) — lease-abstraction-pipeline confirmed-install (batch2 index-unregistered)
+
+2026-07-27 | lease-abstraction-pipeline v2.3 (3-file bundle: SKILL.md + SCHEDULED_TASK.md + references/extraction-edge-cases.md) | confirmed-install (Save-skill click, Gabriel) | source: ora-skills/_staging/2026-07-27_index-unregistered-batch2
+
+## 2026-07-27 (cont.) — deploy-site confirmed-install (batch2 index-unregistered)
+
+2026-07-27 | deploy-site v1.0 | confirmed-install (Save-skill click, Gabriel) | source: ora-skills/_staging/2026-07-27_index-unregistered-batch2
+
+## 2026-07-27 (cont.) — debt-management confirmed-install (batch2 index-unregistered)
+
+2026-07-27 | debt-management v1.2 | confirmed-install (Save-skill click, Gabriel) | source: ora-skills/_staging/2026-07-27_index-unregistered-batch2
+
+## 2026-07-27 (cont.) — code-debugging-optimizations confirmed-install (batch2 index-unregistered)
+
+2026-07-27 | code-debugging-optimizations v1.1 | confirmed-install (Save-skill click, Gabriel) | source: ora-skills/_staging/2026-07-27_index-unregistered-batch2
+
+## 2026-07-27 (cont.) — automation-health-monitor confirmed-install (batch2 index-unregistered)
+
+2026-07-27 | automation-health-monitor v1.4 | confirmed-install (Save-skill click, Gabriel) | source: ora-skills/_staging/2026-07-27_index-unregistered-batch2
+
+## 2026-07-27 — Schematic refresh rev 2026-07-27a: fleet collision returns, throttle skips 13 → 69, memory-integrity orphan set turns over
+
+Scheduled `ora-cc-schematic-refresh` (Mon 14:15 ET). Producer-clobber pre-check CLEAN — published artifact and durable source both at REV 2026-07-23a, nothing to reconcile. Logging because four of the "material change" triggers fired at once.
+
+- **New fleet collision (0 at 07-23a → 1).** 08:00 `ora-calibration-snapshot` (`0 8 1 1,4,7,10 *`) × `ora-tenant-contact-gap-sweep` (`0 8 * * 1`). `crons_share_a_day()` is correct to flag it — the crons genuinely can co-fire — but only when the 1st of Jan/Apr/Jul/Oct lands on a Monday. Walking 2026–2031, the next actual co-fire is **2029-01-01** (then 2029-10-01, 2030-04-01, 2030-07-01). Real, correctly detected, ~2.5 years out — retime opportunistically, not urgently. Not fixed by this task (registry writes are out of its scope).
+- **Throttle skips 13 → 69 in 24h, and the shape inverted.** 07-23a was 100% `ora-pm-ledger`; this run ora-pm-ledger contributes 0 of the recent 69 and seven other tasks do: lease-snapshot-refresh=18, am-brief=14, cc-snapshot-refresh=14, aaos-publish-contracts=12, aaos-expire-leases=9, deal-command-board=1, skill-store-drift-check=1. All-time 195 across 16 tasks. Same documented catch-up-burst mechanism (`reference_fleet_throttle_skip_catchup_burst.md`), now broad rather than concentrated — tracks a fleet that grew 52 → 59 tasks against a 21-task AM window (was 16).
+- **Fleet composition moved hard:** 59 tracked / 57 enabled (cc=29, lams=28) / 2 disabled, up from 52/49/3. LAMS gained 5; three new LAMS tasks are live in the registry but absent from the schematic's carried-forward item lists and unaudited by this task: `ora-dd-critical-tracker`, `ora-health-guard-fail-aging-nudge`, `ora-tenant-contact-gap-sweep`. The three previously-disabled entries (check-appsec-sweep-beacon-pickup, ora-heartbeat-fix-verify-0718am, check-dirty-files-session-pr) are gone from the registries entirely; the 2 now disabled are spent one-time tasks expired 07-26 (ora-claude-config-push-when-settled, ora-override-sweep-dryrun-check). 0 overdue, 0 missed/stuck.
+- **memory-integrity still EXIT 1, but a new instance, not a lingering one.** 07-23a's five uncommitted index orphans have all been committed and cleared. One new orphan replaced them: `project_northwood_egflc_loan_miscategorized_2026-07-27.md` — indexed in MEMORY.md at HEAD, absent from HEAD's tree. Whichever session owns it should commit it. 161/161 files present on disk (was 132/132).
+- **NEW non-fatal warning:** MEMORY.md is 19,077 bytes against its 17,100-byte compaction target (5,323 bytes before the 24,400 hard limit). The 07-27 partial compaction did not get it under target; compact before the next several index lines land.
+
+Green and unchanged: governor-drift exit 0 (779 files, up from 638, DSCR 1.25x / LTV 40% consistent), doctrine-integrity exit 0 (8/8 guards, CLAUDE.md 1694 words, declassification sweep clean), confidentiality-guard 131/131, enabledPlugins 14 keys / 12 true. Both repos fully clean and synced: oxford-command-center main==origin/main @958402a (was e6aba59, and last pass's untracked plan doc is gone), ora-pm main==origin/main @a226f2b (was 1b304e8).
+
+Artifact republished in place at REV 2026-07-27a. Also corrected a standing accuracy defect in the artifact: the callout heading read "This run's headline" while describing the 2026-07-17b pass — relabeled as carried-forward.
+
 ## 2026-07-27 — 3 skills reimported (Save-skill click confirmed); 4 REPO-FIRST violations recovered to repo (PR #25, not merged)
 
 Follow-up to today's `ora-skill-store-drift-check` Notion comment (7 drifted: 3 repo-newer, 4 cache-newer).
@@ -1981,3 +2049,68 @@ Invoked to close the register-scheduled-task v2.8 (commit 609164f, "require date
 **Correction to today's automation-health-monitor report** ("Automation Health — 2026-07-27", page `3aa6ecd8-9e59-8125-a84f-e205bd3bc2d9"): that report's Step 0.55 row for `ora-pm-ledger` Block C overstated the gap as spanning 07-26 AND 07-27 — 07-27's fire isn't due until this evening, so only 07-26 is actually missing. Also, Block A's real output_contract artifact is a **sent_mail** subject pattern ("ORA Notion Daily Digest - {DATE}"), not a Notion page as that report's table implied — corrected here for the record; an addendum was appended to the Notion page itself.
 
 
+## 2026-07-27 — Off-market master: $150/SF benchmark caught and reverted against the 2026-07-14 RCT v03 ratification
+
+**Trigger:** ora-owner-outreach-queue-refresh weekly run showed NET-NEW=0 for a second consecutive week. Investigation found the queue's source master (20260610_AllMarkets-OffMarket-Master_v06.xlsx) had never absorbed a newer Columbus screen (20260724_Columbus-Parcel-Screen_v04.xlsx), and that the master's own Columbus tab was scored on RCT v02 ($124.86/SF), a table `acquisition-underwriting` v4.5's own changelog calls superseded.
+
+**First pass (v07, superseded same session):** Gabriel instructed, in-turn, to use $150/SF as the benchmark — matching a flat figure already used by the `county-parcel-screen` tool that produced the v04 Columbus file (that tool's own README flags the $150 figure as unreconciled against RCT v03 and recommends against trusting its 0-100 score's basis component). Built and shipped `20260727_AllMarkets-OffMarket-Master_v07.xlsx` on that basis: 1,154 Columbus rows, KILLED=184, T2-QUEUE=243, PASS-BAND=727.
+
+**Conflict found:** while writing up the decision for the record, `memory/project_replacement_cost_benchmark_unratified.md` (2026-07-14, governor-level) was located: "THERE IS ONE BASIS DENOMINATOR: RCT v03 ... If you find a second denominator, it is a bug." $150/SF is a third denominator (after RCT v02 and RCT v03), not a fix for the two the ratification already names as stale. Flagged to Gabriel rather than writing the $150 ruling into memory as if consistent with standing doctrine.
+
+**Resolution (Gabriel, in-session):** revert to RCT v03. Built `20260727_AllMarkets-OffMarket-Master_v08.xlsx`, superseding v07: Columbus recomputed against RCT v03's Columbus LOW ($229.65, ratified 2026-07-14) at the standing 35-40%-of-replacement buy threshold, conservative (35%) end used because Yr Built is unpopulated for every v04 row (no vintage-ramp position known) — DEEP threshold = $80.38/SF, vs. v07's incorrect $60/SF (which was 40% of $150, not 40% of true replacement). Result: KILLED=184 (unchanged, gate-driven), T2-QUEUE=487 (up from 243), PASS-BAND=483. Parcel facts (Bldg SF, Auditor Value, Owner, mailing, ESTATE/ABSENTEE flags) unchanged from v07 — only the basis benchmark and resulting Verdict P1 changed.
+
+**Not done this pass:** P1 sub-scores (Yield/Motiv/VA/NOI/Walk-Price) for Columbus remain blank, not fabricated — out of scope for a benchmark-only fix. Other 8 markets (Cincinnati, Kansas City, Indianapolis, Baltimore-MD, Madison, Grand Rapids, Richmond, Des Moines) untouched, still on RCT v02 — a known, already-flagged stale-consumer gap per the 07-14 ratification, not newly discovered here. Summary tab's Columbus row is stale relative to both v07 and v08 and was annotated, not silently overwritten, in the workbook.
+
+**Because owner_outreach_queue.py's `_latest_master()` picks the highest version number, v08 is now the default master on the next run (scheduled or ad hoc).**
+
+**Lesson:** check `project_replacement_cost_benchmark_unratified.md` (or search memory for "denominator"/"replacement cost") BEFORE accepting any in-turn benchmark instruction on off-market/underwriting basis work, not after building on it — this session built v07 on an instruction that took 20+ minutes of downstream work to catch as conflicting with standing doctrine.
+
+
+## 2026-07-27 — Off-market master: full 9-market RCT v02->v03 migration + Columbus P1 backfill (v09)
+
+**Follow-up to the same-day $150/SF catch-and-revert entry above.** Gabriel instructed fixing all
+three items left open after v08: (1) 8 non-Columbus markets still on RCT v02, (2) Columbus P1
+sub-scores still blank, (3) Summary tab stale.
+
+**8-market migration:** for every row in Cincinnati/Kansas City/Indianapolis/Baltimore-MD/Madison/
+Grand Rapids/Richmond/Des Moines that already carried a computed basis (non-null RCT LOW v02),
+recomputed Disc/FloorReq/MaxPriceToFloor/MaxP-per-Modeled/FloorResult/P1-Basis/Score/Max/%/Verdict
+against RCT v03 and the ratified 65%->60% vintage ramp (unknown Yr Built defaults to the
+conservative 1995/65% end). Rows that were UNSCREENABLE/DATA-GAP, or gate-killed on SF/price before
+basis was ever computed, were left untouched (gates don't depend on the replacement-cost
+denominator). Yield/Mkt/Motiv/VA sub-scores were not touched for these 8 markets (not
+RCT-dependent). Madison/Grand Rapids/Richmond/Des Moines (all [PROXY] RCT markets) got an explicit
+DENOMINATOR-SENSITIVE tag on every recomputed verdict per standing doctrine. Kansas City and
+Indianapolis had zero previously-basis-scored rows (non-disclosure state / gate-killed-only
+respectively), so nothing there to recompute — expected, not a defect.
+
+**Columbus correction (v08 -> v09):** in writing this up, found v08 itself used the wrong promotion
+gate — it required full floor clearance (~65% discount) instead of the master's own documented
+MaxP/Modeled >= 0.6 "CLEAR-AT-DISCOUNT" band (verified by reverse-engineering the exact formula set
+from the original shipped v06 Columbus sample row — every component matched to the penny: NOI =
+SF x rent x 0.95 x 0.96 - 0.15xSF, Walk = NOI/8%, P1 Basis = clip((Disc-FloorReq)/(top-FloorReq),0,1)x25,
+etc.). Rebuilt Columbus a third time with the corrected gate and full P1 backfill: Rent NNN ($6.50/SF)
+and P1 Mkt (9/12) pulled as per-metro constants from the original v06 Columbus tab (uniform across
+all 1,129 legacy rows); P1 Motiv computed from v04's ESTATE/ABSENTEE/NONARMS/Delinq-$/Hold-yrs flags
+per the ratified additive formula; P1 VA left blank (Acres not present in the v04 source — not
+fabricated). Result: 1,154 rows, KILLED=300, T2-QUEUE=854 (up from v08's KILLED=184/T2=487 — the
+gate correction alone materially changed the outcome, independent of the RCT version question).
+
+**Summary tab:** fully reconciled across all 9 markets + TOTAL row against the actual post-recompute
+Verdict P1 tallies (re-counted directly from each market's Verdict column, not derived algebraically
+from deltas, to avoid compounding an arithmetic slip). Row totals per market matched the pre-existing
+Rows figures exactly for all 8 untouched-count markets (Columbus's total rose to 1,154 as already
+logged). A superseding note was added pointing past the earlier "Columbus stale" annotation.
+
+**QC:** spot-checked 9 rows across 3 markets (Cincinnati, Grand Rapids, Baltimore-MD) by
+independently recomputing Disc/MaxP-per-Modeled/P1-Basis by hand in a separate script and diffing
+against the values actually written to the workbook — all 9 matched exactly before this was
+considered done.
+
+**File:** `20260727_AllMarkets-OffMarket-Master_v09.xlsx` (supersedes v08; v08/v07/v06 kept, not
+deleted). Now the default master on the next owner-outreach run (`_latest_master()` picks highest
+version number).
+
+**Still open, unchanged:** DD-Critical items (flood/zoning/roof/CapEx/reassessed tax) were not
+re-verified for any market this pass — that's a separate, larger workstream (`ora-flood-zoning-dd`
++ county reassessment pulls), not part of the RCT migration.
