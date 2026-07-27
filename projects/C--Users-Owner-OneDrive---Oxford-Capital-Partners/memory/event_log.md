@@ -12,6 +12,55 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-27 -- Two new scheduled tasks registered (Gabriel: "fix all workflow optimization candidates")
+
+Registered via supervised create_scheduled_task MCP (Cowork/LAMS surface),
+per register-scheduled-task doctrine -- no JSON splice.
+
+1. **ora-health-guard-fail-aging-nudge** (`0 9 * * 1-5`, weekdays 9:00 AM ET).
+   Checks whether any Health Guard probe FAIL (e.g. the 2026-07-24
+   memory-integrity-probe FAIL, which had no follow-up nudge) has sat
+   unresolved 48h+; escalates via Notion + email only if genuinely stale.
+   Silent on all-clear days to avoid alert fatigue.
+2. **ora-dd-critical-tracker** (`35 9 * * 4`, weekly Thursday 9:35 AM ET).
+   Scans the Acquisition Pipeline for open DD-Critical items (flood/zoning/
+   replacement-cost/reassessed-tax) so they surface automatically instead of
+   being found incidentally (the 808 Rhoads Avenue / 250 NW 10th Street class
+   of finding from this morning's Monday Sync).
+
+QC gate: both ids unique across both fleets (confirmed via
+list_scheduled_tasks), crons don't collide with any existing exact hour:minute
+slot, routing is ggoldberg-only (no cc) in both prompts, send path is the sole
+send-via-outlook.ps1 COM script, [MODEL: claude-sonnet-5 | set 2026-07-27] tag
+present on both. Next fires: ora-health-guard-fail-aging-nudge 2026-07-28
+~09:08 ET; ora-dd-critical-tracker 2026-07-30 ~09:44 ET.
+
+Noted for automation-health-monitor's next revision: add both new tasks to
+its Step 0.55 producer-consumer table (not done in this session -- that
+skill's own maintainers should decide the beacon/freshness wiring).
+
+Also noticed `ora-tenant-contact-gap-sweep` now live in the registry
+(Monday 08:00 ET) that this session did not create and has no [MODEL:] tag --
+appears to be another concurrent session's work; flagging only, not touched.
+
+## 2026-07-27 -- ora-claude-config-push-when-settled: retried and pushed
+
+The one-time settle-check task (fired 2026-07-26 15:01 ET) found a live
+hooks-override-auth claim and correctly declined to push, self-disabling
+without retry. Re-checked both settle conditions directly this session:
+(a) `hooks\active-work\hooks-override-auth.json` no longer exists (claim
+expired/released), (b) HEAD was 62+ minutes old. Both clear.
+
+Pushed `origin/main` (2 commits: the fleet-status.py OI-031 fix + its test
+fixture follow-up, plus the pre-existing 1-commit backlog from 07-27
+morning). git-prepush-doctrine-gate ran clean (59/59 hook-tests, doctrine
+probe OK w/ 1 pre-existing unrelated warning). `main` and `origin/main` both
+at `df5566b`. Repo working tree still carries the large pre-existing
+multi-session uncommitted diff (untouched, not part of this push).
+
+Requested by Gabriel: fix the workflow-optimization candidates surfaced in
+the 2026-07-27 ora-monday-sync output.
+
 ## 2026-07-27 -- fleet-status.py missed-single-cycle detector built, closes OI-031
 
 Gabriel asked to "fix all workflow optimization candidates" from that morning's

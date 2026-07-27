@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-07-27T03:17:54.508Z
+  modified: 2026-07-27T14:40:13.856Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -599,19 +599,17 @@ open**, 3 comments. Awaiting GitHub's action on the corrected SHA.
 **Auto-check:** none.
 
 ### OI-016
-**Status:** OPEN
+**Status:** CLOSED
 **Opened:** 2026-07-18
+**Closed:** 2026-07-19
 **Source:** ora-appsec-sweep first run (2026-07-18); Notion Ops Hub row `3a26ecd8-9e59-81e4-85d4-d08d0d5d920b`
-**Description:** ora-pm (pinned SHA `f47bbe0`) depends directly on `hono` <=4.12.24, which carries HIGH
-advisories: path-traversal via encoded backslash `%5C` on Windows (NOT reachable — the app runs on the
+**Description:** ora-pm (pinned SHA `f47bbe0`) depended directly on `hono` <=4.12.24, which carried HIGH
+advisories: path-traversal via encoded backslash `%5C` on Windows (not reachable — the app runs on the
 Cloudflare Workers Linux edge), CORS middleware reflecting any Origin with credentials when `origin`
 defaults to wildcard, and AWS-Lambda-adapter Set-Cookie merging. Effective severity MEDIUM: portal auth
-is Bearer-token (Authorization header), not cookie-based, which limits the CORS-credential vector; the
-Windows path-traversal is not reachable on the Linux edge. Fix available (upgrade hono). Route through
-the normal Engineering OS lane with its own gate — the sweep does not bump dependencies.
-**Resolved 2026-07-19:** hono bumped 4.12.23→4.12.31, commit `c300867` on `main` (already merged, landed
-by Gabriel directly). Verified via `npm audit` — this finding no longer appears.
-**Status:** CLOSED.
+is Bearer-token (Authorization header), not cookie-based, which limits the CORS-credential vector.
+**Evidence:** `hono` bumped 4.12.23→4.12.31, commit `c300867` on `main` (landed by Gabriel directly).
+Verified via `npm audit` — the finding no longer appears.
 **Auto-check:** none.
 
 ### OI-017
@@ -897,6 +895,23 @@ with no automated stage-advancement. That's a policy/tooling gap (when should a 
 **Not yet done:** the remaining 86 unaudited folders (including all names that DO match a live registry task — `ora-am-brief`, `ora-pm-ledger`, `ora-health-guard`, etc. — which need the more careful (b)-vs-(c) diff-against-canonical treatment both passes so far deliberately deferred) still need classification. Recommend continuing the bounded sweep (5-10 folders/pass, mirroring `ora-weekly-hygiene` Block F's pattern), and prioritizing the still-unresolved `ora-pm-ledger` question specifically: a same-named folder was archived as an orphan in `_archive_2026-07-12_orphans\` yet a new `ora-pm-ledger` folder reappeared at top level the very next day (2026-07-13) — the same reappearance pattern observed for `ora-tenant-hubspot-reconciliation` above — which should be treated as (c) AMBIGUOUS, not re-archived on autopilot, until that recurrence pattern itself is understood.
 **Auto-check:** none.
 
+### OI-030
+**Status:** OPEN
+**Opened:** 2026-07-26
+**Source:** `ora-weekly-hygiene` Sunday run + 3 concurrent sessions, 2026-07-26 (see [event_log.md](event_log.md) 2026-07-26)
+**Description:** `ora-weekly-hygiene/SKILL.md` Block C absorbed edits from four concurrent sessions in
+a single day, including a Gabriel ruling (`caf154b`) that overrode an earlier same-day repoint:
+check G was repointed to the `egoldberg` Graph drive, then formally DROPPED hours later, leaving
+text that argued for a check the file struck through (dangling ref fixed in `9870bb4`, but only
+that one symptom). Other same-day edits: Check B respec, frozen-snapshot RED override, real
+folder names, Block N added, `781bf95` consolidating several idle sessions' WIP. Each change is
+individually sound and the block is coherent as far as incremental patching can verify — the risk
+is the kind only a full read catches: two locally-correct passages that disagree globally, exactly
+the failure mode the check-G ruling itself was.
+**Why not fixed yet:** the next edit to Block C should follow a full human read, not another
+incremental agent patch. Due before the next Sunday fire (2026-08-02).
+**Auto-check:** none.
+
 ## Closed
 
 | ID | Opened | Closed | Source | One-line |
@@ -920,6 +935,17 @@ with no automated stage-advancement. That's a policy/tooling gap (when should a 
 | [OI-015](#OI-015) | 2026-07-18 | 2026-07-19 | ora-appsec-sweep first run (2026-07-18); Notion Ops Hub row `3a26ecd8-9e59-81e4-85d4-d08d0d5d920b` | Reachable/clonable ora-pm git history confirmed genuinely clean of real E. Fulton terms — no history rewrite needed; residual (a dangling blob still served via GitHub's Data API) spun off as OI-022 |
 | [OI-017](#OI-017) | 2026-07-18 | 2026-07-26 | ora-appsec-sweep first run (2026-07-18) | ora-pm + oxford-command-center toolchain CVEs — both repos' vitest/vite CRITICAL+HIGH chain cleared (ora-pm 0 vulns; occ 30→9, 0 critical); wrangler/sharp and react-router (v8.3.0) also resolved on ora-pm. Residual npm-audit-fix pass on occ and the unrelated blank-tenant-portal defect tracked separately, not part of this item |
 | [OI-016](#OI-016) | 2026-07-18 | 2026-07-19 | ora-appsec-sweep first run (2026-07-18) | ora-pm: `hono` bumped 4.12.23→4.12.31 (commit `c300867`), resolved HIGH CORS/Set-Cookie/path-traversal advisories; verified via `npm audit` |
+
+### OI-028
+**Status:** CLOSED (RESOLVED)
+**Opened:** 2026-07-26
+**Closed:** 2026-07-26
+**Source:** `hooks/git-prepush-hook-tests-gate.py` GIT_TRACE root-cause + fix, commit `0d4b974`; repo-housekeeping follow-up session, 2026-07-26 (see [event_log.md](event_log.md) 2026-07-26)
+**Description:** A live `git push` from the `~/.claude` checkout appeared to stall for well over two minutes with no visible progress, raising suspicion of a network or Git remote problem.
+**Resolution:** `GIT_TRACE`/`GIT_TRACE_PERFORMANCE` on a live `git push` isolated the delay precisely: the pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran ~54 tracked test files SEQUENTIALLY, 137s wall-clock measured directly — the actual network push (`send-pack`) that ran immediately after took 0.54s. It was never the network call. Fix: `run_suite()` now dispatches to a bounded `ThreadPoolExecutor` (8 workers) instead of a for-loop, reassembling results into original discovery order regardless of completion order.
+**Evidence:** TDD in an isolated worktree (`worktrees/prepush-gate-parallelize`); real-world result 137s → 38–42s across 4 measured runs, 0 failures. Mandatory adversarial REFUTE pass (hooks/** override/auth logic) via the `security-auditor` subagent found one real defect on the first draft — a new perf test asserted a wall-clock threshold while itself running as one of the ~54 concurrently-gated files on a real push, reintroducing a load-sensitive flake-block risk with no retry path — fixed per the reviewer's own suggestion (structural sweep-line max-overlap proof instead of a timing threshold); re-review returned NOT REFUTED. Landed via `git merge --ff-only` into the live `~/.claude` checkout only after Gabriel's explicit in-turn "Good to merge" confirmation (config-write-guard requires it for any hooks/** write). Tracker closed same day, commit `b0b9ffd`.
+**Note:** reproduced once more later 2026-07-26 during a 21-item consolidated commit/push (pre-push gate passed clean in seconds; the push itself then took noticeably longer before `git fetch origin main` confirmed `origin/main` landed) — same standing workaround (verify landing via fetch, not client exit code) applied; not a regression of the fix itself.
+**Auto-check:** none.
 
 ### OI-023
 **Status:** CLOSED

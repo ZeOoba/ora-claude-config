@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-07-26T18:32:16.387Z
+  modified: 2026-07-27T14:55:13.859Z
 ---
 
 # ORA Tech Stack & Reference
@@ -129,6 +129,14 @@ Composio-Outlook was REMOVED 2026-06-11 and has no live config (per CLAUDE.md: n
 - Server: `C:/Users/Owner/.claude/mcp-servers/fred/server.py` (official `mcp` SDK + `httpx` only; fully auditable). Runs `uv run --directory <dir> --with mcp --with httpx python server.py`. Registered in `C:/Users/Owner/.claude.json` (user scope), key as env `FRED_API_KEY` (rotation: fredaccount.stlouisfed.org/apikeys). Feeds underwriting + market-monitor.
 - Tools: `fred_search_series`, `fred_series_info`, `fred_observations`, `fred_latest`.
 - Series: DGS10/5/2, SOFR, T10Y2Y, CPIAUCSL (units=pc1 for YoY), MORTGAGE30US, FEDFUNDS; state payrolls OHNA/MDNA/INNA/WINA/MONA/KSNA/TNNA. (Verified 2026-05-31: DGS10 4.45%, SOFR 3.62%, MORTGAGE30US 6.53%, CPI YoY 3.78%.)
+- **Stdio credential rotation needs no restart (confirmed 2026-07-26):** the `fred` entry in
+  `~/.claude.json` is `"type": "stdio"` — spawned fresh per session (including every scheduled
+  task, a fresh process per firing) with `FRED_API_KEY` read from the current config at each
+  spawn. A rotated key is live for the very next session with no app/fleet restart needed;
+  a live post-rotation `ora-health-guard` fire called `fred_latest`/`fred_series_info`
+  successfully with no auth error. Root-caused during the 2026-07-24 key-exposure incident
+  (see [event_log.md](event_log.md)) after the older "restart to reload FRED" assumption
+  turned out wrong.
 - **2026-06-09 — raw-FRED HTTP is BLOCKED from the Cowork scheduled-session env** (`fredgraph.csv` → connection-reset; FRED series page → HTTP 403), and the local `fred` MCP is typically **not loaded** in scheduled sessions. Reliable rate paths there: **U.S. Treasury daily par-yield-curve XML** (`/pages/xml?data=daily_treasury_yield_curve&field_tdr_date_value_month=YYYYMM`) for the UST curve; **NY Fed JSON API** for SOFR (`/api/rates/secured/sofr` + `/sofrai`); **web_search** for Freddie Mac PMMS (30Y FRM) + BBB OAS; **05:25 `ora-connector-preflight-guard` mirror email** as a rate fallback. `ora-am-brief` Block A patched 2026-06-09 (both Documents + Governance copies): BBB OAS now uses a `fred`-MCP → FRED-HTTP → mirror → web_search chain, and a FRED-only outage no longer forces `SOURCE_DEGRADED`. (This is why the 2026-06-09 brief posted SOURCE_DEGRADED with BBB OAS ~100 bp [APPROX].) Underwriting/market-monitor sessions DO have the `fred` MCP — keep using it directly there.
 
 ## 5. Notion database IDs (verified live 2026-07-12; Property Register row-count corrected 2026-07-21)

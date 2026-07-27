@@ -42,6 +42,10 @@ MEMORY_WARN_BYTES = 17100     # 17.1KB compaction target
 MEMORY_HARD_BYTES = 24400     # 24.4KB Read-tool limit
 
 CANON_RECIPIENTS = {"ggoldberg@oxfordra.net", "egoldberg@oxfordra.net"}
+RECIPIENT_DRIFT_EXEMPT_FILES = {
+    "event_log.md",
+    "project_autonomy_gate_indirection_ceiling_followup.md",
+}
 RETIRED_DOCS = ("reference_tech.md", "reference_financial.md", "reference_communication.md",
                 "reference_optimization_log.md", "ORA_SetupReference.md", "feedback_",
                 "project_active.md", "project_command_center.md", "firm_ora.md", "user_gabriel.md")
@@ -75,10 +79,15 @@ def parse_open_items(text):
         oid = m.group(1)
         end = headers[i + 1].start() if i + 1 < len(headers) else len(text)
         body = text[m.end():end]
-        sm = OI_STATUS_RE.search(body)
+        # Last match wins, not first: a section can narrate an inline status update
+        # (e.g. "Status: OPEN" ... later in the same body ... "Status: CLOSED.") rather
+        # than moving to a fresh Closed-table section. Reading the first match would
+        # silently misclassify an actually-closed item as still open (found live on
+        # OI-016, 2026-07-27).
+        sm_all = list(OI_STATUS_RE.finditer(body))
         am = OI_AUTOCHECK_RE.search(body)
         items[oid] = {
-            "status": sm.group(1).upper() if sm else None,
+            "status": sm_all[-1].group(1).upper() if sm_all else None,
             "autocheck": am.group(1).strip() if am else None,
         }
     return items
@@ -285,8 +294,13 @@ def main():
             continue
         low = txt.lower()
         # recipient drift: a non-canonical @oxfordra.net address near 'recipient'/'digest'/'send'.
-        # Skip event_log.md — it legitimately documents historical recipient drift that was fixed.
-        if name != "event_log.md" and any(k in low for k in ("recipient", "digest", "send to", "distribution")):
+        # Skip files that legitimately document a historical recipient issue that was fixed,
+        # rather than a live routing config:
+        #   - event_log.md: narrates historical recipient drift that was fixed.
+        #   - project_autonomy_gate_indirection_ceiling_followup.md: quotes the double-@
+        #     spoofing PoC (`attacker@evilhost.com@oxfordra.net`) that the 2026-07-17 Gate 1
+        #     fix closed -- an illustrative attack string, not a real digest recipient.
+        if name not in RECIPIENT_DRIFT_EXEMPT_FILES and any(k in low for k in ("recipient", "digest", "send to", "distribution")):
             for em in set(m.lower() for m in EMAIL_RE.findall(txt)):
                 if em not in CANON_RECIPIENTS:
                     warnings.append("%s references non-canonical recipient '%s' in a send/digest context" % (name, em))
@@ -354,8 +368,12 @@ def main():
                               "row in the tracker (dead pointer)" % (name, ref))
 
     # 4b. auto-check drift -- OPEN items whose stated condition now mechanically matches.
+    # Only text that looks like a real kind=... attempt is evaluated -- the convention's
+    # documented "no auto-check configured" placeholder is the literal word "none" (with
+    # or without trailing prose), which is not itself a malformed kind= attempt and must
+    # not be reported as one (found live on OI-009/016/021/022/024/025, 2026-07-27).
     open_autochecks = [(oid, it) for oid, it in tracker_items.items()
-                       if it["status"] == "OPEN" and it["autocheck"]]
+                       if it["status"] == "OPEN" and it["autocheck"] and "kind=" in it["autocheck"]]
     if open_autochecks:
         fleet_json, ferr = load_fleet_json()
         for oid, it in open_autochecks:
