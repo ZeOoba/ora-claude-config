@@ -12,6 +12,27 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-27 — Thinned the 05:00-09:30 AM window: 3 CC/MCP tasks retimed, 2 deliberately left in place
+
+Gabriel-directed follow-up to the retime/reconcile pass earlier today. Asked to "thin out the rest of the AM window" after confirming the 08:00 collision fix; investigated the raw `recordedSkips` data first (not just the documented "expected catch-up burst" label) and found the day's 69 skips clustered almost entirely in one ~09:02-09:50 ET burst, with the tightest natural daily collision point being a 3-task, 12-minute cluster at 07:00/07:05/07:12.
+
+**Retimed (all CC/MCP, via supervised `update_scheduled_task`, single-writer check clean beforehand — `list_sessions` showed no other session touching the registry):**
+
+- `ora-lease-snapshot-refresh`: `0 7,13,19 * * 1-5` → `40 7,13,19 * * 1-5` (07:00/13:00/19:00 → 07:40/13:40/19:40, weekdays). This was the single highest throttle-skip contributor today (18 skips) and sat wedged against `ora-task-integrity-guard`'s fixed 07:05 slot. Uniform +40min offset preserves the 6h symmetric cadence.
+- `ora-aaos-expire-leases`: `12 7,13,19 * * *` → `20 7,13,19 * * *` (07:12/13:12/19:12 → 07:20/13:20/19:20, daily). Minor +8min uniform offset; Fleet Ledger v2 ruling C2's 3x/day cadence intent unchanged, just cleaner spacing from the guard and the lease-snapshot retime.
+- `ora-site-exposure-probe`: `20 9 * * 3` → `50 9 * * 3` (09:20 → 09:50, Wednesdays). Cleared a recurring 5-minute Wednesday-only adjacency with `ora-deal-aging-sla` (weekdays 09:25). Moved the lower-frequency weekly task rather than the higher-frequency weekday one to minimize blast radius — this also happens to push it entirely outside the AM-pileup window definition (>09:30).
+
+**Deliberately NOT touched, with reasons (this is the point of the exercise — not everything in the window is a problem):**
+
+- `ora-task-integrity-guard` (07:05 daily) — its own changelog (v1.6, 2026-07-24) records it was retimed INTO this exact cluster on Gabriel's own direction, specifically so a repeat overnight outage gets caught by the same catch-up burst that would otherwise strand it silently. Moving it out would reverse that ruling and reopen the failure mode it exists to close.
+- `ora-am-brief` (06:00 daily) — it's the morning brief; moving it later than 06:00 defeats its purpose. Its actual multi-hour delay today (06:00 scheduled → 09:16 actual) traces to the app not being open that early, not to same-clock-minute contention with another task — retiming crons cannot fix an availability gap.
+- `ora-master-workbook-ingest` (05:45 Mon) / `ora-cc-snapshot-refresh` (06:15 Mon) — real ordering dependency: cc-snapshot-refresh's own SKILL.md states it runs "against the live Master Workbook" that ingest just refreshed. Moving either without moving both in lockstep, with the gap preserved, risks reading stale data. Flagged for Gabriel's call rather than moved unilaterally.
+- LAMS-side AM tasks (`ora-cowork-heartbeat` 05:50, `ora-health-guard-fail-aging-nudge` 09:00 weekdays, `ora-tenant-contact-gap-sweep` 08:00 Mon, and several quarterly/monthly ones) are not writable from Claude Code — `list_scheduled_tasks` only returns the CC/MCP fleet from this surface. A Cowork-side pass would be needed to thin that half.
+
+**Verified:** `list_scheduled_tasks` confirms all three new crons live and enabled. `fleet-status.py` re-run: `same-time collisions 0` (no new collision introduced), AM pileup **20 → 19** (site-exposure-probe's move pushed it past the 09:30 cutoff). Today's already-recorded 69 throttle-skip events are unchanged, as expected — they're historical, from before the retime; tomorrow's cycle is the first real test of whether the 07:00-07:12 cluster thinning reduces the skip count.
+
+**Also worth recording:** `fleet-status.py`'s `cron_hm()` only parses single-value hour fields — it silently excludes multi-fire crons like `7,13,19` or `9,15` from the AM-pileup count entirely, so the reported "20 tasks" (now 19) undercounts real AM density. This was discovered while investigating whether the pileup counter was even measuring the right thing; worth a probe fix at some point but out of scope for this pass.
+
 ## 2026-07-27 — Deal-stage sync: E Fulton Street Portfolio — Columbus, OH — Killed — Note/Short-Sale in Discussion → Killed (Notion)
 
 Detected by ora-open-sessions-board's reconciliation step; no corresponding entry existed. Tripwire only — see Notion for the actual decision context.
