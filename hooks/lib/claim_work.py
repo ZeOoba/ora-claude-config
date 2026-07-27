@@ -33,14 +33,20 @@ matching the existing single-writer rules, which are also conventions, not gates
 
 Stdlib only. ASCII-only. Windows (`python`).
 """
-import argparse
 import datetime
 import json
 import os
 import sys
+# NOTE: `argparse` is imported lazily inside main(), NOT here. Measured 2026-07-26:
+# importing it costs ~46 ms, and this module is imported by two hooks that run on the
+# hot path -- shared-checkout-guard.py on EVERY Edit/Write, active-work-broadcast.py on
+# every session start -- neither of which ever touches the CLI. That was ~46 ms of pure
+# waste per edit for a dependency only the `python claim_work.py ...` entry point uses.
 
 CLAIMS_DIR = os.environ.get("ORA_ACTIVE_WORK_DIR") or \
     r"C:\Users\Owner\.claude\hooks\active-work"
+MAX_CLAIM_FILES = 512    # see read_active_claims(): hot-path scan bound
+MAX_CLAIM_BYTES = 64 * 1024
 DEFAULT_TTL_MINUTES = 120  # headroom above the 90-min stuck-session-watchdog kill
                             # threshold, so a legitimately long task's claim survives
                             # while a genuinely stuck session's claim goes stale before
@@ -57,6 +63,35 @@ def _safe_filename(slug):
 
 def claim_path(slug, base_dir=None):
     return os.path.join(base_dir or CLAIMS_DIR, _safe_filename(slug))
+
+
+def norm_path(p):
+    """Canonical on-disk form for path comparison. Deliberately IDENTICAL to
+    commit_provenance.norm() (normcase + abspath) so a claim-declared path and a
+    provenance-recorded touched path compare equal on Windows, where the same file
+    is reachable as `C:\\x\\Y.md`, `c:/x/y.md`, and a relative path from any cwd.
+    Not imported from commit_provenance: this module is stdlib-only and must keep
+    working if that module is missing/broken (same fail-open posture as the rest of
+    it), and the two definitions are asserted equal by the test suite."""
+    return os.path.normcase(os.path.abspath(p))
+
+
+def _clean_paths(paths):
+    """Normalize an agent-supplied path list. Fail-soft: a non-list, or any member
+    that is not a usable string, is dropped rather than raised -- `paths` is
+    free-form agent input on a courtesy mechanism, and a bad value must never cost
+    a caller its claim (or, worse, crash the PreToolUse guard that reads it)."""
+    if not isinstance(paths, (list, tuple)):
+        return []
+    out = []
+    for p in paths:
+        if not isinstance(p, str) or not p.strip():
+            continue
+        try:
+            out.append(norm_path(p.strip()))
+        except Exception:
+            continue
+    return sorted(set(out))
 
 
 def _now_iso(now=None):
@@ -76,7 +111,7 @@ def own_session_id():
 
 
 def write_claim(slug, session_id, description, title=None, cwd=None, base_dir=None,
-                 now=None):
+                 now=None, paths=None):
     """Write (or overwrite) this session's claim on `slug`. Atomic rename + a
     pid-unique tmp name, same pattern as fleet-session-hook.py's save_session() --
     closes the exact same "two writers share one tmp path" hazard that pattern was
@@ -92,6 +127,13 @@ def write_claim(slug, session_id, description, title=None, cwd=None, base_dir=No
         "description": description,
         "claimed_at": _now_iso(now),
         "cwd": cwd or os.getcwd(),
+        # ADDED 2026-07-26 (defect D1). Optional and always present-but-possibly-empty
+        # so readers never branch on absence. Slugs are work-TYPE scoped, so two
+        # sessions editing one file under two honest slugs
+        # ("ora-weekly-hygiene-spec" and "repo-housekeeping", observed same-day)
+        # were indistinguishable from two sessions on unrelated subsystems. Paths are
+        # what make a same-FILE collision expressible at all.
+        "paths": _clean_paths(paths),
     }
     path = claim_path(slug, base_dir)
     tmp = "%s.tmp.%d" % (path, os.getpid())
@@ -127,12 +169,27 @@ def read_active_claims(base_dir=None, ttl_minutes=DEFAULT_TTL_MINUTES, now=None)
         names = os.listdir(base_dir)
     except Exception:
         return out
+    # HARD CAPS (2026-07-26, adversarial review). This directory is world-writable
+    # by design and nothing ever deletes from it -- release_claim is opt-in and
+    # best-effort, so it only grows. Since this module is now read on the Edit/Write
+    # hot path (not just at SessionStart), an unbounded scan is a self-DoS: measured
+    # 100 files -> 2.5x hook latency, 2,000 -> 17x, 20,000 -> 217x (~33 s per edit,
+    # under the 60 s hook timeout, so it degrades silently rather than erroring).
+    # Sorted for determinism: which claims survive the cap must not depend on
+    # filesystem enumeration order.
+    names = sorted(n for n in names if n.endswith(".json"))
+    if len(names) > MAX_CLAIM_FILES:
+        names = names[:MAX_CLAIM_FILES]
     for name in names:
-        if not name.endswith(".json"):
-            continue  # excludes "<slug>.json.tmp.<pid>" leftovers too -- they don't
-                       # end in ".json"
+        # ".json" filter applied above; that also excludes "<slug>.json.tmp.<pid>"
+        # leftovers, which do not end in ".json".
         path = os.path.join(base_dir, name)
         try:
+            # Size gate BEFORE open(): a claim is a handful of short fields, so
+            # anything large is either corrupt or hostile. Cheap stat beats reading
+            # a 200 MB "claim" into memory on every edit.
+            if os.path.getsize(path) > MAX_CLAIM_BYTES:
+                continue
             with open(path, "r", encoding="utf-8") as f:
                 d = json.load(f)
         except Exception:
@@ -152,13 +209,74 @@ def read_active_claims(base_dir=None, ttl_minutes=DEFAULT_TTL_MINUTES, now=None)
             "description": d.get("description", ""),
             "claimed_at": d.get("claimed_at", ""),
             "cwd": d.get("cwd", ""),
+            # Re-normalized on READ, not trusted as written: claim files are
+            # world-writable by design ("NOT a security boundary", above), so a
+            # hand-edited or older-format file may carry raw/relative paths. Running
+            # them back through _clean_paths() means a malformed `paths` value
+            # degrades to [] (no match) instead of raising inside a PreToolUse hook.
+            "paths": _clean_paths(d.get("paths")),
             "age_minutes": age_minutes,
         })
     out.sort(key=lambda c: c["age_minutes"])
     return out
 
 
+def _path_overlap(wanted, declared):
+    """Paths in `wanted` covered by `declared` -- exact match OR inside a declared
+    DIRECTORY.
+
+    WHY prefix matching (2026-07-26, found by both reviewers): the CLI advertises
+    "Files/dirs this claim covers", but the first cut did a plain set intersection,
+    so `--paths scheduled-tasks/ora-weekly-hygiene` (the natural granularity for
+    directory-scoped work, and exactly the shape of the incident that motivated all
+    of this) matched the directory itself and NOTHING inside it -- while still
+    printing "covering 1 path(s) -- other sessions editing them will be warned".
+    A silent no-op behind an affirmative confirmation is worse than no feature.
+
+    Prefix comparison is on a separator-terminated string so `/foo/bar` never
+    matches the sibling `/foo/barbecue`."""
+    declared = set(declared or [])
+    if not declared:
+        return set()
+    out = set(wanted) & declared
+    for d in declared:
+        pref = d.rstrip("\\/") + os.sep
+        for w in wanted:
+            if w.startswith(pref):
+                out.add(w)
+    return out
+
+
+def claims_touching(paths, base_dir=None, ttl_minutes=DEFAULT_TTL_MINUTES, now=None,
+                    exclude_session=None):
+    """Live claims whose declared `paths` intersect `paths`.
+
+    The pre-edit half of the file-collision signal: it fires on a claim alone, before
+    the claiming session has written anything, so it covers the window that
+    provenance (touched-files.txt, necessarily written only AFTER a first edit)
+    structurally cannot. Fail-open like everything else here -- an unreadable claims
+    dir yields [], never an exception, because the caller is a PreToolUse hook and an
+    exception there would surface as a tool failure on an unrelated edit.
+
+    `exclude_session` drops the caller's own claims: a session being warned about
+    itself is noise that trains the reader to ignore the signal."""
+    wanted = set(_clean_paths(list(paths or [])))
+    if not wanted:
+        return []
+    hits = []
+    for c in read_active_claims(base_dir=base_dir, ttl_minutes=ttl_minutes, now=now):
+        if exclude_session and c.get("session_id") == exclude_session:
+            continue
+        overlap = _path_overlap(wanted, c.get("paths") or [])
+        if overlap:
+            c = dict(c)
+            c["matched_paths"] = sorted(overlap)
+            hits.append(c)
+    return hits
+
+
 def main():
+    import argparse  # lazy: CLI-only, see the import block at the top of this module
     p = argparse.ArgumentParser(
         description="Claim or release a shared ~/.claude subsystem for ad-hoc work, "
                      "so other sessions' SessionStart hook broadcasts it automatically. "
@@ -170,6 +288,13 @@ def main():
                                  "oxford-command-center-data, repo-housekeeping")
     c.add_argument("description", help="One line: what you're doing and why")
     c.add_argument("--title")
+    c.add_argument("--paths", nargs="*", default=None,
+                   help="Files and/or DIRECTORIES this claim covers (a directory "
+                        "covers everything beneath it). Slugs are work-TYPE scoped, so "
+                        "two honest slugs can collide on one file (observed 2026-07-26: "
+                        "three sessions, one SKILL.md, zero warnings). Declaring paths "
+                        "makes shared-checkout-guard.py warn any other session that "
+                        "edits them -- BEFORE it has written anything.")
 
     r = sub.add_parser("release", help="Clear a claim you previously made")
     r.add_argument("slug")
@@ -180,8 +305,16 @@ def main():
 
     if args.cmd == "claim":
         sid = own_session_id()
-        path = write_claim(args.slug, sid, args.description, title=args.title)
+        path = write_claim(args.slug, sid, args.description, title=args.title,
+                           paths=args.paths)
+        n = len(_clean_paths(args.paths))
         print("Claimed '%s' as session %s -> %s" % (args.slug, sid, path))
+        if n:
+            print("  covering %d path(s) -- other sessions editing them will be warned" % n)
+        else:
+            print("  NOTE: no --paths given. This claim broadcasts the slug only, so a "
+                  "session editing the same FILE under a different slug will NOT be "
+                  "warned (defect D1, 2026-07-26). Pass --paths for file-level cover.")
         return 0
 
     if args.cmd == "release":
