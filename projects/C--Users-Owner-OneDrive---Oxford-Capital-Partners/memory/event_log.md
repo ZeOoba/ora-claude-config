@@ -12,6 +12,21 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-26 — Block C absorbed four sessions' edits in one day; flagged for a human read (OI-030)
+
+`ora-weekly-hygiene/SKILL.md` Block C took edits from four concurrent sessions on 2026-07-26. Each is individually sound; the concern is global coherence, which incremental patching cannot verify.
+
+Sequence:
+- Sunday hygiene run (this session) repointed **check G** to the `egoldberg_oxfordra_net` Graph drive, having verified that drive is live (the 2026-07-24 "both drives are a DEAD TARGET" note is half wrong — `ggoldberg` is tombstoned, `egoldberg` is not). Also: Check B respec (the `v01`-`v09` orphan rule contradicted ORA's own naming schema, 64/64 false positives), Block J rent-roll `Company`-column match, Block M mailbox scan.
+- `caf154b` — **Gabriel ruling: check G DROPPED outright.** This overrode the repoint hours later, and with a better rationale: a `sharepoint_search`-backed check G *succeeds* while returning no permission/sharing/ACL field, so it reports zero anomalies from a call that never had the data. A "report it if the call fails" guard cannot help, because the call does not fail. The repoint would have reintroduced the silent-clean failure one layer deeper.
+- `781bf95` consolidated several idle sessions' accumulated WIP (this swept up the four spec edits above, all of which survived intact).
+- `0d40e76` added Block N (OI-NNN duplicate-ID collisions); `5fac375` added a cross-repo WIP-aging check-in to Block I.
+- `9870bb4` fixed the one mechanical residue: the repoint paragraph still closed "it exists solely so check G has a live target. See check G below" — arguing for a check the same file struck through 36 lines later. Kept the clause and recorded WHY it was wrong (reachability is not permission data; "the target exists" is not "the check can work") rather than deleting it.
+
+**Why this is an open item and not a closed one:** the check-G episode is itself an instance of the failure mode being flagged — two locally-correct passages that disagreed globally, caught only because a human ruling happened to land on the same block the same day. The next edit to Block C should follow a full human read, not another incremental agent patch. Tracked as OI-030, due before the next Sunday fire (2026-08-02).
+
+Also corrected in the same session: an earlier in-session claim that the four-session collision was "still uncommitted work" was **stale** — `781bf95` had already consolidated it. Verified against `git log` before acting rather than editing on the stale premise.
+
 ## 2026-07-26 — repo-housekeeping follow-up: OI-028 root-caused + fixed, OI-027 collision guard, cross-repo WIP check-in
 
 Gabriel directed action on the three systematization candidates flagged at the end of the earlier repo-housekeeping session. All three landed same day.
