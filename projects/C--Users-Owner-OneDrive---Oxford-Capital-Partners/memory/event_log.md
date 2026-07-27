@@ -12,6 +12,16 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-26 — repo-housekeeping: 21 accumulated uncommitted items reviewed, committed (`781bf95`), pushed
+
+Gabriel-directed sequencing of the WIP multiple idle sessions had deliberately left uncommitted (see the two same-day Block E/telemetry entries above, and the cross-repo survey entry noting `~/.claude` was excluded from that sweep). Claimed `repo-housekeeping`, reviewed each of the 21 changed/new files individually (diff read, not just staged blind): `eos-telemetry-rollup.py` recompiled + its new test suite re-run (15/15 pass), `registry-membership.json` and answered.json-shaped JSON re-parsed, SKILL.md frontmatter's unquoted-colon style confirmed pre-existing convention rather than a new defect.
+
+**Found + fixed one real defect:** `open-items-tracker.md` had two rows both stamped `OI-027` — the new credential-exposure row (this session's repo-sweep entry) collided with an already-committed row about the PR #238 vitest ESLint gap. Renumbered the new row to `OI-029` (no `### OI-NNN` detail section existed for either yet, so a clean rename with no anchor breakage).
+
+Committed all 21 items in one consolidated commit, then pushed to the private `ZeOoba/ora-claude-config` backup — reproduced [OI-028](open-items-tracker.md#OI-028) again (pre-push doctrine gate passed clean in seconds; the push itself then took noticeably longer before `git fetch origin main` confirmed `origin/main` at `781bf95`). Landing was verified via fetch, not the client exit code, per that item's standing workaround.
+
+**Systematization gap surfaced by the OI-027 collision:** `open-items-tracker.md`'s "read the current highest OI-NNN, assign next" convention has no concurrency guard — two sessions (or one session across two same-day entries) reading the same "current highest" before either commits will mint the same ID. Worth a follow-up: either a claim-slug reservation step before ID assignment, or a post-hoc duplicate-ID check folded into an existing sweep (`ora-weekly-hygiene` or `ora-task-integrity-guard`). Not built here — flagged only.
+
 ## 2026-07-26 — Silent-null defect class swept; telemetry rollup hardened (ora-weekly-hygiene follow-on)
 
 Follow-on to the same-day Block E answered.json fix. Generalized the defect class and swept for it: **a check whose "found nothing" is indistinguishable from "couldn't look."**
