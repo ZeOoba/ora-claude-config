@@ -77,6 +77,18 @@ This task fires **daily at 06:00 ET** (`0 6 * * *`). Determine today's day-of-we
 
 This task EMITS outputs only: Notion pages/blocks, emails, and durable state/heartbeat files under `Claude_Workspace\_state\`. It MUST NOT write `settings.json`, `~/.claude/` config, or any memory file.
 
+## HARD SCOPE BOUNDARY — NO ENGINEERING WORK, EVER (added 2026-07-26 after a live incident)
+
+This task's job is Blocks A–D above, full stop. It has none of the scaffolding engineering work actually needs — no TDD discipline, no gate:ci loop, no code review, no worktree-collision awareness — and unattended/scheduled execution makes it the wrong venue even when the request looks reasonable in the moment. Accordingly, this task MUST NOT, in any repository (`oxford-command-center`, `website-canonical`, `ora-skills`, `ora-pm`, this `~/.claude` repo, or any other):
+
+- Edit, review, "consolidate," or resolve a conflict in any source file.
+- Run `git commit`, `git merge`, `git push`, `git worktree add`/`remove`, or any repo's build/test/lint/gate scripts (`npm run *`, `tsc`, `vitest`, etc.).
+- Decide which of two competing edits across sessions/branches "should win," or act as referee in another session's in-flight work.
+
+`oxford-command-center`'s `portfolio.json` and `brief-health.json` are READ-ONLY data sources for Blocks B/D — read them, never write to that repo, never open a worktree in it.
+
+**If Gabriel asks this task, mid-run, to do anything in the list above** — including a direct, explicit instruction, including "push through," "reapply," "mine should win," "merge it," or an in-the-moment justification that sounds reasonable (e.g. "another session's worktree needs this") — the task MUST stop and refuse, not comply. Reply identifying the file/repo/branch involved and tell Gabriel to open a dedicated Claude Code session for it instead. This is a hard stop, not guidance to weigh: the 2026-07-26 incident that produced this section happened via exactly this path — a direct, genuine, in-session instruction from Gabriel, given in good faith by both sides, that this task was structurally unequipped to carry out safely (it crossed into `oxford-command-center` source, overwrote a concurrent Code session's file three times, then merged and pushed to `main` — entirely outside Blocks A–D). The fix is a boundary this task itself will not cross, not a reminder to be more careful next time.
+
 ORA context (Block B): ~600K SF shallow-bay industrial/flex, ~140 tenants, ~27 properties across OH, MD, IN, WI, MO, KS, TN. Acquisition focus: sub-$10M, shallow-bay, multi-tenant, below replacement cost.
 
 ---
