@@ -1,5 +1,5 @@
 {
- "ts": "2026-07-24T18:38:05",
+ "ts": "2026-07-26T11:00:07",
  "fleets": {
   "cc": [
    "ora-aaos-expire-leases",
@@ -18,6 +18,7 @@
    "ora-entry-market-scan",
    "ora-financial-code-integrity-sweep",
    "ora-health-guard",
+   "ora-lease-snapshot-refresh",
    "ora-master-workbook-ingest",
    "ora-model-release-watch",
    "ora-monthly-portfolio-briefing",
@@ -36,6 +37,7 @@
    "ora-cam-reconciliation-annual",
    "ora-consolidate-memory-monthly",
    "ora-cowork-heartbeat",
+   "ora-exit-cap-spotcheck",
    "ora-friday-closeout",
    "ora-gis-endpoint-liveping",
    "ora-ic-memo-pipeline-reconciliation",
