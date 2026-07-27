@@ -1,6 +1,6 @@
 ---
 name: ora-weekly-hygiene
-description: ORA Weekly Hygiene — single sequential Sunday session (20:00 ET) folding five hygiene tasks: A) Claude Workspace Hygiene → B) OneDrive Cleanup (reversible quarantine) → C) SharePoint Aging & Freshness → D) Artifact Staleness Scan → E) Session Pruner → F) legacy task-dir classification → G) EOS telemetry rollup → H) system inventory refresh → I) git repo ref integrity scan → J) Tenant DB completeness spot-check → K) session-env retention sweep → L) override-token sweep → M) unsigned draft-to-signature nudge. v1.1 2026-06-03 Phase 3 merge, extended through 2026-07-25 (Block M added). Block D rebuilt 2026-07-26: freshness-type classification (LIVE/FROZEN/HYBRID) now gates flagging, since the old age-only rule mis-flagged live-read artifacts permanently; adds an Unprobed status so an unrunnable connector probe can no longer report as "0 Broken"; adds a mandatory scope disclaimer on the local-folder fallback; adds a quoted-number unit check after a run compared skill-folder counts to a task count. Re-enabled 2026-07-09 (Gabriel-approved, post-recovery-stabilization confirmation). [MODEL: UNVERIFIABLE | checked 2026-07-25]
+description: ORA Weekly Hygiene — single sequential Sunday session (20:00 ET) folding five hygiene tasks: A) Claude Workspace Hygiene → B) OneDrive Cleanup (reversible quarantine) → C) SharePoint Aging & Freshness → D) Artifact Staleness Scan → E) Session Pruner → F) legacy task-dir classification → G) EOS telemetry rollup → H) system inventory refresh → I) git repo ref integrity scan → J) Tenant DB completeness spot-check → K) session-env retention sweep → L) override-token sweep → M) unsigned draft-to-signature nudge → N) open-items-tracker ID integrity check. v1.1 2026-06-03 Phase 3 merge, extended through 2026-07-26 (Block N added). Block D rebuilt 2026-07-26: freshness-type classification (LIVE/FROZEN/HYBRID) now gates flagging, since the old age-only rule mis-flagged live-read artifacts permanently; adds an Unprobed status so an unrunnable connector probe can no longer report as "0 Broken"; adds a mandatory scope disclaimer on the local-folder fallback; adds a quoted-number unit check after a run compared skill-folder counts to a task count. Re-enabled 2026-07-09 (Gabriel-approved, post-recovery-stabilization confirmation). [MODEL: UNVERIFIABLE | checked 2026-07-25]
 output_contract:
   version: 1
   blocks:
@@ -66,6 +66,11 @@ output_contract:
       on_missing_severity: info
     - id: block-m-unsigned-draft-nudge
       artifact: { type: file, path_glob: "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-weekly-hygiene\\_state\\block-M-last-run.json" }
+      freshness_window_hours: 192
+      expected_on: { cron: "15 20 * * 0" }
+      on_missing_severity: info
+    - id: block-n-open-items-id-integrity
+      artifact: { type: file, path_glob: "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-weekly-hygiene\\_state\\block-N-last-run.json" }
       freshness_window_hours: 192
       expected_on: { cron: "15 20 * * 0" }
       on_missing_severity: info
@@ -461,6 +466,27 @@ The script enforces every safety check itself (live-sessionId exclusion read fre
 
 ---
 
+# BLOCK N — OPEN-ITEMS TRACKER ID INTEGRITY CHECK (mechanical; added 2026-07-26)
+
+**WHY THIS BLOCK EXISTS:** `open-items-tracker.md`'s own convention is "read the tracker's current highest `OI-NNN`, assign the next sequential ID" — a read-then-write with no lock and no reservation step. Two sessions (or two same-day entries from one session) that both read the tracker before either commits will independently mint the SAME id. Confirmed live 2026-07-26: a repo-housekeeping session found the tracker carrying two distinct rows both stamped `OI-027` — a same-day credential-exposure finding had collided with an already-committed PR-238 vitest-gap finding — fixed by hand that day (renumbered to `OI-029`). Nearly every block in this file (D, J, M) and several other skills (`ora-tenant-hubspot-reconciliation`, etc.) assign fresh `OI-NNN` ids into this same tracker, so the race is structural, not a one-off mistake, and will recur without a standing catch.
+
+**EXECUTION**
+
+1. Run:
+   `C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe "C:/Users/Owner/.claude/maintenance/check-open-items-duplicate-ids.py"` via Bash and capture stdout + exit code.
+2. The script is READ-ONLY and AUTHORITATIVE — do not reimplement its logic. It reports three finding classes, each carried verbatim into the run summary if present: `DUPLICATE_ROW` (an `OI-NNN` id appears in more than one table row, Open and/or Closed combined — always a collision, never a legitimate state, since a closed item is CLOSED by moving its row, not by leaving a second one behind), `DUPLICATE_SECTION` (more than one `### OI-NNN` detail section for the same id), and `ORPHANED_SECTION` (a `### OI-NNN` detail section with no matching table row in either table — likely a row lost during an edit, or the stale half of a collision that was renumbered elsewhere).
+3. **Detection only — this block never renumbers or edits the tracker itself.** Deciding which of two colliding rows is "the newer one that should be renumbered" requires reading both rows' content and dates to judge intent (exactly what a human did by hand on 2026-07-26) — a mechanical id-count cannot safely automate that judgment call. Surface the collision with both full row texts quoted (read them directly from the tracker) so Gabriel or a future session can resolve it without re-deriving what collided.
+4. Exit 0 = clean, nothing to report. Exit non-zero = at least one finding — this is a Block N alarm condition for the run summary (not an email; see Delivery below).
+5. If the script itself errors (tracker unreadable, path missing), note that plainly as a coverage gap in the run summary — never report "0 findings" when the check could not actually run.
+
+**Delivery:** no new email (blocks stay un-cross-wired, matching G/H/I/J/M). Append one line to the END-OF-SESSION RUN SUMMARY: `Block N — Open-Items ID Integrity: N table rows · N unique ids · N detail sections · N finding(s)`. If any finding exists, also append each `[ACTION]` line verbatim (id, count, and which check fired) plus the full text of every colliding row/section (quoted directly from the tracker) so Gabriel can resolve it without re-opening the file to hunt for the collision.
+
+**Guards:** strictly read-only against `open-items-tracker.md` — never writes, renumbers, or deletes a row or section; never halts the session if the probe errors — note it in the run summary and continue.
+
+**Block N state marker:** as this block's final action, EVERY run — including a clean run — append one line to `C:\Users\Owner\.claude\scheduled-tasks\ora-weekly-hygiene\_state\block-N-last-run.json` (create the `_state\` folder if absent): `{"lastRun": "<ISO timestamp>", "outcome": "<N rows, N unique ids, N sections, N findings>"}`.
+
+---
+
 # END-OF-SESSION RUN SUMMARY
 
-After all twelve blocks complete, emit a one-line-per-block status (block · files moved/quarantined or audit counts · email/Notion delivery result) to the session log so `ora-health-guard` can confirm the merged hygiene session fired cleanly. Blocks A/B may legitimately report "nothing to do" — that is NORMAL. A missed whole-session run is independently surfaced by the health guard.
+After all thirteen blocks complete, emit a one-line-per-block status (block · files moved/quarantined or audit counts · email/Notion delivery result) to the session log so `ora-health-guard` can confirm the merged hygiene session fired cleanly. Blocks A/B may legitimately report "nothing to do" — that is NORMAL. A missed whole-session run is independently surfaced by the health guard.
