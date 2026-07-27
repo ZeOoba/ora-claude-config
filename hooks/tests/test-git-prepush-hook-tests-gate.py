@@ -308,6 +308,90 @@ expect("format_summary: twice-timed-out FAIL block survives with exit 124",
        "test-hung.py" in retry_summary and "124" in retry_summary,
        "got %r" % retry_summary)
 
+# --- run_suite(): CONCURRENT execution (2026-07-26, OI-028 root cause) ----------------
+# A live push trace showed the pre-push hook-tests gate taking 137s wall-clock for ~54
+# sequential subprocess spawns, while the actual network push (send-pack) completed in
+# 0.54s -- that 137s reads as a "hung push" from the client and is the confirmed root
+# cause of open-items-tracker.md's OI-028. Files are independent subprocesses with no
+# shared state, so they should run CONCURRENTLY.
+#
+# NOT a wall-clock-threshold test (REFUTE review finding, 2026-07-26): this very file is
+# itself one of the ~54 tracked files run_suite() discovers on a real push, so on a real
+# push THIS test runs as one of up to MAX_PARALLEL_TESTS concurrent workers, sharing the
+# host with siblings that themselves spawn subprocesses (one discovered file spawns 48).
+# An "elapsed < N seconds" assertion measured under that self-inflicted contention has no
+# safe margin and reintroduces exactly the flaky-block risk this diff exists to remove
+# (a non-timeout assertion failure here would get no retry -- see _run_one). Instead,
+# record each dummy file's own [start, end) wall-clock interval via a thin wrapper around
+# gt._run_one and assert STRUCTURAL overlap (>=2 files genuinely in flight at once) --
+# true regardless of host load, since ThreadPoolExecutor dispatches queued work to any
+# free worker immediately, so overlap is guaranteed by the pool having >1 worker, not by
+# how fast any individual subprocess happens to run.
+import time as _time
+
+perf_root = tempfile.mkdtemp(prefix="gt-perf-")
+for _i in range(6):
+    write_dummy_test(perf_root, "test-sleep-%d.py" % _i,
+                      "import time; time.sleep(0.5); print('ok')\n")
+
+_intervals = []
+_real_run_one = gt._run_one
+def _timed_run_one(path):
+    start = _time.time()
+    result = _real_run_one(path)
+    _intervals.append((start, _time.time()))
+    return result
+gt._run_one = _timed_run_one
+try:
+    perf_suite = gt.run_suite(perf_root)
+finally:
+    gt._run_one = _real_run_one
+
+expect("run_suite: all 6 sleep-0.5s fixtures pass",
+       all(r["status"] == "pass" for r in perf_suite) and len(perf_suite) == 6,
+       "got %r" % perf_suite)
+expect("run_suite: recorded one timing interval per fixture",
+       len(_intervals) == 6, "got %d intervals" % len(_intervals))
+
+
+def _max_concurrent(intervals):
+    """Classic sweep-line: max number of [start, end) intervals overlapping at any
+    instant. >1 proves genuine concurrent execution, independent of absolute speed."""
+    events = []
+    for s, e in intervals:
+        events.append((s, 1))
+        events.append((e, -1))
+    events.sort()
+    cur = peak = 0
+    for _, delta in events:
+        cur += delta
+        peak = max(peak, cur)
+    return peak
+
+
+_peak_concurrency = _max_concurrent(_intervals)
+expect("run_suite: at least 2 files were genuinely IN FLIGHT at the same instant "
+       "(peak concurrency %d) -- proves real parallelism structurally, not by a "
+       "load-sensitive wall-clock threshold" % _peak_concurrency,
+       _peak_concurrency >= 2, "peak_concurrency=%d, intervals=%r"
+       % (_peak_concurrency, _intervals))
+
+# --- run_suite(): output order is stable (discovery/sorted order), independent of
+# which worker happens to finish first ------------------------------------------------
+order_root = tempfile.mkdtemp(prefix="gt-order-")
+# Deliberately reverse-biased sleep durations so the SLOWEST file is discovered FIRST
+# (alphabetically) and the FASTEST is discovered LAST -- if run_suite() just appended
+# results in completion order, this would visibly scramble the returned order.
+write_dummy_test(order_root, "test-a-slow.py", "import time; time.sleep(0.6); print('ok')\n")
+write_dummy_test(order_root, "test-b-mid.py", "import time; time.sleep(0.3); print('ok')\n")
+write_dummy_test(order_root, "test-c-fast.py", "print('ok')\n")
+order_suite = gt.run_suite(order_root)
+expect("run_suite: results preserve discovery (sorted) order regardless of which "
+       "file finishes first",
+       [r["file"] for r in order_suite] == ["test-a-slow.py", "test-b-mid.py",
+                                             "test-c-fast.py"],
+       "got %r" % [r["file"] for r in order_suite])
+
 # --- any_real_failure() ---------------------------------------------------------------
 expect("any_real_failure: pass+env-skip only -> False",
        gt.any_real_failure([{"status": "pass"}, {"status": "env-skip"}]) is False)
