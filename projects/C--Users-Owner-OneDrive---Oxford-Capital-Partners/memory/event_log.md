@@ -12,6 +12,23 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-27 — Deal-stage sync: E Fulton Street Portfolio — Columbus, OH — Killed — Note/Short-Sale in Discussion → Killed (Notion)
+
+Detected by ora-open-sessions-board's reconciliation step; no corresponding entry existed. Tripwire only — see Notion for the actual decision context.
+
+## 2026-07-27 (cont.) — pre-push hook-tests-gate flake: test-claim-file-collision.py, unconfirmed cause
+
+The `event_log.md` isolated-hunk push above was blocked once by `git-prepush-doctrine-gate.py`'s hook-tests-gate: "58 pass, 1 fail, 0 env-skip (of 59)," naming `hooks/tests/test-claim-file-collision.py` (exit 1). Did not use the override-token bypass (`allow-hook-test-failure` requires Gabriel's explicit in-chat authorization with a stated reason — not warranted here without first ruling out a real regression). Investigated instead:
+
+**Inspected the test itself (409 lines).** Fully isolated by design — every fixture uses `tempfile.mkdtemp()`/`tempfile.mkstemp()` for its sessions/claims/repo dirs, the `shared-checkout-guard.py` subprocess call is driven via explicit `env=dict(os.environ, SHARED_CHECKOUT_SESSIONS_DIR=..., ORA_ACTIVE_WORK_DIR=..., SHARED_CHECKOUT_REPOS=..., ORA_FLEET_SESSIONS_DIR="C:/does/not/exist_cfc_sessions_dir")` overrides pointing at the temp fixtures, not real machine state. No obvious logic defect found on inspection — this reads as environmental/timing, not a code regression.
+
+**Could not identify the specific failing assertion.** The pre-push hook's captured output showed the same 6 `D1` PASS lines both times, then jumped straight to the aggregate "RESULT: 38/39 passed" with no visible FAIL line for this file — the actual failing check was not captured in what reached this session, and the failure did not reproduce on either of two follow-up runs (direct `python hooks/tests/test-claim-file-collision.py` → 39/39; the immediate push retry's hook-tests-gate → 59/59 clean). Logging this as **cause unconfirmed**, not as a diagnosed-and-fixed defect — flagging candidates rather than asserting one:
+
+- **Environmental/tooling (leading candidate):** the test spawns several real `git init`/`add`/`commit` and `python shared-checkout-guard.py` subprocesses against fresh temp dirs (30-60s timeouts) — the same general shape (native-process spawn + fresh temp-dir file writes) as the already-documented [[feedback_npm_test_intermittent_access_violation]] Windows AV/EDR-interference class, generalized here from Node/vitest to a Python/git subprocess suite.
+- **Concurrent-load (session-specific, not previously seen in the npm case):** this push landed during confirmed heavy concurrent activity on this exact shared checkout — `git status` at push time showed 17 modified files and 5 untracked dirs from other sessions/scheduled tasks (ora-am-brief, ora-cc-snapshot-refresh, maintenance state, etc.), and this session's own SessionStart carried a live cross-session claim notice (`oxford-command-center-data`, session `d30c7c3b`). A `git init`/`add`/`commit` sequence spawned inside `~/.claude`'s process tree at that moment competing for disk/CPU with other sessions' real git and file operations is a plausible transient-timeout trigger distinct from AV interference.
+
+**Disposition:** not fixed (nothing reproducibly broken to fix), not overridden (no bypass token written). Treated as a single observed flake, consistent with an existing known failure class — logging for pattern-tracking per the "classify recurring failures by cause before proposing a fix" rule. If `test-claim-file-collision.py` flakes again, check for a genuine race in its subprocess timeout handling before assuming AV/load noise a second time.
+
 ## 2026-07-27 (cont.) — stray solar-lease-underwriting ledger line cleared; PENDING_REIMPORT.md now empty
 
 Investigated before clearing per Gabriel's request — raw SHA256 of repo vs cache solar-lease-underwriting/SKILL.md diverged (2a1f69ee… vs 9b757b25…), which looked like new drift. EOL-normalized compare (strip \r) showed byte-identical content on both sides (9b757b25…, zero diff) — the documented git-CRLF-normalize-on-next-touch false-positive class, not real drift; repo picked up CRLF on checkout after the PR #24 merge, cache still holds the original LF upload. Cleared via `python tools/pending_reimport.py clear solar-lease-underwriting`; the ledger helper deletes `_staging/PENDING_REIMPORT.md` entirely once empty — file is now absent, confirming zero pending reimports fleet-wide. This closes the full 2026-07-27 batch2 index-unregistered + solar-lease-underwriting capture thread.
