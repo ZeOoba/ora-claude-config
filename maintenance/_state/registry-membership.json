@@ -1,5 +1,5 @@
 {
- "ts": "2026-07-26T11:00:07",
+ "ts": "2026-07-27T09:04:15",
  "fleets": {
   "cc": [
    "ora-aaos-expire-leases",
@@ -35,8 +35,10 @@
    "ora-ar-export-freshness-nudge",
    "ora-bearmode-refresh",
    "ora-cam-reconciliation-annual",
+   "ora-capex-idea-stage-nudge",
    "ora-consolidate-memory-monthly",
    "ora-cowork-heartbeat",
+   "ora-critical-deadlines-scan",
    "ora-exit-cap-spotcheck",
    "ora-friday-closeout",
    "ora-gis-endpoint-liveping",
