@@ -12,6 +12,63 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-27 -- fleet-status.py missed-single-cycle detector built, closes OI-031
+
+Gabriel asked to "fix all workflow optimization candidates" from that morning's
+`ora-monday-sync` output. One candidate was OI-031 (logged earlier today by
+another session via `orphaned-task-forensics`): `fleet-status.py`'s
+never-ran/expired/skip checks are structurally blind to an already-established
+recurring task silently missing a single scheduled cycle -- the exact gap that
+let `ora-master-workbook-ingest`'s 2026-07-20 Monday fire go unnoticed for a
+full week.
+
+Built the candidate fix described in OI-031: added `find_missed_cycles()` to
+`maintenance/fleet-status.py`, comparing each enabled recurring task's
+`lastRunAt` against its most recent expected cron-predicate fire time
+(walk-backward over dom/month/dow, mirroring `automation-health-monitor`'s
+Step 0.5 `expectedFireTime` logic), flagging anything more than 24h stale to
+its own cadence. Wired into `--json` output (new `missed_cycle` key), the
+plain-text HEALTH SUMMARY, and the verdict-flags line. Purely additive --
+no existing field's meaning changed.
+
+Verified: `maintenance\_tests\test_fleet_contract_check.py` (pre-existing, 5
+tests) still passes unchanged. Added
+`maintenance\_tests\test_fleet_status_missed_cycle.py` (7 new tests: flags a
+genuine 8-day-stale weekly miss, does not flag a same-cycle fire, does not
+flag within the 24h grace window, does not flag disabled/one-time/never-ran/
+non-fixed-cron tasks) -- all 7 pass. Live run against the current registry:
+0 missed cycles currently (consistent -- `ora-master-workbook-ingest` fired
+normally this week per its own 07-27 log).
+
+Committed (fleet-status.py + new test file only, scoped -- left the large
+pre-existing multi-session uncommitted diff untouched) and pushed to
+`origin/main` in the same session as the separately-requested
+`ora-claude-config-push-when-settled` retry (see that entry).
+
+OI-031 status: candidate fix now BUILT and live. Recommend Gabriel close
+OI-031 in `open-items-tracker.md` once satisfied; leaving it OPEN for now
+since the fix hasn't been observed catching a real miss in production yet.
+
+## 2026-07-27 — Memory consolidation follow-up: 1 more file archived, 3 more candidates checked and rejected
+
+Continuing the same-day consolidation pass. Archived `project_ora_am_brief_lams_retirement_blocked.md` (RESOLVED 07-16, CC/MCP copy is the sole live task) — its only inbound reference (`oxford-cc-repo-health.md`) is a soft prose citation from a non-living incident-log file, not a markdown link, so no dead pointer created. Removed its CLOSED-threads bullet from MEMORY.md.
+
+**Checked and deliberately rejected 3 more candidates** that looked closed but have real, load-bearing inbound references and would have created new dead pointers or stale rationale-pointers if archived: `project_tenant_db_no_sync_rootcause.md` (10+ live markdown links from `open-items-tracker.md`'s OI-003/004/005/006/008/009 rows and detail sections), `project_master_workbook_single_writer_proposal_2026-07-25.md` (`tech.md`'s single-writer-protocol section explicitly points to it for "full incident + rationale"), and `project_master_workbook_no_single_writer_2026-07-24.md` (same `tech.md` pointer, plus still tagged OPEN in MEMORY.md's own index).
+
+**Result:** 162 → 161 files indexed/present, still 1:1. MEMORY.md 19,106 → 19,001 bytes. Genuine high-confidence archival candidates are now scarce — most remaining closed-looking project files are load-bearing sources for `open-items-tracker.md` rows or cited as the "full detail" pointer from a living doc. Further compaction from here likely needs either updating those referencing files' citations first (more invasive) or waiting for more content to age past its reference window.
+
+## 2026-07-27 — Memory consolidation pass: 8 closed files archived, index tightened, 2 durable lessons folded into living docs
+
+Gabriel-directed reflective consolidation pass (`consolidate-memory` skill) after MEMORY.md crossed the 17.1KB compaction target (was 20,600 bytes). Ran against an actively-contended shared checkout (5-6 concurrent sessions touching `~/.claude` throughout) — checked `git diff` before/after every write, no collisions.
+
+**Archived (moved to `_archive/`, dated-suffix convention, no MEMORY.md pointer left behind):** `project_fred_key_exposure` (closed 07-26; durable lesson — FRED MCP is stdio, spawns fresh per session, no restart needed for a rotated key — folded into `tech.md`'s FRED section instead), `project_config_corruption_recurrence` (closed 07-25, ALL CLEAR), `project_sell_your_building_page_shelved` (merged+live via PR #43), `project_lease_snapshot_id_rebaseline` (closed same-day; its durable "diff by business key not id" lesson folded into the surviving `reference_lease_date_detector_defects_2026-07-24.md` line instead of dropped), `project_setup_self_audit_frontmatter_probe` (closed 07-24), `project_tenant_hubspot_reconciliation` (closed 07-21), `project_seller_resource_hub` (merged+live 07-21), `project_config_write_guard_boundary_fix` (closed 07-22).
+
+**Deliberately NOT archived** despite looking closed, to avoid creating new dead pointers: `project_bash_guard_indirection_gap.md` (still has 4 live inbound markdown links from `open-items-tracker.md`'s OI-010/OI-011 rows+sections) and `project_tenant_db_renewal_watch_view_2026-07-22.md` (live inbound link from `reference_notion_view_dsl_formula_filter_bug.md`). `project_orphan_guard_timing_2026-07-24.md` also skipped — its own frontmatter says REOPENED with an unmerged fix branch as of 07-24, status unverified since.
+
+**Index tightened:** the 10 dense "gotcha bundle" lines under Reference (Fleet & scheduler, Skill/Notion/Workflow gotchas, Git & shared-checkout hazards, event_log hazards, Windows/shell gotchas, Command Center, Hooks & guards, Verify before trusting) rewritten for brevity, no links or hooks dropped. CLOSED-threads bundle under Projects & system shrunk from 14 to 8 items.
+
+**Result:** 170 → 162 files indexed/present (still 1:1, `memory-integrity-probe.py` clean). MEMORY.md 20,600 → 19,106 bytes. **Still ~2KB over the 17.1KB target** — remaining bulk is durable, individually-terse feedback/reference entries (Rules & governance section, the trimmed gotcha bundles) that would need to lose real recall value to cut further, not more fat to trim. Flagged to Gabriel rather than cut further.
+
 ## 2026-07-27 — ora-deal-aging-sla run: bare `Killed` added to both boards' stage exclusions; 754 `Last Activity` corrected to 07-23
 
 The weekday `ora-deal-aging-sla` run came back 0 breaches / 0 nudges, and both of its useful outputs were byproducts — consistent with the STEP 3b doctrine note that a zero-breach run's findings are usually the substance. Two follow-on corrections were made on Gabriel's in-turn direction.
@@ -1783,3 +1840,16 @@ Invoked to close the register-scheduled-task v2.8 (commit 609164f, "require date
 **Per Step 2's short-circuit rule: STOPPED before packaging — no `.skill` was built, no Save-skill click was requested of Gabriel.** `python tools\pending_reimport.py clear register-scheduled-task` run to close the now-stale ledger line (cache re-sync is the qualifying event per the ledger's own clear-condition, regardless of which session's click produced it). `monthly-close` and `ora-flood-zoning-dd` ledger lines left untouched (out of scope this pass).
 
 **Flag for Gabriel:** the install that produced this sync was not captured in this log by whichever session performed it — worth a quick check of other recent Cowork/Code session transcripts if attribution matters, but the cache content itself is unambiguous and correct at v2.8.
+
+
+## 2026-07-27 — orphaned-task-forensics: ora-pm-ledger EOD/Digest gap (Workflow A)
+
+**Symptom (from same-day automation-health-monitor run):** no "EOD Action Ledger" or "ORA Notion Daily Digest" output found for 2026-07-26 or 2026-07-27 — most recent prior was 2026-07-25.
+
+**Investigation:** `fleet-status.py --json` confirmed `ora-pm-ledger` is live and enabled on the cc fleet (cron `0 18 * * *`, not archived/orphaned) — 13 total throttle-skip events logged historically but 0 in the last 24h, ruling out active throttling as the cause. `ora-pm-ledger`'s own `state/` folder shows dated `tenant-db-YYYY-MM-DD.json` snapshots for 07-20 through 07-25 with a hard stop after 07-25 — no 07-26 file. Sent Items search for both output_contract artifacts (Block A `sent_mail` "ORA Notion Daily Digest - {DATE}", cross-referenced against Block C "ORA EOD Action Ledger - {DATE}") confirms neither exists for 2026-07-26; the chain is otherwise unbroken back through 07-20.
+
+**Root cause:** Sunday 2026-07-26's 18:00 ET fire did not execute at all — one missed cycle, not a multi-day gap. Consistent with the same recurring overnight/evening machine-offline pattern already documented fleet-wide this week (Action Register — 2026-07-27 remediation cites catch-up bursts on 07-22/07-24/07-26/07-27). **Distinct wrinkle worth watching:** unlike the AM-cluster tasks, which all caught up automatically once the Desktop app reopened this morning, `ora-pm-ledger`'s 07-26 cycle has NOT caught up as of this check (~11:55 ET 07-27) despite the app clearly being open (automation-health-monitor, ora-health-guard, ora-am-brief all ran/caught up this morning). `ora-pm-ledger`'s own doctrine says a missed 18:00 ET fire "runs at next app-open and is still 'today's' run" — that has not visibly happened for 07-26 yet. Today's (07-27) 18:00 ET fire is not yet due (current time is morning).
+
+**Resolution:** Not an orphaned producer — task is live, no absorption/revival decision needed, no registry action taken. Recommend watching tonight's (07-27, 18:00 ET) fire: if it silently produces only 07-27 content with no 07-26 backfill or acknowledgment, and/or if 07-27's Block A digest email also fails to appear by tomorrow morning, escalate as a genuine ora-pm-ledger catch-up defect rather than assuming it's the same one-off overnight-offline class as the AM cluster. Logged per orphaned-task-forensics Workflow A step 7.
+
+**Correction to today's automation-health-monitor report** ("Automation Health — 2026-07-27", page `3aa6ecd8-9e59-8125-a84f-e205bd3bc2d9"): that report's Step 0.55 row for `ora-pm-ledger` Block C overstated the gap as spanning 07-26 AND 07-27 — 07-27's fire isn't due until this evening, so only 07-26 is actually missing. Also, Block A's real output_contract artifact is a **sent_mail** subject pattern ("ORA Notion Daily Digest - {DATE}"), not a Notion page as that report's table implied — corrected here for the record; an addendum was appended to the Notion page itself.
