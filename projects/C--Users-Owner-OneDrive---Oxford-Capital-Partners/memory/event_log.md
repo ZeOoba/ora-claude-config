@@ -12,6 +12,16 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-27 — 3 skills reimported (Save-skill click confirmed); 4 REPO-FIRST violations recovered to repo (PR #25, not merged)
+
+Follow-up to today's `ora-skill-store-drift-check` Notion comment (7 drifted: 3 repo-newer, 4 cache-newer).
+
+**Standalone reimport (Entry Point A, package-and-stage-skill):** daily-brief v2.8, monthly-close v2.2, ora-flood-zoning-dd v1.3. Step 0 `plugin_of()` → `None` for all three. Packaged clean via `tools/package_skills.py` (daily-brief 2 entries incl. injected `target-markets.json`; monthly-close 1 entry; ora-flood-zoning-dd 2 entries incl. `references/endpoints.md`). Staged to session outputs, `present_files`'d. **Gabriel confirmed the Save-skill click on all three.** Post-install verify: every packaged file present and SHA256-identical (raw and EOL-normalized) in the runtime cache mirror for all three, including daily-brief's shared `target-markets.json` (matches repo-root exactly). `pending_reimport.py clear` run for daily-brief, monthly-close, ora-flood-zoning-dd.
+
+**REPO-FIRST VIOLATION recovery (cache was ahead of repo, not a Save-skill matter):** acquisition-underwriting (cache v4.5 2026-07-25 vs repo v4.4 2026-07-23), communication-intelligence (cache v1.3 2026-07-24, entity-awareness/signature fix, vs repo v1.2 2026-07-11), market-monitor (cache v1.2 2026-07-25 vs repo v1.1 2026-07-08), tenant-email (cache v1.1 2026-07-24 entity-awareness fix vs repo unversioned/pre-fix). Byte-exact copy cache→repo on branch `fix/repo-first-violations-cache-pull-2026-07-27`, no content edits; post-copy SHA256 verified identical to cache pre-copy for all four. Committed `20a936e`, pushed, opened [PR #25](https://github.com/ZeOoba/ora-skills/pull/25) — **not merged**, awaiting Gabriel's review per doctrine. The new `tools/hooks/pre-commit` AppData dual-write sync (merged `5ff5b5f`/`ae84f16` since the last drift check) fired on this commit and re-synced the same bytes back to the cache (no-op, content already matched) and auto-recorded all four in `PENDING_REIMPORT.md`; cleared immediately since no platform-side reimport is needed here — cache was already the source of truth.
+
+Noted but out of scope this pass: a stray unmerged branch `capture/solar-lease-underwriting-cache-pull` (commit `8fd9ec7`) already captures the cache-only solar-lease-underwriting skill into the repo from an earlier/parallel session; its `PENDING_REIMPORT.md` entry is the one remaining ledger line and belongs to that branch's own follow-up, not this session's work.
+
 ## 2026-07-27 — FRED key thread closed: Gabriel declined rotation
 
 Following the dead-vs-live determination above, Gabriel initially asked to rotate the FRED key anyway "just to be safe," then retracted that request in the same session. Disposition: **no rotation performed** — the pre-fix key stands confirmed dead by the scope/timeline argument, the exposed backup copy is already scrubbed to `{{FRED_API_KEY}}`, and no other surviving copy contains a usable literal. Thread fully closed; no open items remain from the 07-26/07-27 Health Guard secret-scan CRIT.
@@ -35,6 +45,10 @@ Follow-up per Gabriel's "chase down why the 07-26/07-27 reports flagged it." Pul
 **Not resolved — flagging, not closing:** which session/process performed the 09:16:28 edit. No maintenance script, hook, or event_log entry attributes it; it does not match any known backup-refresh or scrub tool's write pattern (`scrub-before-optin.py` is advisory/read-only by design). Most likely a manual/interactive fix by a session that never logged it here — a plausible instance of the known [[reference_event_log_uncommitted_backlog]] gap. Also unresolved per the 07-26 email's own open question: whether the scrubbed literal was the already-dead (07-24-rotated) key or something live — nobody confirmed this before the fix landed.
 
 **Disposition:** no further file changes needed (the backup + its one true mirror are already scrubbed to a template placeholder; the second "mirror" candidate is a 9-line stub with no FRED section, never at risk). Recommend Gabriel confirm retroactively whether the pre-fix literal was dead or live, for the record — this session cannot determine that from Code-surface artifacts alone.
+
+## 2026-07-27 (cont.) — index-unregistered batch 2 staged (9 skills)
+
+Gabriel's ruling on the 9-skill REIMPORT-PENDING (index-unregistered) finding: re-stage and re-click rather than retroactively confirm. Packaged all 9 via `tools/package_skills.py` into `_staging/2026-07-27_index-unregistered-batch2/` (mirrors the 2026-07-21_index-unregistered-batch convention) — automation-health-monitor, code-debugging-optimizations, debt-management, deploy-site, lease-abstraction-pipeline (3-file bundle: SKILL.md + SCHEDULED_TASK.md + references/extraction-edge-cases.md), maintenance-analytics, re-operations, rent-roll-qc, tax-appeal. All 9 passed frontmatter validation clean. Awaiting Gabriel's Save-skill click on each in Cowork; once confirmed, log the actual install per package-and-stage-skill step 7 to close the finding.
 
 ## 2026-07-27 — Telemetry rollup cohort-segmentation fix + wt-branch/GIT_DIR corruption incident: closed out
 
@@ -1965,3 +1979,5 @@ Invoked to close the register-scheduled-task v2.8 (commit 609164f, "require date
 **Resolution:** Not an orphaned producer — task is live, no absorption/revival decision needed, no registry action taken. Recommend watching tonight's (07-27, 18:00 ET) fire: if it silently produces only 07-27 content with no 07-26 backfill or acknowledgment, and/or if 07-27's Block A digest email also fails to appear by tomorrow morning, escalate as a genuine ora-pm-ledger catch-up defect rather than assuming it's the same one-off overnight-offline class as the AM cluster. Logged per orphaned-task-forensics Workflow A step 7.
 
 **Correction to today's automation-health-monitor report** ("Automation Health — 2026-07-27", page `3aa6ecd8-9e59-8125-a84f-e205bd3bc2d9"): that report's Step 0.55 row for `ora-pm-ledger` Block C overstated the gap as spanning 07-26 AND 07-27 — 07-27's fire isn't due until this evening, so only 07-26 is actually missing. Also, Block A's real output_contract artifact is a **sent_mail** subject pattern ("ORA Notion Daily Digest - {DATE}"), not a Notion page as that report's table implied — corrected here for the record; an addendum was appended to the Notion page itself.
+
+
