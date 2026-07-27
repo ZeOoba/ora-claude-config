@@ -43,6 +43,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | [OI-029](#OI-029) | 2026-07-26 | Repo-sweep session, 2026-07-26 | TWO live/unrotated credential exposures found: (1) `oxford-realty/oxfordra-net` git history has a plaintext `NETLIFY_AUTH_TOKEN` from an April WSL experiment (repo now archived to `archive/oxford-realty_archived-20260726/`, history NOT scrubbed); (2) Claude_Workspace `oxford-site` duplicate has a non-redacted Netlify MCP proxy token in a `.git-corrupted-20260716/` backup folder on disk — needs Gabriel to rotate BOTH tokens, then this folder specifically needs secure deletion (not mere archiving — never verified as-touched by this session per the ORA autonomy gate's oxfordra.net-path block on 2026-07-26, so the whole `Claude_Workspace/01_Workspace/oxford-site` duplicate is also still un-archived) |
 | [OI-027](#OI-027) | 2026-07-26 | PR [ZeOoba/oxford-command-center#238](https://github.com/ZeOoba/oxford-command-center/pull/238) (OI-017 vitest-4 REFUTE pass) | Nothing guards against a *future* test regressing into the same class of bug OI-017 fixed (`vi.mock()` of a Node builtin silently no-ops under this repo's jsdom default) — most cases fail loudly, but a bare automock with no configured return value could silently exercise the real implementation and pass for the wrong reason. REFUTE reviewer recommended an ESLint rule (or a `vitest.config.ts` comment at the `environment: 'jsdom'` line) requiring `@vitest-environment node` on any file calling `vi.mock('node:*')`. Not yet built |
 | [OI-030](#OI-030) | 2026-07-26 | `ora-weekly-hygiene` Sunday run + 3 concurrent sessions, 2026-07-26 | **Block C of `ora-weekly-hygiene/SKILL.md` needs one HUMAN coherence read before the next Sunday fire (2026-08-02).** It absorbed edits from four sessions in a single day, including a Gabriel ruling (`caf154b`) that *overrode* an earlier same-day repoint: check G was repointed to the `egoldberg` Graph drive, then formally DROPPED hours later, leaving text that argued for a check the file struck through (dangling ref fixed in `9870bb4`, but only that one symptom). Other same-day edits: Check B respec, frozen-snapshot RED override, real folder names, Block N added, `781bf95` consolidating several idle sessions' WIP. Each change is individually sound and the block is coherent *as far as incremental patching can verify* — the risk is the kind only a full read catches: two locally-correct passages that disagree globally, exactly the failure mode the check-G ruling itself was. NOT another incremental agent patch; the next edit to Block C should follow a human read of the whole block. Detail: [event_log.md](event_log.md) 2026-07-26 |
+| [OI-031](#OI-031) | 2026-07-27 | `orphaned-task-forensics` trace of the `ora-master-workbook-ingest` 2026-07-20 gap, [event_log.md](event_log.md#2026-07-27) | `fleet-status.py`'s overdue/missed-stuck detectors are structurally blind to a single skipped weekly cycle on an already-established recurring task — neither check applies to it (confirmed by reading the script) |
 
 ### OI-009
 **Status:** OPEN (substantial progress made 2026-07-17, real scope remains)
@@ -1343,3 +1344,28 @@ at `C:\Users\Owner\oxford-site` — flagged separately, out of this item's ora-p
 confirmed NOT a repo (task folder only, no `.git`). Real `ora-pm` repo confirmed live at
 `C:\Users\Owner\ora-pm`.
 **Auto-check:** none (not a fleet-registry item).
+
+### OI-031
+**Status:** OPEN
+**Opened:** 2026-07-27
+**Source:** `orphaned-task-forensics` trace of the `ora-master-workbook-ingest` 2026-07-20 silent
+gap, [event_log.md](event_log.md#2026-07-27)
+**Description:** `fleet-status.py`'s missed-cycle detectors are structurally blind to an
+already-established recurring task silently skipping a single scheduled fire — confirmed by
+reading the script directly (`C:\Users\Owner\.claude\maintenance\fleet-status.py`). "Overdue"
+(`never_ran_overdue`) only fires for a RECURRING task that has NEVER fired even once (a
+cadence-buffer heuristic meant for brand-new tasks). "Missed/stuck" (`expired_needs_attention`)
+applies only to expired ONE-TIME tasks. Throttle-skip tracking catches a task that fired and got
+rate-limited, not one that never attempted to fire at all. None of the three checks can detect
+"this weekly/monthly task has run before, is still enabled, but silently missed this one cycle" —
+exactly the gap that let `ora-master-workbook-ingest`'s 2026-07-20 Monday fire go unnoticed for a
+full week despite the fleet's own Monday-afternoon schematic-refresh snapshot reporting "0
+overdue, 0 missed/stuck" that same day.
+**Candidate fix (not built):** extend `fleet-status.py` with a per-task expected-fire-window
+check for tasks that HAVE fired before, comparing `lastRunAt` against the most recent
+cron-predicate fire time (mirroring `automation-health-monitor`'s Step 0.5 `expectedFireTime`
+walk-backward logic, already implemented for the LAMS fleet) — flagging MISSED/OUT-OF-WINDOW
+the same way that step does, rather than only checking never-fired-at-all or expired-one-time
+states.
+**Auto-check:** none (a tooling-logic gap, not a fleet-registry state comparable to the closed
+Auto-check vocabulary above).
