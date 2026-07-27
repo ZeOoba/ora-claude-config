@@ -1,6 +1,6 @@
 ---
 name: ora-calibration-snapshot
-description: Quarterly calibration snapshot — logs current property verdicts + resolves due outcomes in the calibration scoring loop (oxford-command-center). [MODEL: UNVERIFIABLE | checked 2026-07-12]
+description: Quarterly calibration snapshot — logs current property verdicts + resolves due outcomes in the calibration scoring loop (oxford-command-center). Retimed 08:00 → 15:30 ET on 2026-07-27: the 08:00 slot genuinely collided with LAMS ora-tenant-contact-gap-sweep (Mondays 08:00) on any quarter-start falling on a Monday (next real co-fire 2029-01-01), and also sat inside the congested 05:00–09:30 AM pileup. Moved rather than the LAMS side because that fleet is not writable from Claude Code and this task is the rarer, lower-impact of the two. [MODEL: UNVERIFIABLE | checked 2026-07-12]
 ---
 
 Read and follow C:\Users\Owner\.claude\scheduled-tasks\ora-calibration-snapshot\SKILL.md in full before taking any action.
