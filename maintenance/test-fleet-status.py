@@ -41,6 +41,18 @@ def now_ms():
     return int(time.time() * 1000)
 
 
+def recent_iso(hours_ago=1):
+    """An ISO8601 'Z' timestamp a couple hours old -- well inside the
+    missed-single-cycle detector's grace window (added 2026-07-27, OI-031),
+    for fixtures where task health/missed-cycle status isn't what's under
+    test. A fixed old date like 2026-01-01 would now trip that detector and
+    force an unrelated ATTENTION verdict."""
+    import datetime
+    dt = datetime.datetime.fromtimestamp((now_ms() - hours_ago * 3600 * 1000) / 1000.0,
+                                          datetime.timezone.utc)
+    return dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
 def check(name, cond, detail=""):
     if cond:
         print("PASS " + name)
@@ -82,8 +94,8 @@ def task(id_, cron=None, fire_at=None, enabled=True, last_run=None, created_days
 # 1. All-healthy synthetic fleet -> VERDICT: OK.
 def test_all_healthy_is_ok():
     tasks = [
-        task("daily-a", cron="0 6 * * *", created_days_ago=1, last_run="2026-01-01T00:00:00Z"),
-        task("weekly-b", cron="0 7 * * 1", created_days_ago=2, last_run="2026-01-01T00:00:00Z"),
+        task("daily-a", cron="0 6 * * *", created_days_ago=1, last_run=recent_iso()),
+        task("weekly-b", cron="0 7 * * 1", created_days_ago=2, last_run=recent_iso()),
         task("quarterly-c", cron="0 8 1 1,4,7,10 *", created_days_ago=5),  # never-ran, not due -- fine
         task("onetime-d", fire_at=now_ms() - 5 * DAY, enabled=False, last_run="2026-01-01T00:00:00Z"),
     ]
@@ -181,7 +193,7 @@ def test_recent_skips_counted_old_skips_decay():
 
 # 10. An old, fully-decayed skip burst alone must NOT keep the verdict at ATTENTION.
 def test_old_skip_burst_alone_is_ok():
-    tasks = [task("quiet", cron="0 6 * * *", created_days_ago=1, last_run="2026-01-01T00:00:00Z")]
+    tasks = [task("quiet", cron="0 6 * * *", created_days_ago=1, last_run=recent_iso())]
     skips = {"quiet": [{"at": now_ms() - 30 * DAY, "reason": "global_limit"}]}
     data, _ = run(tasks, skips)
     check("test_old_skip_burst_alone_is_ok",
@@ -207,8 +219,8 @@ def test_collision_still_flags():
 # x ora-appsec-sweep (Wed 13:30) as a false-positive collision).
 def test_same_time_different_weekday_not_a_collision():
     tasks = [
-        task("mon-task", cron="30 13 * * 1", created_days_ago=1, last_run="2026-01-01T00:00:00Z"),
-        task("wed-task", cron="30 13 * * 3", created_days_ago=1, last_run="2026-01-01T00:00:00Z"),
+        task("mon-task", cron="30 13 * * 1", created_days_ago=1, last_run=recent_iso()),
+        task("wed-task", cron="30 13 * * 3", created_days_ago=1, last_run=recent_iso()),
     ]
     data, _ = run(tasks)
     check("test_same_time_different_weekday_not_a_collision",
