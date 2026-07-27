@@ -12,6 +12,16 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-27 (cont.) — stray solar-lease-underwriting ledger line cleared; PENDING_REIMPORT.md now empty
+
+Investigated before clearing per Gabriel's request — raw SHA256 of repo vs cache solar-lease-underwriting/SKILL.md diverged (2a1f69ee… vs 9b757b25…), which looked like new drift. EOL-normalized compare (strip \r) showed byte-identical content on both sides (9b757b25…, zero diff) — the documented git-CRLF-normalize-on-next-touch false-positive class, not real drift; repo picked up CRLF on checkout after the PR #24 merge, cache still holds the original LF upload. Cleared via `python tools/pending_reimport.py clear solar-lease-underwriting`; the ledger helper deletes `_staging/PENDING_REIMPORT.md` entirely once empty — file is now absent, confirming zero pending reimports fleet-wide. This closes the full 2026-07-27 batch2 index-unregistered + solar-lease-underwriting capture thread.
+
+## 2026-07-27 (cont.) — package-and-stage-skill v1.11 confirmed-install (closes batch2 follow-through)
+
+2026-07-27 | package-and-stage-skill v1.11 | confirmed-install (Save-skill click, Gabriel, via Cowork) | source: ora-skills/_staging/2026-07-27_package-and-stage-skill-v1.11
+
+Post-install verify: cache copy is byte-identical to the staged .skill's source (SHA256 702645e9…, single-file skill, raw comparison — no EOL normalization needed since both sides carry CRLF). v1.11 changelog marker confirmed present in the cache copy. This closes the last open item from the 2026-07-27 batch2 index-unregistered remediation — the meta-skill (package-and-stage-skill itself) needed its own reimport after its step-7 doctrine text and description were edited same day.
+
 ## 2026-07-27 — RETIMED ora-calibration-snapshot 08:00 → 15:30 ET (clears the 08:00 collision); 3 LAMS tasks reconciled into the schematic
 
 Gabriel-directed follow-up to the same-day `ora-cc-schematic-refresh` rev 2026-07-27a, which had flagged both items. Schematic republished as rev 2026-07-27b.
