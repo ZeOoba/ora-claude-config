@@ -87,6 +87,7 @@
 - [Memory Policy](memory-policy.md) — storage rules, naming, staleness, archival
 - [Procurement Stance — Deepen, Don't Migrate](procurement-stance-deepen-not-migrate.md) — below $150M AUM, spend goes to the Claude/agent stack
 - [Interactive decision questions](feedback_interactive_decision_questions.md) — every Gabriel ruling → multiple-choice with a researched recommendation
+- [Verified null vs inferred null](feedback_verified_null_vs_inferred_null.md) — a zero that could equally mean "couldn't look" is a FAILURE, not a null result
 - [Refute pass — proactive by default](feedback_refute_pass_proactive_default.md) — run before declaring done
 - [Verify before repeating session claims](feedback_verify_before_repeating_session_claims.md) — check ground truth before relaying another session's claim
 - [Artifact citation requirement](feedback_artifact_citation_requirement.md) — Resolved/Closed claims in artifacts need a citation
@@ -96,6 +97,7 @@
 - Model tiers: [routines default to sonnet-5](feedback_routines_default_model.md) · [oxfordra.net work = opus always](feedback_website_model_tier.md) (Gabriel override)
 - [External AI Governance Proposals](feedback_external_ai_governance_proposals.md) — ChatGPT proposals merged selectively; Hard Invariants supreme
 - [Auto-review blast-radius gate](feedback_auto_review_blast_radius_gate.md) — 07-24 ruling: auto-review for hooks/financial code, blocking; needs an AgentTool carve-out first
+- [Artifact staleness scan false positives](feedback_artifact_staleness_scan_mtime_false_positives.md) — mtime can't measure a live-read artifact; Block D FIXED 07-26 + LIVE/FROZEN/HYBRID disposition convention
 
 ---
 *Index holds pointers, not narration — history in [event_log.md](event_log.md). Last compacted 2026-07-26 (partial — see event_log for what's left).*

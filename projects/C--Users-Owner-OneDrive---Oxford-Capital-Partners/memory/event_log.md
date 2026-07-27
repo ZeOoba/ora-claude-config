@@ -12,6 +12,35 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-26 — Silent-null defect class swept; telemetry rollup hardened (ora-weekly-hygiene follow-on)
+
+Follow-on to the same-day Block E answered.json fix. Generalized the defect class and swept for it: **a check whose "found nothing" is indistinguishable from "couldn't look."**
+
+**CONFIRMED + FIXED — `maintenance/eos-telemetry-rollup.py`.** `load_records` collapsed five outcomes into one bare `[]`: file absent (legitimate), every line unparseable, mid-read I/O error, individual corrupt lines, and `encoding="ascii"` mangling non-ASCII lines into parse failures. All five printed `(no telemetry recorded yet)`, which SKILL.md Block G explicitly instructed the run to treat as valid. Worst sub-case: the `except: return []` **discarded records already accumulated**, so a partial read could zero an 880-session dataset. Now returns `(records, status, detail)` with status in absent/ok/unreadable/corrupt; encoding moved to utf-8/surrogateescape; salvaged records retained on I/O error; caller prints a `!! TELEMETRY READ FAILED` banner (exit stays 0 so the block does not halt). New `maintenance/test-eos-telemetry-rollup.py` — 15 assertions, all pass. Live regression: 880 sessions, clean read, ratios match the morning marker (61.7/52.4/92.8 vs 61.8/52.5/92.8). The utf-8 change recovered no extra records, so the hazard was latent, not actively losing data.
+
+**CONFIRMED + FIXED (latent) — Block G threshold alert.** "If the marker file is absent, unparseable, or has no numeric prior, treat as no prior and do NOT alert (first-run safe)" conflates absent with broken. Because the alert requires two consecutive weeks, a permanently-broken marker writer suppresses it **forever**, silently. Gabriel's two-week firing rule left unchanged; added a distinct `⚠️ BLOCK-G MARKER UNREADABLE — threshold alert is structurally suppressed` line for the exists-but-unparseable case. Marker verified healthy at time of fix (written 2026-07-26, ratio 6.3).
+
+**EXAMINED, RULED SAFE (do not re-flag).** `ora-sofr-direct-prefetch` "This is a SUCCESS, not a failure" and `ora-pm-ledger` "BASELINE 296 rows... not a failure". Both are **positively verified** nulls, not inferred ones: SOFR gates success on rows actually showing `effectiveDate` or later; pm-ledger asserts a specific 296-row baseline, so a broken fetch yields 0, not 296. Neither can confuse absence of evidence with evidence of absence.
+
+**Two Block E ergonomics fixes.** (1) E.3 now writes the FULL union worklist to `_state\prune-worklist.json` (uncapped, with an `arm` field) — the emailed table is display-capped at 40 prose lines, which is why the 106-session sweep had to re-derive every id from scratch. (2) ENVIRONMENT NOTES rewritten: the 2026-05-25 "Python is NOT installed — use PowerShell for all filesystem analysis" bullet described the retired Cowork sandbox, was already contradicted in writing by E.2 two paragraphs later, and had been pushing this block into PowerShell for no reason.
+
+**Concurrency note.** Session 5c5a3605 committed `caf154b` (Block C, drop check G) against the same file mid-work and correctly took only its own touched-set — my Block E hunks were not swept up. Verified by grepping HEAD vs working tree. My 3 files (SKILL.md, eos-telemetry-rollup.py, test-eos-telemetry-rollup.py) remain uncommitted; index clean.
+
+## 2026-07-26 — ora-weekly-hygiene Block E: answered.json arm fixed + 106 sessions archived
+
+**Defect (confirmed, silent).** Block E.2's answered-board arm reported "parsed to 0 decided entries" on the 2026-07-26 run. Root cause: `ora-open-sessions-board\answered.json` is a **JSON object keyed by sessionId**, not a list of records. SKILL.md:248 said only "the sessionId/title appears in answered.json" without pinning the shape, so the consumer iterated it as a list, got bare key strings, and every field access missed. The file actually held **61 decided entries current through 2026-07-24**. Fix pins the dict shape + `utf-8-sig`, and reclassifies a 0-parse as a FAILURE (emit a warning banner) rather than a benign null result — the loss was invisible because every surviving candidate qualified on the other (idle-a-week) arm, so the section still looked fully populated.
+
+**Three stale-spec drifts fixed in the same block** (all one root cause: Block E was written against the retired `session_info` MCP and never repointed):
+- SKILL.md:227 named `mcp__session_info__list_sessions`, which exists on no current surface, and claimed PLAIN TEXT output. Actual tool is `mcp__ccd_session_mgmt__list_sessions`, returning **JSON** with fields `sessionId, title, cwd, isArchived, isRunning, lastActivityAt`.
+- SKILL.md:232 asserted "no last_activity field exists" and mandated a `\?\`-prefixed recursive folder-mtime walk. `lastActivityAt` is a first-class field. The walk was not just redundant but *wrong-directional*: incidental writes bump folder mtime, making idle sessions look fresh, so it **silently under-reported** prune candidates.
+- PRUNE predicate checked only `state != running`; added `isArchived == false` so archived sessions stop re-surfacing weekly as fresh candidates.
+
+**Board sweep executed.** Recomputed from live data: 16 at >=14d (Block E) + 102 surplus-over-newest-2 (Block E.3) = **106 union**, archived via `archive_session`. Board 205 -> 99. Every recurring task now at exactly <=2 run-sessions. `aaos-expire-leases` (35) and `aaos-publish-contracts` (20) were 55 of the surplus.
+
+**Standing constraint re-confirmed, not a bug:** `archive_session` ALWAYS prompts; there is no headless archive API. Block E remaining report-only is correct. What was missing was never automation — it was that nobody had run the resulting worklist since the cadence cuts on 2026-07-16.
+
+**Not committed.** `~/.claude` had 16 uncommitted changes from sessions 5c5a3605 / 6b88807d / faa17fe4 at edit time; SKILL.md edits left in the working tree for Gabriel to sequence rather than co-mingling other sessions' hunks.
+
 ## 2026-07-26 — ora-weekly-hygiene Block C: check G DROPPED (Gabriel ruling) + 4 spec-drift fixes
 
 **RULING (Gabriel, in-turn): check G "permission anomalies" is FORMALLY DROPPED.** Block C's CHECKS list is now A–F; the `Permission-Anomalies` XLSX sheet is removed. Do not reinstate without a new ruling.
@@ -35,6 +64,84 @@ Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (fir
 - **Fix:** `run_test_file()` now returns an explicit `timed_out` flag (True only from the `TimeoutExpired` path); `run_suite()` gives a first genuine timeout exactly ONE rerun at `PER_TEST_TIMEOUT_SECONDS * TIMEOUT_RETRY_MULTIPLIER` (90s → 180s), and the rerun's result is authoritative. A second timeout, any non-timeout failure, or a child that merely *exits* 124 (flag, not rc, keys the retry) still BLOCKS; non-timeout failures are never retried. Recovered flakes are disclosed in the gate summary ("timeout-retry … not blocking") instead of being silently eaten.
 - **Not touched:** doctrine gate, confidentiality scan, override-token mechanism, both fail-closed discovery floors — verified hunk-free by the independent review.
 - **Process:** blast-radius claim (`hooks-override-auth`) taken; built in isolated worktree `eos-gate-timeout-retry` (config-write-guard's preferred path; main checkout had 16 foreign uncommitted changes); TDD (8 new assertions red first, then green); test file 71/71; full 53-file suite 52 pass / 0 fail / 1 by-design worktree env-skip; independent adversarial REFUTE review (pinned claude-fable-5) returned NOT REFUTED — it also found the change *stricter* in one corner (a first-run timeout whose partial stdout contained the `CANNOT RUN:` sentinel used to classify env-skip and pass silently; the rerun-is-authoritative rule closes half that soft spot). Reviewer's Minor findings (explicit `timed_out` flag; stale docstring; test load-margin) folded in and delta re-reviewed; eos-review-gate artifact recorded before commit.
+
+## 2026-07-26 — OI-017 CLOSED: ora-pm + oxford-command-center toolchain CVE chain resolved
+
+Gabriel merged both remaining OI-017 PRs same day: `ZeOoba/ora-pm#9` (react-router 6->8.3.0, `68fe84d`)
+and `ZeOoba/oxford-command-center#238` (vitest 2->4.1.10 + `@vitest-environment node` fix,
+REFUTE-confirmed, `e7446cc`). ora-pm side: 0 vulnerabilities, deploy verified live (production serving
+`68fe84d`, `/api` 401 auth-gated, admin `/login` 200, no regression). oxford-command-center side: no
+auto-deploy exists for this repo (verified against all 3 workflow files — gate/canary only), so the merge
+is main-only; `npm audit` 30->9 vulns, 0 critical (vitest/vite chain fully cleared). Item opened 07-18,
+closed 07-26 after several partial-progress passes (overrides-only fix 07-19, wrangler bump 07-26,
+react-router target corrected mid-investigation from v7 to v8.3.0, independent adversarial REFUTE pass on
+the occ fix). Two threads spun off, NOT part of this closure: occ's queued non-breaking `npm audit fix`
+pass (4 advisories), and the ora-pm blank-tenant-portal defect (found incidentally during the
+react-router investigation, tracked as its own task, already running in a separate session). Full detail:
+open-items-tracker.md OI-017.
+
+## 2026-07-26 — ora-pm shipped: react-router 6->8.3.0 (OI-017 residual, target corrected from v7 mid-investigation)
+
+Merged PR #9 (`68fe84d`, squash), Gabriel-approved. Investigation found v7 was a dead end: current 6.30.4
+carries 2 MOD advisories (GHSA-wrjc-x8rr-h8h6 open redirect applicable; GHSA-337j-9hxr-rhxg SSR hydration
+N/A, client-rendered); bumping to 7.x clears those but introduces a new HIGH (GHSA-qwww-vcr4-c8h2, RSC-mode
+CSRF, published 2026-07-24), patched only at react-router@8.3.0 — `react-router-dom` was removed in v8, so
+no react-router-dom release is ever audit-clean again. Diff was mechanical: import renames across 22 files
+(`react-router-dom`->`react-router`, `RouterProvider` from `react-router/dom`), zero behavior changes — no
+future-flag exposure, no data APIs, all absolute route targets. Evidence: typecheck clean, 185/185 tests,
+build green, `npm audit` 5->2 MOD (OI-017 first pass)->**0 vulnerabilities**. Deploy verified: production
+serving `68fe84d` via `wrangler pages deployment list`, `/api` 401 (auth-gated, healthy), admin `/login` 200.
+**Incidental finding, separate work already in progress:** the tenant portal (`/portal/login`) renders
+blank in production, unrelated to this bump (reproduced on v6/v8/prod alike) — nested absolute routes under
+a splat parent in `PortalRouter.tsx` never match. Spawned as its own task, Gabriel already running it in a
+separate session. OI-017 tracker updated; ora-pm side of OI-017 now fully clear (0 vulnerabilities).
+
+## 2026-07-26 — Brain.persist() anomaly-floor collision: two gaps worth tracking (addendum to same-day entries above)
+
+Independently re-verified `origin/main` at `f511d5f` (pushed, in sync) after the cross-session collision documented in the two entries above. Two things surfaced during that investigation that aren't yet captured elsewhere:
+
+1. **Claim-broadcast mechanism was unusable when it mattered.** This session's attempt to register `claim_work.py claim oxford-command-center-data` was blocked by `config-write-guard` (blocks all writes under `hooks/**`, including the courtesy `hooks/active-work/*.json` files it's meant to enable — same class of gap as [reference_config_write_guard_quote_split_gap.md]). The attempt was skipped rather than escalated for an override token, so no claim was ever visible to warn the concurrently-active `ora-am-brief` session off the same worktree. **Follow-up:** a narrower carve-out (dedicated tool, or an explicit `hooks/active-work/**` exemption) so the claim mechanism isn't gated shut by the same guard it's supposed to work alongside.
+2. **`ora-am-brief` scope drift.** That scheduled task's stated job is the daily CRE/market brief; this session found it deep in live source-code edits and a main-branch merge+push on an unrelated repo, jointly driven with Gabriel across 1150+ messages. Resolved cleanly (Gabriel confirmed both directing turns), but the scope boundary for that task is worth a look independent of this incident.
+
+## 2026-07-26 — oxford-command-center: Brain.persist() anomaly floor MERGED + pushed
+
+`fix/brain-persist-anomaly-floor` (commit `f511d5f`) merged to `main` via fast-forward (Gabriel-approved) and pushed to `origin/main`. Worktree and local branch cleaned up. Full context in the same-day "Brain.persist() anomaly floor + full consolidation" entry above.
+
+This closes out the full chain from this session's ora-am-brief run: 2026-07-25 portfolio.json regression found (2 tenants' lease dates corrupted) → root-caused to extract-workbook.ts's missing anomaly floor → floor + drift-report ported and merged (fix/extract-workbook-anomaly-floor) → Brain.persist() identified as a third unguarded writer, follow-up task spawned → that task's live worktree work (jointly driven by this session and Gabriel's parallel session, with two real-time file-revert collisions resolved per Gabriel's explicit "mine should win" direction) merged and pushed. All three writers of data/snapshots/portfolio.json now share one tested anomaly-floor implementation.
+
+## 2026-07-26 — oxford-command-center: Brain.persist() anomaly floor + full consolidation (branch fix/brain-persist-anomaly-floor, commit f511d5f, NOT yet merged)
+
+Closes the `Brain.persist()` follow-up (`task_92bb8958`) filed earlier the same day, driven jointly by this session and Gabriel's parallel session (`local_28af37ae-ce41-4352-b6af-6fe498349299`, container session id `2f5ecd2b`) working the same worktree concurrently.
+
+**What shipped:**
+- `server/anomaly-floor.ts` (new): pure `evaluateAnomalyFloor()` + `loadPreviousLeaseIds()`, guarding the third (previously unprotected) writer of `data/snapshots/portfolio.json` — `Brain.refresh()`'s live in-memory adoption, not just its disk mirror write.
+- `server/brain.ts`: floor evaluated against the true in-memory previous lease set before adopting a new parse; `persist()` now does an atomic temp-file+rename write and logs failures instead of swallowing them.
+- **Consolidation** (Gabriel-directed): `scripts/lease-snapshot-drift-check.ts`'s `evaluateAnomalyFloor` now delegates to `server/anomaly-floor.ts`'s core instead of maintaining an independent copy — all three writers of `portfolio.json` (the two CLI scripts + Brain) now share ONE implementation of the 0-lease/>25%-removed thresholds.
+- 67 tests, `gate:ci` green.
+
+**Process note, worth remembering:** this file (`server/anomaly-floor.ts`) got reverted by the concurrent session TWICE while this session was actively editing it — genuine live two-writer contention on the same file, not stale-base drift. Gabriel confirmed he was driving the other session directly and, after the second revert, explicitly directed "push through and reapply — mine should win." Committed under `commit-provenance-guard.py`'s declared-override mechanism (`allow-foreign-commit` flag, created and removed same session) since 4 of 5 committed files were attributed to the other live session by the guard — used deliberately, per Gabriel's explicit in-turn direction, not as a routine bypass.
+
+**Status: branch NOT merged to main** — unlike the earlier `fix/extract-workbook-anomaly-floor` fix, Gabriel has not yet given a merge instruction for this one; the original follow-up task also said not to merge without presenting the result first. Awaiting that.
+
+## 2026-07-26 — Setup improvements shipped: external-artifact-intake skill + overlay-drift watch (Gabriel-ratified)
+
+Follow-through on the architect-prompt comparison session. (1) Completed the /build graft with a scale/SLO elicitation requirement (commands/build.md, commit d0eeec0) — the bottleneck derivation needs a stated figure, never an invented one. (2) New skill `~/.claude/skills/external-artifact-intake/SKILL.md` (commit 8196c25) codifying evaluate→compare→rule→graft→log→dispose for external AI artifacts; built per writing-skills TDD — baseline subagent confirmed the failure modes (compared from memory, no ruling mechanics, no disposition), GREEN run with skill passed all five checks, no refactor needed. Precedents folded in: ChatGPT governance proposals, ECC repo, 2026-07-26 architect prompt (disposition: SUPERSEDED). (3) ora-skill-store-drift-check bumped v1.10→v1.11: new read-only step 6 OVERLAY-DRIFT WATCH flags third-party plugin version bumps against ORA overlay touchpoints; first registry entry = build.md Chain-step-1 graft ← superpowers 6.1.1. Content-only SKILL.md edit (authoritative per filePath mechanism); no registry change.
+
+## 2026-07-26 — Cross-repo loose-commit survey + cleanup (picking up b9d863d9's stalled repo-housekeeping claim)
+
+Surveyed all 6 local git repos (`AAOS`, `ora-pm`, `ora-skills`, `oxford-command-center`, `oxford-realty`, `website-canonical`) at Gabriel's request after flagging `b9d863d9`'s scope creep off its own `repo-housekeeping` claim. Findings and actions:
+
+**Clean:** `ora-pm`, `ora-skills` — in sync with origin, nothing to do.
+
+**`AAOS` had no remote at all** — 10 days of real work (contract-drift guard, 21 tests, last commit 2026-07-16) with no off-machine backup. Created private `ZeOoba/AAOS` and pushed `main`, mirroring the `~/.claude` → `ora-claude-config` backup pattern.
+
+**`oxford-command-center`:** `main` in sync with origin. Three active worktrees, all legitimate live WIP (not loose): `gov-ltv-hardening` (`b9d863d9`'s branch, `fix/governor-ltv-false-clearance` — 6 ahead of main, 2 were unpushed and have now been pushed to origin per Gabriel's approval; still no PR open, one commit self-flagged `NOT FINAL, known order-dependence defect`, left as-is since the session is still actively working it), `brain-persist-anomaly-floor` (matches queued `task_92bb8958`, actively worked by running session `local_28af37ae`), `rm-delinquency-parser` (dirty working tree, no visibly-attached live session — not yet investigated further).
+
+**`website-canonical` cleanup (the real backlog):** initially misread 8 recently-touched local branches as unmerged/no-PR work and mistakenly re-pushed 5 of them to origin before checking PR history — corrected: all 8 already had PRs (7 MERGED — #53/#61/#40/#54/#48/#44/#52 — 1 CLOSED-as-duplicate #46, confirmed via its close comment as genuinely superseded by #44+#48). Deleted the 5 mistakenly-recreated remote branches, then deleted all 11 confirmed-safe stale local branches (the 8 above + `claude/reverent-hellman-7ffcb4` [never had a PR, 0 ahead of main] + `financing-gap-section-v2`/`v3` [PRs #5/#6, CLOSED]). Zero content loss — everything deleted was already fully preserved in a merged or closed PR. `main` now checked out and clean.
+
+**Held back, NOT touched — real uncommitted/unmerged content with no backup elsewhere:** `preview/redesign-v1` branch (3 commits ahead, no PR ever opened) and its stash (full navy/parchment/gold brand-palette rebrand of the interactive preview page — new fonts EB Garamond/DM Sans/IBM Plex Mono), plus a second unrelated stash on `perf-mobile` (209-line deletion trimming Value Proposition/Investment Criteria/Financing Gap/Featured Results sections from `index.html`, uncommitted). Gabriel reviewed both and confirmed leave-alone for now — needs his actual look before any decision, not further automated cleanup.
+
+**`oxford-realty`:** no remote, single stub commit (2026-05-30, "workspace config, oxfordra-net tracked separately") — flagged as likely low-value, not acted on.
 
 ## 2026-07-26 — ora-pm shipped: wrangler 3->4.114.0 CVE fix (OI-017), CI Node-version fallout fixed same day
 

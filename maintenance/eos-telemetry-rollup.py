@@ -62,11 +62,30 @@ def resolve_path():
 
 
 def load_records(path):
+    """Return (records, status, detail).
+
+    An empty `records` list is NOT self-explanatory, so the status says which
+    empty it is. Previously every one of these collapsed to a bare [] and the
+    caller printed "(no telemetry recorded yet)" — meaning a corrupt, moved, or
+    unreadable telemetry file was indistinguishable from a genuine first run.
+
+      "absent"     - file does not exist. The ONLY legitimate empty.
+      "ok"         - file read cleanly (records may still be [] if truly empty).
+      "unreadable" - open/read raised; `records` holds whatever was salvaged
+                     before the error rather than being discarded.
+      "corrupt"    - file had content but no line parsed into a dict record.
+
+    `detail` carries the skipped-line count / exception text for the report.
+    """
     records = []
+    skipped = 0
     if not os.path.isfile(path):
-        return records
+        return records, "absent", ""
     try:
-        with open(path, "r", encoding="ascii", errors="replace") as fh:
+        # utf-8, not ascii: the previous encoding mangled any non-ASCII line
+        # into replacement chars, json.loads then failed, and the record was
+        # dropped silently. Surrogateescape keeps the bytes round-trippable.
+        with open(path, "r", encoding="utf-8", errors="surrogateescape") as fh:
             for line in fh:
                 line = line.strip()
                 if not line:
@@ -74,12 +93,20 @@ def load_records(path):
                 try:
                     obj = json.loads(line)
                 except Exception:
+                    skipped += 1
                     continue
                 if isinstance(obj, dict):
                     records.append(obj)
-    except Exception:
-        return []
-    return records
+                else:
+                    skipped += 1
+    except Exception as exc:
+        # Do NOT discard what was already read — a partial I/O failure used to
+        # zero out an otherwise-valid dataset.
+        return records, "unreadable", "%s: %s" % (type(exc).__name__, exc)
+    if not records and skipped:
+        return records, "corrupt", "%d unparseable line(s), 0 usable records" % skipped
+    detail = "%d unparseable line(s) skipped" % skipped if skipped else ""
+    return records, "ok", detail
 
 
 def dispatch_capability(rec):
@@ -122,12 +149,24 @@ def pct(part, total):
 
 def main():
     path = resolve_path()
-    records = load_records(path)
+    records, status, detail = load_records(path)
     total = len(records)
 
     print("EOS Lane Telemetry Rollup")
     print("source: %s" % path)
     print("total coding sessions: %d" % total)
+    if detail:
+        print("read note: %s" % detail)
+
+    if status in ("unreadable", "corrupt"):
+        # Loud and unmistakable: this is NOT the benign first-run empty. Exit
+        # stays 0 so the calling block does not halt, but the caller must never
+        # report this as "no telemetry yet".
+        print("!! TELEMETRY READ FAILED (%s) — %s" % (status, detail))
+        print("!! This is a FAILURE, not a null result. Do NOT report it as "
+              "'(no telemetry recorded yet)'. Verify the file at the source "
+              "path above before trusting any Block G ratio this run.")
+        return
 
     if total == 0:
         print("(no telemetry recorded yet)")
