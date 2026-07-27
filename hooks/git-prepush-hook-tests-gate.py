@@ -86,6 +86,7 @@ unchanged):
 Exit 0 = allow push (all tests pass, or failures with a valid logged override).
 Exit 1 = block (a real test failure, no valid override) — git pre-push convention.
 """
+import concurrent.futures
 import glob
 import importlib.util
 import os
@@ -109,6 +110,15 @@ PER_TEST_TIMEOUT_SECONDS = 90
 # generically; deliberately NOT a per-file known-slow roster, which would rot.
 TIMEOUT_RETRY_MULTIPLIER = 2
 ENV_SKIP_SENTINEL = "CANNOT RUN:"
+# Bounded worker pool for run_suite() (added 2026-07-26, OI-028 root cause — see
+# run_suite()'s docstring). Fixed, not os.cpu_count()-scaled: this gate runs on
+# Gabriel's interactive daily-driver machine during a live push, and several
+# discovered files (e.g. test-eos-review-gate.py, 48 subprocess spawns) are
+# themselves subprocess-heavy, so scaling to all logical cores would let one push
+# oversubscribe the host. 8 is comfortably below the 16-core machine this was
+# measured on and still collapses the observed 137s sequential runtime to roughly
+# the single slowest file's own duration (a few seconds), not floor-to-zero.
+MAX_PARALLEL_TESTS = 8
 
 # git sets these in a hook process's own environment so IT can operate on the outer
 # repo. Every test file is spawned as a subprocess of THIS gate, so without stripping
@@ -208,29 +218,59 @@ def classify(rc, output):
     return "fail"
 
 
+def _run_one(path):
+    """Run a single test file end-to-end, including the timeout-retry policy. Split
+    out of run_suite() (2026-07-26) so it can be dispatched to a worker pool — same
+    logic as before, just callable per-file instead of inline in a sequential loop.
+    References run_test_file by module-global name (not a captured local), so a test
+    that monkeypatches gt.run_test_file still intercepts calls made from a worker
+    thread — normal Python global lookup-at-call-time, unaffected by which thread
+    calls it."""
+    rc, output, timed_out = run_test_file(path)
+    timeout_retried = False
+    if timed_out:
+        timeout_retried = True
+        rc, output, _ = run_test_file(
+            path, timeout=PER_TEST_TIMEOUT_SECONDS * TIMEOUT_RETRY_MULTIPLIER)
+    return {
+        "file": display_name(path),
+        "rc": rc,
+        "status": classify(rc, output),
+        "output": output,
+        "timeout_retried": timeout_retried,
+    }
+
+
 def run_suite(root=None):
     """[{"file", "rc", "status", "output", "timeout_retried"}] for every discovered
-    test file, in order. A first-run timeout (the timed_out flag from run_test_file,
-    NOT the rc — so a child that merely exits 124 is a deterministic failure, no
-    retry) gets one rerun at the doubled budget; the rerun's rc/output replace the
-    first run's and are what classify() judges. timeout_retried records that the
-    rerun happened, whatever its outcome, so the summary can disclose it."""
-    out = []
-    for path in discover_test_files(root):
-        rc, output, timed_out = run_test_file(path)
-        timeout_retried = False
-        if timed_out:
-            timeout_retried = True
-            rc, output, _ = run_test_file(
-                path, timeout=PER_TEST_TIMEOUT_SECONDS * TIMEOUT_RETRY_MULTIPLIER)
-        out.append({
-            "file": display_name(path),
-            "rc": rc,
-            "status": classify(rc, output),
-            "output": output,
-            "timeout_retried": timeout_retried,
-        })
-    return out
+    test file, in DISCOVERY (sorted) order. A first-run timeout (the timed_out flag
+    from run_test_file, NOT the rc — so a child that merely exits 124 is a
+    deterministic failure, no retry) gets one rerun at the doubled budget; the
+    rerun's rc/output replace the first run's and are what classify() judges.
+    timeout_retried records that the rerun happened, whatever its outcome, so the
+    summary can disclose it.
+
+    Runs discovered files CONCURRENTLY, bounded by MAX_PARALLEL_TESTS (2026-07-26,
+    OI-028 root cause). WHY: a live push trace showed this gate running all ~54
+    tracked test files SEQUENTIALLY, one subprocess at a time, for 137s wall-clock —
+    while the actual network push (git send-pack) that ran immediately after
+    completed in 0.54s. That 137s is what open-items-tracker.md's OI-028 had logged
+    as the push itself "hanging"; it was never the network call, it was this loop.
+    Each file is an independent subprocess with no shared state (env-var stripping
+    and the timeout/retry policy are both already scoped per-file in _run_one/
+    run_test_file), so there is no correctness reason to serialize them. Output order
+    is restored to the original discovery order after collection, regardless of which
+    worker finishes first, so reports stay deterministic/diffable run to run."""
+    paths = discover_test_files(root)
+    if not paths:
+        return []
+    results_by_path = {}
+    workers = min(MAX_PARALLEL_TESTS, len(paths))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        future_to_path = {pool.submit(_run_one, path): path for path in paths}
+        for future in concurrent.futures.as_completed(future_to_path):
+            results_by_path[future_to_path[future]] = future.result()
+    return [results_by_path[path] for path in paths]
 
 
 def any_real_failure(results):
