@@ -197,6 +197,99 @@ def cadence_buffer_days(expr):
     return 3              # daily/hourly/frequent
 
 
+# MISSED-SINGLE-CYCLE detector (added 2026-07-27, closes OI-031).
+#
+# Gap this closes: never_ran_overdue only applies to a RECURRING task that has
+# NEVER fired even once; expired_needs_attention only applies to expired
+# ONE-TIME tasks; throttle-skip tracking only catches a task that fired and got
+# rate-limited. None of the three can detect "this weekly/monthly task has run
+# before, is still enabled, but silently missed its most recent scheduled
+# cycle" -- exactly the gap that let ora-master-workbook-ingest's 2026-07-20
+# Monday fire go unnoticed for a full week despite same-day fleet snapshots
+# reporting "0 overdue, 0 missed/stuck". This is additive only -- it does not
+# change any existing field's meaning or the pre-existing verdict inputs above.
+MISSED_CYCLE_GRACE_HOURS = 24  # generous: fleet only fires while the Desktop
+                               # app is open, so some lateness is normal and
+                               # expected, not a fault. Flags only once a task
+                               # is more than a full day late to its own cadence.
+
+def _local_utc_offset():
+    """Best-effort fixed UTC offset for 'now' on this machine (cron is evaluated
+    in local time per doctrine; lastRunAt is stored as UTC ISO8601 'Z')."""
+    return datetime.datetime.now().astimezone().utcoffset() or datetime.timedelta(0)
+
+
+def parse_last_run_utc(s):
+    """Parse a lastRunAt ISO8601 string (with or without trailing 'Z') into a
+    naive UTC datetime, or None if missing/unparseable."""
+    if not isinstance(s, str) or not s:
+        return None
+    try:
+        dt = datetime.datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+        return dt
+    except Exception:
+        return None
+
+
+def most_recent_expected_fire_utc(expr, now_local, lookback_days=400):
+    """For a fixed-hour/minute 5-field cron, walk backward from now_local to
+    find the most recent local datetime at/before now that the cron would
+    have fired (respecting dom/month/dow), converted to naive UTC. Returns
+    None if the cron isn't a single-fixed-time expression (e.g. '*/n', or
+    one-time) or no match falls within lookback_days."""
+    hm = cron_hm(expr)
+    if hm is None:
+        return None
+    parts = expr.split()
+    if len(parts) != 5:
+        return None
+    _mn, _hr, dom, mon, dow = parts
+    hour, minute = hm
+    offset_td = _local_utc_offset()
+    cur_date = now_local.date()
+    for day_offset in range(lookback_days):
+        d = cur_date - datetime.timedelta(days=day_offset)
+        dow_val = (d.weekday() + 1) % 7  # cron Sun=0..Sat=6; python Mon=0..Sun=6
+        if _cron_fires_on(dom, mon, dow, d.day, d.month, dow_val):
+            candidate_local = datetime.datetime(d.year, d.month, d.day, hour, minute)
+            if candidate_local <= now_local:
+                return candidate_local - offset_td
+    return None
+
+
+def find_missed_cycles(tasks, now_local=None, grace_hours=MISSED_CYCLE_GRACE_HOURS):
+    """Recurring, enabled tasks that HAVE fired before but whose lastRunAt is
+    older than their most recent expected cron fire time by more than
+    grace_hours. Silent-single-cycle-miss detector -- see module docstring
+    above for the incident this closes (OI-031 / ora-master-workbook-ingest
+    2026-07-20)."""
+    now_local = now_local or datetime.datetime.now()
+    out = []
+    for t in tasks:
+        if fire_at(t):
+            continue  # one-time tasks are covered by expired_needs_attention
+        if not t.get("enabled", True):
+            continue  # a paused task isn't expected to fire
+        last_run_utc = parse_last_run_utc(t.get("lastRunAt"))
+        if last_run_utc is None:
+            continue  # never-ran is never_ran/never_ran_overdue's job, not this one
+        expected_utc = most_recent_expected_fire_utc(t.get("cronExpression"), now_local)
+        if expected_utc is None:
+            continue  # unparseable/non-fixed cadence -- don't guess
+        gap = expected_utc - last_run_utc
+        if gap > datetime.timedelta(hours=grace_hours):
+            out.append({
+                "id": t.get("id"), "fleet": t.get("_fleet"),
+                "cron": t.get("cronExpression"),
+                "expected_fire_utc": expected_utc.isoformat() + "Z",
+                "last_run_utc": last_run_utc.isoformat() + "Z",
+                "gap_hours": round(gap.total_seconds() / 3600.0, 1),
+            })
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--registry")
@@ -307,12 +400,17 @@ def main():
         if key and (5 <= key[0] < 9 or (key[0] == 9 and key[1] <= 30)):
             am_pileup.append((("%02d:%02d" % key), t.get("id")))
 
+    missed_cycle = find_missed_cycles(tasks, now_local=datetime.datetime.fromtimestamp(now_ms / 1000))
+
     verdict_flags = []
     if never_ran_overdue:
         verdict_flags.append("%d never-ran past their expected cadence" % len(never_ran_overdue))
     if expired_needs_attention:
         verdict_flags.append("%d one-time task(s) missed their fire or stayed enabled past fireAt"
                               % len(expired_needs_attention))
+    if missed_cycle:
+        verdict_flags.append("%d recurring task(s) missed their most recent scheduled cycle"
+                              % len(missed_cycle))
     if recent_skip_total > 0:
         verdict_flags.append("%d throttle skip(s) in the last 24h" % recent_skip_total)
     if collisions:
@@ -335,6 +433,7 @@ def main():
             "onetime": [t.get("id") for t in onetime],
             "expired_onetime": [t.get("id") for t in expired],
             "expired_needs_attention": [t.get("id") for t in expired_needs_attention],
+            "missed_cycle": missed_cycle,
             "total_skip_events": total_skip_events,
             "tasks_with_skips": skip_counts,
             "recent_skip_events_24h": recent_skip_total,
@@ -378,6 +477,9 @@ def main():
     print("  EXPIRED one-time ... %d   %s" % (len(expired), ", ".join(sorted(t.get("id") for t in expired)) or "-"))
     print("      of which missed/stuck %d   %s" % (len(expired_needs_attention),
           ", ".join(sorted(t.get("id") for t in expired_needs_attention)) or "- (normal completions)"))
+    print("  missed single cycle  %d   %s" % (len(missed_cycle),
+          ", ".join("%s(%.1fh)" % (m["id"], m["gap_hours"]) for m in
+                    sorted(missed_cycle, key=lambda m: m["id"])) or "-"))
     print("  throttle skips ..... %d events across %d tasks (all-time)" % (total_skip_events, len(skip_counts)))
     if skip_counts:
         top = sorted(skip_counts.items(), key=lambda kv: kv[1], reverse=True)[:5]
