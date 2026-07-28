@@ -12,6 +12,23 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-28 — fleet-status.py false "missed single cycle" on ora-entry-market-scan — root-caused and fixed (orphaned-task-forensics)
+
+Symptom: `fleet-status.py --summary` flagged `ora-entry-market-scan` as 137h overdue. Investigation (orphaned-task-forensics skill) found this was a false positive, not a real miss:
+
+- `ora-entry-market-scan` was registered 2026-07-16 (confirmed via `registry-membership.log`'s add-diff that day) — too late to have fired on July's first Tuesday (07-07).
+- The only session titled "Ora entry market scan" in the past 18 days is a 2026-07-22 archived run — not a cron fire (July 22 is a Wednesday, matching neither the dom-1-7 nor dow-Tuesday field); read as a manual smoke-test 6 days after registration.
+- The live scheduler's actual `nextRunAt` (2026-08-04) proved the real engine uses AND/intersection semantics for a compound dom+dow cron (`0 11 1-7 * 2`, "first Tuesday of the month") — it skipped Aug 1-3 (which satisfy a dom-only OR-match) and landed on the true AND-match date.
+- `fleet-status.py`'s `_cron_fires_on()` implemented textbook POSIX cron OR-semantics (fire if EITHER field matches when both are restricted) — diverging from the live engine's actual AND behavior. That mismatch, compared against the July 22 manual run, manufactured the bogus 137h gap.
+
+Fix (Gabriel-approved via AskUserQuestion, "fix the parser" over suppress/leave-it): `_cron_fires_on()` in `C:\Users\Owner\.claude\maintenance\fleet-status.py` changed from OR to AND for the both-restricted case. Added regression test `test_compound_dom_dow_cron_uses_first_match_semantics_not_or` in `_tests\test_fleet_status_missed_cycle.py` (reproduced the bug pre-fix, passes post-fix). Full suite green: 8/8 unit tests + 16/16 black-box tests (`test-fleet-status.py`). Live-reverified: `missed single cycle` count 0 (was 1) against the real dual-fleet registry; verdict now correctly shows only the pre-existing, unrelated throttle-skip ATTENTION.
+
+Blast radius: `_cron_fires_on()` is also used by `crons_share_a_day()` (same-time collision detector) — no regression, since `ora-entry-market-scan` is currently the fleet's only task with both dom and dow restricted, so no other detector output changed. If a second compound-cron task is ever registered, re-verify this assumption still holds.
+
+No registry/task file touched — `ora-entry-market-scan` itself needed no fix; its Aug 4 next-fire is correct as-is.
+
+Detail: [reference_fleet_status_compound_cron_and_semantics.md](reference_fleet_status_compound_cron_and_semantics.md)
+
 ## 2026-07-28 — Gabriel-directed 4-item fix pass off the morning Health Guard
 
 Ran as a follow-on to `ora-health-guard`'s 2026-07-28 run (which woke 217 min late, 08:52 ET vs its 05:15 target — 5th overnight-offline catch-up burst in 7 days). Gabriel's in-turn instruction superseded the task's I6 no-memory/no-registry-write boundary; Hard Invariants still applied.
