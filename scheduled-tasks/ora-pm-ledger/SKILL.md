@@ -145,7 +145,7 @@ table of being wrong. It was not. Version + endpoint, not permissions.)
 | Broker Relationships | 2026-04-05 21:03 | 2026-04-05 20:06 | ✅ **LIVE — varies.** |
 | Tenant Database | 2026-03-30 | 2026-03-22 | ❌ **FROZEN.** Notion itself reports `last_edited_time == created_time`. A zero is a false negative. |
 | Property Register | 2026-07-12 | 2026-07-12 | ❌ **Uniform stamp** — all 14 rows share ONE identical timestamp. That is a batch write, not editing. An earlier read of this as "live" was WRONG. |
-| CapEx & Maintenance Log | 2026-07-26 | 2026-07-26 | ❌ **Uniform stamp — corrected 2026-07-27.** The table is no longer empty (6 rows, verified live via REST this date) and every row shares ONE identical timestamp, same failure mode as Property Register: a batch write, not editing. The "0 rows, can never report an edit" claim below was true on 2026-07-16 and is not true now — do not repeat it. |
+| CapEx & Maintenance Log | 2026-07-26 | 2026-07-26 | ❌ **Uniform stamp.** The table is no longer empty (6 rows) and every row shares ONE identical timestamp, same failure mode as Property Register: a batch write, not editing. **Detector built 2026-07-27 — see `capex_snapshot_diff.py` (§A.2 step 2, same as the Tenant DB).** The "0 rows, can never report an edit" claim once here was true on 2026-07-16 and is not true now — do not repeat it. |
 
 **Net: Section A (Deal Pipeline) has fully trustworthy, precise, quota-free edit
 detection via REST. Section B does not, and no read path will fix it** — Tenant
@@ -355,6 +355,27 @@ Use all of the following signals and merge, deduping by page ID:
    Only if the SCRIPT itself errors (token unreadable, REST
    down) does Tenant DB revert to a COVERAGE GAP — a clean 0-diff is now a REAL
    "no edits today", no longer a false negative.
+
+   **✅ BUILT 2026-07-27 — `capex_snapshot_diff.py` (same folder, same pattern).**
+   CapEx & Maintenance Log hit the same uniform-stamp failure mode as Property
+   Register once it stopped being empty (see §A.1's Reality table). Section B
+   (CapEx & Maintenance Log) MUST invoke:
+   ```
+   C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \
+     C:/Users/Owner/.claude/scheduled-tasks/ora-pm-ledger/capex_snapshot_diff.py \
+     --run --date {TODAY}
+   ```
+   Same `RESULT_JSON=` contract, same `state/capex-*.json` storage shape. Unlike
+   the Tenant DB, CapEx carries no date-derived formula fields today (checked
+   live at build time — its two formulas, `Annualized Reserve` and `Yield on
+   Cost`, are ratios of static numeric inputs, a legitimate change signal, not
+   calendar drift), so `TIME_DERIVED_FIELDS` is empty; the bulk-field guard is
+   the backstop if one is ever added later. `--selftest` is 21 assertions
+   (diff engine, the exclusion mechanism proven against a synthetic field name
+   since no real one exists yet, the bulk-field guard incl. the 50% boundary,
+   pagination, and `load_prev()` corruption fallback), all passing. Property
+   Register remains the one source in §A.1 with no detector — same gap, not
+   yet built.
 
    **⚠ DEFECT 2 — `notion-query-data-sources` is ENTITLEMENT-GATED and will
    hard-fail mid-run.** Measured live 2026-07-16: after ~5 queries the tool
@@ -1230,3 +1251,30 @@ Register — the Tenant DB is the only source with a snapshot-diff detector). A
 future run that wants trustworthy CapEx edit detection needs one built, not a
 timestamp query. No block logic, routing, or send-path changed — documentation
 fix to §A.1 only.
+
+## AMENDMENT NOTE (2026-07-27, later same day — CapEx snapshot-diff detector built)
+
+The gap the amendment above named as open ("no detector exists for this source
+yet") is closed. `capex_snapshot_diff.py` generalizes `tenant_db_snapshot_diff.py`'s
+approach — full REST pull, per-row sha256 fingerprint, diff against the prior
+persisted snapshot — to CapEx & Maintenance Log. It is a separate, self-contained
+script rather than a shared library extracted from the Tenant DB engine: both are
+short, independently selftested, and living alone in this folder is the
+established convention (see `outbox_qc_window.py`); a shared-library refactor of
+a working, reviewed production script was not asked for and was not done.
+
+**Live-checked at build time:** CapEx carries no date-derived formula fields —
+unlike the Tenant DB's five, its two formulas (`Annualized Reserve`, `Yield on
+Cost`) are ratios of static numeric inputs, so `TIME_DERIVED_FIELDS` is empty
+by default. The exclusion mechanism itself is still proven by `--selftest`
+against a synthetic field name, so it is a one-line addition (not a rewrite)
+if Notion ever adds a real calendar-derived formula here; the bulk-field guard
+is the backstop in the meantime, exactly as it is for the Tenant DB.
+
+**Wired in:** §A.1's Reality table row now points at the script; §A.2 step 2
+carries the same `MUST invoke` block as the Tenant DB's. `--run` was smoke-tested
+live against the real database (6 rows, baseline established, exit 0) before
+this note was written — not merely selftested offline.
+
+**Not done:** Property Register has the same uniform-stamp problem and no
+detector. That gap is unchanged and is not implicitly closed by this note.
