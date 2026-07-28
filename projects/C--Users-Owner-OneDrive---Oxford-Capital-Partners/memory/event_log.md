@@ -12,6 +12,24 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-27 â€” Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `e1d6f498-e7bb-4131-8062-a64810d6f2bc` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel explicitly authorized in-turn ("override the gate and push anyway") after being told the pre-push hook-tests-gate blocks on 4 pre-existing failures (governor-drift-probe false positive on prompts/2026-07-09_setup-audit-remediation.md, test-memory-retired-doc-links.py, test-memory-review-by.py) unrelated to the tenant_db_snapshot_diff.py commit being pushed.
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-07-27 22:44:20 local.
+
+## 2026-07-27 â€” Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `918cb416-e04e-4681-a058-1372660695a4` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel confirmed in-turn (2026-07-27 ~21:10 ET, via AskUserQuestion) to push past the pre-push hook-tests-gate failure. Confirmed root cause: all 5 failing tests (test-claim-file-collision.py, test-memory-index-git-tracking.py, test-memory-retired-doc-links.py, test-memory-review-by.py, test-governor-drift-probe.py) are pre-existing and unrelated to this commit's 3 files (.gitignore, ora-pm-ledger/SKILL.md, ora-pm-ledger/capex_snapshot_diff.py). The governor-drift failure traces to an untracked, non-git-tracked leftover worktree file (scheduled-tasks/ora-pm-ledger/.claude/worktrees/angry-nash-34c072/prompts/2026-07-09_setup-audit-remediation.md, confirmed via git ls-files -- empty result) from a different session, predating this session's work.
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-07-27 22:41:53 local.
+
+## 2026-07-27 â€” Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `e1d6f498-e7bb-4131-8062-a64810d6f2bc` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel explicitly authorized in-turn ("override the gate and push anyway") after being told the pre-push hook-tests-gate blocks on 4 pre-existing failures (governor-drift-probe false positive on prompts/2026-07-09_setup-audit-remediation.md, test-memory-retired-doc-links.py, test-memory-review-by.py) unrelated to the tenant_db_snapshot_diff.py commit being pushed.
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-07-27 22:39:02 local.
+
 ## 2026-07-27 (cont.) — ora-lease-snapshot-refresh: material-change gate stops timestamp-only auto-commits (`1b06cf3`)
 
 The 19:00 weekday run of `ora-lease-snapshot-refresh` (exit 0, 138 leases, no drift) surfaced that `scripts/lease-snapshot-drift-check.ts` rewrites `meta.generatedAt` on every regeneration — so once `data/snapshots/portfolio.json` became git-tracked earlier today (Gabriel directive), `git status --short` on that file was never empty and the auto-commit rule's "byte-identical → skip" short-circuit was unreachable. Every one of the 3x/weekday fires would commit, producing ~15 timestamp-only commits/week on `main` that bury the commits representing real lease movement. That run's commit (`b0a55e6`, "138 leases, no drift") is the first instance and is left in history — a revert would be destructive git on a shared checkout for one cosmetic commit.
