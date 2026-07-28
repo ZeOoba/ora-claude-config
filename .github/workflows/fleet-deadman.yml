@@ -110,7 +110,7 @@ jobs:
                   if age_h > MAX_AGE_H:
                       reasons.append("heartbeat stale (%.1fh > %dh)" % (age_h, MAX_AGE_H))
                   # --- (f) AM cluster completed late / not at all ---
-                  # Deadline is 08:30 on the RUN's local date. Two distinct failures land
+                  # Deadline is AM_DEADLINE_LOCAL_* on the RUN's local date. Two failures land
                   # here: heartbeat still from a previous day (machine never came back --
                   # (a) also catches this once past 24h, but this catches it sooner), and
                   # heartbeat from today but pushed after the deadline (catch-up burst).
