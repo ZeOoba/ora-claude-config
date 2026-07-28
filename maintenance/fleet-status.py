@@ -111,16 +111,27 @@ def _parse_cron_set(field, lo, hi):
 
 
 def _cron_fires_on(dom_field, mon_field, dow_field, dom_val, mon_val, dow_val):
-    """Standard cron OR-semantics: if BOTH dom and dow are restricted (not '*'),
-    the field fires when EITHER matches; if only one is restricted, that one
-    alone governs; if neither, every day in-month matches."""
+    """NOT standard POSIX cron OR-semantics. The live Claude scheduled-task
+    engine's own nextRunAt uses AND (intersection) when BOTH dom and dow are
+    restricted -- confirmed 2026-07-28 against ora-entry-market-scan
+    ("0 11 1-7 * 2"): its registered nextRunAt was 2026-08-04 (the first
+    Tuesday that also falls within days 1-7), skipping Aug 1-3 even though
+    those days satisfy the dom-only OR-match. Under POSIX OR semantics
+    nextRunAt would have been Aug 1, not Aug 4. This function must mirror the
+    live engine, not the textbook, or this script's missed-cycle/collision
+    checks silently diverge from what the scheduler actually does (see
+    test_fleet_status_missed_cycle.py::
+    test_compound_dom_dow_cron_uses_first_match_semantics_not_or, and
+    reference_fleet_status_compound_cron_and_semantics.md for the incident).
+    If only one of dom/dow is restricted, that one alone governs (unambiguous
+    either way); if neither, every day in-month matches."""
     if mon_val not in _parse_cron_set(mon_field, 1, 12):
         return False
     dom_restricted = dom_field != "*"
     dow_restricted = dow_field != "*"
     if dom_restricted and dow_restricted:
         return (dom_val in _parse_cron_set(dom_field, 1, 31)
-                or dow_val in _parse_cron_set(dow_field, 0, 6))
+                and dow_val in _parse_cron_set(dow_field, 0, 6))
     if dom_restricted:
         return dom_val in _parse_cron_set(dom_field, 1, 31)
     if dow_restricted:
