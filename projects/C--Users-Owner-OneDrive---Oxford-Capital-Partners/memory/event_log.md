@@ -12,6 +12,58 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-28 — ora-deal-aging-sla: F-1/F-2 broker backfill + a self-correction on search method
+
+Gabriel directed (in-turn) that the run's two "unverifiable exclusion" findings be fixed rather than
+re-reported. Both `Broker / Source` fields backfilled in the Notion Acquisition Pipeline Tracker from
+primary sources — no fabrication (Hard Invariant 7):
+
+- **1333 Research Road** → David Ludwig, Coldwell Banker King Thompson / Ludwig Real Estate Group,
+  david.ludwig@kingthompson.com. Sourced from the ORA LOI letterhead block + an Outlook `mail:///`
+  read for the literal address. Domain is **kingthompson.com**, not coldwellbanker.com — a guessed
+  domain would have failed silently.
+- **5515 Catfish Court** → M&M listing team from OM p.22 (Tyler Sharp / Timothy Sullivan /
+  Adam Abushagur; Todd Lindblom flagged as WI Broker of Record, a compliance role). Verified null on
+  correspondence: no Outlook history with any of the four, so an 08-14 re-approach is a cold first contact.
+
+**Correction recorded on the run page:** F-1 originally asserted 1333 Research Road had zero external
+correspondence. False — a Ludwig thread runs 2026-02-18 → 2026-05-18 (LOI sent 03-11; formal written
+PASS sent 05-18). Cause: this connector's free-text search is relevance-ranked, not literal, so the
+address query surfaced ORA's own daily digests ahead of the real thread. The reported gap (empty
+tracker field) was real; the supporting evidence was an artifact of my own search method.
+
+**Material fact surfaced:** ORA's last word to Ludwig was a declination. The 2026-07-21 reopen at a
+$1.25M reservation has never been communicated to him.
+
+**Standing defect, NOT fixed (needs an ora-skills SKILL.md edit, single-writer):** STEP 3's mandatory
+recipient-domain fallback is scoped to qualifying open asks. STEP 3b(b) inherits the trap but not the
+safeguard — when the tracker carries no counterparty domain, the correct move is to derive one from the
+deal folder (LOI letterhead, OM contact page) before declaring a row unverifiable. Two consecutive runs
+(07-27, 07-28) called F-1 unverifiable while the contact sat in the deal folder.
+
+Untouched by design: `Next Action`, `Stage`, `Last Activity` on both rows — the staleness clocks this
+task measures remain intact.
+
+## 2026-07-28 — ora-task-integrity-guard daily run + supervised MODEL re-tag fix
+
+- **GUARD OK** (cc=27, lams=26): `guard.ps1` checked=59, restored=0, missing_everywhere=0 (4 churn_suppressed, byte-identical, non-actionable); `membership-guard.ps1` disappeared=0, disabled=0, parse_miss=0; STEP 2.75 (registration probe) and STEP 2.8 (backup-completeness probe) both exit 0. No alarm, no email.
+- LAMS grew 23→26 this run (`ora-tenant-contact-gap-sweep`, `ora-dd-critical-tracker`, `ora-health-guard-fail-aging-nudge`) — membership CHANGED, per doctrine unsettled until a second consecutive clean run.
+- STEP 2.5 model-currency: 5 tasks landed `MODEL-OBSERVATION-STALE` (real ids, but observation date predates the 2026-07-26 lineup-anchor bump to Opus 5) — `ora-site-exposure-probe`, `ora-cc-schematic-refresh`, `ora-am-brief`, `ora-appsec-sweep`, `ora-lease-snapshot-refresh`. 0 real coverage gaps (0 untagged).
+- **Gabriel-directed supervised fix, same turn:** re-tagged `ora-aaos-expire-leases` and `ora-aaos-publish-contracts` via the `register-scheduled-task` skill (`update_scheduled_task`, description field only) from `[MODEL: UNVERIFIABLE | checked 2026-07-12]` to `[MODEL: claude-opus-5 observed | checked 2026-07-26 via session-metadata canary]`, applying the action item already queued in `reference_scheduled_task_model_standard.md`'s 2026-07-26 canary table (both tasks sampled firing on `claude-opus-5[1m]` that day). Concurrent-writer check (`list_sessions`) ran first — no live sibling touching the registry. Cron/enabled/prompt unchanged on both; verified live via `list_scheduled_tasks`. Memory file updated in place to mark the action DONE.
+- Remaining 3 OBSERVATION-STALE tasks (`ora-site-exposure-probe`, `ora-appsec-sweep`, plus `ora-am-brief`/`ora-cc-schematic-refresh`/`ora-lease-snapshot-refresh`, already real-tagged pre-anchor-bump) still need re-canary at next fire — `ora-site-exposure-probe`/`ora-appsec-sweep` covered by the already-queued one-time `ora-appsec-siteexposure-canary-recheck` (Wed 2026-07-29 15:00 ET).
+
+## 2026-07-27 â€” Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `e1d6f498-e7bb-4131-8062-a64810d6f2bc` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel explicitly authorized in-turn ("override the gate and push anyway") after being told the pre-push hook-tests-gate blocks on 4 pre-existing failures (governor-drift-probe false positive on prompts/2026-07-09_setup-audit-remediation.md, test-memory-retired-doc-links.py, test-memory-review-by.py) unrelated to the tenant_db_snapshot_diff.py commit being pushed.
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-07-27 22:55:01 local.
+
+## 2026-07-27 â€” Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `e1d6f498-e7bb-4131-8062-a64810d6f2bc` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel explicitly authorized in-turn ("override the gate and push anyway") after being told the pre-push hook-tests-gate blocks on 4 pre-existing failures (governor-drift-probe false positive on prompts/2026-07-09_setup-audit-remediation.md, test-memory-retired-doc-links.py, test-memory-review-by.py) unrelated to the tenant_db_snapshot_diff.py commit being pushed.
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-07-27 22:53:41 local.
+
 ## 2026-07-27 â€” Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
 
 - The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `e1d6f498-e7bb-4131-8062-a64810d6f2bc` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
