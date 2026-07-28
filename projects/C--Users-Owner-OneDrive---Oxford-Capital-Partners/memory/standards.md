@@ -5,6 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
+  modified: 2026-07-27T13:17:19.935Z
 ---
 
 # ORA Standards — Financial Conventions & Communication
@@ -69,6 +70,7 @@ Pulled from actual ORA underwriting models (hardcoded input cells; computed cell
 
 ### Entity / debt conventions
 - QuickBooks Desktop manages ~20 LLC company files; each property has its own LLC entity; debt service calculated per-entity.
+- **Debt service / DSCR excludes internal (intercompany) loans — Gabriel-confirmed 2026-07-27.** Only external third-party borrower debt counts toward debt-service-coverage calculations. Internal/intercompany positions (e.g. Master Workbook's "Internal Loan Journals" — 2203 FROM EGFLLC, Muirkirk-to-EG(Oxford), 3883 from Oxford, 1100 From Fenton) are intercompany accrual, not a real external obligation requiring coverage, and should never be added into a DSCR or debt-service figure alongside external debt. They do still count toward **Total Debt** balance/leverage figures (external + internal), which is a distinct metric from DSCR. Applies wherever DSCR or "debt service" is computed — Master Workbook ingest, acquisition-underwriting, disposition-analysis, debt-management.
 
 ---
 

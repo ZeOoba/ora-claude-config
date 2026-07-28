@@ -46,3 +46,25 @@ Three denominators were tried and two discarded **in one day**:
 - Four **`[PROXY]`** markets (Madison←Milwaukee, Grand Rapids←Detroit, Richmond←Baltimore, Des Moines←Minneapolis) always trigger **DENOMINATOR-SENSITIVE**. Grand Rapids is weakest — Detroit is a high-cost union market, so its floor is likely too generous.
 
 Related: [[deal-decision-ledger]] · [[markets]] · [[standards]] · [[firm]]
+
+
+## Addendum 2026-07-27 — a third denominator was caught and reverted (the rule worked)
+
+`county-parcel-screen`'s Columbus v04 output (2026-07-24) carried a flat **$150/SF** benchmark, independent of RCT v03 — its own README already flagged this as unreconciled. An in-session instruction to adopt $150/SF for the off-market master's Columbus tab was caught against this file's "if you find a second denominator, it is a bug" rule before it propagated into memory or to other markets, and reverted. Corrected build: `20260727_AllMarkets-OffMarket-Master_v08.xlsx`, Columbus on RCT v03 LOW ($229.65) at the conservative 35%-of-replacement threshold ($80.38/SF, vintage unknown for all rows). Full narrative: `memory/event_log.md`, 2026-07-27 entry; ratification record: `memory/ops_decision_log.md`, 2026-07-27 entry.
+
+**Added stale-consumer confirmation:** `county-parcel-screen`'s $150/SF is now a **third** confirmed stale consumer alongside the two already named above (ranking workbook, `parcel-data-recovery`). If that tool is re-run for another market, re-derive its basis component against RCT v03 before trusting the 0-100 score's basis sub-component or any "ORA Basis Band" it emits — do not reuse the $150-anchored bands as-is.
+
+
+## Addendum 2026-07-27 (later same session) — off-market master fully migrated to RCT v03
+
+The off-market master (`AllMarkets-OffMarket-Master`) is CLOSED as a stale consumer as of
+`20260727_AllMarkets-OffMarket-Master_v09.xlsx` — all 9 markets now basis-score against RCT v03,
+not RCT v02. Full detail: `memory/event_log.md`, 2026-07-27 "full 9-market RCT v02->v03 migration"
+entry.
+
+**Remaining stale consumers (unchanged from the original list above):** the standalone
+`parcel-data-recovery` skill's own P1 recompute formulas (still documents the old 25/30 cliff +
+RCT v02 constants in its own SKILL.md text — only the off-market MASTER WORKBOOK was migrated this
+session, not that skill's doctrine text) and the platform engine `config/replacement-cost.v1.json`
+(flat $125/$137.50/$150). Route a doctrine patch to those two directly rather than assuming this
+session's workbook-level fix covers them.

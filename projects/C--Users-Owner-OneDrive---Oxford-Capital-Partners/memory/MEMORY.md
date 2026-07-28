@@ -68,6 +68,7 @@
 - [setup-writing-style Platform Skill](reference_writing_style_platform_skill.md) — gated, per-account; never on the filesystem
 - [Obsidian Copilot Keychain Gap](reference_obsidian_copilot_keychain_migration_gap.md) — post-migration "Needs API key" = re-enter keys
 - [NY Fed API 403 to Hosted Fetch](reference_newyorkfed_api_403_hosted_fetch.md) — pull SOFR locally via Desktop Commander
+- [Deal-Stage Reconciler Label Normalization](reference_deal_stage_reconciler_efulton_label_normalization.md) — first-run E Fulton "transition" was just a richer label collapsing to Notion's fixed Stage options, not a real change
 - [WebFetch Markdown False Negatives](feedback_webfetch_markdown_false_negatives.md) — HTML→markdown strips head/script; verify via raw curl
 - [session-env Retention Proposal](reference_session_env_retention_proposal.md) — PROPOSAL: age-gate session-env\ (763 empty dirs, growing)
 - [Subagent Anti-Delegation](feedback_subagent_anti_delegation.md) — `Tools:*` subagents may recurse via Agent instead of working; forbid it

@@ -177,3 +177,20 @@ line, broker touch cadence) were carried forward into the 2026-07-17 implementat
 and Tier 4 are meta-work on the tooling itself with no near-term payoff toward acquisition
 velocity — do not "helpfully" pick them up from the 07-16 report's open-items framing; that
 report's plan is superseded on this point.
+
+
+### 2026-07-27 — Should the off-market master's Columbus tab use $150/SF or RCT v03 as its replacement-cost benchmark?
+**Answer (Gabriel, in-turn, then reconciled same session): RCT v03 — the $150/SF instruction is
+withdrawn.** Gabriel initially ruled $150/SF (matching what the `county-parcel-screen` tool already
+used for the Columbus v04 screen). Before extending that to memory or other markets, the standing
+2026-07-14 governor-level ratification was located (`project_replacement_cost_benchmark_unratified.md`:
+"THERE IS ONE BASIS DENOMINATOR: RCT v03 ... if you find a second denominator, it is a bug") and
+flagged as in conflict. Gabriel's recommendation on reconciliation, confirmed: revert to RCT v03,
+not carve out a screening-only exception. `20260727_AllMarkets-OffMarket-Master_v08.xlsx` ships
+Columbus on RCT v03 (Columbus LOW $229.65, conservative 35%-of-replacement threshold = $80.38/SF,
+since Yr Built is unknown for the v04 source rows). v07 (the $150/SF build) is superseded, not
+deleted. **Do not re-litigate $150/SF for Columbus** without new information (e.g., a GC/lender
+quote specifically challenging RCT v03's Columbus figure) — treat the one-denominator rule as
+holding here same as everywhere else. The other 8 markets remain on RCT v02 and were not touched
+by this decision; that migration is separately open per the 07-14 ratification's own "stale
+consumers" list, not new.
