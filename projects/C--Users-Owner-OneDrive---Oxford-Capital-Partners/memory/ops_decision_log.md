@@ -194,3 +194,20 @@ quote specifically challenging RCT v03's Columbus figure) — treat the one-deno
 holding here same as everywhere else. The other 8 markets remain on RCT v02 and were not touched
 by this decision; that migration is separately open per the 07-14 ratification's own "stale
 consumers" list, not new.
+
+
+### 2026-07-28 — Columbus Suburban Construction (392 Morrison Rd): move-out or mis-staged HubSpot deal?
+**Answer (Gabriel, in-turn: genuine move-out.)** Today's Daily Brief flagged a three-way
+lease-expiration discrepancy — workbook and the HubSpot deal name both said 2026-08-31, Notion
+said 2026-06-30, and the HubSpot renewal deal ("Columbus Suburban Construction — Lease Renewal
+2026-08-31") was marked closed-lost 2026-07-25 with no `closed_lost_reason` and no notes.
+Gabriel ruled it a genuine move-out, not a mis-staged deal. Executed same session: Notion Tenant
+DB corrected (Lease Expiration 06-30 -> 08-31, Lease Status -> "Notice Given", matching workbook +
+HubSpot; verified via re-query). AR $5,670.84 outstanding — move-out/collection email drafted via
+`tenant-email` skill, NOT sent (Hard Invariant 1); signature entity left unresolved and flagged to
+Gabriel, since 392 Morrison Rd is absent from `ORA_Property-LLC-Signature-Roster_v01.md` (a real
+gap, not a lookup miss — full-file grep confirmed no "Morrison" or "392" entry). Loan data (the
+"Banwick / Morrison Refi" Symetra loan lists Fairground Village Center LLC as counterparty) is a
+plausible but unconfirmed signing-entity clue; do not use it to sign an executed instrument
+without separate confirmation, per the roster's own Zettler/Banwick-vs-401-Sunburst caution.
+**Follow-up:** confirm the Morrison Rd signing LLC and add it to the roster to close this gap.
