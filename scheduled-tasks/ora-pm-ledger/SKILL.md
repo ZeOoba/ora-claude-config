@@ -145,12 +145,12 @@ table of being wrong. It was not. Version + endpoint, not permissions.)
 | Broker Relationships | 2026-04-05 21:03 | 2026-04-05 20:06 | ✅ **LIVE — varies.** |
 | Tenant Database | 2026-03-30 | 2026-03-22 | ❌ **FROZEN.** Notion itself reports `last_edited_time == created_time`. A zero is a false negative. |
 | Property Register | 2026-07-12 | 2026-07-12 | ❌ **Uniform stamp** — all 14 rows share ONE identical timestamp. That is a batch write, not editing. An earlier read of this as "live" was WRONG. |
-| CapEx & Maintenance Log | — | — | ⚠ **0 rows. The table is EMPTY** — it can never report an edit, and never could. |
+| CapEx & Maintenance Log | 2026-07-26 | 2026-07-26 | ❌ **Uniform stamp — corrected 2026-07-27.** The table is no longer empty (6 rows, verified live via REST this date) and every row shares ONE identical timestamp, same failure mode as Property Register: a batch write, not editing. The "0 rows, can never report an edit" claim below was true on 2026-07-16 and is not true now — do not repeat it. |
 
 **Net: Section A (Deal Pipeline) has fully trustworthy, precise, quota-free edit
 detection via REST. Section B does not, and no read path will fix it** — Tenant
-DB is frozen at the source, Property Register only ever shows its last bulk sync,
-and CapEx has no rows at all.
+DB is frozen at the source, and Property Register and CapEx & Maintenance Log
+both only ever show their last bulk sync (uniform-stamp).
 
 **The uniform-date tell:** when newest == oldest across every row, the column is
 reporting a bulk sync, not edits. Only trust a source whose dates VARY.
@@ -1208,3 +1208,25 @@ merges, weekend flagging, and sub-minute sliver suppression. All passing.
 
 **Not changed:** Block B remains read-only and Mon–Fri; routing and send-path unchanged;
 retro findings are pattern notes only and never trigger a corrective send.
+
+## AMENDMENT NOTE (2026-07-27 — CapEx & Maintenance Log coverage-gap correction)
+
+§A.1's Reality table carried a stale claim: CapEx & Maintenance Log recorded as
+"0 rows — the table is EMPTY, it can never report an edit, and never could,"
+dated to 2026-07-16 evidence. Live-checked over REST during the 2026-07-27 run
+(the same run that produced that date's EOD Action Ledger COVERAGE GAPS item):
+**the table now holds 6 rows**, all stamped one identical `last_edited_time`
+(2026-07-26). That is not "empty" and it is not "reportable" either — it is the
+same uniform-stamp/batch-write signature already documented for Property
+Register, so it goes in the same bucket: `column-unreliable`, not `sql-confirmed`.
+
+**Fixed:** the CapEx row in the §A.1 Reality table now states the live count and
+the uniform-stamp finding instead of the empty-table claim; the "Net:" summary
+paragraph no longer says "CapEx has no rows at all" and instead groups it with
+Property Register as sharing the same last-bulk-sync limitation.
+
+**Not changed:** no detector exists for this source yet (same gap as Property
+Register — the Tenant DB is the only source with a snapshot-diff detector). A
+future run that wants trustworthy CapEx edit detection needs one built, not a
+timestamp query. No block logic, routing, or send-path changed — documentation
+fix to §A.1 only.
