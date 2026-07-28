@@ -454,6 +454,21 @@ def selftest():
             os.rmdir(tmpdir)
         STATE_DIR, LATEST = real_dir, real_latest
 
+    # --- decide_persist() (independent-review fix, 2026-07-27) ---
+    # Exact 50% collapse (3 of 6) must refuse -- the bulk-field guard elsewhere in this file
+    # already treats this exact boundary as suspicious via `>=`; the collapse guard was the
+    # odd one out with strict `<` and is fixed to `<=` to match. Mirrors
+    # capex_snapshot_diff.py's identical p5/p6 regression checks for the same defect.
+    with_prior = {"count": 6}
+    p5, w5 = decide_persist(with_prior, 3)
+    check(not p5, "decide_persist: refuses at the exact 50pct collapse boundary (3 of 6)")
+    check(w5 and "REFUSED" in w5, "decide_persist: boundary refusal is a loud warning")
+
+    # One row above the boundary (4 of 6) is NOT a collapse and must persist normally --
+    # confirms the fix didn't over-tighten the guard.
+    p6, w6 = decide_persist(with_prior, 4)
+    check(p6 and w6 is None, "decide_persist: 4 of 6 (just above the boundary) persists cleanly")
+
     print("SELFTEST:", "PASS" if ok else "FAIL")
     return 0 if ok else 1
 
@@ -524,6 +539,42 @@ def load_prev():
         return None, why + " - and no readable archive; treated as no baseline"
 
 
+def decide_persist(prev, curr_count):
+    """Whether to persist a pull of `curr_count` rows, and any extra warning to surface.
+
+    Pulled out of run() as a pure function so the persist/refusal decision -- the one part
+    of this file with real production risk -- is directly exercised by --selftest instead of
+    only reachable through a live run(). An independent review (2026-07-27) found the
+    collapse guard below used strict `<` against a 50% floor, so an EXACT 50% collapse (e.g.
+    30 -> 15) sailed through and persisted silently -- while this file's own bulk-field guard
+    (see BULK_FIELD_RATIO above) deliberately uses `>=` at the same 50% boundary, with the
+    explicit reasoning that this exact boundary is trivial to land on and not inherently safe.
+    Fixed to `<=` so both guards treat the boundary the same way. Identical defect,
+    independently found and fixed the same way, in capex_snapshot_diff.py's decide_persist().
+
+    Returns (persisted: bool, warning: str or None).
+    """
+    prev_count = (prev or {}).get("count", 0)
+
+    if curr_count == 0:
+        # Independent of any baseline: the Tenant DB is never legitimately empty, so a
+        # 0-row pull is an access/scope failure. This also covers the case where LATEST was
+        # corrupt AND no archive existed, which leaves prev=None and would otherwise skip
+        # the comparison guard below entirely.
+        return False, (
+            "REFUSED to persist snapshot: pull returned 0 rows. The Tenant DB is never "
+            "legitimately empty - check the Notion integration's database access. Prior "
+            "snapshot (if any) kept.")
+
+    if prev and curr_count <= prev_count * COLLAPSE_FLOOR_RATIO:
+        return False, (
+            "REFUSED to persist snapshot: row count collapsed %d -> %d (at or below %.0f%% of "
+            "prior). Prior baseline kept. Check the Notion integration's database access before "
+            "trusting this run's diff." % (prev_count, curr_count, COLLAPSE_FLOOR_RATIO * 100))
+
+    return True, None
+
+
 def run(as_of):
     os.makedirs(STATE_DIR, exist_ok=True)
     token = load_token()
@@ -537,24 +588,9 @@ def run(as_of):
         warnings.append(load_warning)
 
     # Persist — unless the pull looks like a collapse, in which case KEEP the old baseline.
-    persisted = True
-    prev_count = (prev or {}).get("count", 0)
-    if curr["count"] == 0:
-        # Independent of any baseline: the Tenant DB is never legitimately empty, so a
-        # 0-row pull is an access/scope failure. This also covers the case where LATEST was
-        # corrupt AND no archive existed, which leaves prev=None and would otherwise skip
-        # the comparison guard below entirely.
-        persisted = False
-        warnings.append(
-            "REFUSED to persist snapshot: pull returned 0 rows. The Tenant DB is never "
-            "legitimately empty - check the Notion integration's database access. Prior "
-            "snapshot (if any) kept.")
-    elif prev and curr["count"] < prev_count * COLLAPSE_FLOOR_RATIO:
-        persisted = False
-        warnings.append(
-            "REFUSED to persist snapshot: row count collapsed %d -> %d (below %.0f%% of prior). "
-            "Prior baseline kept. Check the Notion integration's database access before trusting "
-            "this run's diff." % (prev_count, curr["count"], COLLAPSE_FLOOR_RATIO * 100))
+    persisted, persist_warning = decide_persist(prev, curr["count"])
+    if persist_warning:
+        warnings.append(persist_warning)
     if persisted:
         atomic_write_json(LATEST, curr)
         atomic_write_json(os.path.join(STATE_DIR, "tenant-db-%s.json" % as_of), curr)
