@@ -1,6 +1,6 @@
 ---
 name: ora-aaos-expire-leases
-description: AAOS lease-expiry sweep (CC/MCP fleet, filesystem/git tool) — reclaims stale locks past expiry+5min grace in the ora-ops seam queue; silent on a clean run, emails ggoldberg only on failure or DeadAgent escalation. v1.1 2026-07-16: cadence halved 6×→3×/day (07:12 / 13:12 / 19:12 ET) per Fleet Ledger v2 ruling C2. v1.0 2026-07-10. Retimed 07:12/13:12/19:12 -> 07:20/13:20/19:20 ET on 2026-07-27 (thin-the-AM-window pass): a minor +8min uniform offset, ruling C2's 3x/day cadence intent unchanged, adding clearance from ora-task-integrity-guard's fixed 07:05 slot and the same-day ora-lease-snapshot-refresh retime to 07:40. [MODEL: UNVERIFIABLE | checked 2026-07-12]
+description: AAOS lease-expiry sweep (CC/MCP fleet, filesystem/git tool) — reclaims stale locks past expiry+5min grace in the ora-ops seam queue; silent on a clean run, emails ggoldberg only on failure or DeadAgent escalation. v1.1 2026-07-16: cadence halved 6×→3×/day (07:12 / 13:12 / 19:12 ET) per Fleet Ledger v2 ruling C2. v1.0 2026-07-10. Retimed 07:12/13:12/19:12 -> 07:20/13:20/19:20 ET on 2026-07-27 (thin-the-AM-window pass): a minor +8min uniform offset, ruling C2's 3x/day cadence intent unchanged, adding clearance from ora-task-integrity-guard's fixed 07:05 slot and the same-day ora-lease-snapshot-refresh retime to 07:40. [MODEL: claude-opus-5 observed | checked 2026-07-26 via session-metadata canary]
 ---
 
 Run the AAOS lease-expiry sweep:
