@@ -12,6 +12,26 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-27 (cont.) — ora-lease-snapshot-refresh: material-change gate stops timestamp-only auto-commits (`1b06cf3`)
+
+The 19:00 weekday run of `ora-lease-snapshot-refresh` (exit 0, 138 leases, no drift) surfaced that `scripts/lease-snapshot-drift-check.ts` rewrites `meta.generatedAt` on every regeneration — so once `data/snapshots/portfolio.json` became git-tracked earlier today (Gabriel directive), `git status --short` on that file was never empty and the auto-commit rule's "byte-identical → skip" short-circuit was unreachable. Every one of the 3x/weekday fires would commit, producing ~15 timestamp-only commits/week on `main` that bury the commits representing real lease movement. That run's commit (`b0a55e6`, "138 leases, no drift") is the first instance and is left in history — a revert would be destructive git on a shared checkout for one cosmetic commit.
+
+**Gabriel ruling 2026-07-27:** compare excluding `meta.generatedAt` before deciding to commit, over the alternative of dropping the field from the committed artifact.
+
+**Shipped:** `~/.claude/scheduled-tasks/ora-lease-snapshot-refresh/SKILL.md` now gates the commit on a diff that strips the `generatedAt` line:
+
+```bash
+MATERIAL=$(git diff -U0 -- data/snapshots/portfolio.json | grep -E '^[+-]' | grep -vE '^(\+\+\+|---)' | grep -vE '^[+-][[:space:]]*"generatedAt":')
+```
+
+Empty → `git restore data/snapshots/portfolio.json`, no commit (keeps the shared checkout clean rather than left dirty). Non-empty → commit as before, and the run report quotes the actual `+`/`-` lines. Branches on the variable's contents, not an exit code — `grep` exits 1 on no-match, so `&&`-chaining would invert the verdict.
+
+**Verified live before shipping, both directions:** a timestamp-only regeneration produced empty `$MATERIAL` (no commit); a deliberately perturbed `leaseEnd` (2028-04-30 → 2028-05-31) produced the expected `+`/`-` pair (commits), then `git restore` reverted the test perturbation cleanly.
+
+**Side effect worth flagging forward:** the drift reporter (Exit 2 path) only speaks up for new/removed/date-changed leases. A rent or SF correction that doesn't touch a date now surfaces as an Exit 0 run that *does* commit — previously indistinguishable from timestamp churn, now the signal that something moved outside the drift checker's own vocabulary.
+
+**Commit mechanics note:** `SKILL.md` was mid-edit by a concurrent session (`dc868414`, the same-day auto-commit section this gate refines) when this change landed; the two edits touch the same bullets and aren't separable, so it went in as one file, credited in the commit message. `MEMORY.md` had a second, unrelated hunk from another session (`reference_deal_stage_reconciler_efulton_label_normalization.md` pointer) — spliced via a single-hunk patch applied to the index (`git apply --cached`) and committed with no pathspec, so only the intended line landed; the other hunk is still sitting uncommitted in the worktree, untouched. Full technical detail and the resolved-state writeup: `memory/reference_portfolio_json_generatedat_commit_churn.md`.
+
 ## 2026-07-27 (cont.) — hook-tests-gate timeout-retry: test-eos-review-gate.py + test-memory-orphan-link-guard.py, corroborates the concurrent-load flake theory
 
 The `event_log.md` fleet-retiming push above (`187f156`) surfaced a second, distinct signal from `git-prepush-doctrine-gate.py`'s hook-tests-gate: `timeout-retry (timed out under load, passed on the doubled-budget rerun; not blocking): hooks/tests/test-eos-review-gate.py, hooks/tests/test-memory-orphan-link-guard.py`. The gate's own retry logic absorbed it — doubled-budget rerun passed, push was not blocked — so no action was needed on this push. Logging it because it directly corroborates, rather than merely repeats, the two-candidate-cause writeup in this file's own "pre-push hook-tests-gate flake: test-claim-file-collision.py, unconfirmed cause" entry above: that entry could not confirm which of (a) Windows AV/EDR interference on fresh subprocess/temp-dir writes or (b) genuine concurrent-session load contention caused the single unreproduced `test-claim-file-collision.py` failure. This event is explicit, first-party evidence for candidate (b) — the gate's own instrumentation named the cause as "timed out under load," on two *different* test files, in the very next push attempt, while the same heavy concurrent multi-session write activity on this shared checkout was still ongoing.
