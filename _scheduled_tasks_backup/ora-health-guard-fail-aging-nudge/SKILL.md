@@ -1,0 +1,22 @@
+---
+name: ora-health-guard-fail-aging-nudge
+description: Weekday 9:00 AM ET -- nudges Gabriel if a Health Guard probe FAIL (e.g. memory-integrity-probe) has sat unresolved 48h+. Closes the gap surfaced 2026-07-27 (ora-monday-sync workflow-optimization list): the 2026-07-24 memory-integrity-probe FAIL had no follow-up nudge and could have gone unnoticed indefinitely. [MODEL: claude-sonnet-5 | set 2026-07-27]
+---
+
+You are running ora-health-guard-fail-aging-nudge for Gabriel Goldberg, Oxford Realty Advisors (ORA). This is a scheduled, unattended run -- execute autonomously, make reasonable judgment calls, and note them in your output. Do not ask clarifying questions.
+
+PURPOSE
+`ora-health-guard` (CC/MCP fleet, daily ~05:15 ET) runs a probe suite and, on any FAIL, sends an email directly (subject pattern "[ACTION] Health Guard - YYYY-MM-DD - N FAIL") and/or posts to the Notion Ops Hub. Nothing currently re-checks whether a reported FAIL ever actually got resolved. The 2026-07-24 `memory-integrity-probe` FAIL (from that day's Health Guard run) sat with no follow-up nudge for several days before anyone noticed -- this task closes that gap by aging-tracking FAILs and escalating if one goes stale.
+
+STEPS
+1. Search Outlook Sent Items (ggoldberg@oxfordra.net mailbox) for messages with subject containing "Health Guard" and "FAIL" from the last 10 days, newest first via `outlook_email_search` or equivalent calendar/mail search tool available on this surface.
+2. Also search Notion (workspace search, query "Health Guard") for Ops Hub pages posted in the last 10 days reporting probe results (titles like "Doctrine/Governor Integrity", "Automation Health", or a dedicated Health Guard page if one exists).
+3. Identify the MOST RECENT probe-result signal (email or Notion page) for each named probe (e.g. `memory-integrity-probe`, and any others Health Guard runs). Determine, from that signal's own text, whether it reports PASS/OK or FAIL for that specific probe as of its run date.
+4. For any probe whose most recent known status is FAIL and whose report date is more than 48 hours before this run's start time: this is a STALE FAIL. Do not assume it was fixed silently -- only a later PASS/OK signal for that same probe counts as resolution.
+5. If no STALE FAIL is found: log a one-line "0 stale Health Guard FAILs" note to the Notion Ops Hub Health Guard tracking area (create a compact page titled "Health Guard FAIL-Aging Check -- [date]" only if there is something to report; a fully clean day does not need its own page -- a single line appended to today's automation-health-monitor context is enough, or skip posting entirely if that is not reachable from this surface). Do NOT send an email on an all-clear day (avoid alert fatigue).
+6. If one or more STALE FAILs are found: post a Notion Ops Hub page titled "[ACTION] Health Guard FAIL Aging -- [date]" listing each stale probe, its original FAIL date, and how many hours/days it has been outstanding. Then send an email via the SOLE send path -- Outlook COM: `powershell -ExecutionPolicy Bypass -File "C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1" -To "ggoldberg@oxfordra.net" -Subject "[ACTION] Health Guard FAIL Aging -- N stale" -BodyFile <path> -BodyFormat html` via the host-exec bridge (Desktop Commander MCP) if available. Routing canon: ggoldberg@oxfordra.net ONLY, no cc. On send failure: retry once, then flag loudly in the Notion page -- do NOT halt.
+7. Never fabricate a probe's resolution status. If you cannot find a clear PASS/OK or FAIL signal for a probe within the 10-day search window, list it as "STATUS UNKNOWN -- needs direct check" rather than guessing either way.
+8. This task does not diagnose or fix the underlying probe failure (e.g. it will not investigate memory-integrity-probe.py itself) -- that is Gabriel's or a Code-surface session's job. This task's only responsibility is making sure a FAIL cannot silently age out of view.
+
+OUTPUT
+End with a one-line summary: `ora-health-guard-fail-aging-nudge: N probes checked / N stale FAIL(s) found / email sent|not needed|failed`.
