@@ -1,0 +1,17 @@
+---
+name: ora-tenant-contact-gap-sweep
+description: Weekly sweep of Notion Tenant Database for active/M2M tenants missing Primary Contact or Contact Email; posts a consolidated gap list to Notion Operations Hub so PM-platform backfill is tracked centrally instead of being re-discovered ad hoc in each Lease Expiration Brief.
+---
+
+This is an automated run of a scheduled task for Gabriel Goldberg, Oxford Realty Advisors (ORA). The user is not present — execute autonomously, make reasonable choices, note them in the output. This task only posts a report to Notion (no external sends, no tenant/counterparty contact).
+
+CONTEXT: The Notion Tenant Database (data source id b12f4cfd-a995-4755-8341-6435ae8173b4, collection URL collection://b12f4cfd-a995-4755-8341-6435ae8173b4; database wrapper id 8dbbaec0-611a-4617-be07-6a77d0d0307a is browser-URL-only, not queryable) has a chronic data gap: many active tenant records are missing "Primary Contact" and/or "Contact Email". This was discovered during the 2026-07-27 Lease Expiration Brief (10 of 14 tenants expiring within 180 days had no contact on file) and this task exists to track the gap on a standing cadence rather than rediscovering it per-brief.
+
+STEPS:
+1. Query the Tenant Database via the Notion MCP (notion-query-data-sources, SQL mode) for all rows where Lease Status IN ('Active','Month-to-Month','Notice Given') AND Row Retired = '__NO__' (use the __YES__/__NO__ checkbox literals, not true/false) AND Tenant Name does not contain '⛔' or 'DUPLICATE'. Select: Tenant Name, Property Address, Suite / Unit, "date:Lease Expiration:start", Primary Contact, Contact Email, Secondary Contact Name, Secondary Contact Email.
+2. From that result set, filter client-side to rows where Primary Contact IS NULL/blank OR Contact Email IS NULL/blank (a row missing only the secondary contact is not a gap; only flag missing primary contact info).
+3. Cross-check HubSpot (search_crm_objects, objectType=contacts, current tenants only) by company/tenant name for each gapped row — if a matching HubSpot contact with an email exists there, note it as "available in HubSpot, not yet synced to Notion" rather than "fully missing"; this distinction matters for prioritization.
+4. Sort the gap list by nearest Lease Expiration first (soonest-expiring tenants with missing contacts are the highest-priority backfill items).
+5. Post the list to the Notion Operations Hub (page id 32b6ecd8-9e59-81f2-b329-df3fd0e25062) as a new page titled "Tenant Contact Gap Sweep — [ISO date]", containing: total active tenants scanned, count and % missing contact, the sorted table, and a one-line recommendation to pull the missing fields from the PM platform export (Yardi/AppFolio/Rent Manager, per property) or QuickBooks tenant records at the next rent-roll-reconciliation pass.
+6. Do not email this report (no routing configured for this task); it is a Notion-only tracking artifact. Do not attempt to contact any tenant or write placeholder/fabricated contact data into Notion under any circumstance — if a field is unknown, leave it blank and list it as a gap.
+7. If the Notion MCP tools are unavailable on this surface, state that plainly in a fallback text note and stop rather than improvising a substitute data source.
