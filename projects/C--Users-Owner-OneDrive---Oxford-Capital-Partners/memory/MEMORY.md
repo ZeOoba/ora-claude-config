@@ -28,6 +28,7 @@
 - [Command Center Mirror Deploy Gap](reference_command_center_mirror_deploy_gap.md) — hourly deploy never pulls
 - [GitHub CI Auto-Fix Rollout](github_ci_autofix_rollout.md) — claude-code-action@v1 live on 2 repos; #7 awaits sign-off
 - [oxford-cc worktree gotchas](project_oxford-command-center_worktree_gotchas.md) — WORKBOOK_PATH not inherited per-worktree
+- [portfolio.json generatedAt commit churn](reference_portfolio_json_generatedat_commit_churn.md) — RESOLVED 07-27 via material-change gate; dirty status ≠ lease data changed
 - Claude Code setup audits: [07-09](project_claude-setup-audit-2026-07-09.md) (migration CLOSED 07-17; 15/21 resolved) · [07-16](project_claude-setup-audit-2026-07-16.md) (G1-G8 done; chip TERMINAL, needs Gabriel)
 - [eos-review-gate shipped](project_eos_review_gate_shipped_2026-07-24.md) — blast-radius commit review gate, merged `c53c69c`
 - [Governor-LTV remediation PR #233](project_governor_ltv_remediation_2026-07-24.md) — 11 defects shipped; OPEN: debt-scoring per-property ltv gap + silent-refusal reload path
