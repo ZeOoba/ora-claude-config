@@ -15,6 +15,25 @@
 #   (c) lams enabled-recurring count < 18 (ratified floor, 2026-07-09)
 #   (d) heartbeat file missing or unparseable
 #   (e) either registry existence flag is false
+#   (f) the AM cluster did not complete on time -- heartbeat ts later than 08:30 America/
+#       New_York on the run date (ADDED 2026-07-28, Gabriel-directed)
+#
+# WHY (f) EXISTS: (a)'s 24h window is calibrated for TOTAL fleet loss and is structurally
+# blind to the recurring failure that actually happens -- the machine/Desktop app sitting
+# closed overnight, so the whole 05:15-06:30 ET cluster fires hours late in a catch-up
+# burst. Worked example, 2026-07-28: ora-health-guard woke 217 min late (08:52 ET vs its
+# 05:15 target) and ora-am-brief at 08:54 ET, missing the pre-06:00 mirror contract
+# entirely -- yet the heartbeat was pushed at 12:54 UTC during that same burst, so at the
+# 13:00 UTC run it was 0.1h old and this dead-man passed clean. Five such bursts in seven
+# days (07-22/24/26/27/28) were each found only by automation-health-monitor at ~11:05 ET,
+# a 3-6h silent gap. (f) closes the half that matters most: if the machine is STILL down
+# at run time, no on-machine alert can fire at all -- ora-health-guard's own Block A.0
+# wake-lateness alert only works once the machine actually wakes. This check runs off-box
+# and does not need the machine to come back.
+#
+# NOTE on the DST-aware deadline: the deadline is computed in America/New_York, not as a
+# fixed UTC hour, because the local push is scheduled in LOCAL time (07:30 ET) while cron
+# is UTC -- a fixed UTC deadline is correct in summer and wrong by an hour in winter.
 # On failure it opens a GitHub issue (or comments on the existing open one -- deduped
 # on the "FLEET DEAD-MAN:" title prefix).
 #
@@ -23,15 +42,20 @@
 # GABRIEL: confirm this repo's notification settings actually deliver issue emails
 # (repo Watch setting "All Activity", and Settings -> Notifications -> email enabled).
 #
-# Schedule: 13:00 UTC daily (~09:00 ET summer / 08:00 ET winter) -- after the morning
-# probe and the 07:30 local heartbeat push. Runbook on alarm: memory/oxford-cc-repo-health.md
+# Schedule: 14:00 UTC daily (10:00 ET summer / 09:00 ET winter). MOVED from 13:00 UTC on
+# 2026-07-28 so check (f) has usable margin year-round: the 08:30 ET grace deadline lands
+# at 13:30 UTC in winter, which a 13:00 UTC run would evaluate BEFORE the deadline had even
+# passed. 14:00 UTC leaves ~90min margin in summer and ~30min in winter, and still alarms
+# ahead of automation-health-monitor's 11:05 ET catch. (a)'s 24h total-loss check is not
+# hour-sensitive, so the 1h shift costs it nothing.
+# Runbook on alarm: memory/oxford-cc-repo-health.md
 # (locally: ~/.claude/projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/).
 
 name: fleet-deadman
 
 on:
   schedule:
-    - cron: "0 13 * * *"
+    - cron: "0 14 * * *"
   workflow_dispatch: {}
 
 permissions:
@@ -50,10 +74,21 @@ jobs:
         run: |
           python3 - <<'PY'
           import datetime, json, os
+          from zoneinfo import ZoneInfo
 
           HB_PATH = "maintenance/_state/fleet-heartbeat.json"
           MAX_AGE_H = 24
           FLOORS = {"cc": 10, "lams": 18}  # ratified 2026-07-09; a count below floor = silent registry shrink
+          # (f) AM-cluster completion deadline, LOCAL time (see header). The local push is
+          # scheduled 07:30 ET (and also runs via ora-task-integrity-guard STEP 1.5 at 07:05
+          # + ~10min jitter), so normal completion is ~07:15-07:45 ET. 08:00 leaves ~15-45min
+          # of grace. Deliberately NOT looser: at a 08:30 deadline the real 2026-07-28 burst
+          # tripped by only 24 min, meaning a burst that recovered before 08:30 would have
+          # passed silently -- and a machine back at 08:15 still means the AM cluster ran ~3h
+          # late. Bias is toward catching the miss; a false positive here costs one deduped
+          # GitHub issue, a false negative costs another silent 3-6h gap.
+          AM_TZ = ZoneInfo("America/New_York")
+          AM_DEADLINE_LOCAL_H, AM_DEADLINE_LOCAL_M = 8, 0
 
           reasons, lines = [], []
           hb = None
@@ -74,6 +109,32 @@ jobs:
                   lines.append("- heartbeat age: %.1fh (max %dh)" % (age_h, MAX_AGE_H))
                   if age_h > MAX_AGE_H:
                       reasons.append("heartbeat stale (%.1fh > %dh)" % (age_h, MAX_AGE_H))
+                  # --- (f) AM cluster completed late / not at all ---
+                  # Deadline is 08:30 on the RUN's local date. Two distinct failures land
+                  # here: heartbeat still from a previous day (machine never came back --
+                  # (a) also catches this once past 24h, but this catches it sooner), and
+                  # heartbeat from today but pushed after the deadline (catch-up burst).
+                  now_local = datetime.datetime.now(AM_TZ)
+                  deadline_local = now_local.replace(
+                      hour=AM_DEADLINE_LOCAL_H, minute=AM_DEADLINE_LOCAL_M,
+                      second=0, microsecond=0)
+                  ts_local = ts.astimezone(AM_TZ)
+                  lines.append("- AM deadline: `%s` · heartbeat local: `%s`"
+                               % (deadline_local.strftime("%Y-%m-%d %H:%M %Z"),
+                                  ts_local.strftime("%Y-%m-%d %H:%M %Z")))
+                  if ts_local.date() < now_local.date():
+                      reasons.append(
+                          "AM cluster has NOT run today -- newest heartbeat is from %s "
+                          "(machine/Desktop app likely still closed)" % ts_local.date())
+                  elif ts_local > deadline_local:
+                      reasons.append(
+                          "AM cluster completed LATE -- heartbeat pushed %s, %.0f min past "
+                          "the %02d:%02d ET deadline (overnight-offline catch-up burst; the "
+                          "05:15-06:30 ET tasks fired late and ora-am-brief's pre-06:00 "
+                          "mirror contract was missed)"
+                          % (ts_local.strftime("%H:%M %Z"),
+                             (ts_local - deadline_local).total_seconds() / 60,
+                             AM_DEADLINE_LOCAL_H, AM_DEADLINE_LOCAL_M))
               except Exception:
                   reasons.append("heartbeat timestamp unparseable (%r)" % ts_raw)
               for label, floor in FLOORS.items():  # (b)/(c) counts, (e) existence
