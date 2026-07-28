@@ -81,6 +81,11 @@ obsidian-fleet-mirror/session-state.d/
 # it. Its `state/` sibling stays untracked on purpose: that is per-run data that churns
 # daily, and losing it degrades safely to the old today-only window rather than breaking.
 !/scheduled-tasks/ora-pm-ledger/outbox_qc_window.py
+# (2026-07-27) Same loss class, same per-file rule: ora-pm-ledger's CapEx & Maintenance Log
+# snapshot-diff engine — generalizes tenant_db_snapshot_diff.py's approach to a second
+# uniform-stamp Notion source (see SKILL.md A.1). Durable engine, not scratch. Its `state/`
+# sibling stays untracked on purpose, same reasoning as the two entries above.
+!/scheduled-tasks/ora-pm-ledger/capex_snapshot_diff.py
 
 # (2026-07-17, Gabriel-authorized) 2b covered live task SKILL.mds but not retired ones: a
 # _archive_*_retired/<id>/SKILL.md sits one level deeper than */SKILL.md matches, so EVERY
