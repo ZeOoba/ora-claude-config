@@ -38,9 +38,17 @@ expect("render: begin marker", rmp.BEGIN_MARKER in block)
 expect("render: end marker", rmp.END_MARKER in block)
 expect("render: cc count", "CC/MCP — 2 live" in block, repr(block))
 expect("render: lams count", "LAMS/Cowork — 1 live" in block, repr(block))
-expect("render: task id present", "ora-alpha (30 6 * * *)" in block, repr(block))
+# Phase 4 compression (2026-07-29): per-task ids/crons must be ABSENT from the
+# session-context block (they cost ~1k recurring tokens/session) and live only in
+# the generated roster file; the block must point at that file instead.
+expect("render: task id ABSENT from compact block", "ora-alpha" not in block, repr(block))
+expect("render: roster-file pointer present", "fleet-roster.md" in block, repr(block))
 expect("render: do-not-hand-edit notice", "do NOT hand-edit" in block)
 expect("render: empty fleet renders 0", "CC/MCP — 0 live" in rmp.render_fleet_block({"cc": [], "lams": []}, ts="x"))
+roster = rmp.render_fleet_roster(DETAIL, ts="2026-06-11T00:00:00")
+expect("roster: task id present", "ora-alpha (30 6 * * *)" in roster, repr(roster))
+expect("roster: generated notice", "GENERATED" in roster)
+expect("roster: cc count", "CC/MCP — 2 live" in roster, repr(roster))
 
 # --- splice_generated_block -----------------------------------------------------------
 doc = ("# context\n- prose above\n"
@@ -49,7 +57,7 @@ doc = ("# context\n- prose above\n"
 new_doc, replaced = rmp.splice_generated_block(doc, block)
 expect("splice: replaced flag", replaced is True)
 expect("splice: old content gone", "OLD STALE ROSTER" not in new_doc)
-expect("splice: new content in", "ora-alpha (30 6 * * *)" in new_doc)
+expect("splice: new content in", "CC/MCP — 2 live" in new_doc)  # compact block (Phase 4): counts, not per-task ids
 expect("splice: prose above kept", "- prose above" in new_doc)
 expect("splice: prose below kept", "- prose below" in new_doc)
 expect("splice: single begin marker", new_doc.count(rmp.BEGIN_MARKER) == 1)

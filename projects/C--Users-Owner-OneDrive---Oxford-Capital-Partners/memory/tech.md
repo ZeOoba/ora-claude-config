@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-07-29T16:58:34.271Z
+  modified: 2026-07-29T17:26:48.288Z
 ---
 
 # ORA Tech Stack & Reference
@@ -157,6 +157,12 @@ Mirrors Claude task state into `C:/Users/Owner/Obsidian/BrainVault/_Claude/`. `C
 - **Disk: single C: volume (~475 GB).** Archiving frees no space → only deletion or NTFS compression (`compact /c`) reclaims. (Conflicts with no-delete rule → compress.)
 - **Claude footprint ≈18 GB:** `vm_bundles/claudevm.bundle` ≈14 GB (sandbox VM — deleting forces re-download, needs Gabriel's call); `local-agent-mode-sessions` ≈2.5 GB (holds the canonical tiny registry — do NOT bulk-delete). Safe regenerable caches ≈6 GB (npm-cache, %TEMP% excl. `%TEMP%/claude/`, Electron caches). Cleanup script: `C:/Users/Owner/oxford-perfection/_cleanup_tier1.ps1`.
 - ~48 Claude helper procs (~1.6 GB), all traced to live parents — no orphans. Levers: close Chrome/Obsidian/msedgewebview2, restart Claude on balloon, `/clear`+`/compact` between tasks, cap parallel subagents.
+
+## 9b. Harness-state quirks (document-only, ruled 2026-07-29 blueprint — do NOT hand-fix)
+- `plugins/blocklist.json` (harness-fetched, stale 2026-04-07) carries a test-row naming installed `code-review@claude-plugins-official` (reason literally "just-a-test") — benign; hand-editing invites overwrite; revisit only if a real advisory lands.
+- `~/.claude.json` holds 4 duplicate project keys for the same Oxford OneDrive tree (path-form variants), each with separate state — cosmetic; hand-merging risks live session state; leave to the harness.
+- `claude-code-plugins` marketplace registration (zero installs) lives in harness-managed `plugins/known_marketplaces.json` — left as-is; the settings-level zero-install registration (`chrome-devtools-plugins`) was removed 2026-07-29.
+- `skillOverrides` is a documented NO-OP for plugin-qualified skill names (/plugin is the real mechanism — T12, claude-code-guide-verified 2026-07-29); the ~14 inert plugin-qualified entries in settings.json are harmless and kept for intent-documentation until Gabriel rules on /plugin actions.
 
 ## 10. Archive notes
 ORA root pre-merge snapshot: `C:/Users/Owner/ORA_pre_consolidation/` (2026-04-09). Rube recipe archive (historical): `ORA/Migrations/2026-04-15_Rube_Export/`. Connectors removed 2026-06-02: Microsoft Learn, Google Drive, stray `searchapi`; earlier: QBO, Adobe, Gmail, Google Calendar.
