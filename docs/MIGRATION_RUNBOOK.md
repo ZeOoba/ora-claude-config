@@ -56,12 +56,25 @@ fact against live state first — this doc is as-of 2026-06-11. Full sprint cont
    OneDrive, or email):
    - `C:\Users\Owner\.claude\.credentials.json` (15,750 B as of 6/11)
    - `C:\Users\Owner\.claude\hooks\confidential-terms.json` (1,428 B)
-   - `C:\Users\Owner\.claude\scheduled-tasks\_shared\anthropic-key.dat` (326 B)
-   - `C:\Users\Owner\.claude\scheduled-tasks\_shared\netlify-token.dat` (262 B)
+   - `C:\Users\Owner\.secrets\anthropic-key.dat` (326 B) and
+     `C:\Users\Owner\.secrets\netlify-token.dat` (262 B) — RELOCATED 2026-07-29
+     (Phase-2 T11) out of `scheduled-tasks\_shared\`; zero live consumers, kept
+     pending Gabriel's rotate-vs-keep ruling (tech.md §7).
+   - `FRED_API_KEY` user env var (`setx FRED_API_KEY <value>`) — moved out of
+     `.claude.json` plaintext 2026-07-29; the fred MCP server reads os.environ.
    (Sweep on 6/11 confirmed: no other .env*/.dat secrets exist under ~/.claude.)
    NOTE: `scheduled-tasks/` is NOT git-tracked — copy the whole
    `C:\Users\Owner\.claude\scheduled-tasks\` tree (SKILL.mds + _shared + engines)
    from the old machine in the same out-of-band transfer.
+5b. **Windows-backbone tasks — ONE COMMAND (added 2026-07-29):** after the clone,
+    run `powershell -NoProfile -ExecutionPolicy Bypass -File
+    C:\Users\Owner\.claude\maintenance\register-windows-backbone.ps1` — restores all
+    6 Task Scheduler jobs (dead-man, heartbeat push, watchdog, both mirrors, nightly
+    disk) from the git-tracked XML snapshots in `maintenance\windows-task-xml\`.
+    WHY: the 2026-07 migration silently lost TWO of these (ClaudeFleetMirror,
+    ORA Nightly Disk Clean); restore-path live-proven 2026-07-29. Also reinstall the
+    untracked git pre-push shim per each `hooks/git-prepush-*.py` docstring —
+    `setup-self-audit.py` now CRITs on both gaps (prepush-shim / windows-tasks checks).
 6. Reinstall plugins per `~/.claude/plugins/installed_plugins.json` (firecrawl,
    superpowers, frontend-design, andrej-karpathy-skills; chrome-devtools stays
    disabled). Marketplaces: claude-plugins-official, chrome-devtools-plugins,
