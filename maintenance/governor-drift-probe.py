@@ -133,12 +133,22 @@ RE_RUBRIC_PAIR = re.compile(
     r"\s*=\s*(?:0|1|2|3|5|8|10)\b(?!\.[0-9])", # = rubric point value (not the head of a decimal)
     re.I)
 # LTV ceiling bound to a comparator immediately after "ltv" (high precision).
-RE_LTV_CMP = re.compile(r"ltv[^0-9\n]{0,15}?[≤<]=?\s*([0-9]{1,3})\s*%", re.I)
-RE_LTV_NUM = re.compile(r"([0-9]{1,3})\s*%")
+# DECIMAL-FRAGMENT GUARD (2026-07-29): every free-floating percent capture below carries
+# (?<![0-9.]) plus a full-decimal tail. Without them, a narrated per-property figure like
+# "54.3% LTV" let the engine bind the FRACTIONAL digits alone ("3% LTV" -> "LTV governor 3%"),
+# a nonsense value -- the live false-positive class caught 2026-07-29 (disposition-ledger.md:38,
+# project_historical_evaluations...:46). The fix is detection-POSITIVE, not a suppression: a
+# genuinely drifted decimal ceiling ("LTV ceiling 42.5%") previously bound a garbage fragment or
+# nothing at all; it now binds whole and flags with the true value. Comparison is NUMERIC in
+# _flag_ltv, so "40.0%" correctly reads as canonical.
+_LTV_VAL = r"(?<![0-9.])([0-9]{1,3}(?:\.[0-9]+)?)"
+RE_LTV_CMP = re.compile(r"ltv[^0-9\n]{0,15}?[≤<]=?\s*" + _LTV_VAL + r"\s*%", re.I)
+RE_LTV_NUM = re.compile(_LTV_VAL + r"\s*%")
 # LTV value in CLOSE PROXIMITY to the word "ltv" (no comparator) -- e.g. "LTV 65%" / "65% LTV".
 # Proximity-bound so unrelated %s on the same line (replacement-discount, yield-on-cost) are NOT
 # misread as LTV merely because the line also mentions "ltv" (fixes the deal-recon buy-box false positive).
-RE_LTV_NEAR = re.compile(r"ltv[^0-9\n]{0,12}([0-9]{1,3})\s*%|([0-9]{1,3})\s*%[^0-9\n]{0,8}ltv", re.I)
+RE_LTV_NEAR = re.compile(r"ltv[^0-9\n]{0,12}" + _LTV_VAL + r"\s*%|"
+                         + _LTV_VAL + r"\s*%[^0-9\n]{0,8}ltv", re.I)
 # --- I-2: canonical-decoy detection ----------------------------------------------------------
 # A drifted threshold can hide behind a CANONICAL restatement on the same line ("DSCR floor
 # raised from 1.25 to 1.40x") because the primary extractors bind to the FIRST value (the
@@ -230,7 +240,7 @@ RE_LTV_ANCHOR = re.compile(r"ltv\s*(?:ceiling|maximum|max)|(?:ceiling|maximum|ma
 # percents ("vacancy 15% max", "exit cap 8% max") -- so bare "max" is DELIBERATELY EXCLUDED, and
 # "maximum" (spelled in full) is a rare enough non-LTV collocation to accept. "ceiling"/"maximum"
 # abutting a percent read unambiguously as an LTV ceiling on a governor line.
-RE_LTV_CEIL_REV = re.compile(r"([0-9]{1,3})\s*%\s*(?:ceiling|maximum)\b", re.I)
+RE_LTV_CEIL_REV = re.compile(_LTV_VAL + r"\s*%\s*(?:ceiling|maximum)\b", re.I)
 # LTV audit-note suppressor (I-4): a PAST correction landing on canonical 40%. Kept TIGHT --
 # requires the explicit "corrected ... from <N>% to/→ 40%" structure. Its MATCH SPAN is used to
 # SPAN-SCOPE the suppression (branch 3): only a percent sitting INSIDE the span (the corrected-away
@@ -774,7 +784,22 @@ def scan_line(raw):
     if "ltv" in low or is_gov:
         seen_ltv = set()
         def _flag_ltv(val, kind="ceiling"):
-            if val and val != CANON_LTV and val not in seen_ltv and 1 <= int(val) <= 100:
+            # NUMERIC comparison (2026-07-29, with the decimal-fragment guard): captures may now be
+            # decimals, so "40.0" must read as canonical and "54.3" must flag as itself -- never as
+            # its fractional fragment. Unparseable input is impossible from these regexes but is
+            # dropped defensively (detection elsewhere is unaffected).
+            if not val or val in seen_ltv:
+                return
+            try:
+                num = float(val)
+            except ValueError:
+                return
+            # 0 < num < 1 flags too (REFUTE residual #1, 2026-07-29): "LTV ceiling 0.65%" is the
+            # unit-interval notation a human porting capital-config.ts (ltvCeiling: 0.65) into
+            # prose would write; whole-value binding would otherwise EXTEND the old 1..100 gate's
+            # silence to it. Includes "0.40%" -- ambiguous notation on a governor line is worth a
+            # loud look, not a silent guess (detection over silence).
+            if num != float(CANON_LTV) and 0 < num <= 100:
                 seen_ltv.add(val)
                 out.append("LTV %s %s%% != canonical %s%%" % (kind, val, CANON_LTV))
         cmp_hits = RE_LTV_CMP.findall(low)  # RE_LTV_CMP embeds 'ltv' -> [] on an ltv-less line
@@ -847,6 +872,10 @@ def scan_line(raw):
 # unit-testable. Accepted blind spot, unchanged IN KIND from the existing precedent: a governor
 # change recorded ONLY in a dated audit file and nowhere in standards.md / rules.md / firm.md /
 # CLAUDE.md / skills (the doctrinal homes) would go unseen.
+# 2026-07-29: a proposed 'review' token alongside 'audit' was REFUTE-REJECTED -- it would also
+# sweep in project_*_doctrine_review_*.md files (a pending doctrine-REVIEW plan is a place a
+# governor change could plausibly first be written down: FN-biased on the catastrophic class).
+# The one live 'review' narrative file is exempted by EXACT NAME in skip_names instead.
 DATED_AUDIT_RE = re.compile(r"^project_.*audit.*\d{4}-\d{2}-\d{2}\.md$", re.I)
 
 def _is_test_file(path):
@@ -888,6 +917,16 @@ def main():
     # change, not the index (2026-07-08, added after the formal CLAUDE.md audit's own tracking file
     # tripped this sentinel).
     skip_names |= {"event_log.md", "MEMORY.md"}
+    # Append-only DECISION LEDGERS (2026-07-29): disposition-ledger.md and deal-decision-ledger.md
+    # are the same append-only narrative class as event_log.md -- one row per ratified past decision,
+    # legitimately quoting off-canonical historicals ("54.3% LTV ... exceeds 40% governor -- ACCEPTED",
+    # Gabriel-ratified exceptions). They RECORD outcomes; the living governor stays declared in
+    # standards.md / rules.md / firm.md / CLAUDE.md / skills / capital-config.ts, all still in scope.
+    # Same accepted blind spot as event_log.md, unchanged in kind. The historical-evaluations
+    # review file is exempt by EXACT NAME (not by a 'review' pattern token -- REFUTE-rejected,
+    # see DATED_AUDIT_RE comment): it narrates the same two Gabriel-ACCEPTED LTV exceptions.
+    skip_names |= {"disposition-ledger.md", "deal-decision-ledger.md",
+                   "project_historical_evaluations_acquisition_review_2026-07-29.md"}
     # DATED AUDIT/PROJECT memory files: exempt by pattern -- see DATED_AUDIT_RE at module level.
     # Dated event_log rollover archives (memory-policy.md's rollover rule, first exercised
     # 2026-07-09: _archive/event_log_<YYYY-MM-DD>.md) are the SAME append-only narrative class
