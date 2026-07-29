@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-07-29T00:08:44.196Z
+  modified: 2026-07-29T16:44:30.273Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -44,6 +44,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | [OI-027](#OI-027) | 2026-07-26 | PR [ZeOoba/oxford-command-center#238](https://github.com/ZeOoba/oxford-command-center/pull/238) (OI-017 vitest-4 REFUTE pass) | Nothing guards against a *future* test regressing into the same class of bug OI-017 fixed (`vi.mock()` of a Node builtin silently no-ops under this repo's jsdom default) — most cases fail loudly, but a bare automock with no configured return value could silently exercise the real implementation and pass for the wrong reason. REFUTE reviewer recommended an ESLint rule (or a `vitest.config.ts` comment at the `environment: 'jsdom'` line) requiring `@vitest-environment node` on any file calling `vi.mock('node:*')`. Not yet built |
 | [OI-030](#OI-030) | 2026-07-26 | `ora-weekly-hygiene` Sunday run + 3 concurrent sessions, 2026-07-26 | **Block C of `ora-weekly-hygiene/SKILL.md` needs one HUMAN coherence read before the next Sunday fire (2026-08-02).** It absorbed edits from four sessions in a single day, including a Gabriel ruling (`caf154b`) that *overrode* an earlier same-day repoint: check G was repointed to the `egoldberg` Graph drive, then formally DROPPED hours later, leaving text that argued for a check the file struck through (dangling ref fixed in `9870bb4`, but only that one symptom). Other same-day edits: Check B respec, frozen-snapshot RED override, real folder names, Block N added, `781bf95` consolidating several idle sessions' WIP. Each change is individually sound and the block is coherent *as far as incremental patching can verify* — the risk is the kind only a full read catches: two locally-correct passages that disagree globally, exactly the failure mode the check-G ruling itself was. NOT another incremental agent patch; the next edit to Block C should follow a human read of the whole block. Detail: [event_log.md](event_log.md) 2026-07-26 |
 | [OI-031](#OI-031) | 2026-07-27 | `orphaned-task-forensics` trace of the `ora-master-workbook-ingest` 2026-07-20 gap, [event_log.md](event_log.md#2026-07-27) | `fleet-status.py`'s overdue/missed-stuck detectors are structurally blind to a single skipped weekly cycle on an already-established recurring task — neither check applies to it (confirmed by reading the script) |
+| [OI-033](#OI-033) | 2026-07-28 | Cowork-surface follow-up to the Code-surface usage-limit audit, 2026-07-28 | LAMS `ora-tenant-contact-gap-sweep` carries no `[MODEL: ...]` tag (sole untagged task in a 27/28-tagged LAMS fleet); fix needs `update_scheduled_task` from a Cowork-surface session |
 
 ### OI-009
 **Status:** OPEN (substantial progress made 2026-07-17, real scope remains)
@@ -912,6 +913,41 @@ the failure mode the check-G ruling itself was.
 incremental agent patch. Due before the next Sunday fire (2026-08-02).
 **Auto-check:** none.
 
+### OI-019
+**Status:** OPEN
+**Opened:** 2026-07-19
+**Source:** [event_log.md](event_log.md#2026-07-19)
+**Description:** Gabriel must add `HUBSPOT_TOKEN` (Private App, `crm.objects.deals.read`) to `oxford-command-center/.env` — PR #221 ready, blocked only on the credential; then re-verify 2146 Enterprise Pkwy lands in acq_candidates.
+*(Section added 2026-07-29 during tracker ID-integrity reconciliation — the row predated the section requirement; row is authoritative for detail.)*
+
+### OI-020
+**Status:** OPEN
+**Opened:** 2026-07-19
+**Source:** [event_log.md](event_log.md#2026-07-19)
+**Description:** ora-cowork-heartbeat's LAMS registry entry has no `approvedPermissions` grant — only fix is Gabriel approving the Notion-tool prompt during a live unattended fire in Cowork's Scheduled Tasks UI; GitHub watchdog issue needs manual closure once fixed.
+*(Section added 2026-07-29 during tracker ID-integrity reconciliation.)*
+
+### OI-026
+**Status:** OPEN
+**Opened:** 2026-07-26
+**Source:** `oxford-command-center` `gov-ltv-hardening` worktree, 18-round adversarial-refute session
+**Description:** debt-snapshot.ts degraded-marker check is tick-partition order-dependent (same facts, opposite governor verdict by snapshot-write partition) — Gabriel ruling 2026-07-26: ship as-is, document only, no fix yet.
+*(Section added 2026-07-29 during tracker ID-integrity reconciliation.)*
+
+### OI-027
+**Status:** OPEN
+**Opened:** 2026-07-26
+**Source:** PR [ZeOoba/oxford-command-center#238](https://github.com/ZeOoba/oxford-command-center/pull/238) (OI-017 vitest-4 REFUTE pass)
+**Description:** No guard against a future test regressing into the OI-017 class (`vi.mock()` of a Node builtin silently no-ops under jsdom) — recommended ESLint rule / `@vitest-environment node` requirement not yet built.
+*(Section added 2026-07-29 during tracker ID-integrity reconciliation.)*
+
+### OI-029
+**Status:** OPEN
+**Opened:** 2026-07-26
+**Source:** Repo-sweep session, 2026-07-26
+**Description:** Two live/unrotated credential exposures: plaintext `NETLIFY_AUTH_TOKEN` in archived `oxford-realty/oxfordra-net` git history, and a non-redacted Netlify MCP proxy token in a `.git-corrupted-20260716/` backup folder — Gabriel must rotate both, then the backup folder needs secure deletion.
+*(Section added 2026-07-29 during tracker ID-integrity reconciliation.)*
+
 ### OI-032
 **Status:** CLOSED
 **Opened:** 2026-07-28
@@ -946,6 +982,7 @@ not reachable from Code) per [[reference_scheduled_task_model_standard]]'s taggi
 
 | ID | Opened | Closed | Source | One-line |
 |----|--------|--------|--------|----------|
+| [OI-032](#OI-032) | 2026-07-28 | 2026-07-28 | Code-surface usage-limit audit → Cowork follow-up, 2026-07-28 | Duplicate `searchfit-seo` plugin installs in Cowork's registry — Gabriel confirmed (in-turn, 2026-07-28) both uninstalled manually via Settings → Capabilities; not independently re-verifiable from Code |
 | [OI-028](#OI-028) | 2026-07-26 | 2026-07-26 | `hooks/git-prepush-hook-tests-gate.py` GIT_TRACE root-cause + fix, commit `0d4b974` | Root cause: NOT the network push (0.54s) — the pre-push hook-tests gate ran ~54 tracked test files SEQUENTIALLY, 137s wall-clock, measured directly. Parallelized (bounded ThreadPoolExecutor, 8 workers) → 137s to ~38-42s across 4 runs, 0 failures. TDD + adversarial REFUTE review (1 real finding fixed: a load-sensitive wall-clock test assertion, replaced with a structural sweep-line overlap proof); re-review NOT REFUTED. Built in isolated worktree, Gabriel-confirmed merge |
 | [OI-023](#OI-023) | 2026-07-21 | 2026-07-22 | oxford-command-center `parse.ts`/`conditions.ts` (ora-pm-ledger 2026-07-21 divergence audit) | Snapshot provenance `asOf` now reads the workbook's own dateline (PR #231) — meta 2026-07-17 / cash 2026-07-10 live-verified; `?? s.meta.asOf` fallback audit: all alerting paths pass explicit run dates, last omitting caller wired |
 | [OI-018](#OI-018) | 2026-07-18 | 2026-07-19 | ora-appsec-sweep first run — supervised re-run (2026-07-18) | ora-pm HIGH IDOR on `/api/stripe/{customer,setup-intent,payment-intent}` RESOLVED — session-ownership guards (portal.ts/autopay pattern) landed in `c705531`, 185/185 green, adversarial refute pass run |
