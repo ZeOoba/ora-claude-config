@@ -1138,6 +1138,86 @@ def test_fleet_skill_drift_would_flag_e2e():
     print("  PASS test_fleet_skill_drift_would_flag_e2e")
 
 
+def test_decimal_fragment_never_binds_unit():
+    """2026-07-29 live FP class: a narrated per-property figure "54.3% LTV" on a governor line let
+    the free-floating percent capture bind the FRACTIONAL digits alone -> "LTV governor 3% !=
+    canonical 40%", a nonsense value (disposition-ledger.md:38 / historical-evaluations:46).
+    The fragment must NEVER bind; the FULL decimal must bind instead (and, being non-canonical on a
+    governor-keyword line, flags AS ITSELF -- garbage killed, detection preserved; the live ledger
+    files are additionally file-exempt, which test_ledger_files_excluded_source_pin covers)."""
+    m = _load_probe_module()
+    line = ("Park National loan, 54.3% LTV (exceeds 40% governor -- see event_log.md "
+            "2026-07-29, ACCEPTED)")
+    out = m.scan_line(line)
+    assert not any("governor 3%" in r or "governor 6%" in r for r in out), \
+        "fractional fragment bound as an LTV value: %s" % out
+    assert any("54.3" in r for r in out), \
+        "full decimal must bind (detection preserved) on a governor line: %s" % out
+    # canonical restated on the same line ("40% governor") must NOT flag
+    assert not any("governor 40%" in r for r in out), "canonical 40 misflagged: %s" % out
+    print("  PASS test_decimal_fragment_never_binds_unit")
+
+
+def test_decimal_ltv_drift_still_flags_unit():
+    """A genuinely drifted DECIMAL ceiling previously bound a garbage fragment or nothing at all;
+    with the decimal-capture fix it must flag with its true value via BOTH word orders."""
+    m = _load_probe_module()
+    out = m.scan_line("Hard filter: LTV ceiling <= 42.5% on every deal (governor).")
+    assert any("42.5" in r for r in out), "comparator-bound decimal drift missed: %s" % out
+    out2 = m.scan_line("This 42.5% ceiling is the acquisition governor.")
+    assert any("42.5" in r for r in out2), "reverse-order decimal drift missed: %s" % out2
+    print("  PASS test_decimal_ltv_drift_still_flags_unit")
+
+
+def test_canonical_decimal_forty_clean_unit():
+    """"40.0%" is numerically canonical -- the numeric compare must not flag it."""
+    m = _load_probe_module()
+    out = m.scan_line("Acquisition governor (non-negotiable): LTV <= 40.0%.")
+    assert out == [], "canonical 40.0%% misread as drift: %s" % out
+    print("  PASS test_canonical_decimal_forty_clean_unit")
+
+
+def test_dated_review_memory_file_excluded_unit():
+    """2026-07-29 REFUTE ruling: a 'review' token in DATED_AUDIT_RE was REJECTED (it would sweep in
+    project_*_doctrine_review_*.md -- a doctrinal home, FN-biased). The one live review-narrative
+    file is exempt by EXACT NAME in skip_names instead; the RE must NOT match review files."""
+    m = _load_probe_module()
+    assert not m.DATED_AUDIT_RE.match(
+        "project_historical_evaluations_acquisition_review_2026-07-29.md"), \
+        "'review' pattern token must stay rejected (REFUTE 2026-07-29)"
+    assert not m.DATED_AUDIT_RE.match(
+        "project_acquisition_underwriting_doctrine_review_2026-07-18.md"), \
+        "doctrine-review plan files must stay IN SCOPE"
+    for bn in ("standards.md", "rules.md", "firm.md",
+               "project_replacement_cost_benchmark_unratified.md"):
+        assert not m.DATED_AUDIT_RE.match(bn), "live/doctrine file must NOT be exempt: %s" % bn
+    with open(PROBE, "r", encoding="utf-8") as fh:
+        src = fh.read()
+    assert '"project_historical_evaluations_acquisition_review_2026-07-29.md"' in src, \
+        "exact-name exemption for the historical-evaluations review file missing from skip_names"
+    print("  PASS test_dated_review_memory_file_excluded_unit")
+
+
+def test_unit_interval_ltv_flags_unit():
+    """REFUTE residual #1 hardening: unit-interval notation on a governor line ("LTV ceiling
+    0.65%" -- a human porting ltvCeiling: 0.65 into prose) must flag loudly, not drop silently."""
+    m = _load_probe_module()
+    out = m.scan_line("Hard filter: LTV ceiling 0.65% on every deal (governor).")
+    assert any("0.65" in r for r in out), "unit-interval LTV drift dropped silently: %s" % out
+    print("  PASS test_unit_interval_ltv_flags_unit")
+
+
+def test_ledger_files_excluded_source_pin():
+    """disposition-ledger.md / deal-decision-ledger.md are append-only decision ledgers -- the same
+    narrative class as event_log.md. skip_names is main()-local, so this pins the exemption at
+    SOURCE level (a rename or accidental removal breaks this test loudly)."""
+    with open(PROBE, "r", encoding="utf-8") as fh:
+        src = fh.read()
+    for name in ("disposition-ledger.md", "deal-decision-ledger.md"):
+        assert '"%s"' % name in src, "ledger exemption missing from skip_names: %s" % name
+    print("  PASS test_ledger_files_excluded_source_pin")
+
+
 def main():
     assert os.path.isfile(PROBE), "probe not found: %s" % PROBE
     test_fleet_roots_are_scanned_unit()
@@ -1183,6 +1263,12 @@ def main():
     test_perdeal_perproperty_drift_still_flags_unit()
     test_review_hole1_lesser_of_gap_drift_flags_unit()
     test_review_hole2_bps_gap_no_leapfrog_flags_unit()
+    test_decimal_fragment_never_binds_unit()
+    test_decimal_ltv_drift_still_flags_unit()
+    test_canonical_decimal_forty_clean_unit()
+    test_dated_review_memory_file_excluded_unit()
+    test_unit_interval_ltv_flags_unit()
+    test_ledger_files_excluded_source_pin()
     test_review_hole3_paired_gap_drift_flags_unit()
     test_review_hole4_veto_window_and_refi_gate_flags_unit()
     test_review_hole5_dscr_extraction_regressions_flags_unit()

@@ -103,7 +103,8 @@ def load_fleet_json():
         return None, "fleet-status.py not found at %s" % FLEET_STATUS_PROBE
     try:
         r = subprocess.run([sys.executable, FLEET_STATUS_PROBE, "--json"],
-                           capture_output=True, text=True, timeout=30)
+                           capture_output=True, text=True, timeout=30,
+                           encoding="utf-8", errors="replace")
     except Exception as e:
         return None, "fleet-status.py failed to run: %s" % e
     if r.returncode != 0:
@@ -276,9 +277,16 @@ def main():
             "a clone gets a broken pointer): %s" % o)
 
     # --- 2a. governor contradiction (delegate) ---
-    if os.path.isfile(GOV_PROBE):
+    # SANDBOX ISOLATION (2026-07-29): the delegate scans its OWN live build_targets, not this
+    # probe's MEM dir -- so under ORA_MEMORY_DIR (test fixtures) live-tree drift bled into every
+    # sandboxed expectation and failed 3 hook test files (the 2026-07-29 pre-push gate incident).
+    # Delegation runs only against the real memory dir. encoding pinned utf-8/errors=replace:
+    # the delegate's drift output quotes file excerpts (≥, →, curly quotes) that crashed the
+    # default cp1252 pipe with UnicodeDecodeError -- same fix class as run_git() at line ~158.
+    if os.path.isfile(GOV_PROBE) and not os.environ.get("ORA_MEMORY_DIR"):
         r = subprocess.run([sys.executable, GOV_PROBE, "--quiet"],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True,
+                           encoding="utf-8", errors="replace")
         if r.returncode == 1:
             issues.append("governor drift detected (see governor-drift-probe.py): "
                           + (r.stdout.strip().splitlines() or ["?"])[0])
