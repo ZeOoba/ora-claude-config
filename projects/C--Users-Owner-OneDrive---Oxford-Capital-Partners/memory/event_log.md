@@ -12,6 +12,36 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-07-29 — Architecture migration Milestone 1 (Phase 1 zero-risk) executed
+
+**Architecture migration Milestone 1 (Phase 1 zero-risk) EXECUTED** — per Gabriel-approved 2026-07-29 target-architecture blueprint. 8 tasks done, all move-to-archive/mkdir, no commits (shared-checkout WIP deferred): hooks/state created (defect #10); stale test orphan + retired flat sentinel -> hooks/archive; 37 _shared run-residue files -> _archive_2026-07-29_run-residue; settings.json.bak -> backups; 8 orphan plugins/data dirs archived; stray docx -> prompts/_archive; 2 expired one-time task folders content-archived (registry delete = verified NO-OP, entries already gone). Validation: autonomy-gate 66/66 PASS; registration probe OK both fleets; doctrine probe OK. Hook-test gate 54/5: all 5 fails PRE-EXISTING, root-caused to (a) governor-drift-probe decimal-percent false positives on disposition-ledger.md + project_historical_evaluations file ("54.3% LTV" parsed as 3%), (b) memory-integrity-probe live-path bleed into test sandboxes, (c) open-items-tracker OI-032/033 orphans + 5 missing sections. CONSEQUENCE: ~/.claude pushes blocked by pre-push gate until fixed — tomorrow's 07:30 heartbeat push may alarm. Journal: docs/2026-07-29_phase1-migration-journal.md. Phases 2-5 await approval.
+
+## 2026-07-29 — deal-retirement v1.3 install confirmed (Save-skill click)
+
+Gabriel clicked Save skill on the staged `ora-operations-extensions.plugin` v0.1.6 (packaging logged earlier today). Verified post-install: `…\rpm\plugin_01Sq7t7TEQEoa4G1asrLe8ms\skills\deal-retirement\SKILL.md` cache mirror byte-matches the v1.3 repo content (commit `e058fbe`) — the description, Closed Deal Retirement step 9 (append ACQUIRED to disposition-ledger.md), and renumbered steps 10-14 all present. Cleared the PENDING_REIMPORT ledger entry for deal-retirement (`pending_reimport.py clear`). This closes the packaging loop started earlier today — deal-retirement now actually runs v1.3 in production, not just in the repo.
+
+## 2026-07-29 — deal-retirement v1.3 shipped: Closed Deal Retirement now logs ACQUIRED to disposition-ledger.md
+
+Per Gabriel's follow-up ("do it") to the disposition-ledger.md scaffold logged earlier today: patched `ora-skills/deal-retirement/SKILL.md` (Closed Deal Retirement, new step 9) so every future deal closing appends an ACQUIRED baseline row to [disposition-ledger.md](disposition-ledger.md) in the same pass it already appends CLOSED to [deal-decision-ledger.md](deal-decision-ledger.md) (step 8, unchanged) — the two files stay in sync going forward instead of only deal-decision-ledger.md being maintained. Trimmed the description field (was 1183 chars, over the 1024 platform cap) while adding the v1.3 changelog line.
+
+**Repo:** committed `e058fbe` (deal-retirement/SKILL.md), pushed to `origin/main` (`69aa8c6..e058fbe`). Pre-commit hook recorded it to the PENDING_REIMPORT ledger as expected.
+
+**Plugin (deal-retirement is a member of `ora-operations-extensions`, not a standalone skill — confirmed via `plugin_of()` per package-and-stage-skill Step 0):** rebuilt via `tools/build_plugin.py ora-operations-extensions <outputs> --bump patch` → v0.1.6, 9 entries validated. Staged `ora-operations-extensions.plugin` in this Cowork session's outputs and surfaced via `present_files` — **awaiting Gabriel's Save-skill click to register.** Per package-and-stage-skill step 7, this entry documents the packaging/staging only; a follow-up entry should confirm the click once made and verify the plugin cache mirror (`…\rpm\plugin_<id>\skills\deal-retirement\`) picked up the change before the PENDING_REIMPORT ledger line is cleared.
+
+## 2026-07-29 — Historical Evaluations acquisition review: 13 deals price-verified, 2 confirmed LTV governor exceptions, 2 open date discrepancies
+
+Ran a full settlement-statement price extraction + Master Workbook NOI cross-reference across the "Historical Evaluations" Cowork project (12 settlement statements, visually verified against source scans; 4 Capstan/CSSI cost segregation studies; Property NOI + Portfolio Summary — Internal tabs of the workbook mirror, dated 2026-07-28). Full findings: [project_historical_evaluations_acquisition_review_2026-07-29.md](project_historical_evaluations_acquisition_review_2026-07-29.md).
+
+**LTV governor — 2 confirmed exceptions, Gabriel ruled ACCEPTED with rationale (2026-07-29, in-session):** 3540 E 5th Ave, Columbus OH (54.3% LTV, Park National) and 1100 Rarig Ave, Columbus OH (46.6% LTV, internal Fenton→Oxford Capital→1100 Rarig chain) both exceed the 40% Hard Invariant 4 ceiling. Gabriel's ruling: log with rationale, treat as accepted — both are strong performers (1100 Rarig 20.8% CoC; 3540 E 5th Ave 3.46x value growth since 2022). Possibly the same exposure class [project_governor_ltv_remediation_2026-07-24.md](project_governor_ltv_remediation_2026-07-24.md) (PR #233) was built to catch — that PR fixed 2 false-clearance defects in the scoring code; worth a follow-up check on whether these are the same 2 properties the fix newly surfaced. No further action ordered.
+
+**Two open date discrepancies — logged, not resolved (Gabriel: verify later against Notion, not this session):**
+1. 29000 Information Lane, Easton MD — settlement statement shows 12/22/2016 close at $2,000,000 (seller Easton Technology Phase I LLC); Property NOI sheet shows Acq Date 1/1/2021 with equity invested at **−$800,000** (implies a cash-out refi event). Workbook may be dating a refi/re-basis event as "acquisition," or a second transaction exists that isn't in this file set. Verify against Acquisition Pipeline (bcfe4a03) before citing either date externally.
+2. Sepich Portfolio (8 parcels, Columbus OH) — settlement statement shows 02/01/2021 close at $4,650,000; Property NOI sheet shows Acq Date 3/16/2021, a 6-week gap larger than typical disbursement lag. Possible second closing tranche.
+
+**Rent/SF conflict resolved, not an error:** 1100 Rarig Ave showed $12.20/SF (Property NOI, = Gross Income/SF) vs $8.97/SF (standalone rent roll, base contract rent/SF). Gabriel confirmed: these are modified gross leases, tenant responsible for utilities + opex increases over base year — so $8.97/SF is contract base rent and $12.20/SF is total collected revenue including above-base reimbursements. Both figures correct; different definitions, not a data-quality issue.
+
+**Minor correction:** Angola Road acquisition entity (3034 Westerville Rd, Columbus OH) is **"5242 Angola Road, LLC"** — confirmed by direct visual read of the ALTA settlement statement; an initial OCR pass misread it as "8242." Not cross-checked against `ORA_Property-LLC-Signature-Roster_v01.md` this session (OneDrive write, out of scope without a separate ask per rules.md §1).
+
 ## 2026-07-28 — fleet-status.py false "missed single cycle" on ora-entry-market-scan — root-caused and fixed (orphaned-task-forensics)
 
 Symptom: `fleet-status.py --summary` flagged `ora-entry-market-scan` as 137h overdue. Investigation (orphaned-task-forensics skill) found this was a false positive, not a real miss:

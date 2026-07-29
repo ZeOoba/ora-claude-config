@@ -18,9 +18,12 @@
 - **OPEN/BLOCKED:** [open-items-tracker worktree/HEAD divergence 07-20](project_open_items_tracker_worktree_head_divergence.md) (don't force-resync) · [event_log IWNS block loss](project_event_log_iwns_block_loss_unattributed_2026-07-21.md) (recovered; cause open)
 - **PLANNED, awaiting Gabriel:** [acquisition-underwriting doctrine review](project_acquisition_underwriting_doctrine_review_2026-07-18.md) (9 items) · [artifact-content top-5](project_artifact_content_top5_plan_2026-07-18.md) · [setup-improvement top-5](project_setup_improvement_top5_plan_2026-07-18.md) + [Plan 2 design](project_plan2_effect_verification_design_2026-07-18.md)
 - [oxfordra.net SEO Audit](project_oxfordra_seo_audit_2026-07.md) — 84/100; open: portfolio SF/counts, FAQ order, /markets redirect
+- [Claude Env Architecture Baseline 07-29](project_claude_env_architecture_baseline_2026-07-29.md) — official forensic baseline; optimization NOT yet approved
 - [CC Build State](cc-build-state.md) — PR #200-204 merged; HUBSPOT_TOKEN needed (OI-019)
 - [CC Autonomous Audit — PR #28](cc-autonomous-audit-pr28.md) — merged; open B2/B3/B5
-- [Intelligence Platform Master Plan](ora-intelligence-platform-master-plan.md) — Phase 0→3; gaps in file
+- [Intelligence Platform Master Plan](ora-intelligence-platform-master-plan.md) — SUPERSEDED, Financial-Intel phases all shipped
+- [Intelligence Platform Roadmap — RATIFIED 07-29](project_intelligence_platform_roadmap_ratified_2026-07-29.md) — merged [PR #246](https://github.com/ZeOoba/oxford-command-center/pull/246); Phase 0 kickoff (IP-0.1–0.10) is next open action
+- [Engineering Constitution — RATIFIED 07-29](project_engineering_constitution_ratified_2026-07-29.md) — merged [PR #247](https://github.com/ZeOoba/oxford-command-center/pull/247); governs roadmap/ADRs unless amended; Phase 0 kickoff still next
 - [PFI Build Canon](pfi-build-canon.md) — ratified 14-unit roster, PM assignments, accounting rulings
 - [PFI Warehouse Backlog](pfi-warehouse-systematization-backlog.md) — 3 queued basis-recovery follow-ups
 - [AAOS Agent Coordination Layer](project_aaos_agent_coordination_layer.md) — real infra; Cowork round-trip unreachable from Code, no gate sign-off
@@ -39,8 +42,10 @@
 - [Market Intelligence](markets.md) — cross-market snapshots, macro (FRED), replacement cost, comps
 - [Basis Denominator — RCT v03 (RATIFIED)](project_replacement_cost_benchmark_unratified.md) — the ONE denominator; ORA buys at ~35-40% of replacement
 - [Deal Decision Ledger](deal-decision-ledger.md) — one row per decided PASS/SKIP/DROP/PARK/CLOSE + buy-box rule validated
+- [Disposition & Exit Ledger](disposition-ledger.md) — POST-acquisition lifecycle: ACQUIRED/HOLD/REFI/1031/SALE per owned asset; 13 deals + 1100 Rarig HOLD backfilled 07-29
 - [DG Portfolio OH — PASS](deal_dg_portfolio_oh_2026-06.md) — Matthews 3-store DG net-lease + cap stratification
 - [1100 Rarig Ave — Disposition (HOLD)](deal_1100_rarig_disposition_2026-07.md) — basis/NOI/cost-seg; open gaps in file
+- [Historical Evaluations acquisition review 07-29](project_historical_evaluations_acquisition_review_2026-07-29.md) — 13-deal price/NOI table; 2 LTV exceptions accepted; 2 open date discrepancies
 - [Delinquency collection-status blind spot](reference_delinquency_report_collection_status_blindspot.md) — "no action taken" is inferred; wrong for 4 of 6 tenants 07-24
 - [Columbus Suburban default/vacate 07-28](tenant_columbus_suburban_default_2026-07-28.md) — ORA-T-105 gone; $20,457 owed, PM misspells name "Suburan"; vacate ≠ contract expiry
 - [Notion Tenant DB Completeness Gap](reference_tenant_db_completeness_gap.md) — split on `Row Retired`, not the ⛔ARCHIVED prefix
@@ -68,7 +73,7 @@
 - [ECC Repo Flagged](reference_ecc_repo_flagged.md) — affaan-m/ECC rejected: malware-clone risk
 - [setup-writing-style Platform Skill](reference_writing_style_platform_skill.md) — gated, per-account; never on disk
 - [Obsidian Copilot Keychain Gap](reference_obsidian_copilot_keychain_migration_gap.md) — "Needs API key" = re-enter keys
-- [NY Fed API 403 to Hosted Fetch](reference_newyorkfed_api_403_hosted_fetch.md) — pull SOFR locally
+- [NY Fed API 403 to Hosted Fetch](reference_newyorkfed_api_403_hosted_fetch.md) — pull SOFR locally; local pull needs an explicit TLS 1.2 prefix or it false-alarms
 - [Deal-Stage Reconciler Labels](reference_deal_stage_reconciler_efulton_label_normalization.md) — richer label collapsing to Notion's fixed Stage options, not a real change
 - [WebFetch Markdown False Negatives](feedback_webfetch_markdown_false_negatives.md) — strips head/script; verify via raw curl
 - [session-env Retention Proposal](reference_session_env_retention_proposal.md) — PROPOSAL: age-gate session-env\
