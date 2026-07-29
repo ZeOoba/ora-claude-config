@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-07-27T14:55:13.859Z
+  modified: 2026-07-29T16:58:34.271Z
 ---
 
 # ORA Tech Stack & Reference
@@ -146,7 +146,7 @@ Deal Sourcing Log `9a6ae21985a34621899cc757fd062f8b` · Acquisition Pipeline Tra
 Yardi → MD/Baltimore · AppFolio → Columbus OH · Rent Manager → Indianapolis + Kansas City · QuickBooks Desktop → accounting (~20 LLCs). Workflow: export → SharePoint → skill parse.
 
 ## 7. Secrets index (locations only — never values)
-`.claude.json` env (`FRED_API_KEY`); `claude_desktop_config.json` env (Composio `ak_…` api-key); `.env`/`.dat` files (git-ignored). Edit-deny on `*credentials*`/`.env`/`password`. Cloudflare: prefer a non-expiring scoped API token over copied OAuth for unattended deploys. No tokens in URLs or memory.
+`FRED_API_KEY`: **user env var** (setx, 2026-07-29 Phase-2 T11 — plaintext REMOVED from `.claude.json`; fred/server.py reads os.environ; validates on next app restart). `C:/Users/Owner/.secrets/`: `anthropic-key.dat`, `netlify-token.dat` (relocated 2026-07-29 from `scheduled-tasks/_shared/` — zero live consumers, sole historical consumer archived 2026-05-31; rotate-vs-keep is Gabriel's call). `claude_desktop_config.json` env (Composio `ak_…` api-key — stale, connector gone). `.env` files (git-ignored). Edit-deny on `*credentials*`/`.env`/`password`. Cloudflare: prefer a non-expiring scoped API token over copied OAuth for unattended deploys. No tokens in URLs or memory. Known unresolved exposures: open-items-tracker.md#OI-029.
 
 ## 8. Obsidian fleet mirror (built 2026-06-03)
 Mirrors Claude task state into `C:/Users/Owner/Obsidian/BrainVault/_Claude/`. `Claude Fleet.md` ← `~/.claude/obsidian-fleet-mirror/write-fleet.ps1` run every 60s by Windows Task `ClaudeFleetMirror` (reads LAMS registry directly, not the MCP). `Claude Session Tasks.md` ← `~/.claude/hooks/fleet-session-hook.py` (settings.json hooks: SessionStart/Stop/SessionEnd/PostToolUse `Bash|Task`, async). **Phase 6 will replace the 60-s poll with event-driven updates.** Removal steps in `…/obsidian-fleet-mirror/README.md`. The `ClaudeFleetMirror` Windows task was lost in the 2026-07 machine migration and was re-registered 2026-07-16 (Gabriel ruling G6) via `register-task.ps1`.

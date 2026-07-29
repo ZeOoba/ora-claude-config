@@ -10,11 +10,17 @@ WHY A SEPARATE, CODED PROBE (not just automation-health-monitor's Step 1.5):
 automation-health-monitor runs on the LAMS/Cowork fleet. Its own SKILL.md documents
 that ~/.claude/scheduled-tasks/ is "host-protected and not mountable" from that
 surface -- so its Step 1.5 CC/MCP tag check can only ever actually run from a
-Code-surface session, never from its own scheduled fire on Cowork. This probe is
-the coded, standing version that DOES run on schedule -- wired into ora-health-guard
-(itself a CC/MCP fleet task, with direct filesystem access to the sibling task
-folders it reads). Sibling to connector-drift-probe.py's same "make a one-time
-manual finding self-detecting" pattern.
+Code-surface session, never from its own scheduled fire on Cowork.
+
+WIRING (corrected 2026-07-29, Phase-2 defect T10 -- the prior claim "wired into
+ora-health-guard" was never true and misdirected a forensic trace): NO scheduled
+task invokes this script. The daily producer of _state/model-currency-cc.md is
+ora-task-integrity-guard STEP 2.5, which performs the same check INLINE in its
+prompt body (v1.1 2026-07-08 onward) and appends the state file directly. This
+script is the standalone/manual diagnostic twin of that inline check -- keep the
+two classification rules in sync via reference_scheduled_task_model_standard.md
+(the single source of truth both cite). Sibling to connector-drift-probe.py's
+same "make a one-time manual finding self-detecting" pattern.
 
 The CC/MCP fleet's model is SERVER-PINNED, not settable (see
 memory/reference_scheduled_task_model_standard.md) -- so this is a presence +
