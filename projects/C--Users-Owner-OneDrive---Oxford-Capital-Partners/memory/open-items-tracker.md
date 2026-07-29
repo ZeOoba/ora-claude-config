@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-07-27T14:40:13.856Z
+  modified: 2026-07-29T00:08:44.196Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -910,6 +910,36 @@ is the kind only a full read catches: two locally-correct passages that disagree
 the failure mode the check-G ruling itself was.
 **Why not fixed yet:** the next edit to Block C should follow a full human read, not another
 incremental agent patch. Due before the next Sunday fire (2026-08-02).
+**Auto-check:** none.
+
+### OI-032
+**Status:** CLOSED
+**Opened:** 2026-07-28
+**Closed:** 2026-07-28
+**Source:** Code-surface usage-limit audit, handed to Cowork for cross-surface follow-up, 2026-07-28
+**Description:** `searchfit-seo` is installed TWICE in Cowork's plugin registry
+(`...\583f08bc.../rpm\manifest.json`) — `plugin_01814pKq2AozUbEdjvGZw5os` (installed 2026-07-08,
+marketplace "My Uploads") and `plugin_016u9h5nGGKuX18riDTJ7otg` (installed 2026-07-24, marketplace
+"knowledge-work-plugins", displayName "SearchFit SEO"). Both show `installationPreference:
+"available"`, doubling every searchfit-seo skill/agent in the listing. Not in active use per
+Gabriel (2026-07-28 usage-limit audit). No supported tool exists to uninstall from either surface —
+Cowork's manifest.json has no enable/disable boolean (unlike Code's `skillOverrides`), and hand-
+editing it blind was correctly declined as an unverified-schema write.
+**Evidence:** Gabriel confirmed (in-turn, 2026-07-28) he uninstalled both `searchfit-seo` entries
+manually via Settings → Capabilities, per the candidate fix below. Not independently re-verified
+against the live manifest.json (no tool access to that surface from Code) — trust the direct report.
+
+### OI-033
+**Status:** OPEN
+**Opened:** 2026-07-28
+**Source:** Cowork-surface follow-up to the Code-surface usage-limit audit, 2026-07-28
+**Description:** LAMS/Cowork scheduled task `ora-tenant-contact-gap-sweep` (weekly Monday) carries
+no `[MODEL: ...]` tag at all in its description — the sole untagged task in an otherwise
+27/28-tagged LAMS fleet (re-verified 2026-07-28, all 27 tagged tasks still `claude-sonnet-5`,
+including 5 set after the ~2026-07-25 Opus 5 rollout — LAMS shows no model drift, unlike CC/MCP).
+**Candidate fix (not built):** tag it `[MODEL: claude-sonnet-5 | set 2026-07-28]` via
+`update_scheduled_task` from a Cowork-surface session (LAMS registry writes need the matching MCP,
+not reachable from Code) per [[reference_scheduled_task_model_standard]]'s tagging convention.
 **Auto-check:** none.
 
 ## Closed

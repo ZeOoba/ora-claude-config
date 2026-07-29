@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: local_3a091e05-9759-4627-93c2-c948e6c29e71
-  modified: 2026-07-25T18:52:38.117Z
+  modified: 2026-07-28T23:46:54.665Z
 ---
 
 **Purpose:** a lightweight companion to [deal-decision-ledger.md](deal-decision-ledger.md) (which
@@ -16,6 +16,11 @@ update in place (don't duplicate) if a later session re-confirms or overturns an
 the overturn explicitly rather than silently replacing.
 
 ## Log
+
+### 2026-07-28 — ora-appsec-sweep confirmed running below the CLAUDE.md never-below-Fable floor for security-gate code (since 2026-07-24) — escalate now or wait?
+**Answer (Gabriel, via AskUserQuestion): accept the gap for now, wait for the Wednesday 2026-07-29 re-canary.** Context: `ora-appsec-sweep`'s scheduled session itself runs on CC/MCP's server-pinned model (confirmed `claude-opus-4-8` via the 2026-07-24 transcript canary; frontmatter `model: fable` is inert on this fleet — see [[reference_scheduled_task_model_standard]]), which is below-floor for security-gate code per CLAUDE.md. No config-level fix exists on this fleet (filed as [anthropics/claude-code#81408](https://github.com/anthropics/claude-code/issues/81408)).
+**Ruling: no escalation, no surface change.** Reasoning: the task's actual security review work is dispatched to the `security-auditor` Agent, which IS correctly Fable-pinned per the task's own v1.3 design (`CLAUDE.md`'s floor is carried by that dispatch, not the orchestrating session) — only the orchestrating session itself runs below-floor, and that session's job is report-only/read-only (secret scan, CVE audit, OWASP checks), not itself making security judgments. `ora-appsec-siteexposure-canary-recheck` (one-time, 2026-07-29 15:00 ET) will produce the first genuine post-Opus-5-rollout data point for this task; revisit after that fires rather than acting on stale 07-22/07-24 data.
+Related: [[reference_scheduled_task_model_standard]] (full drift history), [[reference_fleet_throttle_skip_catchup_burst]].
 
 ### 2026-07-25 — Should oxford-command-center's lease-snapshot drift check's >25% anomaly floor gate on raw id-level removals or business-key-reconciled removals?
 **Answer (Gabriel, via AskUserQuestion): keep the raw id-level gate — no code change.** PR #234
