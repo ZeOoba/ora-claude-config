@@ -1,6 +1,6 @@
 ---
 name: ora-weekly-hygiene
-description: ORA Weekly Hygiene — single sequential Sunday session (20:00 ET) folding five hygiene tasks: A) Claude Workspace Hygiene → B) OneDrive Cleanup (reversible quarantine) → C) SharePoint Aging & Freshness → D) Artifact Staleness Scan → E) Session Pruner → F) legacy task-dir classification → G) EOS telemetry rollup → H) system inventory refresh → I) git repo ref integrity scan → J) Tenant DB completeness spot-check → K) session-env retention sweep → L) override-token sweep → M) unsigned draft-to-signature nudge → N) open-items-tracker ID integrity check. v1.1 2026-06-03 Phase 3 merge, extended through 2026-07-26 (Block N added). Block D rebuilt 2026-07-26: freshness-type classification (LIVE/FROZEN/HYBRID) now gates flagging, since the old age-only rule mis-flagged live-read artifacts permanently; adds an Unprobed status so an unrunnable connector probe can no longer report as "0 Broken"; adds a mandatory scope disclaimer on the local-folder fallback; adds a quoted-number unit check after a run compared skill-folder counts to a task count. Re-enabled 2026-07-09 (Gabriel-approved, post-recovery-stabilization confirmation). [MODEL: UNVERIFIABLE | checked 2026-07-25]
+description: ORA Weekly Hygiene — single sequential Sunday session (20:00 ET) folding five hygiene tasks: A) Claude Workspace Hygiene → B) OneDrive Cleanup (reversible quarantine) → C) SharePoint Aging & Freshness → D) Artifact Staleness Scan → E) Session Pruner → F) legacy task-dir classification → G) EOS telemetry rollup → H) system inventory refresh → I) git repo ref integrity scan → J) Tenant DB completeness spot-check → K) session-env retention sweep → L) override-token sweep → M) unsigned draft-to-signature nudge → N) open-items-tracker ID integrity check → O) fleet producer-contract freshness check. v1.1 2026-06-03 Phase 3 merge, extended through 2026-07-29 (Block O added — Phase-3 blueprint item: fleet-contract-check.py had no scheduled caller since it was built; Block N added 2026-07-26). Block D rebuilt 2026-07-26: freshness-type classification (LIVE/FROZEN/HYBRID) now gates flagging, since the old age-only rule mis-flagged live-read artifacts permanently; adds an Unprobed status so an unrunnable connector probe can no longer report as "0 Broken"; adds a mandatory scope disclaimer on the local-folder fallback; adds a quoted-number unit check after a run compared skill-folder counts to a task count. Re-enabled 2026-07-09 (Gabriel-approved, post-recovery-stabilization confirmation). [MODEL: UNVERIFIABLE | checked 2026-07-25]
 output_contract:
   version: 1
   blocks:
@@ -492,6 +492,22 @@ The script enforces every safety check itself (live-sessionId exclusion read fre
 
 ---
 
+## Block O — Fleet Producer-Contract Freshness Check (added 2026-07-29, Phase-3 blueprint: the probe built to catch silently-frozen producer outputs had no scheduled caller)
+
+**EXECUTION**
+
+1. Run:
+   `C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe "C:/Users/Owner/.claude/maintenance/fleet-contract-check.py"` via Bash and capture stdout + exit code.
+2. The script is READ-ONLY and AUTHORITATIVE — do not reimplement its logic. It checks an explicitly SEEDED registry of producer→output-file→consumer contracts (registry-membership → doctrine-status, write-doctrine-status → prepush gate, emit-fleet-heartbeat → external dead-man as of 2026-07-29) and reports any output file older than its contract's freshness ceiling — the silently-frozen-producer failure class that registry/doctrine/governor probes structurally cannot see.
+3. Exit 0 = all contracts fresh. Exit 1 = at least one contract STALE/MISSING — a Block O alarm condition for the run summary (each stale contract line carried verbatim). Exit 2 = probe error — report as a coverage gap, never as "0 stale."
+4. **Detection only** — never touches producers, consumers, or state files. If a contract is stale, the fix belongs to the producer's own task (trace via the orphaned-task-forensics skill), not to this block.
+
+**Delivery:** no new email (blocks stay un-cross-wired, matching G/H/I/J/M/N). Append one line to the END-OF-SESSION RUN SUMMARY: `Block O — Fleet Contract Freshness: N contracts checked · N stale · N missing`.
+
+**Guards:** strictly read-only; never halts the session if the probe errors — note it in the run summary and continue.
+
+---
+
 # END-OF-SESSION RUN SUMMARY
 
-After all thirteen blocks complete, emit a one-line-per-block status (block · files moved/quarantined or audit counts · email/Notion delivery result) to the session log so `ora-health-guard` can confirm the merged hygiene session fired cleanly. Blocks A/B may legitimately report "nothing to do" — that is NORMAL. A missed whole-session run is independently surfaced by the health guard.
+After all fifteen blocks (A–O) complete, emit a one-line-per-block status (block · files moved/quarantined or audit counts · email/Notion delivery result) to the session log so `ora-health-guard` can confirm the merged hygiene session fired cleanly. Blocks A/B may legitimately report "nothing to do" — that is NORMAL. A missed whole-session run is independently surfaced by the health guard.

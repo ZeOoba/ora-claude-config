@@ -145,6 +145,34 @@ else:
     expect("strict YAML rejects it -- so the leniency here is load-bearing, not an oversight",
            strict_rejects)
 
+
+# --- check_prepush_shim (2026-07-29, Phase-5): shim-content logic via a temp CLAUDE root ---
+import tempfile
+_orig_claude = ssa.CLAUDE
+try:
+    tmp = tempfile.mkdtemp()
+    hooks_dir = os.path.join(tmp, ".git", "hooks")
+    os.makedirs(hooks_dir)
+    ssa.CLAUDE = tmp
+    ssa.results.clear()
+    ssa.check_prepush_shim()
+    expect("shim: missing -> CRIT", ssa.results[-1]["status"] == "CRIT", str(ssa.results[-1]))
+    with open(os.path.join(hooks_dir, "pre-push"), "w") as f:
+        f.write("python git-prepush-doctrine-gate.py\npython git-prepush-hook-tests-gate.py\n")
+    ssa.results.clear()
+    ssa.check_prepush_shim()
+    expect("shim: partial chain -> CRIT names the gap",
+           ssa.results[-1]["status"] == "CRIT" and "confidential" in ssa.results[-1]["detail"],
+           str(ssa.results[-1]))
+    with open(os.path.join(hooks_dir, "pre-push"), "a") as f:
+        f.write("exec python git-prepush-confidential-scan.py\n")
+    ssa.results.clear()
+    ssa.check_prepush_shim()
+    expect("shim: full chain -> OK", ssa.results[-1]["status"] == "OK", str(ssa.results[-1]))
+finally:
+    ssa.CLAUDE = _orig_claude
+    ssa.results.clear()
+
 npass = sum(1 for ok, _ in results if ok)
 print(f"setup-self-audit tests: {npass}/{len(results)} pass")
 sys.exit(0 if npass == len(results) else 1)

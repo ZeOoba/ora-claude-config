@@ -59,3 +59,39 @@ Handoff/state: `handoffs/2026-07-29_phase2-defect-correction-state.md`. Chip cla
 
 **Deferred validations (owner: next session / tomorrow's fires):** dead-man 2× green · heartbeat 07:30 unattended fire · fred MCP post-restart · `.claude.json` clobber check.
 **Out-of-scope confirmations:** per-property LTV gap stays with PR #233 follow-up; OI-029 credential rotations remain Gabriel's.
+
+---
+
+# Milestone 3 (Phases 3+4+5) — EXECUTED 2026-07-29 (same session, Gabriel-approved "proceed with 3, 4 and 5")
+
+Mid-flight deferred-validation result: `.claude.json` clobber check PASSED (fred env still absent ~40 min after edit).
+
+## Phase 3 — conditional retirements & scoping
+| Task | Result | Validation |
+|---|---|---|
+| Legacy senders | ARCHIVED (`Send-OraReport.ps1`, `Send-OutreachQueueEmail.ps1` → `_shared/_archive_2026-07-29_run-residue/`) — fleet-wide grep: ZERO callers; README annotated | grep evidence |
+| ora-nightly-disk | **Verdict FLIPPED by evidence: re-registered, not deprecated** — the "ORA Nightly Disk Clean" Windows task (daily 04:00, set 2026-06-05) was LOST in the July machine migration (same class as ClaudeFleetMirror, which WAS re-registered); log stopped 06-24 = old-machine era | Live-fire: result 0; immediately pruned 56 stale session dirs + rotated send-log (5 weeks of backlog) |
+| pr187 launch configs | REMOVED — PR #187 merged 2026-07-09 (gh-verified); worktree path gone. `site-dist-wt` removed too (same dead-reference class, target dir verified absent). Port collisions eliminated | launch.json rewritten, 3 configs remain |
+| Empty `.claude/{projects,skills}` | Verified empty → removed | dir listing |
+| Marketplaces | `chrome-devtools-plugins` removed from settings extraKnownMarketplaces (zero installs, skills already off); `claude-code-plugins` = harness-file, documented in tech.md §9b | settings JSON valid, 3 marketplaces |
+| security-auditor scoping | frontmatter `tools: Read, Grep, Glob, Bash` added (report-only role + git-history/CVE scans; no write tools — now consistent with the other 6 agents); model floor stays at DISPATCH per ratified Option C | file check |
+| fleet-contract-check wiring | ora-weekly-hygiene **Block O** added (A–O = 15 blocks; description + run-summary count updated); probe ran clean live (3 contracts fresh) | SKILL.md; probe exit 0 |
+| Authority Registry | **`docs/authority-registry.md` AUTHORED** — ~38 concept rows, one owner each; accepted dual-surface items listed; quarterly/annual review rules | file exists |
+
+## Phase 4 — context optimization (measured, not estimated)
+| Lever | Result | Measured |
+|---|---|---|
+| 4a fleet-block compression | `registry-membership-probe.py`: compact counts+pointer block; full roster → generated `maintenance/_state/fleet-roster.md` | session-context.md **7,975 → 5,628 B (~590 tokens/session)**; probe tests 45/45 (pins updated: ids ABSENT from block, present in roster) |
+| 4b description lint | ora-skill-text-audit **class n** added (v1.10, FOURTEEN classes): >1536 chars or ≥2 changelog fragments; remediation always MOVE-TO-BODY, trigger vocabulary preserved | SKILL.md verified |
+| 4c description hygiene | ora-skills worktree branch → **PR #26 MERGED**: 6 skills' changelog tails moved to bodies, descriptions 4,751 → 3,169 chars (**~400 tokens/session [EST] after store convergence**). NOTE: measured reality was smaller than the blueprint's 3–5k estimate — the giant descriptions are fleet-registry entries (not the skill listing), already addressed by 4a | PR merged; 1-week trigger observation open |
+| 4d skillOverrides demotions | **COLLAPSED by T12** (plugin-qualified overrides no-op); documented in tech.md §9b + authority registry; /plugin actions = Gabriel's call | doc |
+
+## Phase 5 — governance
+| Task | Result | Validation |
+|---|---|---|
+| setup-self-audit +2 checks | `check_prepush_shim` (CRIT on missing/gutted shim — the #1 SPOF) + `check_windows_tasks` (6-task backbone presence/last-result) | Live: shim OK; windows-tasks correctly WARNs on dead-man's latched morning result (clears at tomorrow's fire). Tests **23/23** (3 new shim-logic tests) |
+| doctrine probe + workspace pointer | `Last verified:` date machine-checked vs the pointer's own 30-day rule (WARN-only, fail-open) | Live: "OK (last verified 21 days ago)"; doctrine tests ALL PASS |
+| tech.md §9b | 4 document-only quirks recorded (blocklist test-row, project-key fragmentation, claude-code-plugins registration, inert skillOverrides entries) | file |
+| Final sweep | settings JSON valid; hook gate **59/59** | outputs above |
+
+**New deferred validations (Milestone 3):** ora-nightly-disk next scheduled 04:00 run · description-trigger observation week (PR #26 skills after store convergence) · ora-weekly-hygiene Block O first Sunday run (2026-08-02) · ora-skill-text-audit class n first run (2026-08-15).

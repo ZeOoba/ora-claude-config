@@ -1272,6 +1272,38 @@ def main():
     # (check 8 already hard-fails on ACTIVE-deal terms anywhere).
     ported_copies = (overrides["ported_copies"] if "ported_copies" in overrides
                      else (list(PORTED_CLAUDE_MD_COPIES) if live_mode else []))
+
+    # --- Workspace-pointer staleness (2026-07-29, Phase-5 blueprint): the thin
+    # pointer CLAUDE.md self-declares "If older than 30 days, treat as stale" via a
+    # 'Last verified: YYYY-MM-DD' line, but nothing machine-checked that promise --
+    # a stale pointer silently misroutes Cowork sessions. WARN-only, fail-open.
+    if live_mode:
+        try:
+            import datetime as _dt
+            _wp = Path(r"C:\Users\Owner\OneDrive - Oxford Capital Partners"
+                       r"\Claude_Workspace\01_Workspace\CLAUDE.md")
+            _body, _err = read_optional(_wp)
+            if _body is None:
+                warn("workspace-pointer staleness: file unreadable (fail-open) -- %s"
+                     % ascii_safe(_err))
+            else:
+                _m = re.search(r"Last verified:\s*(\d{4})-(\d{2})-(\d{2})", _body)
+                if not _m:
+                    warn("workspace-pointer staleness: no 'Last verified: YYYY-MM-DD' "
+                         "line found -- the self-staleness contract is unverifiable")
+                else:
+                    _age = (_dt.date.today()
+                            - _dt.date(*map(int, _m.groups()))).days
+                    if _age > 30:
+                        warn("workspace-pointer CLAUDE.md is STALE by its own rule: "
+                             "last verified %s (%d days ago > 30) -- re-verify or "
+                             "re-point it" % (_m.group(0)[14:], _age))
+                    else:
+                        print("Workspace-pointer staleness: OK (last verified %d days ago)"
+                              % _age)
+        except Exception as _e:
+            warn("workspace-pointer staleness check errored (fail-open): %s"
+                 % ascii_safe(str(_e)))
     if terms_data is not None and isinstance(terms_data, dict):
         residue_total = 0
         for key, entry in terms_data.items():
