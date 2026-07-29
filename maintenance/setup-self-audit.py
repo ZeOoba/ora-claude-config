@@ -412,10 +412,82 @@ def check_drift():
     except Exception as e:
         add("memory-fleet-drift", "SKIP", f"error: {e}")
 
+# ---- Check 6: PRE-PUSH SHIM PRESENCE (2026-07-29, Phase-5 blueprint) ----
+# ~/.claude/.git/hooks/pre-push is deliberately NOT version-controlled (git drops it on
+# a fresh clone), yet it is the ONLY thing that chains all three push gates (doctrine
+# drift, hook-test suite, fail-closed confidential scan). A missing/gutted shim means
+# every push silently skips all three -- the audit's #1 single-point-of-failure finding.
+def check_prepush_shim():
+    shim = os.path.join(CLAUDE, ".git", "hooks", "pre-push")
+    if not os.path.isfile(shim):
+        add("prepush-shim", "CRIT",
+            "pre-push shim MISSING -- all 3 push gates (doctrine/tests/confidential) are "
+            "silently OFF; reinstall per docs/MIGRATION_RUNBOOK.md")
+        return
+    try:
+        txt = open(shim, encoding="utf-8", errors="replace").read()
+    except Exception as e:
+        add("prepush-shim", "WARN", "shim unreadable: %s" % e)
+        return
+    missing = [g for g in ("git-prepush-doctrine-gate.py", "git-prepush-hook-tests-gate.py",
+                           "git-prepush-confidential-scan.py") if g not in txt]
+    if missing:
+        add("prepush-shim", "CRIT", "shim present but does NOT chain: %s" % ", ".join(missing))
+    else:
+        add("prepush-shim", "OK", "shim chains all 3 gates")
+
+# ---- Check 7: WINDOWS-TASK BACKBONE (2026-07-29, Phase-5 blueprint) ----
+# The app-independent automation layer. Presence: all 6 expected. Last-result: nonzero
+# on the two dead-man legs is WARN (retry policy added 2026-07-29 absorbs transients;
+# two consecutive failures surface via the daily cadence of this audit).
+WINDOWS_TASKS = {  # name -> CRIT-if-missing?
+    "ORA Fleet Dead-Man": True,
+    "ORA Fleet Heartbeat Push": True,
+    "ORA Stuck-Session Watchdog": False,
+    "ORA Command Center - Mirror Deploy": False,
+    "ClaudeFleetMirror": False,
+    "ORA Nightly Disk Clean": False,
+}
+
+def check_windows_tasks():
+    import subprocess
+    ps = ("$ErrorActionPreference='SilentlyContinue'; "
+          + "; ".join(
+              "$t=Get-ScheduledTask -TaskName '%s'; if ($t) { $i=$t | Get-ScheduledTaskInfo; "
+              "Write-Output ('%s|PRESENT|' + $t.State + '|' + $i.LastTaskResult) } "
+              "else { Write-Output '%s|MISSING||' }" % (n, n, n)
+              for n in WINDOWS_TASKS))
+    try:
+        r = subprocess.run(["powershell.exe", "-NoProfile", "-Command", ps],
+                           capture_output=True, text=True, timeout=60,
+                           encoding="utf-8", errors="replace")
+        rows = dict()
+        for ln in (r.stdout or "").splitlines():
+            parts = ln.strip().split("|")
+            if len(parts) == 4:
+                rows[parts[0]] = parts
+    except Exception as e:
+        add("windows-tasks", "SKIP", "query failed: %s" % e)
+        return
+    bad = []
+    for name, crit in WINDOWS_TASKS.items():
+        row = rows.get(name)
+        if not row or row[1] != "PRESENT":
+            bad.append(("CRIT" if crit else "WARN", "%s MISSING (re-register per its script header)" % name))
+        elif row[3] not in ("0", "267009", "267011", ""):  # 267009=running, 267011=never-ran
+            bad.append(("WARN", "%s last result %s" % (name, row[3])))
+    if any(s == "CRIT" for s, _ in bad):
+        add("windows-tasks", "CRIT", "; ".join(m for _, m in bad))
+    elif bad:
+        add("windows-tasks", "WARN", "; ".join(m for _, m in bad))
+    else:
+        add("windows-tasks", "OK", "all %d backbone tasks present, last results clean" % len(WINDOWS_TASKS))
+
 def main():
     as_json = "--json" in sys.argv
     strict = "--strict" in sys.argv
-    for fn in (check_fleet, check_skills, check_secrets, check_connectors, check_drift):
+    for fn in (check_fleet, check_skills, check_secrets, check_connectors, check_drift,
+               check_prepush_shim, check_windows_tasks):
         try:
             fn()
         except Exception:

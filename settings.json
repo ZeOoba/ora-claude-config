@@ -462,12 +462,6 @@
         "repo": "anthropics/claude-plugins-official"
       }
     },
-    "chrome-devtools-plugins": {
-      "source": {
-        "source": "github",
-        "repo": "ChromeDevTools/chrome-devtools-mcp"
-      }
-    },
     "anthropic-agent-skills": {
       "source": {
         "source": "github",

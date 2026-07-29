@@ -1,5 +1,8 @@
 # ORA scheduled-task email send pattern (canonical)
 
+> **RETIRED 2026-07-29 (Phase 3, approved blueprint):** `Send-OraReport.ps1` and `Send-OutreachQueueEmail.ps1` are archived in `_archive_2026-07-29_run-residue/` — zero live callers (verified by fleet-wide grep, both fleets). `send-via-outlook.ps1` is the SOLE send path (canon). Examples below referencing the retired wrappers are historical.
+
+
 Last updated 2026-06-15. Applies to EVERY scheduled task that emails a report.
 
 ## The rule
