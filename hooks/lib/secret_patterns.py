@@ -38,8 +38,38 @@ SECRET_PATTERNS = [
     ("Slack token", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b")),
     ("generic API key assignment",
      re.compile(r"(?i)\b(?:api[_-]?key|apikey)\b\s*[:=]\s*[\"']?[A-Za-z0-9_\-]{16,}")),
+    ("Netlify token", re.compile(r"\bnfp_[A-Za-z0-9]{20,}\b")),
+    # 2026-07-30 GAP FIX (credential-exposure sweep). The prior pattern was
+    #   \b(?:FRED_API_KEY|SECRET|TOKEN)\b
+    # and `_` is a WORD character, so no \b exists before TOKEN in NETLIFY_AUTH_TOKEN --
+    # the boundary silently required the keyword to stand alone. Measured: 10 of 12
+    # realistic shapes evaded EVERY pattern in this module, including every secret name in
+    # ORA's own stack (tech.md 7). Live proof: the archived oxfordra-net repo's commit
+    # 4b7a3bb carries NETLIFY_AUTH_TOKEN = nfp_..., and a whole-history scan using this
+    # module returned CLEAN -- the pre-push exfiltration gate was blind to it.
+    # The name side now allows an optional UPPER_SNAKE prefix (NETLIFY_AUTH_, STRIPE_,
+    # SUPABASE_SERVICE_ROLE_) and an optional lower_snake prefix for the common
+    # access_/refresh_/auth_/client_ forms. Value side unchanged at 12+ chars; the
+    # placeholder/env-reference suppressor below keeps the widening from adding noise.
+    # Both EDGES need the same treatment: `_` is a word char, so \b fails before the
+    # keyword (NETLIFY_AUTH_TOKEN) AND after it (STRIPE_SECRET_KEY -- SECRET is followed
+    # by _KEY). Optional UPPER_SNAKE prefix AND suffix. The explicit KEY-ending names are
+    # curated: bare `*_KEY` is DELIBERATELY EXCLUDED because the 2026-07-30 sweep measured
+    # it firing on localStorage keys (STORAGE_KEY/SESSION_KEY/HISTORY_KEY in chat.js) --
+    # a precision trade, documented, not an oversight.
     ("secret/token assignment",
-     re.compile(r"(?i)\b(?:FRED_API_KEY|SECRET|TOKEN)\b\s*[:=]\s*[\"']?[A-Za-z0-9_\-]{12,}")),
+     re.compile(r"(?i)\b(?:[A-Z][A-Z0-9]*_)*"
+                r"(?:FRED_API_KEY|SECRET|TOKEN|PASSWD"
+                r"|SERVICE_ROLE_KEY|ANON_KEY|PRIVATE_KEY|ACCESS_KEY"
+                r"|SIGNING_KEY|ENCRYPTION_KEY|AUTH_KEY|MASTER_KEY)"
+                r"(?:_[A-Z0-9]+)*\b"
+                r"\s*[:=]\s*[\"']?[A-Za-z0-9_\-\.]{12,}")),
+    ("secret/token assignment",
+     re.compile(r"(?i)\b(?:access|refresh|auth|session|client|private|bearer)_"
+                r"(?:token|secret|key)\b\s*[:=]\s*[\"']?[A-Za-z0-9_\-\.]{12,}")),
+    ("generic API key assignment",
+     re.compile(r"(?i)\b(?:[A-Z][A-Z0-9]*_)+API[_-]?KEY\b"
+                r"\s*[:=]\s*[\"']?[A-Za-z0-9_\-\.]{12,}")),
     ("generic bearer token", re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._\-]{16,}")),
     ("password assignment",
      re.compile(r"(?i)\bpassword\b\s*[:=]\s*[\"']?[^\s\"']{6,}")),
@@ -102,6 +132,88 @@ def _is_placeholder(value):
     return (v.lower() in _PLACEHOLDER_VALUES) or bool(_PLACEHOLDER_SHAPE_RE.match(v))
 
 
+# --- 2026-07-30: reference / placeholder suppressor for the WIDENED name matcher -------
+# Widening the name side (NETLIFY_AUTH_TOKEN, SUPABASE_SERVICE_ROLE_KEY, access_token...)
+# also makes ordinary CODE match: `process.env.GITHUB_TOKEN`, `os.environ["CRON_SECRET"]`,
+# `NETLIFY_AUTH_TOKEN = "${NETLIFY_AUTH_TOKEN}"`. Those are REFERENCES, not credentials.
+# Per the 2026-07-24 alarm-fatigue ruling, precision here protects the gate's usefulness.
+# DELIBERATELY NARROW -- each entry is a construct that cannot itself BE a secret:
+#   * an env/config LOOKUP on the value side  * a template/interpolation placeholder
+#   * an obvious YOUR_/EXAMPLE/CHANGEME literal
+# A real 12+ char literal still fires. Suppression is a false NEGATIVE, so nothing here
+# may match a value that could be genuine.
+# Split a single NAME<sep>VALUE match into its value side. Per-match, so no greedy
+# capture across a following assignment (a REFUTED design, 2026-07-30).
+_SEP_SPLIT_RE = re.compile(r"[:=]")
+
+
+def _match_value(matched_text):
+    parts = _SEP_SPLIT_RE.split(matched_text, maxsplit=1)
+    return parts[1].strip() if len(parts) > 1 else ""
+_REFERENCE_VALUE_RE = re.compile(
+    r"""(?ix)^\s*["']?(?:
+          (?:process\.)?env(?:iron)?[\.\[\(]      # process.env.X / environ["X"] / env(
+        | os\.environ | os\.getenv | getenv
+        | Deno\.env | import\.meta\.env
+        | \$\{ | \{\{ | %\( | <%                  # template interpolation
+        | \$env: | \$Env:                          # PowerShell
+        | Get-Item\s+env: | \[Environment\]::
+        | secrets\. | vars\.                       # GH Actions
+    )""")
+# ANCHORED and case-SENSITIVE for the word forms (REFUTE finding 3, 2026-07-30): the
+# earlier unanchored (?i) version suppressed any value merely BEGINNING with
+# your/sample/todo/fake/redacted -- including quoted 14+ char high-entropy values, 6
+# proven false negatives. A placeholder must now be essentially the WHOLE value, and the
+# word forms must be SHOUTED (real keys are mixed-case/lowercase; template placeholders
+# are conventionally upper). Bracketed/starred/dotted forms stay case-agnostic.
+_PLACEHOLDER_LITERAL_RE = re.compile(
+    r"""^\s*["']?(?:
+          (?:YOUR|REPLACE|CHANGEME|CHANGE_ME|EXAMPLE|PLACEHOLDER|TODO|FIXME
+            |DUMMY|FAKE|SAMPLE|REDACTED|INSERT|ADD)[A-Z0-9_\-]*
+        | [Xx]{4,} | \.{3,} | \*{4,} | <[^>]*> | \{\{[^}]*\}\}
+    )["']?\s*$""", re.X)
+
+
+# CODE-REFERENCE discriminator (2026-07-30, measured): the widened name matcher also fires
+# on ordinary source -- `token = _normalize(new_stage)` (a function call) and
+# `SECRET_PATTERNS = sp.SECRET_PATTERNS` (a constant reference) were 3 of 3 newly-flagged
+# TRACKED files in the differential run. Left unfixed those would block EVERY push, which
+# is a worse outcome than the gap: a gate that always fires gets bypassed.
+# Discriminator: a real credential literal is QUOTED or contains a DIGIT (entropy);
+# a code identifier is typically neither, and a call is followed by '('. Conservative --
+# an unquoted digit-bearing value still fires, so nfp_/sk-/AKIA-style keys are unaffected.
+_CALL_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_\.]*\s*\(")
+# EXACTLY one dot, identifier both sides -> `module.CONST` / `sp.SECRET_PATTERNS`.
+# A JWT (eyJ...eyJ...sig) has TWO dots and always carries digits, so it never matches.
+_DOTTED_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _looks_like_code_reference(raw_value):
+    """A CODE construct that cannot itself be a credential. Deliberately narrow -- an
+    earlier, broader 'unquoted and no digits' rule suppressed this module's OWN long-
+    standing fixtures, i.e. it would have silently weakened real detection. Two shapes.
+    ACCEPTED residual (REFUTE, 2026-07-30): an UNQUOTED passphrase-style secret of the
+    form word.word with no digits reads as a module.CONST reference and is suppressed.
+    Quoting it restores detection; the code-reference FP it prevents is far more common."""
+    v = raw_value.strip().rstrip(",;)")
+    if _CALL_RE.match(v):
+        return True                                   # function call: _normalize(...)
+    # module.CONST reference, with NO digits anywhere (a real key has entropy)
+    return bool(_DOTTED_IDENT_RE.match(v)) and not any(c.isdigit() for c in v)
+
+
+def _value_is_reference(value):
+    """True when THIS match's own value is an env lookup / template / placeholder / code
+    reference rather than a credential. Suppression is the false-negative direction, so
+    anything not positively recognized here keeps the finding."""
+    v = (value or "").strip()
+    if not v:
+        return True                                   # empty assignment is not a secret
+    return bool(_REFERENCE_VALUE_RE.match(v)
+                or _PLACEHOLDER_LITERAL_RE.match(v)
+                or _looks_like_code_reference(v))
+
+
 def scan_text(text):
     """Sorted, de-duplicated labels of patterns present in `text`.
 
@@ -115,6 +227,23 @@ def scan_text(text):
             # report only if at least one assigned value is not a documented placeholder
             vals = _PASSWORD_VALUE_RE.findall(text)
             if vals and all(_is_placeholder(v) for v in vals):
+                continue
+        if label in ("secret/token assignment", "generic API key assignment"):
+            # widened-name matcher: suppress env-reference / placeholder / code-reference
+            # matches only. Evaluated PER MATCH -- each match is tested against ITS OWN
+            # value. Two earlier designs were REFUTED (2026-07-30) and must not return:
+            #   * whole-TEXT: all-or-nothing; one genuine value anywhere defeated
+            #     suppression everywhere, and vice versa.
+            #   * per-LINE: the pattern's `\s*` after [:=] spans newlines, so a YAML-style
+            #     `TOKEN:\n  <value>` matched the full text while matching NO single line
+            #     -- the label was dropped entirely. A real false negative.
+            # Per-match also fixes the greedy-capture evasion (`A=${TPL} SECRET=real`):
+            # the match's value side stops at whitespace, so the real assignment is its
+            # own match and is judged on its own.
+            # Prefix-shaped credentials (nfp_/sk-ant-/ghp_/AKIA) carry their own labels
+            # and never route through here, so a real key is unaffected either way.
+            if all(_value_is_reference(_match_value(m.group(0)))
+                   for m in rx.finditer(text)):
                 continue
         found.add(label)
     return sorted(found)
