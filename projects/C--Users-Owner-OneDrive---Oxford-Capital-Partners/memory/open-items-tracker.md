@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-07-30T12:53:59.097Z
+  modified: 2026-08-02T01:43:11.974Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -45,6 +45,28 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | [OI-030](#OI-030) | 2026-07-26 | `ora-weekly-hygiene` Sunday run + 3 concurrent sessions, 2026-07-26 | **Block C of `ora-weekly-hygiene/SKILL.md` needs one HUMAN coherence read before the next Sunday fire (2026-08-02).** It absorbed edits from four sessions in a single day, including a Gabriel ruling (`caf154b`) that *overrode* an earlier same-day repoint: check G was repointed to the `egoldberg` Graph drive, then formally DROPPED hours later, leaving text that argued for a check the file struck through (dangling ref fixed in `9870bb4`, but only that one symptom). Other same-day edits: Check B respec, frozen-snapshot RED override, real folder names, Block N added, `781bf95` consolidating several idle sessions' WIP. Each change is individually sound and the block is coherent *as far as incremental patching can verify* — the risk is the kind only a full read catches: two locally-correct passages that disagree globally, exactly the failure mode the check-G ruling itself was. NOT another incremental agent patch; the next edit to Block C should follow a human read of the whole block. Detail: [event_log.md](event_log.md) 2026-07-26 |
 | [OI-031](#OI-031) | 2026-07-27 | `orphaned-task-forensics` trace of the `ora-master-workbook-ingest` 2026-07-20 gap, [event_log.md](event_log.md#2026-07-27) | `fleet-status.py`'s overdue/missed-stuck detectors are structurally blind to a single skipped weekly cycle on an already-established recurring task — neither check applies to it (confirmed by reading the script) |
 | [OI-033](#OI-033) | 2026-07-28 | Cowork-surface follow-up to the Code-surface usage-limit audit, 2026-07-28 | LAMS `ora-tenant-contact-gap-sweep` carries no `[MODEL: ...]` tag (sole untagged task in a 27/28-tagged LAMS fleet); fix needs `update_scheduled_task` from a Cowork-surface session |
+| [OI-034](#OI-034) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **HIGH** ora-pm autopay creates a DUPLICATE ACH DEBIT if monthly-billing re-runs — `server/routes/cron.ts:71-107`: the charge inserts are idempotent (unique `idempotency_key`, 23505 counted as skipped) but the autopay `paymentIntents.create` below has NO `idempotencyKey` and no existing-payment check, and sums ALL charges due in the period regardless of manual payment. Real-money/NACHA exposure; `scripts/trigger-billing.ps1` is manually re-runnable and the fleet has a documented catch-up-burst behaviour |
+| [OI-035](#OI-035) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **HIGH** ora-pm `payments.stripe_payment_intent_id` has only a NON-unique partial index (`supabase/migrations/0002_financial_tables.sql:26-40`) — nothing at the DB layer prevents two `payments` rows for one PaymentIntent. `POST /api/stripe/payment-intent` creates the PI then inserts the row as two non-atomic steps, so a client retry after a network timeout doubles both. Same class as the shipped cartesian fan-out: the ledger is a sum over rows, so a duplicate row is a silent balance error that under-states the tenant's true balance and makes delinquency-check skip them |
+| [OI-036](#OI-036) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **MEDIUM** ora-pm admin authorization is a bare email-domain suffix (`server/middleware/admin-auth.ts:30-32`, `user.email?.endsWith('@oxfordra.net')`) over a self-service OTP flow — no role table, no allowlist, one Supabase auth project for both admin and tenant audiences, and `AdminLogin.tsx` calls `signInWithOtp` without `shouldCreateUser: false`. Anyone controlling mail at ANY `@oxfordra.net` address (catch-all, shared/departed mailbox) gets the full admin API: all tenant PII, lease economics, AR, plus `inviteUserByEmail`/`deleteUser`. Edge: a tenant invited at an `@oxfordra.net` contact email silently becomes admin |
+| [OI-037](#OI-037) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **MEDIUM** ora-pm HTTP response posture: wildcard CORS on every authenticated API route (`server/index.ts:47`, Hono `cors()` defaults to `origin:'*'`, applied to `/api/*` incl. admin CRUD, portal and Stripe), and NO security headers at all — no `_headers` file, no `wrangler.toml` header block, no `<meta http-equiv>`; Cloudflare Pages emits none by default. The Pay Now page is framable (clickjacking into an ACH debit), and with no CSP any future injected script reaches the Supabase session in `localStorage` on an origin shared by the tenant portal and the admin app. NOTE: header absence was verified by file inventory, NOT by fetching the live site |
+| [OI-038](#OI-038) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **MEDIUM** ora-pm rate limiting is per-isolate in-memory and therefore bypassable (`server/lib/rate-limit.ts:1-26` — a module-scope `Map` in a Cloudflare Workers isolate; Cloudflare spreads requests across many isolates/colos, so an attacker gets a fresh counter each time; the file concedes it is best-effort). It is the ONLY rate limit in the app and is applied only to PaymentIntent creation — `/api/intake/lease`, admin CRUD and `/api/cron/*` have none. IP fallback at `stripe.ts:87` trusts the attacker-controlled `X-Forwarded-For` when `CF-Connecting-IP` is absent. Compounding: the LLM intake endpoint has no rate, per-day or spend budget and `INTAKE_MODEL` is an unallowlisted env override |
+| [OI-039](#OI-039) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **MEDIUM** ora-pm money columns are bare `NUMERIC` with no scale, no `COMMENT ON COLUMN` and no unit suffix (`supabase/migrations/0002_financial_tables.sql:14` `charges.amount`, `:30` `payments.amount`), while the API boundary uses a DIFFERENT unit under a similar name (`amount_cents`, `server/routes/stripe.ts:96`). Cents-vs-dollars is unprovable from name, type or comment — the precondition that produced the 2026-07-18 divide-by-100 display bug. Unconstrained `NUMERIC` also permits sub-cent values (0.005) that round inconsistently between the aggregate view and per-row display. NOTE: the balance path itself traced CLEAN this run (exactly zero conversions, correctly) |
+| [OI-040](#OI-040) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **MEDIUM** ora-pm has no server-side upper bound and no ledger reconciliation on `amount_cents` (`server/routes/stripe.ts:96-101` validates integer + `>= 50` only, with no maximum and no check that the amount relates to the lease's outstanding balance). Compounding: `GET /api/portal/charges` returns EVERY charge on an active lease with no paid/open discriminator (acknowledged in-code at `portal.ts:44-51` and `PortalPayNow.tsx:21-24`), so the portal presents already-settled charges as payable. A tenant can initiate an arbitrarily large ACH debit and can pay the same charge twice with no warning — dispute/reversal exposure plus credit balances the system has no way to represent |
+| [OI-041](#OI-041) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **MEDIUM** ora-pm mass assignment — 10 handlers pass `await c.req.json()` straight into `.insert()`/`.update()`/`.upsert()` with no Zod schema (`budgets.ts:25`, `insurance.ts:35,46`, `renewals.ts:22`, `units.ts:20,28`, `cam.ts:23-24`, `leases.ts:74,98`, `tenants.ts:62`) while sibling routes correctly use `safeParse`. `budgets.ts:25` also accepts an ARRAY body, making the upsert unbounded in row count. Admin-authenticated only, so integrity/defense-in-depth rather than a breach path — but an admin (or anything holding an admin JWT, see OI-036) can set columns the UI never exposes including `id` and `created_at` |
+| [OI-042](#OI-042) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **MEDIUM** ora-pm returns RAW Postgres error messages to clients from ~20 call sites (`portal.ts:50,74,93,117,141`, `insurance.ts:38,50`, `cam.ts:79`, `reports.ts:15,27,35,53,57,62`, `cron.ts:40,131,167,227`, `units.ts`, `budgets.ts`, `renewals.ts`, `webhook.ts:20,40`). `server/middleware/error-handler.ts` sanitizes *thrown* errors and its comment claims raw DB messages are never exposed — but that only covers the catch path; these sites `return c.json({error: error.message}, 500)` from a Supabase result. Several are on `/api/portal/*`, reachable by any authenticated tenant, disclosing table/column/constraint/RLS-policy names as a free schema map |
+| [OI-043](#OI-043) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **MEDIUM** ora-pm stores `autopay_payment_method_id` verbatim from the client with no ownership verification (`server/routes/portal.ts:124,136-140`) — the lease-ownership IDOR guard at `:133-134` is correct, but nothing calls Stripe to confirm the payment method is attached to THIS tenant's `stripe_customer_id`. The value is later used off-session at `cron.ts:87`. Stripe rejects a PI whose payment_method belongs to another customer, so the practical outcome is failed autopay rather than a cross-tenant debit — but the only control is a third party's behaviour, and the failure is silent (`errors++` inside a 200 response). A tenant can also write arbitrary strings into the column |
+| [OI-044](#OI-044) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **MEDIUM (OWASP LLM02)** ora-pm's confidentiality guard scans the FILENAME only, never the PDF content (`server/routes/intake.ts:17-30`, `server/lib/confidentiality.ts:8-11`) — `containsConfidentialTerm` is applied pre-egress to `filename` and post-egress to returned strings, but the decoded PDF ships to `api.anthropic.com` unexamined. A confidential-matter lease saved as `lease_final_v3.pdf` egresses in full. Documented as Phase 2a scope with four compensating controls (admin-gated, bound to an existing managed tenant_id+unit_id, fail-closed denylist, UI attestation) — the residual is that the 'structurally a managed lease' control is an argument about intent, not an enforced constraint |
+| [OI-045](#OI-045) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **MEDIUM** ora-pm MFA enrollment is a NO-OP that misrepresents its own state — `src/portal/pages/PortalAccount.tsx:33-35,87-93`: `handleMFA` awaits `portalSupabase.auth.mfa.enroll({...})` and DISCARDS the result; the TOTP secret and QR code are never rendered and no `mfa.challenge`/`mfa.verify` call exists anywhere in the repo (grep for `mfa` returns only this file). The factor is created `unverified` and enrollment can never complete. The UI tells tenants 'Enable two-factor authentication (TOTP) for additional account security' — so tenants may believe the account that authorizes ACH debits is MFA-protected when it is not. Repeated clicks accumulate orphaned unverified factors |
+| [OI-046](#OI-046) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **MEDIUM** ora-pm CAM approval is a read-check-act race with no transaction or row lock (`server/routes/cam.ts:84-138` reads `status`, checks `!== 'draft'`, inserts a `cam_true_up` charge, then updates status) and the inserted charge carries no `idempotency_key`. Root cause is broader: `charges.idempotency_key` is `TEXT UNIQUE` but NULLABLE (`0002_financial_tables.sql:17`), and Postgres treats NULLs as distinct — so EVERY manually-sourced charge, including every `POST /api/charges`, has zero duplicate protection. Two concurrent approvals both observe `draft` and both post a true-up, double-billing the tenant |
+| [OI-047](#OI-047) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **MEDIUM — NEEDS GABRIEL'S RULING, do not change unilaterally.** ora-pm's two cron jobs send email via Resend (`POST https://api.resend.com/emails`, `server/routes/cron.ts:118,184-200,219,297-311`) with `RECIPIENTS = ['ggoldberg@oxfordra.net','egoldberg@oxfordra.net']` and `from` defaulting to `pm@oxfordra.net`. ORA canon designates `_shared/send-via-outlook.ps1` as the SOLE automated send path and routes scheduled output to ggoldberg ONLY (sole exception: ora-am-brief's Daily Brief, which this is not). A second independently-credentialed egress path for firm operational data — tenant names, property/suite, outstanding balances — outside the audited Outlook chain and its exit-code retry semantics |
+| [OI-048](#OI-048) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **MEDIUM** ora-pm: ALL API database access uses the service-role key (`server/db/client.ts:6-13`), which bypasses RLS entirely — so the `auth.uid()` policies in `0004_views_and_rls.sql:101-189` have NO effect on any API request and every tenant-scoping guarantee rests solely on hand-written `.eq('auth_user_id', userId)` lookups. Not a live vulnerability (all six portal endpoints + three Stripe endpoints were traced and each correctly resolves the tenant from the JWT first, with explicit IDOR guards) — the risk is that RLS READS as a safety net in the migrations but is not one: one future endpoint that forgets the filter is an immediate full cross-tenant read with nothing behind it. Compounding: `0008_storage_rls.sql` self-describes as applied out-of-band via a Node script, so live RLS state is UNVERIFIED-not-clean |
+| [OI-049](#OI-049) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (oxford-command-center @ `3692385`, security-auditor dispatch) | **MEDIUM — S-002 carve-out drift, CONFIRMED IN HISTORY.** oxford-command-center's ratified financial config has no mechanical change-gate: `config/acquisition-ruleset.v1.json` and `config/replacement-cost.v3.json` appear in NO gate — not in `.claude/hooks/architect-owned.json` globs, not in `scripts/check-refute-required.ts` path sets, and `governance-check.ts` does not reference them. Only prose in the file's `_comment` protects them. Commit `a83ce684` (2026-07-14, PR #210, merged to origin/main) materially changed gate bounds (basisDiscountMin 0.25->0.60 / 0.30->0.65, vintage cutoff 2000->2005) while still carrying `rulesetVersion:"1.0.0"` and `ratifiedDate:"2026-06-14"`; the version-bump ceremony landed 2 days later (`d28d8bfb`). No ACTIVE drift at the pinned SHA — the file is blob-identical to the ceremony state — but the root cause is open. Invariant-4 adjacent |
+| [OI-050](#OI-050) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (oxford-command-center @ `3692385`, security-auditor dispatch) | **MEDIUM** oxford-command-center brain server has NO Host-header validation (`server/index.ts:531` binds 127.0.0.1, `server/cors-policy.ts` enforces localhost-only CORS) — but CORS is the wrong control for DNS rebinding: an attacker page whose DNS rebinds to 127.0.0.1 makes SAME-ORIGIN requests, so no CORS check applies at all. There is no Host allowlist and no CSRF token, and every state-changing route (`POST /api/actions/*`, `/api/refresh`, `/api/warehouse/properties/onboard`) is unauthenticated by design. A malicious page open in Gabriel's browser while the server runs can exfiltrate `GET /api/snapshot` — the full portfolio including confidential deals, tenants, loans, counterparty data — and can mutate deal stages, NOI budgets, tenant notes and lease-run assumptions |
+| [OI-051](#OI-051) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (oxford-command-center @ `3692385`, security-auditor dispatch) | **MEDIUM** oxford-command-center's confidential-bake deploy PUBLISHES BEFORE it checks the gate and never rolls back — `scripts/deploy-mirror.ps1:112` sets `MIRROR_INCLUDE_CONFIDENTIAL=1`, `:120` deploys to Cloudflare Pages, and only `:137-167` curls the apex to confirm unauthenticated traffic still 302s to Access. If Access has been disabled/misconfigured since the last run, confidential data is publicly served for deploy + 5s settle + up to 3 retries x 15s (~35s+) and REMAINS served after the script throws — the failure path alerts but performs no rollback or unpublish. Second gap: it probes `$VerifyUrl` (`ora-command-center.pages.dev`) only, while `brain.oxfordra.net` is a second Access destination on the same project, so a custom-domain-scoped policy change would pass the check while serving confidential data. This is the one path in scope where deal terms reach an EXTERNALLY SERVED artifact — outside S-001's suppression |
+| [OI-053](#OI-053) | 2026-07-30 | Credential-exposure sweep, 2026-07-30 | **Composio API key in plaintext inside OneDrive (cloud-synced):** `Claude_Workspace/01_Workspace/oxford-agent/config.py:3`, duplicated at `01_Workspace/_archive/legacy-templates-2026-03/Claude Agents SDK - Getting Started.md:90`. Composio is a RETIRED connector (removed 2026-06-11), so the key is probably dead — but it has been syncing to Microsoft's cloud and any other device on this OneDrive account. Gabriel to revoke at Composio if that account still exists, then the two files can be scrubbed/archived |
+| [OI-054](#OI-054) | 2026-07-30 | Credential-exposure sweep, 2026-07-30 | **Stale FRED API key hardcoded into 3 request URLs in a OneDrive-synced file:** `Claude_Workspace/00_Governance/Scheduled/_archive_2026-06-09_retired/ora-debt-maturity-snapshot/SKILL.md:16-18`. Hash-compared against the live key (now a user env var): **different**, so this is an older/rotated key. Free St. Louis Fed key, no billing — LOW severity, cleanup not rotation |
+| [OI-055](#OI-055) | 2026-07-30 | Credential-exposure sweep, 2026-07-30 | **Dead-connector + dev credentials in local archives:** a searchapi.io token in 3 `.claude.json` backups under `~/archive/root-cleanup-2026-07-09/config-backups/` (connector removed 2026-06-02), plus two local dev private keys (`~/archive/ai-tool-cleanup-2026-07-09/.android/adbkey`, `.ollama/id_ed25519`). All disk-local, none git-tracked. LOW — revoke the searchapi token if that account is live; the PEM keys have no external account |
+| [OI-052](#OI-052) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (dispatch integrity gate, first live test) | **MEDIUM — sweep mechanism, not a repo defect.** The `ora-appsec-sweep` Fable model floor is carried entirely by the `security-auditor` Agent dispatch (Gabriel-ratified Option C, 2026-07-24, because the task's own frontmatter `model:` pin is inert on CC/MCP). First live test 2026-07-31: the dispatch WORKED — both subagents spawned with `model:"fable"` recorded in their meta and both STARTED on `claude-fable-5` — but both then fell back mid-run to `claude-opus-5` via an explicit harness `{"type":"fallback","from":"claude-fable-5","to":"claude-opus-5"}` event (ora-pm at msg ~108, 68 of 130 assistant msgs on opus-5; occ at msg ~163, 3 of 110). Opus-5 is the session's own top-tier main-loop model, NOT a downgrade to Sonnet/Haiku — so the never-below-Fable floor does not appear breached downward — but the pin does NOT hold end-to-end, which the DISPATCH INTEGRITY GATE's three assertions do not detect |
 
 ### OI-009
 **Status:** OPEN (substantial progress made 2026-07-17, real scope remains)
@@ -597,6 +619,19 @@ authorized) correcting the SHA to `6aed9a7`, confirming `main`/branches/#5/#6 ar
 asking GitHub to purge `6aed9a7` / blob `39b02f4585cc6357876423d04d5c3fcee65793b0` via the
 strip-internal-references option (preserves PR #2 comment history). Ticket reopened to **status:
 open**, 3 comments. Awaiting GitHub's action on the corrected SHA.
+**SCOPE CORRECTION 2026-07-31 (ora-appsec-sweep, ora-pm @ `a226f2b`) — the blob is reachable from
+THREE PR refs, not one.** The weekly sweep's `security-auditor` dispatch re-derived this finding
+independently and, scanning per-ref after fetching `+refs/pull/*/head` (11 refs), found blob
+`39b02f4585cc6357876423d04d5c3fcee65793b0` reachable from **`refs/pull/2/head`, `refs/pull/3/head`,
+AND `refs/pull/4/head`** — this row and ticket #4584520 both cite only PR #2. Introducing commit
+confirmed as `6aed9a7` ("feat(intake): Phase 2a lease intake…", 2026-06-06), carried forward by
+`926f3315`. Branch-reachability re-confirmed clean a third time (local `log -p --all` and a fresh
+bare clone's `refs/heads/*` both show only the placeholder value), so OI-015's conclusion still
+stands. **Action for Gabriel:** the pending Support request should enumerate PR refs 2, 3 and 4 —
+purging only #2 would leave the blob live. Also worth confirming while the ticket is open: the terms
+`3520`, `sij`, `columbus stamping`, `nutis` in that blob have NOT been verified as declassified
+(only the Fulton terms have, 2026-07-09) — check them against `confidential-terms.json` before
+assuming the exposure is low-urgency across the whole string.
 **Auto-check:** none.
 
 ### OI-016
@@ -977,6 +1012,400 @@ including 5 set after the ~2026-07-25 Opus 5 rollout — LAMS shows no model dri
 **Candidate fix (not built):** tag it `[MODEL: claude-sonnet-5 | set 2026-07-28]` via
 `update_scheduled_task` from a Cowork-surface session (LAMS registry writes need the matching MCP,
 not reachable from Code) per [[reference_scheduled_task_model_standard]]'s tagging convention.
+**Auto-check:** none.
+
+### OI-034
+**Status:** OPEN
+**Opened:** 2026-07-31
+**Source:** ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch)
+**Severity:** HIGH (financial, real-money)
+**Description:** `server/routes/cron.ts:71-107`. The charge-insert loop is correctly idempotent
+(`charges.idempotency_key` UNIQUE, a `23505` counted as `skipped`). The autopay PaymentIntent path
+immediately below is **not**: it re-queries every charge with a `due_date` in the period, sums it, and
+calls `stripe.paymentIntents.create({...})` with no `idempotencyKey` option and no check for an
+existing payment for that lease/period, then inserts a second `payments` row. Two aggravators: the sum
+is over *all* charges due in the period regardless of whether the tenant already paid manually; and
+`errors++` on a Stripe failure still returns HTTP 200, so a caller retrying on failure re-enters the
+loop for every lease, not just the failed one.
+**Repro (not executed — static):** `POST /api/cron/monthly-billing?year=2026&month=7` twice with
+`CRON_SECRET`. Run 2: all charge inserts return `23505` -> `skipped`, then the autopay block re-runs
+unchanged, creating PI #2 confirmed `off_session` and a second `payments` row. Net: two ACH debits,
+`ar_ledger.total_paid` double-counted once both settle.
+**Candidate fix (NOT applied — this sweep is report-only):** pass a deterministic Stripe idempotency
+key (`autopay:${lease.id}:${periodStartStr}`); add a DB-level precondition (partial unique index on
+autopay payments per lease/period — prefer the index, a pre-check alone is racy); and compute
+`totalAmount` as *outstanding* (charges minus settled payments), not gross charges.
+**Note:** financial-decision code — per CLAUDE.md the fix requires a mandatory adversarial REFUTE pass.
+Related: [OI-035](#OI-035) is the enforcement layer that would have caught this.
+**Auto-check:** none.
+
+### OI-035
+**Status:** OPEN
+**Opened:** 2026-07-31
+**Source:** ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch)
+**Severity:** HIGH (financial, ledger integrity)
+**Description:** schema `supabase/migrations/0002_financial_tables.sql:26-40`; writers
+`server/routes/stripe.ts:138-147` and `server/routes/cron.ts:94-102`. `payments` carries a
+**non-unique** partial index on `stripe_payment_intent_id` (line 40) and no unique constraint
+anywhere. `POST /api/stripe/payment-intent` creates the PI and *then* inserts the payments row as two
+non-atomic steps; a client retry after a network timeout (the Stripe call having already succeeded)
+produces a second PI *and* a second row.
+**Impact:** `ar_ledger.total_paid` over-counts, understating the tenant's true balance; the
+delinquency check then skips a genuinely delinquent tenant. This is the same underlying failure mode
+as the original cartesian fan-out, expressed at the row-creation layer instead of the join layer.
+**Candidate fix (NOT applied):** `CREATE UNIQUE INDEX payments_stripe_pi_unique ON
+payments(stripe_payment_intent_id) WHERE stripe_payment_intent_id IS NOT NULL;` then handle `23505`
+in both writers as “already recorded” rather than 500; plus an `idempotencyKey` on the
+`/payment-intent` Stripe call. Financial-decision code — mandatory adversarial REFUTE pass on the fix.
+**Auto-check:** none.
+
+### OI-036
+**Status:** OPEN
+**Opened:** 2026-07-31
+**Source:** ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch)
+**Severity:** MEDIUM (authorization)
+**Description:** `server/middleware/admin-auth.ts:30-32`; `src/pages/auth/AdminLogin.tsx:18-21`. The
+only authorization check for the entire admin API is an email-domain suffix test. No role table, no
+admin allowlist, no separation between admin and tenant audiences (one Supabase auth project). The
+client-side `email.endsWith('@oxfordra.net')` at line 12 is cosmetic and bypassable by calling
+Supabase directly. `signInWithOtp` without `shouldCreateUser: false` mints a new auth user for any
+address entered.
+**Impact:** full admin API — every tenant's PII, all lease economics, all AR, plus `inviteUserByEmail`
+/ `deleteUser` on the auth project. Related edge: `tenants.contact_email` drives `inviteUserByEmail`,
+so a portal tenant invited at an `@oxfordra.net` address would pass the same domain test and become a
+full admin.
+**Candidate fix (NOT applied):** explicit two-principal allowlist from an env binding, failing CLOSED
+when unconfigured (503); `shouldCreateUser: false` on the admin OTP call; a guard in `portal-auth.ts`
+refusing to invite a tenant whose `contact_email` is in the admin domain.
+**Auto-check:** none.
+
+### OI-037
+**Status:** OPEN
+**Opened:** 2026-07-31
+**Source:** ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch)
+**Severity:** MEDIUM (defense-in-depth / clickjacking)
+**Description:** (a) `server/index.ts:47` — `app.use('/api/*', cors())`; Hono's no-arg `cors()`
+defaults to `origin: '*'`, applied to every `/api/*` path including the admin CRUD surface. Bounded
+today because auth is an `Authorization: Bearer` header and Supabase stores the JWT in `localStorage`
+(not a cookie), so a foreign origin cannot silently attach credentials — but it removes the layer that
+would contain any future token-in-cookie change or a token leak. (b) No `_headers`, no `public/`, no
+header block in `wrangler.toml`, no `<meta http-equiv>` in `index.html` — so no CSP, HSTS,
+X-Frame-Options, or Referrer-Policy.
+**Impact:** `/portal/pay` is framable, so a clickjacking overlay can drive a tenant into initiating an
+ACH debit. No CSP means an injected script executes with full origin privileges against a session
+shared by the portal and the admin app.
+**Candidate fix (NOT applied):** restrict CORS to the known origins with explicit `allowHeaders`; add
+`public/_headers` with X-Frame-Options DENY, nosniff, Referrer-Policy, HSTS and a CSP allowing only
+self + `js.stripe.com` + the Supabase/Stripe API origins, `frame-ancestors 'none'`.
+**Verification caveat:** the served response headers were NOT fetched (report-only, no live probing).
+A merged config is not a live header — verify against the served response before closing.
+**Auto-check:** none.
+
+### OI-038
+**Status:** OPEN
+**Opened:** 2026-07-31
+**Source:** ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch)
+**Severity:** MEDIUM (abuse / cost, OWASP LLM10)
+**Description:** `server/lib/rate-limit.ts:1-26`, applied only at `server/routes/stripe.ts:87-94`.
+The limiter is a module-scope `Map` in a Workers isolate — not shared state, so the 5-per-minute cap
+on PaymentIntent creation is not enforceable in practice. Line 87 falls back to the
+attacker-controlled `X-Forwarded-For` when `CF-Connecting-IP` is absent. Separately
+`server/routes/intake.ts:9,38-43,47-48`: per-request controls are good (10 MB cap enforced
+server-side, `%PDF` magic-byte check, `max_tokens: 1024`) but there is no *rate* limit, no per-day
+request or spend budget, no concurrency cap, and `INTAKE_MODEL` is an env-controlled model override
+with no allowlist.
+**Impact:** an authenticated tenant can drive high-volume Stripe API calls (cost, Stripe-side
+rate-limit exhaustion affecting legitimate payments) and generate `payments` rows at will. An
+admin-authenticated caller can loop 10 MB PDFs against the Anthropic API without bound — direct
+billing exposure and API-key rate-limit exhaustion that breaks legitimate intake.
+**Candidate fix (NOT applied):** move the counter to durable shared state (Cloudflare KV, a Durable
+Object, or a `rate_limits` table) keyed on `tenantUserId` rather than IP; apply it to the intake route
+at a much lower ceiling (~10/hour/admin) plus a daily counter; constrain `INTAKE_MODEL` to an
+allowlist. Cloudflare native Rate Limiting rules are the cheapest correct option.
+**Auto-check:** none.
+
+### OI-039
+**Status:** OPEN
+**Opened:** 2026-07-31
+**Source:** ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch)
+**Severity:** MEDIUM (latent correctness precondition)
+**Description:** every money column is bare `NUMERIC` — no `(12,2)` scale, no `COMMENT ON COLUMN`, no
+unit suffix in the name — while `server/routes/stripe.ts:96` uses `amount_cents` at the API boundary.
+**Balance path traced clean this run** (recorded so it is not re-derived): DB `ar_ledger.balance` ->
+`server/routes/portal.ts:24-27` -> `PortalDashboard.tsx:10,31` `formatCurrency` = **exactly zero unit
+conversions**, which is correct (dollars at every hop). The payment path likewise has every `*100`
+matched by exactly one `/100`. The 2026-07-18 fix is holding and is guarded by
+`tests/components/portal-dashboard-no-cents-division.test.ts`.
+**Why still open:** the *schema ambiguity that caused it* is unfixed, so a future producer can
+reintroduce a 100x error that passes every constraint.
+**Candidate fix (NOT applied):** `ALTER COLUMN amount TYPE NUMERIC(12,2)` on `charges` and `payments`
+plus `COMMENT ON COLUMN ... IS 'US dollars, 2dp. NOT cents.'`. Keep the existing regression test.
+**Auto-check:** none.
+
+### OI-040
+**Status:** OPEN
+**Opened:** 2026-07-31
+**Source:** ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch)
+**Severity:** MEDIUM (financial)
+**Description:** `server/routes/stripe.ts:96-101`. Validation is integer + `>= 50`; no maximum, no
+relation to the lease's outstanding balance. `GET /api/portal/charges` has no paid/open discriminator
+(`portal.ts:44-51`, `PortalPayNow.tsx:21-24` — both acknowledge the limitation in-code).
+**Impact:** `amount_cents: 100000000` is accepted; and the normal UI flow lets a tenant pay the same
+charge twice with no warning. Both create dispute/reversal exposure and pollute `ar_ledger` with
+credit balances the system cannot represent (cf. the `cam.ts:103-107` credit limitation).
+**Candidate fix (NOT applied):** compute the outstanding balance server-side from `ar_ledger` and
+reject `amount_cents > Math.round(balance * 100)` with a 422, plus an absolute sanity ceiling. Longer
+term close the schema gap: a `payment_allocations(payment_id, charge_id, amount)` table so a charge
+has a provable settled state — this one change retires this item, the `portal.ts` limitation and the
+`cam.ts` credit limitation together instead of patching each symptom separately.
+**Auto-check:** none.
+
+### OI-041
+**Status:** OPEN
+**Opened:** 2026-07-31
+**Source:** ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch)
+**Severity:** MEDIUM (input validation / integrity)
+**Description:** unvalidated request bodies written straight to the database at `server/routes/`
+`budgets.ts:25`, `insurance.ts:35` and `:46`, `renewals.ts:22`, `units.ts:20` and `:28`,
+`cam.ts:23-24`, `leases.ts:74` and `:98`, `tenants.ts:62`. The sibling routes (`charges`, `payments`,
+`properties`, `tenants` core, `expenses`, `leases` core) already use `safeParse` correctly — so this
+is an incomplete rollout, not a missing pattern. `server/lib/schemas.ts` covers 6 of 13 write routes.
+**Impact:** admin-authenticated only. An admin can set columns the UI never exposes (`id`,
+`created_at`) and bulk-write unbounded rows via the array body on `budgets`.
+**Candidate fix (NOT applied):** extend `server/lib/schemas.ts` to the remaining routes, apply
+`safeParse` uniformly, cap array bodies with `.array().max(200)`, and add a test asserting every
+mutating handler parses its body.
+**Auto-check:** none.
+
+### OI-042
+**Status:** OPEN
+**Opened:** 2026-07-31
+**Source:** ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch)
+**Severity:** MEDIUM (information disclosure)
+**Description:** the error-handler middleware's sanitization covers only *thrown* errors; every site
+listed above *returns* the raw PostgREST/Postgres message from a Supabase result object instead. The
+middleware's own comment therefore overstates the guarantee, which is the part most likely to mislead
+a future reviewer.
+**Impact:** discloses table names, column names, constraint names and RLS policy names to any
+authenticated tenant — a free schema map for anyone probing for a missed authorization check.
+**Candidate fix (NOT applied):** log server-side, return generic text
+(`console.error('[ORA PM] portal/charges', error); return c.json({error:'Unable to load charges'},500)`).
+Reserve specific messages for 4xx validation responses the caller can act on. Correct the
+error-handler comment so it describes what it actually covers.
+**Auto-check:** none.
+
+### OI-043
+**Status:** OPEN
+**Opened:** 2026-07-31
+**Source:** ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch)
+**Severity:** MEDIUM (authorization, mitigated by a third party)
+**Description:** `server/routes/portal.ts:124`, `:136-140`. Lease ownership IS verified (`:133-134`);
+payment-method ownership is not. Consumed off-session at `server/routes/cron.ts:87`.
+**Impact:** bounded — Stripe rejects a PaymentIntent whose `payment_method` is attached to a different
+customer, so the realistic outcome is broken autopay, not a cross-tenant debit. Recorded because the
+only thing standing between the two outcomes is Stripe's own behaviour, and the failure mode is
+silent (counted as `errors++` in an HTTP 200).
+**Candidate fix (NOT applied):** before persisting, `stripe.paymentMethods.retrieve(payment_method_id)`
+and reject unless `pm.customer === tenant.stripe_customer_id`.
+**Auto-check:** none.
+
+### OI-044
+**Status:** OPEN
+**Opened:** 2026-07-31
+**Source:** ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch)
+**Severity:** MEDIUM (third-party data egress)
+**Description:** `server/routes/intake.ts:17-30`; `server/lib/confidentiality.ts:8-11`. The guard
+checks the filename before egress and the returned string fields after, but never the document body.
+**Why MEDIUM and not HIGH:** the four compensating controls are genuine — the endpoint is admin-gated,
+structurally bound to an existing managed `tenant_id`+`unit_id`, the denylist fails CLOSED when
+unconfigured (503 rather than proceed — the correct direction), and there is a UI attestation.
+**Residual:** control (3) is an argument about intent, not an enforced constraint — nothing stops an
+admin creating a placeholder tenant/unit for an acquisition target.
+**Candidate fix (NOT applied):** until Phase 2b adds Worker-side PDF text extraction, add the cheap
+enforceable check — reject when the resolved `tenant_id`'s name or the `unit_id`'s property name hits
+the denylist. That converts “structurally a managed lease” from an assumption into a test.
+**Auto-check:** none.
+
+### OI-045
+**Status:** OPEN
+**Opened:** 2026-07-31
+**Source:** ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch)
+**Severity:** MEDIUM (security control that misrepresents its own state)
+**Description:** `src/portal/pages/PortalAccount.tsx:33-35`, `:87-93`. The enroll call's return value
+is discarded; no challenge/verify flow exists anywhere in the codebase.
+**Impact:** tenants may believe an account authorizing ACH debits is MFA-protected when it is not.
+This is worse than having no MFA button at all, because it is an affirmative false assurance.
+**Candidate fix (NOT applied):** either implement the full enroll -> display QR/secret -> challenge ->
+verify flow, or remove the button and the copy until it is built. Do not ship a control that
+misrepresents its own state.
+**Auto-check:** none.
+
+### OI-046
+**Status:** OPEN
+**Opened:** 2026-07-31
+**Source:** ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch)
+**Severity:** MEDIUM (financial, concurrency)
+**Description:** `server/routes/cam.ts:84-138`; nullable unique column at
+`supabase/migrations/0002_financial_tables.sql:17`. Same failure class as [OI-034](#OI-034) /
+[OI-035](#OI-035): the ledger is a sum over rows and a duplicate row is a silent, wrong balance.
+**Candidate fix (NOT applied):** make the status transition itself the concurrency control —
+`.update({status:'billed'}).eq('id', id).eq('status','draft').select().single()` and proceed only if a
+row was returned; and give the CAM charge a deterministic key
+(`cam_true_up:${r.lease_id}:${r.reconciliation_year}`). Financial-decision code — REFUTE pass on the fix.
+**Auto-check:** none.
+
+### OI-047
+**Status:** OPEN — needs a ruling from Gabriel, not an engineering fix
+**Opened:** 2026-07-31
+**Source:** ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch)
+**Severity:** MEDIUM (send-path canon / routing)
+**Description:** `server/routes/cron.ts:118`, `:184-200`, `:219`, `:297-311`. Both scheduled jobs POST
+to the Resend API with a two-recipient list including `egoldberg@`, which the routing canon does not
+cover for this job.
+**Done correctly and worth preserving:** the send is non-fatal on network failure (`:201-204`,
+`:313-316`), and dedup rows are written *before* the send (`:165-167`) so a failure retries cleanly
+rather than re-sending. Those are the right calls — a fix must not regress them.
+**Decision needed (either is defensible, Gabriel's call):** (a) formally carve out ora-pm cron mail as
+a ratified exception with the `egoldberg@` cc documented; or (b) reduce `RECIPIENTS` to `ggoldberg@`
+only and have the ORA scheduler, not the Worker, perform the send via Outlook COM.
+**Do NOT change the recipient list without that ruling** — this is a canon question, not a code defect.
+**Auto-check:** none.
+
+### OI-048
+**Status:** OPEN
+**Opened:** 2026-07-31
+**Source:** ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch)
+**Severity:** MEDIUM (missing defense-in-depth + an unrun verification)
+**Description:** (a) `server/db/client.ts:6-13` constructs a client with
+`SUPABASE_SERVICE_ROLE_KEY`, bypassing RLS; the policies at `0004_views_and_rls.sql:101-189` therefore
+constrain only direct anon-key access from the browser. (b) `supabase/migrations/0008_storage_rls.sql`
+states in its header that the policies were *“applied 2026-06-05 via Node.js db script”* — a record of
+an out-of-band action, not a migration the tooling can prove was applied.
+**UNRUN CHECK, NOT A PASS:** whether the storage and table RLS policies are actually live in the
+production project could not be determined from the repo, and this sweep does not probe live services.
+If absent or drifted, `insurance-certs` and `lease-documents` — private buckets holding COIs and
+executed leases — would be readable across tenants by any authenticated portal user.
+**Candidate fix (NOT applied):** query the live project (`select policyname, cmd, qual from pg_policies
+where schemaname in ('storage','public')`) and reconcile against 0004/0008; add a CI or scheduled
+assertion so drift is detected rather than assumed away. For read paths, construct a per-request client
+with the tenant's JWT so RLS is genuinely in force; reserve the service-role client for admin/cron.
+**Auto-check:** none.
+
+### OI-049
+**Status:** OPEN
+**Opened:** 2026-07-31
+**Source:** ora-appsec-sweep 2026-07-31 (oxford-command-center @ `3692385`, security-auditor dispatch)
+**Severity:** MEDIUM (governor-adjacent financial config, Invariant 4)
+**Suppression note:** suppression S-002 covers the *existence* of the ratified ruleset and explicitly
+does NOT cover a change carrying a stale ratification stamp — “that is the drift S-002 exists to
+protect against, not permit.” This item is the carve-out firing as designed, not a re-flag.
+**Description:** no mechanical gate references either config file. For a 2-day window on `main`
+(`a83ce684` -> `d28d8bfb`) the edge function and server served scoring behaviour attributed to a
+v1.0.0 stamp it no longer matched. An agent or human can change acquisition gate bounds/floors/weights
+in a normal PR with no hook challenge, no refute-trailer requirement, and no version/ratification
+consistency check.
+**Evidence:** `git diff a83ce684^ a83ce684 -- config/acquisition-ruleset.v1.json` shows floor changes
+with an unchanged version/stamp header, merged to `origin/main`. At pinned SHA `3692385` the file
+is blob-identical (`bde04ba9`) to the post-ceremony ratified state — consistent, no active drift.
+**Candidate fix (NOT applied):** add `config/acquisition-ruleset*.json` and `config/replacement-cost*.json`
+to `architect-owned.json` globs and to the refute-required path set; add a `governance-check.ts` rule
+failing when the ruleset's content (excluding the header block) differs from the archived copy for its
+`rulesetVersion`, or when a diff touches the file without changing `rulesetVersion` + `ratifiedDate`. A
+content-hash field in the header (mirroring migration 024's pattern) makes this a one-line comparison.
+**Note:** if this fix adds `config/**` to the architect-owned globs, that gate inherits the documented
+silent-degradation path in `file-guard.mjs:112-114` (a corrupt `architect-owned.json` degrades the
+check to a no-op) — accept that knowingly or emit a visible warning.
+**Auto-check:** none.
+
+### OI-050
+**Status:** OPEN
+**Opened:** 2026-07-31
+**Source:** ora-appsec-sweep 2026-07-31 (oxford-command-center @ `3692385`, security-auditor dispatch)
+**Severity:** MEDIUM (rated below HIGH only because it requires the server running AND the victim
+visiting attacker-controlled content)
+**Description:** `server/index.ts:531`; `server/cors-policy.ts`. Hono's `cors()` never gates a
+same-origin request, and after a DNS rebind the attacker's origin *is* the request origin, so the
+localhost-only CORS policy is bypassed entirely rather than violated.
+**Impact:** `/api/snapshot` is the single highest-value data set in the fleet. Both read and write are
+reachable.
+**Candidate fix (NOT applied):** a Host-header allowlist as the FIRST middleware, mirroring the
+existing CORS pure-function pattern so it is equally unit-testable — `/^(localhost|127\.0\.0\.1)(:\d+)?$/`
+tested against `c.req.header('host')`, 403 otherwise, registered before `app.use('/api/*', cors(...))`.
+Add a regression test alongside `tests/unit/server-cors.test.ts`.
+**Auto-check:** none.
+
+### OI-051
+**Status:** OPEN
+**Opened:** 2026-07-31
+**Source:** ora-appsec-sweep 2026-07-31 (oxford-command-center @ `3692385`, security-auditor dispatch)
+**Severity:** MEDIUM (confidential data egress window, no automatic remediation)
+**Suppression note:** S-001 covers deal terms in this repo's *source and git history* and explicitly
+does NOT cover deal terms in a public or externally-served artifact. This finding is the externally
+served path, so it is reportable; noted here as adjacent to S-001 to prevent a future re-litigation.
+**Description:** `scripts/deploy-mirror.ps1:112`, `:120`, `:137-167`. The ordering is inherently
+publish-then-check, and the failure path raises without unpublishing.
+**Impact:** the full confidential deal book (terms, counterparties, tasks) publicly readable at a
+stable, discoverable URL for at least the deploy window, with no automatic remediation.
+**Candidate fix (NOT applied):** (1) add a PRE-deploy gate probe and abort without publishing on any
+non-302, keeping the post-deploy probe as a second check; (2) on a post-deploy `GATE CHECK FAILED`,
+automatically redeploy the redacted bake (`MIRROR_INCLUDE_CONFIDENTIAL` unset) as rollback before
+re-raising; (3) probe every Access destination — make it `[string[]]$VerifyUrls` including
+`https://brain.oxfordra.net/` and require all to 302; (4) consider asserting the JWT hostname, not
+just the redirect host.
+**Related unrun check:** live Access enforcement on both hostnames was NOT verified (report-only, no
+live probing). The only evidence is [brain-oxfordra-access-finding.md](brain-oxfordra-access-finding.md),
+a 2026-06-15 record. Do not carry “gated” forward as verified-today.
+**Auto-check:** none.
+
+### OI-053
+**Status:** OPEN
+**Opened:** 2026-07-30
+**Source:** Credential-exposure sweep, 2026-07-30 (`event_log.md` 2026-07-30)
+**Description:** `COMPOSIO_API_KEY` sits in plaintext at `Claude_Workspace/01_Workspace/oxford-agent/config.py:3`, with the same key duplicated at `01_Workspace/_archive/legacy-templates-2026-03/Claude Agents SDK - Getting Started.md:90`. Both paths are inside the **OneDrive-synced** tree, so the value has been replicating to Microsoft's cloud and to every device on this account. Composio was removed as a connector 2026-06-11, so the key is very likely dead — but "likely dead" is not "revoked."
+**Action (Gabriel):** revoke at Composio if that account still exists; then the two files can be scrubbed or archived. Not automatable — credential revocation is outside Code's permitted actions.
+**Auto-check:** none.
+
+### OI-054
+**Status:** OPEN
+**Opened:** 2026-07-30
+**Source:** Credential-exposure sweep, 2026-07-30
+**Description:** A FRED API key is hardcoded into three `api_key=` request URLs at `Claude_Workspace/00_Governance/Scheduled/_archive_2026-06-09_retired/ora-debt-maturity-snapshot/SKILL.md:16-18` (OneDrive-synced). SHA-compared against the live key — now a user env var per Phase-2 T11 — and they **differ**, so this is an older/rotated key, not the current one.
+**Severity:** LOW (free St. Louis Fed key, no billing attached). This is cleanup, not rotation.
+**Auto-check:** none.
+
+### OI-055
+**Status:** OPEN
+**Opened:** 2026-07-30
+**Source:** Credential-exposure sweep, 2026-07-30
+**Description:** Residual credentials in local archive trees: (1) a `searchapi.io` MCP token embedded in a URL across three `.claude.json` backups under `~/archive/root-cleanup-2026-07-09/config-backups/` — the searchapi connector was removed 2026-06-02; (2) two local dev private keys, `~/archive/ai-tool-cleanup-2026-07-09/.android/adbkey` (ADB) and `.ollama/id_ed25519`. All are disk-local and none is git-tracked (verified).
+**Severity:** LOW. Revoke the searchapi token if that account is still live; the PEM keys back no external account and can simply stay archived.
+**Auto-check:** none.
+
+### OI-052
+**Status:** OPEN
+**Opened:** 2026-07-31
+**Source:** ora-appsec-sweep 2026-07-31 (dispatch integrity gate, first live test)
+**Severity:** MEDIUM (governance mechanism — the model floor is not enforced for a full run)
+**Description:** the 2026-07-24 Option C ruling moved the Fable floor from this task's (inert)
+frontmatter into the Agent dispatch, on the reasoning that “the dispatch pin IS honored.” The first
+live exercise of that path shows it is honored *at spawn* but not *for the duration*.
+**Evidence (2026-07-31, this sweep's own transcripts):**
+`~/.claude/projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/0ab34204-58c9-4742-bed5-706c5d028422/subagents/`
+- `agent-a7cb98f7a98d0daed` (ora-pm): meta `{"model":"fable"}`; 62 assistant msgs `claude-fable-5`,
+  then a `fallback` content block at line 109, then 68 msgs `claude-opus-5`.
+- `agent-a43623bcd1c477c5d` (occ): meta `{"model":"fable"}`; 107 msgs `claude-fable-5`, `fallback` at
+  line 163, then 3 msgs `claude-opus-5`.
+**What this does and does not mean.** The three DISPATCH INTEGRITY GATE assertions all PASS (the call
+returned a real subagent result; the findings came from the subagent, not an inline substitute;
+`model:'fable'` was passed explicitly). The gate is not defective for what it asserts — it simply
+cannot see a mid-run fallback. And the fallback target is the session's own top-tier model, so this is
+not the Sonnet-downgrade the doctrine warns about.
+**Open question for Gabriel:** does “never below Fable” treat a mid-run fallback to Opus-5 as
+compliant? If yes, this item closes as documentation. If no, the gate needs a fourth assertion —
+post-hoc grep of the subagent transcript for `"type":"fallback"` / any non-Fable `model` value, which
+is cheap and mechanical (the exact commands used this run are reproducible from the Evidence block).
+**Do NOT “fix” this by deleting the frontmatter pin or flipping anything to Sonnet** (standing
+instruction in the task file).
 **Auto-check:** none.
 
 ## Closed
