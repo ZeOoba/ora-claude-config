@@ -217,6 +217,29 @@ expect("module source is CLEAN under its own patterns (must stay pushable)",
 expect("MASTER_KEY is caught",
        bool(sp.scan_text('RAILS_MASTER_KEY = "a1b2c3d4e5f6g7h8"')))
 
+
+# --- REFUTE pass 2, 2026-07-30: surviving placeholder-prefix entropy hole ------------
+# The anchored tail [A-Z0-9_-]* still swallowed arbitrary entropy, so any ALL-CAPS value
+# merely BEGINNING with a placeholder word was suppressed -- including a valid
+# uppercase-hex secret starting "ADD". Word-form suppression now requires DIGIT-FREE.
+for _v in ("YOURK9X84QPLM22ABC", "ADDF9E2B41C77A03", "SAMPLEK9X84QPLM22"):
+    expect("R2 all-caps entropy value starting with a placeholder word is caught (%s)" % _v[:6],
+           bool(sp.scan_text("TOKEN = %s" % _v)), _v)
+expect("R2 digit-free shouted placeholders stay suppressed",
+       sp.scan_text('GITHUB_TOKEN = "YOUR_TOKEN_HERE_XXXXXXXX"') == []
+       and sp.scan_text("CRON_SECRET = REPLACE_WITH_YOUR_TOKEN") == [])
+# _CALL_RE was dead code (the value class excludes '('), which made a vault lookup a FP.
+# Call detection now reads the char AFTER the match.
+expect("R2 function-call value is suppressed via trailing char",
+       sp.scan_text("AUTH_TOKEN = get_credential_from_vault(scope)") == [])
+expect("R2 a real literal is still caught when a call appears elsewhere on the line",
+       bool(sp.scan_text('AUTH_TOKEN = "k9x84qplm22abcd" # cf get_credential(scope)')))
+# repo-relative tests/ paths must be exempt (they were not -- leading-slash bug)
+expect("R2 repo-root tests/ path is exempt",
+       sp.is_exempt_path("tests/unit/x.test.ts") and sp.is_exempt_path("src/tests/y.ts"))
+expect("R2 non-test path is still NOT exempt",
+       not sp.is_exempt_path("server/routes/stripe.ts"))
+
 npass = sum(1 for ok, _ in results if ok)
 print("secret-patterns tests: %d/%d pass" % (npass, len(results)))
 sys.exit(0 if npass == len(results) else 1)
