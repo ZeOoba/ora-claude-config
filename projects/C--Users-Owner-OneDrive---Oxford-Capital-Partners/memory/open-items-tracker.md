@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-08-02T01:43:11.974Z
+  modified: 2026-08-02T02:01:04.746Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -982,6 +982,8 @@ incremental agent patch. Due before the next Sunday fire (2026-08-02).
 **Source:** Repo-sweep session, 2026-07-26
 **Description:** Two live/unrotated credential exposures: plaintext `NETLIFY_AUTH_TOKEN` in archived `oxford-realty/oxfordra-net` git history, and a non-redacted Netlify MCP proxy token in a `.git-corrupted-20260716/` backup folder — Gabriel must rotate both, then the backup folder needs secure deletion.
 *(Section added 2026-07-29 during tracker ID-integrity reconciliation.)*
+**2026-07-30 SCANNER CORRECTION (read this before trusting any earlier "clean" result here):** the whole-history scans that reported this repo clean were run with `hooks/lib/secret_patterns.py` BEFORE its word-boundary fix — `\b(?:SECRET|TOKEN)\b` cannot match inside `NETLIFY_AUTH_TOKEN` because `_` is a word character, and there was no `nfp_` pattern at all. The scanner was structurally blind to THIS ITEM'S OWN credential type. Commit `4b7a3bb` was only found by a targeted grep. Fixed and merged 2026-07-30 (`f809c73`, 4 adversarial REFUTE passes); the re-scan with working patterns is what actually cleared the other 1,377 commits. Treat any pre-fix "0 findings" as unearned.
+
 **2026-07-30 investigation (still OPEN — Netlify rotation is Gabriel's, not automatable):** `oxford-realty/oxfordra-net`'s archived repo has 1 local commit, NO remote configured — exposure is disk-local, not live on GitHub. The `.git-corrupted-20260716` backup folder is unreadable by git (`fsck`/`log` both fail) but sits inside the **OneDrive-synced** Claude_Workspace tree — raw bytes likely still plaintext and have been syncing to the cloud since mid-July, a bigger exposure surface than the original note implied. Neither Netlify token rotation nor the backup folder's secure deletion can be performed by Code (credential-generation + permanent-deletion are both outside its permitted actions) — runbook handed to Gabriel directly. Unrelated but adjacent: the orphaned `~/.secrets/anthropic-key.dat`/`netlify-token.dat` pair (zero consumers, separate from this item's tokens) was archived-and-retired same day per Gabriel's ruling — see `tech.md` §7.
 
 ### OI-032
