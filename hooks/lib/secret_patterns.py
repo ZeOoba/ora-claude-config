@@ -203,7 +203,13 @@ _DOTTED_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$
 # the routed patterns' value class excludes '(', so it can never appear inside the match
 # (REFUTE pass 2 proved the old in-value check was dead code, which silently turned
 # `AUTH_TOKEN = get_credential_from_vault(scope)` into a false positive).
-_TRAILING_CALL_RE = re.compile(r"^\s*\(")
+# IMMEDIATE paren only -- no leading \s* (REFUTE pass 3): a whitespace run let a PROSE
+# PARENTHETICAL after an unquoted secret read as a call, suppressing real findings like
+#   SECRET = <value> (rotate monthly)
+# and, because \s* also spans newlines, a value whose NEXT LINE opened with '('. Both were
+# executed OLD-caught / NEW-missed regressions. A call has no space before its paren; the
+# `helper (scope)` style becomes a false positive instead, which is the safe direction.
+_TRAILING_CALL_RE = re.compile(r"^\(")
 
 
 def _looks_like_code_reference(raw_value):
@@ -231,8 +237,12 @@ def _value_is_reference(value, trailing=""):
         # separator (REFUTE pass 2 verified across 1,667 tracked files). Retained as a
         # defensive default in the SAFE direction should a future pattern relax that.
         return True
-    if _TRAILING_CALL_RE.match(trailing or ""):
-        return True                                   # NAME = some_helper(...) -> a call
+    # NAME = some_helper(...) -> a call. BOTH guards required (REFUTE pass 3): the paren
+    # must be immediate AND the callee digit-free. An identifier is rarely digit-dense; a
+    # real secret almost always is -- so a digit-bearing value keeps its finding even if
+    # something paren-shaped follows it.
+    if _TRAILING_CALL_RE.match(trailing or "") and not any(c.isdigit() for c in v):
+        return True
     return bool(_REFERENCE_VALUE_RE.match(v)
                 or _PLACEHOLDER_SHAPE2_RE.match(v)
                 or (_PLACEHOLDER_WORD_RE.match(v) and not any(c.isdigit() for c in v))

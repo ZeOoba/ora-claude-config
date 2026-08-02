@@ -240,6 +240,21 @@ expect("R2 repo-root tests/ path is exempt",
 expect("R2 non-test path is still NOT exempt",
        not sp.is_exempt_path("server/routes/stripe.ts"))
 
+
+# --- REFUTE pass 3, 2026-07-30: prose parenthetical read as a function call -----------
+# _TRAILING_CALL_RE carried a leading \s*, so an annotation after an UNQUOTED secret --
+# `SECRET = <value> (rotate monthly)` -- and (because \s* spans newlines) a value whose
+# NEXT LINE opened with '(' were both suppressed. Two executed OLD-caught/NEW-missed
+# regressions. Fixed with immediate-paren AND a digit-free callee gate.
+expect("R3 prose parenthetical after an unquoted secret still fires",
+       bool(sp.scan_text("SECRET = zq8r4tkx91mmv2 (rotate monthly)")))
+expect("R3 parenthetical on the NEXT line still fires",
+       bool(sp.scan_text("SECRET = zq8r4tkx91mmv2\n(see rotation doc)")))
+expect("R3 digit-bearing value keeps its finding even with an immediate paren",
+       bool(sp.scan_text("SECRET = zq8r4tkx91mmv2(rotate)")))
+expect("R3 genuine call is still suppressed",
+       sp.scan_text("AUTH_TOKEN = get_credential_from_vault(scope)") == [])
+
 npass = sum(1 for ok, _ in results if ok)
 print("secret-patterns tests: %d/%d pass" % (npass, len(results)))
 sys.exit(0 if npass == len(results) else 1)
