@@ -141,6 +141,120 @@ expect("commit-message key caught even when a diff follows",
 expect("clean diff yields nothing", sp.scan_diff(
     "diff --git a/x.md b/x.md\n+DSCR 1.25x\n") == [])
 
+
+# --- 2026-07-30 GAP: underscore-prefixed credential names + Netlify PAT ---------------
+# Found by the credential-exposure sweep. `(?:SECRET|TOKEN)` cannot match inside
+# NETLIFY_AUTH_TOKEN because `_` is a WORD character, so no boundary exists before TOKEN.
+# Measured: 10 of 12 realistic shapes evaded EVERY pattern -- including every secret name
+# in ORA's own stack (tech.md 7: SUPABASE_SERVICE_ROLE_KEY, STRIPE_SECRET_KEY,
+# CRON_SECRET, RESEND_API_KEY). The pre-push gate would NOT have blocked them.
+# Live proof: archive/oxford-realty_archived-20260726/oxfordra-net commit 4b7a3bb carries
+# NETLIFY_AUTH_TOKEN = nfp_... and the whole-history scan returned CLEAN.
+V = "A" * 24
+for _name in ("NETLIFY_AUTH_TOKEN", "GITHUB_TOKEN", "SLACK_BOT_TOKEN", "STRIPE_SECRET_KEY",
+              "SUPABASE_SERVICE_ROLE_KEY", "CRON_SECRET", "RESEND_API_KEY",
+              "STRIPE_WEBHOOK_SECRET", "ANTHROPIC_API_KEY"):
+    expect("underscore-prefixed %s is caught" % _name,
+           bool(sp.scan_text('%s = "%s"' % (_name, V))), _name)
+for _name in ("access_token", "refresh_token", "auth_token", "client_secret"):
+    expect("lowercase %s is caught" % _name,
+           bool(sp.scan_text('%s: "%s"' % (_name, V))), _name)
+expect("Netlify PAT bare shape is caught",
+       "Netlify token" in sp.scan_text("nfp_" + "b3Kq9x" * 6))
+expect("Netlify PAT in assignment is caught",
+       bool(sp.scan_text('NETLIFY_AUTH_TOKEN = "nfp_' + "c" * 36 + '"')))
+
+# Precision guards for the widened matcher: env-var REFERENCES and placeholders are not
+# leaks. A scanner that fires on `process.env.GITHUB_TOKEN` is alarm fatigue by 2026-07-24
+# ruling, and alarm fatigue is how a real finding gets ignored.
+expect("env-var reference (no value) is not a finding",
+       sp.scan_text("const t = process.env.NETLIFY_AUTH_TOKEN;") == [])
+expect("os.environ reference is not a finding",
+       sp.scan_text("key = os.environ.get('SUPABASE_SERVICE_ROLE_KEY')") == [])
+expect("templated placeholder is not a finding",
+       sp.scan_text('NETLIFY_AUTH_TOKEN = "${NETLIFY_AUTH_TOKEN}"') == [])
+expect("YOUR_ placeholder is not a finding",
+       sp.scan_text('GITHUB_TOKEN = "YOUR_TOKEN_HERE_XXXXXXXX"') == [])
+expect("empty assignment is not a finding",
+       sp.scan_text('CRON_SECRET = ""') == [])
+expect("short value below threshold is not a finding",
+       sp.scan_text('API_TOKEN = "abc"') == [])
+
+expect("function-call value is not a finding (code, not credential)",
+       sp.scan_text("token = _normalize(new_stage)") == [])
+expect("constant reference is not a finding",
+       sp.scan_text("SECRET_PATTERNS = sp.SECRET_PATTERNS") == [])
+expect("unquoted digit-bearing value STILL fires (nfp_/env-file shape)",
+       bool(sp.scan_text("NETLIFY_AUTH_TOKEN=nfp_a3Kq9xb3Kq9xc3Kq9xd3Kq9x")))
+expect("quoted no-digit value STILL fires (a real key can lack digits)",
+       bool(sp.scan_text('CRON_SECRET = "AAAAAAAAAAAAAAAAAAAAAAAA"')))
+
+
+# --- REFUTE findings, 2026-07-30 (all were REAL false negatives I introduced) ---------
+# F1 multi-line: the pattern's whitespace run after the separator spans newlines, so a
+# YAML-style name-then-indented-value matched the FULL text but NO single line --
+# per-LINE evaluation dropped the label entirely. Fixed by evaluating PER MATCH.
+expect("F1 multi-line YAML-style assignment is still caught",
+       bool(sp.scan_text("TOKEN:\n  zq8r4tkx91mmv2abcd")))
+# F2 greedy capture: a template value followed by a REAL assignment on the same line was
+# swallowed into one value, and the leading ${ suppressed the whole line.
+expect("F2 real assignment after a template on one line is still caught",
+       bool(sp.scan_text("A_TOKEN=${TPL} SECRET=zq8r4tkx91mmv2")))
+# F3 unanchored placeholder: any value merely BEGINNING with your/sample/todo/fake was
+# suppressed -- including quoted, high-entropy values.
+for _v in ("yourk9x84qplm22abc", "samplev8k2m4x9qp11", "todok9x84qplm22abc",
+           "fakev8k2m4x9qp1122", "redactedk9x84qplm2"):
+    expect("F3 entropy value starting with a placeholder word is still caught (%s)" % _v[:6],
+           bool(sp.scan_text('SECRET = "%s"' % _v)), _v)
+# ...while genuine SHOUTED placeholders stay suppressed
+expect("F3 shouted placeholder still suppressed",
+       sp.scan_text('GITHUB_TOKEN = "YOUR_TOKEN_HERE_XXXXXXXX"') == [])
+# F4 self-block: the module's own source must pass its own gate, else no push can ship it.
+_lib_src = open(LIB, encoding="utf-8").read()
+expect("module source is CLEAN under its own patterns (must stay pushable)",
+       sp.scan_text(_lib_src) == [], sp.scan_text(_lib_src))
+# residual added from the REFUTE pass
+expect("MASTER_KEY is caught",
+       bool(sp.scan_text('RAILS_MASTER_KEY = "a1b2c3d4e5f6g7h8"')))
+
+
+# --- REFUTE pass 2, 2026-07-30: surviving placeholder-prefix entropy hole ------------
+# The anchored tail [A-Z0-9_-]* still swallowed arbitrary entropy, so any ALL-CAPS value
+# merely BEGINNING with a placeholder word was suppressed -- including a valid
+# uppercase-hex secret starting "ADD". Word-form suppression now requires DIGIT-FREE.
+for _v in ("YOURK9X84QPLM22ABC", "ADDF9E2B41C77A03", "SAMPLEK9X84QPLM22"):
+    expect("R2 all-caps entropy value starting with a placeholder word is caught (%s)" % _v[:6],
+           bool(sp.scan_text("TOKEN = %s" % _v)), _v)
+expect("R2 digit-free shouted placeholders stay suppressed",
+       sp.scan_text('GITHUB_TOKEN = "YOUR_TOKEN_HERE_XXXXXXXX"') == []
+       and sp.scan_text("CRON_SECRET = REPLACE_WITH_YOUR_TOKEN") == [])
+# _CALL_RE was dead code (the value class excludes '('), which made a vault lookup a FP.
+# Call detection now reads the char AFTER the match.
+expect("R2 function-call value is suppressed via trailing char",
+       sp.scan_text("AUTH_TOKEN = get_credential_from_vault(scope)") == [])
+expect("R2 a real literal is still caught when a call appears elsewhere on the line",
+       bool(sp.scan_text('AUTH_TOKEN = "k9x84qplm22abcd" # cf get_credential(scope)')))
+# repo-relative tests/ paths must be exempt (they were not -- leading-slash bug)
+expect("R2 repo-root tests/ path is exempt",
+       sp.is_exempt_path("tests/unit/x.test.ts") and sp.is_exempt_path("src/tests/y.ts"))
+expect("R2 non-test path is still NOT exempt",
+       not sp.is_exempt_path("server/routes/stripe.ts"))
+
+
+# --- REFUTE pass 3, 2026-07-30: prose parenthetical read as a function call -----------
+# _TRAILING_CALL_RE carried a leading \s*, so an annotation after an UNQUOTED secret --
+# `SECRET = <value> (rotate monthly)` -- and (because \s* spans newlines) a value whose
+# NEXT LINE opened with '(' were both suppressed. Two executed OLD-caught/NEW-missed
+# regressions. Fixed with immediate-paren AND a digit-free callee gate.
+expect("R3 prose parenthetical after an unquoted secret still fires",
+       bool(sp.scan_text("SECRET = zq8r4tkx91mmv2 (rotate monthly)")))
+expect("R3 parenthetical on the NEXT line still fires",
+       bool(sp.scan_text("SECRET = zq8r4tkx91mmv2\n(see rotation doc)")))
+expect("R3 digit-bearing value keeps its finding even with an immediate paren",
+       bool(sp.scan_text("SECRET = zq8r4tkx91mmv2(rotate)")))
+expect("R3 genuine call is still suppressed",
+       sp.scan_text("AUTH_TOKEN = get_credential_from_vault(scope)") == [])
+
 npass = sum(1 for ok, _ in results if ok)
 print("secret-patterns tests: %d/%d pass" % (npass, len(results)))
 sys.exit(0 if npass == len(results) else 1)
