@@ -12,6 +12,92 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-03 — Identity drift resolved across all 3 flagged skills; entity-capacity register ruled EXEMPT
+
+**Outcome: all three of `doctrine-integrity-probe` Check 13's flagged emitters are settled — but only TWO were the same defect.**
+
+**(1) Firm title — FIXED (by a concurrent session, `edc9fa1`).** `ratify-hurdle-rate/SKILL.md:159` (audit-memo attribution) and `tenant-email/SKILL.md:23` (signature block) now read `Gabriel Goldberg, VP Acquisitions`, per the 2026-08-03 in-turn ruling (`b830628`) that reinstated the 2026-06-10 canon. Verified live post-merge. This session deliberately did NOT touch either file — both carried that session's uncommitted work when the request arrived, and the ora-skills single-writer rule says surface, not overwrite. No claim existed on either side, so neither of us would have been warned automatically; a chip-claims broadcast was posted announcing the narrow scope before any edit.
+
+**(2) Entity-execution capacity — RULED EXEMPT (Gabriel, in-turn 2026-08-03), documented in place (`74120f6`).** `document-assembly/SKILL.md:180` reads `Signing authority: "Gabriel Goldberg, Member / Principal" unless the entity's operating agreement specifies otherwise`. This is NOT a firm title: "Member"/"Principal" state the capacity under which Gabriel binds an LLC — a term of the operating agreement — whereas "VP Acquisitions" is his ORA operating title. **Different registers; the firm-title ruling deliberately does not reach an execution block**, where asserting a job title would misdescribe the authority to bind. Left unchanged, with an in-file note explaining WHY so the next reader does not "fix" it into a legal inaccuracy. If an operating agreement ever names a different capacity, THAT governs here — not CLAUDE.md.
+
+**Probe consequence (accepted):** Check 13 greps for `principal` and cannot distinguish the two registers, so it will flag `document-assembly:180` on every run. That is now a KNOWN FALSE POSITIVE, documented at the line itself. A structured exemption marker would be the real fix if the noise ever matters.
+
+**BLIND SPOT FOUND — 21 live emitters the probe cannot see.** The property-LLC signature roster led to `%APPDATA%\Microsoft\Signatures\`: **21 `Landlord - *` signature files** sign `[LLC], by Oxford Realty Advisors LLC, its Manager / Gabriel Goldberg, Principal` and generate real outbound tenant mail. They are covered by the same entity-capacity exemption (Gabriel's capacity within the Manager entity, not his job title) so no change was needed — but the probe has ZERO visibility into them because they are not in any repo. Second instance today of a live-emitter class living outside scanner scope (the first: the Zapier OAuth grant, visible only in Netlify's dashboard). **Pattern worth institutionalizing: doctrine probes see repos; outbound reality also lives in %APPDATA%, provider dashboards, and Outlook.**
+
+**Method note.** The mechanical fix here — grep `principal`, replace with `VP Acquisitions` — would have been wrong on 1 of 3 files and on all 21 signatures. Reading the line's CONTEXT rather than trusting the probe's match is what separated them. Same lesson as the OI-054 false finding earlier today: a pattern match is a candidate, not a finding.
+
+## 2026-08-03 — Write-loss detector shipped (dangling-mutation-probe, STEP 2.9)
+
+Closes the silent write-loss gap found earlier the same day. Commit `2c4e440` (ora-claude-config): new `maintenance/dangling-mutation-probe.py` + 75-test suite, wired as STEP 2.9 of ora-task-integrity-guard (alarm tier) and into the dry-run orchestrator. Gabriel chose the wider of three scopes (probe + tag-freshness) via interactive ruling.
+
+CHECK A: mutating tool call with no tool_result where the session died at that call (rows_after==0). Calibrated on 186 transcripts -- 8 sessions had some dangling call, only 1 met all conditions (the real incident). Replayed against the actual 07-29 transcript, it alarms -- would have caught it 5 days earlier.
+CHECK B: real-id MODEL tag predating the lineup anchor on a task that has since fired, past a 7-day grace. Exists because only 186 of 373 sessions still have transcripts, so Check A is blind to ~half of history.
+
+THREE DEFECTS FOUND BY THE LIVE RUN, all silent rather than erroring:
+1. discover_store() takes a store NAME not the 'cc' label -- returned None (same regression task-folder-registration-probe's tests pin).
+2. Session metadata uses epoch MILLISECONDS while the registry uses ISO strings, same directory. ISO-only parsing returned None, degrading the lookback to scan-all-history and leaving live-session exclusion never firing -- which produced a FALSE LOST_WRITE against a mid-flight session. New memory: reference_session_store_epoch_vs_registry_iso.md.
+3. lastActivityAt stops advancing while a session is BLOCKED on one long tool call; a 20-min liveness window aged out running sessions and consecutive runs disagreed (exit 1 then exit 0). Window now 120 min.
+
+Self-refute pass also tightened the Bash redirect heuristic, which matched '->' and '=>' in read-only commands and would have promoted dangling shell READS into alarms.
+
+SCOPE LIMIT (structural, stated not papered over): CC/MCP only -- LAMS has 154 scheduled-task sessions but ZERO transcripts on disk, so Check A has nothing to read there. A LAMS task can lose a write the same way and this will not see it.
+
+Verification: 75/75 new suite; full hook+maintenance sweep 54 suites / 0 failures (one earlier failure in test-claim-file-collision.py was load-induced under 8 concurrent sessions -- clean on rerun, and it uses isolated tempdirs so no live-claim interference was possible).
+
+MINOR FINDING: claim_work.py --paths is nargs="*" (space-separated); a comma-separated list silently becomes ONE bogus path while reporting "covering 1 path(s)", which reads like success.
+
+## 2026-08-03 — drift comparator stack MERGED to main (370c4d8) and verified live
+
+Gabriel merged the stack top-down (#33 → #32's branch, #32 → #31's branch, #31 → main), which is the correct way to land a stack — all four commits arrive in main's ancestry via #31. main is now `370c4d8`.
+
+**Merged-PR ≠ live, and it mattered here.** The producer SKILL.md invokes the hardcoded path `C:\Users\Owner\ora-skills\tools\skill_drift_report.py` — the MAIN CHECKOUT, which was still at `e0aba43` and did not contain the file at all. A GitHub merge does not update a local checkout. Fast-forwarded the canonical checkout to `370c4d8` with `--ff-only`; the incoming diff touched only `tools/`, with **zero overlap** against the other session's uncommitted WIP (`plugins/ora-operations-extensions/plugin-build.json`, `ratify-hurdle-rate/SKILL.md`, `tenant-email/SKILL.md`, `_check_plugin.py`), all of which are preserved. No post-merge hook exists, so nothing else fired.
+
+**Verified on main, not on the branches:** every marker from all three PRs present in `tools/skill_drift_report.py` (shallow/empty-history guards from #31, order-aware `_line_subset` + block-scalar `description_of` from #32, `CACHE_ONLY`/`BROKEN_INSTALL`/`_read_bytes`/`STOCK_SKILLS`/`WHITESPACE_ONLY` from #33), plus the `pending_reimport` twin fix. Full suite green from a clean detached worktree at `origin/main`: **168 tests, 6 files**. The tool then run via the SKILL.md's exact hardcoded path: exit 0, 6s.
+
+**Live verdicts now: 43 IN-SYNC · 1 REPO-NEWER · 1 MANUAL-MERGE · 3 CACHE-ONLY · 10 NOT-INSTALLED.**
+- `tenant-email` REPO-NEWER is the tool correctly seeing ANOTHER session's uncommitted SKILL.md edit as repo-ahead-of-cache — working as designed, not actionable by this session.
+- `acquisition-underwriting` MANUAL-MERGE is still the YAML quoting-only difference (`name: "x"` vs `name: x`) — one character in the repo.
+
+**⚠️ OPEN DECISION FOR GABRIEL — 3 skills installed with NO authoritative repo source:** `lease-form-qc`, `masterlease-jurisdiction-rebase`, `morning`. Each needs capture into `ora-skills` or retirement. These were invisible to every prior drift check.
+
+Housekeeping: SKILL.md's fallback clause no longer names the (now-merged) branch — a rotting anchor removed. All four of this session's worktrees removed and their merged local branches deleted; `git worktree prune` also cleared stale metadata for three worktrees whose directories were already gone (`wt-20260803`, `wt-millage`, `wt-v47`) — verified absent before pruning, no live worktree touched.
+
+## 2026-08-03 â€” Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `0f70099a-3948-4894-b7c2-634e27ec2455` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel authorized (in-chat, 2026-08-03) pushing past a hooks/tests/test-eos-review-gate.py timeout (exit 124, 180s, reproduced 3x identically). Root cause is environmental, not a regression in the commit being pushed: the test's run_hook() spawns the real eos-review-gate.py subprocess with no timeout of its own, that hook performs an independent-review model call for blast-radius/financial commits, and 3 other Claude Code sessions were concurrently active on this machine at push time (repo-housekeeping, oxford-command-center-data, hooks-override-auth claims all live per session-start broadcast) -- plausible API/resource contention. The commit being pushed touches only memory/event_log.md (a verified skill-install log entry) and has no relationship to eos-review-gate.py or its test. A second flagged timeout in the same run (test-memory-orphan-link-guard.py, purely local/no external call) passed cleanly on retry, consistent with an external-call-specific stall rather than general machine overload.
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-08-03 16:46:01 local.
+
+## 2026-08-03 — drift comparator: remaining review findings folded in (PR #33); 3 unreviewed cache-only skills surfaced
+
+[PR #33](https://github.com/ZeOoba/ora-skills/pull/33) (stacked on [#32](https://github.com/ZeOoba/ora-skills/pull/32) → [#31](https://github.com/ZeOoba/ora-skills/pull/31)) closes the confirmed review findings left after the Critical fix.
+
+**⚠️ NEW FINDING with standing significance — 3 skills are INSTALLED with no authoritative repo source:** `lease-form-qc`, `masterlease-jurisdiction-rebase`, `morning`. The report enumerated only the repo working tree, so every cache-only skill fell out silently — unreviewed platform text entering session context with nothing to review it against, which is the direction that most warrants review. Enumeration is now the UNION of both stores; new **CACHE-ONLY** verdict, with the 9 Anthropic stock skills excluded so the finding stays signal. **These three need a REPO-FIRST decision from Gabriel: capture into `ora-skills`, or retire.**
+
+**Other under-reports closed:** a cache dir with no SKILL.md is HALF-installed — it had an actionable remedy but the NOT-INSTALLED label kept it out of `ACTIONABLE`, so the renderer dropped it entirely (now **BROKEN-INSTALL**). An unknown skill argument rendered a clean, empty, reassuring report — the worst possible answer to "is this one skill in sync?"; unknown names now render and **exit 2**, as does an unreadable cache root. An unreadable store file used to raise out of the ENTIRE run — now contained to a single **UNREADABLE** verdict for that skill (matters on Windows, where the Claude app holds cache files open).
+
+**New false-positive class closed:** whitespace-only churn (trailing newline, blank line) fell through containment into DISJOINT → MANUAL-MERGE, i.e. a supervised-merge ticket for a zero-content difference — the same nuisance family as the CRLF flags this whole effort exists to kill. New WHITESPACE-ONLY relation; it compares every non-blank line AND its order, so it cannot mask real content.
+
+**Cost:** git history was walked for every skill even when both parts were identical, spawning a subprocess per revision and discarding the result. Now walked only when a part differs, each unique revision hashed once. **Live run 47s → 6s.**
+
+Also: BOM no longer defeats frontmatter detection; `MAX_DESC` imported from `package_skills` rather than duplicated; `point_in_time.read_at` stamped per skill at ITS read time rather than at run start (a multi-second run misdated everything after the first).
+
+**Producer SKILL.md** gains the three new verdicts, the union-enumeration/whitespace/exit-2 contract, and a rewritten step 3 that reads REPO-ONLY/CACHE-ONLY off the tool. The stock-skill roster is doctrine mirrored in code as `STOCK_SKILLS`, and the SKILL.md now says so explicitly so the two can't drift unnoticed.
+
+Verified: **168 tests, 6 files** green; live 44 IN-SYNC / 1 MANUAL-MERGE / 3 CACHE-ONLY / 10 NOT-INSTALLED in 6s; exit codes 2/0/0 for typo/valid/json. **Still open:** `acquisition-underwriting` reports MANUAL-MERGE on a YAML quoting-only difference (`name: "x"` vs `name: x`) — one character in the repo, not a comparator change.
+
+## 2026-08-03 - checkSnapshot wired into both portfolio.json writers (PR #252); both fleet suspensions LIFTED; first live resume committed
+
+Closes the 2026-08-03 phantom-lease incident end to end. Directed to wire `checkSnapshot` into the CLI writers -- claimed `oxford-command-center-data`, isolated worktree (`occ-wt-checksnapshot-wire`), TDD: 7 new unit tests written first (red), then `evaluateReconciliationGate()` implemented in `scripts/lease-snapshot-drift-check.ts` (exported, imported by `extract-workbook.ts`, matching the existing `evaluateAnomalyFloor` pattern). Refuses the write on any error-severity flag from the union of `checkSnapshot()`'s own output and `snapshot.dataQuality` -- the union was a real gap I found mid-build: `checkSnapshot()` never reads `dataQuality` itself, so a future parse-time `'error'` flag (today every `parse.ts` flag is `'warn'`) would have been invisible to a gate that only checked `checkSnapshot()`'s own output. Added a dedicated test for that case before closing it.
+
+**Verification, strongest first: live A/B against the real production workbook, both writers independently.** Temporarily reverted PR #250's parser fix inside the isolated worktree only, re-ran both `extract-workbook.ts` and `lease-snapshot-drift-check.ts` against the live workbook -- both refused with the exact incident numbers (`Σ annual rent 5889077 ≠ workbook total 5576537`) instead of writing corrupt data, proving the gate would have caught 2026-08-03 had it existed then. Restored the fix immediately after each run (`git diff --stat` confirmed clean). 42/42 unit tests pass, typecheck/lint/governance/dev-css clean, full suite 3220/3220 (zero flakes this run). `check:refute` has the same enumerated-path scope gap PR #250 hit (neither script is in the financial-source path list) -- commit carries a `Refute-Reviewed:` trailer from manual adversarial review regardless. `scripts/bake-mirror.ts` (mirror-publish path, same defect class) deliberately left out of scope, flagged as a residual.
+
+PR #252 opened, CI (`gate` 5m34s, `refute-required`, CodeRabbit) all green, merged (`1185638`) after explicit approval. Gabriel also approved lifting both fleet suspensions on merge -- did not infer this from the merge alone.
+
+**First live resume.** Synced local `main` to the merge, then ran `extract-workbook.ts` by hand against synced `main` (not just the pre-merge worktree) as final proof the wiring works end to end: clean write, both gates passed, 138 leases, $5,576,537, 0 flags. Applied the material-change gate exactly as `ora-lease-snapshot-refresh`'s own contract specifies: non-timestamp diff was non-empty (962 lines -- 5 days of accumulated portfolio movement during the suspension: loan amortization advancing balances/LTV/DSCR, rent/NOI changes on several properties -- not corruption), so committed rather than restored. Repo-sanity check passed (clean status apart from the one file, on `main`, no merge/rebase in progress). Committed locally as `fa9ed8b` with the task's own message convention and real printed counts; explicitly did NOT push, per the task's standing no-push rule.
+
+Both `SKILL.md` files (`ora-lease-snapshot-refresh`, `ora-cc-snapshot-refresh`) rewritten from suspension banners to a compact "CLOSED" note referencing both PRs and the live verification; STEPS sections restored to normal, unconditional operation -- no more special-casing needed on the next scheduled fire of either task. Diagnostic memory file (`reference_parseleases_vacancy_block_phantom_leases_2026-08-03.md`) updated to RESOLVED. Claim on `oxford-command-center-data` released after the PR was opened (editing complete; remainder was CI wait + merge decision).
+
 ## 2026-08-03 — OI-029 exposed Netlify token REVOKED by Gabriel; live Zapier OAuth grant found
 
 **Token revoked (confirmed by screenshot).** Gabriel deleted the `ORA Lease App Sync` PAT (No Expiry, created Apr 25) — the only live token on the account and the credential leaked by both OI-029 exposures (the archived `oxfordra-net` git history at commit `4b7a3bb`, and the corrupted `.git-corrupted-20260716` backup). **The live half of OI-029 is closed:** that plaintext material is now dead. The four remaining PATs all show `Expired` (Cowork Deploy - Temp, Website ×2, For VSC — lapsed Apr 6–27) and cannot authenticate; deleting them is tidiness, not security.
