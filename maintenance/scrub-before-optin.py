@@ -106,17 +106,49 @@ def scan_file_for_terms(path, term_seqs):
     return hits
 
 
+MULTILINE_SENTINEL = 0  # line_no for a label that matched ACROSS lines, not on any one
+
+
 def scan_file_for_secrets(path):
-    """[(line_no, label), ...] for every secret-pattern hit in `path`. Never
-    returns or prints the matched text itself."""
+    """[(line_no, label), ...] for every secret hit in `path`. Never returns or prints
+    the matched text itself.
+
+    Routed through `secret_patterns.scan_text` (2026-08-03) instead of iterating
+    SECRET_PATTERNS raw. The raw loop bypassed BOTH of scan_text's guarantees, so this
+    consumer silently disagreed with the pre-push gate and the daily audit about the same
+    file -- exactly the divergence importing the shared lib was meant to end:
+      * the reference/placeholder/code suppressor never ran here, so `TOKEN =
+        os.environ.get(...)` and `NAME = lib.CONST` were reported as credentials;
+      * per-line matching cannot see a MULTI-LINE assignment (`CRON_SECRET:` then an
+        indented value) -- the pattern's whitespace run spans newlines, which is why
+        scan_text evaluates whole text. That was a REFUTE-confirmed false negative
+        class in the 2026-07-30 gap fix.
+
+    scan_text is whole-text and returns labels only, so line numbers are re-derived
+    best-effort for display: a label that no single line reproduces came from a
+    cross-line match and is reported at MULTILINE_SENTINEL. The authoritative
+    determination is always scan_text's -- line attribution never adds or drops a label.
+
+    NOT applied here, deliberately: `secret_patterns.is_exempt_path()`. The pre-push gate
+    exempts test-fixture paths because it must not block every push; scrub gates a NEW
+    tree ENTERING version control, where a `tests/` directory is exactly as unvetted as
+    any other. Staying stricter than the gate is the safe direction for this caller, and
+    the difference is a policy choice rather than drift -- recorded so a future reader
+    does not "fix" it into consistency."""
     body, _err = dip.read_optional(path)
     if body is None:
         return []
-    hits = []
+    labels = set(_secret_lib.scan_text(body))
+    if not labels:
+        return []
+    hits, attributed = [], set()
     for ln_no, line in enumerate(body.splitlines(), start=1):
-        for label, pattern in SECRET_PATTERNS:
-            if pattern.search(line):
+        for label in _secret_lib.scan_text(line):
+            if label in labels and (ln_no, label) not in hits:
                 hits.append((ln_no, label))
+                attributed.add(label)
+    for label in sorted(labels - attributed):
+        hits.append((MULTILINE_SENTINEL, label))
     return hits
 
 

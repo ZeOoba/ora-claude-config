@@ -255,6 +255,24 @@ expect("R3 digit-bearing value keeps its finding even with an immediate paren",
 expect("R3 genuine call is still suppressed",
        sp.scan_text("AUTH_TOKEN = get_credential_from_vault(scope)") == [])
 
+
+# --- 2026-08-03: legacy password placeholder shape swallowed entropy ------------------
+# _PLACEHOLDER_SHAPE_RE (2026-07-24) allowed [A-Z0-9_] in its ALL-CAPS branch, so a real
+# shouted password carrying digits read as a placeholder. Same class as the 2026-07-30
+# word-form fix; that gate was never applied to this older regex. Found by the REFUTE
+# pass on the scrub-before-optin scan_text routing change.
+expect("all-caps password WITH digits is caught",
+       "password assignment" in sp.scan_text("password = ALLCAPS99X"))
+expect("all-caps password with trailing digits is caught",
+       "password assignment" in sp.scan_text("db password: HUNTER2XYZABC"))
+expect("digit-free shouted placeholders stay suppressed",
+       sp.scan_text("password: YOUR_PASSWORD") == []
+       and sp.scan_text("password: PASSWORD") == []
+       and sp.scan_text("password = CHANGEME") == [])
+expect("bracketed/starred placeholder branches unaffected",
+       sp.scan_text("password=<password>") == []
+       and sp.scan_text("password: ********") == [])
+
 npass = sum(1 for ok, _ in results if ok)
 print("secret-patterns tests: %d/%d pass" % (npass, len(results)))
 sys.exit(0 if npass == len(results) else 1)
