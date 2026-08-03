@@ -162,6 +162,36 @@ try:
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
+# --- 2026-08-03: scrub must route secret detection through scan_text -----------------
+# Root cause (REFUTE pass 2 of the secret_patterns gap fix, 2026-07-30):
+# scan_file_for_secrets iterated SECRET_PATTERNS RAW per line, so neither the
+# reference/placeholder suppressor nor scan_text's multi-line handling ever reached this
+# consumer -- the two scanners could disagree about the same file, which is precisely the
+# divergence the shared lib exists to prevent.
+tmp = tempfile.mkdtemp(prefix="sbo_scantext_")
+try:
+    # (a) suppressor must now apply: env lookups / templates / code refs are NOT secrets
+    _mkfile(tmp, "envref.py", "TOKEN = os.environ.get('NETLIFY_AUTH_TOKEN')\n")
+    _mkfile(tmp, "template.yml", 'NETLIFY_AUTH_TOKEN: "${NETLIFY_AUTH_TOKEN}"\n')
+    _mkfile(tmp, "coderef.py", "SECRET_PATTERNS = lib.SECRET_PATTERNS\n")
+    # (b) recall preserved -- a real key still fires
+    _mkfile(tmp, "real.env", "NETLIFY_AUTH_TOKEN=nfp_a3Kq9xb3Kq9xc3Kq9xd3Kq9x\n")
+    # (c) MULTI-LINE assignment: the raw per-line loop could never see this
+    _mkfile(tmp, "multiline.yml", "CRON_SECRET:\n  zq8r4tkx91mmv2abcd\n")
+    _t, _secret_hits, _w = sbo.scrub([tmp])
+    _flagged = {os.path.basename(str(f)) for f, _ in _secret_hits}
+    expect("scrub suppresses an env-lookup value", "envref.py" not in _flagged, _flagged)
+    expect("scrub suppresses a template placeholder", "template.yml" not in _flagged, _flagged)
+    expect("scrub suppresses a code reference", "coderef.py" not in _flagged, _flagged)
+    expect("scrub still flags a real Netlify key", "real.env" in _flagged, _flagged)
+    expect("scrub flags a MULTI-LINE assignment (raw per-line loop could not)",
+           "multiline.yml" in _flagged, _flagged)
+    for _f, _hits in _secret_hits:
+        if os.path.basename(str(_f)) == "real.env":
+            expect("single-line hit keeps its line number", _hits and _hits[0][0] == 1, _hits)
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
 passed = sum(1 for ok, _ in results if ok)
 print("\nscrub-before-optin tests: %d/%d passed" % (passed, len(results)))
 sys.exit(0 if passed == len(results) else 1)
