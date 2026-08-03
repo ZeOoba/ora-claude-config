@@ -34,12 +34,43 @@ MEM = os.environ.get("ORA_MEMORY_DIR") or os.path.join(
 INDEX = os.path.join(MEM, "MEMORY.md")
 GOV_PROBE = os.path.join(HOME, ".claude", "maintenance", "governor-drift-probe.py")
 
-# MEMORY.md size gates. WARN at the compaction target (still readable, but the next
-# session should compact rather than keep appending) -- a hard issue only at the read
-# limit, where the file can no longer be read in one Read call and index maintenance
-# itself becomes unreliable. Bytes, not KiB, to match how du/wc report it.
-MEMORY_WARN_BYTES = 17100     # 17.1KB compaction target
-MEMORY_HARD_BYTES = 24400     # 24.4KB Read-tool limit
+# MEMORY.md size gates. HARD is a REAL tool constraint: past it the index no longer fits
+# in one Read call and index maintenance itself becomes unreliable. WARN is a runway
+# marker BELOW that cliff -- it exists to fire while there is still time to act, not to
+# describe a target size. Bytes, not KiB, to match how du/wc report it.
+#
+# RECALIBRATED 2026-07-31 (warn 17100 -> 21500), Gabriel's in-turn direction. The old
+# 17100 was calibrated against a much smaller corpus and never rescaled, so it had become
+# UNSATISFIABLE without destroying the index. Measured against the live 176-file corpus
+# (182 links) at the time of recalibration:
+#   * stripping EVERY hook (the prose after each link), leaving only bullets + links +
+#     titles, floors the file at 15183 bytes -- just 1917 below the old 17100 WARN. So
+#     satisfying 17100 allowed ~10 characters of description per entry across 182 entries.
+#     The hook is exactly what recall reads to judge relevance; at that length the file is
+#     a list of filenames, not an index. The gate's own purpose defeats the file's.
+#   * the only other way to reach 17100 was deleting ~30 entries (17% of all memories, at
+#     a measured mean of 112.4 bytes/entry) -- i.e. losing recall to satisfy a number.
+#   * archiving the CLOSED/superseded entries (the usual escape hatch) was checked
+#     file-by-file and does NOT work unaided: all 10 candidates have inbound refs from
+#     OTHER LIVE memory files, so archiving orphans real pointers unless those files are
+#     repaired in the same pass.
+# Same failure class as the CLAUDE.md word budget -- see the memory
+# reference_claude_md_word_budget_is_a_floor.md: a WARN sitting at/below the honest floor
+# reads as "approaching a limit" and drives trimming that cuts load-bearing content. Its
+# ratified point 4 -- "if the WARN line itself is the irritant, the honest fix is
+# recalibrating the constant upward, not shrinking the file to satisfy a marker" -- is
+# what this change implements.
+#
+# 21500 leaves ~2900 bytes (~26 entries) of runway below HARD. It is deliberately close
+# enough to fire soon: the corpus grows monotonically (~112 bytes of index per new memory)
+# and HARD does NOT scale, so a real structural decision IS approaching. When WARN fires
+# the lever is archival-with-inbound-ref-repair or splitting the index -- NOT prose
+# trimming, which is now known to buy almost nothing. NOTE: splitting is currently blocked
+# by check 1 below, which requires every top-level *.md to be linked from MEMORY.md
+# ITSELF; a sub-index would leave every file it lists reported as "unlisted". Amending
+# check 1 to follow sub-indexes is the structural fix and is a separate, signed-off change.
+MEMORY_WARN_BYTES = 21500     # runway marker below HARD (see calibration above)
+MEMORY_HARD_BYTES = 24400     # 24.4KB Read-tool limit -- a real constraint, do not raise
 
 CANON_RECIPIENTS = {"ggoldberg@oxfordra.net", "egoldberg@oxfordra.net"}
 RECIPIENT_DRIFT_EXEMPT_FILES = {
@@ -247,9 +278,12 @@ def main():
             "fits in one Read call; compact now, not on the next pass" % (idx_bytes, MEMORY_HARD_BYTES))
     elif idx_bytes > MEMORY_WARN_BYTES:
         warnings.append(
-            "MEMORY.md is %d bytes, over the %d-byte compaction target (%d bytes of "
-            "headroom left before the %d-byte hard limit) -- compact before the next "
-            "several index lines land" % (
+            "MEMORY.md is %d bytes, past the %d-byte runway marker (%d bytes left before "
+            "the %d-byte Read-tool limit). The lever here is ARCHIVAL (move dead entries "
+            "to _archive/ AND repair the inbound refs in other memory files, which is what "
+            "makes it non-trivial) or SPLITTING the index -- NOT prose trimming, which is "
+            "measured to buy almost nothing (see the calibration comment on "
+            "MEMORY_WARN_BYTES). Do not delete live pointers to satisfy this number." % (
                 idx_bytes, MEMORY_WARN_BYTES, MEMORY_HARD_BYTES - idx_bytes, MEMORY_HARD_BYTES))
 
     # --- 1. index reconciliation ---
