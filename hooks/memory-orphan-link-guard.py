@@ -615,72 +615,100 @@ def main():
 
     # Would this commit include MEMORY.md at all? Simulated from the command's segments,
     # NOT read straight off the pre-command index -- see _commit_would_include.
-    included, from_worktree = _commit_would_include(cmd, rel_index, rel_index in staged)
-    if not included:
-        return  # MEMORY.md not part of this commit -- not our business
+    # EVERY index this commit might land: the root MEMORY.md plus any sub-index
+    # (INDEX_*.md) beside it. The 2026-08-03 split moved 108 of ~190 pointers into
+    # INDEX_reference.md, so guarding MEMORY.md alone would leave the MAJORITY of the
+    # corpus's pointers unguarded at commit time -- this hook's own hole, relocated.
+    # Iterated, never duplicated: this file already records how two independent
+    # scanners for one fact drifted apart, and that lesson applies to itself.
+    mem_dir = os.path.dirname(rel_index)
+    index_rels = [rel_index]
+    try:
+        for name in sorted(os.listdir(os.path.join(repo, mem_dir) if mem_dir else repo)):
+            if name.upper().startswith("INDEX_") and name.lower().endswith(".md"):
+                index_rels.append((mem_dir + "/" + name) if mem_dir else name)
+    except Exception:
+        pass  # fail-open: an unreadable directory must never block a commit
 
-    # `from_worktree` (from _commit_would_include, above) is the single source of truth
-    # for whether THIS commit reads MEMORY.md from the working tree or the index -- it
-    # is already quote-aware via _commit_pathspec(). A second, independent raw-string
-    # `_has_pathspec(cmd)` check used to live here (`re.search(r"\s--\s", cmd)`) and was
-    # REMOVED (2026-07-24, second local-review round): it could fire on a decoy " -- "
-    # inside an ordinary quoted commit message even when `_commit_pathspec` correctly
-    # found no real pathspec, forcing a working-tree read for what is actually a plain
-    # staged commit. If the working tree had since been reverted to a clean MEMORY.md
-    # while the ORPHANED version stayed staged (real git commits the index here, not the
-    # working tree), the guard scanned the wrong, clean content and ALLOWED -- verified
-    # live: the orphaned index content landed. Two independent quote-aware scanners for
-    # the same fact is itself a hazard (this is exactly how they drifted); there is now
-    # only one.
-    if from_worktree:
+    missing = []          # [(index_rel, rel_target)] -- which index carried the bad link
+    for idx_rel in index_rels:
+        # Would this commit include THIS index at all? Simulated from the command's
+        # segments, NOT read straight off the pre-command index -- see
+        # _commit_would_include.
+        included, from_worktree = _commit_would_include(cmd, idx_rel, idx_rel in staged)
+        if not included:
+            continue  # this index is not part of the commit -- not our business
+
+        # `from_worktree` (from _commit_would_include, above) is the single source of
+        # truth for whether THIS commit reads the index from the working tree or from
+        # git's index -- it is already quote-aware via _commit_pathspec(). A second,
+        # independent raw-string `_has_pathspec(cmd)` check used to live here
+        # (`re.search(r"\s--\s", cmd)`) and was REMOVED (2026-07-24, second local-review
+        # round): it could fire on a decoy " -- " inside an ordinary quoted commit
+        # message even when `_commit_pathspec` correctly found no real pathspec, forcing
+        # a working-tree read for what is actually a plain staged commit. If the working
+        # tree had since been reverted to a clean index while the ORPHANED version stayed
+        # staged (real git commits the index here, not the working tree), the guard
+        # scanned the wrong, clean content and ALLOWED -- verified live: the orphaned
+        # index content landed. Two independent quote-aware scanners for the same fact is
+        # itself a hazard (this is exactly how they drifted); there is still only one.
+        #
         # A pathspec commit takes the WORKING TREE, and so does anything the command
         # stages itself -- read the RESOLVED repo's own copy (os.path.join(repo,
-        # rel_index)), NOT the hardcoded canonical index_abs path: for a command
-        # targeting a worktree, that is a DIFFERENT file on disk from the main
-        # checkout's copy, even though both are "MEMORY.md" at the same relative path.
-        try:
-            with open(os.path.join(repo, rel_index), "r", encoding="utf-8") as fh:
-                content = fh.read()
-        except Exception:
-            return
-    else:
-        content = _git(repo, "show", ":" + rel_index)
-        if content is None:
-            return
+        # idx_rel)), NOT a hardcoded canonical path: for a command targeting a worktree
+        # that is a DIFFERENT file on disk from the main checkout's copy, even though
+        # both sit at the same relative path.
+        if from_worktree:
+            try:
+                with open(os.path.join(repo, idx_rel), "r", encoding="utf-8") as fh:
+                    content = fh.read()
+            except Exception:
+                continue
+        else:
+            content = _git(repo, "show", ":" + idx_rel)
+            if content is None:
+                continue
 
-    # If the version being committed is byte-identical to HEAD's, this commit lands no
-    # new index lines -- any orphan in it is pre-existing, and blocking here would be a
-    # permanent deadlock rather than a guard. (Reachable via `git add -A` when MEMORY.md
-    # happens to be unmodified.)
-    head_content = _git(repo, "show", "HEAD:" + rel_index)
-    if head_content is not None and head_content == content:
-        return
+        # If the version being committed is byte-identical to HEAD's, this commit lands
+        # no new index lines -- any orphan in it is pre-existing, and blocking here would
+        # be a permanent deadlock rather than a guard.
+        head_content = _git(repo, "show", "HEAD:" + idx_rel)
+        if head_content is not None and head_content == content:
+            continue
 
-    mem_dir = os.path.dirname(rel_index)
-    missing = []
-    seen = set()
-    for target in LINK_RE.findall(content):
-        if target in seen:
-            continue
-        seen.add(target)
-        rel_target = (mem_dir + "/" + target) if mem_dir else target
-        rel_target = os.path.normpath(rel_target).replace(os.sep, "/")
-        if rel_target in staged:
-            continue
-        if _in_head(repo, rel_target):
-            continue
-        missing.append(rel_target)
+        seen = set()
+        for target in LINK_RE.findall(content):
+            if target in seen:
+                continue
+            seen.add(target)
+            rel_target = (mem_dir + "/" + target) if mem_dir else target
+            rel_target = os.path.normpath(rel_target).replace(os.sep, "/")
+            if rel_target in staged:
+                continue
+            if _in_head(repo, rel_target):
+                continue
+            missing.append((idx_rel, rel_target))
 
     if not missing:
         return
 
-    on_disk = [m for m in missing if os.path.isfile(os.path.join(repo, m))]
-    absent = [m for m in missing if m not in on_disk]
+    # De-duplicate by body path, preserving order: the same body can be linked from more
+    # than one index, and the fix (stage the body) is identical either way.
+    miss_paths = []
+    for _idx_rel, m in missing:
+        if m not in miss_paths:
+            miss_paths.append(m)
+    carriers = sorted({i for i, _m in missing})
+    on_disk = [m for m in miss_paths if os.path.isfile(os.path.join(repo, m))]
+    absent = [m for m in miss_paths if m not in on_disk]
 
     parts = [
         "MEMORY.md orphan-index-link guard: this commit would land %d index link(s) whose "
         "body file is neither in HEAD nor staged. A clone would get a broken pointer, and "
-        "memory-integrity-probe.py would exit 1 on the next run." % len(missing)
+        "memory-integrity-probe.py would exit 1 on the next run.%s" % (
+            len(miss_paths),
+            "" if carriers == [rel_index] else
+            "  Carried by: " + ", ".join(os.path.basename(c) for c in carriers))
     ]
     if on_disk:
         parts.append(
