@@ -1510,6 +1510,40 @@ the original row would have expected a blocked push and reached for an override 
 confirms or kills the contention hypothesis without touching the hook. The durable fix regardless is an
 explicit timeout on the `run_hook()` subprocess so the failure is a clean, attributable error rather than a
 180s hang.
+**✅ THE 180s QUESTION IS ANSWERED - and it REVERSES the reading above (2026-08-03, later same evening).**
+`PER_TEST_TIMEOUT_SECONDS = 90` has been 90 continuously since at least 2026-07-24 (checked across six commits
+of `hooks/git-prepush-hook-tests-gate.py`). The doubled-budget retry landed in `55522aa` at **2026-07-26
+15:02**. This item's triggering push - of `8b61f20` - was **2026-08-03 16:20, eight days later**. So the retry
+was already in force, and **180s = 90 x TIMEOUT_RETRY_MULTIPLIER = the DOUBLED budget.** This item's event was
+therefore the *rerun* also timing out, which by the gate's own stated policy is a genuine blocking FAIL: "a
+test that cannot finish inside DOUBLE the budget even once signals a genuine hang, not load." It was not an
+unmitigated first-run timeout.
+**Consequence - the two events are different severities, not the same failure recurring:**
+| | This item's event (16:20) | Third push (19:43) |
+|---|---|---|
+| Budget reached | 180s = first run **and** doubled rerun | 90s first run only |
+| Gate verdict | blocking FAIL | `timeout-retry ... not blocking` |
+| Resolution | `allow-hook-test-failure` override | absorbed by the retry, no override |
+**CORRECTION of my own COUNTER-EVIDENCE paragraph above (same session, ~1 hour earlier).** That paragraph is
+factually accurate on its narrow claims - two pushes at 19:38-19:42 did pass with 0 fail and no override - but
+its framing was wrong twice, and the corrected reading is the one to trust:
+- It called the timeout **"non-deterministic"**. Wrong shape. The timeout is not intermittently absent; it
+  recurred on the very next push (19:43). What varies is only whether it clears the FIRST budget or also the
+  second. The gate absorbs the former and blocks on the latter.
+- It said `run_hook()`'s missing subprocess timeout "is unchanged", implying nothing mitigates this. True of
+  that function in isolation, but **misleading**: a gate-level mitigation has existed since 2026-07-26.
+- It treated the 'will block the next push' claim as simply FALSIFIED. Better: that claim is **too strong but
+  not baseless** - a push under sufficient load still blocks, which is exactly what happened at 16:20.
+**Also stale in this item's own Description: the cause is NOT "unconfirmed".** It was root-caused 2026-07-26 and
+is documented in `hooks/git-prepush-hook-tests-gate.py`'s module docstring: during a push with three other live
+sessions, this file - the suite's outlier at **48 subprocess spawns** - blew the flat 90s budget and blocked,
+then passed all 48 tests quickly on isolated rerun. An environmental load flake. This item was filed a week
+later still calling that hypothesis unconfirmed.
+**STAYS OPEN, with the real defect restated:** the gate is behaving correctly; the *test* is slow enough that
+under real concurrent load it can exceed even 180s. Two candidate fixes - (a) cut its 48 subprocess spawns
+(attacks the cause), or (b) give this known outlier a larger budget, which the gate's docstring deliberately
+rejects as a per-file roster that would rot. (a) is the better target. **Do not close this on quiet-machine
+pushes**; only a push under comparable multi-session load tests it.
 **Auto-check:** none.
 
 ## Closed
