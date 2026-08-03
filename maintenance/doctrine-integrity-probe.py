@@ -713,6 +713,199 @@ AM_BRIEF_SENTINELS = (
 )
 
 
+# --- Check 13 (2026-08-03 extension): doctrine-vs-deliverable identity drift.
+# Defect (event_log.md 2026-08-03): CLAUDE.md's Identity line said "Principal"
+# while 38 .docx deliverables, three ora-skills sources, and
+# build_t1_letterpack.py's OUTBOUND owner-letter signature block all said "VP
+# Acquisitions". Two contradictory ratified rulings (2026-06-10 and 2026-07-08)
+# coexisted for nearly two months and no guard noticed, because nothing compared
+# the doctrine file against what deliverables actually emit. A title in CLAUDE.md
+# is not self-enforcing.
+#
+# Scope is EMITTERS, not artifacts: templates, SKILL.mds and document generators
+# -- the things that produce NEW paper. Historical .docx deliverables are
+# deliberately out of scope per Gabriel's 2026-08-03 "live sources only" ruling;
+# they are dated records and rewriting them would falsify the archive.
+#
+# WARN-only and fail-open, like the other sweeps: a missing tree or an unreadable
+# file must never fail the probe. ---
+IDENTITY_NAME = "Gabriel Goldberg"
+IDENTITY_LINE_RE = re.compile(
+    re.escape(IDENTITY_NAME) + r",\s*([^,\n]+?),\s*Oxford Realty Advisors")
+
+# Surface renderings, longest first so "vice president, acquisitions" wins over
+# the "principal"-style short keys and over its own prefixes.
+IDENTITY_TITLE_SURFACES = (
+    "vice president of acquisitions",
+    "vice president, acquisitions",
+    "vice president acquisitions",
+    "vp of acquisitions",
+    "vp acquisitions",
+    "co-principal",
+    "principal",
+    "founder",
+)
+IDENTITY_TITLE_KEYS = {
+    "vice president of acquisitions": "VP-ACQUISITIONS",
+    "vice president acquisitions": "VP-ACQUISITIONS",
+    "vp of acquisitions": "VP-ACQUISITIONS",
+    "vp acquisitions": "VP-ACQUISITIONS",
+    "co-principal": "CO-PRINCIPAL",
+    "principal": "PRINCIPAL",
+    "founder": "FOUNDER",
+}
+# Characters that may sit between the name and its title (markdown emphasis,
+# dashes, bullets, quotes, parens) and be skipped.
+_IDENT_SEP = " \t\"'*_|:,-—–·•()\r\n"
+_QUOTED_LITERAL_RE = re.compile(r'"([^"\n]{1,120})"|\'([^\'\n]{1,120})\'')
+
+ORA_SKILLS_ROOT = HOME / "ora-skills"
+# Document generators live beside the deal data they draw on, not in a repo.
+OUTREACH_GENERATOR_DIR = (HOME / "OneDrive - Oxford Capital Partners"
+                          / "Business" / "Investment Candidates -- 2026")
+IDENTITY_EMITTER_SPECS = (
+    (ORA_SKILLS_ROOT, "*/SKILL.md"),
+    (ORA_SKILLS_ROOT / "cowork-settings" / "templates", "*.md"),
+    (OUTREACH_GENERATOR_DIR, "*.py"),
+)
+# Version snapshots and archives are historical record, not live emitters.
+IDENTITY_PRUNE_PARTS = ("_archive", "versions", "__pycache__", ".git")
+
+
+def normalize_title(s):
+    """Fold a title rendering to a stable key, or None if unrecognised.
+    'VP Acquisitions', 'Vice President, Acquisitions' and 'vice  president of
+    acquisitions' are the SAME title -- without this the probe would report
+    build_t1_letterpack.py as drifting from CLAUDE.md when it agrees."""
+    if not s:
+        return None
+    t = s.strip().strip('"\'').strip()
+    t = t.replace("—", " ").replace("–", " ")
+    t = re.sub(r"^[\*_]+|[\*_]+$", "", t)
+    t = re.sub(r"[,.;:]+$", "", t)
+    t = t.replace(",", " ")
+    t = re.sub(r"\s+", " ", t).strip().lower()
+    return IDENTITY_TITLE_KEYS.get(t)
+
+
+def canonical_identity_title(text):
+    """The title CLAUDE.md's Identity line asserts, as a key (None if absent)."""
+    m = IDENTITY_LINE_RE.search(text)
+    return normalize_title(m.group(1)) if m else None
+
+
+def _title_at_start(rem):
+    """If `rem` BEGINS with a title surface used as a title, return (surface,key).
+
+    The terminator rule is what keeps 'principal' -- an ordinary finance word --
+    from registering: a real assertion is followed by end-of-line or punctuation
+    ('Principal (Cornell, economics)', 'VP Acquisitions, Oxford...'), whereas
+    prose continues in lowercase ('principal balance was written down')."""
+    s = re.sub(r"[ \t]+", " ", rem).lstrip(_IDENT_SEP)
+    # Compound roles ("Member / Principal", "Manager / VP Acquisitions") state the
+    # title in the tail. Try the whole string first, then after each leading
+    # "<word> /" segment, so document-assembly's signing-authority line is seen.
+    candidates = [s]
+    tail = s
+    for _ in range(3):
+        mm = re.match(r"[A-Za-z]+\s*/\s*", tail)
+        if not mm:
+            break
+        tail = tail[mm.end():]
+        candidates.append(tail)
+    for cand in candidates:
+        low = cand.lower()
+        for surf in IDENTITY_TITLE_SURFACES:
+            if not low.startswith(surf):
+                continue
+            rest = cand[len(surf):].lstrip()
+            if not rest or not rest[0].islower():
+                return surf, IDENTITY_TITLE_KEYS[surf]
+            # "Principal at Oxford Realty Advisors" is an assertion; "principal
+            # of the loan" is not. The preposition alone cannot tell them apart
+            # -- what follows it can: a proper noun means an employer.
+            pm = re.match(r"(at|of|for|with)\s+(\S+)", rest)
+            if pm and pm.group(2)[:1].isupper():
+                return surf, IDENTITY_TITLE_KEYS[surf]
+    return None
+
+
+def scan_title_assertions(text):
+    """Return [(lineno, surface, key)] where `text` asserts a title for Gabriel.
+
+    Two shapes, because the real defects took both forms:
+      A. same line  -- '**Owner:** Gabriel Goldberg, VP Acquisitions'
+      B. adjacent quoted literals -- a generator's signature block, where the
+         name and the title are separate string literals on separate lines.
+    Line reported is the TITLE's, since that is the token a fix edits."""
+    hits, seen = [], set()
+    for i, line in enumerate(text.splitlines(), 1):
+        pos = line.find(IDENTITY_NAME)
+        if pos < 0:
+            continue
+        got = _title_at_start(line[pos + len(IDENTITY_NAME):])
+        if got and (i, got[1]) not in seen:
+            seen.add((i, got[1]))
+            hits.append((i, got[0], got[1]))
+
+    literals = []
+    for i, line in enumerate(text.splitlines(), 1):
+        for m in _QUOTED_LITERAL_RE.finditer(line):
+            literals.append((i, (m.group(1) or m.group(2)).strip()))
+    for idx, (_, lit) in enumerate(literals[:-1]):
+        if lit != IDENTITY_NAME:
+            continue
+        nline, nlit = literals[idx + 1]
+        key = normalize_title(nlit)
+        if key and (nline, key) not in seen:
+            seen.add((nline, key))
+            hits.append((nline, nlit.strip(), key))
+    return sorted(hits)
+
+
+def check_identity_drift(canonical_key, sources):
+    """sources = [(label, text)]. Return one finding per source asserting a title
+    that conflicts with `canonical_key`. Reports EVERY conflicting source, not
+    just the first -- 38 drifted at once, and a first-hit-only report would let
+    the rest survive a 'fixed it' claim."""
+    if not canonical_key:
+        return []
+    out = []
+    for label, text in sources:
+        bad = sorted({(ln, surf, key) for ln, surf, key
+                      in scan_title_assertions(text) if key != canonical_key})
+        if bad:
+            where = ", ".join("line %d: %r" % (ln, surf) for ln, surf, _ in bad[:3])
+            extra = "" if len(bad) <= 3 else " (+%d more)" % (len(bad) - 3)
+            out.append("%s asserts %s -- %s%s"
+                       % (label, "/".join(sorted({k for _, _, k in bad})),
+                          where, extra))
+    return out
+
+
+def collect_identity_emitters():
+    """(label, text) for every live emitter that is readable. Fail-open: an
+    absent tree (e.g. OneDrive not synced on this machine) yields nothing."""
+    out = []
+    for root, pattern in IDENTITY_EMITTER_SPECS:
+        try:
+            if not root.is_dir():
+                continue
+            for p in sorted(root.glob(pattern)):
+                if any(part in IDENTITY_PRUNE_PARTS for part in p.parts):
+                    continue
+                try:
+                    # parent/name -- bare "SKILL.md" is ambiguous across ~50 skills.
+                    label = "%s/%s" % (p.parent.name, p.name)
+                    out.append((label, p.read_text(encoding="utf-8",
+                                                   errors="replace")))
+                except Exception:
+                    continue
+        except Exception:
+            continue
+    return out
+
+
 def check_am_brief_sofr_guardrail(text):
     """Return the list of guardrail sentinels ABSENT from the SKILL.md text
     (empty == guardrail intact). Pure over text so it is unit-testable without
@@ -1390,6 +1583,35 @@ def main():
                 print("ora-am-brief SOFR-narration guardrail: intact "
                       "(%d/%d sentinels present)"
                       % (len(AM_BRIEF_SENTINELS), len(AM_BRIEF_SENTINELS)))
+
+    # --- 13. doctrine-vs-deliverable identity sweep (2026-08-03). Live-mode
+    # only: it compares the doctrine file against what live EMITTERS say, which
+    # is meaningless against a single fixture path. WARN-only, fail-open. ---
+    if live_mode:
+        canon = canonical_identity_title(text)
+        if canon is None:
+            warn("Doctrine-vs-deliverable identity sweep: no parseable Identity "
+                 "line in CLAUDE.md ('%s, <title>, Oxford Realty Advisors') -- "
+                 "sweep SKIPPED, not asserted." % IDENTITY_NAME)
+        else:
+            emitters = collect_identity_emitters()
+            if not emitters:
+                warn("Doctrine-vs-deliverable identity sweep: no live emitters "
+                     "readable (ora-skills / outreach generators absent?) -- "
+                     "sweep SKIPPED, not asserted.")
+            else:
+                drift = check_identity_drift(canon, emitters)
+                if drift:
+                    warn("Doctrine-vs-deliverable identity DRIFT -- CLAUDE.md "
+                         "says %s but %d live emitter(s) disagree: %s. These "
+                         "produce NEW paper, so the drift compounds until fixed. "
+                         "Reconcile against CLAUDE.md's Identity line (see "
+                         "event_log.md 2026-08-03)."
+                         % (canon, len(drift), ascii_safe(" | ".join(drift))))
+                else:
+                    print("Doctrine-vs-deliverable identity sweep: clean "
+                          "(%s across %d live emitter(s))"
+                          % (canon, len(emitters)))
 
     # --- verdict ---
     if missing:
