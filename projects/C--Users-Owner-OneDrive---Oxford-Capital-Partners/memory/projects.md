@@ -5,6 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
+  modified: 2026-08-03T19:53:40.624Z
 ---
 
 # ORA Active Projects (current state)
@@ -64,7 +65,7 @@ Replacing Yardi/AppFolio/Rent Manager/QuickBooks with a unified internal platfor
 Relocation to `Claude_Workspace/00_Governance/References/` done & verified 2026-05-31. All 3 prior open decisions ratified 2026-07-17:
 1. **File-naming schema: subject-first is canonical** — Style Guide §3.1's `ORA_[Subject]_[DocType]_[YYYYMMDD]_v[N][_State]` wins over the date-first `YYYYMMDD_[Property]_[DocType]_v##` pattern that had crept into observed practice. Existing date-first files are NOT retroactively renamed by this ratification alone — flag for a separate cleanup pass if Gabriel wants files brought into conformance.
 2. **DocType controlled vocabulary ratified as exactly 5 tokens:** ICMemo · LOI · PSA · RentRoll · Deck. No others are valid without a future amendment — do not invent new tokens ad hoc.
-3. **Naming Standard v1.1 ratified provisionally** — locked in on Gabriel's authority; formal sign-off from Eric still outstanding (Notion page `35e6ecd8-9e59-8129-af9d-c69b04a3cce2` / Ops Hub decision log). Treat as binding now, but note the pending co-principal confirmation if Eric raises it later.
+3. **Naming Standard v1.1 ratified provisionally** — locked in on Gabriel's authority; formal sign-off from Eric still outstanding (Notion page `35e6ecd8-9e59-8129-af9d-c69b04a3cce2` / Ops Hub decision log). Treat as binding now, but note the pending Founder confirmation if Eric raises it later.
 - **Cowork-only fix (still open):** CLAUDE.md memory citations for Voice + Standard-Positions still point to old `/References/` path — fix in the Cowork memory editor (no editable on-disk source from Code).
 
 ## 7. Engineering Operating System (Claude Code dev doctrine) — installed 2026-06-05
