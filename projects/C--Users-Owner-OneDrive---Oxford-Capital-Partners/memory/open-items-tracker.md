@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-08-03T21:03:04.262Z
+  modified: 2026-08-03T22:59:07.810Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -42,7 +42,6 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | [OI-026](#OI-026) | 2026-07-26 | `oxford-command-center` `gov-ltv-hardening` worktree, 18-round adversarial-refute session | debt-snapshot.ts's degraded-marker "does a new loan explain this one's disappearance" check is tick-partition order-dependent (same facts, opposite governor verdict depending on which snapshot write each fact lands in) — Gabriel's ruling 2026-07-26: ship rounds 14-18 as-is, document only, no fix yet |
 | [OI-029](#OI-029) | 2026-07-26 | Repo-sweep session, 2026-07-26 | TWO live/unrotated credential exposures found: (1) `oxford-realty/oxfordra-net` git history has a plaintext `NETLIFY_AUTH_TOKEN` from an April WSL experiment (repo now archived to `archive/oxford-realty_archived-20260726/`, history NOT scrubbed); (2) Claude_Workspace `oxford-site` duplicate has a non-redacted Netlify MCP proxy token in a `.git-corrupted-20260716/` backup folder on disk — needs Gabriel to rotate BOTH tokens, then this folder specifically needs secure deletion (not mere archiving — never verified as-touched by this session per the ORA autonomy gate's oxfordra.net-path block on 2026-07-26, so the whole `Claude_Workspace/01_Workspace/oxford-site` duplicate is also still un-archived) |
 | [OI-027](#OI-027) | 2026-07-26 | PR [ZeOoba/oxford-command-center#238](https://github.com/ZeOoba/oxford-command-center/pull/238) (OI-017 vitest-4 REFUTE pass) | Nothing guards against a *future* test regressing into the same class of bug OI-017 fixed (`vi.mock()` of a Node builtin silently no-ops under this repo's jsdom default) — most cases fail loudly, but a bare automock with no configured return value could silently exercise the real implementation and pass for the wrong reason. REFUTE reviewer recommended an ESLint rule (or a `vitest.config.ts` comment at the `environment: 'jsdom'` line) requiring `@vitest-environment node` on any file calling `vi.mock('node:*')`. Not yet built |
-| [OI-030](#OI-030) | 2026-07-26 | `ora-weekly-hygiene` Sunday run + 3 concurrent sessions, 2026-07-26 | **Block C of `ora-weekly-hygiene/SKILL.md` needs one HUMAN coherence read before the next Sunday fire (2026-08-02).** It absorbed edits from four sessions in a single day, including a Gabriel ruling (`caf154b`) that *overrode* an earlier same-day repoint: check G was repointed to the `egoldberg` Graph drive, then formally DROPPED hours later, leaving text that argued for a check the file struck through (dangling ref fixed in `9870bb4`, but only that one symptom). Other same-day edits: Check B respec, frozen-snapshot RED override, real folder names, Block N added, `781bf95` consolidating several idle sessions' WIP. Each change is individually sound and the block is coherent *as far as incremental patching can verify* — the risk is the kind only a full read catches: two locally-correct passages that disagree globally, exactly the failure mode the check-G ruling itself was. NOT another incremental agent patch; the next edit to Block C should follow a human read of the whole block. Detail: [event_log.md](event_log.md) 2026-07-26 |
 | [OI-031](#OI-031) | 2026-07-27 | `orphaned-task-forensics` trace of the `ora-master-workbook-ingest` 2026-07-20 gap, [event_log.md](event_log.md#2026-07-27) | `fleet-status.py`'s overdue/missed-stuck detectors are structurally blind to a single skipped weekly cycle on an already-established recurring task — neither check applies to it (confirmed by reading the script) |
 | [OI-033](#OI-033) | 2026-07-28 | Cowork-surface follow-up to the Code-surface usage-limit audit, 2026-07-28 | LAMS `ora-tenant-contact-gap-sweep` carries no `[MODEL: ...]` tag (sole untagged task in a 27/28-tagged LAMS fleet); fix needs `update_scheduled_task` from a Cowork-surface session |
 | [OI-034](#OI-034) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **HIGH** ora-pm autopay creates a DUPLICATE ACH DEBIT if monthly-billing re-runs — `server/routes/cron.ts:71-107`: the charge inserts are idempotent (unique `idempotency_key`, 23505 counted as skipped) but the autopay `paymentIntents.create` below has NO `idempotencyKey` and no existing-payment check, and sums ALL charges due in the period regardless of manual payment. Real-money/NACHA exposure; `scripts/trigger-billing.ps1` is manually re-runnable and the fleet has a documented catch-up-burst behaviour |
@@ -66,6 +65,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | [OI-053](#OI-053) | 2026-07-30 | Credential-exposure sweep, 2026-07-30 | **Composio API key in plaintext inside OneDrive (cloud-synced):** `Claude_Workspace/01_Workspace/oxford-agent/config.py:3`, duplicated at `01_Workspace/_archive/legacy-templates-2026-03/Claude Agents SDK - Getting Started.md:90`. Composio is a RETIRED connector (removed 2026-06-11), so the key is probably dead — but it has been syncing to Microsoft's cloud and any other device on this OneDrive account. Gabriel to revoke at Composio if that account still exists, then the two files can be scrubbed/archived |
 | [OI-052](#OI-052) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (dispatch integrity gate, first live test) | **MEDIUM — sweep mechanism, not a repo defect.** The `ora-appsec-sweep` Fable model floor is carried entirely by the `security-auditor` Agent dispatch (Gabriel-ratified Option C, 2026-07-24, because the task's own frontmatter `model:` pin is inert on CC/MCP). First live test 2026-07-31: the dispatch WORKED — both subagents spawned with `model:"fable"` recorded in their meta and both STARTED on `claude-fable-5` — but both then fell back mid-run to `claude-opus-5` via an explicit harness `{"type":"fallback","from":"claude-fable-5","to":"claude-opus-5"}` event (ora-pm at msg ~108, 68 of 130 assistant msgs on opus-5; occ at msg ~163, 3 of 110). Opus-5 is the session's own top-tier main-loop model, NOT a downgrade to Sonnet/Haiku — so the never-below-Fable floor does not appear breached downward — but the pin does NOT hold end-to-end, which the DISPATCH INTEGRITY GATE's three assertions do not detect |
 | [OI-057](#OI-057) | 2026-08-03 | Push of event_log.md commit `8b61f20`, 2026-08-03 | `hooks/tests/test-eos-review-gate.py` reliably times out on pre-push (exit 124, 180s, reproduced identically 3x) — `run_hook()` spawns the real `eos-review-gate.py` subprocess with no timeout of its own; suspected cause is a live independent-review model call inside that hook contending with other concurrently active sessions (unconfirmed — Gabriel chose override over investigation this run). Bypassed via a session-scoped `allow-hook-test-failure` override token to land that push; the underlying timeout is unfixed and will block the next push (any session) until root-caused or overridden again |
+| [OI-058](#OI-058) | 2026-08-03 | `ora-pm-ledger` 2026-08-01 run + OI-030 coherence read, 2026-08-03 | `ora-weekly-hygiene` Block C fired 2026-08-03 03:47 ET but published NOTHING - no XLSX, no Notion page, no email (verified null on all three). One full weekly cycle lost; last output is 2026-07-26. Cause undetermined from artifacts alone, needs the run transcript. Related: [open-items-tracker.md#OI-031](open-items-tracker.md#OI-031) (same blind spot, one level coarser) |
 
 ### OI-009
 **Status:** OPEN (substantial progress made 2026-07-17, real scope remains)
@@ -931,8 +931,9 @@ with no automated stage-advancement. That's a policy/tooling gap (when should a 
 **Auto-check:** none.
 
 ### OI-030
-**Status:** OPEN
+**Status:** CLOSED
 **Opened:** 2026-07-26
+**Closed:** 2026-08-03
 **Source:** `ora-weekly-hygiene` Sunday run + 3 concurrent sessions, 2026-07-26 (see [event_log.md](event_log.md) 2026-07-26)
 **Description:** `ora-weekly-hygiene/SKILL.md` Block C absorbed edits from four concurrent sessions in
 a single day, including a Gabriel ruling (`caf154b`) that overrode an earlier same-day repoint:
@@ -940,13 +941,41 @@ check G was repointed to the `egoldberg` Graph drive, then formally DROPPED hour
 text that argued for a check the file struck through (dangling ref fixed in `9870bb4`, but only
 that one symptom). Other same-day edits: Check B respec, frozen-snapshot RED override, real
 folder names, Block N added, `781bf95` consolidating several idle sessions' WIP. Each change is
-individually sound and the block is coherent as far as incremental patching can verify — the risk
+individually sound and the block is coherent as far as incremental patching can verify - the risk
 is the kind only a full read catches: two locally-correct passages that disagree globally, exactly
 the failure mode the check-G ruling itself was.
-**Why not fixed yet:** the next edit to Block C should follow a full human read, not another
-incremental agent patch. Due before the next Sunday fire (2026-08-02).
+**Evidence (2026-08-03):** full read of Block C (lines 169-243) performed; **Gabriel ruled the item satisfied 2026-08-03.** The predicted
+failure mode was REAL and present in four places, each a locally-correct passage contradicting the block globally:
+1. **CONSTRAINTS guarded a forbidden tool.** The block's only error-handling clause covered SharePoint MCP
+   auth/throttle errors, which SCOPE section 1 forbids the block from calling at all - while check C's Notion query
+   and the local enumeration, which can fail, had no error path. Same dangling-reference class as check G;
+   `9870bb4` fixed one symptom, this was another.
+2. **Check A enforced a schema the firm does not use.** It flagged anything not matching
+   `YYYYMMDD_[Topic]_[DocType]_[v##]`, which matches NONE of CLAUDE.md's three ratified schemas - so it
+   flagged conformant session outputs as violations. The block's own XLSX followed the local rule and
+   therefore breached firm canon.
+3. **Check D had no frozen-snapshot carve-out.** SCOPE section 4's suppression was scoped only to the action count
+   and Summary sheet, so D's "top 20" ran unfiltered against `01_Workspace/oxford-site/` (a frozen copy of
+   the website repo) and would be dominated by files the block elsewhere declares need no action.
+4. **Check C would likely return a silent zero.** `bcfe4a03` is the Acquisition Pipeline *data-source* id; it
+   404s on `/v1/databases/{id}` and 400s at Notion-Version 2022-06-28 (multi-source DB). The same trap cost
+   `ora-pm-ledger` a two-week false coverage gap. Block C carried no endpoint guidance.
+Two lesser findings: SCOPE section 1's global "aging from mtime" contradicted check C's new deal-activity basis (no
+carve-out stated); and line 183's standing "re-list the tree root before trusting this list" instruction remains
+unmet going into the 2026-08-10 fire.
+**Fix:** all six corrected in `scheduled-tasks/ora-weekly-hygiene/SKILL.md` (+39/-4). Structure re-verified after
+edit: 14 block headings intact, checks A-F all present, and every surviving `sharepoint_search` mention is now a
+prohibition or historical provenance, not a live instruction.
+**Scope of the closure - recorded, not disputed:** the read was owed before the 2026-08-02 fire. That fire ran
+late (2026-08-03 03:47 ET, catch-up) and the read happened after it; Block C published nothing on that run, so no
+un-read output reached anyone (see [open-items-tracker.md#OI-058](open-items-tracker.md#OI-058)). The read was
+agent-performed with Gabriel adjudicating three substantive rulings (check-A schema, check-D scope, commit
+handling) rather than a line-by-line human pass. Gabriel accepted this as satisfying the item.
+**Fixes were NOT committed at closure time.** The `.claude` checkout held 55 uncommitted changes across 8
+sessions; committing was deliberately deferred rather than co-mingle another session's hunks. The edits are on
+disk and take effect on the 2026-08-10 fire regardless of commit state - **verify they are committed before
+treating this as durable.**
 **Auto-check:** none.
-
 ### OI-019
 **Status:** OPEN
 **Opened:** 2026-07-19
@@ -976,16 +1005,20 @@ incremental agent patch. Due before the next Sunday fire (2026-08-02).
 *(Section added 2026-07-29 during tracker ID-integrity reconciliation.)*
 
 ### OI-029
-**Status:** OPEN
+**Status:** CLOSED
 **Opened:** 2026-07-26
+**Closed:** 2026-08-03
 **Source:** Repo-sweep session, 2026-07-26
 **Description:** Two live/unrotated credential exposures: plaintext `NETLIFY_AUTH_TOKEN` in archived `oxford-realty/oxfordra-net` git history, and a non-redacted Netlify MCP proxy token in a `.git-corrupted-20260716/` backup folder — Gabriel must rotate both, then the backup folder needs secure deletion.
-*(Section added 2026-07-29 during tracker ID-integrity reconciliation.)*
-**2026-08-03 — ⭐ EXPOSED TOKEN REVOKED (Gabriel, confirmed by screenshot).** The `ORA Lease App Sync` PAT (No Expiry, created Apr 25 — the only live token and the one this item's exposures leak) is DELETED from the Netlify account. The four remaining PATs are all `Expired` (Cowork Deploy - Temp, Website ×2, For VSC — all lapsed Apr 6–27) and cannot authenticate; deleting them is optional tidiness, not a security action. **This closes the live half of OI-029:** the plaintext token in the archived repo history and in the corrupted backup folder is now dead credential material. Remaining: delete the de-synced folder (below).
+*(Section added 2026-07-29 during tracker ID-integrity reconciliation. The four paragraphs below record the 2026-08-03 close-out chronologically; they previously appeared out of order — de-sync, then revoke, then a summary claiming both — which read as self-contradictory. Consolidated here 2026-08-03, no facts changed, one independent re-verification added.)*
 
-**2026-08-03 — NEW, from the same screenshot: a live Zapier OAuth grant.** Netlify's *Authorized applications* shows **Zapier, authorized Apr 5 (~4 months)** — still permitted to act on the account. Verified NOT in use: Zapier is not among the live MCP servers (`context7`, `excel`, `fred` only), it sits in `mcp-needs-auth-cache.json` as a stale `claude.ai Zapier` entry, and a retired scheduled task named `hard-delete-zapier-trial-reminder` records that the trial was meant to be torn down. An OAuth grant does not expire the way a PAT does, so this is a longer-lived access path than the tokens that prompted this item. **Action (Gabriel):** Netlify → User settings → Applications → Authorized applications → Zapier → Revoke. KEEP `Netlify CLI` (Jul 9) and `Netlify MCP` (Jul 16) — both in active use by the deploy canon and the connector set.
+**Timeline:**
+1. **CORRUPTED FOLDER DE-SYNCED** (`eccc6b7`) — the `.git-corrupted-20260716` backup was MOVED out of the OneDrive-synced tree to `~/archive/desynced-2026-08-03/20260726_oxford-site_git-corrupted-20260716` (263 MB, byte-intact; the git dir is genuinely unreadable so selective scrubbing was impossible). This stopped the plaintext token replicating to Microsoft's cloud and other devices — the live half of that exposure leg — but left rotation and final deletion open.
+2. **EXPOSED PAT REVOKED** (`a09280e`, Gabriel, screenshot-confirmed) — the `ORA Lease App Sync` PAT (No Expiry, created Apr 25 — the only live token, and the one both exposures leak) was deleted from the Netlify account. The 4 remaining PATs are all `Expired` and cannot authenticate. This killed the plaintext material in both the archived `oxfordra-net` git history (`4b7a3bb`) and the de-synced backup folder — both now reference a dead credential.
+3. **NEW FINDING, same screenshot** — Netlify's *Authorized applications* panel (never previously in frame) showed a live **Zapier OAuth grant, authorized Apr 5**. Verified unused before flagging: not a live MCP server, a stale `claude.ai Zapier` entry in `mcp-needs-auth-cache.json`, and a retired `hard-delete-zapier-trial-reminder` task records the trial as intended-for-teardown. Flagged for revocation; `Netlify CLI` and `Netlify MCP` explicitly kept (both in active use).
+4. **FOLDER DELETED, Zapier revoked** (Gabriel) — the de-synced backup folder was deleted outright (not left in archive). **Independently re-verified 2026-08-03 by a separate session:** `~/archive/desynced-2026-08-03/` does not exist at all — no such directory, and no `README-WHY-THIS-IS-HERE.md` anywhere under `~/archive` or the original synced path. Folder-deletion leg confirmed from the filesystem, not just from report. The Zapier grant revocation is **account-side and was not independently verified from Code** (Netlify's OAuth-grants list is a web-UI-only surface with no exposed read endpoint — confirmed by attempting `netlify-user-services-reader get-user`, which does not cover it) — this leg rests on Gabriel's report only.
 
-**2026-08-03 — CORRUPTED FOLDER DE-SYNCED (cloud vector closed; deletion + rotation still Gabriel's):** the `.git-corrupted-20260716` backup was MOVED out of the OneDrive-synced tree to `C:/Users/Owner/archive/desynced-2026-08-03/20260726_oxford-site_git-corrupted-20260716` (263 MB, byte-intact, nothing deleted or edited — the git dir is genuinely unreadable so selective scrubbing is impossible). That stops the plaintext token replicating to Microsoft's cloud and to other devices on the account, which was the live half of this exposure. A `README-WHY-THIS-IS-HERE.md` sits beside it with the rollback path. **Still open and Gabriel-only:** rotate/revoke the exposed Netlify token, then delete the folder.
+**Net position:** PAT revocation and folder deletion are each corroborated by two independent means (Gabriel's account-side action + a separate filesystem/screenshot check). The Zapier leg rests on a single, unverifiable-from-Code report. Closing on that basis — flag if the Zapier grant should be re-checked at the next credential sweep.
 
 **2026-07-30 SCANNER CORRECTION (read this before trusting any earlier "clean" result here):** the whole-history scans that reported this repo clean were run with `hooks/lib/secret_patterns.py` BEFORE its word-boundary fix — `\b(?:SECRET|TOKEN)\b` cannot match inside `NETLIFY_AUTH_TOKEN` because `_` is a word character, and there was no `nfp_` pattern at all. The scanner was structurally blind to THIS ITEM'S OWN credential type. Commit `4b7a3bb` was only found by a targeted grep. Fixed and merged 2026-07-30 (`f809c73`, 4 adversarial REFUTE passes); the re-scan with working patterns is what actually cleared the other 1,377 commits. Treat any pre-fix "0 findings" as unearned.
 
@@ -1420,10 +1453,39 @@ is cheap and mechanical (the exact commands used this run are reproducible from 
 instruction in the task file).
 **Auto-check:** none.
 
+### OI-058
+**Status:** OPEN
+**Opened:** 2026-08-03
+**Source:** `ora-pm-ledger` 2026-08-01 run + the OI-030 coherence read, 2026-08-03
+**Description:** `ora-weekly-hygiene` Block C (SharePoint Aging & Freshness) executed its 2026-08-02
+cycle - the task's `lastRunAt` is `2026-08-03T07:47:46Z` (03:47 ET, a late catch-up fire) - but produced
+none of its three required outputs. Verified null on all three independently: newest XLSX in
+`Claude_Workspace\Reports\` is `20260726_SharePoint_Freshness-Audit_v01.xlsx`; newest Notion page is
+`SharePoint Freshness Audit - 2026-07-26`; newest send-log entry is `ORA SharePoint Freshness - 2026-07-26`.
+One full weekly cycle lost; last successful output was 8 days old at filing.
+**Why it matters:** the block is *audit-only*, so a silent no-op costs no data - but it is indistinguishable
+in every downstream surface from a clean run. Nothing in the fleet alarms on "a block inside a composite
+task produced no artifact," which is the same structural blind spot as
+[open-items-tracker.md#OI-031](open-items-tracker.md#OI-031) (`fleet-status.py` cannot see a single skipped
+cycle on an established recurring task) - there, at task level; here, one level finer, at block level
+*within* a task that did fire and did stamp `lastRunAt`.
+**Two candidate causes, not yet distinguished:** (a) the session terminated or was truncated before reaching
+Block C - it is the third of fifteen blocks in a long sequential run; (b) Block C ran and failed silently,
+most plausibly on the check-C Notion query (see [open-items-tracker.md#OI-030](open-items-tracker.md#OI-030)
+evidence #4 - `bcfe4a03` 404s on the obvious endpoint, and until the 2026-08-03 fix there was no instruction
+to report that as a coverage gap rather than a zero).
+**Next step:** pull the 2026-08-03 03:47 ET run transcript and determine which. If (a), the question is whether
+a 15-block sequential task is too long to complete reliably on a catch-up fire. If (b), the 2026-08-03 check-C
+endpoint fix may already have closed it - verify against the 2026-08-10 run rather than assuming.
+**Do not close on a single clean 2026-08-10 run** without knowing which cause applied; a one-off pass does not
+distinguish "fixed" from "did not recur."
+**Auto-check:** none.
+
 ## Closed
 
 | ID | Opened | Closed | Source | One-line |
 |----|--------|--------|--------|----------|
+| [OI-030](#OI-030) | 2026-07-26 | 2026-08-03 | `ora-weekly-hygiene` Sunday run + 3 concurrent sessions, 2026-07-26 | Block C full coherence read done (Gabriel ruled satisfied 2026-08-03) - 4 real global-contradiction defects found and fixed (+39/-4): dead SharePoint-MCP error clause, check A enforcing a non-canonical naming schema, check D missing the frozen-snapshot carve-out, check C's data-source-id 404 trap. Read was post-deadline and agent-performed; fixes uncommitted at closure (55-file dirty tree) - see entry |
 | [OI-054](#OI-054) | 2026-07-30 | 2026-08-03 | Credential-exposure sweep, 2026-07-30 | **FALSE FINDING (reporting error).** The three flagged `api_key=` values read literally `ROTATED-DEAD-FRED-KEY-REDACTED-20260724` — already neutralized 6 days BEFORE the sweep. Filed on shape match without reading the value; a same-day hash check had already reported 0 keys in the file and I misread it as "not the live key" rather than "not a key" |
 | [OI-055](#OI-055) | 2026-07-30 | 2026-08-03 | Credential-exposure sweep, 2026-07-30 | Backup-then-redact applied (Gabriel ruling): 4 values in 3 `.claude.json.bak-*` files replaced with a dated marker, originals preserved byte-intact in `_preredaction_2026-08-03/`, JSON re-verified. searchapi connector removed 2026-06-02 so revocation is optional/Gabriel's. The 2 local dev PEM keys left as-is by design (no external account; redaction would corrupt them for no gain) |
 | [OI-056](#OI-056) | 2026-08-03 | 2026-08-03 | `doctrine-integrity-probe.py` pre-push run, 2026-08-03; resolved by commits `edc9fa1` + `7596feb` | Not 3 instances of one defect as first logged — only 2 were the same bug. `ratify-hurdle-rate`/`tenant-email` SKILL.md genuinely said "Principal" against canon and are now fixed to "VP Acquisitions" (`edc9fa1`). The third, `document-assembly/SKILL.md:180`, was never a defect: Gabriel ruled that "Member / Principal" there states the LLC-execution capacity Gabriel binds under, a distinct concept from his firm operating title — left unchanged with an in-file note as a documented Check-13 false positive (`7596feb`). Separately recorded, not this item: 21 live "Landlord - *" Outlook signatures carry the same "Principal" execution-capacity language and are outside the probe's scan scope |
