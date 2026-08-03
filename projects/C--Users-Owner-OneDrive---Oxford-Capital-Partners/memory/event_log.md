@@ -12,6 +12,31 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-03 — acquisition-underwriting v4.8 / ora-millage-lookup v1.0 / parcel-data-recovery v1.6 / disposition-analysis v1.1 INSTALLED (Save-skill click confirmed); pending-reimport ledger cleared
+
+**Trigger.** Four pre-drafted install lines (dated `[TIME TBD]`, each citing a package SHA256 and "verified pre-install") arrived at session start, ahead of any request from Gabriel. Per standing doctrine on unverified session claims ([[feedback_verify_before_repeating_session_claims]], [[feedback_verified_null_vs_inferred_null]]), independently re-verified before writing anything permanent rather than transcribing the draft as-is.
+
+**Content-level verification (all 4 confirmed genuine):**
+- `ora-skills` HEAD = `e0aba43` (merge of PR #30, `ora-millage-lookup`), matching the source commit the drafted lines cited.
+- `main.log` (`AppData\Roaming\Claude\logs\main.log`): `SkillsPlugin` sync burst 16:05:53–16:06:14 downloaded 7 files across 6 sync cycles (2,1,1,1,1,1) — exactly matching real package file counts: acquisition-underwriting (`SKILL.md` + repo-root `target-markets.json` = 2), ora-millage-lookup (`SKILL.md` + `references/endpoints.md` = 2), parcel-data-recovery (`SKILL.md` + `references/endpoints.md` = 2), disposition-analysis (`SKILL.md` only = 1).
+- Mirror (`local-agent-mode-sessions\skills-plugin\583f08bc-…\a6ad2c61-…\skills\`), all 7 files, raw SHA256 vs. repo HEAD:
+
+| File | Mirror mtime | vs. repo HEAD |
+|---|---|---|
+| `acquisition-underwriting/SKILL.md` | 16:06:04 | content match; frontmatter `name:` unquoted vs. repo's quoted — cosmetic YAML style only ([[reference_skill_frontmatter_lenient_parse]]), not a version/content gap |
+| `acquisition-underwriting/target-markets.json` | 16:06:04 | byte-exact MATCH |
+| `ora-millage-lookup/SKILL.md` | 16:06:07 | byte-exact MATCH |
+| `ora-millage-lookup/references/endpoints.md` | 16:06:07 | byte-exact MATCH |
+| `parcel-data-recovery/SKILL.md` | 16:06:11 | byte-exact MATCH |
+| `parcel-data-recovery/references/endpoints.md` | 16:06:11 | byte-exact MATCH |
+| `disposition-analysis/SKILL.md` | 16:06:14 | byte-exact MATCH |
+
+**Package-level SHA256 (the 4 hashes cited in the pre-drafted lines): not independently re-verifiable post-hoc, and that's expected, not a defect.** No 2026-08-03-dated `.skill` zip for any of the 4 packages remains in `_staging/` — package builds land in ephemeral Cowork session-output directories, not the repo, so the artifact that hash would describe no longer exists to re-hash. Content-level verification above is a strictly stronger check than a package hash anyway (it confirms what's actually live in the runtime cache, not just what was zipped before install), so nothing here is held open pending that hash.
+
+**Timing note (why `pending_reimport` still showed PENDING after the click).** `disposition-analysis` and `parcel-data-recovery` were flagged pending at 19:28Z (15:28 local) by commit `ed57f6f` (REPO-FIRST content-merge, Gabriel's ruling, logged separately same day) — a repo change made *after* whatever cache state existed before. The 16:06 Save-skill click pulled that post-merge HEAD into the cache (confirmed byte-exact above), but the click doesn't self-clear the ledger. Ran `python tools/pending_reimport.py clear disposition-analysis` and `clear parcel-data-recovery`; `list` now reports **none pending**. `acquisition-underwriting` and `ora-millage-lookup` were never on the ledger — the former was resolved by an earlier concurrent-session PR per `ed57f6f`'s own commit message, the latter is a first registration with no prior cache entry to diff against.
+
+**Not touched:** a pre-existing uncommitted change in the checkout (`plugins/ora-operations-extensions/plugin-build.json` modified, `_check_plugin.py` untracked) — not mine, left alone per single-writer doctrine.
+
 ## 2026-08-03 — Skill installs via Cowork Save-skill click: ora-millage-lookup, parcel-data-recovery, disposition-analysis
 - **ora-millage-lookup v1.0** — first registration, no prior cache entry. SHA256 `63e05c3b687d0455161e921a8a062f632f200cfe1260dcbbc7951e9ba2022df2`; post-install cache verify: SKILL.md + references/endpoints.md byte-match package. Source `ora-skills@e0aba43`.
 - **parcel-data-recovery v1.6** — closes the PENDING_REIMPORT entry from the 2026-08-03 REPO-FIRST recovery (commit `ed57f6f`). SHA256 `f6cf4b3c3d851e76cdb4236046b65896c30add9c15e12278a7d7fd7ef7a4e274`; post-install cache verify: SKILL.md + references/endpoints.md byte-match package. Source `ora-skills@e0aba43`.
