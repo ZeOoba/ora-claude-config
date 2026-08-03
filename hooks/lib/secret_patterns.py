@@ -130,8 +130,19 @@ _PLACEHOLDER_VALUES = frozenset({
 })
 # ALL-CAPS / bracketed / templated placeholders: PASSWORD, YOUR_PASSWORD, <password>,
 # {{password}}, ${PASSWORD}, ****** .
+# 2026-08-03: the ALL-CAPS branch is now DIGIT-FREE. It previously allowed [A-Z0-9_], so a
+# genuine SHOUTED password carrying digits was suppressed as a placeholder (see the
+# regression tests for the shapes -- deliberately not restated here, because a live
+# example in this comment is itself credential-shaped and would make the module
+# unpushable through its own gate, the F4 defect from the 2026-07-30 REFUTE round)
+# -- the same entropy-swallowing bug the 2026-07-30 word-form fix addressed,
+# but this older shape regex (2026-07-24) was never given the same gate. Found by the
+# REFUTE pass on the scrub routing change. Real placeholders (PASSWORD, YOUR_PASSWORD,
+# CHANGEME) carry no digits, so the gate costs no suppression we want; digit-bearing
+# ALL-CAPS values now fire. The bracketed/starred/x-run/dotted branches are unchanged --
+# they carry no entropy by construction.
 _PLACEHOLDER_SHAPE_RE = re.compile(
-    r"^(?:[A-Z][A-Z0-9_]{4,}|[<{\[$].*|\*+|x{6,}|\.{3,})$")
+    r"^(?:[A-Z][A-Z_]{4,}|[<{\[$].*|\*+|x{6,}|\.{3,})$")
 _PASSWORD_VALUE_RE = re.compile(r"(?i)\bpassword\b\s*[:=]\s*[\"']?([^\s\"']{6,})")
 
 
