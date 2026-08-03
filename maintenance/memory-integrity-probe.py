@@ -194,6 +194,51 @@ def _git(*args):
     return r.stdout if r.returncode == 0 else None
 
 
+SUBINDEX_PREFIX = "INDEX_"   # top-level sub-index files, e.g. INDEX_reference.md
+_LINK_RE = re.compile(r"\]\(([A-Za-z0-9_./-]+\.md)\)")
+
+
+def _links_in(text):
+    """Set of linked memory basenames in a markdown body. Pure."""
+    return {os.path.basename(p) for p in _LINK_RE.findall(text or "")}
+
+
+def collect_indexed_links(index_text, mem_dir):
+    """(links, subindexes_followed) -- every memory basename reachable from the
+    index: MEMORY.md's own links, unioned with the links of each INDEX_*.md that
+    MEMORY.md ITSELF links.
+
+    WHY: MEMORY.md is read whole into every session and is bounded by the
+    24.4KB Read-tool limit, which the corpus was days from hitting (2026-08-03).
+    Splitting a section into a sub-index is the only lever that scales, but
+    check 1 previously reconciled against MEMORY.md alone, so every file a
+    sub-index listed came back as "unlisted file" -- which is precisely why the
+    split was recorded as BLOCKED in reference_memory_index_size_gate_is_a_runway_marker.
+
+    ONE LEVEL, and only sub-indexes the root index actually links. Both limits
+    are deliberate: a stray INDEX_*.md dropped into the directory cannot grant
+    itself -- or anything it lists -- coverage, so it keeps showing up as an
+    unlisted file until the root index adopts it. Chaining would let a file
+    smuggle in arbitrary coverage two hops from anything a human reviews.
+
+    A sub-index that is linked but MISSING is not swallowed here: it stays in
+    `links`, so check 1 reports it as an ordinary orphan pointer. Pure apart
+    from reading the sub-index files.
+    """
+    links = _links_in(index_text)
+    followed = []
+    for name in sorted(links):          # sorted() copies -- safe to grow `links` inside
+        if not name.startswith(SUBINDEX_PREFIX):
+            continue
+        try:
+            with open(os.path.join(mem_dir, name), encoding="utf-8") as fh:
+                links |= _links_in(fh.read())
+        except Exception:
+            continue                    # missing/unreadable -> reported as an orphan below
+        followed.append(name)
+    return links, followed
+
+
 def head_orphans():
     """Basenames linked by HEAD's MEMORY.md but absent from HEAD's tree -- i.e. exactly the
     pointers a fresh clone would find broken. Sorted; empty when the check cannot apply.
@@ -251,8 +296,18 @@ def head_orphans():
     head_files = {os.path.basename(p) for p in tree.splitlines() if p.endswith(".md")}
     head_files.discard("MEMORY.md")
 
-    head_linked = {os.path.basename(p)
-                   for p in re.findall(r"\]\(([A-Za-z0-9_./-]+\.md)\)", head_index)}
+    # Sub-index aware, matching check 1 (2026-08-03). Read each followed sub-index
+    # from HEAD too, never from disk: the whole point of this check is to see what a
+    # CLONE sees, and a sub-index sitting uncommitted on the authoring machine would
+    # otherwise vouch for pointers no other reader can resolve -- reintroducing, one
+    # level down, exactly the 32f3065 failure this function exists to catch.
+    head_linked = _links_in(head_index)
+    for name in sorted(head_linked):
+        if not name.startswith(SUBINDEX_PREFIX):
+            continue
+        sub = _git("show", "HEAD:" + prefix + name)
+        if sub is not None:
+            head_linked |= _links_in(sub)
     return sorted(head_linked - head_files)
 
 
@@ -292,10 +347,13 @@ def main():
     except Exception as e:
         sys.stderr.write("[ACTION] cannot read MEMORY.md: %s\n" % e)
         sys.exit(2)
-    linked = set(re.findall(r"\]\(([A-Za-z0-9_./-]+\.md)\)", idx))
-    linked = {os.path.basename(p) for p in linked}
+    linked, subindexes = collect_indexed_links(idx, MEM)
     present = {os.path.basename(p) for p in glob.glob(os.path.join(MEM, "*.md"))}
-    present.discard("MEMORY.md")  # the index doesn't link itself
+    present.discard("MEMORY.md")  # the root index is not an entry in itself
+    # ...and a SUB-index legitimately links back home ("Sub-index of MEMORY.md"), which
+    # would otherwise make the root index look like an orphan pointer to a missing file.
+    # Discard from both sides, not just `present` (found by the 2026-08-03 split itself).
+    linked.discard("MEMORY.md")
 
     orphans = sorted(linked - present)          # linked but missing
     unlisted = sorted(present - linked)          # present but not indexed
