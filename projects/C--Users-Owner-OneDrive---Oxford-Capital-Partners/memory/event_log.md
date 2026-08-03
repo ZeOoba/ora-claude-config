@@ -12,6 +12,13 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-03 — Skill installs via Cowork Save-skill click: ora-millage-lookup, parcel-data-recovery, disposition-analysis
+- **ora-millage-lookup v1.0** — first registration, no prior cache entry. SHA256 `63e05c3b687d0455161e921a8a062f632f200cfe1260dcbbc7951e9ba2022df2`; post-install cache verify: SKILL.md + references/endpoints.md byte-match package. Source `ora-skills@e0aba43`.
+- **parcel-data-recovery v1.6** — closes the PENDING_REIMPORT entry from the 2026-08-03 REPO-FIRST recovery (commit `ed57f6f`). SHA256 `f6cf4b3c3d851e76cdb4236046b65896c30add9c15e12278a7d7fd7ef7a4e274`; post-install cache verify: SKILL.md + references/endpoints.md byte-match package. Source `ora-skills@e0aba43`.
+- **disposition-analysis v1.1** — closes the PENDING_REIMPORT entry from the 2026-08-03 REPO-FIRST recovery (commit `ed57f6f`). SHA256 `7740cec3edda4bfab62e87bd3197246e542bc84f4ce6b6aed3baf4976c7b27a3`; post-install cache verify: SKILL.md byte-matches package. Source `ora-skills@e0aba43`.
+
+All three logged at 16:07 ET; no drift detected against package hashes.
+
 ## 2026-08-03 — CORRECTION: commit eccc6b7 mis-attributed 3 other sessions' files (my error)
 
 **What happened.** Commit `eccc6b7` ("docs(security): OI-053 key redacted, OI-029 corrupted folder de-synced") carries FIVE files. Only two are mine (`open-items-tracker.md`, `event_log.md`). The other three belong to concurrent sessions and were swept in:
