@@ -64,7 +64,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | [OI-051](#OI-051) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (oxford-command-center @ `3692385`, security-auditor dispatch) | **MEDIUM** oxford-command-center's confidential-bake deploy PUBLISHES BEFORE it checks the gate and never rolls back — `scripts/deploy-mirror.ps1:112` sets `MIRROR_INCLUDE_CONFIDENTIAL=1`, `:120` deploys to Cloudflare Pages, and only `:137-167` curls the apex to confirm unauthenticated traffic still 302s to Access. If Access has been disabled/misconfigured since the last run, confidential data is publicly served for deploy + 5s settle + up to 3 retries x 15s (~35s+) and REMAINS served after the script throws — the failure path alerts but performs no rollback or unpublish. Second gap: it probes `$VerifyUrl` (`ora-command-center.pages.dev`) only, while `brain.oxfordra.net` is a second Access destination on the same project, so a custom-domain-scoped policy change would pass the check while serving confidential data. This is the one path in scope where deal terms reach an EXTERNALLY SERVED artifact — outside S-001's suppression |
 | [OI-053](#OI-053) | 2026-07-30 | Credential-exposure sweep, 2026-07-30 | **Composio API key in plaintext inside OneDrive (cloud-synced):** `Claude_Workspace/01_Workspace/oxford-agent/config.py:3`, duplicated at `01_Workspace/_archive/legacy-templates-2026-03/Claude Agents SDK - Getting Started.md:90`. Composio is a RETIRED connector (removed 2026-06-11), so the key is probably dead — but it has been syncing to Microsoft's cloud and any other device on this OneDrive account. Gabriel to revoke at Composio if that account still exists, then the two files can be scrubbed/archived |
 | [OI-052](#OI-052) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (dispatch integrity gate, first live test) | **MEDIUM — sweep mechanism, not a repo defect.** The `ora-appsec-sweep` Fable model floor is carried entirely by the `security-auditor` Agent dispatch (Gabriel-ratified Option C, 2026-07-24, because the task's own frontmatter `model:` pin is inert on CC/MCP). First live test 2026-07-31: the dispatch WORKED — both subagents spawned with `model:"fable"` recorded in their meta and both STARTED on `claude-fable-5` — but both then fell back mid-run to `claude-opus-5` via an explicit harness `{"type":"fallback","from":"claude-fable-5","to":"claude-opus-5"}` event (ora-pm at msg ~108, 68 of 130 assistant msgs on opus-5; occ at msg ~163, 3 of 110). Opus-5 is the session's own top-tier main-loop model, NOT a downgrade to Sonnet/Haiku — so the never-below-Fable floor does not appear breached downward — but the pin does NOT hold end-to-end, which the DISPATCH INTEGRITY GATE's three assertions do not detect |
-| [OI-057](#OI-057) | 2026-08-03 | Push of event_log.md commit `8b61f20`, 2026-08-03 | `hooks/tests/test-eos-review-gate.py` reliably times out on pre-push (exit 124, 180s, reproduced identically 3x) — `run_hook()` spawns the real `eos-review-gate.py` subprocess with no timeout of its own; suspected cause is a live independent-review model call inside that hook contending with other concurrently active sessions (unconfirmed — Gabriel chose override over investigation this run). Bypassed via a session-scoped `allow-hook-test-failure` override token to land that push; the underlying timeout is unfixed and will block the next push (any session) until root-caused or overridden again |
+| [OI-057](#OI-057) | 2026-08-03 | Push of event_log.md commit `8b61f20`, 2026-08-03 | `hooks/tests/test-eos-review-gate.py` reliably times out on pre-push (exit 124, 180s, reproduced identically 3x) — `run_hook()` spawns the real `eos-review-gate.py` subprocess with no timeout of its own; suspected cause is a live independent-review model call inside that hook contending with other concurrently active sessions (unconfirmed — Gabriel chose override over investigation this run). Bypassed via a session-scoped `allow-hook-test-failure` override token to land that push; the underlying timeout is unfixed and will block the next push (any session) until root-caused or overridden again — **but the 2026-08-03 push evidence CONTRADICTS the 'will block the next push' claim: two consecutive pushes ran the gate to completion, 0 fail, no override needed.** See entry |
 | [OI-058](#OI-058) | 2026-08-03 | `ora-pm-ledger` 2026-08-01 run + OI-030 coherence read, 2026-08-03 | `ora-weekly-hygiene` Block C fired 2026-08-03 03:47 ET but published NOTHING - no XLSX, no Notion page, no email (verified null on all three). One full weekly cycle lost; last output is 2026-07-26. Cause undetermined from artifacts alone, needs the run transcript. Related: [open-items-tracker.md#OI-031](open-items-tracker.md#OI-031) (same blind spot, one level coarser) |
 
 ### OI-009
@@ -1479,6 +1479,37 @@ a 15-block sequential task is too long to complete reliably on a catch-up fire. 
 endpoint fix may already have closed it - verify against the 2026-08-10 run rather than assuming.
 **Do not close on a single clean 2026-08-10 run** without knowing which cause applied; a one-off pass does not
 distinguish "fixed" from "did not recur."
+**Auto-check:** none.
+
+### OI-057
+**Status:** OPEN
+**Opened:** 2026-08-03
+**Source:** Push of event_log.md commit `8b61f20`, 2026-08-03
+**Description:** `hooks/tests/test-eos-review-gate.py` timed out on pre-push (exit 124, 180s, reproduced
+identically 3x). `run_hook()` spawns the real `eos-review-gate.py` subprocess with no timeout of its own;
+suspected cause is a live independent-review model call inside that hook contending with other concurrently
+active sessions (unconfirmed - Gabriel chose override over investigation that run). Bypassed via a
+session-scoped `allow-hook-test-failure` override token to land that push.
+**⚠ COUNTER-EVIDENCE 2026-08-03 ~19:38-19:42 ET - the 'will block the next push (any session)' claim is
+FALSIFIED AS STATED.** Session `ffa9b1ef` pushed `ora-claude-config` twice in four minutes. Both attempts ran
+the full pre-push doctrine gate **to completion**:
+- attempt 1 - `hook-tests-gate: 62 pass, 0 fail, 0 env-skip (of 62)`
+- attempt 2 - `hook-tests-gate: 63 pass, 0 fail, 0 env-skip (of 63)` (63rd = `test-memory-subindex-guards.py`,
+  arriving with PR #31 in between)
+`test-eos-review-gate.py` did **not** time out on either run, and **no `allow-hook-test-failure` token was
+created or needed**. Attempt 1 did fail - but on a concurrent-push ref race (`cannot lock ref 'refs/heads/main':
+is at 5c994ba... but expected b91475a...`, PR #31 landing underneath), which is a different failure entirely.
+Attempt 2 pushed clean: `5c994ba..f1bdafe`.
+**What this does and does not mean.** It does NOT mean the defect is fixed - two clean runs are an absence of
+the symptom, not a root cause, and nothing about `run_hook()`'s missing subprocess timeout has changed. What it
+does establish is that the timeout is **non-deterministic**, not a standing block. That is consistent with this
+item's own contention hypothesis: under low concurrent-session load the hook completes normally. Anyone reading
+the original row would have expected a blocked push and reached for an override token they did not need.
+**Cheapest next discriminator:** on the next occurrence, capture the number of concurrently active sessions
+(and whether any is mid-model-call) at the moment of the timeout, before overriding. That single datum
+confirms or kills the contention hypothesis without touching the hook. The durable fix regardless is an
+explicit timeout on the `run_hook()` subprocess so the failure is a clean, attributable error rather than a
+180s hang.
 **Auto-check:** none.
 
 ## Closed
