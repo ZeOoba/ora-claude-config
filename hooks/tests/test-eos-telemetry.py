@@ -288,6 +288,147 @@ def test_task_management_tools_are_not_dispatch():
     print("PASS test_task_management_tools_are_not_dispatch")
 
 
+def test_unchanged_re_emission_is_skipped():
+    """SessionEnd fires on every resume/clear/compaction, and each fire
+    re-parses the WHOLE transcript. When nothing changed between fires the
+    second record is byte-identical noise -- 67% of the 569 duplicate records
+    on the live file were exactly this. Firing twice on an unchanged
+    transcript must leave ONE line."""
+    tmp = tempfile.mkdtemp(prefix="eos-test-")
+    transcript = os.path.join(tmp, "transcript.jsonl")
+    tele_dir = os.path.join(tmp, "telemetry")
+    make_transcript(transcript)
+    stdin = json.dumps({"session_id": "dup1", "transcript_path": transcript})
+
+    for _ in range(3):
+        rc, out, err = run_hook(stdin, tele_dir)
+        assert rc == 0, "expected exit 0, got %s (stderr=%s)" % (rc, err)
+
+    out_file = os.path.join(tele_dir, "lane-telemetry.jsonl")
+    with open(out_file, "r", encoding="ascii") as fh:
+        lines = [l for l in fh.read().splitlines() if l.strip()]
+    assert len(lines) == 1, (
+        "3 fires on an unchanged transcript must write 1 record, got %d" % len(lines)
+    )
+    print("PASS test_unchanged_re_emission_is_skipped")
+
+
+def test_changed_transcript_still_appends():
+    """The skip must be driven by CONTENT, never by 'have I written before'.
+    When the transcript genuinely grew, the new observation has to be
+    recorded -- suppressing it would lose the signal the hook exists for."""
+    tmp = tempfile.mkdtemp(prefix="eos-test-")
+    transcript = os.path.join(tmp, "transcript.jsonl")
+    tele_dir = os.path.join(tmp, "telemetry")
+    make_transcript(transcript)
+    stdin = json.dumps({"session_id": "grow1", "transcript_path": transcript})
+
+    rc, out, err = run_hook(stdin, tele_dir)
+    assert rc == 0, err
+    # the session continues: another edit lands, then SessionEnd fires again
+    with open(transcript, "a", encoding="ascii") as fh:
+        fh.write(json.dumps({
+            "type": "assistant",
+            "message": {"role": "assistant", "content": [
+                {"type": "tool_use", "name": "Edit",
+                 "input": {"file_path": "C:/proj/second.py"}}]},
+        }) + "\n")
+    rc, out, err = run_hook(stdin, tele_dir)
+    assert rc == 0, err
+
+    out_file = os.path.join(tele_dir, "lane-telemetry.jsonl")
+    with open(out_file, "r", encoding="ascii") as fh:
+        lines = [l for l in fh.read().splitlines() if l.strip()]
+    assert len(lines) == 2, (
+        "a grown transcript must append a fresh record, got %d line(s)" % len(lines)
+    )
+    first, second = json.loads(lines[0]), json.loads(lines[1])
+    assert second["edits"] > first["edits"], (first, second)
+    assert "C:/proj/second.py" in second["files"], second
+    print("PASS test_changed_transcript_still_appends")
+
+
+def test_skip_compares_only_this_session():
+    """The comparison must key on session_id. Another session writing an
+    identical-looking record in between must not suppress ours, and ours
+    must not suppress theirs -- 7+ sessions interleave in this file."""
+    tmp = tempfile.mkdtemp(prefix="eos-test-")
+    transcript = os.path.join(tmp, "transcript.jsonl")
+    tele_dir = os.path.join(tmp, "telemetry")
+    make_transcript(transcript)
+
+    rc, _, err = run_hook(
+        json.dumps({"session_id": "sA", "transcript_path": transcript}), tele_dir)
+    assert rc == 0, err
+    rc, _, err = run_hook(
+        json.dumps({"session_id": "sB", "transcript_path": transcript}), tele_dir)
+    assert rc == 0, err
+
+    out_file = os.path.join(tele_dir, "lane-telemetry.jsonl")
+    with open(out_file, "r", encoding="ascii") as fh:
+        lines = [l for l in fh.read().splitlines() if l.strip()]
+    assert len(lines) == 2, (
+        "two DIFFERENT sessions must each get a record, got %d" % len(lines)
+    )
+    assert {json.loads(l)["session_id"] for l in lines} == {"sA", "sB"}, lines
+    print("PASS test_skip_compares_only_this_session")
+
+
+def test_skip_ignores_interleaved_other_sessions():
+    """Our previous record is not necessarily the LAST line -- other sessions
+    append after it. Scanning only the tail would miss it and duplicate."""
+    tmp = tempfile.mkdtemp(prefix="eos-test-")
+    transcript = os.path.join(tmp, "transcript.jsonl")
+    tele_dir = os.path.join(tmp, "telemetry")
+    make_transcript(transcript)
+    mine = json.dumps({"session_id": "mine", "transcript_path": transcript})
+
+    rc, _, err = run_hook(mine, tele_dir)
+    assert rc == 0, err
+    for other in range(5):
+        rc, _, err = run_hook(json.dumps(
+            {"session_id": "other%d" % other, "transcript_path": transcript}), tele_dir)
+        assert rc == 0, err
+    rc, _, err = run_hook(mine, tele_dir)   # our unchanged re-emission
+    assert rc == 0, err
+
+    out_file = os.path.join(tele_dir, "lane-telemetry.jsonl")
+    with open(out_file, "r", encoding="ascii") as fh:
+        lines = [json.loads(l) for l in fh.read().splitlines() if l.strip()]
+    mine_lines = [r for r in lines if r["session_id"] == "mine"]
+    assert len(mine_lines) == 1, (
+        "our earlier record must be found past 5 interleaved sessions, got %d"
+        % len(mine_lines)
+    )
+    assert len(lines) == 6, lines
+    print("PASS test_skip_ignores_interleaved_other_sessions")
+
+
+def test_unreadable_telemetry_file_still_appends():
+    """FAIL OPEN, and fail toward WRITING. If the existing file cannot be read
+    or parsed, the hook must append anyway -- a duplicate record is harmless
+    (the rollup dedupes), silently dropping telemetry is not."""
+    tmp = tempfile.mkdtemp(prefix="eos-test-")
+    transcript = os.path.join(tmp, "transcript.jsonl")
+    tele_dir = os.path.join(tmp, "telemetry")
+    make_transcript(transcript)
+    os.makedirs(tele_dir)
+    out_file = os.path.join(tele_dir, "lane-telemetry.jsonl")
+    with open(out_file, "w", encoding="ascii") as fh:
+        fh.write("\x00 not json \x01\n{{{ broken\n")
+
+    stdin = json.dumps({"session_id": "gar1", "transcript_path": transcript})
+    rc, out, err = run_hook(stdin, tele_dir)
+    assert rc == 0, "expected exit 0, got %s (stderr=%s)" % (rc, err)
+    with open(out_file, "r", encoding="ascii", errors="replace") as fh:
+        lines = [l for l in fh.read().splitlines() if l.strip()]
+    assert len(lines) == 3, (
+        "a corrupt existing file must not suppress the append, got %d" % len(lines)
+    )
+    assert json.loads(lines[-1])["session_id"] == "gar1", lines[-1]
+    print("PASS test_unreadable_telemetry_file_still_appends")
+
+
 def test_override_used_surfaces_reason():
     tmp = tempfile.mkdtemp(prefix="eos-test-")
     transcript = os.path.join(tmp, "transcript.jsonl")
@@ -367,6 +508,11 @@ if __name__ == "__main__":
     test_missing_transcript_fails_open()
     test_no_code_activity_skipped()
     test_task_management_tools_are_not_dispatch()
+    test_unchanged_re_emission_is_skipped()
+    test_changed_transcript_still_appends()
+    test_skip_compares_only_this_session()
+    test_skip_ignores_interleaved_other_sessions()
+    test_unreadable_telemetry_file_still_appends()
     test_override_used_surfaces_reason()
     test_override_used_no_reason_backward_compat()
     test_no_override_file()
