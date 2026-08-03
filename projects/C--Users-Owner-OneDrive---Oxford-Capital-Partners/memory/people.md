@@ -5,6 +5,7 @@ metadata:
   node_type: memory
   type: people
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
+  modified: 2026-08-03T19:32:53.406Z
 ---
 
 # ORA People
@@ -15,7 +16,7 @@ Merged 2026-06-03 from people_team.md + people_brokers.md.
 
 **Eric Goldberg — Founder** · egoldberg@oxfordra.net · Washington University, accounting. Strategic oversight, capital allocation, **final approval on all acquisitions + major CapEx.** Communication: formal, numbers-first (NOI, cap rate, DSCR before narrative).
 
-**Gabriel Goldberg — Principal** · ggoldberg@oxfordra.net · Cornell, economics. Deal sourcing, broker relationships, market research, site visits. Communication: direct, deal-focused. Netlify authenticated as ggoldberg@oxfordra.net. (Profile: [user.md](user.md).)
+**Gabriel Goldberg — VP Acquisitions** · ggoldberg@oxfordra.net · Cornell, economics. Deal sourcing, broker relationships, market research, site visits. Communication: direct, deal-focused. Netlify authenticated as ggoldberg@oxfordra.net. (Profile: [user.md](user.md).)
 
 **Philip Collins — Transaction Counsel** · philip@collinsrelaw.com · Collins Real Estate Law. PSA drafting/negotiation, lease review, entity formation, closing coordination. Engaged per-deal, not on retainer. Communication: precise, clause-level — reference specific sections.
 

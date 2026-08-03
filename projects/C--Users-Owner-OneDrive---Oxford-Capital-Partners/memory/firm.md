@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: firm
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-07-21T19:55:46.204Z
+  modified: 2026-08-03T19:32:47.745Z
 ---
 
 # Oxford Realty Advisors — Firm Context
@@ -20,7 +20,7 @@ metadata:
 
 ## Team
 - **Eric Goldberg** — Founder (Washington University, accounting). Strategic oversight, capital allocation, **final sign-off on all acquisitions + major CapEx.** egoldberg@oxfordra.net
-- **Gabriel Goldberg** — Principal (Cornell, economics). Drives acquisitions, underwriting, operations, financial analysis end-to-end. ggoldberg@oxfordra.net
+- **Gabriel Goldberg** — VP Acquisitions (Cornell, economics). Drives acquisitions, underwriting, operations, financial analysis end-to-end. ggoldberg@oxfordra.net
 - **Philip Collins** — Transaction counsel (Collins Real Estate Law), engaged per-deal.
 
 (Full contacts incl. counsel + title in [people.md](people.md); Gabriel's profile in [user.md](user.md).)

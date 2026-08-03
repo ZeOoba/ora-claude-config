@@ -5,11 +5,12 @@ metadata:
   node_type: memory
   type: user
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
+  modified: 2026-08-03T19:32:42.384Z
 ---
 
 # Gabriel Goldberg — Profile
 
-Principal at Oxford Realty Advisors (private family-office industrial RE; ~$60M AUM, 600K+ SF, ~140 tenants). Two-person core team with Eric Goldberg (Founder). Drives acquisitions, underwriting, and operational optimization end-to-end.
+VP Acquisitions at Oxford Realty Advisors (private family-office industrial RE; ~$60M AUM, 600K+ SF, ~140 tenants). Two-person core team with Eric Goldberg (Founder). Drives acquisitions, underwriting, and operational optimization end-to-end.
 
 **Domain expertise:** Institutional-grade across real estate underwriting, commercial leasing, PSA/lease legal work, financial modeling, and technology. **Do not explain basics. Match and exceed sophistication.**
 

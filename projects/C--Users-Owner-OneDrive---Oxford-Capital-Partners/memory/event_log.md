@@ -12,6 +12,59 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-03 — RULING: "VP Acquisitions" is canon; the 2026-07-08 flip to "Principal" was drift. Live canon corrected, 38 historical deliverables deliberately not
+
+**Gabriel ruled in-turn: VP Acquisitions.** This reinstates his 2026-06-10 ruling ("title = VP Acquisitions"; Cowork's "Principal" REJECTED) and settles the question the 2026-07-08 entry left open. That entry had declared "'Principal' is the current, correct title, superseding the 2026-06-10 'VP Acquisitions' ruling" while itself noting no reversal was ever logged and asking Gabriel to confirm whether it was a considered decision or drift. **It was drift.** The 07-08 entry stands as the historical record of the contradiction; its conclusion is now superseded.
+
+**How it surfaced.** Not from a doctrine audit — from a session retro. A 754 Old State Route 74 memo was observed to style Gabriel "VP Acquisitions" against CLAUDE.md's "Principal", and was flagged as a probable templated defect worth sweeping. The sweep inverted the finding: scanning 2,655 `.docx` files under the OneDrive business tree returned **38 hits** for VP/Vice President Acquisitions, spanning IC memos, LOIs, commission agreements and every T1 owner-outreach letter pack — including one generated the same day. Three live repo sources carried it too (`cowork-settings/templates/settings_template.md`, `oxford-cc-strategic-audit/SKILL.md`, the v3.0 settings snapshot), as did `build_t1_letterpack.py:152`, which hardcodes "Vice President, Acquisitions" into the signature block of outbound cold-outreach letters to property owners. The minority position was the one in CLAUDE.md.
+
+**Scope ruled: live sources only.** The 38 historical `.docx` deliverables are **deliberately left untouched** — they are dated records of what was actually produced or sent, and rewriting them would falsify the archive. Nothing further is needed on the outbound side either: `build_t1_letterpack.py`, the three repo sources, and `2026-08-01_754OldStateRoute74_SellerRedlineAnalysis_v02.docx` were all already correct under this ruling.
+
+**What actually changed — four files, all of which had drifted to "Principal":**
+
+| File | Line |
+|---|---|
+| `~/.claude/CLAUDE.md` | Identity, line 8 |
+| `memory/user.md` | line 12 |
+| `memory/firm.md` | line 23 |
+| `memory/people.md` | line 18 |
+
+The ported CLAUDE.md copies (`Claude Command Center Code/`, `Claude_Workspace/01_Workspace/`, `oxford-site/.claude/`) carry no identity line and needed nothing.
+
+**Gate handling.** `config-write-guard.py` correctly BLOCKED the CLAUDE.md write: the title ruling was not by itself approval to write the governance layer, and the scope question put to Gabriel had been framed under the opposite assumption. An `allow-config-write` token was minted only after he approved the specific edit ("title only"). Post-edit: word budget 1558 (WARN 1700 / FAIL 1850), `doctrine-integrity-probe.py` OK with all 8 guards live and the declassification-residue sweep clean across CLAUDE.md + 4 ported copies + 4 roster files.
+
+**Deliberately NOT changed:** the same Identity line continues "Co-principal: Eric Goldberg (father, Founder)". With Gabriel as VP Acquisitions, "co-principal" has no obvious referent. Gabriel chose "title only" over fixing Eric's descriptor, so it stands — rewriting a second person's role was outside what was asked. Flagged here rather than silently amended; worth a decision if the wording ever goes external.
+
+**Standing lesson.** A title in CLAUDE.md is not self-enforcing. It reached 38 documents and a live outbound-letter generator without any guard noticing, because no probe compares the Identity line against what deliverables actually say. Two ratified rulings pointing opposite ways survived nearly two months. If a future doctrine change matters at the document level, it needs either a sweep at ruling time or a probe — the doctrine file alone will not propagate it.
+
+## 2026-08-03 - Snapshot-write suspension WIDENED: both portfolio.json writers stopped, not just the auto-commit
+
+Follow-up to the same-day entry below. Gabriel directed suspending `ora-cc-snapshot-refresh` (weekly Mon 06:15 ET, `npm run extract`) before Monday, since it writes `data/snapshots/portfolio.json` through the same unreconciled `parseWorkbook` path and would re-poison the restored snapshot. Done — banner above STEPS plus frontmatter marker. `scripts/extract-workbook.ts` has no dry-run flag (write at lines 88-89 is unconditional once the anomaly floor passes), so the suspension replaces the run outright rather than gating it.
+
+**Self-caught hole in the earlier fix.** The first ruling was taken as "suspend auto-commit," and that is what was written. Insufficient: `scripts/lease-snapshot-drift-check.ts` writes `portfolio.json` on **every** fire regardless of whether a commit follows, so the 19:40 ET fire would have silently overwritten the deliberately restored `HEAD` snapshot with the same corrupt 148-lease parse — four hours before `ora-am-brief`'s 06:00 read, undoing the revert that was approved specifically to protect it. `ora-lease-snapshot-refresh` widened from commit-only to **write-and-commit** suspension. The scope change is recorded in the file's own banner so the next reader sees why it is broader than the ruling as first phrased.
+
+Both tasks now run a read-only substitute: `npx tsx scripts/reconcile.ts`, which does its own independent workbook parse, writes nothing, and fails on this exact defect (`Annualized rent total exp 5,576,537 · got 5,889,077 · Δ 312540.00`; `Count: Leases exp 138 · got 148`). Continued failure = expected, Notion note only. A **pass** means the parser fix landed and the suspension can lift — that case emails ggoldberg only. Also corrected `ora-cc-snapshot-refresh`'s description and step 1, both of which still called `portfolio.json` "git-ignored" (false since 2026-07-27; see `reference_command_center_snapshot_is_tracked_not_ignored.md`).
+
+Residual exposure, not suspendable from the fleet: `server/brain.ts` persists a fresh parse whenever the interactive Command Center server runs, so starting `npm run dev` will re-corrupt the on-disk snapshot — with `dataQuality` flags attached, unlike the CLI path, since `brain.ts:85` is the one caller of `checkSnapshot`. `scripts/bake-mirror.ts:104` likewise parses directly, so a mirror bake publishes the corruption independently of `portfolio.json`. Both close with the `parse.ts:476` fix.
+
+## 2026-08-03 — ora-skills drift remediation: 10 of 12 reported CACHE-NEWER findings were false; 2 content-merged (PR #29)
+
+Actioned the 2026-08-03 `ora-skill-store-drift-check` report (Notion Ops Hub comment `3b16ecd8-9e59-81fa-9fa5-001da9abf07f`), which reported 12 skills CACHE-NEWER and prescribed a byte-exact cache→repo pull for all 12. **Verification against disk before any write invalidated 10 of the 12.**
+
+- **9 were already IN-SYNC** (EOL-normalized); 7 of those byte-identical to cache. Remediated earlier by `20a936e` (07-27), `cb24934` (07-29), `f9fc184` (07-29). Because 7 were byte-identical, no content comparison could have flagged them — **the drift check appears to compare stale version tokens rather than file content**. `market-monitor` and `tenant-email` differed only in CRLF (known false-positive class).
+- **acquisition-underwriting** was reported as cache v4.6 / 138,460B. The cache was actually at **v4.7 / 146,847B** — it advanced again on 2026-08-02 (1518 K St NW / Peyser Building DC underwrite) *after* the drift check ran. A concurrent session remediated it mid-flight via PR #28 (`c39b7df` v4.6 pull → `72e36f5` v4.7 patch → merged `11ef873`).
+- **2 genuinely needed work**, and neither could take the instructed byte-exact copy — both tripped the procedure's **step-3 anomaly gate (neither side a superset)**. Gabriel ruled content-merge: cache BODY + repo's richer frontmatter description.
+
+**The material catch — `parcel-data-recovery`.** Cache body was newer (v1.6, Iron rule 11: RCT figures imported rather than embedded; stale RCT v02 constants replaced with ratified v03, e.g. Columbus 124.86 → 229.65), but the cache **description had collapsed 850 → 203 chars, losing every trigger phrase** (`recover SF`, `UNSCREENABLE rows`, `DATA-GAP rows`, `CAMA extract`, `county GIS pull`, verified-endpoint county roster). The prescribed byte-exact copy would have silently destroyed the skill's entire routing surface. Same class of regression, smaller, in `disposition-analysis` (cache description dropped Sec 1245 / unrecaptured Sec 1250 / LTCG / NIIT recapture detail, 45/180-day / QI / boot 1031 mechanics, estate step-up overlay, "tax-charged net proceeds"); its cache body added the v1.1 Step 7 disposition-ledger append.
+
+**Delivered:** [PR #29](https://github.com/ZeOoba/ora-skills/pull/29), branch `pull/2026-08-03-cache-newer-batch`, commit `ed57f6f` (2 files). Merged descriptions held under the 1024-char platform import limit (1001 / 885). Verified: body byte-identical to cache source; every dropped trigger phrase restored; operative `Recompute P1` block carries only ratified RCT v03 constants (stale v02 figures survive solely in supersedes-clauses/changelog, which is correct); **Hard Invariant 4 intact** — DSCR 1.25x / per-property 65% LTV / portfolio-aggregate 40% LTV language unchanged. Final parity: **12/12 IN-SYNC** EOL-normalized.
+
+**Two findings worth carrying forward:**
+1. **Store B is not read-only in practice.** The task framed the runtime cache as READ-ONLY, but this repo's canonical `tools/hooks/post-commit` auto-syncs committed skills *into* it. Both merged files were written to the cache automatically at commit. Content parity achieved; platform **re-indexing** is a separate question — per the `189bd28` warning a post-commit copy produces no SkillsPlugin log activity, so confirm via a `main.log` delta before assuming new descriptions are live. `PENDING_REIMPORT` entries for both were therefore **left pending, not cleared** — clearing requires a confirmed Save-skill install, which has not occurred.
+2. **Shared-checkout contention was live throughout.** A concurrent session held `C:\Users\Owner\ora-skills`, moved HEAD `5ea0df7` → `189bd28` mid-session, and contended on the index lock. Work was done in an isolated worktree (`C:\Users\Owner\ora-skills-wt-20260803`), which is why the collision was harmless.
+
+Untouched as instructed: the pending `deal-execution` / `legal-intelligence` reimport workstream (`1567da7`); the 17 index-unregistered confirmations; `morning` repo capture; the `acquisition-buy-box-v1` memory-gap decision.
+
 ## 2026-08-03 — scrub-before-optin routed through scan_text; legacy password placeholder gap closed
 
 Merged `a13b764` (branch `fix/scrub-uses-scan-text`), pushed through all three pre-push gates. Closes the last consumer divergence flagged by the 2026-07-30 secret_patterns REFUTE round.
