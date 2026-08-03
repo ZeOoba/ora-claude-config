@@ -931,6 +931,162 @@ def _load_probe_module():
     return mod
 
 
+# --- Check 13: doctrine-vs-deliverable identity drift (2026-08-03) ---------
+# Regression origin: CLAUDE.md said "Principal" while 38 .docx deliverables, three
+# ora-skills sources and build_t1_letterpack.py's outbound signature block all said
+# "VP Acquisitions" -- for nearly two months, across two contradictory ratified
+# rulings, with no guard noticing. See event_log.md 2026-08-03.
+
+def test_title_normalisation_folds_renderings():
+    """The same title written four ways must fold to one key, and a different
+    title must NOT fold into it. Without this the probe would flag
+    build_t1_letterpack.py's 'Vice President, Acquisitions' as drift against
+    CLAUDE.md's 'VP Acquisitions' -- they are the same title."""
+    m = _load_probe_module()
+    same = ["VP Acquisitions", "VP of Acquisitions", "Vice President, Acquisitions",
+            "Vice President of Acquisitions", "  vice  president,  acquisitions  "]
+    keys = {m.normalize_title(s) for s in same}
+    assert len(keys) == 1, "renderings must fold to one key; got %r" % keys
+    assert m.normalize_title("Principal") not in keys, \
+        "Principal must not fold into the VP-Acquisitions key"
+    print("  PASS test_title_normalisation_folds_renderings")
+
+
+def test_canonical_title_extracted_from_identity_line():
+    m = _load_probe_module()
+    doc = ('# doc\n\n## Identity\n'
+           '- Gabriel Goldberg, VP Acquisitions, Oxford Realty Advisors (ORA) '
+           '-- private family-office industrial real estate. Founder: Eric '
+           'Goldberg (father).\n')
+    assert m.canonical_identity_title(doc) == m.normalize_title("VP Acquisitions")
+    other = doc.replace("VP Acquisitions", "Principal")
+    assert m.canonical_identity_title(other) == m.normalize_title("Principal")
+    assert m.canonical_identity_title("no identity line here") is None
+    print("  PASS test_canonical_title_extracted_from_identity_line")
+
+
+def test_scan_finds_signature_block_assertion():
+    """The real defect shape: name and title on ADJACENT lines in a generator."""
+    m = _load_probe_module()
+    src = ('def sig(doc):\n'
+           '    add(doc, "Gabriel Goldberg", space_after=0)\n'
+           '    add(doc, "Vice President, Acquisitions", space_after=0)\n')
+    hits = m.scan_title_assertions(src)
+    assert len(hits) == 1, "expected one assertion, got %r" % (hits,)
+    lineno, raw, norm = hits[0]
+    # Report the TITLE's line (3), not the name's (2) -- the title is the token a
+    # fix has to edit, so it is the actionable locator.
+    assert lineno == 3 and norm == m.normalize_title("VP Acquisitions"), \
+        "wrong line/title: %r" % (hits[0],)
+    print("  PASS test_scan_finds_signature_block_assertion")
+
+
+def test_scan_ignores_principal_in_unrelated_prose():
+    """'principal' is an ordinary finance word. It must only count when asserted
+    as Gabriel's title, or the probe drowns in false positives on loan text."""
+    m = _load_probe_module()
+    noise = ("The principal amount outstanding is $2.8M. Repayment of principal\n"
+             "begins in June. Principal and interest are escrowed separately.\n"
+             "Gabriel Goldberg reviewed the note.\n"
+             "The principal balance was later written down.\n")
+    assert m.scan_title_assertions(noise) == [], \
+        "prose 'principal' must not register: %r" % (m.scan_title_assertions(noise),)
+    print("  PASS test_scan_ignores_principal_in_unrelated_prose")
+
+
+def test_drift_detection_is_symmetric_and_quiet_when_aligned():
+    m = _load_probe_module()
+    canon_vp = m.normalize_title("VP Acquisitions")
+    agree = [("letterpack.py",
+              'add("Gabriel Goldberg")\nadd("Vice President, Acquisitions")\n')]
+    assert m.check_identity_drift(canon_vp, agree) == [], \
+        "an equivalent rendering must not be reported as drift"
+
+    conflict = [("settings_template.md", "**Owner:** Gabriel Goldberg, Principal\n")]
+    found = m.check_identity_drift(canon_vp, conflict)
+    assert len(found) == 1 and "settings_template.md" in found[0], \
+        "expected one drift finding, got %r" % (found,)
+
+    # Symmetry: the historical state (canon Principal, emitters VP) must ALSO fire.
+    # A one-directional check would have stayed silent for the entire 2-month window.
+    canon_pr = m.normalize_title("Principal")
+    back = m.check_identity_drift(canon_pr, agree)
+    assert len(back) == 1, "reverse drift must fire too; got %r" % (back,)
+    print("  PASS test_drift_detection_is_symmetric_and_quiet_when_aligned")
+
+
+def test_drift_reports_every_conflicting_source_not_just_the_first():
+    """38 deliverables drifted at once. Reporting only the first would understate
+    the blast radius and let the rest survive a 'fixed it' claim."""
+    m = _load_probe_module()
+    canon = m.normalize_title("VP Acquisitions")
+    srcs = [("a.md", "Gabriel Goldberg, Principal, Oxford Realty Advisors\n"),
+            ("b.md", "Gabriel Goldberg, Principal\n"),
+            ("c.md", "Gabriel Goldberg, VP Acquisitions\n")]
+    found = m.check_identity_drift(canon, srcs)
+    assert len(found) == 2, "expected both conflicting sources, got %r" % (found,)
+    assert not any("c.md" in f for f in found), "aligned source must not be reported"
+    print("  PASS test_drift_reports_every_conflicting_source_not_just_the_first")
+
+
+def test_compound_role_states_title_in_the_tail():
+    """'Gabriel Goldberg, Member / Principal' is a title assertion. Missing it
+    let document-assembly's signing-authority line drift unreported."""
+    m = _load_probe_module()
+    hits = m.scan_title_assertions(
+        '- Signing authority: "Gabriel Goldberg, Member / Principal" unless the\n')
+    assert [h[2] for h in hits] == [m.normalize_title("Principal")], \
+        "compound role must resolve to its tail title; got %r" % (hits,)
+    print("  PASS test_compound_role_states_title_in_the_tail")
+
+
+def test_title_word_before_the_name_is_not_an_assertion():
+    """communication-intelligence:213 says '...never valid for this principal.
+    Corrected to Gabriel Goldberg / ...'. The word PRECEDES the name and means
+    'this person', not a title. Scanning forward-only is what keeps it quiet."""
+    m = _load_probe_module()
+    prose = ("signed outbound comms as \"Ze Ooba\", an incorrect/retired identity "
+             "never valid for this principal. Corrected to Gabriel Goldberg / "
+             "`ggoldberg@oxfordra.net` per current routing canon.\n")
+    assert m.scan_title_assertions(prose) == [], \
+        "a title word before the name must not register: %r" % (
+            m.scan_title_assertions(prose),)
+    print("  PASS test_title_word_before_the_name_is_not_an_assertion")
+
+
+def test_title_followed_by_employer_preposition():
+    """'Gabriel Goldberg, Principal at Oxford Realty Advisors' IS an assertion --
+    found as a false negative by the REFUTE sweep, because 'at' is lowercase and
+    the terminator rule rejected it. The preposition alone cannot decide; what
+    follows it can. 'principal of the loan' must still stay quiet."""
+    m = _load_probe_module()
+    pr = m.normalize_title("Principal")
+    for txt in ("Gabriel Goldberg, Principal at Oxford Realty Advisors (ORA).\n",
+                "User is Gabriel Goldberg, Principal of Oxford Realty Advisors.\n"):
+        assert [h[2] for h in m.scan_title_assertions(txt)] == [pr], \
+            "employer preposition must register: %r" % (
+                m.scan_title_assertions(txt),)
+    for txt in ("Gabriel Goldberg reviewed the principal of the loan today.\n",
+                "Gabriel Goldberg, principal at the time, signed for it.\n"):
+        assert m.scan_title_assertions(txt) == [], \
+            "lowercase continuation must stay quiet: %r" % (
+                m.scan_title_assertions(txt),)
+    print("  PASS test_title_followed_by_employer_preposition")
+
+
+def test_live_probe_wires_identity_sweep_and_is_non_fatal():
+    """End-to-end: the sweep must actually run against the real tree and must be
+    WARN-only. Deliberately does NOT assert the tree is clean -- pinning that
+    would make this test fixture-shaped, and it would start failing the moment a
+    real emitter drifts, which is exactly when the probe is doing its job."""
+    r = run_probe()
+    assert "Doctrine-vs-deliverable identity" in r.stdout, \
+        "sweep did not run in live mode:\n%s" % r.stdout
+    assert r.returncode == 0, \
+        "identity drift must WARN, never fail the probe:\n%s" % r.stdout
+    print("  PASS test_live_probe_wires_identity_sweep_and_is_non_fatal")
+
+
 def test_selfcheck_positive_and_negative_controls():
     """leak_scan_selfcheck: a clean sample (no synthetic terms) -> ok=True; a sample
     that DOES contain a synthetic term (collision) -> ok=False with a finding."""
@@ -1072,6 +1228,16 @@ def main():
     test_selfcheck_positive_and_negative_controls()
     test_selfcheck_detects_broken_matcher()
     test_no_active_deal_runs_selfcheck_and_passes()
+    test_title_normalisation_folds_renderings()
+    test_canonical_title_extracted_from_identity_line()
+    test_scan_finds_signature_block_assertion()
+    test_scan_ignores_principal_in_unrelated_prose()
+    test_drift_detection_is_symmetric_and_quiet_when_aligned()
+    test_drift_reports_every_conflicting_source_not_just_the_first()
+    test_compound_role_states_title_in_the_tail()
+    test_title_followed_by_employer_preposition()
+    test_title_word_before_the_name_is_not_an_assertion()
+    test_live_probe_wires_identity_sweep_and_is_non_fatal()
     print("ALL DOCTRINE-PROBE TESTS PASS")
 
 
