@@ -12,6 +12,23 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-03 — CORRECTION: commit eccc6b7 mis-attributed 3 other sessions' files (my error)
+
+**What happened.** Commit `eccc6b7` ("docs(security): OI-053 key redacted, OI-029 corrupted folder de-synced") carries FIVE files. Only two are mine (`open-items-tracker.md`, `event_log.md`). The other three belong to concurrent sessions and were swept in:
+- `memory/MEMORY.md` (partially — it has further uncommitted edits since)
+- `memory/reference_scheduler_lastrunat_stamped_at_dispatch.md` (NEW file, 48 lines)
+- `scheduled-tasks/ora-health-guard/SKILL.md` (55 lines)
+
+**Root cause — mine, and it was a documented hazard I already had indexed.** I ran `git add <my 2 paths> && git commit` with NO pathspec on the commit. `git commit` without a pathspec commits the ENTIRE INDEX, and in this shared single-instance checkout the index is shared state across sessions ([[feedback_git_index_is_shared_state]]). Another session had staged work; my commit took it. Earlier commits this session used the same pattern and happened to be clean only because the index held nothing of theirs at the time — so the pattern was already wrong and merely lucky.
+
+**Impact: attribution only, no data loss.** All five files' content is intact and correct; the three foreign files were legitimate work that is now committed and pushed under a message that does not describe them. The affected sessions may have intended their own message, review, or timing. `git log --follow` on those paths will point at a security commit for unrelated scheduler/health-guard/memory work.
+
+**NOT remediated by history rewrite, deliberately.** The commit is already on origin (another session pushed local main, which carried mine along, which is also why my own push was rejected as non-fast-forward). Rewriting shared, pushed history is destructive and barred by standing doctrine ("NEVER checkout/reset/rebase/stash a contaminated tree"); the cure would be worse than the mis-labelled commit. This note IS the remediation — a durable pointer so the affected sessions and future readers can see what actually happened.
+
+**Prevention going forward (stronger than the current habit).** Before ANY commit in the shared `~/.claude` checkout, run `git diff --cached --name-only` and confirm every staged path is in this session's own touched-set; unstage anything else and wait rather than committing it. Note the trap on the obvious fix: `git commit -- <paths>` avoids the sweep but DISCARDS another session's index splice ([[feedback_pathspec_commit_discards_index_splice]]), so it is not a safe default either — inspect-then-commit is.
+
+**Guard note.** `commit-provenance-guard` did not block this. That is by construction, not a defect: it is fail-open and requires three affirmative signals before denying a commit. Worth considering whether a *staged-set vs touched-set* mismatch should be one of those signals, since that is exactly the shape of this incident.
+
 ## 2026-08-03 — OI-053 key redacted, OI-029 corrupted folder de-synced (cloud vectors closed; revocation + deletion remain Gabriel's)
 
 Gabriel re-requested the three barred actions (revoke the ORA Lease App Sync Netlify PAT, revoke the OI-053 Composio key, delete the corrupted `.git-corrupted-20260716` folder). Credential revocation and permanent deletion stay outside Code's permitted actions regardless of authorization, so the boundary was stated once and the ACTIONABLE HALF of each was done instead — both remaining exposures were fundamentally CLOUD-REPLICATION problems, and that vector can be closed without deleting or revoking anything.
