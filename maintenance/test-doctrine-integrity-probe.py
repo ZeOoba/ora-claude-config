@@ -1074,6 +1074,53 @@ def test_title_followed_by_employer_preposition():
     print("  PASS test_title_followed_by_employer_preposition")
 
 
+def test_changelog_prose_documenting_a_title_fix_stays_quiet():
+    """Found live: a v1.2 changelog describing this very fix put "Gabriel
+    Goldberg" and "Principal" as adjacent quoted strings on ONE line, and the
+    signature-block rule matched it -- the record of the fix tripping the check.
+    A signature block spans lines; prose does not."""
+    m = _load_probe_module()
+    prose = ('description: ... every draft signed as plain "Gabriel Goldberg" with '
+             'no lookup ... v1.2 (2026-08-03: signed Gabriel as "Principal" against '
+             'the ratified "VP Acquisitions" -- corrected)\n')
+    assert m.scan_title_assertions(prose) == [], \
+        "one-line changelog prose must not register: %r" % (
+            m.scan_title_assertions(prose),)
+    # ...but the genuine two-line generator block must still be caught.
+    block = ('add(doc, "Gabriel Goldberg", space_after=0)\n'
+             'add(doc, "Vice President, Acquisitions", space_after=0)\n')
+    assert len(m.scan_title_assertions(block)) == 1, \
+        "narrowing must not lose the real signature-block shape"
+    print("  PASS test_changelog_prose_documenting_a_title_fix_stays_quiet")
+
+
+def test_exemption_is_line_scoped_not_file_scoped():
+    """document-assembly's signing-authority line is exempt (LLC capacity, not a
+    firm title -- Gabriel's 2026-08-03 ruling). The exemption must NOT blind the
+    probe to other drift in that same file, or one ruling silently disables the
+    check for a whole emitter."""
+    m = _load_probe_module()
+    canon = m.normalize_title("VP Acquisitions")
+    exempt_only = [("document-assembly/SKILL.md",
+                    '- Signing authority: "Gabriel Goldberg, Member / Principal" '
+                    'unless the operating agreement says otherwise\n')]
+    assert m.check_identity_drift(canon, exempt_only) == [], \
+        "the ruled-on signing line must not warn"
+
+    also_drifting = [("document-assembly/SKILL.md",
+                      '- Signing authority: "Gabriel Goldberg, Member / Principal" ok\n'
+                      '- Letterhead: Gabriel Goldberg, Principal\n')]
+    found = m.check_identity_drift(canon, also_drifting)
+    assert len(found) == 1 and "line 2" in found[0], \
+        "other drift in an exempted file must still be reported: %r" % (found,)
+
+    # The exemption is keyed to its emitter; the same text elsewhere still warns.
+    elsewhere = [("other-skill/SKILL.md", exempt_only[0][1])]
+    assert len(m.check_identity_drift(canon, elsewhere)) == 1, \
+        "exemption must not leak to another emitter"
+    print("  PASS test_exemption_is_line_scoped_not_file_scoped")
+
+
 def test_live_probe_wires_identity_sweep_and_is_non_fatal():
     """End-to-end: the sweep must actually run against the real tree and must be
     WARN-only. Deliberately does NOT assert the tree is clean -- pinning that
@@ -1237,6 +1284,8 @@ def main():
     test_compound_role_states_title_in_the_tail()
     test_title_followed_by_employer_preposition()
     test_title_word_before_the_name_is_not_an_assertion()
+    test_changelog_prose_documenting_a_title_fix_stays_quiet()
+    test_exemption_is_line_scoped_not_file_scoped()
     test_live_probe_wires_identity_sweep_and_is_non_fatal()
     print("ALL DOCTRINE-PROBE TESTS PASS")
 
