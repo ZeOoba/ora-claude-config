@@ -12,6 +12,46 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-03 — PR #35 merged (YAML quoting); ora-skills local main DIVERGED — needs reconciliation by the other session
+
+[PR #35](https://github.com/ZeOoba/ora-skills/pull/35) merged to `origin/main` (`e1b56b0`). Verified independently in a detached worktree at origin/main: 78 drift-comparator tests green, and the standing quoting MANUAL-MERGEs are gone (**46 IN-SYNC / 1 MANUAL-MERGE / 10 NOT-INSTALLED**).
+
+**⛔ OPEN — `C:\Users\Owner\ora-skills` local `main` is DIVERGED 2 ahead / 2 behind `origin/main`; I did NOT touch it.** Another session committed TWO commits directly to local main (unpushed) while this work was in flight: `3cb891f` (lease-form-qc v2.1.1 — bundles `scripts/lease_qc.py`) and `863a0b3` (masterlease-jurisdiction-rebase v1.1.1). Both build on the two skills captured in [PR #34](https://github.com/ZeOoba/ora-skills/pull/34) hours earlier. `origin/main` holds my `3d15526` + merge `e1b56b0`. Fast-forward correctly refused. Per the ora-skills single-writer rule (HEAD newer than session start and not mine) I STOPPED rather than merge/rebase/reset — that tree's unpushed commits are the other session's to reconcile and push. **Consequence until then: the canonical checkout lacks the quoting-insensitive comparator, so a drift run from it over-reports 4 quoting-only MANUAL-MERGEs. Degraded but safe — it over-reports, never destroys.**
+
+**The platform's frontmatter quoting flip-flopped again, in real time.** After the commit hook wrote unquoted names into the live cache and I verified all 4 byte-identical, `lease-form-qc`'s cache was re-serialized BACK to quoted within minutes. This is the strongest possible confirmation that chasing quoting in files is futile and the compare-only normalization is the correct layer — recorded in [reference_skill_store_drift_check_false_positives.md](reference_skill_store_drift_check_false_positives.md).
+
+**The DIVERGENT guard proved itself on a live case.** origin/main's one remaining MANUAL-MERGE is `lease-form-qc`, frontmatter AND body DISJOINT/**DIVERGENT**. Verified by hash: the cache matches the other session's local `3cb891f`, NOT origin/main. The tool said "cache matches an off-HEAD commit; do NOT auto-reimport" instead of prescribing a destructive pull — exactly the intended behaviour, on real data, unplanned. It self-resolves when they push.
+
+## 2026-08-03 — PR #34 merged (skill capture); YAML scalar quoting fixed as a CLASS, not an instance ([PR #35](https://github.com/ZeOoba/ora-skills/pull/35))
+
+[PR #34](https://github.com/ZeOoba/ora-skills/pull/34) merged (`51a1c9a`); canonical checkout fast-forwarded (again — a GitHub merge never updates it, and the scheduled task runs from that checkout).
+
+**The YAML quoting fix is a class fix, and the provenance is why.** `acquisition-underwriting` reported MANUAL-MERGE every run on repo `name: "acquisition-underwriting"` vs cache `name: acquisition-underwriting` — identical YAML meaning. Fixing only the file would have guaranteed recurrence: the QUOTED form in the repo was itself pulled FROM the cache by the 2026-07-27 REPO-FIRST recovery (`20a936e`, byte-exact copy), and the same cache served it UNQUOTED on 2026-08-03. **The platform re-serializes frontmatter on install and its quoting style varies over time.** Three more skills (`lease-form-qc`, `market-monitor`, `solar-lease-underwriting`) sat quoted on BOTH sides and would flip identically on the next style change.
+
+Fix: `_normalize_frontmatter` provides a COMPARE-ONLY view with scalar quoting stripped from top-level keys; `_split_parts` routes working-tree files AND historical git blobs through it so ancestry hashes share the space. Narrow by design — no YAML parser, top-level `key: value` only; block-scalar indicators carry no quotes and their indented continuations aren't top-level keys. Plus repo consistency: `name:` unquoted in all 4 (repo was 4 quoted vs 53 unquoted; names are plain identifiers).
+
+**⚠️ Bug the replayed real-data fixture caught — worth generalizing.** The first cut fed the normalized frontmatter into the REPORTING path too. **Unquoting a YAML scalar discards the leading/trailing whitespace that quotes exist to protect**, so parcel-data-recovery's replayed 203-char truncation reported 202. A compare-only normalization must never reach a reported figure; `description_of`/`version_token_of` now read RAW frontmatter, pinned by a hermetic trailing-space test. The real-data suite from PR #32 earned its keep — no synthetic fixture would have found this.
+
+**Post-commit hook, second observation:** unlike the capture commit (a no-op), this one genuinely CHANGED live cache content for 3 skills whose caches were quoted. Verified after: all 4 caches byte-identical to repo, bodies unchanged, descriptions intact (997/972/901/841 chars). Its 4 PENDING_REIMPORT entries were false again — `sweep_drift` clean, cleared. **Standing pattern: any commit touching a SKILL.md writes the live cache and leaves false ledger entries; verify content and clear in the same session.**
+
+Verified: live drift **47 IN-SYNC / 10 NOT-INSTALLED — zero drifted, zero cache-only, standing MANUAL-MERGE gone**. Full suite green (170 tests, 6 files). PR #35 open.
+
+## 2026-08-03 — 3 cache-only skills resolved: 2 captured to repo, 'morning' classified platform stock ([PR #34](https://github.com/ZeOoba/ora-skills/pull/34))
+
+Closes the open decision from the CACHE-ONLY verdict. The three were **not** the same kind of thing, and provenance — not the fact of being cache-only — decided each:
+
+- **`lease-form-qc` → CAPTURED.** 13 Oxford/ORA mentions; QC gate for leases on ORA's OWN landlord form (Fairground Village Center / 1100 Rarig / Sepich paper). 1 file.
+- **`masterlease-jurisdiction-rebase` → CAPTURED.** Rebases ORA's jurisdiction-conformed Master Lease templates; ships real ORA entity/property configs (MD/MO overlays, executed-lease provenance) + a rebase engine. 4 files.
+- **`morning` → NOT captured; added to `STOCK_SKILLS`.** ZERO Oxford/ORA mentions — same profile as known-stock `schedule`/`setup-cowork` — first-person personal-productivity voice, ships its own Fraunces font assets. **Capturing it would have manufactured a bogus authoritative source for a skill ORA does not own, which would then read as drift on every platform update forever.** Generalizable: CACHE-ONLY is a prompt to decide provenance, never an instruction to capture.
+
+Byte-exact copy is safe for a CAPTURE in a way it is NOT for a drift pull — there is no repo copy to overwrite, so nothing can be lost. All file hashes verified post-copy. Complete installs, not partial: the packager ships exactly the files the cache holds. Both pass `validate_frontmatter` (972 and 952 of 1024 chars) and package cleanly. **Repo confirmed PRIVATE before committing ORA entity/property data.**
+
+A test now pins the `STOCK_SKILLS` boundary in BOTH directions (stock names in, ORA skill names explicitly out) so a future edit cannot quietly exclude an ORA skill from the CACHE-ONLY check.
+
+**Post-commit hook side effects, both handled:** (i) it synced the committed files back into the LIVE runtime cache (documented — an unmerged branch commit still goes live, see [reference_ora_skills_post_commit_syncs_live_cache.md](reference_ora_skills_post_commit_syncs_live_cache.md)); verified **byte-identical**, a genuine no-op. (ii) it wrote 2 PENDING_REIMPORT entries that are **FALSE** — the cache already matches because the content was captured FROM it. Confirmed `skill_drifted == False` for both, then cleared via the sanctioned `pending_reimport.py clear`, so next week's run won't emit a spurious LEDGER-STALE finding. **Worth remembering: capturing a cache-only skill always produces false ledger entries; clear them in the same session.**
+
+Verified: drift report **46 IN-SYNC / 1 MANUAL-MERGE / 10 NOT-INSTALLED, ZERO cache-only**; full suite green (169 tests, 6 files). Unchanged: `acquisition-underwriting` MANUAL-MERGE on a YAML quoting-only difference.
+
 ## 2026-08-03 — Identity drift resolved across all 3 flagged skills; entity-capacity register ruled EXEMPT
 
 **Outcome: all three of `doctrine-integrity-probe` Check 13's flagged emitters are settled — but only TWO were the same defect.**
