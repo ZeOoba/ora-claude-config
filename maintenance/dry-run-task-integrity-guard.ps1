@@ -286,6 +286,20 @@ if ($tfbcActionLines -or $tfbc.exit -ne 0) {
 }
 
 # ---------------------------------------------------------------------------
+# STEP 2.9 -- dangling-mutation-probe.py (added 2026-08-03)
+# ---------------------------------------------------------------------------
+Write-Section 'STEP 2.9 -- dangling-mutation-probe.py'
+$dmp = Invoke-Engine 'dmp' $pyExe @((Join-Path $maintDir 'dangling-mutation-probe.py'))
+Write-Output $dmp.stdout
+Write-Output "exit=$($dmp.exit)"
+$raw['dangling_mutation_probe'] = $dmp
+$dmpActionLines = ($dmp.stdout -split "`n") | Where-Object { $_ -match '\[ACTION\] (LOST_WRITE|UNCOLLECTED_OBSERVATION)' }
+if ($dmpActionLines -or $dmp.exit -ne 0) {
+    $joined = if ($dmpActionLines) { ($dmpActionLines -join ' | ') } else { '(no matching [ACTION] line captured, but exit was non-zero)' }
+    $reasons.Add("dangling-mutation-probe.py: $joined")
+}
+
+# ---------------------------------------------------------------------------
 # VERDICT
 # ---------------------------------------------------------------------------
 Write-Section 'VERDICT'
