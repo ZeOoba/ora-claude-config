@@ -33,6 +33,11 @@ DEFAULT_SESSIONS_DIR = "C:/Users/Owner/.claude/hooks/sessions"
 #   2 -- dispatch detection fixed (2026-07-24) and capability self-declared.
 SCHEMA_VERSION = 2
 
+# Fields excluded when deciding whether a re-emission carries new information.
+# `ts` is the emission clock and differs on every fire by construction, so
+# comparing it would make every record "changed" and defeat the check.
+VOLATILE_FIELDS = ("ts",)
+
 EDIT_TOOLS = ("Edit", "Write", "MultiEdit")
 # Subagent-dispatch tools. EXACT match only -- never a prefix/substring test:
 # TaskCreate / TaskUpdate / TaskList / TaskGet / TaskOutput / TaskStop are
@@ -99,14 +104,63 @@ def iter_text(obj):
                     yield txt
 
 
+def payload(record):
+    """The part of a record that represents an OBSERVATION, ignoring when it
+    was written. Two records with equal payloads say the same thing."""
+    return {k: v for k, v in record.items() if k not in VOLATILE_FIELDS}
+
+
+def is_duplicate_of_last(out_file, session_id, record):
+    """True when `record` repeats this session's most recent record verbatim.
+
+    SessionEnd fires on every resume/clear/compaction and each fire re-parses
+    the ENTIRE transcript, so an unchanged session emits the same observation
+    again and again -- 67% of the 569 duplicate records on the live file were
+    byte-identical payloads carrying zero new information.
+
+    Scans the WHOLE file rather than the tail: 7+ sessions interleave here, so
+    this session's previous record is routinely many lines back. Comparing
+    against the file's last line would miss it and duplicate anyway.
+
+    FAILS TOWARD WRITING. Any error -- unreadable file, corrupt JSON, odd
+    shape -- returns False so the record is still appended. A duplicate is
+    harmless (the rollup merges by session_id); a silently dropped record is
+    lost telemetry, which is the failure this hook exists to prevent.
+    """
+    if not session_id or not os.path.isfile(out_file):
+        return False
+    try:
+        latest = None
+        with open(out_file, "r", encoding="utf-8", errors="surrogateescape") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    prev = json.loads(line)
+                except Exception:
+                    continue  # a corrupt neighbour must not abort the scan
+                if isinstance(prev, dict) and prev.get("session_id") == session_id:
+                    latest = prev
+        if latest is None:
+            return False
+        return payload(latest) == payload(record)
+    except Exception:
+        return False
+
+
 def main():
     raw = sys.stdin.read()
-    payload = json.loads(raw)
-    if not isinstance(payload, dict):
+    # NOT named `payload` -- that is a module-level function here, and
+    # shadowing it would make any future payload(...) call inside main()
+    # raise TypeError, which the fail-open wrapper would swallow, silently
+    # killing telemetry emission.
+    hook_input = json.loads(raw)
+    if not isinstance(hook_input, dict):
         return
 
-    transcript_path = payload.get("transcript_path")
-    session_id = payload.get("session_id")
+    transcript_path = hook_input.get("transcript_path")
+    session_id = hook_input.get("session_id")
     if not transcript_path or not os.path.isfile(transcript_path):
         return
 
@@ -201,6 +255,14 @@ def main():
         "override_reason": override_reason,
         "override_at": override_at,
     }
+    # Nothing observable changed since this session's last record -> writing
+    # it again adds a line and no information. Append-only is preserved: this
+    # only ever declines to write, it never rewrites or removes an existing
+    # record, so it keeps the concurrency property that has held 963 lines of
+    # interleaved multi-session appends at zero corruption.
+    if is_duplicate_of_last(out_file, session_id, record):
+        return
+
     with open(out_file, "a", encoding="ascii") as fh:
         fh.write(json.dumps(record) + "\n")
 
