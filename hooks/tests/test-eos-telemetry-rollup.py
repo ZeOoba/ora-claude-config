@@ -174,7 +174,7 @@ def test_regressed_detector_is_not_counted_capable():
     assert field(out, "dispatch-capable cohort") == "1", (
         "regressed-detector records must be excluded from capable: %s" % out
     )
-    assert field(out, "detector-regressed records") == "2", out
+    assert field(out, "detector-regressed sessions") == "2", out
     assert "1/1 capable" in field(out, "task_dispatched"), out
     assert "WARNING" in out, "a detector regression must be reported loudly:\n%s" % out
     print("PASS test_regressed_detector_is_not_counted_capable")
@@ -189,7 +189,7 @@ def test_schema2_without_detectors_block_is_capable():
     rc, out, err = run_rollup(path)
     assert rc == 0, "expected exit 0, got %s (stderr=%s)" % (rc, err)
     assert field(out, "dispatch-capable cohort") == "1", out
-    assert field(out, "detector-regressed records") == "0", out
+    assert field(out, "detector-regressed sessions") == "0", out
     print("PASS test_schema2_without_detectors_block_is_capable")
 
 
@@ -248,6 +248,296 @@ def test_most_missing_compares_rates_not_raw_absences():
     print("PASS test_most_missing_compares_rates_not_raw_absences")
 
 
+def test_duplicate_session_records_collapse_to_one_session():
+    """SessionEnd fires on every resume/clear/compaction and re-parses the
+    WHOLE transcript, appending a fresh record each time. Three records for
+    one session are one session, not three."""
+    path = write_jsonl([
+        capable_record("s1", False, edits=5),
+        capable_record("s1", False, edits=9),
+        capable_record("s1", False, edits=12),
+    ])
+    rc, out, err = run_rollup(path)
+    assert rc == 0, "expected exit 0, got %s (stderr=%s)" % (rc, err)
+    assert field(out, "total coding sessions") == "1", (
+        "3 re-emissions of one session must count as 1 session: %s" % out
+    )
+    assert field(out, "total records").startswith("3"), (
+        "the raw record count must still be reported: %s" % out
+    )
+    assert field(out, "dispatch-capable cohort") == "1", out
+    print("PASS test_duplicate_session_records_collapse_to_one_session")
+
+
+def test_duplicates_do_not_inflate_dispatch_denominator():
+    """A long session that re-emits 3x must not weigh 3x in the rate. Without
+    dedupe this reads 3/4 = 75%; the true figure is 1/2 = 50%."""
+    path = write_jsonl([
+        capable_record("long", True),
+        capable_record("long", True),
+        capable_record("long", True),
+        capable_record("short", False),
+    ])
+    rc, out, err = run_rollup(path)
+    assert rc == 0, "expected exit 0, got %s (stderr=%s)" % (rc, err)
+    dispatched = field(out, "task_dispatched")
+    assert "1/2 capable" in dispatched, (
+        "re-emissions must not be weighted: %s" % dispatched
+    )
+    assert "50.0%" in dispatched, dispatched
+    print("PASS test_duplicates_do_not_inflate_dispatch_denominator")
+
+
+def test_stale_partial_superseded_by_later_signal():
+    """An early SessionEnd fire snapshots the transcript BEFORE a dispatch
+    happens, writing task_dispatched=false. That stale partial must not
+    outvote the later record that saw the dispatch. These signals are
+    existential ('did this session ever X'), so the merge is a union."""
+    path = write_jsonl([
+        capable_record("s1", False, edits=2, lane_declared=False,
+                       bash_test_ran=False, verification_seen=False),
+        capable_record("s1", True, edits=30, lane_declared=True,
+                       bash_test_ran=True, verification_seen=True),
+    ])
+    rc, out, err = run_rollup(path)
+    assert rc == 0, "expected exit 0, got %s (stderr=%s)" % (rc, err)
+    assert "1/1 capable" in field(out, "task_dispatched"), (
+        "a later record observing dispatch must win over the stale false: %s" % out
+    )
+    assert "1/1 all" in field(out, "lane_declared"), out
+    assert "1/1 all" in field(out, "bash_test_ran"), out
+    assert "1/1 all" in field(out, "verification_seen"), out
+    print("PASS test_stale_partial_superseded_by_later_signal")
+
+
+def test_merge_is_order_independent():
+    """The union must not depend on which re-emission landed last. A True
+    observed in an EARLIER record survives a later False.
+
+    Every unioned signal is asserted here, not just task_dispatched. Pinning
+    dispatch alone leaves last-write-wins undetected on the other three: they
+    are the only signals that flow through the UNION_SIGNALS loop, since
+    task_dispatched is merged separately under a capability guard. Ordered
+    True-then-False deliberately -- last-write-wins agrees with union when
+    the True lands last, so that ordering proves nothing."""
+    recs = [
+        capable_record("s1", True, edits=30, lane_declared=True,
+                       bash_test_ran=True, verification_seen=True),
+        capable_record("s1", False, edits=2, lane_declared=False,
+                       bash_test_ran=False, verification_seen=False),
+    ]
+    rc, out, err = run_rollup(write_jsonl(recs))
+    assert rc == 0, "expected exit 0, got %s (stderr=%s)" % (rc, err)
+    assert "1/1 capable" in field(out, "task_dispatched"), (
+        "a true observed in an EARLIER record must survive a later false: %s" % out
+    )
+    for signal in ("lane_declared", "bash_test_ran", "verification_seen"):
+        value = field(out, signal)
+        assert "1/1 all" in value, (
+            "%s must union, not take the last record's value: %s" % (signal, value)
+        )
+    print("PASS test_merge_is_order_independent")
+
+
+def test_session_capability_is_the_best_of_its_records():
+    """A session spanning the 2026-07-24 fix has a blind record and a capable
+    one. It is one capable session -- not one of each."""
+    path = write_jsonl([
+        blind_record("spanning"),
+        capable_record("spanning", True),
+    ])
+    rc, out, err = run_rollup(path)
+    assert rc == 0, "expected exit 0, got %s (stderr=%s)" % (rc, err)
+    assert field(out, "total coding sessions") == "1", out
+    assert field(out, "dispatch-capable cohort") == "1", out
+    assert field(out, "blind-era backlog") == "0", (
+        "a session with any capable record is not blind-era: %s" % out
+    )
+    print("PASS test_session_capability_is_the_best_of_its_records")
+
+
+def test_distinct_sessions_are_not_merged():
+    """Regression guard: dedupe must key on session_id only, never collapse
+    genuinely separate sessions that happen to share field values."""
+    path = write_jsonl([
+        capable_record("a", True),
+        capable_record("b", True),
+        capable_record("c", False),
+    ])
+    rc, out, err = run_rollup(path)
+    assert rc == 0, "expected exit 0, got %s (stderr=%s)" % (rc, err)
+    assert field(out, "total coding sessions") == "3", out
+    assert "2/3 capable" in field(out, "task_dispatched"), out
+    print("PASS test_distinct_sessions_are_not_merged")
+
+
+def test_records_without_session_id_stay_separate():
+    """A record with no session_id has no merge key. It must be kept as its
+    own session, never collapsed with every other keyless record."""
+    r1 = capable_record("x", True)
+    del r1["session_id"]
+    r2 = capable_record("y", False)
+    del r2["session_id"]
+    path = write_jsonl([r1, r2])
+    rc, out, err = run_rollup(path)
+    assert rc == 0, "expected exit 0, got %s (stderr=%s)" % (rc, err)
+    assert field(out, "total coding sessions") == "2", (
+        "keyless records must not collapse into one: %s" % out
+    )
+    print("PASS test_records_without_session_id_stay_separate")
+
+
+def test_duplication_does_not_inflate_non_dispatch_numerators():
+    """The numerator must be counted over SESSIONS, exactly like the
+    denominator. Counting a unioned signal over raw records while dividing by
+    sessions prints impossible rates -- 3 duplicate records of one
+    lane-declaring session reported 'lane_declared: 300.0% (3/1 all)'."""
+    path = write_jsonl([
+        capable_record("s1", False, lane_declared=True, bash_test_ran=True,
+                       verification_seen=True),
+        capable_record("s1", False, lane_declared=True, bash_test_ran=True,
+                       verification_seen=True),
+        capable_record("s1", False, lane_declared=True, bash_test_ran=True,
+                       verification_seen=True),
+    ])
+    rc, out, err = run_rollup(path)
+    assert rc == 0, "expected exit 0, got %s (stderr=%s)" % (rc, err)
+    for signal in ("lane_declared", "bash_test_ran", "verification_seen"):
+        value = field(out, signal)
+        assert "1/1 all" in value, (
+            "%s numerator must be counted over sessions: %s" % (signal, value)
+        )
+        assert "100.0%" in value, value
+    print("PASS test_duplication_does_not_inflate_non_dispatch_numerators")
+
+
+def test_collapsed_count_is_reported_accurately():
+    """The one number unique to this feature. 5 records over 2 sessions is
+    exactly 3 collapsed; an unasserted counter can drift silently."""
+    path = write_jsonl([
+        capable_record("a", True),
+        capable_record("a", True),
+        capable_record("a", True),
+        capable_record("b", False),
+        capable_record("b", False),
+    ])
+    rc, out, err = run_rollup(path)
+    assert rc == 0, "expected exit 0, got %s (stderr=%s)" % (rc, err)
+    assert field(out, "total coding sessions") == "2", out
+    assert field(out, "total records") == "5 (3 duplicate re-emission(s) collapsed)", (
+        "collapsed count must be exact: %s" % field(out, "total records")
+    )
+    print("PASS test_collapsed_count_is_reported_accurately")
+
+
+def test_untrusted_record_cannot_supply_the_dispatch_verdict():
+    """A degraded record's task_dispatched 'is not evidence of anything'. If
+    the CAPABLE record for a session saw no dispatch, a regressed-detector
+    sibling claiming true must NOT make the session count as dispatched --
+    that manufactures the exact signal this rollup exists to measure."""
+    path = write_jsonl([
+        capable_record("p", False),
+        capable_record("p", True, detectors={"dispatch": ["Task"]}),
+    ])
+    rc, out, err = run_rollup(path)
+    assert rc == 0, "expected exit 0, got %s (stderr=%s)" % (rc, err)
+    dispatched = field(out, "task_dispatched")
+    assert "0/1 capable" in dispatched, (
+        "an untrusted record must not supply the verdict: %s" % dispatched
+    )
+    assert "0.0%" in dispatched, dispatched
+    print("PASS test_untrusted_record_cannot_supply_the_dispatch_verdict")
+
+
+def test_untrusted_record_cannot_SEED_the_dispatch_verdict():
+    """The capability guard exists TWICE -- once where a session is first
+    seeded from a record, once where a later record merges in. Placing the
+    untrusted record second exercises only the merge half. Here it lands
+    FIRST, so the seed half is what must reject it: without that guard the
+    untrusted True becomes the session's opening verdict and the later
+    capable False cannot pull it back down, reinstating the exact defect
+    this guard was added to close."""
+    path = write_jsonl([
+        capable_record("p", True, detectors={"dispatch": ["Task"]}),
+        capable_record("p", False),
+    ])
+    rc, out, err = run_rollup(path)
+    assert rc == 0, "expected exit 0, got %s (stderr=%s)" % (rc, err)
+    dispatched = field(out, "task_dispatched")
+    assert "0/1 capable" in dispatched, (
+        "an untrusted record must not SEED the verdict: %s" % dispatched
+    )
+    assert "0.0%" in dispatched, dispatched
+    print("PASS test_untrusted_record_cannot_SEED_the_dispatch_verdict")
+
+
+def test_capable_true_survives_a_later_untrusted_record():
+    """Mirror image of the guard: gating the union on capability must not
+    throw away a REAL dispatch. A capable record saw it; a degraded sibling
+    arriving later must leave that verdict standing."""
+    path = write_jsonl([
+        capable_record("p", True),
+        capable_record("p", False, detectors={"dispatch": ["Task"]}),
+    ])
+    rc, out, err = run_rollup(path)
+    assert rc == 0, "expected exit 0, got %s (stderr=%s)" % (rc, err)
+    assert "1/1 capable" in field(out, "task_dispatched"), (
+        "the capability guard must not discard a trustworthy True: %s" % out
+    )
+    print("PASS test_capable_true_survives_a_later_untrusted_record")
+
+
+def test_blind_record_cannot_supply_the_dispatch_verdict():
+    """Same rule for the blind era, where task_dispatched is uniformly
+    meaningless rather than merely suspect."""
+    path = write_jsonl([
+        capable_record("p", False),
+        blind_record("p", task_dispatched=True),
+    ])
+    rc, out, err = run_rollup(path)
+    assert rc == 0, "expected exit 0, got %s (stderr=%s)" % (rc, err)
+    assert "0/1 capable" in field(out, "task_dispatched"), out
+    print("PASS test_blind_record_cannot_supply_the_dispatch_verdict")
+
+
+def test_malformed_files_cannot_blank_the_report():
+    """FAIL-LOUD invariant. merge_sessions runs before the first print, so an
+    exception there exited 0 having printed ZERO bytes -- no numbers, no
+    banner, indistinguishable from 'nothing to report'. Two records whose
+    `files` lists cannot be unioned (unorderable / unhashable entries) must
+    still produce a full report."""
+    path = write_jsonl([
+        capable_record("s", True, files=["a.py"]),
+        capable_record("s", True, files=[1]),
+        capable_record("t", False, files=[["nested"]]),
+        capable_record("t", False, files={"not": "a list"}),
+    ])
+    rc, out, err = run_rollup(path)
+    assert rc == 0, "expected exit 0, got %s (stderr=%s)" % (rc, err)
+    assert out.strip(), "a malformed `files` entry must not blank the report"
+    assert field(out, "total coding sessions") == "2", out
+    assert "1/2 capable" in field(out, "task_dispatched"), out
+    print("PASS test_malformed_files_cannot_blank_the_report")
+
+
+def test_malformed_scalar_fields_cannot_blank_the_report():
+    """Same invariant across the other merged fields. lane-telemetry.jsonl is
+    append-only and hand-editable; no field type may take the report down."""
+    path = write_jsonl([
+        capable_record("s", True, edits="lots"),
+        capable_record("s", True, edits=None),
+        # session_id is positional in the helper, so override it after build.
+        dict(capable_record("u", False), session_id=17),
+        dict(capable_record("u2", False), session_id=None),
+        capable_record("v", False, detectors="not-a-dict"),
+    ])
+    rc, out, err = run_rollup(path)
+    assert rc == 0, "expected exit 0, got %s (stderr=%s)" % (rc, err)
+    assert out.strip(), "a malformed scalar must not blank the report"
+    assert field(out, "total coding sessions"), out
+    print("PASS test_malformed_scalar_fields_cannot_blank_the_report")
+
+
 def test_malformed_lines_skipped():
     path = write_jsonl(
         [capable_record("s1", True)],
@@ -289,6 +579,21 @@ if __name__ == "__main__":
     test_non_dispatch_signals_span_all_records()
     test_all_blind_reports_dispatch_unmeasurable()
     test_most_missing_compares_rates_not_raw_absences()
+    test_duplicate_session_records_collapse_to_one_session()
+    test_duplicates_do_not_inflate_dispatch_denominator()
+    test_stale_partial_superseded_by_later_signal()
+    test_merge_is_order_independent()
+    test_session_capability_is_the_best_of_its_records()
+    test_distinct_sessions_are_not_merged()
+    test_records_without_session_id_stay_separate()
+    test_duplication_does_not_inflate_non_dispatch_numerators()
+    test_collapsed_count_is_reported_accurately()
+    test_untrusted_record_cannot_supply_the_dispatch_verdict()
+    test_untrusted_record_cannot_SEED_the_dispatch_verdict()
+    test_capable_true_survives_a_later_untrusted_record()
+    test_blind_record_cannot_supply_the_dispatch_verdict()
+    test_malformed_files_cannot_blank_the_report()
+    test_malformed_scalar_fields_cannot_blank_the_report()
     test_malformed_lines_skipped()
     test_missing_file_exits_zero()
     test_garbage_file_exits_zero()
