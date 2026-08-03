@@ -77,7 +77,24 @@ def target_index():
 
 
 def is_memory_index(file_path):
-    return _norm(file_path) == _norm(target_index())
+    """True for the root index OR a top-level sub-index (INDEX_*.md) beside it.
+
+    Sub-index awareness added 2026-08-03 with the MEMORY.md split. memory-policy.md
+    sec 3's one-line-entry rule governs INDEX ENTRIES, not one particular filename,
+    so relocating 108 of ~190 entries into INDEX_reference.md must not relocate them
+    out from under this guard -- that would leave the majority of the corpus unlinted
+    while the guard still reported healthy.
+
+    Scoped to the index directory's OWN level so an unrelated INDEX_*.md elsewhere in
+    the repo is never linted as a memory index.
+    """
+    norm_target = _norm(target_index())
+    norm_path = _norm(file_path)
+    if norm_path == norm_target:
+        return True
+    base = os.path.basename(file_path).upper()
+    return (os.path.dirname(norm_path) == os.path.dirname(norm_target)
+            and base.startswith("INDEX_") and base.endswith(".MD"))
 
 
 def simulate_edit(tool_name, tool_input, current_text):
