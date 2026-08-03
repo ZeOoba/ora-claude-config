@@ -1,0 +1,9 @@
+[
+  {
+    "session_id": "local_27eae976-50b9-4ed4-94bb-9cd6dee2903a",
+    "task_id": "ora-appsec-siteexposure-canary-recheck",
+    "tool": "mcp__scheduled-tasks__update_scheduled_task",
+    "acknowledged": "2026-08-03",
+    "reason": "The founding incident for this probe. The 2026-07-29 one-time canary-recheck reached the correct conclusion and called update_scheduled_task on ora-site-exposure-probe, but the session ended at that call and the write never landed. REMEDIATED 2026-08-03: the task was re-canaried off its 2026-07-29 fire and retagged claude-opus-5 by hand, verified live via list_scheduled_tasks. Kept here rather than deleted so the probe's first true positive stays auditable; it would otherwise re-alarm daily until it ages out of the 14-day lookback."
+  }
+]
