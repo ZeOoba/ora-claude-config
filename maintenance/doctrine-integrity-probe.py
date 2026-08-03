@@ -783,6 +783,16 @@ IDENTITY_ASSERTION_EXEMPTIONS = (
     # line as-is; exempted here rather than left as a standing WARN that would
     # train the reader to ignore this check.
     ("document-assembly/SKILL.md", "Signing authority:"),
+    # The explanatory comment for the exemption above (the line directly below
+    # "Signing authority:") illustrates the SAME ruling with a second worked
+    # example -- the 21 Outlook landlord signatures, "...Gabriel Goldberg,
+    # Principal" -- on a DIFFERENT line, so the line-scoped rule above does not
+    # cover it. That left the comment EXPLAINING a known false positive as a
+    # second false positive of its own (found 2026-08-03 by running this probe
+    # live against the real file, right after the signing-authority line was
+    # first exempted). Scoped to this specific explanatory line, not the whole
+    # file, for the same reason as the entry above.
+    ("document-assembly/SKILL.md", 'DO NOT "correct" this to "VP Acquisitions"'),
 )
 
 
