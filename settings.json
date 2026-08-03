@@ -243,6 +243,15 @@
             "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/commit-provenance-recorder.py\""
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit|mcp__Desktop_Commander__write_file|mcp__Desktop_Commander__edit_block|mcp__plugin_desktop-commander_desktop-commander__write_file|mcp__plugin_desktop-commander_desktop-commander__edit_block",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/memory-nag-correction.py\""
+          }
+        ]
       }
     ],
     "PreToolUse": [
