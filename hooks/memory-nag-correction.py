@@ -81,6 +81,16 @@ except Exception:
 _FALLBACK_WARN_BYTES = 21500
 _FALLBACK_HARD_BYTES = 24400
 
+# The harness's own nag threshold is NOT introspectable -- it's internal to Claude Code,
+# not ORA config -- but it has been OBSERVED to fire below our current WARN (2026-07-31,
+# MEMORY.md = 20,455 bytes, reference_memory_index_size_gate_is_a_runway_marker.md line
+# 13), and it cites exactly 17100 (17.1KB), which was this repo's WARN before the
+# 2026-07-31 recalibration. So 17100 is a defensible floor: correcting from there covers
+# the band the harness's nag can occupy that sits below our post-recalibration WARN,
+# without guessing at the harness's real cutoff. Fixed regardless of any FUTURE
+# recalibration of MEMORY_WARN_BYTES -- the harness's nag doesn't move when ours does.
+HARNESS_NAG_FLOOR_BYTES = 17100
+
 
 def _norm(p):
     return os.path.normcase(os.path.abspath(p))
@@ -166,8 +176,9 @@ def main():
 
     idx_bytes = os.path.getsize(target_index())
     warn_bytes, hard_bytes = _thresholds()
-    if idx_bytes <= warn_bytes:
-        return  # nothing to correct -- genuinely under the real gate
+    fire_floor = min(warn_bytes, HARNESS_NAG_FLOOR_BYTES)
+    if idx_bytes <= fire_floor:
+        return  # genuinely under both our real gate AND where the harness's nag can appear
 
     emit(build_message(idx_bytes, warn_bytes, hard_bytes))
 

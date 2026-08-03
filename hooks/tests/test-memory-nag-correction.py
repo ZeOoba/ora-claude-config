@@ -17,10 +17,13 @@ crosses the REAL, ratified threshold.
 Drives the real hook as a subprocess with real PostToolUse payloads against a temp
 MEMORY.md (via ORA_MEMORY_INDEX), so the live index is never touched -- and every
 "other file" case in this suite ALSO stays inside a tempdir (never a real path like
-CLAUDE.md), so a bug in the test helper cannot corrupt anything live. It imports
-MEMORY_WARN_BYTES/MEMORY_HARD_BYTES from maintenance/memory-integrity-probe.py rather
-than hardcoding its own copies, so the two cannot drift apart -- tests therefore read
-those constants directly rather than hardcoding 21500/24400 either.
+CLAUDE.md), so a bug in the test helper cannot corrupt anything live. Most assertions
+derive their expected values from maintenance/memory-integrity-probe.py and the hook
+itself (so the write-time correction, the audit-time gate, and this suite cannot drift
+apart on ORDINARY changes) -- EXCEPT two deliberately hardcoded pin checks near the
+top, which exist because a derived-only suite already proved unable to catch the one
+failure mode that actually matters: the probe file itself holding the WRONG value.
+2026-08-03 code review caught this live -- see the comment above those two checks.
 
 fires  == stdout carries a non-empty hookSpecificOutput.additionalContext
 silent == empty stdout (the hook stays silent)
@@ -41,16 +44,18 @@ PROBE = os.path.normpath(os.path.join(
     "memory-integrity-probe.py"))
 
 
-def _load_probe():
-    spec = importlib.util.spec_from_file_location("memory_integrity_probe", PROBE)
+def _load_module(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-_probe = _load_probe()
+_probe = _load_module("memory_integrity_probe", PROBE)
+_hook = _load_module("memory_nag_correction", HOOK)
 WARN_BYTES = _probe.MEMORY_WARN_BYTES
 HARD_BYTES = _probe.MEMORY_HARD_BYTES
+FLOOR_BYTES = _hook.HARNESS_NAG_FLOOR_BYTES
 
 failures = []
 
@@ -59,6 +64,22 @@ def check(label, cond):
     print(("PASS  " if cond else "FAIL  ") + label)
     if not cond:
         failures.append(label)
+
+
+# PINNED, not derived: the whole point of these two lines is to catch drift the
+# derived checks below structurally cannot. 2026-08-03 code review caught exactly
+# this failure mode live -- the hook imported MEMORY_WARN_BYTES from a copy of the
+# probe that still held the OLD, un-recalibrated 17100, and every assertion below
+# (which reads its expected value from that SAME copy) passed green while the hook
+# emitted a message naming 17100 as "the ratified threshold (Gabriel, 2026-07-31)".
+# A test that derives its expectation from the thing it's testing cannot catch the
+# thing it's testing having the wrong value baked in -- see
+# feedback_fixture_shaped_tests_certify_dead_branches.md. These two lines are the
+# ONLY assertions in this file that do not route through _probe/_hook.
+check("probe still carries the ratified 2026-07-31 constants (21500 / 24400)",
+      (WARN_BYTES, HARD_BYTES) == (21500, 24400))
+check("hook's harness-nag floor is still the pre-recalibration 17100",
+      FLOOR_BYTES == 17100)
 
 
 def _write_padded(path, nbytes):
@@ -96,34 +117,62 @@ def run(tool_name, index_bytes):
         return hso.get("additionalContext", ""), out
 
 
-# 1. Below WARN -> silent. Nothing to correct.
-ctx, _ = run("Write", WARN_BYTES - 100)
-check("size below WARN -> silent", ctx == "")
+# Effective fire threshold is the LOWER of WARN and the harness-nag floor -- since the
+# floor (17100) sits below the recalibrated WARN (21500), the floor is what actually
+# governs today. Assert that ordering explicitly so these tests fail loudly (not
+# silently mis-target) if a future recalibration ever pushes WARN below the floor.
+check("floor is currently the binding threshold (floor < WARN)", FLOOR_BYTES < WARN_BYTES)
+EFFECTIVE_FLOOR = min(WARN_BYTES, FLOOR_BYTES)
 
-# 2. Exactly at WARN -> silent (probe's own gate is strictly-greater, mirror it).
-ctx, _ = run("Write", WARN_BYTES)
-check("size == WARN exactly -> silent (probe uses strict >)", ctx == "")
+# 1. Below the effective floor -> silent. Nothing to correct, and the harness's own
+#    nag cannot plausibly have fired here either.
+ctx, _ = run("Write", EFFECTIVE_FLOOR - 100)
+check("size below the effective floor -> silent", ctx == "")
 
-# 3. Just past WARN, still under HARD -> fires, names the real thresholds, and tells
+# 2. Exactly at the effective floor -> silent (strictly-greater, mirroring the probe).
+ctx, _ = run("Write", EFFECTIVE_FLOOR)
+check("size == floor exactly -> silent (strict >)", ctx == "")
+
+# 3. Past the floor but still BELOW WARN -- this is the band the original design left
+#    uncovered (2026-08-03 review finding #4): the harness's nag has been observed to
+#    fire here (reference_memory_index_size_gate_is_a_runway_marker.md, 20,455 bytes),
+#    below our post-recalibration WARN. Must now fire.
+ctx, out = run("Write", FLOOR_BYTES + 200)
+check("size past the floor but below WARN -> fires (closes the silent-band gap)",
+      ctx != "")
+check("floor-band message mentions the real WARN threshold", str(WARN_BYTES) in ctx)
+check("floor-band message mentions the real HARD threshold", str(HARD_BYTES) in ctx)
+check("floor-band message never re-states the stale 17100 as itself ratified",
+      "17100" not in ctx)
+check("floor-band message names the stale 17.1KB harness figure for context",
+      "17.1" in ctx)
+
+# 4. Just past WARN, still under HARD -> fires, names the real thresholds, and tells
 #    the model to ignore the harness's 17.1KB figure.
 ctx, out = run("Write", WARN_BYTES + 500)
 check("size just past WARN -> fires", ctx != "")
 check("mentions the real WARN threshold", str(WARN_BYTES) in ctx)
 check("mentions the real HARD threshold", str(HARD_BYTES) in ctx)
 check("explicitly names the stale 17.1KB harness figure", "17.1" in ctx)
-check("tells the model not to delete live pointers",
-      "delete" in ctx.lower() or "drop" in ctx.lower())
+check("message never states the stale 17100 byte figure as itself ratified",
+      "17100" not in ctx)
+check("explicitly instructs NOT to delete live pointers",
+      "not delete" in ctx.lower() or "not to delete" in ctx.lower())
 check("points at the standing-answer memory file",
       "reference_memory_index_size_gate_is_a_runway_marker" in ctx)
 check("hookEventName is PostToolUse", '"hookEventName": "PostToolUse"' in out
       or '"hookEventName":"PostToolUse"' in out)
+WARN_BAND_CTX = ctx  # reused below to prove the HARD-only token is HARD-exclusive
 
-# 4. Past HARD -> still fires, but this is a REAL problem (Read-tool limit), not just
-#    a nag to correct -- the message must say so distinctly.
+# 5. Past HARD -> still fires, but this is a REAL problem (Read-tool limit), not just
+#    a nag to correct -- the message must say so distinctly and use a token the WARN
+#    branch never uses (2026-08-03 review finding #3: the original assertion here was
+#    satisfiable by EITHER branch and never actually distinguished them).
 ctx, _ = run("Write", HARD_BYTES + 500)
 check("size past HARD -> fires", ctx != "")
-check("HARD-exceeded message reads as a real problem, not just nag correction",
-      "read" in ctx.lower() and ("limit" in ctx.lower() or "fit" in ctx.lower()))
+check("HARD-exceeded message names it a genuine problem", "genuine problem" in ctx)
+check("WARN-band message does NOT claim the genuine-problem framing (branches differ)",
+      "genuine problem" not in WARN_BAND_CTX)
 
 # 5. A write to some OTHER file entirely (still inside the tempdir, never a real path)
 #    -> silent, regardless of the REAL index's size sitting well past HARD.
