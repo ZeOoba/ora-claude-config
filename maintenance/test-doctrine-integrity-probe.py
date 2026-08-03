@@ -1121,6 +1121,45 @@ def test_exemption_is_line_scoped_not_file_scoped():
     print("  PASS test_exemption_is_line_scoped_not_file_scoped")
 
 
+def test_exemption_covers_its_own_explanatory_comment():
+    """LIVE BUG, found 2026-08-03 by running the probe against the real,
+    already-fixed document-assembly/SKILL.md: the explanatory comment that
+    documents the signing-authority exemption (the line directly below it)
+    illustrates the SAME ruling with a second worked example -- the 21
+    Outlook landlord signatures, 'Gabriel Goldberg, Principal' -- which is
+    its own independent title-assertion hit on a DIFFERENT line than the
+    exempted 'Signing authority:' line. The line-scoped exemption correctly
+    left this second line uncovered, so the comment EXPLAINING a known false
+    positive became a second false positive itself -- verified via a live
+    `python maintenance/doctrine-integrity-probe.py` run before this fix,
+    which printed exactly this WARN."""
+    m = _load_probe_module()
+    canon = m.normalize_title("VP Acquisitions")
+    real_shape = [("document-assembly/SKILL.md",
+        '- Signing authority: "Gabriel Goldberg, Member / Principal" unless the '
+        'entity\'s operating agreement specifies otherwise; if uncertain, ask '
+        'Gabriel\n'
+        '  - **DO NOT "correct" this to "VP Acquisitions" (Gabriel ruling, '
+        '2026-08-03).** This line is ENTITY-EXECUTION CAPACITY, not a firm '
+        'title. Same exemption covers the 21 `Landlord - *` Outlook '
+        'signatures, which sign "[LLC], by Oxford Realty Advisors LLC, its '
+        'Manager / Gabriel Goldberg, Principal" -- Gabriel\'s capacity within '
+        'the Manager entity, not his job title.\n')]
+    assert m.check_identity_drift(canon, real_shape) == [], (
+        "the comment that explains the known false positive must not become "
+        "a second false positive: %r" % (m.check_identity_drift(canon, real_shape),))
+
+    # A genuinely NEW, unrelated title assertion elsewhere in the same file
+    # must still be caught -- this fix must not widen into a file-wide pass.
+    still_catches_real_drift = [("document-assembly/SKILL.md",
+        real_shape[0][1] + '- Cover sheet: Gabriel Goldberg, Principal\n')]
+    found = m.check_identity_drift(canon, still_catches_real_drift)
+    assert len(found) == 1 and "Cover sheet" not in found[0] and "line 3" in found[0], (
+        "an unrelated new drift line in the same file must still be reported: "
+        "%r" % (found,))
+    print("  PASS test_exemption_covers_its_own_explanatory_comment")
+
+
 def test_live_probe_wires_identity_sweep_and_is_non_fatal():
     """End-to-end: the sweep must actually run against the real tree and must be
     WARN-only. Deliberately does NOT assert the tree is clean -- pinning that
@@ -1286,6 +1325,7 @@ def main():
     test_title_word_before_the_name_is_not_an_assertion()
     test_changelog_prose_documenting_a_title_fix_stays_quiet()
     test_exemption_is_line_scoped_not_file_scoped()
+    test_exemption_covers_its_own_explanatory_comment()
     test_live_probe_wires_identity_sweep_and_is_non_fatal()
     print("ALL DOCTRINE-PROBE TESTS PASS")
 
