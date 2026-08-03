@@ -771,6 +771,20 @@ IDENTITY_EMITTER_SPECS = (
 # Version snapshots and archives are historical record, not live emitters.
 IDENTITY_PRUNE_PARTS = ("_archive", "versions", "__pycache__", ".git")
 
+# (label, line marker) pairs whose title assertion is NOT a firm-title claim.
+# Scoped to the LINE, never the whole file, so any other drift in the same
+# emitter is still reported.
+IDENTITY_ASSERTION_EXEMPTIONS = (
+    # document-assembly's signing-authority rule states the capacity in which
+    # Gabriel binds an LLC ("Member"), not his title at the firm. Signing
+    # capacity is a legal question -- "Principal" is a more standard capacity in
+    # an entity signature block than a departmental title, and getting it wrong
+    # bears on whether a signature binds. Gabriel ruled 2026-08-03 to leave the
+    # line as-is; exempted here rather than left as a standing WARN that would
+    # train the reader to ignore this check.
+    ("document-assembly/SKILL.md", "Signing authority:"),
+)
+
 
 def normalize_title(s):
     """Fold a title rendering to a stable key, or None if unrecognised.
@@ -852,10 +866,16 @@ def scan_title_assertions(text):
     for i, line in enumerate(text.splitlines(), 1):
         for m in _QUOTED_LITERAL_RE.finditer(line):
             literals.append((i, (m.group(1) or m.group(2)).strip()))
-    for idx, (_, lit) in enumerate(literals[:-1]):
+    for idx, (line_no, lit) in enumerate(literals[:-1]):
         if lit != IDENTITY_NAME:
             continue
         nline, nlit = literals[idx + 1]
+        # A signature block puts the name and the title on SEPARATE lines. Two
+        # quoted strings on ONE line are prose -- e.g. a changelog documenting
+        # this very kind of fix ('signed "Gabriel Goldberg" ... as "Principal"'),
+        # which otherwise makes the record of the fix trip the check.
+        if nline == line_no:
+            continue
         key = normalize_title(nlit)
         if key and (nline, key) not in seen:
             seen.add((nline, key))
@@ -872,8 +892,17 @@ def check_identity_drift(canonical_key, sources):
         return []
     out = []
     for label, text in sources:
-        bad = sorted({(ln, surf, key) for ln, surf, key
-                      in scan_title_assertions(text) if key != canonical_key})
+        lines = text.splitlines()
+        bad = set()
+        for ln, surf, key in scan_title_assertions(text):
+            if key == canonical_key:
+                continue
+            src = lines[ln - 1] if 0 < ln <= len(lines) else ""
+            if any(lbl == label and mark in src
+                   for lbl, mark in IDENTITY_ASSERTION_EXEMPTIONS):
+                continue
+            bad.add((ln, surf, key))
+        bad = sorted(bad)
         if bad:
             where = ", ".join("line %d: %r" % (ln, surf) for ln, surf, _ in bad[:3])
             extra = "" if len(bad) <= 3 else " (+%d more)" % (len(bad) - 3)
