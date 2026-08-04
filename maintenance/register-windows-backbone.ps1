@@ -31,7 +31,14 @@ $Backbone = @(
     'ORA Stuck-Session Watchdog',
     'ORA Command Center - Mirror Deploy',
     'ClaudeFleetMirror',
-    'ORA Nightly Disk Clean'
+    'ORA Nightly Disk Clean',
+    # Added 2026-08-04 (OI-076): both found missing this scan set. ORA PM
+    # Crons was unregistered on this machine ~6 weeks (same migration-loss
+    # class as ClaudeFleetMirror above); ORA Claude Desktop Wake-and-Launch
+    # keeps Claude Desktop running, which both Claude fleets depend on to
+    # fire at all. Kept in sync with setup-self-audit.py's WINDOWS_TASKS.
+    'ORA PM Crons',
+    'ORA Claude Desktop Wake-and-Launch'
 )
 
 if (-not (Test-Path $XmlDir)) { New-Item -ItemType Directory -Path $XmlDir | Out-Null }

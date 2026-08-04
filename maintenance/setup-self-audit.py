@@ -447,6 +447,17 @@ WINDOWS_TASKS = {  # name -> CRIT-if-missing?
     "ORA Command Center - Mirror Deploy": False,
     "ClaudeFleetMirror": False,
     "ORA Nightly Disk Clean": False,
+    # Added 2026-08-04 (OI-076): found unregistered on this machine since
+    # ~2026-06-24, ~6 weeks dead (same migration-loss class as
+    # ClaudeFleetMirror above) -- this scan set never covered it, so this
+    # daily check couldn't have caught it. CRIT: drives ora-pm's
+    # critical-dates-alerts/delinquency-check (real financial impact --
+    # late-fee posting missed for the outage's duration).
+    "ORA PM Crons": True,
+    # Added 2026-08-04 (OI-076 follow-up review): keeps Claude Desktop
+    # running -- BOTH Claude fleets (CC/MCP, LAMS/Cowork) only fire while
+    # it's open, so this is upstream of the entire fleet. CRIT.
+    "ORA Claude Desktop Wake-and-Launch": True,
 }
 
 def check_windows_tasks():
