@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-08-04T19:55:27.240Z
+  modified: 2026-08-04T20:03:19.581Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -2244,6 +2244,28 @@ concurrent and a stale in-memory summary can drift from origin within hours.
 - `maintenance/test-append-event-log.py` (~15 git, 1 init site) — unconverted. The cross-tree import pattern
   is now precedented by `test_cross_repo_wip_scan.py`; this one should be a mechanical follow of that pattern,
   not a fresh design decision.
+
+**⚠ SECOND CORRECTION 2026-08-04 — do NOT convert `maintenance/test-append-event-log.py`; the line above
+resolved the design question but never measured whether converting pays for itself, and it doesn't.** Read
+the file in full: `_make_temp_git_repo()` (the `init` + 2x `config` shape `gitfixture.blank_repo()` models)
+is defined once and called exactly **once**, at module scope — not per-test, not in a loop. Total `git`
+subprocess calls in the whole file: **7**, measured (`grep -c` of the `_run_git(`/`_make_temp_git_repo(`
+call sites), not the `~15` this item had been carrying unmeasured. Only 3 of those 7 (the ones inside
+`_make_temp_git_repo()`) are the fixture-able shape; the other 4 (2x `add` + 2x `commit`) sit outside it and
+are unaffected either way. Converting the single call site replaces its 3 spawns with `gitfixture`'s
+one-time template build — also 3 spawns, since there is no second call in this process to amortize against
+— plus an added `shutil.move`/copy and an import dependency. **Net spawn change: zero.** This is the same
+"no fixture to convert" verdict `33e958a` already gave `test-override-token-hygiene.py` /
+`test-claim-file-collision.py` / `test-doctrine-integrity-probe.py` / `test-ora-autonomy-gate.py` for the
+identical reason (call-count too thin to amortize) — see the batch-2 note under OI-061. It applies here
+regardless of the cross-tree-import question being resolved.
+
+**STAYS OPEN, rescoped a third time: only `test-git-prepush-scan.py` remains as a live candidate** from the
+original ~13-file inventory (177 git, genuinely fixture-able, blocked on the bare-repo/clone topology design
+decision above). `maintenance/test-append-event-log.py` moves to the same bucket as
+`test-claim-file-collision.py` et al. — NOT APPLICABLE, not merely deferred. Worktree opened to attempt this
+conversion (`perf/oi061-append-event-log`) was closed unused once the measurement above came back negative;
+no file was touched.
 **Auto-check:** none.
 
 ## Closed
