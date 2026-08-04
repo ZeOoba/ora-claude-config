@@ -11,6 +11,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+import gitfixture  # noqa: E402  (shared repo fixture -- open-items-tracker.md#OI-061)
 import time
 
 # This test spins up its own throwaway git repos in temp dirs. When invoked as part of
@@ -52,15 +55,14 @@ def payload(session_id, file_path):
     return json.dumps({"session_id": session_id, "tool_input": {"file_path": file_path}})
 
 
-def _git(args, cwd):
-    subprocess.run(["git"] + args, cwd=cwd, capture_output=True, text=True)
-
-
 def make_main_repo(dirty):
-    d = tempfile.mkdtemp(prefix="scg-main-")
-    _git(["init", "-q"], d)
-    _git(["config", "user.email", "t@t.t"], d)
-    _git(["config", "user.name", "t"], d)
+    # Shared template-and-copy fixture (open-items-tracker.md#OI-061). Same shape as the
+    # hand-rolled version -- init + user config, no commit -- at one-off cost instead of
+    # 3 git spawns per call: this file's git spawns drop 48 -> 3. Only this fixture is
+    # convertible: make_worktree_repo() and make_nested_worktree() below spawn no git at
+    # all (they just write a `.git` gitdir POINTER FILE, which is what they model).
+    # The module-level GIT_* scrub this relies on already existed (337a7af, 2026-07-25).
+    d = gitfixture.blank_repo(prefix="scg-main-")
     if dirty:
         with open(os.path.join(d, "foreign-wip.txt"), "w") as fh:
             fh.write("another session's uncommitted work")
