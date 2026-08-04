@@ -1970,6 +1970,11 @@ budget is not the problem; the per-test process cost is.**
 per test process and `shutil.copytree`s it per test. A filesystem copy of a tiny repo is far cheaper than 5
 spawns, and the git object store copies intact, so the resulting repo is byte-identical to a freshly-inited
 one. Expected to remove the large majority of the ~365-per-file fixture spawns.
+**Amended 2026-08-04, after two sessions independently reached opposite verdicts on the same file (see
+OI-072's THIRD CORRECTION): spawn reduction is NOT the only valid reason to convert a file to this helper.**
+Dedup/consistency — one shared fixture implementation instead of N hand-rolled copies, shrinking the
+surface a future silent-divergence bug can hide in — is a co-equal, independent justification, valid even
+at spawn-parity. Weigh both axes before writing off a candidate as "not worth it."
 **⚠ Constraints - this is the verification layer for security gates, so treat it as such:**
 - **A shared fixture becomes a single point of failure for 13 test files.** If it silently produces a subtly
   different repo (missing config, different default branch name, no initial commit), tests can pass while no
