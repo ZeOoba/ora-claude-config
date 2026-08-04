@@ -1,0 +1,14 @@
+# OI-id enforcement baseline.
+#
+# Ids at or below this number predate enforcement and are GRANDFATHERED: they
+# carry no ledger reservation because the allocator did not exist when they were
+# filed. Ids ABOVE it must be allocated via allocate-oi-id.py, or regularised
+# with --backfill.
+#
+# Set 2026-08-04 at enforcement switch-on: the tracker held 69 ids and the
+# reservation ledger held 0. A whole-file rule would have failed every push on
+# day one, so enforcement starts here and applies only going forward.
+#
+# Do NOT raise this to silence a violation -- raising it grandfathers real
+# collisions. Use --backfill for a legitimate hand-assigned id.
+69

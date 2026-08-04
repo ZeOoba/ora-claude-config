@@ -58,6 +58,11 @@ DEFAULT_TRACKER = os.path.join(
     "open-items-tracker.md")
 DEFAULT_LEDGER = os.path.join(
     HOME, ".claude", "maintenance", "_state", "oi-id-reservations.log")
+# Highest id predating enforcement. Ids <= this are grandfathered: at switch-on
+# the ledger held 0 reservations against 69 tracker ids, so a whole-file rule
+# would have blocked every push on day one.
+DEFAULT_BASELINE = os.path.join(
+    HOME, ".claude", "maintenance", "_state", "oi-id-baseline.txt")
 
 # Same shapes check-open-items-duplicate-ids.py uses -- kept identical on
 # purpose so the allocator and the checker can never disagree about what
@@ -171,6 +176,97 @@ def allocate(tracker_path=None, ledger_path=None, session="unknown", note="",
     return oid
 
 
+def backfill(oid, ledger_path=None, session="unknown", note=""):
+    """Record a reservation for an id that already exists but was never
+    allocated -- a hand-edit, a historical import, a merge resolution.
+
+    This is the escape hatch, and it is NOT optional. Enforcement without one
+    wedges honest work, and a wedged gate gets bypassed, which is strictly worse
+    than no gate. Entries are marked BACKFILL so a human can later see exactly
+    which ids went round the allocator and how often -- if that list grows, the
+    allocator is too inconvenient and THAT is the thing to fix."""
+    ledger_path = ledger_path or DEFAULT_LEDGER
+    if not re.fullmatch(r"OI-\d+", str(oid or "")):
+        raise AllocatorError("not an OI-NNN id: %r" % (oid,))
+    os.makedirs(os.path.dirname(ledger_path) or ".", exist_ok=True)
+    lock_path = ledger_path + ".lock"
+    _acquire(lock_path)
+    try:
+        existing = ledger_ids(_read(ledger_path)) if os.path.isfile(ledger_path) else set()
+        if int(str(oid).split("-")[1]) in existing:
+            raise AllocatorError("%s is already reserved -- nothing to backfill" % oid)
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        with io.open(ledger_path, "a", encoding="utf-8", newline="") as f:
+            f.write("%s | %s | %s | BACKFILL %s\n" % (
+                oid, stamp, session, " ".join(str(note).split()) or "(no note)"))
+            f.flush()
+            os.fsync(f.fileno())
+    finally:
+        _release(lock_path)
+    return oid
+
+
+def read_baseline(path=None):
+    """Highest id that predates enforcement. Ids <= this are grandfathered.
+
+    Returns None when unreadable -- callers must treat that as SKIP, never as
+    'baseline 0', which would turn every id in the file into a violation."""
+    path = path or DEFAULT_BASELINE
+    try:
+        for ln in _read(path).splitlines():
+            ln = ln.strip()
+            if ln and not ln.startswith("#"):
+                m = re.search(r"(\d+)", ln)
+                if m:
+                    return int(m.group(1))
+    except Exception:
+        return None
+    return None
+
+
+def enforce(tracker_path=None, ledger_path=None, baseline=None):
+    """Ids ABOVE the baseline must carry a ledger reservation.
+
+    Deliberately baseline-scoped rather than whole-file: at switch-on the ledger
+    held 0 reservations against 69 tracker ids, so a whole-file rule would have
+    failed every push on day one. Grandfathering is what makes enforcement
+    adoptable at all.
+
+    Fails OPEN on a missing baseline (skipped=True). A gate that cannot read its
+    own config must not convert that into a total outage."""
+    tracker_path = tracker_path or DEFAULT_TRACKER
+    ledger_path = ledger_path or DEFAULT_LEDGER
+    if baseline is None:
+        return {"violations": [], "skipped": True,
+                "reason": "no readable baseline -- enforcement skipped, not asserted"}
+    taken = tracker_ids(_read(tracker_path)) if os.path.isfile(tracker_path) else set()
+    reserved = ledger_ids(_read(ledger_path)) if os.path.isfile(ledger_path) else set()
+    violations = [{"id": "OI-%03d" % n} for n in sorted(taken)
+                  if n > baseline and n not in reserved]
+    return {"violations": violations, "skipped": False, "baseline": baseline,
+            "checked": len([n for n in taken if n > baseline])}
+
+
+def format_enforcement(result):
+    if result.get("skipped"):
+        return "OI-id enforcement: SKIPPED -- %s" % result.get("reason", "")
+    if not result["violations"]:
+        return ("OI-id enforcement: clean (%d id(s) above baseline OI-%03d, all "
+                "reserved)" % (result["checked"], result["baseline"]))
+    lines = ["OI-id enforcement: %d unreserved id(s) above baseline OI-%03d"
+             % (len(result["violations"]), result["baseline"])]
+    for v in result["violations"]:
+        lines.append(
+            "[ACTION] %s was added without a reservation. Ids must come from "
+            "`python maintenance/allocate-oi-id.py --session <id> --note \"<why>\"`, "
+            "which is what makes two sessions unable to pick the same number. "
+            "If %s is legitimate but was hand-assigned, merged in from a branch, "
+            "or imported, regularise it with `python maintenance/allocate-oi-id.py "
+            "--backfill %s --note \"<why it bypassed the allocator>\"`."
+            % (v["id"], v["id"], v["id"]))
+    return "\n".join(lines)
+
+
 def report(tracker_path=None, ledger_path=None):
     """Reservations that never became rows. Informational only -- never
     reclaimed, because reclaiming re-opens the window this file closes."""
@@ -194,7 +290,28 @@ def main(argv=None):
     ap.add_argument("--tracker", default=None)
     ap.add_argument("--ledger", default=None)
     ap.add_argument("--report", action="store_true")
+    ap.add_argument("--enforce", action="store_true",
+                    help="exit 1 if any id above the baseline lacks a reservation")
+    ap.add_argument("--backfill", metavar="OI-NNN",
+                    help="regularise an id that was hand-assigned, merged in, or "
+                         "imported (escape hatch; recorded as BACKFILL)")
+    ap.add_argument("--baseline", default=None,
+                    help="path to the baseline file (tests only)")
     a = ap.parse_args(argv)
+
+    if a.backfill:
+        try:
+            print(backfill(a.backfill, a.ledger, session=a.session, note=a.note))
+        except AllocatorError as e:
+            sys.stderr.write("allocate-oi-id: %s\n" % e)
+            return 1
+        return 0
+
+    if a.enforce:
+        base = read_baseline(a.baseline)
+        r = enforce(a.tracker, a.ledger, baseline=base)
+        print(format_enforcement(r))
+        return 1 if r["violations"] else 0
 
     if a.report:
         r = report(a.tracker, a.ledger)
