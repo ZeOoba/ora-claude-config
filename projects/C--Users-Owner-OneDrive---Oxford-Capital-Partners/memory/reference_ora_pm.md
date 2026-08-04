@@ -1,16 +1,25 @@
 ---
 name: reference-ora-pm
-description: ORA PM app (ZeOoba/ora-pm) — local path & oxford-perfection disambiguation, Supabase magic-link redirect whitelist, UX-overhaul roadmap status (Phase 1+2a shipped+pushed, Stripe ACH payments built beyond original scope), 2026-07-16 audit findings pointer, and 2026-07-18 test-suite status
+description: ORA PM app (ZeOoba/ora-pm) — local path & oxford-perfection disambiguation, Supabase magic-link redirect whitelist, UX-overhaul roadmap status (Phase 1+2a shipped+pushed, Stripe ACH payments built beyond original scope), 2026-07-16 audit findings pointer, 2026-07-18 test-suite status, and the wrangler pages deploy --branch gotcha (2026-08-04)
 metadata: 
   node_type: memory
   type: reference
   originSessionId: 6c6059fc-f17f-4580-94d9-40b005f38973
+  modified: 2026-08-04T22:21:50.124Z
 ---
 
 ## ORA PM — ZeOoba/ora-pm
 
 **Repo:** `ZeOoba/ora-pm`
 **Production URL:** `https://ora-pm.pages.dev` (Cloudflare Pages)
+
+## Deploy gotcha — `wrangler pages deploy` needs `main` checked out, or it silently ships a preview (2026-08-04)
+
+This project has **no Git auto-deploy** (`tech.md` §11) — `wrangler pages deploy` is the only path to prod, and Cloudflare Pages tags each deploy with whatever git branch is checked out **locally** at deploy time, not any server-side branch state. Confirmed live 2026-08-04 (OI-047): running `npx wrangler pages deploy dist --project-name ora-pm` from a feature-branch worktree produced a **branch preview alias** (`https://<hash>.ora-pm.pages.dev`, `Environment: Preview`, `Branch: fix/oi-047-...`) — `ora-pm.pages.dev` (what tenants and `ping-crons.ps1` actually hit) was untouched. No error, no warning that it wasn't prod.
+
+**The fix, and the only reliable way to ship:** check out `main` locally (`git pull origin main` after merging), build, deploy from there — `wrangler pages deployment list --project-name ora-pm` will show `Environment: Production` / `Branch: main` for that deploy. Verify with that command after every deploy meant for prod; don't infer production status from the deploy command's own success output.
+
+**Every prior merged OI-0xx fix in this repo followed this pattern already** (PR → merge to `main` → deploy from `main`) — this note exists because the deploy step of a plan/task brief hadn't spelled it out explicitly, so it's easy to skip when working from an isolated feature-branch worktree, which is now the default workflow for ora-pm changes.
 
 ## Supabase Magic Link Auth — Site URL + Redirect URL Whitelist
 

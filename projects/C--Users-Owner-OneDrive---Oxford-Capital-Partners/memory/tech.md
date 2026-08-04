@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-07-30T12:53:52.873Z
+  modified: 2026-08-04T22:22:38.031Z
 ---
 
 # ORA Tech Stack & Reference
@@ -169,7 +169,7 @@ ORA root pre-merge snapshot: `C:/Users/Owner/ORA_pre_consolidation/` (2026-04-09
 
 ## 11. ora-pm — Property Manager app (Phase 1 shipped 2026-06-05)
 - **Repo:** `C:/Users/Owner/ora-pm` (git `ZeOoba/ora-pm`). Stack: Hono on Cloudflare **Pages** Functions + Supabase Postgres + React/Vite + TanStack Query + Vitest. Server wired via `functions/api/[[route]].ts` → `handle(createApp())`. Prod URL `ora-pm.pages.dev`.
-- **Deploy = MANUAL** — this Pages project has **no Git auto-deploy** (Git Provider: No), so merging to `main` does NOT ship. Deploy: `cd ora-pm && npm run build && npx wrangler pages deploy dist --project-name ora-pm` (bundles `dist/` + `functions/`).
+- **Deploy = MANUAL** — this Pages project has **no Git auto-deploy** (Git Provider: No), so merging to `main` does NOT ship. Deploy: merge to `main`, `git pull` a checkout that's ON `main`, then `cd ora-pm && npm run build && npx wrangler pages deploy dist --project-name ora-pm` (bundles `dist/` + `functions/`) FROM that checkout. **Must be run from a checkout on `main`** — Cloudflare Pages tags each deploy with whatever branch is locally checked out, not server-side state; running this from a feature-branch worktree ships a branch preview alias silently, `ora-pm.pages.dev` untouched, no error (confirmed 2026-08-04, OI-047 — detail: [reference_ora_pm.md](reference_ora_pm.md)). Verify with `wrangler pages deployment list --project-name ora-pm` (`Environment: Production` / `Branch: main`) after every prod deploy — don't infer success from the deploy command's own output.
 - **CI** (`.github/workflows/ci.yml`, Node 20): typecheck + `vitest run` + build, **no deploy step**. Vitest pool is env-aware (`vitest.config.ts`): `vmThreads` locally (RAM-constrained), `forks` on CI — `vmThreads` SIGSEGVs (exit 139) on CI Node 20.
 - **Secrets on ora-pm Pages (names only):** SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, CRON_SECRET (rotated 2026-06-05), RESEND_API_KEY, RESEND_FROM_EMAIL=`pm@oxfordra.net`.
 - **HTTP crons** (`/api/cron/*`, auth `Bearer CRON_SECRET`): `monthly-billing`, `critical-dates-alerts`, `delinquency-check`. Pages has no native cron AND this CF account has **no workers.dev subdomain** (Workers never initialized) → a cron Worker can't attach schedules. Driven instead by **Windows Task "ORA PM Crons"** (daily 9:00 ET, Interactive logon, runs only while Owner logged on) → `C:/Users/Owner/ora-pm-cron/ping-crons.ps1` (reads `cron-secret.txt`, logs `cron.log`). Re-register via `register-task.ps1`. Dormant trigger-less CF worker `ora-pm-cron` is an orphan (deletable from dashboard).
