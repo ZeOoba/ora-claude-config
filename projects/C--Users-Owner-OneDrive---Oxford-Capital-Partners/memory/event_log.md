@@ -12,6 +12,33 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-03 — Skill-install verification found a MAX_PATH false positive in the drift detector; third duplicate-work near-miss caught by the claim system
+
+Asked to verify another session's claim that two skills were installed. The claim was half right, and checking it surfaced an unrelated infrastructure defect.
+
+**Install claims, checked against the oracle order rather than the ledger.** `lease-form-qc` — **verified**, both bundled files present and byte-identical to the repo. `masterlease-jurisdiction-rebase` — **overstated**. It is installed, but cache and repo held *different* v1.1.2 text: same version number, different document. The cached copy was a Cowork-surface hand-edit applied straight to the packaged `.skill`, and its own changelog said so — *"Applied directly to the packaged `.skill` in Cowork ahead of the Code-surface source; reconcile SKILL.md on next Code session sync."* That reconcile had never happened. A repo-first violation of the same class as PR #25's earlier recovery, not simple staleness.
+
+**The real find: `skill_drifted()` reports a permanent false positive above Windows MAX_PATH.** `tools/pending_reimport.py` does `if not cache_file.is_file(): return True`. On Windows, `Path.is_file()` returns **False** for any path ≥260 chars unless the `\\?\` prefix is used — the file is present and readable, the stdlib simply cannot see it. Measured on `masterlease-jurisdiction-rebase`'s bundled fixture: **265 chars**, `os.path.exists` False, long-path form True, and the file **byte-identical to the repo**. So the skill was reported drifted forever, and no amount of reinstalling could clear it, because every sweep failed the same way.
+
+Surveyed all 96 bundled cache paths: **1 over the limit, 0 in the 240–260 band**, longest-under being 221. Narrow today — but `CACHE_ROOT` alone consumes 148 characters before any skill name, so the headroom is thin for everything.
+
+**How it was found is the transferable part.** Not by reading the code — by my own checker hitting the *same* false negative and reporting a file as absent that `ls` could plainly see. I distrusted my own output rather than the filesystem. Any ad-hoc drift script written against stdlib path calls silently inherits this and reports phantom missing files; the earlier `ABSENT in cache` line in this session's own output was wrong for exactly that reason and should not be cited as evidence.
+
+**Third duplicate-work near-miss today, and the third time the claim system paid for itself.** Before writing the fix I found session `f2e2a6e5` had claimed it under `repo-housekeeping` **12 minutes earlier**, with an uncommitted `import os` already in the file — mid-edit on the exact function. Gabriel ruled: hand over findings, let them finish. Written to `handoffs/2026-08-03_maxpath-drift-false-positive_findings.md` (that path is chip-claim-locked; claim opened and closed). **No code touched.** They landed `cbffee5` (the fix) and `9ca7e09` (the masterlease reconcile) within the hour.
+
+**Their fix independently verified against the reproduction that found the defect:** the 265-char fixture now resolves, hashes, and compares equal; `skill_drifted()`'s remaining verdict on that skill is driven solely by `SKILL.md`, which is correct and unrelated. Their suite 39/39. Worth recording that the buggy skill was never a clean fixture for its own bug — a test asserting "masterlease disappears from candidates" would fail for the unrelated SKILL.md reason, which is why the handoff recommended a synthetic deep path instead.
+
+**One residual, documented not fixed (`e7ff782`).** `_win_long()` prepends the prefix verbatim, which is right for drive-letter paths and wrong for UNC: `\\srv\share\f` becomes `\\?\\\srv\share\f` (measured), which Windows will not resolve — the file then reads as MISSING, reintroducing the exact false verdict the helper exists to prevent, in a form harder to spot because the path still looks plausible. Latent only: `CACHE_ROOT` is a drive path and the repo side is local. Documented rather than fixed because there is no way to exercise a UNC branch here, and an untested branch is worse than a stated gap. Every long-path helper routes through that one function, so the note names it as the single point of repair.
+
+**The merge was messier than the work.** The same MAX_PATH fix reached the repo **twice** — `cbffee5` committed locally and `21e8795` via PR #37 — so both sides introduced `_win_long` at the same place and collided. Resolved by taking this session's side, but only after proving it safe: a full diff showed the **sole** difference was the 16-line UNC note, implementations otherwise byte-identical, making it a strict superset; then the staged blob hash was checked equal to HEAD's (`1a91d0c`) rather than trusting `--ours` to mean what was intended. Final state `a22410a`, on `origin/main`, all three commits confirmed present, suite green.
+
+**Two process lessons, both cheap to repeat and expensive to miss.**
+1. **An aborted merge and a completed merge look identical if you only check `MERGE_HEAD`.** A wait-loop keyed on "merge no longer in progress" fired in 0 s on an *abort*; only HEAD failing to advance to a merge commit revealed it. Wait conditions must assert the goal state, not the absence of the intermediate one.
+2. **`git merge … | tail` reports `tail`'s exit code, not git's.** It printed `MERGE EXIT: 0` while git had actually failed with "unmerged files". Same exit-masking trap as the earlier `| tail -20` incident this session — piping any gate and reading `$?` is reading the wrong process.
+
+Throughout, the repo moved repeatedly under the work — behind 1 → behind 3, merge open → aborted → reopened, finally pushed by a concurrent session. Every verdict here came from re-reading state immediately before acting rather than carrying forward the previous observation.
+
+
 ## 2026-08-03 — Override-record em dash: root-caused to a stdin decode, fixed at both levels, 7 historical headings repaired
 
 Seven `event_log.md` headings carried `â€”` where an em dash belongs — every one of them a pre-push override record. The templates were never wrong; **the corruption happened in transit.**
