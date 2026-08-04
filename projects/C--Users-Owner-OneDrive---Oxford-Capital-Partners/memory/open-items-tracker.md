@@ -68,6 +68,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | [OI-058](#OI-058) | 2026-08-03 | `ora-pm-ledger` 2026-08-01 run + OI-030 coherence read, 2026-08-03 | `ora-weekly-hygiene` Block C fired 2026-08-03 03:47 ET but published NOTHING - no XLSX, no Notion page, no email (verified null on all three). One full weekly cycle lost; last output is 2026-07-26. Cause undetermined from artifacts alone, needs the run transcript. Related: [open-items-tracker.md#OI-031](open-items-tracker.md#OI-031) (same blind spot, one level coarser) |
 | [OI-059](#OI-059) | 2026-08-03 | [open-items-tracker.md#OI-057](open-items-tracker.md#OI-057) root-cause pass, 2026-08-03 | `hooks/tests/test-eos-review-gate.py` runs **44-67s on an IDLE machine** against a 90s pre-push budget via **559 subprocess spawns** (451 git + 108 Python); **365 of the git spawns come from 73 runtime `make_repo()` calls**. Cause behind OI-057. Fix the fixture (template-and-copy), not the budget. NB: figures corrected 2026-08-03 after review - the first set were static grep counts, not measurements |
 | [OI-060](#OI-060) | 2026-08-03 | ora-pm appsec fix plan Task 5 (OI-037), `plan/appsec-fixes-oi034-048` branch, commit `5a23927` | ora-pm's `public/_headers` (added for OI-037) does NOT apply to `/api/*` — Cloudflare Pages `_headers` only covers static assets, and `/api/*` is served by a Pages Function (`functions/api/[[route]].ts`). Page/document routes correctly get CSP + clickjacking protection; the API surface does not. Needs a Hono middleware (in `server/index.ts` or a new module) setting the same security headers per-response for `/api/*`, mirroring `public/_headers`'s directives (deliberately not built as part of Task 5 — filed instead, per Gabriel's call, 2026-08-03) |
+| [OI-061](#OI-061) | 2026-08-03 | Fixture measurement during [open-items-tracker.md#OI-059](open-items-tracker.md#OI-059), 2026-08-03 | **13 hook/maintenance test files each hand-roll their own git-repo fixture at ~5 process spawns per repo.** Measured sequential total 347.1s across 12 files; worst is 141.7s **under load — over the 90s pre-push budget**, 2nd is 46.3s (51%). Proposal: ONE shared template-and-copytree helper. Broader than OI-059, which only makes the worst file fit |
 
 ### OI-009
 **Status:** OPEN (substantial progress made 2026-07-17, real scope remains)
@@ -1611,6 +1612,53 @@ mitigates suite-level wall-clock but cannot help a single file that exceeds a pe
 **Description:** Task 5 added `public/_headers` to ora-pm to close OI-037 (missing CORS allowlist + security headers). The task's independent reviewer (fable model) found that Cloudflare Pages' `_headers` mechanism only applies to **static assets** — it does not apply to responses served by a **Pages Function**. ora-pm's `/api/*` routes are served by `functions/api/[[route]].ts`, a Pages Function, so none of `_headers`'s directives (CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, HSTS, Permissions-Policy) actually reach API responses. OI-037's own motivating example (`curl -I https://ora-pm.pages.dev/api/health` showing no security headers) is therefore **not fixed** by Task 5 for the API surface, even though the fix is correctly applied and verified for document/page routes (clickjacking protection, page-level CSP).
 **How to apply:** add a Hono middleware (in `server/index.ts`, or a small new module mirroring `server/lib/`'s existing structure) that sets the same header set as `public/_headers` on every `/api/*` response. Reuse the exact directive values already committed in `public/_headers` rather than re-deriving them, so the two surfaces stay in sync. Should get the same TDD + independent-review treatment as the rest of the appsec-fix work (this is still security-gate code). Deliberately not folded into Task 5 itself — Gabriel's call, 2026-08-03, to keep that task's scope and review clean rather than expand it mid-flight.
 **Auto-check:** none.
+**Auto-check:** none.
+
+### OI-061
+**Status:** OPEN
+**Opened:** 2026-08-03
+**Source:** Fixture measurement taken while root-causing [open-items-tracker.md#OI-059](open-items-tracker.md#OI-059), 2026-08-03
+**Description:** **13** test files across `hooks/tests/`, `maintenance/_tests/` and `maintenance/` each
+hand-roll their own throwaway git-repo fixture, every one paying ~5 process spawns per repo built (`git init`
++ 2x `git config` + `git add` + `git commit`). There is no shared helper. In `test-eos-review-gate.py` alone
+that fixture accounts for **365 of its 559 spawns (65%)** - see OI-059.
+**Measured 2026-08-03** (each file run as its own subprocess, as the gate runs them):
+
+| file | secs | % of the 90s per-file budget |
+|---|---|---|
+| `test-eos-review-gate.py` | **141.7** | **157% - OVER BUDGET** |
+| `test-memory-orphan-link-guard.py` | 46.3 | 51% |
+| `test-confidentiality-guard.py` | 42.0 | 47% |
+| `test-git-prepush-scan.py` | 31.2 | 35% |
+| `test-commit-provenance-guard.py` | 29.2 | 32% |
+| `test-shared-checkout-guard.py` | 19.6 | 22% |
+| `test-doctrine-integrity-probe.py` | 18.4 | 20% |
+| (5 more) | 2.1-7.0 | <8% |
+| **sequential total, 12 files** | **347.1** | |
+
+**Why this is a SEPARATE item from OI-059.** OI-059 is scoped to getting ONE file back under its budget. This
+is the cross-cutting cause and is **preventive**: the second-worst file is already at **51%** of the budget
+with nothing pathological about it, so the next file to grow hits the same wall and files another OI-057. The
+141.7s reading above is the point - that run happened while this session was doing other work, i.e. exactly
+the multi-session load condition OI-057 documented. On a quiet machine the same file takes 44-67s. **The
+budget is not the problem; the per-test process cost is.**
+**Proposed fix:** one shared helper (e.g. `hooks/tests/lib/gitfixture.py`) that builds a template repo ONCE
+per test process and `shutil.copytree`s it per test. A filesystem copy of a tiny repo is far cheaper than 5
+spawns, and the git object store copies intact, so the resulting repo is byte-identical to a freshly-inited
+one. Expected to remove the large majority of the ~365-per-file fixture spawns.
+**⚠ Constraints - this is the verification layer for security gates, so treat it as such:**
+- **A shared fixture becomes a single point of failure for 13 test files.** If it silently produces a subtly
+  different repo (missing config, different default branch name, no initial commit), tests can pass while no
+  longer exercising what they claim. Keep it small, and assert its invariants in its own test.
+- **Convert incrementally, top-3 first, and re-measure between each.** Do NOT convert all 13 in one pass.
+- **Each converted file must still pass with its assertions UNCHANGED.** A fixture change that requires
+  editing assertions is a behaviour change in disguise - stop and re-examine.
+- Per CLAUDE.md, changes under `hooks/**` take the independent-review gate; expect the same
+  `config-write-guard`/`eos-review-gate` interaction that currently blocks OI-059's docstring fix
+  ([[reference_config_write_guard_blocks_eos_review_gate]]), so plan to land this from a worktree.
+**Acceptance:** re-run the timing table above; the top three should drop materially and nothing should regress
+in pass counts. Do not accept on a quiet-machine run alone - re-measure under concurrent load, since that is
+the condition that actually blocks pushes.
 **Auto-check:** none.
 
 ## Closed
