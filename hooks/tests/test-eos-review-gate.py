@@ -28,6 +28,16 @@ for _v in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # hooks/
 HOOK = os.path.join(HERE, "eos-review-gate.py")
 
+# Shared repo fixture (open-items-tracker.md#OI-061). Import position is NOT load-bearing
+# -- gitfixture builds its template LAZILY on first use, which is always after the GIT_*
+# scrub above has run at module level. (An earlier version of this comment claimed the
+# import had to follow the scrub; that was wrong, and test-memory-orphan-link-guard.py
+# imports it before its own scrub, safely.) It WOULD become load-bearing if gitfixture
+# ever built a template at import time -- so if you add eager construction there, both
+# call sites need re-checking.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+import gitfixture  # noqa: E402
+
 LADDER_TOP = "claude-fable-5"  # must match eos-review-gate.REVIEWER_MODEL_LADDER[0]
 
 
@@ -43,15 +53,18 @@ def git(repo, *args):
 
 
 def make_repo():
-    """A real git repo with one committed non-risk file."""
-    repo = tempfile.mkdtemp(prefix="eos-rg-repo-")
-    subprocess.run(["git", "init", "-q", repo], capture_output=True)
-    git(repo, "config", "user.email", "t@t.t")
-    git(repo, "config", "user.name", "t")
-    write(repo, "README.md", "hello\n")
-    git(repo, "add", "-A")
-    git(repo, "commit", "-q", "-m", "init")
-    return repo
+    """A real git repo with one committed non-risk file.
+
+    Delegates to the shared template-and-copy fixture (OI-061). Byte-for-byte the same
+    repo shape as the hand-rolled version this replaces -- init + user config + a
+    committed README.md "hello\\n" -- but the ~5 subprocess spawns are paid ONCE per
+    process instead of on all 73 runtime calls in this file. That was 365 of this
+    file's 559 spawns, and the reason it ran 141.7s under load against a 90s budget.
+    """
+    return gitfixture.repo_with_commit(files={"README.md": "hello\n"},
+                                       message="init",
+                                       prefix="eos-rg-repo-",
+                                       encoding="ascii")  # matches this file's write()
 
 
 def write(repo, rel, text):

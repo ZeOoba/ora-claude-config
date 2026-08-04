@@ -3,6 +3,9 @@ that mimics the memory/ layout, then drives the guard via stdin exactly as the h
 """
 import json, os, shutil, subprocess, sys, tempfile, uuid
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+import gitfixture  # noqa: E402  (shared repo fixture -- open-items-tracker.md#OI-061)
+
 # This test spins up its own throwaway git repos in temp dirs. When invoked as part of
 # the real pre-push hook chain, git sets GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE (etc.) in
 # this process's environment so IT can operate on the outer repo -- but those same vars
@@ -74,18 +77,25 @@ def run_guard(cmd, index_path, tool="Bash", cwd=None):
         return "UNPARSEABLE", out
 
 def setup():
-    root = tempfile.mkdtemp(prefix="orphan-guard-")
+    # Shared template-and-copy fixture (open-items-tracker.md#OI-061). Same repo shape
+    # as the hand-rolled version this replaces -- init + user config + a committed
+    # memory tree -- but the 5 git spawns are paid ONCE per process instead of on each
+    # of the 26 repos that route through here (14 direct setup() sites + 12 via
+    # _new_orphan_repo). The file builds ~4 more repos -- the unrelated-repo B, two
+    # decoys and the worktree -- which stay hand-rolled by design because they need
+    # shapes this fixture deliberately does not model. newline=None is REQUIRED: the original
+    # wrote these files with plain open(..., "w"), i.e. platform newline translation
+    # (CRLF here), and this guard parses MEMORY.md line by line.
+    root = gitfixture.repo_with_commit(
+        files={
+            "projects/proj/memory/good.md": "body\n",
+            "projects/proj/memory/MEMORY.md": "# Index\n- [Good](good.md) - hook\n",
+        },
+        message="base",
+        prefix="orphan-guard-",
+        newline=None,
+    )
     mem = os.path.join(root, "projects", "proj", "memory")
-    os.makedirs(mem)
-    git(root, "init", "-q")
-    git(root, "config", "user.email", "t@t.t")
-    git(root, "config", "user.name", "t")
-    # committed baseline: index + one body, both in HEAD
-    with open(os.path.join(mem, "good.md"), "w", encoding="utf-8") as f:
-        f.write("body\n")
-    with open(os.path.join(mem, "MEMORY.md"), "w", encoding="utf-8") as f:
-        f.write("# Index\n- [Good](good.md) - hook\n")
-    git(root, "add", "-A"); git(root, "commit", "-qm", "base")
     return root, mem
 
 results = []
