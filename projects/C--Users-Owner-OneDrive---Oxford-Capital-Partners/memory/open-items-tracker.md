@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-08-04T16:37:10.681Z
+  modified: 2026-08-04T19:02:37.388Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -66,7 +66,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | [OI-066](#OI-066) | 2026-08-03 | REFUTE pass on the [OI-037](#OI-037) fix, 2026-08-03 | ora-pm's new CSP ships as `Content-Security-Policy-Report-Only`, deliberately — logs violations, blocks nothing. `X-Frame-Options: DENY` (separate header) already closes clickjacking; this item is only the XSS-containment half. Needs a manual browser pass through Pay Now + admin login against a deployed preview, then drop `-Report-Only` to enforce |
 | [OI-068](#OI-068) | 2026-08-03 | ora-pm appsec fix plan Task 8 (OI-043), local `plan/appsec-fixes-oi034-048` branch, commit `59f79ff`, confirmed by independent task reviewer | Autopay-with-payment-method is **unreachable from any live frontend path today** — `PortalAccount.tsx` is the sole caller of `setAutopay` and never passes `payment_method_id`; the enable toggle is disabled unless `lease.autopay_payment_method_id` is already set; the ONLY writer of that column is `PATCH /portal/autopay`, which the frontend never calls with a PM. `PortalPayNow.tsx` creates a PM but only ever feeds it to one-time `createPaymentIntent`, never to `setAutopay`. The whole autopay-enrollment feature is unbuilt/unreachable on the frontend, independent of Task 8's (correct) backend hardening — a product gap, not a security defect in what shipped |
 | [OI-069](#OI-069) | 2026-08-03 | REFUTE pass on the [OI-046](#OI-046) fix, 2026-08-03 | ora-pm CAM true-up idempotency key is scoped only to lease+year, no amount/version — a legitimate recalculation of an already-billed CAM (ops corrects an error, re-runs /calculate for a new amount) collides with the OLD charge's key and is silently dropped as a duplicate. Tenant's ledger keeps the stale amount; response says success. Under-billing, not exploitable by an outside party |
-| [OI-070](#OI-070) | 2026-08-04 | `ora-health-guard` 2026-08-04 run + `fleet-status.py` investigation, this session | `fleet-status.py`'s missed-cycle detector (OI-031's fix) only sees a CURRENTLY-open gap — it compares `lastRunAt` to the single most-recent expected fire, so a gap that self-heals before the next check erases all evidence of the miss. `ora-health-guard` itself missed 07-31/08-01/08-02 then resumed 08-03/08-04; `fleet-status.py` reported "missed single cycle 0" the same day the scheduler's own run log showed the 3-day gap. Same blind-spot family as [OI-031](#OI-031)/[OI-058](#OI-058), one level narrower |
+| [OI-070](#OI-070) | 2026-08-04 | `ora-health-guard` 2026-08-04 run + `fleet-status.py` investigation, this session | `fleet-status.py`'s missed-cycle detector (OI-031's fix) only sees a CURRENTLY-open gap — it compares `lastRunAt` to the single most-recent expected fire, so a gap that self-heals before the next check erases all evidence of the miss. `ora-health-guard` itself missed 07-31/08-01/08-02 then resumed 08-03/08-04; `fleet-status.py` reported "missed single cycle 0" the same day the scheduler's own run log showed the 3-day gap. Same blind-spot family as [OI-031](#OI-031)/[OI-058](#OI-058), one level narrower. **Still OPEN despite commit `848d4cb`'s message saying "closes OI-070"** — that commit is labeling/documentation only (its own body: "no detection logic changed"); see detail section |
 | [OI-071](#OI-071) | 2026-08-03 | Production verification of [OI-067](#OI-067), 2026-08-03 | ora-pm `PortalInsurance.tsx` uploads COI files to `session.user.id`'s folder, but the live (confirmed-applied, confirmed-correct) RLS policy requires `tenants.id` — every real tenant COI upload fails today. Confirmed against production, not just the repo. Misleadingly-named variable (`tenantId = session.user.id`) is likely the root cause |
 | [OI-072](#OI-072) | 2026-08-04 | [open-items-tracker.md#OI-061](open-items-tracker.md#OI-061) batch-2 scoping, 2026-08-04 | **Design question, not a chore:** `gitfixture` models only two shapes (blank / single-commit), so the two remaining high-git files can't be converted — `test-git-prepush-scan.py` (177 git) needs BARE repos + an origin/clone/push/fetch topology + identity `t@example.invalid`, and `test-memory-index-git-tracking.py` (28 git) inits a CALLER-PROVIDED dir with identity `t@t`. Decide whether to extend a fixture 4 security-gate suites already depend on |
 
@@ -1913,7 +1913,15 @@ exists; (b) parse the scheduler's own run-history log (the same `main*.log` `ora
 read) for a true historical census over a lookback window — most complete, heavier lift,
 duplicates what health-guard already reconstructs ad hoc; (c) at minimum, relabel the "missed
 single cycle" output so a `0` doesn't read as a clean historical census when it's only a
-point-in-time check (DONE this session — see [event_log.md](event_log.md#2026-08-04)).
+point-in-time check (DONE — commit `848d4cb`).
+**Commit `848d4cb`'s own message says "closes OI-070" — that claim is wrong, and this item is
+deliberately left OPEN despite it.** The commit's diff (`maintenance/fleet-status.py`, +18/-1) is
+option (c) above and nothing more: it relabels the plain-text line to "missed single cycle
+(currently open)", adds a `missed_cycle_scope` JSON caveat, and adds inline comments — its own
+body states "no detection logic changed." Neither (a) nor (b) is built, so `fleet-status.py`
+still cannot detect a self-healed historical gap; it can only now describe that limitation
+honestly instead of silently misreporting it. Do not close this item on the strength of that
+commit alone — closure needs (a) or (b) actually landed and verified.
 **Auto-check:** none (a tooling-logic gap, not a fleet-registry state comparable to the closed
 Auto-check vocabulary above).
 
