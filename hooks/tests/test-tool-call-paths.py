@@ -326,6 +326,247 @@ def test_shell_may_write_open_readonly_does_not_mask_other_indicators():
           tcp.shell_may_write(cmd2), "cmd=%r" % cmd2)
 
 
+def test_write_verbs_require_a_word_boundary():
+    """A verb buried inside an unrelated word is not a write.
+
+    Live cost of the bare-substring version (2026-08-03): "del " matched
+    "--model ", so `eos-review-gate.py --record ... --model <id>` read as a
+    write to the governance layer. config-write-guard then blocked the ONLY
+    sanctioned way to satisfy eos-review-gate, and the documented exit was a
+    60-minute governance-WIDE write token to permit one single-file write.
+    A false positive that forces a strictly BROADER privilege is a security
+    regression, not caution."""
+    benign = [
+        "python gate.py --record --verdict approved --model claude-fable-5",
+        "git add -A",                       # "dd " inside "add "
+        "git add hooks/x.py && git status",
+        "echo please confirm the value",    # "rm " inside "confirm "
+        "ls children/",                     # "ren " inside "children "
+        "grep remodel notes.txt",           # "del " inside "remodel "
+        "cat model.json",
+        "python train.py --model resnet",
+    ]
+    for cmd in benign:
+        check("benign not write-shaped: %r" % cmd,
+              not tcp.shell_may_write(cmd), cmd)
+
+
+def test_word_boundary_fix_loses_no_genuine_write():
+    """THE regression that matters. Anchoring may not let a real write through.
+
+    Every genuine verb still matches, because the character preceding it is
+    never a word character -- start of string, whitespace, quote, slash, or a
+    shell metacharacter. Judged as a DELTA against the old bare-substring
+    behavior: the fix is only acceptable if this set is unchanged."""
+    genuine = [
+        "del C:/Users/Owner/.claude/hooks/eos-review-gate.py",
+        "rm -rf hooks/",
+        "rm hooks/x.py",
+        "/usr/bin/rm hooks/x.py",
+        "cp a.py hooks/b.py",
+        "mv a.py hooks/b.py",
+        "dd if=/dev/zero of=hooks/x.py",
+        "mkdir newdir",
+        "touch hooks/x.py",
+        "tee hooks/x.py",
+        "ren old.py new.py",
+        "rename old.py new.py",
+        "copy a.py b.py",
+        "move a.py b.py",
+        'echo x && del hooks/x.py',
+        'true;rm hooks/x.py',
+        'false||rm hooks/x.py',
+        "sudo rm hooks/x.py",
+        # non-verb indicators must be untouched by the anchoring change
+        "echo x > hooks/x.py",
+        "Remove-Item hooks/x.py",
+        "Set-Content hooks/x.py",
+        "python -c \"shutil.copy('a','b')\"",
+        "python -c \"os.remove('hooks/x.py')\"",
+        "sed -i s/a/b/ hooks/x.py",
+    ]
+    for cmd in genuine:
+        check("genuine write still flagged: %r" % cmd,
+              tcp.shell_may_write(cmd), cmd)
+
+
+def test_composite_writers_containing_a_bounded_verb_are_still_flagged():
+    """THE regression the hand-written corpus above missed (review finding D1).
+
+    Real writers were caught only ACCIDENTALLY, as substrings of the short
+    verbs: "copy " inside robocopy/xcopy, "cp " inside scp/rcp/pscp. Anchoring
+    removed that accident and un-flagged every one of them -- and robocopy.EXE,
+    xcopy.EXE and scp.EXE are all present on this machine, where
+    `robocopy <src> <hooks> /MIR` MIRRORS: it deletes and replaces the whole
+    target tree.
+
+    Enumerated MECHANICALLY rather than remembered, because remembering is
+    exactly what failed: the first battery listed only simple `rm`/`cp`/`dd`
+    forms, so a green suite certified the regression."""
+    real_command_names = [
+        "robocopy", "xcopy", "scp", "rcp", "pscp", "rsync", "git-rm", "git-mv",
+    ]
+    for name in real_command_names:
+        cmd = "%s src C:/Users/Owner/.claude/hooks/x.py" % name
+        check("composite writer flagged: %r" % name, tcp.shell_may_write(cmd), cmd)
+
+    # Every command name that CONTAINS a bounded verb must be consciously
+    # classified -- either it is a real writer (flagged above) or a benign word
+    # (unflagged below). A new bounded verb whose collision set is unexamined is
+    # how D1 happened.
+    for verb in tcp._BOUNDED_VERBS:
+        containing = [n for n in real_command_names if verb in n]
+        for name in containing:
+            check("collision-set writer %r (contains %r) flagged" % (name, verb),
+                  tcp.shell_may_write("%s a b" % name), name)
+
+
+def test_anchoring_details_are_pinned():
+    """The two most load-bearing characters in the regex, pinned directly.
+
+    Mutation testing found both unobserved: dropping the trailing `\\s` and
+    changing the lookbehind class each survived the original battery."""
+    # trailing \s is required -- without it, ordinary words re-flag
+    check("'copyright notice' is not a write", not tcp.shell_may_write("copyright notice"))
+    check("'movement plan' is not a write", not tcp.shell_may_write("movement plan"))
+    # lookbehind excludes '-' so the common benign docker flag is not a write...
+    check("'docker run --rm img' is not a write",
+          not tcp.shell_may_write("docker run --rm img"))
+    # ...and the hyphenated writers that costs are covered explicitly instead
+    check("'git-rm x' IS a write", tcp.shell_may_write("git-rm x"))
+    # lookbehind does NOT exclude '.' or '/' -- these are real invocations
+    check("'foo.rm x' IS a write", tcp.shell_may_write("foo.rm x"))
+    check("'./cp a b' IS a write", tcp.shell_may_write("./cp a b"))
+    check("'/usr/bin/rm x' IS a write", tcp.shell_may_write("/usr/bin/rm x"))
+
+
+def test_quoted_and_switch_separated_verbs_are_flagged():
+    """Evasion 1, pre-existing and closed here. A verb followed by anything
+    other than a literal space slipped past: the old matcher required `"del "`
+    with a trailing space, and the anchoring fix kept `\\s`, so a quote or a
+    cmd.exe switch character sat in the way.
+
+    Every form here was EXECUTED to confirm it is a real invocation, not
+    theoretical coverage: bash runs `"rm" f`, PowerShell runs `& 'del' x`, and
+    cmd.exe accepts `/ , ; =` as token delimiters -- `del,f` / `del;f` / `del=f`
+    were each verified to actually delete a file via a .bat harness.
+
+    Deliberately NOT pinned: `del"x"`. It concatenates to `delx` and executes in
+    no shell, so pinning it would certify coverage for a non-invocation. The
+    quote rule is justified by the bash/PowerShell forms above instead."""
+    for cmd in ['"rm" C:/Users/Owner/.claude/hooks/x.py',
+                "& 'del' C:/Users/Owner/.claude/hooks/x.py",
+                '"cp" a b',
+                "del/f C:/Users/Owner/.claude/hooks/x.py",
+                "del/q/s C:/Users/Owner/.claude/hooks",
+                "del,C:/Users/Owner/.claude/hooks/x.py",
+                "del;C:/Users/Owner/.claude/hooks/x.py",
+                "del=C:/Users/Owner/.claude/hooks/x.py",
+                "rm<C:/Users/Owner/.claude/hooks/x.py",
+                "rm\tC:/Users/Owner/.claude/hooks/x.py",
+                "del\tC:/Users/Owner/.claude/hooks/x.py",
+                "cp\ta b"]:
+        check("quoted/switch-separated verb flagged: %r" % cmd,
+              tcp.shell_may_write(cmd), cmd)
+
+
+def test_composite_writers_are_separator_agnostic():
+    """Evasion 2, pre-existing and closed here. The composite writers were bare
+    substrings ending in a LITERAL SPACE, while the bounded verbs used `\\s` --
+    an inconsistency between the two matchers, so `robocopy\\tsrc <hooks> /MIR`
+    evaded while `rm\\tx` did not."""
+    for name in ("robocopy", "xcopy", "scp", "rcp", "pscp", "rsync",
+                 "git-rm", "git-mv"):
+        for sep in ("\t", '"', "'"):
+            cmd = "%s%ssrc C:/Users/Owner/.claude/hooks/x.py" % (name, sep)
+            check("composite writer %r with %r separator flagged" % (name, sep),
+                  tcp.shell_may_write(cmd), cmd)
+
+
+def test_widening_the_separator_is_strictly_broadening():
+    """THE safety property of this change, and the reason it cannot repeat the
+    D1 regression: widening a separator class can only ADD matches, never
+    remove one. Every command flagged before must still be flagged.
+
+    Pinned by re-running the anchoring fix's own corpus -- if any of these ever
+    stops flagging, the change stopped being purely additive."""
+    still_flagged = [
+        "del C:/Users/Owner/.claude/hooks/x.py",
+        "rm -rf hooks/", "rm hooks/x.py", "/usr/bin/rm hooks/x.py",
+        "cp a.py hooks/b.py", "mv a.py hooks/b.py",
+        "dd if=/dev/zero of=hooks/x.py", "mkdir newdir", "touch hooks/x.py",
+        "tee hooks/x.py", "ren old.py new.py", "rename old.py new.py",
+        "copy a.py b.py", "move a.py b.py", "echo x && del hooks/x.py",
+        "true;rm hooks/x.py", "false||rm hooks/x.py", "sudo rm hooks/x.py",
+        "echo x > hooks/x.py", "Remove-Item hooks/x.py",
+        "Set-Content hooks/x.py", "sed -i s/a/b/ hooks/x.py",
+        "robocopy src hooks /MIR", "xcopy src hooks /y",
+        "scp evil:x hooks/g.py", "rsync -a evil/ hooks/",
+        "git-rm hooks/x.py", "git-mv a b",
+        "foo.rm x", "./cp a b",
+    ]
+    for cmd in still_flagged:
+        check("still flagged after widening: %r" % cmd,
+              tcp.shell_may_write(cmd), cmd)
+
+    # ...and the benign set the anchoring fix earned must STAY benign. Widening
+    # the separator is exactly how the original "del " inside "--model " bug
+    # would come back -- `--model=x` is the shape to watch, since `=` sits
+    # where the separator does.
+    still_benign = [
+        "python gate.py --record --verdict approved --model claude-fable-5",
+        "python gate.py --record --model=claude-fable-5",
+        "git add -A", "git add hooks/x.py && git status",
+        "echo please confirm the value", "ls children/",
+        "grep remodel notes.txt", "cat model.json",
+        "python train.py --model resnet", "docker run --rm img",
+        "copyright notice", "movement plan",
+        "the model/version is old", "remodel/kitchen",
+        "confirm/yes", "echo \"model\" x",
+        # One pin per separator character. The anchor is what stops the
+        # original `"del "`-in-`"--model "` deadlock from returning through a
+        # wider separator, so it must be pinned against EVERY member of the
+        # class -- not just the space form, which the remove-lookbehind mutant
+        # already covers.
+        "python gate.py --model,claude-fable-5",
+        "python gate.py --model;claude-fable-5",
+        "python gate.py --model<claude-fable-5",
+        "remodel=kitchen", "confirm;yes", "model,version", "x-rm=y",
+    ]
+    for cmd in still_benign:
+        check("still benign after widening: %r" % cmd,
+              not tcp.shell_may_write(cmd), cmd)
+
+
+def test_indicator_partition_is_total():
+    """Every canonical indicator must still be reachable by one of the two
+    matchers. A verb added to SHELL_WRITE_INDICATORS but never classified would
+    otherwise fall between them and silently stop being detected."""
+    for ind in tcp.SHELL_WRITE_INDICATORS:
+        buckets = [
+            ind.strip() in tcp._BOUNDED_VERBS,          # anchored verb regex
+            ind.strip() in tcp._COMPOSITE_WRITERS,      # unanchored composite regex
+            ind in tcp.UNBOUNDED_WRITE_INDICATORS,      # bare substring
+        ]
+        check("indicator %r is classified exactly once" % ind,
+              sum(buckets) == 1,
+              "bounded=%s composite=%s unbounded=%s" % tuple(buckets))
+
+    # ...and every canonical indicator must actually be DETECTED. Classification
+    # alone is not enough: an entry could sit in a bucket whose matcher no longer
+    # fires. HONEST LIMIT: for the unbounded bucket the probe string contains the
+    # indicator verbatim, so those assertions are near-tautological. The real
+    # power is over the two REGEX buckets -- this is what catches a composite or
+    # bounded matcher being wired out of shell_may_write entirely.
+    canonical_probe = {
+        ">": "echo x > f", "sed -i": "sed -i s/a/b/ f",
+    }
+    for ind in tcp.SHELL_WRITE_INDICATORS:
+        cmd = canonical_probe.get(ind, "%s target" % ind.strip())
+        check("indicator %r is actually detected" % ind,
+              tcp.shell_may_write(cmd), cmd)
+
+
 if __name__ == "__main__":
     test_primary_write_path_native()
     test_primary_write_path_dc_write_file_both_prefixes_both_arg_names()
@@ -348,6 +589,14 @@ if __name__ == "__main__":
     test_shell_may_write_open_write_modes_still_flagged()
     test_shell_may_write_open_indirect_or_unparseable_stays_flagged()
     test_shell_may_write_open_readonly_does_not_mask_other_indicators()
+    test_write_verbs_require_a_word_boundary()
+    test_word_boundary_fix_loses_no_genuine_write()
+    test_composite_writers_containing_a_bounded_verb_are_still_flagged()
+    test_anchoring_details_are_pinned()
+    test_quoted_and_switch_separated_verbs_are_flagged()
+    test_composite_writers_are_separator_agnostic()
+    test_widening_the_separator_is_strictly_broadening()
+    test_indicator_partition_is_total()
     if _failures:
         print("\n%d FAILURE(S): %s" % (len(_failures), ", ".join(_failures)))
         sys.exit(1)
