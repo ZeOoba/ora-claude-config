@@ -32,7 +32,17 @@ import shutil
 import subprocess
 import tempfile
 
-__all__ = ["blank_repo", "repo_with_commit", "git", "spawn_count", "reset_cache"]
+__all__ = ["blank_repo", "repo_with_commit", "git", "spawn_count", "reset_cache",
+           "DEFAULT_IDENTITY"]
+
+# (user.email, user.name) baked into a template's local config. NOT a house style to
+# normalise on: the suites using this fixture legitimately differ -- "t@t.t" here,
+# "t@example.invalid" and "t@t" elsewhere -- and author identity lands in commit
+# metadata, so silently rewriting a caller's identity is exactly the kind of
+# looks-right-but-differs change this module exists to avoid. Pass what your original
+# hand-rolled fixture passed; it is part of the cache key so two identities never share
+# a template. (open-items-tracker.md#OI-072)
+DEFAULT_IDENTITY = ("t@t.t", "t")
 
 # Template cache: shape-key -> path of the pristine template repo for that shape.
 _TEMPLATES = {}
@@ -72,12 +82,13 @@ def _must(proc, what):
     return proc
 
 
-def _build_template(key, files, message, newline, encoding):
+def _build_template(key, files, message, newline, encoding, identity):
     """Create the pristine template for a shape. Called at most once per shape."""
+    email, name = identity
     tpl = tempfile.mkdtemp(prefix="gitfixture-tpl-")
     _must(_run(["git", "init", "-q", tpl]), "init")
-    _must(git(tpl, "config", "user.email", "t@t.t"), "config user.email")
-    _must(git(tpl, "config", "user.name", "t"), "config user.name")
+    _must(git(tpl, "config", "user.email", email), "config user.email")
+    _must(git(tpl, "config", "user.name", name), "config user.name")
     if files:
         for rel, text in files.items():
             path = os.path.join(tpl, rel)
@@ -93,21 +104,34 @@ def _build_template(key, files, message, newline, encoding):
     return tpl
 
 
-def _clone_template(key, files, message, prefix, newline, encoding):
-    tpl = _TEMPLATES.get(key) or _build_template(key, files, message, newline, encoding)
-    dest = tempfile.mkdtemp(prefix=prefix)
-    # mkdtemp already created dest; copytree needs it absent or dirs_exist_ok.
+def _clone_template(key, files, message, prefix, newline, encoding, identity, dest):
+    tpl = (_TEMPLATES.get(key) or
+           _build_template(key, files, message, newline, encoding, identity))
+    if dest is None:
+        dest = tempfile.mkdtemp(prefix=prefix)
+    # dest already exists (mkdtemp, or the caller's own dir); copytree needs it absent
+    # or dirs_exist_ok. Materialising INTO a caller's dir keeps that caller's own
+    # lifetime management -- e.g. a `with tempfile.TemporaryDirectory() as d:` block
+    # that auto-deletes -- which returning a fresh path would silently break.
     shutil.copytree(tpl, dest, dirs_exist_ok=True)
     return dest
 
 
-def blank_repo(prefix="gitfixture-blank-"):
-    """An initialised repo with user config and NO commits (git init + 2x config)."""
-    return _clone_template("__blank__", None, None, prefix, "\n", "utf-8")
+def blank_repo(prefix="gitfixture-blank-", identity=DEFAULT_IDENTITY, dest=None):
+    """An initialised repo with user config and NO commits (git init + 2x config).
+
+    `identity` is (user.email, user.name) and is part of the cache key -- see
+    repo_with_commit's docstring for why it must mirror the caller's original.
+    `dest`, if given, materialises the repo INTO that existing directory and returns
+    it, instead of creating a new temp dir.
+    """
+    return _clone_template(("__blank__", identity), None, None, prefix,
+                           "\n", "utf-8", identity, dest)
 
 
 def repo_with_commit(files=None, message="init", prefix="gitfixture-repo-",
-                     newline="\n", encoding="utf-8"):
+                     newline="\n", encoding="utf-8", identity=DEFAULT_IDENTITY,
+                     dest=None):
     """An initialised repo with `files` committed. Default: one README.md.
 
     `newline` is passed straight to open() and MUST match what the caller's original
@@ -126,8 +150,9 @@ def repo_with_commit(files=None, message="init", prefix="gitfixture-repo-",
     """
     if files is None:
         files = {"README.md": "hello\n"}
-    key = repr((tuple(sorted(files.items())), message, newline, encoding))
-    return _clone_template(key, files, message, prefix, newline, encoding)
+    key = repr((tuple(sorted(files.items())), message, newline, encoding, identity))
+    return _clone_template(key, files, message, prefix, newline, encoding,
+                           identity, dest)
 
 
 def reset_cache():
