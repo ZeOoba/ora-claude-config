@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-08-04T20:03:19.581Z
+  modified: 2026-08-04T22:02:17.825Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -44,7 +44,6 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | [OI-027](#OI-027) | 2026-07-26 | PR [ZeOoba/oxford-command-center#238](https://github.com/ZeOoba/oxford-command-center/pull/238) (OI-017 vitest-4 REFUTE pass) | Nothing guards against a *future* test regressing into the same class of bug OI-017 fixed (`vi.mock()` of a Node builtin silently no-ops under this repo's jsdom default) — most cases fail loudly, but a bare automock with no configured return value could silently exercise the real implementation and pass for the wrong reason. REFUTE reviewer recommended an ESLint rule (or a `vitest.config.ts` comment at the `environment: 'jsdom'` line) requiring `@vitest-environment node` on any file calling `vi.mock('node:*')`. Not yet built |
 | [OI-031](#OI-031) | 2026-07-27 | `orphaned-task-forensics` trace of the `ora-master-workbook-ingest` 2026-07-20 gap, [event_log.md](event_log.md#2026-07-27) | `fleet-status.py`'s overdue/missed-stuck detectors are structurally blind to a single skipped weekly cycle on an already-established recurring task — neither check applies to it (confirmed by reading the script) |
 | [OI-033](#OI-033) | 2026-07-28 | Cowork-surface follow-up to the Code-surface usage-limit audit, 2026-07-28 | LAMS `ora-tenant-contact-gap-sweep` carries no `[MODEL: ...]` tag (sole untagged task in a 27/28-tagged LAMS fleet); fix needs `update_scheduled_task` from a Cowork-surface session |
-| [OI-039](#OI-039) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **MEDIUM** ora-pm money columns are bare `NUMERIC` with no scale, no `COMMENT ON COLUMN` and no unit suffix (`supabase/migrations/0002_financial_tables.sql:14` `charges.amount`, `:30` `payments.amount`), while the API boundary uses a DIFFERENT unit under a similar name (`amount_cents`, `server/routes/stripe.ts:96`). Cents-vs-dollars is unprovable from name, type or comment — the precondition that produced the 2026-07-18 divide-by-100 display bug. Unconstrained `NUMERIC` also permits sub-cent values (0.005) that round inconsistently between the aggregate view and per-row display. NOTE: the balance path itself traced CLEAN this run (exactly zero conversions, correctly) |
 | [OI-041](#OI-041) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **MEDIUM** ora-pm mass assignment — 10 handlers pass `await c.req.json()` straight into `.insert()`/`.update()`/`.upsert()` with no Zod schema (`budgets.ts:25`, `insurance.ts:35,46`, `renewals.ts:22`, `units.ts:20,28`, `cam.ts:23-24`, `leases.ts:74,98`, `tenants.ts:62`) while sibling routes correctly use `safeParse`. `budgets.ts:25` also accepts an ARRAY body, making the upsert unbounded in row count. Admin-authenticated only, so integrity/defense-in-depth rather than a breach path — but an admin (or anything holding an admin JWT, see OI-036) can set columns the UI never exposes including `id` and `created_at` |
 | [OI-042](#OI-042) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **MEDIUM** ora-pm returns RAW Postgres error messages to clients from ~20 call sites (`portal.ts:50,74,93,117,141`, `insurance.ts:38,50`, `cam.ts:79`, `reports.ts:15,27,35,53,57,62`, `cron.ts:40,131,167,227`, `units.ts`, `budgets.ts`, `renewals.ts`, `webhook.ts:20,40`). `server/middleware/error-handler.ts` sanitizes *thrown* errors and its comment claims raw DB messages are never exposed — but that only covers the catch path; these sites `return c.json({error: error.message}, 500)` from a Supabase result. Several are on `/api/portal/*`, reachable by any authenticated tenant, disclosing table/column/constraint/RLS-policy names as a free schema map |
 | [OI-045](#OI-045) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **MEDIUM** ora-pm MFA enrollment is a NO-OP that misrepresents its own state — `src/portal/pages/PortalAccount.tsx:33-35,87-93`: `handleMFA` awaits `portalSupabase.auth.mfa.enroll({...})` and DISCARDS the result; the TOTP secret and QR code are never rendered and no `mfa.challenge`/`mfa.verify` call exists anywhere in the repo (grep for `mfa` returns only this file). The factor is created `unverified` and enrollment can never complete. The UI tells tenants 'Enable two-factor authentication (TOTP) for additional account security' — so tenants may believe the account that authorizes ACH debits is MFA-protected when it is not. Repeated clicks accumulate orphaned unverified factors |
@@ -1249,8 +1248,9 @@ RATE_LIMIT_KV`, paste the id into `wrangler.toml`, uncomment the `[[kv_namespace
 **Auto-check:** none.
 
 ### OI-039
-**Status:** OPEN
+**Status:** CLOSED
 **Opened:** 2026-07-31
+**Closed:** 2026-08-04
 **Source:** ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch)
 **Severity:** MEDIUM (latent correctness precondition)
 **Description:** every money column is bare `NUMERIC` — no `(12,2)` scale, no `COMMENT ON COLUMN`, no
@@ -1260,10 +1260,23 @@ unit suffix in the name — while `server/routes/stripe.ts:96` uses `amount_cent
 conversions**, which is correct (dollars at every hop). The payment path likewise has every `*100`
 matched by exactly one `/100`. The 2026-07-18 fix is holding and is guarded by
 `tests/components/portal-dashboard-no-cents-division.test.ts`.
-**Why still open:** the *schema ambiguity that caused it* is unfixed, so a future producer can
-reintroduce a 100x error that passes every constraint.
-**Candidate fix (NOT applied):** `ALTER COLUMN amount TYPE NUMERIC(12,2)` on `charges` and `payments`
-plus `COMMENT ON COLUMN ... IS 'US dollars, 2dp. NOT cents.'`. Keep the existing regression test.
+**Candidate fix (as originally filed):** `ALTER COLUMN amount TYPE NUMERIC(12,2)` on `charges` and
+`payments` plus `COMMENT ON COLUMN ... IS 'US dollars, 2dp. NOT cents.'`.
+**Evidence (2026-08-04):** applied migration `0011_appsec_idempotency_and_scale.sql` directly against
+production (Supabase SQL Editor, Gabriel executed the DDL in-turn after reviewing it; all 3 of the
+migration's own documented pre-flight checks run first and clean — 0 duplicate PaymentIntents, 0
+backfill-key collisions, 0 sub-cent-precision rows across all 10 target columns). Post-apply, all 10
+money columns (`charges.amount`, `payments.amount`, `expenses.amount`,
+`cam_reconciliations.{total_property_recoverable_expenses,estimated_cam_paid,actual_cam_owed,
+true_up_amount}`, `budgets.budgeted_amount`, `tenant_sales_reports.{reported_sales,
+percentage_rent_owed}`) confirmed live at `NUMERIC(12,2) NOT NULL` via
+`information_schema.columns`. `ar_ledger` view (dropped/recreated inside the same migration to release
+the column dependency) confirmed resolving cleanly post-apply (139 leases, aggregates compute without
+error). Same session also discovered and closed a broader latent gap: production's migration tracker
+(`supabase_migrations.schema_migrations`) was stalled at version 0007, which had made 0009/0010 look
+unapplied — they were in fact already live (applied out-of-band, untracked; confirmed via
+`pg_get_viewdef('ar_ledger')` matching 0010's definition verbatim before 0011 ran). See
+[OI-073](#OI-073) for that tracking-gap finding, filed separately.
 **Auto-check:** none.
 
 ### OI-040
@@ -2300,11 +2313,133 @@ fixture even at spawn-parity.
 unconverted**, still correctly blocked on the bare-repo/clone topology design decision, not effort.
 **Auto-check:** none.
 
+### OI-073
+**Status:** CLOSED
+**Opened:** 2026-08-04
+**Closed:** 2026-08-04
+**Source:** Applying migrations 0009-0011 to ora-pm production, 2026-08-04
+**Severity:** MEDIUM (tooling blind spot, not a live defect)
+**Description:** ora-pm's production `supabase_migrations.schema_migrations` tracking table is stalled at
+version 0007 and has been for some time — but this does NOT mean migrations after 0007 were never applied.
+While applying 0009 (`ar_ledger` cartesian-fan-out fix), the `CREATE OR REPLACE VIEW` failed with
+`42P16: cannot drop columns from view` — because production's live `ar_ledger` already carried
+`property_name` (0010's addition). `pg_get_viewdef('ar_ledger'::regclass, true)` confirmed the live view is
+byte-for-byte 0010's CTE-based definition. So 0009 and 0010 were both already applied to production, out of
+band, sometime before this session, without ever being recorded in the tracking table. 0011 was genuinely
+absent (confirmed via `pg_indexes`/`information_schema.columns` before applying) and has now been applied —
+see [OI-039](#OI-039)'s Evidence. `0008_storage_rls.sql` has the same self-described out-of-band-via-Node-script
+history (see [OI-048](#OI-048)'s Compounding note), so this is at least the second migration to land this way.
+**Why this matters:** the tracking table is the thing anyone (including a future session, or `supabase db
+push`) would consult to answer "is migration N live in prod?" — and for at least 3 of the last 4 migrations,
+the honest answer was "check the actual schema, not the tracker." A future automated migration run that
+trusts the tracker could attempt to re-apply 0008/0009/0010, which would fail loudly (as 0009 just did) rather
+than silently — so the immediate blast radius is low — but the root cause (whatever process applies migrations
+out-of-band never writes the tracking row) is still live and will produce the same confusion on the next
+migration.
+**Evidence (2026-08-04):** Gabriel ruled "backfill now." Confirmed table structure first
+(`information_schema.columns`: `version text NOT NULL`, `name text`, `statements text[]`) and the existing
+naming convention (`name` = filename slug minus version prefix/extension, e.g. `0007` -> `stripe_webhook_events_fix`).
+Ran `INSERT INTO supabase_migrations.schema_migrations (version, name) VALUES ('0008','storage_rls'),
+('0009','fix_ar_ledger_view'), ('0010','ar_ledger_property_name'), ('0011','appsec_idempotency_and_scale');`
+— succeeded. Re-queried: tracker now shows 11 rows, 0001 through 0011 contiguous, matching the actual live
+schema for the first time. `statements` left NULL for the backfilled rows (nullable column; these were applied
+outside the CLI's normal statement-splitting path, so there is nothing authentic to populate it with).
+**Residual, not closed by this backfill:** the root cause — whatever process applies migrations out-of-band
+never writing the tracking row — is unidentified and still live. The next migration applied the same
+undocumented way will reopen this same gap. Gabriel has not yet named or changed that process.
+**Root cause identified + fixed 2026-08-04 — see [OI-074](#OI-074):** the actor is any Code session applying
+a production migration; the process is manual application via Claude-in-Chrome → Supabase Dashboard SQL
+editor (or an ad-hoc Node script) because the Code sandbox has no `SUPABASE_ACCESS_TOKEN` configured, so
+`supabase db push`/`migration up` — the only commands that auto-write the tracking row — cannot run here.
+**Auto-check:** none.
+
+### OI-074
+**Status:** OPEN (partially fixed — CI piece inert pending Gabriel-provisioned secrets)
+**Opened:** 2026-08-04
+**Source:** OI-073 follow-up session, root-causing why ora-pm migrations keep landing untracked
+**Severity:** MEDIUM (tooling blind spot, not a live defect — same class as OI-073/OI-048)
+**Root cause (confirmed by direct testing, not inference):** this Code sandbox has no
+`SUPABASE_ACCESS_TOKEN` set (`npx supabase migration list --linked` fails with
+`LegacyPlatformAuthRequiredError`) and no `supabase login` session exists — so `supabase db push`/`migration
+up`, the only CLI commands that write a row into `supabase_migrations.schema_migrations` as a side effect of
+applying a migration, cannot run from here. Raw TCP to the Supabase Postgres pooler on 5432 DOES connect from
+this sandbox (contradicting an earlier 2026-08-03 event_log claim of "no network egress at all" — that may
+have been a different sandbox/environment, or a stale claim), but CLI auth requires the access token
+regardless of TCP reachability. Sessions have therefore applied migrations out-of-band instead — pasting SQL
+into the Supabase Dashboard SQL editor via Claude-in-Chrome, or an ad-hoc Node script against the
+service-role key (0008's self-documented history) — and neither path touches the tracking table. This is the
+process OI-073 left unidentified.
+**Fix, two-tier (Gabriel-directed via AskUserQuestion, 2026-08-04):**
+1. **Fallback (built, tested, no credentials needed):** `ora-pm/scripts/prepare-migration-for-dashboard.mjs`
+   — given a migration file, wraps its SQL together with an idempotent
+   `INSERT ... ON CONFLICT (version) DO NOTHING` tracking row in a single `BEGIN;...COMMIT;` block, so a
+   human pastes ONE block into the Dashboard SQL editor and apply+track can't be split into two steps to
+   forget between. Guards added after an adversarial REFUTE pass (security-auditor agent): refuses to wrap
+   SQL containing `CONCURRENTLY`/`VACUUM`/`ALTER SYSTEM`/`CREATE DATABASE` (can't run inside a transaction),
+   and refuses unbalanced `/* */` block comments (would silently swallow the appended COMMIT). 21 vitest
+   tests incl. a real-subprocess CLI test (caught and fixed a genuine bug: the original `import.meta.url`
+   vs. hand-built `file://${argv[1]}` comparison never matches on Windows, silently no-op'ing `main()`).
+   404→414/414 suite green, typecheck clean. **Caveat, not yet empirically verified:** the script's
+   atomicity claim assumes the Supabase Dashboard SQL editor honors explicit `BEGIN`/`COMMIT` the way
+   `psql -f` does — untested against the live editor; probe instructions are in the script's own header
+   comment before relying on it for anything touching `charges`/`payments`/`ar_ledger`.
+2. **Primary path (built, YAML-validated, NOT yet live-tested — needs Gabriel):** `ora-pm/.github/workflows/db-migrate.yml`,
+   a `workflow_dispatch`-only GitHub Actions job that runs the real `supabase db push` (auto-tracking) against
+   project ref `tvfarkddtbtdrpvvehth`. Requires two repo secrets Gabriel has not yet added —
+   `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD` — until then it fails cleanly at the link step. REFUTE
+   pass caught and fixed two HIGH findings before this could be considered safe to use: `dry_run` now
+   defaults to `true` (a bare "Run workflow" click is always a no-op preview), and the job is gated
+   `if: github.ref == 'refs/heads/main'` (workflow_dispatch could otherwise target an unmerged branch and
+   push an unreviewed migration straight to prod). Added `timeout-minutes: 10` as defense-in-depth.
+**Residual, not closed:** the CI path cannot be exercised until Gabriel adds the two secrets and runs it once
+with `dry_run: true`; the dashboard-paste script's core atomicity assumption is unverified against the live
+Supabase Studio editor. Full REFUTE report (security-auditor agent, 2026-08-04) available in this session's
+transcript — 2 HIGH (fixed), 2 MEDIUM (1 fixed via `timeout-minutes`, 1 residual — atomicity), 3 LOW (fixed:
+transaction-unsafe-SQL guard, unbalanced-comment guard; 1 accepted as-is — no static pre-flight-comment
+detector added, judged low-value for a script whose whole job is to wrap arbitrary migration SQL verbatim).
+**Auto-check:** none.
+
+### OI-075
+**Status:** OPEN (fix built + scheduled; first live alert not yet observed)
+**Opened:** 2026-08-04
+**Source:** Session brief follow-up — standing fix for skill-store/repo drift (2 same-day REVERSE-DIRECTION
+reconciles, event_log.md commits `a2b34ad` and `3825ac5`)
+**Severity:** MEDIUM (process gap — content itself was recovered both times, but only by manual diffing)
+**Description:** Cowork's `save_skill`/`create-skill` writes straight to the AppData runtime skill cache from
+outside git — no repo commit, and no Code-side hook can intercept a different app's write (confirmed: grepped
+`hooks/` for any save_skill/Cowork interception point, found none). **Correction to the session brief's framing:**
+the detector this item asks for was NOT missing — `ora-skills/tools/repo_first_check.py` (merged to main
+2026-08-03/04, PR `store-ahead-of-repo-ledger`, commit `1e714eb`) already does exactly this, per-file (not
+just SKILL.md), with proper git-ancestry-based CACHE-AHEAD/DIVERGENT/REPO-MISSING classification and a
+rescue-copy safety net — built by a concurrent session working the same problem. It was already wired into
+two places: the ora-skills pre-commit hook (`--check-staged`, only fires on a commit touching that exact
+skill) and `ora-doctrine-integrity-guard`'s **daily** sweep (`--all`, cron `55 12 * * *`, alarms via
+email+Notion on any `!! REPO-FIRST` finding). Neither catches drift on a skill nobody is committing to AND
+edited same-day — daily is too slow for "3 occurrences in one day."
+**Fix:** new CC/MCP scheduled task `ora-skill-cache-drift-alert` (registered via supervised
+`create_scheduled_task`, cron `*/30 * * * *`), narrowly scoped to ONLY the `repo_first_check.py --all` sweep
+(not the other 3 doctrine-guard engines, so a 30-min cadence stays cheap). On a finding NOT already tracked
+by an open item (cross-checks this tracker first, dedup by skill name — avoids re-filing every 30 min for
+the same unresolved drift), it allocates a real OI id via `allocate-oi-id.py`, appends an entry to this
+tracker (isolated hunk, re-verify-before-write — same discipline as any interactive session), and alerts via
+Notion + email (reusing `ora-doctrine-integrity-guard`'s proven STEP 3 alarm mechanism). A clean run is
+silent — no Notion, no email, no OI item — matching every other guard in this fleet.
+**Residual, not closed:** built and registered but has not yet fired against a real finding (next run within
+30 min of registration) — the dedup-cross-check logic and the OI-filing step are unverified against a live
+drift event. `ora-doctrine-integrity-guard`'s daily sweep and this task's 30-min sweep will both alarm on the
+same finding until the daily guard's own STEP 3 is taught to check this task's already-filed OI items too
+(not done this session — flagged, not fixed, to avoid scope creep into a guard another session may still be
+actively working: `b5d8615c` was mid-session on "3 systematization items" when this session's `claim_work.py`
+call overwrote its `repo-housekeeping` claim broadcast).
+**Auto-check:** `ora-skill-cache-drift-alert`, cron `*/30 * * * *`.
+
 ## Closed
 
 | ID | Opened | Closed | Source | One-line |
 |----|--------|--------|--------|----------|
 | [OI-037](#OI-037) | 2026-07-31 | 2026-08-04 | ora-appsec-sweep 2026-07-31; fixed `ora-pm` commit `23b924f`; verified live 2026-08-04 (in-page fetch against `ora-pm.pages.dev`) | CORS exact-match allowlist + security headers. `X-Frame-Options: DENY` and `Content-Security-Policy-Report-Only` (exact expected policy) confirmed present on the real served response, not just the merged config — closes this item's own standing verification caveat. CSP-enforcement flip remains OI-066's separate job |
+| [OI-039](#OI-039) | 2026-07-31 | 2026-08-04 | ora-appsec-sweep 2026-07-31; fixed `ora-pm` migration `0011_appsec_idempotency_and_scale.sql`, applied to production 2026-08-04 | All 10 money columns retyped `NUMERIC(12,2) NOT NULL` with unit `COMMENT ON COLUMN`s; `charges.idempotency_key` backfilled + `NOT NULL`; `payments.stripe_payment_intent_id` unique index + `autopay_period` dedup column added. All 3 of the migration's own pre-flight checks ran clean against prod first (0 dupes, 0 backfill collisions, 0 sub-cent rows/10 cols). Verified post-apply via `information_schema.columns` + `ar_ledger` resolving cleanly. Bonus finding: migration tracker was stalled at 0007, masking that 0009/0010 were already live untracked — see [OI-073](#OI-073) |
+| [OI-073](#OI-073) | 2026-08-04 | 2026-08-04 | Applying migrations 0009-0011 to ora-pm production, 2026-08-04 | `supabase_migrations.schema_migrations` backfilled with rows for 0008-0011 (Gabriel: "backfill now") — tracker now shows 11 contiguous rows matching the live schema for the first time. Root cause (whatever process applies migrations out-of-band never writing the tracking row) is still unidentified and unaddressed — will recur on the next out-of-band apply unless that process itself changes |
 | [OI-067](#OI-067) | 2026-08-03 | 2026-08-03 | ora-pm appsec fix plan Task 11 (OI-048), commit `9aa7f30`; verified against production 2026-08-03 (Gabriel signed into Supabase, ran verify-rls.sql live) | Status resolved: production DB was found paused (unrelated, resumed in-turn), all 3 parts of verify-rls.sql pass cleanly — the RLS policy IS live and IS exactly as documented (rules out the "more-permissive out-of-band policy" scenario). Confirmed instead: every real COI upload fails today because the client code uploads to the wrong path. Underlying fix filed as [OI-071](#OI-071). Bonus finding flagged, not filed: Security Advisor shows `public.units` has RLS disabled (CRITICAL), confirmed `rowsecurity=false`, needs Gabriel's triage on client-exposure |
 | [OI-057](#OI-057) | 2026-08-03 | 2026-08-04 | Push of event_log.md commit `8b61f20`, 2026-08-03; fixed by `6dc5df3` (OI-061) | The pre-push timeout is resolved. Direct re-measurement of `hooks/tests/test-eos-review-gate.py` under real concurrent multi-session load (56 dirty files in the checkout at test time, not idle): **76.6s, PASS 55/55** — comfortably under both the 90s per-file budget and the 180s hard timeout that produced OI-057's 3 identical failures. Also corroborated by 2 consecutive real pre-push gates completing clean (61/61, then 63/63, 0 fail) after `6dc5df3` landed. Root cause was OI-059 (excessive fixture-driven subprocess spawns), not the originally-suspected live model call inside the hook — that theory is retired |
 | [OI-059](#OI-059) | 2026-08-03 | 2026-08-04 | [open-items-tracker.md#OI-057](open-items-tracker.md#OI-057) root-cause pass, 2026-08-03; fixed by `6dc5df3` | `hooks/tests/lib/gitfixture.py` (shared template-and-copytree helper) landed, converting `test-eos-review-gate.py`'s `make_repo()` calls from live `git init`/`config`/`commit` subprocess chains to a `shutil.copytree` of a pre-built template. Spawn count 559 -> 199, confirmed by the commit's own measurement and this session's independent 76.6s re-run. Broader 13-file version of this problem is [OI-061](#OI-061), left OPEN — only 2 of 13 files converted so far |
