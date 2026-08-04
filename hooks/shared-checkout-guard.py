@@ -275,6 +275,83 @@ def _sessions_touching(paths, others, sessions_dir, max_age_s=None):
     return found
 
 
+def _claim_renew_after_minutes():
+    """How stale (age_minutes) the CALLING session's own claim must be before an
+    edit in a claim-relevant repo bumps it. Default 20 -- comfortably under
+    claim_work.DEFAULT_TTL_MINUTES (120), so an actively-editing session's claims
+    stay well clear of expiry, while still being long enough that this hook (which
+    fires on EVERY Edit/Write/MultiEdit) does not rewrite the claim file on nearly
+    every call. Env-overridable for tests, same convention as
+    SHARED_CHECKOUT_RECENT_WINDOW_S above."""
+    try:
+        return float(os.environ.get("CLAIM_RENEW_AFTER_MINUTES") or 20.0)
+    except Exception:
+        return 20.0
+
+
+def _self_renew_claims(session_id):
+    """Bump claimed_at on every LIVE claim `session_id` already holds, as a side
+    effect of that session continuing to edit inside a claim-relevant repo.
+
+    WHY (2026-08-04): claim_work.py's `renew` CLI subcommand only helps a claim
+    stay accurate if the session remembers to call it -- and the incident that
+    motivated building `renew` in the first place was exactly a session NOT
+    remembering (see reference_concurrent_session_duplicate_hardening_work.md's
+    2026-08-04 entry). This closes that gap without relying on memory: renewing an
+    ALREADY-OWNED claim needs no judgment call about whether new work is
+    claim-worthy -- the session already made that call once, at initial `claim` --
+    which is exactly why this is safe to automate where auto-CLAIMING was not (see
+    claim_work.py's own module docstring: "classifying 'non-trivial hook work'
+    from a single tool call has too high a false positive/negative rate").
+
+    Rate-limited for free by the claim's own age: only claims already older than
+    _claim_renew_after_minutes() get rewritten, and a renewal resets age to ~0 --
+    so the age gate itself blocks further writes until the threshold elapses
+    again, no separate throttle state needed. This is also why it is correct (not
+    merely convenient) to call this unconditionally on every eligible edit rather
+    than sampling or debouncing: the vast majority of calls do zero writes.
+
+    Self-contained try/except (unlike the rest of this file's reliance on
+    __main__'s single outer wrapper): a bug here must never suppress the
+    collision-warning logic that runs AFTER this in main() -- an exception
+    escaping to that single outer wrapper would abort the entire hook body, not
+    just this best-effort side effect.
+
+    HONEST LIMIT (independent review finding, 2026-08-04): renewal is unconditional
+    across ALL of the calling session's live claims, keyed only on session_id -- it
+    does not check whether the edit is actually related to the SLUG being renewed.
+    A session that claims slug-A, finishes that specific task, and spends the rest
+    of a long session editing UNRELATED files elsewhere in the same repo will keep
+    re-stamping slug-A's claimed_at anyway, because it is still the same session
+    still editing inside a claim-relevant repo. This is a real semantic shift, not
+    a bug: `claimed_at`'s age now means "this session last edited somewhere in a
+    claim-relevant repo", NOT "this session last worked on THIS slug specifically"
+    -- and it means claim_work.py's DEFAULT_TTL_MINUTES (2 hours) no longer reliably
+    expires an abandoned-but-unreleased claim for the rest of a long session, which
+    is exactly the kind of frozen-but-still-"fresh"-looking claim that misled a
+    reader in the incident that motivated building `renew` in the first place (see
+    the WHY paragraph above) -- just deferred from ~30 minutes to "until the session
+    ends or calls `release`". `claim_work.release_claim()`'s "not required for
+    correctness" framing is accordingly weaker while this hook is active: releasing
+    a claim once its task is actually done now matters more, not less, than before
+    self-renewal existed. Deliberately NOT fixed by scoping renewal to claims whose
+    declared `paths` overlap the edited file: most claims never declare `paths` (see
+    claim_work.py's own D1 note), and the "banner claim" pattern -- one slug
+    covering an evolving stream of related work across a whole repo for an extended
+    session -- is the PRIMARY case this feature exists to help, so path-scoping would
+    defeat its own purpose for exactly the callers who need it most."""
+    try:
+        from claim_work import read_active_claims, renew_claim  # noqa: E402
+        threshold = _claim_renew_after_minutes()
+        for c in read_active_claims():
+            if (c.get("session_id") == session_id and
+                    c.get("age_minutes", 0.0) >= threshold):
+                renew_claim(c["slug"], session_id)
+    except Exception:
+        pass  # best-effort: a lost renewal costs a future stale-claim misread,
+              # not a broken edit -- never let this affect the rest of the hook
+
+
 def _claims_on(file_path, session_id):
     """Other sessions' LIVE claims that declare `file_path`. Guarded import +
     blanket except: claim_work.py is an optional courtesy module and this guard must
@@ -443,6 +520,14 @@ def main():
     repo = find_repo(file_path, shared_repos())
     if repo is None:
         return  # fast path: not a shared-checkout repo -> no git call at all
+
+    # Runs BEFORE the worktree-isolation early-return just below, deliberately: an
+    # already-isolated linked worktree is the CORRECT, mandated way to do hooks/**
+    # work in this codebase, so if self-renewal only ran on the warn path it would
+    # almost never fire for a well-behaved session -- precisely backwards. No git
+    # call of its own (claim_work.py is plain JSON file I/O), so this does not
+    # reintroduce the git-subprocess cost the fast-path return above avoids.
+    _self_renew_claims(session_id)
 
     # Check isolation against the file's OWN checkout, not the matched shared-repo
     # root -- see nearest_git_root()'s docstring. Falls back to `repo` if no `.git`
