@@ -35,13 +35,13 @@ and pushed.
 flowchart TB
     subgraph SESSION["A Claude Code session on this machine"]
         CFG["settings.json\nhook wiring, permissions,\nmodel/plugin config"]
-        HOOKS["hooks/\nPreToolUse + git-hook guard scripts"]
+        HOOKS["hooks/\n~25 guard scripts across all 6 hook events\n(PreToolUse/PostToolUse/Session*/Stop/PromptSubmit)\n+ git pre-push chain"]
         SKILLS["skills/ + agents/ + commands/ + workflows/\nprocedures the session can invoke"]
         SCHED["scheduled-tasks/*/SKILL.md\nspecs for recurring automations"]
         MAINT["maintenance/\nhealth/probe scripts"]
         CFG -->|registers| HOOKS
         CFG -->|exposes| SKILLS
-        HOOKS -->|guards every Edit/Write/Bash/git op| SESSION
+        HOOKS -->|guards tool calls + session lifecycle| SESSION
         SCHED -.read by live scheduler, not this repo.-> SESSION
     end
 
@@ -51,9 +51,16 @@ flowchart TB
     REPO -.git clone / pull\n(disaster recovery).-> LOCALDIR
 ```
 
-The repo is downstream of the live directory, never the other way around: nothing
-deploys *from* GitHub back into a running session automatically. A clone only becomes
-"live" again when it's placed at `~/.claude` and Claude Code is pointed at it.
+**Reading the diagram:** everything in the top box happens inside one live Claude Code
+session. `settings.json` wires up the hooks and exposes the skills/agents/commands/
+workflows a session can call; the hooks then guard every tool call and session-lifecycle
+event that follows. `scheduled-tasks/*/SKILL.md` specs are dotted-line because they're
+read by the external Windows/Cowork scheduler, not by this session directly. Below that,
+the live directory on disk contains the whole session and is the only thing that ever
+pushes to GitHub (dotted arrow, opt-in files only) — the repo is downstream of the live
+directory, never the other way around: nothing deploys *from* GitHub back into a running
+session automatically. A clone only becomes "live" again when it's placed at `~/.claude`
+and Claude Code is pointed at it.
 
 ## 3. Directory structure
 
@@ -64,11 +71,11 @@ each directory — not assumed from folder names.
 |---|---|
 | `CLAUDE.md` | The global operating prompt (identity, hard invariants, routing canon) loaded into every session. |
 | `settings.json` | Hook wiring, permissions, model/plugin config — top-level keys include `hooks`, `permissions`, `enabledPlugins`, `env`, `model`, `statusLine`. |
-| `hooks/` | ~25 PreToolUse/git-hook guard scripts (`confidentiality-guard.py`, `config-write-guard.py`, `shared-checkout-guard.py`, `ora-autonomy-gate.py`, `commit-provenance-guard.py`, `git-prepush-confidential-scan.py`, `git-prepush-doctrine-gate.py`, …) plus `bin/`, `lib/`, `tests/`, `active-work/`. `hooks/confidential-terms.json` (the confidential-deal roster) lives in this folder on disk but is **not tracked** by git. |
+| `hooks/` | ~25 guard scripts across all 6 hook events, not just PreToolUse (`confidentiality-guard.py`, `config-write-guard.py`, `shared-checkout-guard.py`, `ora-autonomy-gate.py`, `commit-provenance-guard.py`, `git-prepush-confidential-scan.py`, `git-prepush-doctrine-gate.py`, …) plus `bin/`, `lib/`, `tests/`, `active-work/`. `hooks/confidential-terms.json` (the confidential-deal roster) lives in this folder on disk but is **not tracked** by git. |
 | `commands/` | 12 slash-command definitions (`build.md`, `debug.md`, `refactor.md`, `research.md`, `ship.md`, `plan.md`, `heavy.md`, `ram.md`, `handoff.md`, `solo.md`, `cleardisk.md`, `open-sessions.md`) — the Engineering-OS lane dispatch. |
 | `agents/` | 7 custom sub-agent definitions (`deal-recon.md`, `deal-flow-triage.md`, `lease-sweep.md`, `underwriting-checker.md`, `site-qc-reviewer.md`, `portfolio-anomaly-scout.md`, `security-auditor.md`). Domain-specific ORA agents, distinct from the general Cowork skill library. |
 | `skills/` | Only 5 ORA-authored skills are versioned here (`county-parcel-screen/`, `evidence-dossier-drafting/`, `external-artifact-intake/`, `ratify-hurdle-rate/`, `security-and-hardening/`), each with its own `SKILL.md` plus `references/`/`scripts/` subfolders. This is **not** the full skill catalog — most `anthropic-skills:*` skills Gabriel uses day to day are Cowork-synced runtime content and are not tracked in this repo. |
-| `maintenance/` | ~35 fleet/health/probe scripts and their tests (`fleet-status.py`, `doctrine-integrity-probe.py`, `governor-drift-probe.py`, `append-event-log.py`, `setup-self-audit.py`, `stuck-session-watchdog.ps1`, …) plus a `1-Check-My-Setup-SAFE.cmd`-style onboarding script set and `_state/`, `_applied/`, `_archive/`, `_shared/` subfolders. |
+| `maintenance/` | 54 fleet/health/probe scripts and their tests (`fleet-status.py`, `doctrine-integrity-probe.py`, `governor-drift-probe.py`, `append-event-log.py`, `setup-self-audit.py`, `stuck-session-watchdog.ps1`, …) plus a `1-Check-My-Setup-SAFE.cmd`-style onboarding script set and `_state/`, `_applied/`, `_archive/`, `_shared/` subfolders. |
 | `scheduled-tasks/` | One folder per scheduled task (48+ live/archived folders observed); **only each task's `SKILL.md` spec is tracked** — runtime state, logs, and `.bak` files are not. Includes a large set of dated `_archive_*_retired` / `_archive_*_orphans` subfolders preserving retired task specs. |
 | `_scheduled_tasks_backup/` | A second, redundant-by-design snapshot of task `SKILL.md` specs (107 entries observed) — a belt-and-suspenders backup of `scheduled-tasks/`. |
 | `workflows/` | 3 named multi-agent `Workflow` scripts (`cc-audit-army.js`, `cc-eval-plan-premortem.js`, `verified-deal-recon.js`) plus a `README-cc-self-audit.md` and a `_tests/` prompt-snapshot rig. |

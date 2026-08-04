@@ -262,7 +262,138 @@ SHELL_WRITE_INDICATORS = (
     # below; a bare substring check cannot tell open(p,'rb') from open(p,'w'))
     "write_text", "write_bytes", "writefile", "shutil.", "os.remove",
     "os.rename", "os.replace", "unlink(", "rmtree",
+    # COMPOSITE WRITERS (2026-08-03, independent-review finding D1). These were
+    # caught only ACCIDENTALLY, as substrings of the short verbs above --
+    # "copy " inside "robocopy "/"xcopy ", "cp " inside "scp "/"rcp "/"pscp ".
+    # Word-anchoring those verbs (below) removed that accident and un-flagged
+    # all of them; robocopy.EXE, xcopy.EXE and scp.EXE are all present on this
+    # box, and `robocopy <src> <hooks> /MIR` MIRRORS -- it deletes and replaces
+    # the entire target tree. config-write-guard is the only control on that
+    # path. Named explicitly here so the coverage is deliberate rather than a
+    # side effect; each is distinctive enough that bare substring cannot
+    # collide with an ordinary word. "rsync " closes a PRE-EXISTING gap found
+    # in the same sweep (it was never matched, by either version).
+    "robocopy ", "xcopy ", "scp ", "rcp ", "pscp ", "rsync ",
+    "git-rm ", "git-mv ",
 )
+# WORD-BOUNDARY BUG (2026-08-03, live-proven). The short verbs above were matched
+# as BARE SUBSTRINGS, so they fired from inside ordinary unrelated words:
+#     "del " matched "--model "     -> every `--model <id>` argument
+#     "dd "  matched "git add "     -> every `git add`
+#     "rm "  matched "confirm "
+#     "ren " matched "children "
+# This is NOT the benign "false positive costs a retry" the doctrine above
+# accepts. It DEADLOCKED a gate: eos-review-gate is satisfied by
+# `eos-review-gate.py --record ... --model <id>`, whose "--model " tripped
+# "del ", so config-write-guard blocked the ONLY sanctioned way to clear the
+# review gate -- and its documented exit was minting a 60-minute, multi-use,
+# governance-WIDE write token to permit one single-file write. A false positive
+# that forces a strictly broader privilege is a security regression, not caution.
+#
+# Fix: a verb must START at a word boundary. `del x`, `/usr/bin/rm x`, `;rm x`,
+# `&&dd if=..` all still match, because the character before the verb is not a
+# word character.
+#
+# THIS ANCHORING IS NOT FREE, and the first draft of it shipped a security
+# regression (caught by independent review, D1). Several REAL writers were being
+# caught only as accidental substrings of these verbs -- robocopy/xcopy (via
+# "copy "), scp/rcp/pscp (via "cp "), git-rm/git-mv. Anchoring removed that
+# accident and silently un-flagged all of them. They are now named explicitly in
+# SHELL_WRITE_INDICATORS above. Do NOT assume "the verb list still covers it":
+# before anchoring anything else here, enumerate the real command names that
+# CONTAIN the verb, because that is where the accidental coverage lived.
+#
+# The lookbehind excludes `\w` and `-`. `-` is deliberate: it keeps the very
+# common benign `docker run --rm <img>` from reading as a write, and the
+# hyphenated writers it would otherwise cost (git-rm, git-mv) are listed
+# explicitly above instead. `.` is deliberately NOT excluded -- it would cost
+# `foo.rm x` and `./cp x` and buys nothing anyone could construct.
+#
+# The differential battery in tests/test-tool-call-paths.py pins BOTH directions
+# and mechanically enumerates the collision class; no real write may become
+# allowed, which is the only regression that matters.
+_BOUNDED_VERBS = ("cp", "copy", "mv", "move", "rm", "del", "tee",
+                  "mkdir", "touch", "ren", "rename", "dd")
+
+# What may sit between a verb and its target. A LITERAL SPACE is not enough.
+# Every form below was EXECUTED on this box to confirm it is a real invocation
+# and not theoretical coverage (2026-08-03):
+#   `"rm" f`      -- bash runs a quoted command name
+#   `& 'del' x`   -- PowerShell runs it via the call operator
+#                    (cmd.exe does NOT: `"del" x` is "not recognized" there,
+#                     and `del"x"` concatenates into `delx` in every shell --
+#                     do not cite that form as motivation, it executes nowhere)
+#   `del/f x`     -- cmd.exe switch form, no space at all
+#   `del,x` `del;x` `del=x`
+#                 -- cmd.exe treats , ; = as token delimiters exactly like / .
+#                    All three were verified to actually DELETE a file via a
+#                    .bat harness. Missing them was the same evasion class the
+#                    `/` fix claimed to close but only closed one third of.
+#   `rm<f`        -- redirect character doubles as a separator in bash
+#   `rm\tx`       -- tab is a valid separator in bash and cmd
+#
+# KNOWN COST, accepted deliberately -- 19 false positives measured across 107
+# probed benign commands (9 from a 73-command realistic corpus, 10 from a
+# 34-command probe set targeting `, ; = <`), in three classes:
+#   quoted/regex TEXT (from `"` `'` `/`):
+#       grep -rn '"del"' <hooks>/...   sed -n 's/rm/x/p' <hooks>/...
+#       --notes "the 'rm' case is closed"
+#   env-var ASSIGNMENT prefixes (from `=`) -- the POSIX/make idiom, and RM/CP/DD
+#   are GNU make built-ins, so this is the least obvious of the three:
+#       make clean RM=del    env DD=1 python x.py    $env:DD=1; python ...
+#   command CHAINING (from `;` `,`):
+#       which rm;which cp    grep rm; echo done    --series=rm,cp
+# All 19 flag only when ALSO paired with a governance-path marker.
+#
+# Why this is accepted rather than a repeat of the PR#32 deadlock: every
+# governance-tree operation that has NO ungated substitute was probed and still
+# ALLOWs -- `--record` (plain and with notes), `--key`, running any hook test or
+# the full suite, fleet-status, doctrine-integrity-probe, governor-drift-probe.
+# The FPs all have trivial substitutes (Read/Grep/Glob for the reads, reword the
+# notes, set the env var in a separate call), so nothing is forced toward the
+# governance-wide token. No Makefile is tracked under ~/.claude, and no path
+# segment there is named cp/rm/mv/del -- so `/` and `=` collide with command
+# TEXT only, never with a real governance path.
+# Widening this class is what reintroduced the original bug the last time a
+# matcher here was touched, so note WHY it is safe now: the lookbehind carries
+# the whole load. `--model=x` puts a word character immediately before "del",
+# so it is rejected on the anchor regardless of how permissive the separator
+# is. Verified across the FULL 7-character class, not just one member:
+# `--model=`, `--model,`, `--model;`, `--model<`, `--model/`, `model,version`,
+# `remodel/`, `remodel=`, `confirm/`, `confirm;`, `x-rm=y`.
+#
+# This change is STRICTLY BROADENING -- a wider separator class can only add
+# matches, never remove one -- so unlike the anchoring change it cannot lose a
+# true positive. That property is pinned by
+# test_widening_the_separator_is_strictly_broadening.
+_VERB_SEPARATOR = r"[\s\"'/,;=<]"
+_BOUNDED_VERB_RE = re.compile(
+    r"(?<![\w-])(?:%s)%s"
+    % ("|".join(re.escape(v) for v in _BOUNDED_VERBS), _VERB_SEPARATOR))
+# Composite writers get the SAME separator class as the bounded verbs. They used
+# to be plain substrings ending in a literal space, which left the two matchers
+# inconsistent: `rm\tx` was caught but `robocopy\tsrc <hooks> /MIR` was not --
+# and /MIR mirrors, i.e. deletes and replaces the whole target tree.
+#
+# NO lookbehind here, deliberately, unlike the bounded verbs. Anchoring these
+# would drop coverage the bare-substring form had (`prescp`, `descp` and similar
+# were flagged via the `cp `/`rm ` substrings). None of those is a real command,
+# but dropping them would still be a flag->unflag delta, and losing a true
+# positive is the one regression that matters here. No English word contains
+# robocopy/xcopy/scp/rcp/pscp/rsync/git-rm/git-mv, so bare matching is safe.
+_COMPOSITE_WRITERS = ("robocopy", "xcopy", "scp", "rcp", "pscp", "rsync",
+                      "git-rm", "git-mv")
+_COMPOSITE_WRITER_RE = re.compile(
+    r"(?:%s)%s"
+    % ("|".join(re.escape(v) for v in _COMPOSITE_WRITERS), _VERB_SEPARATOR))
+
+# Indicators distinctive enough that a bare substring test cannot collide with an
+# ordinary word (hyphenated cmdlets, dotted module calls, redirection).
+UNBOUNDED_WRITE_INDICATORS = tuple(
+    ind for ind in SHELL_WRITE_INDICATORS
+    if ind.strip() not in _BOUNDED_VERBS
+    and ind.strip() not in _COMPOSITE_WRITERS)
+
 # open() mode-awareness (BUG, 2026-07-21: "open(" as a bare substring flagged
 # open(p,'rb') -- an ordinary READ -- identically to open(p,'w')). Only an
 # UNAMBIGUOUS read-only call is exempt: a single simple (non-nested-paren,
@@ -324,7 +455,11 @@ def shell_may_write(command):
         return True
     if _open_may_write(lowered):
         return True
-    return any(ind in lowered for ind in SHELL_WRITE_INDICATORS)
+    if _BOUNDED_VERB_RE.search(lowered):
+        return True
+    if _COMPOSITE_WRITER_RE.search(lowered):
+        return True
+    return any(ind in lowered for ind in UNBOUNDED_WRITE_INDICATORS)
 
 
 def shell_analysis(tool_name, tool_input):
