@@ -414,6 +414,49 @@ expect("entry: starts with dated '## ' header (append-event-log contract)",
 expect("entry: references the override + hook test failure",
        "override" in entry.lower() and "hook test" in entry.lower())
 
+# --- ROUND-TRIP ENCODING (2026-08-03) -------------------------------------------------
+# Defect: seven event_log headings carry a DOUBLE-ENCODED em dash ("â€”"
+# instead of "—"), all of them override records from this gate and the doctrine
+# gate. The template is fine -- the corruption happened in TRANSIT.
+# log_override_use() piped UTF-8 bytes to append-event-log.py's STDIN, and that script's
+# stdin branch is a bare sys.stdin.read(), which on Windows decodes as cp1252: the three
+# UTF-8 bytes E2 80 94 arrive as three cp1252 characters and get re-encoded as UTF-8.
+# (feedback_append_event_log_stdin_encoding.md already prescribed --entry-file.)
+# Asserting on the template alone would NOT have caught this, so drive the real script.
+expect("entry: template em dash is a real U+2014, not pre-corrupted",
+       "—" in entry and "â€" not in entry)
+
+with tempfile.TemporaryDirectory() as _td:
+    _log = os.path.join(_td, "event_log.md")
+    with io.open(_log, "w", encoding="utf-8") as _f:
+        _f.write("---\nname: event_log\n---\n\n# ORA Event Log\n\nintro line\n\n"
+                 "## 2026-01-01 - seed entry\n\nbody\n")
+    _prev = gt.EVENT_LOG_OVERRIDE
+    gt.EVENT_LOG_OVERRIDE = _log          # documented test seam
+    # Force the hostile condition deterministically. PYTHONIOENCODING=utf-8 in the
+    # ambient environment is inherited by the child and MASKS this defect entirely --
+    # with it set, the broken stdin path passes and this test is worthless. A real
+    # pre-push runs without it, so strip it for the duration.
+    _prev_enc = os.environ.pop("PYTHONIOENCODING", None)
+    try:
+        gt.log_override_use(session_id=SESSION, reason="encoding round-trip test")
+        with io.open(_log, encoding="utf-8") as _f:
+            _written = _f.read()
+    finally:
+        gt.EVENT_LOG_OVERRIDE = _prev
+        if _prev_enc is not None:
+            os.environ["PYTHONIOENCODING"] = _prev_enc
+
+    expect("log_override_use: entry actually reached the log",
+           "Pre-push proceeded DESPITE a hook test failure" in _written,
+           _written[:200])
+    expect("log_override_use: em dash survives the write as U+2014",
+           "— Pre-push proceeded DESPITE" in _written,
+           repr([l for l in _written.splitlines() if "Pre-push" in l][:1]))
+    expect("log_override_use: NO double-encoded em dash reaches the log",
+           "â€”" not in _written and "â€" not in _written,
+           repr([l for l in _written.splitlines() if "â" in l][:1]))
+
 # --- override_active(): smoke-test the shared contract is wired with the RIGHT tier ---
 # (token_grants()/parse_token()'s own exhaustive adversarial matrix — duplicate keys,
 # oversized, future-dated, path-traversal session ids, etc — is already covered by
