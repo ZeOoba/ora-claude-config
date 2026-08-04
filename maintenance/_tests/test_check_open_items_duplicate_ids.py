@@ -69,6 +69,14 @@ expect("dup-row: report names the colliding id",
        "OI-027" in report and "DUPLICATE_ROW" in report, "got %r" % report)
 expect("dup-row: report recommends reading both rows, not auto-picking one",
        "renumber" in report.lower(), "got %r" % report)
+# The guidance must name the allocator, not just say "renumber" (2026-08-04).
+# Telling someone to renumber without saying HOW sends them back to hand-computing
+# max+1 -- the exact procedure that produces these collisions, because the tracker
+# shows the old max for the whole gap between reading it and committing the row.
+expect("dup-row: report points at allocate-oi-id.py for the replacement id",
+       "allocate-oi-id.py" in report, "got %r" % report)
+expect("dup-row: report warns off hand-computing max+1",
+       "max+1" in report and "do NOT hand-compute" in report, "got %r" % report)
 
 # --- three-way collision: count must be 3, not just 'duplicated' -------------------
 triple = "## Open\n\n" + row("050") + row("050") + row("050")

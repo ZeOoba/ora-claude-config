@@ -149,7 +149,14 @@ def format_report(result, path):
             lines.append("[ACTION] DUPLICATE_ROW %s appears in %d table rows -- "
                           "two items were independently assigned the same id; "
                           "read both rows and renumber the newer one (never guess "
-                          "which is newer from the id alone)." % (d["id"], d["count"]))
+                          "which is newer from the id alone). Get the replacement "
+                          "id from `python maintenance/allocate-oi-id.py --session "
+                          "<id> --note \"<why>\"` -- do NOT hand-compute max+1, "
+                          "which is what produced this collision: the tracker still "
+                          "shows the OLD max for the whole minutes-long gap between "
+                          "reading it and committing the row, so a second session "
+                          "reading in good faith gets the same answer."
+                          % (d["id"], d["count"]))
         for d in result["duplicate_sections"]:
             lines.append("[ACTION] DUPLICATE_SECTION %s has %d '### %s' detail "
                           "sections -- same collision, in the detail sections "
