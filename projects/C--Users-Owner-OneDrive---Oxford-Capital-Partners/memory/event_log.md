@@ -12,6 +12,16 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-04 — FLEET DEAD-MAN fix (issue #19) now fully live: part A (wake-and-launch task) registered and verified
+
+Closes out the open half of the earlier same-day root-cause entry ("Root-caused the recurring FLEET DEAD-MAN trips..."), which shipped only the software fix (`push-fleet-heartbeat.ps1`'s ff-only merge, `5a98941`) and left the system-level fix as a command for Gabriel to run.
+
+Registered `ORA Claude Desktop Wake-and-Launch` (Windows Scheduled Task): daily 04:45 ET, `WakeToRun=True`, `DisallowStartIfOnBatteries=False`, action launches Claude Desktop via its AppUserModelID (`Claude_pzs8sxrjxfjjc!Claude`, confirmed via `Get-StartApps` — survives app version updates, unlike a pinned `WindowsApps\Claude_<version>\...` path) if not already running.
+
+Before registering for real, validated the command against a throwaway test task (registered, confirmed live settings matched intent, unregistered — zero persistent state left behind from the validation pass itself). That pass caught and fixed a real defect in the originally-handed-off command: `-RunLevel Highest` made `Register-ScheduledTask` fail with "Access is denied" in a non-elevated shell — dropping it (unnecessary; launching Claude Desktop needs no admin rights) let registration succeed from a normal PowerShell session, removing the elevation requirement entirely. Confirmed the `-AllowStartIfOnBatteries` switch was working correctly despite its property reading back as `$null` on inspection — the real underlying CIM property is `DisallowStartIfOnBatteries`, verified by comparing settings objects built with and without the switch (`True` vs `False`).
+
+Gives the AM cluster a wake trigger for the first time — mirrors the pattern already proven on this machine by `ORA Fleet Dead-Man` and `ORA Nightly Disk Clean` (both already `WakeToRun=True`). Both halves of today's fix (software race-fix + system wake-task) are now live; the fleet-deadman's next few overnight runs are the real test of whether this closes issue #19, not today's coincidental on-time heartbeat (which predated this task's registration).
+
 ## 2026-08-04 — Rollout mistake: shipping OI-id enforcement as BLOCK taxed every other session; downgraded to WARN
 
 Corrects the record on tonight's OI-id allocator work. The mechanics — reservation-based allocation, baseline grandfathering, `--backfill`, the checker's guidance pointing at it — are all sound and independently REFUTE-verified. **The mistake was operational: shipping enforcement in BLOCK mode was premature, and it cost every other session working tonight, not just this one.**
