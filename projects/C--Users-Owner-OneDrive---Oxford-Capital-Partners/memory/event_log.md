@@ -12,6 +12,27 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-03 — Override-record em dash: root-caused to a stdin decode, fixed at both levels, 7 historical headings repaired
+
+Seven `event_log.md` headings carried `â€”` where an em dash belongs — every one of them a pre-push override record. The templates were never wrong; **the corruption happened in transit.**
+
+**Root cause.** `log_override_use()` in both gates piped `entry.encode("utf-8")` to `append-event-log.py`'s **stdin**, and that script's stdin branch was a bare `sys.stdin.read()`, which decodes with the Windows locale (cp1252). The em dash's three UTF-8 bytes `E2 80 94` arrived as three cp1252 characters and were re-encoded as `C3 A2 E2 82 AC E2 80 9D`. The `--entry-file` branch always opened with an explicit `encoding="utf-8"`; only stdin did not. This is precisely the hazard [feedback_append_event_log_stdin_encoding.md](feedback_append_event_log_stdin_encoding.md) already prescribed `--entry-file` for — the memory existed and the call site predated or ignored it.
+
+**Why it went unnoticed for weeks:** a mangled heading also defeats any same-heading check, so these records could accumulate without ever colliding. The corruption was self-concealing.
+
+**Fixed at both levels rather than one.** Both gates now write to a temp file and pass `--entry-file`, unlinking in a `finally`. Separately, `append-event-log.py`'s stdin branch now decodes `sys.stdin.buffer` as UTF-8 explicitly, falling back to the old behaviour on `AttributeError`/`UnicodeDecodeError`. Either fix alone closes this; together, a future caller that reaches for stdin is covered too. Merged as `07bd20d`.
+
+**The test would have been worthless written the obvious way.** Asserting on `build_override_entry()`'s output cannot catch this — the template is correct. The new test drives the real `append-event-log.py` end to end. It also **pops `PYTHONIOENCODING` for the duration**: with that set in the ambient environment the child inherits it, the broken stdin path passes, and the test proves nothing. That was not hypothetical — the first run of this test passed green against unfixed code for exactly that reason, and only failed once the variable was stripped. Verified red first (77/79, both encoding assertions failing), green after (79/79), and green with *and* without ambient `PYTHONIOENCODING`.
+
+**Adversarial REFUTE, byte-level not string-level**, both gates, `PYTHONIOENCODING` stripped: `E2 80 94` present, the double-encoded sequence absent, zero temp files leaked. Swept for other stdin callers of `append-event-log.py` — none. **NOT REFUTED.** Regressions clean: doctrine gate suite PASS, `maintenance/_tests/test_git_prepush_doctrine_gate.py` ALL PASS, `test-append-event-log.py` PASS.
+
+**Historical repair (`1776b39`), separate commit by design** — stopping the bleeding and rewriting the past are different decisions. All 7 occurrences were in `## ` headings (07-25 ×1, 07-27 ×5, 08-03 ×1); zero in body text, and no other mojibake class present (checked the U+201C, U+2122 and U+00C2 forms). Verified before writing: substitution count equals occurrence count so nothing outside headings moved; entry count unchanged; each heading differs from its original by the substitution alone; and the concatenation of every non-heading line is byte-identical before and after.
+
+**The five 07-27 records are still five separate entries.** They shared a heading before the repair and share a corrected one after; their *bodies* differ, which is what makes them distinct override events. Nothing about the repair touches that — and it is worth restating because these were nearly deleted as duplicates earlier the same day.
+
+**Concurrency.** A concurrent session held an uncommitted "Save-skill installs confirmed" entry in the working tree throughout, so the repair was staged via the isolated-hunk technique against HEAD and committed with no pathspec; their entry was left untouched. Work was claimed under `hooks-override-auth` with `--paths` cover for both gate files, done in a worktree (blast radius), and the claim released on completion.
+
+
 ## 2026-08-03 — Reimport queue was 8, not 5: `list` is blind to sweep-only drift, and a hash match does not mean installed
 
 Built a Cowork install prompt for the pending skill batch. Two verification errors surfaced on the way, both of which would have shipped a wrong result, and both of which are the *documented* failure modes of the tooling rather than novel bugs.
