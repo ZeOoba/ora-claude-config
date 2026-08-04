@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-08-04T15:16:59.102Z
+  modified: 2026-08-04T16:37:10.681Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -65,8 +65,10 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | [OI-065](#OI-065) | 2026-08-03 | REFUTE pass on the [OI-035](#OI-035) fix, 2026-08-03 | ora-pm `POST /api/stripe/payment-intent` has no lock between the `ar_ledger.balance` read and PaymentIntent creation — two genuinely concurrent requests (two tabs, or a bypassed client guard) each read the same stale balance and each create a separate, individually-valid PI, exceeding the true balance. Requires the tenant's own concurrent action, not a third-party attack. Outside OI-035/OI-040's original scope |
 | [OI-066](#OI-066) | 2026-08-03 | REFUTE pass on the [OI-037](#OI-037) fix, 2026-08-03 | ora-pm's new CSP ships as `Content-Security-Policy-Report-Only`, deliberately — logs violations, blocks nothing. `X-Frame-Options: DENY` (separate header) already closes clickjacking; this item is only the XSS-containment half. Needs a manual browser pass through Pay Now + admin login against a deployed preview, then drop `-Report-Only` to enforce |
 | [OI-068](#OI-068) | 2026-08-03 | ora-pm appsec fix plan Task 8 (OI-043), local `plan/appsec-fixes-oi034-048` branch, commit `59f79ff`, confirmed by independent task reviewer | Autopay-with-payment-method is **unreachable from any live frontend path today** — `PortalAccount.tsx` is the sole caller of `setAutopay` and never passes `payment_method_id`; the enable toggle is disabled unless `lease.autopay_payment_method_id` is already set; the ONLY writer of that column is `PATCH /portal/autopay`, which the frontend never calls with a PM. `PortalPayNow.tsx` creates a PM but only ever feeds it to one-time `createPaymentIntent`, never to `setAutopay`. The whole autopay-enrollment feature is unbuilt/unreachable on the frontend, independent of Task 8's (correct) backend hardening — a product gap, not a security defect in what shipped |
-| [OI-067](#OI-067) | 2026-08-03 | ora-pm appsec fix plan Task 11 (OI-048), local `plan/appsec-fixes-oi034-048` branch, commit `9aa7f30` — implementer-found, independently re-verified from first principles (source + SQL trace) by the task reviewer | **HIGH — needs urgent human production verification, status of a customer-facing tenant-data-boundary control is currently UNKNOWN.** `PortalInsurance.tsx` uploads tenant COI files directly to Supabase Storage (anon key + tenant JWT, bypassing the API) into a folder keyed by `session.user.id` (`auth.users.id`) — but the RLS policy governing that bucket (`0008_storage_rls.sql:6-16`, `tenant_upload_insurance`) checks the folder against `tenants.id`, a structurally different, independently-generated UUID (no trigger/computed-column/FK path makes them equal, confirmed against `0001_core_entities.sql`). Two possible live consequences, can't be distinguished from the repo alone: **(a) more likely** — uploads are silently failing today (RLS defaults to deny with no matching policy for the anon+JWT role) — broken feature, not a breach; **(b) can't be ruled out** — `0008_storage_rls.sql:2` itself documents this exact policy was "applied out-of-band via a one-off Node script," i.e. this project has documented history of storage-policy state living outside migrations/version control, so a more-permissive out-of-band policy on this bucket can't be excluded without checking live prod. Run `scripts/verify-rls.sql` (shipped by the same task) against prod, then attempt a real COI upload |
 | [OI-069](#OI-069) | 2026-08-03 | REFUTE pass on the [OI-046](#OI-046) fix, 2026-08-03 | ora-pm CAM true-up idempotency key is scoped only to lease+year, no amount/version — a legitimate recalculation of an already-billed CAM (ops corrects an error, re-runs /calculate for a new amount) collides with the OLD charge's key and is silently dropped as a duplicate. Tenant's ledger keeps the stale amount; response says success. Under-billing, not exploitable by an outside party |
+| [OI-070](#OI-070) | 2026-08-04 | `ora-health-guard` 2026-08-04 run + `fleet-status.py` investigation, this session | `fleet-status.py`'s missed-cycle detector (OI-031's fix) only sees a CURRENTLY-open gap — it compares `lastRunAt` to the single most-recent expected fire, so a gap that self-heals before the next check erases all evidence of the miss. `ora-health-guard` itself missed 07-31/08-01/08-02 then resumed 08-03/08-04; `fleet-status.py` reported "missed single cycle 0" the same day the scheduler's own run log showed the 3-day gap. Same blind-spot family as [OI-031](#OI-031)/[OI-058](#OI-058), one level narrower |
+| [OI-071](#OI-071) | 2026-08-03 | Production verification of [OI-067](#OI-067), 2026-08-03 | ora-pm `PortalInsurance.tsx` uploads COI files to `session.user.id`'s folder, but the live (confirmed-applied, confirmed-correct) RLS policy requires `tenants.id` — every real tenant COI upload fails today. Confirmed against production, not just the repo. Misleadingly-named variable (`tenantId = session.user.id`) is likely the root cause |
+| [OI-072](#OI-072) | 2026-08-04 | [open-items-tracker.md#OI-061](open-items-tracker.md#OI-061) batch-2 scoping, 2026-08-04 | **Design question, not a chore:** `gitfixture` models only two shapes (blank / single-commit), so the two remaining high-git files can't be converted — `test-git-prepush-scan.py` (177 git) needs BARE repos + an origin/clone/push/fetch topology + identity `t@example.invalid`, and `test-memory-index-git-tracking.py` (28 git) inits a CALLER-PROVIDED dir with identity `t@t`. Decide whether to extend a fixture 4 security-gate suites already depend on |
 
 ### OI-009
 **Status:** OPEN (substantial progress made 2026-07-17, real scope remains)
@@ -1839,6 +1841,82 @@ recalculate-then-reapprove path — not covered by OI-046's test suite (verified
 re-approval and a directly-injected constraint violation are tested, not this scenario).
 **Auto-check:** none.
 
+### OI-067
+**Status:** CLOSED (verification done; underlying fix filed separately as [OI-071](#OI-071))
+**Opened:** 2026-08-03
+**Closed:** 2026-08-03
+**Source:** ora-pm appsec fix plan Task 11 (OI-048), local `plan/appsec-fixes-oi034-048` branch, commit `9aa7f30`
+**Severity:** HIGH (was: status UNKNOWN, needed urgent human production verification)
+**Description:** see the Open-table one-liner above (unchanged) for the original finding —
+`PortalInsurance.tsx` uploads keyed by `session.user.id`, but the `tenant_upload_insurance` RLS policy
+checks the folder against `tenants.id`, a structurally different UUID. Two live consequences couldn't
+be distinguished from the repo alone: (a) uploads silently failing (broken feature), or (b) a
+more-permissive out-of-band policy exists that isn't in the migrations.
+**Evidence — verified directly against production, 2026-08-03 (Gabriel signed into the Supabase
+dashboard; ran `scripts/verify-rls.sql` in the live SQL Editor, not simulated):** Production database
+was found PAUSED (Supabase free-tier auto-pause, unrelated to this finding) — Gabriel resumed it
+in-turn before this verification could run. All three parts of the script pass cleanly: **Part 1** —
+all 6 expected tables (`charges`, `payments`, `lease_documents`, `lease_amendments`, `tenant_notices`,
+`insurance_certificates`) have `rowsecurity = true`. **Part 2** — all 10 expected policies exist,
+including all 3 `storage.objects` policies from the out-of-band 0008 migration
+(`tenant_upload_insurance`, `tenant_read_insurance`, `tenant_read_lease_docs`) — confirmed live, and
+the `tenant_upload_insurance` `with_check` expression text matches the migration file exactly. **Part
+3** — zero undocumented policies (`0 rows`). This **rules out scenario (b)**: the policy is exactly as
+documented, not more permissive. **Scenario (a) is confirmed**: since the policy correctly requires
+the storage folder to equal `tenants.id` (via a `tenants.auth_user_id = auth.uid()` join) and the
+client code uploads to `session.user.id` instead, every real COI upload through this page fails RLS
+today — a broken feature, not a data exposure.
+**Bonus finding, out of this item's original scope:** while in the dashboard, Supabase's own Security
+Advisor surfaced a live CRITICAL flag — `public.units` has RLS disabled entirely. Confirmed directly
+(`rowsecurity = false`). Not investigated further (unclear whether `units` is ever queried
+client-side with the anon key, the same way `tenants` also shows `false` but is server-only-accessed
+per [OI-048](#OI-048)'s finding that all API routes use the service-role key) — flag for Gabriel to
+triage, not filed as its own OI item pending that check.
+**Auto-check:** none.
+
+### OI-071
+**Status:** OPEN
+**Opened:** 2026-08-03
+**Source:** Production verification of [OI-067](#OI-067), 2026-08-03
+**Severity:** MEDIUM (broken feature, confirmed — not a security exposure; the RLS policy is correct and holding)
+**Description:** `src/portal/pages/PortalInsurance.tsx` uploads tenant COI files to
+`${session.user.id}/${file.name}` in the `insurance-certs` bucket, but the live `tenant_upload_insurance`
+RLS policy (confirmed applied and correct, see OI-067) requires the folder to equal `tenants.id`
+(resolved via `tenants.auth_user_id = auth.uid()`). Every real tenant COI upload through this page
+fails today — confirmed against production, not just the repo.
+**Candidate fix:** the variable is even misleadingly named `const tenantId = session.user.id` —
+should instead look up the tenant's own `id` (e.g. from the already-loaded portal session/tenant
+context) and upload to `${tenant.id}/${file.name}`. Add an integration test asserting the upload path
+matches the RLS policy's expected folder, not just that the upload call is made.
+**Auto-check:** none.
+
+### OI-070
+**Status:** OPEN
+**Opened:** 2026-08-04
+**Source:** `ora-health-guard` 2026-08-04 run (self-detected via its own `main*.log` read) + direct
+reading of `fleet-status.py`, this session
+**Description:** `find_missed_cycles()` (OI-031's fix, live since 2026-07-27) compares each enabled
+recurring task's `lastRunAt` against only the single most-recent expected cron-fire time as of
+now — a point-in-time check. The registry stores no run history beyond that one scalar, so the
+moment a previously-missed task fires again, `lastRunAt` advances and the gap collapses to ~0h
+with no trace of the earlier miss. Confirmed today: `ora-health-guard` itself produced nothing on
+2026-07-31, 08-01, and 08-02, then resumed 08-03 and 08-04 — but the 08-04 `fleet-status.py` run
+reported "missed single cycle 0" because by the time it ran, `lastRunAt` already reflected the
+fresh same-day fire. The 3-day gap was visible only via the scheduler's own `main*.log` run
+history, which `fleet-status.py` never reads. Same family as [OI-031](#OI-031) (currently-open
+single-cycle miss, fixed) and [OI-058](#OI-058) (a coarser instance of this same blind spot) —
+this item is the narrower "self-healed before the next check" case neither of those covers.
+**Candidate fix (not built):** (a) have `fleet-status.py` persist its own `lastRunAt` snapshot
+across invocations (e.g. `_state/fleet-status-history.json`) and diff against the prior snapshot
+to catch a gap prospectively — cheap, but only detects gaps occurring after the tracking file
+exists; (b) parse the scheduler's own run-history log (the same `main*.log` `ora-health-guard`
+read) for a true historical census over a lookback window — most complete, heavier lift,
+duplicates what health-guard already reconstructs ad hoc; (c) at minimum, relabel the "missed
+single cycle" output so a `0` doesn't read as a clean historical census when it's only a
+point-in-time check (DONE this session — see [event_log.md](event_log.md#2026-08-04)).
+**Auto-check:** none (a tooling-logic gap, not a fleet-registry state comparable to the closed
+Auto-check vocabulary above).
+
 ### OI-061
 **Status:** OPEN
 **Opened:** 2026-08-03
@@ -2015,10 +2093,47 @@ would be the wrong default; needs either the owning session to finish/commit it,
 confirm it's abandoned so it can be discarded.
 **Auto-check:** none.
 
+### OI-072
+**Status:** OPEN
+**Opened:** 2026-08-04
+**Source:** [open-items-tracker.md#OI-061](open-items-tracker.md#OI-061) batch-2 scoping, 2026-08-04
+**Description:** `hooks/tests/lib/gitfixture.py` (landed `6dc5df3`, extended in use by `33e958a`) models exactly
+two repo shapes: `blank_repo()` (init + user config, no commit) and `repo_with_commit()` (adds committed files).
+Four suites now depend on it. Two remaining git-heavy suites need shapes it does NOT model, and converting them
+means EXTENDING that shared dependency — a design decision, not a mechanical swap, which is why it is filed
+rather than done:
+
+| file | git spawns | what it needs that the helper lacks |
+|---|---|---|
+| `test-git-prepush-scan.py` | 177 | **bare** repos (`git init --bare`), a full origin/clone/push/fetch topology (`_mk_origin_and_clone_state`), branch renames, remotes — and author identity `t@example.invalid`, not the template's `t@t.t` |
+| `test-memory-index-git-tracking.py` | 28 | `make_repo(d)` inits a **caller-provided** directory rather than returning a new one (signature mismatch), and uses `user.email "t@t"` — a third identity |
+
+**The identity problem is the crux, and it is a fidelity risk, not a cosmetic one.** Three distinct author
+identities are in play across these suites (`t@t.t`, `t@example.invalid`, `t@t`). A shared template that
+silently normalises them would change committed author metadata — exactly the class of silent difference that
+makes a security-gate suite pass while testing something subtly different. Any extension must key identity into
+the cache (as `newline` and `encoding` already are), never default it.
+**Also unresolved — where the library lives.** Two more candidates sit in the maintenance tree
+(`maintenance/_tests/test_cross_repo_wip_scan.py`, `maintenance/test-append-event-log.py`, ~36 and ~15 git
+spawns, 1 init site each). Importing `hooks/tests/lib/` from `maintenance/` creates a cross-tree coupling; the
+alternative is relocating the helper to a shared location, which touches every current caller. Decide the
+location BEFORE converting either, not after.
+**Recommendation: probably DON'T extend it, at least not for topology.** The bare/clone shapes in
+`test-git-prepush-scan.py` are genuinely part of what that suite tests (push/fetch behaviour against a real
+remote), so hiding them behind a fixture reduces what the test demonstrably exercises. A cheaper, safer option
+is to leave that file alone and convert only `test-memory-index-git-tracking.py` behind an explicit
+`identity=` parameter. **Do not treat this item as a backlog chore to burn down** — the measured benefit is
+modest and the shared-fixture blast radius grows with every shape added.
+**Cost/benefit as measured 2026-08-04:** neither file is near the 90s per-file budget on a quiet machine, so
+this is preventive. Prefer spawn deltas over timings when re-assessing — timings for these files swing by 3x
+on ambient load alone (documented repeatedly in OI-061).
+**Auto-check:** none.
+
 ## Closed
 
 | ID | Opened | Closed | Source | One-line |
 |----|--------|--------|--------|----------|
+| [OI-067](#OI-067) | 2026-08-03 | 2026-08-03 | ora-pm appsec fix plan Task 11 (OI-048), commit `9aa7f30`; verified against production 2026-08-03 (Gabriel signed into Supabase, ran verify-rls.sql live) | Status resolved: production DB was found paused (unrelated, resumed in-turn), all 3 parts of verify-rls.sql pass cleanly — the RLS policy IS live and IS exactly as documented (rules out the "more-permissive out-of-band policy" scenario). Confirmed instead: every real COI upload fails today because the client code uploads to the wrong path. Underlying fix filed as [OI-071](#OI-071). Bonus finding flagged, not filed: Security Advisor shows `public.units` has RLS disabled (CRITICAL), confirmed `rowsecurity=false`, needs Gabriel's triage on client-exposure |
 | [OI-057](#OI-057) | 2026-08-03 | 2026-08-04 | Push of event_log.md commit `8b61f20`, 2026-08-03; fixed by `6dc5df3` (OI-061) | The pre-push timeout is resolved. Direct re-measurement of `hooks/tests/test-eos-review-gate.py` under real concurrent multi-session load (56 dirty files in the checkout at test time, not idle): **76.6s, PASS 55/55** — comfortably under both the 90s per-file budget and the 180s hard timeout that produced OI-057's 3 identical failures. Also corroborated by 2 consecutive real pre-push gates completing clean (61/61, then 63/63, 0 fail) after `6dc5df3` landed. Root cause was OI-059 (excessive fixture-driven subprocess spawns), not the originally-suspected live model call inside the hook — that theory is retired |
 | [OI-059](#OI-059) | 2026-08-03 | 2026-08-04 | [open-items-tracker.md#OI-057](open-items-tracker.md#OI-057) root-cause pass, 2026-08-03; fixed by `6dc5df3` | `hooks/tests/lib/gitfixture.py` (shared template-and-copytree helper) landed, converting `test-eos-review-gate.py`'s `make_repo()` calls from live `git init`/`config`/`commit` subprocess chains to a `shutil.copytree` of a pre-built template. Spawn count 559 -> 199, confirmed by the commit's own measurement and this session's independent 76.6s re-run. Broader 13-file version of this problem is [OI-061](#OI-061), left OPEN — only 2 of 13 files converted so far |
 | [OI-034](#OI-034) | 2026-07-31 | 2026-08-03 | ora-appsec-sweep 2026-07-31; fixed `ora-pm` commit `3e600e4` | Autopay double-debit-on-re-run + arrears-sweep gap both closed — deterministic Stripe idempotencyKey + DB-unique autopay_period guard, plus a REFUTE-caught follow-up fix scoping the debit cap to the current period (not lifetime AR balance). TDD, 244/244 green, typecheck clean |
