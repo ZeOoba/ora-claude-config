@@ -10,10 +10,16 @@ real `git status --short` subprocess path, not a mock.
 """
 import importlib.util
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import time
+
+HOOKS_LIB = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                         "..", "hooks", "tests", "lib")
+sys.path.insert(0, os.path.abspath(HOOKS_LIB))
+import gitfixture  # noqa: E402  (shared repo fixture -- open-items-tracker.md#OI-061)
 
 MAINT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 spec = importlib.util.spec_from_file_location(
@@ -35,10 +41,23 @@ def run(cmd, cwd):
 
 
 def init_repo(path):
-    os.makedirs(path, exist_ok=True)
-    run(["git", "init", "-q"], path)
-    run(["git", "config", "user.email", "test@example.com"], path)
-    run(["git", "config", "user.name", "Test"], path)
+    """Shared template-and-copy fixture (open-items-tracker.md#OI-061), relocated to
+    the caller's chosen `path` so every call site below -- and the
+    tempfile.TemporaryDirectory() scope each sits in -- stays unchanged. Same shape as
+    the hand-rolled version this replaces: init + user config, no commits. The 3 git
+    spawns are now paid ONCE per process instead of on each of this file's 7 calls.
+
+    blank_repo()'s user.email/user.name ("t@t.t"/"t") differ from the original's
+    ("test@example.com"/"Test"); no assertion in this file inspects commit author
+    identity, so that is not a behaviour change for anything actually tested here --
+    every test only checks scan_repo()'s uncommitted_count/oldest_age_hours/stale
+    output, never commit metadata.
+
+    `path` must not already exist -- shutil.move() would nest the fixture INSIDE it
+    instead of renaming onto it. Every caller passes a not-yet-existing subdirectory
+    of a freshly made TemporaryDirectory, so this holds.
+    """
+    shutil.move(gitfixture.blank_repo(), path)
     return path
 
 
