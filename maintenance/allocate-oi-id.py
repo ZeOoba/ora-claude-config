@@ -21,9 +21,22 @@ consider reservations as well as the tracker:
 
     next id = max(highest in tracker, highest reserved) + 1
 
-Reservations live in an append-only ledger next to the tracker. An id is
-therefore burned the moment it is handed out, whether or not the row is ever
-written. That is deliberate: ids are free, collisions are not. A reservation
+Reservations live in an append-only ledger next to the tracker.
+
+THE LEDGER IS LOCAL-ONLY AND NOT BACKED UP. `.gitignore`'s `*.log` catches
+`_state/oi-id-reservations.log`, deliberately: committing a file that gains a
+line on every allocation would drop it straight into the shared-checkout
+contention this tool exists to avoid. The BASELINE is tracked; the reservations
+are not. So after a restore or fresh clone the ledger reads empty while the
+tracker still holds every id, and enforcement flags everything above the
+baseline. Recovery is a re-baseline, documented in full at the bottom of
+`_state/oi-id-baseline.txt` -- including how to tell a lost ledger (empty
+ledger, many violations) from a real hand-assigned id (populated ledger, one or
+two), because re-baselining to paper over the latter would grandfather a genuine
+collision.
+
+An id is therefore burned the moment it is handed out, whether or not the row is
+ever written. That is deliberate: ids are free, collisions are not. A reservation
 that never becomes a row shows up in `--report` as ORPHANED, for a human to
 notice; it is NEVER auto-reclaimed, because reclaiming is precisely how you
 re-open the window this file closes.

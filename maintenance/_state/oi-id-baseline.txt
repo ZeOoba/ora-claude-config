@@ -11,4 +11,32 @@
 #
 # Do NOT raise this to silence a violation -- raising it grandfathers real
 # collisions. Use --backfill for a legitimate hand-assigned id.
+#
+# ---------------------------------------------------------------------------
+# RECOVERY: the reservation ledger is LOCAL-ONLY and NOT backed up.
+# ---------------------------------------------------------------------------
+# THIS file is tracked in git. The ledger it is checked against
+# (_state/oi-id-reservations.log) is NOT -- .gitignore's `*.log` catches it, and
+# that is deliberate: committing it would put an append-on-every-allocation file
+# into the same shared-checkout contention that the allocator exists to avoid.
+#
+# Consequence: after a restore, a fresh clone, or any loss of that .log, the
+# ledger reads as EMPTY while the tracker still holds every id. Enforcement then
+# reports EVERY id above this baseline as unreserved and blocks all pushes.
+#
+# That is the ONLY situation in which raising this number is correct. Recover by
+# re-baselining to the tracker's current highest id:
+#
+#   python maintenance/allocate-oi-id.py --report      # confirm 0 reservations
+#   # then replace the number below with the tracker's current max id
+#   python maintenance/allocate-oi-id.py --enforce     # must exit 0
+#
+# HOW TO TELL THIS APART from a real collision -- check before re-baselining:
+#   ledger absent/empty AND many violations  -> lost ledger, re-baseline
+#   ledger populated AND one or two          -> a real hand-assigned id, use
+#                                               --backfill, do NOT re-baseline
+#
+# Re-baselining costs the audit trail of who reserved or backfilled which ids;
+# it does NOT weaken collision prevention going forward, because every id issued
+# after the new baseline still has to come from the allocator.
 69
