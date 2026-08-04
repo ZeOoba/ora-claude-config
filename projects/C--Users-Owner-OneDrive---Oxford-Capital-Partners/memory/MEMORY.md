@@ -77,6 +77,7 @@
 - [Refute pass — proactive by default](feedback_refute_pass_proactive_default.md) — run before declaring done
 - [REFUTE differential harness](reference_refute_differential_harness.md) — guard/probe regex edits: old-vs-new differential battery; judge deltas, not absolutes
 - [Verify before repeating session claims](feedback_verify_before_repeating_session_claims.md) — check ground truth before relaying
+- [Findings decay — re-check before WRITING](feedback_findings_decay_recheck_before_writing.md) — minutes-long shelf life on shared files; waiting beat intervening 4/4
 - [Artifact citation requirement](feedback_artifact_citation_requirement.md) — Resolved/Closed claims need a citation
 - [Session-retro evidence rule](reference_session_retro_evidence_rule.md) — retros need citation + null-result path or they fabricate
 - [Prompt-embedded current-state prose](feedback_prompt_current_state_prose.md) — baked shas/counts/aging anchors rot, in data fields too; an anchor belongs in a computed field or nowhere
