@@ -14,6 +14,11 @@ import os
 import sys
 import tempfile
 
+HOOKS_LIB = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "..", "hooks", "tests", "lib")
+sys.path.insert(0, os.path.abspath(HOOKS_LIB))
+import gitfixture  # noqa: E402  (shared repo fixture -- open-items-tracker.md#OI-061/#OI-072)
+
 # This test spins up its own throwaway git repos in temp dirs (_make_temp_git_repo
 # below). When invoked as part of the real pre-push hook chain, git sets
 # GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE (etc.) in this process's environment so IT can
@@ -351,11 +356,17 @@ def _run_git(args, cwd):
 
 
 def _make_temp_git_repo():
-    d = tempfile.mkdtemp(prefix="ael-warn-repo-")
-    _run_git(["init", "-q"], d)
-    _run_git(["config", "user.email", "t@t.t"], d)
-    _run_git(["config", "user.name", "t"], d)
-    return d
+    """Shared template-and-copy fixture (open-items-tracker.md#OI-061/#OI-072),
+    following the precedent set by maintenance/_tests/test_cross_repo_wip_scan.py
+    (45fb073). Same shape as the hand-rolled version this replaces: init + user
+    config, no commits -- this file's own _run_git add/commit calls build on top
+    of it. `identity` is passed explicitly, matching what the original hand-rolled
+    fixture used (per OI-072: always pass the caller's original value, never rely
+    on gitfixture's default, even when -- as here -- they happen to be equal).
+    No assertion in this file inspects commit author identity; every downstream
+    check only reads warn_if_uncommitted_backlog()'s stderr output.
+    """
+    return gitfixture.blank_repo(prefix="ael-warn-repo-", identity=("t@t.t", "t"))
 
 
 def _captured_stderr_of(fn, *a, **kw):
