@@ -184,6 +184,9 @@ A unit of work is **done** only when ALL hold (scaled to lane):
 6. **Evidence before claim** — `verification-before-completion`: paste the command output; never assert success from memory.
 7. **Confidentiality** — no `confidential-terms.json` term on any egress surface; cloud review forbidden on confidential repos.
 8. **Karpathy checklist** (skill is `off`, so applied as a manual gate): smallest surgical change; no over-engineering/speculative generality; assumptions surfaced; success criteria stated and verifiable.
+9. **Mutation battery on guard/probe/gate code** (added 2026-08-03) — for anything under `hooks/**` or `maintenance/*-probe.py` / `*-gate.py`, the reviewer must MUTATE the implementation in a scratch copy and confirm each new test detects it. Green tests are not evidence; a test that passes against a broken implementation is worse than no test, because it certifies the gap. Report the kill matrix (killed / survived), and prove each survivor is an *equivalent* mutant rather than a gap.
+   - **When narrowing a matcher, enumerate the collision class mechanically, not from memory.** If a pattern is being made *stricter*, list the real inputs that only matched via the looser form and classify each as intended-drop or must-keep. A hand-picked corpus reflects what the author already thought of, which is never the set that breaks.
+   - Both directions must be pinned: no false positive left, **and no true positive lost**. Only the second is a security regression.
 
 ### 7.1 Execution & model dispatch (auto-selected, not asked)
 
