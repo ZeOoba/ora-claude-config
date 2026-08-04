@@ -17,6 +17,7 @@ Run: python maintenance/_tests/test_oi_id_enforcement.py
 import importlib.util
 import io
 import os
+import subprocess
 import sys
 import tempfile
 
@@ -152,7 +153,52 @@ def test_section_only_new_id_also_enforced():
                [v["id"] for v in r["violations"]] == ["OI-071"], r["violations"])
 
 
+def test_mode_defaults_to_warn_when_unreadable():
+    """Fails TOWARD warn. A gate that cannot read its own config must not
+    spontaneously start blocking pushes."""
+    m = load()
+    with tempfile.TemporaryDirectory() as td:
+        expect("missing mode file -> WARN",
+               m.read_mode(os.path.join(td, "nope.txt")) == "WARN")
+        p = os.path.join(td, "mode.txt")
+        io.open(p, "w", encoding="utf-8").write("# comment\nBLOCK\n")
+        expect("BLOCK is read", m.read_mode(p) == "BLOCK")
+        io.open(p, "w", encoding="utf-8").write("garbage\n")
+        expect("unparseable mode -> WARN", m.read_mode(p) == "WARN")
+
+
+def test_warn_mode_exits_zero_but_still_reports():
+    """The whole point of WARN: visible, not silent, and not blocking. A silent
+    warn is just a disabled check."""
+    m = load()
+    with tempfile.TemporaryDirectory() as td:
+        t, led = fx(td, list(range(1, 70)) + [70]), os.path.join(td, "r.log")
+        bl = os.path.join(td, "b.txt"); io.open(bl, "w", encoding="utf-8").write("69\n")
+        p = subprocess.run(
+            [sys.executable, ALLOC, "--enforce", "--tracker", t, "--ledger", led,
+             "--baseline", bl, "--mode", "WARN"], capture_output=True, text=True)
+        expect("WARN mode exits 0", p.returncode == 0, p.returncode)
+        expect("WARN mode still names the violating id", "OI-070" in p.stdout, p.stdout)
+        expect("WARN mode still names the remedy", "--backfill" in p.stdout, p.stdout)
+        expect("WARN mode says it is not blocking", "not blocking" in p.stdout, p.stdout)
+
+
+def test_block_mode_still_blocks():
+    """WARN must not have quietly disarmed enforcement."""
+    m = load()
+    with tempfile.TemporaryDirectory() as td:
+        t, led = fx(td, list(range(1, 70)) + [70]), os.path.join(td, "r.log")
+        bl = os.path.join(td, "b.txt"); io.open(bl, "w", encoding="utf-8").write("69\n")
+        p = subprocess.run(
+            [sys.executable, ALLOC, "--enforce", "--tracker", t, "--ledger", led,
+             "--baseline", bl, "--mode", "BLOCK"], capture_output=True, text=True)
+        expect("BLOCK mode exits 1", p.returncode == 1, p.returncode)
+
+
 def main():
+    test_mode_defaults_to_warn_when_unreadable()
+    test_warn_mode_exits_zero_but_still_reports()
+    test_block_mode_still_blocks()
     test_grandfathered_ids_pass()
     test_new_id_without_reservation_is_a_violation()
     test_new_id_with_reservation_passes()
