@@ -69,6 +69,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | [OI-059](#OI-059) | 2026-08-03 | [open-items-tracker.md#OI-057](open-items-tracker.md#OI-057) root-cause pass, 2026-08-03 | `hooks/tests/test-eos-review-gate.py` runs **44-67s on an IDLE machine** against a 90s pre-push budget via **559 subprocess spawns** (451 git + 108 Python); **365 of the git spawns come from 73 runtime `make_repo()` calls**. Cause behind OI-057. Fix the fixture (template-and-copy), not the budget. NB: figures corrected 2026-08-03 after review - the first set were static grep counts, not measurements |
 | [OI-060](#OI-060) | 2026-08-03 | ora-pm appsec fix plan Task 5 (OI-037), `plan/appsec-fixes-oi034-048` branch, commit `5a23927` | ora-pm's `public/_headers` (added for OI-037) does NOT apply to `/api/*` — Cloudflare Pages `_headers` only covers static assets, and `/api/*` is served by a Pages Function (`functions/api/[[route]].ts`). Page/document routes correctly get CSP + clickjacking protection; the API surface does not. Needs a Hono middleware (in `server/index.ts` or a new module) setting the same security headers per-response for `/api/*`, mirroring `public/_headers`'s directives (deliberately not built as part of Task 5 — filed instead, per Gabriel's call, 2026-08-03) |
 | [OI-061](#OI-061) | 2026-08-03 | Fixture measurement during [open-items-tracker.md#OI-059](open-items-tracker.md#OI-059), 2026-08-03 | **13 hook/maintenance test files each hand-roll their own git-repo fixture at ~5 process spawns per repo.** Measured sequential total 347.1s across 12 files; worst is 141.7s **under load — over the 90s pre-push budget**, 2nd is 46.3s (51%). Proposal: ONE shared template-and-copytree helper. Broader than OI-059, which only makes the worst file fit |
+| [OI-062](#OI-062) | 2026-08-04 | `pending_reimport.py` frontmatter-norm session, 2026-08-04 | ora-skills MAIN checkout has unattributed uncommitted WIP (modified `plugins/ora-operations-extensions/plugin-build.json` version bump 0.1.5→0.1.6, plus untracked `_check_plugin.py`, both dated ~2026-07-29) — present at session start and still present after PR #38 merged; spans ≥2 sessions unclaimed, nobody has picked it up or discarded it |
 
 ### OI-009
 **Status:** OPEN (substantial progress made 2026-07-17, real scope remains)
@@ -1659,6 +1660,25 @@ one. Expected to remove the large majority of the ~365-per-file fixture spawns.
 **Acceptance:** re-run the timing table above; the top three should drop materially and nothing should regress
 in pass counts. Do not accept on a quiet-machine run alone - re-measure under concurrent load, since that is
 the condition that actually blocks pushes.
+**Auto-check:** none.
+
+### OI-062
+**Status:** OPEN
+**Opened:** 2026-08-04
+**Source:** `pending_reimport.py` frontmatter-normalization session, 2026-08-04 (port of PR #35's
+YAML-quoting fix into `pending_reimport.py`'s comparator, [PR #38](https://github.com/ZeOoba/ora-skills/pull/38),
+merged `33d2579`)
+**Description:** At session start, `C:\Users\Owner\ora-skills` (the MAIN checkout, not a
+worktree) had two uncommitted changes with no attributable owner: `plugins/ora-operations-extensions/plugin-build.json`
+modified (version bump `0.1.5` → `0.1.6`) and an untracked `_check_plugin.py` (112 bytes,
+mtime 2026-07-29). Neither relates to any work this session did. Per the repo's single-writer
+convention, isolated all of this session's own work into a git worktree (`.claude/worktrees/pending-reimport-frontmatter-norm`)
+rather than touch or clean up the stray files, then fast-forwarded the main checkout's `main`
+branch after the PR merged — confirmed the two stray changes were still present and untouched
+afterward. No `claim_work.py`-style claim was found recorded against either file. Left open
+because deleting or committing someone else's possible in-progress change without confirmation
+would be the wrong default; needs either the owning session to finish/commit it, or Gabriel to
+confirm it's abandoned so it can be discarded.
 **Auto-check:** none.
 
 ## Closed
