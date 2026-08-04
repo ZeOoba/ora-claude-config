@@ -12,6 +12,16 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-04 — Root-caused the recurring FLEET DEAD-MAN trips (issue #19, 11 occurrences since 07-21); shipped the software half of the fix
+
+Asked to scope a fix for `ZeOoba/ora-claude-config#19`, which had tripped on essentially every scheduled run for two weeks. Found two distinct, compounding causes rather than one:
+
+**Primary: no wake trigger covers the AM cluster.** The machine's sleep timeout is 180 min on both AC and DC power, and neither `ORA Fleet Heartbeat Push` nor anything else wakes the machine (or relaunches Claude Desktop) before the 05:15 ET task window. Two *other* local Scheduled Tasks (`ORA Fleet Dead-Man`, `ORA Nightly Disk Clean`) already use `WakeToRun=True` successfully — proven, already-used pattern, just never extended to cover this case. Claude Desktop auto-launches at Windows login (confirmed via the `HKCU\...\Run` key), so the gap is specifically sleep-without-a-fresh-login, not full shutdown.
+
+**Compounding, previously unattributed: `push-fleet-heartbeat.ps1` never retries past a push rejection, by design** (avoids touching another session's staged/dirty work in this shared single-writer checkout). Checked its own log: 6 of the last 8 logged push failures were plain non-fast-forward races against a concurrent session's push, not real conflicts — including one, 2026-08-04, caused by the very `OI-066` duplicate-ID bug fixed earlier the same day in this same repo. Fixed in `5a98941`: added a `git fetch` + `git merge --ff-only origin/main` step before commit/push — safe under the script's own invariant (a ff-only merge can't touch uncommitted or another session's staged content; genuine divergence still fails loud exactly as before).
+
+**Left for Gabriel (system-level, not something to change unilaterally):** register a new Scheduled Task, `WakeToRun=True`, ~04:45 ET daily, that launches Claude Desktop (via its AppUserModelID `Claude_pzs8sxrjxfjjc!Claude`, confirmed via `Get-StartApps` — version-update-proof, unlike the pinned `WindowsApps\Claude_<version>\...` path) if not already running. Gave him the `Register-ScheduledTask` PowerShell command (confirmed `schtasks.exe`'s classic `/Create` syntax has no wake-to-run flag at all — checked its help output directly rather than assume — so the modern `ScheduledTasks` module is the correct tool here, not legacy `schtasks`).
+
 ## 2026-08-04 — CORRECTION: commit f9a389e's OI-061 note cited a load-inflated number for test-memory-orphan-link-guard.py
 
 Commit `f9a389e` (closing OI-057/OI-059) said, in justifying why OI-061 stays open: *"verified test-memory-orphan-link-guard.py, the other file 6dc5df3 converted, still runs 96.9s under current load, over the stated 90s budget even post-conversion."* That 96.9s reading was mine, taken standalone while the shared checkout was busy (56 other sessions' dirty files at the time) — not a property of the file's real post-conversion cost.
