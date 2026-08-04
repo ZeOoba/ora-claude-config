@@ -15,7 +15,7 @@
 - [Open Items Tracker](open-items-tracker.md) — canonical punch-list; other files POINT here, never restate item text
 - [Ops Decision Log](ops_decision_log.md) — recurring operational yes/no calls; companion to deal-decision-ledger.md
 - [Active Projects](projects.md) — deal pipeline · E. Fulton (declassified) · React brain · oxfordra.net · PM/lease/governance
-- **OPEN/BLOCKED:** [open-items-tracker worktree/HEAD divergence 07-20](project_open_items_tracker_worktree_head_divergence.md) (don't force-resync) · [event_log IWNS block loss](project_event_log_iwns_block_loss_unattributed_2026-07-21.md) (recovered; cause open)
+- **OPEN/BLOCKED:** [broker OM intake BROKEN in prod 08-04](project_broker_pipeline_blobs_v1_outage_2026-08-04.md) (V1 fns can't auto-provision Blobs; PR #64 ≠ fixed; no data lost) · [open-items-tracker worktree/HEAD divergence 07-20](project_open_items_tracker_worktree_head_divergence.md) (don't force-resync) · [event_log IWNS block loss](project_event_log_iwns_block_loss_unattributed_2026-07-21.md) (recovered; cause open)
 - **PLANNED, awaiting Gabriel:** [acquisition-underwriting doctrine review](project_acquisition_underwriting_doctrine_review_2026-07-18.md) (9 items) · [artifact-content top-5](project_artifact_content_top5_plan_2026-07-18.md) · [setup-improvement top-5](project_setup_improvement_top5_plan_2026-07-18.md) + [Plan 2 design](project_plan2_effect_verification_design_2026-07-18.md)
 - [oxfordra.net SEO Audit](project_oxfordra_seo_audit_2026-07.md) — 84/100; open: portfolio SF/counts, FAQ order, /markets redirect
 - [Claude Env Architecture Baseline 07-29](project_claude_env_architecture_baseline_2026-07-29.md) — official forensic baseline; optimization NOT yet approved
@@ -28,7 +28,7 @@
 - [PFI Warehouse Backlog](pfi-warehouse-systematization-backlog.md) — 3 queued basis-recovery follow-ups
 - [AAOS Agent Coordination Layer](project_aaos_agent_coordination_layer.md) — real infra; Cowork round-trip unreachable from Code, no gate sign-off
 - [brain.oxfordra.net Access](brain-oxfordra-access-finding.md) — LIVE via Pages mirror; tunnel path is a DEAD END
-- [Command Center Mirror Deploy Gap](reference_command_center_mirror_deploy_gap.md) — hourly deploy never pulls
+- [Command Center Mirror Deploy Gap](reference_command_center_mirror_deploy_gap.md) — "never pulls" FIXED (PR #192); open: kill-class alerting blind spot, PR #248
 - [Mirror Deploy 0xC000013A is usually benign](reference_mirror_deploy_0xc000013a_is_usually_benign.md) — run the classifier; duration is not a detector; the script can't self-report a kill
 - [GitHub CI Auto-Fix Rollout](github_ci_autofix_rollout.md) — live on 2 repos; #7 awaits sign-off
 - [oxford-cc worktree gotchas](project_oxford-command-center_worktree_gotchas.md) — WORKBOOK_PATH not inherited per-worktree
@@ -47,6 +47,7 @@
 - [DG Portfolio OH — PASS](deal_dg_portfolio_oh_2026-06.md) — Matthews 3-store DG net-lease + cap stratification
 - [1100 Rarig Ave — Disposition (HOLD)](deal_1100_rarig_disposition_2026-07.md) — basis/NOI/cost-seg; open gaps in file
 - [Historical Evaluations acquisition review 07-29](project_historical_evaluations_acquisition_review_2026-07-29.md) — 13-deal price/NOI table; 2 LTV exceptions accepted; 2 open date discrepancies
+- [entry-market-scan defects 08-04](reference_entry_market_scan_defects_2026-08-04.md) — `Gate Review` field CREATED 08-04; blank = awaiting Gabriel, never placeholder it
 - [5515 Catfish Court broker-correspondence claim is FALSE](reference_catfish_court_broker_correspondence_claim_false.md) — Sullivan thread exists; 08-14 re-check is a warm follow-up, not a cold call
 - [Delinquency collection-status blind spot](reference_delinquency_report_collection_status_blindspot.md) — "no action taken" is inferred; wrong for 4 of 6 tenants 07-24
 - [Columbus Suburban default/vacate 07-28](tenant_columbus_suburban_default_2026-07-28.md) — ORA-T-105 gone; $20,457 owed, PM misspells name "Suburan"; vacate ≠ contract expiry
@@ -77,6 +78,7 @@
 - [Refute pass — proactive by default](feedback_refute_pass_proactive_default.md) — run before declaring done
 - [REFUTE differential harness](reference_refute_differential_harness.md) — guard/probe regex edits: old-vs-new differential battery; judge deltas, not absolutes
 - [Verify before repeating session claims](feedback_verify_before_repeating_session_claims.md) — check ground truth before relaying
+- [Browser pane is 0x0 until resized](reference_browser_pane_zero_viewport_blocks_images.md) — "screenshots impossible" is usually an unresized pane; 9/9 agents got this wrong
 - [Findings decay — re-check before WRITING](feedback_findings_decay_recheck_before_writing.md) — minutes-long shelf life on shared files; waiting beat intervening 4/4
 - [Artifact citation requirement](feedback_artifact_citation_requirement.md) — Resolved/Closed claims need a citation
 - [Session-retro evidence rule](reference_session_retro_evidence_rule.md) — retros need citation + null-result path or they fabricate
