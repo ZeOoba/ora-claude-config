@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-08-04T19:31:52.173Z
+  modified: 2026-08-04T19:39:47.802Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -2093,6 +2093,25 @@ under self-inflicted load) — do not quote it.
 - **A live post-landing datapoint:** the very push that landed this still emitted
   `timeout-retry ... not blocking` for `test-eos-review-gate.py`. At 199 spawns it is now python-spawn-bound,
   which is exactly why OI-057 stays open and why the residual hook invocations must not be cut to chase it.
+
+**✅ ONE MORE OF THE ~10 LANDED 2026-08-04 — `maintenance/_tests/test_cross_repo_wip_scan.py`, commit
+`45fb073`.** Well under budget before conversion (1.47s baseline) — preventive, not urgent — done to prove
+the shared helper generalises past the first two files. `init_repo()` (7 call sites, `git init` + 2x
+`git config` each = 21 spawns) now delegates to `gitfixture.blank_repo()` and `shutil.move()`s the result
+onto the caller's chosen path, so every call site and its enclosing `tempfile.TemporaryDirectory()` scope
+is unchanged — zero call-site diff. `blank_repo()`'s `user.email`/`user.name` ("t@t.t"/"t") differ from the
+original's ("test@example.com"/"Test"); no assertion here inspects commit author identity, so per this
+item's own "assertions unchanged" bar that is not a behaviour change for anything actually tested.
+Measured: 23/23 pass unchanged; spawns 21 → 3 (via `gitfixture.spawn_count()`); 0 orphaned temp dirs — this
+conversion leaks *less* than files 1-2, because relocating into the caller's `TemporaryDirectory()` scope
+means the OS cleans it up rather than leaving it for gitfixture's documented leak-and-reap contract (that
+0-leaked result only trusted after catching that a first env-var-based measurement attempt was silently
+inert on Windows). No regression in `gitfixture`'s own invariant suite or either already-converted file.
+Landed from worktree `perf/oi061-cross-repo-wip-scan`, not the shared checkout. Lighter review than files
+1-2's independent-review + sabotage-test rounds, deliberately: this file tests `cross-repo-wip-scan.py`, a
+periodic informational status report, not an auth/exit-code security gate, so CLAUDE.md's mandatory-REFUTE
+clause does not apply — the `gitfixture` primitive it calls already carries that heavier review. **~9 files
+remain**, still preventive.
 **Auto-check:** none.
 
 ### OI-062
