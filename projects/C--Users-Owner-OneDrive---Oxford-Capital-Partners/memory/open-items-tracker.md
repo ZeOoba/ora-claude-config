@@ -66,6 +66,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | [OI-052](#OI-052) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (dispatch integrity gate, first live test) | **MEDIUM — sweep mechanism, not a repo defect.** The `ora-appsec-sweep` Fable model floor is carried entirely by the `security-auditor` Agent dispatch (Gabriel-ratified Option C, 2026-07-24, because the task's own frontmatter `model:` pin is inert on CC/MCP). First live test 2026-07-31: the dispatch WORKED — both subagents spawned with `model:"fable"` recorded in their meta and both STARTED on `claude-fable-5` — but both then fell back mid-run to `claude-opus-5` via an explicit harness `{"type":"fallback","from":"claude-fable-5","to":"claude-opus-5"}` event (ora-pm at msg ~108, 68 of 130 assistant msgs on opus-5; occ at msg ~163, 3 of 110). Opus-5 is the session's own top-tier main-loop model, NOT a downgrade to Sonnet/Haiku — so the never-below-Fable floor does not appear breached downward — but the pin does NOT hold end-to-end, which the DISPATCH INTEGRITY GATE's three assertions do not detect |
 | [OI-057](#OI-057) | 2026-08-03 | Push of event_log.md commit `8b61f20`, 2026-08-03 | `hooks/tests/test-eos-review-gate.py` reliably times out on pre-push (exit 124, 180s, reproduced identically 3x) — `run_hook()` spawns the real `eos-review-gate.py` subprocess with no timeout of its own; suspected cause is a live independent-review model call inside that hook contending with other concurrently active sessions (unconfirmed — Gabriel chose override over investigation this run). Bypassed via a session-scoped `allow-hook-test-failure` override token to land that push; the underlying timeout is unfixed and will block the next push (any session) until root-caused or overridden again — **but the 2026-08-03 push evidence CONTRADICTS the 'will block the next push' claim: two consecutive pushes ran the gate to completion, 0 fail, no override needed.** See entry |
 | [OI-058](#OI-058) | 2026-08-03 | `ora-pm-ledger` 2026-08-01 run + OI-030 coherence read, 2026-08-03 | `ora-weekly-hygiene` Block C fired 2026-08-03 03:47 ET but published NOTHING - no XLSX, no Notion page, no email (verified null on all three). One full weekly cycle lost; last output is 2026-07-26. Cause undetermined from artifacts alone, needs the run transcript. Related: [open-items-tracker.md#OI-031](open-items-tracker.md#OI-031) (same blind spot, one level coarser) |
+| [OI-059](#OI-059) | 2026-08-03 | [open-items-tracker.md#OI-057](open-items-tracker.md#OI-057) root-cause pass, 2026-08-03 | `hooks/tests/test-eos-review-gate.py` runs **66.5s on an IDLE machine** against a 90s pre-push budget (26% headroom) via ~**344 subprocess spawns** - 270 of them `git`, from 54 x `make_repo()` at 5 spawns each. This is the cause behind OI-057's timeouts. Fix the fixture (template-and-copy), not the budget |
 
 ### OI-009
 **Status:** OPEN (substantial progress made 2026-07-17, real scope remains)
@@ -1544,6 +1545,42 @@ under real concurrent load it can exceed even 180s. Two candidate fixes - (a) cu
 (attacks the cause), or (b) give this known outlier a larger budget, which the gate's docstring deliberately
 rejects as a per-file roster that would rot. (a) is the better target. **Do not close this on quiet-machine
 pushes**; only a push under comparable multi-session load tests it.
+**Auto-check:** none.
+
+### OI-059
+**Status:** OPEN
+**Opened:** 2026-08-03
+**Source:** [open-items-tracker.md#OI-057](open-items-tracker.md#OI-057) root-cause pass, 2026-08-03
+**Description:** `hooks/tests/test-eos-review-gate.py` (1045 lines, 55 tests) is the pre-push suite's runtime
+outlier and the direct cause of OI-057's timeouts. **Measured 2026-08-03, not estimated:**
+- **66.5s wall-clock running the file alone on an otherwise-idle machine**, against the gate's
+  `PER_TEST_TIMEOUT_SECONDS = 90`. That is **26% headroom on a quiet box** - so any real concurrent load pushes
+  it past 90s (first-budget timeout, absorbed by the retry) and heavy load past 180s (both budgets, a hard
+  block). Both OI-057 events fall out of this one number; nothing else needs to be invoked to explain them.
+- **~344 subprocess spawns per run**: **270 `git`** (54 calls to `make_repo()`, each doing `git init` + 2x
+  `git config` + `git add` + `git commit` = 5 spawns) plus **74 Python** (`run_hook()` / `run_cli()`, each a
+  fresh interpreter running the real hook).
+**Corrects a stale figure:** `hooks/git-prepush-hook-tests-gate.py`'s module docstring calls this file "the
+suite's outlier at 48 subprocess spawns." 48 undercounts by ~7x - it appears to count only hook invocations and
+misses the git fixture entirely, which is where the majority of the cost actually is. Worth correcting there so
+the next reader optimises the right thing.
+**Recommended fix - attack the fixture, not the budget.** Build ONE template repo per run and `shutil.copytree`
+it per test (a filesystem copy of a tiny repo is far cheaper than 5 process spawns). That removes roughly 265
+of the 270 git spawns and should be the bulk of the 66.5s, with no change to what any test asserts. Do this
+first and re-measure before touching anything else.
+**⚠ Do NOT bulk-convert the 74 hook invocations to in-process calls.** This is a SECURITY-GATE test
+(`hooks/**` override/auth/exit-code logic). The subprocess boundary *is* part of the contract under test -
+exit codes, the stdin JSON protocol, env-var isolation - and importing the hook to call it directly would let
+the suite pass while the real invoked path is broken. That is the precise failure class these gates exist to
+prevent. If any of these are converted later, keep a meaningful set as true end-to-end subprocess tests, and
+per CLAUDE.md that change takes the MANDATORY adversarial REFUTE pass for security-gate code.
+**Acceptance:** re-measure the file's isolated wall-clock after the fixture change; it should land far enough
+under 90s that concurrent load has real margin, and the pre-push summary should stop emitting
+`timeout-retry ... not blocking` for it on ordinary pushes. Do not treat a single quiet-machine pass as
+acceptance - the failure is load-dependent (see OI-057).
+**Relationship to other items:** OI-057 is the *symptom* (timeouts at the gate) and stays open until this is
+fixed; this item is the *cause*. The gate's own parallel worker pool (added 2026-07-26, OI-028) already
+mitigates suite-level wall-clock but cannot help a single file that exceeds a per-file budget on its own.
 **Auto-check:** none.
 
 ## Closed
