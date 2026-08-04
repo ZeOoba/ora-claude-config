@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-08-03T22:59:07.810Z
+  modified: 2026-08-04T02:26:14.459Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -66,7 +66,11 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | [OI-052](#OI-052) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (dispatch integrity gate, first live test) | **MEDIUM — sweep mechanism, not a repo defect.** The `ora-appsec-sweep` Fable model floor is carried entirely by the `security-auditor` Agent dispatch (Gabriel-ratified Option C, 2026-07-24, because the task's own frontmatter `model:` pin is inert on CC/MCP). First live test 2026-07-31: the dispatch WORKED — both subagents spawned with `model:"fable"` recorded in their meta and both STARTED on `claude-fable-5` — but both then fell back mid-run to `claude-opus-5` via an explicit harness `{"type":"fallback","from":"claude-fable-5","to":"claude-opus-5"}` event (ora-pm at msg ~108, 68 of 130 assistant msgs on opus-5; occ at msg ~163, 3 of 110). Opus-5 is the session's own top-tier main-loop model, NOT a downgrade to Sonnet/Haiku — so the never-below-Fable floor does not appear breached downward — but the pin does NOT hold end-to-end, which the DISPATCH INTEGRITY GATE's three assertions do not detect |
 | [OI-057](#OI-057) | 2026-08-03 | Push of event_log.md commit `8b61f20`, 2026-08-03 | `hooks/tests/test-eos-review-gate.py` reliably times out on pre-push (exit 124, 180s, reproduced identically 3x) — `run_hook()` spawns the real `eos-review-gate.py` subprocess with no timeout of its own; suspected cause is a live independent-review model call inside that hook contending with other concurrently active sessions (unconfirmed — Gabriel chose override over investigation this run). Bypassed via a session-scoped `allow-hook-test-failure` override token to land that push; the underlying timeout is unfixed and will block the next push (any session) until root-caused or overridden again — **but the 2026-08-03 push evidence CONTRADICTS the 'will block the next push' claim: two consecutive pushes ran the gate to completion, 0 fail, no override needed.** See entry |
 | [OI-058](#OI-058) | 2026-08-03 | `ora-pm-ledger` 2026-08-01 run + OI-030 coherence read, 2026-08-03 | `ora-weekly-hygiene` Block C fired 2026-08-03 03:47 ET but published NOTHING - no XLSX, no Notion page, no email (verified null on all three). One full weekly cycle lost; last output is 2026-07-26. Cause undetermined from artifacts alone, needs the run transcript. Related: [open-items-tracker.md#OI-031](open-items-tracker.md#OI-031) (same blind spot, one level coarser) |
-| [OI-059](#OI-059) | 2026-08-03 | [open-items-tracker.md#OI-057](open-items-tracker.md#OI-057) root-cause pass, 2026-08-03 | `hooks/tests/test-eos-review-gate.py` runs **66.5s on an IDLE machine** against a 90s pre-push budget (26% headroom) via ~**344 subprocess spawns** - 270 of them `git`, from 54 x `make_repo()` at 5 spawns each. This is the cause behind OI-057's timeouts. Fix the fixture (template-and-copy), not the budget |
+| [OI-059](#OI-059) | 2026-08-03 | [open-items-tracker.md#OI-057](open-items-tracker.md#OI-057) root-cause pass, 2026-08-03 | `hooks/tests/test-eos-review-gate.py` runs **44-67s on an IDLE machine** against a 90s pre-push budget via **559 subprocess spawns** (451 git + 108 Python); **365 of the git spawns come from 73 runtime `make_repo()` calls**. Cause behind OI-057. Fix the fixture (template-and-copy), not the budget. NB: figures corrected 2026-08-03 after review - the first set were static grep counts, not measurements |
+| [OI-060](#OI-060) | 2026-08-03 | ora-pm appsec fix plan Task 5 (OI-037), `plan/appsec-fixes-oi034-048` branch, commit `5a23927` | ora-pm's `public/_headers` (added for OI-037) does NOT apply to `/api/*` — Cloudflare Pages `_headers` only covers static assets, and `/api/*` is served by a Pages Function (`functions/api/[[route]].ts`). Page/document routes correctly get CSP + clickjacking protection; the API surface does not. Needs a Hono middleware (in `server/index.ts` or a new module) setting the same security headers per-response for `/api/*`, mirroring `public/_headers`'s directives (deliberately not built as part of Task 5 — filed instead, per Gabriel's call, 2026-08-03) |
+| [OI-063](#OI-063) | 2026-08-03 | ora-pm appsec fix plan Task 9 (OI-041/042 remainder), `plan/appsec-fixes-oi034-048` branch, commit `afef524`, confirmed by independent task reviewer | ora-pm has raw Postgres error-message passthroughs (the OI-042 pattern) on **5 files no task in the 11-task appsec plan named**: `properties.ts` (3 sites), `expenses.ts` (2), `payments.ts` (1), `portal-auth.ts` (2), `portal-insurance.ts` (1) — a gap in how the original sweep carved up scope, not a regression. Fix: route each through the `dbError(c, error, publicMsg?)` helper already shipped in `server/lib/api-error.ts` (Task 7), same pattern used across the rest of the branch. Straightforward, low-risk, mechanical follow-up |
+| [OI-061](#OI-061) | 2026-08-03 | Fixture measurement during [open-items-tracker.md#OI-059](open-items-tracker.md#OI-059), 2026-08-03 | **13 hook/maintenance test files each hand-roll their own git-repo fixture at ~5 process spawns per repo.** Measured sequential total 347.1s across 12 files; worst is 141.7s **under load — over the 90s pre-push budget**, 2nd is 46.3s (51%). Proposal: ONE shared template-and-copytree helper. Broader than OI-059, which only makes the worst file fit |
+| [OI-062](#OI-062) | 2026-08-04 | `pending_reimport.py` frontmatter-norm session, 2026-08-04 | ora-skills MAIN checkout has unattributed uncommitted WIP (modified `plugins/ora-operations-extensions/plugin-build.json` version bump 0.1.5→0.1.6, plus untracked `_check_plugin.py`, both dated ~2026-07-29) — present at session start and still present after PR #38 merged; spans ≥2 sessions unclaimed, nobody has picked it up or discarded it |
 
 ### OI-009
 **Status:** OPEN (substantial progress made 2026-07-17, real scope remains)
@@ -1553,17 +1557,38 @@ pushes**; only a push under comparable multi-session load tests it.
 **Source:** [open-items-tracker.md#OI-057](open-items-tracker.md#OI-057) root-cause pass, 2026-08-03
 **Description:** `hooks/tests/test-eos-review-gate.py` (1045 lines, 55 tests) is the pre-push suite's runtime
 outlier and the direct cause of OI-057's timeouts. **Measured 2026-08-03, not estimated:**
-- **66.5s wall-clock running the file alone on an otherwise-idle machine**, against the gate's
-  `PER_TEST_TIMEOUT_SECONDS = 90`. That is **26% headroom on a quiet box** - so any real concurrent load pushes
-  it past 90s (first-budget timeout, absorbed by the retry) and heavy load past 180s (both budgets, a hard
-  block). Both OI-057 events fall out of this one number; nothing else needs to be invoked to explain them.
-- **~344 subprocess spawns per run**: **270 `git`** (54 calls to `make_repo()`, each doing `git init` + 2x
-  `git config` + `git add` + `git commit` = 5 spawns) plus **74 Python** (`run_hook()` / `run_cli()`, each a
-  fresh interpreter running the real hook).
-**Corrects a stale figure:** `hooks/git-prepush-hook-tests-gate.py`'s module docstring calls this file "the
-suite's outlier at 48 subprocess spawns." 48 undercounts by ~7x - it appears to count only hook invocations and
-misses the git fixture entirely, which is where the majority of the cost actually is. Worth correcting there so
+- **44-67s wall-clock running the file alone on an otherwise-idle machine** (three independent clean runs:
+  44.2s, ~60s, 66.5s), against the gate's `PER_TEST_TIMEOUT_SECONDS = 90`. A thin AND highly variable margin -
+  the variance matters as much as the mean. Under real concurrent load it exceeds 90s (first-budget timeout,
+  absorbed by the retry) and can exceed 180s (both budgets, a hard block). Both OI-057 events fall out of this.
+- **559 subprocess spawns per run**, measured by wrapping `subprocess.Popen` with a counter around a full run:
+  **451 `git` + 108 Python**. Of the git spawns, **365 come from the `make_repo()` fixture** (**73 runtime
+  calls** x 5: init + 2x config + add + commit); the remaining ~86 are direct `git()` helper calls. The fixture
+  is **65% of all spawns** - it is the thing to fix.
+
+**⚠ FIGURES CORRECTED 2026-08-03 (this entry originally carried WRONG numbers - the same error class it was
+filed to fix).** As first filed this item claimed "~344 spawns (270 git + 74 Python), 54 make_repo() calls,
+~7x undercount." Those were **static grep call-site counts presented as measurements**. An independent review
+REJECTED them and instrumented the actual run; a second independent instrumented run confirmed the reviewer
+exactly. Two things made the grep wrong: it counted the `def make_repo():`/`def run_hook():` lines as call
+sites, and - the larger error - **two loops call `make_repo()` once per iteration** (a 14-case risk-class loop
+and an 8-form pathspec loop), so 53 static sites produce 73 runtime calls. **Lesson: a spawn count is a runtime
+property; grep cannot measure it.** That is precisely the mistake the original "48" made, so filing it again
+here would have been self-refuting.
+**Corrects a stale figure (fix REVIEWED, not yet landed - see below):** `hooks/git-prepush-hook-tests-gate.py`'s module docstring calls this file "the
+suite's outlier at 48 subprocess spawns." 48 undercounts by ~11.6x. It is that file's TEST count (48 then, 55 now), and the git
+fixture - 65% of the real cost - is missing from it entirely. Worth correcting there so
 the next reader optimises the right thing.
+
+**Docstring fix status: reviewed and APPROVED, BLOCKED on a guard deadlock (2026-08-03).** The corrected
+docstring is committed-ready in worktree `fix/spawn-count-docstring` (branch off `59155c4`). It passed two
+independent review rounds - the first REJECTED it over the bad figures above, the second APPROVED after they
+were re-measured, proving behavioural inertness three ways (AST minus docstring node, token stream with
+comments masked, recursive bytecode compare) with the gate's own suite 75/75. It cannot LAND because
+`eos-review-gate` requires a recorded review artifact and `config-write-guard` blocks `--record` for naming
+`hooks/` - the documented deadlock in [[reference_config_write_guard_blocks_eos_review_gate]]. Gabriel ruled
+2026-08-03: WAIT for session 83715320's config-write-guard hooks/sessions carve-out rather than mint an
+override. **Land it once that carve-out ships** - the worktree is the pending work, do not redo it.
 **Recommended fix - attack the fixture, not the budget.** Build ONE template repo per run and `shutil.copytree`
 it per test (a filesystem copy of a tiny repo is far cheaper than 5 process spawns). That removes roughly 265
 of the 270 git spawns and should be the bulk of the 66.5s, with no change to what any test asserts. Do this
@@ -1581,6 +1606,89 @@ acceptance - the failure is load-dependent (see OI-057).
 **Relationship to other items:** OI-057 is the *symptom* (timeouts at the gate) and stays open until this is
 fixed; this item is the *cause*. The gate's own parallel worker pool (added 2026-07-26, OI-028) already
 mitigates suite-level wall-clock but cannot help a single file that exceeds a per-file budget on its own.
+
+### OI-060
+**Status:** OPEN
+**Opened:** 2026-08-03
+**Source:** ora-pm appsec fix plan (subagent-driven-development execution of `plan/appsec-fixes-oi034-048`), Task 5 (OI-037 CORS + security headers), commit `5a23927`
+**Description:** Task 5 added `public/_headers` to ora-pm to close OI-037 (missing CORS allowlist + security headers). The task's independent reviewer (fable model) found that Cloudflare Pages' `_headers` mechanism only applies to **static assets** — it does not apply to responses served by a **Pages Function**. ora-pm's `/api/*` routes are served by `functions/api/[[route]].ts`, a Pages Function, so none of `_headers`'s directives (CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, HSTS, Permissions-Policy) actually reach API responses. OI-037's own motivating example (`curl -I https://ora-pm.pages.dev/api/health` showing no security headers) is therefore **not fixed** by Task 5 for the API surface, even though the fix is correctly applied and verified for document/page routes (clickjacking protection, page-level CSP).
+**How to apply:** add a Hono middleware (in `server/index.ts`, or a small new module mirroring `server/lib/`'s existing structure) that sets the same header set as `public/_headers` on every `/api/*` response. Reuse the exact directive values already committed in `public/_headers` rather than re-deriving them, so the two surfaces stay in sync. Should get the same TDD + independent-review treatment as the rest of the appsec-fix work (this is still security-gate code). Deliberately not folded into Task 5 itself — Gabriel's call, 2026-08-03, to keep that task's scope and review clean rather than expand it mid-flight.
+**Auto-check:** none.
+**Auto-check:** none.
+
+### OI-063
+**Status:** OPEN
+**Opened:** 2026-08-03
+**Source:** ora-pm appsec fix plan (subagent-driven-development execution of `plan/appsec-fixes-oi034-048`), Task 9 (OI-041/OI-042 remainder + OI-046 gap closure), commit `afef524` — self-flagged by the implementer, independently confirmed via grep by the task reviewer (not just trusted)
+**Description:** OI-042 ("raw Postgres error messages returned to clients") was originally scoped across Tasks 2/7/8/9 by file, but the scoping missed 5 files entirely — no task in the 11-task plan names them, so no branch commit touches them. Confirmed still live: `properties.ts` (3 sites), `expenses.ts` (2), `payments.ts` (1), `portal-auth.ts` (2), `portal-insurance.ts` (1). Task 9 correctly declined to silently expand its own scope to cover these — same discipline as OI-060's filing.
+**How to apply:** route each site through `dbError(c, error, publicMsg?)` (`server/lib/api-error.ts`, shipped by Task 7 of the same branch) — mechanical, same pattern as every other file in the branch. Low risk, no schema/logic changes needed, just the error-response swap. Should extend `tests/lib/no-raw-db-errors.test.ts`'s tripwire (same branch, Task 9) to cover these 5 files once fixed, closing the allowlist gap that currently excludes them.
+**Auto-check:** none.
+**Auto-check:** none.
+
+### OI-061
+**Status:** OPEN
+**Opened:** 2026-08-03
+**Source:** Fixture measurement taken while root-causing [open-items-tracker.md#OI-059](open-items-tracker.md#OI-059), 2026-08-03
+**Description:** **13** test files across `hooks/tests/`, `maintenance/_tests/` and `maintenance/` each
+hand-roll their own throwaway git-repo fixture, every one paying ~5 process spawns per repo built (`git init`
++ 2x `git config` + `git add` + `git commit`). There is no shared helper. In `test-eos-review-gate.py` alone
+that fixture accounts for **365 of its 559 spawns (65%)** - see OI-059.
+**Measured 2026-08-03** (each file run as its own subprocess, as the gate runs them):
+
+| file | secs | % of the 90s per-file budget |
+|---|---|---|
+| `test-eos-review-gate.py` | **141.7** | **157% - OVER BUDGET** |
+| `test-memory-orphan-link-guard.py` | 46.3 | 51% |
+| `test-confidentiality-guard.py` | 42.0 | 47% |
+| `test-git-prepush-scan.py` | 31.2 | 35% |
+| `test-commit-provenance-guard.py` | 29.2 | 32% |
+| `test-shared-checkout-guard.py` | 19.6 | 22% |
+| `test-doctrine-integrity-probe.py` | 18.4 | 20% |
+| (5 more) | 2.1-7.0 | <8% |
+| **sequential total, 12 files** | **347.1** | |
+
+**Why this is a SEPARATE item from OI-059.** OI-059 is scoped to getting ONE file back under its budget. This
+is the cross-cutting cause and is **preventive**: the second-worst file is already at **51%** of the budget
+with nothing pathological about it, so the next file to grow hits the same wall and files another OI-057. The
+141.7s reading above is the point - that run happened while this session was doing other work, i.e. exactly
+the multi-session load condition OI-057 documented. On a quiet machine the same file takes 44-67s. **The
+budget is not the problem; the per-test process cost is.**
+**Proposed fix:** one shared helper (e.g. `hooks/tests/lib/gitfixture.py`) that builds a template repo ONCE
+per test process and `shutil.copytree`s it per test. A filesystem copy of a tiny repo is far cheaper than 5
+spawns, and the git object store copies intact, so the resulting repo is byte-identical to a freshly-inited
+one. Expected to remove the large majority of the ~365-per-file fixture spawns.
+**⚠ Constraints - this is the verification layer for security gates, so treat it as such:**
+- **A shared fixture becomes a single point of failure for 13 test files.** If it silently produces a subtly
+  different repo (missing config, different default branch name, no initial commit), tests can pass while no
+  longer exercising what they claim. Keep it small, and assert its invariants in its own test.
+- **Convert incrementally, top-3 first, and re-measure between each.** Do NOT convert all 13 in one pass.
+- **Each converted file must still pass with its assertions UNCHANGED.** A fixture change that requires
+  editing assertions is a behaviour change in disguise - stop and re-examine.
+- Per CLAUDE.md, changes under `hooks/**` take the independent-review gate; expect the same
+  `config-write-guard`/`eos-review-gate` interaction that currently blocks OI-059's docstring fix
+  ([[reference_config_write_guard_blocks_eos_review_gate]]), so plan to land this from a worktree.
+**Acceptance:** re-run the timing table above; the top three should drop materially and nothing should regress
+in pass counts. Do not accept on a quiet-machine run alone - re-measure under concurrent load, since that is
+the condition that actually blocks pushes.
+**Auto-check:** none.
+
+### OI-062
+**Status:** OPEN
+**Opened:** 2026-08-04
+**Source:** `pending_reimport.py` frontmatter-normalization session, 2026-08-04 (port of PR #35's
+YAML-quoting fix into `pending_reimport.py`'s comparator, [PR #38](https://github.com/ZeOoba/ora-skills/pull/38),
+merged `33d2579`)
+**Description:** At session start, `C:\Users\Owner\ora-skills` (the MAIN checkout, not a
+worktree) had two uncommitted changes with no attributable owner: `plugins/ora-operations-extensions/plugin-build.json`
+modified (version bump `0.1.5` → `0.1.6`) and an untracked `_check_plugin.py` (112 bytes,
+mtime 2026-07-29). Neither relates to any work this session did. Per the repo's single-writer
+convention, isolated all of this session's own work into a git worktree (`.claude/worktrees/pending-reimport-frontmatter-norm`)
+rather than touch or clean up the stray files, then fast-forwarded the main checkout's `main`
+branch after the PR merged — confirmed the two stray changes were still present and untouched
+afterward. No `claim_work.py`-style claim was found recorded against either file. Left open
+because deleting or committing someone else's possible in-progress change without confirmation
+would be the wrong default; needs either the owning session to finish/commit it, or Gabriel to
+confirm it's abandoned so it can be discarded.
 **Auto-check:** none.
 
 ## Closed
