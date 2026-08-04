@@ -219,6 +219,17 @@ def cadence_buffer_days(expr):
 # Monday fire go unnoticed for a full week despite same-day fleet snapshots
 # reporting "0 overdue, 0 missed/stuck". This is additive only -- it does not
 # change any existing field's meaning or the pre-existing verdict inputs above.
+#
+# KNOWN LIMITATION (OI-070, logged 2026-08-04): this is a POINT-IN-TIME check.
+# It compares lastRunAt against only the single most-recent expected fire as
+# of THIS run -- the registry carries no run history beyond that one scalar.
+# If a task misses one or more cycles and then fires again before the next
+# fleet-status.py invocation, lastRunAt advances and the earlier gap becomes
+# permanently invisible here (confirmed 2026-08-04: ora-health-guard missed
+# 07-31/08-01/08-02, resumed 08-03/08-04, and this detector read 0 -- the
+# 3-day gap was only recoverable from the scheduler's own run log). A clean
+# "0" from this check means "no CURRENTLY open miss", not "nothing was ever
+# missed" -- do not report it as a historical census.
 MISSED_CYCLE_GRACE_HOURS = 24  # generous: fleet only fires while the Desktop
                                # app is open, so some lateness is normal and
                                # expected, not a fault. Flags only once a task
@@ -445,6 +456,10 @@ def main():
             "expired_onetime": [t.get("id") for t in expired],
             "expired_needs_attention": [t.get("id") for t in expired_needs_attention],
             "missed_cycle": missed_cycle,
+            "missed_cycle_scope": ("point-in-time only -- lastRunAt vs. the most recent expected "
+                                   "fire as of THIS run; a gap that already self-healed (task "
+                                   "fired again) before this check is invisible here -- see OI-070 "
+                                   "and the scheduler's own run log for a historical census"),
             "total_skip_events": total_skip_events,
             "tasks_with_skips": skip_counts,
             "recent_skip_events_24h": recent_skip_total,
@@ -488,9 +503,11 @@ def main():
     print("  EXPIRED one-time ... %d   %s" % (len(expired), ", ".join(sorted(t.get("id") for t in expired)) or "-"))
     print("      of which missed/stuck %d   %s" % (len(expired_needs_attention),
           ", ".join(sorted(t.get("id") for t in expired_needs_attention)) or "- (normal completions)"))
-    print("  missed single cycle  %d   %s" % (len(missed_cycle),
+    print("  missed single cycle (currently open) %d   %s" % (len(missed_cycle),
           ", ".join("%s(%.1fh)" % (m["id"], m["gap_hours"]) for m in
                     sorted(missed_cycle, key=lambda m: m["id"])) or "-"))
+    print("      NOTE: point-in-time only -- a gap that already self-healed (task fired again "
+          "since) is invisible here; see OI-070 and the scheduler's own run log for history.")
     print("  throttle skips ..... %d events across %d tasks (all-time)" % (total_skip_events, len(skip_counts)))
     if skip_counts:
         top = sorted(skip_counts.items(), key=lambda kv: kv[1], reverse=True)[:5]
