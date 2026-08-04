@@ -31,6 +31,22 @@ NOT a security boundary: any session can release or overwrite any claim file (no
 ownership enforcement). It is a courtesy broadcast, not an access-control mechanism --
 matching the existing single-writer rules, which are also conventions, not gates.
 
+RENEWAL (added 2026-08-04, open-items-tracker.md OI-072 handoff near-miss): `claimed_at`
+was originally set once, at initial `claim`, and nothing prompted a session doing
+continued multi-step work under one slug to touch it again. A claim's reported age then
+drifts from "time since this session was last active" to "time since one single past
+event" -- a reader (this module's own `list` output, or another session via
+active-work-broadcast.py's SessionStart context) can misjudge a still-live, still-being-
+worked claim as abandoned purely because the timestamp is old and the frozen description
+reads as already finished. `renew_claim()` / `claim_work.py renew <slug>` bumps
+`claimed_at` to now on a claim the calling session already holds (refuses -- returns
+None / exits 1 -- if the slug has no live claim, or a DIFFERENT session holds it, so it
+can never be used to quietly take over someone else's slug). Convention: run it
+periodically ("I'm still here, still on this") rather than claiming once and letting a
+multi-hour session's timestamp sit unchanged. Separately, `claim` now WARNS (does not
+block -- still fail-open) when it is about to overwrite a different session's still-live
+claim, closing the matching gap where that overwrite previously happened silently.
+
 Stdlib only. ASCII-only. Windows (`python`).
 """
 import datetime
@@ -221,6 +237,69 @@ def read_active_claims(base_dir=None, ttl_minutes=DEFAULT_TTL_MINUTES, now=None)
     return out
 
 
+def find_claim(slug, base_dir=None, ttl_minutes=DEFAULT_TTL_MINUTES, now=None):
+    """The single live (non-expired) claim on `slug`, or None. Thin convenience
+    wrapper over read_active_claims() for the single-slug lookups renew_claim()
+    and the CLI's collision warning both need -- neither has to know
+    read_active_claims()'s list-of-all-slugs shape.
+
+    Compares against `_safe_filename(slug)`, NOT the raw `slug` -- read_active_claims()
+    reports `"slug"` as the on-disk filename stem, which is already the SANITIZED form
+    (`_safe_filename` maps any char outside [A-Za-z0-9-_] to "_"). Every documented slug
+    (repo-housekeeping, hooks-override-auth, ...) happens to already be filename-safe, so
+    comparing against the raw slug looked correct under every existing test -- but slugs
+    are documented as free-form agent-supplied strings, and a raw comparison silently
+    never matches the moment one contains a space or other sanitized character, making
+    both renew_claim() and the CLI's collision warning dead code for that slug without
+    ever raising (caught 2026-08-04 independent review)."""
+    target = _safe_filename(slug)[:-5]
+    for c in read_active_claims(base_dir=base_dir, ttl_minutes=ttl_minutes, now=now):
+        if c["slug"] == target:
+            return c
+    return None
+
+
+def renew_claim(slug, session_id, description=None, base_dir=None, now=None,
+                ttl_minutes=DEFAULT_TTL_MINUTES):
+    """Bump `claimed_at` to `now` on a claim `session_id` ALREADY holds, without
+    needing to re-supply title/cwd/paths. Returns the pre-renewal claim dict on
+    success, or None if there is nothing of this session's to renew (no live
+    claim on `slug`, or it is held by a different session_id) -- callers should
+    treat None as a reportable error, never fall back to silently creating a
+    fresh claim, so `renew` can never be used to quietly take over someone
+    else's slug (that is what `claim` is for, and `claim` now warns when it
+    happens).
+
+    WHY (2026-08-04, open-items-tracker.md's OI-072 handoff near-miss):
+    `claimed_at` was previously set once, at initial `claim`, with nothing
+    prompting a session doing continued multi-step work under one slug to
+    touch it again. A claim's age then drifts from "time since this session
+    was last active" to "time since one single past event," and a reader
+    (human or another session, via active-work-broadcast.py's %.0fm-ago
+    display) can misjudge a still-live claim as abandoned/completed purely
+    because the timestamp is old and the frozen description reads as already
+    finished -- exactly what happened when a session read a 28-minute-old
+    "convert test_cross_repo_wip_scan.py" claim as stale (that specific task
+    WAS done) and reclaimed the slug for unrelated work, not realizing the
+    claiming session had simply moved on to a second task under the same
+    banner claim without renewing it. See reference_concurrent_session_
+    duplicate_hardening_work.md's 2026-08-04 entry for the full incident.
+
+    `description`, if given, replaces the stored description (use this to keep
+    the broadcast text current as work moves between sub-tasks); if omitted,
+    the existing description is kept as-is so a "just extend my TTL, nothing
+    changed" renewal doesn't require re-typing it.
+    """
+    existing = find_claim(slug, base_dir=base_dir, ttl_minutes=ttl_minutes, now=now)
+    if existing is None or existing.get("session_id") != session_id:
+        return None
+    write_claim(slug, session_id,
+               description if description is not None else existing.get("description", ""),
+               title=existing.get("title"), cwd=existing.get("cwd"),
+               base_dir=base_dir, now=now, paths=existing.get("paths"))
+    return existing
+
+
 def _path_overlap(wanted, declared):
     """Paths in `wanted` covered by `declared` -- exact match OR inside a declared
     DIRECTORY.
@@ -296,6 +375,18 @@ def main():
                         "makes shared-checkout-guard.py warn any other session that "
                         "edits them -- BEFORE it has written anything.")
 
+    rn = sub.add_parser("renew", help="Bump claimed_at on a claim THIS session already "
+                                      "holds, without re-supplying title/paths. Run this "
+                                      "periodically during continued multi-step work "
+                                      "under one slug -- a claim's age is otherwise time "
+                                      "since the ORIGINAL claim, not time since this "
+                                      "session was last active, and an old timestamp "
+                                      "reads to other sessions as abandoned/done.")
+    rn.add_argument("slug")
+    rn.add_argument("--description", help="Replace the stored description (e.g. moving "
+                                          "to a new sub-task under the same slug). Omit "
+                                          "to keep the existing one and just extend the TTL.")
+
     r = sub.add_parser("release", help="Clear a claim you previously made")
     r.add_argument("slug")
 
@@ -305,6 +396,14 @@ def main():
 
     if args.cmd == "claim":
         sid = own_session_id()
+        existing = find_claim(args.slug)
+        if existing is not None and existing.get("session_id") != sid:
+            print("WARNING: '%s' has a LIVE claim held by a different session "
+                  "(%s, %.0fm ago -- %s). Overwriting it now -- if that session is "
+                  "still working, its broadcast context is replaced with yours and "
+                  "other sessions will no longer see its claim." % (
+                      args.slug, str(existing.get("session_id", "?"))[:8],
+                      existing.get("age_minutes", 0.0), existing.get("description", "")))
         path = write_claim(args.slug, sid, args.description, title=args.title,
                            paths=args.paths)
         n = len(_clean_paths(args.paths))
@@ -315,6 +414,27 @@ def main():
             print("  NOTE: no --paths given. This claim broadcasts the slug only, so a "
                   "session editing the same FILE under a different slug will NOT be "
                   "warned (defect D1, 2026-07-26). Pass --paths for file-level cover.")
+        print("  For continued work under this slug, run 'claim_work.py renew %s' "
+              "periodically rather than letting this timestamp age -- see 'renew -h'."
+              % args.slug)
+        return 0
+
+    if args.cmd == "renew":
+        sid = own_session_id()
+        result = renew_claim(args.slug, sid, description=args.description)
+        if result is None:
+            existing = find_claim(args.slug)
+            if existing is None:
+                print("No live claim found for '%s' to renew -- use 'claim' to start "
+                      "one." % args.slug)
+            else:
+                print("Claim on '%s' is held by a different session (%s), not this "
+                      "one -- 'renew' only extends a claim THIS session already holds. "
+                      "Use 'claim' if you intend to take it over (this will warn, not "
+                      "block)." % (args.slug, str(existing.get("session_id", "?"))[:8]))
+            return 1
+        print("Renewed '%s' (was %.0fm old) -- session %s" % (
+            args.slug, result["age_minutes"], sid))
         return 0
 
     if args.cmd == "release":
