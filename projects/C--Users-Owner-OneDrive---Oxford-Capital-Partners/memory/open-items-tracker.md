@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-08-04T16:37:10.681Z
+  modified: 2026-08-04T19:39:47.802Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -44,12 +44,11 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | [OI-027](#OI-027) | 2026-07-26 | PR [ZeOoba/oxford-command-center#238](https://github.com/ZeOoba/oxford-command-center/pull/238) (OI-017 vitest-4 REFUTE pass) | Nothing guards against a *future* test regressing into the same class of bug OI-017 fixed (`vi.mock()` of a Node builtin silently no-ops under this repo's jsdom default) — most cases fail loudly, but a bare automock with no configured return value could silently exercise the real implementation and pass for the wrong reason. REFUTE reviewer recommended an ESLint rule (or a `vitest.config.ts` comment at the `environment: 'jsdom'` line) requiring `@vitest-environment node` on any file calling `vi.mock('node:*')`. Not yet built |
 | [OI-031](#OI-031) | 2026-07-27 | `orphaned-task-forensics` trace of the `ora-master-workbook-ingest` 2026-07-20 gap, [event_log.md](event_log.md#2026-07-27) | `fleet-status.py`'s overdue/missed-stuck detectors are structurally blind to a single skipped weekly cycle on an already-established recurring task — neither check applies to it (confirmed by reading the script) |
 | [OI-033](#OI-033) | 2026-07-28 | Cowork-surface follow-up to the Code-surface usage-limit audit, 2026-07-28 | LAMS `ora-tenant-contact-gap-sweep` carries no `[MODEL: ...]` tag (sole untagged task in a 27/28-tagged LAMS fleet); fix needs `update_scheduled_task` from a Cowork-surface session |
-| [OI-037](#OI-037) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **MEDIUM — code fixed, deploy-verification still open.** CORS exact-match allowlist + `public/_headers` merged `ora-pm` commit `23b924f`; `X-Frame-Options: DENY` enforcing today (clickjacking closed), CSP deliberately Report-Only pending a manual browser pass ([OI-066](#OI-066)). Per this item's own standing caveat, stays OPEN until the live served response is verified, not just the merged config |
 | [OI-039](#OI-039) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **MEDIUM** ora-pm money columns are bare `NUMERIC` with no scale, no `COMMENT ON COLUMN` and no unit suffix (`supabase/migrations/0002_financial_tables.sql:14` `charges.amount`, `:30` `payments.amount`), while the API boundary uses a DIFFERENT unit under a similar name (`amount_cents`, `server/routes/stripe.ts:96`). Cents-vs-dollars is unprovable from name, type or comment — the precondition that produced the 2026-07-18 divide-by-100 display bug. Unconstrained `NUMERIC` also permits sub-cent values (0.005) that round inconsistently between the aggregate view and per-row display. NOTE: the balance path itself traced CLEAN this run (exactly zero conversions, correctly) |
 | [OI-041](#OI-041) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **MEDIUM** ora-pm mass assignment — 10 handlers pass `await c.req.json()` straight into `.insert()`/`.update()`/`.upsert()` with no Zod schema (`budgets.ts:25`, `insurance.ts:35,46`, `renewals.ts:22`, `units.ts:20,28`, `cam.ts:23-24`, `leases.ts:74,98`, `tenants.ts:62`) while sibling routes correctly use `safeParse`. `budgets.ts:25` also accepts an ARRAY body, making the upsert unbounded in row count. Admin-authenticated only, so integrity/defense-in-depth rather than a breach path — but an admin (or anything holding an admin JWT, see OI-036) can set columns the UI never exposes including `id` and `created_at` |
 | [OI-042](#OI-042) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **MEDIUM** ora-pm returns RAW Postgres error messages to clients from ~20 call sites (`portal.ts:50,74,93,117,141`, `insurance.ts:38,50`, `cam.ts:79`, `reports.ts:15,27,35,53,57,62`, `cron.ts:40,131,167,227`, `units.ts`, `budgets.ts`, `renewals.ts`, `webhook.ts:20,40`). `server/middleware/error-handler.ts` sanitizes *thrown* errors and its comment claims raw DB messages are never exposed — but that only covers the catch path; these sites `return c.json({error: error.message}, 500)` from a Supabase result. Several are on `/api/portal/*`, reachable by any authenticated tenant, disclosing table/column/constraint/RLS-policy names as a free schema map |
 | [OI-045](#OI-045) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **MEDIUM** ora-pm MFA enrollment is a NO-OP that misrepresents its own state — `src/portal/pages/PortalAccount.tsx:33-35,87-93`: `handleMFA` awaits `portalSupabase.auth.mfa.enroll({...})` and DISCARDS the result; the TOTP secret and QR code are never rendered and no `mfa.challenge`/`mfa.verify` call exists anywhere in the repo (grep for `mfa` returns only this file). The factor is created `unverified` and enrollment can never complete. The UI tells tenants 'Enable two-factor authentication (TOTP) for additional account security' — so tenants may believe the account that authorizes ACH debits is MFA-protected when it is not. Repeated clicks accumulate orphaned unverified factors |
-| [OI-047](#OI-047) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **MEDIUM — NEEDS GABRIEL'S RULING, do not change unilaterally.** ora-pm's two cron jobs send email via Resend (`POST https://api.resend.com/emails`, `server/routes/cron.ts:118,184-200,219,297-311`) with `RECIPIENTS = ['ggoldberg@oxfordra.net','egoldberg@oxfordra.net']` and `from` defaulting to `pm@oxfordra.net`. ORA canon designates `_shared/send-via-outlook.ps1` as the SOLE automated send path and routes scheduled output to ggoldberg ONLY (sole exception: ora-am-brief's Daily Brief, which this is not). A second independently-credentialed egress path for firm operational data — tenant names, property/suite, outstanding balances — outside the audited Outlook chain and its exit-code retry semantics |
+| [OI-047](#OI-047) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **MEDIUM — RULED 2026-08-04, not yet implemented.** ora-pm's two cron jobs send email via Resend (`POST https://api.resend.com/emails`, `server/routes/cron.ts:118,184-200,219,297-311`) with `RECIPIENTS = ['ggoldberg@oxfordra.net','egoldberg@oxfordra.net']` and `from` defaulting to `pm@oxfordra.net`. ORA canon designates `_shared/send-via-outlook.ps1` as the SOLE automated send path and routes scheduled output to ggoldberg ONLY (sole exception: ora-am-brief's Daily Brief, which this is not). A second independently-credentialed egress path for firm operational data — tenant names, property/suite, outstanding balances — outside the audited Outlook chain and its exit-code retry semantics. **Gabriel ruled: trim RECIPIENTS to ggoldberg@ only, move the actual send to the ORA scheduler via Outlook COM** — needs the scheduler side built + the Worker's non-fatal-failure/pre-send-dedup semantics replicated there; see detail section |
 | [OI-048](#OI-048) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **MEDIUM** ora-pm: ALL API database access uses the service-role key (`server/db/client.ts:6-13`), which bypasses RLS entirely — so the `auth.uid()` policies in `0004_views_and_rls.sql:101-189` have NO effect on any API request and every tenant-scoping guarantee rests solely on hand-written `.eq('auth_user_id', userId)` lookups. Not a live vulnerability (all six portal endpoints + three Stripe endpoints were traced and each correctly resolves the tenant from the JWT first, with explicit IDOR guards) — the risk is that RLS READS as a safety net in the migrations but is not one: one future endpoint that forgets the filter is an immediate full cross-tenant read with nothing behind it. Compounding: `0008_storage_rls.sql` self-describes as applied out-of-band via a Node script, so live RLS state is UNVERIFIED-not-clean |
 | [OI-049](#OI-049) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (oxford-command-center @ `3692385`, security-auditor dispatch) | **MEDIUM — S-002 carve-out drift, CONFIRMED IN HISTORY.** oxford-command-center's ratified financial config has no mechanical change-gate: `config/acquisition-ruleset.v1.json` and `config/replacement-cost.v3.json` appear in NO gate — not in `.claude/hooks/architect-owned.json` globs, not in `scripts/check-refute-required.ts` path sets, and `governance-check.ts` does not reference them. Only prose in the file's `_comment` protects them. Commit `a83ce684` (2026-07-14, PR #210, merged to origin/main) materially changed gate bounds (basisDiscountMin 0.25->0.60 / 0.30->0.65, vintage cutoff 2000->2005) while still carrying `rulesetVersion:"1.0.0"` and `ratifiedDate:"2026-06-14"`; the version-bump ceremony landed 2 days later (`d28d8bfb`). No ACTIVE drift at the pinned SHA — the file is blob-identical to the ceremony state — but the root cause is open. Invariant-4 adjacent |
 | [OI-050](#OI-050) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (oxford-command-center @ `3692385`, security-auditor dispatch) | **MEDIUM** oxford-command-center brain server has NO Host-header validation (`server/index.ts:531` binds 127.0.0.1, `server/cors-policy.ts` enforces localhost-only CORS) — but CORS is the wrong control for DNS rebinding: an attacker page whose DNS rebinds to 127.0.0.1 makes SAME-ORIGIN requests, so no CORS check applies at all. There is no Host allowlist and no CSRF token, and every state-changing route (`POST /api/actions/*`, `/api/refresh`, `/api/warehouse/properties/onboard`) is unauthenticated by design. A malicious page open in Gabriel's browser while the server runs can exfiltrate `GET /api/snapshot` — the full portfolio including confidential deals, tenants, loans, counterparty data — and can mutate deal stages, NOI budgets, tenant notes and lease-run assumptions |
@@ -66,7 +65,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | [OI-066](#OI-066) | 2026-08-03 | REFUTE pass on the [OI-037](#OI-037) fix, 2026-08-03 | ora-pm's new CSP ships as `Content-Security-Policy-Report-Only`, deliberately — logs violations, blocks nothing. `X-Frame-Options: DENY` (separate header) already closes clickjacking; this item is only the XSS-containment half. Needs a manual browser pass through Pay Now + admin login against a deployed preview, then drop `-Report-Only` to enforce |
 | [OI-068](#OI-068) | 2026-08-03 | ora-pm appsec fix plan Task 8 (OI-043), local `plan/appsec-fixes-oi034-048` branch, commit `59f79ff`, confirmed by independent task reviewer | Autopay-with-payment-method is **unreachable from any live frontend path today** — `PortalAccount.tsx` is the sole caller of `setAutopay` and never passes `payment_method_id`; the enable toggle is disabled unless `lease.autopay_payment_method_id` is already set; the ONLY writer of that column is `PATCH /portal/autopay`, which the frontend never calls with a PM. `PortalPayNow.tsx` creates a PM but only ever feeds it to one-time `createPaymentIntent`, never to `setAutopay`. The whole autopay-enrollment feature is unbuilt/unreachable on the frontend, independent of Task 8's (correct) backend hardening — a product gap, not a security defect in what shipped |
 | [OI-069](#OI-069) | 2026-08-03 | REFUTE pass on the [OI-046](#OI-046) fix, 2026-08-03 | ora-pm CAM true-up idempotency key is scoped only to lease+year, no amount/version — a legitimate recalculation of an already-billed CAM (ops corrects an error, re-runs /calculate for a new amount) collides with the OLD charge's key and is silently dropped as a duplicate. Tenant's ledger keeps the stale amount; response says success. Under-billing, not exploitable by an outside party |
-| [OI-070](#OI-070) | 2026-08-04 | `ora-health-guard` 2026-08-04 run + `fleet-status.py` investigation, this session | `fleet-status.py`'s missed-cycle detector (OI-031's fix) only sees a CURRENTLY-open gap — it compares `lastRunAt` to the single most-recent expected fire, so a gap that self-heals before the next check erases all evidence of the miss. `ora-health-guard` itself missed 07-31/08-01/08-02 then resumed 08-03/08-04; `fleet-status.py` reported "missed single cycle 0" the same day the scheduler's own run log showed the 3-day gap. Same blind-spot family as [OI-031](#OI-031)/[OI-058](#OI-058), one level narrower |
+| [OI-070](#OI-070) | 2026-08-04 | `ora-health-guard` 2026-08-04 run + `fleet-status.py` investigation, this session | `fleet-status.py`'s missed-cycle detector (OI-031's fix) only sees a CURRENTLY-open gap — it compares `lastRunAt` to the single most-recent expected fire, so a gap that self-heals before the next check erases all evidence of the miss. `ora-health-guard` itself missed 07-31/08-01/08-02 then resumed 08-03/08-04; `fleet-status.py` reported "missed single cycle 0" the same day the scheduler's own run log showed the 3-day gap. Same blind-spot family as [OI-031](#OI-031)/[OI-058](#OI-058), one level narrower. **Still OPEN despite commit `848d4cb`'s message saying "closes OI-070"** — that commit is labeling/documentation only (its own body: "no detection logic changed"); see detail section |
 | [OI-071](#OI-071) | 2026-08-03 | Production verification of [OI-067](#OI-067), 2026-08-03 | ora-pm `PortalInsurance.tsx` uploads COI files to `session.user.id`'s folder, but the live (confirmed-applied, confirmed-correct) RLS policy requires `tenants.id` — every real tenant COI upload fails today. Confirmed against production, not just the repo. Misleadingly-named variable (`tenantId = session.user.id`) is likely the root cause |
 | [OI-072](#OI-072) | 2026-08-04 | [open-items-tracker.md#OI-061](open-items-tracker.md#OI-061) batch-2 scoping, 2026-08-04 | **Design question, not a chore:** `gitfixture` models only two shapes (blank / single-commit), so the two remaining high-git files can't be converted — `test-git-prepush-scan.py` (177 git) needs BARE repos + an origin/clone/push/fetch topology + identity `t@example.invalid`, and `test-memory-index-git-tracking.py` (28 git) inits a CALLER-PROVIDED dir with identity `t@t`. Decide whether to extend a fixture 4 security-gate suites already depend on |
 
@@ -1163,8 +1162,9 @@ the entire admin API 503s for everyone, Gabriel included, until it's configured.
 **Auto-check:** none.
 
 ### OI-037
-**Status:** OPEN
+**Status:** CLOSED
 **Opened:** 2026-07-31
+**Closed:** 2026-08-04
 **Source:** ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch)
 **Severity:** MEDIUM (defense-in-depth / clickjacking)
 **Description:** (a) `server/index.ts:47` — `app.use('/api/*', cors())`; Hono's no-arg `cors()`
@@ -1192,9 +1192,16 @@ half ships `Content-Security-Policy-Report-Only` (deliberately, per the commit's
 environment can't browser-test the live Stripe Elements + Supabase auth flow) — it logs violations
 only and does not yet block anything; flipping it to enforcing needs a manual browser pass against a
 deployed preview, then dropping `-Report-Only` from the header name. Filed as
-[OI-066](#OI-066) rather than silently expanding this item's scope. **Still per this item's own
-verification caveat: the merged config has not been confirmed against a live served response — stays
-OPEN pending that check**, not the CSP-enforcement follow-up (that's OI-066's job).
+[OI-066](#OI-066) rather than silently expanding this item's scope.
+**Closure evidence (2026-08-04):** the item's own verification caveat is now satisfied — fetched
+`https://ora-pm.pages.dev` live (Claude-in-Chrome, in-page `fetch` with `credentials:'omit'`, not
+simulated): `x-frame-options: DENY` confirmed present and enforcing on the real served response;
+`content-security-policy-report-only` confirmed present with exactly the expected policy
+(`default-src 'self'; script-src 'self' https://js.stripe.com; connect-src 'self' https://api.stripe.com
+https://*.supabase.co; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'self';
+form-action 'self'`); enforcing `content-security-policy` correctly absent (Report-Only by design, per
+OI-066). This item's scope (clickjacking protection + CORS allowlist, live and confirmed) is closed;
+CSP-enforcement flip remains OI-066's separate job.
 **Auto-check:** none.
 
 ### OI-038
@@ -1422,7 +1429,7 @@ dropped as a "duplicate" — filed as [OI-069](#OI-069). 311/311 suite green, ty
 **Auto-check:** none.
 
 ### OI-047
-**Status:** OPEN — needs a ruling from Gabriel, not an engineering fix
+**Status:** OPEN — RULED (2026-08-04), not yet implemented
 **Opened:** 2026-07-31
 **Source:** ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch)
 **Severity:** MEDIUM (send-path canon / routing)
@@ -1432,10 +1439,16 @@ cover for this job.
 **Done correctly and worth preserving:** the send is non-fatal on network failure (`:201-204`,
 `:313-316`), and dedup rows are written *before* the send (`:165-167`) so a failure retries cleanly
 rather than re-sending. Those are the right calls — a fix must not regress them.
-**Decision needed (either is defensible, Gabriel's call):** (a) formally carve out ora-pm cron mail as
-a ratified exception with the `egoldberg@` cc documented; or (b) reduce `RECIPIENTS` to `ggoldberg@`
-only and have the ORA scheduler, not the Worker, perform the send via Outlook COM.
-**Do NOT change the recipient list without that ruling** — this is a canon question, not a code defect.
+**RULING (Gabriel, 2026-08-04): option (b).** Trim `RECIPIENTS` to `ggoldberg@` only; the Resend call
+in the Worker is removed, and the ORA scheduler performs the actual send via Outlook COM
+(`_shared/send-via-outlook.ps1`) instead. Brings ora-pm in line with the standing send-path canon and
+closes the second-egress-path risk (a leaked Resend key today could send/exfiltrate tenant data
+through a channel outside the audited chain). Option (a) — ratify Resend as a documented exception —
+was declined.
+**Not yet built.** This is a real lift, not a recipient-list edit: the scheduler side needs building,
+and the Worker's non-fatal-failure + pre-send-dedup semantics (the two things called out above as
+worth preserving) need to be replicated in whatever performs the send instead. Scope this as its own
+engineering task (ora-pm repo, TDD, review) before touching code — not a drive-by fix.
 **Auto-check:** none.
 
 ### OI-048
@@ -1913,7 +1926,15 @@ exists; (b) parse the scheduler's own run-history log (the same `main*.log` `ora
 read) for a true historical census over a lookback window — most complete, heavier lift,
 duplicates what health-guard already reconstructs ad hoc; (c) at minimum, relabel the "missed
 single cycle" output so a `0` doesn't read as a clean historical census when it's only a
-point-in-time check (DONE this session — see [event_log.md](event_log.md#2026-08-04)).
+point-in-time check (DONE — commit `848d4cb`).
+**Commit `848d4cb`'s own message says "closes OI-070" — that claim is wrong, and this item is
+deliberately left OPEN despite it.** The commit's diff (`maintenance/fleet-status.py`, +18/-1) is
+option (c) above and nothing more: it relabels the plain-text line to "missed single cycle
+(currently open)", adds a `missed_cycle_scope` JSON caveat, and adds inline comments — its own
+body states "no detection logic changed." Neither (a) nor (b) is built, so `fleet-status.py`
+still cannot detect a self-healed historical gap; it can only now describe that limitation
+honestly instead of silently misreporting it. Do not close this item on the strength of that
+commit alone — closure needs (a) or (b) actually landed and verified.
 **Auto-check:** none (a tooling-logic gap, not a fleet-registry state comparable to the closed
 Auto-check vocabulary above).
 
@@ -2072,6 +2093,25 @@ under self-inflicted load) — do not quote it.
 - **A live post-landing datapoint:** the very push that landed this still emitted
   `timeout-retry ... not blocking` for `test-eos-review-gate.py`. At 199 spawns it is now python-spawn-bound,
   which is exactly why OI-057 stays open and why the residual hook invocations must not be cut to chase it.
+
+**✅ ONE MORE OF THE ~10 LANDED 2026-08-04 — `maintenance/_tests/test_cross_repo_wip_scan.py`, commit
+`45fb073`.** Well under budget before conversion (1.47s baseline) — preventive, not urgent — done to prove
+the shared helper generalises past the first two files. `init_repo()` (7 call sites, `git init` + 2x
+`git config` each = 21 spawns) now delegates to `gitfixture.blank_repo()` and `shutil.move()`s the result
+onto the caller's chosen path, so every call site and its enclosing `tempfile.TemporaryDirectory()` scope
+is unchanged — zero call-site diff. `blank_repo()`'s `user.email`/`user.name` ("t@t.t"/"t") differ from the
+original's ("test@example.com"/"Test"); no assertion here inspects commit author identity, so per this
+item's own "assertions unchanged" bar that is not a behaviour change for anything actually tested.
+Measured: 23/23 pass unchanged; spawns 21 → 3 (via `gitfixture.spawn_count()`); 0 orphaned temp dirs — this
+conversion leaks *less* than files 1-2, because relocating into the caller's `TemporaryDirectory()` scope
+means the OS cleans it up rather than leaving it for gitfixture's documented leak-and-reap contract (that
+0-leaked result only trusted after catching that a first env-var-based measurement attempt was silently
+inert on Windows). No regression in `gitfixture`'s own invariant suite or either already-converted file.
+Landed from worktree `perf/oi061-cross-repo-wip-scan`, not the shared checkout. Lighter review than files
+1-2's independent-review + sabotage-test rounds, deliberately: this file tests `cross-repo-wip-scan.py`, a
+periodic informational status report, not an auth/exit-code security gate, so CLAUDE.md's mandatory-REFUTE
+clause does not apply — the `gitfixture` primitive it calls already carries that heavier review. **~9 files
+remain**, still preventive.
 **Auto-check:** none.
 
 ### OI-062
@@ -2133,6 +2173,7 @@ on ambient load alone (documented repeatedly in OI-061).
 
 | ID | Opened | Closed | Source | One-line |
 |----|--------|--------|--------|----------|
+| [OI-037](#OI-037) | 2026-07-31 | 2026-08-04 | ora-appsec-sweep 2026-07-31; fixed `ora-pm` commit `23b924f`; verified live 2026-08-04 (in-page fetch against `ora-pm.pages.dev`) | CORS exact-match allowlist + security headers. `X-Frame-Options: DENY` and `Content-Security-Policy-Report-Only` (exact expected policy) confirmed present on the real served response, not just the merged config — closes this item's own standing verification caveat. CSP-enforcement flip remains OI-066's separate job |
 | [OI-067](#OI-067) | 2026-08-03 | 2026-08-03 | ora-pm appsec fix plan Task 11 (OI-048), commit `9aa7f30`; verified against production 2026-08-03 (Gabriel signed into Supabase, ran verify-rls.sql live) | Status resolved: production DB was found paused (unrelated, resumed in-turn), all 3 parts of verify-rls.sql pass cleanly — the RLS policy IS live and IS exactly as documented (rules out the "more-permissive out-of-band policy" scenario). Confirmed instead: every real COI upload fails today because the client code uploads to the wrong path. Underlying fix filed as [OI-071](#OI-071). Bonus finding flagged, not filed: Security Advisor shows `public.units` has RLS disabled (CRITICAL), confirmed `rowsecurity=false`, needs Gabriel's triage on client-exposure |
 | [OI-057](#OI-057) | 2026-08-03 | 2026-08-04 | Push of event_log.md commit `8b61f20`, 2026-08-03; fixed by `6dc5df3` (OI-061) | The pre-push timeout is resolved. Direct re-measurement of `hooks/tests/test-eos-review-gate.py` under real concurrent multi-session load (56 dirty files in the checkout at test time, not idle): **76.6s, PASS 55/55** — comfortably under both the 90s per-file budget and the 180s hard timeout that produced OI-057's 3 identical failures. Also corroborated by 2 consecutive real pre-push gates completing clean (61/61, then 63/63, 0 fail) after `6dc5df3` landed. Root cause was OI-059 (excessive fixture-driven subprocess spawns), not the originally-suspected live model call inside the hook — that theory is retired |
 | [OI-059](#OI-059) | 2026-08-03 | 2026-08-04 | [open-items-tracker.md#OI-057](open-items-tracker.md#OI-057) root-cause pass, 2026-08-03; fixed by `6dc5df3` | `hooks/tests/lib/gitfixture.py` (shared template-and-copytree helper) landed, converting `test-eos-review-gate.py`'s `make_repo()` calls from live `git init`/`config`/`commit` subprocess chains to a `shutil.copytree` of a pre-built template. Spawn count 559 -> 199, confirmed by the commit's own measurement and this session's independent 76.6s re-run. Broader 13-file version of this problem is [OI-061](#OI-061), left OPEN — only 2 of 13 files converted so far |
