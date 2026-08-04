@@ -24,6 +24,9 @@ for _v in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
            "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_PREFIX"):
     os.environ.pop(_v, None)
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+import gitfixture  # noqa: E402  (shared repo fixture -- open-items-tracker.md#OI-061)
+
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # hooks/
 HOOK = os.path.join(HERE, "commit-provenance-guard.py")
 
@@ -69,11 +72,16 @@ def _git(args, cwd):
 
 
 def make_repo():
-    d = tempfile.mkdtemp(prefix="cpg-repo-")
-    _git(["init", "-q"], d)
-    _git(["config", "user.email", "t@t.t"], d)
-    _git(["config", "user.name", "t"], d)
-    return d
+    # Shared template-and-copy fixture (open-items-tracker.md#OI-061). Identical shape to
+    # the hand-rolled version this replaces -- init + user config, NO commit -- but the 3
+    # git spawns are paid ONCE per process instead of on each of the 38 call sites here.
+    # This file was the largest remaining fixture cost: test-side git spawns 179 -> 68
+    # (process-tree-wide, including the guard's own internal git calls, 230 -> 119).
+    # Timing is load-dominated and NOT a reliable ranking signal -- idle medians measured
+    # between 10.5s and 34.4s for the same file; prefer the spawn delta, which is
+    # deterministic. An earlier "72.2s = 80% of the 90s budget" note was measured under
+    # self-inflicted load and was wrong; do not reintroduce it.
+    return gitfixture.blank_repo(prefix="cpg-repo-")
 
 
 def write_and_stage(repo, name, text="x"):
