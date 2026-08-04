@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-08-04T19:39:47.802Z
+  modified: 2026-08-04T19:55:27.240Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -2112,6 +2112,42 @@ Landed from worktree `perf/oi061-cross-repo-wip-scan`, not the shared checkout. 
 periodic informational status report, not an auth/exit-code security gate, so CLAUDE.md's mandatory-REFUTE
 clause does not apply — the `gitfixture` primitive it calls already carries that heavier review. **~9 files
 remain**, still preventive.
+
+**✅ "BATCH 2" ALSO LANDED 2026-08-04 (`33e958a`, 13:00) — recorded here retroactively; this entry was
+silent about it until now (caught 2026-08-04 by a session that verified `git log` against this file's own
+prose instead of trusting it).** Landed *before* the `45fb073` cross-repo-wip-scan conversion above (13:00
+vs 15:37) but never got its own note here. Converted 2 more suites to the same `blank_repo()` shape:
+
+| file | git spawns |
+|---|---|
+| `test-commit-provenance-guard.py` | 179 → 68 (38 `make_repo` sites) |
+| `test-shared-checkout-guard.py` | 48 → 3 |
+
+Process-tree-wide (including the guards' own internal git calls): 230 → 119 and 65 → 20. Reviewed
+independently twice — the full pass proved `blank_repo()` byte-identical to each hand-rolled repo (config,
+default branch, zero commits, `fsck`, every `.git` file) and sabotage-tested both suites (guards stubbed to
+exit 0: 41/59 and 12/17 failures, confirming still load-bearing). Fixed 3 findings raised in review: a
+duplicate `GIT_*` scrub added on a false premise, dead `_git()` code left behind by the swap, and two wrong
+figures in a comment.
+
+The same commit also assessed the rest of the original ~13-file inventory, which is why the "~9/~10 remain"
+headline counts elsewhere in this item are now imprecise — **use this itemized list instead of any single
+number:**
+- **NOT APPLICABLE** (git calls query the real repo or barely exist — not worth a fixture):
+  `test-override-token-hygiene.py` (21 git, all real-repo queries), `test-claim-file-collision.py` (3 of
+  22), `test-doctrine-integrity-probe.py` (2 of 47), `test-ora-autonomy-gate.py` (1 of 91, already a known
+  stale orphan outside the gate's discovery roots)
+- **Fits but marginal, undecided:** `test-memory-subindex-guards.py` (~3 spawns saved)
+- **Blocked on a real design decision, not effort — filed separately as [OI-072](#OI-072):**
+  `test-git-prepush-scan.py`; `test-memory-index-git-tracking.py` (since resolved, `8c9ebd0`, see OI-072);
+  and the two `maintenance/`-tree files, `maintenance/_tests/test_cross_repo_wip_scan.py` (since resolved
+  by `45fb073` above — OI-072's text calling it "unresolved" is now stale) and
+  `maintenance/test-append-event-log.py` (still genuinely open)
+
+**Net effect of this correction: only `test-git-prepush-scan.py` and `maintenance/test-append-event-log.py`
+remain from the original inventory, and both are blocked on OI-072's design decisions — read that item in
+full before touching either. Neither is a quick body-swap**, contrary to how a candidate list drafted
+without this cross-check characterized them.
 **Auto-check:** none.
 
 ### OI-062
