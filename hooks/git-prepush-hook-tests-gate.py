@@ -92,6 +92,7 @@ import importlib.util
 import os
 import subprocess
 import sys
+import tempfile
 from datetime import datetime
 
 HOOK_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -347,12 +348,29 @@ def log_override_use(session_id=None, reason=None):
     cmd = [sys.executable, APPEND_LOG_SCRIPT]
     if EVENT_LOG_OVERRIDE:
         cmd += ["--log", EVENT_LOG_OVERRIDE]
+    # --entry-file, NOT stdin. append-event-log.py's stdin branch is a bare
+    # sys.stdin.read(), which decodes using the Windows locale (cp1252), so piped
+    # UTF-8 arrives DOUBLE-ENCODED: the em dash's E2 80 94 becomes "a<TM>". That is
+    # how seven override headings landed in event_log.md corrupted (2026-08-03), and
+    # a mangled heading also defeats any same-heading check. The --entry-file branch
+    # opens with an explicit encoding="utf-8".
+    # Prescribed by memory/feedback_append_event_log_stdin_encoding.md.
+    path = None
     try:
-        subprocess.run(cmd, input=entry.encode("utf-8"), capture_output=True)
+        fd, path = tempfile.mkstemp(suffix=".md", prefix="ora-override-entry-")
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
+            f.write(entry)
+        subprocess.run(cmd + ["--entry-file", path], capture_output=True)
     except Exception as e:  # pragma: no cover - defensive
         sys.stderr.write(
             "pre-push hook-tests gate: override used but event_log append FAILED (%s) - "
             "record it manually.\n" % e)
+    finally:
+        if path:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
 
 
 def main():

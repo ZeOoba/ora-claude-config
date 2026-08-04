@@ -285,7 +285,18 @@ def main(argv=None):
         with open(a.entry_file, encoding="utf-8") as f:
             entry = f.read()
     else:
-        entry = sys.stdin.read()
+        # Decode stdin as UTF-8 explicitly. A bare sys.stdin.read() uses the Windows
+        # locale (cp1252), so a caller piping UTF-8 -- as both pre-push gates did --
+        # gets it DOUBLE-ENCODED: the em dash's E2 80 94 arrives as three cp1252
+        # characters and is re-encoded, producing "a<TM>" in the heading. Seven
+        # override records landed in event_log.md that way before this was found
+        # (2026-08-03). --entry-file always opened with an explicit encoding; stdin
+        # did not. Callers should still prefer --entry-file, but the appender must not
+        # silently corrupt input when they don't.
+        try:
+            entry = sys.stdin.buffer.read().decode("utf-8")
+        except (AttributeError, UnicodeDecodeError):
+            entry = sys.stdin.read()
     # Tolerate a leading UTF-8 BOM. PowerShell 5.1 `Set-Content -Encoding UTF8` prepends one
     # (U+FEFF), which str.strip() does NOT remove -- so a BOM'd --entry-file used to fail the
     # '## ' header check in insert_newest() (2026-07-17). lstrip it before validation; harmless
