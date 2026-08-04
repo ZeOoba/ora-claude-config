@@ -326,6 +326,131 @@ def test_shell_may_write_open_readonly_does_not_mask_other_indicators():
           tcp.shell_may_write(cmd2), "cmd=%r" % cmd2)
 
 
+def test_write_verbs_require_a_word_boundary():
+    """A verb buried inside an unrelated word is not a write.
+
+    Live cost of the bare-substring version (2026-08-03): "del " matched
+    "--model ", so `eos-review-gate.py --record ... --model <id>` read as a
+    write to the governance layer. config-write-guard then blocked the ONLY
+    sanctioned way to satisfy eos-review-gate, and the documented exit was a
+    60-minute governance-WIDE write token to permit one single-file write.
+    A false positive that forces a strictly BROADER privilege is a security
+    regression, not caution."""
+    benign = [
+        "python gate.py --record --verdict approved --model claude-fable-5",
+        "git add -A",                       # "dd " inside "add "
+        "git add hooks/x.py && git status",
+        "echo please confirm the value",    # "rm " inside "confirm "
+        "ls children/",                     # "ren " inside "children "
+        "grep remodel notes.txt",           # "del " inside "remodel "
+        "cat model.json",
+        "python train.py --model resnet",
+    ]
+    for cmd in benign:
+        check("benign not write-shaped: %r" % cmd,
+              not tcp.shell_may_write(cmd), cmd)
+
+
+def test_word_boundary_fix_loses_no_genuine_write():
+    """THE regression that matters. Anchoring may not let a real write through.
+
+    Every genuine verb still matches, because the character preceding it is
+    never a word character -- start of string, whitespace, quote, slash, or a
+    shell metacharacter. Judged as a DELTA against the old bare-substring
+    behavior: the fix is only acceptable if this set is unchanged."""
+    genuine = [
+        "del C:/Users/Owner/.claude/hooks/eos-review-gate.py",
+        "rm -rf hooks/",
+        "rm hooks/x.py",
+        "/usr/bin/rm hooks/x.py",
+        "cp a.py hooks/b.py",
+        "mv a.py hooks/b.py",
+        "dd if=/dev/zero of=hooks/x.py",
+        "mkdir newdir",
+        "touch hooks/x.py",
+        "tee hooks/x.py",
+        "ren old.py new.py",
+        "rename old.py new.py",
+        "copy a.py b.py",
+        "move a.py b.py",
+        'echo x && del hooks/x.py',
+        'true;rm hooks/x.py',
+        'false||rm hooks/x.py',
+        "sudo rm hooks/x.py",
+        # non-verb indicators must be untouched by the anchoring change
+        "echo x > hooks/x.py",
+        "Remove-Item hooks/x.py",
+        "Set-Content hooks/x.py",
+        "python -c \"shutil.copy('a','b')\"",
+        "python -c \"os.remove('hooks/x.py')\"",
+        "sed -i s/a/b/ hooks/x.py",
+    ]
+    for cmd in genuine:
+        check("genuine write still flagged: %r" % cmd,
+              tcp.shell_may_write(cmd), cmd)
+
+
+def test_composite_writers_containing_a_bounded_verb_are_still_flagged():
+    """THE regression the hand-written corpus above missed (review finding D1).
+
+    Real writers were caught only ACCIDENTALLY, as substrings of the short
+    verbs: "copy " inside robocopy/xcopy, "cp " inside scp/rcp/pscp. Anchoring
+    removed that accident and un-flagged every one of them -- and robocopy.EXE,
+    xcopy.EXE and scp.EXE are all present on this machine, where
+    `robocopy <src> <hooks> /MIR` MIRRORS: it deletes and replaces the whole
+    target tree.
+
+    Enumerated MECHANICALLY rather than remembered, because remembering is
+    exactly what failed: the first battery listed only simple `rm`/`cp`/`dd`
+    forms, so a green suite certified the regression."""
+    real_command_names = [
+        "robocopy", "xcopy", "scp", "rcp", "pscp", "rsync", "git-rm", "git-mv",
+    ]
+    for name in real_command_names:
+        cmd = "%s src C:/Users/Owner/.claude/hooks/x.py" % name
+        check("composite writer flagged: %r" % name, tcp.shell_may_write(cmd), cmd)
+
+    # Every command name that CONTAINS a bounded verb must be consciously
+    # classified -- either it is a real writer (flagged above) or a benign word
+    # (unflagged below). A new bounded verb whose collision set is unexamined is
+    # how D1 happened.
+    for verb in tcp._BOUNDED_VERBS:
+        containing = [n for n in real_command_names if verb in n]
+        for name in containing:
+            check("collision-set writer %r (contains %r) flagged" % (name, verb),
+                  tcp.shell_may_write("%s a b" % name), name)
+
+
+def test_anchoring_details_are_pinned():
+    """The two most load-bearing characters in the regex, pinned directly.
+
+    Mutation testing found both unobserved: dropping the trailing `\\s` and
+    changing the lookbehind class each survived the original battery."""
+    # trailing \s is required -- without it, ordinary words re-flag
+    check("'copyright notice' is not a write", not tcp.shell_may_write("copyright notice"))
+    check("'movement plan' is not a write", not tcp.shell_may_write("movement plan"))
+    # lookbehind excludes '-' so the common benign docker flag is not a write...
+    check("'docker run --rm img' is not a write",
+          not tcp.shell_may_write("docker run --rm img"))
+    # ...and the hyphenated writers that costs are covered explicitly instead
+    check("'git-rm x' IS a write", tcp.shell_may_write("git-rm x"))
+    # lookbehind does NOT exclude '.' or '/' -- these are real invocations
+    check("'foo.rm x' IS a write", tcp.shell_may_write("foo.rm x"))
+    check("'./cp a b' IS a write", tcp.shell_may_write("./cp a b"))
+    check("'/usr/bin/rm x' IS a write", tcp.shell_may_write("/usr/bin/rm x"))
+
+
+def test_indicator_partition_is_total():
+    """Every canonical indicator must still be reachable by one of the two
+    matchers. A verb added to SHELL_WRITE_INDICATORS but never classified would
+    otherwise fall between them and silently stop being detected."""
+    for ind in tcp.SHELL_WRITE_INDICATORS:
+        bounded = ind.strip() in tcp._BOUNDED_VERBS
+        in_unbounded = ind in tcp.UNBOUNDED_WRITE_INDICATORS
+        check("indicator %r is classified exactly once" % ind,
+              bounded != in_unbounded, "bounded=%s unbounded=%s" % (bounded, in_unbounded))
+
+
 if __name__ == "__main__":
     test_primary_write_path_native()
     test_primary_write_path_dc_write_file_both_prefixes_both_arg_names()
@@ -348,6 +473,11 @@ if __name__ == "__main__":
     test_shell_may_write_open_write_modes_still_flagged()
     test_shell_may_write_open_indirect_or_unparseable_stays_flagged()
     test_shell_may_write_open_readonly_does_not_mask_other_indicators()
+    test_write_verbs_require_a_word_boundary()
+    test_word_boundary_fix_loses_no_genuine_write()
+    test_composite_writers_containing_a_bounded_verb_are_still_flagged()
+    test_anchoring_details_are_pinned()
+    test_indicator_partition_is_total()
     if _failures:
         print("\n%d FAILURE(S): %s" % (len(_failures), ", ".join(_failures)))
         sys.exit(1)

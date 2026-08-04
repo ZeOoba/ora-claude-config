@@ -1036,9 +1036,14 @@ if __name__ == "__main__":
     for t in TESTS:
         try:
             t()
-        except AssertionError as exc:
+        except Exception as exc:
+            # Exception, not AssertionError: a test that raises anything else
+            # (KeyError on a missing output field, say) used to escape this
+            # handler and abort the RUN, so every test sorted after it was
+            # silently never executed and the suite printed no summary at all.
+            # A crash is a failure, and the run must continue past it.
             failures += 1
-            print("FAIL %s: %s" % (t.__name__, exc))
+            print("FAIL %s: %s: %s" % (t.__name__, type(exc).__name__, exc))
     if failures:
         print("%d REVIEW-GATE TEST(S) FAILED" % failures)
         sys.exit(1)
