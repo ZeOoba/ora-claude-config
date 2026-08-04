@@ -9,6 +9,7 @@ including the one that is the whole point: spawn count must NOT scale with call 
 import os
 import subprocess
 import sys
+import tempfile
 
 # Strip git's leaked hook environment BEFORE any fixture call. Same scrub the two
 # converted suites carry, and it is load-bearing here for the same reason: gitfixture's
@@ -85,6 +86,45 @@ rc, out = git_out(c, "log", "-1", "--format=%s")
 check("custom shape: commit message honoured", out == "custom", "got %r" % out)
 rc, out = git_out(c, "status", "--porcelain")
 check("custom shape: clean tree", out == "", "got %r" % out)
+
+# --- identity + dest (open-items-tracker.md#OI-072) -------------------------
+i1 = gitfixture.blank_repo(identity=("a@a.a", "alice"))
+rc, out = git_out(i1, "config", "user.email")
+check("custom identity: user.email honoured", out == "a@a.a", "got %r" % out)
+rc, out = git_out(i1, "config", "user.name")
+check("custom identity: user.name honoured", out == "alice", "got %r" % out)
+
+i2 = gitfixture.blank_repo(identity=("b@b.b", "bob"))
+check("distinct identities return distinct copies",
+      os.path.abspath(i1) != os.path.abspath(i2))
+rc, out = git_out(i2, "config", "user.email")
+check("second identity did not leak into the first template", out == "b@b.b", "got %r" % out)
+# The real invariant: two identities occupy two DISTINCT cache entries. Different
+# returned paths (above) is necessary but not sufficient -- every call mkdtemps a
+# fresh copy regardless, so that alone would pass even if both copied the SAME
+# template. Assert on the cache directly, and re-check i1 (built first) is still
+# intact after i2 is built -- a key collision would show up as i1's config having
+# been silently rebuilt to bob's identity.
+check("two identities occupy two distinct _TEMPLATES entries",
+      len(gitfixture._TEMPLATES) >= 2, "templates=%d" % len(gitfixture._TEMPLATES))
+rc, out = git_out(i1, "config", "user.email")
+check("first identity's OWN copy still reads alice's email after building bob's",
+      out == "a@a.a", "got %r" % out)
+
+with tempfile.TemporaryDirectory() as owned:
+    result = gitfixture.blank_repo(dest=owned, identity=("c@c.c", "carol"))
+    check("dest= materialises INTO the given dir, not a new one",
+          os.path.abspath(result) == os.path.abspath(owned), "got %r vs %r" % (result, owned))
+    check("dest= repo has .git", os.path.isdir(os.path.join(owned, ".git")))
+    rc, out = git_out(owned, "config", "user.name")
+    check("dest= repo has the requested identity", out == "carol", "got %r" % out)
+check("dest= caller's TemporaryDirectory cleaned up normally afterward",
+      not os.path.isdir(owned))
+
+d1 = gitfixture.repo_with_commit(identity=("d@d.d", "dave"))
+rc, out = git_out(d1, "log", "-1", "--format=%an <%ae>")
+check("repo_with_commit: commit author matches the requested identity",
+      out == "dave <d@d.d>", "got %r" % out)
 
 # --- newline fidelity: must reproduce the caller's original bytes ----------
 lf = gitfixture.repo_with_commit(files={"n.txt": "a\nb\n"}, message="lf", newline="\n")

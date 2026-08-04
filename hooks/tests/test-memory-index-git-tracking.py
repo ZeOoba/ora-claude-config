@@ -34,6 +34,9 @@ for _v in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
     os.environ.pop(_v, None)
 import tempfile
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+import gitfixture  # noqa: E402  (shared repo fixture -- open-items-tracker.md#OI-061)
+
 PROBE = os.path.normpath(os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "..", "maintenance",
     "memory-integrity-probe.py"))
@@ -58,12 +61,23 @@ def run_probe(memdir):
 
 
 def make_repo(d):
-    """A git repo with memory/ inside it (mirrors the real layout: memory is a subdir)."""
+    """A git repo with memory/ inside it (mirrors the real layout: memory is a subdir).
+
+    Shared template-and-copy fixture (open-items-tracker.md#OI-061 / #OI-072). Two
+    details here are deliberate, not incidental:
+      * `dest=d` materialises INTO the caller's directory rather than returning a fresh
+        one, because every call site wraps this in `with tempfile.TemporaryDirectory()
+        as d:` and relies on that block to delete the repo. Returning a new path would
+        leave `d` empty and leak the real repo -- this file cleans up after itself,
+        unlike the leak-and-let-the-OS-reap convention the other suites use.
+      * `identity=("t@t", "t")` preserves THIS file's author identity, which differs
+        from the fixture default ("t@t.t"). Identity lands in commit metadata, so
+        normalising it would be a silent difference of exactly the kind this fixture
+        is supposed to prevent.
+    """
+    gitfixture.blank_repo(dest=d, identity=("t@t", "t"))
     mem = os.path.join(d, "memory")
     os.makedirs(mem)
-    git(d, "init", "-q", ".")
-    git(d, "config", "user.email", "t@t")
-    git(d, "config", "user.name", "t")
     return mem
 
 
