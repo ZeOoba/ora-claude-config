@@ -2194,8 +2194,20 @@ can now take custom identities" as license to also give it bare-repo/clone shape
 (silently normalised author metadata) is boundable by one cache-keyed tuple; the topology risk (hiding
 push/fetch behaviour a suite exists to test behind a fixture) is not fixed by the same mechanism.
 
-**STAYS OPEN**, rescoped again: only `test-git-prepush-scan.py` and the 2 maintenance-tree files remain, all
-three blocked on the design decisions already described above, not on effort.
+**⚠ CORRECTION 2026-08-04 (discovered while drafting a handoff prompt) — the "2 maintenance-tree files"
+scope above is STALE.** Another session independently converted `test_cross_repo_wip_scan.py` and landed it
+on `origin/main` (branch `perf/oi061-cross-repo-wip-scan`, commit `45fb073`, merge-base-confirmed an ancestor
+of the current `main` tip). It also resolved the library-location question this item raised: cross-tree import
+via `sys.path.insert(0, os.path.abspath(HOOKS_LIB))` reaching into `hooks/tests/lib/` from `maintenance/`.
+That precedent now exists and should be followed, not re-litigated, for the one remaining maintenance-tree
+file. This item did not track that session's work in real time — a reminder that this tracker is genuinely
+concurrent and a stale in-memory summary can drift from origin within hours.
+
+**STAYS OPEN, rescoped to what is ACTUALLY left as of 2026-08-04 (verified against origin/main, not assumed):**
+- `test-git-prepush-scan.py` (177 git) — unconverted. Recommendation against extending for topology stands.
+- `maintenance/test-append-event-log.py` (~15 git, 1 init site) — unconverted. The cross-tree import pattern
+  is now precedented by `test_cross_repo_wip_scan.py`; this one should be a mechanical follow of that pattern,
+  not a fresh design decision.
 **Auto-check:** none.
 
 ## Closed
