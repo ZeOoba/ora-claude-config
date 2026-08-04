@@ -262,7 +262,66 @@ SHELL_WRITE_INDICATORS = (
     # below; a bare substring check cannot tell open(p,'rb') from open(p,'w'))
     "write_text", "write_bytes", "writefile", "shutil.", "os.remove",
     "os.rename", "os.replace", "unlink(", "rmtree",
+    # COMPOSITE WRITERS (2026-08-03, independent-review finding D1). These were
+    # caught only ACCIDENTALLY, as substrings of the short verbs above --
+    # "copy " inside "robocopy "/"xcopy ", "cp " inside "scp "/"rcp "/"pscp ".
+    # Word-anchoring those verbs (below) removed that accident and un-flagged
+    # all of them; robocopy.EXE, xcopy.EXE and scp.EXE are all present on this
+    # box, and `robocopy <src> <hooks> /MIR` MIRRORS -- it deletes and replaces
+    # the entire target tree. config-write-guard is the only control on that
+    # path. Named explicitly here so the coverage is deliberate rather than a
+    # side effect; each is distinctive enough that bare substring cannot
+    # collide with an ordinary word. "rsync " closes a PRE-EXISTING gap found
+    # in the same sweep (it was never matched, by either version).
+    "robocopy ", "xcopy ", "scp ", "rcp ", "pscp ", "rsync ",
+    "git-rm ", "git-mv ",
 )
+# WORD-BOUNDARY BUG (2026-08-03, live-proven). The short verbs above were matched
+# as BARE SUBSTRINGS, so they fired from inside ordinary unrelated words:
+#     "del " matched "--model "     -> every `--model <id>` argument
+#     "dd "  matched "git add "     -> every `git add`
+#     "rm "  matched "confirm "
+#     "ren " matched "children "
+# This is NOT the benign "false positive costs a retry" the doctrine above
+# accepts. It DEADLOCKED a gate: eos-review-gate is satisfied by
+# `eos-review-gate.py --record ... --model <id>`, whose "--model " tripped
+# "del ", so config-write-guard blocked the ONLY sanctioned way to clear the
+# review gate -- and its documented exit was minting a 60-minute, multi-use,
+# governance-WIDE write token to permit one single-file write. A false positive
+# that forces a strictly broader privilege is a security regression, not caution.
+#
+# Fix: a verb must START at a word boundary. `del x`, `/usr/bin/rm x`, `;rm x`,
+# `&&dd if=..` all still match, because the character before the verb is not a
+# word character.
+#
+# THIS ANCHORING IS NOT FREE, and the first draft of it shipped a security
+# regression (caught by independent review, D1). Several REAL writers were being
+# caught only as accidental substrings of these verbs -- robocopy/xcopy (via
+# "copy "), scp/rcp/pscp (via "cp "), git-rm/git-mv. Anchoring removed that
+# accident and silently un-flagged all of them. They are now named explicitly in
+# SHELL_WRITE_INDICATORS above. Do NOT assume "the verb list still covers it":
+# before anchoring anything else here, enumerate the real command names that
+# CONTAIN the verb, because that is where the accidental coverage lived.
+#
+# The lookbehind excludes `\w` and `-`. `-` is deliberate: it keeps the very
+# common benign `docker run --rm <img>` from reading as a write, and the
+# hyphenated writers it would otherwise cost (git-rm, git-mv) are listed
+# explicitly above instead. `.` is deliberately NOT excluded -- it would cost
+# `foo.rm x` and `./cp x` and buys nothing anyone could construct.
+#
+# The differential battery in tests/test-tool-call-paths.py pins BOTH directions
+# and mechanically enumerates the collision class; no real write may become
+# allowed, which is the only regression that matters.
+_BOUNDED_VERBS = ("cp", "copy", "mv", "move", "rm", "del", "tee",
+                  "mkdir", "touch", "ren", "rename", "dd")
+_BOUNDED_VERB_RE = re.compile(
+    r"(?<![\w-])(?:%s)\s" % "|".join(re.escape(v) for v in _BOUNDED_VERBS))
+# Indicators distinctive enough that a bare substring test cannot collide with an
+# ordinary word (hyphenated cmdlets, dotted module calls, redirection).
+UNBOUNDED_WRITE_INDICATORS = tuple(
+    ind for ind in SHELL_WRITE_INDICATORS
+    if ind.strip() not in _BOUNDED_VERBS)
+
 # open() mode-awareness (BUG, 2026-07-21: "open(" as a bare substring flagged
 # open(p,'rb') -- an ordinary READ -- identically to open(p,'w')). Only an
 # UNAMBIGUOUS read-only call is exempt: a single simple (non-nested-paren,
@@ -324,7 +383,9 @@ def shell_may_write(command):
         return True
     if _open_may_write(lowered):
         return True
-    return any(ind in lowered for ind in SHELL_WRITE_INDICATORS)
+    if _BOUNDED_VERB_RE.search(lowered):
+        return True
+    return any(ind in lowered for ind in UNBOUNDED_WRITE_INDICATORS)
 
 
 def shell_analysis(tool_name, tool_input):
