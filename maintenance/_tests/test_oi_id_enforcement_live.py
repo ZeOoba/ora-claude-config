@@ -35,12 +35,26 @@ expect("baseline file is readable (else enforcement silently skips forever)",
        baseline is not None,
        "expected a number in %s" % m.DEFAULT_BASELINE)
 
+mode = m.read_mode()
 r = m.enforce(baseline=baseline)
 text = m.format_enforcement(r)
 print("  " + text.splitlines()[0])
+print("  mode: %s" % mode)
 
-expect("canonical tracker has no unreserved ids above the baseline",
-       not r["violations"], text)
+# Only BLOCK mode fails the gate. In WARN the finding is surfaced loudly and the
+# push proceeds -- see _state/oi-id-enforcement-mode.txt for why this shipped as
+# WARN (a blocking rule for an unadopted workflow taxes every other session).
+if mode == "BLOCK":
+    expect("canonical tracker has no unreserved ids above the baseline",
+           not r["violations"], text)
+elif r["violations"]:
+    print("  [WARN] %d unreserved id(s) -- reported, not blocking:" % len(r["violations"]))
+    for v in r["violations"]:
+        print("         %s  (regularise: allocate-oi-id.py --backfill %s --note \"...\")"
+              % (v["id"], v["id"]))
+else:
+    expect("canonical tracker has no unreserved ids above the baseline (WARN mode)",
+           True)
 
 # A skipped run must be loud. Silent skipping is how a gate rots into decoration.
 expect("enforcement actually ran (did not skip)", not r.get("skipped"), r)
