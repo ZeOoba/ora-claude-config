@@ -40,7 +40,20 @@ try {
     & $py $emitter 2>&1 | ForEach-Object { Log ("emit: " + $_) }
     if ($LASTEXITCODE -ne 0) { Log 'emit FAILED - pushing the previous heartbeat unchanged (Action will alarm if this persists)' }
 
-    # 2) Commit ONLY the heartbeat path. --only scopes the commit to the pathspec
+    # 2) Sync main, fast-forward ONLY (added 2026-08-04, root-causing recurring
+    #    dead-man trips: 6 of the prior 8 logged push failures were pure
+    #    non-fast-forward races against another session's push, not real
+    #    conflicts). A --ff-only merge just moves the branch pointer when local
+    #    main is a strict ancestor of origin/main -- it cannot touch the
+    #    uncommitted heartbeat file in the working tree, and it refuses
+    #    (harmlessly, fail-open below) on any real divergence. This does NOT
+    #    relax the "no rebase/reset" invariant in step 4: still zero risk to
+    #    another session's staged/dirty work.
+    git -C $repo fetch origin main 2>&1 | ForEach-Object { Log ("fetch: " + $_) }
+    git -C $repo merge --ff-only origin/main 2>&1 | ForEach-Object { Log ("merge: " + $_) }
+    if ($LASTEXITCODE -ne 0) { Log 'ff-only merge FAILED (real divergence, not just a race) - proceeding anyway, push below will fail loud if still behind' }
+
+    # 3) Commit ONLY the heartbeat path. --only scopes the commit to the pathspec
     #    even if other work is staged (shared single-writer checkout: other
     #    sessions' hunks must never ride along).
     $changed = git -C $repo status --porcelain -- $hbRel
@@ -50,9 +63,10 @@ try {
     git -C $repo commit --only -m $msg -- $hbRel 2>&1 | ForEach-Object { Log ("commit: " + $_) }
     if ($LASTEXITCODE -ne 0) { Log 'commit FAILED (fail-open, no push)'; exit 0 }
 
-    # 3) Push. NO rebase/reset fallback here ever -- this is a shared dirty
-    #    checkout (single-writer doctrine). If the remote is ahead, log and let
-    #    the next manual session reconcile; the commit is safe locally.
+    # 4) Push. NO rebase/reset fallback here ever -- this is a shared dirty
+    #    checkout (single-writer doctrine). If the remote is still ahead after
+    #    step 2's ff-only attempt (real divergence, not just a race), log and
+    #    let the next manual session reconcile; the commit is safe locally.
     git -C $repo push origin main 2>&1 | ForEach-Object { Log ("push: " + $_) }
     if ($LASTEXITCODE -ne 0) { Log 'push FAILED - heartbeat NOT on GitHub; Action alarms if stale >24h (by design)' }
     else { Log 'OK - heartbeat pushed' }
