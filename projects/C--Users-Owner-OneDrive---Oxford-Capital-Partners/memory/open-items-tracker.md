@@ -67,7 +67,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | [OI-069](#OI-069) | 2026-08-03 | REFUTE pass on the [OI-046](#OI-046) fix, 2026-08-03 | ora-pm CAM true-up idempotency key is scoped only to lease+year, no amount/version — a legitimate recalculation of an already-billed CAM (ops corrects an error, re-runs /calculate for a new amount) collides with the OLD charge's key and is silently dropped as a duplicate. Tenant's ledger keeps the stale amount; response says success. Under-billing, not exploitable by an outside party |
 | [OI-070](#OI-070) | 2026-08-04 | `ora-health-guard` 2026-08-04 run + `fleet-status.py` investigation, this session | `fleet-status.py`'s missed-cycle detector (OI-031's fix) only sees a CURRENTLY-open gap — it compares `lastRunAt` to the single most-recent expected fire, so a gap that self-heals before the next check erases all evidence of the miss. `ora-health-guard` itself missed 07-31/08-01/08-02 then resumed 08-03/08-04; `fleet-status.py` reported "missed single cycle 0" the same day the scheduler's own run log showed the 3-day gap. Same blind-spot family as [OI-031](#OI-031)/[OI-058](#OI-058), one level narrower. **Still OPEN despite commit `848d4cb`'s message saying "closes OI-070"** — that commit is labeling/documentation only (its own body: "no detection logic changed"); see detail section |
 | [OI-071](#OI-071) | 2026-08-03 | Production verification of [OI-067](#OI-067), 2026-08-03 | ora-pm `PortalInsurance.tsx` uploads COI files to `session.user.id`'s folder, but the live (confirmed-applied, confirmed-correct) RLS policy requires `tenants.id` — every real tenant COI upload fails today. Confirmed against production, not just the repo. Misleadingly-named variable (`tenantId = session.user.id`) is likely the root cause |
-| [OI-072](#OI-072) | 2026-08-04 | [open-items-tracker.md#OI-061](open-items-tracker.md#OI-061) batch-2 scoping, 2026-08-04 | **Design question, not a chore:** `gitfixture` models only two shapes (blank / single-commit), so the two remaining high-git files can't be converted — `test-git-prepush-scan.py` (177 git) needs BARE repos + an origin/clone/push/fetch topology + identity `t@example.invalid`, and `test-memory-index-git-tracking.py` (28 git) inits a CALLER-PROVIDED dir with identity `t@t`. Decide whether to extend a fixture 4 security-gate suites already depend on |
+| [OI-072](#OI-072) | 2026-08-04 | [open-items-tracker.md#OI-061](open-items-tracker.md#OI-061) batch-2 scoping, 2026-08-04 | **`identity=`/`dest=` extension LANDED 2026-08-04 (`8c9ebd0`)** — converted `test-memory-index-git-tracking.py` (git spawns 28->16). Recommendation against extending for bare-repo/clone topology STANDS — `test-git-prepush-scan.py` and the 2 maintenance-tree files remain OPEN, unconverted by design/deferred decision |
 
 ### OI-009
 **Status:** OPEN (substantial progress made 2026-07-17, real scope remains)
@@ -2167,6 +2167,35 @@ modest and the shared-fixture blast radius grows with every shape added.
 **Cost/benefit as measured 2026-08-04:** neither file is near the 90s per-file budget on a quiet machine, so
 this is preventive. Prefer spawn deltas over timings when re-assessing — timings for these files swing by 3x
 on ambient load alone (documented repeatedly in OI-061).
+**✅ IDENTITY EXTENSION LANDED 2026-08-04 (`8c9ebd0`), pushed to origin/main.** `blank_repo()` and
+`repo_with_commit()` gained `identity=(email, name)` (default `DEFAULT_IDENTITY = ("t@t.t", "t")`, part of the
+cache key) and `dest=<dir>` (materialise into a caller-owned directory instead of creating a fresh one).
+`test-memory-index-git-tracking.py` converted — its identity `("t@t", "t")` differs from the fixture
+default, and its call sites wrap fixture use in `with tempfile.TemporaryDirectory() as d:`, relying on that
+block's auto-cleanup rather than the leak-and-reap convention every other caller uses. git spawns 28 -> 16.
+Smaller win than the earlier conversions (5 call sites, and per-test `add`/`commit`/`config` calls sit on top
+of the one shared init) — this was the last EASY candidate, not a high-value one; done because it was cheap
+and safe, not because it was urgent.
+
+Reviewed independently twice, both APPROVED. The full pass proved backward compatibility byte-identical for
+all 4 EXISTING dependents (fingerprinted config/branch/commit-count/blob-SHA against the pre-extension
+baseline: 55/55, 79/79, 59/59, 17/17, unchanged) and sabotage-tested the converted suite two ways against the
+underlying `memory-integrity-probe.py` orphan-link check. It found the cache-collision test only incidentally
+caught collisions via a neighbouring assertion — fixed. **The delta review then constructed a SYNTHETIC cache
+collision and proved the fix actually catches it** (5 failures) where the original check passed vacuously —
+worth naming because it is the strongest form of verification this whole series has produced: not "the test
+looks right" but "the test was demonstrated to fail when it should."
+
+**The recommendation against extending for topology STANDS, unchanged.** `test-git-prepush-scan.py` (177 git,
+bare repos + origin/clone/push/fetch + a third identity) and the two `maintenance/`-tree files (cross-tree
+library-location decision) remain open. Nothing about the identity extension's success argues for tackling
+those — they are a different kind of decision, not more of this mechanical work. **Do not read "the fixture
+can now take custom identities" as license to also give it bare-repo/clone shapes** — the identity risk
+(silently normalised author metadata) is boundable by one cache-keyed tuple; the topology risk (hiding
+push/fetch behaviour a suite exists to test behind a fixture) is not fixed by the same mechanism.
+
+**STAYS OPEN**, rescoped again: only `test-git-prepush-scan.py` and the 2 maintenance-tree files remain, all
+three blocked on the design decisions already described above, not on effort.
 **Auto-check:** none.
 
 ## Closed
