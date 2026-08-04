@@ -150,6 +150,137 @@ code, out, err = run_cli(["list"], root)
 check("list after release reports no active claims", "No active claims" in out, True)
 shutil.rmtree(root, ignore_errors=True)
 
+# ===================================================================================
+# RENEW (2026-08-04, OI-072 handoff near-miss): bump claimed_at on a claim THIS
+# session already holds, without needing to re-supply title/paths/cwd.
+# ===================================================================================
+print()
+print("== RENEW: bumping an own claim's timestamp, direct calls ==")
+root = tempfile.mkdtemp(prefix="claim-renew-")
+now = datetime.datetime(2026, 8, 4, 12, 0, 0)
+old = now - datetime.timedelta(minutes=30)
+cw.write_claim("repo-housekeeping", "sess-mine", "task 1", base_dir=root, now=old,
+               paths=["a/b.py"])
+orig_paths = cw.read_active_claims(base_dir=root, now=now)[0]["paths"]
+
+pre = cw.renew_claim("repo-housekeeping", "sess-mine", base_dir=root, now=now)
+check("renew_claim returns the pre-renewal claim", pre["description"], "task 1")
+claims = cw.read_active_claims(base_dir=root, now=now)
+check("renewed claim's age resets to ~0", round(claims[0]["age_minutes"], 3), 0.0)
+check("renewed claim keeps its description when none given",
+      claims[0]["description"], "task 1")
+check("renewed claim keeps its (already-normalized) paths",
+      claims[0]["paths"], orig_paths)
+
+cw.renew_claim("repo-housekeeping", "sess-mine", description="task 2", base_dir=root,
+               now=now)
+claims = cw.read_active_claims(base_dir=root, now=now)
+check("renew with a new description replaces it",
+      claims[0]["description"], "task 2")
+
+miss = cw.renew_claim("never-claimed", "sess-mine", base_dir=root, now=now)
+check("renewing a slug with no live claim returns None", miss, None)
+
+foreign = cw.renew_claim("repo-housekeeping", "sess-someone-else", base_dir=root, now=now)
+check("renewing a DIFFERENT session's claim returns None (no takeover)", foreign, None)
+claims = cw.read_active_claims(base_dir=root, now=now)
+check("...and leaves the original claim's session_id untouched",
+      claims[0]["session_id"], "sess-mine")
+shutil.rmtree(root, ignore_errors=True)
+
+print()
+print("== FIND_CLAIM: single-slug lookup ==")
+root = tempfile.mkdtemp(prefix="claim-find-")
+cw.write_claim("hooks-override-auth", "sess-x", "hardening", base_dir=root)
+found = cw.find_claim("hooks-override-auth", base_dir=root)
+check("find_claim locates a live claim", found["session_id"], "sess-x")
+check("find_claim returns None for an unclaimed slug",
+      cw.find_claim("nope", base_dir=root), None)
+shutil.rmtree(root, ignore_errors=True)
+
+# Regression (2026-08-04 independent review, confidence 95): find_claim() originally
+# compared the caller's RAW slug against read_active_claims()'s already-SANITIZED
+# "slug" field (the on-disk filename stem). Every documented slug happens to already be
+# filename-safe, so this passed every test above while being silently dead for any slug
+# containing a character _safe_filename() maps to "_" -- exactly the "free-form,
+# agent-supplied strings" the module's own docstring says slugs are.
+print()
+print("== FIND_CLAIM / RENEW / WARNING: a slug with a space (non-filename-safe) ==")
+root = tempfile.mkdtemp(prefix="claim-nonalnum-")
+SPACEY = "OI-072 cleanup"
+cw.write_claim(SPACEY, "sess-mine", "task 1", base_dir=root)
+spacey_found = cw.find_claim(SPACEY, base_dir=root)
+check("find_claim locates a live claim under a spacey slug", spacey_found is not None, True)
+check("...and it's the right one",
+      (spacey_found or {}).get("session_id"), "sess-mine")
+renewed = cw.renew_claim(SPACEY, "sess-mine", base_dir=root)
+check("renew_claim succeeds on a spacey slug", renewed is not None, True)
+shutil.rmtree(root, ignore_errors=True)
+
+root = tempfile.mkdtemp(prefix="claim-nonalnum-cli-")
+code, out, err = run_cli(["claim", SPACEY, "task 1"], root, session_id="cli-owner-spacey")
+check("CLI claim on a spacey slug exits 0", code, 0)
+code, out, err = run_cli(["renew", SPACEY], root, session_id="cli-owner-spacey")
+check("CLI renew on a spacey slug exits 0 (not a dead-on-arrival 'no claim found')",
+      code, 0)
+code, out, err = run_cli(["claim", SPACEY, "different work"], root,
+                         session_id="cli-intruder-spacey")
+check("CLI claim-over on a spacey slug still exits 0 (fail-open)", code, 0)
+check("...and DOES print the collision WARNING (previously silent for this slug)",
+      "WARNING" in out, True)
+shutil.rmtree(root, ignore_errors=True)
+
+print()
+print("== CLI: renew round-trip, and the ownership refusal ==")
+root = tempfile.mkdtemp(prefix="claim-renew-cli-")
+code, out, err = run_cli(["claim", "repo-housekeeping", "task 1"], root,
+                          session_id="cli-owner-001")
+check("initial claim exits 0", code, 0)
+
+code, out, err = run_cli(["renew", "repo-housekeeping"], root, session_id="cli-owner-001")
+check("renew (own claim) exits 0", code, 0)
+check("renew confirmation mentions the slug", "repo-housekeeping" in out, True)
+check("renew confirmation says 'Renewed'", "Renewed" in out, True)
+
+code, out, err = run_cli(["renew", "repo-housekeeping", "--description", "task 2"],
+                          root, session_id="cli-owner-001")
+check("renew with --description exits 0", code, 0)
+claims = cw.read_active_claims(base_dir=root)
+check("renew --description updated the stored description",
+      claims[0]["description"], "task 2")
+
+code, out, err = run_cli(["renew", "repo-housekeeping"], root, session_id="cli-intruder")
+check("renew by a DIFFERENT session exits nonzero", code != 0, True)
+check("renew-by-stranger explains it's held by someone else",
+      "different session" in out, True)
+
+code, out, err = run_cli(["renew", "never-claimed-anywhere"], root,
+                          session_id="cli-owner-001")
+check("renew of an unclaimed slug exits nonzero", code != 0, True)
+check("renew-of-nothing suggests 'claim' instead", "use 'claim'" in out, True)
+shutil.rmtree(root, ignore_errors=True)
+
+print()
+print("== CLI: claim WARNS (not blocks) when overwriting a different live session ==")
+root = tempfile.mkdtemp(prefix="claim-warn-cli-")
+code, out, err = run_cli(["claim", "repo-housekeeping", "original work"], root,
+                          session_id="cli-first-owner")
+check("first claim exits 0", code, 0)
+
+code, out, err = run_cli(["claim", "repo-housekeeping", "different work"], root,
+                          session_id="cli-second-owner")
+check("overwriting claim from a different session still exits 0 (fail-open)", code, 0)
+check("...but prints a WARNING naming the collision", "WARNING" in out, True)
+check("...mentioning the prior session's description", "original work" in out, True)
+claims = cw.read_active_claims(base_dir=root)
+check("the overwrite did land (fail-open, not fail-closed)",
+      claims[0]["session_id"], "cli-second-owner")
+
+code, out, err = run_cli(["claim", "repo-housekeeping", "still my work"], root,
+                          session_id="cli-second-owner")
+check("re-claiming one's OWN slug prints no collision warning", "WARNING" in out, False)
+shutil.rmtree(root, ignore_errors=True)
+
 print()
 print("RESULT: %d/%d passed" % (sum(results), len(results)))
 sys.exit(0 if all(results) else 1)
