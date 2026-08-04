@@ -162,7 +162,17 @@ def write_claim(slug, session_id, description, title=None, cwd=None, base_dir=No
 def release_claim(slug, base_dir=None):
     """Best-effort delete. Not required for correctness -- an unreleased claim
     simply ages out past DEFAULT_TTL_MINUTES -- but keeps the broadcast quiet
-    sooner when a session remembers to call it."""
+    sooner when a session remembers to call it.
+
+    WEAKER GUARANTEE while shared-checkout-guard.py's self-renewal is active
+    (added 2026-08-04, independent review finding): that hook bumps `claimed_at`
+    on ALL of a session's live claims on every edit inside a claim-relevant repo,
+    keyed only on session_id -- not on whether the edit relates to the specific
+    slug being renewed. A finished-but-unreleased claim therefore keeps looking
+    fresh for as long as the session keeps editing ANYWHERE in that repo, not
+    just DEFAULT_TTL_MINUTES past when the work actually stopped. Calling
+    `release` once a task is actually done matters MORE now than the "not
+    required for correctness" framing above suggests on its own."""
     path = claim_path(slug, base_dir or CLAIMS_DIR)
     try:
         os.remove(path)
