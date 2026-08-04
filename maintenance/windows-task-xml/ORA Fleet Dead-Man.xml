@@ -12,13 +12,15 @@
     </Principal>
   </Principals>
   <Settings>
-    <DisallowStartIfOnBatteries>true</DisallowStartIfOnBatteries>
-    <StopIfGoingOnBatteries>true</StopIfGoingOnBatteries>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
     <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
     <RestartOnFailure>
       <Count>3</Count>
       <Interval>PT10M</Interval>
     </RestartOnFailure>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <WakeToRun>true</WakeToRun>
     <IdleSettings>
       <Duration>PT10M</Duration>
       <WaitTimeout>PT1H</WaitTimeout>
