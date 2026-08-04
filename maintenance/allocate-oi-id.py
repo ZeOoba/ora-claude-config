@@ -76,6 +76,15 @@ DEFAULT_LEDGER = os.path.join(
 # would have blocked every push on day one.
 DEFAULT_BASELINE = os.path.join(
     HOME, ".claude", "maintenance", "_state", "oi-id-baseline.txt")
+# WARN or BLOCK. Shipped as WARN on 2026-08-04 after enforcement went live in
+# BLOCK mode and immediately blocked every session's push twice in one hour --
+# for OI-070 and OI-071, both LEGITIMATE items, neither a collision. The gate was
+# correct and the rollout was not: no other session knew the allocator existed,
+# so ordinary filing tripped it. Enforcement without adoption is a tax on
+# everyone else's work. Flip to BLOCK once the ledger shows allocations from
+# sessions other than the one that built this.
+DEFAULT_MODE = os.path.join(
+    HOME, ".claude", "maintenance", "_state", "oi-id-enforcement-mode.txt")
 
 # Same shapes check-open-items-duplicate-ids.py uses -- kept identical on
 # purpose so the allocator and the checker can never disagree about what
@@ -237,6 +246,26 @@ def read_baseline(path=None):
     return None
 
 
+def read_mode(path=None):
+    """'BLOCK' or 'WARN'. Defaults to WARN, including when unreadable.
+
+    Fails toward WARN deliberately: a gate that cannot read its own config must
+    not spontaneously start blocking pushes. The 2026-08-04 rollout proved the
+    asymmetry -- a missed collision costs one renumber, a wrongly-blocked push
+    stalls every concurrent session until a human intervenes."""
+    path = path or DEFAULT_MODE
+    try:
+        for ln in _read(path).splitlines():
+            ln = ln.strip().upper()
+            if ln.startswith("#") or not ln:
+                continue
+            if ln in ("BLOCK", "WARN"):
+                return ln
+    except Exception:
+        pass
+    return "WARN"
+
+
 def enforce(tracker_path=None, ledger_path=None, baseline=None):
     """Ids ABOVE the baseline must carry a ledger reservation.
 
@@ -310,6 +339,10 @@ def main(argv=None):
                          "imported (escape hatch; recorded as BACKFILL)")
     ap.add_argument("--baseline", default=None,
                     help="path to the baseline file (tests only)")
+    ap.add_argument("--mode", default=None, choices=["WARN", "BLOCK", "warn", "block"],
+                    help="override the enforcement mode for this run (tests only)")
+    ap.add_argument("--mode-file", default=None,
+                    help="path to the mode file (tests only)")
     a = ap.parse_args(argv)
 
     if a.backfill:
@@ -322,9 +355,17 @@ def main(argv=None):
 
     if a.enforce:
         base = read_baseline(a.baseline)
+        mode = (a.mode or read_mode(a.mode_file)).upper()
         r = enforce(a.tracker, a.ledger, baseline=base)
         print(format_enforcement(r))
-        return 1 if r["violations"] else 0
+        if r["violations"]:
+            if mode == "BLOCK":
+                return 1
+            # WARN: loud, but does not hold anyone's push hostage.
+            print("MODE=WARN -- reported, not blocking. Flip to BLOCK in %s once "
+                  "the allocator is in routine use (see that file for the "
+                  "criterion)." % DEFAULT_MODE)
+        return 0
 
     if a.report:
         r = report(a.tracker, a.ledger)
