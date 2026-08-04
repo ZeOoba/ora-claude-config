@@ -56,6 +56,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime
 
@@ -241,12 +242,26 @@ def log_override_use(session_id=None, reason=None):
     cmd = [sys.executable, APPEND_LOG_SCRIPT]
     if EVENT_LOG_OVERRIDE:
         cmd += ["--log", EVENT_LOG_OVERRIDE]
+    # --entry-file, NOT stdin -- see the identical fix in
+    # git-prepush-hook-tests-gate.py: piped UTF-8 is decoded by append-event-log.py's
+    # bare sys.stdin.read() using the Windows locale (cp1252) and lands
+    # double-encoded. Same template, same corruption, same remedy (2026-08-03).
+    path = None
     try:
-        subprocess.run(cmd, input=entry.encode("utf-8"), capture_output=True)
+        fd, path = tempfile.mkstemp(suffix=".md", prefix="ora-override-entry-")
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
+            f.write(entry)
+        subprocess.run(cmd + ["--entry-file", path], capture_output=True)
     except Exception as e:  # pragma: no cover - defensive
         sys.stderr.write(
             "pre-push doctrine gate: override used but event_log append FAILED (%s) - "
             "record it manually.\n" % e)
+    finally:
+        if path:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
 
 
 def main():
