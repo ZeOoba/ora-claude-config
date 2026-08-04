@@ -35,13 +35,13 @@ and pushed.
 flowchart TB
     subgraph SESSION["A Claude Code session on this machine"]
         CFG["settings.json\nhook wiring, permissions,\nmodel/plugin config"]
-        HOOKS["hooks/\nPreToolUse + git-hook guard scripts"]
+        HOOKS["hooks/\n~25 guard scripts across all 6 hook events\n(PreToolUse/PostToolUse/Session*/Stop/PromptSubmit)\n+ git pre-push chain"]
         SKILLS["skills/ + agents/ + commands/ + workflows/\nprocedures the session can invoke"]
         SCHED["scheduled-tasks/*/SKILL.md\nspecs for recurring automations"]
         MAINT["maintenance/\nhealth/probe scripts"]
         CFG -->|registers| HOOKS
         CFG -->|exposes| SKILLS
-        HOOKS -->|guards every Edit/Write/Bash/git op| SESSION
+        HOOKS -->|guards tool calls + session lifecycle| SESSION
         SCHED -.read by live scheduler, not this repo.-> SESSION
     end
 
@@ -51,9 +51,16 @@ flowchart TB
     REPO -.git clone / pull\n(disaster recovery).-> LOCALDIR
 ```
 
-The repo is downstream of the live directory, never the other way around: nothing
-deploys *from* GitHub back into a running session automatically. A clone only becomes
-"live" again when it's placed at `~/.claude` and Claude Code is pointed at it.
+**Reading the diagram:** everything in the top box happens inside one live Claude Code
+session. `settings.json` wires up the hooks and exposes the skills/agents/commands/
+workflows a session can call; the hooks then guard every tool call and session-lifecycle
+event that follows. `scheduled-tasks/*/SKILL.md` specs are dotted-line because they're
+read by the external Windows/Cowork scheduler, not by this session directly. Below that,
+the live directory on disk contains the whole session and is the only thing that ever
+pushes to GitHub (dotted arrow, opt-in files only) — the repo is downstream of the live
+directory, never the other way around: nothing deploys *from* GitHub back into a running
+session automatically. A clone only becomes "live" again when it's placed at `~/.claude`
+and Claude Code is pointed at it.
 
 ## 3. Directory structure
 
