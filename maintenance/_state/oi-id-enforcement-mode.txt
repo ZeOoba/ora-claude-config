@@ -1,0 +1,36 @@
+# OI-id enforcement mode: WARN or BLOCK.
+#
+# WARN  -- unreserved ids above the baseline are REPORTED in the pre-push gate
+#          with the remedy named, but do not fail the push.
+# BLOCK -- the same finding fails the gate and blocks the push.
+#
+# ---------------------------------------------------------------------------
+# WHY THIS IS WARN (set 2026-08-04, same day enforcement shipped)
+# ---------------------------------------------------------------------------
+# Enforcement went live in BLOCK mode and, within one hour, blocked EVERY
+# session's push twice -- for OI-070 and OI-071. Both were LEGITIMATE items.
+# Neither was a collision. Neither session had any way to know the allocator
+# existed, because it had shipped minutes earlier and nothing advertised it.
+#
+# The gate was correct; the ROLLOUT was wrong. A blocking rule for a workflow
+# nobody has adopted is not enforcement -- it is a tax on everyone else's work,
+# collected by whoever happens to push next, for a defect they did not cause.
+#
+# The asymmetry that decides the default: a missed collision costs one renumber,
+# caught by check-open-items-duplicate-ids.py which has been running for weeks.
+# A wrongly-blocked push stalls every concurrent session until a human hand-
+# backfills. The cheap failure is the one to prefer while a habit spreads.
+#
+# ---------------------------------------------------------------------------
+# WHEN TO FLIP TO BLOCK
+# ---------------------------------------------------------------------------
+# When _state/oi-id-reservations.log contains allocations from sessions OTHER
+# than the one that built this (ebb67ffe) -- i.e. the allocator is in routine
+# use rather than being routed around. Until then, BLOCK just relearns the same
+# lesson at everyone else's expense.
+#
+#   python maintenance/allocate-oi-id.py --report    # who has allocated?
+#
+# Do NOT flip to BLOCK merely because the tracker is currently clean. Clean
+# today only means nobody filed an item today.
+WARN
