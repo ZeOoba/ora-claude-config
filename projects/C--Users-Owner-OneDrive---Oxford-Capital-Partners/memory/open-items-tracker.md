@@ -2266,6 +2266,33 @@ decision above). `maintenance/test-append-event-log.py` moves to the same bucket
 `test-claim-file-collision.py` et al. — NOT APPLICABLE, not merely deferred. Worktree opened to attempt this
 conversion (`perf/oi061-append-event-log`) was closed unused once the measurement above came back negative;
 no file was touched.
+
+**⚠ THIRD CORRECTION 2026-08-04 (Gabriel-directed) — RECONSIDER: `maintenance/test-append-event-log.py` WAS
+converted after all, merged `dd9c13b`.** The spawn-count measurement two paragraphs up is correct and
+stands (7 total git calls, 3 fixture-able, single call site, net spawn change zero) — but "no spawn
+benefit" was this item's ONLY decision axis, and a concurrently-running session (worktree
+`perf/oi072-append-event-log-fixture`, commit `6eacbb1`, independently reviewed by Opus
+pr-review-toolkit:code-reviewer, 40/40 pass, fingerprint-verified against the original hand-rolled repo,
+sabotage-tested) converted it anyway on a **different, legitimate axis this item never weighed:
+consistency/dedup** — one shared fixture implementation instead of N hand-rolled copies, shrinking the
+surface a future silent-divergence bug can hide in (more hand-rolled copies is itself a divergence risk,
+the mirror image of OI-061's original "shared fixture is a single point of failure" warning).
+
+Gabriel reviewed both rationales in-turn and directed the merge (2026-08-04, `config-write-guard`
+override token minted for the merge specifically). `_make_temp_git_repo()` now delegates to
+`gitfixture.blank_repo(prefix="ael-warn-repo-", identity=("t@t.t", "t"))`, matching the hand-rolled shape
+and identity exactly. Re-verified post-merge from the merged tree directly (not just the pre-merge branch):
+40/40 pass, unchanged.
+
+**Lesson for this item, stated plainly since it recurred twice in one afternoon (see the OI-061 batch-2 note
+and this file's own two prior corrections): "no spawn-count benefit" and "not worth converting" are NOT the
+same claim.** OI-061's original framing (its "Proposed fix" section) is spawn-reduction-only, which is why
+every session working it — including the one that wrote the SECOND CORRECTION above — kept collapsing "zero
+measured spawn win" into "reject," missing dedup as an independent, valid reason to convert a hand-rolled
+fixture even at spawn-parity.
+
+**CLOSED as far as OI-061/OI-072's file-by-file inventory goes: only `test-git-prepush-scan.py` remains
+unconverted**, still correctly blocked on the bare-repo/clone topology design decision, not effort.
 **Auto-check:** none.
 
 ## Closed
