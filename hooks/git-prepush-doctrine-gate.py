@@ -4,11 +4,29 @@ confidentiality scan).
 
 WHY (audit finding 2026-07-08): doctrine drift (CLAUDE.md / rules / session-context
 integrity) could reach the private remote unremarked. This gate runs
-`maintenance/doctrine-integrity-probe.py` (no flags -- the probe has no --quiet option,
-only --session-context=/--rules=/--terms=) and BLOCKS the push when the probe exits
-non-zero (drift found), UNLESS a valid `allow-doctrine-drift` override sentinel is
-present. It is INDEPENDENT of and does NOT modify the confidentiality scan — that
-FAIL-CLOSED scan (git-prepush-confidential-scan.py) still runs after this one.
+`maintenance/doctrine-integrity-probe.py` against a scratch worktree of the commit about
+to be pushed (see materialize_pushed_commit(), OI-100 below) and BLOCKS the push when the
+probe exits non-zero (drift found), UNLESS a valid `allow-doctrine-drift` override
+sentinel is present. It is INDEPENDENT of and does NOT modify the confidentiality scan —
+that FAIL-CLOSED scan (git-prepush-confidential-scan.py) still runs after this one.
+
+RESCOPE (OI-100, 2026-08-05, Gabriel-approved): prior to this, run_doctrine_probe() ran
+the probe with NO arguments, which validates the WORKING TREE, not the commit(s) being
+pushed -- a false-negative hole (commit drift, revert it uncommitted, push: the gate saw
+a clean working tree and allowed a drifted commit through). The fix materializes HEAD via
+`git worktree add --detach` into a scratch dir and passes it to the probe as
+`--live-root=<scratch dir>` -- a NEW flag that redirects the probe's git-TRACKED-content
+paths (CLAUDE.md, commands/, agents/, workflows/, skills/, memory/, settings.json,
+scheduled-tasks/, hooks/pretooluse-dispatcher.py) at that root WITHOUT setting
+live_mode=False the way the probe's pre-existing positional-path/--session-context=/
+--rules=/--terms= overrides do (that flag flip silently disables 7 coupled checks --
+see doctrine-integrity-probe.py's LIVE_CLAUDE_DIR comment). Paths with no meaningful
+"as of this commit" version (session-context.md, confidential-terms.json -- both
+gitignored; the pre-push shim itself -- not version-controlled) stay pinned to the real
+live ~/.claude. KNOWN, ACCEPTED LIMITATION: this validates HEAD, not literally whatever
+ref/sha git names on pre-push's stdin (this gate still reads no stdin -- see below) --
+correct for ORA's actual workflow (push your current branch at its tip); pushing an
+explicit refspec for a DIFFERENT, non-checked-out ref is not covered.
 
 OVERRIDE (hardened 2026-07-16; shared contract in hooks/lib/override_tokens.py, which
 carries the full rationale; protocol in memory/rules.md §10). A token lives at
@@ -54,6 +72,7 @@ Exit 1 = block (drift, no valid override) — git pre-push convention.
 import importlib.util
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -69,6 +88,21 @@ sys.path.insert(0, LIB_DIR)
 # must NOT degrade to some looser local check. It raises, the pre-push hook exits non-zero,
 # and the push is blocked. A validator we cannot load cannot validate an override.
 from override_tokens import Tier, token_grants, describe_token  # noqa: E402
+
+# Scrubbed from every git subprocess this module spawns (worktree add/remove): git
+# exports these to hook subprocesses, and an inherited GIT_DIR/GIT_WORK_TREE would
+# silently redirect `git worktree add` at whatever repo/tree those name instead of
+# the `cwd=` this module passes -- same hazard, same fix, as hooks/lib/isolated_commit.py.
+_GIT_ENV_VARS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+                 "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+                 "GIT_PREFIX")
+
+
+def _clean_git_env():
+    env = dict(os.environ)
+    for v in _GIT_ENV_VARS:
+        env.pop(v, None)
+    return env
 
 # One name, one tier. 60 min, multi-use: unchanged from the retired flat sentinel, so this
 # hardening changes WHO a token authorizes and WHETHER its content is load-bearing — not how
@@ -88,6 +122,17 @@ EVENT_LOG_OVERRIDE = None
 # Test seam only (mirrors EVENT_LOG_OVERRIDE): when set, the status file is written here
 # instead of the canonical maintenance/_state/doctrine-status.json. None -> canonical.
 STATUS_PATH_OVERRIDE = None
+# Test seam only (mirrors EVENT_LOG_OVERRIDE): the repo `git worktree add`/`remove`
+# operate against. None -> CLAUDE_DIR (the real, live checkout this gate ships in).
+# A test points this at a throwaway repo so it never touches the real ~/.claude repo's
+# worktree registry.
+REPO_ROOT_OVERRIDE = None
+# Test seam only (mirrors EVENT_LOG_OVERRIDE): the probe script actually invoked.
+# None -> PROBE_SCRIPT (the real doctrine-integrity-probe.py in this checkout). A test
+# combining this with REPO_ROOT_OVERRIDE can run the REAL run_doctrine_probe() end to
+# end against a throwaway repo carrying its own copy of the probe script, with no risk
+# to the real ~/.claude repo -- see hooks/tests/test-git-prepush-doctrine-gate-worktree.py.
+PROBE_SCRIPT_OVERRIDE = None
 
 
 def current_session_id():
@@ -110,24 +155,135 @@ def override_active(session_id):
     return override_token(session_id) is not None
 
 
+def materialize_pushed_commit(repo_root=None):
+    """git-worktree-checkout HEAD of `repo_root` into a fresh scratch dir, so the probe
+    can validate the COMMIT about to be pushed instead of the working tree (OI-100: the
+    prior no-args invocation validated the working tree, so commit-then-uncommitted-fix
+    left drift that reached the remote unremarked while the gate reported clean).
+
+    Returns (worktree_path, error): worktree_path is None on any failure, with `error`
+    describing why -- the caller treats a None here as fail-closed drift, matching this
+    module's existing "a probe we cannot run cannot prove doctrine is intact" posture.
+
+    HEAD, NOT the ref/sha git supplies on pre-push's stdin: this gate deliberately reads
+    NO stdin (module docstring) so that payload reaches the confidentiality scan after it
+    untouched. HEAD is the commit about to be pushed in the overwhelming common case here
+    (push your current branch at its current tip). KNOWN, ACCEPTED LIMITATIONS (OI-100
+    design direction, 2026-08-05; independent review + adversarial REFUTE, 2026-08-05):
+      * Validates HEAD, not literally whatever ref(s) git names on stdin -- covers a plain
+        `git push`/`push origin <current-branch>`, but NOT an explicit refspec for a
+        different (non-checked-out) ref, `git push --all`/`--mirror`, a
+        `push.default=matching` multi-branch push, or a tag push -- none of those are
+        "pushing my current branch," and none is validated here. The tradeoff was made to
+        keep the no-stdin contract rather than re-architect stdin sharing across all three
+        gates in the same change.
+      * Validates the TIP only, not the whole pushed commit range -- drift introduced and
+        then fixed in an earlier commit of the same push is not flagged by this gate (gate
+        #3, the confidentiality scan, reads the full pushed range separately and remains
+        the backstop for that history-egress case).
+      * Check 8's untracked-root-*.md leak-scan leg (doctrine-integrity-probe.py) is
+        structurally inert here: a fresh worktree has no untracked files, so a confidential
+        term sitting only in an untracked root *.md no longer trips this gate the way the
+        pre-fix working-tree read did. Accepted: an untracked file cannot itself reach the
+        remote (the push carries no such content), so this is a lost hygiene tripwire, not
+        lost egress control -- the scheduled live probe runs still cover it."""
+    repo_root = repo_root or REPO_ROOT_OVERRIDE or CLAUDE_DIR
+    worktree_path = tempfile.mkdtemp(prefix="ora-doctrine-push-")
+    try:
+        # `git worktree add` refuses a non-empty target, and on some git versions an
+        # already-EXISTING-but-empty one too -- remove the mkdtemp()-created dir and
+        # let git create the leaf itself, same idiom as isolated_commit.py's scratch dirs.
+        os.rmdir(worktree_path)
+    except OSError as e:
+        return None, "could not prepare worktree scratch dir (%s)" % e
+    try:
+        result = subprocess.run(
+            ["git", "worktree", "add", "--detach", "--quiet", worktree_path, "HEAD"],
+            cwd=repo_root, capture_output=True, text=True, encoding="utf-8",
+            errors="replace", env=_clean_git_env())
+    except Exception as e:  # pragma: no cover - defensive
+        # mkdtemp's dir was already rmdir'd above (empty), so there is nothing left on
+        # disk to clean up on this specific path -- git never got far enough to create one.
+        return None, "could not launch git worktree add (%s)" % e
+    if result.returncode != 0:
+        # Independent review (2026-08-05): on a mid-failure (e.g. git created the leaf
+        # then errored partway through registration), don't orphan it -- best-effort,
+        # errors ignored, since the gate is about to fail-closed-block regardless.
+        shutil.rmtree(worktree_path, ignore_errors=True)
+        return None, "git worktree add failed (rc=%d): %s" % (
+            result.returncode, (result.stderr or "").strip()[:500])
+    return worktree_path, None
+
+
+def remove_worktree(worktree_path, repo_root=None):
+    """Best-effort cleanup -- by the time this runs the probe has already finished
+    reading the worktree, so a cleanup failure here must NEVER change the gate's
+    decision. Falls back to a plain rmtree (worktree left administratively registered,
+    harmless, prunable later via `git worktree prune`) if `git worktree remove` itself
+    fails for any reason."""
+    if not worktree_path:
+        return
+    repo_root = repo_root or REPO_ROOT_OVERRIDE or CLAUDE_DIR
+    try:
+        result = subprocess.run(
+            ["git", "worktree", "remove", "--force", worktree_path],
+            cwd=repo_root, capture_output=True, text=True, encoding="utf-8",
+            errors="replace", env=_clean_git_env())
+    except Exception as e:  # pragma: no cover - defensive
+        result = None
+        sys.stderr.write(
+            "pre-push doctrine gate: could not launch git worktree remove (%s).\n" % e)
+    if result is None or result.returncode != 0:
+        detail = (result.stderr or "").strip()[:300] if result is not None else ""
+        sys.stderr.write(
+            "pre-push doctrine gate: could not cleanly remove scratch worktree %s "
+            "(%s) -- harmless but stale; `git worktree prune` clears it later.\n"
+            % (worktree_path, detail))
+        shutil.rmtree(worktree_path, ignore_errors=True)
+
+
 def run_doctrine_probe():
-    """Run the probe (it has no --quiet flag -- unlike governor-drift-probe.py, its only
-    options are --session-context=/--rules=/--terms=; passing --quiet would itself be an
-    unrecognized-option [MISSING] finding and always fail-closed-block every push).
+    """Materialize the commit about to be pushed into a scratch worktree (see
+    materialize_pushed_commit()) and run the probe against it with --live-root=, so it
+    validates that commit's content in FULL live mode -- not the positional-argv single-
+    fixture path, which would flip live_mode False and silently disable 7 coupled checks
+    (OI-100 Trap 1). The probe has no --quiet flag -- unlike governor-drift-probe.py, its
+    only options are --session-context=/--rules=/--terms=/--live-root=/...; passing an
+    unrecognized flag would itself be an unrecognized-option [MISSING] finding and always
+    fail-closed-block every push.
 
     CAPTURE-then-echo (was: inherit) so the SAME diagnostics still surface live to the git
     user AND the text is available to derive a one-line status-file summary from -- without
     re-running the probe (a second run would double the cost and could race a mid-push
-    CLAUDE.md edit). Returns (exit_code, stdout_text). A launch failure is reported as
-    (1, "") -- fail-closed: a probe we cannot run cannot prove doctrine is intact.
+    CLAUDE.md edit). Returns (exit_code, stdout_text). A launch failure -- including a
+    worktree that could not be materialized -- is reported as (1, "") -- fail-closed: a
+    probe we cannot run cannot prove doctrine is intact.
 
     Decoded utf-8/errors=replace and echoed through the utf-8-reconfigured streams so the
     probe's box/arrow/em-dash glyphs neither corrupt the display nor raise on a cp1252
-    console (same stream-reconfigure guard as maintenance/append-event-log.py)."""
+    console (same stream-reconfigure guard as maintenance/append-event-log.py).
+
+    env=_clean_git_env() (independent review, 2026-08-05): the probe itself shells out to
+    git (check 8's tracked-.md roster, the backup-coverage sweep) -- an inherited
+    GIT_DIR/GIT_WORK_TREE from the pre-push hook's own environment would silently redirect
+    THOSE calls at the live repo instead of the materialized --live-root worktree, by the
+    exact mechanism this module's own _clean_git_env() docstring already describes for its
+    own git calls. Without this, git_tracked_md()'s roster for check 8 could read the live
+    index (e.g. a file `git rm --cached`'d, uncommitted, still present in the pushed
+    commit) instead of the worktree's -- narrow, but the same false-negative shape as
+    OI-100 itself, so it is closed here rather than left as a second undisclosed gap."""
+    worktree_path, err = materialize_pushed_commit()
+    if worktree_path is None:
+        sys.stderr.write(
+            "pre-push doctrine gate: could not materialize the pushed commit (%s) - "
+            "treating as drift (fail-closed).\n" % err)
+        return 1, ""
     try:
+        probe_script = PROBE_SCRIPT_OVERRIDE or PROBE_SCRIPT
         result = subprocess.run(
-            [sys.executable, PROBE_SCRIPT],
-            capture_output=True, text=True, encoding="utf-8", errors="replace")
+            [sys.executable, probe_script, "--live-root=%s" % worktree_path],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            env=_clean_git_env())
         # Echo exactly what the user would have seen when the probe inherited the console.
         if result.stdout:
             sys.stdout.write(result.stdout)
@@ -141,6 +297,8 @@ def run_doctrine_probe():
             "pre-push doctrine gate: could not launch doctrine-integrity-probe.py "
             "(%s) - treating as drift (fail-closed).\n" % e)
         return 1, ""
+    finally:
+        remove_worktree(worktree_path)
 
 
 def summarize_probe_output(probe_rc, probe_stdout):
