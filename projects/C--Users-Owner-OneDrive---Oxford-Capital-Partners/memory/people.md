@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: people
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-03T19:32:53.406Z
+  modified: 2026-08-05T20:19:10.920Z
 ---
 
 # ORA People
@@ -23,7 +23,7 @@ Merged 2026-06-03 from people_team.md + people_brokers.md.
 **Tamara Lucas — Closing/Title (Symetra)** · tamara.lucas@symetra.com · Title + closing coordination. Active on FVC closing and E. Fulton Street closing (as of April 2026). [CONFIDENTIAL deal context]
 
 ## Brokers — Last verified: 2026-06-11
-Last contact = latest email to/from (Outlook). **HubSpot scope (Gabriel 2026-06-11): HubSpot tracks CURRENT TENANTS only — it is NOT a broker/deal CRM.** Broker freshness truth = Outlook; the "NOT in HubSpot" / stale-HubSpot notes below are EXPECTED, not defects — do NOT backfill brokers into HubSpot or build broker workflows on it (see rules.md §3b). Sources: Outlook M365 search (+ incidental HubSpot reads), 2026-06-11.
+Last contact = latest email to/from (Outlook). **HubSpot scope (revised Gabriel 2026-08-05): HubSpot holds tenants PLUS two deal pipelines (Lease Renewals, Acquisitions) — but it is still NOT a broker CRM.** The prior "current tenants ONLY, not a deal CRM" wording was retired because it contradicted live state; the broker exclusion below is unchanged and still correct. Broker freshness truth = Outlook; the "NOT in HubSpot" / stale-HubSpot notes below are EXPECTED, not defects — do NOT backfill brokers into HubSpot or build broker workflows on it (see rules.md §3b). Sources: Outlook M365 search (+ incidental HubSpot reads), 2026-06-11.
 
 | Broker | Firm / contact | Last contact | Market focus | Active deal(s) / notes |
 |---|---|---|---|---|

@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: rules
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-07-24T16:31:37.176Z
+  modified: 2026-08-05T20:19:02.078Z
 ---
 
 # ORA Standing Rules & Preferences
@@ -37,11 +37,33 @@ feedback_qb_desktop, feedback_netlify_mcp, feedback_less_permission_prompts, fee
 
 - **Routing:** canonical rule → `CLAUDE.md` Email & scheduler section (supersedes the old cc-both default, re-ratified 2026-06-10). In Outlook COM, semicolon-delimit if a send legitimately has multiple recipients.
 
-## 3b. HubSpot — current tenants ONLY
+## 3b. HubSpot — tenants + two deal pipelines; NOT a broker CRM
 
-- HubSpot's scope at ORA is **tracking current tenants** — it is NOT a broker, deal, or general-relationship CRM.
-- Broker/counterparty last-contact truth = **Outlook** (M365 search). Missing or stale broker records in HubSpot are expected, never defects to "fix."
-- Do not propose HubSpot backfills, dedupes, or workflows for brokers/deals; tenant-side use (tenant-intelligence, monthly-close HubSpot items) is unchanged.
+**Scope revised 2026-08-05** (Gabriel). The prior rule read "current tenants ONLY —
+it is NOT a broker/deal CRM." The tenant half and the broker half still hold; the
+**deal** half did not survive contact with the live system and was retired.
+
+- **In scope — tenants:** the Tenant DB remains HubSpot's primary job
+  (tenant-intelligence, monthly-close HubSpot items).
+- **In scope — deals, two pipelines:**
+  - *Lease Renewals* — ~50 deals, stage `appointmentscheduled`; per-tenant renewal
+    deals using `dealname`/`closedate` conventions, closed `closedlost` when a
+    tenant vacates.
+  - *Acquisitions* — named acquisition deals (6150 Avery Road, 1333 Research Road,
+    Pendleton Trade Center); the target of the `acq_candidates` sync (OI-019,
+    blocked on `HUBSPOT_TOKEN`).
+- **STILL out of scope — brokers.** Broker/counterparty last-contact truth remains
+  **Outlook** (M365 search). Missing or stale broker records in HubSpot are
+  expected, never defects. Do not backfill brokers into HubSpot or build broker
+  workflows on it. `people.md`'s "NOT in HubSpot" broker notes stay correct.
+
+Why the change: the old rule was dated 2026-06-11 and, by 2026-08-05, contradicted
+observable state — a doctrine that says a system holds no deals while that system
+holds two live deal pipelines causes sessions to disbelieve real data. Evidence:
+`event_log.md` (Lease Renewals pipeline, 50 deals), `cc-build-state.md` +
+`open-items-tracker.md` OI-019 (Acquisitions pipeline / acq_candidates sync),
+`reference_delinquency_report_collection_status_blindspot.md` (deal `58522276430`
+closed `closedlost` 2026-07-25). See [[reference_hubspot_missed_lease_date_correction]].
 
 ## 4. QuickBooks — Desktop only
 
@@ -191,3 +213,15 @@ ACTIVE-deal terms anywhere).
 - **Rule:** settlement statements in deal folders and knowledge-base projects are routinely scanned images with no text layer — `pdftotext`/direct extraction returns 0 lines and looks like an empty or unreadable file. Before concluding a document has no extractable data, render the page to an image (`pdftoppm`) and either OCR it (`tesseract`) or, for anything price-bearing, view the rendered image directly — OCR on financial tables (HUD-1 line 101/401, ALTA "Contract sales price" rows) is error-prone on shaded/bordered cells and produces silently wrong digits (confirmed 2026-07-29: an entity name OCR'd as "8242 Angola Road, LLC" was actually "5242 Angola Road, LLC" — a one-digit transcription error that would have propagated if not visually cross-checked).
 - **Why it matters:** a purchase price, entity name, or settlement date wrong by a transcription error is worse than not having the figure at all — it looks sourced and authoritative while being fabricated-by-OCR. Hard Invariant 7 (never fabricate deal/counterparty data) extends to OCR misreads, not just invented figures.
 - **How to apply:** for any settlement statement or scanned financial document, treat OCR text as a first pass only — visually confirm every purchase price, entity name, and date against a rendered page image before writing it into memory, a deliverable, or a Notion record. Cost segregation studies and other text-layer PDFs from professional preparers (Capstan, CSSI, ELB) are reliably extractable via `pdftotext` and don't need this treatment.
+
+## 19. Master Lease template — canonical location
+
+- **Rule:** the controlled `ORA_MasterLease_ShallowBayIndustrial_v*.docx` (the OH-anchored master that `masterlease-jurisdiction-rebase` conforms into state property templates) lives at **`Business/Leases All properties/`** on egoldberg's OneDrive/SharePoint — Gabriel's pinned choice. Locally, that resolves to `C:\Users\Owner\OneDrive - Oxford Capital Partners\Business\Leases All properties\` on this machine (the no-suffix OneDrive root syncs egoldberg's account — see [[reference_memory_scope_fragmentation]]).
+- **Why it matters:** SharePoint search once confirmed no copy of this master existed anywhere — the controlled master had only ever existed as a local file passed session to session, with version-drift incidents (a stale cache used while a newer version was canonical) traced directly to that gap. Full incident detail: `event_log.md`.
+- **How to apply:** always pull the highest version number present in that folder before any rebase run — never build from a cached or knowledge-store copy. `masterlease-jurisdiction-rebase` SKILL.md's own "Canonical master" section carries the same pointer; keep both in sync if the location ever changes.
+
+## 20. Master Lease property templates rebase — never hand-port jurisdictional edits
+
+- **Rule:** state-conformed Master Lease property templates (MD-EAS, MD-SBY, MO-RAY, and any future property/state) are regenerated from the canonical master via the `masterlease-jurisdiction-rebase` skill's asserted-count substitution engine — never by hand-copying a prior property template and manually editing in the jurisdictional changes for a new master revision.
+- **Why it matters:** hand-porting is exactly the failure mode that produced the underlying lease-form defects this whole conformance effort exists to fix (see `lease-form-qc`'s "Why this exists" — cross-property contamination from copying the last executed lease instead of a controlled master). The same failure mode applies one level up, to templates.
+- **How to apply:** any request to add a state, add a property, or regenerate templates off a new master revision routes to `masterlease-jurisdiction-rebase`, not a manual DOCX edit.
