@@ -92,6 +92,20 @@ from pathlib import Path
 
 HOME = Path(os.path.expanduser("~"))
 CLAUDE_DIR = HOME / ".claude"
+# OI-100 (2026-08-05): CLAUDE_DIR above is REASSIGNABLE -- apply_content_root_override()
+# repoints it (and the other git-TRACKED-content constants below) at a worktree of the
+# commit being pushed, so gate #1 can validate that commit instead of the working tree,
+# without ever setting live_mode=False (Trap 1 -- that flag disables 7 unrelated checks).
+# LIVE_CLAUDE_DIR is a SEPARATE, NEVER-reassigned alias for the paths that have no
+# meaningful "as of this commit" version and must stay pinned to the real install even
+# while CLAUDE_DIR is redirected: PREPUSH_SHIM (untracked, not version-controlled, and
+# structurally broken under a worktree root -- worktree/.git is a FILE, not the directory
+# CLAUDE_DIR/".git"/"hooks" assumes), SESSION_CONTEXT_MD and TERMS_JSON (both gitignored
+# -- a worktree of any commit never has them, so redirecting would read "missing" instead
+# of the live roster), the plugins/ skill-scan root (locally installed, gitignored), and
+# the backup-coverage sweep (its whole point is untracked top-level dirs in the LIVE
+# install -- a worktree has none, so redirecting would silently report always-clean).
+LIVE_CLAUDE_DIR = CLAUDE_DIR
 REAL_CLAUDE_MD = CLAUDE_DIR / "CLAUDE.md"
 COMMANDS_DIR = CLAUDE_DIR / "commands"
 MEMORY_DIR = (CLAUDE_DIR / "projects"
@@ -159,7 +173,9 @@ SLASH_SKILL_ALLOWLIST = {"code-review"}
 # Backup/archive trees are pruned so a deleted skill that lingers only in a backup
 # still reports MISSING (correct), and so the live skill is found wherever it sits.
 WORKSPACE = HOME / "OneDrive - Oxford Capital Partners" / "Claude_Workspace"
-SKILL_SCAN_ROOTS = (CLAUDE_DIR / "skills", CLAUDE_DIR / "plugins", WORKSPACE)
+# plugins/ is gitignored (locally installed, not a repo-content dir) -> pinned to
+# LIVE_CLAUDE_DIR always, same reasoning as the other pinned paths above.
+SKILL_SCAN_ROOTS = (CLAUDE_DIR / "skills", LIVE_CLAUDE_DIR / "plugins", WORKSPACE)
 # Pruned ONLY for correctness (backup/archive copies) and speed (the top-level
 # 02_Outputs artifact tree). Resolution is by SKILL.md presence (see
 # collect_skill_dirs), which already excludes non-skill junk, so the prune list is
@@ -229,9 +245,12 @@ AGENTS_DIR = CLAUDE_DIR / "agents"
 WORKFLOWS_DIR = CLAUDE_DIR / "workflows"
 
 # --- Checks 5-8 (2026-06-11 extension: enforce the v2.1 layered-doctrine model) ---
-SESSION_CONTEXT_MD = CLAUDE_DIR / "session-context.md"
+# SESSION_CONTEXT_MD/TERMS_JSON pinned to LIVE_CLAUDE_DIR -- both gitignored, so a
+# worktree of any commit never has them (see the OI-100 note at LIVE_CLAUDE_DIR's
+# definition above).
+SESSION_CONTEXT_MD = LIVE_CLAUDE_DIR / "session-context.md"
 RULES_MD = MEMORY_DIR / "rules.md"
-TERMS_JSON = CLAUDE_DIR / "hooks" / "confidential-terms.json"
+TERMS_JSON = LIVE_CLAUDE_DIR / "hooks" / "confidential-terms.json"
 # Sanctioned untracked confidential-staging home (rules.md sec 7a): active
 # deal-bound files legitimately sit UNTRACKED under this subtree during a live
 # deal. They never reach git (the fail-closed .gitignore ignores the whole dir,
@@ -303,7 +322,11 @@ BULLET_RE = re.compile(r"^\s*[-*]\s+\S")
 # verifies each guard in CLAUDE.md's "Guards:" line has >=1 live invocation point. ---
 SETTINGS_JSON = CLAUDE_DIR / "settings.json"
 SCHEDULED_TASKS_DIR = CLAUDE_DIR / "scheduled-tasks"
-PREPUSH_SHIM = CLAUDE_DIR / ".git" / "hooks" / "pre-push"
+# Pinned to LIVE_CLAUDE_DIR, not CLAUDE_DIR: the shim is NOT version-controlled (see its
+# own docstring) and hooks/ live in the git COMMON dir, shared across every worktree --
+# under a worktree root, "<worktree>/.git" is a FILE (gitlink), not a directory, so
+# CLAUDE_DIR-relative would silently resolve to a path that can never exist.
+PREPUSH_SHIM = LIVE_CLAUDE_DIR / ".git" / "hooks" / "pre-push"
 # 2026-08-05: the PreToolUse Edit/Write chain moved in-process. Four guards
 # (eos-plan-gate, shared-checkout-guard, eos-claude-md-guard, rules-md-guard) lost
 # their settings.json entries entirely and now run only via the dispatcher's
@@ -695,12 +718,19 @@ def parse_args(argv):
         elif a.startswith("--roster-files="):
             v = a.split("=", 1)[1]
             overrides["roster_files"] = [Path(p) for p in v.split(",") if p]
+        elif a.startswith("--live-root="):
+            # OI-100: redirect the git-TRACKED-content roots (CLAUDE.md, commands/,
+            # agents/, workflows/, skills/, memory/, settings.json, scheduled-tasks/,
+            # hooks/pretooluse-dispatcher.py) at this directory -- typically a
+            # `git worktree add --detach` checkout of the commit about to be pushed --
+            # WITHOUT setting live_mode=False. See apply_content_root_override().
+            overrides["live_root"] = Path(a.split("=", 1)[1])
         elif a.startswith("--"):
             # A typo'd flag must not silently become the CLAUDE.md path (which
             # would also disable live-mode scanning). Fail loud.
             print("[MISSING] unknown option: %s (known: --session-context= "
                   "--rules= --terms= --quick --memory-index= --backup-root= "
-                  "--ported-copies= --roster-files=)" % ascii_safe(a))
+                  "--ported-copies= --roster-files= --live-root=)" % ascii_safe(a))
             sys.exit(1)
         else:
             pos.append(a)
@@ -727,7 +757,11 @@ def parse_args(argv):
 # archived to Documents\Claude\Scheduled\_archive_2026-07-16_retired-to-ccmcp\ and
 # is no longer live; all 3 sentinels verified present in the CC/MCP copy (carried
 # over verbatim from the LAMS spec) before repointing. ---
-AM_BRIEF_SKILL = (HOME / ".claude" / "scheduled-tasks" / "ora-am-brief" / "SKILL.md")
+# Rebased onto CLAUDE_DIR (was a standalone HOME-derived constant) so OI-100's
+# apply_content_root_override() can redirect it too -- it is tracked content
+# (scheduled-tasks/ora-am-brief/SKILL.md) checked only in live_mode, so it should
+# validate the commit being pushed, same as SCHEDULED_TASKS_DIR/SETTINGS_JSON.
+AM_BRIEF_SKILL = CLAUDE_DIR / "scheduled-tasks" / "ora-am-brief" / "SKILL.md"
 AM_BRIEF_SENTINELS = (
     "CALLOUT TEMPLATE (assemble",
     "There is deliberately NO clause for the SOFR 30/90/180-day averages",
@@ -974,11 +1008,58 @@ def check_am_brief_sofr_guardrail(text):
     return [s for s in AM_BRIEF_SENTINELS if s not in text]
 
 
+def apply_content_root_override(root):
+    """OI-100: redirect every git-TRACKED-content path constant at `root` (normally a
+    `git worktree add --detach` checkout of the commit about to be pushed), leaving
+    live_mode untouched (the caller sets it separately) and leaving every PINNED
+    constant (LIVE_CLAUDE_DIR itself, and everything already defined in terms of it --
+    SESSION_CONTEXT_MD, TERMS_JSON, PREPUSH_SHIM, the plugins/ skill-scan root) alone.
+
+    Reassigns module GLOBALS rather than threading a root parameter through every check
+    function: every call site below reads these names at call time (verified -- none is
+    captured as a function-default value, which binds at def time and would freeze the
+    pre-override value), so reassigning here, before any check runs, is sufficient and
+    keeps this a small, auditable, single-purpose change instead of a call-site rewrite
+    across the whole file.
+
+    Deliberately narrow -- do NOT add REPO_ROOT, WORKSPACE, PORTED_CLAUDE_MD_COPIES, or
+    ORA_SKILLS_ROOT/OUTREACH_GENERATOR_DIR here: those name genuinely separate repos or
+    cross-surface (OneDrive/Cowork) locations with no version inside THIS repo's commits
+    -- redirecting them would just make them resolve against unrelated content."""
+    global CLAUDE_DIR, COMMANDS_DIR, MEMORY_DIR, RULES_MD, MEMORY_INDEX_MD
+    global AGENTS_DIR, WORKFLOWS_DIR, SETTINGS_JSON, SCHEDULED_TASKS_DIR
+    global PRETOOLUSE_DISPATCHER, SKILL_SCAN_ROOTS, AM_BRIEF_SKILL
+    CLAUDE_DIR = root
+    COMMANDS_DIR = root / "commands"
+    MEMORY_DIR = (root / "projects"
+                  / "C--Users-Owner-OneDrive---Oxford-Capital-Partners" / "memory")
+    RULES_MD = MEMORY_DIR / "rules.md"
+    MEMORY_INDEX_MD = MEMORY_DIR / "MEMORY.md"
+    AGENTS_DIR = root / "agents"
+    WORKFLOWS_DIR = root / "workflows"
+    SETTINGS_JSON = root / "settings.json"
+    SCHEDULED_TASKS_DIR = root / "scheduled-tasks"
+    PRETOOLUSE_DISPATCHER = root / "hooks" / "pretooluse-dispatcher.py"
+    AM_BRIEF_SKILL = root / "scheduled-tasks" / "ora-am-brief" / "SKILL.md"
+    SKILL_SCAN_ROOTS = (root / "skills", LIVE_CLAUDE_DIR / "plugins", WORKSPACE)
+
+
 def main():
     pos, overrides = parse_args(sys.argv[1:])
     argv_path = pos[0] if pos else None
-    claude_md = Path(argv_path) if argv_path else REAL_CLAUDE_MD
-    live_mode = argv_path is None
+    live_root = overrides.get("live_root")
+    if live_root is not None:
+        if argv_path is not None:
+            print("[MISSING] --live-root= cannot be combined with a positional "
+                  "CLAUDE.md path -- they set live_mode differently (--live-root "
+                  "stays live; a positional path is single-fixture-file mode)")
+            sys.exit(1)
+        apply_content_root_override(live_root)
+        claude_md = CLAUDE_DIR / "CLAUDE.md"
+        live_mode = True  # OI-100 Trap 1: NEVER False on this path (7 coupled checks)
+    else:
+        claude_md = Path(argv_path) if argv_path else REAL_CLAUDE_MD
+        live_mode = argv_path is None
 
     if not claude_md.is_file():
         print("[MISSING] CLAUDE.md not found: %s" % claude_md)
@@ -1029,8 +1110,12 @@ def main():
         file_checks.append(("confidential-repos.json",
                             CLAUDE_DIR / "confidential-repos.json"))
     if "confidential-terms.json" in section:
-        file_checks.append(("confidential-terms.json",
-                            CLAUDE_DIR / "hooks" / "confidential-terms.json"))
+        # TERMS_JSON, not CLAUDE_DIR/"hooks"/"...": this file is gitignored (OI-100 --
+        # a worktree of any commit never has it, so redirecting this reference would
+        # hard-FAIL check 2 on every --live-root= run for a file that was never
+        # supposed to be tracked in the first place). TERMS_JSON is pinned to
+        # LIVE_CLAUDE_DIR for exactly this reason -- see its definition above.
+        file_checks.append(("confidential-terms.json", TERMS_JSON))
     if "event_log.md" in section:
         file_checks.append(("memory/event_log.md", MEMORY_DIR / "event_log.md"))
 
@@ -1497,7 +1582,10 @@ def main():
     # Runs live (root = ~/.claude) or on a fixture root via --backup-root=.
     # WARN-only by design: a hit is an opt-in review candidate, not drift --
     # see BACKUP_SWEEP_TRANSIENT_DIRS for rationale and the allowlist contract.
-    backup_root = overrides.get("backup_root") or (CLAUDE_DIR if live_mode else None)
+    # Pinned to LIVE_CLAUDE_DIR (not CLAUDE_DIR): this sweep's whole point is untracked
+    # top-level dirs in the LIVE install -- a worktree of a commit has none by
+    # construction, so redirecting would silently report always-clean (OI-100 Trap 1).
+    backup_root = overrides.get("backup_root") or (LIVE_CLAUDE_DIR if live_mode else None)
     if backup_root is not None:
         sweep_skipped = None
         candidates = []
