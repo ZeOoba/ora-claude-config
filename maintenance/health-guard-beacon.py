@@ -108,7 +108,12 @@ def write_beacon(path, status, subject_sent, failed_connectors,
             json.dump(data, fh, indent=2)
         os.replace(tmp, path)                   # atomic: a torn write cannot orphan the beacon
         return True
-    except Exception:
+    except Exception as exc:                    # noqa: BLE001 -- never raise, but never SILENT
+        # Returning a bare False loses WHY. registry-membership-probe.py shipped a
+        # silent `except: pass` on its own log append and went quiet for two days
+        # (fixed 2026-08-05); the caller sees exit 1 but nobody could say what broke.
+        print("beacon write FAILED (%s: %s) -> %s"
+              % (exc.__class__.__name__, exc, path), file=sys.stderr)
         return False
 
 
@@ -169,6 +174,14 @@ def main():
     w.add_argument("--notion-written", required=True, choices=["true", "false"])
     w.add_argument("--notion-error", default=None)
     w.add_argument("--store", default=DEFAULT_STORE)
+    w.add_argument("--now-iso", default=None,
+                   help="ET timestamp of the run being recorded, e.g. "
+                        "2026-08-04T06:05:18-04:00. Omit for a live run. REQUIRED when "
+                        "BACKFILLING a past run: without it the entry is stamped with the "
+                        "backfill time, which silently claims the run happened now. That "
+                        "is exactly how the 2026-08-04 and 08-05 entries came to be stamped "
+                        "2026-08-05T11:26:53 -- write_beacon() always took now_iso, but the "
+                        "CLI had no way to pass it.")
 
     r = sub.add_parser("read", help="gap verdict from the local ledger (B.3.5a)")
     r.add_argument("--store", default=DEFAULT_STORE)
@@ -178,7 +191,7 @@ def main():
         ok = write_beacon(a.store, status=a.status, subject_sent=a.subject,
                           failed_connectors=a.failed_connectors,
                           notion_written=(a.notion_written == "true"),
-                          notion_error=a.notion_error)
+                          notion_error=a.notion_error, now_iso=a.now_iso)
         print(json.dumps({"written": ok, "store": a.store}))
         return 0 if ok else 1                   # non-zero is a real signal: disk write failed
 
