@@ -1008,6 +1008,32 @@ def check_am_brief_sofr_guardrail(text):
     return [s for s in AM_BRIEF_SENTINELS if s not in text]
 
 
+def check_worktree_baseref(settings_obj):
+    """Return a WARN message if settings.json's worktree.baseRef isn't the
+    ratified "head" (None if compliant). Pure over the parsed settings.json
+    object so it is unit-testable without a live file.
+
+    2026-08-05: EnterWorktree's worktree.baseRef governs which commit a new
+    worktree branches from. Unset (or "fresh") branches from
+    origin/<default-branch>, silently dropping local-ahead-of-origin commits --
+    the routine state of this repo's main (frequent local commits, infrequent
+    pushes; same pattern in ora-skills and oxford-command-center). Gabriel
+    ratified "head" as the standing default (event_log.md, 2026-08-05)."""
+    wt = settings_obj.get("worktree")
+    base_ref = wt.get("baseRef") if isinstance(wt, dict) else None
+    if base_ref == "head":
+        return None
+    if base_ref is None:
+        return ("worktree.baseRef is unset in settings.json (defaults to "
+                "\"fresh\" -- branches new worktrees from origin/<default-branch>, "
+                "silently dropping local-ahead-of-origin commits). Ratified "
+                "default is \"head\" (event_log.md, 2026-08-05).")
+    return ("worktree.baseRef=%r in settings.json, expected \"head\" (branches "
+            "new worktrees from origin/<default-branch> instead of local HEAD -- "
+            "silently drops local-ahead-of-origin commits). Ratified default is "
+            "\"head\" (event_log.md, 2026-08-05)." % (base_ref,))
+
+
 def apply_content_root_override(root):
     """OI-100: redirect every git-TRACKED-content path constant at `root` (normally a
     `git worktree add --detach` checkout of the commit about to be pushed), leaving
@@ -1669,6 +1695,28 @@ def main():
         except Exception as _e:
             warn("workspace-pointer staleness check errored (fail-open): %s"
                  % ascii_safe(str(_e)))
+
+    # --- worktree.baseRef config drift (2026-08-05, EnterWorktree investigation
+    # follow-up): WARN-only, fail-open -- settings.json is best-effort here, same
+    # as every other config-drift check in this module. ---
+    if live_mode:
+        settings_text, settings_read_err = read_optional(SETTINGS_JSON)
+        if settings_text is None:
+            warn("worktree.baseRef check: settings.json unreadable (fail-open) -- %s"
+                 % ascii_safe(settings_read_err))
+        else:
+            try:
+                settings_obj = json.loads(settings_text)
+            except ValueError as e:
+                warn("worktree.baseRef check: settings.json unparseable "
+                     "(fail-open) -- %s" % ascii_safe(e))
+            else:
+                gap = check_worktree_baseref(settings_obj)
+                if gap:
+                    warn(gap)
+                else:
+                    print("worktree.baseRef: OK (\"head\")")
+
     if terms_data is not None and isinstance(terms_data, dict):
         residue_total = 0
         for key, entry in terms_data.items():
