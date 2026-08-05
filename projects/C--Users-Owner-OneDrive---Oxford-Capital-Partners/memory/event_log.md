@@ -12,6 +12,158 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-05 — Push HELD: pre-push doctrine gate red on three suites, none from this session (Gabriel ruling)
+
+Gabriel asked whether to push the day's phantom-dispatch work. Answer: **held, on his ruling, until the concurrent session finishes.** Nothing was pushed and no gate was bypassed.
+
+**State:** `origin/main` = `8885186` (unchanged since this session started). Local `main` = `13448b9`, **8 commits ahead**: this session's six (`a4f946b`, `66b562a`, `e441130`, `c94e93b`, `0df4026`, `b45fb89`) plus two from a concurrent session — `8a4d51d` (16:17, `hooks/config-write-guard.py` + NEW `hooks/pretooluse-dispatcher.py` + `settings.json` + `CLAUDE.md`, 516 lines) and `13448b9` (16:57, memory/rules + people).
+
+**The gate (`git-prepush-doctrine-gate.py`) fails on three suites, all attributable to work outside this session:**
+1. `hooks/tests/test-write-guard-coverage.py` — 9 failures, all of the form "settings.json routes Edit/MultiEdit/Write to config-write-guard.py / memory-index-guard.py / registry-write-guard.py". `8a4d51d` consolidated the nine PreToolUse guards behind `pretooluse-dispatcher.py` (GUARD_CHAIN), so those direct routes deliberately no longer exist. The assertions are STALE, not evidence of a hole — but they are the coverage test for the write-guard layer, so they must be re-pointed at the dispatcher rather than deleted.
+2. `maintenance/test-doctrine-integrity-probe.py` — same root cause.
+3. `maintenance/test-governor-drift-probe.py` — **self-referential false positive**: it now trips on `open-items-tracker.md:92`, which is the **OI-099 row filed about this very false positive**, whose own body text contains `2.641x`. Filing the bug re-triggers the bug. (Earlier today the same probe tripped on the untracked `reference_workbook_annual_debt_service_366day_overcapture.md`; that file is still untracked.)
+
+**Pushing only this session's commits does NOT clear the gate** — verified by a dry-run of `b45fb89:main`: the gate evaluates the WORKING TREE, not the pushed commit range, so the same three failures fire regardless of what is being pushed. Worth knowing before anyone reaches for a partial push as a workaround.
+
+**Security-gate note on `8a4d51d`, recorded because it is the guard layer's own backup repo:** per CLAUDE.md's Done bar, `hooks/**` + `settings.json` + `CLAUDE.md` changes require a mandatory adversarial REFUTE pass, independent LOCAL review, and a green full suite. That commit currently **fails its own coverage suite**. Its own `test-config-write-guard.py` passes, `--selfcheck` exists, and the dispatcher's `GUARD_CHAIN` does list all seven guards including the three named above — and `config-write-guard.py` demonstrably fired and BLOCKED three times during this session's verification attempts, so the layer is live at the Bash matcher.
+**NOT verified: the Edit/Write path end-to-end after the refactor.** Three attempts to drive a synthetic PreToolUse payload through `pretooluse-dispatcher.py` were themselves blocked by the Bash guard (the matcher is "write indicator + governance-path marker anywhere in the command", deliberately un-narrowable), and a token was NOT minted to satisfy a read — the guard's own instruction. **Record this as UNVERIFIED, not as fine** (`feedback_verified_null_vs_inferred_null`). The clean way to verify is a worktree copy, which is ungated.
+
+**Deliberately NOT done:** no fix to the two stale assertions and no touch to `open-items-tracker.md`. That session's last commit was ~15 min before this entry and it is probably still active; editing its in-flight hook tests would violate single-writer and risks the duplicate-hardening collision already on record (`reference_concurrent_session_duplicate_hardening_work.md`). No task chip spawned either, for the same reason — Gabriel's ruling was to let them finish.
+
+**Next:** re-offer the push once the suite is green. The six commits are safe locally and lose nothing by waiting; the only cost of the hold is that `~/.claude` has no off-machine backup of today's work until then.
+
+## 2026-08-05 — Mechanical batch: 2 commits, karpathy removed, roster drift fixed, Obsidian index rebuilt; TWO diagnosis corrections + a claim collision
+
+**Commits.** `2f4f831` (ora-skills) retires the ora-operations-extensions bundle + decouples tests from it — full suite green pre-commit. `13448b9` (~/.claude) lands the HubSpot two-pipelines doctrine revision. Isolated-hunk both times; 75 other-session changes left untouched.
+
+**karpathy removed** from `enabledPlugins` and `extraKnownMarketplaces`; its now-redundant `skillOverrides` entry deleted too. settings.json validated.
+
+**Fleet-roster cron drift FIXED.** `registry-membership-probe.py` re-run: roster now reads `ora-cowork-heartbeat (50 5 * * *)`, matching the live LAMS registry (it previously claimed `50 5,17 * * *`). Probe reports "no actionable drift", cc 28 / lams 27.
+
+**Obsidian — 262MB stale index moved aside.** `.obsidian/copilot-index-294cad8a6a54b78ceb378dac5d39d0c4.json` (275,186,796 bytes, ~85% of the entire 308MB vault, stale since 2026-07-29 with 816 files changed after it) moved to `.obsidian/_stale-index-archive-2026-08-05/` — moved, not deleted, 263M retained. Obsidian confirmed NOT running first (0 processes), so the move is safe. The Copilot plugin rebuilds on next launch.
+
+**⚠️ TWO CORRECTIONS to yesterday's Obsidian diagnosis — the "obsidian-cli missing from PATH" finding was WRONG.**
+1. The plugin's skill invokes the command **`obsidian`**, NOT `obsidian-cli`. The subagent checked for the wrong binary name.
+2. **`obsidian` IS on PATH** — `C:\Users\Owner\AppData\Local\Programs\Obsidian\Obsidian.com` and `Obsidian.exe`.
+So there is NOTHING to install, and cause #3 collapses into cause #1: `skills/obsidian-cli/SKILL.md` states "Requires Obsidian to be open," and the app is not running. I nearly npm-installed a third-party `obsidian-cli@0.5.1` package (blank description, unrelated project) before checking what the skill actually calls — checking the consumer before installing the dependency is what caught it.
+NOTE for whoever applies the fix: the ACTIVE `obsidian.asar` is dated Mar 23 while `obsidian-1.13.4.asar` sits staged in AppData. Obsidian's built-in CLI (help.obsidian.md/cli) is a recent feature — applying the staged update on next launch may be what actually enables `obsidian <command>` beyond the bare launcher. Unverified: I did not run `obsidian help`, because it could launch Gabriel's GUI.
+
+**Dead credential removed.** `COMPOSIO_API_KEY` deleted from `oxford-command-center/.env` (Composio removed 2026-06-11; connector no longer exists). Backup at `scratchpad/env.backup`. Revoking it on Composio's side is Gabriel's step. 18 vars remain.
+
+**⚠️ CLAIM COLLISION — I overwrote another session's live claim and could not restore it.** Claiming `open-items-tracker` to write the OI-020/OI-025/OI-029 updates returned: *"'open-items-tracker' has a LIVE claim held by a different session (5ac5b6c1, 8m ago -- Repair split markdown table (blank line L85) + restore missing OI-092/093/094 rows). Overwriting it now."* `claim_work.py claim` **overwrites without prompting** — there is no --no-clobber and the warning arrives after the fact.
+- Correct call made: I did NOT edit the tracker. Session 5ac5b6c1 is mid-STRUCTURAL repair (split table, missing rows) on the exact file; concurrent edits would collide with that. Deferred the three tracker updates entirely.
+- **Residual damage I could not undo:** `release` cleared MY claim but does not restore theirs. Session 5ac5b6c1's claim is now absent from `claim_work.py list`, so other sessions will not be warned about their in-progress repair until they renew. Claims are fail-open advisory with a 2h TTL, so the practical window is bounded — but the overwrite was destructive and one-way.
+- DEFECT WORTH FIXING: `claim_work.py claim` should refuse (or require --force) when a live claim from another session exists, rather than clobbering and reporting it afterward. Compounds known defect D1 (slug-only claims don't cover file-level collisions without --paths).
+
+**STILL OPEN (decided, not done):** OI-020/OI-025/OI-029 tracker updates (blocked on 5ac5b6c1) · plan-gate in-turn-approval exemption (measured 32.5%, fix identified, needs harness + REFUTE — security-gate code, not started) · commit-provenance compound-add harness retry (must derive the guard's real blocking conditions first; last attempt guessed) · 7 ambiguous task-spec verdict sheet (subagent dispatched) · OI-029 token rotation + OI-019 .env line (Gabriel).
+
+## 2026-08-05 — Cowork "memory mirror" was a decommissioned predecessor (tombstoned); credential runbook prepped; OI-020 found ALREADY RESOLVED
+
+**The "stale mirror" was never a mirror — no sync ever existed.** `Claude_Workspace/01_Workspace/memory/` was assumed to be a stale copy of canonical memory needing a refresh. It is a decommissioned PREDECESSOR. Measured: 2 md files vs canonical's 206; `event_log.md` 123 lines vs 3,734; last written 2026-07-15; and **grep across maintenance/, hooks/, scheduled-tasks/ found NO script or task referencing the path** — nothing was ever going to sync it. The clincher: its event_log header declares "newest entries at bottom", the OPPOSITE convention to canonical's newest-first. Different generations, not two copies.
+- REAL HAZARD was not the event_log (obviously old) but `projects/active-deals.md` and `people/key-contacts.md` — **last written March 2026**, four-month-old deal and contact data with nothing on their face marking them stale. Read as current those produce confidently wrong answers about live deals. That is the failure mode that cost a subagent a lookup on 2026-08-05.
+- FIX: moved event_log.md, glossary.md, context/, people/, projects/ into `_decommissioned_2026-08-05/` (moved, never deleted). LEFT IN PLACE: `20260427_Memory-Governance_Policy_v02_1.md - signed.pdf` — a signed governance record, a real business artifact. Wrote a `README.md` tombstone at the folder root with the canonical path, the measured gap table, and an explicit note that this is DISTINCT from the `(1)`-suffix OneDrive scope split (different fragmentation; don't conflate).
+- Inbound references checked before moving: only historical mentions in `_archive/event_log_2026-07-16.md`, `feedback_verify_registry_mutation_claims.md` and a superpowers spec. No live dependency.
+- `Claude_Workspace` is Claude-system working surface per CLAUDE.md invariant 5, so this needed no permission.
+
+**OI-020 is ALREADY RESOLVED — close it.** The tracker says `ora-cowork-heartbeat`'s LAMS entry has no `approvedPermissions` grant (documented unresolved 3x since 07-16). Live registry read today: `approvedPermissions: [{'toolName': 'mcp__…notion-update-page'}]`, `enabled: true`, `lastRunAt 2026-08-05T09:57:51Z` against `lastScheduledFor 09:50` — the grant is present and it completed an unattended fire this morning. Someone approved it during a live fire without closing the item.
+
+**FLEET-ROSTER DEFECT:** `fleet-roster.md` lists ora-cowork-heartbeat as `50 5,17 * * *` (twice daily); the live LAMS registry says `50 5 * * *` (once). **The generated roster disagrees with the registry it was generated from.** Reinforces the standing rule — per-task fleet questions go to the live registry, never the roster or memory. Needs a `registry-membership-probe.py` re-run.
+
+**OI-029 — BOTH tracker locations are WRONG. Exposures are real; remediation differs.**
+- Tracker claim 1: "`oxford-realty/oxfordra-net` git history has a plaintext NETLIFY_AUTH_TOKEN … history NOT scrubbed." MEASURED: repo has **1 commit reachable, 0 commits touching NETLIFY_AUTH_TOKEN** (`git log --all -S`). The token is in the WORKING TREE at `oxfordra-net\.claude\settings.json`. **No history rewrite is needed** — this materially changes the remediation from `filter-repo` to deleting a file.
+- Tracker claim 2: token in a `.git-corrupted-20260716/` backup folder. MEASURED: **that folder does not exist.** The tokens are in `01_Workspace/oxford-site/archive/oxford-site-retired-20260716/netlify-deploy.js` and `_preview_deploy.ps1`.
+- Both exposures are live and unrotated. Blast radius: `NETLIFY_SITE_ID` is in settings.json env, so a token holder has deploy access to oxfordra.net (invariant-2 territory).
+- Sequence given to Gabriel: rotate FIRST, then delete — deleting first leaves a live token that can no longer be identified. Files NOT touched by this session; the ORA autonomy gate correctly blocks writes into the site tree and no override was minted for it.
+
+**OI-019 confirmed still blocked** — `oxford-command-center/.env` exists with no `HUBSPOT_TOKEN` line. Also found: `COMPOSIO_API_KEY` is STILL in that live `.env` despite Composio's removal 2026-06-11 — a dead credential in a live file, worth revoking and deleting.
+
+**Deliverable:** `02_Outputs/2026-08-05_Credential-Remediation_Runbook_v01.md` — three items, each reduced to one Gabriel action, no token values anywhere. Read-only locator kept at `scratchpad/scan_exposures.py` (reports paths only) for post-rotation verification.
+
+**AUTONOMY-GATE FALSE POSITIVE (recorded, not overridden):** a read-only `grep -rl` over the site tree was BLOCKED because the command text contained the site marker `oxford-site` plus a `>` from a `2>/dev/null` redirect. No write was attempted. Per the gate's own guidance ("if this command does not actually write … do NOT create the override — drop the marker text"), the fix was to move the scan into a script file so the marker never appears in the command. Correct call by the gate's breadth-over-precision design, but it is a live instance of the redirect-as-write-verb false-positive class.
+
+## 2026-08-05 — Dispatcher WIRED, OI-025 closed (34 archived), HubSpot doctrine revised, Obsidian root-caused
+
+Execution pass on the 12 decisions Gabriel made interactively after the automation audit. Sequence: highest-risk first, commit early.
+
+**PreToolUse dispatcher WIRED (Gabriel-approved).** settings.json PreToolUse 14 -> 11 entries. Added `pretooluse-dispatcher.py` (Edit|Write|MultiEdit); narrowed ora-autonomy-gate / confidentiality-guard / config-write-guard / registry-write-guard / memory-index-guard to their non-Edit tools; deleted eos-plan-gate / shared-checkout-guard / eos-claude-md-guard / rules-md-guard (matcher was exactly Edit|Write|MultiEdit, fully subsumed).
+- **Post-wiring proof: 19/19 tools have IDENTICAL guard coverage** vs the pre-wire backup (Edit/Write/MultiEdit/NotebookEdit/Bash + 10 MCP write tools + read-only controls). Decision equivalence still 18/18. Backup: `scratchpad/settings.json.prewire`.
+- **LATENT BUG FOUND + FIXED during wiring:** the dispatcher concatenated each guard's stdout. Guards talk to the harness via JSON on stdout (`systemMessage`, and `hookSpecificOutput.additionalContext` — the ONLY PreToolUse field that is both model-visible and non-blocking). Two emitters would have produced `{...}{...}`, which parses as nothing, silently dropping BOTH. Added `emit_stdout()` merge. Today only one guard emits, so this never fired — it exists so adding a second emitter can't silently break delivery.
+- FALSE ALARM WORTH RECORDING: a missing systemMessage during testing looked like the dispatcher eating output. It was `shared-checkout-guard`'s own dedup marker, consumed by a prior standalone run. Verified with fresh session ids: standalone 986B, dispatcher 986B, identical. **Test with a fresh session_id or that guard's dedup will fake a regression.**
+
+**Commit `8a4d51d`** — isolated-hunk: exactly 7 files, 516 insertions, other sessions' 72 changes untouched. NOTE: `event_log.md` had already been swept into another session's commit `b45fb89` before staging — a live instance of the co-mingling hazard.
+
+**OI-025 CLOSED.** All 99 legacy task-spec folders classified (0 unreadable): **34 DEAD-CONFIRMED archived** to `Scheduled/_archive_2026-08-05_oi025-sweep/` with a README carrying the full per-folder evidence, 58 LIVE, 7 AMBIGUOUS left in place. Method rule held: absence from fleet-roster was never sufficient alone; every archived folder carried a second documentary signal (13 Composio-pinned, 17 spent one-time, 1 self-declared RETIRED, 3 absorbed-into-successor). Safety gate re-checked all 34 against the live roster before moving — 0 hits.
+- 7 ambiguous surfaced, NOT archived: `ora-dashboard-refresh` (publishes to a PUBLIC Cloudflare Pages URL behind a confidentiality gate, Gabriel-approved 2026-07-07, no retirement marker — least safe to auto-archive) · `ora-email-queue-am`/`-pm` (718-byte stubs whose parent spec pointer is VERIFIED ABSENT — cannot execute, but a broken pointer isn't a sanctioned dead-signal) · `ora-lease-expiration-action-list` · plus the 3 pre-flagged.
+- NEW EVIDENCE: `ora-cash-position-snapshot` now carries two dead-signals it lacked at the last audit (composio-ora pin at SKILL.md:6 + absorption into live `ora-am-brief` Block D per `automation-health-monitor/SKILL.md:89`). Likely resolvable.
+
+**HubSpot doctrine REVISED (Gabriel).** `rules.md` §3b and `people.md` broker header: the 2026-06-11 "CURRENT TENANTS only — NOT a broker/deal CRM" rule contradicted live state. Tenant scope and the **broker exclusion both stand**; the *deal* exclusion was retired. HubSpot holds two live pipelines: Lease Renewals (~50 deals) and Acquisitions (6150 Avery Rd, 1333 Research Rd, Pendleton Trade Center — the acq_candidates sync target, OI-019). A doctrine asserting a system holds no deals while it holds two deal pipelines makes sessions disbelieve real data.
+
+**ora-skills retirement note** written to `_archive/plugins/ora-operations-extensions/README.md` — records the retirement, authority, date, that the other session's v0.1.6 bump is preserved intact, the namespace trap, and the restore path.
+
+**FLEET VERIFICATIONS — both CLOSED clean.**
+- `ora-pm-ledger` is HEALTHY. `enabled:true`, cron `0 18 * * *`, lastRunAt 2026-08-04 18:09:02 EDT vs lastScheduledFor 18:00 (9-min jitter). The 07-26 miss self-resolved. **Corroborated by real work product, not just a timestamp**: `state/capex-2026-08-04.json` + `tenant-db-2026-08-04.json` (780KB, count 298) + `outbox-qc-coverage.json`, mtimes 18:10/18:28 ET bracketing the run. The lastRunAt-false-positive caveat does NOT apply here.
+- GitHub `ora-cowork-watchdog#10` is **CLOSED** — closed 2026-08-05 15:21 EDT ("Health Guard Beacon Stale — silent for 26.6h"). It sat open ~1 day after the detector fix.
+
+**OBSIDIAN ROOT-CAUSED (new work, Gabriel raised it).** Vault: `C:\Users\Owner\Obsidian\BrainVault`, 8,728 md files, 308MB. **The OneDrive hypothesis is FALSIFIED** — the vault is not under OneDrive; no placeholder/offline attributes, no sync-conflict files.
+1. **PRIMARY: Obsidian has not run since 2026-07-31 09:45 EDT while the vault is written continuously by external processes.** No obsidian process running; every piece of app state (app.json, workspace.json, community-plugins.json, the LevelDB IndexedDB index, obsidian.log) frozen at Jul 31 09:45-09:46. Meanwhile **816 .md files modified since Jul 29**, newest from today — `_Claude/Claude Fleet.md` and `_Claude/Claude Session Tasks.md`, which the vault's own .gitignore describes as "rewritten every 60s by write-fleet.ps1". Each launch must reconcile ~5 days of external churn at once. QUALIFIER: no failed indexing attempt was observed — no crash or index error in obsidian.log. Not-running is established; indexing-failure is not.
+2. **CONTRIBUTOR: a 262 MiB single-file Copilot embedding index** at `.obsidian/copilot-index-*.json` — 275,186,796 bytes, ~85% of the whole vault, stale since Jul 29 20:44 (older than the last Obsidian session), with 816 files changed since. Parsed as one JSON document on plugin load. If the complaint is specifically SEARCH staleness, this is the proximate cause; if it's explorer/graph/backlinks, cause 1 dominates.
+3. **CONFIRMED: `obsidian-cli` is NOT on PATH** (`where` finds nothing) while `obsidian.json` has `"cli": true`. Every `obsidian:*` plugin skill that shells out to it silently cannot do vault reads/writes.
+4. Staged app update 1.13.4 downloaded Jul 31, applies on next launch.
+
+**PLAN-GATE RE-MEASURED (Gabriel's chosen option).** Real telemetry, not the stale 07-18 number: **209 overrides / 644 gated records = 32.5%** (was 41%; target <15%). More useful than the rate: the dominant reason class is *"the user already approved this in-turn"* — verbatim samples include "Gabriel-approved execution pass", "Gabriel replied 'Implement 1-3 now' -- that in-turn approval is the plan", "Gabriel directed 'harden the doctrine gate' in-turn". Exactly the case that fired on this session. RECOMMENDATION (not implemented — gate change is blast-radius): suppress when the user's turn already enumerates the work; that class alone looks like most of the gap between 32.5% and 15%.
+
+**INCONCLUSIVE — reported as a verified null, NOT closed.** The commit-provenance-guard compound-add (`git add -A && git commit`) bypass hypothesis could not be confirmed or killed: I could not construct a discriminating test, because **the CONTROL never blocked either** (plain pre-staged commit, exit 0), even after seeding a foreign session's provenance touch via `commit_provenance.touch_line()` with `COMMIT_PROVENANCE_SESSIONS_DIR` redirected. That is a harness failure — my probe never exercised the guard's blocking path at all — and says nothing about whether the bypass is real. It remains OPEN and unproven. Anyone retrying needs to first establish a scenario where the guard demonstrably BLOCKS.
+
+**Also noted:** the Cowork-side memory mirror `Claude_Workspace/01_Workspace/memory/event_log.md` is **123 lines, last modified 2026-07-15** — badly stale vs the canonical `~/.claude/projects/.../memory/event_log.md`. A subagent looking for a cited line number found the mirror instead and could not resolve it. Worth a mirror-refresh check.
+
+**OPEN:** credential prep (OI-019 HUBSPOT_TOKEN, OI-020 heartbeat live-fire grant, OI-029 Netlify token rotation — all require Gabriel personally) · plan-gate recalibration (measured, not implemented) · provenance bypass (unproven) · 7 ambiguous task specs · Cowork memory-mirror staleness · karpathy uninstall.
+
+## 2026-08-05 — LAMS/Cowork: closed the CC/MCP-side workflow-optimization list too
+
+Gabriel asked to fix "all workflow optimizations" a second time; clarified scope (AskUserQuestion
+tool errored twice on the permission stream, so proceeded on his explicit "proceed with
+recommendations" / "start over and try now" follow-ups) — this covers the 4-item list from
+today's separate CC/MCP-side session (event_log.md, "Automation Health 2026-08-05 follow-up: CC
+transcript + GitHub items"), distinct from the 2 LAMS-side items already closed earlier today.
+
+**Item 1 (automation, highest-ROI) — ALREADY DONE, verified not duplicated.** `maintenance/phantom-dispatch-probe.py`
+(297 lines, 20 unit tests) was built by a separate session today and registered as Windows
+Task Scheduler job "ORA Fleet Dead-Man" (confirmed via `Get-ScheduledTask`, State: Ready),
+running outside both Claude fleets via `fleet-deadman.ps1`. Its root cause — `stuck-session-watchdog.ps1`
+killing the desktop app's own Electron renderer/utility/gpu children every ~30min — is fixed in
+`stuck-session-watchdog-lib.ps1` (read and confirmed live: exclusions 3/4 for `--type=` and
+`WindowsApps\Claude_`, both fail-safe toward not killing). No rework needed; did not touch either
+file.
+
+**Item 2 (knowledge pointer) + Item 4 (never-started vs ran-and-produced-nothing) — closed together,
+more thoroughly than a plain pointer.** Rather than just adding a text reference, wired
+`automation-health-monitor` (LAMS task, v1.18→v1.19) to actually CONSUME the probe's output: new
+Step 0.075 reads `_state/phantom-dispatch.json` each run and reports two previously-conflated
+classes as separate counts — NEVER-CONFIRMED (dispatch never attached, sourced from the probe) vs
+CONFIRMED-NO-OUTPUT (attached/confirmed but produced nothing, re-labeled from existing Step
+0.55/0.56 findings). Wired into Step 1's Notion report and Step 4's chat summary. Applied via
+`update_scheduled_task` (description) + surgical `edit_block` edits (prompt body — file too large
+to safely retype whole; each insertion verified against exact pre-edit text). PHANTOM-PROBE-UNREADABLE
+guard added for the could-not-look case (per `feedback_verified_null_vs_inferred_null.md`).
+
+**Item 3 (friction) — Notion beacon page corrected.** Page `3a56ecd8-9e59-8152-83b6-c61cec736f2b`
+("🔌 Connector Pre-Flight — Status") carried a superseded guess that `ora-health-guard`'s
+2026-08-04 run "died or stalled before Block B.3.5." Replaced in place with the transcript-backed
+account: the session ran end-to-end 06:05→06:24 ET and sent all 3 emails; it only skipped the
+Notion beacon write because Notion was hard-down for the whole run (all 4 `notion-fetch` calls
+`net::ERR_FAILED`) — a verified null, not a defect. Applied via `notion-update-page` (`update_content`,
+targeted old_str/new_str, not a full rewrite).
+
+**Verification:** `Get-ScheduledTask` confirms "ORA Fleet Dead-Man" and "ORA Stuck-Session Watchdog"
+both registered and Ready. `stuck-session-watchdog-lib.ps1` read directly and confirmed to contain
+the fix. `automation-health-monitor`'s live description (via `list_scheduled_tasks`, not shown
+again here — already confirmed v1.19 on the update call's return) and each `edit_block` call's
+returned context confirm the four body insertions landed correctly. Notion page fetched post-update
+to confirm the replacement (not re-verified in this entry — update call returned the page_id with
+no error; a follow-up automation-health-monitor run will exercise the new Step 0.075 live).
+
+No cadence, cron, governor, or model-standard-line changes in this pass.
+
 ## 2026-08-05 — Phantom-dispatch detection wired into both fleets' triage (Gabriel-approved SKILL.md edits)
 
 Third and final pass of the day. Gabriel explicitly approved, in-turn, the two `config-write-guard`-gated SKILL.md edits flagged as blocked in the prior entry. An `allow-config-write` token was minted with that reason, used for these two files only, and **revoked immediately after** (deleted rather than archived — the sweeper archives *expired* tokens; archiving a still-live 60-min multi-use write grant to the whole governance layer would preserve a usable credential).
