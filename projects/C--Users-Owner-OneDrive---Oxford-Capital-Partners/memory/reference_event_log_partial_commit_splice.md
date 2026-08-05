@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: ac546aef-18b3-45a2-9a97-675c1f7135f4
-  modified: 2026-08-04T19:38:14.905Z
+  modified: 2026-08-05T22:11:13.823Z
 ---
 
 Companion technique to [[shared-checkout-cofile-patch-hazard]]: that note names the problem (a co-edited file's diff captures another writer's hunks too); this note is the concrete fix for the specific case of `event_log.md` — a single file, multiple sessions appending newest-first, no interactive `git add -p` available in a scripted/headless session.
@@ -38,3 +38,5 @@ Companion technique to [[shared-checkout-cofile-patch-hazard]]: that note names 
 **Verify a splice that used this method** by diffing the result against the parent directly (`diff <(git show <parent>:<path>) <spliced>`) — it should show *only* your entry's own lines as additions, zero removals. If it shows any `<` (removed) lines, something is still wrong. Also grep for duplicate headings in the result (`grep -c "^## <exact title>"` should be 1) — inserting on top of the parent instead of the working tree means you must confirm you haven't also left a second copy sitting in the excluded-from-commit working tree that a later commit could redundantly re-add.
 
 **Real instance, 2026-08-04:** used the old (working-tree-anchor) method, excised a ~30KB span between "mine" and a chosen resume heading, and it turned out an already-committed entry ("Atomic OI-id allocator shipped...") plus two more sat inside that span. Caught only because the commit's own diff showed those headings as *removed* relative to the true parent — a signal worth checking for on every splice commit, not just this one. Fixed with a second corrective commit rebuilt via the parent-content method above; verified byte-exact against parent + own entry only.
+
+**Scope note, 2026-08-05: this technique and its step-6 pathspec gotcha are NOT specific to `event_log.md`.** Applied successfully to `open-items-tracker.md` the same day — a different structured, multi-writer, append-heavy memory file, same shape of problem (concurrent sessions' uncommitted blocks interleaved too closely for git to hunk-split). The splice itself worked correctly and was verified clean (`git diff --no-index` against the reconstructed target showed exactly the intended hunks). The commit step is where it failed: `--only <pathspec>` was used instead of a bare commit, which — per [[feedback_pathspec_commit_discards_index_splice]]'s same-day update — re-reads the working tree exactly like the plain pathspec form already documented in step 6, discarding the splice. Read that file's recurrence note before using this technique on any file; the failure isn't event_log-specific and the fix (bare commit, zero pathspec, any form) applies everywhere this technique is used.
