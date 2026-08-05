@@ -12,6 +12,61 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-05 — Phantom-dispatch detection wired into both fleets' triage (Gabriel-approved SKILL.md edits)
+
+Third and final pass of the day. Gabriel explicitly approved, in-turn, the two `config-write-guard`-gated SKILL.md edits flagged as blocked in the prior entry. An `allow-config-write` token was minted with that reason, used for these two files only, and **revoked immediately after** (deleted rather than archived — the sweeper archives *expired* tokens; archiving a still-live 60-min multi-use write grant to the whole governance layer would preserve a usable credential).
+
+**1. `ora-task-integrity-guard` SKILL.md → v1.11 (committed `0df4026`).**
+- NEW STEP 1.5 script 4: `phantom-dispatch-probe.py`. Exit 1 (phantom found) and exit 2 (probe could not look — logs unreadable) are both STEP-3 alarm conditions; `phantom-dispatch.log` added to STEP 3's per-artifact freshness list.
+- Marked **DEFENCE IN DEPTH, explicitly not the primary**, with a written instruction that `fleet-deadman.ps1` check 4 must never be deleted as a duplicate: this guard was itself phantom-dispatched on both 08-04 and 08-05, so it cannot be its own detector. The in-fleet copy earns its place only by catching same-run phantoms in OTHER tasks hours before the next 07:30 out-of-band sweep.
+- STEP 3 now states outright that **its own freshness check cannot see this failure class** — if the task never starts, nothing there evaluates. That check (added earlier the same day) was hardening a failure mode that had not occurred.
+- Records why the 08-04/08-05 misses were misdiagnosed as a SKILL.md-length problem, so it is not re-derived: `fleet-heartbeat.json` is also written by the `ORA Fleet Heartbeat Push` Windows task at 07:30, so it stayed fresh on days the guard never ran, and the mixed-freshness pattern read as a partial run. Also corrected script 3's stale "never-installed" claim about that schtask — it **is** installed.
+- The commit also carries the earlier same-day Cowork STEP 0.5 / STEP 3 hardening, which shipped unversioned and uncommitted in the shared checkout; folded into v1.11 rather than left dangling.
+
+**2. `automation-health-monitor` SKILL.md → v1.19 (LAMS live copy, OneDrive — not a git repo, so no commit).**
+- NEW **Step 0.57 — PHANTOM-DISPATCH DISCRIMINATION**, a mandatory gate every Step 0.5 / 0.55 / 0.56 finding must pass *before* a cause is named. Placed before Step 0.6 deliberately: it must run ahead of attribution, not after.
+- Encodes the three-way distinction the fleet previously collapsed: **NEVER STARTED** (phantom — no transcript, no exit code, no SKILL.md defect possible) · **RAN AND FAILED** (the only class that can be a SKILL.md bug) · **CONFIRMED BUT NO OUTPUT** (`ora-health-guard` 08-04: attached, ran end-to-end, sent 3 emails, Notion down, beacon correctly skipped). Discriminate via `_state/phantom-dispatch.json` or a `Confirmed task run for:` grep of `main.log`; always finish on an OUTPUT check.
+- Written against this monitor's own 2026-08-05 report, where the step's absence caused **both** findings to be mis-attributed. Instructs re-measuring the ~44% rate rather than quoting it, since the root cause was fixed the same day.
+
+**Verification:** `fleet-contract-check.py` exit 0 (parses `output_contract` frontmatter on both files) · `task-folder-registration-probe.py` exit 0, both fleets reconcile · the exact quoted command literal now written into STEP 1.5 script 4 runs correctly under the file's own PATH-QUOTING RULE (exit 1, 23 phantoms in-window) · the integrity guard's trailing model tag is still the LAST bracketed match, per that file's own first-match hazard rule.
+
+**Pre-existing defects found while verifying, NOT introduced and NOT fixed here:**
+- Both SKILL.mds **fail strict YAML frontmatter parsing** (`mapping values are not allowed here`) because their unquoted `description:` scalars contain `): ` colon-space — and have for many versions. Confirmed identical failure at git HEAD *before* any of today's edits. The platform and every ORA probe read them fine (lenient parsing), so this is latent, not active; quoting a 40KB description is a risky rewrite of a governance file and was deliberately not attempted as a side effect of this task.
+- `automation-health-monitor`'s **governance mirror has drifted**: `Claude_Workspace/00_Governance/Scheduled/…` is 46,205 bytes @ 2026-07-31 (v1.17) against a live 55,256 bytes @ v1.19. Pre-existing — v1.18 was never mirrored. Not synced here: propagating another session's unreviewed v1.18 through a mirror is a separate decision, and adding only my hunk would produce a version-incoherent hybrid. Needs a deliberate sync.
+- `automation-health-monitor`'s v1.18 description contains a literal bracketed MODEL token as prose, the exact hazard `ora-task-integrity-guard` warns about. Harmless today because the real tag is still the LAST match and the classifier takes the last — but it is one edit away from mis-classifying that task.
+
+**Open:** nothing pushed (5 commits local: `a4f946b`, `66b562a`, `e441130`, `c94e93b`, `0df4026`); the checkout still carries ~80 files dirty from three other sessions, including the untracked `reference_workbook_annual_debt_service_366day_overcapture.md` that trips `governor-drift-probe` and will block whoever pushes next. Re-measure the phantom rate in ~48h — the newest phantom in the window is 11:04 ET, before the renderer returned at 11:08, so there is not yet meaningful post-fix data.
+
+## 2026-08-05 — Audit follow-through: 2 stale claims disproven, config-write-guard bypasses CLOSED, PreToolUse dispatcher built (not wired)
+
+Gabriel directive: fix the five items left open by the automation audit earlier today.
+
+**1. memory-orphan-link-guard shlex fix — NO WORK NEEDED, memory was STALE.** The fix is already on main: `hooks/memory-orphan-link-guard.py` imports shlex (line 50) and carries the full whole-command `shlex.shlex(cmd, posix=True, punctuation_chars=True)` tokenization plus removal of the raw-string `_has_pathspec` decoy check. Tests **79/79 pass** (memory said "52/52 on an unmerged branch"). `project_orphan_guard_timing_2026-07-24.md` needs correcting — it reads as OPEN and is not.
+
+**2. doctrine-integrity-probe PLUGIN_SKILL_ALLOWLIST — EMPTIED.** Was `{"re-operations"}`, not the 5-skill list memory implied. Dead weight for two independent reasons: (a) the allowlist is only consulted for skills NAMED in CLAUDE.md's Skill-precedence section, and `re-operations` is not named anywhere in CLAUDE.md, so the entry was unreachable; (b) its premise was already disproven — `re-operations` has a real dir at `ora-skills/re-operations/`. Kept as an empty set (the branch logic still uses it) rather than deleted. Probe tests pass; live probe OK.
+
+**3. claude-api "3 active copies" — EARLIER REPORT WAS WRONG, corrected.** Only ONE was live. The platform had already marked the other two `.orphaned_at` (superseded snapshots, 24 MB, left for the platform's own inuse-sweep — not hand-deleted). The genuine duplicate was the harness BUILT-IN `claude-api` vs `fa0fa64bdc96:claude-api`; turned the plugin copy off, keeping the built-in since it updates with the harness.
+
+**4. config-write-guard quote-split + caret-escape — CLOSED.** Both bypasses from `reference_config_write_guard_quote_split_gap.md`, open since 2026-07-22 as "needs real shell tokenization."
+- FIX: `_shell_variants()` — scan the command text plus dequoted / de-caretted variants, **union-only**. A variant can only ADD a hit, never remove one, so a false-negative regression is structurally impossible. This was chosen over tokenizing precisely because a tokenizer that disagrees with the real shell can LOSE detections — the 2026-08-03 direction-of-error mistake. Variants are deduped, so commands with no quote/caret pay nothing.
+- DIFFERENTIAL BATTERY: 14/18 → **18/18**. 4 bypasses closed, 0 of 13 controls changed.
+- REFUTE: 10 further evasion shapes (caret inside quotes, `^^` literal, per-segment quoting, single quotes, caret-before-slash, quotes mid-segment) all BLOCK; 7 benign shapes (caret ASCII art, `grep -E "^hooks"`, quoted paths with spaces, ora-skills, worktree escape hatch) all ALLOW. **0 leaks, 0 over-blocks.**
+- 12 permanent regression tests added to `hooks/tests/test-config-write-guard.py`. Full hooks suite green.
+- GOTCHA CAUGHT: a first version of one new test hardcoded the real root while the Rig uses a synthetic temp root — it passed in my ad-hoc harness and FAILED in the rig, i.e. it would have tested nothing. Now derived from `r.path()`.
+
+**5. PreToolUse dispatcher — BUILT + VALIDATED, DELIBERATELY NOT WIRED.** `hooks/pretooluse-dispatcher.py`.
+- Measured: **490 ms → 73 ms (85% saved)** on the common all-nine-run path.
+- **18/18 decision-equivalent** with the real 9-process chain across a payload matrix (governance writes, memory files, registry, unrelated repos, worktree, ZWSP evasion, non-ASCII, malformed input).
+- Safety: per-guard subprocess fallback (a guard that can't load in-process degrades to today's behavior, costing only latency — NOT protection); missing guard script fails CLOSED with an explicit message; `--selfcheck`.
+- **BUG THE HARNESS CAUGHT IN MY OWN DISPATCHER:** an early revision short-circuited to ALLOW on non-JSON stdin, on my stated assumption that "every guard fails open on garbage." FALSE — the real chain returns 2 there because `confidentiality-guard.py` fails CLOSED by design (invariant 3). The short-circuit silently weakened confidential-leak protection. Removed; the dispatcher now makes no allow/block decision of its own, ever, and passes malformed input straight through to the guards.
+- **WHY NOT WIRED:** the nine guards do NOT share a matcher. All nine fire on Edit|Write|MultiEdit, but five ALSO fire on Bash / NotebookEdit / MCP write tools where a SMALLER subset belongs. A naive one-for-nine swap would stop running autonomy/confidentiality/config-write on Bash AND start running all nine on NotebookEdit — both security regressions. The correct wiring is a 9-edit matcher partition (5 narrowed, 4 deleted, 1 added), documented verbatim in the dispatcher's docstring, left for explicit review because one slip there is a silent hole.
+
+**Process note:** eos-plan-gate fired ("4+ code files, no plan") and was overridden with a written reason — the 41% override rate flagged in this morning's audit is visibly still in effect.
+
+**Not committed** — `.claude` had 79-84 uncommitted changes across sessions `144f9637` / `3d9d97cf` / `b20e95bf` throughout. All edits kept strictly additive; no tree checkout/reset/stashed.
+
+**OPEN:** dispatcher matcher-partition wiring (awaiting Gabriel) · `commit-provenance-guard` compound-add SPECULATIVE bypass (still unconfirmed) · HubSpot tenant-only doctrine vs live Lease-Renewal/Acquisitions pipelines · 24 MB orphaned plugin snapshots pending the platform sweep.
+
 ## 2026-08-05 — ROOT CAUSE: the stuck-session watchdog was killing Claude Desktop's renderer (Code session)
 
 Follow-on to the same-day phantom-dispatch forensics. Gabriel asked how to fix the ~45% phantom rate; the answer turned out to be self-inflicted. **ORA's own `stuck-session-watchdog.ps1` was killing the desktop app's Electron child processes, including 155 renderers — and a renderer is precisely what the scheduler needs to attach a dispatch.**
