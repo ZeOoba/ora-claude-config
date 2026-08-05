@@ -29,8 +29,40 @@ python C:/Users/Owner/.claude/maintenance/doctrine-integrity-probe.py     # CLAU
 python C:/Users/Owner/.claude/maintenance/governor-drift-probe.py         # DSCR 1.25 / LTV 40 invariant
 python C:/Users/Owner/.claude/maintenance/memory-integrity-probe.py       # index<->files + (when upgraded) --live drift
 python C:/Users/Owner/.claude/maintenance/eos-telemetry-rollup.py         # lane compliance (treat task_dispatched as INFO only)
+python C:/Users/Owner/.claude/maintenance/skill-override-efficacy-probe.py # skillOverrides entries that are silently ignored (added 2026-08-05)
 ```
 Each is read-only, deterministic, sub-second. If a script is missing/errors, note it and move on.
+
+### STEP 1b — Compare the LIVE skill listing against the `off` keys (added 2026-08-05)
+**Do this by eye, in-session, every run. It is the one check no script can do for you** — the
+listing is rendered into *your own* system prompt at session start; no file on disk contains it.
+Skipping it is how this class of drift survived at least two prior audits.
+
+1. Read `skillOverrides` out of `settings.json`.
+2. For every key whose value is `off`, search your own available-skills listing for that skill.
+3. **Any `off` skill that still appears in your listing is a live finding.** Report it with the
+   key, the value, and the fact that it is listed — do not rationalise it as "probably fine."
+
+Why this is not paranoia — the 2026-08-05 root cause, confirmed against the CLI bundle:
+
+```js
+if ((e.type==="local-jsx"||e.type==="local") && BUILTIN_CMDS.has(e.name)) ...
+if (e.type!=="prompt" || e.source==="plugin") return "on";   // <-- consulted BEFORE overrides
+let n = r?.[e.name] ?? r?.[e.unqualifiedName] ?? "on";
+```
+
+`skillOverrides` is **never consulted for a plugin-sourced skill.** A plugin skill's qualified
+name is always `<plugin>:<skill>`, so **any override key containing `:` is inert by
+construction** — it reads as intent in the config and does nothing at all. On 2026-08-05, 38 of
+55 entries were in exactly this state and every skill they named was still fully listed and
+model-invocable. `skill-override-efficacy-probe.py` now flags that key shape deterministically
+(CRIT), but the probe cannot see the listing — **it proves the key is inert, this step proves
+the skill is present.** Run both; neither substitutes for the other.
+
+**The remedy is never "add another override key."** To suppress a plugin skill, disable the
+plugin or its marketplace (`enabledPlugins` / `blockedMarketplaces`) — that is a `settings.json`
+change, so PROPOSE it under STEP 4, never auto-apply. If you catch yourself adding a
+`plugin:skill` key to `skillOverrides`, stop: that is the bug, not the fix.
 
 ## STEP 2 — Triage findings (SCREEN / WATCH / PASS, ranked by blast radius × goal impact)
 For every non-OK result, classify:
