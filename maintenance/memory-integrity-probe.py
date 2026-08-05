@@ -294,7 +294,6 @@ def head_orphans():
     # Non-recursive output is one name per line; subdir entries appear as the dir name (e.g.
     # "_archive"), which .endswith(".md") already excludes.
     head_files = {os.path.basename(p) for p in tree.splitlines() if p.endswith(".md")}
-    head_files.discard("MEMORY.md")
 
     # Sub-index aware, matching check 1 (2026-08-03). Read each followed sub-index
     # from HEAD too, never from disk: the whole point of this check is to see what a
@@ -308,6 +307,19 @@ def head_orphans():
         sub = _git("show", "HEAD:" + prefix + name)
         if sub is not None:
             head_linked |= _links_in(sub)
+
+    # Drop the index's own name from head_LINKED, not from head_FILES (which is ground
+    # truth about what HEAD contains). A link TO MEMORY.md is never a pointer worth
+    # verifying here -- MEMORY.md is the thing doing the linking, and it is necessarily
+    # committed or `git show HEAD:...MEMORY.md` above would have returned None.
+    #
+    # Discarding it from head_files instead produced a false FAIL on the 2026-08-05
+    # health-guard run: the 2026-08-03 sub-index-following change unions each linked
+    # INDEX_*.md's links into head_linked, and the live INDEX_reference.md ends with a
+    # "Back to [MEMORY.md](MEMORY.md)" link -- so MEMORY.md was "linked" but had been
+    # erased from "present", and got reported as a pointer a clone would find broken.
+    # It never was. See _tests/test_memory_integrity_probe.py.
+    head_linked.discard("MEMORY.md")
     return sorted(head_linked - head_files)
 
 
