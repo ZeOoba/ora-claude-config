@@ -135,10 +135,18 @@ If the guard.ps1 script itself is missing, skip Block A gracefully this run, log
 
 **B.3.5 — CROSS-FLEET BEACON (NEW 2026-07-22).** Immediately after B.3's send (success or failure — this step runs regardless), update the Notion page `3a56ecd8-9e59-8152-83b6-c61cec736f2b` ("🔌 Connector Pre-Flight — Status", under Ops Hub `32b6ecd8-9e59-81f2-b329-df3fd0e25062`) via `notion-update-page`.
 
-**B.3.5a — SELF-GAP CHECK — READ THE BEACON BEFORE YOU OVERWRITE IT (added 2026-08-03, mandatory).** The beacon is the ONLY on-machine artifact that can prove this task actually produced something, and blindly overwriting it destroys that evidence. So: `notion-fetch` the page FIRST, parse the **existing** `last_run_et`, and compute `beacon_gap_hours` = now(ET) − that value.
-  - `beacon_gap_hours > 26` → **the task silently produced nothing for at least one full cycle.** Carry a `BEACON GAP — N.Nh since last beacon write (expected ≤26h)` line into the Block C email as a **probe-equivalent FAIL** (flips the subject to `[ACTION]`, same mechanism as the B.2 rate-staleness escalation), and state the previous `last_run_et` verbatim alongside the new one. Subtract weekend/holiday days only if the intervening slots were genuinely non-weekday — this task's cron is `15 5 * * *`, i.e. **daily including weekends**, so weekends do NOT excuse a gap here (unlike B.2's weekday-only `ora-am-brief` slot math).
-  - `beacon_gap_hours <= 26` → note `beacon_gap_hours` in the run summary and move on.
-  - Beacon unreadable / no parseable `last_run_et` → record `BEACON GAP UNKNOWN — could not read prior value` and treat it as a **FAIL, not a pass** (`feedback_verified_null_vs_inferred_null.md`: a zero that could mean "couldn't look" is a failure).
+**B.3.5a — SELF-GAP CHECK — READ THE LOCAL BEACON FIRST (added 2026-08-03; REWRITTEN 2026-08-05 to be local-first).** Run:
+```
+C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe "C:/Users/Owner/.claude/maintenance/health-guard-beacon.py" read
+```
+It returns `{verdict, gap_hours, last_run_et, last_entry, notion_gap_explained, last_notion_write_et}` from the local ledger at `~/.claude/maintenance/_state/health-guard-beacon.json`. **The LOCAL ledger is the authority for "did this task run?" — the Notion page is the cross-fleet mirror, not the detector.**
+  - `verdict: OK` (gap ≤ 26h) → note `gap_hours` in the run summary and move on.
+  - `verdict: STALE` (gap > 26h) → **the task genuinely produced nothing for at least one full cycle.** Carry a `BEACON GAP — N.Nh since last run (expected ≤26h)` line into the Block C email as a **probe-equivalent FAIL** (flips the subject to `[ACTION]`, same mechanism as the B.2 rate-staleness escalation), and state the previous `last_run_et` verbatim. This task's cron is `15 5 * * *` — **daily including weekends** — so weekends do NOT excuse a gap here (unlike B.2's weekday-only `ora-am-brief` slot math).
+  - `verdict: UNKNOWN` (no readable ledger) → record `BEACON GAP UNKNOWN — could not read the local ledger` and treat it as a **FAIL, not a pass** (`feedback_verified_null_vs_inferred_null.md`: a zero that could mean "couldn't look" is a failure). Expected exactly once, on the first run after 2026-08-05.
+  - `notion_gap_explained: true` → the task HAS been running but could not write Notion. The Notion page will look stale to `automation-health-monitor` and to the GitHub Actions watchdog. **This is NOT a failure and must NOT flip the subject** — say so explicitly in the Block C email so the cross-fleet readers' staleness alarm can be triaged as explained.
+  - Also `notion-fetch` the Notion page (below) for the cross-fleet value, but **only as a cross-check**. A Notion-side gap that the local ledger explains is an advisory row, never a FAIL.
+
+> **WHY LOCAL-FIRST — the beacon used to depend on the connector most likely to break it (root-caused 2026-08-05).** The beacon existed solely as a Notion page, so a Notion outage and a dead task produced identical evidence. On **2026-08-04** the run woke 51min late, executed end to end, and sent all three emails (A.0 alert 06:09:43, mirror 06:20:19, `[ACTION] Health Guard` 06:24:05 — every send exit 0). All **four** of its `notion-fetch` calls returned `net::ERR_FAILED`, so per B.3.5b it correctly skipped the Notion write. The next run then measured a 42h Notion gap and reported a **FAIL that never happened**, and the off-machine watchdog opened [ora-cowork-watchdog#10](https://github.com/ZeOoba/ora-cowork-watchdog/issues/10) on the same non-event. Evidence: session transcript `beafc783-8ea6-4dbe-ae9d-9ec992b82d82`. **Do not "fix" a Notion-side gap by treating it as a missed run — check the local ledger.**
 
 > **WHY THIS EXISTS — `lastRunAt` LIES, DO NOT TRUST IT (root-caused 2026-08-03).** `ora-health-guard` produced nothing on **2026-07-31, 08-01 and 08-02** and no on-machine detector noticed for four days. Cause, from `%APPDATA%\Claude\logs\main{,1}.log`: **the Claude Desktop scheduler stamps `lastRunAt` at DISPATCH, not at completion.** Each of those days logged `Spawning new session for scheduled task ora-health-guard` with **no** matching `Confirmed task run`, followed minutes later by `Cleared stale pending dispatch for: ora-health-guard`. The dispatch was issued while the desktop app was still starting, never attached, and was garbage-collected — but `lastRunAt` had already been advanced, **and the stale-clear advanced it again** (08-02's spawn carried `lastRunAt` = the 08-01 stale-clear timestamp, which made it compute `missed: undefined` and never retry). A healthy run confirms in ~4 seconds; these never confirmed at all.
 >
@@ -146,7 +154,15 @@ If the guard.ps1 script itself is missing, skip Block A gracefully this run, log
 >
 > Off-machine backstop: `ZeOoba/ora-cowork-watchdog` → `.github/workflows/health-guard-beacon.yml` (added 2026-08-03) watches this same beacon page every 4h from GitHub Actions and opens an Issue past 26h — the one detector that survives the machine itself being wrong.
 
-**B.3.5b — WRITE THE BEACON.** Replace the page's JSON block with:
+**B.3.5b — WRITE THE BEACON. LOCAL FIRST, ALWAYS (rewritten 2026-08-05).**
+
+**Step 1 — write the local ledger. This is UNCONDITIONAL and must never be skipped, whatever any connector did:**
+```
+C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe "C:/Users/Owner/.claude/maintenance/health-guard-beacon.py" write --status <OK|DEGRADED> --subject "<exact subject sent in B.3>" --failed-connectors "<none | comma-list from B.1>" --notion-written <true|false> [--notion-error "<error text>"]
+```
+It touches only the local filesystem — no network, no MCP — so it cannot be defeated by a connector outage, which is the whole reason it exists. It never raises; a non-zero exit means the **disk** write failed and is itself a real finding for the Block C email. Run it even when Notion is down (`--notion-written false`), and *especially* then: that record is what lets the next run tell "Notion was unreachable" from "the task died."
+
+**Step 2 — mirror to Notion for the cross-fleet readers.** Replace the page's JSON block with:
 ```javascript
 status: <OK|DEGRADED>
 last_run_et: <today's date + actual send time, ET, e.g. "2026-07-22 05:31 ET">
@@ -154,7 +170,9 @@ failed_connectors: <none | comma-list from B.1>
 subject_sent: <the exact subject line sent in B.3>
 beacon_gap_hours: <from B.3.5a — hours since the PRIOR last_run_et, or UNKNOWN>
 ```
-Purpose: `automation-health-monitor` (LAMS/Cowork fleet) previously had no reliable cross-fleet way to confirm this block actually ran — it fell back to an ambiguous Outlook Sent Items subject search that came up empty on 2026-07-22 despite the block firing, forcing an informational-only downgrade. This page gives it one deterministic `notion-fetch` call instead. If the Notion write itself fails (Notion already confirmed down per B.1), skip silently — B.4's local-log path is the failure record of last resort; do not spend a retry on the beacon write specifically.
+Purpose: `automation-health-monitor` (LAMS/Cowork fleet) previously had no reliable cross-fleet way to confirm this block actually ran — it fell back to an ambiguous Outlook Sent Items subject search that came up empty on 2026-07-22 despite the block firing, forcing an informational-only downgrade. This page gives it one deterministic `notion-fetch` call instead. If the Notion write itself fails (Notion already confirmed down per B.1), skip it — do not spend a retry on the beacon write specifically. **Skipping it is now safe and no longer creates a phantom gap**, because Step 1 already recorded the run locally with `notion_written: false`; B.3.5a reads that and classifies the resulting Notion-side gap as `notion_gap_explained`. Before 2026-08-05 this skip was the direct cause of a false FAIL and a spurious watchdog Issue — see the B.3.5a callout.
+
+> **EDITING THIS PAGE — replace the JSON block, don't prepend to it.** A `update_content` whose `old_str` stops mid-note leaves the previous note's tail concatenated after the new one (observed 2026-08-05). Read the page back after writing and confirm the block contains exactly one `note:`.
 
 **B.4 — FAILURE PATHS.**
 - Notion FAILED but Outlook OK: still send the alert email (Outlook is independent). The `rate_snapshot` WILL have been reconstructed via the B.2 fallback ladder — include it and state its `confidence` prominently; only `portfolio_watch` is lost. If web_fetch also failed (primary tier down), say so and label rates SECONDARY (below decision-grade). Recommend a manual Notion check / re-auth before the next cycle.
