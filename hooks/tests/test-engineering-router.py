@@ -93,4 +93,78 @@ genblock = run("run /code-review ultra on oxford-command-center")
 assert ("confidential" in genblock.lower()) and ("local" in genblock.lower()), \
     f"genuine cloud review on confidential repo must still warn/block, got: {genblock!r}"
 
+# --- Plan-gate in-turn budget reset (2026-08-05) ------------------------------
+# A qualifying scoped directive resets eos-plan-gate's per-session edit budget,
+# so Gabriel is not asked to re-approve work he already enumerated. FALSE
+# POSITIVES ARE THE DANGEROUS DIRECTION -- each one silently weakens a safety
+# gate -- so the negative cases below matter more than the positive ones.
+import importlib.util as _ilu, os as _os, tempfile as _tf, shutil as _sh
+
+_spec = _ilu.spec_from_file_location(
+    "_er_pg", _os.path.join(_os.path.dirname(_os.path.dirname(
+        _os.path.abspath(__file__))), "engineering-router.py"))
+_er = _ilu.module_from_spec(_spec)
+_spec.loader.exec_module(_er)
+
+_base = _tf.mkdtemp(prefix="router-plangate-")
+
+
+def _resets(prompt, sid):
+    """True if `prompt` resets a CONSUMED edit budget."""
+    sess = _os.path.join(_base, sid)
+    _os.makedirs(sess, exist_ok=True)
+    cf = _os.path.join(sess, "code-edits.count")
+    with open(cf, "w") as fh:
+        fh.write("7")
+    _os.environ["EOS_SESSIONS_DIR"] = _base
+    _er._reset_plan_gate_budget({"session_id": sid}, prompt, prompt.lower())
+    with open(cf) as fh:
+        return fh.read().strip() == "0"
+
+
+# MUST reset -- drawn from real override-reason strings in lane telemetry
+_QUALIFY = [
+    "Implement 1-3 now",
+    "implementing items 1-3 of the 5 ranked recommendations",
+    "execute the pre-written top-5 plan from memory/x.md",
+    "Fix this: item 1, item 2 and item 3 -- proceed",
+    "do all four now",
+    "Fix these items:\n1. the guard\n2. the probe\n3. the tests",
+    "apply steps 2 through 5",
+    "proceed with the plan",
+]
+for _i, _p in enumerate(_QUALIFY):
+    assert _resets(_p, "q%02d" % _i), \
+        "scoped directive must reset the plan-gate budget: %r" % _p
+
+# MUST NOT reset -- a false positive here silently disables the gate
+_VAGUE = [
+    "fix this", "Proceed", "what's next?", "this is broken",
+    "add a test", "build the feature",
+    "can you explain how the guard works",
+    "I have 3 monitors and 2 keyboards",             # bare quantities
+    "summarize the last 3 commits",                  # analytical
+    "explain step 1 and step 2 of the algorithm",    # item refs, no imperative
+    "the invoice has item 1 and item 2 on it",       # item refs, no imperative
+    "",
+]
+for _i, _p in enumerate(_VAGUE):
+    assert not _resets(_p, "v%02d" % _i), \
+        "vague/non-directive prompt must NOT reset the plan-gate budget: %r" % _p
+
+# Never fabricates session state for a session that has consumed no budget.
+_virgin = _os.path.join(_base, "virgin")
+_os.makedirs(_virgin, exist_ok=True)
+_er._reset_plan_gate_budget({"session_id": "virgin"},
+                            "Implement 1-3 now", "implement 1-3 now")
+assert not _os.path.isfile(_os.path.join(_virgin, "code-edits.count")), \
+    "must not create a count file for a session that has edited nothing"
+
+# Malformed session ids must not raise -- this runs on every user turn.
+for _bad in (None, "", 123, {"a": 1}):
+    _er._reset_plan_gate_budget({"session_id": _bad}, "Implement 1-3 now",
+                                "implement 1-3 now")
+
+_sh.rmtree(_base, ignore_errors=True)
+
 print("ALL ROUTER TESTS PASS")

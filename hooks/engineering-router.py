@@ -1,12 +1,109 @@
 # engineering-router.py — UserPromptSubmit hook. Non-blocking lane suggester. Always exits 0.
-import sys, json
+import sys, json, os, re
+
+# --- in-turn-approval budget reset for eos-plan-gate (2026-08-05) -------------
+# WHY: measured plan-gate override rate was 32.5% (209/644) against a <15%
+# target, and the DOMINANT override-reason class is verbatim "the user already
+# approved this in-turn" -- e.g. "Gabriel replied 'Implement 1-3 now', that
+# in-turn approval is the plan". A gate overridden 1-in-3 trains the reflex it
+# exists to prevent.
+#
+# The plan gate itself CANNOT see prompts -- its PreToolUse payload carries only
+# session_id and tool_input. This hook is the only one that sees the user's
+# turn, so detection has to live here.
+#
+# DESIGN CHOICE, deliberate: a qualifying directive RESETS the edit budget
+# (code-edits.count -> 0) rather than writing a permanent override marker.
+#   * A permanent bypass would silently disable the gate for the whole session
+#     after one qualifying prompt -- genuine unplanned sprawl LATER in that
+#     session would go uncaught.
+#   * A reset gives a fresh budget of LIMIT edits per scoped instruction, so
+#     sprawl WITHIN a directive is still caught, and each new scoped directive
+#     legitimately earns a new budget.
+#
+# Detection is deliberately CONSERVATIVE -- a false positive quietly weakens a
+# safety gate, while a false negative merely costs one manual override (today's
+# status quo). Requires an imperative directive AND a concrete scope signal.
+_IMPERATIVE = (
+    "fix", "implement", "do ", "proceed", "execute", "apply", "build",
+    "run ", "add ", "make ", "update", "finish", "complete", "handle",
+)
+# Concrete scope signals: a numeric item reference ("items 1-3", "1 and 2"),
+# an explicit plan/list reference, or a self-enumerated list in the prompt.
+_NUM_REF = re.compile(
+    r"\b(?:item|items|point|points|step|steps|number|numbers|#)?\s*"
+    r"\d+\s*(?:-|–|to|and|,|through)\s*\d+\b")
+_PLAN_REF = (
+    "the plan", "pre-written plan", "top-5 plan", "top 5 plan", "the list",
+    "the backlog", "these items", "those items", "the items", "all five",
+    "all four", "all three", "enumerated", "as listed", "listed above",
+)
+_ENUM_LINE = re.compile(r"(?m)^\s*(?:\d+[.)]\s|[-*•]\s)")
+# Comma/conjunction-separated item lists ("item 1, item 2 and item 3") that
+# _NUM_REF's adjacent-digits form does not reach. Requires the explicit
+# item/step/point noun, so bare quantities ("3 monitors and 2 keyboards")
+# cannot qualify.
+_ITEM_REF = re.compile(r"\b(?:item|step|point|number|#)\s*\d+\b")
+
+
+def _scoped_directive_evidence(prompt_raw, prompt_lower):
+    """Non-empty evidence string if this turn is an explicitly-scoped directive,
+    else None. Both an imperative AND a scope signal are required."""
+    if not any(w in prompt_lower for w in _IMPERATIVE):
+        return None
+    m = _NUM_REF.search(prompt_lower)
+    if m:
+        return "numeric item reference: %r" % m.group(0).strip()
+    items = _ITEM_REF.findall(prompt_lower)
+    if len(items) >= 2:
+        return "enumerated item references (%d)" % len(items)
+    for phrase in _PLAN_REF:
+        if phrase in prompt_lower:
+            return "explicit plan/list reference: %r" % phrase
+    enum = _ENUM_LINE.findall(prompt_raw)
+    if len(enum) >= 3:
+        return "self-enumerated list of %d items" % len(enum)
+    return None
+
+
+def _reset_plan_gate_budget(data, prompt_raw, prompt_lower):
+    """Reset eos-plan-gate's per-session code-edit counter when the user's turn
+    already enumerates the work. Best-effort and fully silent on failure -- this
+    must never affect prompt handling."""
+    try:
+        sid = data.get("session_id")
+        if not isinstance(sid, str) or not sid:
+            return
+        evidence = _scoped_directive_evidence(prompt_raw, prompt_lower)
+        if not evidence:
+            return
+        base = os.environ.get("EOS_SESSIONS_DIR") or \
+            "C:/Users/Owner/.claude/hooks/sessions"
+        sess = os.path.join(base, sid)
+        count_file = os.path.join(sess, "code-edits.count")
+        # Only act if a budget has actually been consumed -- no point creating
+        # session state for a turn that has not edited anything yet.
+        if not os.path.isfile(count_file):
+            return
+        os.makedirs(sess, exist_ok=True)
+        with open(count_file, "w", encoding="ascii") as fh:
+            fh.write("0")
+        # Auditable, not silent: telemetry can distinguish an auto-reset from a
+        # human override, so the measured override rate stays honest.
+        with open(os.path.join(sess, "plan-gate-resets.log"), "a",
+                  encoding="utf-8") as fh:
+            fh.write("in-turn scoped directive -> budget reset (%s)\n" % evidence)
+    except Exception:
+        pass  # never let this affect the prompt path
+
 
 def main():
     try:
         data = json.load(sys.stdin)
     except Exception:
         return
-    prompt = (data.get("prompt") or "").lower()
+    prompt_raw = data.get("prompt") or ""
+    prompt = prompt_raw.lower()
     if not prompt.strip():
         return
 
@@ -21,6 +118,10 @@ def main():
     )
     if any(m in prompt for m in system_markers):
         return
+
+    # Genuine user turn confirmed (system/notification text already returned
+    # above), so a scope signal here really is Gabriel's own instruction.
+    _reset_plan_gate_budget(data, prompt_raw, prompt)
 
     # Fix #1b: '/code-review ultra' is CLOUD review; doctrine forbids it on confidential repos.
     # The slash command itself can't be hooked, but catch the natural-language ask here.
