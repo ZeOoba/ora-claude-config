@@ -1,14 +1,28 @@
 ---
 name: project-orphan-guard-timing-2026-07-24
-description: "REOPENED 2026-07-24 — the compound-command bypass fix below was real but incomplete: a SECOND bypass (decoy ' -- ' inside an ordinary -m message) landed 1687fbc 13 min after this file's 'CLOSED' fix, orphaning 2 links. A fix for the second bypass is in progress on fix/orphan-guard-pathspec-exclusivity (52/52 tests passing as of 13:53, uncommitted WIP) — not yet merged to main."
+description: "CLOSED 2026-08-05 (re-verified on main: shlex whole-command tokenization present, raw-string _has_pathspec decoy check removed, 79/79 tests pass). History below is retained: this was REOPENED 2026-07-24 when a SECOND bypass (decoy ' -- ' inside an ordinary -m message) landed 1687fbc 13 min after the first 'CLOSED' fix, orphaning 2 links."
 metadata: 
   node_type: memory
   type: project
   originSessionId: d6635568-ae53-453c-9bd7-ec8551f96c73
-  modified: 2026-07-24T17:58:33.749Z
+  modified: 2026-08-05T20:01:30.005Z
 ---
 
-**REOPENED 2026-07-24, ~13:56.** This file originally read "CLOSED" after the
+**CLOSED 2026-08-05.** Re-verified directly against `main`, not inferred: the fix
+this file described as "uncommitted WIP on fix/orphan-guard-pathspec-exclusivity"
+did land. `hooks/memory-orphan-link-guard.py` imports `shlex` and tokenizes the
+WHOLE command once via `shlex.shlex(cmd, posix=True, punctuation_chars=True)`
+(not `shlex.split`, not pre-split by line); the second, independent raw-string
+`_has_pathspec(cmd)` scanner was removed. **79/79 tests pass** — this file's
+"52/52" was the pre-merge branch count. That branch no longer exists locally.
+
+Anyone reading the description before 2026-08-05 would have concluded a live
+bypass was still open. It was not. Re-check ground truth before acting on a
+memory entry that names a branch.
+
+---
+
+**REOPENED 2026-07-24, ~13:56 (historical).** This file originally read "CLOSED" after the
 compound-command bypass fix below (landed 12:54). That fix was real and is not in
 question. But `1687fbc` (13:07 — 13 minutes *after* the "CLOSED" fix was deployed)
 still landed 2 orphaned index links, proving a distinct hole survived.

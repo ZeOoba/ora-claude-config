@@ -35,7 +35,7 @@
 - Send: Outlook COM (`_shared/send-via-outlook.ps1`) — the SOLE automated send path; Outlook/M365 only. Exit 2 (COM failure)/4 (timeout): retry once, flag loudly (Notion row) — do NOT halt. Exit 1 (usage error)/3 (stuck wizard): do NOT retry, flag immediately.
 - Routing: all scheduled/automated outputs → `ggoldberg@oxfordra.net` ONLY; sole exception — ora-am-brief Daily Brief cc's `egoldberg@oxfordra.net`. Counterparty mail follows its class routing (Voice Register). Never ze@.
 - Scheduler: dual fleet, registered ONLY via supervised `create_scheduled_task` on the target surface — never splice registry JSON.
-- Outlook pane: drafting only (Mail.Send not held). Relationship-context, redline, or LP mail → hand to Cowork (`communication-intelligence` / `legal-intelligence` / `investor-relations`). Sign landlord mail as the property LLC, never the firm name (Voice Register). Never click links from the pane.
+- Outlook pane: drafting only (Mail.Send not held). Relationship-context, redline, or LP mail → hand to Cowork (`communication-intelligence` / `legal-intelligence`). Sign landlord mail as the property LLC, never the firm name (Voice Register). Never click links from the pane.
 
 ## Tools & data
 - Hierarchy: dedicated MCPs (Notion · HubSpot — current tenants only · M365 · Netlify) → Claude-in-Chrome → computer-use (native apps only).

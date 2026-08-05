@@ -202,7 +202,19 @@ SKILL_TOKEN_RE = re.compile(r"`([a-z][a-z0-9-]*(?:\{[a-z0-9-]+\})?)`")
 # (see 01_Workspace/_archive/2026-07-21_stale-outputs-skills/ for the audit that found
 # 12 stale copies, 2 governor-relevant, and the refreshed-in-place fix) -- don't paper
 # over the gap with an allowlist entry.
-PLUGIN_SKILL_ALLOWLIST = {"re-operations"}
+# EMPTIED 2026-08-05 (automation audit). Two independent reasons the sole remaining
+# entry, "re-operations", was dead weight:
+#   1. This allowlist is only ever consulted for skills NAMED in CLAUDE.md's "Skill
+#      precedence" section. `re-operations` is not named anywhere in CLAUDE.md, so the
+#      entry could never be reached.
+#   2. Its premise was disproven (reference_skill_surfaces.md): `re-operations` was
+#      assumed plugin-only with no local source, but it has a real, current dir at
+#      C:/Users/Owner/ora-skills/re-operations/. The `anthropic-skills:` prefix is the
+#      generic Code/CLI namespace label for the whole catalog, NOT a plugin-only marker.
+# Kept as an empty set rather than deleted: the resolution logic still branches on it,
+# and a genuinely plugin-only skill could legitimately need it again. The CAUTION above
+# still governs -- do not add an entry to paper over a stale outputs/ copy.
+PLUGIN_SKILL_ALLOWLIST: set[str] = set()
 
 # The "Skill precedence" block names orchestration primitives that are NOT SKILL.md
 # skills and must resolve against their own homes, else they false-positive as MISSING:
