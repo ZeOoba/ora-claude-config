@@ -1,0 +1,20 @@
+{
+  "entries": [
+    {
+      "last_run_et": "2026-08-05T11:26:53-04:00",
+      "status": "DEGRADED",
+      "subject_sent": "\u26a0\ufe0f ORA Connector Pre-Flight \u2014 2026-08-04 \u2014 Notion",
+      "failed_connectors": "notion",
+      "notion_written": false,
+      "notion_error": "net::ERR_FAILED on all 4 fetches (backfilled 2026-08-05 from session transcript beafc783; run completed, 3 emails sent exit 0)"
+    },
+    {
+      "last_run_et": "2026-08-05T11:26:53-04:00",
+      "status": "DEGRADED",
+      "subject_sent": "\u2705 ORA Connector Pre-Flight \u2014 2026-08-05 \u2014 Notion OK",
+      "failed_connectors": "none",
+      "notion_written": true,
+      "notion_error": null
+    }
+  ]
+}

@@ -12,6 +12,43 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-05 — ora-health-guard: two FAILs root-caused; one was the detector, not the task
+
+**BEACON GAP 42h was a FALSE POSITIVE — the 08-04 run was healthy.** Session transcript
+`beafc783-8ea6-4dbe-ae9d-9ec992b82d82` shows it woke 51min late, ran end to end 06:05→06:24 ET,
+and sent all three emails (A.0 alert 06:09:43, mirror 06:20:19, `[ACTION] Health Guard` 06:24:05 —
+every send exit 0). All **4** of its `notion-fetch` calls returned `net::ERR_FAILED`; Notion MCP was
+hard-down for the whole run (same outage the Rate Snapshot page records for `ora-am-brief`). Per
+spec B.3.5 it therefore *correctly* skipped the Notion beacon write. Root cause is architectural:
+**the beacon — the one detector built to survive a lying `lastRunAt` — lived only on Notion**, so a
+connector outage and a dead task produced identical evidence. Two false alarms resulted: the 08-05
+run's `[ACTION]` subject, and off-machine watchdog Issue
+[ora-cowork-watchdog#10](https://github.com/ZeOoba/ora-cowork-watchdog/issues/10) (still OPEN, spurious).
+NOTE: the 08-05 Health Guard email sent to Gabriel carried the wrong diagnosis
+("confirmed-but-no-output / died before B.3.5") — superseded by this entry.
+
+**FIX (Gabriel-approved in-session):** new `maintenance/health-guard-beacon.py` — a local, network-free,
+write-always ledger at `_state/health-guard-beacon.json` (atomic replace, 30-entry cap, never raises;
+absent/corrupt/unparseable → UNKNOWN, never a silent pass). SKILL.md B.3.5a now reads **local-first**
+(Notion demoted to cross-fleet mirror) and classifies a Notion-side gap the local ledger explains as
+`notion_gap_explained` — advisory, not a FAIL. B.3.5b step 1 is the unconditional local write.
+Ledger seeded with the verified 08-04 and 08-05 runs. 16/16 new tests.
+**STILL OPEN:** the GitHub Actions watchdog reads Notion only, so a Notion outage can still open a
+spurious Issue — it was out of scope for the approved option.
+
+**memory-integrity FAIL — 3 of 4 orphans real, 1 a probe bug.** Real: commit `b964fc4` (08-04 15:04)
+changed **only MEMORY.md** (+4/−2) and never `git add`ed the 3 files it points at — the exact `32f3065`
+class the check exists to catch; they remain untracked. Bug: `head_orphans()` did
+`head_files.discard("MEMORY.md")`, erasing ground truth about a file that IS in HEAD, while the
+2026-08-03 sub-index-following change unions `INDEX_reference.md`'s links — which include a
+`](MEMORY.md)` back-link from `b91475a` — into `head_linked`. Neither change was wrong alone.
+**FIX:** discard from `head_linked` instead. Live probe 5→4 issues, phantom gone, all 3 true positives
+retained; 16/16 tests. REFUTE 7/7 on both fixes (a genuinely dead task still reports STALE; a
+sub-index pointer to an uncommitted file is still caught).
+
+**Uncommitted** — `.claude` main checkout had ~70 changes from 2 other live sessions; left staged for
+Gabriel rather than co-mingling hunks.
+
 ## 2026-08-04 — ora-pm appsec sweep: OI-063/OI-069/OI-045 closed via 3-round REFUTE cycle; OI-045 escalated MEDIUM→CRITICAL mid-fix
 
 Continuing the appsec sweep, Gabriel asked for a status check on OI-041/042/045/046/048 (previously closed in the tracker on the strength of commit messages, never independently re-verified). A `git log` check on `ora-pm` found merged commits for all five that the tracker still listed as OPEN. Dispatched 5 parallel REFUTE-pass agents (security-auditor) to independently re-verify each against the actual current code, not trust the commit messages.
