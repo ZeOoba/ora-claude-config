@@ -119,6 +119,77 @@ expect("OI-016 now parses as CLOSED in the live tracker (post-restructure)",
        real_items.get("OI-016", {}).get("status") == "CLOSED",
        "got %r" % real_items.get("OI-016"))
 
+# --- head_orphans: a back-link to MEMORY.md is not an orphan pointer ----------------
+# Regression guard for a false FAIL observed live on the 2026-08-05 ora-health-guard run,
+# which reported "orphan index link IN GIT ... MEMORY.md" while MEMORY.md was demonstrably
+# present in HEAD (git cat-file -e succeeded).
+#
+# Two individually-correct changes combined to produce it:
+#   * head_orphans() removed MEMORY.md from head_FILES -- the set that answers "what does
+#     HEAD actually contain?" -- erasing ground truth about a file that IS committed.
+#   * the 2026-08-03 sub-index-following change unions each linked INDEX_*.md's links into
+#     head_linked, and the real INDEX_reference.md ends with a "Back to [MEMORY.md]" link
+#     (added by b91475a, the ## Reference split).
+# Result: MEMORY.md appears in head_linked, has been deleted from head_files, and is
+# reported as a pointer a clone would find broken -- which it never was.
+#
+# The self/back-link must be dropped from head_LINKED (there is nothing to verify: the
+# index is the thing doing the linking), never from head_FILES.
+
+import subprocess
+import tempfile
+
+
+def _build_repo(tmp, backlink, commit_note_b=True, root_self_link=False):
+    """A minimal memory dir under git. Everything is committed unless commit_note_b=False."""
+    for cmd in (["git", "init", "-q"],
+                ["git", "config", "user.email", "t@example.invalid"],
+                ["git", "config", "user.name", "fixture"]):
+        subprocess.run(cmd, cwd=tmp, check=True, capture_output=True)
+    root = "# Index\n- [Ref sub-index](INDEX_reference.md)\n- [note a](note_a.md)\n"
+    if root_self_link:
+        root += "- [this index](MEMORY.md)\n"
+    sub = "# Reference\n- [note b](note_b.md)\n"
+    if backlink:
+        sub += "\nBack to [MEMORY.md](MEMORY.md)\n"
+    for name, body in (("MEMORY.md", root), ("INDEX_reference.md", sub),
+                       ("note_a.md", "x\n"), ("note_b.md", "x\n")):
+        with open(os.path.join(tmp, name), "w", encoding="utf-8") as fh:
+            fh.write(body)
+    staged = ["MEMORY.md", "INDEX_reference.md", "note_a.md"]
+    if commit_note_b:
+        staged.append("note_b.md")
+    subprocess.run(["git", "add"] + staged, cwd=tmp, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-qm", "fixture"], cwd=tmp, check=True, capture_output=True)
+
+
+def _orphans_in(**kw):
+    """head_orphans() against a throwaway repo. Restores mip.MEM so later checks are unaffected."""
+    tmp = tempfile.mkdtemp(prefix="mip_head_orphans_")
+    _build_repo(tmp, **kw)
+    saved = mip.MEM
+    try:
+        mip.MEM = tmp
+        return mip.head_orphans()
+    finally:
+        mip.MEM = saved
+
+
+got = _orphans_in(backlink=True)
+expect("sub-index back-link to MEMORY.md is NOT reported as an orphan", got == [], "got %r" % got)
+
+got = _orphans_in(backlink=False)
+expect("baseline: no back-link, all committed -> no orphans", got == [], "got %r" % got)
+
+got = _orphans_in(backlink=False, root_self_link=True)
+expect("MEMORY.md linking itself is NOT reported as an orphan", got == [], "got %r" % got)
+
+# The point of the check must survive the fix: a committed pointer to an uncommitted file
+# is still caught, and is not masked by the back-link handling.
+got = _orphans_in(backlink=True, commit_note_b=False)
+expect("true positive preserved: committed pointer to an UNCOMMITTED file is still reported",
+       got == ["note_b.md"], "got %r" % got)
+
 passed = sum(1 for ok, _ in results if ok)
 print("memory-integrity-probe tests: %d/%d passed" % (passed, len(results)))
 sys.exit(0 if passed == len(results) else 1)
