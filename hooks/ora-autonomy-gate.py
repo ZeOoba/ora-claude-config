@@ -449,8 +449,14 @@ def check_bash(command, session_id):
                 extra="  NOTE: both are matched ANYWHERE in the command, related or not. If this\n"
                       "  command does not actually write to the site tree (e.g. it only quotes a\n"
                       "  site path inside a string, heredoc, or commit message), do NOT create the\n"
-                      "  override -- re-run it via the Edit/Write tool, or drop the marker text from\n"
-                      "  the command. The override is for real site changes Gabriel just approved.\n")
+                      "  override -- the override grants live write access to oxfordra.net and is\n"
+                      "  strictly worse than the read you wanted.\n"
+                      "  IF THIS WAS A READ (2026-08-05, 3 same-session false positives on grep/ls/\n"
+                      "  heredocs over the same day): use the Read/Grep/Glob tools instead -- never\n"
+                      "  gated by this check -- or drop the site marker text from the shell command\n"
+                      "  (e.g. avoid naming 'website-canonical' or 'oxford-site' in the cwd/args).\n"
+                      "  IF THIS WAS A GENUINE EDIT (Edit/Write/MultiEdit to a site file): use those\n"
+                      "  tools directly rather than a shell redirect -- they carry their own gate.\n")
 
 
 def check_file_write(file_path, session_id):
