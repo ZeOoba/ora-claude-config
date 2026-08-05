@@ -79,6 +79,7 @@
 - [Refute pass — proactive by default](feedback_refute_pass_proactive_default.md) — run before declaring done
 - [REFUTE differential harness](reference_refute_differential_harness.md) — guard/probe regex edits: old-vs-new differential battery; judge deltas, not absolutes
 - [Verify before repeating session claims](feedback_verify_before_repeating_session_claims.md) — check ground truth before relaying
+- [skillOverrides is ignored for plugin skills](reference_skilloverrides_ignored_for_plugin_skills.md) — any key with `:` is inert by construction; disable the plugin, not the skill
 - [Browser pane is 0x0 until resized](reference_browser_pane_zero_viewport_blocks_images.md) — "screenshots impossible" is usually an unresized pane; 9/9 agents got this wrong
 - [Findings decay — re-check before WRITING](feedback_findings_decay_recheck_before_writing.md) — minutes-long shelf life on shared files; waiting beat intervening 4/4
 - [Artifact citation requirement](feedback_artifact_citation_requirement.md) — Resolved/Closed claims need a citation
