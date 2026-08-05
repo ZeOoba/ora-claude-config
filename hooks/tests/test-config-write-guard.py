@@ -346,6 +346,54 @@ def test_shell_unicode_evasion_blocked():
     check("ZWSP-in-path shell write -> still blocked", rc == 2, "rc=%s" % rc)
 
 
+def test_quote_split_and_caret_escape_bypasses_closed():
+    """2026-08-05: the two bypasses left open in
+    reference_config_write_guard_quote_split_gap.md, each live-proven ALLOW
+    against the current guard before the _shell_variants fix.
+
+    (1) QUOTE-SPLIT: quote chars break a path into fragments the matcher never
+        sees as one token, while the shell strips them before the FS does.
+    (2) CARET-ESCAPE: cmd.exe removes `^` at parse time, so `CLA^UDE.md` reaches
+        disk as CLAUDE.md while the matcher only ever sees the caret form."""
+    r = Rig()
+    root = r.path().rstrip("/\\")
+    leaks = [
+        ('cp x.json "%s"/hooks/evil.py' % root, "quote-split mid-path"),
+        ('cp a.json "%s"/settings.json' % root, "quote-split settings.json"),
+        ("cp x.json '%s'/settings.json" % root, "single-quote split"),
+        ('echo x > %s/CLA^UDE.md' % root, "caret in CLAUDE.md"),
+        ('cp a %s/set^tings.json' % root, "caret in settings.json"),
+        ('cp x "%s/hoo^ks/evil.py"' % root, "caret inside quotes"),
+        ('echo x > %s/ho"o"ks/evil.py' % root, "quotes inside a segment"),
+        # every segment quoted separately -- built from the RIG's root, not a
+        # hardcoded real path, or it silently tests nothing.
+        ('echo x > %s/"hooks"/"e.py"'
+         % "/".join('"%s"' % seg for seg in root.split("/")),
+         "every segment separately quoted"),
+    ]
+    for cmd, label in leaks:
+        rc, _, _ = r.run(payload("Bash", {"command": cmd}))
+        check("bypass closed: %s -> blocked" % label, rc == 2, "rc=%s" % rc)
+
+
+def test_quote_caret_normalization_does_not_overblock():
+    """The union-only variant scan must not turn benign commands into blocks --
+    this is the guard against repeating the 2026-08-03 direction-of-error
+    mistake, where a boundary fix changed classification of unrelated shapes."""
+    r = Rig()
+    benign = [
+        ('echo "^_^" > C:/tmp/face.txt', "caret art in an unrelated echo"),
+        ('grep -E "^hooks" C:/tmp/list.txt', "regex anchor, not an escape"),
+        ('cp a.md "C:/Users/Owner/OneDrive - Oxford Capital Partners"/n.md',
+         "quoted path with spaces, unrelated root"),
+        ('cp x "C:/Users/Owner/ora-skills"/daily-brief/SKILL.md',
+         "quoted ora-skills path is not governance"),
+    ]
+    for cmd, label in benign:
+        rc, _, _ = r.run(payload("Bash", {"command": cmd}))
+        check("no over-block: %s -> allowed" % label, rc == 0, "rc=%s" % rc)
+
+
 # ------------------------------------------------------------ REFUTE regressions
 def test_refute_shape_bypasses_closed():
     """2026-07-18 adversarial REFUTE pass: five live-proven bypasses (each reached
@@ -737,6 +785,8 @@ if __name__ == "__main__":
     test_shell_reads_and_unrelated_writes_allow()
     test_shell_write_with_token_allows()
     test_shell_unicode_evasion_blocked()
+    test_quote_split_and_caret_escape_bypasses_closed()
+    test_quote_caret_normalization_does_not_overblock()
     test_refute_shape_bypasses_closed()
     test_shell_dot_claude_worktrees_dash_suffix_not_matched()
     test_shell_dot_claude_worktrees_regression_real_root_still_blocks()
