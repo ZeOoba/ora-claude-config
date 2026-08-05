@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-08-04T22:31:53.541Z
+  modified: 2026-08-05T21:46:39.895Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -68,12 +68,46 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | [OI-075](#OI-075) | 2026-08-04 | Session brief follow-up — standing fix for skill-store/repo drift | Skill-cache drift standing fix: new CC/MCP task `ora-skill-cache-drift-alert` (cron `*/30 * * * *`) runs `ora-skills/tools/repo_first_check.py --all` (built on [PR #39](https://github.com/ZeOoba/ora-skills/pull/39)) at a tighter cadence than the existing daily `ora-doctrine-integrity-guard`, auto-filing an OI item + Notion/email alert on new drift. Not yet closed — hasn't fired against a real finding |
 | [OI-076](#OI-076) | 2026-08-04 | OI-047 final whole-branch review, 2026-08-04 | ora-pm's "ORA PM Crons" Windows Task Scheduler task (drives `critical-dates-alerts`/`delinquency-check` daily) was unregistered on this machine — `cron.log`'s last entry was 2026-06-24, ~6 weeks dead, likely lost in the 2026-07-09 machine migration to LAPTOP-CSHSCBE6 (task registrations are OS-level, don't travel with a file/repo copy). Re-registered and confirmed live (`NextRunTime` set); real backlog cleared same-day (10 critical-date alerts, 24 delinquent tenants / 7 late fees posted across the catch-up runs) |
 | [OI-077](#OI-077) | 2026-08-04 | 3rd REFUTE pass on the OI-045 fix, 2026-08-04 | **LOW** ora-pm `POST /api/stripe/customer` accepts `email`/`name` straight from the request body with zero validation against the tenant's own `contact_email` on file, sent directly to `stripe.customers.create`. Deliberately left ungated by OI-045's AAL2 work (no PM/money involved, IDOR-safe, idempotent) but a tenant can set an arbitrary email on their own Stripe customer object, meaning future Stripe-side comms (receipts, Financial Connections links) go to an attacker-chosen address. Not blocking; recommend sourcing from the `tenants` row server-side instead |
-| [OI-092](#OI-092) | 2026-08-05 | `ora-lease-snapshot-refresh` run 2026-08-05; handoff session `3d9d97cf` | **MEDIUM** `External Loans Summary` computed next-12-month interest/principal over the half-open 366-day span `[TODAY(), TODAY()+366)`, capturing **13 payments instead of 12** whenever `TODAY()` landed on a loan's payment day-of-month — inflating annual debt service by one payment and depressing DSCR. **Workbook RESOLVED** (Gabriel's own edit 2026-08-05): window re-anchored to `(Assumptions!$B$30, EDATE(Assumptions!$B$30,12)]` with `B30 = EOMONTH(TODAY(),0)`, making the payment-day coincidence structurally impossible; zero `TODAY()+366` remain. Warehouse `debt_positions` was clean (all 8 snapshot dates fell on non-payment days); the one contaminated artifact, `data/snapshots/portfolio.json` from `61cc346`, was re-baked as `51d4039` (local only, **not pushed**). **Detector WITHDRAWN before shipping** — code review + REFUTE both found `debt-service-window.ts` cannot detect the defect it was built for (it counts schedule rows against its own correctly-computed window, never reading the `External Loans Summary` formula; reverting `H9` to the buggy form leaves its output byte-identical). Retry must key on **distinct dates, not row counts** (see [OI-096](#OI-096)) and must not flag balloon-excluded principal (see [OI-095](#OI-095)). **Do NOT build the ">2 decimal places" detector** — fires on 6 of 11 loans, every one correct. **Residual:** (a) workbook `Claude Log` has no entry for the 08-05 edit (last row Turn 147, 08-03); (b) `SCHEDULE_SOURCES` hardcodes each schedule's sheet/column/row range and must be updated alongside the formulas |
-| [OI-093](#OI-093) | 2026-08-05 | surfaced by the OI-092 `portfolio.json` re-bake (`51d4039`) | **MEDIUM** (silent history split in the debt warehouse) The internal 2203-2207 Northwood loan now parses with **no journal sheet**, changing its snapshot id from `internal-2203-2207-northwood` to `internal-2203-2207-northwood-no-journal-sheet`. `debt_positions` keys `ON CONFLICT(id, snapshot_date)`, so every future snapshot lands under a NEW key — silently orphaning the loan's prior history rather than continuing it; `monthsToMaturity` also went null → 105. **Diagnosed 2026-08-05:** full 50-sheet enumeration confirms **no Northwood journal sheet exists in any spelling**, so the parser's `⚠ NO JOURNAL SHEET` marker is **correct and reporting a real accounting gap**, not a parser defect — aliasing the id would hide a genuinely missing record. **Provenance problem:** workbook `Claude Log` Turn 144 (2026-08-03) states the sheet *was created* during the EXTERNAL→INTERNAL reclassification, and it is not there. **Gabriel ruled 2026-08-05:** create the journal sheet — but **chase the provenance first**, since "never completed" vs "created then removed" implies different things about the rest of that reclassification |
+| [OI-078](#OI-078) | 2026-08-05 | ora-appsec-sweep 2026-08-05 (ora-pm @ `a29f8f0`, security-auditor dispatch) | **CRITICAL** ora-pm Row Level Security is enabled on only **6 of 23** tables (`charges`, `payments`, `lease_documents`, `lease_amendments`, `tenant_notices`, `insurance_certificates`) while `VITE_SUPABASE_ANON_KEY` ships in the public JS bundle by design. `properties`, `units`, `tenants`, `leases`, `expenses`, `budgets`, `renewals`, `broker_commissions`, `cam_reconciliations`, `correspondence_log`, `journal_entry_exports`, `lease_move_events`, `sent_notifications`, `stripe_webhook_events`, `tenant_sales_reports`, `utility_meters`, `utility_readings` have no `ENABLE ROW LEVEL SECURITY` anywhere in `supabase/migrations/**` (verified this run by direct grep, not taken from the agent). Under stock Supabase grants an RLS-disabled public table is readable AND writable via PostgREST with the bundle-extractable anon key. Distinct from [OI-048](#OI-048), which is about the *API* using the service-role key; this is the direct-database perimeter. **Live exploitability is INFERRED, not verified** — a one-command curl check is in the item |
+| [OI-079](#OI-079) | 2026-08-05 | ora-appsec-sweep 2026-08-05 (ora-pm @ `a29f8f0`, security-auditor dispatch) | **HIGH** ora-pm's `ar_ledger`, `rent_roll` and `critical_dates` views are created without `WITH (security_invoker = true)` (`0011_appsec_idempotency_and_scale.sql:118-151`, `0004_views_and_rls.sql:33-99`) — grep confirms the string appears nowhere in `supabase/migrations/**`. A view without it runs as its owner and IGNORES the RLS policies on `charges`/`payments`/`leases`/`tenants`, so one `GET /rest/v1/ar_ledger` returns every tenant's balance and payment totals even after [OI-078](#OI-078) is fixed. Cross-tenant financial disclosure in one request |
+| [OI-080](#OI-080) | 2026-08-05 | ora-appsec-sweep 2026-08-05 (ora-pm @ `a29f8f0`, security-auditor dispatch) | **HIGH** ora-pm tenant portal login permits open self-registration — `src/portal/pages/PortalLogin.tsx:12-15` calls `signInWithOtp` WITHOUT `shouldCreateUser: false` (defaults true), so any submitted email mints a Supabase auth user. [OI-036](#OI-036)'s fix covered only the ADMIN login (`AdminLogin.tsx:22` has the flag plus an explicit OI-036 comment) — one of two login pages was missed. Verified by direct diff of the two files this run. Yields a valid `authenticated` JWT to anyone, which is the credential that escalates OI-078/OI-079 past anon-only hardening; also pre-registering a known tenant address breaks `inviteUserByEmail` onboarding |
+| [OI-081](#OI-081) | 2026-08-05 | ora-appsec-sweep 2026-08-05 (ora-pm @ `a29f8f0`, security-auditor dispatch) | **HIGH** ora-pm `requireAal2` is a no-op for any tenant who never enrolled MFA — `server/middleware/aal-guard.ts:46` blocks only when `nextLevel === 'aal2' && currentLevel !== 'aal2'`, and `nextLevel` never rises above `aal1` without a verified factor. Enrollment is voluntary (`PortalAccount.tsx:90`); nothing requires it. So for the realistic majority of tenants the only control on `POST /api/stripe/setup-intent` and `POST /api/stripe/payment-intent` (confirms ACH immediately, up to min(balance, $50k)) is possession of a magic-link session. Does NOT contradict [OI-045](#OI-045)'s closure (the gate IS wired and does fail closed) but materially narrows what that closure bought — read alongside it |
+| [OI-082](#OI-082) | 2026-08-05 | ora-appsec-sweep 2026-08-05 (ora-pm @ `a29f8f0`, security-auditor dispatch) | **MEDIUM** ora-pm `payments` has no idempotency or uniqueness constraint for non-Stripe methods. `0011`'s two partial unique indexes cover `stripe_payment_intent_id` and `(lease_id, autopay_period)` only; `method IN ('check','wire','other')` rows are NULL on both and so fall outside each. `charges` got `idempotency_key TEXT UNIQUE NOT NULL`; `payments` did not. A double-submitted admin form or replayed import writes two identical rows and `ar_ledger`'s `payment_totals` CTE sums both — the tenant's balance silently drops, and that understated balance then feeds the payment-intent cap and the autopay lifetime cap. Same failure class as the two AR bugs already shipped here (cartesian fan-out, divide-by-100): the join was fixed, the write path was not |
+| [OI-083](#OI-083) | 2026-08-05 | ora-appsec-sweep 2026-08-05 (ora-pm @ `a29f8f0`, security-auditor dispatch) | **MEDIUM** ora-pm `POST /api/portal/insurance` (`server/routes/portal-insurance.ts:13-37`) is the only write route with no Zod schema — it destructures the raw body and inserts it, and writes client-supplied `storage_path` to `document_path` verbatim with no ownership or prefix check (the admin route uses `InsuranceInsertSchema`; this one doesn't). An authenticated tenant can point their COI record at another tenant's storage key, surfacing the wrong document under the wrong tenant in the admin UI. Adjacent to but distinct from [OI-041](#OI-041)'s mass-assignment set, which did not include this file |
+| [OI-084](#OI-084) | 2026-08-05 | ora-appsec-sweep 2026-08-05 (ora-pm @ `a29f8f0`, security-auditor dispatch) | **MEDIUM** ora-pm COI uploads go browser -> Supabase Storage directly (`src/portal/pages/PortalInsurance.tsx:29-39`), bypassing the API entirely: no MIME/magic-byte check, no size cap, `upsert: true` with an unsanitized `file.name`. The `accept` attribute is the only gate and is client-side. The repo already has a server-side validator doing this correctly for lease intake (`server/routes/intake.ts:86-91`) and an unused client validator (`src/components/ui/file-drop.ts`) — the pattern exists, this path just doesn't use it |
+| [OI-085](#OI-085) | 2026-08-05 | ora-appsec-sweep 2026-08-05 (ora-pm @ `a29f8f0`, security-auditor dispatch) | **MEDIUM** ora-pm portal "Open Charges" is not open charges — `server/routes/portal.ts:39-60` returns EVERY charge on active leases and `PortalPayNow.tsx:33-39` treats them all as selectable, because `charges` has no paid/open state and no charge<->payment link. Separately the balance card sums `ar_ledger` across ALL the tenant's leases while the charge list covers only ACTIVE ones, so the two figures cannot reconcile by construction. A tenant with 18 months of history sees 36+ "open" charges. The server-side cap (`stripe.ts:168`) prevents actual overpayment, so this is a correctness/trust defect, not a loss — but it is the same balance-display class this repo has shipped twice |
+| [OI-086](#OI-086) | 2026-08-05 | ora-appsec-sweep 2026-08-05 (ora-pm @ `a29f8f0`, security-auditor dispatch) | **MEDIUM** ora-pm `CRON_SECRET` gate uses a short-circuiting string compare (`server/middleware/auth.ts:7`) on the route set that includes `POST /api/cron/monthly-billing` — which creates and CONFIRMS off-session ACH PaymentIntents portfolio-wide. The timing side-channel alone is marginal through Cloudflare's edge; what raises this is the combination: a static, never-rotated shared secret passed on a PowerShell command line (`scripts/trigger-billing.ps1:14`, visible in process listings and shell history) as the single factor gating automated debits |
+| [OI-087](#OI-087) | 2026-08-05 | ora-appsec-sweep 2026-08-05 (both repos, security-auditor dispatch) | **MEDIUM** `hono` ReDoS in the CORS middleware via `Access-Control-Request-Headers` (GHSA-8j4g-w8fx-2239, affects `<4.12.34`) is live in BOTH repos — ora-pm resolves 4.12.31, oxford-command-center 4.12.28 (both verified from the lockfiles this run). Runtime dependency on a served path in each: ora-pm mounts `cors()` on `/api/*` (`server/index.ts:71-76`), occ on `/api/*` of the Brain Server (`server/index.ts:52`). Reachable pre-authentication in both. NOT the same advisory as the one closed by ora-pm's earlier 4.12.23->4.12.31 bump, and NOT in [OI-017](#OI-017)'s tracked set (react-router / @hono/node-server / sharp / brace-expansion / fast-uri / js-yaml / postcss). Fix is semver-compatible: `hono@^4.12.34` |
+| [OI-088](#OI-088) | 2026-08-05 | ora-appsec-sweep 2026-08-05 (oxford-command-center @ `175e3f9`, security-auditor dispatch) | **MEDIUM** oxford-command-center `ledger_entries` — the money table — is the only one of its siblings with no natural-key uniqueness constraint (`server/warehouse/migrations/001_initial.sql:59-74`): an AUTOINCREMENT surrogate PK and one NON-unique index, so an identical `(import_id, property_id, period, raw_account, amount)` row is insertable twice by a re-run or replay and silently doubles a balance. Contrast `property_tax_assessments`, `insurance_loss_events`, `property_insurance_policies`, `debt_positions`, all of which have one. Also: no FK on `ledger_entries.property_id` -> `property_master(id)` or on `mapping_id` (though `PRAGMA foreign_keys = ON` is set, so declared constraints WOULD be enforced — the enforcement is on, the declarations are missing), `lease_events` (`011`) has no uniqueness at all, and every money column across `001`/`009`/`011` is bare `REAL` with no unit in the name, comment or CHECK. Security-relevant half only — math correctness stays with `ora-financial-code-integrity-sweep`. Note `server/warehouse/migrations/**` is architect-owned |
+| [OI-089](#OI-089) | 2026-08-05 | ora-appsec-sweep 2026-08-05 (oxford-command-center @ `175e3f9`, security-auditor dispatch) | **MEDIUM** oxford-command-center `/api/actions/om-extract` (`server/index.ts:358-414`) validates only `file.name.endsWith('.pdf')` plus a 25 MB cap — no `%PDF-` magic-byte check — then feeds the buffer to `pdf-parse` and, with a `dealId`, writes it verbatim into the live OneDrive deal-document tree. Arbitrary non-PDF content can be persisted into business storage under a `.pdf` name. Reach is local-only (see [OI-050](#OI-050)). The filename sanitization and `resolve()`-prefix traversal assertion at `:400-405` are correct and should be preserved as-is |
+| [OI-090](#OI-090) | 2026-08-05 | ora-appsec-sweep 2026-08-05 (oxford-command-center @ `175e3f9`, security-auditor dispatch) | **MEDIUM** oxford-command-center has no rate or concurrency limit on `/api/ai` (`server/index.ts:460-493`), `/api/documents/search` (`:447-453`) or `/api/actions/om-extract` (`:358`). Per-request bounds are good (`maxTurns: 8`, `max_tokens: 16000`, 25 MB cap) but nothing bounds concurrent or repeated calls, and each `/api/ai` call spends real Anthropic tokens against the machine's key. OWASP-LLM10 unbounded consumption; combined with [OI-050](#OI-050)'s unauthenticated cross-site write path this is the cheapest denial-of-wallet route in the repo. ora-pm's equivalent gap was closed under OI-038/044; occ has no counterpart |
+| [OI-091](#OI-091) | 2026-08-05 | ora-appsec-sweep 2026-08-05 (oxford-command-center @ `175e3f9`, security-auditor dispatch) | **MEDIUM** oxford-command-center `.claude/hooks/file-guard.mjs:144-159` applies its documented fail-open to the HARD-DENY paths, not just the sentinel-overridable architect-owned list: `findRepoRoot` walks up looking for `CLAUDE.md` and `continue`s (unpoliced) if none is found, and skips any target whose owning root is neither ancestor nor descendant of the session root. A worktree or checkout without a root `CLAUDE.md`, or a path form that breaks `relative()` matching (junction, `\\?\`, 8.3 short name, UNC), therefore leaves `data/overlay.json`, `data/warehouse/**`, `.claude/settings.json` and `.claude/hooks/**` unprotected by this hook; the `permissions.deny` globs are path-form-sensitive in the same way. LLM06/excessive-agency: an agent session on an unusual path form can edit its own guardrails. Requires an already-agentic session, so MEDIUM not HIGH. Any fix here is security-gate hook logic: mandatory adversarial REFUTE pass + the old-vs-new differential battery |
+| [OI-092](#OI-092) | 2026-08-05 | `ora-lease-snapshot-refresh` run 2026-08-05; handoff session `3d9d97cf` | **MEDIUM** `External Loans Summary` computed next-12-month interest/principal over the half-open 366-day span `[TODAY(), TODAY()+366)`, capturing **13 payments instead of 12** whenever `TODAY()` landed on a loan's payment day-of-month — inflating annual debt service by one payment and depressing DSCR. **Workbook RESOLVED** (Gabriel's own edit 2026-08-05): window re-anchored to `(Assumptions!$B$30, EDATE(Assumptions!$B$30,12)]` with `B30 = EOMONTH(TODAY(),0)`, making the payment-day coincidence structurally impossible; zero `TODAY()+366` remain. Warehouse `debt_positions` was clean (all 8 snapshot dates fell on non-payment days); the one contaminated artifact, `data/snapshots/portfolio.json` from `61cc346`, was re-baked as `51d4039` (local only, **not pushed**). **Detector WITHDRAWN before shipping** — code review + REFUTE both found `debt-service-window.ts` cannot detect the defect it was built for (it counts schedule rows against its own correctly-computed window, never reading the `External Loans Summary` formula; reverting `H9` to the buggy form leaves its output byte-identical). Retry must key on **distinct dates, not row counts** (see [OI-096](#OI-096)) and must expect
+balloon-inclusive forward-looking principal on lender rows, per OI-095's final basis — do NOT build the
+detector around balloon exclusion, which was superseded same-day (see [OI-095](#OI-095)). **Do NOT build the ">2 decimal places" detector** — fires on 6 of 11 loans, every one correct. **Residual:** (a) workbook `Claude Log` has no entry for the 08-05 edit (last row Turn 147, 08-03); (b) `SCHEDULE_SOURCES` hardcodes each schedule's sheet/column/row range and must be updated alongside the formulas |
+| [OI-093](#OI-093) | 2026-08-05 | surfaced by the OI-092 `portfolio.json` re-bake (`51d4039`) | **RESOLVED 2026-08-05 — journal sheet recreated, verified end-to-end (0 unintended changes elsewhere), see full entry for caveat on cached formula values.** Was **MEDIUM** (silent history split in the debt warehouse): the internal 2203-2207 Northwood loan had parsed with **no journal sheet**, changing its snapshot id from `internal-2203-2207-northwood` to `internal-2203-2207-northwood-no-journal-sheet`. `debt_positions` keys `ON CONFLICT(id, snapshot_date)`, so every future snapshot lands under a NEW key — silently orphaning the loan's prior history rather than continuing it; `monthsToMaturity` also went null → 105. **Diagnosed 2026-08-05:** full 50-sheet enumeration confirms **no Northwood journal sheet exists in any spelling**, so the parser's `⚠ NO JOURNAL SHEET` marker is **correct and reporting a real accounting gap**, not a parser defect — aliasing the id would hide a genuinely missing record. **Provenance problem:** workbook `Claude Log` Turn 144 (2026-08-03) states the sheet *was created* during the EXTERNAL→INTERNAL reclassification, and it is not there. **Gabriel ruled 2026-08-05:** create the journal sheet — but **chase the provenance first**, since "never completed" vs "created then removed" implies different things about the rest of that reclassification |
 | [OI-094](#OI-094) | 2026-08-05 | adversarial REFUTE pass on the OI-092 detector; independently re-verified against the live workbook | **MEDIUM now, HIGH from ~mid-2030** (understates annual debt service by $3.35M when it bites) — needs Gabriel's ruling to execute (workbook edit, Hard Invariant 4). `'External Loans Summary'!H9`/`I9` sum the Banwick-Morrison schedule over `B11:B70`, but the schedule's **final payment is row 71** and it carries the balloon (r71: 2031-06-05, principal 3,333,953.68, total $3,349,289.87 — matching Symetra loan 11153's documented balloon to within rounding). `K9` maturity = 2031-06-05, the very row the range stops one short of. **Audit COMPLETE 2026-08-05, all six ranges checked** (scanning 40 rows past each range end): Banwick is the **only** truncated range; 3540 E Fifth Ave, 9050 Red Branch, 29000 Information Ln, Restoration Church Trust and 485 S Walnut St all end on their final payment row. Reproduced exactly by a second independent audit (session `3d9d97cf`). **Gabriel ruled: consolidated fix** — one workbook session covering (1) extend the Banwick ranges to row 71, and (2) the February pair fix: six cells to `EOMONTH(Assumptions!$B$30,12)` **and** `B30` constrained to month-end. Both edits are required together — a 1,080-case simulation (120 month-ends × 9 pay-days) shows `EDATE` right-edge → 9 under-capture deviations, `EOMONTH` → 0, but `EOMONTH` under manual override (`B32` non-month-end) → **1,428 deviations**. Two findings this audit surfaced were **promoted out** so closing OI-094 on the range fix cannot silently close them: → [OI-095](#OI-095), [OI-096](#OI-096) |
+| [OI-095](#OI-095) | 2026-08-05 | OI-094 range audit, finding (b); promoted out per Gabriel ruling 2026-08-05 | **CLOSED 2026-08-05 — final basis: INCLUDE the balloon.** Superseded this session's earlier "no
+change" reading. `I15` now -$978,763.425 (was ~0); `J15` -$1,022,692.32. Gabriel confirmed 2026-08-05
+he authorized the Turn 149 reversal; root cause was `I14`/`I15`/`I16` computing three different bases
+under one header, now made consistently forward-looking — see full entry. Historical framing below
+retained for context, superseded, not authoritative. Restoration Church Trust's balloon rows carry
+their amount in column `C` only, with `D`/`E` originally empty, so `'External Loans Summary'!H15`/`I15` (which sum `D`/`E`) exclude the $1,945,102.73 balloon / $972,551.37 Oxford share due 2027-02-20 from next-12-month principal return. **This paragraph is HISTORICAL — superseded same-day by Turn 149 and Gabriel's confirmation, see the
+CLOSED status above. Retained so the reasoning trail is visible, not as current guidance.** At the time,
+Gabriel ruled this was intended modelling (`C` = total payment, `D`/`E` = itemized split that balloon
+rows legitimately do not carry) and that `3540 E Fifth Ave`'s captured balloon vs RCT's excluded one
+was a principled borrower/lender asymmetry. Turn 149 found a different, more precise root cause — the
+three lender rows (`I14`/`I15`/`I16`) computed principal on three inconsistent bases, not one
+deliberate design choice — and fixed all three to a consistent forward-looking basis. RCT's balloon is
+now included. **Detector constraint SUPERSEDED:** the OI-092 detector retry must NOT be built to treat
+balloon-excluded lender principal as correct — RCT's current behavior (balloon INCLUDED, forward basis)
+is what the detector should expect on all three lender rows |
+| [OI-096](#OI-096) | 2026-08-05 | OI-094 range audit, finding (a); promoted out per Gabriel ruling 2026-08-05 | **RESOLVED 2026-08-05.** `485 S Walnut St` rows 45 and 46 BOTH carried `2028-09-26` — r45 was the final regular payment (`E`=1,365), r46 is the payoff (`D`=253,365 = 252,000 principal + 1,365 interest, `E`=1,365). `'External Loans Summary'!H16` sums column `E` over a date predicate, so it picks up **both** rows' $1,365, counting the same September interest twice. Bites when 2028-09-26 enters the forward-12-month window, ~Oct 2027. Small ($1,365) but a genuine over-count, and the same shape as the OI-092 defect. It is also why the OI-092 detector retry must key on **distinct dates, not row counts** — the withdrawn draft false-fired "13 payments" on exactly this pair |
+| [OI-097](#OI-097) | 2026-08-05 | Phantom-dispatch fix (`e441130` stop killing Claude Desktop's own renderer); Gabriel ruling 2026-08-05 (remind, do not automate) | **Re-measure the phantom-dispatch rate on/after 2026-08-07.** The 2026-08-05 measurement is not a post-fix reading: the newest phantom in the window is 11:04 ET and the renderer only came back at 11:08 ET, so there is no meaningful post-fix data yet — a "rate improved" claim off that window would be [[feedback_verified_null_vs_inferred_null]]. Baseline to beat: **54 phantom dispatches vs 68 confirmed runs = 44%** over the 94h to 2026-08-05, with `fleet-deadman` logging "OK" through all of them. Re-run `maintenance/phantom-dispatch-probe.py` over a window that starts after 11:08 ET 2026-08-05 and compare. Deliberately NOT registered as a scheduled task (one-time measurement; registry is under a single-writer rule) |
 | [OI-098](#OI-098) | 2026-08-05 | tracker consistency audit, this file, 2026-08-05 | **LOW/MEDIUM** Six residual row/detail inconsistencies in THIS file, found by a full audit after repairing the split table. (i) `OI-029`, `OI-047`, `OI-076` carry `**Status:** CLOSED` in their detail sections but their rows still sit in the **Open** table. (ii) `OI-056`, `OI-068`, `OI-097` have rows in a table but **no `### OI-NNN` detail section at all**. All six verified real, not regex artifacts. `OI-047`/`OI-076` were touched by recent commits (`90e680c`, `fb4875c`) so reconcile against those before moving anything. The sibling defect — `OI-057`/`OI-059` detail sections stale at OPEN while their rows were correctly closed — was fixed 2026-08-05 |
 | [OI-099](#OI-099) | 2026-08-05 | `governor-drift-probe.py` false positive, 2026-08-05 | **LOW** (advisory probe; does **not** gate pushes — the pre-push shim runs doctrine-drift, hook-tests and confidentiality only) `RE_DSCR_THRESH` (`governor-drift-probe.py:117`) reads **any** decimal within 40 non-digit characters after "DSCR" as a threshold declaration, so a **measured** coverage ratio in prose flags as a governor redefinition. Fired on `reference_workbook_annual_debt_service_366day_overcapture.md:27` — a measured Banwick coverage ratio sitting a few words after the token "DSCR" (the offending string is deliberately NOT quoted verbatim here: doing so reproduces the false positive in this very file, which is how it was re-triggered 2026-08-05) — exit 1, which also poisons `memory-integrity-probe.py:395` and stands the daily guards red. Worked around 2026-08-05 by rewording that prose (probe now exits 0, 861 files scanned); **the gap itself is untouched** and the next measured DSCR written in prose re-fires it. A real fix must distinguish measured-vs-declared **without** handing a drifting editor an evasion on a Hard-Invariant-4 guard — note it would sit beside `RE_DSCR_PIVOT_DECOY`, which deliberately treats arrow-shaped DSCR changes as drift. Mandatory REFUTE + old-vs-new differential battery |
 | [OI-100](#OI-100) | 2026-08-05 | Gabriel ruling 2026-08-05 (rescope approved); design pass this session | **MEDIUM** Rescope `git-prepush-doctrine-gate.py` from the **working tree** to the **pushed commits**. Not just shared-checkout friction (one session's half-finished edit blocks everyone's push) — it is a **false-negative hole**: commit drift, then fix it uncommitted, and the probe passes on a clean tree while the drift pushes. **Two traps found 2026-08-05, both must be handled or the "fix" silently weakens a fail-closed gate:** (1) the obvious route — pass the probe's `--session-context=`/`--rules=`/`--terms=`/positional overrides — sets `live_mode = argv_path is None` **False** (`doctrine-integrity-probe.py:971`), which disables **seven** coupled blocks (lines 1216, 1467, 1518, 1524, 1585, 1618, 1641) incl. backup-root scanning and `PORTED_CLAUDE_MD_COPIES`; it would gut the gate, not rescope it. (2) running the probe against a temp worktree of the pushed sha does **not** redirect it either — roots come from `expanduser("~")` (`:93-95`), which on Windows keys off `USERPROFILE`, too fragile to hang a security gate on. **Design:** add an explicit root-override env var to the probe that does **not** flip `live_mode`, materialize the pushed commit via `git worktree add --detach`, run the probe in FULL live mode against it. hooks/** + security-gate: mandatory adversarial REFUTE + differential battery + TDD |
+| [OI-101](#OI-101) | 2026-08-05 | `linkedin-insight-tag-followup` (spent one-time task), captured before archiving, OI-025 sweep follow-up | **LOW** The LinkedIn Insight Tag Partner ID for oxfordra.net analytics is still a placeholder. `website-canonical/sell-your-building.html` (line 930) still carries `window._linkedin_partner_id='XXXXXXX';` (appears twice in the file). The GA4 side of this same instrumentation swap is DONE — real Measurement ID `G-YDSX0RW5HC` is live across 16 other files, committed locally on `main` (`df2bc2a`, not pushed). Blocker: LinkedIn Campaign Manager (account id `547184587`, "Oxford Realty Advisors, LLC") was gated behind a mandatory 2FA-upgrade modal with no dismiss option as of 2026-07-16 — Gabriel completed 2FA setup that day but the gate was still showing immediately after, most likely a propagation delay on LinkedIn's end; unknown whether it has since cleared. **The originating task's own file target list is STALE** — it named 16 files (404.html, about.html, application-received.html, available-space.html, contact.html, for-brokers.html, index.html, markets/columbus-oh.html, markets/index.html, markets/maryland.html, portfolio.html, privacy.html, tenant-application.html, tenant-resources.html, terms.html, track-record.html); verified 2026-08-05 that all 16 are now clean and `sell-your-building.html` — not on that list — is the only tracked source file still carrying the placeholder. Next step: ask Gabriel whether Campaign Manager loads past the 2FA gate now; if yes, retrieve the Insight Tag Partner ID (Campaign Manager > Account Assets > Insight Tag) and replace both occurrences in `sell-your-building.html` only. Commit locally; do NOT push (invariant 2, per-deploy confirmation). Source task archived same day to `Claude_Workspace\00_Governance\Scheduled\_archive_2026-08-05_oi025-sweep\linkedin-insight-tag-followup\` — this item is now the sole record of the blocker and account id. |
 | [OI-102](#OI-102) | 2026-08-05 | Session-end optimization candidates, this session, 2026-08-05 | **LOW** The shared-checkout hygiene warning fires on every single write in a dirty `.claude` checkout, but only ever reports the growing dirty-file count, not which condition is actually blocking (e.g. one red test suite). A warning that named the specific blocker (failing suite, contested claim, etc.) instead of a count that only grows would be more actionable |
 | [OI-103](#OI-103) | 2026-08-05 | Session-end optimization candidates, this session, 2026-08-05 | **LOW** `skillOverrides` was found silently inert this session (the second such config key, after the v1.8 drift-check prose-comparison finding) — no mechanism in this repo verifies that a `settings.json` key actually takes effect once set. Candidate: a standing audit question/probe enumerating which settings.json keys have never been mechanically confirmed live, rather than discovering inertness ad hoc per session |
 | [OI-104](#OI-104) | 2026-08-05 | Session-end optimization candidates, this session, 2026-08-05 | **LOW** The plugin-vs-user skill-source distinction was derived this session (per the referring conversation) by disassembling the CLI binary — a one-off, expensive investigation. If that distinction is needed again, it belongs in a reusable probe helper under `maintenance/`, not re-derived from scratch each time |
@@ -919,7 +953,33 @@ with no automated stage-advancement. That's a policy/tooling gap (when should a 
 **Auto-check:** none.
 
 ### OI-025
-**Status:** OPEN — one instance confirmed and remediated; full population unaudited
+**Status:** CLOSED 2026-08-05 — full population audited (99/99, 0 unreadable)
+**Resolution (2026-08-05):** the bounded sweep was completed. All 99 top-level folders in
+`Claude_Workspace\00_Governance\Scheduled\` classified against the live fleet roster:
+**34 DEAD-CONFIRMED archived**, 58 LIVE, 7 AMBIGUOUS left in place, 0 unreadable.
+The method rule held throughout — absence from the roster was NEVER sufficient on its own
+(many legitimate specs were simply never registered); every archived folder carried a second
+documentary signal: 13 pinned to the dead Composio connector, 17 spent one-time diagnostics,
+1 self-declared RETIRED, 3 absorbed into a live successor per that successor's own dated spec.
+All 34 were re-checked against the live roster immediately before moving (0 hits), and moved —
+never deleted — to `_archive_2026-08-05_oi025-sweep\`, whose README carries the per-folder evidence.
+**The 7 AMBIGUOUS are now resolved to verdicts** (separate research pass, same day):
+ARCHIVE — `ora-dashboard-refresh` (its entire project root `C:\Users\Owner\oxford-perfection` no
+longer exists, so it cannot fire; its Cloudflare Pages target is served by a live successor,
+`deploy-mirror.ps1` via a native Windows Scheduled Task, whose confidentiality control is
+flag-based rather than the archived spec's obsolete Fulton-name gate) · `ora-email-queue-am` /
+`-pm` (full-disk search confirms the parent spec they delegate to exists NOWHERE; both also
+still name egoldberg, violating routing canon) · `ora-annual-budget-kickoff` (`_REGISTRY.md:79`
+Gabriel-ratified-unneeded 2026-06-11) · `ora-cash-position-snapshot` (Composio-pinned AND
+absorbed as Block D of live `ora-am-brief`, verified at `ora-am-brief\SKILL.md:44/71/290/294`).
+NEEDS-GABRIEL — `ora-lease-expiration-action-list` (genuinely ADDITIVE, not redundant: the live
+`ora-lease-expiration-brief` reads the Notion Tenant DB and buckets by horizon, but produces no
+revenue-at-risk ranking, WALT, concentration flag, or outreach-gap list; registering both would
+send two weekly lease emails) · `linkedin-insight-tag-followup` (the task is spent, but its
+UNDERLYING item is still live — the placeholder `window._linkedin_partner_id='XXXXXXX';` survives
+at `website-canonical\sell-your-building.html:930`; capture as a website backlog item before
+archiving the reminder).
+*(Original status line, retained: OPEN — one instance confirmed and remediated; full population unaudited)*
 **Opened:** 2026-07-25
 **Source:** shared-checkout investigation, this session (Gabriel asked to investigate the dirty-`~/.claude`-checkout flag raised at the end of the prior turn)
 **Description:** while porting two skill-spec changes (HubSpot idle-deal flag + tracker-output redirect) into `ora-tenant-hubspot-reconciliation`, discovered the edit had first landed on `C:\Users\Owner\OneDrive - Oxford Capital Partners\Claude_Workspace\00_Governance\Scheduled\ora-tenant-hubspot-reconciliation\SKILL.md` — a path that is NOT one of the two documented live registry locations (`tech.md` §3: CC/MCP = `~\.claude\scheduled-tasks\`, LAMS = `OneDrive…\Documents\Claude\Scheduled\`). Confirmed via `list_scheduled_tasks` that the task's real registered `path` is the CC/MCP copy; the Claude_Workspace copy drives nothing. Listing that directory found **100+ task folders** — active-looking names matching live CC registry tasks (`ora-am-brief`, `ora-weekly-hygiene`, `ora-health-guard`, `ora-pm-ledger`, etc.), clearly one-off/completed check-* and investigate-* folders, and four pre-existing `_archive_2026-0[6-7]-*` subfolders already inside this same directory — i.e. someone has been using this location as a working/archival area for some time, but no memory file documents its relationship to the two-fleet doctrine.
@@ -996,10 +1056,12 @@ treating this as durable.**
 *(Section added 2026-07-29 during tracker ID-integrity reconciliation — the row predated the section requirement; row is authoritative for detail.)*
 
 ### OI-020
-**Status:** OPEN
+**Status:** CLOSED 2026-08-05
 **Opened:** 2026-07-19
 **Source:** [event_log.md](event_log.md#2026-07-19)
 **Description:** ora-cowork-heartbeat's LAMS registry entry has no `approvedPermissions` grant — only fix is Gabriel approving the Notion-tool prompt during a live unattended fire in Cowork's Scheduled Tasks UI; GitHub watchdog issue needs manual closure once fixed.
+**Resolution (2026-08-05):** the grant is PRESENT and the task is firing. Live LAMS registry read: `approvedPermissions: [{'toolName': 'mcp__…notion-update-page'}]`, `enabled: true`, `lastRunAt 2026-08-05T09:57:51Z` against `lastScheduledFor 09:50` — i.e. it completed an unattended fire that morning. Someone approved it during a live fire without closing this item; it was documented "unresolved 3×" while already fixed.
+**Residual (NOT closed by this):** the GitHub watchdog issue still needs manual closure — verify against `ZeOoba/ora-cowork-watchdog`. Separately, `fleet-roster.md` had this task's cron as `50 5,17 * * *` while the live registry said `50 5 * * *`; corrected by re-running `registry-membership-probe.py` the same day.
 *(Section added 2026-07-29 during tracker ID-integrity reconciliation.)*
 
 ### OI-026
@@ -3065,40 +3127,711 @@ states.
 **Auto-check:** none (a tooling-logic gap, not a fleet-registry state comparable to the closed
 Auto-check vocabulary above).
 
-
-### OI-056
-**Status:** CLOSED
-**Opened:** 2026-08-03
-**Closed:** 2026-08-03
-**Source:** `doctrine-integrity-probe.py` pre-push run, 2026-08-03; resolved by `edc9fa1` + `7596feb`
-**Description:** Detail section written 2026-08-05 (this row existed in the Closed table with no `###`
-section — see [OI-098](#OI-098)); content is restated from the row, not re-investigated.
-Logged initially as three instances of one defect; **only two were the same bug.**
-`ratify-hurdle-rate` and `tenant-email` SKILL.md genuinely carried "Principal" against canon and were
-corrected to "VP Acquisitions" (`edc9fa1`).
-**The third was not a defect.** `document-assembly/SKILL.md:180` says "Member / Principal", which Gabriel
-ruled states the **LLC-execution capacity** he binds under — a distinct concept from his firm operating
-title. Left unchanged, with an in-file note recording it as a documented Check-13 false positive
-(`7596feb`).
-**Separately recorded, not this item:** 21 live "Landlord - \*" Outlook signatures carry the same
-execution-capacity language and sit outside the probe's scan scope.
-
-### OI-068
+### OI-078
 **Status:** OPEN
-**Opened:** 2026-08-03
-**Source:** ora-pm appsec fix plan Task 8 (OI-043), local `plan/appsec-fixes-oi034-048` branch, commit
-`59f79ff`; confirmed by an independent task reviewer
-**Severity:** product gap, **not** a security defect in what shipped
-**Description:** Detail section written 2026-08-05 (row existed with no `###` section — see
-[OI-098](#OI-098)); restated from the row, not re-investigated.
-Autopay-with-payment-method is **unreachable from any live frontend path today**:
-- `PortalAccount.tsx` is the sole caller of `setAutopay` and never passes `payment_method_id`.
-- The enable toggle is disabled unless `lease.autopay_payment_method_id` is already set.
-- The only writer of that column is `PATCH /portal/autopay`, which the frontend never calls with a PM.
-- `PortalPayNow.tsx` creates a payment method but only ever feeds it to one-time
-  `createPaymentIntent`, never to `setAutopay`.
-So the whole autopay-enrollment feature is unbuilt/unreachable on the frontend, independent of Task 8's
-(correct) backend hardening.
+**Opened:** 2026-08-05
+**Source:** ora-appsec-sweep 2026-08-05 (ora-pm @ `a29f8f0`, security-auditor dispatch)
+**Severity:** CRITICAL (data exposure / authorization)
+**Description:** `supabase/migrations/0001_core_entities.sql`, `0002_financial_tables.sql` (no RLS
+anywhere in either), `0004_views_and_rls.sql:102-107` (RLS enabled on 6 tables only),
+`src/lib/supabase.ts:3-6`, `src/portal/lib/supabase-portal.ts:4-7`. Row Level Security is enabled on
+`charges`, `payments`, `lease_documents`, `lease_amendments`, `tenant_notices`,
+`insurance_certificates` — and on nothing else. The 17 remaining tables (`properties`, `units`,
+`tenants`, `leases`, `expenses`, `budgets`, `renewals`, `broker_commissions`, `cam_reconciliations`,
+`correspondence_log`, `journal_entry_exports`, `lease_move_events`, `sent_notifications`,
+`stripe_webhook_events`, `tenant_sales_reports`, `utility_meters`, `utility_readings`) have no
+`ENABLE ROW LEVEL SECURITY` statement in any migration. `VITE_SUPABASE_URL` and
+`VITE_SUPABASE_ANON_KEY` are compiled into the public JS bundle by design. In a stock Supabase
+project `anon`/`authenticated` hold default GRANTs on `public` tables, so an RLS-disabled table is
+readable and writable straight through PostgREST.
+**Impact:** anyone who loads the site can extract the anon key and read the whole portfolio — 14
+properties, ~140 tenants, contact PII, `stripe_customer_id`, full lease economics (base rent, CAM,
+TI allowances, security deposits, options) — and, absent an explicit `REVOKE`, write to it:
+rewriting `leases.base_rent_monthly`, or inserting `payments` rows that zero a tenant's balance in
+`ar_ledger`.
+**Relationship to [OI-048](#OI-048):** OI-048 records that the API uses the service-role key so RLS
+is not the API's control, and that RLS reads as a safety net which is not actually one. This item is
+the other half and the more severe one: for 17 tables the net is not merely bypassed by the API, it
+does not exist at all on the internet-facing database endpoint. The in-repo rebuttal at
+`supabase/migrations/README.md:23-29` and `server/db/client.ts:18-23` — "these policies protect a
+code path that doesn't exist yet", true of the app and confirmed by grep — does not apply, because
+the attacker brings their own PostgREST client rather than using the app's.
+**Verification status (IMPORTANT — inferred, not verified):** the migration-level facts above were
+independently re-verified this run by direct grep against the pinned worktree, not taken on the
+agent's word. What was NOT verified is whether the live Supabase project actually grants
+`anon`/`authenticated` on these tables — this sweep is report-only and does no live probing. Do not
+record this as exploited-in-production until someone runs the check. One command settles it:
+`curl -s "https://<project-ref>.supabase.co/rest/v1/tenants?select=id,name&limit=1" -H "apikey: <anon key from the deployed bundle>"`
+— any row returned confirms it.
+**Candidate fix (NOT applied — this sweep is report-only):** enable RLS on every `public` table (no
+policies = deny-all for anon/authenticated, service-role API unaffected), or
+`REVOKE ALL ON <table> FROM anon, authenticated` for tables that should never be client-reachable.
+Then change `tests/db/rls-inventory.test.ts` from a manifest match to a COMPLETENESS check — parse
+every `CREATE TABLE` in the migrations and fail on any without a corresponding enable or a
+documented exemption. As written that test asserts the claim set hasn't changed, which locks the gap
+in rather than catching it. Sequence with [OI-080](#OI-080) and [OI-079](#OI-079): they are one
+chain, and fixing any one alone leaves it intact.
+**Auto-check:** none.
+
+### OI-079
+**Status:** OPEN
+**Opened:** 2026-08-05
+**Source:** ora-appsec-sweep 2026-08-05 (ora-pm @ `a29f8f0`, security-auditor dispatch)
+**Severity:** HIGH (cross-tenant data exposure)
+**Description:** `supabase/migrations/0011_appsec_idempotency_and_scale.sql:118-151` (`ar_ledger`),
+`0004_views_and_rls.sql:33-99` (`rent_roll`, `critical_dates`). None of the three views is created
+`WITH (security_invoker = true)` — the string does not appear anywhere in `supabase/migrations/**`
+(verified by grep this run). A view without it executes with the view owner's privileges and
+therefore ignores the RLS policies on the underlying `charges`/`payments`/`leases`/`tenants`.
+**Impact:** one `GET /rest/v1/ar_ledger?select=tenant_name,balance` with the anon key — or with an
+`authenticated` JWT minted via [OI-080](#OI-080) — returns every tenant's name, total charged, total
+paid, balance and property. `rent_roll` additionally discloses full per-suite rent economics. This
+survives a fix to [OI-078](#OI-078), which is why it is filed separately.
+**Candidate fix (NOT applied):** `ALTER VIEW ar_ledger SET (security_invoker = true);` (same for
+`rent_roll`, `critical_dates`), plus
+`REVOKE ALL ON ar_ledger, rent_roll, critical_dates FROM anon, authenticated;`. The service-role API
+reads all three (`server/routes/reports.ts:13,24,34`, `cron.ts:160,322`, `stripe.ts:159`) and is
+unaffected by either change.
+**Auto-check:** none.
+
+### OI-080
+**Status:** OPEN
+**Opened:** 2026-08-05
+**Source:** ora-appsec-sweep 2026-08-05 (ora-pm @ `a29f8f0`, security-auditor dispatch)
+**Severity:** HIGH (authorization / self-provisioning)
+**Description:** `src/portal/pages/PortalLogin.tsx:12-15` calls
+`portalSupabase.auth.signInWithOtp({ email, options: { emailRedirectTo } })` with no
+`shouldCreateUser: false`. That option defaults to **true**, so any email submitted at
+`/portal/login` creates a Supabase auth user in the same project that serves admins.
+**Why this is not covered by [OI-036](#OI-036):** that item's fix added the flag to the ADMIN login
+only. Verified this run by reading both files side by side — `src/pages/auth/AdminLogin.tsx:22` has
+`shouldCreateUser: false` with an explicit "OI-036" comment above it; the portal login has no such
+option at all. Two login pages, one fixed.
+**Impact:** three effects. (1) An attacker self-registers, completes the magic link, and holds a
+valid `authenticated` JWT — the credential that turns [OI-078](#OI-078)/[OI-079](#OI-079) from
+anon-key-reachable into authenticated-role-reachable, surviving anon-only hardening. (2)
+Pre-registering a known tenant contact address (broker and tenant emails are discoverable) makes
+`admin.auth.admin.inviteUserByEmail` (`server/routes/portal-auth.ts:38-41`) fail on an
+already-registered email, blocking that tenant's onboarding until someone reconciles the auth user
+by hand. (3) Unbounded auth-table pollution and ORA-branded magic-link mail to arbitrary addresses.
+`tenantAuthMiddleware` (`server/middleware/tenant-auth.ts:21-25`) accepts the JWT as valid; the API
+then 404s at the `tenants` lookup, but the JWT remains fully valid for direct PostgREST and Storage.
+**Candidate fix (NOT applied):** mirror the admin fix exactly —
+`options: { emailRedirectTo: window.location.origin + '/portal', shouldCreateUser: false }`. Tenants
+are provisioned only via `POST /api/admin/tenants/:id/invite`, so this is the correct posture. Add a
+portal-login test alongside `tests/components/admin-login-shouldcreateuser.test.ts`; that test
+existing for one of two login pages is itself the signal this was missed.
+**Auto-check:** none.
+
+### OI-081
+**Status:** OPEN
+**Opened:** 2026-08-05
+**Source:** ora-appsec-sweep 2026-08-05 (ora-pm @ `a29f8f0`, security-auditor dispatch)
+**Severity:** HIGH (money-movement control weaker than documented)
+**Description:** `server/middleware/aal-guard.ts:46-48` blocks only when
+`data.nextLevel === 'aal2' && data.currentLevel !== 'aal2'` (verified verbatim this run). Supabase
+raises `nextLevel` to `aal2` only when the user has a **verified factor**; for a tenant who never
+enrolled, `nextLevel` stays `aal1` and the guard calls `next()` unconditionally. MFA enrollment is a
+voluntary action on the account page (`src/portal/pages/PortalAccount.tsx:90`) and nothing in the
+portal requires it. The code comment states this honestly — the gap is that the surrounding OI-045
+remediation reads as though AAL2 is the control protecting ACH.
+**Impact:** for any tenant without an enrolled factor — realistically most of them — the only thing
+between an attacker and an ACH debit is possession of a magic-link session: a forwarded or leaked
+sign-in email, a shared AP mailbox (common at industrial tenants), or an XSS chain via the
+still-Report-Only CSP ([OI-066](#OI-066)). `POST /api/stripe/setup-intent` then
+`POST /api/stripe/payment-intent` (`confirm: true`) moves real money up to
+min(outstanding balance, $50,000).
+**Relationship to [OI-045](#OI-045):** that closure is not wrong — `requireAal2` is a real
+server-side check, it does fail closed on error, and it is wired onto all three sensitive routes,
+all re-confirmed here. This item narrows what it actually buys: the gate is only as strong as
+enrollment, and enrollment is optional. Read the two together.
+**Candidate fix (NOT applied):** either (a) require MFA enrollment before the Pay Now / autopay
+surfaces are reachable — 403 with "enroll MFA to authorize bank payments" on `setup-intent`,
+`payment-intent` and `PATCH /autopay` whenever `nextLevel !== 'aal2'` — or (b) if enrollment cannot
+be mandated, add a step-up email/OTP confirmation on first bank-account attach and on any payment
+over a threshold. Either way, correct `aal-guard.ts`'s header comment, which currently overstates
+the protection.
+**Auto-check:** none.
+
+### OI-082
+**Status:** OPEN
+**Opened:** 2026-08-05
+**Source:** ora-appsec-sweep 2026-08-05 (ora-pm @ `a29f8f0`, security-auditor dispatch)
+**Severity:** MEDIUM (financial data integrity)
+**Description:** `supabase/migrations/0002_financial_tables.sql:26-40`,
+`0011_appsec_idempotency_and_scale.sql:39-53`, insert path `server/routes/payments.ts:28-36`.
+`0011` hardened `charges` with `idempotency_key TEXT UNIQUE NOT NULL` but gave `payments` only two
+PARTIAL unique indexes, on `stripe_payment_intent_id` and on `(lease_id, autopay_period)`. Rows with
+`method IN ('check','wire','other')` are NULL on both columns and so fall outside both indexes.
+Nothing prevents a second identical row.
+**Impact:** a double-submitted admin form, a retried request, or a re-run import writes a duplicate
+payment; `ar_ledger`'s `payment_totals` CTE sums both and the tenant's balance silently drops by the
+duplicated amount. That understated balance then propagates: `POST /api/stripe/payment-intent`'s
+balance cap (`server/routes/stripe.ts:166-168`) and the autopay lifetime cap
+(`server/routes/cron.ts:173-174`) both read it, so under-collection reaches automated billing. Same
+class as the two AR defects already shipped in this repo (cartesian fan-out; divide-by-100) — the
+read path was fixed, the write path was not. Distinct from [OI-034](#OI-034)/[OI-035](#OI-035),
+which addressed Stripe-side idempotency keys rather than the manual-entry methods.
+**Candidate fix (NOT applied):** mirror the `charges` treatment —
+`ALTER TABLE payments ADD COLUMN idempotency_key TEXT;`, backfill `'legacy:' || id::text`,
+`SET NOT NULL`, `CREATE UNIQUE INDEX payments_idempotency_key_uniq ON payments(idempotency_key);` —
+and default it in `server/routes/payments.ts` the way `charges.ts:35` does. Run 0011's pre-flight
+equivalent first (`SELECT lease_id, payment_date, amount, method, count(*) ... HAVING count(*)>1`):
+existing duplicates are a live-data finding in their own right, not a migration obstacle to code
+around.
+**Auto-check:** none.
+
+### OI-083
+**Status:** OPEN
+**Opened:** 2026-08-05
+**Source:** ora-appsec-sweep 2026-08-05 (ora-pm @ `a29f8f0`, security-auditor dispatch)
+**Severity:** MEDIUM (input validation / cross-tenant integrity)
+**Description:** `server/routes/portal-insurance.ts:13-37` destructures the raw JSON body and
+inserts it with no Zod schema — the only write route in the repo that does. The admin equivalent
+uses `InsuranceInsertSchema` (`server/lib/schemas.ts:139-147`). `storage_path` is written to
+`document_path` verbatim with no ownership or prefix check; `policy_type`, `carrier`,
+`policy_number`, `coverage_amount` are unvalidated in type and length.
+**Impact:** an authenticated tenant can point their COI record at any storage key, including
+`<other-tenant-uuid>/coi.pdf`, surfacing another tenant's document under the wrong tenant in the
+admin UI (integrity, and a possible cross-tenant read depending on how the admin fetches it).
+Unbounded strings land in the DB and in the insurance report. Related but distinct:
+[OI-041](#OI-041) catalogued 10 mass-assignment handlers and did not include this file;
+[OI-063](#OI-063) touched this file for raw-error hygiene only.
+**Candidate fix (NOT applied):** `safeParse` a strict schema (reuse `InsuranceInsertSchema` minus
+`tenant_id`) returning 422 on failure, and constrain the path to the caller's own prefix — reject
+unless `storage_path` starts with the caller's own folder. Note this interacts with
+[OI-071](#OI-071): the correct prefix depends on resolving the `tenants.id` vs `auth.users.id`
+question first.
+**Auto-check:** none.
+
+### OI-084
+**Status:** OPEN
+**Opened:** 2026-08-05
+**Source:** ora-appsec-sweep 2026-08-05 (ora-pm @ `a29f8f0`, security-auditor dispatch)
+**Severity:** MEDIUM (unvalidated file upload)
+**Description:** `src/portal/pages/PortalInsurance.tsx:29-39`. COI uploads go browser -> Supabase
+Storage directly, never touching the API, so there is no server-side MIME or magic-byte check, no
+size cap, and `upsert: true` with an unsanitized `file.name`. The `accept=".pdf,.jpg,.png"`
+attribute at line 156 is the only check and is trivially bypassed. Bucket policies:
+`supabase/migrations/0008_storage_rls.sql:6-16`.
+**Impact:** any authenticated tenant can store any file type at any size in the `insurance-certs`
+bucket (storage-cost abuse; malicious content later downloaded by staff). The repo demonstrates the
+correct pattern elsewhere — `server/routes/intake.ts:86-91` does server-side magic-byte and size
+validation for lease intake — and has an unused client-side validator at
+`src/components/ui/file-drop.ts`.
+**Candidate fix (NOT applied):** route COI uploads through the API (server validates magic bytes and
+size, then writes to Storage with the service role), or set a bucket-level file-size limit and
+allowed-MIME list in the Supabase bucket config plus `upsert: false` and a server-generated object
+name.
+**Auto-check:** none.
+
+### OI-085
+**Status:** OPEN
+**Opened:** 2026-08-05
+**Source:** ora-appsec-sweep 2026-08-05 (ora-pm @ `a29f8f0`, security-auditor dispatch)
+**Severity:** MEDIUM (tenant-facing AR display correctness)
+**Description:** `server/routes/portal.ts:39-60` returns every charge on the tenant's ACTIVE leases;
+`src/portal/pages/PortalDashboard.tsx:10-15,57` labels the count "Open Charges";
+`src/portal/pages/PortalPayNow.tsx:33-39` does `const openCharges = charges` and makes them all
+selectable. There is no charge<->payment link and no paid/open state on `charges` — a schema gap
+first noted in the 2026-07-16 audit and still unaddressed. Separately, the balance card
+(`server/routes/portal.ts:32-35`) sums `ar_ledger` across ALL the tenant's leases while the charge
+list covers only active ones, so the two numbers on the same screen cannot reconcile.
+**Impact:** a tenant with 18 months of history sees 36+ "open charges" totalling far more than they
+owe, and can select already-settled charges to pay. The server-side cap
+(`server/routes/stripe.ts:168`, 422 when `amount_cents > outstandingBalanceCents`) prevents actual
+overpayment, so this is a correctness and trust failure rather than a financial loss — but on a
+tenant-facing AR display at a firm that has already shipped two balance-display bugs, it is the same
+class and deserves the same treatment.
+**Candidate fix (NOT applied):** add settlement state to charges (a
+`paid_amount NUMERIC(12,2) NOT NULL DEFAULT 0` updated on payment application, or a
+`payment_allocations` join table), filter `/api/portal/charges` to `paid_amount < amount`, and scope
+the balance query to the same lease set the charge list uses so the two figures reconcile by
+construction. Until then, relabel the UI to "Charge history" — the current label asserts something
+the data cannot support.
+**Auto-check:** none.
+
+### OI-086
+**Status:** OPEN
+**Opened:** 2026-08-05
+**Source:** ora-appsec-sweep 2026-08-05 (ora-pm @ `a29f8f0`, security-auditor dispatch)
+**Severity:** MEDIUM (authentication of an automated money-movement path)
+**Description:** `server/middleware/auth.ts:7` compares the Authorization header to
+`Bearer <CRON_SECRET>` with a short-circuiting string comparison. The routes behind it include
+`POST /api/cron/monthly-billing`, which creates and confirms off-session ACH PaymentIntents for
+every autopay-enabled lease (`server/routes/cron.ts:182-196`). The secret is static, shared with an
+out-of-repo PowerShell trigger, and has no documented rotation.
+**Impact:** the timing side-channel by itself is marginal over the internet through Cloudflare's
+edge and would not merit MEDIUM alone. What raises it is the combination — a static, long-lived,
+never-rotated shared secret, passed on a PowerShell command line (`scripts/trigger-billing.ps1:14`,
+therefore visible in process listings and shell history), acting as the sole factor gating
+portfolio-wide automated debits. Anyone who obtains it can trigger billing runs at will. Note
+[OI-076](#OI-076) re-registered the Windows Task Scheduler job that carries this secret, so that
+command line is live on this machine.
+**Candidate fix (NOT applied):** constant-time comparison (length check, then XOR-accumulate over
+char codes with no early return), and prefer a mechanism that is not a bearer string on a command
+line — Cloudflare Access service tokens or mTLS for the cron origin. Document a rotation cadence
+alongside the existing secret notes in `wrangler.toml`.
+**Auto-check:** none.
+
+### OI-087
+**Status:** OPEN
+**Opened:** 2026-08-05
+**Source:** ora-appsec-sweep 2026-08-05 (both repos, security-auditor dispatch)
+**Severity:** MEDIUM (dependency CVE, both repos)
+**Description:** GHSA-8j4g-w8fx-2239 — ReDoS in Hono's CORS middleware via the
+`Access-Control-Request-Headers` header, affecting `hono <4.12.34`. Present in both production
+codebases, versions read directly from the lockfiles this run: `ora-pm` @ `a29f8f0` resolves `hono`
+**4.12.31**; `oxford-command-center` @ `175e3f9` resolves **4.12.28**. Both are runtime dependencies
+on served paths — ora-pm mounts `cors()` on `/api/*` (`server/index.ts:71-76`), occ on `/api/*` of
+the Brain Server (`server/index.ts:52`) — and CORS preflight is evaluated before any auth or origin
+rejection, so the vulnerable code is reachable pre-authentication in both.
+**Impact:** CPU exhaustion from crafted preflight headers. On ora-pm, Worker isolate CPU limits
+convert this into request failures and billing impact; on occ it hangs the event loop of the process
+holding the confidential warehouse. Unauthenticated and trivially scriptable in both.
+**Why this is not already tracked:** it is NOT the advisory closed by ora-pm's earlier
+4.12.23 -> 4.12.31 bump (that one was satisfied at 4.12.31; this one is not), and core `hono` is not
+in [OI-017](#OI-017)'s tracked set, which covers react-router, `@hono/node-server`, sharp/libvips,
+brace-expansion, fast-uri, js-yaml and postcss. Those remain OI-017's.
+**Candidate fix (NOT applied — report-only; this sweep never runs `npm audit fix`):** bump both
+repos to `hono@^4.12.34`. Semver-compatible in both, and the highest-reachability compatible fix
+available in either.
+**Auto-check:** none.
+
+### OI-088
+**Status:** OPEN
+**Opened:** 2026-08-05
+**Source:** ora-appsec-sweep 2026-08-05 (oxford-command-center @ `175e3f9`, security-auditor dispatch)
+**Severity:** MEDIUM (schema integrity — security half; math correctness out of scope)
+**Description:** `server/warehouse/migrations/001_initial.sql:59-74` (`ledger_entries`), `:44-56`
+(`account_mappings`), `009_debt_positions.sql`, `011_lease_events.sql`.
+(1) **No uniqueness on `ledger_entries`** — an `AUTOINCREMENT` surrogate PK and one NON-unique index
+`idx_ledger_prop_period(property_id, period, is_active)`. An identical
+`(import_id, property_id, period, raw_account, amount)` row is insertable twice by a re-run, a
+retried transaction, or a partial-failure replay. Every sibling table has a natural key:
+`property_tax_assessments` `UNIQUE(property_id, tax_year)`, `insurance_loss_events`
+`UNIQUE(property_id, loss_date, cause, gross_incurred)`, `property_insurance_policies`
+`UNIQUE(property_id, policy_number, effective_date)`, `debt_positions`
+`PRIMARY KEY (id, snapshot_date)`. The money table is the exception.
+(2) **Missing FKs** — `ledger_entries.property_id TEXT NOT NULL` has no
+`REFERENCES property_master(id)` (unlike `import_batches.property_id`, which does) and `mapping_id`
+has no reference to `account_mappings(id)`. `PRAGMA foreign_keys = ON` is set
+(`server/warehouse/db.ts:33`), so declared constraints WOULD be enforced — the enforcement is on,
+the declarations are absent. Orphan rows against a typo'd or renamed property id are insertable and
+vanish silently from every property-scoped aggregate.
+(3) **`lease_events` has no uniqueness at all** — a duplicate
+`(property_id, suite, event_kind, event_date)` pair double-counts days-vacant velocity.
+(4) **Monetary units unprovable from the schema** — every money column is bare `REAL` with no unit
+in the name, no comment and no CHECK: `ledger_entries.amount`, `debt_positions.current_balance` /
+`original_principal` / `monthly_pmt` / `annual_interest` / `annual_principal`,
+`property_insurance_policies.premium_annual` / `coverage_tiv`,
+`property_tax_assessments.annual_tax_billed`, `tax_appeals.est_savings_annual` /
+`realized_savings_annual`, `insurance_loss_events.gross_incurred` / `paid` / `reserve`. Nothing
+distinguishes dollars from cents. (Migrations `020` and `022` do carry good non-negativity CHECKs —
+they are the model.) ora-pm's equivalent was [OI-039](#OI-039); this is the occ counterpart.
+**Impact:** a duplicated ledger row or an orphaned `property_id` yields a silently wrong balance
+feeding AR aging, NOI and capital-allocation display, with no constraint violation to surface it.
+The unit ambiguity is a latent 100x defect one importer away.
+**Scope note:** security-relevant half only. Adversarial review of the ledger MATH belongs to
+`ora-financial-code-integrity-sweep` and was deliberately not duplicated here.
+**Candidate fix (NOT applied):** a new forward migration (`001` and `011` are correctly marked
+never-modify-after-apply) adding `ux_ledger_natural` on
+`(import_id, property_id, period, raw_account, normalized_category)` and `ux_lease_events_natural`
+on `(property_id, IFNULL(suite,''), event_kind, event_date)` — de-duping first. SQLite cannot add an
+FK without a table rebuild, so either do the 12-step `ALTER` for
+`ledger_entries.property_id -> property_master(id)` or add an INSERT-time validation trigger.
+Separately, state every money column's unit explicitly (rename to `amount_usd`, or a per-column
+comment) and record the convention in `architecture/coding-standards.md` so new migrations inherit
+it. `server/warehouse/migrations/**` is architect-owned per `.claude/hooks/architect-owned.json` —
+this needs the declared review_needed + architect-ack path.
+**Auto-check:** none.
+
+### OI-089
+**Status:** OPEN
+**Opened:** 2026-08-05
+**Source:** ora-appsec-sweep 2026-08-05 (oxford-command-center @ `175e3f9`, security-auditor dispatch)
+**Severity:** MEDIUM (unvalidated file write into business storage)
+**Description:** `server/index.ts:358-414`. `/api/actions/om-extract` validates only
+`file.name.toLowerCase().endsWith('.pdf')` and a 25 MB size cap — there is no `%PDF-` magic-byte
+check. The buffer is handed to `pdf-parse` and, on success with a `dealId`, written verbatim into
+`DOCUMENTS_DIR/Investment Candidates -- <year>/<deal>/`.
+**Impact:** arbitrary non-PDF content can be persisted into the live OneDrive deal-document tree
+under a `.pdf` name, and is fed to a parsing surface. Not remotely exploitable — reach is local-only
+per [OI-050](#OI-050) — but it is an unvalidated-content write into business storage.
+**Candidate fix (NOT applied):** check the first five bytes equal `%PDF-` before parsing or writing;
+reject with 415 otherwise. Keep the existing extension and size checks. Preserve the filename
+sanitization and `resolve()`-prefix traversal assertion at `:400-405` exactly as they are — both are
+correct.
+**Auto-check:** none.
+
+### OI-090
+**Status:** OPEN
+**Opened:** 2026-08-05
+**Source:** ora-appsec-sweep 2026-08-05 (oxford-command-center @ `175e3f9`, security-auditor dispatch)
+**Severity:** MEDIUM (unbounded consumption, OWASP-LLM10)
+**Description:** `server/index.ts:460-493` (`/api/ai`, SSE), `:447-453` (`/api/documents/search`),
+`:358` (`/api/actions/om-extract`). Per-request bounds are correct and worth keeping — the agent
+loop caps at `maxTurns: 8` (`server/ai/agent.ts:178`) and `max_tokens: 16000` (`:203`), the upload
+caps at 25 MB — but nothing bounds CONCURRENT or REPEATED requests. Each `/api/ai` call spends real
+Anthropic tokens against the machine's `ANTHROPIC_API_KEY`.
+**Impact:** any local process — or a cross-site simple POST per [OI-050](#OI-050) — can drive
+unbounded API spend and memory pressure on a workstation with a ~5.7 GB ceiling. Combined with
+OI-050 this is the cheapest denial-of-wallet path in the repo. ora-pm's equivalent exposure was
+closed under OI-038/044 (KV-backed `checkRateLimit`, per-route ceilings); oxford-command-center has
+no counterpart at all.
+**Candidate fix (NOT applied):** a small in-process token bucket keyed on route — roughly 10
+`/api/ai` starts per minute, 3 concurrent SSE streams, 5 uploads per minute — returning 429. No
+external dependency needed, and no KV-provisioning dependency like ora-pm's.
+**Auto-check:** none.
+
+### OI-091
+**Status:** OPEN
+**Opened:** 2026-08-05
+**Source:** ora-appsec-sweep 2026-08-05 (oxford-command-center @ `175e3f9`, security-auditor dispatch)
+**Severity:** MEDIUM (guardrail bypass / excessive agency, LLM06)
+**Description:** `.claude/hooks/file-guard.mjs:144-159`. `findRepoRoot` resolves the repo by walking
+up from the target's directory looking for `CLAUDE.md`; if no ancestor has one it `continue`s and the
+target is "not policed (fail-open)". The guard also skips any target whose owning root is neither an
+ancestor nor a descendant of the session root. Both are deliberate, documented fail-open choices —
+but they apply to the HARD-DENY paths (`data/overlay.json`, `data/warehouse/**`,
+`.claude/settings.json`, `.claude/hooks/**`), not only to the sentinel-overridable architect-owned
+list. A worktree or checkout with no `CLAUDE.md` at its root, or a path form that makes `relative()`
+produce a non-matching repo-relative string (junction, extended-length prefix, 8.3 short name, UNC
+localhost admin share), leaves those four targets unprotected by this hook. The `permissions.deny`
+globs in `.claude/settings.json` that back-stop confidentiality are path-form-sensitive in the same
+way.
+**Impact:** an agent session operating from an unusual path form can edit its own guardrails or the
+live overlay/warehouse. Requires an already-agentic session — not remotely exploitable — which is
+why this is MEDIUM rather than HIGH. Distinct from the previously-noted silent-degradation path when
+`architect-owned.json` is corrupt (`file-guard.mjs:112-114`); this is the repo-root resolution path.
+**Assessed-correct, do NOT "fix":** the sweep also examined `bash-guard.mjs`'s `git push -n` handling
+(`:591-607`). Only the long `--no-verify` is denied, deliberately — for `git push`, `-n` means
+`--dry-run` and there is no short `-n` for `--no-verify`. That is correct as written; a future
+reviewer should not "harden" it into a false positive that blocks legitimate dry-runs.
+**Candidate fix (NOT applied):** before the fail-open `continue` at :145, add an unconditional
+absolute-path check for the four hard-deny targets that does not depend on repo-root resolution —
+normalize with `realpathSync.native()` (which collapses junctions and short names) and deny if the
+normalized tail matches `data/overlay.json`, `data/warehouse/`, `.claude/settings*.json` or
+`.claude/hooks/`, whichever repo owns it. Keep the existing repo-family scoping for the
+sentinel-overridable architect list only.
+**Process requirement:** per Invariant 6 and the guard's own self-protection this must be changed
+outside a session via a reviewed PR, and per the CLAUDE.md Done bar security-gate hook logic carries
+a MANDATORY adversarial REFUTE pass plus the old-vs-new differential battery
+(`reference_refute_differential_harness.md`) — judge deltas, not absolutes.
+**Auto-check:** none.
+
+### OI-092
+**Status:** OPEN — workbook fix + snapshot remediation DONE. **The detector was NOT shipped: it was
+built, reviewed, and WITHDRAWN before shipping** (see the CORRECTION appended below, and the preserved
+draft at `docs/superpowers/plans/withdrawn-detector-oi092/`, commit `0701397`). Remaining work is the
+detector REBUILD on the correct design — Gabriel ruled it queued, warn-severity, new session.
+*(Status line corrected 2026-08-05: it previously read "detector shipped, awaiting review sign-off",
+which contradicted the CORRECTION in this same entry.)*
+**Opened:** 2026-08-05
+**Source:** `ora-lease-snapshot-refresh` run 2026-08-05; handoff session `3d9d97cf`
+**Severity:** MEDIUM (financial reporting accuracy — DSCR input; no governor decision affected)
+**Description:** `External Loans Summary!H6:I9`, `H15:I15`, `H16` computed next-12-month interest and
+principal over `[TODAY(), TODAY()+366)`. That half-open 366-day span captured **13 payments instead of
+12** whenever `TODAY()` landed on a loan's payment day-of-month, inflating annual debt service by
+exactly one payment and depressing DSCR. Payment days: 3540 E Fifth Ave / 9050 Red Branch Road /
+29000 Information Lane on the 1st; Banwick / Morrison on the 5th. Fired ~6 days per loan per year and
+self-corrected the next day, so it never presented as a persistent defect.
+**Resolved — workbook (Gabriel, 2026-08-05 ~15:14 ET, his own edit, confirmed):** window replaced with
+`(Assumptions!$B$30, EDATE(Assumptions!$B$30,12)]` — exactly 12 payments, anchored on
+`Assumptions!B30` "Loan As-Of Date" = `EOMONTH(TODAY(),0)`. Month-end anchoring makes the payment-day
+coincidence **structurally impossible**, not merely corrected. Verified: `J9` = $275,031.24, matching
+Symetra loan 11153's own amortization schedule. Full-workbook sweep confirms zero `TODAY()+366` remain.
+**Note this was also a reporting-DEFINITION change:** "next 12 months" now means 12 months from the
+month-end close, not from today. That re-anchor moved Restoration Church Trust by two payments
+(−58,497.78 → −50,140.95) with no defect involved, and decremented every loan's `monthsToMaturity`
+by 1. Do not read those as drift.
+**Resolved — downstream:** the warehouse `debt_positions` table was **clean** (all 8 snapshot dates
+fell on non-payment days; nothing was ever frozen inflated, nothing backfilled). The one contaminated
+artifact was `data/snapshots/portfolio.json` committed in `61cc346`; re-baked and committed as
+`51d4039` (oxford-command-center, local only, **not pushed**). Banwick DSCR 2.641 → 2.861 — the bug
+*depressed* DSCR, moving it toward the 1.25x floor, so no capital-allocation or governor gate was
+ever wrongly cleared.
+**Detector (shipped, review pending):** `server/workbook/debt-service-window.ts` + 14 unit tests,
+wired into `parseWorkbook` after `parseLoans`. Counts amortization-schedule rows in the window and
+asserts exactly 12; warn-severity per Gabriel's ruling, with a carve-out so a genuine near-maturity
+taper does not false-fire. Live probe: 12/12/12/12 for the four borrower loans, 8 for Restoration
+Church Trust correctly suppressed (matures 2027-02-20, inside the window). Extract reports 0 flags.
+**Do NOT build the ">2 decimal places" detector** the original handoff proposed — it fires on 6 of 11
+loans, every one correct (`9050 Red Branch` carries a legitimate half-cent from its `*0.5` Oxford-share
+multiplier; `3883 from Oxford` has no schedule at all, so its "monthly payment" is a synthetic
+annual÷12 and always repeats). At error-severity it would block every refresh permanently.
+**Residual:** (a) the workbook's own `Claude Log` has no entry for the 08-05 edit — last row is Turn
+147 (08-03); (b) `SCHEDULE_SOURCES` hardcodes each schedule's sheet/column/row range mirroring the
+`External Loans Summary` formulas, so it must be updated alongside them.
+**Auto-check:** `npm run extract` — the detector emits a warn-severity `annualDebtService` flag.
+**Memory:** `reference_workbook_annual_debt_service_366day_overcapture.md`
+
+### OI-093
+**Status:** RESOLVED 2026-08-05. Gabriel confirmed "Northwood is good" (go-ahead to recreate).
+Rebuilt `Northwood FROM EGFLLC` in the live workbook, modeled row-for-row on `1100 From Fenton`
+(the simplest existing single-balance journal — Turn 144 named `2203 FROM EGFLLC` as its template,
+but that sheet has irregular mid-month paydowns Northwood never had; the simpler template is the
+better structural match). Matches Turn 147's own recorded specifics exactly: 8 monthly interest-only
+periods, 1/1/2026–8/31/2026, constant $2,800,000 balance, 6.99% (`Rate_Northwood_EGFLLC`, already
+present in `Assumptions!B21`), Feb=28 days (2026 not a leap year). Wired `Portfolio Summary —
+Internal!C10`/`D10` to the new sheet with the same `LOOKUP(2,1/(...))` pattern every other row uses.
+**Verification (not skipped):** openpyxl round-trip fidelity tested first on a scratch copy (0
+unintended diffs across the full workbook) before any live write. Every write went scratch → diff →
+fresh-copy-of-live → diff → live → diff, three full passes. Final end-to-end diff against the
+original pre-session snapshot: 50→51 sheets, 30/30 defined names intact, **0 cells removed, 0 cells
+changed anywhere else in the workbook**, exactly the 8 intended additions (6 on a new `Claude Log`
+Turn 150 entry, 2 on `Portfolio Summary — Internal!C10`/`D10`).
+**CAVEAT — not yet live for any automated reader.** Written via openpyxl (file-level), which does
+NOT recalculate formulas. The new formulas carry no cached value until Excel opens the file once and
+recalculates (automatic on open, or F9). Any tool reading cached values only — not live Excel — will
+see the new cells blank/0 until then. Expected once recalculated: annual forward interest exactly
+$195,720.00 (matches Turn 147's own quoted figure), Portfolio Summary row 10 balance/original-
+principal repopulate and rejoin every portfolio total.
+**Opened:** 2026-08-05
+**Source:** surfaced by the OI-092 `portfolio.json` re-bake (`51d4039`)
+**Severity:** MEDIUM (silent history split in the debt warehouse)
+**Description:** The internal 2203-2207 Northwood loan now parses with **no journal sheet**, which
+changed its snapshot id from `internal-2203-2207-northwood` to
+`internal-2203-2207-northwood-no-journal-sheet` and its display name to
+`⚠ 2203-2207 Northwood — NO JOURNAL SHEET`. The loan was reclassified from EXTERNAL to INTERNAL on
+2026-08-03 (workbook Claude Log Turn 144, register WBC-…), which created the expectation of a journal
+sheet that does not exist or is not named as the parser expects.
+**Impact:** `debt_positions` keys `ON CONFLICT(id, snapshot_date)`, so the id change makes every
+future snapshot land under a NEW key — silently orphaning this loan's prior history under the old id
+rather than continuing it. Time-series queries on that loan will show a gap and a restart, not a
+rename. `monthsToMaturity` also went null → 105.
+**Candidate fix (NOT applied):** either create/rename the Northwood journal sheet to what the parser
+expects, or add an explicit id-alias so the reclassified loan keeps its original warehouse key.
+Decide which before the next warehouse snapshot run, since each run widens the split.
+**Auto-check:** `npm run extract` then grep `portfolio.json` for `no-journal-sheet`.
+
+### OI-094
+**Status:** RESOLVED 2026-08-05 — the range fix LANDED. `'External Loans Summary'!H9`/`I9` now read
+`Banwick-Morrison!B11:B71` / `D11:D71` / `E11:E71`, capturing the 2031-06-05 balloon row. Verified
+directly against the live workbook: `J9` = $275,031.24 and `Loan Index!F9` = $22,919.27, matching
+Symetra loan 11153's own amortization schedule. The February pair fix landed in the same consolidated
+edit (all window cells on `EOMONTH(Assumptions!$B$30,12)`, `B30` constrained to month-end).
+Findings (a) and (b) were promoted out to [OI-096](#OI-096) (OPEN, ruled) and [OI-095](#OI-095)
+(CLOSED) and are **not** closed by this resolution.
+*(Status line corrected 2026-08-05: it previously read "needs Gabriel's ruling", which was stale — the
+ruling was given and the edit applied. Left as-is it would have prompted a redundant re-ask.)*
+**Opened:** 2026-08-05
+**Source:** adversarial REFUTE pass on the OI-092 detector; independently re-verified against the live workbook
+**Severity:** MEDIUM now, HIGH from ~mid-2030 (understates annual debt service by $3.35M when it bites)
+**Description:** `'External Loans Summary'!H9` and `I9` sum the Banwick-Morrison schedule over
+`B11:B70` / `D11:D70` / `E11:E70`. The schedule's **final payment is row 71**, and it carries the
+balloon. Verified directly from the workbook (2026-08-05, cached values):
+```
+r70: B=2031-05-05  D(int)=15,370.91  E(prin)=7,548.36      F(bal)=3,333,953.68
+r71: B=2031-06-05  D(int)=15,336.19  E(prin)=3,333,953.68  F(bal)=0        <-- EXCLUDED
+```
+`K9` (maturity) = `'Banwick-Morrison'!E7` = **2031-06-05** — the very row the SUMPRODUCT range stops
+one short of. Row 71's total is $3,349,289.87, matching Symetra loan 11153's documented balloon of
+$3,349,289.89 to within rounding.
+**Impact:** currently immaterial — the forward window ends 2027-08-31, nowhere near 2031-06-05. It
+becomes real around **mid-2030**, when the balloon enters the forward-12-month window and `J9`
+silently omits it. The direction is the dangerous one: annual debt service is **understated**, so
+**DSCR is overstated** against the governed 1.25x floor. Note this is independent of the OI-092
+window fix — correcting the window did not correct the range.
+**Also check the other five loans for the same one-short truncation** before ruling; only Banwick was
+verified. Ranges in use: 3540 `B9:B92` · 9050 `B11:B158` · 29000 `A9:A69` · Banwick `B11:B70` ·
+RCT `B11:B310` · 485 Walnut `B10:B46`.
+**Candidate fix (NOT applied):** extend the Banwick ranges to row 71. Do NOT blanket-widen — row 74
+of that sheet holds a bare number (276714.48) in col B that would be misread as a date if swept in.
+**Auto-check:** none yet — this is precisely what the OI-092 detector redesign should catch.
+
+### OI-092 — CORRECTION appended 2026-08-05
+The detector described above (`server/workbook/debt-service-window.ts`) was **withdrawn before
+shipping** and its `parse.ts` wiring reverted. Independent code review plus an adversarial REFUTE pass
+both found it **cannot detect the defect it was built for**: `countPaymentsInWindow` computes its own
+correct window from `asOf` and counts schedule rows against it, never reading the `External Loans
+Summary` formula. Reverting `H9` to the buggy `TODAY()+366` leaves its output byte-identical — all
+clean — while annual debt service re-inflates to $297,950.51. It tested a property of the schedule
+DATA, not of the FORMULA that carried the bug.
+Three further confirmed defects in that draft: (a) it counts rows, not distinct dates, and
+`485 S Walnut St` rows 45/46 both hold `2028-09-26`, producing a **false "13 payments" flag dated
+2027-09-30** — the exact fingerprint of the bug just fixed; (b) the near-maturity carve-out
+suppresses any short count whose last read row lands inside the window, so a truncated range, a stale
+schedule, or a dropped row all read as clean — it would sit silently on OI-094; (c) the test fixture
+built dates with `Date.UTC(y,m,day)`, which **overflows** instead of clamping, so the 29th/30th/31st
+payer cases the design rests on were never actually tested.
+**Sound and worth keeping from the draft:** `edateMonths` was differentially verified against Excel
+EDATE semantics over 1990–2060 (0 mismatches, negative months and leap-Feb clamping both correct).
+**Correct design for the retry:** independently recompute annual debt service from the FULL
+amortization schedule and compare against the workbook's own `External Loans Summary!J`. That is a
+cross-check of two independent computations, so it catches a wrong window (OI-092), a truncated range
+(OI-094), and wrong column mapping alike — none of which the count-only shape can see. Must handle
+the per-loan `*0.5` Oxford-share multipliers and the lender-row sign convention.
+**Residual defect in the CURRENT workbook, latent:** February month-end close in the year before a
+leap year (`asOf` 2027-02-28 → end 2028-02-28) captures **11** payments for a month-end-clamped payer,
+understating debt service and OVERSTATING DSCR. Recurs 2031-02-28, 2035-02-28. No current loan pays
+month-end (pay days: 1, 1, 1, 5, 20, 26), so it is latent — but one acquisition on month-end terms
+makes it live. The claim that month-end anchoring makes the coincidence "structurally impossible" is
+therefore too strong: it closes the over-capture path, not the under-capture path.
+
+### OI-094 — AUDIT COMPLETE 2026-08-05 (all six ranges checked; Gabriel ruled: consolidated fix)
+**Only Banwick is truncated.** Verified by scanning 40 rows past each formula's range end:
+| loan | range | dated rows in range | rows past end | verdict |
+|---|---|---|---|---|
+| 3540 E Fifth Ave | `B9:B92` | 84, last r92 2032-04-01 | none | ok |
+| 9050 Red Branch | `B11:B158` | 148, last r158 2028-01-01 | none | ok |
+| 29000 Information Ln | `A9:A69` | 61, last r69 2030-12-01 | none | ok |
+| **Banwick / Morrison** | `B11:B70` | 60, last r70 2031-05-05 | **r71 2031-06-05, REAL** | **TRUNCATED** |
+| Restoration Church Trust | `B11:B310` | 26, last r37 2027-02-20 | none | ok (see below) |
+| 485 S Walnut St | `B10:B46` | 37, last r46 2028-09-26 | none | ok (see below) |
+
+**PROMOTED OUT 2026-08-05 (Gabriel ruling) — findings (a) and (b) below now have their own ids so that
+closing OI-094 on the Banwick range fix cannot silently close them: (a) → [OI-096](#OI-096) (OPEN),
+(b) → [OI-095](#OI-095) (RULED intentional, no change). Text retained here for the audit narrative;
+**the live status lives in those entries**, not here.**
+
+**Consolidated fix scope for OI-094 (Gabriel ruling 2026-08-05)** — one workbook session covering BOTH:
+1. extend the Banwick ranges to row 71 (the balloon), and
+2. the February pair fix — six cells to `EOMONTH(Assumptions!$B$30,12)` **and** `B30` constrained to
+   month-end. Folded in here rather than tracked separately, per ruling; supersedes the earlier
+   "let the detector cover it" answer, which was given before the 1,080-case simulation existed.
+
+Second independent audit (session `3d9d97cf`, 2026-08-05) reproduced the range table above exactly —
+Banwick the only truncated range, other five ending on their final payment row — and independently
+found (b). It did **not** find (a); the duplicate-date over-count was caught only by the first pass.
+
+**TWO NEW findings the range audit surfaced — both need Gabriel's read, neither is a range problem:**
+
+(a) **485 S Walnut St double-counts $1,365 from ~Oct 2027.** Rows 45 and 46 BOTH carry `2028-09-26`:
+r45 is the final regular payment (`D`=1365 interest, `E`=1365, `F`=252,000 balance); r46 is the payoff
+(`D`=253,365 = 252,000 principal + 1,365 interest, `E`=1365, `F`=0). `H16` sums column `E` over the
+date predicate, so it picks up **both** rows' 1,365 — the same September interest counted twice. Bites
+when 2028-09-26 enters the forward window, around Oct 2027. Small ($1,365) but it is a genuine
+over-count, and it is the same "13 payments" shape as OI-092.
+
+(b) **Restoration Church Trust's $1.945M balloon is absent from `I15` (annual principal).** Rows 35/36/37
+all carry `2027-02-20`: r35 is the regular payment (`D`=14,604.09 int, `E`=2,109.56 prin), r36 holds the
+balloon **in column C** (`C`=1,945,102.73, `D`/`E` empty, `F`=0), r37 holds Oxford's 50% share
+(`C`=972,551.37, `D`/`E` empty). Because `H15`/`I15` sum `D`/`E` only, the balloon contributes **zero** —
+so the next-12-month principal return understates Oxford's capital coming back by **$972,551**. The
+maturity date 2027-02-20 is ALREADY inside the current window (ends 2027-08-31), so this is live NOW,
+not latent. May be intentional (C = total payment, D/E = the itemized split that balloons don't carry) —
+**needs Gabriel's read before any change.**
+
+**February fix VERIFIED by simulation (1,080 cases: 120 month-ends x 9 pay-days):**
+- `EDATE(B30,12)` right edge → **9 deviations**, all under-capture 11, all month-end payers on
+  asOf 2027-02-28 / 2031-02-28 / 2035-02-28.
+- `EOMONTH(B30,12)` right edge → **0 deviations.**
+- BUT under manual override (B32 = an arbitrary non-month-end date) `EOMONTH` is catastrophic —
+  **1,428 deviations, over-capturing 13** — while `EDATE` has only 6. So the fix is a PAIR, not one edit:
+  the six cells move to `EOMONTH(Assumptions!$B$30,12)` **and** `B30` must be constrained to month-end:
+  `=IF(B31="Auto (current month-end)",EOMONTH(TODAY(),0),IF(ISNUMBER(B32),EOMONTH(B32,0),EOMONTH(TODAY(),0)))`
+  This is consistent with the sheet's own design intent — B30's label already reads "current month-end"
+  and B33's status formula already compares against `EOMONTH(TODAY(),0)`.
+
+### OI-093 — RESOLVED (diagnosis) 2026-08-05
+**The Northwood journal sheet does not exist.** Full sheet enumeration of the live workbook (50 sheets)
+contains no Northwood sheet of any spelling — the only match for "north" is `Banwick-Morrison` (a false
+hit on "Morrison"). Internal-loan journals present: `2203 FROM EGFLLC`, `EGFLLC FROM OXFORD`,
+`3883 from Oxford & LAST Non`, `1100 From Fenton`, `Muirkirk to EG(Oxford)+ LASTNON`,
+`Muirkirk from Oxford`.
+**Note the provenance problem:** the workbook's own `Claude Log` Turn 144 (2026-08-03) states the
+Northwood sheet was *created* as part of the EXTERNAL→INTERNAL reclassification. It is not there. Either
+that step never completed, or the sheet was created and subsequently removed. The parser's
+`⚠ NO JOURNAL SHEET` marker is therefore **correct and is reporting a real gap**, not a parser defect —
+so the fix is to create the journal sheet, not to alias the id. Aliasing alone would hide a genuinely
+missing accounting record.
+**Gabriel ruled 2026-08-05:** create the journal sheet — but **chase the provenance first**. Claude Log
+Turn 144 (2026-08-03) claims the sheet was created and it is not there; whether that step never
+completed or the sheet was created and later removed implies different things about whether the rest
+of that reclassification landed. Establish which before recreating. Do NOT alias.
+
+### OI-095
+**Status:** CLOSED 2026-08-05 — final basis: **include the balloon**, superseding this session's earlier
+"intentional, no change" reading. **Timeline:** Gabriel first ruled (this session, AskUserQuestion)
+that RCT's balloon exclusion from `I15` was intentional modelling. `Claude Log` Turn 149, applied to
+the live workbook the same day, did the opposite — populated `RCT!E36` with the $1,945,102.73 balloon,
+moving `I15` from ~0 to -$978,763.425 and `J15` from -$50,140.95 to -$1,022,692.32 — on the reasoning
+that the entire remaining balance is contractually repaid inside the window, so the exclusion was the
+actual defect. Verified against the live formulas 2026-08-05 (session `3d9d97cf`) — a real cell/formula
+change, not a stale log entry. **Gabriel confirmed 2026-08-05 he authorized the Turn 149 reversal** —
+resolves the conflict; the earlier "intentional, no change" framing does NOT stand. **Correction to the
+record, not vindication:** this session's original OI-095 close was accurate to what Gabriel said at
+the time, but was superseded within the same day by his own further direction. Do not read the first
+ruling as "wrong" in isolation — read the second as current. **Note on the "Residual — RULED" section below:** it explains the surviving 3540-vs-RCT asymmetry
+(borrower balloon = obligation, captured; lender balloon = return, now also captured) and that
+reasoning is still accurate as a description of the CURRENT state. But do not read it as confirming the
+original OI-095 "C=total, D/E=itemized split RCT legitimately lacks" theory — Turn 149's own root cause
+was different and more precise: `I14`/`I16` were computing "principal paid to date," not the header's
+promised "next 12 months," and `I15` read the wrong column for RCT's balloon specifically. All three
+lender rows were fixed to one consistent forward-looking basis; RCT's balloon inclusion is a
+consequence of that basis, not a standalone reversal of an isolated design choice.
+**Opened:** 2026-08-05 (promoted out of OI-094 finding (b) per Gabriel ruling, so the Banwick fix
+closing OI-094 cannot silently close this)
+**Source:** OI-094 six-range audit; independently corroborated by a second session's audit same day
+**Severity:** N/A as ruled — was MEDIUM ($972,551 of next-12-month principal return)
+**Description:** `Restoration Church Trust` rows 35/36/37 all carry `2027-02-20`. r35 is the regular
+payment with its split in `D`/`E`; r36 holds the full balloon **in column `C`** ($1,945,102.73, `D`/`E`
+empty, `F`=0); r37 holds Oxford's 50% share ($972,551.37, `D`/`E` empty).
+`'External Loans Summary'!H15`/`I15` sum `D`/`E` only, so the balloon contributes **zero** to the
+next-12-month figure. 2027-02-20 is already inside the current forward window.
+**Gabriel's ruling (2026-08-05):** intentional. `C` is the total payment; `D`/`E` are the itemized
+interest/principal split that balloon rows legitimately do not carry. "Annual debt service" means
+recurring P&I only and deliberately excludes principal returned at maturity. **No change to RCT.**
+**Residual — RULED 2026-08-05 (Gabriel): both sheets are correct as they stand. Change neither.**
+The observation: `3540 E Fifth Ave` row 92 places its balloon principal in column `F` — the column
+`I6` sums — so **3540's balloon IS captured** while RCT's is not.
+**This asymmetry is principled, not accidental.** 3540 is a **borrower** loan: its balloon is cash
+Oxford must pay, so it belongs in annual debt service. RCT is a **lender** loan: its balloon is capital
+returning *to* Oxford, so it is not debt service at all. Both treatments follow directly from the
+ruling above ("what we must service"), and the direction convention is already used elsewhere
+(`src/analytics/conditions.ts` sign handling).
+**Do NOT "harmonize" the two sheets.** Seeing them side by side invites exactly that, and it would
+either drop a real $2.14M cash obligation from the borrower-side figure or inflate the lender-side
+figure with capital that was never an obligation.
+*(Provenance note: session `3d9d97cf` first filed this as an accidental inconsistency and recommended
+excluding 3540's balloon. That framing was wrong — the borrower/lender distinction was missed. Recorded
+so the earlier reasoning is not mistaken for a second, conflicting ruling.)*
+**Detector constraint SUPERSEDED 2026-08-05 (Turn 149 + Gabriel confirmation) — do not build to this
+sentence.** It previously read "the cross-check must NOT treat balloon-excluded principal on lender
+rows as an error." RCT's balloon is now INCLUDED (see OI-095's CLOSED status), so the retry should
+expect balloon-inclusive forward-looking principal on ALL lender rows and flag exclusion as the error,
+not the reverse. This borrower/lender asymmetry paragraph itself (why 3540 captures its balloon and how
+that differs conceptually from a lender row) is still accurate; only the detector's pass/fail direction
+on lender rows changed.
+
+### OI-096
+**Status:** OPEN
+**Opened:** 2026-08-05 (promoted out of OI-094 finding (a) per Gabriel ruling)
+**Source:** OI-094 six-range audit (second session's pass; this session's audit missed it)
+**Severity:** LOW ($1,365 over-count) but structurally identical to OI-092
+**Description:** `485 S Walnut St` rows 45 and 46 both carry the date `2028-09-26`:
+```
+r45  2028-09-26   D=1,365      E=1,365   F=252,000   <- final regular payment
+r46  2028-09-26   D=253,365    E=1,365   F=0         <- payoff (252,000 principal + 1,365 interest)
+```
+`'External Loans Summary'!H16` sums column `E` over the date predicate and therefore picks up **both**
+rows' $1,365 — the same September interest counted twice.
+**Impact:** over-states annual interest by $1,365 once `2028-09-26` enters the forward-12-month window,
+i.e. from ~Oct 2027. Direction is over-statement, so it is the safe direction against the 1.25x DSCR
+floor, and the magnitude is small — hence LOW.
+**Why it matters more than $1,365:** it is the same duplicate-date over-count shape as OI-092, and it
+is the exact case that made the withdrawn OI-092 detector false-fire "13 payments" dated 2027-09-30.
+Any detector that counts ROWS rather than DISTINCT DATES will trip on it.
+**RULED 2026-08-05 (Gabriel): fix at SOURCE — correct the schedule rows, not the formula.**
+r46's payoff already contains the same September interest that r45 reports, so one of the two must stop
+carrying it in column `E`. The formula-side alternative (de-duplicating `H16`'s predicate on date) was
+considered and **rejected**: it compensates downstream while leaving the duplicate dates in place, so
+every future formula over this sheet inherits the same trap and the detector must special-case it
+forever.
+**Execution requirements:** verify the payoff total and the remaining-balance column still reconcile
+after the edit — do not simply blank a cell.
+**RESOLVED 2026-08-05 ~17:00 ET.** Applied and verified directly against the live workbook: r46 is now
+a pure balloon (`D`=252,000, `E`=0, `F`=0); r45 retains its interest-only payment (`D`=1,365, `E`=1,365).
+`TOTALS` row corrected: `D` 302,505 → 301,140, `E` 50,505 → 49,140. Independently reconciled: 36 monthly
+interest-only payments at $1,365 = $49,140 exactly = the corrected `E` total; `301,140 − 49,140 =
+252,000` = the balloon principal, matching `Loan Index` row 8's balance. `H16`/`I16` (which split
+interest via `E` and principal via `D−E`) are now correct at every `asOf` date, not only outside the
+current forward window.
+*(Status corrected 2026-08-05 by session `3d9d97cf`, which re-inspected the live workbook expecting to
+apply this fix and found it already done by another session — status here was stale by roughly the
+length of one workbook-copy round-trip.)*
+**Auto-check:** the OI-092 detector retry, if built on distinct dates.
 
 ### OI-098
 **Status:** OPEN
@@ -3167,7 +3900,12 @@ still flags. A measured-vs-declared suppressor should follow that shape, not a l
 **Auto-check:** `python maintenance/governor-drift-probe.py` — exit 0 = clean.
 
 ### OI-100
-**Status:** OPEN — approved by Gabriel 2026-08-05, designed but NOT implemented
+**Status:** IMPLEMENTED, not yet merged/deployed — committed on branch
+`fix/oi-100-doctrine-gate-rescope` (isolated worktree, commit 9ad6146). Independent
+review + adversarial REFUTE pass both APPROVED (both fable-tier); 14/14 new tests +
+37/37 existing gate tests + full probe suite green; TDD red confirmed via git-stash
+before the fix landed. The live `.git/hooks/pre-push` shim and `main` are untouched —
+no merge or push has been made; awaiting Gabriel's merge/deploy decision.
 **Opened:** 2026-08-05
 **Source:** Gabriel ruling 2026-08-05 (rescope approved); design/trap investigation this session
 **Severity:** MEDIUM (correctness of a fail-closed security gate, plus shared-checkout friction)
@@ -3197,3 +3935,99 @@ relies on that to hand git's ref payload to the confidentiality scan).
 unimplemented rather than half-landed in a fail-closed gate.
 **Auto-check:** a test that commits drift and then reverts it in the working tree only — the gate must
 BLOCK (today it allows).
+
+### OI-056
+**Status:** CLOSED
+**Opened:** 2026-08-03
+**Closed:** 2026-08-03
+**Source:** `doctrine-integrity-probe.py` pre-push run, 2026-08-03; resolved by `edc9fa1` + `7596feb`
+**Description:** Detail section written 2026-08-05 (this row existed in the Closed table with no `###`
+section — see [OI-098](#OI-098)); content is restated from the row, not re-investigated.
+Logged initially as three instances of one defect; **only two were the same bug.**
+`ratify-hurdle-rate` and `tenant-email` SKILL.md genuinely carried "Principal" against canon and were
+corrected to "VP Acquisitions" (`edc9fa1`).
+**The third was not a defect.** `document-assembly/SKILL.md:180` says "Member / Principal", which Gabriel
+ruled states the **LLC-execution capacity** he binds under — a distinct concept from his firm operating
+title. Left unchanged, with an in-file note recording it as a documented Check-13 false positive
+(`7596feb`).
+**Separately recorded, not this item:** 21 live "Landlord - \*" Outlook signatures carry the same
+execution-capacity language and sit outside the probe's scan scope.
+
+### OI-068
+**Status:** OPEN
+**Opened:** 2026-08-03
+**Source:** ora-pm appsec fix plan Task 8 (OI-043), local `plan/appsec-fixes-oi034-048` branch, commit
+`59f79ff`; confirmed by an independent task reviewer
+**Severity:** product gap, **not** a security defect in what shipped
+**Description:** Detail section written 2026-08-05 (row existed with no `###` section — see
+[OI-098](#OI-098)); restated from the row, not re-investigated.
+Autopay-with-payment-method is **unreachable from any live frontend path today**:
+- `PortalAccount.tsx` is the sole caller of `setAutopay` and never passes `payment_method_id`.
+- The enable toggle is disabled unless `lease.autopay_payment_method_id` is already set.
+- The only writer of that column is `PATCH /portal/autopay`, which the frontend never calls with a PM.
+- `PortalPayNow.tsx` creates a payment method but only ever feeds it to one-time
+  `createPaymentIntent`, never to `setAutopay`.
+So the whole autopay-enrollment feature is unbuilt/unreachable on the frontend, independent of Task 8's
+(correct) backend hardening.
+
+### OI-097
+**Status:** OPEN — scheduled action, not yet due
+**Opened:** 2026-08-05
+**Source:** phantom-dispatch fix (`e441130`, stop killing Claude Desktop's own renderer); Gabriel ruling
+2026-08-05 (**remind, do not automate**)
+**Description:** Detail section written 2026-08-05 (row existed with no `###` section — see
+[OI-098](#OI-098)); restated from the row.
+**Re-measure the phantom-dispatch rate on/after 2026-08-07.** The 2026-08-05 measurement is **not** a
+post-fix reading: the newest phantom in that window is 11:04 ET and the renderer only came back at
+11:08 ET, so there is no meaningful post-fix data yet. A "rate improved" claim off that window would be
+[[feedback_verified_null_vs_inferred_null]].
+**Baseline to beat:** 54 phantom dispatches vs 68 confirmed runs = **44%** over the 94h to 2026-08-05,
+with `fleet-deadman` logging "OK" through all of them.
+**Deliberately NOT registered as a scheduled task** — one-time measurement, and the registry is under a
+single-writer rule.
+**Auto-check:** re-run `maintenance/phantom-dispatch-probe.py` over a window starting after 11:08 ET
+2026-08-05 and compare against the 44% baseline.
+
+### OI-094 — RESOLVED 2026-08-05 (workbook edits applied, Claude Log Turn 148)
+Four Gabriel-approved edits applied via Excel COM and independently re-verified:
+1. Banwick `H9`/`I9` ranges `B11:B70` → `B11:B71` — captures the 2031-06-05 balloon. Proof: at
+   `asOf` 2030-06-30 the window now returns 12 payments WITH the balloon; before, 11 and a silent
+   $3.35M omission.
+2. All 11 window cells `EDATE(B30,12)` → `EOMONTH(B30,12)` (0 deviations vs 9).
+3. `Assumptions!B30` manual-override branch wrapped in `EOMONTH(B32,0)` — **mandatory pair with #2**;
+   with a non-month-end override, `EOMONTH` over-captures in 1,428/1,428 cases.
+4. `485 S Walnut St` r46 → pure balloon (D=252,000, E=0); TOTALS 302,505→301,140, 50,505→49,140.
+**No currently-reported figure moved** — all four are future-proofing. Verified unchanged:
+195,653.52 / 146,269.26 / 208,344.72 / 275,031.24 / 47,895.08 / −50,140.95 / −16,380; 0 formula-error
+cells across 50 sheets. Snapshot re-baked and pushed (`f269986`).
+**PROCESS LESSON — the first COM script was not defensive enough for a financial model.**
+`FormulaArray` threw on `H15` (longer lender-row formulas) and, with `$ErrorActionPreference='Stop'`,
+the script aborted AFTER 8 of 11 edits had been made — leaving the workbook SAVED in a mixed
+EDATE/EOMONTH state plus an orphaned `EXCEL.EXE` holding it. No value was ever wrong (EOMONTH and
+EDATE agree while B30 is month-end), and it was caught on the next verification pass. **Next time:**
+per-cell `try/catch` with a `FormulaArray → Formula2 → Formula` fallback ladder, save only after all
+edits are attempted, and a `finally` block that always closes/quits. Also: kill ONLY your own orphaned
+PID — Gabriel's interactive Excel was PID 21768 throughout.
+
+### OI-093 — RESOLVED 2026-08-05
+Gabriel resolved it in the workbook himself at 16:20: the row is retitled
+`⚠ DUPLICATE OF ROW 22 — DO NOT USE` (Loan Index r24, idx 13, balance 0). My earlier "create the
+missing journal sheet" recommendation was **wrong** — there was no missing sheet, it was a duplicate
+entry. Residual closed in code: `parseLoans` now skips tombstoned rows via the exported
+`isTombstonedLoanRow` predicate (`9ab137d`), so a retired row can no longer mint a snapshot id or
+claim a `debt_positions` key. Matching is narrow (`DO NOT USE` / `DUPLICATE OF <x>`; bare "duplicate"
+is not a marker) and all 13 live loan names are pinned as non-matches. The skip raises an
+**info**-severity flag naming the row — deliberately not silent. Live: loans 13 → 12, tombstone id
+absent, 1 info flag. Full suite 3,266 pass.
+
+### OI-095-CANDIDATE — lender block "Annual Principal (Next 12 Months)" is semantically inconsistent
+Surfaced by the OI-094 audit; **not yet allocated an id, awaiting Gabriel's ruling.**
+`I14` (1100 Rarig) and `I16` (485 Walnut) compute `D−E` = principal repaid **to date**; `I15` (RCT)
+sums the schedule over the **forward 12-month** window. All three sit under the same
+"Annual Principal (Next 12 Months)" header (`I4`). Consequences: (a) RCT's $1,945,102.73 balloon due
+**2027-02-20 — already inside the window** — is absent from `I15` because it sits in column C
+(Payment Amount) not D/E, so Oxford's 50% share of **$972,551** of principal return is missing;
+(b) `I16` will miss Walnut's $252,000 balloon when it enters the window in **Oct 2027**. The RCT sheet
+r8 already holds `Balloon Balance at Maturity (Oxford 50%) = -972,551.365`, so the figure exists — it
+just doesn't flow. **Careful:** RCT r37 is a 50%-share memo row and `H15`/`I15` already apply `*0.5`;
+never let r37 into a D/E sum or it double-counts.
