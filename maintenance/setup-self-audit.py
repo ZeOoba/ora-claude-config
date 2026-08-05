@@ -494,11 +494,37 @@ def check_windows_tasks():
     else:
         add("windows-tasks", "OK", "all %d backbone tasks present, last results clean" % len(WINDOWS_TASKS))
 
+# ---- Check 8: SKILL-OVERRIDE EFFICACY (2026-08-05) ----
+# Root cause: the harness short-circuits `if (e.type!=="prompt" || e.source==="plugin")
+# return "on";` BEFORE consulting skillOverrides, so an override on a plugin-sourced
+# skill is silently ignored -- the skill stays fully listed and model-invocable. Live
+# 2026-08-05: 38 of 55 override entries were plugin-namespaced and doing nothing; the
+# skills they named were all still in the session listing. Two prior setup audits missed
+# it because nothing ever compared the override keys against a live skill listing.
+# Verdict logic + the failure-class notes live in skill-override-efficacy-probe.py
+# (its own unit tests: test-skill-override-efficacy-probe.py) -- ONE home, not two.
+def check_skill_overrides():
+    try:
+        import importlib.util
+        p = os.path.join(CLAUDE, "maintenance", "skill-override-efficacy-probe.py")
+        if not os.path.exists(p):
+            add("skill-override-efficacy", "SKIP", "probe not found: %s" % p)
+            return
+        spec = importlib.util.spec_from_file_location("_soep", p)
+        soep = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(soep)
+        s = soep.summarize(soep.load_overrides(), soep.load_user_skills())
+        items = ["%s = %s  [%s]" % (f["key"], f["value"], f["verdict"])
+                 for f in s["findings"] if f["verdict"] != "EFFECTIVE"]
+        add("skill-override-efficacy", s["status"], s["detail"], items)
+    except Exception as e:
+        add("skill-override-efficacy", "SKIP", "error: %s" % e)
+
 def main():
     as_json = "--json" in sys.argv
     strict = "--strict" in sys.argv
     for fn in (check_fleet, check_skills, check_secrets, check_connectors, check_drift,
-               check_prepush_shim, check_windows_tasks):
+               check_prepush_shim, check_windows_tasks, check_skill_overrides):
         try:
             fn()
         except Exception:
