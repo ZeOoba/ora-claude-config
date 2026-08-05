@@ -180,3 +180,8 @@ skills/county-parcel-screen/data/
 *.log
 *.bak
 *.bak-*
+# Per-run probe snapshot: rewritten every fleet-deadman cycle, read only on this
+# machine. Tracking it would churn a commit a day for no reader (same trap as the
+# portfolio.json generatedAt churn). The durable ledger next to it,
+# health-guard-beacon.json, IS tracked on purpose -- the GitHub dead-man reads it.
+maintenance/_state/phantom-dispatch.json
