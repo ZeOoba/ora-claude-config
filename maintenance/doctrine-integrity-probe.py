@@ -304,6 +304,16 @@ BULLET_RE = re.compile(r"^\s*[-*]\s+\S")
 SETTINGS_JSON = CLAUDE_DIR / "settings.json"
 SCHEDULED_TASKS_DIR = CLAUDE_DIR / "scheduled-tasks"
 PREPUSH_SHIM = CLAUDE_DIR / ".git" / "hooks" / "pre-push"
+# 2026-08-05: the PreToolUse Edit/Write chain moved in-process. Four guards
+# (eos-plan-gate, shared-checkout-guard, eos-claude-md-guard, rules-md-guard) lost
+# their settings.json entries entirely and now run only via the dispatcher's
+# GUARD_CHAIN -- invisible to sources (a)-(c), so this check called a live guard an
+# orphan. Parse the LIST LITERAL, not the file text: the dispatcher's docstring names
+# all four in prose, so a whole-file substring match would hand out OKs for guards
+# that are merely mentioned. A false OK is strictly worse than a false WARN here --
+# it is exactly the orphan this check exists to catch.
+PRETOOLUSE_DISPATCHER = CLAUDE_DIR / "hooks" / "pretooluse-dispatcher.py"
+GUARD_CHAIN_RE = re.compile(r"^GUARD_CHAIN\s*=\s*\[(.*?)\]", re.S | re.M)
 # A backtick-quoted token on the Guards: line. Guard names are bare filenames/
 # identifiers; GUARD_NAME_RE drops anything else the parse catches (e.g. the
 # eos-plan-gate override recipe `touch hooks/sessions/<id>/override`, which is a
@@ -1435,6 +1445,27 @@ def main():
                  "invocation point not checked this run" % ascii_safe(shim_err))
             shim_text = ""
 
+        # (d) the PreToolUse dispatcher's GUARD_CHAIN (in-process Edit/Write chain).
+        chain_names = set()
+        dispatcher_text, disp_err = read_optional(PRETOOLUSE_DISPATCHER)
+        if dispatcher_text is None:
+            degraded = True
+            warn("guard-liveness: dispatcher unreadable (%s) -- GUARD_CHAIN "
+                 "invocation points not checked this run" % ascii_safe(disp_err))
+        else:
+            m = GUARD_CHAIN_RE.search(dispatcher_text)
+            if m is None:
+                degraded = True
+                warn("guard-liveness: GUARD_CHAIN list not found in %s -- in-process "
+                     "invocation points not checked this run"
+                     % PRETOOLUSE_DISPATCHER.name)
+            else:
+                chain_names = set(re.findall(r"[\"']([^\"']+)[\"']", m.group(1)))
+                if not chain_names:
+                    degraded = True
+                    warn("guard-liveness: GUARD_CHAIN parsed empty -- in-process "
+                         "invocation points not checked this run")
+
         print("Guard liveness: %d guard(s) checked" % len(guards))
         for name in guards:
             # Match on the filename STEM (trailing .py/.sh dropped) as a substring.
@@ -1447,7 +1478,8 @@ def main():
             stem = re.sub(r"\.(py|sh)$", "", name)
             hit = (any(stem in c for c in hook_cmds)
                    or stem in skill_md_blob
-                   or stem in shim_text)
+                   or stem in shim_text
+                   or stem in chain_names)
             if hit:
                 print("  [OK]      %s -> live invocation point found" % ascii_safe(name))
             elif degraded:
@@ -1457,7 +1489,8 @@ def main():
             else:
                 warn("guard '%s' named in CLAUDE.md's Guards: line has no live "
                      "invocation point found (checked: settings.json hooks, CC/MCP "
-                     "scheduled-task SKILL.mds, ~/.claude pre-push shim)"
+                     "scheduled-task SKILL.mds, ~/.claude pre-push shim, "
+                     "pretooluse-dispatcher GUARD_CHAIN)"
                      % ascii_safe(name))
 
     # --- 12. backup-coverage sweep (top-level dirs invisible to the backup) ---
