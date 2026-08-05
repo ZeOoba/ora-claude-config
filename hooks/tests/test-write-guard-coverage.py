@@ -18,6 +18,7 @@ with no code at all.
 Run: python test-write-guard-coverage.py
 Stdlib only. ASCII-only. Windows (`python`).
 """
+import importlib.util
 import json
 import os
 import re
@@ -30,6 +31,8 @@ CLAUDE_ROOT = os.path.dirname(HOOKS_DIR)
 sys.path.insert(0, os.path.join(HOOKS_DIR, "lib"))
 
 import tool_call_paths as tcp  # noqa: E402
+
+DISPATCHER = "pretooluse-dispatcher.py"
 
 _failures = []
 
@@ -51,6 +54,17 @@ def run_hook(hook, payload, env_extra):
         capture_output=True, env=env)
     return proc.returncode, proc.stdout.decode("utf-8", "replace"), \
         proc.stderr.decode("utf-8", "replace")
+
+
+def _dispatcher_guard_chain():
+    """GUARD_CHAIN from pretooluse-dispatcher.py, loaded without running main()
+    (module-level import only; main() is __name__-guarded -- see that file's
+    own _load() docstring for the same pattern)."""
+    path = os.path.join(HOOKS_DIR, DISPATCHER)
+    spec = importlib.util.spec_from_file_location("_dispatcher_under_test", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.GUARD_CHAIN
 
 
 def blocked_exit2(rc, out, err):
@@ -156,22 +170,49 @@ def test_new_hard_gate_is_contracted_to_every_shape():
 
 
 def test_settings_matchers_route_every_contracted_shape():
+    """A guard is 'routed' for a shape either (a) directly -- some settings.json
+    PreToolUse entry names the guard's own script and its matcher covers the
+    shape's tool_name -- or (b) via the dispatcher -- pretooluse-dispatcher.py's
+    matcher covers the tool_name AND the guard is a GUARD_CHAIN member, since
+    the dispatcher runs every chain member in-process for anything its matcher
+    catches (2026-08-05 wiring). Recognizing (b) is what keeps this test able
+    to go red on a REAL gap (guard dropped from GUARD_CHAIN, or the dispatcher's
+    own matcher narrowed) instead of alarming on the dispatcher refactor itself."""
     settings_path = os.path.join(CLAUDE_ROOT, "settings.json")
     with open(settings_path, "r", encoding="utf-8-sig") as fh:
         settings = json.load(fh)
     entries = settings.get("hooks", {}).get("PreToolUse", [])
+    dispatcher_matchers = [e.get("matcher", "") for e in entries
+                            if any(DISPATCHER in (h.get("command") or "")
+                                   for h in e.get("hooks", []))]
+    guard_chain = _dispatcher_guard_chain()
     for spec in GUARDS:
         matchers = [e.get("matcher", "") for e in entries
                     if any(spec.matcher_key in (h.get("command") or "")
                            for h in e.get("hooks", []))]
+        in_chain = spec.hook[:-len(".py")] in guard_chain
         check("%s is registered in settings.json PreToolUse" % spec.hook,
-              len(matchers) >= 1)
+              len(matchers) >= 1 or in_chain)
         for shape in tcp.SHAPES:
             if not spec.shape_filter(shape):
                 continue
-            routed = any(re.fullmatch(m, shape.tool_name) for m in matchers if m)
+            direct = any(re.fullmatch(m, shape.tool_name) for m in matchers if m)
+            via_dispatcher = in_chain and any(
+                re.fullmatch(m, shape.tool_name) for m in dispatcher_matchers if m)
             check("settings.json routes %s to %s" % (shape.tool_name, spec.hook),
-                  routed, "matchers=%r" % matchers)
+                  direct or via_dispatcher,
+                  "matchers=%r dispatcher_matchers=%r in_chain=%s" %
+                  (matchers, dispatcher_matchers, in_chain))
+            # A guard both directly matched AND dispatcher-chained for the same
+            # shape runs TWICE per tool call -- silent for stateless guards but
+            # a real bug for anything with single-use state (e.g.
+            # ora-autonomy-gate.py consumes its override token on the first
+            # pass, then blocks on the second). GUARD_CHAIN's own docstring
+            # names this exact trap: "add it to GUARD_CHAIN -- NOT as a new
+            # settings.json PreToolUse entry -- or it will run twice."
+            check("%s is not double-routed for %s (direct + dispatcher)"
+                  % (spec.hook, shape.tool_name),
+                  not (direct and via_dispatcher))
 
 
 if __name__ == "__main__":
