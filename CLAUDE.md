@@ -38,7 +38,7 @@
 - Outlook pane: drafting only (Mail.Send not held). Relationship-context, redline, or LP mail → hand to Cowork (`communication-intelligence` / `legal-intelligence`). Sign landlord mail as the property LLC, never the firm name (Voice Register). Never click links from the pane.
 
 ## Tools & data
-- Hierarchy: dedicated MCPs (Notion · HubSpot — current tenants only · M365 · Netlify) → Claude-in-Chrome → computer-use (native apps only).
+- Hierarchy: dedicated MCPs (Notion · HubSpot — tenants + 2 deal pipelines, never brokers · M365 · Netlify) → Claude-in-Chrome → computer-use (native apps only).
 - QuickBooks: Desktop only (~20 LLC files) — SharePoint export + parse; QBO MCP structurally incompatible, never suggest re-auth or Zapier. (Detail: `tech.md`.)
 - Source of record: the live ORA Master Workbook (SharePoint) is FIRST for firm figures; read order + freshness canon = Notion page `3706ecd8-9e59-813a-b4c7-ecbc2c213fa8`; a mirror >7 days behind is STALE — never present as current.
 - Notion canon: Tenant `8dbbaec0` · Knowledge Base `3386ecd8`; Acq Pipeline/Deal Sourcing/Ops Hub IDs: `tech.md`.

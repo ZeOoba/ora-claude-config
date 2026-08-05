@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 83715320-ea98-4ae2-8ebd-e3ec6f2163dd
-  modified: 2026-08-05T19:38:08.405Z
+  modified: 2026-08-05T21:05:06.488Z
 ---
 
 # ORA Memory Index — Reference
@@ -29,6 +29,7 @@ metadata:
 - [docx verification gap on Windows](reference_docx_verification_windows_gap.md) — no LibreOffice/Poppler, soffice.py is Unix-only; use maintenance/docx-to-pdf.ps1
 - [Model Release Checklist](reference_model_release_checklist.md) — hardcoded model IDs + sweep process
 - [Claude Code Setups](reference_claude_code_setups.md) — best public setups: obra/superpowers, disler hooks
+- [skillOverrides is INERT for plugin skills](reference_skilloverrides_inert_for_plugin_skills.md) — `source==="plugin"` exits before the lookup; 39 of 56 ORA keys are dead. Uninstall/unpublish instead; never infer suppression from a settings entry
 - [ECC Repo Flagged](reference_ecc_repo_flagged.md) — affaan-m/ECC rejected: malware-clone risk
 - [setup-writing-style Platform Skill](reference_writing_style_platform_skill.md) — gated, per-account; never on disk
 - [Obsidian Copilot Keychain Gap](reference_obsidian_copilot_keychain_migration_gap.md) — "Needs API key" = re-enter keys
