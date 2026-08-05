@@ -87,6 +87,77 @@ Check "null CommandLine -> skipped, no crash" ($result.Count -eq 0)
 $result = Get-KillCandidates -Procs @() -Now $Now -ThresholdMinutes 90
 Check "empty process list -> empty result" ($result.Count -eq 0)
 
+# ---------------------------------------------------------------------------
+# 10-15 added 2026-08-05. THE BUG THIS SUITE MISSED FOR THREE WEEKS.
+# Electron runs its OWN child processes (renderer, GPU, utility) as claude.exe
+# too. They have long command lines, carry no --resume=, and are long-lived BY
+# DESIGN -- so exclusions 1 and 2 let every one of them through and the watchdog
+# culled them every ~2h. Forensics 2026-08-05 over stuck-session-watchdog.log,
+# cross-referenced against the app's own [process-memory] PID->role telemetry:
+#   391 electron_utility, 155 electron_renderer, 88 electron_gpu, 4 electron_main
+# killed. The renderer is the process the scheduler needs to attach a dispatch:
+# with one present, 74 of 76 dispatches confirmed; with none, 0 of 53 did. This
+# watchdog was the single largest cause of the fleet's phantom-dispatch rate.
+# Command lines below are copied from the LIVE process table, not invented.
+# ---------------------------------------------------------------------------
+$pkg = '"C:\Program Files\WindowsApps\Claude_1.25927.0.0_x64__pzs8sxrjxfjjc\Claude.exe"'
+function ElectronChild($type) {
+    # Real shape: quoted package path + --type= + the usual mojo/field-trial handles.
+    ("$pkg --type=$type --user-data-dir=""C:\Users\Owner\AppData\Roaming\Claude"" " +
+     "--field-trial-handle=2308,i,10743404793281416549,7166071214620440086,262144 " +
+     "--variations-seed-version --mojo-platform-channel-handle=2312 /prefetch:1")
+}
+
+# 10. THE REGRESSION: the renderer. Long-lived, long cmdline, no --resume.
+$procs = @(
+    [PSCustomObject]@{ ProcessId = 8324; CommandLine = (ElectronChild 'renderer'); CreationDate = $Now.AddMinutes(-600) }
+)
+$result = Get-KillCandidates -Procs $procs -Now $Now -ThresholdMinutes 90
+Check "electron RENDERER, 10h old -> NEVER a candidate (killing it kills the fleet)" ($result.Count -eq 0)
+
+# 11. GPU process.
+$procs = @(
+    [PSCustomObject]@{ ProcessId = 24852; CommandLine = (ElectronChild 'gpu-process'); CreationDate = $Now.AddMinutes(-600) }
+)
+$result = Get-KillCandidates -Procs $procs -Now $Now -ThresholdMinutes 90
+Check "electron GPU process -> never a candidate" ($result.Count -eq 0)
+
+# 12. Utility processes (the largest killed cohort, 391).
+$procs = @(
+    [PSCustomObject]@{ ProcessId = 38588; CommandLine = (ElectronChild 'utility'); CreationDate = $Now.AddMinutes(-600) }
+)
+$result = Get-KillCandidates -Procs $procs -Now $Now -ThresholdMinutes 90
+Check "electron UTILITY process -> never a candidate" ($result.Count -eq 0)
+
+# 13. Second net: a desktop-app process from the WindowsApps package with NO --type=
+#     (belt-and-braces -- if Electron ever drops the flag, the package path still holds).
+$procs = @(
+    [PSCustomObject]@{ ProcessId = 9999; CommandLine = ($pkg + ' --some-future-flag ' + (LongCmd '')); CreationDate = $Now.AddMinutes(-600) }
+)
+$result = Get-KillCandidates -Procs $procs -Now $Now -ThresholdMinutes 90
+Check "any WindowsApps\Claude_ package process -> never a candidate" ($result.Count -eq 0)
+
+# 14. THE FIX MUST NOT NEUTER THE WATCHDOG: a real stuck CLI task session, full
+#     path as it actually appears live, still gets flagged.
+$realSession = ('C:\Users\Owner\AppData\Roaming\Claude\claude-code\2.1.221\claude.exe ' + (LongCmd ''))
+$procs = @(
+    [PSCustomObject]@{ ProcessId = 34012; CommandLine = $realSession; CreationDate = $Now.AddMinutes(-120) }
+)
+$result = Get-KillCandidates -Procs $procs -Now $Now -ThresholdMinutes 90
+Check "real stuck claude-code task session STILL a candidate (fix must not neuter)" ($result.Count -eq 1 -and $result[0].ProcessId -eq 34012)
+
+# 15. Realistic mixed batch: app internals + a resumed conversation + one genuine
+#     stuck session. Exactly one kill.
+$procs = @(
+    [PSCustomObject]@{ ProcessId = 8324;  CommandLine = (ElectronChild 'renderer');    CreationDate = $Now.AddMinutes(-600) }
+    [PSCustomObject]@{ ProcessId = 24852; CommandLine = (ElectronChild 'gpu-process'); CreationDate = $Now.AddMinutes(-600) }
+    [PSCustomObject]@{ ProcessId = 38588; CommandLine = (ElectronChild 'utility');     CreationDate = $Now.AddMinutes(-600) }
+    [PSCustomObject]@{ ProcessId = 40632; CommandLine = ($realSession + ' --resume=de576307-980f-43fd-b5c4-4e7b76c361e2'); CreationDate = $Now.AddMinutes(-900) }
+    [PSCustomObject]@{ ProcessId = 34012; CommandLine = $realSession; CreationDate = $Now.AddMinutes(-120) }
+)
+$result = Get-KillCandidates -Procs $procs -Now $Now -ThresholdMinutes 90
+Check "live-shaped batch: ONLY the stuck task session (34012) is flagged" (($result.ProcessId -join ',') -eq '34012')
+
 Write-Output ""
 if ($script:failures.Count -gt 0) {
     Write-Output "$($script:failures.Count) FAILED: $($script:failures -join '; ')"
