@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-08-04T22:12:21.187Z
+  modified: 2026-08-04T22:31:53.541Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -46,7 +46,6 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | [OI-033](#OI-033) | 2026-07-28 | Cowork-surface follow-up to the Code-surface usage-limit audit, 2026-07-28 | LAMS `ora-tenant-contact-gap-sweep` carries no `[MODEL: ...]` tag (sole untagged task in a 27/28-tagged LAMS fleet); fix needs `update_scheduled_task` from a Cowork-surface session |
 | [OI-041](#OI-041) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **MEDIUM** ora-pm mass assignment — 10 handlers pass `await c.req.json()` straight into `.insert()`/`.update()`/`.upsert()` with no Zod schema (`budgets.ts:25`, `insurance.ts:35,46`, `renewals.ts:22`, `units.ts:20,28`, `cam.ts:23-24`, `leases.ts:74,98`, `tenants.ts:62`) while sibling routes correctly use `safeParse`. `budgets.ts:25` also accepts an ARRAY body, making the upsert unbounded in row count. Admin-authenticated only, so integrity/defense-in-depth rather than a breach path — but an admin (or anything holding an admin JWT, see OI-036) can set columns the UI never exposes including `id` and `created_at` |
 | [OI-042](#OI-042) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **MEDIUM** ora-pm returns RAW Postgres error messages to clients from ~20 call sites (`portal.ts:50,74,93,117,141`, `insurance.ts:38,50`, `cam.ts:79`, `reports.ts:15,27,35,53,57,62`, `cron.ts:40,131,167,227`, `units.ts`, `budgets.ts`, `renewals.ts`, `webhook.ts:20,40`). `server/middleware/error-handler.ts` sanitizes *thrown* errors and its comment claims raw DB messages are never exposed — but that only covers the catch path; these sites `return c.json({error: error.message}, 500)` from a Supabase result. Several are on `/api/portal/*`, reachable by any authenticated tenant, disclosing table/column/constraint/RLS-policy names as a free schema map |
-| [OI-045](#OI-045) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **MEDIUM** ora-pm MFA enrollment is a NO-OP that misrepresents its own state — `src/portal/pages/PortalAccount.tsx:33-35,87-93`: `handleMFA` awaits `portalSupabase.auth.mfa.enroll({...})` and DISCARDS the result; the TOTP secret and QR code are never rendered and no `mfa.challenge`/`mfa.verify` call exists anywhere in the repo (grep for `mfa` returns only this file). The factor is created `unverified` and enrollment can never complete. The UI tells tenants 'Enable two-factor authentication (TOTP) for additional account security' — so tenants may believe the account that authorizes ACH debits is MFA-protected when it is not. Repeated clicks accumulate orphaned unverified factors |
 | [OI-047](#OI-047) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **MEDIUM — CLOSED 2026-08-04.** ora-pm's two cron jobs (`critical-dates-alerts`, `delinquency-check`) no longer call Resend; `RECIPIENTS` trimmed to `ggoldberg@oxfordra.net` only; the Worker now returns `email: {subject, body} \| null` and `C:\Users\Owner\ora-pm-cron\ping-crons.ps1` (the real live trigger — a standalone Windows Task Scheduler task, not the Claude fleet registry) sends it via Outlook COM. Dedup-before-send and non-fatal-on-send-failure both preserved, covered by tests + a 12-assertion PowerShell self-test. Deployed to production (PR #20, merge `5bbb262`) and verified with two REAL sends through the live trigger. See detail section for full evidence, including a separately-filed finding ([OI-076](#OI-076)) discovered along the way |
 | [OI-048](#OI-048) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **MEDIUM** ora-pm: ALL API database access uses the service-role key (`server/db/client.ts:6-13`), which bypasses RLS entirely — so the `auth.uid()` policies in `0004_views_and_rls.sql:101-189` have NO effect on any API request and every tenant-scoping guarantee rests solely on hand-written `.eq('auth_user_id', userId)` lookups. Not a live vulnerability (all six portal endpoints + three Stripe endpoints were traced and each correctly resolves the tenant from the JWT first, with explicit IDOR guards) — the risk is that RLS READS as a safety net in the migrations but is not one: one future endpoint that forgets the filter is an immediate full cross-tenant read with nothing behind it. Compounding: `0008_storage_rls.sql` self-describes as applied out-of-band via a Node script, so live RLS state is UNVERIFIED-not-clean |
 | [OI-049](#OI-049) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (oxford-command-center @ `3692385`, security-auditor dispatch) | **MEDIUM — S-002 carve-out drift, CONFIRMED IN HISTORY.** oxford-command-center's ratified financial config has no mechanical change-gate: `config/acquisition-ruleset.v1.json` and `config/replacement-cost.v3.json` appear in NO gate — not in `.claude/hooks/architect-owned.json` globs, not in `scripts/check-refute-required.ts` path sets, and `governance-check.ts` does not reference them. Only prose in the file's `_comment` protects them. Commit `a83ce684` (2026-07-14, PR #210, merged to origin/main) materially changed gate bounds (basisDiscountMin 0.25->0.60 / 0.30->0.65, vintage cutoff 2000->2005) while still carrying `rulesetVersion:"1.0.0"` and `ratifiedDate:"2026-06-14"`; the version-bump ceremony landed 2 days later (`d28d8bfb`). No ACTIVE drift at the pinned SHA — the file is blob-identical to the ceremony state — but the root cause is open. Invariant-4 adjacent |
@@ -56,20 +55,19 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | [OI-052](#OI-052) | 2026-07-31 | ora-appsec-sweep 2026-07-31 (dispatch integrity gate, first live test) | **MEDIUM — sweep mechanism, not a repo defect.** The `ora-appsec-sweep` Fable model floor is carried entirely by the `security-auditor` Agent dispatch (Gabriel-ratified Option C, 2026-07-24, because the task's own frontmatter `model:` pin is inert on CC/MCP). First live test 2026-07-31: the dispatch WORKED — both subagents spawned with `model:"fable"` recorded in their meta and both STARTED on `claude-fable-5` — but both then fell back mid-run to `claude-opus-5` via an explicit harness `{"type":"fallback","from":"claude-fable-5","to":"claude-opus-5"}` event (ora-pm at msg ~108, 68 of 130 assistant msgs on opus-5; occ at msg ~163, 3 of 110). Opus-5 is the session's own top-tier main-loop model, NOT a downgrade to Sonnet/Haiku — so the never-below-Fable floor does not appear breached downward — but the pin does NOT hold end-to-end, which the DISPATCH INTEGRITY GATE's three assertions do not detect |
 | [OI-058](#OI-058) | 2026-08-03 | `ora-pm-ledger` 2026-08-01 run + OI-030 coherence read, 2026-08-03 | `ora-weekly-hygiene` Block C fired 2026-08-03 03:47 ET but published NOTHING - no XLSX, no Notion page, no email (verified null on all three). One full weekly cycle lost; last output is 2026-07-26. Cause undetermined from artifacts alone, needs the run transcript. Related: [open-items-tracker.md#OI-031](open-items-tracker.md#OI-031) (same blind spot, one level coarser) |
 | [OI-060](#OI-060) | 2026-08-03 | ora-pm appsec fix plan Task 5 (OI-037), `plan/appsec-fixes-oi034-048` branch, commit `5a23927` | ora-pm's `public/_headers` (added for OI-037) does NOT apply to `/api/*` — Cloudflare Pages `_headers` only covers static assets, and `/api/*` is served by a Pages Function (`functions/api/[[route]].ts`). Page/document routes correctly get CSP + clickjacking protection; the API surface does not. Needs a Hono middleware (in `server/index.ts` or a new module) setting the same security headers per-response for `/api/*`, mirroring `public/_headers`'s directives (deliberately not built as part of Task 5 — filed instead, per Gabriel's call, 2026-08-03) |
-| [OI-063](#OI-063) | 2026-08-03 | ora-pm appsec fix plan Task 9 (OI-041/042 remainder), `plan/appsec-fixes-oi034-048` branch, commit `afef524`, confirmed by independent task reviewer | ora-pm has raw Postgres error-message passthroughs (the OI-042 pattern) on **5 files no task in the 11-task appsec plan named**: `properties.ts` (3 sites), `expenses.ts` (2), `payments.ts` (1), `portal-auth.ts` (2), `portal-insurance.ts` (1) — a gap in how the original sweep carved up scope, not a regression. Fix: route each through the `dbError(c, error, publicMsg?)` helper already shipped in `server/lib/api-error.ts` (Task 7), same pattern used across the rest of the branch. Straightforward, low-risk, mechanical follow-up |
 | [OI-061](#OI-061) | 2026-08-03 | Fixture measurement during [open-items-tracker.md#OI-059](open-items-tracker.md#OI-059), 2026-08-03 | **Files 1-2 LANDED 2026-08-04 (`6dc5df3`)** — shared `gitfixture` helper; spawns 559->199 and 272->147. **File 3 CLOSED NOT APPLICABLE** — profiled 131 spawns of which only 6 are git, so conversion would gain <4%; its "3rd-worst 42.0s" rank was a load-contaminated measurement (clean median 49.1s = 55% of budget). OPEN only for the ~10 unconverted files (preventive, none near budget) |
 | [OI-062](#OI-062) | 2026-08-04 | `pending_reimport.py` frontmatter-norm session, 2026-08-04 | ora-skills MAIN checkout has unattributed uncommitted WIP (modified `plugins/ora-operations-extensions/plugin-build.json` version bump 0.1.5→0.1.6, plus untracked `_check_plugin.py`, both dated ~2026-07-29) — present at session start and still present after PR #38 merged; spans ≥2 sessions unclaimed, nobody has picked it up or discarded it |
 | [OI-064](#OI-064) | 2026-08-03 | REFUTE pass on the [OI-035](#OI-035) fix, 2026-08-03 | ora-pm portal payment retry doesn't dedupe as the OI-035 fix's commit message claims — every retry re-links the bank account, producing a new `payment_method_id`, so Stripe's idempotency layer rejects the reused key as a mismatch (caught, returned as a clean 400 — fails safe, no double charge) rather than returning the original PaymentIntent. Risk is operational (tenant sees "failed" for a payment that went through, may pay again another way), not a code-level double-charge. The retry-recovery test is regex-over-source-text, never actually exercised this |
 | [OI-065](#OI-065) | 2026-08-03 | REFUTE pass on the [OI-035](#OI-035) fix, 2026-08-03 | ora-pm `POST /api/stripe/payment-intent` has no lock between the `ar_ledger.balance` read and PaymentIntent creation — two genuinely concurrent requests (two tabs, or a bypassed client guard) each read the same stale balance and each create a separate, individually-valid PI, exceeding the true balance. Requires the tenant's own concurrent action, not a third-party attack. Outside OI-035/OI-040's original scope |
 | [OI-066](#OI-066) | 2026-08-03 | REFUTE pass on the [OI-037](#OI-037) fix, 2026-08-03 | ora-pm's new CSP ships as `Content-Security-Policy-Report-Only`, deliberately — logs violations, blocks nothing. `X-Frame-Options: DENY` (separate header) already closes clickjacking; this item is only the XSS-containment half. Needs a manual browser pass through Pay Now + admin login against a deployed preview, then drop `-Report-Only` to enforce |
 | [OI-068](#OI-068) | 2026-08-03 | ora-pm appsec fix plan Task 8 (OI-043), local `plan/appsec-fixes-oi034-048` branch, commit `59f79ff`, confirmed by independent task reviewer | Autopay-with-payment-method is **unreachable from any live frontend path today** — `PortalAccount.tsx` is the sole caller of `setAutopay` and never passes `payment_method_id`; the enable toggle is disabled unless `lease.autopay_payment_method_id` is already set; the ONLY writer of that column is `PATCH /portal/autopay`, which the frontend never calls with a PM. `PortalPayNow.tsx` creates a PM but only ever feeds it to one-time `createPaymentIntent`, never to `setAutopay`. The whole autopay-enrollment feature is unbuilt/unreachable on the frontend, independent of Task 8's (correct) backend hardening — a product gap, not a security defect in what shipped |
-| [OI-069](#OI-069) | 2026-08-03 | REFUTE pass on the [OI-046](#OI-046) fix, 2026-08-03 | ora-pm CAM true-up idempotency key is scoped only to lease+year, no amount/version — a legitimate recalculation of an already-billed CAM (ops corrects an error, re-runs /calculate for a new amount) collides with the OLD charge's key and is silently dropped as a duplicate. Tenant's ledger keeps the stale amount; response says success. Under-billing, not exploitable by an outside party |
 | [OI-070](#OI-070) | 2026-08-04 | `ora-health-guard` 2026-08-04 run + `fleet-status.py` investigation, this session | `fleet-status.py`'s missed-cycle detector (OI-031's fix) only sees a CURRENTLY-open gap — it compares `lastRunAt` to the single most-recent expected fire, so a gap that self-heals before the next check erases all evidence of the miss. `ora-health-guard` itself missed 07-31/08-01/08-02 then resumed 08-03/08-04; `fleet-status.py` reported "missed single cycle 0" the same day the scheduler's own run log showed the 3-day gap. Same blind-spot family as [OI-031](#OI-031)/[OI-058](#OI-058), one level narrower. **Still OPEN despite commit `848d4cb`'s message saying "closes OI-070"** — that commit is labeling/documentation only (its own body: "no detection logic changed"); see detail section |
 | [OI-071](#OI-071) | 2026-08-03 | Production verification of [OI-067](#OI-067), 2026-08-03 | ora-pm `PortalInsurance.tsx` uploads COI files to `session.user.id`'s folder, but the live (confirmed-applied, confirmed-correct) RLS policy requires `tenants.id` — every real tenant COI upload fails today. Confirmed against production, not just the repo. Misleadingly-named variable (`tenantId = session.user.id`) is likely the root cause |
 | [OI-072](#OI-072) | 2026-08-04 | [open-items-tracker.md#OI-061](open-items-tracker.md#OI-061) batch-2 scoping, 2026-08-04 | **`identity=`/`dest=` extension LANDED 2026-08-04 (`8c9ebd0`)** — converted `test-memory-index-git-tracking.py` (git spawns 28->16). Recommendation against extending for bare-repo/clone topology STANDS — `test-git-prepush-scan.py` and the 2 maintenance-tree files remain OPEN, unconverted by design/deferred decision |
 | [OI-074](#OI-074) | 2026-08-04 | OI-073 follow-up, root-causing why ora-pm migrations keep landing untracked | ora-pm migration-tracking root cause: no `SUPABASE_ACCESS_TOKEN` in the Code sandbox, so `supabase db push` (the only auto-tracking path) can't run here. Two-tier fix built (dashboard-paste tracking generator + inert `workflow_dispatch` CI job) — CI piece needs Gabriel-provisioned secrets before it can close |
 | [OI-075](#OI-075) | 2026-08-04 | Session brief follow-up — standing fix for skill-store/repo drift | Skill-cache drift standing fix: new CC/MCP task `ora-skill-cache-drift-alert` (cron `*/30 * * * *`) runs `ora-skills/tools/repo_first_check.py --all` (built on [PR #39](https://github.com/ZeOoba/ora-skills/pull/39)) at a tighter cadence than the existing daily `ora-doctrine-integrity-guard`, auto-filing an OI item + Notion/email alert on new drift. Not yet closed — hasn't fired against a real finding |
 | [OI-076](#OI-076) | 2026-08-04 | OI-047 final whole-branch review, 2026-08-04 | ora-pm's "ORA PM Crons" Windows Task Scheduler task (drives `critical-dates-alerts`/`delinquency-check` daily) was unregistered on this machine — `cron.log`'s last entry was 2026-06-24, ~6 weeks dead, likely lost in the 2026-07-09 machine migration to LAPTOP-CSHSCBE6 (task registrations are OS-level, don't travel with a file/repo copy). Re-registered and confirmed live (`NextRunTime` set); real backlog cleared same-day (10 critical-date alerts, 24 delinquent tenants / 7 late fees posted across the catch-up runs) |
+| [OI-077](#OI-077) | 2026-08-04 | 3rd REFUTE pass on the OI-045 fix, 2026-08-04 | **LOW** ora-pm `POST /api/stripe/customer` accepts `email`/`name` straight from the request body with zero validation against the tenant's own `contact_email` on file, sent directly to `stripe.customers.create`. Deliberately left ungated by OI-045's AAL2 work (no PM/money involved, IDOR-safe, idempotent) but a tenant can set an arbitrary email on their own Stripe customer object, meaning future Stripe-side comms (receipts, Financial Connections links) go to an attacker-chosen address. Not blocking; recommend sourcing from the `tenants` row server-side instead |
 
 ### OI-009
 **Status:** OPEN (substantial progress made 2026-07-17, real scope remains)
@@ -1405,10 +1403,12 @@ clean, verified on `main` post-merge before push.
 **Auto-check:** none.
 
 ### OI-045
-**Status:** OPEN
+**Status:** CLOSED
 **Opened:** 2026-07-31
+**Closed:** 2026-08-04
 **Source:** ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch)
-**Severity:** MEDIUM (security control that misrepresents its own state)
+**Severity:** MEDIUM (security control that misrepresents its own state) — escalated to CRITICAL
+mid-fix, see Evidence.
 **Description:** `src/portal/pages/PortalAccount.tsx:33-35`, `:87-93`. The enroll call's return value
 is discarded; no challenge/verify flow exists anywhere in the codebase.
 **Impact:** tenants may believe an account authorizing ACH debits is MFA-protected when it is not.
@@ -1416,6 +1416,30 @@ This is worse than having no MFA button at all, because it is an affirmative fal
 **Candidate fix (NOT applied):** either implement the full enroll -> display QR/secret -> challenge ->
 verify flow, or remove the button and the copy until it is built. Do not ship a control that
 misrepresents its own state.
+**Evidence (2026-08-04):** the enroll->challenge->verify UI flow itself was already fixed by an earlier
+commit (real QR/secret rendering, real `mfa.verify()` gate, orphaned-unverified-factor cleanup on
+enroll) — a REFUTE pass on THAT fix found the resulting AAL2 (step-up) enforcement was **client-side
+only**: `src/portal/PortalApp.tsx` gates which React component renders, but nothing on the server ever
+checked whether the current session had completed the MFA challenge. PoC: `PATCH /api/portal/autopay`
+had no AAL check anywhere in its chain — any tenant (or attacker holding a stolen/leaked bearer JWT,
+e.g. via XSS or a synced session) with a valid but un-stepped-up (aal1) JWT could enable ACH autopay
+directly via the API, bypassing MFA entirely. Escalated from MEDIUM to CRITICAL on this finding.
+Fixed via `server/middleware/aal-guard.ts` (`requireAal2`): calls the documented server-side/stateless
+form of `auth.mfa.getAuthenticatorAssuranceLevel(jwt)` (a real Supabase network round-trip, not a
+locally-decoded claim), fails closed on any error, mirrors `mfa-guard.ts`'s existing pure decision
+logic. A SECOND REFUTE pass on that fix found the scope was still too narrow: `POST
+/api/stripe/setup-intent` (attaches a `us_bank_account` PaymentMethod to the tenant's Stripe customer)
+and `POST /api/stripe/payment-intent` (CONFIRMS and charges immediately — the single most sensitive
+path, moves real money) were both still completely ungated, independent of `/autopay`. Both gated. A
+THIRD REFUTE pass swept the rest of `server/routes/` for any other tenant-JWT-reachable
+financial-write path — none found; confirmed complete. End-to-end integration tests (not just
+middleware-unit tests) prove the real middleware is wired onto the real routes against the real app,
+asserting the underlying Stripe API call is never reached when the gate blocks, not just that the HTTP
+status is 403. `POST /api/stripe/customer` (customer-shell creation, no PM/money involved, IDOR-safe,
+idempotent) deliberately left ungated — one low-severity follow-up surfaced there (unvalidated
+email/name from the request body reaching `stripe.customers.create`), filed as [OI-077](#OI-077).
+Fixed on `ora-pm` main, commits `03487cd` + merge `a29f8f0`. 426/426 suite green (448/448 after
+merging concurrent `main` work), typecheck clean.
 **Auto-check:** none.
 
 ### OI-046
@@ -1778,12 +1802,13 @@ mitigates suite-level wall-clock but cannot help a single file that exceeds a pe
 **Auto-check:** none.
 
 ### OI-063
-**Status:** OPEN
+**Status:** CLOSED
 **Opened:** 2026-08-03
+**Closed:** 2026-08-04
 **Source:** ora-pm appsec fix plan (subagent-driven-development execution of `plan/appsec-fixes-oi034-048`), Task 9 (OI-041/OI-042 remainder + OI-046 gap closure), commit `afef524` — self-flagged by the implementer, independently confirmed via grep by the task reviewer (not just trusted)
 **Description:** OI-042 ("raw Postgres error messages returned to clients") was originally scoped across Tasks 2/7/8/9 by file, but the scoping missed 5 files entirely — no task in the 11-task plan names them, so no branch commit touches them. Confirmed still live: `properties.ts` (3 sites), `expenses.ts` (2), `payments.ts` (1), `portal-auth.ts` (2), `portal-insurance.ts` (1). Task 9 correctly declined to silently expand its own scope to cover these — same discipline as OI-060's filing.
 **How to apply:** route each site through `dbError(c, error, publicMsg?)` (`server/lib/api-error.ts`, shipped by Task 7 of the same branch) — mechanical, same pattern as every other file in the branch. Low risk, no schema/logic changes needed, just the error-response swap. Should extend `tests/lib/no-raw-db-errors.test.ts`'s tripwire (same branch, Task 9) to cover these 5 files once fixed, closing the allowlist gap that currently excludes them.
-**Auto-check:** none.
+**Evidence (2026-08-04):** a REFUTE pass re-verifying a later commit (`8fb7022`, whose title claimed "dbError sweep") found it had NOT touched any of the 5 self-flagged files despite the title — confirmed still-open via `git diff` (empty on all 5 files) before writing anything. Fixed all 9 sites (TDD — RED test per site asserting a generic message + no leak of the injected raw error text, written before the fix) through `dbError()`, matching the established pattern exactly; `properties.ts`'s single-record 404 lookup kept a plain generic 404 (mirroring `tenants.ts`'s own documented exception, since `dbError()` always 500s). Tripwire allowlist entries for all 5 files removed; the "fully clean" pinned assertion extended to cover them. Fixed on `ora-pm` main, commit `7857646` + merge `a29f8f0`. 402/402 suite green at the time, typecheck clean.
 **Auto-check:** none.
 
 ### OI-064
@@ -1858,8 +1883,9 @@ before enforcing, not after.
 **Auto-check:** none.
 
 ### OI-069
-**Status:** OPEN
+**Status:** CLOSED
 **Opened:** 2026-08-03
+**Closed:** 2026-08-04
 **Source:** REFUTE pass on the [OI-046](#OI-046) fix (security-auditor dispatch), 2026-08-03; verified directly by the Code-surface session that merged it
 **Severity:** MEDIUM (financial correctness — silent under-billing, not exploitable by an outside party)
 **Description:** `server/routes/cam.ts` (OI-046's fix, commit `81b5626`). The new insert-first
@@ -1879,6 +1905,23 @@ have `/calculate` refuse to silently reset an already-`billed` recon to `draft` 
 "supersede"/override flag that a human consciously sets. Either way, add a test for the
 recalculate-then-reapprove path — not covered by OI-046's test suite (verified: only sequential
 re-approval and a directly-injected constraint violation are tested, not this scenario).
+**Evidence (2026-08-04):** a later commit (`8fb7022`) claimed "OI-046 gap closure" in its title, but
+`git diff` against `cam.ts` confirmed it was empty — that commit's "charges idempotency-key default"
+was an unrelated fix in `charges.ts` (OI-039's NOT NULL backfill), not this item; verified directly
+rather than assuming from the commit message alone. Fixed via approach (b): `/calculate`'s update is
+now atomically conditional (`.eq('lease_id',x).eq('reconciliation_year',y).eq('status','draft')`) — the
+same "conditional update IS the concurrency control" idiom OI-046 already established on
+`/:id/approve`, applied here instead of a separate check-then-act pre-check (a first REFUTE pass on an
+earlier version of this fix found a check-then-act pre-check still raced against a concurrent
+`/:id/approve`: a real TOCTOU window, not theoretical, closed by making the write itself the guard).
+Zero rows matched falls through to an insert (first-ever calculation); an insert conflict means a row
+already exists, read once to distinguish "won a first-time-calc race" (retry the update) from
+"already billed/collected" (409, reject). Allow-list (`status='draft'`), not a deny-list against
+`'billed'` — a second REFUTE pass found the original deny-list would have silently reopened a
+`'collected'` reconciliation too (a third legal status per the DB's own CHECK constraint, currently
+unreachable but latent); fixed and pinned with a regression test. Financial-decision code: 2 REFUTE
+passes (security-auditor dispatch). Fixed on `ora-pm` main, commit `f0b6780` + merge `a29f8f0`.
+409/409 suite green at the time, typecheck clean.
 **Auto-check:** none.
 
 ### OI-067
@@ -1928,6 +1971,10 @@ fails today — confirmed against production, not just the repo.
 should instead look up the tenant's own `id` (e.g. from the already-loaded portal session/tenant
 context) and upload to `${tenant.id}/${file.name}`. Add an integration test asserting the upload path
 matches the RLS policy's expected folder, not just that the upload call is made.
+**Corroborated independently, 2026-08-04:** a REFUTE pass on the OI-048 docs/tripwire fix, reading
+`server/db/client.ts` cold with no knowledge of this item, re-derived the exact same
+`session.user.id`-vs-`tenants.id` mismatch from first principles. Two independent passes reaching the
+identical root cause is corroboration, not new information — no change to this item's status or scope.
 **Auto-check:** none.
 
 ### OI-070
@@ -2460,14 +2507,44 @@ call overwrote its `repo-housekeeping` claim broadcast).
 **Residual, not closed by this item:** whether any OTHER host-level scheduled task (outside both Claude fleets AND this one) has a similar migration-survival gap is unchecked — this item covers `ora-pm-cron` only, discovered incidentally during OI-047's final review, not from a systematic audit of non-Claude Windows Task Scheduler entries on this host.
 **Auto-check:** none.
 
+### OI-077
+**Status:** OPEN
+**Opened:** 2026-08-04
+**Source:** 3rd (final) REFUTE pass on the [OI-045](#OI-045) fix (security-auditor dispatch), 2026-08-04 —
+sweeping `server/routes/` for any remaining tenant-JWT financial-write gap after `/autopay` and the two
+Stripe payment-method/money routes were gated
+**Severity:** LOW (spoofing-enablement, not a fund-movement or data-exposure bug)
+**Description:** `server/routes/stripe.ts:28-57` (`POST /api/stripe/customer`). Deliberately left ungated
+by the OI-045 AAL2 work — this endpoint only creates a Stripe customer shell (no PaymentMethod
+attached, no money moved), is IDOR-safe (`tenant_id` cross-checked against the JWT-resolved tenant),
+and is idempotent (short-circuits to the existing `stripe_customer_id` on repeat calls) — so an aal1
+attacker gains no resource-exhaustion or enumeration vector from the endpoint's core purpose. But
+`email`/`name` (lines 30, 47) are taken directly from the request body with zero validation against
+`tenant.contact_email` and sent straight to `stripe.customers.create`. A tenant (aal1-only session is
+sufficient — no MFA bypass even needed, since this route was never gated) can set an arbitrary email on
+their own Stripe customer object.
+**Impact:** low — no money moves and no cross-tenant data is exposed. But every future Stripe-side
+communication on that customer object (receipts, Financial Connections bank-linking links) would be
+sent to the attacker-chosen address instead of the tenant's real one — a phishing/spoofing-enablement
+vector, and a support/reconciliation headache if a tenant's own customer record silently diverges from
+their real contact info.
+**Candidate fix (NOT applied):** source `email`/`name` from the already-resolved `tenants` row
+server-side (the handler already does `db.from('tenants').select(...)` for the IDOR check — just add
+`contact_email`/`name` to that select and use it) instead of trusting the request body. Low priority,
+not blocking; noted here so it isn't lost, not because it's urgent.
+**Auto-check:** none.
+
 ## Closed
 
 | ID | Opened | Closed | Source | One-line |
 |----|--------|--------|--------|----------|
 | [OI-037](#OI-037) | 2026-07-31 | 2026-08-04 | ora-appsec-sweep 2026-07-31; fixed `ora-pm` commit `23b924f`; verified live 2026-08-04 (in-page fetch against `ora-pm.pages.dev`) | CORS exact-match allowlist + security headers. `X-Frame-Options: DENY` and `Content-Security-Policy-Report-Only` (exact expected policy) confirmed present on the real served response, not just the merged config — closes this item's own standing verification caveat. CSP-enforcement flip remains OI-066's separate job |
 | [OI-039](#OI-039) | 2026-07-31 | 2026-08-04 | ora-appsec-sweep 2026-07-31; fixed `ora-pm` migration `0011_appsec_idempotency_and_scale.sql`, applied to production 2026-08-04 | All 10 money columns retyped `NUMERIC(12,2) NOT NULL` with unit `COMMENT ON COLUMN`s; `charges.idempotency_key` backfilled + `NOT NULL`; `payments.stripe_payment_intent_id` unique index + `autopay_period` dedup column added. All 3 of the migration's own pre-flight checks ran clean against prod first (0 dupes, 0 backfill collisions, 0 sub-cent rows/10 cols). Verified post-apply via `information_schema.columns` + `ar_ledger` resolving cleanly. Bonus finding: migration tracker was stalled at 0007, masking that 0009/0010 were already live untracked — see [OI-073](#OI-073) |
-| [OI-073](#OI-073) | 2026-08-04 | 2026-08-04 | Applying migrations 0009-0011 to ora-pm production, 2026-08-04 | `supabase_migrations.schema_migrations` backfilled with rows for 0008-0011 (Gabriel: "backfill now") — tracker now shows 11 contiguous rows matching the live schema for the first time. Root cause (whatever process applies migrations out-of-band never writing the tracking row) is still unidentified and unaddressed — will recur on the next out-of-band apply unless that process itself changes |
+| [OI-073](#OI-073) | 2026-08-04 | 2026-08-04 | Applying migrations 0009-0011 to ora-pm production, 2026-08-04 | `supabase_migrations.schema_migrations` backfilled with rows for 0008-0011 (Gabriel: "backfill now") — tracker now shows 11 contiguous rows matching the live schema for the first time. Root cause was left unidentified at this item's own closure — since root-caused and fixed as [OI-074](#OI-074) (no `SUPABASE_ACCESS_TOKEN` in the Code sandbox; two-tier fix built) |
 | [OI-067](#OI-067) | 2026-08-03 | 2026-08-03 | ora-pm appsec fix plan Task 11 (OI-048), commit `9aa7f30`; verified against production 2026-08-03 (Gabriel signed into Supabase, ran verify-rls.sql live) | Status resolved: production DB was found paused (unrelated, resumed in-turn), all 3 parts of verify-rls.sql pass cleanly — the RLS policy IS live and IS exactly as documented (rules out the "more-permissive out-of-band policy" scenario). Confirmed instead: every real COI upload fails today because the client code uploads to the wrong path. Underlying fix filed as [OI-071](#OI-071). Bonus finding flagged, not filed: Security Advisor shows `public.units` has RLS disabled (CRITICAL), confirmed `rowsecurity=false`, needs Gabriel's triage on client-exposure |
+| [OI-045](#OI-045) | 2026-07-31 | 2026-08-04 | ora-appsec-sweep 2026-07-31; fixed `ora-pm` commit `03487cd` + merge `a29f8f0` | MFA enroll->verify UI flow fixed earlier; this closure covers the AAL2 (step-up) enforcement REFUTE found was client-side-only. 3 REFUTE passes: pass 1 built `requireAal2` (real server-side Supabase call, fails closed) and wired it to `PATCH /api/portal/autopay`; pass 2 found `POST /api/stripe/setup-intent` (attaches a bank account) and `POST /api/stripe/payment-intent` (confirms/charges immediately — moves real money) both still ungated, independent of `/autopay`; pass 3 swept the rest of `server/routes/` and confirmed complete. Escalated MEDIUM->CRITICAL mid-fix. End-to-end integration tests assert the underlying Stripe call is never reached when blocked. One low-severity follow-up filed as [OI-077](#OI-077) |
+| [OI-063](#OI-063) | 2026-08-03 | 2026-08-04 | ora-pm appsec fix plan Task 9, commit `afef524`; fixed `ora-pm` commit `7857646` + merge `a29f8f0` | The 5 self-flagged files (properties/expenses/payments/portal-auth/portal-insurance) were confirmed STILL leaking raw errors after a later commit's title claimed "dbError sweep" (verified via `git diff`, not trusted from the message). All 9 sites now route through `dbError()`; single-record 404 lookups keep a plain generic 404 (dbError always 500s), mirroring `tenants.ts`'s precedent. Tripwire allowlist fully closed |
+| [OI-069](#OI-069) | 2026-08-03 | 2026-08-04 | REFUTE pass on the OI-046 fix, 2026-08-03; fixed `ora-pm` commit `f0b6780` + merge `a29f8f0` | CAM recalculation could silently reopen and under-bill an already-billed reconciliation. A commit titled "OI-046 gap closure" was confirmed (via empty `git diff` on `cam.ts`) to be unrelated. 2 REFUTE passes: pass 1 found a check-then-act pre-check version still raced against a concurrent approve (real TOCTOU); fixed via making the write itself atomically conditional (`status='draft'` guard). Pass 2 found the guard was a deny-list against `'billed'` that would've silently reopened a `'collected'` row too (3rd legal status, currently unreachable but latent) — fixed to an allow-list |
 | [OI-057](#OI-057) | 2026-08-03 | 2026-08-04 | Push of event_log.md commit `8b61f20`, 2026-08-03; fixed by `6dc5df3` (OI-061) | The pre-push timeout is resolved. Direct re-measurement of `hooks/tests/test-eos-review-gate.py` under real concurrent multi-session load (56 dirty files in the checkout at test time, not idle): **76.6s, PASS 55/55** — comfortably under both the 90s per-file budget and the 180s hard timeout that produced OI-057's 3 identical failures. Also corroborated by 2 consecutive real pre-push gates completing clean (61/61, then 63/63, 0 fail) after `6dc5df3` landed. Root cause was OI-059 (excessive fixture-driven subprocess spawns), not the originally-suspected live model call inside the hook — that theory is retired |
 | [OI-059](#OI-059) | 2026-08-03 | 2026-08-04 | [open-items-tracker.md#OI-057](open-items-tracker.md#OI-057) root-cause pass, 2026-08-03; fixed by `6dc5df3` | `hooks/tests/lib/gitfixture.py` (shared template-and-copytree helper) landed, converting `test-eos-review-gate.py`'s `make_repo()` calls from live `git init`/`config`/`commit` subprocess chains to a `shutil.copytree` of a pre-built template. Spawn count 559 -> 199, confirmed by the commit's own measurement and this session's independent 76.6s re-run. Broader 13-file version of this problem is [OI-061](#OI-061), left OPEN — only 2 of 13 files converted so far |
 | [OI-034](#OI-034) | 2026-07-31 | 2026-08-03 | ora-appsec-sweep 2026-07-31; fixed `ora-pm` commit `3e600e4` | Autopay double-debit-on-re-run + arrears-sweep gap both closed — deterministic Stripe idempotencyKey + DB-unique autopay_period guard, plus a REFUTE-caught follow-up fix scoping the debit cap to the current period (not lifetime AR balance). TDD, 244/244 green, typecheck clean |
