@@ -68,6 +68,12 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | [OI-075](#OI-075) | 2026-08-04 | Session brief follow-up — standing fix for skill-store/repo drift | Skill-cache drift standing fix: new CC/MCP task `ora-skill-cache-drift-alert` (cron `*/30 * * * *`) runs `ora-skills/tools/repo_first_check.py --all` (built on [PR #39](https://github.com/ZeOoba/ora-skills/pull/39)) at a tighter cadence than the existing daily `ora-doctrine-integrity-guard`, auto-filing an OI item + Notion/email alert on new drift. Not yet closed — hasn't fired against a real finding |
 | [OI-076](#OI-076) | 2026-08-04 | OI-047 final whole-branch review, 2026-08-04 | ora-pm's "ORA PM Crons" Windows Task Scheduler task (drives `critical-dates-alerts`/`delinquency-check` daily) was unregistered on this machine — `cron.log`'s last entry was 2026-06-24, ~6 weeks dead, likely lost in the 2026-07-09 machine migration to LAPTOP-CSHSCBE6 (task registrations are OS-level, don't travel with a file/repo copy). Re-registered and confirmed live (`NextRunTime` set); real backlog cleared same-day (10 critical-date alerts, 24 delinquent tenants / 7 late fees posted across the catch-up runs) |
 | [OI-077](#OI-077) | 2026-08-04 | 3rd REFUTE pass on the OI-045 fix, 2026-08-04 | **LOW** ora-pm `POST /api/stripe/customer` accepts `email`/`name` straight from the request body with zero validation against the tenant's own `contact_email` on file, sent directly to `stripe.customers.create`. Deliberately left ungated by OI-045's AAL2 work (no PM/money involved, IDOR-safe, idempotent) but a tenant can set an arbitrary email on their own Stripe customer object, meaning future Stripe-side comms (receipts, Financial Connections links) go to an attacker-chosen address. Not blocking; recommend sourcing from the `tenants` row server-side instead |
+| [OI-092](#OI-092) | 2026-08-05 | `ora-lease-snapshot-refresh` run 2026-08-05; handoff session `3d9d97cf` | **MEDIUM** `External Loans Summary` computed next-12-month interest/principal over the half-open 366-day span `[TODAY(), TODAY()+366)`, capturing **13 payments instead of 12** whenever `TODAY()` landed on a loan's payment day-of-month — inflating annual debt service by one payment and depressing DSCR. **Workbook RESOLVED** (Gabriel's own edit 2026-08-05): window re-anchored to `(Assumptions!$B$30, EDATE(Assumptions!$B$30,12)]` with `B30 = EOMONTH(TODAY(),0)`, making the payment-day coincidence structurally impossible; zero `TODAY()+366` remain. Warehouse `debt_positions` was clean (all 8 snapshot dates fell on non-payment days); the one contaminated artifact, `data/snapshots/portfolio.json` from `61cc346`, was re-baked as `51d4039` (local only, **not pushed**). **Detector WITHDRAWN before shipping** — code review + REFUTE both found `debt-service-window.ts` cannot detect the defect it was built for (it counts schedule rows against its own correctly-computed window, never reading the `External Loans Summary` formula; reverting `H9` to the buggy form leaves its output byte-identical). Retry must key on **distinct dates, not row counts** (see [OI-096](#OI-096)) and must not flag balloon-excluded principal (see [OI-095](#OI-095)). **Do NOT build the ">2 decimal places" detector** — fires on 6 of 11 loans, every one correct. **Residual:** (a) workbook `Claude Log` has no entry for the 08-05 edit (last row Turn 147, 08-03); (b) `SCHEDULE_SOURCES` hardcodes each schedule's sheet/column/row range and must be updated alongside the formulas |
+| [OI-093](#OI-093) | 2026-08-05 | surfaced by the OI-092 `portfolio.json` re-bake (`51d4039`) | **MEDIUM** (silent history split in the debt warehouse) The internal 2203-2207 Northwood loan now parses with **no journal sheet**, changing its snapshot id from `internal-2203-2207-northwood` to `internal-2203-2207-northwood-no-journal-sheet`. `debt_positions` keys `ON CONFLICT(id, snapshot_date)`, so every future snapshot lands under a NEW key — silently orphaning the loan's prior history rather than continuing it; `monthsToMaturity` also went null → 105. **Diagnosed 2026-08-05:** full 50-sheet enumeration confirms **no Northwood journal sheet exists in any spelling**, so the parser's `⚠ NO JOURNAL SHEET` marker is **correct and reporting a real accounting gap**, not a parser defect — aliasing the id would hide a genuinely missing record. **Provenance problem:** workbook `Claude Log` Turn 144 (2026-08-03) states the sheet *was created* during the EXTERNAL→INTERNAL reclassification, and it is not there. **Gabriel ruled 2026-08-05:** create the journal sheet — but **chase the provenance first**, since "never completed" vs "created then removed" implies different things about the rest of that reclassification |
+| [OI-094](#OI-094) | 2026-08-05 | adversarial REFUTE pass on the OI-092 detector; independently re-verified against the live workbook | **MEDIUM now, HIGH from ~mid-2030** (understates annual debt service by $3.35M when it bites) — needs Gabriel's ruling to execute (workbook edit, Hard Invariant 4). `'External Loans Summary'!H9`/`I9` sum the Banwick-Morrison schedule over `B11:B70`, but the schedule's **final payment is row 71** and it carries the balloon (r71: 2031-06-05, principal 3,333,953.68, total $3,349,289.87 — matching Symetra loan 11153's documented balloon to within rounding). `K9` maturity = 2031-06-05, the very row the range stops one short of. **Audit COMPLETE 2026-08-05, all six ranges checked** (scanning 40 rows past each range end): Banwick is the **only** truncated range; 3540 E Fifth Ave, 9050 Red Branch, 29000 Information Ln, Restoration Church Trust and 485 S Walnut St all end on their final payment row. Reproduced exactly by a second independent audit (session `3d9d97cf`). **Gabriel ruled: consolidated fix** — one workbook session covering (1) extend the Banwick ranges to row 71, and (2) the February pair fix: six cells to `EOMONTH(Assumptions!$B$30,12)` **and** `B30` constrained to month-end. Both edits are required together — a 1,080-case simulation (120 month-ends × 9 pay-days) shows `EDATE` right-edge → 9 under-capture deviations, `EOMONTH` → 0, but `EOMONTH` under manual override (`B32` non-month-end) → **1,428 deviations**. Two findings this audit surfaced were **promoted out** so closing OI-094 on the range fix cannot silently close them: → [OI-095](#OI-095), [OI-096](#OI-096) |
+| [OI-098](#OI-098) | 2026-08-05 | tracker consistency audit, this file, 2026-08-05 | **LOW/MEDIUM** Six residual row/detail inconsistencies in THIS file, found by a full audit after repairing the split table. (i) `OI-029`, `OI-047`, `OI-076` carry `**Status:** CLOSED` in their detail sections but their rows still sit in the **Open** table. (ii) `OI-056`, `OI-068`, `OI-097` have rows in a table but **no `### OI-NNN` detail section at all**. All six verified real, not regex artifacts. `OI-047`/`OI-076` were touched by recent commits (`90e680c`, `fb4875c`) so reconcile against those before moving anything. The sibling defect — `OI-057`/`OI-059` detail sections stale at OPEN while their rows were correctly closed — was fixed 2026-08-05 |
+| [OI-099](#OI-099) | 2026-08-05 | `governor-drift-probe.py` false positive, 2026-08-05 | **LOW** (advisory probe; does **not** gate pushes — the pre-push shim runs doctrine-drift, hook-tests and confidentiality only) `RE_DSCR_THRESH` (`governor-drift-probe.py:117`) reads **any** decimal within 40 non-digit characters after "DSCR" as a threshold declaration, so a **measured** coverage ratio in prose flags as a governor redefinition. Fired on `reference_workbook_annual_debt_service_366day_overcapture.md:27` — a measured Banwick coverage ratio sitting a few words after the token "DSCR" (the offending string is deliberately NOT quoted verbatim here: doing so reproduces the false positive in this very file, which is how it was re-triggered 2026-08-05) — exit 1, which also poisons `memory-integrity-probe.py:395` and stands the daily guards red. Worked around 2026-08-05 by rewording that prose (probe now exits 0, 861 files scanned); **the gap itself is untouched** and the next measured DSCR written in prose re-fires it. A real fix must distinguish measured-vs-declared **without** handing a drifting editor an evasion on a Hard-Invariant-4 guard — note it would sit beside `RE_DSCR_PIVOT_DECOY`, which deliberately treats arrow-shaped DSCR changes as drift. Mandatory REFUTE + old-vs-new differential battery |
+| [OI-100](#OI-100) | 2026-08-05 | Gabriel ruling 2026-08-05 (rescope approved); design pass this session | **MEDIUM** Rescope `git-prepush-doctrine-gate.py` from the **working tree** to the **pushed commits**. Not just shared-checkout friction (one session's half-finished edit blocks everyone's push) — it is a **false-negative hole**: commit drift, then fix it uncommitted, and the probe passes on a clean tree while the drift pushes. **Two traps found 2026-08-05, both must be handled or the "fix" silently weakens a fail-closed gate:** (1) the obvious route — pass the probe's `--session-context=`/`--rules=`/`--terms=`/positional overrides — sets `live_mode = argv_path is None` **False** (`doctrine-integrity-probe.py:971`), which disables **seven** coupled blocks (lines 1216, 1467, 1518, 1524, 1585, 1618, 1641) incl. backup-root scanning and `PORTED_CLAUDE_MD_COPIES`; it would gut the gate, not rescope it. (2) running the probe against a temp worktree of the pushed sha does **not** redirect it either — roots come from `expanduser("~")` (`:93-95`), which on Windows keys off `USERPROFILE`, too fragile to hang a security gate on. **Design:** add an explicit root-override env var to the probe that does **not** flip `live_mode`, materialize the pushed commit via `git worktree add --detach`, run the probe in FULL live mode against it. hooks/** + security-gate: mandatory adversarial REFUTE + differential battery + TDD |
 
 ### OI-009
 **Status:** OPEN (substantial progress made 2026-07-17, real scope remains)
@@ -1673,8 +1679,16 @@ distinguish "fixed" from "did not recur."
 **Auto-check:** none.
 
 ### OI-057
-**Status:** OPEN
+**Status:** CLOSED
 **Opened:** 2026-08-03
+**Closed:** 2026-08-04
+**Evidence (status-line reconciliation 2026-08-05):** this detail section's `Status:` was left at OPEN
+when the item was closed — the Closed-table row was moved and dated correctly, but the flip never
+happened here, so the two contradicted each other. Reconciled in favour of the row: `6dc5df3`
+("perf(tests): shared git-repo fixture for the hook test suites (OI-061)") verified present in history,
+landing `hooks/tests/lib/gitfixture.py` (+135) and converting `hooks/tests/test-eos-review-gate.py` —
+exactly the fix the row cites. See also the COUNTER-EVIDENCE block below, which had already falsified
+the "will block the next push" claim as stated.
 **Source:** Push of event_log.md commit `8b61f20`, 2026-08-03
 **Description:** `hooks/tests/test-eos-review-gate.py` timed out on pre-push (exit 124, 180s, reproduced
 identically 3x). `run_hook()` spawns the real `eos-review-gate.py` subprocess with no timeout of its own;
@@ -1738,8 +1752,15 @@ pushes**; only a push under comparable multi-session load tests it.
 **Auto-check:** none.
 
 ### OI-059
-**Status:** OPEN
+**Status:** CLOSED
 **Opened:** 2026-08-03
+**Closed:** 2026-08-04
+**Evidence (status-line reconciliation 2026-08-05):** same defect as [OI-057](#OI-057) — the Closed-table
+row was moved and dated, but this detail section's `Status:` was never flipped, leaving the two
+contradicting each other. Reconciled in favour of the row: `6dc5df3` verified present in history, landing
+the shared `hooks/tests/lib/gitfixture.py` (+135, with `test-gitfixture.py` +122) and converting
+`test-eos-review-gate.py` and `test-memory-orphan-link-guard.py` onto it — the `make_repo()` spawn cost
+this item was filed to remove.
 **Source:** [open-items-tracker.md#OI-057](open-items-tracker.md#OI-057) root-cause pass, 2026-08-03
 **Description:** `hooks/tests/test-eos-review-gate.py` (1045 lines, 55 tests) is the pre-push suite's runtime
 outlier and the direct cause of OI-057's timeouts. **Measured 2026-08-03, not estimated:**
@@ -3039,3 +3060,136 @@ the same way that step does, rather than only checking never-fired-at-all or exp
 states.
 **Auto-check:** none (a tooling-logic gap, not a fleet-registry state comparable to the closed
 Auto-check vocabulary above).
+
+
+### OI-056
+**Status:** CLOSED
+**Opened:** 2026-08-03
+**Closed:** 2026-08-03
+**Source:** `doctrine-integrity-probe.py` pre-push run, 2026-08-03; resolved by `edc9fa1` + `7596feb`
+**Description:** Detail section written 2026-08-05 (this row existed in the Closed table with no `###`
+section — see [OI-098](#OI-098)); content is restated from the row, not re-investigated.
+Logged initially as three instances of one defect; **only two were the same bug.**
+`ratify-hurdle-rate` and `tenant-email` SKILL.md genuinely carried "Principal" against canon and were
+corrected to "VP Acquisitions" (`edc9fa1`).
+**The third was not a defect.** `document-assembly/SKILL.md:180` says "Member / Principal", which Gabriel
+ruled states the **LLC-execution capacity** he binds under — a distinct concept from his firm operating
+title. Left unchanged, with an in-file note recording it as a documented Check-13 false positive
+(`7596feb`).
+**Separately recorded, not this item:** 21 live "Landlord - \*" Outlook signatures carry the same
+execution-capacity language and sit outside the probe's scan scope.
+
+### OI-068
+**Status:** OPEN
+**Opened:** 2026-08-03
+**Source:** ora-pm appsec fix plan Task 8 (OI-043), local `plan/appsec-fixes-oi034-048` branch, commit
+`59f79ff`; confirmed by an independent task reviewer
+**Severity:** product gap, **not** a security defect in what shipped
+**Description:** Detail section written 2026-08-05 (row existed with no `###` section — see
+[OI-098](#OI-098)); restated from the row, not re-investigated.
+Autopay-with-payment-method is **unreachable from any live frontend path today**:
+- `PortalAccount.tsx` is the sole caller of `setAutopay` and never passes `payment_method_id`.
+- The enable toggle is disabled unless `lease.autopay_payment_method_id` is already set.
+- The only writer of that column is `PATCH /portal/autopay`, which the frontend never calls with a PM.
+- `PortalPayNow.tsx` creates a payment method but only ever feeds it to one-time
+  `createPaymentIntent`, never to `setAutopay`.
+So the whole autopay-enrollment feature is unbuilt/unreachable on the frontend, independent of Task 8's
+(correct) backend hardening.
+
+### OI-098
+**Status:** OPEN
+**Opened:** 2026-08-05
+**Source:** full row/detail consistency audit of this file, 2026-08-05
+**Severity:** LOW/MEDIUM (tracker hygiene; the OPEN-item-lost class is how items go unworked)
+**Description:** Repairing the split table (blank line at former line 85, which pushed OI-095/096/097
+outside it) and restoring the missing OI-092/093/094 rows prompted a full audit of every row against
+every `### OI-NNN` detail section. Six residual inconsistencies remain, all verified real:
+- **CLOSED detail, row still in the Open table:** `OI-029`, `OI-047`, `OI-076`, and (added
+  2026-08-05, closed later the same day by a different session) `OI-020`, `OI-025`.
+  **THIS DEFECT CLASS CAUSED A REAL FALSE ALARM THE SAME DAY** — worth the severity bump.
+  Reading only `OI-029`'s Open-table row (which still describes "TWO live/unrotated credential
+  exposures") and not its detail section, a session escalated it to Gabriel as an urgent live
+  security exposure with "deploy access to oxfordra.net", and wrote him a rotation runbook.
+  The detail block records it CLOSED 2026-08-03: Gabriel had already revoked the
+  `ORA Lease App Sync` PAT — the only live token, the one both exposures leak — and the
+  corrupted backup folder was deleted and independently re-verified. A follow-up digest
+  comparison confirmed only ONE file still holds an actual token VALUE
+  (`oxford-realty_archived-20260726/oxfordra-net/.claude/settings.json`), it is that single
+  already-revoked credential, and the two other "hits" were matches on the variable NAME
+  `NETLIFY_AUTH_TOKEN` with no value assigned. Net: dead material on disk, not an exposure.
+  The Open-table row is the surface most readers hit first; a stale one here does not merely
+  lose work, it manufactures urgency.
+- **Row present, no detail section at all:** `OI-056`, `OI-068`, `OI-097`.
+**Fixed already (do not re-file):** `OI-057` and `OI-059` were the mirror-image defect — rows correctly
+moved to Closed and dated 2026-08-04, but their detail `Status:` lines left at OPEN. Reconciled
+2026-08-05 in favour of the rows after verifying `6dc5df3` really did land `hooks/tests/lib/gitfixture.py`
+and convert `test-eos-review-gate.py`.
+**Caution:** `OI-047` and `OI-076` were touched by recent commits (`90e680c`, `fb4875c`) and this file
+collides constantly — reconcile against those commits, and expect other sessions holding edits.
+**Auto-check:** re-run the row/detail audit; it reports DETAIL-WITH-NO-ROW, STATUS/TABLE MISMATCH,
+ROW-WITH-NO-DETAIL and blank-line-splitting-table in one pass.
+
+### OI-099
+**Status:** OPEN
+**Opened:** 2026-08-05
+**Source:** `governor-drift-probe.py` false positive investigated 2026-08-05
+**Severity:** LOW — advisory only. **Verified NOT push-blocking:** the pre-push shim runs exactly three
+gates (doctrine-drift, hook-tests, confidentiality); `governor-drift-probe` is in none of them. It is
+reached via `memory-integrity-probe.py:395`.
+**Description:** `RE_DSCR_THRESH` (`maintenance/governor-drift-probe.py:117`) is
+`dscr[^0-9\n]{0,40}?(?<![vV])([0-9]+\.[0-9]+)(?![0-9])(?!%)\s*[x×]?` — it reads **any** decimal within 40
+non-digit characters after "DSCR" as a threshold declaration. A **measured** coverage ratio written in
+prose therefore flags as a governor redefinition. It fired on
+`reference_workbook_annual_debt_service_366day_overcapture.md:27`, where a **measured** Banwick coverage
+ratio sat a few words after the token "DSCR" — in a sentence explicitly noting the value moved *away*
+from the floor — exiting **1**, which also makes
+`memory-integrity-probe` report a governor-drift issue and stands the daily guards red.
+**Why the existing suppressors miss it:** `RE_DSCR_CORRECTION` demands the tight
+`corrected … from X to 1.25` shape; the prose said "moved *away* from the 1.25x governor floor".
+**Worked around 2026-08-05, NOT fixed:** that one sentence was reworded to avoid the bare
+`DSCR <decimal>` adjacency; probe now exits 0 (861 files scanned). The gap is untouched — the next
+measured DSCR written in prose re-fires it.
+**Constraint on any real fix:** it must distinguish measured-vs-declared without handing a drifting
+editor a one-word evasion on a Hard-Invariant-4 guard, and it would sit beside `RE_DSCR_PIVOT_DECOY`,
+which *deliberately* treats arrow-shaped DSCR changes (`1.25x → N.NN`) as drift. Mandatory adversarial
+REFUTE pass + the old-vs-new differential battery (`reference_refute_differential_harness.md`).
+**Demonstrated 2026-08-05:** filing this very item re-fired the probe — the OI-099 row originally quoted
+the offending string verbatim, so *documenting* the false positive reproduced it in this file. Both
+places were reworded to describe the shape without quoting it. Treat that as the reproduction case.
+**Design precedent already in the probe:** `RE_SENTINEL_PROSE` (`:~267`) solves exactly this class for
+the probe's own documentation — it suppresses `1.75x regression sentinel`, deliberately bound to a
+**term of art** rather than a bare nearby token, and span-scoped so a real declaration sharing the line
+still flags. A measured-vs-declared suppressor should follow that shape, not a looser one.
+**Auto-check:** `python maintenance/governor-drift-probe.py` — exit 0 = clean.
+
+### OI-100
+**Status:** OPEN — approved by Gabriel 2026-08-05, designed but NOT implemented
+**Opened:** 2026-08-05
+**Source:** Gabriel ruling 2026-08-05 (rescope approved); design/trap investigation this session
+**Severity:** MEDIUM (correctness of a fail-closed security gate, plus shared-checkout friction)
+**Description:** `hooks/git-prepush-doctrine-gate.py` runs `doctrine-integrity-probe.py` with **no
+arguments**, so the probe evaluates the **working tree**. Two consequences:
+1. **Friction:** in a shared checkout, one session's half-finished edit blocks *everyone's* push.
+2. **False-negative hole (the stronger reason):** commit drift, then fix it uncommitted — the probe
+   passes on a clean working tree while the drift is what actually reaches the remote. What is pushed
+   is commit content, not the working tree.
+**TWO TRAPS — either one silently weakens the gate if the "obvious" fix is taken:**
+- **Trap 1 — the path-override route guts the gate.** Passing the probe's positional CLAUDE.md or
+  `--session-context=`/`--rules=`/`--terms=` sets `live_mode = argv_path is None` → **False**
+  (`doctrine-integrity-probe.py:971`), which disables **seven** coupled blocks (lines 1216, 1467, 1518,
+  1524, 1585, 1618, 1641), including backup-root scanning and the `PORTED_CLAUDE_MD_COPIES` checks.
+  This is a reduced check set, not a rescope.
+- **Trap 2 — a temp worktree alone does not redirect it.** The probe's roots are
+  `HOME = Path(os.path.expanduser("~"))` / `CLAUDE_DIR` / `REAL_CLAUDE_MD` (`:93-95`). `expanduser` on
+  Windows keys off `USERPROFILE`, so redirecting by environment is platform-sensitive — too fragile to
+  hang a fail-closed security gate on.
+**Design (agreed direction):** add an **explicit root-override env var** to the probe that does **not**
+flip `live_mode`; have the gate materialize the pushed commit via `git worktree add --detach <sha>` and
+run the probe in **FULL live mode** against that root. Preserve the existing fail-closed contract: a
+probe that cannot be launched still counts as drift, and the gate must keep reading no stdin (the shim
+relies on that to hand git's ref payload to the confidentiality scan).
+**Done bar:** `hooks/**` + security-gate exit-code logic → TDD, independent local review, and a
+**mandatory adversarial REFUTE pass** plus the old-vs-new differential battery. Deliberately left
+unimplemented rather than half-landed in a fail-closed gate.
+**Auto-check:** a test that commits drift and then reverts it in the working tree only — the gate must
+BLOCK (today it allows).
