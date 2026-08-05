@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 0888c827-119f-4877-98ae-23ac7c404a27
-  modified: 2026-07-24T15:03:11.518Z
+  modified: 2026-08-05T21:08:23.150Z
 ---
 
 **What it is:** two cooperating hooks, live in `~/.claude` since 2026-07-16 (registered in
@@ -133,10 +133,33 @@ would return False, the `Bash` PreToolUse wiring is intact, and **no `allow-fore
 anywhere under `hooks/sessions/`** — the sanctioned bypass was not used. So a block was the correct
 outcome and something suppressed it silently. Staged-vs-unstaged cannot be the explanation: `-a/--all` is
 handled by `_has_all_flag()`, and a `git add` in an *earlier* Bash call leaves the index already populated.
-LEADING HYPOTHESIS [SPECULATIVE — the janitor's literal command was not recoverable]: `candidate_paths()`
-reads `git diff --cached --name-only`, but **PreToolUse fires BEFORE the command runs**, so a compound
-`git add -A && git commit -m "..."` presents an index that does not yet contain those paths → empty
-candidate set → line 344's `if not cands: return` allows it. Not excluded: an internal exception hitting
-the deliberate `except Exception: pass` (silent by construction). Practical consequence until fixed: **do
-not treat this guard as protection when the other party may commit via a compound add+commit one-liner** —
-that is the most natural way to write a janitor sweep. Full evidence chain: [[event_log]] 2026-07-24.
+~~LEADING HYPOTHESIS [SPECULATIVE]~~ — **REFUTED 2026-08-05. Do not carry this as an open risk.**
+
+The hypothesis was that `candidate_paths()` reads `git diff --cached --name-only` while PreToolUse fires
+BEFORE the command runs, so a compound `git add -A && git commit -m "..."` would present an empty index →
+empty candidate set → allowed. **This is not what the code does.** `git_commit_parse.candidate_paths()`
+ends with, verbatim:
+
+```python
+# A `git add` PRECEDING this commit in the same command hasn't run yet at
+# hook-fire time, so it can't show up in `git diff --cached`.
+cands |= pending_add_paths(repo, cmd)
+```
+
+The exact case was anticipated and handled. Three independent confirmations:
+
+1. **Unit probe against a temp repo (2026-08-05):** `candidate_paths()` SEES the target file in
+   `git add -A && git commit`, `git add . && git commit`, and `git add -A ; git commit`, with the file
+   unstaged at call time — identical to the staged control.
+2. **Existing regression coverage already existed** and passes: `hooks/tests/test-commit-provenance-guard.py`
+   lines 1031 and 1046 assert `candidate_paths` on the compound forms, and line 1119 drives the full hook
+   with `git add -A && git commit`. Whole suite green. The 2026-07-24 speculation was never checked against
+   the test file that already disproved it.
+3. **`git commit -a` semantics verified correct**, not a gap: `candidate_paths` sees a tracked+modified file
+   and correctly does NOT see an untracked one — matching what git itself commits with `-a` (confirmed by
+   running a real `-a` commit and reading `--name-only`).
+
+The ORIGINAL 2026-07-24 observation — a janitor commit that should have blocked and didn't — remains
+unexplained; only this explanation for it is dead. The other candidate named above (an internal exception
+hitting the deliberate `except Exception: pass`, silent by construction) was NOT investigated and is now the
+leading remaining explanation. Full evidence chain: [[event_log]] 2026-07-24 and 2026-08-05.
