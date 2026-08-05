@@ -12,6 +12,131 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-05 — LAMS/Cowork fleet cadence + model-tag policy pass (Gabriel-directed, Cowork session)
+
+Closes the loop the same-day CC/MCP entry ("CC/MCP fleet cadence policy: collapsed all >1x/day
+tasks to daily") left open ("Not done — LAMS/Cowork fleet unreachable from Code-surface").
+Same two ratified policies applied here: no LAMS/Cowork routine >1x/day; default claude-sonnet-5.
+
+**Cadence audit** — pulled the live registry via `list_scheduled_tasks` (27 enabled recurring +
+2 pending one-time + 1 disabled/fired one-time; composition matched the last known roster
+exactly, no drift). 26/27 recurring tasks already ≤1x/day. One exception found, the same one
+flagged going in: `ora-cowork-heartbeat` at 2x/day (05:50 + 17:50 ET) — the dead-man heartbeat
+feeding Notion beacon `35c6ecd8…` → the GitHub Actions watchdog. Surfaced the tradeoff to
+Gabriel via AskUserQuestion (keep 2x/day vs. collapse to 1x/day vs. collapse-and-flag-watchdog).
+
+Gabriel initially chose the plain "reduce to 1x/day" option. Before executing, caught that this
+introduces a new problem the option text underclaimed: the external GitHub Actions watchdog's
+alert threshold is 16h, shorter than the 24h gap a single daily fire leaves — so a straight
+cadence cut produces a **guaranteed daily false stale-alarm** (~8h before each fire), not merely
+"slower detection" as originally framed. Re-surfaced the corrected tradeoff; Gabriel ruled to
+proceed anyway ("cut to 1x/day now regardless"), accepting the daily false alarm as a known,
+tolerable cost until the watchdog threshold is separately widened past 24h (repo:
+ZeOoba/ora-cowork-watchdog — outside scheduler-MCP reach, not touched this pass, flagged as a
+follow-up). Applied via `update_scheduled_task`: `50 5,17 * * *` -> `50 5 * * *` (kept the AM
+slot). Description updated in the same call to record both the retime rationale and the known
+watchdog-threshold gap. Verified via `list_scheduled_tasks`: next fire 2026-08-06 ~05:57 ET
+(jittered), daily thereafter.
+
+**Model-tag audit** — per `reference_scheduled_task_model_standard.md` (current standard
+unchanged, claude-sonnet-5 since 2026-07-08). No task on this fleet carries a non-standard
+model id (unlike CC/MCP, which has confirmed opus-5/fable drift on several tasks) — so no
+LAMS task required the disable -> archive -> delete -> recreate cycle this pass. Found:
+- 1 genuine `MODEL-UNTAGGED` gap: `ora-counsel-review-standard-positions-2027` (one-time,
+  enabled, fires 2027-08-02) — in scope per the doctrine's LAMS-one-time-enabled row, tag
+  was missing entirely. Added `[MODEL: claude-sonnet-5 | set 2026-08-05]`.
+- 8 tasks with a tag date predating the task's own last content/prompt revision by 3-22 days
+  (cosmetic only, no wrong-model implication): `automation-health-monitor` (22d),
+  `ora-skill-store-drift-check` (19d), `ora-skill-text-audit` (16d), `ora-om-intake-ocr` (16d),
+  `ora-lease-expiration-brief` (13d), `ora-monday-sync` (13d), `ora-friday-closeout` (10d),
+  `ora-stale-pipeline-nudge` (3d). Gabriel approved re-tagging all 9 in one pass; applied via
+  `update_scheduled_task` (description field only — no cron/prompt changes on the 8 recurring
+  tasks). Verified via `list_scheduled_tasks`: all 9 now read `[MODEL: claude-sonnet-5 | set
+  2026-08-05]`.
+
+**Net:** LAMS/Cowork fleet is now 27/27 enabled recurring + 2/2 enabled one-time tasks tagged
+claude-sonnet-5, current as of today. One standing cadence exception (`ora-cowork-heartbeat`,
+now 1x/day per Gabriel's ruling) carries a known, accepted watchdog-threshold gap pending a
+separate fix. Summary emailed to ggoldberg@oxfordra.net only, no cc, per routing canon.
+
+## 2026-08-05 — Automation audit: ora-operations-extensions bundle RETIRED, skill-creator dupe closed, hook overhead measured
+
+**Audit.** Full usage/performance sweep of hooks, skills, plugins, MCP connectors and the dual scheduled-task fleet (Gabriel-requested). Artifact: `claude.ai/code/artifact/8b29049b-d7a0-4394-a602-d51e52fd21e7`.
+
+**Hook overhead — first hard measurement.** The PreToolUse Edit-chain costs **1,307 ms per single Edit/Write call** (9 guards: ora-autonomy-gate 211ms, shared-checkout-guard 195, confidentiality-guard 164, registry-write-guard 141, config-write-guard 136, eos-claude-md-guard 121, memory-index-guard 121, rules-md-guard 113, eos-plan-gate 105). Bare python spawn on this machine is 65 ms, so **585 ms (45%) is interpreter startup paid 9×**; only ~722 ms is guard logic. No duplicate logic between them — this is purely spawn overhead. A single dispatcher importing all nine would recover ~520 ms/edit. PostToolUse adds 4 more spawns (untimed; several write state). Measured from a throwaway worktree, NOT by minting a governance write token — `config-write-guard.py` blocked the read-only timing command for merely naming `hooks/` paths (live instance of the false-positive class in `reference_config_write_guard_blocks_eos_review_gate.md`).
+
+**ora-operations-extensions RETIRED (Gabriel: "retire 6, fold submarket-spatial-analysis, then retire the bundle").** Trigger: `.claude.json pluginUsage` showed lifetime invocation count **1** (last 2026-06-13) vs 128 for anthropic-skills, 1240 for superpowers.
+- KEY STRUCTURAL FINDING: the plugin was a **manifest-only overlay** — all 7 member skills already lived as standalone dirs at the ora-skills repo root, with NO duplicated copies under `plugins/`. So the "fold" required no move; retiring the manifest is what makes all 7 revert to standalone Save-skill installs.
+- `plugins/ora-operations-extensions/` → `git mv` to `_archive/plugins/ora-operations-extensions/` (never delete; invariant 6). Another session's uncommitted v0.1.5→0.1.6 bump was preserved in the archived copy rather than discarded.
+- `plugin_of()` now returns None for every skill in the repo (defensive `load_plugin_manifests()` no-plugins path).
+- **TRAP CAUGHT:** the 6 retirement overrides were first written under the `ora-operations-extensions:` namespace. Retiring the bundle makes those keys stop matching, which would have **silently re-enabled all six**. Both namespaces are now keyed off (`ora-operations-extensions:X` AND `anthropic-skills:X`) — the dead keys are deliberate belt-and-suspenders, do not "clean them up" without re-verifying which namespace the platform actually resolves.
+- SURVIVES, active in main catalog: `submarket-spatial-analysis` (still referenced CLAUDE.md line 51).
+
+**CLAUDE.md amended.** Line 38 Outlook-pane routing dropped `investor-relations` (now retired); LP/relationship mail routes to `communication-intelligence` / `legal-intelligence`. 1692 words, within budget. doctrine-integrity-probe: OK, all referenced skills/files/commands resolve (2 pre-existing unrelated warnings).
+
+**skill-creator duplicate closed.** `anthropic-skills:skill-creator` set off — it was the only pair among docx/pdf/pptx/xlsx/mcp-builder/skill-creator where the stock-Anthropic suppression had been missed, and the ORA copy carried generic non-customized text. `claude-api` still has 3 active copies on disk (NOT addressed).
+
+**Tests.** ora-skills suite green after refactor: 211 tests / 7 files. `test_build_plugin.py` 16→20 (real-bundle-dependent classes ShippedManifest/Entries/BuildRoundTrip converted to a synthetic `make_fixture_plugin` fixture so the 8-vs-7, outdir-collision and validate-before-bump regression coverage survives bundle retirement; added `RetiredBundleArchived`). `test_pending_reimport.py` 49→50 (live-membership test now passes owner explicitly + asserts the post-retirement empty-membership invariant).
+
+**Not committed** — `.claude` had 77 uncommitted changes across sessions `3d9d97cf`/`b20e95bf`, ora-skills had unattributed WIP. Gabriel authorized overriding other sessions; edits were kept strictly additive and no tree was checkout/reset/stashed.
+
+**OPEN / not done:** dispatcher consolidation for the 9 PreToolUse guards (measured, not built) · `claude-api` 3-copy dedupe · config-write-guard quote-split + caret-escape bypasses · memory-orphan-link-guard unmerged shlex fix · commit-provenance-guard compound-add SPECULATIVE bypass · `doctrine-integrity-probe.py` PLUGIN_SKILL_ALLOWLIST review (memory flags it as built on a disproven premise; now additionally stale since no plugin bundle exists) · HubSpot tenant-only doctrine contradicted by live Lease-Renewal + Acquisitions pipelines.
+
+## 2026-08-05 — Automation Health 2026-08-05 follow-up: CC transcript + GitHub items (Code session)
+
+Three items Cowork could not reach from its surface. **Both fleet defects turned out to be ONE root cause — phantom dispatch — and both of Cowork's working hypotheses are refuted.** Evidence: `%APPDATA%\Claude\logs\main1.log` + `main.log` (`[CCDScheduledTasks]` / `[ScheduledTasks]`), the CC session store, `~/.claude/maintenance/_state/`, and Windows Task Scheduler.
+
+1. **ora-task-integrity-guard partial-run pattern (08-04, 08-05) — ROOT-CAUSED. Not a partial run: the task never started on either day. SKILL.md-length hypothesis REFUTED; no split performed.**
+   - **The premise was wrong.** `emit-fleet-heartbeat.py`'s output is NOT written by this task. `_state/fleet-heartbeat.json` (mtime 08-05 07:30:11 ET) is written by the **Windows Task Scheduler** job `ORA Fleet Heartbeat Push` (daily 07:30, LastRun 08-05 07:30:01) via `maintenance/push-fleet-heartbeat.ps1` — outside both Claude fleets by design. `push-fleet-heartbeat.log` confirms `emit: ORA FLEET HEARTBEAT written cc=27 lams=27` at `2026-08-04T11:30:02Z`. So "wrote step X but not steps Y/Z" was never a partial run — the guard wrote **nothing** on either day, and a different runner supplied the one artifact that looked alive.
+   - **No transcript exists to pull.** The CC session store holds no session titled `Ora task integrity guard` for 08-04 or 08-05; the most recent is 08-03 (createdAt 11:29:30, itself a catch-up). A truncated session would have left a transcript with early steps done — there is none.
+   - **What actually happened**, from the desktop log:
+     ```
+     08-04 07:29:07  Spawning new session ... ora-task-integrity-guard { missed: '2026-08-04T11:05:00.000Z' }
+     08-04 07:45:05  [warn] Cleared stale pending dispatch for: ora-task-integrity-guard
+     08-05 07:05:22  Delaying dispatch for ora-task-integrity-guard by 559s (jitter)
+     08-05 07:14:41  Spawning new session ... ora-task-integrity-guard
+     08-05 07:20:22  [warn] Cleared stale pending dispatch for: ora-task-integrity-guard
+     ```
+     Neither day produced a `Confirmed task run for:` line. This is the phantom-dispatch class already documented in `reference_scheduler_lastrunat_stamped_at_dispatch` (root-caused 08-03 on `ora-health-guard`) — **it was simply never checked for these two tasks.**
+   - **`lastRunAt` is stamped by the stale-clear itself.** Registry `lastRunAt` = `2026-08-05T11:20:22.767Z` — matches the 07:20:22 ET stale-clear to the millisecond; the 08-04 value carried in the next day's spawn line was `2026-08-04T11:45:05.316Z` = the 07:45:05 stale-clear. A never-started task is byte-identical to a completed one in the registry.
+   - **The 08-04 slot was also machine-down**: `event-loop-stall: main process blocked for 3097354ms [likely sleep: power_event]` = 51.6 min sleep ending 07:29 ET; the Windows watchdog's own 30-min cron skipped its 11:05Z slot and ran late at 11:29Z, independently confirming it. The catch-up spawn then fired into a still-offline network (`net::ERR_FAILED` on sessions-bridge/plan-usage/my-access/growthbook/updater) and went stale.
+   - **⚠️ Yesterday's fix addresses a failure mode that did not occur.** STEP 0.5's write-failure alarm and STEP 3's per-artifact freshness check both require the session to *start*. Under phantom dispatch no step ever evaluates. They are good hardening and should stay — but neither would have caught 08-04 or 08-05. (STEP 3's freshness check WILL catch the *next* one on the following day's run, which is a real gain.)
+   - SKILL.md measured 108 lines / 38,681 bytes. Large, but not implicated. **Changelog NOT split out of frontmatter** — the hypothesis it was meant to fix is refuted, and the file sits behind `config-write-guard`.
+
+2. **ora-broker-touch-cadence 2026-08-02 zero output — ROOT-CAUSED. Same class: the task never started. NOT a producer bug; no catch-up needed or proposed.**
+   ```
+   08-02 13:40:28  Delaying dispatch for ora-broker-touch-cadence by 338s (jitter)
+   08-02 13:46:07  Spawning new session for scheduled task ora-broker-touch-cadence
+   08-02 13:55:29  [warn] Cleared stale pending dispatch for: ora-broker-touch-cadence
+   ```
+   Registry `lastRunAt` `2026-08-02T17:55:29.045Z` = the stale-clear, exactly. `Confirmed task run for: ora-broker-touch-cadence` appears **zero times in main.log through main4.log** — the task has never once confirmed a run. No session, therefore no STEP 1 Notion read, no STEP 2/4 Outlook COM, **no broker drafts were created**, and nothing to unwind. Its SKILL.md is uninvolved; no code-level fix warranted. Next slot 2026-09-02 remains registered.
+   Caveat kept explicit: this specific stale-clear is one of only **2 of 47** CC-fleet cases that did NOT carry the renderer-absence signature below (renderer present, electron(12), 1.85GB RSS, no network error, no sleep). Its *class* is certain; its *trigger* is not.
+
+3. **GitHub `ora-cowork-watchdog#10` — commented and CLOSED** ([comment](https://github.com/ZeOoba/ora-cowork-watchdog/issues/10#issuecomment-5196294281)). **Gabriel's premise was partly wrong and is corrected on the issue:** #10 was *not* a false alarm. The beacon page really was 42h stale, and the 08-04 `ora-health-guard` run was *not* a phantom dispatch — the log shows `Spawning` 06:04:47 **and `Confirmed task run for: ora-health-guard` 06:05:18**. The run completed and sent 3 emails; Notion was genuinely down, so B.3.5b skipped the write by design. The alarm was correct; only the *inference* (silence ⇒ dead task) was wrong, which is exactly what the local-first rewrite fixes. Closed because the condition cleared on its own merits: beacon updated 08-05 05:35 ET, and both watchdog runs since (14:58Z, 18:07Z) passed silently.
+
+**NEW — fleet-wide quantification and a candidate predictor (this session's own finding, beyond the 08-03 memory note):**
+- Over 2026-07-31 21:06 → 2026-08-05 15:07: **74 `Confirmed task run` vs 55 `Cleared stale pending dispatch` — 43% of ALL dispatches never started.** By fleet: **CC/MCP 47 stale / 54 confirmed (47%)**; **LAMS/Cowork 8 / 20 (29%)**. Worst offenders: `ora-skill-cache-drift-alert` 10, `ora-aaos-expire-leases` 7, `ora-lease-snapshot-refresh` 5, `ora-cowork-heartbeat` 4 (the dead-man's own pulse), `ora-task-integrity-guard` 4, `ora-aaos-publish-contracts` 4.
+- **Renderer-absence signature:** all **54/54** confirmed CC dispatches occurred while an `electron_renderer` process appeared in the app's own `[process-memory]` top-list; **45/47** stale ones occurred with **no renderer present** (median electron proc count 5 vs 15). This generalises the 08-03 note's "dispatched while the app was still starting" — the common factor is *renderer absent*, which also covers post-sleep and post-network-outage teardown, not just cold start. NOT sufficient on its own: 5 confirmed runs happened at electron(5) too, so it is a **predictor, not a proven mechanism** — the spawn path never reaches `LocalSessions.checkTrust` in the failing cases, and the app logs nothing between `Spawning` and the ~10-min sweep that clears it.
+- Contributing triggers, CC fleet: 19/47 stale clears within 3 min of a `net::ERR_FAILED` burst; 12/47 within 20 min of a `likely sleep: power_event`. Confirmed runs: 3/54 near a network error.
+
+**Workflow-optimization candidates:**
+- *(automation)* The only reliable execution proof on this machine is the `Confirmed task run for: <id>` line in `main.log`. A probe that diffs `Spawning` against `Confirmed` per task per day would convert a 43% blind spot into a same-day alarm — and would have caught all three of today's items without any transcript archaeology. Highest-ROI item in this sweep.
+- *(knowledge)* `reference_scheduler_lastrunat_stamped_at_dispatch` existed since 08-03 and describes this exactly, but the 08-05 Automation Health triage did not consult it and mis-attributed both defects (one to SKILL.md length, one to a producer bug). The memory was right and unread — worth a pointer from the automation-health-monitor SKILL.md's triage step so the check is forced, not remembered.
+- *(friction)* Two independent artifacts now disagree about the 08-04 `ora-health-guard` run: the beacon page's 08-05 entry says it "died or stalled before Block B.3.5", while the local ledger (backfilled from the actual transcript) says it completed and sent 3 emails. The transcript-backed account wins; the beacon-page text is a superseded guess written without transcript access. Same lesson as above — an inference recorded in a durable artifact outlives the uncertainty that produced it.
+- *(skill gap)* Nothing in either fleet distinguishes "never started" from "ran and produced nothing." Every current detector (fleet-status.py, lastRunAt, recordedSkips, output-freshness) collapses the two. STEP 3's new freshness check finally covers the second half for one task — the first half still needs the log-based probe above.
+
+## 2026-08-05 — CC/MCP fleet cadence policy: collapsed all >1x/day tasks to daily (Gabriel-directed)
+
+Gabriel requested no ORA scheduled-task-fleet routine run more than once/day and all default to sonnet-5. Audited the live CC/MCP fleet (28 recurring tasks via `list_scheduled_tasks`): 24/28 already ≤1/day; 4 exceeded it, each a previously deliberate exception (`ora-skill-cache-drift-alert` 30-min, built same-day for OI-075; `ora-lease-snapshot-refresh` 3x/day weekday, closes PR #232 lease-integrity incident; `ora-aaos-expire-leases` 3x/day and `ora-aaos-publish-contracts` 2x/day, both Fleet Ledger v2 ruling C2). Surfaced the tradeoffs (AskUserQuestion); Gabriel chose to collapse all 4 regardless. Applied via `update_scheduled_task` (cron + description changelog on each):
+- `ora-skill-cache-drift-alert`: `*/30 * * * *` -> `0 11 * * *`. Now duplicates `ora-doctrine-integrity-guard`'s identical daily 12:55 ET sweep — flagged as a retirement candidate, not retired.
+- `ora-lease-snapshot-refresh`: `40 7,13,19 * * 1-5` -> `40 7 * * 1-5`. Snapshot staleness window widens 6h -> ~24h.
+- `ora-aaos-expire-leases`: `20 7,13,19 * * *` -> `20 7 * * *`. Stale-lock reclaim window widens ~6h -> ~24h.
+- `ora-aaos-publish-contracts`: `0 9,15 * * *` -> `0 9 * * *`. AAOS contracts mirror can drift up to ~24h behind HEAD.
+
+**Model default:** confirmed NOT enforceable via any tool on either fleet — `update_scheduled_task`/`create_scheduled_task` have no `model` parameter; CC/MCP model is a server-side pin (drift to `claude-opus-5` already observed on 4 tasks per [[reference_scheduled_task_model_standard]]), filed as [anthropics/claude-code#81408](https://github.com/anthropics/claude-code/issues/81408). No action taken or possible from this surface.
+
+**Not done — LAMS/Cowork fleet (27 tasks) unreachable from this Code-surface session** ([[reference_fleet_status_dual_read]]). Last known roster shows one cadence exception there too: `ora-cowork-heartbeat` (2x/day) — the dead-man heartbeat feeding the watchdog chain; NOT touched. Needs the same audit + Gabriel's ruling from a Cowork-surface session.
+
 ## 2026-08-05 — ora-health-guard: two FAILs root-caused; one was the detector, not the task
 
 **BEACON GAP 42h was a FALSE POSITIVE — the 08-04 run was healthy.** Session transcript
@@ -3382,3 +3507,21 @@ Ran `fleet-status.py --json` (58 tracked, 57 enabled/1 disabled, 0 collisions, a
 - The "Insurance Renewals" tab of the Master Workbook (eric spreadsheets/Master Excel Template Company Wide -- Oxford.xlsx) is now the CANONICAL live insurance tracker. The formerly cited source — "Insurance 2025" folder / "Eric & Gabriel Goldberg Accounts.xlsx" on OneDrive — no longer exists; the 2025-dated "Copy of…" files in Business/Insurance Policies Historical + Current are historical artifacts, never live data.
 - Implemented: (1) Insurance Renewals!A3 header rewritten via Excel COM (workbook was open; AutoSave on) — canonical-source language, dynamic TODAY() as-of date preserved as a formula; (2) ora-insurance-renewal-monitor SKILL.md Step 1 rewritten in BOTH copies (LAMS live: Documents/Claude/Scheduled; governance: Claude_Workspace/00_Governance/Scheduled) — no CC-fleet copy exists (LAMS-only by design); (3) staleness rule re-keyed: row-3 as-of date is TODAY()-driven and useless for staleness — use workbook file mtime >14d instead.
 - Gotcha logged: Insurance Renewals!A3 was a live formula; a naive Value2 write froze the date. Any future header edits on Master Workbook banner rows must check .Formula before writing.
+
+
+## 2026-08-05 — Automation Health 2026-08-05: CC/MCP fleet defect sweep (Cowork session)
+
+Four issues triaged in priority order from the 2026-08-05 Automation Health report (Notion `3b36ecd8-9e59-8125-b404c59d13fb53a1`).
+
+1. **ora-task-integrity-guard STEP 0.5 snapshot gap — FIXED, root cause partially confirmed.** `.cc.json` missing 08-04/08-05 was the visible symptom of a broader pattern: `registry-membership.log`, `task-folder-registration.log`, `task-folder-backup-completeness.log`, and `dangling-mutation.log` (STEP 1.5/2.75/2.8/2.9) ALL silently stopped updating after 2026-08-03T16:20, 2 consecutive days, while only `emit-fleet-heartbeat.py` kept succeeding — about to trip a second (48h) alarm within hours, undetected until this sweep. All 4 probe scripts verified healthy when run manually (exit 0, log-appends succeed) — the scripts are not broken; the scheduled CC session is not completing all its steps. Applied: (a) SKILL.md STEP 0.5 hardened — a write failure is now a STEP-3 alarm, not "non-fatal," closing a drift between the body text and the file's own `output_contract` (`is_primary_health_signal:true`); (b) STEP 3 extended with a presence/freshness check on each step's own output artifact, so a step that never ran (no exit code to check) still gets caught; (c) `registry-membership-probe.py`'s silent `except Exception: pass` on its log append now prints a WARN; (d) backfilled `2026-08-05.cc.json` (08-04 skipped, low value per doctrine). **Open, needs Gabriel's call:** suspect the SKILL.md (109 lines, dense accreted changelog) is long enough that the executing session is truncating before completing all ~10 steps — could not confirm from Cowork (no CC transcript access here). Recommend a Code-surface transcript pull for the 08-04/08-05 07:05 ET runs, and consider splitting the changelog out of frontmatter into a separate reference file (precedent: `reference_scheduled_task_model_standard.md`).
+
+2. **ora-broker-touch-cadence 2026-08-02 first-fire — investigated, needs Gabriel's call on catch-up.** Confirmed fired on schedule (lastRunAt 17:55Z vs scheduled 17:40Z, not a Sunday-offline miss) but produced zero output — no Ops Hub row (required in both the normal and guard-exit path per its own `output_contract`) and no completion email. Genuine producer bug on its first-ever monthly fire; root cause not pinpointed (no CC transcript access). Not auto-retried — drafting broker outreach is Hard-Invariant-1-adjacent even unsent. Next slot (2026-09-02) confirmed still correctly registered. Posted resolution comment closing the open watch-item (Notion id `3b36ecd8-9e59-817d-adc2-001de0cec596`).
+
+3. **ora-health-guard 2026-08-04 "confirmed but no output" — ALREADY FIXED same-day by the fleet's own prior work, verified not redone.** Per the SKILL.md's own 2026-08-05 root-cause note (session transcript `beafc783-8ea6-4dbe-ae9d-9ec992b82d82`): the run woke 51min late but executed end-to-end (3 emails sent, all exit 0); Notion was genuinely down (`net::ERR_FAILED` on all 4 fetches) so Block B.3.5b correctly skipped the beacon write per doctrine — but the old detector depended solely on that same Notion page, so a Notion outage and a dead task looked identical, producing a false FAIL and a spurious GitHub watchdog issue (`ora-cowork-watchdog#10`). Already fixed: `health-guard-beacon.py` + SKILL.md B.3.5a/B.3.5b rewritten local-first, a local ledger is now authoritative for "did this run," with a Notion-side gap the local ledger explains downgraded to advisory. Verified the 08-04 ledger entry is present and correct. **Open, needs Gabriel's call:** confirm GitHub `ora-cowork-watchdog#10` was actually closed — no GitHub access from this surface to check.
+
+4. **ora-session-sweep chronic Sunday lateness — investigated, retime proposed, NOT registered.** Confirmed same root cause as the ora-monday-sync/ora-lease-expiration-brief/ora-tenant-contact-gap-sweep retimes (machine/app not reliably running Sun evening through Mon AM); lastRunAt 03:47 ET Monday vs 20:00 ET Sunday scheduled (~467min late). Proposed new slot: Monday ~12:05 PM ET (clear of the existing 10:35–11:47 AM cluster). Not registered — needs Gabriel's explicit sign-off first, same bar as the three precedent retimes.
+
+**Workflow-optimization candidates (session close-out):**
+- 5 tasks now retimed/proposed-retimed around the same "machine not running Sun evening–Mon AM" root cause (monday-sync, lease-expiration-brief, tenant-contact-gap-sweep, session-sweep-proposed) plus broker-touch-cadence's first fire landing in an adjacent risk window — worth solving once at the infra level (a wake trigger / keep-open policy) rather than continuing to retime every new task around it.
+- A step that never executes produces neither a non-zero exit nor a log line — exit-code-only alarm conditions (as ora-task-integrity-guard's STEP 3 was before today) are structurally blind to a step being skipped outright. The freshness-check pattern added today generalizes to any multi-step guard task.
+- ora-health-guard's Notion-outage-vs-dead-task confusion (fixed today) is a pattern worth checking for on any other task whose sole health signal is a single external connector write (e.g., confirm ora-broker-touch-cadence's Ops Hub-row contract has the same failure mode before its next fire).

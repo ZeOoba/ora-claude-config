@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: c9af9d3a-ea56-47fe-aff8-4f8c6e61b383
-  modified: 2026-08-03T19:35:01.729Z
+  modified: 2026-08-05T19:37:58.857Z
 ---
 
 **`lastRunAt` is written at DISPATCH, not at completion. A task that produced nothing can look freshly-run to every on-machine detector.**
@@ -37,11 +37,25 @@ A dispatch issued while the desktop app is still starting never attaches and is 
 - **Fleet-wide, not health-guard-specific:** `Cleared stale pending dispatch` appears **115+ times across 20+ tasks** in those logs (top: ora-cowork-heartbeat 15, ora-aaos-expire-leases 14, ora-pm-ledger 10, ora-lease-snapshot-refresh 10, ora-aaos-publish-contracts 10).
 - **Not the overnight-offline pattern.** On 07-31 the app was up and `ora-am-brief` / `ora-deal-aging-sla` / `ora-aaos-publish-contracts` all confirmed within 4-5s in the 09:39 wave. The failed 08:50:44 wave was 4 tasks spawned during app startup, all cleared stale together at 09:36. Do not misfile a phantom dispatch as a late wake — see [[reference_fleet_throttle_skip_catchup_burst]].
 
+## Re-measured 2026-08-05 (Code session) — rate, spread, and a predictor
+
+Re-run over `main1.log` + `main.log`, **2026-07-31 21:06 → 2026-08-05 15:07**:
+
+- **74 `Confirmed task run` vs 55 `Cleared stale pending dispatch` — 43% of ALL dispatches never started.** By fleet: **CC/MCP 47 stale / 54 confirmed (47%)**, **LAMS/Cowork 8 / 20 (29%)**. It is not a CC-only bug.
+- Worst: `ora-skill-cache-drift-alert` 10 · `ora-aaos-expire-leases` 7 · `ora-lease-snapshot-refresh` 5 · `ora-cowork-heartbeat` 4 (**the dead-man's own pulse**) · `ora-task-integrity-guard` 4 · `ora-aaos-publish-contracts` 4.
+- **The stale-clear is what stamps `lastRunAt`** — not (only) the spawn. Registry values match the clear timestamp to the millisecond: guard `2026-08-05T11:20:22.767Z` = 07:20:22 ET clear; broker-touch `2026-08-02T17:55:29.045Z` = 13:55:29 ET clear.
+- **Renderer-absence signature (predictor, NOT a proven mechanism):** all **54/54** confirmed CC dispatches had an `electron_renderer` in the app's own `[process-memory]` top-list; **45/47** stale ones had **none** (median electron proc count 15 vs 5). This generalises "dispatched while the app was still starting" — the common factor is *renderer absent*, which also covers post-sleep and post-network-outage teardown. Not sufficient: 5 confirmed runs happened at electron(5) too. Failing spawns never reach `LocalSessions.checkTrust`; nothing is logged between `Spawning` and the ~10-min sweep that clears it.
+- Triggers, CC fleet: 19/47 within 3 min of a `net::ERR_FAILED` burst · 12/47 within 20 min of `likely sleep: power_event`. Confirmed runs: 3/54 near a network error.
+- **Do not assume the inverse.** A *confirmed* run can still produce nothing — `ora-health-guard` 2026-08-04 shows `Spawning 06:04:47` **and** `Confirmed task run 06:05:18`, ran end-to-end, but wrote no Notion beacon because Notion was down. Confirmed-but-no-output is a separate class — the confirm line proves the session *attached*, never that it produced anything. Both classes need an OUTPUT check; see [[feedback_verified_null_vs_inferred_null]].
+
 ## How to detect it
 
 Only an **output** check works. Registry state is compromised by construction.
 
-- Grep `main.log` for `Spawning new session for scheduled task <id>` with no `Confirmed task run for: <id>` within ~10s, and/or `Cleared stale pending dispatch for: <id>`.
+- **AUTOMATED since 2026-08-05 — `maintenance/phantom-dispatch-probe.py`** (20 unit tests, `test-phantom-dispatch-probe.py`). Pairs every `Spawning` against its `Confirmed task run for:` across `main.log`+`main1..4.log`, both fleets. Exit 0 clean · 1 phantom found · **2 = could not look** (logs unreadable — never conflated with clean). Runs from `fleet-deadman.ps1` (Windows Task Scheduler, daily 07:30) as check (4), deliberately OUTSIDE both fleets: `ora-task-integrity-guard` was itself phantom-dispatched on 08-04 AND 08-05, so an in-fleet check is silent exactly when it is needed. Findings land in `_state/phantom-dispatch.{log,json}` and in the desktop `FLEET-DOWN_ALERT.txt`.
+  - Two classes: `cleared-stale` (the app garbage-collected it) and **`never-confirmed`** (spawn with no confirm *and* no stale-clear — the app never even collected it). Counting stale-clears alone MISSES the second class; it was 3 of 54 over the 94h to 08-05.
+  - Gotcha baked into the tests: a healthy dispatch very often spawns AND confirms **inside the same log second**, and log lines carry no sub-second precision — sort spawn before confirm or every fast confirm reads as a phantom (this false positive shipped and was caught on live data, not by the tests).
+- Manual equivalent: grep `main.log` for `Spawning new session for scheduled task <id>` with no `Confirmed task run for: <id>` within ~10s, and/or `Cleared stale pending dispatch for: <id>`.
 - Off-machine backstop **LIVE 2026-08-03**: `ZeOoba/ora-cowork-watchdog` → `.github/workflows/health-guard-beacon.yml` watches the Connector Pre-Flight beacon page `3a56ecd8-9e59-8152-83b6-c61cec736f2b` on cron `35 */4 * * *`, opens a `health-guard-alert` Issue past 26h. [PR #8](https://github.com/ZeOoba/ora-cowork-watchdog/pull/8) merged; verified by `workflow_dispatch` run [30846258326](https://github.com/ZeOoba/ora-cowork-watchdog/actions/runs/30846258326) — `Fetched 1 page(s)` (so `secrets.NOTION_TOKEN` **does** have the beacon page shared; that risk is closed), age math correct at 3.96h, verdict OK, no false-positive Issue. The refactored shared probe was regression-tested on the pre-existing `cowork-heartbeat.yml` in the same session (run 30846327172, still OK at threshold 16h) — its defaults are unchanged.
 - On-machine: `ora-health-guard` Block B.3.5a now reads the beacon's prior `last_run_et` before overwriting it and escalates a >26h gap to a probe-equivalent FAIL.
 
