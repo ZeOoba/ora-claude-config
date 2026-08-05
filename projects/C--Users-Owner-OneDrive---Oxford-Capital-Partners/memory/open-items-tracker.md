@@ -3896,7 +3896,12 @@ still flags. A measured-vs-declared suppressor should follow that shape, not a l
 **Auto-check:** `python maintenance/governor-drift-probe.py` — exit 0 = clean.
 
 ### OI-100
-**Status:** OPEN — approved by Gabriel 2026-08-05, designed but NOT implemented
+**Status:** IMPLEMENTED, not yet merged/deployed — committed on branch
+`fix/oi-100-doctrine-gate-rescope` (isolated worktree, commit 9ad6146). Independent
+review + adversarial REFUTE pass both APPROVED (both fable-tier); 14/14 new tests +
+37/37 existing gate tests + full probe suite green; TDD red confirmed via git-stash
+before the fix landed. The live `.git/hooks/pre-push` shim and `main` are untouched —
+no merge or push has been made; awaiting Gabriel's merge/deploy decision.
 **Opened:** 2026-08-05
 **Source:** Gabriel ruling 2026-08-05 (rescope approved); design/trap investigation this session
 **Severity:** MEDIUM (correctness of a fail-closed security gate, plus shared-checkout friction)
