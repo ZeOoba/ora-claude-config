@@ -341,50 +341,125 @@ def _strip_heredoc_bodies(text):
     return _HEREDOC_RE.sub(_blank, text)
 
 
-def classify_shell(command):
-    """('governance'|'claim', label) for a write-shaped shell command naming a
-    protected path, else None."""
-    if not TOOL_PATHS_LOADED:
-        return None
-    text = normalize_text(command).replace("\\", "/").lower()
-    text = _strip_heredoc_bodies(text)
-    exempt, governance, claim = _shell_marker_sets()
-    text = _blank_exempt(text, exempt)
-    live_root = _norm(guard_root())
+# --- quoting/escaping normalization (2026-08-05) -----------------------------
+# Two live bypasses closed here, both previously documented as open in
+# memory/reference_config_write_guard_quote_split_gap.md and deliberately left
+# unfixed because a full shell tokenizer was judged too large a change:
+#
+#   1. QUOTE-SPLIT.  `cp x.json "<root>"/hooks/evil.py` -- the quote characters
+#      break what the OS sees as one contiguous path into fragments, so
+#      _ABS_PATH_TOKEN_RE never matches a drive-qualified token and the lexical
+#      markers never see a contiguous ".claude/hooks" either. The shell strips
+#      the quotes before the FS ever sees the path.
+#   2. CARET-ESCAPE.  `echo x > <root>/CLA^UDE.md` -- in cmd.exe `^` escapes the
+#      next character and is removed at parse time, so `CLAUDE.md` reaches the
+#      filesystem while the matcher only ever sees `CLA^UDE.md`.
+#
+# THE APPROACH IS UNION-ONLY, DELIBERATELY.  Rather than tokenizing (which risks
+# *losing* detections when the tokenizer disagrees with the real shell -- the
+# exact failure mode that produced the 2026-08-03 security regression, where a
+# boundary fix un-flagged real composite writers like `robocopy /MIR`), each
+# normalization produces an ADDITIONAL variant of the command text and every
+# variant is scanned. A variant can only ever ADD a hit, never remove one, so no
+# previously-caught command can become allowed by this change. The cost is the
+# opposite risk -- over-blocking -- which the negative controls in the
+# differential battery exist to bound.
+#
+# Variants are deduped, so the overwhelmingly common case (a command containing
+# neither a quote nor a caret) collapses to exactly one scan and pays nothing.
+_CARET_ESCAPE_RE = re.compile(r"\^(.)", re.DOTALL)
 
+
+def _decaret(text):
+    """cmd.exe caret-escape removal: `^X` -> `X` (and `^^` -> a literal `^`)."""
+    return _CARET_ESCAPE_RE.sub(r"\1", text)
+
+
+def _dequote(text):
+    """Drop quote CHARACTERS only, preserving every other character including
+    whitespace -- so two genuinely separate quoted arguments stay separated by
+    their space and cannot be glued into one spurious governance-looking path."""
+    return text.replace('"', "").replace("'", "")
+
+
+def _shell_variants(text):
+    """Deduped normalization variants of a shell command, each defeating one
+    quoting/escaping trick. Order is irrelevant (hits are unioned)."""
+    variants = []
+    for candidate in (text, _dequote(text), _decaret(text),
+                      _decaret(_dequote(text))):
+        if candidate not in variants:
+            variants.append(candidate)
+    return variants
+
+
+def _classify_shell_variant(text, live_root, governance, claim):
+    """(governance_hit_or_None, claim_hit_or_None) for ONE normalized variant.
+
+    This is the pre-2026-08-05 classify_shell body, unchanged in substance and
+    with its original precedence intact; it is factored out so every variant can
+    be scanned with identical logic."""
     # Every drive-qualified absolute path token gets classified through the
     # real-path resolver first -- more accurate than lexical marker matching
     # for anything absolute (handles '..', clears a genuinely different root).
     abs_hits = _shell_absolute_hits(text, live_root)
-    gov_abs = [h for h in abs_hits if h[0] == "governance"]
-    claim_abs = [h for h in abs_hits if h[0] == "claim"]
-    if gov_abs:
-        return gov_abs[0]
-
-    for marker, label in governance:
-        if _marker_matches(text, marker):
-            return ("governance", label)
-    if REGISTRY_BASENAME in text and (CC_SEGMENT in text or LAMS_SEGMENT in text):
-        return ("governance", "scheduled-task registry")
+    gov = next((h for h in abs_hits if h[0] == "governance"), None)
+    if gov is None:
+        for marker, label in governance:
+            if _marker_matches(text, marker):
+                gov = ("governance", label)
+                break
+    if gov is None and REGISTRY_BASENAME in text and (
+            CC_SEGMENT in text or LAMS_SEGMENT in text):
+        gov = ("governance", "scheduled-task registry")
     # file-rewriting git aimed anywhere at the live checkout (REFUTE 2026-07-18:
     # `git -C ~/.claude checkout main -- hooks/` rewrote the live hook layer with
     # neither a classic write verb nor a contiguous ".claude/hooks" marker in its
     # text -- live-proven). Read-only git passes; `git -C ~/.claude checkout -b
     # feature` false-positives and costs a retry/token -- breadth over precision.
     # (Absolute-path forms of this same case are already caught above via
-    # gov_abs -- this is the coarser "root mentioned anywhere, split across
+    # abs_hits -- this is the coarser "root mentioned anywhere, split across
     # unrelated arguments" signal for forms like `-C ~/.claude ... hooks/`.)
-    root_mentions = (live_root, "~/.claude", ".claude")
-    if GIT_MUTATE_RE.search(text) and any(
-            _marker_matches(text, r) for r in root_mentions):
-        return ("governance",
-                "file-rewriting git command referencing the live ~/.claude checkout")
-    if claim_abs:
-        return claim_abs[0]
-    for marker, label in claim:
-        if _marker_matches(text, marker):
-            return ("claim", label)
-    return None
+    if gov is None:
+        root_mentions = (live_root, "~/.claude", ".claude")
+        if GIT_MUTATE_RE.search(text) and any(
+                _marker_matches(text, r) for r in root_mentions):
+            gov = ("governance",
+                   "file-rewriting git command referencing the live "
+                   "~/.claude checkout")
+    clm = next((h for h in abs_hits if h[0] == "claim"), None)
+    if clm is None:
+        for marker, label in claim:
+            if _marker_matches(text, marker):
+                clm = ("claim", label)
+                break
+    return gov, clm
+
+
+def classify_shell(command):
+    """('governance'|'claim', label) for a write-shaped shell command naming a
+    protected path, else None.
+
+    Scans every quoting/escaping variant (see _shell_variants). Governance
+    precedence is preserved ACROSS variants: a governance hit found in any
+    variant outranks a claim hit found in any other, matching the original
+    single-pass ordering."""
+    if not TOOL_PATHS_LOADED:
+        return None
+    base = normalize_text(command).replace("\\", "/").lower()
+    base = _strip_heredoc_bodies(base)
+    exempt, governance, claim = _shell_marker_sets()
+    live_root = _norm(guard_root())
+
+    first_claim = None
+    for variant in _shell_variants(base):
+        text = _blank_exempt(variant, exempt)
+        gov, clm = _classify_shell_variant(text, live_root, governance, claim)
+        if gov:
+            return gov
+        if clm and first_claim is None:
+            first_claim = clm
+    return first_claim
 
 
 # ------------------------------------------------------------------ claim-lock

@@ -154,8 +154,22 @@
     "fa0fa64bdc96:pptx": "off",
     "fa0fa64bdc96:xlsx": "off",
     "fa0fa64bdc96:mcp-builder": "off",
+    "fa0fa64bdc96:claude-api": "off",
     "anthropic-skills:personal-portfolio": "off",
     "anthropic-skills:setup-cowork": "off",
+    "anthropic-skills:skill-creator": "off",
+    "ora-operations-extensions:annual-cycle": "off",
+    "ora-operations-extensions:capex-budgeting": "off",
+    "ora-operations-extensions:cash-position-monitor": "off",
+    "ora-operations-extensions:vendor-management": "off",
+    "ora-operations-extensions:investor-relations": "off",
+    "ora-operations-extensions:deal-retirement": "off",
+    "anthropic-skills:annual-cycle": "off",
+    "anthropic-skills:capex-budgeting": "off",
+    "anthropic-skills:cash-position-monitor": "off",
+    "anthropic-skills:vendor-management": "off",
+    "anthropic-skills:investor-relations": "off",
+    "anthropic-skills:deal-retirement": "off",
     "simplify": "user-invocable-only",
     "init": "user-invocable-only",
     "run": "user-invocable-only",
@@ -256,7 +270,16 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Bash|Edit|Write|MultiEdit|NotebookEdit|mcp__.*netlify.*-updater",
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/pretooluse-dispatcher.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|NotebookEdit|mcp__.*netlify.*-updater",
         "hooks": [
           {
             "type": "command",
@@ -274,7 +297,7 @@
         ]
       },
       {
-        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash|mcp__.*notion-(create|update|append|duplicate|move|comment)|mcp__.*OUTLOOK_(SEND|CREATE_DRAFT|SEND_DRAFT|FORWARD|REPLY)",
+        "matcher": "NotebookEdit|Bash|mcp__.*notion-(create|update|append|duplicate|move|comment)|mcp__.*OUTLOOK_(SEND|CREATE_DRAFT|SEND_DRAFT|FORWARD|REPLY)",
         "hooks": [
           {
             "type": "command",
@@ -283,25 +306,7 @@
         ]
       },
       {
-        "matcher": "Edit|Write|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/eos-plan-gate.py\""
-          }
-        ]
-      },
-      {
-        "matcher": "Edit|Write|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/shared-checkout-guard.py\""
-          }
-        ]
-      },
-      {
-        "matcher": "Edit|Write|MultiEdit|mcp__Desktop_Commander__write_file|mcp__Desktop_Commander__edit_block|mcp__plugin_desktop-commander_desktop-commander__write_file|mcp__plugin_desktop-commander_desktop-commander__edit_block",
+        "matcher": "mcp__Desktop_Commander__write_file|mcp__Desktop_Commander__edit_block|mcp__plugin_desktop-commander_desktop-commander__write_file|mcp__plugin_desktop-commander_desktop-commander__edit_block",
         "hooks": [
           {
             "type": "command",
@@ -310,7 +315,7 @@
         ]
       },
       {
-        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|mcp__excel__.*|mcp__.*(write_file|edit_block|move_file|start_process|interact_with_process|write_pdf)",
+        "matcher": "NotebookEdit|Bash|mcp__excel__.*|mcp__.*(write_file|edit_block|move_file|start_process|interact_with_process|write_pdf)",
         "hooks": [
           {
             "type": "command",
@@ -319,29 +324,11 @@
         ]
       },
       {
-        "matcher": "Edit|Write|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/eos-claude-md-guard.py\""
-          }
-        ]
-      },
-      {
-        "matcher": "Edit|Write|MultiEdit|mcp__Desktop_Commander__write_file|mcp__Desktop_Commander__edit_block|mcp__plugin_desktop-commander_desktop-commander__write_file|mcp__plugin_desktop-commander_desktop-commander__edit_block",
+        "matcher": "mcp__Desktop_Commander__write_file|mcp__Desktop_Commander__edit_block|mcp__plugin_desktop-commander_desktop-commander__write_file|mcp__plugin_desktop-commander_desktop-commander__edit_block",
         "hooks": [
           {
             "type": "command",
             "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/memory-index-guard.py\""
-          }
-        ]
-      },
-      {
-        "matcher": "Edit|Write|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/rules-md-guard.py\""
           }
         ]
       },
