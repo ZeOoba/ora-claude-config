@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: c9af9d3a-ea56-47fe-aff8-4f8c6e61b383
-  modified: 2026-08-05T19:37:58.857Z
+  modified: 2026-08-05T19:58:03.910Z
 ---
 
 **`lastRunAt` is written at DISPATCH, not at completion. A task that produced nothing can look freshly-run to every on-machine detector.**
@@ -44,7 +44,9 @@ Re-run over `main1.log` + `main.log`, **2026-07-31 21:06 → 2026-08-05 15:07**:
 - **74 `Confirmed task run` vs 55 `Cleared stale pending dispatch` — 43% of ALL dispatches never started.** By fleet: **CC/MCP 47 stale / 54 confirmed (47%)**, **LAMS/Cowork 8 / 20 (29%)**. It is not a CC-only bug.
 - Worst: `ora-skill-cache-drift-alert` 10 · `ora-aaos-expire-leases` 7 · `ora-lease-snapshot-refresh` 5 · `ora-cowork-heartbeat` 4 (**the dead-man's own pulse**) · `ora-task-integrity-guard` 4 · `ora-aaos-publish-contracts` 4.
 - **The stale-clear is what stamps `lastRunAt`** — not (only) the spawn. Registry values match the clear timestamp to the millisecond: guard `2026-08-05T11:20:22.767Z` = 07:20:22 ET clear; broker-touch `2026-08-02T17:55:29.045Z` = 13:55:29 ET clear.
-- **Renderer-absence signature (predictor, NOT a proven mechanism):** all **54/54** confirmed CC dispatches had an `electron_renderer` in the app's own `[process-memory]` top-list; **45/47** stale ones had **none** (median electron proc count 15 vs 5). This generalises "dispatched while the app was still starting" — the common factor is *renderer absent*, which also covers post-sleep and post-network-outage teardown. Not sufficient: 5 confirmed runs happened at electron(5) too. Failing spawns never reach `LocalSessions.checkTrust`; nothing is logged between `Spawning` and the ~10-min sweep that clears it.
+- **⚠️ ROOT CAUSE FOUND same day — mostly self-inflicted.** ORA's own `stuck-session-watchdog.ps1` was killing the desktop app's Electron children: **155 `electron_renderer`**, 391 `electron_utility`, 88 `electron_gpu`, 4 `electron_main`. Its kill filter excluded only short command lines and `--resume=`; Electron's children are named `claude.exe`, carry 851–5016-char command lines, pass no `--resume=`, and are long-lived by design. Fixed `e441130` (exclude `--type=` and `WindowsApps\Claude_`; both fail safe toward not killing). **Re-measure the rate before quoting the 44% figure — it describes the broken state.**
+- **The renderer is the mechanism, not merely a predictor** (superseding the first day's hedge, which conflated process COUNT with renderer PRESENCE): renderer present → **74 of 76 confirmed**; renderer absent → **0 of 53**. Network is a red herring: renderer absent + network fine = 31 stale/0 confirmed; renderer present + network DOWN = 0 stale/4 confirmed.
+- **Renderer-absence signature (raw first-day measurement, kept for the method):** all **54/54** confirmed CC dispatches had an `electron_renderer` in the app's own `[process-memory]` top-list; **45/47** stale ones had **none** (median electron proc count 15 vs 5). This generalises "dispatched while the app was still starting" — the common factor is *renderer absent*, which also covers post-sleep and post-network-outage teardown. Not sufficient: 5 confirmed runs happened at electron(5) too. Failing spawns never reach `LocalSessions.checkTrust`; nothing is logged between `Spawning` and the ~10-min sweep that clears it.
 - Triggers, CC fleet: 19/47 within 3 min of a `net::ERR_FAILED` burst · 12/47 within 20 min of `likely sleep: power_event`. Confirmed runs: 3/54 near a network error.
 - **Do not assume the inverse.** A *confirmed* run can still produce nothing — `ora-health-guard` 2026-08-04 shows `Spawning 06:04:47` **and** `Confirmed task run 06:05:18`, ran end-to-end, but wrote no Notion beacon because Notion was down. Confirmed-but-no-output is a separate class — the confirm line proves the session *attached*, never that it produced anything. Both classes need an OUTPUT check; see [[feedback_verified_null_vs_inferred_null]].
 

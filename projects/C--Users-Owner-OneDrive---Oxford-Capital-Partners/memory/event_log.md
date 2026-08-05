@@ -12,6 +12,75 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-05 — ROOT CAUSE: the stuck-session watchdog was killing Claude Desktop's renderer (Code session)
+
+Follow-on to the same-day phantom-dispatch forensics. Gabriel asked how to fix the ~45% phantom rate; the answer turned out to be self-inflicted. **ORA's own `stuck-session-watchdog.ps1` was killing the desktop app's Electron child processes, including 155 renderers — and a renderer is precisely what the scheduler needs to attach a dispatch.**
+
+**The causal chain, evidenced end to end:**
+1. `Get-KillCandidates` excluded only two things: CommandLine ≤200 chars (the bare shell) and `--resume=` (interactive sessions). Electron names its own children `claude.exe`, gives them 851–5016-char command lines, passes no `--resume=`, and keeps them alive for the life of the window — so all of them passed both exclusions into the >90min age test.
+2. Cross-referencing `stuck-session-watchdog.log` against the app's own `[process-memory]` PID→role telemetry: **391 `electron_utility`, 155 `electron_renderer`, 88 `electron_gpu`, 4 `electron_main` killed** (1,645 kills total; the other 1,007 were genuine sessions). Most recent renderer kill: 2026-08-05T19:05:04Z, PID 33084 — the same renderer that had served the successful 13:05 dispatch.
+3. Renderer presence is effectively deterministic for dispatch success: **renderer present → 74 of 76 confirmed; renderer absent → 0 of 53.** Splitting on network state kills the earlier network hypothesis outright: renderer absent + network fine = 31 stale / 0 confirmed; renderer present + network DOWN = 0 stale / 4 confirmed. **Network was a red herring** — a correlate of sleep/teardown, not a cause.
+4. Renderer absent **59% of the observed 114.6h**. The ~2h-spaced daytime dark windows (07:03→11:08, 07:30→09:49, 13:05→14:42, 13:35→14:55, 17:05→18:48) match the watchdog's 30-min/90-min cull cadence.
+
+**⚠️ Correction to this morning's entry:** it called the renderer signature "a predictor, not a proven mechanism," citing confirmed runs at `electron(5)`. That conflated *process count* with *renderer presence* — a 5-process app can still have a renderer. Properly split, it is 0-for-53 / 74-of-76. The mechanism is established, not merely correlated.
+
+**Fixes shipped (`e441130`):**
+- `stuck-session-watchdog-lib.ps1`: two new exclusions — `--type=` (Electron child marker; the Claude Code CLI never passes it) and `WindowsApps\Claude_` (packaged desktop app vs the CLI's `…\claude-code\<version>\claude.exe`). Both fail SAFE toward not killing. 6 new tests using command lines copied from the live process table, not invented.
+- **REFUTE differential harness** (old vs new filter over the live 25-process table, threshold 0 so the filter alone is measured): **16 spared** (4 renderers, 1 gpu, 11 utility), **0 newly killed** (regression gate), **all 7 real CLI task sessions still reachable**. Verdict PASS.
+- `ensure-claude-renderer.ps1` (new, 7 tests): the wake task guarded on `Get-Process Claude`, which is TRUE for a tray-only app with no renderer — the exact state where dispatches die — so it never relaunched during the outages it existed to prevent. Now classifies RENDERER / NO-RENDERER / NOT-RUNNING and restores the window. Windows task `ORA Claude Desktop Wake-and-Launch` action re-pointed at it; **trigger unchanged (daily 04:45)**. Old action recorded in the commit message for rollback.
+- Gabriel's rulings this session: fix the filter now (over pause-first / retire); harden Wake-and-Launch (over retiming crons); keep the phantom alert bar at "any phantom" for now — the alert going quiet is how we will know the fix worked.
+
+**Verification:** stuck-session-watchdog 15/15 · ensure-claude-renderer 7/7 · phantom-dispatch-probe 20/20 · Python suite 16/17. The one failure is NOT from this work — `reference_workbook_annual_debt_service_366day_overcapture.md` is untracked, written 15:34 today by a concurrently-working session, and trips `governor-drift-probe` on a `2.641x` DSCR figure in prose. Left alone per single-writer doctrine; it will block whoever pushes next.
+
+**Open / next:**
+- **Re-measure the phantom rate in ~48h.** Expect the daytime component to collapse; if it does not, the renderer is dying for a third reason. `_state/phantom-dispatch.log` carries the daily rate line, so the trend is already being recorded.
+- Overnight dark windows (19:00→04:45, 22:05→09:30) are the machine asleep / window closed, not the watchdog. The 04:45 daily guard covers the morning edge only. If post-fix data still shows overnight losses, the next lever is raising the guard's frequency — deliberately NOT done today, because a window that pops open every 30 minutes is an intrusion Gabriel did not ask for.
+- Still needs Gabriel's explicit approval (both behind `config-write-guard`): wiring the phantom probe into `ora-task-integrity-guard` STEP 1.5, and adding a "check the desktop log before attributing a defect to a SKILL.md" step to `automation-health-monitor`'s triage.
+- Nothing pushed. Two commits from the earlier entry (`a4f946b`, `66b562a`) plus `e441130` sit local; the checkout has ~82 files dirty from three other sessions.
+
+**Workflow-optimization candidates:**
+- *(doctrine)* A guard that kills processes needs an allow-list of what it may kill, not a deny-list of what it may not. Both of the old exclusions were deny-list heuristics inferred from two observed shapes; the class that broke it (Electron's own children) simply was not among the shapes considered. Worth applying to any other ORA script that terminates, deletes, or archives by pattern.
+- *(doctrine)* This bug was invisible for three weeks because its *victim* was the thing that reports health. Any watchdog whose failure mode is "silences the fleet" must be verified against an out-of-band signal — the phantom probe is now that signal for this one.
+- *(friction)* The watchdog shipped 2026-07-15 WITH a unit-test suite and the suite passed throughout. The tests encoded the same two-shape assumption as the code, so they could never have caught it. A fixture set derived from the *live* process table (as the 6 new tests now are) would have.
+
+## 2026-08-05 — LAMS/Cowork: closed both workflow-optimization gaps from today's cadence+tag audit
+
+Follow-up to the same-day "LAMS/Cowork fleet cadence + model-tag policy pass" entry. Gabriel asked
+to fix both workflow-optimization notes from that audit's closing summary.
+
+**1. Watchdog-threshold/heartbeat-cadence coupling now documented.** Added a standing section to
+`reference_scheduled_task_model_standard.md` ("Cadence changes on watchdog-monitored tasks — check
+external thresholds first"): before changing the cron cadence of any task an EXTERNAL monitor
+depends on, verify the monitor's threshold exceeds the new inter-fire gap first — a cadence cut
+without a matching widen produces a guaranteed false alarm every cycle, not just "slower
+detection." Cites the `ora-cowork-heartbeat` precedent from earlier today. Also cross-referenced
+into `automation-health-monitor` itself (v1.18, via `update_scheduled_task` description + surgical
+edit_block edits to its SKILL.md body — the file was too large to safely retype whole via a single
+`prompt` replace, so targeted insertions were used instead, each verified against the exact
+pre-edit text): the Step 0.55 table row for `ora-cowork-heartbeat`'s own 16h beacon-freshness check
+now notes it stays accurate only because this monitor's 11:15 ET run always follows the heartbeat's
+same-morning ~05:57 ET fire — a timing coincidence, not a designed invariant — and a new Operational
+Notes bullet tells the next editor to check both sides before any future cadence change to either
+task.
+
+**2. Tag-date-vs-revision drift detector added.** New Step 0.07 item 6 on `automation-health-monitor`
+(v1.18): for each enabled LAMS task, compares the `[MODEL:]` tag's `set` date against the latest
+`vX.Y (YYYY-MM-DD)` / "retimed YYYY-MM-DD" marker documented in the task's own description. A gap
+>3 days classifies `MODEL-TAG-STALE-VS-REVISION` (ℹ️, cosmetic — independent of the existing
+MODEL-STALE/MODEL-UNTAGGED standard-match check; a task can read current on one and stale on the
+other). Wired into Step 1's Notion report and Step 4's chat summary as a separate count so it
+doesn't inflate or hide behind the existing model-currency numbers. This is exactly the class of
+gap that let 8 tasks' tags go 3-22 days stale against their own last edit before a manual sweep
+caught it earlier today.
+
+**Verification:** `list_scheduled_tasks` confirms `automation-health-monitor`'s description now
+reads v1.18 with both changes summarized; `edit_block` outputs confirmed each surgical insertion
+landed at the intended location with surrounding text unchanged. Memory file append confirmed via
+read-back (tail 46 lines match intended content).
+
+No cadence, cron, or model-standard-line changes in this pass — both fixes are additive
+documentation/detection logic only.
+
 ## 2026-08-05 — LAMS/Cowork fleet cadence + model-tag policy pass (Gabriel-directed, Cowork session)
 
 Closes the loop the same-day CC/MCP entry ("CC/MCP fleet cadence policy: collapsed all >1x/day
