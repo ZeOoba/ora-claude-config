@@ -189,7 +189,10 @@ if (-not $tasks) {
 # STEP 1 -- guard.ps1 then membership-guard.ps1
 # ---------------------------------------------------------------------------
 Write-Section 'STEP 1a -- guard.ps1'
-$g = Invoke-Engine 'guard' $psExe @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $guardDir 'guard.ps1'))
+# -ReportOnly (added 2026-08-09): compute every decision, write NOTHING. Before this switch
+# existed the "dry run" invoked the real engine bare, so it wrote the live content ledger and
+# refreshed live mirrors -- a dry run with side effects.
+$g = Invoke-Engine 'guard' $psExe @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $guardDir 'guard.ps1'), '-ReportOnly')
 Write-Output $g.stdout
 Write-Output "exit=$($g.exit)"
 $raw['guard'] = $g
@@ -202,10 +205,20 @@ if ($guardJson) {
     if ($checkedIsZero) { $reasons.Add('guard.ps1 reports checked==0 (store discovery broken -- self-check for the self-healer)') }
     if ($restoredNonEmpty) { $reasons.Add("guard.ps1 restored[] non-empty: $($guardJson.restored -join ', ')") }
     if ($missingNonEmpty) { $reasons.Add("guard.ps1 missing_everywhere[] non-empty: $($guardJson.missing_everywhere -join ', ')") }
-    # churn_suppressed is INFORMATIONAL, never a WOULD-ALARM reason (guard.ps1 content-equality
-    # gate, 2026-07-24) -- surface it so the suppressor stays observable, but do not escalate.
+    # Keys added by the 2026-08-09 engine rewrite. Without these the dry run reported
+    # "no WOULD-ALARM" for findings the real STEP 3 escalates on.
+    if (@($guardJson.regressed).Count -gt 0)     { $reasons.Add("guard.ps1 regressed[] non-empty (canonical matches a recorded ANCESTOR; deliberately NOT auto-fixed): $($guardJson.regressed -join '; ')") }
+    if (@($guardJson.unreadable).Count -gt 0)    { $reasons.Add("guard.ps1 unreadable[] non-empty (canonical exists but is unreadable/0-byte; left untouched): $($guardJson.unreadable -join ', ')") }
+    if (@($guardJson.errors).Count -gt 0)        { $reasons.Add("guard.ps1 errors[] non-empty (per-task failures; run continued): $($guardJson.errors -join '; ')") }
+    if (@($guardJson.parse_miss).Count -gt 0)    { $reasons.Add("guard.ps1 parse_miss[] non-empty (a registry file would not parse): $($guardJson.parse_miss -join ', ')") }
+    if (@($guardJson.id_collisions).Count -gt 0) { $reasons.Add("guard.ps1 id_collisions[] non-empty (same id, different filePath): $($guardJson.id_collisions -join '; ')") }
+    if ($guardJson.ledger_status -eq 'unreadable') { $reasons.Add('guard.ps1 ledger_status=unreadable -- the content ledger could not be parsed, so REGRESSION DETECTION WAS OFF this run (a zero here could mean "could not look")') }
+    # churn_suppressed is VESTIGIAL as of the 2026-08-09 rewrite: mtime is gone from the engine,
+    # mirrors are written iff content differs, so mtime churn cannot occur and this is always
+    # empty. Retained only so older parsing does not break. A NON-empty value now means someone
+    # reintroduced an mtime heuristic -- which is why it is surfaced rather than dropped.
     if (@($guardJson.churn_suppressed).Count -gt 0) {
-        Write-Output "INFO churn_suppressed (mtime-newer but byte-identical, NOT an alarm): $($guardJson.churn_suppressed -join ', ')"
+        $reasons.Add("guard.ps1 churn_suppressed[] non-empty -- structurally impossible since 2026-08-09; an mtime heuristic may have been reintroduced: $($guardJson.churn_suppressed -join ', ')")
     }
 } else {
     Write-Output "WARN guard.ps1 stdout did not parse as JSON -- engine error, not itself a STEP-3 alarm unless it's the checked==0 case (STEP 4 failure note territory); flagging as inconclusive."

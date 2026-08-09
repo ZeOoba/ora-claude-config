@@ -155,6 +155,62 @@ foreach ($ch in @($OLD, $NEW, $NEW2)) {
 Check "PROPERTY: a canonical that EXISTS is never overwritten (27 combos)" $never
 
 # ---------------------------------------------------------------------------
+# 10. HISTORY IS UNBOUNDED. The old 40-entry cap silently turned a revert past the cap
+#     into an adopt, which was then pushed over both mirrors -- destructive AND silent.
+# ---------------------------------------------------------------------------
+$entry = $null
+$hashes = @()
+for ($i = 0; $i -lt 60; $i++) {
+    $h = ('{0:x2}' -f $i) * 32
+    $hashes += $h
+    $entry = Update-TaskLedgerEntry $entry $h $null $false
+}
+Check "history retains all 60 revisions (no cap)" (@($entry.history).Count -ge 60)
+$r = Resolve-TaskAction -Id 't' -CanonHash $hashes[0] `
+        -MirrorHashes @{ gov = $entry.current; local = $entry.current } -LedgerEntry $entry
+Check "a revert to the OLDEST ancestor is still detected" ($r.Action -eq 'regression_detected')
+Check "deep revert does not push to mirrors"              ($r.SyncMirrors -eq $false)
+
+# ---------------------------------------------------------------------------
+# 11. UNVERIFIED restore protects existing mirrors; VERIFIED restore refreshes them.
+#     Gating on verified-ness, not on "has a baseline", is the fix: an unverified restore
+#     is a guess, and overwriting a mirror with a guess destroys the last good copy.
+# ---------------------------------------------------------------------------
+$r = Resolve-TaskAction -Id 't' -CanonHash $null `
+        -MirrorHashes @{ gov = $OLD; local = $NEW2 } -LedgerEntry (Ledger $NEW @($OLD, $NEW))
+Check "unverified restore is marked unverified"        ($r.Verified -eq $false -and $r.Reason -match 'unverified')
+Check "unverified restore leaves existing mirrors alone" ($r.MirrorsToSync -notcontains 'local')
+
+$r = Resolve-TaskAction -Id 't' -CanonHash $null `
+        -MirrorHashes @{ gov = $NEW; local = $OLD } -LedgerEntry (Ledger $NEW @($OLD, $NEW))
+Check "verified restore is marked verified"             ($r.Verified -eq $true)
+Check "verified restore DOES refresh the stale mirror"  ($r.MirrorsToSync -contains 'local')
+
+# 11b. Git is preferred over mirrors when NO copy matches the known-good. Mirrors are what a
+#      bulk backup pass poisons; git is version-controlled. Trying mirrors first let a poisoned
+#      local backup beat a pristine git HEAD -- the 2026-08-09 shape.
+$r = Resolve-TaskAction -Id 't' -CanonHash $null -MirrorHashes @{ gov = $OLD; local = $OLD } `
+        -LedgerEntry $null -GitHeadHash $NEW2
+Check "with no lineage, git outranks the mirrors" ($r.RestoreFrom -eq 'git')
+
+# ---------------------------------------------------------------------------
+# 12. A rollback that PERSISTS across runs is adopted, so the entry cannot stick in
+#     regression_detected forever (which also left canonical restorable to the undone version).
+# ---------------------------------------------------------------------------
+$stuck = [PSCustomObject]@{ current = $NEW; history = @($OLD, $NEW); pending = $OLD }
+$r = Resolve-TaskAction -Id 't' -CanonHash $OLD -MirrorHashes @{ gov = $NEW; local = $NEW } -LedgerEntry $stuck
+Check "persisted rollback is adopted"            ($r.Action -eq 'adopt_after_regression')
+Check "adopted rollback advances known-good"     ($r.NewCurrent -eq $OLD)
+Check "adopted rollback still alarms"            ($r.Alarm -eq $true)
+Check "adopted rollback propagates to mirrors"   ($r.MirrorsToSync -contains 'gov')
+
+# 12b. First sighting sets pending and writes nothing.
+$fresh = [PSCustomObject]@{ current = $NEW; history = @($OLD, $NEW) }
+$r = Resolve-TaskAction -Id 't' -CanonHash $OLD -MirrorHashes @{ gov = $NEW; local = $NEW } -LedgerEntry $fresh
+Check "first rollback sighting sets pending"     ($r.SetPending -eq $OLD)
+Check "first rollback sighting writes nothing"   (-not $r.RestoreCanonical -and $r.SyncMirrors -eq $false)
+
+# ---------------------------------------------------------------------------
 if ($script:failures.Count -eq 0) {
     Write-Output ""
     Write-Output "ALL TESTS PASSED"
