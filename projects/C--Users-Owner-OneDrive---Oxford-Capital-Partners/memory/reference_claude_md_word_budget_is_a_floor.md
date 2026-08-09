@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 5e4a9dbe-c799-4e0e-b709-059286471562
-  modified: 2026-07-28T17:10:10.466Z
+  modified: 2026-08-09T18:10:05.650Z
 ---
 
 **The trap:** `doctrine-integrity-probe.py` prints `CLAUDE.md size: NNNN words (warn > 1700, fail > 1850)` on every pre-push. At ~1694 words this reads as "nearly at the limit — trim it." **That reading is backwards and acting on it damages doctrine.**
@@ -18,7 +18,7 @@ metadata:
 
 **Consequences for anyone asked to "trim CLAUDE.md":**
 
-1. **Check the live count first** (`python maintenance/doctrine-integrity-probe.py`) and compare to **1850**, not 1700. In the 1694–1755 band the correct answer is usually **"don't"** — Gabriel ruled exactly that on 2026-07-28 when the 1694/warn-1700 line was misread as approaching a limit.
+1. **Check the live count first** (`python maintenance/doctrine-integrity-probe.py`) and compare to **1850**, not 1700. In the 1694–1755 band the correct answer is usually **"don't"** — Gabriel ruled exactly that on 2026-07-28 when the 1694/warn-1700 line was misread as approaching a limit, and **re-ratified it on 2026-08-09 at 1725 words** when asked to trim directly (options offered: don't / relocate Engineering OS / recalibrate WARN→1800 / compress phrasing — he chose **don't**). Two rulings, same band: treat "trim CLAUDE.md" in this band as already-decided, and surface the ruling instead of executing.
 2. **Cross-file duplication is already 0** (`>= 12`-word shared runs). The cheap redundancy was harvested in the prior passes — there is no free text left to reclaim, only phrasing compression with real semantic risk in a file that IS the operating prompt.
 3. **A genuine reduction is relocation, not deletion** — move a whole rule down a layer (`tech.md` / `rules.md` / `standards.md`) and leave a pointer. Deleting to hit a number is how invariants quietly disappear.
 4. If the WARN line itself is the irritant, the honest fix is **recalibrating WORD_BUDGET_WARN upward**, not shrinking the file to satisfy a marker. That edits a guard constant — needs deliberate sign-off.

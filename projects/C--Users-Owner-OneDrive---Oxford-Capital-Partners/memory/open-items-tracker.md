@@ -2580,7 +2580,19 @@ same finding until the daily guard's own STEP 3 is taught to check this task's a
 (not done this session — flagged, not fixed, to avoid scope creep into a guard another session may still be
 actively working: `b5d8615c` was mid-session on "3 systematization items" when this session's `claim_work.py`
 call overwrote its `repo-housekeeping` claim broadcast).
-**Auto-check:** `ora-skill-cache-drift-alert`, cron `*/30 * * * *`.
+**Auto-check:** ~~`ora-skill-cache-drift-alert`, cron `*/30 * * * *`~~ → **`ora-doctrine-integrity-guard` engine 4, cron `55 12 * * *`** (updated 2026-08-09).
+**2026-08-09 — the fix built for this item was RETIRED; item stays OPEN with a narrowed residual.**
+`ora-skill-cache-drift-alert` is gone from the CC/MCP registry (archived to
+`scheduled-tasks/_archive_2026-08-09_retired/`; RATIFIED drop logged in `event_log.md`). It was collapsed
+`*/30` → `0 11 * * *` by the 2026-08-05 ORA-wide once/day cadence policy, which erased the only thing it did
+that the daily guard didn't — sub-daily detection — leaving it running the identical `repo_first_check.py --all`
+sweep ~2h before `ora-doctrine-integrity-guard`. **Sweep coverage is NOT lost** (two live invokers remain: the
+`ora-skills` pre-commit hook `--check-staged`, and the daily guard's engine 4). **What IS lost, and is the
+residual this item now tracks:** the retired task also filed a durable OI-NNN item on a finding and cross-checked
+this tracker to dedup; the daily guard alarms via email + Notion only, so a finding can still be lost to a
+scrolled terminal or an unread Notion page. Closing OI-075 would assert a durable-record capability that no
+longer exists — so it stays OPEN. The original "not yet fired against a real finding" residual is moot: the task
+never fired on a real finding before retirement (its last live sweep, 2026-08-09, returned 50 skills / 0 findings).
 
 ### OI-076
 **Status:** CLOSED
