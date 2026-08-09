@@ -12,6 +12,12 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-09 — EnterWorktree investigation, follow-up: baseRef drift check shipped
+
+Both optimization candidates from the 2026-08-05 EnterWorktree investigation landed. Built `check_worktree_baseref()` in `maintenance/doctrine-integrity-probe.py` (isolated worktree `feat/worktree-baseref-probe-check`, branched from local HEAD) -- live, WARN-only, fail-open check that asserts settings.json's `worktree.baseRef` stays `"head"`, so a future Claude Code version reset or accidental edit surfaces as `[WARN]` instead of silently regressing to `"fresh"` (which would drop local-ahead-of-origin commits again). 5 new unit/integration tests, full suite 60/60 green. Fast-forward wasn't possible at merge time (main had moved 2 commits via routine `chore(deadman)` heartbeat refreshes, disjoint from the touched files) -- merged `--no-ff` instead (`4eeff5b`), Gabriel-approved via AskUserQuestion for the live-governance-layer write (config-write-guard). Also documented, not fixed (no lever exists): `EnterWorktree`-created worktrees for `~/.claude` land at the cosmetically double-nested `~/.claude/.claude/worktrees/<name>` because the repo root is itself named `.claude`. Detail: `reference_enterworktree_launch_dir_repo_detection.md`.
+
+**Gotcha hit mid-task, worth its own note:** the config-write-guard override-token file (`hooks/sessions/<sid>/overrides/allow-config-write`) silently refuses to grant ANYTHING if appended to a second time -- `override_tokens.py`'s `parse_token()` treats a duplicate key across two appended blocks as ambiguous and returns `None` with no error surfaced to the caller, so the block message looks identical to "no token written yet." Always OVERWRITE this file fresh per grant, never append.
+
 ## 2026-08-05 -- Encoded verify-freshness-before-acting as standing doctrine (commit c6aa128), isolation done right this time
 
 Direct response to Gabriel asking how to make Code aware of today's recurring lesson for future sessions.
