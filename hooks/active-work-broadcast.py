@@ -125,7 +125,21 @@ def main() -> None:
         "(see reference_concurrent_session_duplicate_hardening_work.md):",
     ]
     for c in others:
-        lines.append("- %s: session %s claimed %.0fm ago -- %s" % (
+        # The host id ("local_<uuid>") is what send_message accepts; the 8-char agent id
+        # printed below is not, so without this a reader can SEE a colliding claim but
+        # cannot contact its owner. Printed in full (truncating makes it unresolvable)
+        # but still _sanitize_field()'d -- it reaches model-visible additionalContext
+        # from world-writable claim JSON, exactly the R4 threat model noted below.
+        # read_active_claims() has already normalized this to "a usable id, or ''"
+        # (claim_work._clean_host_session_id), so the emptiness test here is exact.
+        # It is NOT enough to test raw truthiness before sanitizing: a whitespace-only
+        # value is truthy, sanitizes to "", and _sanitize_field renders "" as its
+        # "(no description)" placeholder -- producing "(message it at (no description))".
+        # That escaped a first fix here and was caught by independent review.
+        # _sanitize_field is still applied as defense in depth for any caller that hands
+        # us a claim dict that did not come through the normalizing reader.
+        host = _sanitize_field(c.get("host_session_id")) if c.get("host_session_id") else ""
+        lines.append("- %s: session %s%s claimed %.0fm ago -- %s" % (
             _sanitize_field(c.get("slug", "?")),
             # session_id is attacker-controlled claim JSON same as description --
             # ROUND 2 REFUTE finding R4: the slug field (already sanitized above)
@@ -134,6 +148,7 @@ def main() -> None:
             # sanitization pass wrapped the one field that structurally could not
             # break, and skipped this one, which can.
             _sanitize_field(str(c.get("session_id", "?"))[:8]),
+            (" (message it at %s)" % host) if host else "",
             c.get("age_minutes", 0.0),
             _sanitize_field(c.get("description") or c.get("title")),
         ))
