@@ -10,8 +10,30 @@
 # Never touches live paths -- every root is injected via the engine's -*Override params.
 
 $script:failures = @()
-function Check($label, [bool]$cond) {
-    if ($cond) { Write-Output "PASS  $label" }
+
+# HARDENED 2026-08-09 (second pass, after independent verification of the same day's engine fix).
+# $cond was [bool]-typed. PowerShell binds parameters BEFORE the body runs, so an argument it
+# cannot coerce threw at BIND time: the body never executed, nothing was appended to
+# $script:failures, and the suite still printed "ALL TESTS PASSED" and exited 0. Four of the 53
+# assertions were dead that way -- all of them written as `(@($out.restored) -match 'x')`, which
+# returns the MATCHING ELEMENTS (an array), not a boolean. The dead four covered git-restore
+# attribution, unverified-restore labelling, rollback adoption and -ReportOnly dry-run reporting:
+# the newest and least-exercised paths in the engine, silently unverified.
+#
+# A suite that cannot fail on a malformed assertion is worse than one with fewer assertions -- it
+# reports green over checks that never ran. So the type constraint moves INSIDE, where the failure
+# path is ours: a condition that is not a single boolean is now a LOUD FAIL, not a skip. Keep it
+# that way. If a future assertion needs "did this list contain a match", write `.Count -gt 0`.
+function Check($label, $cond) {
+    if ($cond -is [bool])      { $ok = $cond }
+    elseif ($null -eq $cond)   { $ok = $false }
+    elseif ($cond -isnot [string] -and $cond -is [System.Collections.IEnumerable]) {
+        Write-Output "FAIL  $label  [HARNESS BUG: condition is a collection, not a boolean -- use (...).Count -gt 0]"
+        $script:failures += "$label  <-- malformed assertion, never evaluated"
+        return
+    }
+    else { $ok = [bool]$cond }
+    if ($ok) { Write-Output "PASS  $label" }
     else { Write-Output "FAIL  $label"; $script:failures += $label }
 }
 
@@ -231,7 +253,7 @@ $out = Invoke-GuardRepo $fxg $repo | ConvertFrom-Json
 $restoredBytes = if (Test-Path -LiteralPath $canonFile) { [System.IO.File]::ReadAllBytes($canonFile) } else { @() }
 
 Check "GIT RESTORE: canonical was restored"        (Test-Path -LiteralPath $canonFile)
-Check "GIT RESTORE: restored from git"             (@($out.restored) -match 'from git')
+Check "GIT RESTORE: restored from git"             ((@($out.restored) -match 'from git').Count -gt 0)
 Check "GIT RESTORE: byte-identical to the committed blob (no encoding corruption)" `
     ($restoredBytes.Length -eq $committed.Length -and (Compare-Object $restoredBytes $committed -SyncWindow 0) -eq $null)
 Check "GIT RESTORE: non-ASCII survived intact" `
@@ -264,7 +286,7 @@ $fx = New-Fixture -Root $root -CanonContent $OLD_CONTENT -GovContent $OLD_CONTEN
 Remove-Item -LiteralPath $fx.CanonFile -Force                # no ledger yet -> unverified restore
 $out = Invoke-Guard $fx | ConvertFrom-Json
 Check "UNVERIFIED restore still restores canonical" (Test-Path -LiteralPath $fx.CanonFile)
-Check "UNVERIFIED restore is flagged as such"       (@($out.restored) -match 'unverified')
+Check "UNVERIFIED restore is flagged as such"       ((@($out.restored) -match 'unverified').Count -gt 0)
 Check "UNVERIFIED restore does NOT overwrite the surviving good mirror" `
     ((Get-Content -LiteralPath "$($fx.Local)\t1\SKILL.md" -Raw) -eq $NEW_CONTENT)
 Remove-Item -Recurse -Force $root
@@ -283,7 +305,7 @@ Set-Content -LiteralPath $fx.CanonFile -Value $OLD_CONTENT -NoNewline   # operat
 $o1 = Invoke-Guard $fx | ConvertFrom-Json                     # run A: report, freeze
 $o2 = Invoke-Guard $fx | ConvertFrom-Json                     # run B: persisted -> adopt
 Check "rollback run A reports a regression"       (@($o1.regressed).Count -eq 1)
-Check "rollback run B adopts the deliberate rollback" (@($o2.regressed) -match 'adopted_deliberate_rollback')
+Check "rollback run B adopts the deliberate rollback" ((@($o2.regressed) -match 'adopted_deliberate_rollback').Count -gt 0)
 Check "rollback run B propagates it to the mirrors" `
     ((Get-Content -LiteralPath "$($fx.Gov)\t1\SKILL.md" -Raw) -eq $OLD_CONTENT)
 Remove-Item -LiteralPath $fx.CanonFile -Force
@@ -344,7 +366,7 @@ Remove-Item -LiteralPath $fx.CanonFile -Force
 $out = & $guard -GovOverride $fx.Gov -LocalOverride $fx.Local -LedgerPathOverride $fx.Ledger `
                 -StoreRootsOverride @($fx.Store) -CcRepoOverride (Join-Path $env:TEMP 'no-such-repo') `
                 -ReportOnly | ConvertFrom-Json
-Check "ReportOnly reports a WOULD-restore"     (@($out.restored) -match 'WOULD restore')
+Check "ReportOnly reports a WOULD-restore"     ((@($out.restored) -match 'WOULD restore').Count -gt 0)
 Check "ReportOnly did NOT recreate canonical"  (-not (Test-Path -LiteralPath $fx.CanonFile))
 Remove-Item -Recurse -Force $root
 
