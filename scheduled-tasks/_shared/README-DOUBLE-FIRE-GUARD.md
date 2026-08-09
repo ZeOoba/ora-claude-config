@@ -225,9 +225,24 @@ a plain hyphen, so an exact match would have missed the real sent item.
 4. Add `complete` (or `fail`) after the durable outputs land.
 5. Make the run summary report guard skips as NORMAL, citing the earlier artifact.
 
-Wired so far: `ora-am-brief` (blocks A/B/C/D), `ora-deal-aging-sla` (`main`).
-Not yet wired, exposure demonstrated above: `ora-monday-sync`,
-`ora-open-sessions-board`, `ora-health-guard`.
+Wired so far:
+
+| Task | Fleet | Block ids | TTL | Notes |
+|---|---|---|---|---|
+| `ora-am-brief` | CC/MCP | `blockA`-`blockD` | 30 | Both layers on B and D |
+| `ora-deal-aging-sla` | CC/MCP | `main` | 30 | Both layers |
+| `ora-open-sessions-board` | CC/MCP | `main` | **45** | Longer TTL: STEP 5 renders an interactive board and STEP 6 waits on Gabriel, so the claim is closed at the end of STEP 5, before that wait |
+| `ora-monday-sync` | **LAMS** | `main` | 30 | Both layers. See the caveat below |
+
+**`ora-monday-sync` lives on the LAMS/Cowork fleet**, whose SKILL.md files sit under
+`OneDrive.../Documents/Claude/Scheduled/` and are **NOT in this git repo** — so that
+edit has no version history or backup here, only a dated `.bak` beside it. The helpers
+are invoked by absolute path under `~/.claude`, so they work from either fleet unchanged;
+it is only the *spec* that is unversioned. Any LAMS task wired later has the same gap.
+
+Not yet wired, exposure demonstrated above: `ora-health-guard` (connector pre-flight,
+2026-07-24 — its two sends differed only in subject encoding, so verify the probe stem
+matches both forms before wiring).
 
 ## Tests
 
