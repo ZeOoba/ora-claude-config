@@ -12,6 +12,18 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-09 — Follow-up: checked the LAMS skill-store drift check for the 6 archived skills — likely already absent from the platform store, not independently confirmed
+
+Gabriel asked to check `ora-skill-store-drift-check` (LAMS-side, weekly Monday 12:10 PM ET) against the 6 skills archived to `ora-skills/_archive/` 2026-08-05 (`census-acs-extract`, `code-debugging-optimizations`, `maintenance-analytics`, `oxford-cc-strategic-audit`, `re-operations`, `rent-comp` — see the prior entry above), which the 08-05 log flagged as still needing a manual platform-side Save-skill removal.
+
+**That task's own Notion log (Ops Hub `32b6ecd8-9e59-81f2-b329-df3fd0e25062`) has not posted since 2026-07-21 19:23 UTC** — 14 total comments, none in August, meaning its last two weekly Monday fires (07-28, 08-04) produced no visible output. Cause not investigated here (out of scope for this pass); it predates the 08-05 archival entirely, so it never had a chance to catch this specific finding.
+
+**Read Store B directly instead** — the exact path the task's own SKILL.md names as authoritative (`C:\Users\Owner\AppData\Roaming\Claude\local-agent-mode-sessions\skills-plugin\583f08bc-0123-4111-8158-8fe3d927e350\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\skills\`). **0 of the 6 archived skills have a folder there** (54 skills present total; directory mtime 2026-08-09 08:53, i.e. fresh as of this morning). This is consistent with the platform copies already being removed, or — per this same skill set's own volatile install history in the drift log (several of the 6 oscillated between CACHE-ONLY / REPO-ONLY / INDEX-UNREGISTERED across the 06-20 through 07-21 runs) — never having been durably registered on the platform to begin with.
+
+**Not treated as confirmed removal** — the drift-check task itself is silent for the exact window that would matter (08-05 onward), so this is a strong but single-source read, not the doctrine's normal two-source corroboration. Updated the drafted Cowork prompt (from the prior entry) to lead with this finding and ask for a verify-then-remove-if-present pass rather than a blind removal, and to flag the drift-check's own missed cadence back to Gabriel rather than silently assuming it self-corrects.
+
+No writes to either skill store, the registry, or Notion this pass — read-only investigation (Desktop-Commander-equivalent directory read + `notion-get-comments`) only.
+
 ## 2026-08-09 — Closed all 4 optimization candidates from the 08-09 schematic refresh
 
 Session picked up the four candidates flagged by that morning's `ora-cc-schematic-refresh` run and closed all of them.
