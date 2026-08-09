@@ -167,4 +167,90 @@ for _bad in (None, "", 123, {"a": 1}):
 
 _sh.rmtree(_base, ignore_errors=True)
 
+# --- Concurrent-session advisory (2026-08-05) ---------------------------------
+# 2026-08-05 investigation (reference_concurrent_session_duplicate_hardening_work.md):
+# three near-collisions in one ~20-concurrent-session day, none caught proactively.
+# Root cause: CLAUDE.md's own "already-done" pre-flight check has no enforcement
+# point -- nothing surfaces concurrent-session activity automatically at task START.
+# This hook already fires on every prompt, so it is the right place to append a
+# cheap, fail-open, ADVISORY-ONLY line (never blocks, mirrors this file's own
+# non-blocking contract) using the already-proven session_liveness reader.
+
+# A real, EXISTING, empty directory -- not a missing path. This matters for the
+# run_env() subprocess cases below, which exercise session_liveness's PRODUCTION
+# resolution path (sessions_dir=None -> ORA_FLEET_SESSIONS_DIR env var): a MISSING
+# directory there falls through to session_liveness's documented old-format
+# fallback (the REAL production legacy session-state.json), which is exactly what
+# those fixtures must NOT exercise. (The explicit-sessions_dir calls just below --
+# _concurrent_session_note(..., sessions_dir=_sdir_empty) -- don't need this: an
+# explicit sessions_dir argument is honored with no fallback either way, per
+# session_liveness.py's own docstring; verified separately by the
+# "does/not/exist" case further down.) An existing-but-empty dir cleanly means
+# "zero other sessions" on both paths.
+_sdir_empty = _tf.mkdtemp(prefix="router-liveness-empty-")
+_note_none = _er._concurrent_session_note("me", sessions_dir=_sdir_empty)
+assert _note_none == "", f"no live sessions -> no note, got: {_note_none!r}"
+
+_sdir = _tf.mkdtemp(prefix="router-liveness-live-")
+def _write_session(sid, status="working"):
+    with open(_os.path.join(_sdir, sid + ".json"), "w", encoding="utf-8") as fh:
+        json.dump({"_sid": sid, "status": status, "cwd": "C:/x", "lastAt": "2026-08-05T12:00:00"}, fh)
+
+_write_session("other1")
+_write_session("other2")
+_write_session("ended-one", status="ended")  # must be excluded, matches session_liveness contract
+_note = _er._concurrent_session_note("me", sessions_dir=_sdir)
+assert "2" in _note, f"note should count the 2 non-ended other sessions, got: {_note!r}"
+assert "list_sessions" in _note or "event_log" in _note, \
+    f"note should point at how to check, got: {_note!r}"
+assert _note.isascii(), f"note must be ASCII-only, got: {_note!r}"
+
+# Own session is excluded even if present in the same dir.
+_write_session("me", status="working")
+_note_self = _er._concurrent_session_note("me", sessions_dir=_sdir)
+assert "2" in _note_self, f"own session must not count itself, got: {_note_self!r}"
+
+# Never raises on a broken/missing sessions dir or malformed session_id -- fail-open,
+# same posture as every other session_liveness consumer in this codebase.
+assert _er._concurrent_session_note("me", sessions_dir="C:/definitely/does/not/exist") == ""
+
+# A non-string/empty session_id must short-circuit BEFORE self-exclusion is even
+# attempted -- other_active_sessions() excludes only an EXACT own-sid match, so an
+# invalid sid would otherwise never match this session's own file and count the
+# caller as one of the "other" sessions. Tested against the POPULATED dir (not the
+# empty one): a weaker test against an empty dir would pass for the wrong reason
+# (nothing to falsely count) and prove nothing about self-exclusion.
+for _bad_sid in (None, "", "   ", 123, {"a": 1}):
+    _bad_note = _er._concurrent_session_note(_bad_sid, sessions_dir=_sdir)
+    assert _bad_note == "", \
+        f"invalid session_id must short-circuit to '', got: {_bad_note!r} for {_bad_sid!r}"
+
+# End-to-end: the advisory is APPENDED to a firing lane's output, never replaces it,
+# never appears when the hook would otherwise be silent, and keeps output ASCII.
+def run_env(prompt, sessions_dir):
+    env = dict(_os.environ)
+    env["ORA_FLEET_SESSIONS_DIR"] = sessions_dir
+    p = subprocess.run([sys.executable, HOOK],
+                       input=json.dumps({"prompt": prompt, "session_id": "me"}),
+                       capture_output=True, text=True, env=env)
+    assert p.returncode == 0, f"hook must always exit 0, got {p.returncode}: {p.stderr}"
+    return p.stdout
+
+out_live = run_env("build a new dashboard widget for WALT", _sdir)
+assert "/build" in out_live, f"lane suggestion must still fire, got: {out_live!r}"
+assert "2 other session" in out_live, f"live sessions -> advisory appended, got: {out_live!r}"
+assert out_live.isascii(), f"output must stay ASCII, got: {out_live!r}"
+
+out_solo = run_env("build a new dashboard widget for WALT", _sdir_empty)
+assert "/build" in out_solo, f"lane suggestion must still fire, got: {out_solo!r}"
+assert "other session" not in out_solo, f"no live sessions -> no advisory, got: {out_solo!r}"
+
+# Silent prompts stay silent regardless of concurrent-session state -- the advisory
+# only ever appends to an already-firing lane, never fires standalone.
+out_silent = run_env("what's the weather", _sdir)
+assert out_silent == "", f"non-work prompt must stay silent even with live sessions, got: {out_silent!r}"
+
+_sh.rmtree(_sdir, ignore_errors=True)
+_sh.rmtree(_sdir_empty, ignore_errors=True)
+
 print("ALL ROUTER TESTS PASS")
