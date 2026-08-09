@@ -65,6 +65,7 @@
 - [Cash Data excludes PM-held accounts](reference_cash_data_excludes_pm_held_accounts.md) — negative balance is usually tax-timing, not distress
 
 ## Reference
+- [settings.json enabledPlugins/skillOverrides attribution](reference_settings_json_enabledplugins_skilloverrides_attribution_2026-08.md) — 08-09's "not investigated" was wrong; both collapses are git-attributed (a0e95bf, 165fff3)
 - **→ [Reference sub-index](INDEX_reference.md)** — 108 pointers: tooling & paths, standards, fleet/scheduler gotchas, skill gotchas, Notion gotchas, workflow gotchas, git & shared-checkout hazards, event_log hazards, Windows/shell gotchas, Command Center, hooks & guards, verify-before-trusting. **Not auto-loaded — open it before debugging any tooling failure or assuming a gotcha is unrecorded.**
 - [SKILL.md frontmatter is deliberately NOT strict YAML](reference_skill_frontmatter_lenient_parse.md) — the harness parses line-wise, so ~97/147 fleet SKILL.md fail `yaml.safe_load` **by design**; do NOT mass-quote descriptions to satisfy a parser the harness doesn't use. Promoted out of the sub-index 2026-08-05 after a **2nd recurrence** — a session raised it as a fresh "pre-existing defect" despite the memory existing, because the sub-index isn't auto-loaded. `setup-self-audit.py` already prints "not a strict YAML parse", but that only helps a session that runs the probe rather than its own `yaml.safe_load`
 
