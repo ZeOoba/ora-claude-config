@@ -113,6 +113,7 @@ is what the detector should expect on all three lender rows |
 | [OI-104](#OI-104) | 2026-08-05 | Session-end optimization candidates, this session, 2026-08-05 | **LOW** The plugin-vs-user skill-source distinction was derived this session (per the referring conversation) by disassembling the CLI binary — a one-off, expensive investigation. If that distinction is needed again, it belongs in a reusable probe helper under `maintenance/`, not re-derived from scratch each time |
 | [OI-105](#OI-105) | 2026-08-05 | Session-end optimization candidates, this session, 2026-08-05 | **LOW** `eos-plan-gate` fires at the 4-file threshold even when the touched files were pre-specified handoff work scoped before the session started, forcing an override-file write that then reads in telemetry as a bypass rather than in-scope work. Candidate: a carve-out recognizing scope fixed before session start (e.g. an explicit file list named in the opening prompt) so the override isn't needed for work that was never actually unplanned |
 | [OI-110](#OI-110) | 2026-08-09 | Process-gap pair found by session `1d88885d`'s `hooks-override-auth` claim, 08-09 | **LOW/MEDIUM** `shared-checkout-guard.py` warns on the shared checkout's dirty-file count but has no notion of branch identity — it does not detect when a commit lands on another session's feature branch (i.e. the wrong branch is checked out relative to whose work is in flight). A commit landed on another session's feature branch this way, undetected by the guard, per the claim note. Companion gap filed alongside this one by the same session: script/Bash writes to memory files bypass the harness's `modified:` frontmatter stamp, leaving stale timestamps (that session's own claim note; not separately re-filed here to avoid duplicating whatever OI id they use) |
+| [OI-111](#OI-111) | 2026-08-09 | Four `git push` invocations landing [PR #41](https://github.com/ZeOoba/ora-claude-config/pull/41) / [PR #44](https://github.com/ZeOoba/ora-claude-config/pull/44), 08-09 | **MEDIUM** `hooks/git-prepush-doctrine-gate.py` runs its full sweep on branch DELETIONS, where there are no incoming objects (1 of 2 deletes applied, client timed out at 120s; `gh api -X DELETE` returned instantly) — and printed `error: failed to push some refs` on a push that SUCCEEDED (`7711df0`, ls-remote-confirmed byte-identical). PR #46 (`a880b39`) added a scratch-worktree janitor but addressed neither. |
 
 ### OI-009
 **Status:** OPEN (substantial progress made 2026-07-17, real scope remains)
@@ -2632,6 +2633,46 @@ their real contact info.
 server-side (the handler already does `db.from('tenants').select(...)` for the IDOR check — just add
 `contact_email`/`name` to that select and use it) instead of trusting the request body. Low priority,
 not blocking; noted here so it isn't lost, not because it's urgent.
+**Auto-check:** none.
+
+### OI-111
+**Status:** OPEN
+**Opened:** 2026-08-09
+**Source:** observed across four `git push` invocations while landing [PR #41](https://github.com/ZeOoba/ora-claude-config/pull/41) and [PR #44](https://github.com/ZeOoba/ora-claude-config/pull/44) (both merged, `c8ea74e` / `6b197f1`) from the `ora-entry-market-scan` session
+**Severity:** MEDIUM — defect 2 is a correctness bug in failure reporting, not merely slowness. No data was lost in the observed instances, but the failure shape actively invites a destructive retry.
+**Owner note:** `hooks/git-prepush-doctrine-gate.py` was under active edit by session `1ce540e5` / host `local_2648ba07-…` ("Ora health guard", `prepush-worktree-janitor` claim) when this was found. Filed here rather than messaged because `send_message` is unavailable from an unattended (scheduled-task) session. **Check with that session before implementing — they may already have touched this.**
+
+**Defect 1 — the gate appears to run on branch DELETIONS, where there are no objects to validate.**
+`git push origin --delete` for two merged branches timed out the client at 120s; the FIRST delete
+landed and the SECOND did not. The same deletion via `gh api -X DELETE
+repos/ZeOoba/ora-claude-config/git/refs/heads/<branch>` returned instantly (exit 0). A delete-only
+refspec carries no incoming objects, so the doctrine-integrity probe and the full `hooks/tests` suite
+have nothing to check — but the observed runtime is consistent with them running anyway. Likely cause:
+the gate derives its changed-file set without first testing for a zero-SHA (delete) source ref, so an
+empty diff falls through to a full sweep rather than an early exit.
+
+**Defect 2 — `error: failed to push some refs` printed on a push that SUCCEEDED.**
+Pushing `docs/memory-cron-retime-rearm`: first attempt printed that error, the retry timed out at 120s,
+and the branch was nonetheless present on the remote at the correct SHA — `7711df0`, confirmed by
+`git ls-remote` with local and remote byte-identical. **The operation succeeded while reporting
+failure.** This is the more dangerous of the two: a false failure invites a destructive retry, or a
+conclusion that work was lost when it was not. Suspected cause: the gate's exit code or stderr bleeding
+into git's own ref-status reporting.
+
+**Timing observed (three data points, same session):** push-with-content → doctrine-integrity-probe +
+`hook-tests-gate` 73/74 (1 env-skip, `test-confidentiality-guard.py`), completed but slow · second push
+→ `hook-tests-gate` 38/39, timed out client-side at 120s, landed anyway · delete push (2 branches) →
+timed out at 120s, 1 of 2 applied.
+
+**Candidate fix (NOT applied):** (a) early-exit the gate on a delete-only refspec — no objects, nothing
+to validate; (b) separate the gate's failure signalling from git's ref-status output so a gate warning
+cannot render as `failed to push some refs`; (c) if the full `hooks/tests` suite is genuinely intended
+to run on every push, budget it against the client timeout — it is already at ~40–75 assertions and
+growing, and two of four observed pushes exceeded 120s.
+
+**Closing condition:** a delete push and a content push each complete inside the client timeout, and a
+gate-warned push reports its true git status. Re-verify with the same commands that produced the
+evidence above (`git push --delete`, `git ls-remote` SHA comparison).
 **Auto-check:** none.
 
 ## Closed
