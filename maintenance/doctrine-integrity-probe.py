@@ -29,7 +29,8 @@ Checks:
   5. CLAUDE.md size budget: > WORD_BUDGET_FAIL words            [MISSING -> fail]
      (fail is a one-in-one-out gate ~95 words above the honest post-consolidation
      floor -- see the WORD_BUDGET_* constants for the calibration),
-     > WORD_BUDGET_WARN = approaching                            [WARN only]
+     > WORD_BUDGET_WARN = AT the consolidation floor -- a nudge,  [WARN only]
+     never a cue to trim; see the constants' calibration comment
   6. Dated annotations: CLAUDE.md is doctrine-dateless (v2.1 layering: ALL dated
      history -> event_log.md). Any bare ISO date in CLAUDE.md    [MISSING -> fail]
      Dates embedded in hyphenated slugs (spec filenames like
@@ -1212,7 +1213,8 @@ def main():
 
     # --- 5. CLAUDE.md size budget ---
     words = len(text.split())
-    print("CLAUDE.md size: %d words (warn > %d, fail > %d)"
+    print("CLAUDE.md size: %d words (warn > %d = consolidation floor; "
+          "fail > %d = the real gate)"
           % (words, WORD_BUDGET_WARN, WORD_BUDGET_FAIL))
     if words > WORD_BUDGET_FAIL:
         print("  [MISSING] size budget exceeded: %d > %d words "
@@ -1221,8 +1223,15 @@ def main():
               % (words, WORD_BUDGET_FAIL))
         missing.append("CLAUDE.md size budget (%d > %d words)" % (words, WORD_BUDGET_FAIL))
     elif words > WORD_BUDGET_WARN:
-        warn("approaching the size budget (%d words; fail at %d)"
-             % (words, WORD_BUDGET_FAIL))
+        warn("%d words is AT the consolidation floor (%d), not near the gate (%d) -- "
+             "this line is a one-in-one-out nudge, NOT 'the file is too big'. Do not "
+             "trim to satisfy it: two independent full-file passes both bottomed out "
+             "here, so cuts below the floor remove load-bearing doctrine. A genuine "
+             "reduction is relocation (move a whole rule down a layer, leave a "
+             "pointer), never deletion. Ruled 'don't trim' in this band on 2026-07-28 "
+             "and again 2026-08-09; calibration: "
+             "memory/reference_claude_md_word_budget_is_a_floor.md"
+             % (words, WORD_BUDGET_WARN, WORD_BUDGET_FAIL))
     else:
         print("  [OK]      within budget")
 
