@@ -126,8 +126,68 @@ def own_session_id():
             os.environ.get("CLAUDE_CODE_HOST_SESSION_ID") or "unknown")
 
 
+def own_host_session_id():
+    """The CCD HOST session id ("local_<uuid>") -- a DIFFERENT namespace from
+    own_session_id()'s CLAUDE_CODE_SESSION_ID agent id, not a fallback for it.
+
+    WHY BOTH (2026-08-09): list_scheduled_tasks' sibling tools -- list_sessions and
+    send_message -- only ever speak the host id, while claim files, the
+    fleet-session-hook mirror (its `_sid`) and session_liveness.py all speak the agent
+    id. No artifact carried both, so a live claim could be READ but its owner could not
+    be CONTACTED: two claim ids this session tried to resolve against list_sessions
+    ("1d24d6a4", "b09003a0") looked like phantom sessions when both were in fact live
+    and present in the mirror under the agent-id namespace.
+
+    Recorded ALONGSIDE the agent id, never instead of it -- own_session_id() stays the
+    identity used for ownership matching (renew/release/collision), so claims remain
+    joinable to the agent-id-keyed mirror. Returns "" when unset (an unattended or
+    scheduled session may not carry it) so callers never branch on absence, matching the
+    `paths` present-but-possibly-empty precedent. Deliberately NOT defaulted to
+    "unknown": that string is a legal agent id here, and a host-id field carrying it
+    would read as a real target and be pasted into send_message.
+    """
+    return (os.environ.get("CLAUDE_CODE_HOST_SESSION_ID") or "").strip()
+
+
+# A host id is a machine-generated handle ("local_<uuid>"): printable ASCII, no
+# whitespace, short. Anything else in that field did not come from the runtime.
+# Checked with a plain scan rather than `re`: this module is imported by
+# shared-checkout-guard.py on EVERY Edit/Write, and the header note above is explicit
+# about not paying import cost on that hot path for something the check does not need.
+_HOST_ID_MAX = 128
+
+
+def _clean_host_session_id(value):
+    """Normalize the host id ON READ to 'a usable target, or nothing'.
+
+    Claim JSON is world-writable by design, and this field is rendered into
+    model-visible SessionStart context AND printed by `list` for an agent to copy into
+    send_message. Normalizing at this single choke point (rather than at each display
+    site) means every consumer receives either a clean id or "", so no caller has to
+    re-derive "is this empty?" -- an earlier version of the broadcast tested raw
+    truthiness, and a whitespace-only value sailed through it into the sanitizer, which
+    renders "" as the placeholder "(no description)". The result was the absurd
+    "(message it at (no description))".
+
+    Degrades to "" (never raises, never truncates): a truncated or control-char-bearing
+    host id is unresolvable anyway, so surfacing a mangled one would advertise a target
+    that cannot be messaged. Same fail-open posture as _clean_paths().
+    """
+    if not isinstance(value, str):
+        return ""
+    v = value.strip()
+    if not v or len(v) > _HOST_ID_MAX:
+        return ""
+    # Printable ASCII, no spaces (0x21..0x7e). Excludes every control character,
+    # newline and tab -- i.e. everything that could break a rendered line.
+    for ch in v:
+        if not ("\x21" <= ch <= "\x7e"):
+            return ""
+    return v
+
+
 def write_claim(slug, session_id, description, title=None, cwd=None, base_dir=None,
-                 now=None, paths=None):
+                 now=None, paths=None, host_session_id=None):
     """Write (or overwrite) this session's claim on `slug`. Atomic rename + a
     pid-unique tmp name, same pattern as fleet-session-hook.py's save_session() --
     closes the exact same "two writers share one tmp path" hazard that pattern was
@@ -139,6 +199,11 @@ def write_claim(slug, session_id, description, title=None, cwd=None, base_dir=No
     os.makedirs(base_dir, exist_ok=True)
     data = {
         "session_id": session_id,
+        # ADDED 2026-08-09. The CCD host id ("local_<uuid>") that list_sessions and
+        # send_message speak -- see own_host_session_id(). Present-but-possibly-empty
+        # (same contract as `paths`) so readers never branch on absence. ADDITIVE:
+        # `session_id` above remains the ownership identity for renew/release/collision.
+        "host_session_id": host_session_id or "",
         "title": title or slug,
         "description": description,
         "claimed_at": _now_iso(now),
@@ -231,6 +296,11 @@ def read_active_claims(base_dir=None, ttl_minutes=DEFAULT_TTL_MINUTES, now=None)
         out.append({
             "slug": name[:-5],
             "session_id": d.get("session_id", "?"),
+            # Defaulted AND normalized, not trusted as written -- same posture as
+            # `paths` below. Absent key (pre-2026-08-09 file), null, a non-string, a
+            # whitespace-only value, an over-long one, or one carrying control
+            # characters all degrade to "" rather than reaching a display site.
+            "host_session_id": _clean_host_session_id(d.get("host_session_id")),
             "title": d.get("title", "?"),
             "description": d.get("description", ""),
             "claimed_at": d.get("claimed_at", ""),
@@ -306,7 +376,11 @@ def renew_claim(slug, session_id, description=None, base_dir=None, now=None,
     write_claim(slug, session_id,
                description if description is not None else existing.get("description", ""),
                title=existing.get("title"), cwd=existing.get("cwd"),
-               base_dir=base_dir, now=now, paths=existing.get("paths"))
+               base_dir=base_dir, now=now, paths=existing.get("paths"),
+               # Carried forward from the existing claim, NOT re-read from the
+               # environment: renew is a rewrite, and anything not passed through here
+               # is silently dropped from the file.
+               host_session_id=existing.get("host_session_id"))
     return existing
 
 
@@ -377,7 +451,13 @@ def main():
                                  "oxford-command-center-data, repo-housekeeping")
     c.add_argument("description", help="One line: what you're doing and why")
     c.add_argument("--title")
-    c.add_argument("--paths", nargs="*", default=None,
+    # action="extend" (not the former bare nargs="*"): with plain nargs, argparse
+    # OVERWRITES on a repeated flag, so `--paths a --paths b` silently recorded only
+    # ["b"] -- observed live 2026-08-09, a two-path claim covering one path, with the
+    # dropped one being the file actually being edited. Silently under-covering defeats
+    # the file-level cover that defect D1 added. extend accumulates across repeats and
+    # still accepts the space-separated form.
+    c.add_argument("--paths", nargs="*", action="extend", default=None,
                    help="Files and/or DIRECTORIES this claim covers (a directory "
                         "covers everything beneath it). Slugs are work-TYPE scoped, so "
                         "two honest slugs can collide on one file (observed 2026-07-26: "
@@ -415,7 +495,7 @@ def main():
                       args.slug, str(existing.get("session_id", "?"))[:8],
                       existing.get("age_minutes", 0.0), existing.get("description", "")))
         path = write_claim(args.slug, sid, args.description, title=args.title,
-                           paths=args.paths)
+                           paths=args.paths, host_session_id=own_host_session_id())
         n = len(_clean_paths(args.paths))
         print("Claimed '%s' as session %s -> %s" % (args.slug, sid, path))
         if n:
@@ -458,8 +538,14 @@ def main():
         if not claims:
             print("No active claims.")
         for cl in claims:
-            print("%s: session %s, %.0fm ago -- %s" % (
-                cl["slug"], cl["session_id"][:8], cl["age_minutes"], cl["description"]))
+            # The host id is printed IN FULL and unabbreviated -- unlike the 8-char
+            # agent id, it is meant to be copied straight into send_message, and a
+            # truncated one would not resolve.
+            host = cl.get("host_session_id") or ""
+            print("%s: session %s%s, %.0fm ago -- %s" % (
+                cl["slug"], cl["session_id"][:8],
+                (" (host %s)" % host) if host else "",
+                cl["age_minutes"], cl["description"]))
         return 0
 
     return 1
