@@ -11,6 +11,60 @@ metadata:
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-08-09 — Closed all 4 optimization candidates from the 08-09 schematic refresh
+
+Session picked up the four candidates flagged by that morning's `ora-cc-schematic-refresh` run and closed all of them.
+
+**Skill gap (fleet-status.py):** `cron_hm()` called `int(hr)/int(mn)` directly, so a comma-list hour field like "7,13,19" raised `ValueError` and silently dropped the whole task from AM-pileup, same-time collision detection, AND the missed-cycle detector — not undercounted, invisible. Flagged 07-27c, still open. Fixed via isolated worktree + TDD: new `cron_hms()` enumerates every fire time; `cron_hm()` stays a single-fire-only back-compat wrapper. 18 new/extended tests, independent review via `pr-review-toolkit:code-reviewer` (no correctness issues). Merged `main` (`0b4ff8c`), pushed to `origin/main`.
+
+**Friction (schematic-refresh 13-day stale gap):** `ora-health-guard`'s daily probe suite already captured fleet-status.py's missed-cycle line but never escalated on it. Added a C.1.1 escalation (v1.3): non-empty missed-cycle list now flips the `[ACTION]` subject, same mechanism as the existing rate-staleness/beacon-gap escalations. Committed `main` (`ed1ceaf`), pushed.
+
+**Knowledge gap (settings.json enabledPlugins/skillOverrides "not investigated"):** It was investigated wrong — `git log -p -- settings.json` fully explains both collapses: `a0e95bf` (2026-07-28, Gabriel, app-UI plugin uninstalls) and `165fff3` (2026-08-05, Gabriel, inert-skillOverrides purge). Documented in `reference_settings_json_enabledplugins_skilloverrides_attribution_2026-08.md`; `ora-cc-schematic-refresh` now requires a git-log check before calling a settings.json change unattributed. Committed `main` (`ed1ceaf`), pushed.
+
+**Automation (09:00/11:00 collisions):** Retimed via supervised `update_scheduled_task` (registry, not a file edit). `ora-aaos-publish-contracts` 09:00→09:15 ET (the LAMS-side `ora-health-guard-fail-aging-nudge` co-occupant at 09:00 weekdays is not writable from Claude Code — moved this side). `ora-entry-market-scan` 11:00→11:45 ET on its rare 1-7/Tue slot (first retimed to 11:30, which fleet-status.py immediately caught as a NEW collision with the LAMS-side `ora-ar-export-freshness-nudge`, days 1/15 — `list_scheduled_tasks` only surfaces the CC/MCP fleet, so the first pick wasn't cross-checked against LAMS; 11:45 verified clear on both fleets before landing). `fleet-status.py --summary` now reports `same-time collisions 0` and `missed single cycle 0` (the two flagged missed-cycle tasks, `ora-am-brief` and `ora-skill-cache-drift-alert`, both self-healed by firing again today — consistent with the pre-existing OI-070 point-in-time caveat, not a fix).
+
+**Concurrency note:** this session ran alongside 3-4 other active sessions in the same `~/.claude` checkout (one of which had, ~30 min earlier, live-retagged `ora-skill-cache-drift-alert`'s MODEL tag and left an open handoff about a possible mirror-revert risk). All file edits were staged with `git add -p` to isolate only this session's hunks; the registry retimes were re-verified against a fresh `registry-membership.log` timestamp and file-mtime check immediately before writing, per the single-writer doctrine.
+
+## 2026-08-09 — ora-task-integrity-guard AND ora-health-guard PAUSED one cycle (Gabriel-directed): guard.ps1 mtime-revert fix not yet landed
+
+Relayed the undelivered `ora-task-integrity-guard` handoff (`maintenance/_state/guard-handoff-2026-08-09-frontmatter-retags.md`; the scheduled run could not use `send_message`) and verified its open question.
+
+**1. The four 2026-08-09 model retags are INTACT** — verified via `list_scheduled_tasks`, not a file read (register-scheduled-task Rule 2). `ora-skill-cache-drift-alert`, `ora-cc-schematic-refresh`, `ora-am-brief`, `ora-lease-snapshot-refresh` all still read `[MODEL: claude-opus-5 observed | checked 2026-08-09 via live-run transcript canary]`. Nothing was re-applied; nothing had reverted.
+
+**2. The fix has NOT landed.** It is uncommitted WIP in worktree `.claude/worktrees/fix-guard-content-revert` (branch `fix/guard-content-revert`, zero commits ahead of main): `guard.ps1` modified unstaged, plus untracked `maintenance/task-integrity-lib.ps1` + two test files. The live engine is still the Jul 24 mtime-newest-wins `guard.ps1`. Owning session is `local_e69b7e30`; a `repo-housekeeping` claim on the same work is held by session `1d24d6a4`, which does NOT appear in `list_sessions` at any limit including archived — an unreconciled claim/session mismatch worth noting for the single-writer protocol.
+
+**3. The WIP design DOES cover the handoff's case, structurally.** `Resolve-TaskAction` accepts no time input at all; canonical is authoritative and is written only when ABSENT. An `update_scheduled_task(description=...)` frontmatter edit (which writes no registry field — there is no `description` in `scheduled-tasks.json`, so it lands as a real content edit to canonical) hits Case 2c `adopt`: unrecorded canonical hash becomes the new known-good and mirrors refresh from it. A stale mirror cannot win on a bumped mtime.
+
+**4. Measured exposure.** All three copies of all four retagged tasks were compared at ticks precision. Every mirror holds the stale `claude-sonnet-5` content; only canonical carries the retag. Canonical wins the old engine's strict `-gt` test in all four cases — but the local-mirror margin is 70 ms (`ora-am-brief`) and 62 ms (`ora-lease-snapshot-refresh`), and both gov mirrors sit in OneDrive holding sonnet-5 content, where a sync-driven mtime bump is the documented 2026-07-24 mechanism.
+
+**5. Gabriel directed a one-cycle pause — and it required disabling TWO tasks, not one.** `ora-health-guard` Block A.1 (its SKILL.md:73) invokes the same `guard.ps1` by absolute path at 05:25 ET, two hours BEFORE the 07:14 slot; disabling only `ora-task-integrity-guard` would have left the old engine running. Both now `enabled:false` with crons preserved (`5 7 * * *` / `15 5 * * *`) and `nextRunAt` cleared, verified via `list_scheduled_tasks`. Single-writer precondition checked first: latest `_state/registry-membership.log` entry was 2026-08-09T08:55:31 (the guard's own STEP 1.5 probe), no competing registrar.
+
+**MUST BE RE-ENABLED after the fix lands — nothing does it automatically.** Known one-cycle collateral: ora-health-guard Block C probe suite (memory-integrity, confidentiality self-test, cc-verifier, setup-self-audit, connector-drift, and the new v1.3 C.1.1 missed-cycle escalation) skips a day; governor/doctrine coverage survives via `ora-doctrine-integrity-guard` (12:55 ET daily). STEP 1.5's three producers also skip: `registry-membership-probe.py`, `emit-fleet-heartbeat.py`, `push-fleet-heartbeat.ps1` — expect a one-day gap in membership.log and the external heartbeat, and expect `fleet-deadman.ps1` check 4 to flag the guard as not-run tomorrow. That alarm is expected noise, not a real miss.
+
+**Doctrine note for guard work generally:** `guard.ps1` has TWO scheduled callers. Any test or landing plan that assumes the single 07:05 entry point is incomplete.
+
+## 2026-08-09 — Follow-up on 2026-08-05 skill-library-audit residuals: 6 archived skills identified, Cowork removal prompt drafted, "still can't tell" rows re-investigated
+
+Gabriel handed back three items left over from the 2026-08-05 skill-library-audit correction pass (session close-out recap), asking for a Cowork prompt where needed and direct investigation otherwise. Two of the three were explicitly out of scope this pass (Gabriel's own call on the audit's open questions; the stale `occ-wt-*`/detached-HEAD worktrees are untouched, unrelated).
+
+**1. Identified the 6 archived skills needing a Platform/Cowork Save-skill removal.** Traced to `ora-skills` commit `da80e05` (2026-08-05, "Retire 6 skills"): `census-acs-extract`, `code-debugging-optimizations`, `maintenance-analytics`, `oxford-cc-strategic-audit`, `re-operations`, `rent-comp` — moved to `_archive/` in the repo, per the never-delete invariant. Repo archival does not reach the Cowork platform's own skill-store install, which is a separate Save-skill action with no Code-surface equivalent tool. Drafted a self-contained Cowork prompt (given to Gabriel in-session, not filed anywhere else) directing that session to open the skill store and remove the platform-side copies of all 6.
+
+**2. Re-investigated the memo's "still can't tell" rows — one new finding, four reconfirmed unknowable from Code.**
+- **New: `ora-tenant-at-risk-monthly` is NOT present in the current live LAMS/Cowork registry** (27 recurring tasks, `fleet-roster.md` generated 2026-08-09T08:55:31 by `registry-membership-probe.py`) or in a direct read of the LAMS `scheduled-tasks.json` registry file. No retirement was ever logged in `event_log.md`. This is stronger than the "still can't tell" framing — the task appears to be genuinely gone, not merely unconfirmed-enabled. Needs a Cowork-side check (Scheduled Tasks UI) to confirm whether it was deliberately retired, renamed, or silently dropped, since a Code-surface session cannot write that registry.
+- `rent-roll-qc`, `file-reconciliation`: reconfirmed zero invocation evidence anywhere in `event_log.md` beyond install/packaging events (Save-skill clicks, hash verification) — no trace of either skill ever producing real output. Consistent with the 08-05 memo; no new evidence either way.
+- `psa-reconciliation` Fact Table row count: no logged real-world PSA run exists to check against — every `event_log.md` mention is install/packaging/description-trim history, never an executed Fact Table. Schema (`psa-fact-schema.md`) specifies ~80 fields across 12 sections, but whether any real run has ever populated it fully is unverifiable from history alone.
+- `portfolio-growth` scenario-run currency: same pattern — only an install-history trace (`portfolio-growth v1.0` staged 2026-07-21), no logged scenario run to check assumption freshness against.
+
+Not acted on unilaterally — all five remain Gabriel's call per the original memo's framing; this pass only sharpened the evidence (especially item 1, which moved from "unconfirmed" to "confirmed absent").
+
+**3. Stale `occ-wt-*` worktrees + detached-HEAD worktree — untouched**, per Gabriel's explicit instruction that these are unrelated to this task.
+
+No writes to `ora-skills`, `oxford-command-center`, or any scheduled-task registry this pass — investigation and drafting only, read-only tools throughout.
+
+## 2026-08-09 — Open-sessions board: OI-100 push request already satisfied
+Gabriel answered the open-sessions board: "Push OI-100 to the remote" (session `local_81976622-d66c-45e8-b48f-fb8e20e01cf4`, title "OI-100 doctrine-integrity-probe root override"). Checked `~/.claude` (ora-claude-config) before pushing: merge commit `230da82` ("Merge OI-100: pre-push doctrine gate validates the pushed commit, not the working tree", 2026-08-05 18:20:50 -04:00) is already an ancestor of `origin/main` — it was pushed sometime after the session ended, before this check. No push performed. Did not touch the 2 unrelated commits currently ahead of `origin/main` (`fix(maintenance): fleet-status.py cron_hm() drops multi-fire crons entirely` + merge) or the ~15 unstaged `_scheduled_tasks_backup/*/SKILL.md` changes in the working tree — out of scope for this decision.
+
 ## 2026-08-09 — ora-deal-aging-sla: 511 broker email backfilled, confidentiality roster re-verified
 
 Both writes Gabriel-directed in-turn during an **off-schedule Sunday catch-up run** of `ora-deal-aging-sla`
@@ -62,6 +116,99 @@ failure mode recorded for 2026-08-03 on the same deal. Time-sensitive: the PSA i
 "final for signature" while still carrying a **§26 offer-expiration placeholder of 8/15/2026**, plus the
 §9.2(i) 75% vacancy placeholder and the west-side replacement easement. Per guardrails no tracker field
 was reconciled.
+
+## 2026-08-09 — CC/MCP model-tag sweep: fleet reaches zero untagged / zero stale
+
+Gabriel-directed in-turn during `ora-task-integrity-guard`'s 07:05 run (which fired in a catch-up
+burst at 12:53Z after a 2-day machine-offline gap; last prior `.cc.json` snapshot was 2026-08-05).
+That run's STEP 2.5 read **4 OBSERVED / 3 OBSERVATION-STALE / 20 UNVERIFIABLE / 1 UNTAGGED** across
+28 in-scope tasks. All four gaps closed via transcript-cut canary, retagged
+`[MODEL: claude-opus-5 observed | checked 2026-08-09 via live-run transcript canary]` through
+`update_scheduled_task` (description only — cron, enabled and prompt untouched), and verified live
+off `list_scheduled_tasks` after the write per the 2026-08-03 lost-write lesson.
+
+Final: **8 OBSERVED / 0 OBSERVATION-STALE / 20 UNVERIFIABLE / 0 UNTAGGED**, 2 exempt (one-time).
+
+- `ora-skill-cache-drift-alert` — UNTAGGED since registration 2026-08-04 (shipped without a tag
+  despite `register-scheduled-task` v2.8 step 4b requiring one). Now OBSERVED.
+- `ora-cc-schematic-refresh`, `ora-am-brief`, `ora-lease-snapshot-refresh` — all three carried
+  pre-2026-07-26 `claude-sonnet-5` tags that aged out at the Opus 5 lineup rollout. All three
+  actually fire on `claude-opus-5`.
+
+**Two findings worth carrying forward** (detail: `reference_scheduled_task_model_standard.md`):
+
+1. **The `get_session` shortcut gotcha recurred — second confirmed instance.** On
+   `ora-lease-snapshot-refresh` the bare `get_session` `model` field read `claude-sonnet-5` while
+   the transcript cut showed `claude-opus-5` across all 34 scheduled-portion messages; that session
+   went interactive at row 102 of 1513. Trusting the shortcut would have written a model the task
+   never fired on. Rule reaffirmed: check `went_interactive` before believing the metadata field.
+2. **Task descriptions are NOT stored in the registry.** `scheduled-tasks.json` holds only
+   `{id, cronExpression, enabled, filePath, createdAt, lastRunAt, ...}` — the `description` that
+   `list_scheduled_tasks` returns is composed from each task's SKILL.md frontmatter. A retag must
+   therefore be built off the SKILL.md, not off a `list_scheduled_tasks` response captured earlier
+   in the session: `ora-lease-snapshot-refresh`'s on-disk description already carried a v1.5
+   auto-push section absent from the 12:54Z registry read, and building from disk preserved it
+   instead of silently reverting it.
+
+Guard run itself was otherwise clean (GUARD OK cc=28 lams=27; both engines, all five probes exit 0,
+all six freshness artifacts stamped today). No alarm email sent — correct per STEP 3's silent-on-clean
+posture.
+
+## 2026-08-05 — PR #262 (OI-092 detector) closed as duplicate of already-merged #261
+
+Follow-up to the same-day "OI-092 debt-service detector: built, adversarially REFUTEd, PR opened" entry. [PR #261](https://github.com/ZeOoba/oxford-command-center/pull/261) — an independent implementation of the identical OI-092 detector, built by a different concurrent session off the same base commit — merged to `oxford-command-center` main 2026-08-05T22:29:53Z, a few minutes before PR #262 was opened. Both added a new file implementing the same cross-check and both edited the same import line and call site in `server/workbook/parse.ts`; GitHub reported #262 `mergeable: CONFLICTING` as a direct result.
+
+Reviewed via the `code-review` skill: confirmed #261 is the stronger of the two (two full independent-review + REFUTE rounds vs. one; a committed, reproducible `npm run extract` live-workbook verification vs. an uncommitted probe; and independently already covers the one gap #262's own REFUTE round had to add — a visible flag rather than silent disable when the workbook's "Loan As-Of Date" anchor is missing/renamed). Nothing in #262 was worth porting. [PR #262](https://github.com/ZeOoba/oxford-command-center/pull/262) closed on Gabriel's confirmation; review comment and closure both posted to GitHub.
+
+Second real duplicate-effort collision surfaced in this session alone (the first: `build-with-gate-reviews` independently archived by another session in `ora-skills` mid-task) — worth a workflow-optimization note: concurrent sessions are independently picking up the same open items (OI-NNN tracker rows) without visible claim/lock signal to each other, which is real wasted compute even though this instance resolved cleanly. Local worktree/branch for #262 (`oxford-command-center/.claude/worktrees/oi092-debt-service-detector`, `fix/oi-092-debt-service-detector`) left in place — safe to remove whenever convenient, nothing further depends on it.
+
+## 2026-08-09 — session-context tombstone consolidation: 6 aging dated lines retired here, live directives kept
+
+Gabriel-directed follow-up to the doctrine-integrity WARN block recorded in today's earlier schematic-refresh entry — 6 aging tombstones (dates > 30 days) at `session-context.md` lines 3/9/10. Consolidated, not deleted: every dated fact is archived below, and `session-context.md` keeps only the live directives, dateless. Claimed `repo-housekeeping` over both files first (no prior active claims).
+
+**Retired from line 3 (the ⛔ MIGRATION STATE bullet).** New machine LAPTOP-CSHSCBE6 (32GB RAM) confirmed in service 2026-07-09; both fleets already live on it. B4 old-machine decommission Gabriel-confirmed 2026-07-11 — a physical/manual step, never a Code action. B3 burn-in partially complete; detail stays in `project_claude-setup-audit-2026-07-09.md`, which is now reachable only via MEMORY.md's setup-audit pointer (the filename itself carries an ISO date, and `ISO_DATE_RE`'s slug exemption is `-[0-9A-Za-z]`-lookahead only, so `…-2026-07-09.md` scans as a bare date — a filename citation in session-context.md re-arms the WARN by construction).
+
+**Kept live in session-context, split out of that same bullet:** event-log appends go through `append-event-log.py` only, never Edit-anchored on the header, one structural writer at a time. It was never migration history and should not have been bundled with it. Also kept, dateless: both fleets are already live here, so Phase B2 fleet re-registration must never be auto-run.
+
+**Retired from line 9 (Fleet recovery CLOSED 2026-07-08) — bullet dropped whole.** The 2026-07-05 CC/MCP registry-loss incident, its recovery, and all residual-item resolutions (RESOLVED 2026-07-09) were already archived to this log's 2026-07-12 consolidation entry and to `oxford-cc-repo-health.md`; the session-context bullet was a pointer to a pointer. Its "current live state (verified 2026-07-11)" snapshot — `ora-health-guard`, `ora-pm-ledger`, `ora-weekly-hygiene` all `enabled:true`; `ora-dashboard-refresh` fully removed from the registry; LAMS 16 enabled matching the ratified core-18 — was a 29-day-old hand verification of exactly the state the generated fleet block and `_state/fleet-roster.md` now regenerate per run, i.e. a stale competing source of record for live fleet counts. A dateless "machine migration + fleet recovery are CLOSED" clause was folded into the migration bullet so the incident cannot be re-litigated from scratch.
+
+**Retired from line 10 (Confidential deals).** E. Fulton DECLASSIFIED 2026-07-09 by Gabriel directive over the standing recommendation — acquisition terminated, now on a lender-note/foreclosure track; `e_fulton` set `active:false` in `confidential-terms.json`, guard retired, block kept as an audit trail. **Kept live:** "none active" (Hard Invariant 3's current state, with confidential-terms.json named as the roster of record), the oxford-command-center repo staying PRIVATE because `seed-deals.ts` embeds E. Fulton figures, and the still-open Cowork `efulton_*` memory + Notion pipeline-row declassification staged for Gabriel/Cowork to mirror.
+
+**Verification (probe re-run, unpiped).** Aging tombstones 6 → 0. Warnings 10 → 4 (exactly the six tombstone WARNs cleared; the surviving four — CLAUDE.md 1725 words, MEMORY.md line-71 514-char hook, workspace-pointer CLAUDE.md stale by its own 30-day rule, and the confidential-scan self-check note — are untouched and out of scope). Exit 0 unchanged, 0 `[MISSING]`. File size 22 lines, unchanged (one bullet added, one dropped); no bullet over the 80-word cap; generated fleet block not hand-edited.
+
+**Not committed.** `~/.claude`'s main checkout carries 84 uncommitted changes and `shared-checkout-guard` names session `b6a366f0` as having edits in that dirty set, `event_log.md` among them — so this run appended (the sanctioned concurrent path) and made no commit. `session-context.md` is git-ignored, so it needs none.
+
+**Known to age next, not touched:** line 18 carries 2026-07-16 (LAMS ora-am-brief retirement) and a `event_log.md 2026-07-24` retiming pointer, which cross 30 days on 2026-08-16 and 2026-08-24 respectively. Same treatment will apply — the retirement is dateless doctrine ("stays retired"), the retiming pointer is history.
+
+## 2026-08-09 — Schematic refresh (rev 2026-08-09a): 13-day refresh gap, 2 new fleet collisions, enabledPlugins collapsed 14→7
+
+Scheduled `ora-cc-schematic-refresh` run. Producer-clobber pre-check CLEAN (artifact REV == source REV 2026-07-27c). Logged because four of this task's material-change triggers fired at once.
+
+**The refresh gap is itself the finding.** This was the first schematic refresh of any kind since 2026-07-27c — 13 days, roughly four missed Mon/Thu slots. The fleet data explains it: `ora-cc-schematic-refresh` is one of twelve throttle-skip contributors (17 skips/24h), and fleet-status now reports **2 recurring tasks sitting on a missed cycle** — `ora-am-brief` (68.4h) and `ora-skill-cache-drift-alert` (67.9h). That detector line has never appeared in a prior schematic revision. ~68h on the daily 06:00 morning brief reads as an availability gap (app not open), not scheduler arbitration.
+
+**Fleet — ATTENTION on three drivers (was one).** 60 tracked / 58 enabled (cc=29, lams=29) / 2 disabled, up from 59/57/2. Throttle skips 69 → **178 in 24h across 12 tasks** (all-time 405/22). Notably the 2026-07-27c AM-thinning retimes did **not** reduce them — `ora-lease-snapshot-refresh`, moved specifically to relieve this, still contributes 18. Collisions 0 → **2**, and unlike the 07-27b case (which could only bite on a quarter-start Monday in 2029) both are frequent-cadence pairs that genuinely co-fire: 09:00 `ora-aaos-publish-contracts` (daily) × `ora-health-guard-fail-aging-nudge` (weekdays, LAMS), and 11:00 `ora-entry-market-scan` × `ora-skill-cache-drift-alert` (daily). Not retimed — this task's scope is read-diagnose-publish, never registry writes. AM pileup 22 (up from 19 post-thinning).
+
+**settings.json structural change — enabledPlugins collapsed 14 keys / 12 true → 7 keys / 7 true / 0 false.** Seven keys were **removed outright rather than set false**: andrej-karpathy-skills, coderabbit, document-skills, firecrawl, obsidian (previously true) and frontend-design, claude-api (previously false). Surviving 7, all true: claude-code-setup, claude-md-management, code-review, commit-commands, hookify, pr-review-toolkit, superpowers. `skillOverrides` also fell 44 → 17 entries. **Attribution not investigated** — flagged as an open question rather than guessed at.
+
+**Probes.** governor-drift exit 0 (861 files, up from 779; DSCR 1.25x / LTV 40% consistent). confidentiality-guard 131/131 exit 0. doctrine-integrity exit 0 (8/8 guards, declassification clean, identity sweep clean across 67 emitters) **but warnings 1 → 10**: CLAUDE.md 1725 words (over the 1700 WARN — and per `reference_claude_md_word_budget_is_a_floor.md` deliberately NOT to be trimmed in the 1694–1755 band, so recorded and left alone), 6 aging tombstones in `session-context.md` (2026-07-05/07-08/07-09 migration-era lines), a 514-char MEMORY.md index hook at line 71 against a 150-char cap, and the workspace-pointer CLAUDE.md stale by its own 30-day rule (last verified 2026-07-08). memory-integrity EXIT 1 for a third straight refresh on a larger surface: 210 indexed / 212 present, 4 orphan index links in git (07-27a's single orphan cleared — these are fresh) plus 2 on-disk files missing from the index. The 07-27a MEMORY.md size warning did not reappear, consistent with the 07-31 gate recalibration to 21.5KB, though not independently re-verified this run.
+
+**Repos — both synced, both went clean → dirty.** oxford-command-center `main==origin/main` @`8e4f51e` with untracked `data/alert-state/`; ora-pm `main==origin/main` @`a29f8f0` with modified `package-lock.json`. Neither touched.
+
+**Method note worth keeping:** the first pass at collecting probe exit codes piped each probe through `tail`, so `$?` reported the *pipeline's* status (always 0) rather than the probe's — memory-integrity's EXIT 1 would have been recorded as green. Every probe was re-run unpiped before any number was written. Also hit `config-write-guard` on a batched probe loop whose redirection + `hooks/` path read as write-shaped; per the guard's own guidance no override token was minted, the command was restructured instead.
+
+No registry writes, no email, one file edit, one republish — task scope held.
+
+## 2026-08-05 — OI-092 debt-service detector: built, adversarially REFUTEd, PR opened (not merged)
+
+Closes out item 3 of the skill-library-audit correction pass's action list (see the two prior same-day event_log entries). Dispatched Fable-tier build (isolated worktree, `oxford-command-center/.claude/worktrees/oi092-debt-service-detector`, branch `fix/oi-092-debt-service-detector`) against the withdrawn-plan spec (`docs/superpowers/plans/withdrawn-detector-oi092/README.md`) and the OI-092/094/095/096 tracker constraints — one interruption mid-build from an account-level API spend-limit error, resumed cleanly from the same agent's transcript with the worktree's partial state intact.
+
+**Result:** `server/workbook/debt-service-recompute.ts` independently recomputes each external loan's next-12-month interest/principal from its full amortization schedule and cross-checks (per-component magnitude) against the workbook's own `External Loans Summary` H/I/J — not a payment count, which is why the withdrawn first attempt couldn't catch the real formula-window bug. Handles distinct-dates (OI-096), per-loan ×0.5 multipliers read from formula text (never hardcoded), the `conditions.ts` lender-sign convention, and OI-095's balloon-inclusive forward-basis ruling. Wired into `parseWorkbook()` (2-line addition to `parse.ts`; `parseLoans()` untouched) as a WARN-severity DataQualityFlag, never blocking. 32 new tests; commit `069f909`.
+
+**Mandatory adversarial REFUTE pass (financial-decision code doctrine, separate Fable-tier agent, independently re-ran every gate itself):** verdict SHIP WITH FIXES. All 10 claims confirmed. One real gap found: the detector silently disabled itself (indistinguishable from "clean") if the workbook's "Loan As-Of Date" anchor went missing/renamed — a verified-null-vs-inferred-null failure. Fixed: now emits a visible info-severity flag instead, with a proving test. Two scope limitations documented in the module header rather than left implicit: this checks summary-vs-schedule consistency only (not schedule-vs-contract correctness — the historical OI-095 shape, schedule and summary agreeing while both are wrong, is out of scope by design), and it follows the ×0.5 multiplier as given rather than judging its correctness. Fix commit `2e61961`.
+
+**Final gates (re-run after the REFUTE fix):** 3,298 tests passed / 0 failed (251 files), typecheck 0 errors (3 tsconfigs), lint 0 errors/warnings.
+
+**PR opened, NOT merged:** [oxford-command-center#262](https://github.com/ZeOoba/oxford-command-center/pull/262) — financial-decision code goes through Gabriel's own review before landing, per standing doctrine. Local worktree left in place at the path above for reference; branch is pushed so removing the worktree is safe whenever convenient.
 
 ## 2026-08-09 — EnterWorktree investigation, follow-up: baseRef drift check shipped
 
