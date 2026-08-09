@@ -11,6 +11,57 @@ metadata:
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+## 2026-08-09 — ora-deal-aging-sla: 511 broker email backfilled, confidentiality roster re-verified
+
+Both writes Gabriel-directed in-turn during an **off-schedule Sunday catch-up run** of `ora-deal-aging-sla`
+v1.4 (cron is `25 9 * * 1-5`; fired after the Desktop app reopened). Aging is computed in business days,
+so the run's figures are identical to what a Friday run would have produced. Run record:
+[Deal Aging SLA — 2026-08-09](https://app.notion.com/p/3b76ecd89e598170a5d5f805870dcfa7).
+Run outcome: 18 pulled / 8 open-stage / 4 PARKED / **0 SLA breaches / 0 nudges drafted / 1 posture mismatch**.
+
+**1. Notion Acquisition Pipeline Tracker — 511 Industrial Mile Road, `Broker / Source` backfilled.**
+Field carried name + phone only (`Noah Kahkonen, Best Corporate Real Estate — (614) 559-3350 x117`),
+which disabled the STEP 3b(b) recipient-domain check and forced a surname-search fallback to reach a
+verdict. Added `nkahkonen@bestcorporaterealestate.com`, sourced from the live Outlook thread
+"511 Industrial Mile" (Gabriel → Kahkonen, 2026-05-11 through 2026-07-15, incl. the 2026-05-15 LOI
+transmittal), stamped with source + date + instruction provenance per the 2026-07-28 precedent
+(1333 Research Road / 5515 Catfish Court). Identity, not posture — `Next Action`, `Stage`, `LOI Status`
+and `Last Activity` untouched, so no staleness clock was reset.
+
+A posture caveat was written into the field itself: the property went under contract to a competing
+buyer at the full $1.575M ask per Kahkonen 2026-07-17, ORA holds a fallout position only, and the
+email's presence is explicitly **not** license to nudge. Without that line the next run sees a freshly
+populated broker email on a row whose `LOI Status` still reads `Submitted` and has everything it needs
+to draft the wrong follow-up. Dedicated tickler `ora-511-industrial-fallout-check` still fires 2026-08-21.
+
+**2. `hooks/confidential-terms.json` — `roster_last_verified` 2026-07-08 → 2026-08-09.**
+The run flagged the anchor as **32 days old against `confidentiality-guard.py`'s
+`STALENESS_THRESHOLD_DAYS = 30`**. Per the field's own note the active-deal list was re-confirmed
+against the source of record BEFORE bumping — `session-context.md` line 10 ("Confidential deals: none
+active", E. Fulton declassified 2026-07-09) and the file's sole entry `e_fulton` (`active: false`) agree,
+so the roster content was already correct and only the anchor had lapsed. Date field only; no deal block,
+term list, or `active` flag changed. Required a `config-write-guard` override token (scoped to the date
+field, reasoning recorded in the token); the guard had earlier and correctly blocked a *read* of the same
+file issued as a `python -c` one-liner — the documented write-shaped-read false positive, resolved by
+using the Read tool instead of minting a token.
+
+**Concurrency note.** Both edits were made while session `b6a366f0` held 84 uncommitted changes in the
+`.claude` main checkout. `confidential-terms.json` was verified NOT in that dirty set before editing.
+`event_log.md` WAS dirty and had been written 23 seconds before this append — this entry went through
+`append-event-log.py` (mtime-guarded retry + atomic `os.replace`, spools on lock) rather than an
+Edit-anchor, which is exactly the contention case that path exists for. **Open:** `confidential-terms.json`
+is now modified-uncommitted in a checkout another session is actively working; a broad commit there will
+sweep it in under an unrelated message.
+
+**Substantive finding from the same run (no write, reported only).** 754 Old State Route 74's tracker
+posture is 14 days behind the live thread: `Next Action` (stamped 2026-07-24) asserts the PSA sits with
+seller's counsel, but Patterson returned a self-described "final" PSA **for Purchaser's approval** on
+2026-08-07 20:15 UTC and JLL is pressing for signature — the ask is ORA's. Surfaced only by the mirrored
+`sender:kmklaw.com` search (a `recipient:`-only search reads as a live unanswered ask), the same
+failure mode recorded for 2026-08-03 on the same deal. Time-sensitive: the PSA is at counterparty-declared
+"final for signature" while still carrying a **§26 offer-expiration placeholder of 8/15/2026**, plus the
+§9.2(i) 75% vacancy placeholder and the west-side replacement easement. Per guardrails no tracker field
+was reconciled.
 
 ## 2026-08-09 — EnterWorktree investigation, follow-up: baseRef drift check shipped
 
