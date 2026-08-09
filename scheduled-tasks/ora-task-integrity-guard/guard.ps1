@@ -2,54 +2,66 @@
 # Self-heals the scheduler's canonical task-definition home from dual backups.
 # Source of truth = the active scheduled-tasks.json registries under the packaged app store.
 #
-# WRITE POLICY (rewritten 2026-08-09 -- read this before changing anything below):
+# WRITE POLICY (rewritten 2026-08-09 -- read before changing anything below):
 #   CANONICAL IS AUTHORITATIVE. Mirrors are DERIVED. Canonical is written in exactly one
-#   situation -- it is ABSENT -- and never otherwise. Everything else is a mirror refresh
-#   from canonical, or a detect-only alarm. Never deletes.
+#   situation -- it is ABSENT -- and never otherwise. Never deletes.
 #
-#   The previous engine was newest-WINS-BY-MTIME across {canonical, gov mirror, local
-#   backup}. On 2026-08-09 08:54:47 that reverted live content for ora-health-guard,
+#   The previous engine was newest-WINS-BY-MTIME across {canonical, gov mirror, local backup}.
+#   On 2026-08-09 08:54:47 that reverted live content for ora-health-guard,
 #   ora-task-integrity-guard and automation-health-monitor: the local backup carried mtime
-#   2026-08-05 17:58:04 over PRE-08-05 CONTENT, beat canonical on mtime, and was copied
-#   over it. Copy-Item preserves the source mtime, so the revert was invisible to any later
-#   mtime check. mtime is NOT a version -- OneDrive sync and bulk backup passes stamp it
-#   without regard to content lineage.
+#   2026-08-05 17:58:04 over PRE-08-05 CONTENT, beat canonical, and was copied over it.
+#   Copy-Item preserves the source mtime, so the revert was invisible to any later mtime check.
+#   mtime is NOT a version. THIRD iteration of that bug class, so mtime is gone entirely:
+#   the decision core (maintenance/task-integrity-lib.ps1) takes no time input, test-enforced.
 #
-#   That was the THIRD iteration of the mtime bug class (oscillation patched 2026-07-24,
-#   checked:0 silent no-op 2026-07-09). A fourth mtime heuristic would be the wrong shape
-#   of fix, so mtime is gone entirely: the decision core (maintenance/task-integrity-lib.ps1,
-#   Resolve-TaskAction) accepts no time input at all, and a test enforces that. "Newer" is
-#   decided from a recorded content-hash ledger, plus the git HEAD blob for the CC-fleet
-#   paths that are version-controlled.
-#
-# The -*Override parameters exist ONLY so maintenance/test-guard-integrity-engine.ps1 can
-# drive the real engine against synthetic fixtures in a temp dir. Unattended runs pass
-# nothing and get the live paths below.
+# HARDENED 2026-08-09 after independent review + adversarial REFUTE. The defects fixed here were
+# all in the ENGINE, not the decision core, and all ended in the same irreversible loss:
+#   * git restore CORRUPTED every non-ASCII character. `& git show` output is decoded through
+#     [Console]::OutputEncoding -- IBM437 in an unattended -NoProfile run -- so em-dashes,
+#     arrows and curly quotes (which every ORA SKILL.md is full of) were mangled BEFORE being
+#     re-encoded as UTF-8. The corrupted file was then adopted as known-good and propagated to
+#     both mirrors. Blobs are now read as RAW BYTES off the redirected stdout stream.
+#     The same bug made the git hash unable to ever equal a file hash, so every git branch was
+#     dead code and a poisoned mirror silently outranked a pristine git HEAD.
+#   * a failed `git show` wrote a ZERO-BYTE SKILL.md (no exit-code check) -- a silently
+#     disabled task -- which then propagated to both mirrors.
+#   * a 0-byte canonical hashes to the SHA of the empty string, a VALID hash, so truncation was
+#     adopted as content. 0-byte files are now UNUSABLE everywhere.
+#   * $ErrorActionPreference='Stop' turns a native command's stderr into a terminating error, so
+#     an ordinary git autocrlf warning could abort the run mid-loop AFTER filesystem writes but
+#     BEFORE the ledger was written. Git is no longer invoked through the PowerShell pipeline,
+#     and every per-task body is isolated so one bad row cannot fail the fleet.
+# The -*Override parameters exist ONLY so maintenance/test-guard-integrity-engine.ps1 can drive
+# the real engine against synthetic fixtures. Unattended runs pass nothing.
+# param() must be the first statement in the script -- it precedes $ErrorActionPreference.
 param(
     [string]  $GovOverride,
     [string]  $LocalOverride,
     [string]  $LedgerPathOverride,
     [string[]]$StoreRootsOverride,
-    [string]  $CcRepoOverride
+    [string]  $CcRepoOverride,
+    # Compute and report every decision, WRITE NOTHING (no canonical, no mirrors, no ledger).
+    # maintenance/dry-run-task-integrity-guard.ps1 calls the real engine; without this it was
+    # a "dry run" that mutated the live ledger and mirrors.
+    [switch]  $ReportOnly
 )
 $ErrorActionPreference = 'Stop'
+
+$ledgerPath = $null; $ledgerTasks = @{}; $ledgerStatus = 'not-read'; $lockStream = $null
 try {
-    # Resolve the decision core relative to this script so a worktree copy loads the
-    # worktree lib (and the live copy loads the live lib). $PSScriptRoot is only safe
-    # inside the body -- it is empty in param defaults
-    # (reference_powershell_psscriptroot_empty_in_param_defaults.md).
     $libPath = Join-Path $PSScriptRoot '..\..\maintenance\task-integrity-lib.ps1'
     if (-not (Test-Path -LiteralPath $libPath)) {
         $libPath = 'C:\Users\Owner\.claude\maintenance\task-integrity-lib.ps1'
     }
+    if (-not (Test-Path -LiteralPath $libPath)) {
+        # Report through the checked==0 channel: that is the one engine error the consuming
+        # SKILL.md escalates to EMAIL. A missing lib would otherwise leave a permanently dead
+        # guard whose only symptom is a local log nobody reads.
+        Write-Output '{"error":"task-integrity-lib.ps1 not found -- decision core missing, guard cannot run","checked":0}'
+        exit 1
+    }
     . $libPath
 
-    # dual-base discovery (2026-07-09): the live store moved to AppData\Roaming\Claude
-    # after the 2026-07-05 migration; the MSIX LocalCache mirror is gone on this machine,
-    # so scanning it alone yielded checked:0 (a silent no-op).
-    # Roots come from the shared config (single source of truth, same file the python
-    # probes read via _shared/store_discovery.py); the literals below are only the
-    # fail-open fallback if the config is missing/unreadable.
     $storeRoots = @(
         'C:\Users\Owner\AppData\Roaming\Claude',
         'C:\Users\Owner\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude'
@@ -61,7 +73,7 @@ try {
         }
     } catch {}
     if ($StoreRootsOverride) { $storeRoots = $StoreRootsOverride }
-    $canonRoot  = 'C:\Users\Owner\OneDrive - Oxford Capital Partners\Documents\Claude\Scheduled'
+
     $gov        = 'C:\Users\Owner\OneDrive - Oxford Capital Partners\Claude_Workspace\00_Governance\Scheduled'
     $local      = 'C:\Users\Owner\.claude\_scheduled_tasks_backup'
     $ledgerPath = 'C:\Users\Owner\.claude\maintenance\_state\task-content-ledger.json'
@@ -70,147 +82,223 @@ try {
     if ($LocalOverride)      { $local      = $LocalOverride }
     if ($LedgerPathOverride) { $ledgerPath = $LedgerPathOverride }
     if ($CcRepoOverride)     { $ccRepo     = $CcRepoOverride }
-    foreach ($d in @($canonRoot, $gov, $local)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }
+    # NOTE: the old $canonRoot (Documents\Claude\Scheduled) is gone. It was dead -- canonical
+    # paths come from each registry entry's filePath -- and its comment asserted a canonical
+    # root that is wrong for the CC fleet, inviting someone to re-derive the wrong location.
+    foreach ($d in @($gov, $local)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }
 
-    # Content identity = SHA256 over the file with CR stripped. Line-ending-only
-    # differences (git's autocrlf smudge vs an OneDrive-written copy) are NOT content
-    # divergence, and treating them as such would both churn the mirrors and make the
-    # git HEAD comparison below useless.
-    function Get-NormalizedHash([string]$Path) {
+    # ---- content identity ------------------------------------------------
+    # SHA256 over the bytes with CR removed, so a line-ending-only difference (git's autocrlf
+    # smudge vs an OneDrive-written copy) is not treated as content divergence. Byte-based on
+    # BOTH sides so a git blob hash and a file hash are directly comparable.
+    function Get-HashFromBytes([byte[]]$Bytes) {
+        if ($null -eq $Bytes -or $Bytes.Length -eq 0) { return $null }   # 0 bytes is NEVER content
+        $text  = [System.Text.Encoding]::UTF8.GetString($Bytes)
+        $norm  = [System.Text.Encoding]::UTF8.GetBytes(($text -replace "`r", ''))
+        if ($norm.Length -eq 0) { return $null }
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        try { return ([BitConverter]::ToString($sha.ComputeHash($norm)) -replace '-', '') }
+        finally { $sha.Dispose() }
+    }
+
+    # Returns $null for absent, unreadable, OR 0-byte. All three are "no usable content",
+    # and the caller must never treat any of them as a hash to adopt.
+    function Get-FileHash-Usable([string]$Path) {
         try {
-            $text = [System.IO.File]::ReadAllText($Path)
-            $bytes = [System.Text.Encoding]::UTF8.GetBytes(($text -replace "`r", ''))
-            $sha = [System.Security.Cryptography.SHA256]::Create()
-            try { return ([BitConverter]::ToString($sha.ComputeHash($bytes)) -replace '-', '') }
-            finally { $sha.Dispose() }
+            if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+            return Get-HashFromBytes ([System.IO.File]::ReadAllBytes($Path))
         } catch { return $null }
     }
 
-    # git HEAD blob for a canonical path that lives inside the ~/.claude checkout (CC fleet).
-    # Lineage evidence that survives even if the ledger and BOTH mirrors are poisoned.
-    # Computed lazily -- only when canonical is absent, the one case where it changes a write.
-    function Get-GitHeadHash([string]$Path) {
+    # Read a git blob as RAW BYTES. Never through the PowerShell pipeline: `& git` output is
+    # decoded via [Console]::OutputEncoding (IBM437 here), which mangles every non-ASCII
+    # character, and line-joining also drops the trailing newline. Both made the hash
+    # uncomparable and the restored content wrong.
+    function Get-GitBlobBytes([string]$Repo, [string]$Rel) {
+        $proc = $null
         try {
-            if (-not $Path.StartsWith($ccRepo, [StringComparison]::OrdinalIgnoreCase)) { return $null }
-            $rel = $Path.Substring($ccRepo.Length).TrimStart('\', '/') -replace '\\', '/'
-            $blob = & git -C $ccRepo show "HEAD:$rel" 2>$null
-            if ($LASTEXITCODE -ne 0 -or $null -eq $blob) { return $null }
-            $text = ($blob -join "`n")
-            $bytes = [System.Text.Encoding]::UTF8.GetBytes(($text -replace "`r", ''))
-            $sha = [System.Security.Cryptography.SHA256]::Create()
-            try { return ([BitConverter]::ToString($sha.ComputeHash($bytes)) -replace '-', '') }
-            finally { $sha.Dispose() }
+            $psi = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName               = 'git'
+            $psi.Arguments              = "-C `"$Repo`" show `"HEAD:$Rel`""
+            $psi.UseShellExecute        = $false
+            $psi.RedirectStandardOutput = $true
+            $psi.RedirectStandardError  = $true
+            $psi.CreateNoWindow         = $true
+            $proc = [System.Diagnostics.Process]::Start($psi)
+            $errTask = $proc.StandardError.ReadToEndAsync()      # drain stderr, avoid deadlock
+            $ms = New-Object System.IO.MemoryStream
+            $proc.StandardOutput.BaseStream.CopyTo($ms)          # BaseStream = undecoded bytes
+            $proc.WaitForExit()
+            $null = $errTask.Result
+            if ($proc.ExitCode -ne 0) { return $null }
+            $b = $ms.ToArray()
+            if ($b.Length -eq 0) { return $null }                # never write an empty file
+            return $b
         } catch { return $null }
+        finally { if ($proc) { $proc.Dispose() } }
     }
 
-    # 1. Build active task set {id -> canonical filePath} from every registry under the app store.
-    $ids = @{}
+    function Get-RepoRelative([string]$Path, [string]$Repo) {
+        $r = $Repo.TrimEnd('\', '/') + '\'
+        if (-not $Path.StartsWith($r, [StringComparison]::OrdinalIgnoreCase)) { return $null }  # path-boundary safe
+        return $Path.Substring($r.Length).Replace('\', '/')
+    }
+
+    # ---- 1. active task set from every registry --------------------------
+    # Case-SENSITIVE: a default PowerShell hashtable is case-insensitive, so registry ids
+    # differing only in case silently collapsed and one real task went unguarded, unreported.
+    $ids        = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([StringComparer]::Ordinal)
+    $parseMiss  = @()
+    $collisions = @()
     Get-ChildItem -Path ($storeRoots | ForEach-Object { Join-Path $_ '*-sessions\*\*\scheduled-tasks.json' }) -ErrorAction SilentlyContinue | ForEach-Object {
         try {
             $j = Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json
             foreach ($t in $j.scheduledTasks) {
-                if ($t.id -and $t.filePath) { $ids[$t.id] = $t.filePath }
+                if ($t.id -and $t.filePath) {
+                    if ($ids.ContainsKey($t.id) -and $ids[$t.id] -ne $t.filePath) {
+                        $collisions += ('{0} -> {1} | {2}' -f $t.id, $ids[$t.id], $t.filePath)
+                    }
+                    $ids[$t.id] = $t.filePath
+                }
             }
-        } catch {}
+        } catch {
+            # A registry that will not parse is exactly the blind spot this guard exists to
+            # catch -- report it, never swallow it.
+            $parseMiss += $_.FullName
+        }
     }
 
     if ($ids.Count -eq 0) {
-        # Self-check for the self-healer: zero discovered registry entries means store
-        # discovery itself is broken -- the 2026-07 checked:0 silent no-op ran ~4 days
-        # undetected. Surface it as an engine error (exit 1) so the wrapper alarms.
         Write-Output '{"error":"checked==0 -- no registry entries discovered under any store root; store discovery is broken (silent no-op)","checked":0}'
         exit 1
     }
 
-    $ledger = Read-TaskLedger $ledgerPath
-
-    $restored = @(); $backed = @(); $missing = @(); $regressed = @(); $unreadable = @()
-
-    foreach ($id in $ids.Keys) {
-        $fp   = $ids[$id]                  # canonical filePath from the live registry
-        $name = Split-Path $fp -Leaf
-
-        $canonExists = Test-Path -LiteralPath $fp
-        $canonHash   = $null
-        if ($canonExists) { $canonHash = Get-NormalizedHash $fp }
-
-        # A file that EXISTS but cannot be read is NOT a missing file. The old engine
-        # failed "safe" by restoring in that case, which meant an unreadable canonical
-        # (transient lock, OneDrive placeholder not yet hydrated) got overwritten from a
-        # mirror. Under canonical-is-authoritative the safe direction is the opposite:
-        # touch nothing, and alarm so a human looks.
-        if ($canonExists -and -not $canonHash) {
-            $unreadable += $id
-            continue
-        }
-
-        $mirrorPaths  = [ordered]@{ gov = (Join-Path $gov "$id\$name"); local = (Join-Path $local "$id\$name") }
-        $mirrorHashes = @{}
-        foreach ($m in $mirrorPaths.Keys) { $mirrorHashes[$m] = Get-NormalizedHash $mirrorPaths[$m] }
-
-        $gitHead = $null
-        if (-not $canonHash) { $gitHead = Get-GitHeadHash $fp }
-
-        $entry = $null
-        if ($ledger.ContainsKey($id)) { $entry = $ledger[$id] }
-
-        $r = Resolve-TaskAction -Id $id -CanonHash $canonHash -MirrorHashes $mirrorHashes `
-                                -LedgerEntry $entry -GitHeadHash $gitHead
-
-        # --- act -------------------------------------------------------------
-        if ($r.Action -eq 'missing_everywhere') { $missing += $id; continue }
-        if ($r.Action -eq 'regression_detected' -or $r.Action -eq 'known_good_lost') {
-            # Detect-only. Canonical is left exactly as found and mirror sync is FROZEN so
-            # the regressed content cannot overwrite the last good copy.
-            $regressed += ('{0} [{1}; known-good at: {2}]' -f $id, $r.Action, (@($r.KnownGoodAt) -join ',' ))
-            continue
-        }
-
-        if ($r.RestoreCanonical) {
-            $srcPath = $null
-            if ($r.RestoreFrom -eq 'git') {
-                New-Item -ItemType Directory -Force -Path (Split-Path $fp) | Out-Null
-                $rel = $fp.Substring($ccRepo.Length).TrimStart('\', '/') -replace '\\', '/'
-                # WriteAllText with an explicit no-BOM encoder: Set-Content -Encoding UTF8
-                # emits a BOM on Windows PowerShell 5.1, which would silently alter every
-                # git-restored SKILL.md relative to its committed bytes.
-                $blob = (& git -C $ccRepo show "HEAD:$rel") -join "`r`n"
-                [System.IO.File]::WriteAllText($fp, $blob, (New-Object System.Text.UTF8Encoding($false)))
-            } else {
-                $srcPath = $mirrorPaths[$r.RestoreFrom]
-                New-Item -ItemType Directory -Force -Path (Split-Path $fp) | Out-Null
-                Copy-Item -LiteralPath $srcPath -Destination $fp -Force
-            }
-            $restored += ('{0} [from {1}; {2}]' -f $id, $r.RestoreFrom, $r.Reason)
-        }
-
-        if ($r.SyncMirrors) {
-            foreach ($m in @($r.MirrorsToSync)) {
-                $mp = $mirrorPaths[$m]
-                New-Item -ItemType Directory -Force -Path (Split-Path $mp) | Out-Null
-                Copy-Item -LiteralPath $fp -Destination $mp -Force
-            }
-            if ($backed -notcontains $id) { $backed += $id }
-        }
-
-        if ($r.NewCurrent) { $ledger[$id] = Update-TaskLedgerEntry $entry $r.NewCurrent }
+    # ---- ledger lock -----------------------------------------------------
+    # The ledger is read-modify-write and this engine has TWO scheduled callers, which an
+    # overnight-outage catch-up burst can fire together. Unlocked, concurrent runs silently lost
+    # whole entries (measured: 150 expected, 100 present).
+    $lockPath = "$ledgerPath.lock"
+    $lockDir = Split-Path $lockPath
+    if ($lockDir -and -not (Test-Path -LiteralPath $lockDir)) { New-Item -ItemType Directory -Force -Path $lockDir | Out-Null }
+    $deadline = (Get-Date).AddSeconds(120)
+    while ($null -eq $lockStream -and (Get-Date) -lt $deadline) {
+        try { $lockStream = [System.IO.File]::Open($lockPath, 'OpenOrCreate', 'ReadWrite', 'None') }
+        catch { Start-Sleep -Milliseconds 500 }
+    }
+    if ($null -eq $lockStream) {
+        # Benign by construction: the run holding the lock performs the identical work. Reported
+        # rather than silent, so it cannot become an invisible skip.
+        Write-Output ('{"skipped_concurrent_run":true,"checked":' + $ids.Count + ',"note":"another guard run holds the ledger lock; it is doing this work"}')
+        exit 0
     }
 
-    Write-TaskLedger $ledgerPath $ledger (Get-Date).ToString('s')
+    $led         = Read-TaskLedger $ledgerPath
+    $ledgerTasks = $led.Tasks
+    $ledgerStatus = $led.Status
+
+    $restored = @(); $backed = @(); $missing = @(); $regressed = @(); $unreadable = @(); $errors = @()
+
+    foreach ($id in @($ids.Keys)) {
+        # PER-TASK ISOLATION: one malformed row (empty directory component, a filePath aliased
+        # onto its own backup) used to abort the whole run under EAP=Stop, discarding every
+        # lineage update decided that run while the filesystem writes had already happened.
+        try {
+            $fp   = $ids[$id]
+            $name = Split-Path $fp -Leaf
+            if (-not $name) { throw "registry filePath has no file component: '$fp'" }
+
+            $canonExists = Test-Path -LiteralPath $fp -PathType Leaf
+            $canonHash   = if ($canonExists) { Get-FileHash-Usable $fp } else { $null }
+
+            # Exists but yields no usable hash = locked, unhydrated, or 0-byte. NOT missing.
+            # Restoring over it would destroy a file we merely could not read.
+            if ($canonExists -and -not $canonHash) { $unreadable += $id; continue }
+
+            $mirrorPaths  = [ordered]@{ gov = (Join-Path $gov "$id\$name"); local = (Join-Path $local "$id\$name") }
+            $mirrorHashes = @{}
+            foreach ($m in $mirrorPaths.Keys) { $mirrorHashes[$m] = Get-FileHash-Usable $mirrorPaths[$m] }
+
+            $gitRel = Get-RepoRelative $fp $ccRepo
+            $gitHead = $null
+            if (-not $canonHash -and $gitRel) { $gitHead = Get-HashFromBytes (Get-GitBlobBytes $ccRepo $gitRel) }
+
+            $entry = $null
+            if ($ledgerTasks.ContainsKey($id)) { $entry = $ledgerTasks[$id] }
+
+            $r = Resolve-TaskAction -Id $id -CanonHash $canonHash -MirrorHashes $mirrorHashes `
+                                    -LedgerEntry $entry -GitHeadHash $gitHead
+
+            if ($r.Action -eq 'missing_everywhere') { $missing += $id; continue }
+            if ($r.Action -eq 'regression_detected' -or $r.Action -eq 'known_good_lost') {
+                $regressed += ('{0} [{1}; known-good at: {2}]' -f $id, $r.Action, (@($r.KnownGoodAt) -join ','))
+                if ($r.SetPending) { $ledgerTasks[$id] = Update-TaskLedgerEntry $entry $null $r.SetPending $false }
+                continue
+            }
+            if ($r.Action -eq 'adopt_after_regression') {
+                $regressed += ('{0} [adopted_deliberate_rollback]' -f $id)
+            }
+
+            if ($r.RestoreCanonical) {
+                # TOCTOU re-check: hashing two mirrors and shelling out to git takes real time,
+                # and a session or OneDrive hydration can land the file in that window.
+                if (Test-Path -LiteralPath $fp -PathType Leaf) {
+                    $errors += ('{0} [canonical reappeared mid-run; restore skipped]' -f $id)
+                    continue
+                }
+                if (-not $ReportOnly) { New-Item -ItemType Directory -Force -Path (Split-Path $fp) | Out-Null }
+                if ($ReportOnly) {
+                    $restored += ('{0} [WOULD restore from {1}; {2}]' -f $id, $r.RestoreFrom, $r.Reason)
+                } elseif ($r.RestoreFrom -eq 'git') {
+                    $bytes = Get-GitBlobBytes $ccRepo $gitRel
+                    if ($null -eq $bytes -or $bytes.Length -eq 0) {
+                        $errors += ('{0} [git restore aborted: blob unreadable or empty]' -f $id); continue
+                    }
+                    [System.IO.File]::WriteAllBytes($fp, $bytes)     # verbatim bytes, no re-encode
+                } else {
+                    Copy-Item -LiteralPath $mirrorPaths[$r.RestoreFrom] -Destination $fp -Force
+                }
+                if (-not $ReportOnly) { $restored += ('{0} [from {1}; {2}]' -f $id, $r.RestoreFrom, $r.Reason) }
+            }
+
+            if ($r.SyncMirrors) {
+                foreach ($m in @($r.MirrorsToSync)) {
+                    if ($ReportOnly) { continue }
+                    $mp = $mirrorPaths[$m]
+                    New-Item -ItemType Directory -Force -Path (Split-Path $mp) | Out-Null
+                    Copy-Item -LiteralPath $fp -Destination $mp -Force
+                }
+                if ($backed -notcontains $id) { $backed += $id }
+            }
+
+            if ($r.NewCurrent -or $r.ClearPending) {
+                $ledgerTasks[$id] = Update-TaskLedgerEntry $entry $r.NewCurrent $r.SetPending $r.ClearPending
+            }
+        } catch {
+            $errors += ('{0} [{1}]' -f $id, ($_.Exception.Message -replace '[\r\n]+', ' '))
+        }
+    }
+
+    if (-not $ReportOnly) { Write-TaskLedger $ledgerPath $ledgerTasks (Get-Date).ToString('s') }
 
     [ordered]@{
+        report_only        = [bool]$ReportOnly
         checked            = $ids.Count
-        restored           = @($restored)          # canonical was ABSENT and was rebuilt
-        backed_up          = @($backed)            # mirrors refreshed from canonical
+        restored           = @($restored)     # canonical was ABSENT and was rebuilt
+        backed_up          = @($backed)       # mirrors refreshed from canonical
         missing_everywhere = @($missing)
-        regressed          = @($regressed)         # canonical matches a recorded ANCESTOR -- NOT auto-fixed
-        unreadable         = @($unreadable)        # canonical exists but could not be read -- untouched
-        churn_suppressed   = @()                   # vestigial: kept for output-contract compatibility.
-                                                   # Structurally always empty now -- mirrors are written
-                                                   # iff content differs, so mtime churn cannot occur.
+        regressed          = @($regressed)    # canonical matches a recorded ANCESTOR -- NOT auto-fixed
+        unreadable         = @($unreadable)   # exists but unreadable/0-byte -- left strictly untouched
+        errors             = @($errors)       # per-task failures; the run continued
+        parse_miss         = @($parseMiss)    # registry files that would not parse
+        id_collisions      = @($collisions)
+        ledger_status      = $ledgerStatus    # ok | absent | unreadable -- 'unreadable' means
+                                              # regression detection was OFF this run
+        churn_suppressed   = @()              # vestigial: kept so older parsing does not break.
         ts                 = (Get-Date).ToString('s')
     } | ConvertTo-Json -Compress
 } catch {
-    Write-Output ('{"error":"' + ($_.Exception.Message -replace '"', '\"') + '"}')
+    Write-Output ('{"error":"' + (($_.Exception.Message -replace '[\r\n]+', ' ') -replace '"', '\"') + '"}')
     exit 1
+} finally {
+    if ($lockStream) { $lockStream.Close(); $lockStream.Dispose() }
 }

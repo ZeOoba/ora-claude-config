@@ -192,6 +192,163 @@ Check "canonical untouched despite malformed siblings" ((Get-Content -LiteralPat
 Remove-Item -Recurse -Force $root
 
 # ===========================================================================
+# 7. GIT RESTORE PATH -- the one place the engine writes bytes it CONSTRUCTED rather
+#    than copied, and the path every earlier scenario disabled via -CcRepoOverride to a
+#    nonexistent repo. That blind spot hid a corruption bug: `& git show` output is decoded
+#    through [Console]::OutputEncoding (IBM437 unattended), mangling every non-ASCII char.
+#    ORA SKILL.mds are full of them, so this fixture uses ORA house style deliberately.
+# ===========================================================================
+$root = New-TempRoot
+$repo = Join-Path $root 'repo'
+$canonDir = Join-Path $repo 'scheduled-tasks\t1'
+New-Item -ItemType Directory -Force -Path $canonDir | Out-Null
+$canonFile = Join-Path $canonDir 'SKILL.md'
+$UNICODE = "# ORA task`n" + [char]0x2014 + " em-dash, " + [char]0x2192 + " arrow, " +
+           [char]0x201C + "curly" + [char]0x201D + ", " + [char]0x2265 + " ge, " + [char]0x00B7 + " mid`n"
+[System.IO.File]::WriteAllText($canonFile, $UNICODE, (New-Object System.Text.UTF8Encoding($false)))
+$committed = [System.IO.File]::ReadAllBytes($canonFile)
+
+Push-Location $repo
+& git init -q . 2>$null
+& git add -A 2>$null
+& git -c user.email=t@ora -c user.name=t commit -qm fixture 2>$null
+Pop-Location
+
+$govD = Join-Path $root 'gov'; $locD = Join-Path $root 'local'
+$storeDir = Join-Path $root 'store\cc-sessions\aaa\bbb'
+New-Item -ItemType Directory -Force -Path $storeDir | Out-Null
+@{ scheduledTasks = @(@{ id = 't1'; filePath = $canonFile }) } | ConvertTo-Json -Depth 5 |
+    Set-Content -LiteralPath (Join-Path $storeDir 'scheduled-tasks.json')
+$fxg = [PSCustomObject]@{ Gov = $govD; Local = $locD; Store = (Join-Path $root 'store'); Ledger = (Join-Path $root 'l.json') }
+function Invoke-GuardRepo($fx, $repoPath) {
+    return & $guard -GovOverride $fx.Gov -LocalOverride $fx.Local -LedgerPathOverride $fx.Ledger `
+                    -StoreRootsOverride @($fx.Store) -CcRepoOverride $repoPath
+}
+Invoke-GuardRepo $fxg $repo | Out-Null                      # adopt + create absent mirrors
+Remove-Item -LiteralPath $canonFile -Force
+Remove-Item -Recurse -Force $govD, $locD -ErrorAction SilentlyContinue   # git is the ONLY source
+$out = Invoke-GuardRepo $fxg $repo | ConvertFrom-Json
+$restoredBytes = if (Test-Path -LiteralPath $canonFile) { [System.IO.File]::ReadAllBytes($canonFile) } else { @() }
+
+Check "GIT RESTORE: canonical was restored"        (Test-Path -LiteralPath $canonFile)
+Check "GIT RESTORE: restored from git"             (@($out.restored) -match 'from git')
+Check "GIT RESTORE: byte-identical to the committed blob (no encoding corruption)" `
+    ($restoredBytes.Length -eq $committed.Length -and (Compare-Object $restoredBytes $committed -SyncWindow 0) -eq $null)
+Check "GIT RESTORE: non-ASCII survived intact" `
+    (([System.IO.File]::ReadAllText($canonFile)) -eq $UNICODE)
+Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
+
+# ===========================================================================
+# 8. A 0-BYTE canonical is NOT content. It hashes to the SHA of the empty string -- a
+#    perfectly valid hash -- so it used to be adopted and pushed over both backups,
+#    destroying the definition and both copies while reporting a clean sync.
+# ===========================================================================
+$root = New-TempRoot
+$fx = New-Fixture -Root $root -CanonContent $NEW_CONTENT -GovContent $NEW_CONTENT -LocalContent $NEW_CONTENT
+Invoke-Guard $fx | Out-Null
+[System.IO.File]::WriteAllBytes($fx.CanonFile, @())          # truncation
+$out = Invoke-Guard $fx | ConvertFrom-Json
+Check "0-BYTE canonical is reported unreadable"  (@($out.unreadable) -contains 't1')
+Check "0-BYTE canonical is NOT adopted"          (@($out.backed_up).Count -eq 0)
+Check "0-BYTE canonical did not reach the mirrors" `
+    ((Get-Content -LiteralPath "$($fx.Gov)\t1\SKILL.md" -Raw) -eq $NEW_CONTENT)
+Remove-Item -Recurse -Force $root
+
+# ===========================================================================
+# 9. An UNVERIFIED restore must not overwrite an existing mirror. Mirror protection is
+#    gated on whether the restore was lineage-VERIFIED, not on having any baseline --
+#    otherwise a guess overwrites the only surviving good copy.
+# ===========================================================================
+$root = New-TempRoot
+$fx = New-Fixture -Root $root -CanonContent $OLD_CONTENT -GovContent $OLD_CONTENT -LocalContent $NEW_CONTENT
+Remove-Item -LiteralPath $fx.CanonFile -Force                # no ledger yet -> unverified restore
+$out = Invoke-Guard $fx | ConvertFrom-Json
+Check "UNVERIFIED restore still restores canonical" (Test-Path -LiteralPath $fx.CanonFile)
+Check "UNVERIFIED restore is flagged as such"       (@($out.restored) -match 'unverified')
+Check "UNVERIFIED restore does NOT overwrite the surviving good mirror" `
+    ((Get-Content -LiteralPath "$($fx.Local)\t1\SKILL.md" -Raw) -eq $NEW_CONTENT)
+Remove-Item -Recurse -Force $root
+
+# ===========================================================================
+# 10. A DELIBERATE rollback that persists across runs is adopted, so the entry cannot
+#     stick in regression_detected forever and a later loss of canonical cannot
+#     "restore" the operator's rollback away through the permitted absent-canonical door.
+# ===========================================================================
+$root = New-TempRoot
+$fx = New-Fixture -Root $root -CanonContent $OLD_CONTENT -GovContent $OLD_CONTENT -LocalContent $OLD_CONTENT
+Invoke-Guard $fx | Out-Null
+Set-Content -LiteralPath $fx.CanonFile -Value $NEW_CONTENT -NoNewline
+Invoke-Guard $fx | Out-Null                                   # NEW is known-good
+Set-Content -LiteralPath $fx.CanonFile -Value $OLD_CONTENT -NoNewline   # operator rolls back
+$o1 = Invoke-Guard $fx | ConvertFrom-Json                     # run A: report, freeze
+$o2 = Invoke-Guard $fx | ConvertFrom-Json                     # run B: persisted -> adopt
+Check "rollback run A reports a regression"       (@($o1.regressed).Count -eq 1)
+Check "rollback run B adopts the deliberate rollback" (@($o2.regressed) -match 'adopted_deliberate_rollback')
+Check "rollback run B propagates it to the mirrors" `
+    ((Get-Content -LiteralPath "$($fx.Gov)\t1\SKILL.md" -Raw) -eq $OLD_CONTENT)
+Remove-Item -LiteralPath $fx.CanonFile -Force
+$o3 = Invoke-Guard $fx | ConvertFrom-Json
+Check "after adoption, a lost canonical restores the ROLLBACK, not the undone version" `
+    ((Get-Content -LiteralPath $fx.CanonFile -Raw) -eq $OLD_CONTENT)
+Remove-Item -Recurse -Force $root
+
+# ===========================================================================
+# 11. One malformed registry row must not fail the fleet, and the ledger must still be written.
+# ===========================================================================
+$root = New-TempRoot
+$fx = New-Fixture -Root $root -CanonContent $NEW_CONTENT -GovContent $NEW_CONTENT -LocalContent $NEW_CONTENT
+$storeDir = Join-Path $root 'store\cc-sessions\aaa\bbb'
+@{ scheduledTasks = @(
+      @{ id = 'bad-row'; filePath = 'SKILL.md' },        # no directory component
+      @{ id = 't1';      filePath = $fx.CanonFile },
+      @{ id = 'T1';      filePath = $fx.CanonFile }      # case-variant of t1
+) } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $storeDir 'scheduled-tasks.json')
+$out = Invoke-Guard $fx | ConvertFrom-Json
+Check "malformed row does not fail the run"        ($null -ne $out.checked)
+Check "case-variant ids are counted separately"    ($out.checked -eq 3)
+Check "canonical untouched by the malformed row"   ((Get-Content -LiteralPath $fx.CanonFile -Raw) -eq $NEW_CONTENT)
+Check "the ledger was still written"               (Test-Path -LiteralPath $fx.Ledger)
+Remove-Item -Recurse -Force $root
+
+# ===========================================================================
+# 12. A corrupt ledger must be REPORTED, not silently treated as "no history". Regression
+#     detection is off for that run; a zero that could mean "couldn't look" is a failure.
+# ===========================================================================
+$root = New-TempRoot
+$fx = New-Fixture -Root $root -CanonContent $NEW_CONTENT -GovContent $NEW_CONTENT -LocalContent $NEW_CONTENT
+Set-Content -LiteralPath $fx.Ledger -Value '{ this is not json'
+$out = Invoke-Guard $fx | ConvertFrom-Json
+Check "corrupt ledger is reported via ledger_status" ($out.ledger_status -eq 'unreadable')
+Check "corrupt ledger does not crash the run"        ($out.checked -ge 1)
+Check "corrupt ledger leaves canonical intact"       ((Get-Content -LiteralPath $fx.CanonFile -Raw) -eq $NEW_CONTENT)
+Remove-Item -Recurse -Force $root
+
+# ===========================================================================
+# 13. -ReportOnly writes NOTHING. dry-run-task-integrity-guard.ps1 drives the real engine,
+#     so without a genuine no-write mode the "dry run" mutated the live ledger and mirrors.
+# ===========================================================================
+$root = New-TempRoot
+$fx = New-Fixture -Root $root -CanonContent $NEW_CONTENT -GovContent $OLD_CONTENT -LocalContent $OLD_CONTENT
+Invoke-Guard $fx | Out-Null                                  # baseline so a sync would be due
+Set-Content -LiteralPath $fx.CanonFile -Value $NEW_CONTENT -NoNewline
+$govBefore = Get-Content -LiteralPath "$($fx.Gov)\t1\SKILL.md" -Raw
+Remove-Item -LiteralPath $fx.Ledger -Force
+$out = & $guard -GovOverride $fx.Gov -LocalOverride $fx.Local -LedgerPathOverride $fx.Ledger `
+                -StoreRootsOverride @($fx.Store) -CcRepoOverride (Join-Path $env:TEMP 'no-such-repo') `
+                -ReportOnly | ConvertFrom-Json
+Check "ReportOnly is flagged in the output"    ($out.report_only -eq $true)
+Check "ReportOnly wrote NO ledger"             (-not (Test-Path -LiteralPath $fx.Ledger))
+Check "ReportOnly did not touch the mirrors"   ((Get-Content -LiteralPath "$($fx.Gov)\t1\SKILL.md" -Raw) -eq $govBefore)
+
+Remove-Item -LiteralPath $fx.CanonFile -Force
+$out = & $guard -GovOverride $fx.Gov -LocalOverride $fx.Local -LedgerPathOverride $fx.Ledger `
+                -StoreRootsOverride @($fx.Store) -CcRepoOverride (Join-Path $env:TEMP 'no-such-repo') `
+                -ReportOnly | ConvertFrom-Json
+Check "ReportOnly reports a WOULD-restore"     (@($out.restored) -match 'WOULD restore')
+Check "ReportOnly did NOT recreate canonical"  (-not (Test-Path -LiteralPath $fx.CanonFile))
+Remove-Item -Recurse -Force $root
+
+# ===========================================================================
 if ($script:failures.Count -eq 0) {
     Write-Output ""; Write-Output "ALL TESTS PASSED"; exit 0
 } else {
