@@ -2625,6 +2625,8 @@ not blocking; noted here so it isn't lost, not because it's urgent.
 
 | ID | Opened | Closed | Source | One-line |
 |----|--------|--------|--------|----------|
+| [OI-107](#OI-107) | 2026-08-09 | 2026-08-09 | [event_log.md](event_log.md#2026-08-09) — guard.ps1 mtime-revert pause | CLOSED — the pause is lifted because its reason is gone. The canonical-is-authoritative engine landed on `main` (`1af60c3`, hardened by `2e29fa7` after independent review + adversarial REFUTE) with `maintenance/task-integrity-lib.ps1`; `guard.ps1` now contains **zero** `LastWriteTime` references — mtime is out of the decision path entirely — and loads the new decision core. Both `ora-task-integrity-guard` and `ora-health-guard` are `enabled:true` again with live next-run times (2026-08-10T11:14:19Z and 09:24:39Z), verified via `list_scheduled_tasks`, not a registry read. The four 2026-08-09 model retags survived the whole episode intact (`ora-skill-cache-drift-alert`, `ora-cc-schematic-refresh`, `ora-am-brief`, `ora-lease-snapshot-refresh` all still read `checked 2026-08-09`), so no write was lost. This item's `Auto-check` fired correctly and is what surfaced the closure |
+| [OI-108](#OI-108) | 2026-08-09 | 2026-08-09 | Investigation of two "untraceable" claim-holder sessions | Both defects fixed and merged to `main` as `8fca11d` (branch `fix/claim-host-session-id`, commit `369c62b`). `host_session_id` is now recorded ALONGSIDE the agent id and normalized at one reader choke point (`_clean_host_session_id`), so a claim can be turned into a `send_message` target; `--paths` uses `action="extend"` so a repeated flag accumulates instead of silently keeping only the last value. **Evidence:** full `hooks/tests` **44/44 on main post-merge, 0 failures** (incl. `test-confidentiality-guard` 131/131, which cannot run in a worktree); `test-claim-work-lib` 85/85 (was 55), `test-active-work-broadcast` 42/42 (was 23). Independent review, `claude-fable-5`, 2 rounds: R1 CHANGES REQUIRED (2 Important + 3 Minor), R2 APPROVED WITH NITS after all five were closed; reviewer mutation-tested both fixes to confirm the new tests BIND (gutted normalizer -> 9+7 failures; renew re-reads env -> exactly the 2 new assertions). Review artifact recorded against `eos-review-gate` before the commit landed. **Accepted residual, not a defect:** no `local_<uuid>` shape check, so renderable-but-wrong printable-ASCII tokens pass -- strictly less expressive than the adjacent, already-unsanitized `description` field, and hard-coding a format observed once would risk silently rejecting a legitimate future target (the very bug this closes) |
 | [OI-037](#OI-037) | 2026-07-31 | 2026-08-04 | ora-appsec-sweep 2026-07-31; fixed `ora-pm` commit `23b924f`; verified live 2026-08-04 (in-page fetch against `ora-pm.pages.dev`) | CORS exact-match allowlist + security headers. `X-Frame-Options: DENY` and `Content-Security-Policy-Report-Only` (exact expected policy) confirmed present on the real served response, not just the merged config — closes this item's own standing verification caveat. CSP-enforcement flip remains OI-066's separate job |
 | [OI-039](#OI-039) | 2026-07-31 | 2026-08-04 | ora-appsec-sweep 2026-07-31; fixed `ora-pm` migration `0011_appsec_idempotency_and_scale.sql`, applied to production 2026-08-04 | All 10 money columns retyped `NUMERIC(12,2) NOT NULL` with unit `COMMENT ON COLUMN`s; `charges.idempotency_key` backfilled + `NOT NULL`; `payments.stripe_payment_intent_id` unique index + `autopay_period` dedup column added. All 3 of the migration's own pre-flight checks ran clean against prod first (0 dupes, 0 backfill collisions, 0 sub-cent rows/10 cols). Verified post-apply via `information_schema.columns` + `ar_ledger` resolving cleanly. Bonus finding: migration tracker was stalled at 0007, masking that 0009/0010 were already live untracked — see [OI-073](#OI-073) |
 | [OI-073](#OI-073) | 2026-08-04 | 2026-08-04 | Applying migrations 0009-0011 to ora-pm production, 2026-08-04 | `supabase_migrations.schema_migrations` backfilled with rows for 0008-0011 (Gabriel: "backfill now") — tracker now shows 11 contiguous rows matching the live schema for the first time. Root cause was left unidentified at this item's own closure — since root-caused and fixed as [OI-074](#OI-074) (no `SUPABASE_ACCESS_TOKEN` in the Code sandbox; two-tier fix built) |
@@ -4032,3 +4034,80 @@ sums the schedule over the **forward 12-month** window. All three sit under the 
 r8 already holds `Balloon Balance at Maturity (Oxford 50%) = -972,551.365`, so the figure exists — it
 just doesn't flow. **Careful:** RCT r37 is a 50%-share memo row and `H15`/`I15` already apply `*0.5`;
 never let r37 into a D/E sum or it double-counts.
+### OI-107
+**Status:** CLOSED 2026-08-09 — fix landed (`1af60c3` + `2e29fa7`), both tasks re-enabled and verified
+**Closed:** 2026-08-09
+**Opened:** 2026-08-09
+**Source:** [event_log.md](event_log.md#2026-08-09) — "ora-task-integrity-guard AND ora-health-guard PAUSED one cycle"; originating handoff at `~/.claude/maintenance/_state/guard-handoff-2026-08-09-frontmatter-retags.md`
+**Severity:** MEDIUM, time-boxed — the pause itself is the mitigation; the risk is that it is never lifted
+**Description:** `ora-task-integrity-guard` (cron `5 7 * * *`) and `ora-health-guard` (cron `15 5 * * *`)
+are both `enabled:false` as of 2026-08-09 (Gabriel-directed, in-turn). Crons are preserved; only
+`enabled` was flipped, via `update_scheduled_task` — never the Scheduled-sidebar delete.
+**Why paused:** the live `guard.ps1` is still the 2026-07-24 mtime-newest-wins engine, which can
+silently revert a legitimate canonical SKILL.md edit when a stale mirror's mtime is bumped above
+canonical's (the documented OneDrive-sync mechanism; it reverted three live SKILL.mds at
+2026-08-09 08:54:47). The replacement decision core is uncommitted WIP in worktree
+`fix/guard-content-revert` (owning session `local_e69b7e30`).
+**TWO tasks, not one — this is the part that is easy to get wrong:** `ora-health-guard` Block A.1
+(its `SKILL.md:73`) invokes the *same* `guard.ps1` by absolute path at 05:25 ET, two hours BEFORE
+the 07:14 slot. Disabling only `ora-task-integrity-guard` leaves the old engine running.
+**Closing condition:** the guard.ps1 fix lands on `main`, then BOTH are re-enabled:
+`update_scheduled_task(taskId:"ora-task-integrity-guard", enabled:true)` and
+`update_scheduled_task(taskId:"ora-health-guard", enabled:true)`. Verify with
+`list_scheduled_tasks` (a registry/file read is not verification — `register-scheduled-task` Rule 2).
+Both already carry dated MODEL tags, so v2.8's re-enable precondition is satisfied as-is.
+**Known collateral while paused (accepted, one cycle):** ora-health-guard Block C's probe suite does
+not run — memory-integrity, confidentiality self-test, cc-verifier, setup-self-audit, connector-drift,
+and the new v1.3 C.1.1 missed-cycle escalation. Governor/doctrine coverage survives via
+`ora-doctrine-integrity-guard` (12:55 ET daily). ora-task-integrity-guard STEP 1.5's three producers
+also skip: `registry-membership-probe.py`, `emit-fleet-heartbeat.py`, `push-fleet-heartbeat.ps1` —
+expect a one-day gap in `_state/registry-membership.log` and the external heartbeat, and expect
+`fleet-deadman.ps1` check 4 (Windows Task Scheduler, outside both fleets) to flag the guard as
+not-run. That alarm is expected noise, not a real miss.
+**Note on the auto-check below:** `memory-integrity-probe.py` is normally run daily by
+`ora-health-guard` — which is one of the two tasks paused here — so while this item is open the
+auto-check is only evaluated on `ora-cc-schematic-refresh`'s Mon+Thu cadence. It self-resolves the
+moment the item does.
+**Outcome:** the auto-check above did its job — `memory-integrity-probe.py` flagged the match, which is how the
+closure was noticed at all. Worth keeping as a pattern for time-boxed pauses.
+**Auto-check:** none (item closed).
+
+### OI-108
+**Status:** CLOSED 2026-08-09 — merged to `main` as `8fca11d` after a 2-round independent review
+**Closed:** 2026-08-09
+**Opened:** 2026-08-09
+**Source:** investigation of two claim-holder session ids (`1d24d6a4`, `b09003a0`) that did not resolve against `list_sessions`
+**Severity:** LOW/MEDIUM — no data loss; degrades the cross-session collision protocol that exists to prevent duplicated/colliding work
+**Defect 1 — two disjoint session-id namespaces, nothing carried both.** `own_session_id()`
+(`hooks/lib/claim_work.py:125`) returns `CLAUDE_CODE_SESSION_ID` — the agent id, e.g.
+`21c98da5-56d2-49aa-bbe9-6626591e6fdd`. `list_sessions` and `send_message` accept ONLY
+`CLAUDE_CODE_HOST_SESSION_ID` — e.g. `local_c689f07f-d45a-473e-94d9-3f418c47e5cd`. Claim files, the
+`obsidian-fleet-mirror/session-state.d/` mirror (its `_sid`) and `session_liveness.py` are all agent-id;
+`list_sessions`/`send_message`/handoff notes are all host-id. **Verified both directions:** every claim
+id checked resolves to a live record under `session-state.d/`, and `local_*` ids appear nowhere in any
+machine-written artifact under `~/.claude`. Consequence: a colliding claim could be seen but its owner
+could not be messaged — and the ids looked like phantom sessions, which is a misleading failure shape.
+**Defect 2 — `--paths` silently dropped all but the last occurrence.** `nargs="*"` without
+`action="extend"` makes argparse OVERWRITE on a repeated flag. Observed live: a claim passing
+`--paths hooks/lib/claim_work.py --paths hooks/active-work-broadcast.py` recorded ONE path, dropping the
+file actually being edited. Silent under-cover of the exact protection defect D1 added 2026-07-26.
+**Fix (additive, branch `fix/claim-host-session-id`):** new `own_host_session_id()`; `write_claim()`
+records `host_session_id` alongside (never instead of) `session_id`, so ownership matching and the
+agent-id-keyed mirror join are untouched; `read_active_claims()` defaults the key so pre-2026-08-09
+claim files still read; `renew_claim()` carries it through (a rewrite drops anything not passed);
+`list` prints it in full; `active-work-broadcast.py` appends `(message it at <host id>)`, sanitized via
+`_sanitize_field` per the R4 threat model. `--paths` becomes `action="extend"`. Fails open: an
+unattended session with no host var records `""`, never `"unknown"` (which is a legal agent id and
+would read as a real target).
+**Evidence so far:** `test-claim-work-lib.py` 71/71 (was 55/55), `test-active-work-broadcast.py` 30/30
+(was 23/23), full `hooks/tests` 43/43 — the 44th, `test-confidentiality-guard.py`, cannot run in any
+worktree because `hooks/confidential-terms.json` is git-ignored (`.gitignore:138`) and passes 131/131 in
+the main checkout. A live end-to-end run confirms a new claim renders the host id and a legacy
+host-less claim renders none.
+**Caught by the live run, NOT by the unit test:** the first implementation sanitized before testing
+emptiness, and `_sanitize_field("")` returns `"(no description)"` — so every legacy claim rendered
+`(message it at (no description))`. The test asserted too narrowly (`"host )"`) and passed anyway. Both
+the implementation and the assertion were fixed, and the strengthened test was proven to catch the
+regression (28/30 with the old implementation restored, 30/30 with the fix).
+**Closing condition (MET):** independent review (`claude-fable-5`, 2 rounds, APPROVED WITH NITS), merged to `main` as `8fca11d`, full `hooks/tests` re-run on main post-merge: 44/44, 0 failures.
+**Auto-check:** none.
