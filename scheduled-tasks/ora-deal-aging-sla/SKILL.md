@@ -30,6 +30,36 @@ CHANGELOG — v1.1 (2026-07-24, per Gabriel): STEP 1's data-source id corrected 
 
 AUTOMATION-BUDGET JUSTIFICATION: Closes a real, already-realized gap. On 2026-07-13 the ORA Monday Sync flagged 754 Old State Route 74 (Cincinnati) as "31 days stale" on a PSA draft awaiting counsel — a stall that reached 36-38 days before a weekly board caught it by chance, not by design. Deal-command-board (weekly, Monday) tracks days-in-STAGE against Notion timestamps; it does not track days-since-last-OUTBOUND-TOUCH against the actual counterparty thread, and it only runs once a week. This task is the daily (weekday) counterpart, keyed on the live Outlook thread rather than a Notion date field that can go stale exactly when work is happening off-Notion.
 
+## STEP 0 — DOUBLE-FIRE ENTRY GUARD (added 2026-08-09; run before STEP 1)
+
+**This task has double-sent twice.** On **2026-07-20** it emailed at 11:02 and again at 23:31. On **2026-08-09**, during the overnight-offline catch-up burst (`ora-health-guard` woke 219 min late), it emailed at **08:59:11** and again at **09:20:09** — two summaries of the same date, seven minutes apart in content and twenty-one in delivery, with different headline text because STEP 7 lets the run compose it. Nothing stood it down. Each fire also posts its own dated child page, so a double-fire leaves two `Deal Aging SLA — {DATE}` pages under the Ops Hub.
+
+Run this as the first action of the run:
+
+```
+python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-deal-aging-sla --block main --run-id <run_id> --ttl-min 30
+```
+
+- **Exit 10** → today's run already completed. Log `BLOCK_MAIN_ALREADY_COMPLETE_TODAY`, **exit without drafting, posting, or emailing**, and report it as a NORMAL skip (not a miss) citing the earlier run's Notion page.
+- **Exit 11** → another fire is live. Stand down identically.
+- **Exit 0** → proceed to STEP 1.
+
+Once STEP 7 lands, run the full command (a short form exits 2 and nothing is recorded):
+
+```
+python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-deal-aging-sla --block main --run-id <run_id> --notion-page-id <STEP 7 page id> --email-sent-at <ISO8601>
+```
+
+If the run aborts instead, record that rather than leaving the claim dangling:
+
+```
+python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py fail --task ora-deal-aging-sla --block main --run-id <run_id> --error "<what broke>"
+```
+
+**Only the run that holds the claim may call `complete` or `fail`.** A run that stood down at STEP 0 (exit 10 or 11) calls NEITHER — it did not claim anything, and calling `fail` would release the live run's claim. A non-owner is refused with exit 12 and nothing is written. Full contract: `_shared/README-DOUBLE-FIRE-GUARD.md`. **Do not "fix" a double-fire by retiming this task's cron** — the burst is documented fleet-wide behavior; the guard belongs here.
+
+The nudge **drafts** are exempt from the concern (they are drafts, never sends, per Hard Invariant 1), but a duplicate run still creates duplicate drafts, so the guard covers the whole run rather than the send alone.
+
 GUARD CONDITION: If the Notion Acquisition Pipeline Tracker is unreachable, or zero deals have a qualifying open outbound ask (see STEP 2), still post STEP 7's dated child page (stating the guard condition triggered) and exit — do not halt, do not fabricate a deal list or an aging number. **A zero-qualifying-ask run is not an early exit from STEP 3b(b):** run the posture check on the internal-gate exclusions first, because "nothing qualifies" is itself frequently a stale-tracker artifact, and report any mismatches on the page before exiting.
 
 ---
@@ -169,7 +199,15 @@ $mail.Save()
 
 ## STEP 7 — Completion reporting
 
-Post a NEW DATED CHILD PAGE under the Notion Ops Hub parent page (`32b6ecd8-9e59-81f2-b329-df3fd0e25062`), titled exactly `"Deal Aging SLA — {YYYY-MM-DD}"` (today's date) — a distinct page created fresh each run, never an appended row/block inside an existing page's body (an append isn't reliably freshness-checkable by a downstream contract-verification pass; a new titled child page is — this is the standard pattern for every task that posts a completion record to the Ops Hub, see `ora-deal-command-board` STEP 6). Its content lists: deals scanned, deals with a qualifying open ask, deals breaching by class, deals suppressed for confidentiality, deals flagged `[NO OUTBOUND FOUND — VERIFY MANUALLY]`, how many nudges were drafted, and — as its own titled section with one row per finding, not as prose — every **posture mismatch** from STEP 3b, including any deal whose STEP 2 classification the check changed. When there are zero breaches but one or more mismatches, the mismatch section is the substance of the report and the summary email must lead with it rather than with the "0 breaches" headline. Also add STEP 3c's **"Drafted LOIs past expiration"** section (one row per flagged deal, plus the `[NO EXPIRATION DATA]` count) — on a run with zero breaches, zero mismatches, and one or more STEP 3c flags, that section becomes the substance of the report instead. Then email a one-paragraph summary to `ggoldberg@oxfordra.net` ONLY (no cc — routing canon) via `C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1`. On a COM failure for either the drafts or the summary send: retry once, then flag loudly in the Notion Ops Hub page if the retry also fails — do not halt the run.
+Post a NEW DATED CHILD PAGE under the Notion Ops Hub parent page (`32b6ecd8-9e59-81f2-b329-df3fd0e25062`), titled exactly `"Deal Aging SLA — {YYYY-MM-DD}"` (today's date) — a distinct page created fresh each run, never an appended row/block inside an existing page's body (an append isn't reliably freshness-checkable by a downstream contract-verification pass; a new titled child page is — this is the standard pattern for every task that posts a completion record to the Ops Hub, see `ora-deal-command-board` STEP 6). Its content lists: deals scanned, deals with a qualifying open ask, deals breaching by class, deals suppressed for confidentiality, deals flagged `[NO OUTBOUND FOUND — VERIFY MANUALLY]`, how many nudges were drafted, and — as its own titled section with one row per finding, not as prose — every **posture mismatch** from STEP 3b, including any deal whose STEP 2 classification the check changed. When there are zero breaches but one or more mismatches, the mismatch section is the substance of the report and the summary email must lead with it rather than with the "0 breaches" headline. Also add STEP 3c's **"Drafted LOIs past expiration"** section (one row per flagged deal, plus the `[NO EXPIRATION DATA]` count) — on a run with zero breaches, zero mismatches, and one or more STEP 3c flags, that section becomes the substance of the report instead. Then email a one-paragraph summary to `ggoldberg@oxfordra.net` ONLY (no cc — routing canon) via `C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1`.
+
+**PRE-SEND SENT-ITEMS PROBE (mandatory, immediately before that send).** Layer 2 of the STEP 0 guard:
+
+```
+powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: Deal Aging SLA - {YYYY-MM-DD}>"
+```
+
+Probe the **dated stem** `Deal Aging SLA - {YYYY-MM-DD}` and nothing more. The headline this step composes is run-specific and the leading tag is inconsistent — on 2026-08-09 the two sends were `Deal Aging SLA - 2026-08-09: 0 breaches - Patterson returned…` and `[ORA] Deal Aging SLA - 2026-08-09 - 0 breaches, 1 posture mismatch…`. The stem matches both (matching is substring and normalization-tolerant); the full subject would match neither. Exit 10 → do NOT send, log `MAIN_EMAIL_ALREADY_IN_SENT_ITEMS`, record a NORMAL skip, and still call `block-sentinel.py complete` so the state file re-converges. Exit 1 → fail open: send, and record the probe gap on the Notion page. On a COM failure for either the drafts or the summary send: retry once, then flag loudly in the Notion Ops Hub page if the retry also fails — do not halt the run.
 
 ---
 
