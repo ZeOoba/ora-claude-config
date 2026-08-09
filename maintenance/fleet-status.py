@@ -81,17 +81,47 @@ def load(path):
 
 
 def cron_hm(expr):
-    """Return (hour, minute) for a 5-field cron, or None for one-time/epoch/unknown."""
+    """Return (hour, minute) for a 5-field cron with exactly ONE fixed fire time,
+    or None for one-time/epoch/unknown/wildcard/multi-fire expressions. Thin
+    wrapper over cron_hms() -- kept for call sites that only make sense for a
+    single fire time (a multi-fire cron returns None here, same as before this
+    fix, so those call sites are unaffected)."""
+    hms = cron_hms(expr)
+    if not hms or len(hms) != 1:
+        return None
+    return hms[0]
+
+
+def cron_hms(expr):
+    """Return a sorted list of every (hour, minute) this 5-field cron fires at on
+    a matching day, or None if it isn't a fixed set of times (wildcard hour/minute,
+    a step value like '*/15', a one-time epoch, or malformed).
+
+    BUG THIS CLOSES (flagged 2026-07-27c, still open 2026-08-09): the prior
+    cron_hm() called int(hr)/int(mn) directly, so a multi-fire hour field like
+    "7,13,19" (e.g. ora-lease-snapshot-refresh, ora-aaos-expire-leases) raised
+    ValueError and the WHOLE task silently vanished from the AM-pileup count,
+    same-time collision detection, AND the missed-cycle detector -- not just
+    undercounted, completely invisible to all three. Supports comma lists and
+    a-b ranges via the existing _parse_cron_set() (same grammar already used
+    for dom/month/dow); a bare '*' hour or minute field is still treated as
+    "not a fixed time" (matching cron_hm()'s prior behavior) rather than
+    expanding to all 24/60 values, which would swamp collision/pileup output
+    with meaningless matches."""
     if not isinstance(expr, str):
         return None
     parts = expr.split()
     if len(parts) != 5:
         return None
     mn, hr = parts[0], parts[1]
+    if mn == "*" or hr == "*":
+        return None
     try:
-        return (int(hr), int(mn))
+        hours = _parse_cron_set(hr, 0, 23)
+        minutes = _parse_cron_set(mn, 0, 59)
     except ValueError:
-        return None  # ranges/lists/* -> not a single fixed time
+        return None  # step values ('*/15') or other unparseable forms
+    return sorted((h, m) for h in hours for m in minutes)
 
 
 def _parse_cron_set(field, lo, hi):
@@ -256,28 +286,34 @@ def parse_last_run_utc(s):
 
 
 def most_recent_expected_fire_utc(expr, now_local, lookback_days=400):
-    """For a fixed-hour/minute 5-field cron, walk backward from now_local to
-    find the most recent local datetime at/before now that the cron would
-    have fired (respecting dom/month/dow), converted to naive UTC. Returns
-    None if the cron isn't a single-fixed-time expression (e.g. '*/n', or
-    one-time) or no match falls within lookback_days."""
-    hm = cron_hm(expr)
-    if hm is None:
+    """For a fixed-time 5-field cron (single- or multi-fire), walk backward from
+    now_local to find the most recent local datetime at/before now that the
+    cron would have fired (respecting dom/month/dow), converted to naive UTC.
+    Returns None if the cron isn't a fixed-time expression (e.g. '*/n', or
+    one-time) or no match falls within lookback_days.
+
+    Multi-fire support (2026-08-09, closes the same gap as cron_hms()): a task
+    like "40 7,13,19 * * 1-5" fires three times on a matching day, not one --
+    each day considered must check all of its fire times, latest first, so the
+    single most recent one at/before now_local is returned rather than only
+    ever checking one fixed hour/minute."""
+    hms = cron_hms(expr)
+    if not hms:
         return None
     parts = expr.split()
     if len(parts) != 5:
         return None
     _mn, _hr, dom, mon, dow = parts
-    hour, minute = hm
     offset_td = _local_utc_offset()
     cur_date = now_local.date()
     for day_offset in range(lookback_days):
         d = cur_date - datetime.timedelta(days=day_offset)
         dow_val = (d.weekday() + 1) % 7  # cron Sun=0..Sat=6; python Mon=0..Sun=6
         if _cron_fires_on(dom, mon, dow, d.day, d.month, dow_val):
-            candidate_local = datetime.datetime(d.year, d.month, d.day, hour, minute)
-            if candidate_local <= now_local:
-                return candidate_local - offset_td
+            for hour, minute in sorted(hms, reverse=True):
+                candidate_local = datetime.datetime(d.year, d.month, d.day, hour, minute)
+                if candidate_local <= now_local:
+                    return candidate_local - offset_td
     return None
 
 
@@ -398,8 +434,10 @@ def main():
     # vs Wed 13:30 used to false-positive as a collision; see crons_share_a_day()).
     hm = {}
     for t in tasks:
-        key = cron_hm(t.get("cronExpression"))
-        if key is not None:
+        # cron_hms(), not cron_hm(): a multi-fire task (e.g. "40 7,13,19 * * 1-5")
+        # must be grouped into EVERY fire-time bucket it occupies, or it collides
+        # invisibly with a task sharing just one of those times (2026-08-09 fix).
+        for key in (cron_hms(t.get("cronExpression")) or []):
             hm.setdefault(key, []).append((t.get("id", "?"), t.get("cronExpression")))
     collisions = {}
     for k, group in hm.items():
@@ -415,12 +453,15 @@ def main():
         if real_ids:
             collisions["%02d:%02d" % k] = real_ids
 
-    # AM pileup 05:00-09:30
+    # AM pileup 05:00-09:30. cron_hms(), not cron_hm(): a multi-fire task only
+    # needs ONE of its fire times inside the window to count once (2026-08-09
+    # fix -- the prior cron_hm()-only version excluded every multi-fire task
+    # from this count entirely, undercounting it; see cron_hms() docstring).
     am_pileup = []
     for t in tasks:
-        key = cron_hm(t.get("cronExpression"))
-        if key and (5 <= key[0] < 9 or (key[0] == 9 and key[1] <= 30)):
-            am_pileup.append((("%02d:%02d" % key), t.get("id")))
+        for key in (cron_hms(t.get("cronExpression")) or []):
+            if 5 <= key[0] < 9 or (key[0] == 9 and key[1] <= 30):
+                am_pileup.append((("%02d:%02d" % key), t.get("id")))
 
     missed_cycle = find_missed_cycles(tasks, now_local=datetime.datetime.fromtimestamp(now_ms / 1000))
 

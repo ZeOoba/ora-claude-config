@@ -243,6 +243,37 @@ def test_same_time_overlapping_weekday_range_still_collides():
           "Wed is inside Mon-Fri -- must still collide, got %r" % (data,))
 
 
+# 14. A multi-fire cron (comma-list hour field) whose one AM-window fire time
+# falls in 05:00-09:30 must be counted in am_pileup_count -- prior cron_hm()
+# raised ValueError on "7,13,19" and silently dropped the task from the count
+# entirely (flagged 07-27c, closed 2026-08-09).
+def test_multifire_cron_counted_in_am_pileup():
+    tasks = [task("ora-lease-snapshot-refresh", cron="40 7,13,19 * * 1-5",
+                  created_days_ago=1, last_run=recent_iso())]
+    data, _ = run(tasks)
+    check("test_multifire_cron_counted_in_am_pileup",
+          data is not None and data.get("am_pileup_count") == 1,
+          "expected the 07:40 fire time counted once, got %r" % (data,))
+
+
+# 15. A multi-fire task sharing ONE of its fire times with a single-fire task
+# must show up as a real same-time collision (previously invisible to
+# collision detection for the same cron_hm() reason as #14).
+def test_multifire_cron_collides_on_shared_fire_time():
+    tasks = [
+        task("ora-lease-snapshot-refresh", cron="40 7,13,19 * * 1-5",
+             created_days_ago=1, last_run=recent_iso()),
+        task("other-1340-task", cron="40 13 * * 1-5",
+             created_days_ago=1, last_run=recent_iso()),
+    ]
+    data, _ = run(tasks)
+    check("test_multifire_cron_collides_on_shared_fire_time",
+          data is not None and "13:40" in (data.get("collisions") or {})
+          and set(data["collisions"]["13:40"]) ==
+              {"ora-lease-snapshot-refresh", "other-1340-task"},
+          "expected a 13:40 collision between the two tasks, got %r" % (data,))
+
+
 if __name__ == "__main__":
     test_all_healthy_is_ok()
     test_quarterly_not_yet_due_is_not_overdue()
@@ -257,6 +288,8 @@ if __name__ == "__main__":
     test_collision_still_flags()
     test_same_time_different_weekday_not_a_collision()
     test_same_time_overlapping_weekday_range_still_collides()
+    test_multifire_cron_counted_in_am_pileup()
+    test_multifire_cron_collides_on_shared_fire_time()
     if _failures:
         print("\n%d FAILURE(S): %s" % (len(_failures), ", ".join(_failures)))
         sys.exit(1)

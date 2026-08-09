@@ -136,5 +136,81 @@ class TestFindMissedCycles(unittest.TestCase):
                                    "semantics to match the live scheduler, not POSIX OR")
 
 
+class TestCronHms(unittest.TestCase):
+    """Unit tests for cron_hms() / cron_hm() multi-fire parsing (2026-08-09).
+
+    Closes the gap flagged 2026-07-27c and still open 2026-08-09: cron_hm()
+    called int(hr)/int(mn) directly, so a multi-fire hour field like "7,13,19"
+    raised ValueError and the whole task vanished from cron_hm()'s output --
+    not undercounted, completely invisible -- to AM-pileup, collision
+    detection, and the missed-cycle detector alike."""
+
+    def test_single_fire_unchanged(self):
+        self.assertEqual(fs.cron_hms("40 7 * * 1-5"), [(7, 40)])
+        self.assertEqual(fs.cron_hm("40 7 * * 1-5"), (7, 40))
+
+    def test_multifire_comma_hours_parsed(self):
+        # ora-lease-snapshot-refresh's real cron.
+        self.assertEqual(fs.cron_hms("40 7,13,19 * * 1-5"), [(7, 40), (13, 40), (19, 40)])
+
+    def test_multifire_returns_none_from_cron_hm(self):
+        # cron_hm() stays a single-fire-only accessor -- multi-fire callers
+        # must use cron_hms() explicitly, so any call site not yet updated
+        # fails closed (silently excluded) rather than picking an arbitrary
+        # one of the fire times.
+        self.assertIsNone(fs.cron_hm("40 7,13,19 * * 1-5"))
+
+    def test_wildcard_hour_or_minute_not_a_fixed_time(self):
+        self.assertIsNone(fs.cron_hms("*/15 * * * *"))
+        self.assertIsNone(fs.cron_hms("0 * * * *"))
+        self.assertIsNone(fs.cron_hms("* 7 * * *"))
+
+    def test_hour_range_expands_like_a_list(self):
+        self.assertEqual(fs.cron_hms("0 7-9 * * *"), [(7, 0), (8, 0), (9, 0)])
+
+    def test_malformed_field_fails_closed(self):
+        self.assertIsNone(fs.cron_hms("0 not-a-cron * * *"))
+
+
+class TestMultiFireMissedCycle(unittest.TestCase):
+    """most_recent_expected_fire_utc() must check every fire time of a
+    multi-fire cron, not just the (nonexistent) single one, and pick the most
+    recent one at/before now_local."""
+
+    def test_picks_latest_fire_time_at_or_before_now(self):
+        # 07:40/13:40/19:40 weekdays; "now" is Wed 15:00 -- most recent
+        # expected fire is today's 13:40, not 07:40 or yesterday's 19:40.
+        now_local = datetime.datetime(2026, 7, 29, 15, 0, 0)  # a Wednesday
+        expected = fs.most_recent_expected_fire_utc("40 7,13,19 * * 1-5", now_local)
+        self.assertEqual(expected, datetime.datetime(2026, 7, 29, 13, 40) -
+                          fs._local_utc_offset())
+
+    def test_multifire_task_missing_a_cycle_is_flagged(self):
+        # Last real run was 07:40 two days ago -- both the 13:40/19:40 slots
+        # that day and the next full day's three slots were silently skipped.
+        now_local = datetime.datetime(2026, 7, 29, 15, 0, 0)
+        last_run = now_local - datetime.timedelta(days=2)
+        tasks = [{
+            "id": "ora-lease-snapshot-refresh", "_fleet": "cc", "enabled": True,
+            "cronExpression": "40 7,13,19 * * 1-5",
+            "lastRunAt": last_run.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+        }]
+        out = fs.find_missed_cycles(tasks, now_local=now_local)
+        ids = [m["id"] for m in out]
+        self.assertIn("ora-lease-snapshot-refresh", ids)
+
+    def test_multifire_task_current_not_flagged(self):
+        # Fired at today's 13:40 slot -- current, not missed.
+        now_local = datetime.datetime(2026, 7, 29, 15, 0, 0)
+        last_run = now_local.replace(hour=13, minute=45)
+        tasks = [{
+            "id": "ora-lease-snapshot-refresh", "_fleet": "cc", "enabled": True,
+            "cronExpression": "40 7,13,19 * * 1-5",
+            "lastRunAt": last_run.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+        }]
+        out = fs.find_missed_cycles(tasks, now_local=now_local)
+        self.assertEqual(out, [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
