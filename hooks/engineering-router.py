@@ -1,6 +1,9 @@
 # engineering-router.py — UserPromptSubmit hook. Non-blocking lane suggester. Always exits 0.
 import sys, json, os, re
 
+LIB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib")
+sys.path.insert(0, LIB_DIR)
+
 # --- in-turn-approval budget reset for eos-plan-gate (2026-08-05) -------------
 # WHY: measured plan-gate override rate was 32.5% (209/644) against a <15%
 # target, and the DOMINANT override-reason class is verbatim "the user already
@@ -97,6 +100,44 @@ def _reset_plan_gate_budget(data, prompt_raw, prompt_lower):
         pass  # never let this affect the prompt path
 
 
+# --- concurrent-session advisory (2026-08-05) ---------------------------------
+# WHY: reference_concurrent_session_duplicate_hardening_work.md's 2026-08-05 entry
+# logs three same-day near-collisions -- duplicate investigation/audit work by two
+# sessions on the same target, discovered only by chance after the work was already
+# done. None involved a contended file until too late, so claim_work.py's four
+# named slugs (scoped to hooks/override-auth, open-items-tracker,
+# oxford-command-center-data, repo-housekeeping) structurally could not have caught
+# them. CLAUDE.md's Engineering OS already mandates checking "already-done" before
+# starting any L2-L7 task, but nothing enforced it -- it depended entirely on the
+# session remembering to run list_sessions/event_log.md before investing effort.
+# This hook already fires on every prompt, so it is the correct trigger point (task
+# START, not tool-call time -- by Write/Edit both recorded incidents were already
+# finished). ADVISORY ONLY, never blocks: same fail-open posture as
+# session_liveness.py's other contract ("enrichment, never a hard gate").
+def _concurrent_session_note(session_id, sessions_dir=None):
+    """One ASCII line naming how many OTHER live sessions are open, or "" if
+    none/unknown. Never raises -- a broken or missing liveness reader must
+    degrade to silence, not affect prompt routing (this runs on every turn).
+
+    A non-string/empty session_id (e.g. a payload with no "session_id" field)
+    must short-circuit to "" rather than reach other_active_sessions(): that
+    reader excludes only an EXACT own-sid match, so an invalid sid never
+    matches this session's own file and would otherwise count the caller as
+    one of the "other" sessions -- a false, self-inclusive advisory. Mirrors
+    _reset_plan_gate_budget's identical isinstance(sid, str) guard above."""
+    if not isinstance(session_id, str) or not session_id.strip():
+        return ""
+    try:
+        from session_liveness import other_active_sessions  # noqa: E402
+        others = other_active_sessions(session_id, sessions_dir=sessions_dir)
+    except Exception:
+        return ""
+    if not others:
+        return ""
+    return ("%d other session(s) active -- check list_sessions/event_log.md "
+            "before duplicating investigation or analysis work." % len(others))
+
+
 def main():
     try:
         data = json.load(sys.stdin)
@@ -190,10 +231,13 @@ def main():
     order = {"L7": 0, "L2": 1, "L4": 2, "L5": 3, "L3": 4}  # most-specific intent wins
     lanes.sort(key=lambda x: order[x[0]])
     lane, cmd, why = lanes[0]
-    others = "".join(f" {l[1]}" for l in lanes[1:])
-    tail = f" Other possible:{others}." if others else ""
+    other_lanes = "".join(f" {l[1]}" for l in lanes[1:])
+    tail = f" Other possible:{other_lanes}." if other_lanes else ""
+    note = _concurrent_session_note(data.get("session_id"))
+    note_tail = f" {note}" if note else ""
     print(f"[Engineering OS] Looks like lane {lane} -> run {cmd} ({why}).{tail} "
-          f"Triage first: clarify if vague, split if compound, state the lane, then proceed. Not a match? Ignore.")
+          f"Triage first: clarify if vague, split if compound, state the lane, then proceed. Not a match? Ignore."
+          f"{note_tail}")
 
 if __name__ == "__main__":
     main()
