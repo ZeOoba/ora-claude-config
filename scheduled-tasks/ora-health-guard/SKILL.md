@@ -210,8 +210,16 @@ If any probe script is missing/absent this run (folders may not have survived th
 **C.2 — Compose ONE HTML email** — a one-screen consolidated table: one section per probe (probe · PASS/FAIL/ABSENT · key observed values / failing rows in red). Lead with a bold summary line `Health Guard: N/M probes PASS` and, if any FAIL, list the failing probe(s) + the specific failing check ids. Prepend the **Block A INTEGRITY REPAIR / ERROR** section if A acted or errored.
 
 **C.3 — Subject line:**
-- All probes pass AND Block A clean/repaired-OK AND rate_snapshot FRESH: `[ORA] Health Guard — YYYY-MM-DD — ALL PASS`
-- Any probe FAIL/ABSENT, or any `missing_everywhere` SKILL, or integrity engine error, or a **B.2 `RATE SNAPSHOT STALE`**, or a **C.1.1 non-empty missed-cycle list** (see B.2 2-NOTION (A) staleness escalation and the C.1.1 missed-cycle escalation): `[ACTION] Health Guard — YYYY-MM-DD — N FAIL`
+- All probes pass AND **every A.3 integrity condition is clear** AND rate_snapshot FRESH AND the B.3.5a beacon gap is within tolerance: `[ORA] Health Guard — YYYY-MM-DD — ALL PASS`
+- Otherwise `[ACTION] Health Guard — YYYY-MM-DD — N FAIL`. The subject flips on ANY of:
+  - any probe FAIL/ABSENT;
+  - **any condition in A.3's list — do not re-enumerate it here, read it there** (as of 2026-08-09 that is `restored[]` · `missing_everywhere[]` · `regressed[]` · `unreadable[]` · `errors[]` · `id_collisions[]` · `ledger_status: unreadable`), or an integrity engine error;
+  - a **B.2 `RATE SNAPSHOT STALE`**;
+  - a **B.3.5a `BEACON GAP`** (including `BEACON GAP UNKNOWN` — an unreadable ledger is a FAIL, never a pass);
+  - a **C.1.1 non-empty missed-cycle list**.
+- Count each of the above toward `N`, and name it in the C.2 summary line so `N` is always reconcilable against the body.
+
+> **WHY C.3 POINTS AT A.3 INSTEAD OF LISTING THE CONDITIONS (added 2026-08-09).** These two lists drifted apart the moment the engine was rewritten. A.3 was widened the same day to escalate `regressed[]`, `unreadable[]`, `errors[]`, `id_collisions[]` and `ledger_status` — the new engine's entire alarm surface — but C.3 still named only `missing_everywhere` and "integrity engine error." The result: Block A could detect that a live SKILL.md had been **reverted to an older version** (`regressed[]`), write it prominently into the body, and still ship it under an `ALL PASS` subject — the one line most likely to be skimmed and filed. A duplicated condition list is a standing drift hazard; there is now exactly one, in A.3, and adding a condition there is sufficient. Do not paste the list back into C.3.
 
 **C.4 — Deliver** to **ggoldberg@oxfordra.net only** via the SOLE send path `send-via-outlook.ps1` (Composio removed 2026-06-11; no fallback connector exists). Write the HTML to a temp file and `-BodyFile` it. On non-zero COM exit: retry once, then flag the failure via the B.4 last-resort local-log path — do not halt.
 
