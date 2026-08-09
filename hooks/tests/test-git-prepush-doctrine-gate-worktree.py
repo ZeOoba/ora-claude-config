@@ -260,6 +260,207 @@ finally:
     shutil.rmtree(repo4, ignore_errors=True)
 
 
+
+# --- sweep_stale_push_worktrees(): the janitor -----------------------------------------
+# WHY THIS EXISTS. remove_worktree() already runs in a finally, but two leak modes escape
+# it, both observed live on 2026-08-09 (9 worktrees registered against the real repo):
+#   (A) the process never reaches the finally at all -- a pre-push hook dies with the push
+#       (Ctrl-C, terminal close, SIGKILL), leaving a full scratch dir on disk. Observed:
+#       ora-doctrine-push-e7uqt8f1, intact and registered, untouched since 2026-08-06.
+#   (B) `git worktree remove` fails, remove_worktree() falls back to rmtree and documents
+#       the leftover as "harmless but stale; `git worktree prune` clears it later" -- but
+#       NOTHING ever runs that prune. Observed: ora-doctrine-push-63_jv1es, directory gone,
+#       registration still live. "Later" never arrives on its own.
+# A janitor that runs at gate START is the only thing that can cover a run that already
+# died. The hard safety property is that it MUST NOT touch a CONCURRENTLY RUNNING gate's
+# scratch dir -- pushes from different sessions overlap routinely (27 sessions live when
+# this was written), and eating a live worktree mid-probe would turn a hygiene sweep into
+# a fail-closed push block. Hence the age threshold, and hence these tests lead with it.
+with tempfile.TemporaryDirectory() as _tmproot:
+    _repo6, _probe6 = make_throwaway_repo()
+    try:
+        write_claude_md(_repo6, CLEAN_CLAUDE_MD)
+        commit_all(_repo6, "base")
+
+        _old = os.path.join(_tmproot, "ora-doctrine-push-oldone")
+        _fresh = os.path.join(_tmproot, "ora-doctrine-push-freshone")
+        _alien = os.path.join(_tmproot, "some-other-tool-scratch")
+        for _d in (_old, _fresh, _alien):
+            os.makedirs(_d)
+            with open(os.path.join(_d, "marker.txt"), "w") as _f:
+                _f.write("x")
+        _long_ago = 1000.0            # epoch: unambiguously older than any threshold
+        os.utime(_old, (_long_ago, _long_ago))
+        os.utime(_alien, (_long_ago, _long_ago))   # old AND non-matching: age alone must not doom it
+
+        _removed, _pruned = dg.sweep_stale_push_worktrees(
+            repo_root=_repo6, temp_root=_tmproot, max_age_seconds=3600)
+
+        expect("janitor: a STALE scratch dir is removed", not os.path.isdir(_old))
+        expect("janitor: a FRESH scratch dir SURVIVES (a concurrent push is using it)",
+               os.path.isdir(_fresh))
+        expect("janitor: a non-matching dir is never touched, however old",
+               os.path.isdir(_alien))
+        expect("janitor: reports what it removed", _removed == 1, "removed=%r" % (_removed,))
+
+        # skip_path: belt-and-braces for THIS run's own worktree, independent of mtime.
+        _mine = os.path.join(_tmproot, "ora-doctrine-push-mine")
+        os.makedirs(_mine)
+        os.utime(_mine, (_long_ago, _long_ago))   # deliberately ancient
+        dg.sweep_stale_push_worktrees(repo_root=_repo6, temp_root=_tmproot,
+                                      max_age_seconds=3600, skip_path=_mine)
+        expect("janitor: skip_path is never removed even when its mtime is ancient",
+               os.path.isdir(_mine))
+
+        # --- leak mode (B): orphaned REGISTRATION, directory already gone ---------------
+        _wt = os.path.join(_tmproot, "ora-doctrine-push-orphanreg")
+        _r = _run(["git", "worktree", "add", "--detach", "--quiet", _wt, "HEAD"], cwd=_repo6)
+        expect("janitor fixture: worktree registered", _r.returncode == 0,
+               "%s%s" % (_r.stdout, _r.stderr))
+        shutil.rmtree(_wt, ignore_errors=True)     # dir gone, registration remains
+        _listed = _run(["git", "worktree", "list"], cwd=_repo6).stdout
+        expect("janitor fixture: registration is orphaned before the sweep",
+               "orphanreg" in _listed)
+        dg.sweep_stale_push_worktrees(repo_root=_repo6, temp_root=_tmproot,
+                                      max_age_seconds=0)   # 0 => expire everything eligible
+        _listed2 = _run(["git", "worktree", "list"], cwd=_repo6).stdout
+        expect("janitor: orphaned registration is pruned (the 'prune it later' that never ran)",
+               "orphanreg" not in _listed2, "list=%s" % _listed2)
+
+        # --- a LIVE registration whose dir still exists must survive the prune ----------
+        _live = os.path.join(_tmproot, "ora-doctrine-push-liveone")
+        _run(["git", "worktree", "add", "--detach", "--quiet", _live, "HEAD"], cwd=_repo6)
+        dg.sweep_stale_push_worktrees(repo_root=_repo6, temp_root=_tmproot,
+                                      max_age_seconds=3600, skip_path=_live)
+        _listed3 = _run(["git", "worktree", "list"], cwd=_repo6).stdout
+        expect("janitor: a live registration with an existing dir is NOT pruned",
+               "liveone" in _listed3, "list=%s" % _listed3)
+        _run(["git", "worktree", "remove", "--force", _live], cwd=_repo6)
+    finally:
+        shutil.rmtree(_repo6, ignore_errors=True)
+
+# --- the PRUNE leg's own guards (independent review, 2026-08-09) ----------------------
+# Two holes the first cut of this change had, both found by review, both writable as tests
+# only because real git was measured first:
+#   * --expire does NOT protect a missing-directory registration once its admin files are
+#     older than the window, so the prune leg needed a SEPARATE guard. It now abstains
+#     whenever it sees a missing-dir registration it does not own -- because the victim
+#     would be a sibling session's long-lived worktree, permanently dead ("fatal: not a
+#     git repository") when its path came back.
+#   * the expire bound itself had zero coverage: the orphan test used max_age_seconds=0
+#     and the survival test used a registration whose directory still existed, which prune
+#     can never touch regardless. Dropping --expire entirely would have stayed green.
+_repo8, _probe8 = make_throwaway_repo()
+try:
+    write_claude_md(_repo8, CLEAN_CLAUDE_MD)
+    commit_all(_repo8, "base")
+    with tempfile.TemporaryDirectory() as _t8:
+        # (a) a FOREIGN missing-dir registration must make the sweep abstain entirely,
+        #     leaving even our OWN orphan registered rather than risk the foreign one.
+        _foreign = os.path.join(_t8, "someones-real-worktree")
+        _ourorphan = os.path.join(_t8, "ora-doctrine-push-ourorphan")
+        for _p in (_foreign, _ourorphan):
+            _run(["git", "worktree", "add", "--detach", "--quiet", _p, "HEAD"], cwd=_repo8)
+        shutil.rmtree(_foreign, ignore_errors=True)
+        shutil.rmtree(_ourorphan, ignore_errors=True)
+        dg.sweep_stale_push_worktrees(repo_root=_repo8, temp_root=_t8, max_age_seconds=0)
+        _l8 = _run(["git", "worktree", "list"], cwd=_repo8).stdout
+        expect("prune guard: a FOREIGN missing-dir registration is never pruned",
+               "someones-real-worktree" in _l8, "list=%s" % _l8)
+        expect("prune guard: the sweep ABSTAINS wholesale rather than prune selectively "
+               "(our own orphan survives too -- disk was already reclaimed)",
+               "ourorphan" in _l8, "list=%s" % _l8)
+        _run(["git", "worktree", "prune"], cwd=_repo8)   # reset for (b)
+
+        # (b) with only OUR debris missing, the guard clears -- and the expire bound then
+        #     protects a registration whose admin files are still FRESH.
+        _fresh_orphan = os.path.join(_t8, "ora-doctrine-push-freshorphan")
+        _run(["git", "worktree", "add", "--detach", "--quiet", _fresh_orphan, "HEAD"], cwd=_repo8)
+        shutil.rmtree(_fresh_orphan, ignore_errors=True)
+        dg.sweep_stale_push_worktrees(repo_root=_repo8, temp_root=_t8, max_age_seconds=3600)
+        _l8b = _run(["git", "worktree", "list"], cwd=_repo8).stdout
+        expect("expire bound: a FRESH orphaned registration survives (a concurrent run "
+               "whose dir is momentarily unreadable is not dropped)",
+               "freshorphan" in _l8b, "list=%s" % _l8b)
+
+        # ...and the same orphan IS pruned once it is treated as expired.
+        dg.sweep_stale_push_worktrees(repo_root=_repo8, temp_root=_t8, max_age_seconds=0)
+        _l8c = _run(["git", "worktree", "list"], cwd=_repo8).stdout
+        expect("expire bound: the same orphan IS pruned when expired",
+               "freshorphan" not in _l8c, "list=%s" % _l8c)
+finally:
+    shutil.rmtree(_repo8, ignore_errors=True)
+
+
+# --- the janitor must NEVER be able to change the gate's decision ----------------------
+# Same posture as remove_worktree(): this is hygiene, not policy. A janitor that can raise
+# would convert "your temp dir is odd" into "your push is blocked", which is strictly worse
+# than the leak it cleans up.
+_nonrepo = tempfile.mkdtemp(prefix="ora-janitor-nonrepo-")
+# GIT_CEILING_DIRECTORIES: sweep's prune leg shells out to git with cwd under %TEMP%, and
+# git walks UPWARD looking for a repo. There is no ancestor repo above %TEMP% on the
+# machine this was written on -- but on a machine with e.g. a dotfiles repo at $HOME this
+# test would prune a REAL repo. A test must not depend on the host's directory layout for
+# its blast radius (independent review, 2026-08-09).
+_prev_ceiling = os.environ.get("GIT_CEILING_DIRECTORIES")
+os.environ["GIT_CEILING_DIRECTORIES"] = _nonrepo
+try:
+    _ok = True
+    try:
+        dg.sweep_stale_push_worktrees(repo_root=_nonrepo, temp_root=_nonrepo,
+                                      max_age_seconds=0)
+    except Exception as _e:
+        _ok = False
+    expect("janitor: never raises on a non-repo root (cannot block a push)", _ok)
+
+    _ok2 = True
+    try:
+        dg.sweep_stale_push_worktrees(repo_root=os.path.join(_nonrepo, "nope"),
+                                      temp_root=os.path.join(_nonrepo, "also-nope"),
+                                      max_age_seconds=0)
+    except Exception:
+        _ok2 = False
+    expect("janitor: never raises on nonexistent roots", _ok2)
+finally:
+    if _prev_ceiling is None:
+        os.environ.pop("GIT_CEILING_DIRECTORIES", None)
+    else:
+        os.environ["GIT_CEILING_DIRECTORIES"] = _prev_ceiling
+    shutil.rmtree(_nonrepo, ignore_errors=True)
+
+
+# --- WIRING: defining the janitor is not the same as CALLING it -----------------------
+# A sweep function nothing invokes is exactly the "tested but disconnected" shape that
+# leaves the original leak in place while the suite reports green. Monkeypatch the sweep
+# (rather than letting it loose on the real %TEMP%, where a concurrent push may have a
+# live scratch dir) and assert materialize_pushed_commit actually drives it, BEFORE it
+# creates this run's directory.
+_repo7, _probe7 = make_throwaway_repo()
+try:
+    write_claude_md(_repo7, CLEAN_CLAUDE_MD)
+    commit_all(_repo7, "base")
+    _calls = []
+    _real_sweep = dg.sweep_stale_push_worktrees
+    dg.sweep_stale_push_worktrees = lambda **kw: (_calls.append(kw), (0, False))[1]
+    try:
+        _wt7, _err7 = dg.materialize_pushed_commit(repo_root=_repo7)
+    finally:
+        dg.sweep_stale_push_worktrees = _real_sweep
+    try:
+        expect("wiring: materialize_pushed_commit invokes the janitor", len(_calls) == 1,
+               "calls=%r" % (_calls,))
+        expect("wiring: janitor is pointed at the same repo the gate is validating",
+               bool(_calls) and _calls[0].get("repo_root") == _repo7,
+               "kw=%r" % (_calls[0] if _calls else None,))
+        expect("wiring: the scratch worktree is still created normally",
+               _wt7 is not None and os.path.isdir(_wt7), "err=%r" % (_err7,))
+    finally:
+        if _wt7:
+            dg.remove_worktree(_wt7, repo_root=_repo7)
+finally:
+    shutil.rmtree(_repo7, ignore_errors=True)
+
+
 passed = sum(1 for ok, _ in results if ok)
 print("\ngit-prepush-doctrine-gate-worktree tests: %d/%d passed" % (passed, len(results)))
 sys.exit(0 if passed == len(results) else 1)
