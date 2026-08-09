@@ -1270,6 +1270,53 @@ def test_archived_skill_no_longer_resolves_e2e():
     print("  PASS test_archived_skill_no_longer_resolves_e2e")
 
 
+def test_worktree_baseref_head_is_clean():
+    m = _load_probe_module()
+    assert m.check_worktree_baseref({"worktree": {"baseRef": "head"}}) is None
+    print("  PASS test_worktree_baseref_head_is_clean")
+
+
+def test_worktree_baseref_unset_warns():
+    """No 'worktree' key at all (the pre-2026-08-05 shape) must warn -- this is
+    the exact gap that let EnterWorktree silently branch from origin/main and
+    drop local-ahead-of-origin commits."""
+    m = _load_probe_module()
+    msg = m.check_worktree_baseref({})
+    assert msg is not None and "unset" in msg and "\"head\"" in msg, msg
+    print("  PASS test_worktree_baseref_unset_warns")
+
+
+def test_worktree_baseref_fresh_warns():
+    m = _load_probe_module()
+    msg = m.check_worktree_baseref({"worktree": {"baseRef": "fresh"}})
+    assert msg is not None and "'fresh'" in msg, msg
+    print("  PASS test_worktree_baseref_fresh_warns")
+
+
+def test_worktree_baseref_non_dict_worktree_key_warns():
+    """A malformed 'worktree' value (not an object) must degrade to the same
+    unset-style warning, not crash the probe."""
+    m = _load_probe_module()
+    msg = m.check_worktree_baseref({"worktree": "head"})
+    assert msg is not None and "unset" in msg, msg
+    print("  PASS test_worktree_baseref_non_dict_worktree_key_warns")
+
+
+def test_live_probe_reports_worktree_baseref_ok():
+    """Integration: the real settings.json (ratified 'head', 2026-08-05) must be
+    reported clean, and only via the live-mode CLI path (no argv) -- fixture-mode
+    runs must not touch the live settings.json at all."""
+    r = run_probe()  # live mode: no argv
+    assert r.returncode == 0, "live probe must stay exit 0\n%s" % r.stdout
+    assert 'worktree.baseRef: OK ("head")' in r.stdout, (
+        "expected the live worktree.baseRef check to report OK:\n%s" % r.stdout)
+    fixture = run_probe([REAL_CLAUDE_MD])  # single-file argv mode: NOT live
+    assert "worktree.baseRef" not in fixture.stdout, (
+        "fixture-mode (argv path given) must skip the live-settings.json check "
+        "entirely, same as the other live_mode-gated checks:\n%s" % fixture.stdout)
+    print("  PASS test_live_probe_reports_worktree_baseref_ok")
+
+
 def main():
     assert os.path.isfile(REAL_CLAUDE_MD), "real CLAUDE.md not found: %s" % REAL_CLAUDE_MD
     test_dated_archive_dirs_pruned_from_skill_scan()
@@ -1327,6 +1374,11 @@ def main():
     test_exemption_is_line_scoped_not_file_scoped()
     test_exemption_covers_its_own_explanatory_comment()
     test_live_probe_wires_identity_sweep_and_is_non_fatal()
+    test_worktree_baseref_head_is_clean()
+    test_worktree_baseref_unset_warns()
+    test_worktree_baseref_fresh_warns()
+    test_worktree_baseref_non_dict_worktree_key_warns()
+    test_live_probe_reports_worktree_baseref_ok()
     print("ALL DOCTRINE-PROBE TESTS PASS")
 
 
