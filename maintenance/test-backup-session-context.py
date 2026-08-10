@@ -56,7 +56,16 @@ class Sandbox:
         return self
 
     def __exit__(self, *exc):
-        shutil.rmtree(self.root, ignore_errors=True)
+        # Windows holds briefly-locked files (AV/indexer) right after a
+        # subprocess exits, and a bare ignore_errors=True leaves the tree behind
+        # forever -- an unbounded temp leak from a rig meant to run on a
+        # schedule. Retry a few times, then give up loudly rather than silently.
+        for attempt in range(5):
+            shutil.rmtree(self.root, ignore_errors=(attempt < 4))
+            if not self.root.exists():
+                return
+            time.sleep(0.2)
+        print("  WARN sandbox not fully removed: %s" % self.root, file=sys.stderr)
 
     def args(self, *extra):
         return ["--source", str(self.source),
@@ -176,12 +185,18 @@ def test_scrub_verdict_clean_is_recorded():
     print("  PASS test_scrub_verdict_clean_is_recorded")
 
 
-def test_unverifiable_scrub_is_never_recorded_as_clean():
-    """The load-bearing case. The scrub fails OPEN when its roster is missing:
-    it prints 'scan skipped (fail-open)' and still exits 0 saying CLEAN. Taking
-    that at face value would record 'no confidential terms' when the truth is
-    'nobody looked' -- a verified-null vs inferred-null failure. The verdict
-    must degrade to UNVERIFIED and must not contain the word CLEAN."""
+def test_missing_roster_is_never_recorded_as_clean():
+    """Roster ABSENT -> UNVERIFIED via the early return, before the scrub is even
+    launched.
+
+    Naming/docstring corrected 2026-08-09: this previously claimed to exercise
+    the scrub's fail-open path ('scan skipped (fail-open)' at exit 0). It never
+    did -- the roster-existence check returns first, so no subprocess ran, and
+    FAIL_OPEN_MARKERS had zero coverage while the suite's headline test appeared
+    to guard it. That branch is now covered by
+    test_corrupt_roster_hits_the_fail_open_branch, which stages a roster that is
+    PRESENT but unparseable. This test keeps the weaker property it actually
+    pins."""
     scrub_roster = HERE.parent / "hooks" / "confidential-terms.json"
     assert not scrub_roster.is_file(), (
         "this test needs the worktree roster to be ABSENT (it is gitignored); "
@@ -197,7 +212,7 @@ def test_unverifiable_scrub_is_never_recorded_as_clean():
         combined = (r.stdout + r.stderr).lower()
         assert "unverified" in combined, \
             "the run must say out loud that the scan was not verifiable:\n%s" % r.stdout
-    print("  PASS test_unverifiable_scrub_is_never_recorded_as_clean (no inferred nulls)")
+    print("  PASS test_missing_roster_is_never_recorded_as_clean (early return)")
 
 
 def test_missing_scrub_script_is_unverified_not_clean():
@@ -232,6 +247,183 @@ def test_source_is_never_modified():
         assert sb.source.read_bytes() == before, \
             "the backup must be strictly read-only on the source"
     print("  PASS test_source_is_never_modified (read-only on source)")
+
+
+def stage_scrub_tree(root, roster_body):
+    """Build a minimal REAL scrub install under `root` with a roster we control:
+        root/maintenance/{scrub-before-optin.py, doctrine-integrity-probe.py}
+        root/hooks/{confidential-terms.json, lib/secret_patterns.py}
+    The scrub resolves its roster as <scrub>/../hooks/confidential-terms.json, so
+    staging is the only way to exercise a roster that is PRESENT but unusable --
+    the fail-open branch a roster-existence check can never reach.
+    Returns the staged scrub path, or None if the live sources are unavailable."""
+    live_maint = Path(r"C:\Users\Owner\.claude\maintenance")
+    live_lib = Path(r"C:\Users\Owner\.claude\hooks\lib\secret_patterns.py")
+    needed = [live_maint / "scrub-before-optin.py",
+              live_maint / "doctrine-integrity-probe.py", live_lib]
+    if not all(p.is_file() for p in needed):
+        return None
+    (root / "maintenance").mkdir(parents=True, exist_ok=True)
+    (root / "hooks" / "lib").mkdir(parents=True, exist_ok=True)
+    for src in needed[:2]:
+        shutil.copy2(str(src), str(root / "maintenance" / src.name))
+    shutil.copy2(str(live_lib), str(root / "hooks" / "lib" / "secret_patterns.py"))
+    (root / "hooks" / "confidential-terms.json").write_text(roster_body, encoding="utf-8")
+    return root / "maintenance" / "scrub-before-optin.py"
+
+
+def test_undecodable_target_is_unverified_not_clean():
+    """REGRESSION -- the 2026-08-09 review's Critical.
+
+    scan_file_for_terms returns None and scan_file_for_secrets returns [] for a
+    file they cannot decode, both SILENTLY. The scrub then prints
+    '0 hits, 0 secret-pattern hits, 0 warning(s)' and exits 0 -- so exit code and
+    fail-open markers BOTH say clean while the file was never scanned. Before the
+    fix this recorded 'CLEAN (scrub exit 0, roster reachable)' for content that
+    had not been looked at."""
+    if not (LIVE_SCRUB.is_file() and LIVE_ROSTER.is_file()):
+        print("  SKIP test_undecodable_target_is_unverified_not_clean (live scrub absent)")
+        return
+    with Sandbox() as sb:
+        # Undecodable by the scanner's whole ladder (utf-8 -> utf-16 -> cp1252).
+        sb.source.write_bytes(b"# ORA Active Context\n\n- SENSITIVE\x81\x8d\x8f\x90\x9d\n")
+        r = run_backup(sb.args("--scrub", str(LIVE_SCRUB)), expect_rc=0)
+        ledger = (sb.local / "backup-log.txt").read_text(encoding="utf-8").upper()
+        assert "UNVERIFIED" in ledger, \
+            "an unscannable target must record UNVERIFIED:\n%s" % ledger
+        assert "CLEAN" not in ledger, \
+            "an unscannable target must NEVER be recorded CLEAN:\n%s" % ledger
+        assert len(sb.snapshots()) == 1, "the snapshot itself must still be taken"
+        assert "unverified" in (r.stdout + r.stderr).lower()
+    print("  PASS test_undecodable_target_is_unverified_not_clean (Critical regression)")
+
+
+def test_corrupt_roster_hits_the_fail_open_branch():
+    """The branch a roster-EXISTENCE check cannot reach: roster present but
+    unparseable -> the scrub warns 'scan skipped (fail-open)' and exits 0 CLEAN.
+    This is the only test that exercises FAIL_OPEN_MARKERS end-to-end."""
+    with Sandbox() as sb:
+        staged = stage_scrub_tree(sb.root / "staged", "{ this is not json")
+        if staged is None:
+            print("  SKIP test_corrupt_roster_hits_the_fail_open_branch (live sources absent)")
+            return
+        run_backup(sb.args("--scrub", str(staged)), expect_rc=0)
+        body = (sb.local / "backup-log.txt").read_text(encoding="utf-8")
+        assert "UNVERIFIED" in body.upper(), "a corrupt roster must record UNVERIFIED:\n%s" % body
+        assert "CLEAN" not in body.upper(), "must never record CLEAN:\n%s" % body
+        assert "fail-open" in body.lower(), (
+            "the detail must show the FAIL-OPEN branch was the one taken (not the "
+            "roster-missing early return):\n%s" % body)
+    print("  PASS test_corrupt_roster_hits_the_fail_open_branch (marker logic covered)")
+
+
+def test_scrub_fail_open_wording_is_still_coupled():
+    """FAIL_OPEN_MARKERS matches the helper's free text. Nothing stops a reword
+    of scrub-before-optin.py from silently turning every fail-open into CLEAN,
+    so pin the coupling here: this test fails instead."""
+    if not LIVE_SCRUB.is_file():
+        print("  SKIP test_scrub_fail_open_wording_is_still_coupled (live scrub absent)")
+        return
+    helper = LIVE_SCRUB.read_text(encoding="utf-8", errors="replace").lower()
+    script = SCRIPT.read_text(encoding="utf-8")
+    markers = [m for m in ("fail-open", "scan skipped") if '"%s"' % m in script]
+    assert markers, "could not find FAIL_OPEN_MARKERS literals in the script"
+    for m in markers:
+        assert m in helper, (
+            "backup-session-context.py matches on %r but scrub-before-optin.py no "
+            "longer emits it -- every fail-open would now be recorded CLEAN. "
+            "Update FAIL_OPEN_MARKERS (or switch to a machine-readable verdict)." % m)
+    print("  PASS test_scrub_fail_open_wording_is_still_coupled (text coupling pinned)")
+
+
+def test_crashed_scrub_is_unverified_not_hits():
+    """A non-zero exit without the findings banner is a broken scanner, not a
+    detection. Filing it as HITS makes 'found terms' and 'scanner is dead'
+    indistinguishable forever."""
+    with Sandbox() as sb:
+        (sb.root / "hooks").mkdir(parents=True, exist_ok=True)
+        (sb.root / "hooks" / "confidential-terms.json").write_text("{}", encoding="utf-8")
+        (sb.root / "maintenance").mkdir(parents=True, exist_ok=True)
+        # A "scrub" that dies on import, like a real traceback would.
+        (sb.root / "maintenance" / "scrub-before-optin.py").write_text(
+            "import sys\nsys.stderr.write('Traceback: boom\\n')\nsys.exit(1)\n",
+            encoding="utf-8")
+        # read_optional comes from the sibling probe; stub it so the pre-check passes.
+        (sb.root / "maintenance" / "doctrine-integrity-probe.py").write_text(
+            "def read_optional(p):\n"
+            "    try:\n"
+            "        return open(p, encoding='utf-8').read(), None\n"
+            "    except Exception as e:\n"
+            "        return None, str(e)\n",
+            encoding="utf-8")
+        run_backup(sb.args("--scrub", str(sb.root / "maintenance" / "scrub-before-optin.py")),
+                   expect_rc=0)
+        body = (sb.local / "backup-log.txt").read_text(encoding="utf-8").upper()
+        assert "UNVERIFIED" in body, "a crashed scrub must record UNVERIFIED:\n%s" % body
+        assert "HITS" not in body, "a crashed scrub must NOT be recorded as HITS:\n%s" % body
+    print("  PASS test_crashed_scrub_is_unverified_not_hits")
+
+
+def test_same_second_collision_never_overwrites():
+    """Two content-distinct runs inside one second must not land on the same
+    filename. Overwriting would destroy good history in a tool that exists to
+    retain it -- and would leave the ledger claiming two snapshots for one file."""
+    with Sandbox() as sb:
+        sb.source.write_text("REVISION ONE - the good history\n", encoding="utf-8")
+        run_backup(sb.args(), expect_rc=0)
+        sb.source.write_text("REVISION TWO\n", encoding="utf-8")
+        run_backup(sb.args(), expect_rc=0)          # deliberately NO sleep
+        snaps = sb.snapshots()
+        assert len(snaps) == 2, \
+            "expected 2 distinct snapshots within one second, got %d: %s" \
+            % (len(snaps), [p.name for p in snaps])
+        bodies = "".join(p.read_text(encoding="utf-8") for p in snaps)
+        assert "REVISION ONE - the good history" in bodies, \
+            "the earlier snapshot was overwritten -- history lost"
+        assert "REVISION TWO" in bodies
+        assert "REVISION TWO" in snaps[-1].read_text(encoding="utf-8"), \
+            "sort order must still put the NEWER snapshot last, or retention " \
+            "will prune the wrong one"
+    print("  PASS test_same_second_collision_never_overwrites (history + sort order)")
+
+
+def test_mirror_catches_up_after_a_failure():
+    """The failure the mirror is documented to tolerate must not become
+    permanent. If a run cannot mirror and the content then stops changing, every
+    later run says 'unchanged' -- and the off-machine copy, the leg that
+    survives losing the machine, never appears."""
+    with Sandbox() as sb:
+        sb.mirror.write_text("not a directory", encoding="utf-8")   # force failure
+        run_backup(sb.args(), expect_rc=0)
+        assert len(sb.snapshots()) == 1 and not sb.mirror.is_dir()
+        sb.mirror.unlink()                                          # OneDrive returns
+        r = run_backup(sb.args(), expect_rc=0)                      # content UNCHANGED
+        assert len(sb.mirrors()) == 1, \
+            "the unchanged path must catch the mirror up, not skip it:\n%s" % r.stdout
+        assert sb.mirrors()[0].read_text(encoding="utf-8") == \
+            sb.source.read_text(encoding="utf-8")
+        assert "catch" in r.stdout.lower(), "the repair must be reported:\n%s" % r.stdout
+    print("  PASS test_mirror_catches_up_after_a_failure")
+
+
+def test_ledger_is_mirrored():
+    """A verdict ledger that dies with the machine leaves every recovered
+    snapshot with exactly the comforting blank it exists to prevent."""
+    with Sandbox() as sb:
+        run_backup(sb.args(), expect_rc=0)
+        mirrored = sb.mirror / "backup-log.txt"
+        assert mirrored.is_file(), "the ledger must reach the mirror too"
+        assert (sb.local / "backup-log.txt").read_text(encoding="utf-8") == \
+            mirrored.read_text(encoding="utf-8")
+    print("  PASS test_ledger_is_mirrored")
+
+
+def test_retain_zero_is_rejected():
+    with Sandbox() as sb:
+        r = run_backup(sb.args("--retain", "0"), expect_rc=2)
+        assert "retain" in (r.stdout + r.stderr).lower(), \
+            "must say which argument was rejected:\n%s\n%s" % (r.stdout, r.stderr)
+    print("  PASS test_retain_zero_is_rejected")
 
 
 def main():
