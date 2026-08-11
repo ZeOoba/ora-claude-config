@@ -32,6 +32,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
+| [OI-119](#OI-119) | 2026-08-11 | `maintenance/_tests/test_allocate_oi_id.py` via the `pre-push` hook-tests gate | Pre-push gate **flake blocks any session's push**: `test_allocate_oi_id.py` passes 12/12 standalone but fails 9/12 under concurrent load (~1 in 6) from a single Windows `PermissionError(13)`; the gate retries tests that *time out* but not this, so it hard-blocks and the tempting escape is an override token |
 | [OI-118](#OI-118) | 2026-08-11 | `.gitignore:61`, found wiring ora-health-guard to the double-fire guard | `.gitignore`'s `/scheduled-tasks/*/*` makes every `_shared/` helper edit **invisible to `git status`** on any branch predating that file's force-add — and git then **silently overwrites** the file on `checkout`/`merge`/`rebase` to main (verified by reproduction; the same file without the ignore rule aborts with exit 1). Standing trap for the whole guard toolkit |
 | [OI-009](#OI-009) | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Verify the 93 Notion Tenant DB rows with no workbook counterpart against primary leases (low priority) |
 | [OI-022](#OI-022) | 2026-07-19 | OI-015 investigation (2026-07-19) | GitHub Data API still serves the pre-rewrite E. Fulton blob (`39b02f4585...`, kept alive by PR #2's internal `refs/pull/2/head`, not deletable via git/API/settings) — Support ticket #4584520 reopened 2026-07-20 with the corrected SHA (`6aed9a7`), awaiting GitHub's purge |
@@ -4258,3 +4259,57 @@ absolute path in every wired SKILL.md; (c) leave as-is and rely on always workin
 Gabriel's call.
 
 **Auto-check:** none yet. A cheap one: fail if any path matched by `.gitignore` is also tracked on `origin/main`.
+
+### OI-119
+**Status:** OPEN (diagnosed and reproduced; fix is a judgement call between three options)
+**Opened:** 2026-08-11
+**Source:** `maintenance/_tests/test_allocate_oi_id.py`, hit via `.git/hooks/pre-push` gate 2
+(`hooks/git-prepush-hook-tests-gate.py`) while pushing the ora-health-guard guard wiring
+**Description:** The pre-push gate runs the whole tracked test suite and **blocks the push on any failure**.
+`test_allocate_oi_id.py` is flaky under the concurrency that gate itself creates, so it can hard-block a push
+that has nothing to do with it — as it did here, on a change touching none of the code it exercises.
+
+**Reproduced, not inferred (2026-08-11):**
+
+| How run | Result |
+|---|---|
+| standalone, 5 sequential runs | **12/12 pass**, exit 0, every time |
+| 6 runs concurrently | **1 of 6 failed 9/12**, exit 1 — the gate's exact signature |
+| the real gate run that blocked | `74 pass, 1 fail, 1 env-skip (of 76)`; `allocate-oi-id tests: 9/12` |
+| the retry that succeeded | `75 pass, 0 fail, 1 env-skip (of 76)` |
+
+**One root cause, three reported failures.** All three are the same event:
+```
+FAIL: 12 concurrent allocations: no exceptions  -- ["PermissionError(13, 'Permission denied')"]
+FAIL: 12 concurrent allocations: all distinct   -- [OI-008 .. OI-018]   <- 11 ids, not 12
+FAIL: 12 concurrent allocations: contiguous     -- [OI-008 .. OI-018]
+```
+One of the 12 threads loses a Windows file lock, so 11 ids are allocated instead of 12; "all distinct" and
+"contiguous" then fail as *cascades* of that single exception, not as independent defects. The classic Windows
+concurrent-file-access flake — same family as `feedback_npm_test_intermittent_access_violation.md`, which
+CLAUDE.md's Done bar already names as the spurious-failure gotcha.
+
+**Why this is worth fixing rather than tolerating.** The gate ALREADY has flake tolerance, and it fired in the
+same run: `timeout-retry (timed out under load, passed on the doubled-budget rerun; not blocking):
+hooks/tests/test-eos-review-gate.py, maintenance/test-governor-drift-probe.py`. But that path keys on
+**timeout**. A `PermissionError` is not a timeout, so it falls straight through to a hard block. The obvious
+escape is the `allow-hook-test-failure` override token — which is a 60-minute, multi-use bypass of the entire
+tracked test suite, minted to get past a known-flaky test. That is exactly how a *real* failure eventually gets
+waved through, and it is the same shape as the 2026-08-09 OI-111 orphan that blocked every session's push.
+
+**Options (Gabriel's call), roughly cheapest first:**
+1. Extend the gate's existing retry path to cover `PermissionError`/`OSError`-class failures, not just
+   timeouts — smallest change, keeps the signal, but broadens what counts as "retryable".
+2. Fix the test: serialize or retry the file access inside the 12-thread case, so it stops failing under load.
+   Best if the production allocator is genuinely safe and only the *test* races.
+3. **Check first whether the allocator itself is the racer.** The test asserts 12 concurrent allocations
+   produce 12 distinct contiguous ids; if `allocate-oi-id.py` can really drop an allocation under contention on
+   Windows, the flake is a genuine product bug surfacing correctly and must NOT be retried away. The "8
+   concurrent PROCESSES: all distinct" case passed in every run, which is weak evidence the lock works
+   cross-process and the fault is thread-level — but this should be settled before option 1 or 2 is chosen.
+
+**Not caused by, and does not affect, the change that surfaced it** (PR #54): that commit touches no code this
+test exercises, and the push succeeded on a clean retry with 0 failures.
+
+**Auto-check:** none. A cheap one: have the gate print which tests it retried and why, so a recurring flake is
+visible as a pattern rather than as one session's bad luck.
