@@ -100,8 +100,17 @@ cw.write_claim("legacy-slug", "sess-CCC", "no paths recorded", base_dir=root)
 claims = cw.read_active_claims(base_dir=root)
 legacy = [c for c in claims if c["slug"] == "legacy-slug"][0]
 check("pathless claim reads back with empty paths", legacy.get("paths"), [])
+# sorted(): this asserts WHICH sessions match -- CCC, the pathless claim, must not --
+# never their order. read_active_claims() age-orders newest-first, so the AAA/BBB order
+# here depends purely on whether the two write_claim() calls above land in the same
+# `claimed_at` second. They do when this file runs alone and fast: equal age_minutes, and
+# a stable sort then preserves the filename order that was once asserted literally. Under
+# the pre-push gate, which runs up to MAX_PARALLEL_TESTS=8 files concurrently, the two
+# writes straddle a second boundary, BBB sorts ahead of AAA as the newer claim, and the
+# literal assertion blocked a real push (2026-08-11) on a timing accident, not a defect.
+# Reproduced 3/8 by running this file 8x concurrently; green 8/8 after this change.
 check("pathless claim never matches a file",
-      [h["session_id"] for h in cw.claims_touching([target], base_dir=root)],
+      sorted(h["session_id"] for h in cw.claims_touching([target], base_dir=root)),
       ["sess-AAA", "sess-BBB"])
 
 # A malformed `paths` value must fail open (skip), not raise.
