@@ -112,7 +112,7 @@ is what the detector should expect on all three lender rows |
 | [OI-103](#OI-103) | 2026-08-05 | Session-end optimization candidates, this session, 2026-08-05 | **LOW** `skillOverrides` was found silently inert this session (the second such config key, after the v1.8 drift-check prose-comparison finding) — no mechanism in this repo verifies that a `settings.json` key actually takes effect once set. Candidate: a standing audit question/probe enumerating which settings.json keys have never been mechanically confirmed live, rather than discovering inertness ad hoc per session |
 | [OI-104](#OI-104) | 2026-08-05 | Session-end optimization candidates, this session, 2026-08-05 | **LOW** The plugin-vs-user skill-source distinction was derived this session (per the referring conversation) by disassembling the CLI binary — a one-off, expensive investigation. If that distinction is needed again, it belongs in a reusable probe helper under `maintenance/`, not re-derived from scratch each time |
 | [OI-105](#OI-105) | 2026-08-05 | Session-end optimization candidates, this session, 2026-08-05 | **LOW** `eos-plan-gate` fires at the 4-file threshold even when the touched files were pre-specified handoff work scoped before the session started, forcing an override-file write that then reads in telemetry as a bypass rather than in-scope work. Candidate: a carve-out recognizing scope fixed before session start (e.g. an explicit file list named in the opening prompt) so the override isn't needed for work that was never actually unplanned |
-| [OI-111](#OI-111) | 2026-08-09 | Four `git push` invocations landing [PR #41](https://github.com/ZeOoba/ora-claude-config/pull/41) / [PR #44](https://github.com/ZeOoba/ora-claude-config/pull/44), 08-09 | **LOW** `hooks/git-prepush-doctrine-gate.py` timing: the full sweep appears to run on branch DELETIONS, where there are no incoming objects (1 of 2 deletes applied, client timed out at 120s; `gh api -X DELETE` returned instantly). Also: the suite's deliberate negative-path stderr (`COULD NOT READ ... does-not-exist.md`) renders identically to a real check failure. **A suspected false-success-reporting bug was investigated and RETRACTED — see the section.** |
+| [OI-111](#OI-111) | 2026-08-09 | Four `git push` invocations landing [PR #41](https://github.com/ZeOoba/ora-claude-config/pull/41) / [PR #44](https://github.com/ZeOoba/ora-claude-config/pull/44), 08-09; concurrency evidence 08-11 | **LOW** `hooks/git-prepush-doctrine-gate.py`. **Headline (defect 4): the hook-test suite is NOT concurrency-safe** — the SAME commit gave 38 fail/76 under fleet load (~37 concurrent python processes) and 75 pass/76 on retry, every failure a git-subprocess error in a fixture, indistinguishable from a real regression. **Do not override it.** Also: the sweep appears to run on branch DELETIONS (unproven), and a passing test's negative-path stderr reads as a live failure. **A suspected false-success-reporting bug was investigated and RETRACTED — see the section.** |
 
 ### OI-009
 **Status:** OPEN (substantial progress made 2026-07-17, real scope remains)
@@ -2666,6 +2666,32 @@ branch, so gate output contains `open-items-tracker ID check: COULD NOT READ <tm
 ... treat as a check failure, not a clean result.` verbatim. It is a *passing test asserting a failure
 path*, but it renders exactly like a live check failure and cost real debugging time here. Prefixing
 test-sourced stderr, or suppressing it on pass, would fix it.
+
+**Defect 4 (OPEN — the highest-value finding here, added 2026-08-11). The hook-test suite is NOT
+concurrency-safe, and under fleet load it fails in a way that is indistinguishable from a real code
+regression.** Proven on the SAME COMMIT, no code change between runs: a push of merge commit `61bcaa8`
+reported **38 fail / 37 pass / 1 env-skip of 76**; the identical push retried later reported **75 pass /
+0 fail / 1 env-skip**. `tasklist` during the failing run showed **~37 concurrent `python.exe`
+processes** — the rest of the fleet running the same suite at the same time.
+
+Every failure was a *git subprocess* error inside a test fixture, not an assertion about behaviour:
+`AssertionError: git ('add', '-A') failed:` (empty stderr) and `git init -q --bare` raising
+`CalledProcessError`. Five suites named in that run: `test-eos-review-gate.py`,
+`test-git-prepush-scan.py`, `test-memory-orphan-link-guard.py`, `test-ora-autonomy-gate.py`,
+`test-shared-checkout-guard.py` — all of which shell out to `git` against temp repos.
+
+**Why this outranks defects 1 and 3:** a red suite reads as "your change broke something." The honest
+response is to stop and investigate, which costs an afternoon; the tempting response is a
+`hook-test-failure` override, which trains the next person to override a red suite and destroys the
+signal permanently. Neither is correct, and nothing in the output tells you which situation you are in.
+On 2026-08-11 the override was declined and the push simply retried on a quieter machine — that is the
+correct handling and it should not depend on someone happening to check the process count.
+
+**Candidate fix (NOT applied):** give each test run its own `GIT_CONFIG_GLOBAL`/`HOME` and a uniquely
+named temp root, and assert on git's captured stderr rather than bare exit status so a contention
+failure is self-identifying. Failing that, serialise the suite behind a lock, or have the gate detect
+concurrent runs and say so in its output instead of reporting a bare fail count.
+**Do NOT "fix" this by overriding.**
 
 **Counter-evidence — the gate works, and caught a genuine defect in this very item.** The push filing
 OI-111 was correctly BLOCKED with `orphaned_sections: ['OI-111']`: the entry had a `### OI-111` detail
