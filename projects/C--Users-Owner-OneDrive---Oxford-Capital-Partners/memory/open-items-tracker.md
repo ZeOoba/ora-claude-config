@@ -32,7 +32,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
-| [OI-119](#OI-119) | 2026-08-11 | `maintenance/_tests/test_allocate_oi_id.py` via the `pre-push` hook-tests gate | Pre-push gate **flake blocks any session's push**: `test_allocate_oi_id.py` passes 12/12 standalone but fails 9/12 under concurrent load (~1 in 6) from a single Windows `PermissionError(13)`; the gate retries tests that *time out* but not this, so it hard-blocks and the tempting escape is an override token |
+| [OI-119](#OI-119) | 2026-08-11 | `pre-push` hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) | Pre-push gate is **flaky under its own load and hard-blocks any session's push**: across 3 consecutive pushes of one branch, **two different** tests failed (`test_allocate_oi_id.py`, `test-claim-file-collision.py`) with two clean runs of the same suite between them. The gate retries tests that *time out* but not those that error, so each flake looks like a real regression and the tempting escape is a 60-min multi-use override token |
 | [OI-118](#OI-118) | 2026-08-11 | `.gitignore:61`, found wiring ora-health-guard to the double-fire guard | `.gitignore`'s `/scheduled-tasks/*/*` makes every `_shared/` helper edit **invisible to `git status`** on any branch predating that file's force-add — and git then **silently overwrites** the file on `checkout`/`merge`/`rebase` to main (verified by reproduction; the same file without the ignore rule aborts with exit 1). Standing trap for the whole guard toolkit |
 | [OI-009](#OI-009) | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Verify the 93 Notion Tenant DB rows with no workbook counterpart against primary leases (low priority) |
 | [OI-022](#OI-022) | 2026-07-19 | OI-015 investigation (2026-07-19) | GitHub Data API still serves the pre-rewrite E. Fulton blob (`39b02f4585...`, kept alive by PR #2's internal `refs/pull/2/head`, not deletable via git/API/settings) — Support ticket #4584520 reopened 2026-07-20 with the corrected SHA (`6aed9a7`), awaiting GitHub's purge |
@@ -4278,7 +4278,30 @@ that has nothing to do with it — as it did here, on a change touching none of 
 | the real gate run that blocked | `74 pass, 1 fail, 1 env-skip (of 76)`; `allocate-oi-id tests: 9/12` |
 | the retry that succeeded | `75 pass, 0 fail, 1 env-skip (of 76)` |
 
-**One root cause, three reported failures.** All three are the same event:
+**WIDENED same day — it is not one test, it is the gate.** A second test flaked on a later push of this same
+branch. Tally across three consecutive pushes of identical-quality work:
+
+| Push | Gate result |
+|---|---|
+| 1 — guard wiring | **FAIL** `maintenance/_tests/test_allocate_oi_id.py` (74 pass / 1 fail) |
+| 2 — review fixes | clean (75 pass / **0 fail**) |
+| 3 — this item | **FAIL** `hooks/tests/test-claim-file-collision.py` (74 pass / 1 fail) |
+| 3 retry | clean (75 pass / **0 fail**) |
+
+Two *different* tests, two clean runs of the same suite on the same machine minutes apart. Note also that push
+1 and push 3 each additionally logged a `timeout-retry` for `test-eos-review-gate.py` — the gate's own
+tolerance path firing on yet a third test.
+
+`test-claim-file-collision.py` was investigated separately and is **not** reproducible on demand: it passes
+39/39 standalone and 6/6 under a 6-way concurrent run, including with a live claim file present (the obvious
+suspect, since that session was holding an `open-items-tracker` claim at the time — ruled out). So the gate's
+real load, 76 test files with subprocess-spawning tests among them, is heavier than a hand-rolled concurrency
+simulation reproduces. **Do not close this item on "cannot reproduce" for any single test** — the reproducible
+`test_allocate_oi_id.py` case below is the tractable entry point, but the failure is a property of the gate's
+concurrency, not of one test file.
+
+**The `test_allocate_oi_id.py` case, which IS reproducible — one root cause, three reported failures.** All
+three are the same event:
 ```
 FAIL: 12 concurrent allocations: no exceptions  -- ["PermissionError(13, 'Permission denied')"]
 FAIL: 12 concurrent allocations: all distinct   -- [OI-008 .. OI-018]   <- 11 ids, not 12
@@ -4297,11 +4320,17 @@ escape is the `allow-hook-test-failure` override token — which is a 60-minute,
 tracked test suite, minted to get past a known-flaky test. That is exactly how a *real* failure eventually gets
 waved through, and it is the same shape as the 2026-08-09 OI-111 orphan that blocked every session's push.
 
-**Options (Gabriel's call), roughly cheapest first:**
+**Options (Gabriel's call), roughly cheapest first.** Note the widening above changes their relative weight:
+options 2 and 3 fix ONE test, and a second test has already flaked, so only option 1 (or reducing the gate's
+parallelism) addresses the actual class.
 1. Extend the gate's existing retry path to cover `PermissionError`/`OSError`-class failures, not just
-   timeouts — smallest change, keeps the signal, but broadens what counts as "retryable".
+   timeouts — smallest change, keeps the signal, but broadens what counts as "retryable". **Preferred given
+   the widening**, since it is the only option that is not per-test.
+   1b. Or reduce the gate's concurrency (run the suite with a lower worker count). Slower push, but it treats
+   the cause rather than tolerating the symptom, and the gate is not on a latency budget.
 2. Fix the test: serialize or retry the file access inside the 12-thread case, so it stops failing under load.
-   Best if the production allocator is genuinely safe and only the *test* races.
+   Best if the production allocator is genuinely safe and only the *test* races. Per-test, so it leaves
+   `test-claim-file-collision.py` and anything else in the same class untouched.
 3. **Check first whether the allocator itself is the racer.** The test asserts 12 concurrent allocations
    produce 12 distinct contiguous ids; if `allocate-oi-id.py` can really drop an allocation under contention on
    Windows, the flake is a genuine product bug surfacing correctly and must NOT be retried away. The "8
