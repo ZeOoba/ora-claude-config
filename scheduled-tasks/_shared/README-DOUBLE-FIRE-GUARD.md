@@ -11,6 +11,25 @@ Neither is sufficient alone. Layer 1 is authoritative but its state lives on One
 and can be lost or rolled back; Layer 2 survives that but only covers blocks that
 send email, and only after the message is actually in the store.
 
+> ### If you arrived here about a "run-once guard" — you already have one
+>
+> This *is* it. On 2026-08-11 the guard was re-specced from scratch as a to-be-built
+> `_shared/run-once-guard.ps1`, because the shipped surface does not match how it gets
+> described from memory. **No PowerShell `run-once-guard.ps1` exists or ever did.**
+> Before building, check this table:
+>
+> | Often specced as | Actually is |
+> |---|---|
+> | `run-once-guard.ps1`, PowerShell | `block-sentinel.py`, **Python** |
+> | `-Action Claim` / `Complete` / `Release` | `claim` / `complete` / **`fail`** (+ `--force`, `--adopt`) |
+> | exit 3 = complete, exit 4 = in-progress | **10** = SKIP_ALREADY_COMPLETE · **11** = STAND_DOWN_IN_PROGRESS · **12** = REFUSED (non-owner) |
+> | `_state\run-once\<taskId>.json` | `_state\<taskId>-block-completion.json` |
+>
+> `fail` is the Release verb — it clears a claim immediately so a legitimate retry need
+> not wait out the TTL. **Do not renumber the exits to 3/4 to match a spec:** they are
+> deliberately 10+ so they cannot be confused with `send-via-outlook.ps1`'s 0–4, which
+> is the conflation the numbering exists to prevent.
+
 ---
 
 ## Why this exists
@@ -233,6 +252,7 @@ Wired so far:
 | `ora-deal-aging-sla` | CC/MCP | `main` | 30 | Both layers |
 | `ora-open-sessions-board` | CC/MCP | `main` | **45** | Longer TTL: STEP 5 renders an interactive board and STEP 6 waits on Gabriel, so the claim is closed at the end of STEP 5, before that wait |
 | `ora-monday-sync` | **LAMS** | `main` | 30 | Both layers. See the caveat below |
+| `ora-health-guard` | CC/MCP | `blockA`/`blockB`/`blockC` | **45** | Wired 2026-08-11. Per-block because the three blocks fail independently and Block C is the fleet's health surface — a Block B crash must not cost the probe suite. TTL 45 because B waits on live connector probes and C runs seven of them |
 
 **`ora-monday-sync` lives on the LAMS/Cowork fleet**, whose SKILL.md files sit under
 `OneDrive.../Documents/Claude/Scheduled/` and are **NOT in this git repo** — so that
@@ -240,9 +260,21 @@ edit has no version history or backup here, only a dated `.bak` beside it. The h
 are invoked by absolute path under `~/.claude`, so they work from either fleet unchanged;
 it is only the *spec* that is unversioned. Any LAMS task wired later has the same gap.
 
-Not yet wired, exposure demonstrated above: `ora-health-guard` (connector pre-flight,
-2026-07-24 — its two sends differed only in subject encoding, so verify the probe stem
-matches both forms before wiring).
+**`ora-health-guard`'s encoding worry is SETTLED (2026-08-11).** It was held back in the
+08-09 pass because its two 2026-07-24 sends "differed only in subject encoding" and it was
+unclear whether one stem could match both. It can: `Normalized` mode folds the dash family
+and drops non-ASCII *before* anchoring at position 0, so the plain dated stem
+`ORA Connector Pre-Flight - 2026-07-24` matches both the plain-ASCII form and the
+`✅`+em-dash form. Both real subjects are now pinned in `-SelfTest` (21 → 34 cases), and it
+was confirmed against the live store: with two similarly-named emails from two *different*
+tasks in the same scan window 11 minutes apart, the dated stem `Health Guard - 2026-08-11`
+correctly matched `[ACTION] Health Guard — 2026-08-11 — 4 FAIL` and not
+`[ACTION] Health Guard FAIL Aging -- 2 stale`.
+
+Still unwired: ~22 email-sending CC/MCP tasks. That is a deliberate backlog — adoption is
+proven per-task, not retrofitted en masse. Rank candidates by the *consequence of a
+duplicate* (does it mutate state, is it externally visible, does it feed a downstream
+consumer), not by whether the task happens to send mail.
 
 ## Tests
 
