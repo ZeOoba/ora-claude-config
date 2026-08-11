@@ -112,6 +112,8 @@ is what the detector should expect on all three lender rows |
 | [OI-103](#OI-103) | 2026-08-05 | Session-end optimization candidates, this session, 2026-08-05 | **LOW** `skillOverrides` was found silently inert this session (the second such config key, after the v1.8 drift-check prose-comparison finding) — no mechanism in this repo verifies that a `settings.json` key actually takes effect once set. Candidate: a standing audit question/probe enumerating which settings.json keys have never been mechanically confirmed live, rather than discovering inertness ad hoc per session |
 | [OI-104](#OI-104) | 2026-08-05 | Session-end optimization candidates, this session, 2026-08-05 | **LOW** The plugin-vs-user skill-source distinction was derived this session (per the referring conversation) by disassembling the CLI binary — a one-off, expensive investigation. If that distinction is needed again, it belongs in a reusable probe helper under `maintenance/`, not re-derived from scratch each time |
 | [OI-105](#OI-105) | 2026-08-05 | Session-end optimization candidates, this session, 2026-08-05 | **LOW** `eos-plan-gate` fires at the 4-file threshold even when the touched files were pre-specified handoff work scoped before the session started, forcing an override-file write that then reads in telemetry as a bypass rather than in-scope work. Candidate: a carve-out recognizing scope fixed before session start (e.g. an explicit file list named in the opening prompt) so the override isn't needed for work that was never actually unplanned |
+| [OI-116](#OI-116) | 2026-08-11 | Landing [PR #52](https://github.com/ZeOoba/ora-claude-config/pull/52) (`claim_work.py` refusal gate), 08-11 | **MEDIUM** An **unattended** session can hold a `claim_work.py` slug indefinitely and cannot be released or contacted: `send_message` refuses delivery to unattended sessions, and `shared-checkout-guard`'s `_self_renew_claims` keeps re-stamping `claimed_at` so the 2h TTL never expires it. Hit **three times in one session** (`1d88885d` on `hooks-override-auth`; `05236b94` on `open-items-tracker`, twice — including while filing this item). The new refusal correctly names the collision and prints the holder's `host_session_id` per OI-108, but "message them" is a dead end for exactly this class of holder, leaving `--force` as the only exit — the operation the gate exists to make rare. |
+| [OI-117](#OI-117) | 2026-08-11 | Landing [PR #52](https://github.com/ZeOoba/ora-claude-config/pull/52) into the live checkout, 08-11 | **MEDIUM** The live `~/.claude` checkout has drifted to where `origin/main` **cannot be merged**: on `feat/model-canary-probe-step25`, 4 ahead / 29 behind, **96+ uncommitted files** from ≥6 concurrent sessions, with 9 of the incoming commits' files dirty locally (incl. `open-items-tracker.md`, live-claimed at the time). `stash`/`checkout`/`reset` on a contaminated tree are forbidden, so PR #52 merged to `main` but was **not live**; getting it live needed a surgical `git checkout origin/main -- <3 files>`, which leaves those files modified against the branch HEAD (a `commit -a` by any session sweeps them; `eos-review-gate` may demand a review artifact from whoever did not write them). This is the general case for every future `hooks/**` change, not a one-off. |
 | [OI-111](#OI-111) | 2026-08-09 | Four `git push` invocations landing [PR #41](https://github.com/ZeOoba/ora-claude-config/pull/41) / [PR #44](https://github.com/ZeOoba/ora-claude-config/pull/44), 08-09; concurrency evidence 08-11 | **LOW** `hooks/git-prepush-doctrine-gate.py`. **Headline (defect 4): the hook-test suite is NOT concurrency-safe** — the SAME commit gave 38 fail/76 under fleet load (~37 concurrent python processes) and 75 pass/76 on retry, every failure a git-subprocess error in a fixture, indistinguishable from a real regression. **Do not override it.** Also: the sweep appears to run on branch DELETIONS (unproven), and a passing test's negative-path stderr reads as a live failure. **A suspected false-success-reporting bug was investigated and RETRACTED — see the section.** |
 
 ### OI-009
@@ -2711,6 +2713,85 @@ timeout — it is at ~75 assertions and growing.
 either an early exit or a justified full run, and gate output distinguishes test-sourced stderr from a
 live check failure. Defect 2 needs no action — it is retracted.
 **Auto-check:** none.
+
+### OI-116
+**Status:** OPEN
+**Opened:** 2026-08-11
+**Source:** landing [PR #52](https://github.com/ZeOoba/ora-claude-config/pull/52) (`claim_work.py` refusal
+gate), 2026-08-11 — hit twice in a single session, then a third time filing this very item
+**Severity:** MEDIUM — it removes the only non-destructive response to a claim collision.
+**Description:** An **unattended** session (scheduled-task run or dispatched session) can hold a
+`claim_work.py` slug indefinitely, and cannot be contacted to release it. Two mechanisms compound:
+`mcp__ccd_session_mgmt__send_message` refuses delivery to unattended sessions outright
+(`"Session <id> is unattended … messages can't be delivered there"`), and `shared-checkout-guard.py`'s
+`_self_renew_claims` re-stamps `claimed_at` on **all** of a session's live claims whenever it edits
+anywhere in a claim-relevant repo — so the 2-hour TTL never expires the claim while that session lives.
+The holder is therefore neither reachable nor wait-out-able.
+
+**Observed three times on 2026-08-11**, all real, none contrived:
+1. `1d88885d` (host `local_fdd428b9`, "Ora deal aging sla") held `hooks-override-auth` while this
+   session needed it. `send_message` refused; its claim self-renewed at 15:17:24 while being read.
+   Worked around by claiming a distinct slug, `hooks-override-auth-claim-work`, with `--paths`.
+2. `05236b94` (host `local_25942895`) held `open-items-tracker` with `--paths` on this very file.
+   `send_message` refused again.
+3. Filing THIS item hit (2) — the refusal correctly reported an `OVERLAP` verdict on
+   `open-items-tracker.md`, and the only paths forward were `--force` or an isolated worktree + PR.
+
+**Why the refusal gate makes this sharper, not worse:** before PR #52 the collision was invisible and
+the clobber silent, so this was never felt. Now the collision is named and correctly refused — which is
+the improvement — but the recommended response ("message the holder", printed from the claim's
+`host_session_id`, the field OI-108 added specifically to make holders contactable) is a dead end for
+exactly the class of session most likely to hold a slug unattended for hours. That leaves `--force` as
+the only exit, which is the operation the gate exists to make rare.
+
+**Candidate fixes (NOT applied, unevaluated):** (a) record whether the claiming session is unattended
+(the runtime knows) and have the refusal say so, replacing the useless "message them" line with the
+honest "this holder cannot be contacted — `--force` or use a distinct slug"; (b) scope
+`_self_renew_claims` to unattended sessions differently, or cap total renewals, so an unattended claim
+can age out even while its session lives; (c) have scheduled-task wrappers `release` on exit.
+Note (b) fights `_self_renew_claims`'s own documented rationale — read its docstring before touching it.
+**Closing condition:** a session that collides with an unattended holder gets a refusal that names the
+holder as uncontactable and offers a next step that is not `--force`.
+**Auto-check:** none.
+
+### OI-117
+**Status:** OPEN
+**Opened:** 2026-08-11
+**Source:** landing [PR #52](https://github.com/ZeOoba/ora-claude-config/pull/52) into the live checkout,
+2026-08-11
+**Severity:** MEDIUM — it blocks the normal landing path for every session, not just this one.
+**Description:** The live `~/.claude` checkout has drifted into a state where `origin/main` **cannot be
+merged**. At the time of filing it sat on branch `feat/model-canary-probe-step25`, 4 ahead / 29 behind
+`origin/main`, with **96+ uncommitted files** attributable to at least six concurrent sessions
+(`08df9f95`, `0c822226`, `3a782c7b` and 3 more, per `shared-checkout-guard`'s own warning). Nine of the
+29 incoming commits' files have uncommitted local changes — including `open-items-tracker.md`, live-claimed
+by another session at the time — so `git merge origin/main` would be refused by git rather than
+completing. The doctrinal remedies are all unavailable: `stash`/`checkout`/`reset`/`rebase` on a
+contaminated tree are forbidden, and committing other sessions' WIP is not this session's to do.
+
+**Consequence, observed:** PR #52 merged to `main` as `a6d346d` but was **not live**, and getting it live
+required a surgical `git checkout origin/main -- <3 files>` (both hook files verified clean in the live
+tree first, backed up, `allow-config-write` token minted against Gabriel's in-turn instruction and revoked
+immediately after). That workaround leaves those files **modified against the live branch's HEAD** until
+that branch merges `main`, with two knock-on effects: a `git commit -a` by any session on that branch
+would sweep in changes that are not theirs (benign — byte-identical to `origin/main` — but confusing),
+and `eos-review-gate` will see a modified `hooks/**` file and may demand a review artifact from a session
+that did not write it.
+
+**This is the general case, not a one-off:** any future `hooks/**` change lands the same way and hits the
+same wall. The 4 unpushed commits on the live branch (`d0b41b6`, `0e6a613`, `3105dcd`, `e5dbc86` — memory
+appends and fleet-heartbeat refreshes) are themselves ordinary work that never got published.
+
+**Candidate fixes (NOT applied):** (a) a supervised reconciliation pass that commits or lands the 96 dirty
+files by owning session and then merges `main`, restoring the live checkout to a mergeable state;
+(b) a scheduled drift probe that alarms when the live checkout exceeds a dirty-file or behind-count
+threshold, so this is caught at 10 files rather than 96; (c) doctrine change — treat the live checkout as
+read-only and require ALL work to happen in worktrees, which is already the rule for repos but is not
+enforced for `~/.claude` itself.
+**Closing condition:** the live checkout merges `origin/main` cleanly, the three surgically-synced files
+show clean against HEAD, and the 4 unpushed commits are either published or deliberately abandoned.
+**Auto-check:** `git -C ~/.claude status --porcelain | wc -l` and `git -C ~/.claude rev-list --count
+HEAD..origin/main` — both should be small; at filing they were 99 and 29.
 
 ## Closed
 
