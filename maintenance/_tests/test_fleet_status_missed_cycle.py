@@ -30,8 +30,11 @@ class TestFindMissedCycles(unittest.TestCase):
         return utc.strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
     def test_flags_a_genuinely_missed_weekly_cycle(self):
-        # cron fires Mondays 05:45; last real run was 8 days ago (missed last Monday).
-        last_run = self.now_local - datetime.timedelta(days=8)
+        # cron fires Mondays 05:45; last real run was 16 days ago -- two
+        # consecutive weekly slots missed (unambiguous starvation, gap well
+        # past the 1.5x-cadence cron-aware threshold), not just this week's
+        # slot still catching up.
+        last_run = self.now_local - datetime.timedelta(days=16)
         tasks = [{
             "id": "ora-master-workbook-ingest", "_fleet": "cc", "enabled": True,
             "cronExpression": "45 5 * * 1",
@@ -40,6 +43,23 @@ class TestFindMissedCycles(unittest.TestCase):
         out = fs.find_missed_cycles(tasks, now_local=self.now_local)
         ids = [m["id"] for m in out]
         self.assertIn("ora-master-workbook-ingest", ids)
+
+    def test_weekly_task_mid_catchup_not_flagged(self):
+        # CRON-AWARE GUARD regression (2026-08-10 live false positive, 8 of
+        # 13 flagged entries): a weekly task whose own current-day slot
+        # simply has not dispatched yet during a throttle-contended catch-up
+        # burst reads a raw gap of ~1 cadence interval against the flat 24h
+        # grace and gets misreported as starved. It is not -- it will fire
+        # later the same day as the burst drains.
+        last_run = self.now_local - datetime.timedelta(hours=175)
+        tasks = [{
+            "id": "ora-weekly-task", "_fleet": "cc", "enabled": True,
+            "cronExpression": "45 5 * * 1",
+            "lastRunAt": self._iso_utc(last_run),
+        }]
+        out = fs.find_missed_cycles(tasks, now_local=self.now_local)
+        self.assertEqual(out, [], "one un-dispatched slot (~1x weekly cadence) must "
+                                   "not flag as a missed cycle")
 
     def test_does_not_flag_a_task_that_fired_this_cycle(self):
         # Fired this morning at its 05:45 Monday slot -- current, not missed.
@@ -134,6 +154,48 @@ class TestFindMissedCycles(unittest.TestCase):
         out = fs.find_missed_cycles(tasks, now_local=now_local)
         self.assertEqual(out, [], "compound dom+dow cron must use AND (intersection) "
                                    "semantics to match the live scheduler, not POSIX OR")
+
+
+    def test_multifire_weekday_cron_prior_gap_not_used_as_interval(self):
+        # Adversarial-review regression (2026-08-11): deriving "the task's own
+        # interval" from only the SINGLE most recent inter-fire hop picks up
+        # the weekend/day-boundary outlier when sampled right at the FIRST
+        # fire of the day (Fri 19:40 -> Mon 07:40 = 60h for this cron), which
+        # inflates the threshold enough to hide multiple real consecutive
+        # misses. (Sampling later in the day, after a same-day fire has
+        # already happened, hits the same-day 6h hop instead and does not
+        # reproduce this -- the bug is specifically in the first-fire-of-the-
+        # day / first-fire-of-the-week sampling window.)
+        now_local = datetime.datetime(2026, 8, 3, 8, 0, 0)  # a Monday, just past 07:40
+        last_run = now_local - datetime.timedelta(hours=90)  # ~5 missed weekday fires
+        tasks = [{
+            "id": "ora-lease-snapshot-refresh", "_fleet": "cc", "enabled": True,
+            "cronExpression": "40 7,13,19 * * 1-5",
+            "lastRunAt": self._iso_utc(last_run),
+        }]
+        out = fs.find_missed_cycles(tasks, now_local=now_local)
+        ids = [m["id"] for m in out]
+        self.assertIn("ora-lease-snapshot-refresh", ids,
+                      "5 consecutive missed weekday fires must still flag, even "
+                      "sampled on a Monday where the single most-recent hop is "
+                      "the 60h+ weekend gap, not the task's true ~6h cadence")
+
+    def test_weekday_daily_cron_missed_friday_and_monday_flagged(self):
+        # Same class of bug for a plain weekday-only daily cron: sampled on a
+        # Monday, the single most-recent hop is the 72h weekend gap, which
+        # must not be mistaken for "this task's normal cadence is 72h."
+        now_local = datetime.datetime(2026, 8, 3, 15, 0, 0)  # a Monday
+        last_run = now_local - datetime.timedelta(hours=96)  # missed Fri AND Mon
+        tasks = [{
+            "id": "ora-weekday-daily-task", "_fleet": "cc", "enabled": True,
+            "cronExpression": "45 5 * * 1-5",
+            "lastRunAt": self._iso_utc(last_run),
+        }]
+        out = fs.find_missed_cycles(tasks, now_local=now_local)
+        ids = [m["id"] for m in out]
+        self.assertIn("ora-weekday-daily-task", ids,
+                      "missing both Friday's and Monday's weekday-cron fires "
+                      "must flag despite the 72h weekend gap in the sample")
 
 
 class TestCronHms(unittest.TestCase):
