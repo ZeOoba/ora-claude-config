@@ -112,6 +112,7 @@ is what the detector should expect on all three lender rows |
 | [OI-103](#OI-103) | 2026-08-05 | Session-end optimization candidates, this session, 2026-08-05 | **LOW** `skillOverrides` was found silently inert this session (the second such config key, after the v1.8 drift-check prose-comparison finding) — no mechanism in this repo verifies that a `settings.json` key actually takes effect once set. Candidate: a standing audit question/probe enumerating which settings.json keys have never been mechanically confirmed live, rather than discovering inertness ad hoc per session |
 | [OI-104](#OI-104) | 2026-08-05 | Session-end optimization candidates, this session, 2026-08-05 | **LOW** The plugin-vs-user skill-source distinction was derived this session (per the referring conversation) by disassembling the CLI binary — a one-off, expensive investigation. If that distinction is needed again, it belongs in a reusable probe helper under `maintenance/`, not re-derived from scratch each time |
 | [OI-105](#OI-105) | 2026-08-05 | Session-end optimization candidates, this session, 2026-08-05 | **LOW** `eos-plan-gate` fires at the 4-file threshold even when the touched files were pre-specified handoff work scoped before the session started, forcing an override-file write that then reads in telemetry as a bypass rather than in-scope work. Candidate: a carve-out recognizing scope fixed before session start (e.g. an explicit file list named in the opening prompt) so the override isn't needed for work that was never actually unplanned |
+| [OI-111](#OI-111) | 2026-08-09 | Four `git push` invocations landing [PR #41](https://github.com/ZeOoba/ora-claude-config/pull/41) / [PR #44](https://github.com/ZeOoba/ora-claude-config/pull/44), 08-09 | **LOW** `hooks/git-prepush-doctrine-gate.py` timing: the full sweep appears to run on branch DELETIONS, where there are no incoming objects (1 of 2 deletes applied, client timed out at 120s; `gh api -X DELETE` returned instantly). Also: the suite's deliberate negative-path stderr (`COULD NOT READ ... does-not-exist.md`) renders identically to a real check failure. **A suspected false-success-reporting bug was investigated and RETRACTED — see the section.** |
 
 ### OI-009
 **Status:** OPEN (substantial progress made 2026-07-17, real scope remains)
@@ -2631,6 +2632,58 @@ their real contact info.
 server-side (the handler already does `db.from('tenants').select(...)` for the IDOR check — just add
 `contact_email`/`name` to that select and use it) instead of trusting the request body. Low priority,
 not blocking; noted here so it isn't lost, not because it's urgent.
+**Auto-check:** none.
+
+### OI-111
+**Status:** OPEN
+**Opened:** 2026-08-09
+**Source:** four `git push` invocations while landing [PR #41](https://github.com/ZeOoba/ora-claude-config/pull/41) and [PR #44](https://github.com/ZeOoba/ora-claude-config/pull/44) (both merged, `c8ea74e` / `6b197f1`) from the `ora-entry-market-scan` session
+**Severity:** LOW — a timing/ergonomics issue. Downgraded from MEDIUM when the correctness claim behind that grade was retracted (below). No data loss in any observed instance.
+**Owner note:** `hooks/git-prepush-doctrine-gate.py` was under active edit by session `1ce540e5` / host `local_2648ba07-…` when this was found; their PR #46 (`a880b39`) has since merged. Filed here rather than messaged because `send_message` is unavailable from an unattended (scheduled-task) session.
+
+**Defect 1 (OPEN) — the full sweep appears to run on branch DELETIONS, where there are no incoming
+objects to validate.** `git push origin --delete` for two merged branches timed out the client at 120s;
+the FIRST delete landed and the SECOND did not. The same deletion via `gh api -X DELETE
+repos/ZeOoba/ora-claude-config/git/refs/heads/<branch>` returned instantly (exit 0). A delete-only
+refspec carries no objects, so the doctrine probe and the `hooks/tests` suite have nothing to check.
+`grep` for zero-SHA / delete handling in the gate found none. **Not proven** — the gate's stdout was not
+captured on that invocation, so the 120s is consistent with, but does not by itself demonstrate, a full
+sweep. Reproduce by pushing a delete with output captured.
+
+**Defect 2 — RETRACTED 2026-08-09, same session, before this item was ever pushed.** Originally filed as
+"`error: failed to push some refs` printed on a push that SUCCEEDED", graded MEDIUM as a correctness bug
+in failure reporting. **That was a misreading of my own evidence.** The observed sequence was: first
+attempt printed the error, a retry was killed by the client at 120s, and the branch was later found on
+the remote at the correct SHA. I attributed the landing to the *first* attempt. A later blocked push,
+captured in full, shows the gate prints an explicit `--- FAIL: <test> ---` reason alongside
+`failed to push some refs` **and the ref genuinely does not land** — i.e. reporting is accurate. The far
+likelier reading is that the first attempt genuinely failed and the killed-at-120s **retry succeeded**.
+Recorded rather than deleted so the wrong conclusion is not re-derived from the same raw symptom.
+
+**Defect 3 (OPEN, minor) — deliberate negative-path test stderr is indistinguishable from a real
+failure.** `maintenance/_tests/test_check_open_items_duplicate_ids.py` exercises the unreadable-tracker
+branch, so gate output contains `open-items-tracker ID check: COULD NOT READ <tmp>\does-not-exist.md
+... treat as a check failure, not a clean result.` verbatim. It is a *passing test asserting a failure
+path*, but it renders exactly like a live check failure and cost real debugging time here. Prefixing
+test-sourced stderr, or suppressing it on pass, would fix it.
+
+**Counter-evidence — the gate works, and caught a genuine defect in this very item.** The push filing
+OI-111 was correctly BLOCKED with `orphaned_sections: ['OI-111']`: the entry had a `### OI-111` detail
+section but no row in the Open table, which the tracker convention requires. That is a real
+convention violation the gate caught before it reached `main`. Any fix to defects 1 and 3 must preserve
+this behaviour. Post-fix the suite reports 74 pass / 0 fail / 1 env-skip.
+
+**Timing observed:** push-with-content → doctrine-integrity-probe + `hook-tests-gate` 73/74, completed
+but slow · second push → 38/39, killed at 120s · delete push (2 branches) → killed at 120s, 1 of 2
+applied · this item's clean push → 74/75, completed. PR #46 added 141 lines of scratch-worktree sweeping
+at gate start, which adds to rather than relieves the startup cost.
+
+**Candidate fix (NOT applied):** (a) early-exit on a delete-only refspec; (b) mark or suppress
+test-sourced stderr so it cannot read as a live check failure; (c) budget the suite against the client
+timeout — it is at ~75 assertions and growing.
+**Closing condition:** a delete push completes inside the client timeout with output captured showing
+either an early exit or a justified full run, and gate output distinguishes test-sourced stderr from a
+live check failure. Defect 2 needs no action — it is retracted.
 **Auto-check:** none.
 
 ## Closed
