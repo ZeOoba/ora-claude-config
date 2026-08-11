@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-08-11T21:19:04.295Z
+  modified: 2026-08-11T22:15:50.875Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -32,6 +32,8 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
+| [OI-119](#OI-119) | 2026-08-11 | `pre-push` hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) | Pre-push gate is **flaky under its own load and hard-blocks any session's push**: across 3 consecutive pushes of one branch, **two different** tests failed (`test_allocate_oi_id.py`, `test-claim-file-collision.py`) with two clean runs of the same suite between them. The gate retries tests that *time out* but not those that error, so each flake looks like a real regression and the tempting escape is a 60-min multi-use override token |
+| [OI-118](#OI-118) | 2026-08-11 | `.gitignore:61`, found wiring ora-health-guard to the double-fire guard | `.gitignore`'s `/scheduled-tasks/*/*` makes every `_shared/` helper edit **invisible to `git status`** on any branch predating that file's force-add — and git then **silently overwrites** the file on `checkout`/`merge`/`rebase` to main (verified by reproduction; the same file without the ignore rule aborts with exit 1). Standing trap for the whole guard toolkit |
 | [OI-009](#OI-009) | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Verify the 93 Notion Tenant DB rows with no workbook counterpart against primary leases (low priority) |
 | [OI-022](#OI-022) | 2026-07-19 | OI-015 investigation (2026-07-19) | GitHub Data API still serves the pre-rewrite E. Fulton blob (`39b02f4585...`, kept alive by PR #2's internal `refs/pull/2/head`, not deletable via git/API/settings) — Support ticket #4584520 reopened 2026-07-20 with the corrected SHA (`6aed9a7`), awaiting GitHub's purge |
 | [OI-019](#OI-019) | 2026-07-19 | [event_log.md](event_log.md#2026-07-19) | Gabriel must add `HUBSPOT_TOKEN` (Private App, `crm.objects.deals.read`) to `oxford-command-center/.env` — PR #221 (frontend trigger) ready, blocked only on the credential. Once live, re-verify 2146 Enterprise Pkwy Twinsburg OH (currently untracked in projects.md/deal-decision-ledger.md) lands correctly in acq_candidates |
@@ -92,6 +94,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | [OI-105](#OI-105) | 2026-08-05 | Session-end optimization candidates, this session, 2026-08-05 | **LOW** `eos-plan-gate` fires at the 4-file threshold even when the touched files were pre-specified handoff work scoped before the session started, forcing an override-file write that then reads in telemetry as a bypass rather than in-scope work. Candidate: a carve-out recognizing scope fixed before session start (e.g. an explicit file list named in the opening prompt) so the override isn't needed for work that was never actually unplanned |
 | [OI-114](#OI-114) | 2026-08-11 | [ORA Monthly Portfolio Briefing — August 2026](https://app.notion.com/p/3b96ecd89e598192b55ae297b2c46cad) Risk 1, run 2026-08-11 | **MEDIUM — tenant concentration, no automated cover.** 55 New Plant Court (Owings Mills MD) has a single tenant, **Eurosort, Inc., 34,534 SF, \$452,835 ARR — 8.09% of portfolio ARR and 11.91% of portfolio NOI** — whose lease ends **2027-12-31**. It is 100% of that property's income (property WALT 1.39 yr). The asset is **unencumbered**, so it appears in no maturity schedule, no LTV test and no DSCR test, and no covenant, lender or automated alert will surface the expiry. Because value is carried as NOI ÷ cap (6.5%), a non-renewal writes down **~\$6.97M — 12.0% of portfolio value**. It also lands in the portfolio's largest expiry month (Dec-2027: 59,727 SF / \$741,690 / 8 leases, of which Eurosort alone is 61%). **Two actions: (a) Gabriel to confirm whether the lease carries a renewal option, ROFR or termination right** — the rent roll records escalation but no option data, and the answer changes the negotiating posture; **(b) open renewal discussions now, at 16 months**, targeting a signed extension or replacement LOI by Q1-2027 |
 | [OI-115](#OI-115) | 2026-08-11 | [ORA Monthly Portfolio Briefing — August 2026](https://app.notion.com/p/3b96ecd89e598192b55ae297b2c46cad) Risk 4, run 2026-08-11; originating incident [project_insurance_lapse_confirmed_real_2026-07-25.md](project_insurance_lapse_confirmed_real_2026-07-25.md) | **HIGH — escalation path has failed, needs a human owner.** Nine properties are uninsured or about to be. **8 policies EXPIRED for 3+ consecutive ingest runs** — escalated to Gabriel 2026-07-13 and **unchanged across four reporting cycles**: Fairground Village Center PCKG+BCL, ETC POA PCKG+BCL, 1100 Rarig PCKG+BCL, 3883 Livingston PCKG+BCL. **4 more are Renew-Now and have closed from 25–29 days to 18–22 days with no movement**: 1900 N Broadway UFX+BCL (expire 2026-08-27) and 9050 Red Branch PCKG+BCL (expire 2026-08-31). **Compounding: 9050 Red Branch is the property carrying the only balloon inside 18 months** (2028-01-01) — a lender finding a lapsed policy on its collateral 16 months before maturity turns a benign refinance into a covenant conversation; and **1100 Rarig is uninsured** while running the portfolio's shortest WALT (0.92 yr) and 22.9% vacancy. Not an analytical question — \$57.95M of insurable value behind a paperwork failure that four cycles of automated alerting has not moved. **Escalate to Eric** |
+| [OI-120](#OI-120) | 2026-08-11 | live incident this session while committing the OI-098 tracker work | **MEDIUM** `config-write-guard` models **working-tree rewrites, not index state**, so a session can contaminate the shared `~/.claude` index but cannot undo it. `GIT_MUTATE_RE` (`hooks/lib/tool_call_paths.py:430-432`) matches the verbs `checkout` / `restore` / `reset` / `apply` / `stash` / `merge` / `rebase` / `cherry-pick` / `clean` / `revert` / `pull` / `switch` (exact regex in the detail section) — **`add` and `commit` are absent; `restore` is present.** Live-proven this session, all three: `git add -- <one memory file>` **PASSED** and silently joined **5 files another session had already staged** (including a 930-line new script); the corrective `git restore --staged` on that same file was **BLOCKED** as a governance write; `git commit` is unguarded too. Net: staging into a shared index is free, un-staging costs a 60-min multi-use `allow-config-write` token, and the single most consequential operation — creating a commit in the live governance repo — is not gated at all. **Workaround that worked and should be documented:** a pathspec commit (`git commit -F <msgfile> -- <path>`) commits the working-tree copy of just that path and leaves the index untouched, so another session's staged work is neither swept in nor disturbed. Secondary finding: the matcher scans command TEXT, so an `allocate-oi-id.py --note` merely *describing* this gap tripped it — same shape as [OI-099](#OI-099). **hooks/** — any fix takes the mandatory adversarial REFUTE pass + old-vs-new differential battery |
 
 ### OI-009
 **Status:** OPEN (substantial progress made 2026-07-17, real scope remains)
@@ -2788,6 +2791,84 @@ not an analytical question — it is **\$57,951,345 of insurable value** behind 
 [39c6ecd8](https://app.notion.com/p/39c6ecd89e59819698d8cf25fac246f9) (07-13), which record the same
 8-policy set unchanged across all three and the Renew-Now window narrowing without movement.
 
+### OI-120
+**Status:** OPEN
+**Opened:** 2026-08-11
+**Source:** live incident this session while committing the OI-098 tracker work (filing OI-114/115,
+back-filling sections, closing class (i))
+**Severity:** MEDIUM — shared-state hazard on the live governance checkout. No data was lost in the
+observed instance, but only because the collision was noticed before committing.
+
+**Description.** `config-write-guard`'s git detection is built around **verbs that rewrite
+working-tree files**. `GIT_MUTATE_RE` (`hooks/lib/tool_call_paths.py:430-432`) is:
+
+```
+\bgit\b[^|;&\n]*?\b(checkout|restore|reset|apply|stash|merge|rebase|cherry-pick|clean|revert|pull|switch)\b
+```
+
+with the comment *"git verbs that REWRITE working-tree files … Read-only git (log/diff/status/show/
+ls-files) is deliberately absent."* **Index-state mutation is not modelled at all.** `add` is absent
+because it writes the index, not the working tree; `restore` is present because its *unqualified*
+form (`git restore <path>`) does rewrite the working tree — but `git restore --staged <path>` touches
+only the index, and gets caught by the same verb.
+
+**Three behaviours, all live-proven in this session (not inferred):**
+
+1. **`git add -- <one memory file>` PASSED.** No block. `git diff --cached` then returned **six**
+   files — five belonging to another session that had already staged them, including a 930-line new
+   script (`scheduled-tasks/ora-pm-ledger/property_register_snapshot_diff.py`). A plain `git commit`
+   at that moment would have swept all five into this session's commit under this session's message.
+2. **`git restore --staged -- <that same file>` was BLOCKED** as *"file-rewriting git command
+   referencing the live ~/.claude checkout"*, demanding an `allow-config-write` token — for an
+   operation whose entire purpose was to *undo* step 1 and hand the index back untouched.
+3. **`git commit` is not gated either.** The pathspec form used to escape the situation
+   (`git commit -F <msgfile> -- <path>`) ran without challenge and produced commit `6654888`.
+
+**This is a scope gap, not a correctness bug in the guard's own terms.** Within its stated model —
+protect the working tree — every one of those three outcomes is consistent. The hazard only appears
+once the *shared index* is treated as governance state too, which on a single-writer checkout it
+plainly is: `git add` from any session is globally visible and silently changes what every other
+session's next `git commit` will capture.
+
+**Why it matters:** it is a **one-way door**. A session can enter a contaminated-index state with no
+friction and then cannot leave it without minting a 60-minute, multi-use, whole-governance-layer
+write token — which the guard's own message correctly warns is worse than the operation you wanted.
+The safe exit exists but is non-obvious.
+
+**Workaround (works today, undocumented — record it wherever the shared-checkout protocol lives):**
+`git commit -F <msgfile> -- <path>` performs a *partial* commit from the working tree for the named
+paths only, ignoring the index for them and leaving every other staged entry exactly as it was.
+Verified this session: the resulting commit contained 1 file, and the other session's 5 staged files
+were still staged afterwards.
+
+**Candidate fixes (none applied; `hooks/**` — mandatory adversarial REFUTE + old-vs-new differential
+battery before any of these ships):**
+- **(a) Narrow, safest:** carve `restore --staged` / `rm --cached` out of the block so the *undo* path
+  is always available, on the reasoning that an index-only operation cannot damage the working tree.
+  Note this widens what passes, so it needs the differential battery to prove no working-tree form is
+  let through with it.
+- **(b) Symmetric, larger:** admit index state into the model — gate `add`/`commit` against the live
+  checkout the same way, so the door is closed rather than one-way. Higher friction on very common
+  operations; would want the pathspec-commit form explicitly allowed.
+- **(c) Cheapest, no matcher change:** leave the gate alone and put the pathspec-commit pattern plus
+  "never `git add` in the shared checkout, commit by pathspec instead" into the shared-checkout
+  protocol in `tech.md`. Removes the trap without touching a fail-closed security gate.
+
+Option (c) is the low-risk first move and does not preclude (a).
+
+**Secondary finding — the matcher fires on prose describing it.** Allocating this very item failed on
+the first attempt: `allocate-oi-id.py --note "… un-staging blocks …"` was blocked because the note
+text contained a listed verb and the command named the governance root. Re-running with the verb
+reworded succeeded. Same shape as [OI-099](#OI-099) (`governor-drift-probe.py` firing on a measured
+DSCR ratio written in prose): a text-scanning guard that cannot distinguish *doing* the thing from
+*writing about* the thing. Cheap to live with, worth knowing before someone tries to document this
+item from a shell command.
+
+**Related, but distinct — do not merge these:**
+[[reference_config_write_guard_blocks_eos_review_gate]] covers the bare-substring era (`"del "`
+matching inside `"--model "`), which was a matching-precision defect and is fixed. This item is about
+*which state the guard models at all*, and is unaffected by that fix.
+
 ## Closed
 
 | ID | Opened | Closed | Source | One-line |
@@ -4616,3 +4697,127 @@ the implementation and the assertion were fixed, and the strengthened test was p
 regression (28/30 with the old implementation restored, 30/30 with the fix).
 **Closing condition (MET):** independent review (`claude-fable-5`, 2 rounds, APPROVED WITH NITS), merged to `main` as `8fca11d`, full `hooks/tests` re-run on main post-merge: 44/44, 0 failures.
 **Auto-check:** none.
+
+### OI-118
+**Status:** OPEN (logged; remedy is a judgement call, not obviously "just un-ignore it")
+**Opened:** 2026-08-11
+**Source:** `.gitignore:61` (`/scheduled-tasks/*/*`); surfaced while wiring `ora-health-guard` to the shared double-fire guard
+**Description:** The guard helpers in `scheduled-tasks/_shared/` (`block-sentinel.py`, `outlook-sent-probe.ps1`,
+`test-block-sentinel.py`, `README-DOUBLE-FIRE-GUARD.md`) live under the ignore pattern `/scheduled-tasks/*/*`
+and were force-added to `main` past it (PRs #39/#40, 2026-08-09). That combination is a trap on any branch
+that forks from before the force-add: there the file is **untracked AND ignored**, so
+(a) `git status` shows nothing no matter how much you edit it, and
+(b) git will **silently overwrite it** on `checkout` / `merge` / `rebase` toward `main` — no conflict, no
+warning, exit 0. On a merge git even reports it as `create mode 100644 <path>`, i.e. it presents a
+destructive overwrite as a file creation.
+
+**Verified by reproduction, not inferred** (four throwaway repos, 2026-08-11), holding the real
+`.gitignore` shape and force-added-on-main history constant:
+
+| File state | `checkout main` | `merge main` | `rebase main` |
+|---|---|---|---|
+| untracked **+ ignored**, tracked on main | silent overwrite, exit 0 | silent overwrite, exit 0 | silent overwrite |
+| untracked, **not** ignored (control) | `error: … would be overwritten` → Aborting, exit 1 | — | — |
+| tracked + local mods, main differs | `error: Your local changes …` → Aborting, exit 1 | Aborting, exit 1 | — |
+
+The control row is what establishes causation: identical setup minus the ignore rule and git refuses. The
+`.gitignore` is precisely what removes git's normal untracked-file safety net.
+
+**Live instance that prompted this:** the `~/.claude` checkout sat on `feat/model-canary-probe-step25`
+(27 commits behind `origin/main`). `outlook-sent-probe.ps1` carried 34 self-test cases on disk vs 21 on
+`origin/main` — 13 new cases that existed nowhere but the working tree, invisible to `git status`, one
+`git merge main` away from being erased. Landed instead via a worktree off `origin/main`, where the files
+are tracked and therefore protected.
+
+**Why the obvious fix may not be right:** un-ignoring `/scheduled-tasks/*/*` would start tracking every task
+folder's run residue (temp HTML bodies, `send-log.txt` at ~99KB and growing, `tmp/`), which is presumably why
+the pattern is broad in the first place. Options, none free: (a) add negation entries (`!/scheduled-tasks/_shared/*.py`
+etc.) so the shared helpers are never ignored — narrowest, but must be kept in step as helpers are added;
+(b) move the shared helpers out of `scheduled-tasks/` entirely (e.g. `maintenance/_shared/`), which breaks every
+absolute path in every wired SKILL.md; (c) leave as-is and rely on always working from a worktree off `main`.
+Gabriel's call.
+
+**Auto-check:** none yet. A cheap one: fail if any path matched by `.gitignore` is also tracked on `origin/main`.
+
+### OI-119
+**Status:** OPEN (diagnosed and reproduced; fix is a judgement call between three options)
+**Opened:** 2026-08-11
+**Source:** `maintenance/_tests/test_allocate_oi_id.py`, hit via `.git/hooks/pre-push` gate 2
+(`hooks/git-prepush-hook-tests-gate.py`) while pushing the ora-health-guard guard wiring
+**Description:** The pre-push gate runs the whole tracked test suite and **blocks the push on any failure**.
+`test_allocate_oi_id.py` is flaky under the concurrency that gate itself creates, so it can hard-block a push
+that has nothing to do with it — as it did here, on a change touching none of the code it exercises.
+
+**Reproduced, not inferred (2026-08-11):**
+
+| How run | Result |
+|---|---|
+| standalone, 5 sequential runs | **12/12 pass**, exit 0, every time |
+| 6 runs concurrently | **1 of 6 failed 9/12**, exit 1 — the gate's exact signature |
+| the real gate run that blocked | `74 pass, 1 fail, 1 env-skip (of 76)`; `allocate-oi-id tests: 9/12` |
+| the retry that succeeded | `75 pass, 0 fail, 1 env-skip (of 76)` |
+
+**WIDENED same day — it is not one test, it is the gate.** A second test flaked on a later push of this same
+branch. Tally across three consecutive pushes of identical-quality work:
+
+| Push | Gate result |
+|---|---|
+| 1 — guard wiring | **FAIL** `maintenance/_tests/test_allocate_oi_id.py` (74 pass / 1 fail) |
+| 2 — review fixes | clean (75 pass / **0 fail**) |
+| 3 — this item | **FAIL** `hooks/tests/test-claim-file-collision.py` (74 pass / 1 fail) |
+| 3 retry | clean (75 pass / **0 fail**) |
+
+Two *different* tests, two clean runs of the same suite on the same machine minutes apart. Note also that push
+1 and push 3 each additionally logged a `timeout-retry` for `test-eos-review-gate.py` — the gate's own
+tolerance path firing on yet a third test.
+
+`test-claim-file-collision.py` was investigated separately and is **not** reproducible on demand: it passes
+39/39 standalone and 6/6 under a 6-way concurrent run, including with a live claim file present (the obvious
+suspect, since that session was holding an `open-items-tracker` claim at the time — ruled out). So the gate's
+real load, 76 test files with subprocess-spawning tests among them, is heavier than a hand-rolled concurrency
+simulation reproduces. **Do not close this item on "cannot reproduce" for any single test** — the reproducible
+`test_allocate_oi_id.py` case below is the tractable entry point, but the failure is a property of the gate's
+concurrency, not of one test file.
+
+**The `test_allocate_oi_id.py` case, which IS reproducible — one root cause, three reported failures.** All
+three are the same event:
+```
+FAIL: 12 concurrent allocations: no exceptions  -- ["PermissionError(13, 'Permission denied')"]
+FAIL: 12 concurrent allocations: all distinct   -- [OI-008 .. OI-018]   <- 11 ids, not 12
+FAIL: 12 concurrent allocations: contiguous     -- [OI-008 .. OI-018]
+```
+One of the 12 threads loses a Windows file lock, so 11 ids are allocated instead of 12; "all distinct" and
+"contiguous" then fail as *cascades* of that single exception, not as independent defects. The classic Windows
+concurrent-file-access flake — same family as `feedback_npm_test_intermittent_access_violation.md`, which
+CLAUDE.md's Done bar already names as the spurious-failure gotcha.
+
+**Why this is worth fixing rather than tolerating.** The gate ALREADY has flake tolerance, and it fired in the
+same run: `timeout-retry (timed out under load, passed on the doubled-budget rerun; not blocking):
+hooks/tests/test-eos-review-gate.py, maintenance/test-governor-drift-probe.py`. But that path keys on
+**timeout**. A `PermissionError` is not a timeout, so it falls straight through to a hard block. The obvious
+escape is the `allow-hook-test-failure` override token — which is a 60-minute, multi-use bypass of the entire
+tracked test suite, minted to get past a known-flaky test. That is exactly how a *real* failure eventually gets
+waved through, and it is the same shape as the 2026-08-09 OI-111 orphan that blocked every session's push.
+
+**Options (Gabriel's call), roughly cheapest first.** Note the widening above changes their relative weight:
+options 2 and 3 fix ONE test, and a second test has already flaked, so only option 1 (or reducing the gate's
+parallelism) addresses the actual class.
+1. Extend the gate's existing retry path to cover `PermissionError`/`OSError`-class failures, not just
+   timeouts — smallest change, keeps the signal, but broadens what counts as "retryable". **Preferred given
+   the widening**, since it is the only option that is not per-test.
+   1b. Or reduce the gate's concurrency (run the suite with a lower worker count). Slower push, but it treats
+   the cause rather than tolerating the symptom, and the gate is not on a latency budget.
+2. Fix the test: serialize or retry the file access inside the 12-thread case, so it stops failing under load.
+   Best if the production allocator is genuinely safe and only the *test* races. Per-test, so it leaves
+   `test-claim-file-collision.py` and anything else in the same class untouched.
+3. **Check first whether the allocator itself is the racer.** The test asserts 12 concurrent allocations
+   produce 12 distinct contiguous ids; if `allocate-oi-id.py` can really drop an allocation under contention on
+   Windows, the flake is a genuine product bug surfacing correctly and must NOT be retried away. The "8
+   concurrent PROCESSES: all distinct" case passed in every run, which is weak evidence the lock works
+   cross-process and the fault is thread-level — but this should be settled before option 1 or 2 is chosen.
+
+**Not caused by, and does not affect, the change that surfaced it** (PR #54): that commit touches no code this
+test exercises, and the push succeeded on a clean retry with 0 failures.
+
+**Auto-check:** none. A cheap one: have the gate print which tests it retried and why, so a recurring flake is
+visible as a pattern rather than as one session's bad luck.
