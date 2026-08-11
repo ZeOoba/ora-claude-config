@@ -1,6 +1,6 @@
 ---
 name: ora-health-guard
-description: ORA Health Guard — single sequential pre-morning session (05:15 ET): A) Scheduled-Task Integrity self-heal → B) Connector Pre-Flight + Morning Mirror (mandatory every run, no clock deadline; tier-4 fallback for the daily-brief skill) → C) Probe Suite (fleet-status, governor-drift, memory-integrity, confidentiality self-test, cc-verifier, setup-self-audit, connector-drift) into one consolidated email. v1.0 2026-06-03 Phase 3 merge. RESTORED 2026-07-09 verbatim from a session-transcript capture after the 2026-07-08 OneDrive deletion; Block A's dead engine reference repointed same day to ora-task-integrity-guard's live guard.ps1. Re-enabled 2026-07-09 (Gabriel-approved, in-session, post-recovery + post-repoint) — see RESTORATION NOTE. v1.1 (2026-07-22): added Block A.0 (wake-lateness immediate alert — fires the moment a machine-offline-overnight catch-up is detected, instead of waiting for automation-health-monitor's ~11:05 ET catch) and Block B.3.5 (cross-fleet Notion beacon so automation-health-monitor can verify this block fired without relying solely on an Outlook Sent Items subject search). Gabriel-directed workflow-optimization follow-up to the 2026-07-22 Automation Health report. v1.2 (2026-07-31, Gabriel-ratified): DROPPED the pre-06:00 mirror deadline (structurally unmeetable, failed 6 consecutive runs; mirror verified TIER-4 behind FRED/treasury/Notion in the daily-brief skill, and the contract was misattributed to ora-am-brief); pinned `confidence` to the closed enum PRIMARY|SECONDARY after the 07-30 run emitted an out-of-enum value; 4a now uses a scoped notion-search instead of a whole-page Ops Hub fetch that had outgrown the tool-result limit; 4d now emits verified-null counts and separates Gabriel-parked deals from genuinely stale ones. v1.3 (2026-08-09, Gabriel-directed workflow-optimization follow-up to the 2026-08-09 schematic-refresh finding): added the C.1.1 missed-cycle escalation — a non-empty fleet-status.py missed-single-cycle list now flips the C.3 subject to [ACTION] instead of sitting unread in the raw probe table, closing the gap that let ora-cc-schematic-refresh go 13 days stale unnoticed (ora-health-guard-fail-aging-nudge only ages probe FAILs, not refresh-task starvation). [MODEL: UNVERIFIABLE | checked 2026-07-09]
+description: ORA Health Guard — single sequential pre-morning session (05:15 ET): A) Scheduled-Task Integrity self-heal → B) Connector Pre-Flight + Morning Mirror (mandatory every run, no clock deadline; tier-4 fallback for the daily-brief skill) → C) Probe Suite (fleet-status, governor-drift, memory-integrity, confidentiality self-test, cc-verifier, setup-self-audit, connector-drift) into one consolidated email. v1.0 2026-06-03 Phase 3 merge. RESTORED 2026-07-09 verbatim from a session-transcript capture after the 2026-07-08 OneDrive deletion; Block A's dead engine reference repointed same day to ora-task-integrity-guard's live guard.ps1. Re-enabled 2026-07-09 (Gabriel-approved, in-session, post-recovery + post-repoint) — see RESTORATION NOTE. v1.1 (2026-07-22): added Block A.0 (wake-lateness immediate alert — fires the moment a machine-offline-overnight catch-up is detected, instead of waiting for automation-health-monitor's ~11:05 ET catch) and Block B.3.5 (cross-fleet Notion beacon so automation-health-monitor can verify this block fired without relying solely on an Outlook Sent Items subject search). Gabriel-directed workflow-optimization follow-up to the 2026-07-22 Automation Health report. v1.2 (2026-07-31, Gabriel-ratified): DROPPED the pre-06:00 mirror deadline (structurally unmeetable, failed 6 consecutive runs; mirror verified TIER-4 behind FRED/treasury/Notion in the daily-brief skill, and the contract was misattributed to ora-am-brief); pinned `confidence` to the closed enum PRIMARY|SECONDARY after the 07-30 run emitted an out-of-enum value; 4a now uses a scoped notion-search instead of a whole-page Ops Hub fetch that had outgrown the tool-result limit; 4d now emits verified-null counts and separates Gabriel-parked deals from genuinely stale ones. v1.3 (2026-08-09, Gabriel-directed workflow-optimization follow-up to the 2026-08-09 schematic-refresh finding): added the C.1.1 missed-cycle escalation — a non-empty fleet-status.py missed-single-cycle list now flips the C.3 subject to [ACTION] instead of sitting unread in the raw probe table, closing the gap that let ora-cc-schematic-refresh go 13 days stale unnoticed (ora-health-guard-fail-aging-nudge only ages probe FAILs, not refresh-task starvation). v1.4 (2026-08-11, Gabriel-directed): wired to the shared double-fire entry guard — per-block block-sentinel.py claims (blockA/blockB/blockC, TTL 45) plus outlook-sent-probe.ps1 pre-send probes on all three sends. This task was the one deferred in the 2026-08-09 fleet pass on the worry that its 2026-07-24 duplicate pair "differed only in subject encoding"; settled empirically — Normalized matching folds dashes and drops emoji, and both real subjects are now pinned as regression cases (-SelfTest 21→34, all green). [MODEL: UNVERIFIABLE | checked 2026-07-09]
 ---
 
 RESTORATION NOTE (2026-07-09): This file was DEGRADED 2026-07-08 after the CC canonical file (a thin pointer-stub) lost its OneDrive target — `Documents\Claude\Scheduled\ora-health-guard\SKILL.md` was deleted outright (not archived) during the 2026-07-08 fleet reconciliation, confirmed absent from the active location and every archive folder checked (`_archive_2026-07-08_retired`, `_archive_2026-06-11_orphans`, `_archive_2026-06-09_retired`). A second mirror at `Claude_Workspace\00_Governance\Scheduled\ora-health-guard\SKILL.md` was itself only another redirect to the same deleted path.
@@ -57,12 +57,43 @@ The prior `8a611864` Composio wrapper is NOT connected; Rube (`d6315173`) is ret
 
 ---
 
+## STEP 0 — DOUBLE-FIRE ENTRY GUARD (added 2026-08-11; applies to Blocks A, B and C)
+
+**Why this task.** The 2026-08-09 catch-up burst is what motivated the fleet-wide guard, and *this task is the one that measured it* — it woke 219 min late and reported the burst that made `ora-am-brief` fire twice. It was nonetheless left **unwired** in that pass, deliberately: its two 2026-07-24 Connector Pre-Flight sends (10:39:25 and 10:40:33, identical 11,852-byte bodies, 68 seconds apart) differed in subject **encoding** — one plain ASCII, one `✅` + em-dashes — and it was unclear whether the probe stem could match both. **That is now settled empirically:** the probe's `Normalized` mode folds the dash family and drops non-ASCII before anchoring, so a single plain dated stem matches both forms. Both real subjects are pinned as regression cases in `outlook-sent-probe.ps1 -SelfTest` (34 cases, all green) — do not weaken the stems below without re-running it.
+
+**Two layers, same contract as every other wired task.** Full contract: `_shared/README-DOUBLE-FIRE-GUARD.md`. Use ONE `run_id` for the whole session.
+
+**Claim at the head of each block** (`--block blockA` / `blockB` / `blockC`), before any of that block's work:
+
+```
+python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-health-guard --block blockA --run-id <run_id> --ttl-min 45
+```
+
+- **Exit 0** → claimed; run the block normally.
+- **Exit 10** → that block already COMPLETE for this ET date. Log `BLOCK_<X>_ALREADY_COMPLETE_TODAY`, **skip the block entirely**, and record it in the END-OF-SESSION RUN SUMMARY as a **NORMAL skip** — not a miss. This matters more here than anywhere else in the fleet: `automation-health-monitor` and this task's own fail-aging nudge read these summaries, and a correctly-suppressed duplicate misfiled as a failure would train a false alarm into the very monitor that is supposed to catch real ones.
+- **Exit 11** → another fire is live inside the TTL. Stand down identically, logging `BLOCK_<X>_IN_PROGRESS_ELSEWHERE`.
+- **Any other exit** → tooling failure, NOT a decision. **Fail open: run the block normally** and put the exit code and stderr verbatim on that block's summary line.
+
+**Per-block, not one `main` claim,** because the three blocks fail independently and Block C is the fleet's health surface — a crash in Block B must not cost the probe suite. Blocks A and B still record COMPLETE, so a retry past the TTL re-runs only C.
+
+**TTL is 45 min** across all three (vs. 30 for the short tasks): Block B waits on live connector probes and Block C runs seven of them, so 30 risks a slow-but-healthy run being reclaimed by the next fire. The cost of the longer window is only delayed crash recovery, which is immaterial for a daily task.
+
+**Close every claimed block** once its outputs land — `complete` on success, `fail --error "<what broke>"` on abort. **Only the run holding the claim may call either**; a run that stood down at exit 10/11 calls NEITHER (a non-owner is refused with exit 12, but do not rely on that). Leaving a block silently `IN_PROGRESS` is the one state to avoid.
+
+**Do NOT "fix" a double-fire by retiming this task's cron.** The burst is documented, intended fleet-wide behavior — and this task exists precisely to observe it. The guard belongs at the block entry.
+
+---
+
 # BLOCK A — SCHEDULED-TASK INTEGRITY (bounded self-heal)
 
 Guarantee every ACTIVE scheduled task's SKILL.md is present at the scheduler's canonical path, mirrored to two independent backups. The scheduler reads each task's instructions from its `filePath` at run time, so an external deletion / sync-conflict can silently orphan a task.
 
+**A.00 — CLAIM BLOCK A** (first action in this block, before A.0's lateness computation): `block-sentinel.py claim --task ora-health-guard --block blockA --run-id <run_id> --ttl-min 45`, per STEP 0. Exit 10/11 → skip to Block B, recording a NORMAL skip. This guards A.1's self-heal as well as A.0's alert: `guard.ps1` **restores files and writes mirrors**, so it is the one genuinely mutating step in this task.
+
 **A.0 — WAKE-LATENESS IMMEDIATE ALERT (NEW 2026-07-22).** This task's cron target is 05:15 ET. On every fire, compute how late the session actually started vs that target. Motivating pattern: repeated "machine/Cowork-app closed overnight" catch-up bursts (2026-07-14, 2026-07-20, 2026-07-21, 2026-07-22) sat undetected until `automation-health-monitor`'s ~11:05 ET run — a 3-6 hour silent gap. No on-machine scheduled task (this one included) can fire before the machine itself wakes, so this cannot be a true pre-9am external ping (that would require extending the existing GitHub Actions/Power Automate dead-man's-switch pattern already used for `ora-cowork-heartbeat` — out of reach from a Cowork/Code session, no such connector available; flagged as a follow-up requiring a session with GitHub/Power Automate access). What this step CAN do: convert "silently discovered ~5h later" into "alerted the instant the system notices."
-  - If actual start time is **> 45 minutes past 05:15 ET**, this is a late/catch-up wake. Immediately send a SEPARATE, lightweight standalone email (do NOT wait for the Block C consolidated send) via the SOLE send path `send-via-outlook.ps1`, to `ggoldberg@oxfordra.net` only:
+  - If actual start time is **> 45 minutes past 05:15 ET**, this is a late/catch-up wake. **Probe Sent Items first** (Layer 2, mandatory before this send): `powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: Overnight machine-offline detected>"`. Exit 10 → do NOT send; log `BLOCK_A_WAKE_ALERT_ALREADY_IN_SENT_ITEMS` and record a NORMAL skip. Exit 1 → fail open: send, and record the probe gap.
+    **This stem is deliberately UNDATED — the only one in this file.** The minutes-late figure sits *between* the stem and the date (`…woke 320min late — 2026-07-24`) and legitimately differs between two fires, so no dated prefix can cover both. Date scoping comes from the probe's `SentOn` filter (default: today, host clock = ET), not from the subject. The stem stays safe only because it is anchored at position 0 — pinned by self-test cases proving it does **not** match this task's other two emails.
+    Then send a SEPARATE, lightweight standalone email (do NOT wait for the Block C consolidated send) via the SOLE send path `send-via-outlook.ps1`, to `ggoldberg@oxfordra.net` only:
     - Subject: `🌙 Overnight machine-offline detected — ora-health-guard woke {N}min late — YYYY-MM-DD`
     - Body: one line — actual start time (ET), minutes late vs 05:15 target, and a note that the AM task cluster (05:15–06:30 ET) is now catching up and `automation-health-monitor`'s 11:05 ET run will confirm full recovery.
   - If actual start time is within 45 minutes of 05:15 ET, skip this step silently — no email, proceed to A.1. A normal-cadence run needs no extra signal.
@@ -84,6 +115,14 @@ If the guard.ps1 script itself is missing, skip Block A gracefully this run, log
 
 **A.4 — On script error** (non-zero exit or unparseable stdout): record an `INTEGRITY ENGINE ERROR` line for the Block C email with the captured error; do not retry more than once.
 
+**A.5 — CLOSE THE BLOCK A CLAIM.** Once A.1–A.4 have resolved (including the error path — an INTEGRITY ENGINE ERROR is a *recorded outcome*, not an aborted block):
+
+```
+python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-health-guard --block blockA --run-id <run_id>
+```
+
+Block A publishes no Notion page, so `--notion-page-id` is omitted; add `--email-sent-at <ISO8601>` **only if A.0 actually sent the late-wake alert**. Call `fail --error "<what broke>"` instead only if the block genuinely aborted before A.2 captured anything — that releases the claim so an operator retry need not wait out the TTL.
+
 ---
 
 # BLOCK B — CONNECTOR PRE-FLIGHT + MORNING MIRROR (mandatory every run; no clock deadline)
@@ -93,6 +132,12 @@ If the guard.ps1 script itself is missing, skip Block A gracefully this run, log
 > **⚠️ CONTRACT — do not change:** the consumer is the **`daily-brief` skill** (`ora-skills/daily-brief/SKILL.md`, "Notion-outage mirror fallback", Patch 9 v2.6), invoked by `ora-am-brief` Block B — *not* `ora-am-brief/SKILL.md` itself, which contains no reference to this email (verified 2026-07-31; earlier wording here misattributed it). It locates this email by searching Gabriel's mailbox (`outlook_email_search`) for a message **to ggoldberg@oxfordra.net** whose **subject begins** `✅ ORA Connector Pre-Flight — [today YYYY-MM-DD]` **or** `⚠️ ORA Connector Pre-Flight — [today YYYY-MM-DD]`, and parses the `rate_snapshot` and `portfolio_watch` JSON blocks from the body. **Preserve the subject prefix and both JSON blocks exactly.**
 >
 > **`confidence` IS A CLOSED ENUM — `PRIMARY` or `SECONDARY`, nothing else (hard rule, added 2026-07-31).** The consumer states it "will be exactly `PRIMARY` or `SECONDARY`, never any other value" and carries it through verbatim into a Gabriel-facing rate table. The 2026-07-30 run emitted `"confidence": "PRIMARY_BUT_STALE"` — an out-of-enum value that would have propagated an unparseable label straight into the brief. **Never encode staleness, degradation, or any other qualifier into `confidence`.** Staleness has its own dedicated fields: `mirror_status`, `rate_age_hours`, `missed_sessions`, `staleness_verdict`. Use those.
+
+**B.0 — CLAIM BLOCK B** (first action in this block): `block-sentinel.py claim --task ora-health-guard --block blockB --run-id <run_id> --ttl-min 45`, per STEP 0. Exit 10 → log `BLOCK_B_ALREADY_COMPLETE_TODAY`, skip the block (no probes, no mirror, no send, no beacon), record a NORMAL skip, continue to Block C. Exit 11 → stand down identically.
+
+> **KNOWN TRADEOFF — this block's email is a DATA FEED, not just a notification (read before weakening the guard).** Per the CONTRACT callout above, the `daily-brief` skill locates this message by subject prefix and parses `rate_snapshot` / `portfolio_watch` out of the body. So suppression has a downstream consumer, and two failure shapes trade against each other:
+> - **Two mirrors is the worse one.** The consumer searches by subject prefix; two same-day matches leave it choosing between them with no rule for which wins. That ambiguity is exactly what the guard removes.
+> - **The accepted cost:** if fire #1 ran while Notion was down it still *completes* (B.2 falls back to 2-FALLBACK and sends a `⚠️` mirror rather than failing), so a fire #2 minutes later that could have captured a healthier `✅` mirror will be suppressed. That is deliberate. A genuinely *aborted* Block B calls `fail`, which releases the claim and lets the next fire run — so the only suppressed case is one where a usable mirror already reached the consumer.
 
 **B.1 — CONNECTOR HEALTH CHECK.** First load tools via ToolSearch: Notion (`notion-fetch`, `notion-search`), Desktop Commander (`start_process`/`write_file` — runs the Outlook COM send path). Probe each critical connector once (retry Notion at most twice on ERR_FAILED); record OK / FAIL + error text:
 - **Notion:** `notion-fetch` the sentinel page `35e6ecd8-9e59-814f-ae22-fe99464084d1` ("Rate Snapshot — Current"). If it fails, also probe Ops Hub `32b6ecd8-9e59-81f2-b329-df3fd0e25062` to distinguish page-specific vs connector-wide failure.
@@ -129,6 +174,14 @@ If the guard.ps1 script itself is missing, skip Block A gracefully this run, log
       (ii) SECONDARY: if web_fetch returns ERR_FAILED / unusable HTML, WebSearch the headline curve (≥2Y/10Y/30Y), SOFR, CME FedWatch next-FOMC odds → `"confidence":"SECONDARY"`.
       (iii) Populate every UST tenor + SOFR + spreads + FedWatch obtained; set unconfirmed cells to `"n/a"`. Compute 2s10s from captured 2Y/10Y as a consistency check. NEVER fabricate; NEVER emit an empty UNAVAILABLE block.
   • `portfolio_watch` — has NO non-Notion source; set the whole block to `null` with reason `"Notion down — Section 4 has no live fallback"`. Expected; do not reconstruct.
+
+**B.3.0 — PRE-SEND SENT-ITEMS PROBE (mandatory, immediately before the B.3 send).** Layer 2 of the double-fire guard, and the step that would have stopped the 2026-07-24 duplicate:
+
+```
+powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: ORA Connector Pre-Flight - {YYYY-MM-DD}>"
+```
+
+Probe the **dated stem** `ORA Connector Pre-Flight - {YYYY-MM-DD}` and nothing more — write it with a plain ASCII hyphen and **no leading emoji**. The status prefix (`✅` / `⚠️`) and the trailing connector list are both run-specific: on 2026-07-24 the two sends were `ORA Connector Pre-Flight - 2026-07-24 - Notion OK` and `✅ ORA Connector Pre-Flight — 2026-07-24 — Notion OK`. The stem matches both after normalization; either full subject would have matched only itself, which is precisely how that duplicate got through. Exit 10 → do **NOT** send; log `BLOCK_B_MIRROR_ALREADY_IN_SENT_ITEMS` with the probe's matched `sentOn`, record a NORMAL skip, and still call `complete` at B.3.9 so the state file re-converges. Exit 1 → fail open: send, and record the probe gap.
 
 **B.3 — EMAIL THE MIRROR / STATUS.** Send exactly one email via the SOLE send path `send-via-outlook.ps1` (write the HTML body to a temp file via Desktop Commander `write_file`, then `-BodyFile`):
 - `-To "ggoldberg@oxfordra.net"`; **no cc** (egoldberg removed 2026-06-03 per directive); `-BodyFormat html`.
@@ -176,6 +229,14 @@ Purpose: `automation-health-monitor` (LAMS/Cowork fleet) previously had no relia
 
 > **EDITING THIS PAGE — replace the JSON block, don't prepend to it.** A `update_content` whose `old_str` stops mid-note leaves the previous note's tail concatenated after the new one (observed 2026-08-05). Read the page back after writing and confirm the block contains exactly one `note:`.
 
+**B.3.9 — CLOSE THE BLOCK B CLAIM.** After the B.3 send resolves and B.3.5b's beacon write has been attempted (success *or* documented skip — a skipped beacon on a known Notion outage is a completed block, not a failed one):
+
+```
+python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-health-guard --block blockB --run-id <run_id> --notion-page-id 3a56ecd8-9e59-8152-83b6-c61cec736f2b --email-sent-at <ISO8601 of the successful send>
+```
+
+Omit `--email-sent-at` if the send failed both attempts and B.4's local-log path was used instead — the block still completed, it simply has no send timestamp to record. Call `fail --error "<what broke>"` only if the block aborted before B.3 (which releases the claim, correctly allowing a retry to capture a fresh mirror — see the B.0 tradeoff note).
+
 **B.4 — FAILURE PATHS.**
 - Notion FAILED but Outlook OK: still send the alert email (Outlook is independent). The `rate_snapshot` WILL have been reconstructed via the B.2 fallback ladder — include it and state its `confidence` prominently; only `portfolio_watch` is lost. If web_fetch also failed (primary tier down), say so and label rates SECONDARY (below decision-grade). Recommend a manual Notion check / re-auth before the next cycle.
 - The Outlook COM send path is unavailable (cannot email — Desktop Commander/PowerShell down): write the full status + any captured JSON to `C:\Users\Owner\OneDrive - Oxford Capital Partners\Documents\Claude\Scheduled\ora-connector-preflight-guard\last-run.json` via Desktop Commander `write_file` as a last-resort durable log. *(This state-file write is permitted — it is not config/memory.)*
@@ -190,10 +251,27 @@ Run the deterministic probes below, then send **ONE consolidated `[ORA] Health G
 
 **READ THE SCAN SET, NOT JUST THE STATUS (standing rule, added 2026-07-24).** When a probe reports an aggregate — `all N files`, `N scanned`, `N/N pass` — carry **N and what N is drawn from** into the email, not the `[OK]` alone. A green line over the wrong scan set is a *silent* coverage gap: it reads as assurance while verifying nothing. Live case that motivated this rule: `setup-self-audit`'s `skill-frontmatter` reported *"all 57 SKILL.md parse cleanly"* for months while (a) never parsing YAML at all and (b) globbing only the skills roots — **all 53 scheduled-task SKILL.md files, both fleets, were outside its scan set**, including every file hit by the 2026-07-08 deletion incident that check exists to detect. If a probe's aggregate does not state its roots, treat that as a probe defect and flag it; do not infer coverage from a passing status. Current per-probe scan-set map: `memory/reference_probe_scan_sets.md`.
 
+**C.0 — CLAIM BLOCK C** (first action in this block, before any probe runs): `block-sentinel.py claim --task ora-health-guard --block blockC --run-id <run_id> --ttl-min 45`, per STEP 0. Exit 10 → log `BLOCK_C_ALREADY_COMPLETE_TODAY`, skip the entire probe suite and its email, record a NORMAL skip in the run summary. Exit 11 → stand down identically.
+
+> Block C is read-only, so a second run does no direct damage — the defect is the **duplicate `[ORA] Health Guard` email**. This is the fleet's primary health signal and the one Gabriel triages against; two of them on the same date, potentially with *different* verdicts (fire #1 `ALL PASS`, fire #2 `2 FAIL` as the burst drains), is worse than none. The C.1.1 CRON-AWARE GUARD below already exists because this task over-reported once and needed a `[CORRECTION]` the same hour — a duplicate is the same class of false signal.
+
 **C.1 — Run each probe** (full Python path; record exit code 0=pass / non-zero=fail):
 1. **Fleet status** — `…\python.exe "C:/Users/Owner/.claude/maintenance/fleet-status.py" --summary` — task counts, never-ran, throttle-skips, collisions. *(Canonical fleet health. STORE MODEL: the claude-code-sessions registry written by the `scheduled-tasks` MCP IS the live store — fleet-status.py auto-discovers it; a 0-task MCP result is a REAL failure, not by-design. **CORRECTED 2026-08-03 — the prior claim here was FALSE.** This file previously said "as of 2026-07-07 this task itself runs from the LAMS/Cowork fleet post-migration." Verified against both live registries 2026-08-03: `ora-health-guard` exists **ONLY in claude-code-sessions (CC/MCP)**, id `ora-health-guard`, `filePath C:\Users\Owner\.claude\scheduled-tasks\ora-health-guard\SKILL.md`, cron `15 5 * * *`. **There is no LAMS twin** — the only LAMS entry matching "health-guard" is the separate `ora-health-guard-fail-aging-nudge`. Consequences: this SKILL.md at the CC path is the sole authoritative copy (editing it is sufficient; there is no second fleet copy to keep in step), and both registries are live and dual-read by fleet-status.py — neither is "orphaned/dark." If fleet-status.py cannot find a registry, record a coverage gap, not a fabricated pass.
     **AND DO NOT READ A GREEN fleet-status LINE AS PROOF A TASK RAN (2026-08-03).** Its missed-cycle detector reads `lastRunAt`, which the Claude Desktop scheduler stamps at **dispatch**, not completion — a phantom dispatch that never confirms still advances it (full root cause in the B.3.5a callout). `ora-health-guard` itself was silently dead 07-31→08-02 while fleet-status reported it healthy and omitted it from the missed-cycle list. Treat "missed cycle" counts as a **floor, not a census**, and say so when quoting them.)*
-    **MISSED-CYCLE ESCALATION (added 2026-08-09 — closes a refresh-task-starvation blind spot).** `ora-cc-schematic-refresh` (2x/week producer) went 13 days / ~4 missed Mon+Thu slots without any alert reaching Gabriel — `ora-health-guard-fail-aging-nudge` only ages probe FAILs, and fleet-status.py's own missed-cycle line was already in this run's `--summary` output the whole time but nothing treated a non-empty list as alarm-worthy. **Rule: if fleet-status.py's "missed single cycle" line is non-empty, list every flagged task+gap_hours verbatim and treat it as a probe-equivalent FAIL → flip the C.3 subject to `[ACTION]`**, same mechanism as the B.2 rate-staleness and B.3.5a beacon-gap escalations. This is subject to the same floor-not-census caveat immediately above (OI-070: a gap that self-heals — the task fires again — before the next run is invisible here), so a clean "0 missed" is reassurance for right now, not a historical guarantee; say so if quoting it as clean.
+    **MISSED-CYCLE ESCALATION (added 2026-08-09 — closes a refresh-task-starvation blind spot).** `ora-cc-schematic-refresh` (2x/week producer) went 13 days / ~4 missed Mon+Thu slots without any alert reaching Gabriel — `ora-health-guard-fail-aging-nudge` only ages probe FAILs, and fleet-status.py's own missed-cycle line was already in this run's `--summary` output the whole time but nothing treated a non-empty list as alarm-worthy. **Rule: if fleet-status.py's "missed single cycle" line is non-empty, list every flagged task+gap_hours verbatim** — then classify each entry through the CRON-AWARE GUARD below before deciding whether it flips the C.3 subject to `[ACTION]` (same mechanism as the B.2 rate-staleness and B.3.5a beacon-gap escalations). This is subject to the same floor-not-census caveat immediately above (OI-070: a gap that self-heals — the task fires again — before the next run is invisible here), so a clean "0 missed" is reassurance for right now, not a historical guarantee; say so if quoting it as clean.
+
+    **CRON-AWARE GUARD (added 2026-08-10, Gabriel-directed — the clause above misfired on 8 of 13 entries on its FIRST live run).** Do NOT escalate on a non-empty list alone.
+
+    *Why the raw list over-reports.* `find_missed_cycles()` computes `gap = most_recent_expected_cron_fire − lastRunAt` and flags it when `gap > MISSED_CYCLE_GRACE_HOURS`, which is a **flat 24h regardless of cadence** (`fleet-status.py:263`). The gap does not accumulate gradually — it jumps to **one full interval** the instant a task's cron time passes unfired. So a *healthy weekly* task reads `gap ≈ 168h` in the window between its cron instant and its actual dispatch, and 168h > 24h, so it is flagged every single week. The detector's arithmetic is correct and genuinely cron-aware; it is the **flat grace** that is cadence-blind. Do not "fix" this by ignoring weekly tasks — a weekly task CAN genuinely starve.
+
+    *Classify by INTERVAL MULTIPLES, not by absolute hours.* Derive each flagged task's `interval` from its own `cronExpression` (`--json` emits `cron` and `gap_hours` per entry; daily `* * *` = 24h, weekday `* * 1-5` = 24h across the week / 72h over a weekend, weekly `* * 1` = 168h, 2x/week Mon+Thu ≈ 84h). Then:
+    - **`gap ≥ 2 × interval` → ESCALATE, always.** Two or more consecutive slots missed. Unambiguous starvation, no catch-up excuse. This is the `ora-cc-schematic-refresh` founding case (2x/week, 13 days ≈ 3.7 intervals) — it still fires, which is the test any change here must pass.
+    - **`gap ≈ 1 × interval` (one slot passed, unfired) → PROVISIONAL.** Advisory row only; do NOT flip the subject **if** the fleet is mid-catch-up — i.e. **A.0 fired this run** (late wake), or the entry's `expected_fire_utc` falls inside the overnight window the machine was closed. In that case the scheduler was structurally unable to dispatch on time and the burst will serve it. If A.0 did NOT fire (machine was up, task simply did not run), a 1-interval gap IS escalation-worthy — that is a phantom dispatch or a dead task, per the B.3.5a callout.
+    - Never suppress an entry merely because its cadence is long. Suppression is earned by `gap ≈ 1 × interval` **and** a demonstrated catch-up condition, never by cadence alone.
+
+    *RE-SAMPLE BEFORE COMPOSING (mandatory, cheapest and highest-yield step).* fleet-status is point-in-time and a catch-up burst drains **while this task runs**. Re-run `fleet-status.py --summary` immediately before composing C.2 and **report only entries open in BOTH samples**; list any that cleared in between as evidence the burst is draining, not as a miss. Measured 2026-08-10: 13 open at 12:21 → 8 at 12:31, five having fired mid-session (`ora-monday-sync` 12:23, `automation-health-monitor` 12:26, `ora-session-sweep` 12:28, `ora-weekly-hygiene` 12:29, `ora-tenant-contact-gap-sweep` dispatched). A single early sample turned a normal Monday drain into a reported "full week of starvation" that had to be retracted by a `[CORRECTION]` email the same hour.
+
+    *Report the burst instead.* On a catch-up run the real signal is **throttle contention**, not the missed list: 2026-08-10 all-time skips went 252 (12:21) → 436 (12:31) → 488 (12:36), last-24h 31 → 267, with each still-queued weekly task refused 16–17 times. Quote the trend and the per-task refusal counts. The operative risk is that the machine closes before the queue drains, which converts a non-event into a genuinely missed slot — and next week that would look identical to this week's false alarm.
 2. **Governor drift** — `…\python.exe "C:/Users/Owner/.claude/maintenance/governor-drift-probe.py"` — flags any DSCR/LTV declaration off the canonical 1.25× / 40%.
 3. **Memory integrity** — `…\python.exe "C:/Users/Owner/.claude/maintenance/memory-integrity-probe.py"` — index↔files reconciliation, contradiction/recipient/retired-link checks, staleness.
 4. **Confidentiality self-test** — `…\python.exe "C:/Users/Owner/.claude/hooks/tests/test-confidentiality-guard.py"` — the egress-guard test suite (must stay all-pass; a fail means the E.-Fulton/confidentiality guard regressed).
@@ -223,6 +301,24 @@ If any probe script is missing/absent this run (folders may not have survived th
 
 **C.4 — Deliver** to **ggoldberg@oxfordra.net only** via the SOLE send path `send-via-outlook.ps1` (Composio removed 2026-06-11; no fallback connector exists). Write the HTML to a temp file and `-BodyFile` it. On non-zero COM exit: retry once, then flag the failure via the B.4 last-resort local-log path — do not halt.
 
+**C.4.0 — PRE-SEND SENT-ITEMS PROBE (mandatory, immediately before the C.4 send):**
+
+```
+powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: Health Guard - {YYYY-MM-DD}>"
+```
+
+Probe the **dated stem** `Health Guard - {YYYY-MM-DD}` — **without** the `[ORA]` / `[ACTION]` tag (the probe strips leading bracket tags, so including one would over-narrow the match and let a verdict flip through) and without the trailing verdict. Exit 10 → do **NOT** send; log `BLOCK_C_EMAIL_ALREADY_IN_SENT_ITEMS`, record a NORMAL skip, and still call `complete` at C.4.9. Exit 1 → fail open: send, and record the probe gap.
+
+**The date in the stem is load-bearing** — three other real subjects would otherwise be caught by it, and suppressing any of them would silence a *different* report: `[ORA] Health Guard Addendum — …` (a distinct follow-up from this task), `[ACTION] Health Guard FAIL Aging — …` (a **different task**, `ora-health-guard-fail-aging-nudge`), and `[CORRECTION] Health Guard — …` (which the probe rejects outright, because a same-day correction is evidence the scheduled run still matters). All four cases are pinned in `-SelfTest`.
+
+**C.4.9 — CLOSE THE BLOCK C CLAIM.** Once the send resolves:
+
+```
+python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-health-guard --block blockC --run-id <run_id> --email-sent-at <ISO8601>
+```
+
+Block C publishes no Notion page, so `--notion-page-id` is omitted. Call `fail --error "<what broke>"` if the probe suite aborted before C.2 composed anything.
+
 **C.5 — HARD RULE (reiterated):** Block C never edits, creates, moves, or deletes any file or task, and never writes settings/hooks/CLAUDE/memory/registry. A FAILing probe is reported with its observed value; Gabriel decides remediation.
 
 ---
@@ -230,3 +326,15 @@ If any probe script is missing/absent this run (folders may not have survived th
 # END-OF-SESSION RUN SUMMARY
 
 Emit a short chat summary: Block A.0 (on-time / N-min-late alert sent), Block A (clean / N restored / M unrecoverable / engine-error / absent), Block B (mirror sent ✅ + beacon updated ✅ / Notion-down→fallback `confidence` / local-log), Block C (`N/M probes PASS`, list any FAIL/ABSENT). Confirm the Block B mirror was **sent** — not that it beat any clock; there is no deadline (see DEADLINE RULING). A clean run is: on-time wake · integrity clean · mirror sent · beacon updated · all probes PASS.
+
+**ENTRY-GUARD REPORTING (added 2026-08-11).** For every block the STEP 0 guard suppressed, add a line naming the block, the `logToken`, and the run that owns today's record — and classify it explicitly as a **NORMAL skip, not a miss**:
+
+```
+Block B — NORMAL SKIP (BLOCK_B_ALREADY_COMPLETE_TODAY; today's record owned by runId=<id>). Not a miss.
+```
+
+This wording is load-bearing in both directions:
+- **Downward:** `automation-health-monitor` and `ora-health-guard-fail-aging-nudge` consume these summaries. A correctly-suppressed duplicate reported as a failure would train a false alarm into the fleet's own monitors and invite someone to remove the guard — the exact outcome the 2026-08-09 design note warns against.
+- **Upward:** a guard skip must never be reported as a clean run either. A run whose blocks were all suppressed did **no** integrity check, captured **no** mirror, and ran **no** probes. Say that plainly rather than emitting the clean-run line above, which would assert health nobody verified this fire.
+
+If a claim returned an exit code other than 0/10/11, report the block as **FAIL-OPEN (guard degraded)** with the exit code and stderr verbatim — the block ran normally, but unguarded.
