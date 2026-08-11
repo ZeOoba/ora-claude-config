@@ -16,7 +16,7 @@ The CC/MCP scheduled-task **run-once / double-fire entry guard already exists** 
 |---|---|
 | `block-sentinel.py` | the guard — per-block, per-ET-date claim-then-complete |
 | `outlook-sent-probe.ps1` | independent Layer 2 — Sent Items probe before any COM send |
-| `test-block-sentinel.py` | 23 test functions |
+| `test-block-sentinel.py` | 22 test functions (`grep -c 'def test_'` — the event_log's "23" is wrong) |
 | `README-DOUBLE-FIRE-GUARD.md` | the canonical contract |
 
 **The surface differs from how it gets re-specced.** A spec written from memory tends to describe a `run-once-guard.ps1`; that file does not exist and never did. The real contract:

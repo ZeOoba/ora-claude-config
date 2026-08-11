@@ -4244,7 +4244,7 @@ The control row is what establishes causation: identical setup minus the ignore 
 `.gitignore` is precisely what removes git's normal untracked-file safety net.
 
 **Live instance that prompted this:** the `~/.claude` checkout sat on `feat/model-canary-probe-step25`
-(27 commits behind `origin/main`). `outlook-sent-probe.ps1` carried 35 self-test cases on disk vs 22 on
+(27 commits behind `origin/main`). `outlook-sent-probe.ps1` carried 34 self-test cases on disk vs 21 on
 `origin/main` — 13 new cases that existed nowhere but the working tree, invisible to `git status`, one
 `git merge main` away from being erased. Landed instead via a worktree off `origin/main`, where the files
 are tracked and therefore protected.
