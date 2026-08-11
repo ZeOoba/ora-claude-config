@@ -32,6 +32,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
+| [OI-118](#OI-118) | 2026-08-11 | `.gitignore:61`, found wiring ora-health-guard to the double-fire guard | `.gitignore`'s `/scheduled-tasks/*/*` makes every `_shared/` helper edit **invisible to `git status`** on any branch predating that file's force-add — and git then **silently overwrites** the file on `checkout`/`merge`/`rebase` to main (verified by reproduction; the same file without the ignore rule aborts with exit 1). Standing trap for the whole guard toolkit |
 | [OI-009](#OI-009) | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Verify the 93 Notion Tenant DB rows with no workbook counterpart against primary leases (low priority) |
 | [OI-022](#OI-022) | 2026-07-19 | OI-015 investigation (2026-07-19) | GitHub Data API still serves the pre-rewrite E. Fulton blob (`39b02f4585...`, kept alive by PR #2's internal `refs/pull/2/head`, not deletable via git/API/settings) — Support ticket #4584520 reopened 2026-07-20 with the corrected SHA (`6aed9a7`), awaiting GitHub's purge |
 | [OI-019](#OI-019) | 2026-07-19 | [event_log.md](event_log.md#2026-07-19) | Gabriel must add `HUBSPOT_TOKEN` (Private App, `crm.objects.deals.read`) to `oxford-command-center/.env` — PR #221 (frontend trigger) ready, blocked only on the credential. Once live, re-verify 2146 Enterprise Pkwy Twinsburg OH (currently untracked in projects.md/deal-decision-ledger.md) lands correctly in acq_candidates |
@@ -4217,3 +4218,43 @@ Independent review: `pr-review-toolkit:code-reviewer` pinned to `claude-fable-5`
 **Why `shared-checkout-guard.py` was not the fix:** the item as filed names that guard, but it is a PreToolUse hook on `Edit|Write|MultiEdit` and therefore never sees a Bash `git commit` at all - the branch check is structurally unreachable from it. `commit-provenance-guard.py` does run on Bash commits but reasons about WHICH FILES a commit sweeps up, not which branch receives them. Hence a new file rather than a change to either.
 **Known residuals (accepted, warn-only - this hook never blocks):** renamed memory files are invisible (`--diff-filter=M` drops `R`); a staged-stale/worktree-fixed inversion is not detected; `git add <narrow-path> && git commit` warns about memory files the commit will not include (deliberately re-accepted after the restriction attempt failed silent, and pinned by test `E-m11a`); a quoted whitespace-free `#`-leading pathspec filename loses its pathspec and over-warns. All fail toward noise or silence, never toward blocking.
 **Auto-check:** none.
+### OI-118
+**Status:** OPEN (logged; remedy is a judgement call, not obviously "just un-ignore it")
+**Opened:** 2026-08-11
+**Source:** `.gitignore:61` (`/scheduled-tasks/*/*`); surfaced while wiring `ora-health-guard` to the shared double-fire guard
+**Description:** The guard helpers in `scheduled-tasks/_shared/` (`block-sentinel.py`, `outlook-sent-probe.ps1`,
+`test-block-sentinel.py`, `README-DOUBLE-FIRE-GUARD.md`) live under the ignore pattern `/scheduled-tasks/*/*`
+and were force-added to `main` past it (PRs #39/#40, 2026-08-09). That combination is a trap on any branch
+that forks from before the force-add: there the file is **untracked AND ignored**, so
+(a) `git status` shows nothing no matter how much you edit it, and
+(b) git will **silently overwrite it** on `checkout` / `merge` / `rebase` toward `main` — no conflict, no
+warning, exit 0. On a merge git even reports it as `create mode 100644 <path>`, i.e. it presents a
+destructive overwrite as a file creation.
+
+**Verified by reproduction, not inferred** (four throwaway repos, 2026-08-11), holding the real
+`.gitignore` shape and force-added-on-main history constant:
+
+| File state | `checkout main` | `merge main` | `rebase main` |
+|---|---|---|---|
+| untracked **+ ignored**, tracked on main | silent overwrite, exit 0 | silent overwrite, exit 0 | silent overwrite |
+| untracked, **not** ignored (control) | `error: … would be overwritten` → Aborting, exit 1 | — | — |
+| tracked + local mods, main differs | `error: Your local changes …` → Aborting, exit 1 | Aborting, exit 1 | — |
+
+The control row is what establishes causation: identical setup minus the ignore rule and git refuses. The
+`.gitignore` is precisely what removes git's normal untracked-file safety net.
+
+**Live instance that prompted this:** the `~/.claude` checkout sat on `feat/model-canary-probe-step25`
+(27 commits behind `origin/main`). `outlook-sent-probe.ps1` carried 35 self-test cases on disk vs 22 on
+`origin/main` — 13 new cases that existed nowhere but the working tree, invisible to `git status`, one
+`git merge main` away from being erased. Landed instead via a worktree off `origin/main`, where the files
+are tracked and therefore protected.
+
+**Why the obvious fix may not be right:** un-ignoring `/scheduled-tasks/*/*` would start tracking every task
+folder's run residue (temp HTML bodies, `send-log.txt` at ~99KB and growing, `tmp/`), which is presumably why
+the pattern is broad in the first place. Options, none free: (a) add negation entries (`!/scheduled-tasks/_shared/*.py`
+etc.) so the shared helpers are never ignored — narrowest, but must be kept in step as helpers are added;
+(b) move the shared helpers out of `scheduled-tasks/` entirely (e.g. `maintenance/_shared/`), which breaks every
+absolute path in every wired SKILL.md; (c) leave as-is and rely on always working from a worktree off `main`.
+Gabriel's call.
+
+**Auto-check:** none yet. A cheap one: fail if any path matched by `.gitignore` is also tracked on `origin/main`.
