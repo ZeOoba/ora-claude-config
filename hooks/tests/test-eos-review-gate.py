@@ -250,6 +250,109 @@ def test_risk_file_without_review_blocks():
     print("PASS test_risk_file_without_review_blocks")
 
 
+def _record_line(err):
+    """The line of the block message that hands the operator the --record command."""
+    return next((l for l in err.splitlines() if "--record" in l and "--verdict" in l),
+                "")
+
+
+def _config_write_guard_verdict(command):
+    """Run config-write-guard.py over `command` and return 'BLOCKED' or 'allowed'.
+
+    CROSS-GUARD, deliberately: the defect being pinned is not inside this gate at
+    all, it is that this gate's remediation command is refused by the OTHER gate.
+    Only a real run of that guard can prove the printed command is usable. Isolated
+    via the guard's documented test seams, so it never reads the live tree.
+
+    NOT THE LOAD-BEARING ASSERTION, and it cannot be (independent review, 2026-08-12,
+    finding 82). Seaming ORA_CONFIG_GUARD_ROOT to a temp dir is what keeps this test
+    off the live tree, but it also means the guard classifies drive-qualified tokens
+    against THAT root -- so a regression back to an absolute LIVE hooks/ path would
+    still come back "allowed" here. The structural `":/" not in line` check in the
+    caller is what actually pins that; this run proves the shape end-to-end against a
+    real guard process. Do not delete the structural check as redundant with this.
+    The early return below is the same class: a checkout without the guard silently
+    skips the cross-check, which is acceptable only because the caller's own
+    assertions still run."""
+    guard = os.path.join(HERE, "config-write-guard.py")
+    if not os.path.isfile(guard):
+        return "allowed"  # guard absent from this checkout -- nothing to prove
+    env = dict(os.environ)
+    env["ORA_CONFIG_GUARD_ROOT"] = tempfile.mkdtemp(prefix="eos-rg-cwg-root-")
+    env["ORA_OVERRIDE_SESSIONS_DIR"] = tempfile.mkdtemp(prefix="eos-rg-cwg-sess-")
+    env["ORA_CHIP_CLAIMS_LOG"] = os.path.join(
+        tempfile.mkdtemp(prefix="eos-rg-cwg-log-"), "chip-claims.log")
+    proc = subprocess.run(
+        [sys.executable, guard], capture_output=True, text=True, env=env,
+        input=json.dumps({"session_id": "s" * 32, "tool_name": "Bash",
+                          "tool_input": {"command": command}}))
+    return "BLOCKED" if proc.returncode == 2 else "allowed"
+
+
+def test_record_hint_is_a_command_the_write_guard_permits():
+    # WHY (2026-08-12, hit live). This gate printed its --record command spelled with
+    # os.path.abspath(__file__) -- i.e. the LIVE C:/Users/Owner/.claude/hooks/ path.
+    # config-write-guard's matcher is "write indicator + governance-path marker
+    # anywhere in the command", and ">" matches inside an ASCII arrow, which review
+    # prose is full of ("199/204 -> 204/204"). So following this gate's own
+    # instructions verbatim was blocked by that guard, whose only named exit was
+    # minting a 60-min multi-use governance-WIDE token to satisfy one artifact
+    # write. Same class as the `--model ` -> "del " deadlock tool_call_paths.py
+    # word-anchored on 2026-08-03: a false positive that forces a strictly broader
+    # privilege. The repo-relative spelling carries no governance marker at all, so
+    # it is not gated -- and the tool resolves its artifact path absolutely, so the
+    # review still lands in the live hooks/sessions/ tree either way.
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "hooks/eos-review-gate.py", "# this repo carries its own copy\n")
+    write(repo, "hooks/new-guard.py", "x = 1\n")
+    git(repo, "add", "-A")
+    rc, out, err = run_hook('git commit -m "add guard"', repo, tmp)
+    assert_blocked(rc, err, "no review artifact")
+
+    line = _record_line(err)
+    assert line, "block message must still hand over a --record command: %r" % err
+    assert "hooks/eos-review-gate.py" in line, (
+        "record hint must still name the tool: %r" % line)
+    # Structural, not a spelling match: ANY drive-qualified path on this line puts a
+    # governance marker back into the command the operator is told to run.
+    assert ":/" not in line and ":\\" not in line, (
+        "record hint must not carry an absolute path when the repo has its own "
+        "copy: %r" % line)
+
+    # END-TO-END: the printed command, with the arrow that caused the live block,
+    # must actually clear config-write-guard.
+    armed = line.strip().replace("<what was reviewed and found>", "199/204 -> 204/204")
+    armed = armed.replace("<pinned-id>", LADDER_TOP)
+    verdict = _config_write_guard_verdict(armed)
+    assert verdict == "allowed", (
+        "the record command this gate prints is refused by config-write-guard: "
+        "%r -> %s" % (armed, verdict))
+
+    # And the operator is warned about the indicator, since the fallback spelling
+    # below (and any hand-typed absolute path) still carries it.
+    assert "arrow" in err, (
+        "block message must warn that an ASCII arrow in --notes reads as a "
+        "redirect: %r" % err)
+    print("PASS test_record_hint_is_a_command_the_write_guard_permits")
+
+
+def test_record_hint_falls_back_to_the_absolute_path_off_repo():
+    # A repo that does NOT carry its own copy of the gate (any non-~/.claude repo
+    # with financial-decision code) has no relative spelling to offer, so the
+    # absolute path is still correct there -- and the arrow warning is what keeps
+    # that form usable.
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "hooks/new-guard.py", "x = 1\n")
+    git(repo, "add", "-A")
+    rc, out, err = run_hook('git commit -m "add guard"', repo, tmp)
+    assert_blocked(rc, err, "no review artifact")
+    line = _record_line(err)
+    assert "eos-review-gate.py" in line and (":/" in line or ":\\" in line), (
+        "off-repo fallback must still print a runnable absolute path: %r" % line)
+    assert "arrow" in err, "the arrow warning must be present in the fallback too"
+    print("PASS test_record_hint_falls_back_to_the_absolute_path_off_repo")
+
+
 def test_valid_review_allows():
     repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
     write(repo, "hooks/new-guard.py", "x = 1\n")
