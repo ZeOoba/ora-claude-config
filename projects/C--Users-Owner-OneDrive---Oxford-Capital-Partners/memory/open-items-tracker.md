@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-08-12T22:01:17.966Z
+  modified: 2026-08-12T22:11:32.788Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -32,6 +32,8 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
+| [OI-136](#OI-136) | 2026-08-12 | `event_log.md` entries committed as `75ab0de`, cross-read against this session's own two declined overrides | **HIGH** `allow-hook-test-failure` normalised: **5 uses across 4 sessions inside 47 minutes** (16:32:04–17:19:23 local, 2026-08-12; `e89ddd24` twice). Every one cites the *same* cause — a load-induced `exit 124` TIMEOUT on `test-eos-review-gate.py` that passes in isolation — i.e. all 5 are [OI-057](#OI-057)/[OI-059](#OI-059), not 5 independent judgement calls. **No protocol was broken**: each token records explicit in-turn authorization, exactly as `rules.md` requires. That is the finding — the control worked as designed and was still worn down, because a gate that false-blocks makes overriding the *rational* move, and the reasons converge to a script ("timeout not assertion, passes standalone"). The security property `allow-hook-test-failure` protects is that a human weighs a **real** test failure; 5-for-5 on one known flake trains the reflex to approve without weighing, so the next genuine failure inherits that reflex. Mitigated indirectly by `c29ec95` (budget 90→240) but **not addressed**: nothing caps, counts, or alerts on override frequency, and nothing distinguishes "5th override this hour for the same flake" from "first override this month for a novel failure". Needs a rate/repeat signal, not a stricter gate |
+| [OI-057](#OI-057) | 2026-08-03 | Reopened 2026-08-12 by a recurrence of the original symptom; originally push of event_log.md commit `8b61f20`, 2026-08-03 | **REOPENED 2026-08-12** — symptom side of [OI-059](#OI-059). Closed 08-04 on a re-measurement at **56 dirty files** (76.6s, 55/55); that is real load but not the load that matters, and this item's own closing instruction ("only a push under comparable multi-session load tests it") was not met. At **26 sessions / 117 dirty files / 16 cores at 100% / 53 python processes** the symptom returned in its original form: a real push hard-blocked when `test-eos-review-gate.py` AND `test-memory-orphan-link-guard.py` each blew the 90s budget *and* the 180s retry, then both passed in isolation on the same loaded box (55/55 in 140s; 79/79 in 105s). Spawn-cutting (option (a), done in `6dc5df3`) was the right cause-directed target and still proved insufficient — the dominant term is per-spawn cost under contention (**348ms→1390ms** vs ~30-50ms idle), not spawn count. Note this item rejected "(b) a larger budget" on the grounds of a **per-file roster that would rot**; that objection stands but does not cover raising the *global* `PER_TEST_TIMEOUT_SECONDS`, which is what `c29ec95` did (90→240, ceiling 180s→480s). Mitigation, not fix: the symptom recurs whenever load outruns whatever budget is set. Closes only when gate pass/fail is decoupled from machine load. **Do not re-close on a quiet-machine push** |
 | [OI-059](#OI-059) | 2026-08-03 | Reopened 2026-08-12 from a false pre-push block; originally [open-items-tracker.md#OI-057](open-items-tracker.md#OI-057) root-cause pass, 2026-08-03 | **REOPENED 2026-08-12** (closed 08-04 on `6dc5df3`, spawns 559→199 / 272→147). That closure was validated at ~56 dirty files and a few live sessions and **did not survive 26-session concurrency**: `test-eos-review-gate.py` and `test-memory-orphan-link-guard.py` each blew the 90s budget AND the 180s retry and hard-blocked a real push, then both passed in isolation on the same loaded box (55/55 in 140s; 79/79 in 105s). Root cause is process-creation cost under contention — bare `python -c pass` measured **348ms then 1390ms** minutes apart vs ~30-50ms idle, on 16 cores at 100% with 53 python processes — which no in-test optimisation controls, and further spawn cuts would mean cutting hook invocations that this item and [OI-061](#OI-061) both forbid. **Mitigated, not fixed, in `c29ec95`** (`PER_TEST_TIMEOUT_SECONDS` 90→240, ceiling 180s→480s, plus 3 stale docstring claims corrected). Stays open because gate reliability is still coupled to machine load; the real fix bounds the load or decouples pass/fail from wall-clock. **Do not re-close on a quiet-machine push** — that is what produced the premature 08-04 close. Mirror item [OI-057](#OI-057) recurred identically and should be reopened with it |
 | [OI-133](#OI-133) | 2026-08-12 | `ora-pm-ledger-retime-efficacy-check` 2026-08-12 run (itself an early fire); CC/MCP registry `recordedSkips` + `_shared/send-log.txt` + `ora-pm-ledger/state/` | **MEDIUM** `ora-pm-ledger` missed **12 of 21 days (57%)** pre-retime, and Blocks A/C have **no retro-sweep** — every miss loses that day's digest and ledger permanently. The 2026-08-12 retime (18:00→15:00 ET) was applied on the theory that the slot was the binding constraint; the evidence says it probably is not. `recordedSkips` shows **107 suppressed dispatches on this task alone — 71 `per_task_limit`, 36 `global_limit`** (fleet-wide 1,863). **Do NOT re-litigate the `global_limit`/catch-up-burst class** — [[reference_fleet_throttle_skip_catchup_burst]] already rules it expected behavior with no code fix. Three things are genuinely open: (a) `per_task_limit` is the **majority** here (71 of 107), where that file documents it as the rare "lone task, no neighbours" pattern explicitly worth fresh investigation; (b) **2026-08-10 is a ran-but-did-not-send day** — snapshot artifacts written 12:44, no email, so execution reached the work and failed at *delivery*, a mode neither the throttle file nor Block B's retro-sweep covers; (c) whether A/C need a delivery-confirmation beacon. Slot half is already instrumented — efficacy check re-armed for 2026-08-20 16:30 ET; do not duplicate it |
 | [OI-132](#OI-132) | 2026-08-12 | `~/.claude/scheduled-tasks/ora-sofr-direct-prefetch/SKILL.md` STEP 4 — observed live during that task's own 2026-08-12 run | **LOW** STEP 4 verifies seconds after its own STEP 3c write, but `ora-am-brief` supersedes ~6 minutes later — so the "superseded by am-brief = PASS" branch that v1.1 added *specifically* for the catch-up-burst ordering hazard is effectively **unreachable**, and the run log records "my write landed, no supersede" as settled fact while a supersede is still pending. Measured 2026-08-12: prefetch dispatched `15:13:20.983Z`, am-brief `15:13:21.612Z` (629 ms apart); prefetch verified at `15:14:11Z` and logged no supersede; am-brief rewrote §2 at `15:20:26Z`. **No data harm that run** — am-brief independently pulled the NY Fed API and matched all five SOFR fields exactly. Cost is a false run-log claim plus silent undercounting of how often the burst inverts producer order. Cheap fix available: STEP 2 already computes `am_brief_pending`, so condition STEP 4's wording on it rather than adding a wait |
@@ -1764,9 +1766,10 @@ distinguish "fixed" from "did not recur."
 **Auto-check:** none.
 
 ### OI-057
-**Status:** CLOSED
+**Status:** REOPENED 2026-08-12 (was CLOSED 2026-08-04) — see "REOPENED" block at the end of this item
 **Opened:** 2026-08-03
 **Closed:** 2026-08-04
+**Reopened:** 2026-08-12
 **Evidence (status-line reconciliation 2026-08-05):** this detail section's `Status:` was left at OPEN
 when the item was closed — the Closed-table row was moved and dated correctly, but the flip never
 happened here, so the two contradicted each other. Reconciled in favour of the row: `6dc5df3`
@@ -1835,6 +1838,31 @@ under real concurrent load it can exceed even 180s. Two candidate fixes - (a) cu
 rejects as a per-file roster that would rot. (a) is the better target. **Do not close this on quiet-machine
 pushes**; only a push under comparable multi-session load tests it.
 **Auto-check:** none.
+
+**REOPENED 2026-08-12 — the symptom recurred, exactly as this item predicted.**
+Closed 2026-08-04 alongside its cause [OI-059](#OI-059) on `6dc5df3`. The closing evidence was a re-measurement
+at **56 dirty files** — real load, but not the load that matters. On 2026-08-12, at **26 concurrent sessions /
+117 dirty files / 16 cores pinned at 100% / 53 simultaneous python processes**, the symptom returned in its
+original form: a real push hard-blocked when `test-eos-review-gate.py` AND
+`test-memory-orphan-link-guard.py` each exceeded the 90s budget *and* the 180s retry. Both then passed when
+rerun in isolation on the same still-loaded box — 55/55 in 140s, 79/79 in 105s. This item's own closing
+instruction ("only a push under comparable multi-session load tests it") was the correct standard and was not
+met by the 08-04 close.
+**Warning this item got right, and the one it got wrong.** Right: option (a), cutting spawns, was indeed the
+better *cause*-directed target — and it was done (559→199, 272→147) and still proved insufficient, because the
+dominant term turned out to be per-spawn cost under contention, not spawn count. Bare `python -c pass`
+measured **348ms then 1390ms** minutes apart against ~30-50ms idle; at that multiplier no achievable spawn
+count saves the file. Wrong, or at least too narrow: the text rejects "(b) a larger budget" by citing the
+docstring's objection to **a per-file known-slow roster that would rot**. That objection is sound and still
+stands — but it does not apply to raising the *global* `PER_TEST_TIMEOUT_SECONDS`, which adds no per-file
+roster and cannot rot. `c29ec95` took exactly that route: 90 → 240 global (ceiling 180s → 480s). Do not read
+this item as having pre-rejected that fix; it rejected a different one.
+**Why it stays open:** the budget raise is a mitigation. This item is the *symptom* — pre-push gate timeouts —
+and the symptom recurs whenever load outruns whatever budget is set. It closes only when gate pass/fail stops
+being coupled to machine load (bound the concurrency, or run the suite under a concurrency cap), not when a
+push happens to pass. **The 08-04 close is the cautionary precedent: it was validated on a quieter machine
+than the one that breaks it.**
+**Mirror item:** [OI-059](#OI-059), the cause side, reopened the same day on the same evidence.
 
 ### OI-059
 **Status:** REOPENED 2026-08-12 (was CLOSED 2026-08-04) — see "REOPENED" block at the end of this item
@@ -3153,7 +3181,6 @@ exceeds ~10, or when the two branches' `event_log.md` newest-entry dates differ 
 | [OI-045](#OI-045) | 2026-07-31 | 2026-08-04 | ora-appsec-sweep 2026-07-31; fixed `ora-pm` commit `03487cd` + merge `a29f8f0` | MFA enroll->verify UI flow fixed earlier; this closure covers the AAL2 (step-up) enforcement REFUTE found was client-side-only. 3 REFUTE passes: pass 1 built `requireAal2` (real server-side Supabase call, fails closed) and wired it to `PATCH /api/portal/autopay`; pass 2 found `POST /api/stripe/setup-intent` (attaches a bank account) and `POST /api/stripe/payment-intent` (confirms/charges immediately — moves real money) both still ungated, independent of `/autopay`; pass 3 swept the rest of `server/routes/` and confirmed complete. Escalated MEDIUM->CRITICAL mid-fix. End-to-end integration tests assert the underlying Stripe call is never reached when blocked. One low-severity follow-up filed as [OI-077](#OI-077) |
 | [OI-063](#OI-063) | 2026-08-03 | 2026-08-04 | ora-pm appsec fix plan Task 9, commit `afef524`; fixed `ora-pm` commit `7857646` + merge `a29f8f0` | The 5 self-flagged files (properties/expenses/payments/portal-auth/portal-insurance) were confirmed STILL leaking raw errors after a later commit's title claimed "dbError sweep" (verified via `git diff`, not trusted from the message). All 9 sites now route through `dbError()`; single-record 404 lookups keep a plain generic 404 (dbError always 500s), mirroring `tenants.ts`'s precedent. Tripwire allowlist fully closed |
 | [OI-069](#OI-069) | 2026-08-03 | 2026-08-04 | REFUTE pass on the OI-046 fix, 2026-08-03; fixed `ora-pm` commit `f0b6780` + merge `a29f8f0` | CAM recalculation could silently reopen and under-bill an already-billed reconciliation. A commit titled "OI-046 gap closure" was confirmed (via empty `git diff` on `cam.ts`) to be unrelated. 2 REFUTE passes: pass 1 found a check-then-act pre-check version still raced against a concurrent approve (real TOCTOU); fixed via making the write itself atomically conditional (`status='draft'` guard). Pass 2 found the guard was a deny-list against `'billed'` that would've silently reopened a `'collected'` row too (3rd legal status, currently unreachable but latent) — fixed to an allow-list |
-| [OI-057](#OI-057) | 2026-08-03 | 2026-08-04 | Push of event_log.md commit `8b61f20`, 2026-08-03; fixed by `6dc5df3` (OI-061) | The pre-push timeout is resolved. Direct re-measurement of `hooks/tests/test-eos-review-gate.py` under real concurrent multi-session load (56 dirty files in the checkout at test time, not idle): **76.6s, PASS 55/55** — comfortably under both the 90s per-file budget and the 180s hard timeout that produced OI-057's 3 identical failures. Also corroborated by 2 consecutive real pre-push gates completing clean (61/61, then 63/63, 0 fail) after `6dc5df3` landed. Root cause was OI-059 (excessive fixture-driven subprocess spawns), not the originally-suspected live model call inside the hook — that theory is retired |
 | [OI-034](#OI-034) | 2026-07-31 | 2026-08-03 | ora-appsec-sweep 2026-07-31; fixed `ora-pm` commit `3e600e4` | Autopay double-debit-on-re-run + arrears-sweep gap both closed — deterministic Stripe idempotencyKey + DB-unique autopay_period guard, plus a REFUTE-caught follow-up fix scoping the debit cap to the current period (not lifetime AR balance). TDD, 244/244 green, typecheck clean |
 | [OI-036](#OI-036) | 2026-07-31 | 2026-08-03 | ora-appsec-sweep 2026-07-31; fixed `ora-pm` commit `18d8f6d` | Bare @oxfordra.net domain-suffix admin check replaced with an exact-match ADMIN_EMAILS allowlist, fail-closed 503 when unset; live tenant-exclusion check blocks a tenant with an admin-domain email from becoming admin; shouldCreateUser:false stops self-provisioning. REFUTE pass: no bypass found. Needs ADMIN_EMAILS actually set in prod or the whole admin API 503s. 266/266 green |
 | [OI-043](#OI-043) | 2026-07-31 | 2026-08-03 | ora-appsec-sweep 2026-07-31; fixed `ora-pm` commit `df196ee` | Autopay payment-method ownership now verified against the tenant's own Stripe customer + bank-account type, before ever persisting. REFUTE pass: no bypass found; added one regression test for an already-correct orphaned-PM edge case. Note OI-068: the flow this protects is currently unreachable from any live frontend, so practical exposure is near zero — still correct defense in depth |
@@ -5119,6 +5146,55 @@ detail section — ~22 h, so its own `[OI-121](#OI-121)` self-link resolves to n
 **Auto-check:** this item IS the auto-check's design. Whichever option is chosen, the acceptance test is: with a
 deliberately half-filed item in the tracker, an unrelated `git push` must succeed.
 
+### OI-134
+**Status:** QUEUED — approved by Gabriel in-turn 2026-08-12, **no work started**
+**Opened:** 2026-08-12 (approved 2026-08-12 but unfiled here until now: the `open-items-tracker` claim slug was
+held by another session, and `claim_work.py` refuses rather than clobbering)
+**Source:** Gabriel's in-turn approval of option (c), alongside (a) the sweep remediation
+([PR #271](https://github.com/ZeOoba/oxford-command-center/pull/271)). Full design and evidence:
+[[deal-join-id-based-redesign-queued]]
+**Severity:** structural, confidentiality-adjacent (Hard Invariant 3). The acute defects were remediated by
+PR #271 — this is the primitive change that stops the class from regenerating.
+
+**What to build.** Give every deal a **stable id shared by both sides** of the seed↔Notion join and retire name
+normalization from the join path entirely. Candidate shape: a `Deal ID` property on the Notion Acquisition
+Pipeline Tracker, mirrored as the `id` in `src/data/seed-deals.ts`, so `mergeDeals` joins on an opaque key that
+no rename, locality suffix, alias, or punctuation variant can perturb.
+
+**Why — evidence, not preference.** `dealJoinKey` (`server/sources/deal-name.ts`) strips a `" — City, ST"`
+locality tail, then lowercases and collapses punctuation. Notion's suffix exists *precisely because* bare street
+names repeat across metros, so the key deletes the only disambiguator. Confidentiality rides on this join: a
+wrong merge folds an unmatched (fail-closed confidential) row into a public seed record.
+
+Four adversarial passes over 2026-08-11/12 produced **9 + 7 + 5 + 6** defects, with the join subsystem
+generating the worst:
+
+| Defect | Detail |
+|---|---|
+| CRITICAL cross-side wrong merge | 2 lenses, executed repros — one deal's economics published under another's identity and public confidential flag |
+| Alias bypass | an alias path skipped the corroboration guard entirely |
+| Corroboration inert | **11 of 20 live rows** (10 map to `Other`, 1 null) — `MARKET_MAP` covers 6 metros, the pipeline spans ~10 |
+| Degenerate `acceptedPairKey` | colliding names share one key, so a single acceptance grandfathers all future collisions |
+| Duplicate seed join keys | one live row merged and "refused" simultaneously |
+
+Every fix bolted on *another* corroboration signal — mapped market, then the locality tail, then literal
+equality. That is the signature of a wrong primitive. Three defects shared one shape: a guard stated over a
+**mechanism** rather than the **invariant**, which keeps recurring because "same deal" has no ground truth in a name.
+
+**How to apply.**
+- Read PR #271's commit bodies first — they record what each guard defends and why, so the redesign preserves
+  the invariants instead of rediscovering them.
+- Migration must be **fail-closed**: an unmatched row keeps defaulting confidential (Hard Invariant 3), and a
+  missing or duplicate id must **refuse** rather than fall back to name matching — otherwise the old class
+  returns through the back door.
+- Retiring name joining should also retire `NOTION_DEALS_NAME_ALIASES`, `NOTION_DEALS_ACCEPTED_NEAR_DUPES`, and
+  `findNearDuplicateNames`' gate-blocking role — check each for other callers before removing.
+- **Cheap interim win, independent of the redesign:** extend `MARKET_MAP` past its 6 entries to the metros
+  actually in use, shrinking the uncorroborable zone from ~55% to near zero. Needs the live Notion select values.
+
+**Related:** [OI-122](#OI-122) — filed the same day, blocked from filing by the same claim-contention mechanism;
+both are cases where a guard keyed on a proxy rather than on the thing it meant to protect.
+
 ### OI-122
 **Status:** FIX IN REVIEW — [PR #67](https://github.com/ZeOoba/ora-claude-config/pull/67) (branch
 `oi122-gate-msg`, commit `21d0de2`, 2 files / 240 insertions, based on `origin/main`). Message-only; the
@@ -5136,8 +5212,10 @@ commit does not land — typically one another session has staged in the shared 
 **⚠ The original diagnosis was WRONG and is withdrawn.** This item was first reported as "the gate ignores the
 pathspec at runtime and keys on the whole shared index." That is not what happens. `scope_for_cmd()`
 (`hooks/eos-review-gate.py:443`) *does* compute correct pathspec scoping, and `main()` uses it. The reservation
-note still sitting in the allocation ledger under this id repeats the retracted theory — **do not** re-derive
-from it.
+note in the allocation ledger under this id **has since been corrected too** (2026-08-12, by the reserving
+session, id/timestamp/session unchanged): it now retracts both earlier theories and points here. An earlier
+revision of this row warned that the ledger still repeated the retracted theory — that warning is itself stale
+and is withdrawn.
 
 **Actual root cause (CORRECTED 2026-08-12 — a second, narrower revision; see the Fix direction block below).**
 `tokenize_cmd_segments()` in `hooks/lib/git_commit_parse.py` (~line 314) tokenizes the command **line by line**
@@ -5468,3 +5546,59 @@ Read/Grep tools, or via a script that derives the path from `%APPDATA%` at runti
 **Related:** [[reference_fleet_throttle_skip_catchup_burst]] (mechanism, already closed),
 [[reference_one_time_task_fired_days_early]] (the early fire that surfaced this),
 [[reference_scheduler_lastrunat_stamped_at_dispatch]] (why `lastRunAt` is not execution evidence).
+
+### OI-136
+**Status:** OPEN
+**Opened:** 2026-08-12
+**Severity:** HIGH
+**Source:** `event_log.md` entries committed as `75ab0de` ("record 5 pre-push hook-test-failure overrides"),
+cross-read against this session's own two *declined* overrides for the identical failure.
+**Description:** `allow-hook-test-failure` has been normalised. On 2026-08-12 it was used **5 times across 4
+distinct sessions inside a 47-minute window**:
+
+| # | Session | Time (local) | Reason recorded in the token |
+|---|---------|--------------|------------------------------|
+| 1 | `d37e22c1` | 16:32:04 | sole failure is test-eos-review-gate.py exit 124 TIMEOUT, passes standalone |
+| 2 | `b0e10e03` | 16:38:29 | both failures exit 124 TIMEOUT, never an assertion; passes in isolation |
+| 3 | `e0f8485e` | 16:38:47 | load-induced timeout, not a defect; 55/55 in 145.9s outside the gate |
+| 4 | `e89ddd24` | 17:03:00 | converging load flake across two retries (3 fail → 1 fail) |
+| 5 | `e89ddd24` | 17:19:23 | same, second use by the same session |
+
+**The finding is NOT a protocol violation.** Every token carries an explicit in-turn authorization, exactly as
+`rules.md` requires; no session self-minted one. The control behaved as designed and was worn down anyway.
+Three properties make that happen:
+- **One cause, five approvals.** All 5 cite the same underlying failure — the load-induced pre-push timeout now
+  reopened as [OI-057](#OI-057)/[OI-059](#OI-059). These were not 5 independent risk judgements; they were the
+  same judgement re-approved 5 times because the gate kept re-asking.
+- **The reasons converge to a script.** "Timeout not assertion / passes standalone / load flake" appears in all
+  five. Once a justification is that reusable, the approval stops being a weighing and becomes a formality.
+- **A false-blocking gate makes overriding rational.** When the gate is wrong, the operator who overrides is
+  *correct* every time. That is precisely the training signal you do not want attached to a security control.
+
+**Why this matters beyond the flake.** The property `allow-hook-test-failure` exists to protect is that a human
+weighs a **real** test failure before it ships. Five-for-five on a known-benign flake trains the reflex to
+approve on sight, and the next genuine failure — a real assertion, in `hooks/**`, in override or exit-code
+logic — inherits that reflex. The gate's own docstring already warns that "an override normalised is a gate
+disabled"; this item is the evidence that it happened.
+
+**Not fixed by `c29ec95`.** Raising `PER_TEST_TIMEOUT_SECONDS` 90→240 removes *today's* trigger, which should
+stop the bleeding. It does nothing about the mechanism: **nothing counts, rate-limits, or alerts on override
+frequency**, and nothing distinguishes "5th override this hour for the same known flake" from "first override
+this month for a novel failure". The `event_log` record is written *after the fact* and per-session, so no
+session can see that three others already overrode the same failure in the last six minutes — sessions 2 and 3
+were 18 seconds apart and each believed it was making a one-off call.
+
+**Candidate fixes (not yet chosen):**
+- A repeat-detector: hash the failing test-file set, and when the same signature is overridden N times in a
+  rolling window, escalate the prompt — surface the prior approvals and their reasons rather than blocking.
+- A visible counter in the gate's block message ("this failure has been overridden 4 times today by 3
+  sessions"), so the approver weighs the pattern, not just the instance.
+- Distinguish `exit 124 TIMEOUT` from assertion failures in the override *tier*, so a timeout override is
+  cheap/logged and an assertion override stays expensive. Note this is a narrower change than removing the
+  block, and does not reintroduce the per-file known-slow roster that OI-057 rightly rejects.
+**Do NOT "fix" this by making the override harder to obtain** while the underlying gate still false-blocks —
+that just converts a normalised override into a blocked engineer, and the 5 approvals above were each, on their
+own merits, the right call.
+**Auto-check:** none. Detection today is manual: grep `event_log.md` for "allow-hook-test-failure".
+**Related:** [OI-057](#OI-057) and [OI-059](#OI-059) (the defect generating the overrides — both reopened
+2026-08-12), `hooks/git-prepush-hook-tests-gate.py` (gate + the "override normalised is a gate disabled" note).
