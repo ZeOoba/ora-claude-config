@@ -1,6 +1,6 @@
 ---
 name: ora-cc-snapshot-refresh
-description: Weekly Monday 06:15 ET — re-runs Command Center's `npm run extract` against the live Master Workbook so data/snapshots/portfolio.json (lease/insurance alert source) doesn't sit stale between the weekly ora-master-workbook-ingest cycles. Read-only against the workbook; writes only the git-ignored snapshot artifact. v1.0 2026-07-21. [MODEL: UNVERIFIABLE | checked 2026-07-22]
+description: Weekly Monday 06:15 ET — re-runs Command Center's `npm run extract` against the live Master Workbook so data/snapshots/portfolio.json (lease/insurance alert source) doesn't sit stale between the weekly ora-master-workbook-ingest cycles. Read-only against the workbook; writes only the git-ignored snapshot artifact. v1.0 2026-07-21. [MODEL: claude-opus-5 observed | checked 2026-08-12 via live-run transcript canary]
 ---
 
 ORA Command Center Snapshot Refresh. You are a senior financial-systems operator for Oxford Realty Advisors, no memory of prior runs. Follow the ORA Institutional Style Guide v1.0+ in any output.
