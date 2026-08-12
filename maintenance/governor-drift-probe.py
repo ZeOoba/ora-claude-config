@@ -362,6 +362,59 @@ GOV_KEYWORDS = ("governor", "hard filter", "hard screen", "hard acquisition",
                 # "aggregate/per-property/refi-sizing ceiling", never "hard cap"/"hard ceiling".
                 "hard cap", "hard ceiling")
 
+# INTERVENING-QUALIFIER gate gap (2026-08-11). Every metric-paired entry above is a CONTIGUOUS
+# literal ("dscr floor", "ltv ceiling", "min dscr"), so a single qualifier between the metric and
+# its floor/ceiling word defeated is_gov and skipped the ENTIRE equality branch: "DSCR hard floor
+# 1.40x" scanned clean. That is not a hypothetical wording -- it is verbatim how the 2026-08-11
+# Notion Acquisition Pipeline Tracker defect was written ("hard floor 1.75"), so the false negative
+# sat squarely on the most probable real-world drift phrasing.
+#
+# Fixed by PAIRING the metric token with its bound-word across a short gap, NOT by adding "hard
+# floor"/"hard ceiling" as standalone keywords. That distinction is the precision guarantee: "hard
+# floor" is also a building term ("Suite B has a hard floor"), and a bare token would arm unrelated
+# property prose on a Hard-Invariant-4 guard. Requiring the metric token means only a line that
+# actually names DSCR/LTV near a bound-word is armed.
+#
+# Bounded deliberately: the gap class excludes CLAUSE ENDERS (. ; ! ?) and line breaks, so the gate
+# cannot reach across a sentence or clause into an unrelated metric: "DSCR is disclosed quarterly.
+# The rent floor is 1.40 psf." and "DSCR fine; rent floor is 1.40 psf." both stay unarmed. Excluding
+# '.' alone was NOT enough -- ';' '!' '?' each let the gap cross into a rent/area figure that
+# RE_DSCR_THRESH (40-char reach) then captured as a DSCR threshold. Caught in independent review;
+# the four clause boundaries are pinned by test_qualifier_gate_requires_the_metric_token_unit.
+# Arming a line is NOT a finding -- every equality check, veto and suppressor downstream still
+# applies unchanged; this only decides whether the line is looked at at all.
+#
+# KNOWN GAP 1 -- metric-VALUE-boundword order ("DSCR 1.40x minimum") does NOT arm, because the
+# value's own decimal point is a '.' and the gap class excludes it. The extractor for that shape
+# already exists (RE_DSCR_DECL_REV, 2026-07-08) and is unreachable on a line whose only governor
+# signal is this phrasing. Pre-existing (the old contiguous keywords missed it too), NOT a
+# regression of this change, but disclosed here because it sits inside the class this fix
+# advertises closing. Pinned by test_known_gap_value_between_metric_and_boundword_unit.
+# The obvious fix -- allow a dot only between digits, (?<=[0-9])\.(?=[0-9]) -- was implemented and
+# REJECTED on measurement: it makes "DSCR of 1.42 with a 10 min cure period" flag 1.42 as a drifted
+# governor, turning a cure period into a Hard-Invariant-4 finding. Closing this needs the EXTRACTOR
+# side tightened first, not a wider gate.
+#
+# KNOWN GAP 2 -- DSCR ONLY; there is no LTV analog. It was implemented, tested and REVERTED because
+# it armed prose describing the RATIFIED per-property 65% refi ceiling, e.g.
+# oxford-command-center/server/warehouse/debt-maturity.DESIGN.md:18 ("Per-property LTV vs the 65%
+# refi ceiling"), which then flagged 65 != canonical 40. It escapes both existing suppressors:
+# _refi_qualified's REFI_FRAME has no "refi ceiling" token, and the per-property pairing suppressor
+# is companion-anchored on a canonical 40 that line does not carry. Closing it requires widening LTV
+# SUPPRESSION -- a false-negative risk on Hard Invariant 4 that belongs in its own reviewed change.
+# ATTRIBUTION (corrected in review): do NOT start at this gate. A line like "LTV hard ceiling 75%"
+# is ALREADY armed today ("hard ceiling" is a GOV_KEYWORDS token, N6 2026-07-12) and still yields
+# nothing -- the binding constraint is the LTV EXTRACTORS (RE_LTV_ANCHOR needs a contiguous "ltv
+# ceiling"; RE_LTV_NEAR's window is shorter than " hard ceiling "), not is_gov.
+RE_GOV_DSCR_BOUND = re.compile(r"\bdscr\b[^.;!?\n]{0,24}?\b(?:floor|minimum|min)\b", re.I)
+
+
+def _is_gov_line(low):
+    """True when the line carries a governor-DECLARATION signal: a GOV_KEYWORDS token, or the DSCR
+    metric token paired with its bound-word across a short intra-sentence gap."""
+    return (any(k in low for k in GOV_KEYWORDS)
+            or RE_GOV_DSCR_BOUND.search(low) is not None)
+
 # --- Portfolio-level DSCR qualifier (2026-07-08) --------------------------------------------
 # Gabriel-ratified doctrine (2026-07-08): "DSCR of 1.25 for each property and 1.75 for the entire
 # portfolio." So DSCR 1.25x is the PER-DEAL / per-property acquisition governor (canonical, I3),
@@ -669,7 +722,7 @@ def scan_line(raw):
     # correction notes above, so only the quoted sentinel token is skipped, never the branch.
     sentinel_prose_spans = [mm.span() for mm in RE_SENTINEL_PROSE.finditer(low)]
     ltv_corr_spans = [mm.span() for mm in RE_LTV_CORRECTION.finditer(low)]
-    is_gov = any(k in low for k in GOV_KEYWORDS)
+    is_gov = _is_gov_line(low)
     # refi-sizing construct MEMBER-VALUE spans (2026-07-11): member-scoped suppression for the
     # DSCR-candidate loop and the LTV proximity fallback ONLY -- the comparator (RE_LTV_CMP), anchor
     # (RE_LTV_ANCHOR), FROMTO and reverse-order passes stay fully armed as the backstop for any
