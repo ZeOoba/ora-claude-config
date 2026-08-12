@@ -229,7 +229,20 @@ RE_DSCR_PIVOT_DECOY = re.compile(
 # Taking only the FIRST percent is the FP guard: if the ceiling is canonical 40%, any later
 # percent ("max LTV 40% and 25% basis discount", "ceiling 40% with 8% yield") is a DIFFERENT
 # metric and is left alone -- this holds even when a connective (not a list delimiter) joins them.
-RE_LTV_ANCHOR = re.compile(r"ltv\s*(?:ceiling|maximum|max)|(?:ceiling|maximum|max)\s*ltv", re.I)
+# GAP 2 CLOSED 2026-08-12: the first alternative required CONTIGUOUS "ltv ceiling" (\s* only), so a
+# qualifier defeated it exactly as the contiguous GOV_KEYWORDS literals defeated is_gov -- "LTV hard
+# ceiling 75%" was ARMED ("hard ceiling" is a GOV_KEYWORDS token, N6) yet extracted nothing. The
+# 2026-08-11 revision misattributed this to the arming gate; independent review corrected it to the
+# extractor, and the middle alternative closes it here.
+# Bounded like the DSCR gate (clause enders, non-greedy) and deliberately NARROWER: bare "max" is
+# NOT allowed across a gap, only contiguously. "maximum" spelled in full is a rare non-LTV
+# collocation, but a gapped bare "max" would reach unrelated percents ("ltv ... vacancy 15% max").
+# Safe against the ratified 65% per-property refi-ceiling false positive that forced the earlier
+# revert, because that line is excluded by ARMING, not by extraction -- pinned by
+# test_ratified_perproperty_refi_ceiling_prose_stays_clean_unit.
+RE_LTV_ANCHOR = re.compile(r"ltv\s*(?:ceiling|maximum|max)"
+                           r"|ltv[^.;!?\n]{0,16}?(?:ceiling|maximum)\b"
+                           r"|(?:ceiling|maximum|max)\s*ltv", re.I)
 # LTV ceiling, REVERSE WORD ORDER (2026-07-08): the NUMBER-then-keyword form "65% ceiling" /
 # "65% maximum" on a governor line that carries NO literal "ltv" -- the LTV analog of the reverse
 # DSCR gap above. "This 65% ceiling is the acquisition governor" never enters the ltv-gated LTV
@@ -384,16 +397,30 @@ GOV_KEYWORDS = ("governor", "hard filter", "hard screen", "hard acquisition",
 # Arming a line is NOT a finding -- every equality check, veto and suppressor downstream still
 # applies unchanged; this only decides whether the line is looked at at all.
 #
-# KNOWN GAP 1 -- metric-VALUE-boundword order ("DSCR 1.40x minimum") does NOT arm, because the
-# value's own decimal point is a '.' and the gap class excludes it. The extractor for that shape
-# already exists (RE_DSCR_DECL_REV, 2026-07-08) and is unreachable on a line whose only governor
-# signal is this phrasing. Pre-existing (the old contiguous keywords missed it too), NOT a
-# regression of this change, but disclosed here because it sits inside the class this fix
-# advertises closing. Pinned by test_known_gap_value_between_metric_and_boundword_unit.
-# The obvious fix -- allow a dot only between digits, (?<=[0-9])\.(?=[0-9]) -- was implemented and
-# REJECTED on measurement: it makes "DSCR of 1.42 with a 10 min cure period" flag 1.42 as a drifted
-# governor, turning a cure period into a Hard-Invariant-4 finding. Closing this needs the EXTRACTOR
-# side tightened first, not a wider gate.
+# DO NOT extend the exclusion set past clause enders. ',' ':' '--' '|' and parentheses deliberately
+# still cross the gap: "DSCR, hard floor, 1.40x" and the house "DSCR -- hard floor 1.40x" style are
+# plausible governor DECLARATIONS, so blacklisting those separators would convert a visible false
+# positive into a silent false negative -- the wrong side of this guard's bias. A markdown table row
+# ("| DSCR | floor | 1.40x |") arming is a TRUE positive, not collateral damage. Recommended
+# explicitly in independent review 2026-08-12; a future "hardening" pass should not undo it.
+#
+# GAP 1 -- CLOSED 2026-08-12 (was a known gap for one day). The metric-VALUE-boundword order
+# ("DSCR 1.40x minimum") did not arm, because the value's own decimal is a '.' and the gap class
+# above excludes it -- so the extractor for that shape (RE_DSCR_DECL_REV, 2026-07-08) was
+# unreachable on any line whose only governor signal was this phrasing.
+#
+# Closed by ADDING a second, value-abutting pattern rather than loosening the first. The decimal
+# lives INSIDE the pattern, so it can never be mistaken for a sentence boundary, and bare "min" is
+# accepted ONLY after an explicit x/× -- because "min" is a duration unit at least as often as it is
+# "minimum". That distinction is the whole fix: the simpler alternative (allow a dot between digits
+# anywhere in the gap) was implemented and REJECTED on measurement, since it reports "DSCR of 1.42
+# with a 10 min cure period" as governor drift. Duration prose is pinned clean by
+# test_value_abutting_arming_does_not_flag_durations_unit.
+#
+# Note on why this is safe to arm at all: the probe SKIPS its own source file and every test file
+# (main(): self_path / skip_names / _is_test_file), so the example strings quoted in these comments
+# and in the test suite are never scanned in a real run. An earlier review believed this gap needed
+# new self-file exemption machinery before it could close; that machinery already existed.
 #
 # KNOWN GAP 2 -- DSCR ONLY; there is no LTV analog. It was implemented, tested and REVERTED because
 # it armed prose describing the RATIFIED per-property 65% refi ceiling, e.g.
@@ -407,13 +434,20 @@ GOV_KEYWORDS = ("governor", "hard filter", "hard screen", "hard acquisition",
 # nothing -- the binding constraint is the LTV EXTRACTORS (RE_LTV_ANCHOR needs a contiguous "ltv
 # ceiling"; RE_LTV_NEAR's window is shorter than " hard ceiling "), not is_gov.
 RE_GOV_DSCR_BOUND = re.compile(r"\bdscr\b[^.;!?\n]{0,24}?\b(?:floor|minimum|min)\b", re.I)
+# Value-abutting order: dscr ... <value> [x] <bound-word>. Bare "min" REQUIRES the x/× (duration
+# guard, see GAP 1 above); "floor"/"minimum" spell themselves out and do not.
+RE_GOV_DSCR_VALUE_BOUND = re.compile(
+    r"\bdscr\b[^.;!?\n]{0,24}?[0-9]+\.[0-9]+\s*(?:[x×]\s*(?:floor|minimum|min)|floor|minimum)\b",
+    re.I)
 
 
 def _is_gov_line(low):
     """True when the line carries a governor-DECLARATION signal: a GOV_KEYWORDS token, or the DSCR
-    metric token paired with its bound-word across a short intra-sentence gap."""
+    metric token paired with its bound-word -- either across a short intra-sentence gap
+    ("DSCR hard floor 1.40x") or with the value between the two ("DSCR 1.40x minimum")."""
     return (any(k in low for k in GOV_KEYWORDS)
-            or RE_GOV_DSCR_BOUND.search(low) is not None)
+            or RE_GOV_DSCR_BOUND.search(low) is not None
+            or RE_GOV_DSCR_VALUE_BOUND.search(low) is not None)
 
 # --- Portfolio-level DSCR qualifier (2026-07-08) --------------------------------------------
 # Gabriel-ratified doctrine (2026-07-08): "DSCR of 1.25 for each property and 1.75 for the entire
