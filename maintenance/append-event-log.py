@@ -85,6 +85,54 @@ def insert_newest(content, entry):
     return content[:idx].rstrip() + "\n\n" + entry + "\n\n" + content[idx:]
 
 
+def normalize_entry(text):
+    """Canonical form for duplicate comparison: LF endings, no per-line trailing
+    whitespace, outer whitespace stripped. Two entries differing only in EOL or
+    trailing spaces are the SAME entry here (a Cowork-prepared entry handed to
+    Code routinely picks up CRLF on the way)."""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = "\n".join(ln.rstrip() for ln in text.split("\n")).strip()
+    # Collapse runs of blank lines so an entry re-prepared with different vertical
+    # spacing still reads as the same entry. Markdown renders 2+ blanks identically,
+    # so this cannot merge two genuinely different entries.
+    while "\n\n\n" in text:
+        text = text.replace("\n\n\n", "\n\n")
+    return text
+
+
+def entry_blocks(content):
+    """Yield each '## '-headed entry block from the log body, skipping YAML
+    frontmatter (so a '## ' inside it is never treated as an entry)."""
+    body_start = 0
+    if content.startswith("---\n"):
+        end = content.find("\n---\n", 4)
+        if end != -1:
+            body_start = end + len("\n---\n")
+    lines = content[body_start:].split("\n")
+    idxs = [i for i, ln in enumerate(lines) if ln.startswith("## ")]
+    for k, i in enumerate(idxs):
+        j = idxs[k + 1] if k + 1 < len(idxs) else len(lines)
+        yield "\n".join(lines[i:j])
+
+
+def is_duplicate_entry(content, entry):
+    """True iff `entry` already exists in `content` as a whole, content-identical
+    '## ' block.
+
+    KEYS ON THE FULL BLOCK, NEVER THE HEADER ALONE -- repeated headers are
+    legitimate and routine. The allow-hook-test-failure override protocol writes
+    five entries in a single day under a byte-identical header, each with a
+    different body; a header-based check would block mandatory mechanical
+    record-keeping. Only an exact content match is a duplicate.
+
+    Compares whole blocks rather than substring-searching, so a short entry whose
+    text happens to appear inside a longer one is not a false positive."""
+    n = normalize_entry(entry)
+    if not n:
+        return False
+    return any(normalize_entry(b) == n for b in entry_blocks(content))
+
+
 def spool_dir_for(log):
     """Directory holding entries that could not be written yet (lock contention)."""
     return log + ".pending"
@@ -280,6 +328,9 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="Append a newest-first event_log entry.")
     ap.add_argument("--entry-file", help="file holding the entry markdown; stdin if omitted")
     ap.add_argument("--log", default=LOG, help="target log (default: canonical event_log.md)")
+    ap.add_argument("--allow-duplicate", action="store_true",
+                    help="append even if a content-identical entry already exists "
+                         "(default: skip it and exit 0)")
     a = ap.parse_args(argv)
     if a.entry_file:
         with open(a.entry_file, encoding="utf-8") as f:
@@ -317,6 +368,33 @@ def main(argv=None):
             print("drained %d spooled entr%s" % (n, "y" if n == 1 else "ies"))
     except Exception as e:
         sys.stderr.write("spool drain skipped: %s\n" % e)
+
+    # DUPLICATE GUARD (2026-08-12). Checked AFTER the drain so an entry that was
+    # spooled by an earlier locked run and has only just replayed is still caught.
+    #
+    # Skipping here cannot lose anything: a content-identical block is ALREADY in
+    # the log, so the caller's intent is already satisfied. Exit stays 0 so `&&`
+    # chains (both pre-push gates use them) never break -- consistent with this
+    # script's "the append must always succeed" design.
+    #
+    # FAIL-OPEN by construction: any error reading the log falls through to the
+    # normal append path. A guard that blocked appends on its own failure would be
+    # strictly worse than the duplicate it prevents.
+    if not a.allow_duplicate:
+        try:
+            with open(a.log, encoding="utf-8") as f:
+                existing = f.read()
+            dup = is_duplicate_entry(existing, entry)
+        except Exception as e:
+            sys.stderr.write("duplicate check skipped (%s) - appending anyway\n" % e)
+            dup = False
+        if dup:
+            sys.stderr.write(
+                "SKIPPED: a content-identical entry is already in %s.\n"
+                "  Nothing was appended. Pass --allow-duplicate to force.\n"
+                % os.path.basename(a.log))
+            print("skipped (duplicate): %s" % header)
+            return 0
 
     for attempt in range(6):
         try_inplace = (attempt + 1) >= INPLACE_FALLBACK_AFTER

@@ -548,7 +548,14 @@ On each run:
 
 STEP 5 — WRITE TO NOTION (canonical record — write BEFORE email)
 Create/update Deal Sourcing Log records: Deal Name / Address; Metro / Submarket;
-Source; Status = "New Lead" (or existing status on update); Asking Price;
+Source; **`Listing URL`** (the working public URL captured in Step 1 — field added
+2026-08-12; before that STEP 1 was told to capture a URL for every listing and STEP 5 had
+NOWHERE TO WRITE IT, so every run captured one and silently discarded it. That is why no
+historical row can have its ask provenance reconstructed, and why STEP 5B's cross-write had
+to fall back to document provenance. Write it on creation AND whenever a re-sighting loads a
+different working URL; leave blank only when the ask came from an OM or a broker directly,
+i.e. when there genuinely is no listing page); Status = "New Lead" (or existing status on
+update); Asking Price;
 **Ask at First Sighting + First Sighted (on creation only)**; Total SF; Price / SF
 (FUNCTIONAL — per Step 2.5); Year Built; Buy Box Score (100); **Verdict** (T1 PURSUE /
 T2 WATCH / PASS / KILLED); **Floor Result** (PASS / FAIL-BASIS / FAIL-YIELD /
@@ -583,11 +590,28 @@ index-only Kansas City finds produced one confirmed, two corrected (including a 
 understated by $125K) and one dead listing.
 
 WRITE EXACTLY THESE THREE FIELDS, AND NOTHING ELSE:
-  - `Listing Ask (Verified)`     (number/dollar) — the ask as published on the detail page.
+  - `Listing Ask (Verified)`     (number/dollar) — the ask as published on the detail page,
+                                                   OR read out of an OM (see provenance below).
   - `Listing Ask Verified On`    (date)          — the date THIS run read it. Always stamp.
-  - `Listing Ask Source`         (url)           — the working public URL captured in Step 1.
-                                                   Never leave this blank on a fresh write;
-                                                   never invent or reconstruct it.
+  - `Listing Ask Source`         (url/text)      — WHERE THE FIGURE ACTUALLY CAME FROM. Never
+                                                   leave this blank on a fresh write; never
+                                                   invent or reconstruct it.
+
+*** PROVENANCE MUST MATCH THE REAL SOURCE — A URL IS NOT ALWAYS AVAILABLE (amended 2026-08-12).
+*** The original wording required "the working public URL captured in Step 1", which assumed every
+verified ask comes from a web listing. It does not, and that assumption pressures a run into pasting
+in a URL that does not actually publish the figure — fabricated provenance, the exact thing this field
+exists to prevent. Worked case: 4484 Robertson Road's $2,950,000 was resolved by OCR of
+`OM 4484 Robertson Road Madison, WI 53714_OCR.pdf`, while the only public listing (LoopNet) shows
+*price upon request* and 403s to automated fetch — so a LoopNet URL there would have CONTRADICTED the
+figure it claimed to source. Write whichever of these is true:
+  - listing page verified this run  → the working public URL.
+  - OM / broker document            → the document filename plus how it was read, e.g.
+                                      `OM <file>.pdf (OCR-resolved YYYY-MM-DD)`. Say so plainly if
+                                      no public listing publishes the ask.
+  - broker stated it directly       → `Broker <name> <firm>, <channel> YYYY-MM-DD`.
+Never cite a source that does not itself carry the number. If the only available URL shows
+price-upon-request, that URL is NOT the provenance — the document or conversation is.
 
 *** NEVER WRITE `Purchase Price`. *** This is the whole point of the three dedicated
 fields, ratified by Gabriel 2026-08-12 over the simpler option of reusing `Purchase Price`:
