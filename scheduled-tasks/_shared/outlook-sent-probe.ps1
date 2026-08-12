@@ -171,6 +171,9 @@ function Test-SubjectMatch {
 if ($SelfTest) {
     $EM = [char]0x2014
     $CHECK = [char]0x2705
+    $WARN = [char]0x26A0
+    # U+1F319 is outside the BMP, so [char] cannot hold it -- it needs a surrogate pair.
+    $MOON = [char]::ConvertFromUtf32(0x1F319)
     $cases = @(
         # candidate (as it sits in the store)     , probe (as the task builds it)                    , mode        , expected
         @("ORA Daily Brief - Sunday, August 9 2026", "ORA Daily Brief $EM Sunday, August 9 2026"      , "Normalized", $true),
@@ -202,15 +205,62 @@ if ($SelfTest) {
         # ora-deal-aging-sla really did double-send on 2026-08-09, and its two subjects
         # differ in BOTH the leading tag and the trailing headline because the spec lets
         # the run compose that text. A dated STEM must match both, or the probe would
-        # have waved the 09:20 duplicate through. This is why matching is substring,
-        # not prefix: the second subject carries a leading "[ORA]" the first lacks.
+        # have waved the 09:20 duplicate through. This works because bracket tags are
+        # STRIPPED before the position-0 anchor -- the match is a prefix test against the
+        # stripped subject, not a substring search. Keeping it a prefix test is what stops
+        # case 20 below (a different producer that merely contains the stem) from matching.
         @("Deal Aging SLA - 2026-08-09: 0 breaches - Patterson returned the 754 PSA marked final", "Deal Aging SLA - 2026-08-09", "Normalized", $true),
         @("[ORA] Deal Aging SLA - 2026-08-09 - 0 breaches, 1 posture mismatch (754 PSA now with ORA)", "Deal Aging SLA - 2026-08-09", "Normalized", $true),
         # ...but the stem must still discriminate by DATE, or every day matches every day.
         @("[ORA] Deal Aging SLA - 2026-08-09 - 0 breaches", "Deal Aging SLA - 2026-08-10", "Normalized", $false),
         # A different producer with a confusingly similar name must NOT match. Both of
         # these were in Sent Items on 2026-08-09 within seven minutes of each other.
-        @("[ORA Command Center] Daily Brief - 2026-08-09", "ORA Daily Brief - Sunday, August 9 2026", "Normalized", $false)
+        @("[ORA Command Center] Daily Brief - 2026-08-09", "ORA Daily Brief - Sunday, August 9 2026", "Normalized", $false),
+
+        # ---- ora-health-guard (wired 2026-08-11). Subjects below are VERBATIM shapes
+        # ---- taken from send-log.txt, not invented, because this task was deferred in
+        # ---- the 2026-08-09 pass specifically on the worry that its two 2026-07-24
+        # ---- sends "differed only in subject encoding" and might defeat the probe.
+        #
+        # B.3 CONNECTOR PRE-FLIGHT -- the pair that actually duplicated on 2026-07-24,
+        # 68 seconds apart, identical bodies (bytes=11852 both). The store held one plain
+        # -ASCII form and one emoji+em-dash form. Normalization folds the dashes and drops
+        # the emoji to whitespace, so a single plain dated stem matches BOTH. This is the
+        # case that unblocks wiring ora-health-guard.
+        @("ORA Connector Pre-Flight - 2026-07-24 - Notion OK"              , "ORA Connector Pre-Flight - 2026-07-24", "Normalized", $true),
+        @("$CHECK ORA Connector Pre-Flight $EM 2026-07-24 $EM Notion OK"   , "ORA Connector Pre-Flight - 2026-07-24", "Normalized", $true),
+        # The subject also flips OK -> FAIL between fires; the stem must survive that,
+        # because two runs on the same ET date are a duplicate regardless of outcome.
+        @("$WARN ORA Connector Pre-Flight $EM 2026-07-24 $EM Notion"       , "ORA Connector Pre-Flight - 2026-07-24", "Normalized", $true),
+        @("$CHECK ORA Connector Pre-Flight $EM 2026-07-24 $EM Notion OK"   , "ORA Connector Pre-Flight - 2026-07-25", "Normalized", $false),
+
+        # C.4 CONSOLIDATED HEALTH GUARD -- "[ORA]" and "[ACTION]" are both benign tags
+        # and both strip; the trailing verdict varies run to run.
+        @("[ORA] Health Guard $EM 2026-08-11 $EM ALL PASS"                 , "Health Guard - 2026-08-11", "Normalized", $true),
+        @("[ACTION] Health Guard $EM 2026-08-11 $EM 2 FAIL"                , "Health Guard - 2026-08-11", "Normalized", $true),
+        # ...and three real near-misses that must NOT match, all present in the send log.
+        # Suppressing any of these would silence a DIFFERENT report -- the false-positive
+        # class this probe treats as worse than the duplicate it exists to stop.
+        #   (a) a distinct follow-up email from this same task
+        @("[ORA] Health Guard Addendum $EM 2026-08-11 $EM rate-snapshot timestamp defect", "Health Guard - 2026-08-11", "Normalized", $false),
+        #   (b) a DIFFERENT task entirely (ora-health-guard-fail-aging-nudge)
+        @("[ACTION] Health Guard FAIL Aging -- 2 stale"                    , "Health Guard - 2026-08-11", "Normalized", $false),
+        #   (c) a manual correction sent earlier the same day -- if anything it is
+        #       evidence the scheduled run still matters. Caught by the reject-list.
+        @("[CORRECTION] Health Guard $EM 2026-08-11 $EM Escalation 1 withdrawn (weekly-cadence false positive)", "Health Guard - 2026-08-11", "Normalized", $false),
+
+        # A.0 WAKE-LATENESS ALERT -- the only stem here that is deliberately UNDATED.
+        # The minutes-late figure sits BETWEEN the stem and the date ("...woke 320min
+        # late - 2026-07-24") and legitimately differs between two fires, so no dated
+        # prefix can cover both. Date scoping therefore comes from the probe's SentOn
+        # filter (-OnDate, default today on the host clock = ET), NOT from the subject.
+        @("Overnight machine-offline detected - ora-health-guard woke 320min late - 2026-07-24", "Overnight machine-offline detected", "Normalized", $true),
+        @("$MOON Overnight machine-offline detected $EM ora-health-guard woke 219min late $EM 2026-08-09", "Overnight machine-offline detected", "Normalized", $true),
+        # An undated stem is only safe because it is anchored at position 0 AND scoped to
+        # one day by SentOn. Prove the anchor still discriminates against the other two
+        # emails this same task sends in the same run.
+        @("$CHECK ORA Connector Pre-Flight $EM 2026-08-09 $EM Notion OK"   , "Overnight machine-offline detected", "Normalized", $false),
+        @("[ORA] Health Guard $EM 2026-08-09 $EM ALL PASS"                 , "Overnight machine-offline detected", "Normalized", $false)
     )
     $fail = 0; $i = 0
     foreach ($c in $cases) {

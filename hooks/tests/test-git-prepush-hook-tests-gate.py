@@ -219,6 +219,8 @@ expect("run_suite: statuses match", by_file == {
 # failure must not get two bites at the gate.
 retry_root = tempfile.mkdtemp(prefix="gt-retry-")
 retry_marker = os.path.join(retry_root, "flaky-first-run.marker")
+fail_retry_marker = os.path.join(retry_root, "flaky-fail-first-run.marker")
+envskip_retry_marker = os.path.join(retry_root, "fail-then-envskip.marker")
 write_dummy_test(retry_root, "test-flaky-timeout.py",
                  "import os, sys, time\n"
                  "marker = %r\n"
@@ -236,6 +238,44 @@ write_dummy_test(retry_root, "test-plain-fail.py",
 # review finding, 2026-07-26).
 write_dummy_test(retry_root, "test-fake-124.py",
                  "print('deterministically exiting 124')\nimport sys; sys.exit(124)\n")
+# Fails on the first run, passes on the second -- a LOAD-INDUCED failure, the shape a
+# wall-clock-sensitive concurrency test takes when the host is oversubscribed. Before
+# 2026-08-10 only TIMEOUTS earned a rerun, so this class blocked the push outright:
+# maintenance/_tests/test_allocate_oi_id.py's 12-thread test lost all three of its
+# coupled assertions (9/12) on a live push and passed cleanly on retry.
+write_dummy_test(retry_root, "test-flaky-fail.py",
+                 "import os, sys\n"
+                 "marker = %r\n"
+                 "if not os.path.exists(marker):\n"
+                 "    open(marker, 'w').close()\n"
+                 "    print('boom: load-induced failure')\n"
+                 "    sys.exit(1)\n"
+                 "print('ok on rerun')\n"
+                 "sys.exit(0)\n" % fail_retry_marker)
+# A control that passes first time: proves the rerun is scoped to FAILURES and does not
+# silently double the whole suite's subprocess count on a healthy push.
+write_dummy_test(retry_root, "test-passes-first-try.py",
+                 "print('green on the first run')\nimport sys; sys.exit(0)\n")
+# REGRESSION (independent review, 2026-08-10): run 1 genuinely FAILS, run 2 declares
+# CANNOT RUN. The first draft reclassified this as env-skip -- non-blocking AND absent
+# from the report, since the flaky disclosure scans passes only. That let a real failure
+# through silently, falsifying the policy's own "a real failure fails both runs and still
+# blocks" claim. Run 1 proved the file CAN execute here, so this must stay a FAIL.
+write_dummy_test(retry_root, "test-fail-then-envskip.py",
+                 "import os, sys\n"
+                 "marker = %r\n"
+                 "if not os.path.exists(marker):\n"
+                 "    open(marker, 'w').close()\n"
+                 "    print('boom: a real assertion failure')\n"
+                 "    sys.exit(1)\n"
+                 "print('CANNOT RUN: precondition vanished on the rerun')\n"
+                 "sys.exit(1)\n" % envskip_retry_marker)
+# An honest ENV-SKIP: must be run exactly ONCE and never retried. Asserted by SPAWN
+# COUNT, not just status -- otherwise a future refactor of the elif chain could start
+# rerunning env-skips with nothing failing.
+write_dummy_test(retry_root, "test-always-envskip.py",
+                 "print('CANNOT RUN: no roster in this environment')\n"
+                 "import sys; sys.exit(1)\n")
 
 # Record every run_test_file() call (file + timeout arg) while still really running the
 # subprocess, so retry COUNT and the retry's enlarged BUDGET are asserted directly
@@ -287,16 +327,72 @@ fake124_calls = [c for c in _rtf_calls if c[0] == "test-fake-124.py"]
 expect("timeout-retry: a timed-out file is run exactly TWICE, never more",
        len(flaky_calls) == 2 and len(hung_calls) == 2,
        "got flaky=%r hung=%r" % (flaky_calls, hung_calls))
-expect("timeout-retry: a non-timeout failure is run exactly ONCE",
-       len(plain_calls) == 1, "got %r" % (plain_calls,))
-expect("timeout-retry: a deterministic exit-124 is run exactly ONCE (flag, not rc, "
-       "triggers the retry)", len(fake124_calls) == 1, "got %r" % (fake124_calls,))
+# POLICY CHANGE 2026-08-10: a failing file now earns ONE rerun too, not just a
+# timed-out one -- so these are TWICE, where they were ONCE before. The REFUTE finding
+# these assertions were written to protect is unchanged and re-asserted just below: the
+# TIMEOUT retry still keys on run_test_file()'s timed_out FLAG, never on the exit code,
+# so a child that merely exits 124 gets a plain-budget rerun like any other failure and
+# never the doubled budget.
+expect("fail-retry: a non-timeout failure is run exactly TWICE, never more",
+       len(plain_calls) == 2, "got %r" % (plain_calls,))
+expect("fail-retry: a deterministic exit-124 is run exactly TWICE, never more",
+       len(fake124_calls) == 2, "got %r" % (fake124_calls,))
+expect("fail-retry: the failure rerun uses the NORMAL budget, not the doubled one "
+       "(flag, not rc, still gates the timeout retry)",
+       [c[1] for c in plain_calls] == [None, None]
+       and [c[1] for c in fake124_calls] == [None, None],
+       "got plain=%r fake124=%r" % (plain_calls, fake124_calls))
 expect("timeout-retry: the rerun gets a DOUBLED budget (base 3 -> retry 6)",
        len(flaky_calls) == 2 and flaky_calls[0][1] is None and flaky_calls[1][1] == 6,
        "got %r" % (flaky_calls,))
 
 expect("any_real_failure: a timeout-retried PASS does not block",
        gt.any_real_failure([flaky]) is False)
+
+# --- fail-retry: a load-induced failure earns ONE rerun (2026-08-10) -------------------
+flaky_fail = retry_by_file.get("test-flaky-fail.py", {})
+expect("fail-retry: fails once, passes on the rerun -> pass (not blocking)",
+       flaky_fail.get("status") == "pass", "got %r" % (flaky_fail,))
+expect("fail-retry: the recovered pass is marked fail_retried",
+       flaky_fail.get("fail_retried") is True, "got %r" % (flaky_fail,))
+expect("fail-retry: a recovered flake does not block the push",
+       gt.any_real_failure([flaky_fail]) is False)
+expect("fail-retry: a file that fails TWICE is still a real FAIL",
+       plain.get("status") == "fail" and plain.get("fail_retried") is True,
+       "got %r" % (plain,))
+flaky_fail_calls = [c for c in _rtf_calls if c[0] == "test-flaky-fail.py"]
+expect("fail-retry: the recovered flake is run exactly TWICE, never more",
+       len(flaky_fail_calls) == 2, "got %r" % (flaky_fail_calls,))
+# Asserted against a REAL passing dummy in this same root -- not a name that happens to
+# match nothing, which would pass vacuously no matter what the policy did.
+firstpass_calls = [c for c in _rtf_calls if c[0] == "test-passes-first-try.py"]
+expect("fail-retry: a first-run PASS is never rerun",
+       len(firstpass_calls) == 1, "got %r" % (firstpass_calls,))
+expect("fail-retry: a first-run PASS is not marked fail_retried",
+       retry_by_file.get("test-passes-first-try.py", {}).get("fail_retried") is False,
+       "got %r" % (retry_by_file.get("test-passes-first-try.py"),))
+expect("fail-retry: a timed-out file is NOT also fail-retried (one rerun total, so a "
+       "push can never pay three budgets for one file)",
+       hung.get("fail_retried") is False and len(hung_calls) == 2,
+       "got %r calls=%r" % (hung, hung_calls))
+
+# --- fail-retry must not become an ENV-SKIP escape hatch (review finding, 2026-08-10) --
+fail_envskip = retry_by_file.get("test-fail-then-envskip.py", {})
+expect("fail-retry: run-1 FAIL + run-2 'CANNOT RUN' stays a FAIL, never env-skip",
+       fail_envskip.get("status") == "fail", "got %r" % (fail_envskip,))
+expect("fail-retry: that FAIL still blocks the push",
+       gt.any_real_failure([fail_envskip]) is True, "got %r" % (fail_envskip,))
+expect("fail-retry: and it is marked fail_retried so the report can explain itself",
+       fail_envskip.get("fail_retried") is True, "got %r" % (fail_envskip,))
+
+always_skip = retry_by_file.get("test-always-envskip.py", {})
+always_skip_calls = [c for c in _rtf_calls if c[0] == "test-always-envskip.py"]
+expect("fail-retry: an honest ENV-SKIP is still env-skip",
+       always_skip.get("status") == "env-skip", "got %r" % (always_skip,))
+expect("fail-retry: an ENV-SKIP is run exactly ONCE, never retried",
+       len(always_skip_calls) == 1, "got %r" % (always_skip_calls,))
+expect("fail-retry: an ENV-SKIP is not marked fail_retried",
+       always_skip.get("fail_retried") is False, "got %r" % (always_skip,))
 
 # Visibility: a flake that recovered must be DISCLOSED in the report, not silently
 # eaten, and the twice-timed-out FAIL block must still appear with its exit code.
@@ -307,6 +403,31 @@ expect("format_summary: discloses the timeout-retried pass by name",
 expect("format_summary: twice-timed-out FAIL block survives with exit 124",
        "test-hung.py" in retry_summary and "124" in retry_summary,
        "got %r" % retry_summary)
+# Silently swallowing a recovered flake would trade a blocked push for an INVISIBLE
+# flake -- the one failure mode the 2026-08-10 fail-retry policy must not introduce.
+expect("format_summary: discloses the fail-retried pass by name",
+       "test-flaky-fail.py" in retry_summary and "fail-retry" in retry_summary,
+       "got %r" % retry_summary)
+expect("format_summary: a file that failed TWICE is reported as failing twice, not as "
+       "a recovered flake",
+       "failed twice" in retry_summary and "test-plain-fail.py" in retry_summary,
+       "got %r" % retry_summary)
+# REGRESSION (review, 2026-08-10): the divergence check compared an 8-line tail against a
+# 5-line one, so two IDENTICAL failures longer than 5 lines rendered "first run failed
+# differently" -- telling the reader the file is racy when the evidence says
+# deterministic. Compare full outputs; truncate only for display.
+_identical = {"file": "f.py", "rc": 1, "status": "fail", "timeout_retried": False,
+              "fail_retried": True,
+              "output": "l1\nl2\nl3\nl4\nl5\nl6\nl7\n",
+              "first_output": "l1\nl2\nl3\nl4\nl5\nl6\nl7\n"}
+expect("format_summary: identical double-failures are NOT reported as differing",
+       "failed differently" not in gt.format_summary([_identical]),
+       "got %r" % gt.format_summary([_identical]))
+_diverged = dict(_identical, first_output="l1\nl2\nl3\nl4\nl5\nl6\nDIFFERENT\n")
+expect("format_summary: genuinely divergent double-failures ARE reported, with run 1",
+       "failed differently" in gt.format_summary([_diverged])
+       and "DIFFERENT" in gt.format_summary([_diverged]),
+       "got %r" % gt.format_summary([_diverged]))
 
 # --- run_suite(): CONCURRENT execution (2026-07-26, OI-028 root cause) ----------------
 # A live push trace showed the pre-push hook-tests gate taking 137s wall-clock for ~54
