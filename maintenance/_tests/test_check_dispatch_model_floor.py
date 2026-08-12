@@ -239,25 +239,33 @@ def test_unknown_floor_name():
     expect("fable floor resolves", cdmf.floor_rank("fable") == 100)
 
 
-def test_real_session_transcripts_catch_the_2026_08_12_fallback():
-    """Integration check against THIS session's real subagent transcripts, which
-    are known to contain the mid-run opus-4-8 fallback that motivated OI-052. If
-    the dir isn't present (running elsewhere), skip rather than fail — but when it
-    IS present the probe MUST report a violation, or the probe is useless."""
-    sid = os.environ.get("CLAUDE_CODE_SESSION_ID")
-    if not sid:
-        print("  (skip) real-session check — no CLAUDE_CODE_SESSION_ID")
-        return
-    d = os.path.join(cdmf.CLAUDE, "projects", cdmf.PROJECT, sid, "subagents")
-    if not os.path.isdir(d):
-        print("  (skip) real-session check — %s absent" % d)
-        return
-    status, rows = cdmf.scan_subagents_dir(d, FR)
-    if not rows:
-        print("  (skip) real-session check — no transcripts yet")
-        return
-    expect("real 2026-08-12 transcripts => status 1 (caught the fallback)",
-           status == 1, "got %d over %d rows" % (status, len(rows)))
+# REMOVED 2026-08-12: test_real_session_transcripts_catch_the_2026_08_12_fallback.
+#
+# It read CLAUDE_CODE_SESSION_ID, scanned THAT LIVE SESSION's real subagents/
+# dir, and asserted status == 1 -- i.e. it asserted that the running session's
+# own dispatches contain a floor violation. It was authored from a session whose
+# subagent had genuinely fallen back, which froze that session's state into a
+# permanent expectation. Because this suite runs in the pre-push hook-tests gate,
+# the effect was inverted: a session whose dispatches were CLEAN scored 0, failed
+# the assertion, and was hard-blocked from pushing, while a session that actually
+# breached the floor passed. Doing the right thing was the failing condition.
+#
+# Nothing was substituted for it, deliberately. Both properties it claimed to
+# protect are already pinned deterministically above -- the catch behaviour by
+# test_below_floor_model_fails and test_violation_outranks_verified_null (which
+# uses the exact floor-then-fallback shape), and the clean case by
+# test_all_fable_passes. Verified by mutation: disabling the probe's below-floor
+# branch fails those assertions, and forcing it always-on fails the clean ones.
+# Adding fixture tests for the same paths was tried and dropped as duplicate
+# weight in a suite that hard-blocks every push.
+#
+# KNOWN GAP, accepted: this was the suite's only contact with real on-disk
+# transcripts, so a harness schema drift (say message.model relocating) would now
+# pass the fixtures. The probe fails CLOSED on that -- it surfaces as status 2
+# (verified-null), never a false PASS -- so this is a follow-up, not a hole. A
+# skip-based smoke test asserting only that the probe RUNS cleanly on real
+# transcripts (status in (0, 1), every row model-bearing), with no verdict
+# assertion, would close it without reintroducing the live-state coupling.
 
 
 if __name__ == "__main__":
