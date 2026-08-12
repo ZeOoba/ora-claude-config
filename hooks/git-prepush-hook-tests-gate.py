@@ -248,27 +248,87 @@ def _run_one(path):
     calls it."""
     rc, output, timed_out = run_test_file(path)
     timeout_retried = False
+    fail_retried = False
+    first_output = None
+    status = classify(rc, output)
     if timed_out:
         timeout_retried = True
         rc, output, _ = run_test_file(
             path, timeout=PER_TEST_TIMEOUT_SECONDS * TIMEOUT_RETRY_MULTIPLIER)
+        status = classify(rc, output)
+    elif status == "fail":
+        # ONE rerun for a FAILING file too (2026-08-10). Load-flake protection used to
+        # cover only timeouts, but an oversubscribed host does not always produce a
+        # timeout: a wall-clock-sensitive concurrency test fails its ASSERTIONS instead
+        # and landed in the one category with no retry, blocking the push outright.
+        # Live case: maintenance/_tests/test_allocate_oi_id.py races 12 threads against a
+        # 30s lock-wait budget; under this gate's own 8-worker pool one thread missed the
+        # deadline and all three of its coupled assertions fell together (9/12). It
+        # passed cleanly on the very next push.
+        #
+        # This does NOT weaken the gate: a genuine failure fails both runs and still
+        # blocks. What it removes is a single unlucky sample deciding a push. Deliberately
+        # `elif`, so one file can never cost three budgets -- a timed-out file already
+        # spent the doubled rerun and does not also get this one.
+        #
+        # The rerun uses the NORMAL budget: the doubled budget exists for timeouts
+        # specifically, and keying it on anything but run_test_file()'s timed_out flag is
+        # the exact confusion a 2026-07-26 REFUTE review corrected (a child that merely
+        # EXITS 124 is a deterministic failure, not a hang).
+        fail_retried = True
+        first_output = output
+        rc, output, _ = run_test_file(path)
+        status = classify(rc, output)
+        if status == "env-skip":
+            # A rerun that declares "CANNOT RUN:" after run 1 genuinely FAILED must not
+            # become a non-blocking skip. Run 1 executed far enough to fail its
+            # assertions, which is proof the file CAN run in this environment -- so an
+            # env-skip on run 2 is a changed precondition (a sibling worker's lock,
+            # fixture handle, or resource state), not a real inability to execute.
+            # Without this, a real failure both stops blocking AND vanishes from the
+            # report, because format_summary()'s flaky list scans passes only. Found by
+            # independent review 2026-08-10, reproduced against the first draft.
+            status = "fail"
+            output = (output or "") + (
+                "\n[gate] rerun reported ENV-SKIP, but the FIRST run failed -- a file "
+                "that ran far enough to fail has proven it can run here, so this is a "
+                "FAIL, not a skip.\n")
     return {
         "file": display_name(path),
         "rc": rc,
-        "status": classify(rc, output),
+        "status": status,
         "output": output,
         "timeout_retried": timeout_retried,
+        "fail_retried": fail_retried,
+        # Run 1's output, kept ONLY when a fail-retry still failed: the two runs can fail
+        # with different signatures, and discarding the first sample is exactly the
+        # diagnostic this policy makes more valuable.
+        "first_output": first_output if (fail_retried and status == "fail") else None,
     }
 
 
 def run_suite(root=None):
-    """[{"file", "rc", "status", "output", "timeout_retried"}] for every discovered
-    test file, in DISCOVERY (sorted) order. A first-run timeout (the timed_out flag
-    from run_test_file, NOT the rc — so a child that merely exits 124 is a
-    deterministic failure, no retry) gets one rerun at the doubled budget; the
-    rerun's rc/output replace the first run's and are what classify() judges.
-    timeout_retried records that the rerun happened, whatever its outcome, so the
-    summary can disclose it.
+    """[{"file", "rc", "status", "output", "timeout_retried", "fail_retried",
+    "first_output"}] for every discovered test file, in DISCOVERY (sorted) order.
+
+    Retry policy — at most ONE rerun per file, never two:
+      * A first-run TIMEOUT (the timed_out flag from run_test_file, NOT the rc — so a
+        child that merely exits 124 is a deterministic failure, not a hang) gets one
+        rerun at the DOUBLED budget.
+      * Otherwise a first-run FAIL gets one rerun at the NORMAL budget (2026-08-10):
+        load-flake protection previously covered only timeouts, but an oversubscribed
+        host also makes wall-clock-sensitive tests fail their ASSERTIONS, which had no
+        retry and blocked the push outright.
+      * An ENV-SKIP is never rerun. And a fail-retry whose rerun reports env-skip is
+        forced back to FAIL — run 1 proved the file can execute here, so run 2's
+        "CANNOT RUN:" is a changed precondition, not an inability to run. Without that,
+        a real failure would stop blocking AND vanish from the report.
+
+    The rerun's rc/output replace the first run's and are what classify() judges;
+    first_output preserves run 1's output when a fail-retry still failed, so a file
+    that fails two DIFFERENT ways is diagnosable. timeout_retried / fail_retried record
+    that a rerun happened, whatever its outcome, so the summary can disclose it — a
+    recovered flake is always named, never silently swallowed.
 
     Runs discovered files CONCURRENTLY, bounded by MAX_PARALLEL_TESTS (2026-07-26,
     OI-028 root cause). WHY: a live push trace showed this gate running all ~54
@@ -307,15 +367,42 @@ def format_summary(results):
              % (len(passed), len(failed), len(skipped), len(results))]
     for r in failed:
         tail = "\n".join((r["output"] or "").splitlines()[-8:])
-        # .get(): stubbed/legacy result dicts may predate the timeout_retried key.
-        note = ", after a timeout retry" if r.get("timeout_retried") else ""
+        # .get(): stubbed/legacy result dicts may predate the retry keys.
+        if r.get("timeout_retried"):
+            note = ", after a timeout retry"
+        elif r.get("fail_retried"):
+            # Say it failed TWICE, so nobody reads a blocked push as one bad sample.
+            note = ", failed twice (reran once)"
+        else:
+            note = ""
         lines.append("--- FAIL: %s (exit %s%s) ---\n%s" % (r["file"], r["rc"], note, tail))
+        # Both runs failed: show run 1 too. They can fail with DIFFERENT signatures, and
+        # that divergence is the strongest signal that the file is racy rather than
+        # deterministically broken.
+        first = r.get("first_output")
+        # Compare the FULL outputs, not the tails. `tail` is 8 lines and a first-run
+        # excerpt is 5, so comparing those two declared "failed differently" for
+        # byte-identical failures whose output ran past 5 lines -- i.e. most real
+        # tracebacks -- pointing the reader at "racy" when the evidence says
+        # deterministic. Truncation is for DISPLAY only.
+        if first and first.strip() != (r["output"] or "").strip():
+            first_tail = "\n".join(first.splitlines()[-5:])
+            if first_tail.strip():
+                lines.append("    (first run failed differently:)\n%s" % first_tail)
     if skipped:
         lines.append("env-skip (not blocking): " + ", ".join(r["file"] for r in skipped))
     recovered = [r for r in passed if r.get("timeout_retried")]
     if recovered:
         lines.append("timeout-retry (timed out under load, passed on the doubled-budget "
                      "rerun; not blocking): " + ", ".join(r["file"] for r in recovered))
+    # Disclosed, never swallowed: trading a blocked push for an INVISIBLE flake would be
+    # a worse bug than the one the fail-retry policy fixes. A file listed here is a real
+    # flake and wants fixing, even though it did not block this push.
+    flaky = [r for r in passed if r.get("fail_retried")]
+    if flaky:
+        lines.append("fail-retry (FAILED once, passed on the rerun; not blocking, but "
+                     "this file is FLAKY and should be fixed): "
+                     + ", ".join(r["file"] for r in flaky))
     return "\n".join(lines)
 
 
