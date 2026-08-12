@@ -1,6 +1,6 @@
 ---
 name: ora-deal-aging-sla
-description: Weekday counterparty-aging SLA — computes days-since-last-outbound per open deal ask (broker/counsel/lender) via live Outlook search; drafts (never sends) a nudge past ratified per-class thresholds (broker 5bd/counsel 7bd/lender 7bd, ratified 2026-07-18). Also reports Notion-vs-Outlook posture mismatches (STEP 3b) and drafted-but-unshipped LOIs past their own stated expiration (STEP 3c) as first-class findings. Draft-only, Hard Invariant 1. v1.4. [MODEL: UNVERIFIABLE | checked 2026-07-21]
+description: Weekday counterparty-aging SLA — computes days-since-last-outbound per open deal ask (broker/counsel/lender) via live Outlook search; drafts (never sends) a nudge past ratified per-class thresholds (broker 5bd/counsel 7bd/lender 7bd, ratified 2026-07-18). Also reports Notion-vs-Outlook posture mismatches (STEP 3b) and drafted-but-unshipped LOIs past their own stated expiration (STEP 3c) as first-class findings. Draft-only, Hard Invariant 1. v1.4. [MODEL: claude-opus-5 observed | checked 2026-08-12 via live-run transcript canary]
 output_contract:
   version: 1
   blocks:

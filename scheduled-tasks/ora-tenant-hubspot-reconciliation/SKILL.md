@@ -1,6 +1,6 @@
 ---
 name: ora-tenant-hubspot-reconciliation
-description: Monthly cross-reference of HubSpot Lease Renewal deals vs. the Notion Tenant DB and the Master Workbook — flags stage/date mismatches and idle appointmentscheduled deals with quoted evidence, writes findings to open-items-tracker.md, never auto-writes to HubSpot/Notion. [MODEL: UNVERIFIABLE | checked 2026-07-25]
+description: Monthly cross-reference of HubSpot Lease Renewal deals vs. the Notion Tenant DB and the Master Workbook — flags stage/date mismatches and idle appointmentscheduled deals with quoted evidence, writes findings to open-items-tracker.md, never auto-writes to HubSpot/Notion. [MODEL: claude-opus-5 observed | checked 2026-08-12 via live-run transcript canary]
 ---
 
 Monthly reconciliation between HubSpot "Lease Renewals" pipeline deals and the Notion Tenant Database, plus a source-of-record date check against the workbook-derived snapshot. This is a detection/reporting task only — it never writes to HubSpot or Notion.

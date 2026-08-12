@@ -1,6 +1,6 @@
 ---
 name: ora-monthly-portfolio-briefing
-description: Monthly AI-narrated portfolio briefing (1st @ 7:30 AM) — NOI trajectory, WALT, debt-maturity countdown, acquisition conversion + cross-sectional compound-risk synthesis; emails ggoldberg, archives to Notion. v1.0 2026-06-16 (strategic-audit Fix #5). Restored 2026-07-07. [MODEL: UNVERIFIABLE | checked 2026-07-08]
+description: Monthly AI-narrated portfolio briefing (1st @ 7:30 AM) — NOI trajectory, WALT, debt-maturity countdown, acquisition conversion + cross-sectional compound-risk synthesis; emails ggoldberg, archives to Notion. v1.0 2026-06-16 (strategic-audit Fix #5). Restored 2026-07-07. [MODEL: claude-opus-5 observed | checked 2026-08-12 via live-run transcript canary]
 ---
 
 Run the ORA Monthly Portfolio Briefing — a self-contained, AI-narrated portfolio-health report. This scheduled session starts fresh with no memory; this prompt is the authoritative, complete spec. Today is the run date; the briefing covers the trailing month and the forward 18-month risk horizon.
