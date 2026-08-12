@@ -29,7 +29,8 @@ Checks:
   5. CLAUDE.md size budget: > WORD_BUDGET_FAIL words            [MISSING -> fail]
      (fail is a one-in-one-out gate ~95 words above the honest post-consolidation
      floor -- see the WORD_BUDGET_* constants for the calibration),
-     > WORD_BUDGET_WARN = approaching                            [WARN only]
+     > WORD_BUDGET_WARN = AT the consolidation floor -- a nudge,  [WARN only]
+     never a cue to trim; see the constants' calibration comment
   6. Dated annotations: CLAUDE.md is doctrine-dateless (v2.1 layering: ALL dated
      history -> event_log.md). Any bare ISO date in CLAUDE.md    [MISSING -> fail]
      Dates embedded in hyphenated slugs (spec filenames like
@@ -69,6 +70,18 @@ Checks:
      a guard named "active" whose only runner was silently retired, unnoticed.
      Code-surface scope only (no OneDrive LAMS fleet I/O); an unreadable source
      downgrades an unresolved guard to a soft WARN, never a false orphan  [WARN only]
+ 14. Stage-exclusion four-site sync: the five ratified terminal Stage values
+     must be present at all four sites that carry the list --
+     ora-deal-command-board STEP 1, ora-deal-aging-sla STEP 1,
+     ora-health-guard 4d (all exclusion) and ora-weekly-hygiene   [WARN only]
+     check C (the inclusion complement). Value-PRESENCE, not byte-identity:
+     the sites legitimately differ in syntax, so a byte compare would fail
+     against correct files. Origin: 4d was found carrying three of the five
+     on 2026-08-03, enforced until then only by prose in the four files.
+     Live-mode only; a site whose SKILL.md is unreadable makes the sweep
+     report PARTIAL rather than clean.
+     (Checks 12 and 13 are registered in main() but were never added to this
+     list -- pre-existing gap, noted 2026-08-12, not fixed here.)
 
 Exit 1 = any hard [MISSING] (command/file/skill absent, size budget, dated
          annotation, confidential leak), or CLAUDE.md / the EOS section is
@@ -1001,6 +1014,70 @@ def collect_identity_emitters():
     return out
 
 
+# --- Check 14 (2026-08-12): four-site stage-exclusion list sync. -----------
+# The five terminal Stage values were ratified 2026-07-27 and extended to
+# ora-health-guard block 4d on 2026-08-03, when 4d was found carrying only
+# THREE of the five. The "all four sites stay identical" rule is stated only in
+# prose inside the four SKILL.mds; no guard enforced it and the gap survived
+# weeks. This is that guard.
+#
+# The assertion is value-PRESENCE, not byte-identity. The four sites
+# legitimately differ in syntax -- 4d spaces its commas, and ora-weekly-hygiene
+# states the same five as an INCLUSION list in backticked prose (it is the
+# complement check) -- so a byte comparison would fail against correct files on
+# day one. Matching the em-dash literally is load-bearing: the doctrine warns
+# that a hyphen silently fails the string comparison, so a hyphenated site
+# reports as missing, which is exactly the desired behaviour.
+STAGE_TERMINAL_VALUES = (
+    "Closed Won",
+    "Passed",
+    "Killed",
+    "Killed — Reneg Only",
+    "Killed — Note/Short-Sale in Discussion",
+)
+STAGE_EXCLUSION_SITES = (
+    ("ora-deal-command-board", "STEP 1"),
+    ("ora-deal-aging-sla", "STEP 1"),
+    ("ora-health-guard", "block 4d"),
+    ("ora-weekly-hygiene", "check C (inclusion complement)"),
+)
+
+
+def check_stage_exclusion_sync(sources):
+    """sources = [(label, text)]. Every site must carry all five canonical
+    terminal-stage values in quoted form. Returns one finding per site with a
+    gap -- EVERY such site, not just the first, for the same reason
+    check_identity_drift reports them all: a first-hit-only report lets the
+    remainder survive a 'fixed it' claim."""
+    out = []
+    for label, text in sources:
+        missing = [v for v in STAGE_TERMINAL_VALUES if ("'%s'" % v) not in text]
+        if missing:
+            out.append("%s missing %d of %d: %s"
+                       % (label, len(missing), len(STAGE_TERMINAL_VALUES),
+                          ", ".join(missing)))
+    return out
+
+
+def collect_stage_exclusion_sites():
+    """(label, text) for each of the four SKILL.mds that is readable. Fail-open
+    per file: an absent/unreadable file is SKIPPED rather than reported as
+    'missing all five'. An absent SKILL.md is a different problem (check 2's
+    territory) and reporting it as stage drift would be an inferred null. The
+    caller compares the returned count against STAGE_EXCLUSION_SITES and warns
+    on a partial sweep, so a skip can never read as clean."""
+    out = []
+    for name, _where in STAGE_EXCLUSION_SITES:
+        p = SCHEDULED_TASKS_DIR / name / "SKILL.md"
+        try:
+            if p.is_file():
+                out.append((name, p.read_text(encoding="utf-8",
+                                              errors="replace")))
+        except Exception:
+            continue
+    return out
+
+
 def check_am_brief_sofr_guardrail(text):
     """Return the list of guardrail sentinels ABSENT from the SKILL.md text
     (empty == guardrail intact). Pure over text so it is unit-testable without
@@ -1212,7 +1289,8 @@ def main():
 
     # --- 5. CLAUDE.md size budget ---
     words = len(text.split())
-    print("CLAUDE.md size: %d words (warn > %d, fail > %d)"
+    print("CLAUDE.md size: %d words (warn > %d = consolidation floor; "
+          "fail > %d = the real gate)"
           % (words, WORD_BUDGET_WARN, WORD_BUDGET_FAIL))
     if words > WORD_BUDGET_FAIL:
         print("  [MISSING] size budget exceeded: %d > %d words "
@@ -1221,8 +1299,15 @@ def main():
               % (words, WORD_BUDGET_FAIL))
         missing.append("CLAUDE.md size budget (%d > %d words)" % (words, WORD_BUDGET_FAIL))
     elif words > WORD_BUDGET_WARN:
-        warn("approaching the size budget (%d words; fail at %d)"
-             % (words, WORD_BUDGET_FAIL))
+        warn("%d words is AT the consolidation floor (%d), not near the gate (%d) -- "
+             "this line is a one-in-one-out nudge, NOT 'the file is too big'. Do not "
+             "trim to satisfy it: two independent full-file passes both bottomed out "
+             "here, so cuts below the floor remove load-bearing doctrine. A genuine "
+             "reduction is relocation (move a whole rule down a layer, leave a "
+             "pointer), never deletion. Ruled 'don't trim' in this band on 2026-07-28 "
+             "and again 2026-08-09; calibration: "
+             "memory/reference_claude_md_word_budget_is_a_floor.md"
+             % (words, WORD_BUDGET_WARN, WORD_BUDGET_FAIL))
     else:
         print("  [OK]      within budget")
 
@@ -1832,6 +1917,35 @@ def main():
                     print("Doctrine-vs-deliverable identity sweep: clean "
                           "(%s across %d live emitter(s))"
                           % (canon, len(emitters)))
+
+    # --- 14. four-site stage-exclusion list sync (2026-08-12). Live-mode only:
+    # it reads the four scheduled-task SKILL.mds, which do not exist beside a
+    # single fixture path. WARN-only, fail-open. ---
+    if live_mode:
+        sites = collect_stage_exclusion_sites()
+        if len(sites) < len(STAGE_EXCLUSION_SITES):
+            seen = set(lbl for lbl, _ in sites)
+            absent = [n for n, _ in STAGE_EXCLUSION_SITES if n not in seen]
+            warn("Stage-exclusion four-site sweep: only %d of %d SKILL.md "
+                 "readable (absent: %s) -- sweep PARTIAL, not asserted. A "
+                 "silent pass on an unread site is the inferred-null failure."
+                 % (len(sites), len(STAGE_EXCLUSION_SITES), ", ".join(absent)))
+        if sites:
+            drift = check_stage_exclusion_sync(sites)
+            if drift:
+                warn("Stage-exclusion list DRIFT -- %d of the four ratified "
+                     "sites disagree: %s. The failure directions are opposite "
+                     "and both silent: a missing value in the three exclusion "
+                     "sites leaks a retired deal onto a live board, while in "
+                     "ora-weekly-hygiene's inclusion form it means retired "
+                     "artifacts are never flagged for archival. Match on the "
+                     "em-dash -- a hyphen fails the comparison. Fix all four "
+                     "in ONE session (each SKILL.md carries the rule)."
+                     % (len(drift), ascii_safe(" | ".join(drift))))
+            else:
+                print("Stage-exclusion four-site sync: clean (%d values across "
+                      "%d site(s))"
+                      % (len(STAGE_TERMINAL_VALUES), len(sites)))
 
     # --- verdict ---
     if missing:
