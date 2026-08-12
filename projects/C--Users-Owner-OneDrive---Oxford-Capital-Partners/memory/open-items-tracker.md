@@ -32,6 +32,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
+| [OI-126](#OI-126) | 2026-08-12 | session 08df9f95 (scheduled `ora-doctrine-integrity-guard` run), investigating why merged `hooks/**` fixes were not live | **TRANSIENT — may self-close.** The primary `~/.claude` checkout cannot move onto `main` because `worktrees/_push-main-tmp` holds that branch (git allows a branch in one worktree only), so PR #51 and #55 are merged but INERT in the live pre-push chain: the confidentiality suite's 131 assertions ENV-SKIP on every worktree push, and a load-induced failure still hard-blocks with no retry. `_push-main-tmp` is NOT stale — actively used, clean, and its owning session is idle awaiting input. Local `main` (`9e6c00a`) already carries #47/#49/#51/#55 and is 4 ahead / 0 behind `origin/main`. Resolution is for that session to release the worktree; the ~117 uncommitted files in the primary checkout are unverified against the 48 incoming commits, so nobody should force the switch |
 | [OI-119](#OI-119) | 2026-08-11 | `pre-push` hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) | Pre-push gate is **flaky under its own load and hard-blocks any session's push**: across 3 consecutive pushes of one branch, **two different** tests failed (`test_allocate_oi_id.py`, `test-claim-file-collision.py`) with two clean runs of the same suite between them. The gate retries tests that *time out* but not those that error, so each flake looks like a real regression and the tempting escape is a 60-min multi-use override token |
 | [OI-118](#OI-118) | 2026-08-11 | `.gitignore:61`, found wiring ora-health-guard to the double-fire guard | `.gitignore`'s `/scheduled-tasks/*/*` makes every `_shared/` helper edit **invisible to `git status`** on any branch predating that file's force-add — and git then **silently overwrites** the file on `checkout`/`merge`/`rebase` to main (verified by reproduction; the same file without the ignore rule aborts with exit 1). Standing trap for the whole guard toolkit |
 | [OI-009](#OI-009) | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Verify the 93 Notion Tenant DB rows with no workbook counterpart against primary leases (low priority) |
@@ -96,6 +97,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | [OI-114](#OI-114) | 2026-08-11 | [ORA Monthly Portfolio Briefing — August 2026](https://app.notion.com/p/3b96ecd89e598192b55ae297b2c46cad) Risk 1, run 2026-08-11 | **MEDIUM — tenant concentration, no automated cover.** 55 New Plant Court (Owings Mills MD) has a single tenant, **Eurosort, Inc., 34,534 SF, \$452,835 ARR — 8.09% of portfolio ARR and 11.91% of portfolio NOI** — whose lease ends **2027-12-31**. It is 100% of that property's income (property WALT 1.39 yr). The asset is **unencumbered**, so it appears in no maturity schedule, no LTV test and no DSCR test, and no covenant, lender or automated alert will surface the expiry. Because value is carried as NOI ÷ cap (6.5%), a non-renewal writes down **~\$6.97M — 12.0% of portfolio value**. It also lands in the portfolio's largest expiry month (Dec-2027: 59,727 SF / \$741,690 / 8 leases, of which Eurosort alone is 61%). **Two actions: (a) Gabriel to confirm whether the lease carries a renewal option, ROFR or termination right** — the rent roll records escalation but no option data, and the answer changes the negotiating posture; **(b) open renewal discussions now, at 16 months**, targeting a signed extension or replacement LOI by Q1-2027 |
 | [OI-115](#OI-115) | 2026-08-11 | [ORA Monthly Portfolio Briefing — August 2026](https://app.notion.com/p/3b96ecd89e598192b55ae297b2c46cad) Risk 4, run 2026-08-11; originating incident [project_insurance_lapse_confirmed_real_2026-07-25.md](project_insurance_lapse_confirmed_real_2026-07-25.md) | **HIGH — escalation path has failed, needs a human owner.** Nine properties are uninsured or about to be. **8 policies EXPIRED for 3+ consecutive ingest runs** — escalated to Gabriel 2026-07-13 and **unchanged across four reporting cycles**: Fairground Village Center PCKG+BCL, ETC POA PCKG+BCL, 1100 Rarig PCKG+BCL, 3883 Livingston PCKG+BCL. **4 more are Renew-Now and have closed from 25–29 days to 18–22 days with no movement**: 1900 N Broadway UFX+BCL (expire 2026-08-27) and 9050 Red Branch PCKG+BCL (expire 2026-08-31). **Compounding: 9050 Red Branch is the property carrying the only balloon inside 18 months** (2028-01-01) — a lender finding a lapsed policy on its collateral 16 months before maturity turns a benign refinance into a covenant conversation; and **1100 Rarig is uninsured** while running the portfolio's shortest WALT (0.92 yr) and 22.9% vacancy. Not an analytical question — \$57.95M of insurable value behind a paperwork failure that four cycles of automated alerting has not moved. **Escalate to Eric** |
 | [OI-120](#OI-120) | 2026-08-11 | live incident this session while committing the OI-098 tracker work | **MEDIUM** `config-write-guard` models **working-tree rewrites, not index state**, so a session can contaminate the shared `~/.claude` index but cannot undo it. `GIT_MUTATE_RE` (`hooks/lib/tool_call_paths.py:430-432`) matches the verbs `checkout` / `restore` / `reset` / `apply` / `stash` / `merge` / `rebase` / `cherry-pick` / `clean` / `revert` / `pull` / `switch` (exact regex in the detail section) — **`add` and `commit` are absent; `restore` is present.** Live-proven this session, all three: `git add -- <one memory file>` **PASSED** and silently joined **5 files another session had already staged** (including a 930-line new script); the corrective `git restore --staged` on that same file was **BLOCKED** as a governance write; `git commit` is unguarded too. Net: staging into a shared index is free, un-staging costs a 60-min multi-use `allow-config-write` token, and the single most consequential operation — creating a commit in the live governance repo — is not gated at all. **Workaround that worked and should be documented:** a pathspec commit (`git commit -F <msgfile> -- <path>`) commits the working-tree copy of just that path and leaves the index untouched, so another session's staged work is neither swept in nor disturbed. Secondary finding: the matcher scans command TEXT, so an `allocate-oi-id.py --note` merely *describing* this gap tripped it — same shape as [OI-099](#OI-099). **hooks/** — any fix takes the mandatory adversarial REFUTE pass + old-vs-new differential battery |
+| [OI-124](#OI-124) | 2026-08-12 | root-cause trace of the two split rows repaired in [#57](https://github.com/ZeOoba/ora-claude-config/pull/57) | **MEDIUM — ROOT CAUSE IDENTIFIED for the split-table-row defect [OI-098](#OI-098) had carried as unknown.** Both splits (`OI-092`, `OI-095`) trace by `git log -S` to a **single commit, `57d0acf` (2026-08-05)**, whose own message names the method: *"isolated via hash-object/update-index"*. Two things combined: (1) the row text was **hard-wrapped at ~100 columns** — continuation widths 98/98/100/101/101/101/102/102/103/104, matching this file's prose-wrapping convention — which is correct for a section body and **fatal for a table row**, since a Markdown row must be exactly one line; and (2) writing the content as a blob straight into the index **bypasses the working tree entirely**, so no editor, no renderer and no diff of the rendered table ever saw the result. The blob-injection technique is itself a reasonable response to a contaminated shared checkout (cf. [OI-120](#OI-120)) — the defect is that it removes the last human/tool check that would have caught a malformed row. **Impact: live 6 days and survived 7 subsequent commits to the same file**, silently ending the table for every row after the break. **Distinct from the other mechanism** already in OI-098's history (a blank line inside the table, which pushed OI-095/096/097 out) — same symptom, different cause; do not treat one fix as covering both. Cheap detector proposed, green today: every line matching `^\| \[OI-` must end in an unescaped pipe character |
 
 ### OI-009
 **Status:** OPEN (substantial progress made 2026-07-17, real scope remains)
@@ -3098,6 +3100,68 @@ remote `ZeOoba/ora-claude-config`.
    firing** in this session's own `UserPromptSubmit` hook output ("10 other session(s) active").
    First-hand confirmation the shipped behaviour is live, not merely merged.
 
+### OI-124
+**Status:** OPEN
+**Opened:** 2026-08-12
+**Source:** root-cause trace of the two split table rows repaired in [PR #57](https://github.com/ZeOoba/ora-claude-config/pull/57)
+**Severity:** MEDIUM — silent structural corruption of the tracker; no data lost, but the file
+misrenders and the defect recurs.
+
+**This closes out the "root cause remains unidentified" note [OI-098](#OI-098) carried through two
+separate repairs of the same symptom.**
+
+**What the evidence shows.** `git log -S` on a distinctive fragment of each runaway row returns the
+same origin for both: commit **`57d0acf`, 2026-08-05 17:55 ET**, *"docs(tracker): close OI-020, close
+OI-025, file OI-101 — isolated via hash-object/update-index"*. The commit message names the method
+that caused it.
+
+**Two conditions combined; either alone is survivable.**
+
+1. **The row text was hard-wrapped at ~100 columns.** Measured continuation-line widths for `OI-095`:
+   101, 101, 98, 98, 104, 101, 100, 101, 93, 102, 102, 103 (plus one 337-char unwrapped insert and a
+   61-char tail). That is the **same wrapping convention this file uses for section prose** — correct
+   there, and **fatal for a table row**, because a Markdown table row must occupy exactly one line.
+   The error is applying a whole-file prose rule to the one construct that cannot take it.
+2. **The content was written as a blob straight into the index** (`git hash-object` +
+   `git update-index`), which **bypasses the working tree**. Nothing rendered it, nothing diffed the
+   rendered table, no editor ever opened it. The last check that would ordinarily catch a malformed
+   row was removed by the very technique used to isolate the change.
+
+**The technique is not the villain.** Blob injection is a sane response to a contaminated shared
+checkout — the same hazard [OI-120](#OI-120) describes, where staging into a shared index sweeps up
+other sessions' work. The defect is that it silently drops the render/review step, so a
+mechanically-generated malformation lands unseen.
+
+**Impact.** Introduced 2026-08-05, repaired 2026-08-11 on a branch and 2026-08-12 on `main`: **live
+for 6 days across 7 subsequent commits to the same file** (`052e59e`, `5ad48a9`, `48f884b`, `a65d3e6`,
+`7e14825`, `36e8030`, `f2d04f1`), none of which noticed. An unterminated row followed by a prose block
+**terminates the table**, so every row after the break — including OI-098 itself — rendered outside it.
+
+**Distinct from the other mechanism — do not conflate them.** OI-098's history records an earlier
+repair of a *different* cause in this same region: **a blank line inside the table**, which pushed
+`OI-095`/`096`/`097` outside it. Same symptom (table ends early), different mechanism (blank-line
+terminator vs. wrapped row). A fix for one does not cover the other, which is exactly why the symptom
+came back and read as unexplained.
+
+**Why nothing detects it.** A row-vs-section audit sees `OI-095` as present and internally consistent,
+because the **row text survives the break intact** — it is only the line structure that is wrong. Every
+audit this file has been given keys on ids and fields, none on line termination.
+
+**Candidate fixes (none applied here; this item is the diagnosis).**
+- **(a) Cheapest and highest value — a termination check.** Every line matching `^\| \[OI-` must end
+  in a `|` that is not backslash-escaped. One line of logic, catches both mechanisms' visible
+  symptom, and is **green as of PR #57**. Natural homes: `memory-integrity-probe.py`, or the
+  pre-push tracker checks.
+- **(b) Never wrap a table row when generating tracker content.** Whatever produced `57d0acf` applied
+  a prose wrapper to the whole file. Row lines must be exempt.
+- **(c) If blob injection is used to isolate a change, validate the blob before writing it** — render
+  or lint the constructed content rather than trusting it, since this path has no other reviewer.
+
+(a) is the one worth doing first: it is independent of who writes the file or how, and it would have
+caught this on day one instead of day six.
+
+**Auto-check:** no line matching `^\| \[OI-` may lack a terminating unescaped `|`.
+
 ## Closed
 
 | ID | Opened | Closed | Source | One-line |
@@ -4367,8 +4431,10 @@ left in the Open table on this side).
   neither terminating. **An unterminated row followed by a prose block ends the table**, so every row
   after them rendered outside it. Repaired by pure join — no content authored; each seam was read and
   reads as continuous prose, and each result is exactly 4 cells. `OI-095` is a **recurrence**: this
-  file's own history records repairing a split table in this same region before. Root cause remains
-  unidentified; only the symptom has been cleared, twice. Cheap detector: every line matching
+  file's own history records repairing a split table in this same region before. **Root cause now
+  IDENTIFIED and filed as [OI-124](#OI-124)** (2026-08-12) — rows hard-wrapped at ~100 columns and written
+  as a blob via `hash-object`/`update-index`, bypassing every renderer; and note OI-124 also shows the
+  earlier repair was a **different** mechanism (a blank line inside the table), so the two are not one bug. Cheap detector: every line matching
   `^\| \[OI-` must end in an unescaped `|`.
 - **Missing detail sections — 6 back-filled.** `OI-101`–`OI-105` (Open) and `OI-106` (Closed). Each
   was reconstructed **from its own table row**, the only surviving record, and carries an explicit
@@ -4699,6 +4765,46 @@ Gabriel's call.
 
 **Auto-check:** none yet. A cheap one: fail if any path matched by `.gitignore` is also tracked on `origin/main`.
 
+### OI-126
+**Status:** OPEN — **TRANSIENT.** Expected to self-close once `_push-main-tmp` is released. If it is gone and the
+primary checkout is on `main`, close this without further work.
+**Opened:** 2026-08-12
+**Source:** session 08df9f95 (an unattended `ora-doctrine-integrity-guard` scheduled run that Gabriel took over
+interactively), while investigating why merged `hooks/**` fixes were not taking effect
+**Description:** The primary checkout `C:/Users/Owner/.claude` sits on `feat/model-canary-probe-step25`
+(19 ahead / 48 behind `origin/main`, ~117 uncommitted files). It **cannot** be moved onto `main`, because
+`C:/Users/Owner/.claude/worktrees/_push-main-tmp` has `main` checked out and git permits a branch in exactly one
+worktree. This is a git constraint, not neglect.
+
+Consequence: PR #51 and #55 are merged but **inert**. Both are `hooks/**` changes that only take effect once the
+primary checkout is on a ref containing them. Until then the live pre-push chain runs the pre-#51/#55 versions —
+`test-confidentiality-guard.py` ENV-SKIPs on every worktree push (131 assertions silently not running), and a
+load-induced test failure hard-blocks a push with no retry (the OI-119 symptom).
+
+**Verified, not inferred (2026-08-12):**
+
+| Claim | Evidence |
+|---|---|
+| `_push-main-tmp` is NOT a stale leftover | reflog: created 15:59, `merge origin/main` at 15:59 and 16:03, `git push orig…` at 16:25; index rewritten 16:12; 0 uncommitted |
+| Nothing in `~/.claude` creates it | no match in any `.py`/`.sh`/`.ps1`; created by hand by a session |
+| Owner is `local_25942895` | its transcript enumerates `repo-housekeeping.json` among **its own** claim files; last-activity matches the worktree owner record to ~3s |
+| Local `main` already has all four PRs | `#47` script present, `#49` 3 refs, `#51` 2 refs, `#55` 8 refs — checked by CONTENT, since squash-merges leave no ancestry |
+| Local `main` is 4 ahead / 0 behind `origin/main` | those 4 are the owning session's unpushed merge commits |
+
+**Resolution:** the owning session releases `_push-main-tmp`, then the primary checkout moves to `main`. **Do not
+force it** — the ~117 uncommitted files are other sessions' work and were NOT verified to survive a checkout
+against the 48 incoming commits. Doctrine forbids `checkout`/`reset`/`rebase` on a contaminated tree.
+
+**Why this wasn't handed off directly:** `send_message` is unavailable *from* unattended sessions, and the target
+is itself a scheduled-task session that cannot receive. A copy-paste handoff was given to Gabriel instead.
+
+**Search-tooling gotcha found here (worth its own note):** ripgrep honours `.gitignore`, so a `Grep` sweep for
+`_push-main-tmp` returned NOTHING while a plain `grep -r` found the one reference — in
+`obsidian-fleet-mirror/session-state.d/`, which is gitignored. That reference is what identified the owning
+session. **Any search for runtime/session state must not rely on ripgrep's defaults.**
+
+---
+
 ### OI-119
 **Status:** OPEN (diagnosed and reproduced; fix is a judgement call between three options)
 **Opened:** 2026-08-11
@@ -4707,6 +4813,23 @@ Gabriel's call.
 **Description:** The pre-push gate runs the whole tracked test suite and **blocks the push on any failure**.
 `test_allocate_oi_id.py` is flaky under the concurrency that gate itself creates, so it can hard-block a push
 that has nothing to do with it — as it did here, on a change touching none of the code it exercises.
+
+> **FIX SHIPPED 2026-08-12 — [PR #55](https://github.com/ZeOoba/ora-claude-config/pull/55), merged. Status left OPEN deliberately: closing it is the author's call, not mine.**
+> Option "retry a failing file once" was put to Gabriel and chosen. `_run_one()` now gives ANY failing file one
+> rerun at the NORMAL budget, not just a timed-out one. Deliberately `elif`, so a timed-out file (which already
+> spent the doubled rerun) never also gets this one — no file can pay three budgets. The doubled budget still
+> keys on `timed_out` rather than rc, preserving the 2026-07-26 REFUTE finding, now asserted via per-call budget
+> lists instead of a bare spawn count. A recovered flake is disclosed by name as FLAKY; a genuine failure fails
+> both runs and still blocks.
+> Independent review caught a real defect in the first draft: a run-1 FAIL whose rerun printed `CANNOT RUN:`
+> reclassified to env-skip — non-blocking AND invisible, since the flaky disclosure scans passes only. Forced
+> back to FAIL, with a regression fixture. Suite 90 → 98 assertions.
+> **Caveat:** this was diagnosed independently on 2026-08-12 before finding this item — duplicated effort, and the
+> arithmetic matched (`9/12` = the three coupled assertions of the 12-thread test failing together). The flake was
+> never reproduced on demand across three attempts, so the root cause is inferred from that signature, not proven.
+> The companion `test-claim-file-collision.py` flake noted above was NOT investigated and may be a different cause.
+> Not fixed here: the symmetric pre-existing hole where a TIMED-OUT run 1 followed by an env-skip rerun is
+> non-blocking — the "ran far enough to fail proves it can run" rationale does not transfer to a timeout.
 
 **Reproduced, not inferred (2026-08-11):**
 
