@@ -1,6 +1,6 @@
 ---
 name: ora-model-release-watch
-description: Weekly Monday ~11:20 AM ET — detects new Anthropic Claude model releases by reading this session's own system-prompt model-lineup statement and diffing against reference_model_release_checklist.md; on detection, updates that memory file, posts to Notion Ops Hub (32b6ecd8), and emails ggoldberg only with the concrete update checklist (settings.json, scheduled-task-standard memory, oxford-command-center + ora-pm sweep). Silent no-op when nothing changed. v1.0 2026-07-10. [MODEL: UNVERIFIABLE | checked 2026-07-10]
+description: Weekly Monday ~11:20 AM ET — detects new Anthropic Claude model releases by reading this session's own system-prompt model-lineup statement and diffing against reference_model_release_checklist.md; on detection, updates that memory file, posts to Notion Ops Hub (32b6ecd8), and emails ggoldberg only with the concrete update checklist (settings.json, scheduled-task-standard memory, oxford-command-center + ora-pm sweep). Silent no-op when nothing changed. v1.0 2026-07-10. [MODEL: claude-opus-5 observed | checked 2026-08-12 via live-run transcript canary]
 ---
 
 # ORA Model Release Watch (CC/MCP fleet)

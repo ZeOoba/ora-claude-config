@@ -1,6 +1,6 @@
 ---
 name: ora-doctrine-integrity-guard
-description: Daily doctrine/governor integrity guard (CC/MCP fleet) — push-independent backstop running BOTH doctrine-integrity-probe.py AND governor-drift-probe.py (Hard Invariant 4, DSCR&gt;=1.25/LTV&lt;=40), surfaces eos-telemetry-rollup, writes _state/doctrine-status.json, emails+posts to Notion ONLY on drift; clean run is silent. Supersedes retired "ORA EOS Health" Windows task. v1.0 2026-07-08. [MODEL: UNVERIFIABLE | checked 2026-07-09]
+description: Daily doctrine/governor integrity guard (CC/MCP fleet) — push-independent backstop running BOTH doctrine-integrity-probe.py AND governor-drift-probe.py (Hard Invariant 4, DSCR&gt;=1.25/LTV&lt;=40), surfaces eos-telemetry-rollup, writes _state/doctrine-status.json, emails+posts to Notion ONLY on drift; clean run is silent. Supersedes retired "ORA EOS Health" Windows task. v1.0 2026-07-08. [MODEL: claude-opus-5 observed | checked 2026-08-12 via live-run transcript canary]
 output_contract:
   version: 1
   blocks:
