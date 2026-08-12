@@ -33,6 +33,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
 | [OI-126](#OI-126) | 2026-08-12 | session 08df9f95 (scheduled `ora-doctrine-integrity-guard` run), investigating why merged `hooks/**` fixes were not live | **TRANSIENT — may self-close.** The primary `~/.claude` checkout cannot move onto `main` because `worktrees/_push-main-tmp` holds that branch (git allows a branch in one worktree only), so PR #51 and #55 are merged but INERT in the live pre-push chain: the confidentiality suite's 131 assertions ENV-SKIP on every worktree push, and a load-induced failure still hard-blocks with no retry. `_push-main-tmp` is NOT stale — actively used, clean, and its owning session is idle awaiting input. Local `main` (`9e6c00a`) already carries #47/#49/#51/#55 and is 4 ahead / 0 behind `origin/main`. Resolution is for that session to release the worktree; the ~117 uncommitted files in the primary checkout are unverified against the 48 incoming commits, so nobody should force the switch |
+| [OI-127](#OI-127) | 2026-08-12 | session `e0f8485e`, hitting pre-push failures under concurrent load | **DUPLICATE — superseded by OI-135; no separate investigation needed.** Same defect, same file, same number: `hooks/git-prepush-hook-tests-gate.py`'s 180s per-test timeout budget is too low under concurrent load, so healthy tests exit-124 and hard-block a push. OI-127 (20:52Z) is the EARLIER reservation; OI-135 (22:00Z, Gabriel-directed, filed by session `2fb76021`) covers the same finding with fuller evidence — 5 sessions hit exit-124 on `test-eos-review-gate.py` and siblings on 2026-08-12, 180s budget vs ~150–300s actual under 12–16+ concurrent sessions, all clearing on rerun. Filed only to close the orphan reservation and stop a third session re-deriving it. **Track the fix under OI-135.** Closely related to [OI-119](#OI-119) (same gate, flakiness rather than timeout) |
 | [OI-119](#OI-119) | 2026-08-11 | `pre-push` hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) | Pre-push gate is **flaky under its own load and hard-blocks any session's push**: across 3 consecutive pushes of one branch, **two different** tests failed (`test_allocate_oi_id.py`, `test-claim-file-collision.py`) with two clean runs of the same suite between them. The gate retries tests that *time out* but not those that error, so each flake looks like a real regression and the tempting escape is a 60-min multi-use override token |
 | [OI-118](#OI-118) | 2026-08-11 | `.gitignore:61`, found wiring ora-health-guard to the double-fire guard | `.gitignore`'s `/scheduled-tasks/*/*` makes every `_shared/` helper edit **invisible to `git status`** on any branch predating that file's force-add — and git then **silently overwrites** the file on `checkout`/`merge`/`rebase` to main (verified by reproduction; the same file without the ignore rule aborts with exit 1). Standing trap for the whole guard toolkit |
 | [OI-009](#OI-009) | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Verify the 93 Notion Tenant DB rows with no workbook counterpart against primary leases (low priority) |
@@ -4802,6 +4803,39 @@ is itself a scheduled-task session that cannot receive. A copy-paste handoff was
 `_push-main-tmp` returned NOTHING while a plain `grep -r` found the one reference — in
 `obsidian-fleet-mirror/session-state.d/`, which is gitignored. That reference is what identified the owning
 session. **Any search for runtime/session state must not rely on ripgrep's defaults.**
+
+---
+
+### OI-127
+**Status:** DUPLICATE — superseded by OI-135. Filed only to close an orphan reservation; do not investigate separately.
+**Opened:** 2026-08-12 (id reserved 2026-08-12T20:52:45Z by session `e0f8485e`; row written 2026-08-12 by session
+`1de11c79` during an orphan-reservation sweep, with the reserving session inactive on it and holding no claim)
+**Severity:** see OI-135 — this row carries no independent severity assessment.
+
+**Why this row exists.** The id was reserved and the row never written, so `allocate-oi-id.py --report` listed it
+as an orphan. Sixty-eight minutes later a different session (`2fb76021`) reserved **OI-135** for the same defect
+and filed it with fuller evidence. Leaving OI-127 as a bare reservation invites a third session to re-derive the
+same finding a third time; writing it as a full standalone row would put two live items in the tracker for one
+defect. Hence a pointer.
+
+**The defect (tracked under OI-135, not here).** `hooks/git-prepush-hook-tests-gate.py` applies a 180s per-test
+timeout budget. Under concurrent load that budget is below the real runtime of several suites, so healthy tests
+exit-124 and the gate hard-blocks the push. Measured on 2026-08-12: 5 sessions hit exit-124 on
+`test-eos-review-gate.py` and siblings, ~150–300s actual against the 180s budget under 12–16+ concurrent
+sessions, **all clearing on rerun**.
+
+Independently corroborated the same day: the push of `oi122-gate-msg` (PR #67) emitted
+`timeout-retry (timed out under load, passed on the doubled-budget rerun; not blocking)` naming
+`test-commit-hygiene-guard.py`, `test-eos-review-gate.py`, and `test-memory-orphan-link-guard.py` — i.e. the
+doubled-budget rerun path already exists and works; the first-pass budget is what is mis-set.
+
+**Do not fix from this row.** Track the fix, evidence, and any REFUTE pass under **OI-135**. Note that OI-135's
+own row/section may still be in flight on branch `docs/oi-135-prepush-timeout-budget` and is deliberately NOT
+linked here as `#OI-135`: the anchor does not resolve until that lands, and `memory-integrity-probe.py`
+hard-fails on dead pointers into the tracker. Convert to a real link once the section exists.
+
+**Related:** [OI-119](#OI-119) — same gate, the *flakiness* failure mode (errored tests are not retried) rather
+than the timeout budget. A fix for one should be checked against the other.
 
 ---
 
