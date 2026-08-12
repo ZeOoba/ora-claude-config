@@ -1042,6 +1042,158 @@ def test_warn_mode_does_not_consume_override_token():
     print("PASS test_warn_mode_does_not_consume_override_token")
 
 
+def _hint_fixture(prefix):
+    """Repo with one non-risk path and one risk path, both staged."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix=prefix)
+    write(repo, "src/ui/button.tsx", "export const B = 1\n")
+    write(repo, "hooks/unrelated.py", "y = 1\n")
+    git(repo, "add", "-A")
+    return repo, tmp
+
+
+def test_multiline_quoted_message_emits_shape_hint():
+    """OI-122. A directly-quoted MULTI-LINE `-m` detaches the trailing pathspec
+    (the tokenizer recognizes heredocs, not this shape), so scope falls back to
+    the whole index and an unrelated staged risk file blocks the commit. The
+    block message must SAY that, rather than steering to an override -- which
+    is what actually happened on 2026-08-11 and spent a ratified exception on a
+    commit that carried zero blast-radius files."""
+    repo, tmp = _hint_fixture("eos-rg-hint-")
+    cmd = 'git commit -m "title line\n\nbody line" -- src/ui/button.tsx'
+    rc, out, err = run_hook(cmd, repo, tmp)
+    assert_blocked(rc, err, "multi-line quoted message falls back to whole index")
+    assert "multi-line" in err, "hint must name the message shape: %s" % err
+    assert "heredoc" in err, "hint must offer the heredoc remedy: %s" % err
+    print("PASS test_multiline_quoted_message_emits_shape_hint")
+
+
+def test_heredoc_message_keeps_pathspec_attached():
+    """The fleet-sanctioned heredoc form must keep scoping correctly -- this is
+    the behaviour the hint points people TO, so it is load-bearing. Guards
+    against any future 'fix' that regresses tokenization."""
+    repo, tmp = _hint_fixture("eos-rg-heredoc-")
+    cmd = ('git commit -m "$(cat <<\'EOF\'\n'
+           'title line\n\nbody line\n'
+           'EOF\n'
+           ')" -- src/ui/button.tsx')
+    rc, out, err = run_hook(cmd, repo, tmp)
+    assert_allowed(rc, err, "heredoc-fed message keeps the pathspec attached")
+    print("PASS test_heredoc_message_keeps_pathspec_attached")
+
+
+def test_shape_hint_silent_when_pathspec_attached():
+    """The hint is a DIAGNOSTIC, not a scope change: when the pathspec attaches
+    correctly and the risk file is genuinely in it, the commit still blocks and
+    the hint must stay silent."""
+    repo, tmp = _hint_fixture("eos-rg-nohint-")
+    rc, out, err = run_hook('git commit -m "touch hook" -- hooks/unrelated.py',
+                            repo, tmp)
+    assert_blocked(rc, err, "risk file genuinely inside the pathspec")
+    assert "directly-quoted multi-line" not in err, (
+        "hint must not fire when the pathspec attached: %s" % err)
+    print("PASS test_shape_hint_silent_when_pathspec_attached")
+
+
+def test_shape_hint_does_not_change_blocked_path_set():
+    """Hard invariant: adding the hint must not alter WHICH paths the gate
+    blocks on, nor its exit code. Review finding F3: an earlier version of this
+    test discarded both return codes, so it passed under a warn-mode downgrade
+    (rc 0 + WARNING -- a genuine fail-open) and on a full revert. Assert the
+    block itself, not just a substring of stderr."""
+    repo, tmp = _hint_fixture("eos-rg-inv-")
+    rc_fb, _, err_fb = run_hook('git commit -m "a\n\nb" -- src/ui/button.tsx',
+                                repo, tmp)
+    rc_sc, _, err_sc = run_hook('git commit -m "a" -- hooks/unrelated.py',
+                                repo, tmp)
+    assert_blocked(rc_fb, err_fb, "fall-back scope must still BLOCK")
+    assert_blocked(rc_sc, err_sc, "scoped commit must still BLOCK")
+    assert "hooks/unrelated.py" in err_fb, (
+        "fall-back scope must still report the risk file: %s" % err_fb)
+    assert "hooks/unrelated.py" in err_sc, (
+        "scoped commit must still report the risk file: %s" % err_sc)
+    print("PASS test_shape_hint_does_not_change_blocked_path_set")
+
+
+def _load_gate_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("gate_mod_under_test", HOOK)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_hint_remedy_template_actually_parses():
+    """Review finding F1 (MAJOR). The heredoc example the hint tells a blocked
+    operator to copy must ITSELF tokenize with the pathspec attached. The first
+    version indented every rendered line for display, including the terminator
+    -- bash requires it at column 0, and this parser's own exact-match
+    terminator rule fails on an indented one, so copying the remedy reproduced
+    the very false block it was explaining, in a loop."""
+    mod = _load_gate_module()
+    hint = mod.message_shape_hint('git commit -m "a\n\nb" -- src/x.tsx')
+    assert hint, "fixture must trigger the hint"
+    start = hint.index('git commit -m "$(cat')
+    end = hint.index('" -- <path>', start) + len('" -- <path>')
+    tpl = (hint[start:end].replace("<title>", "t")
+                          .replace("<body>", "b")
+                          .replace("<path>", "src/x.tsx"))
+    sys.path.insert(0, os.path.join(HERE, "lib"))
+    from git_commit_parse import find_commit_segment
+    args = find_commit_segment(tpl)
+    assert args is not None and "--" in args, (
+        "the hint's own remedy template strands its pathspec: %r -> %r"
+        % (tpl, args))
+    print("PASS test_hint_remedy_template_actually_parses")
+
+
+def test_hint_silent_on_heredoc_prose_containing_double_dash():
+    """Review finding F2 (MAJOR). `--` is this fleet's house punctuation. A
+    heredoc-fed message whose BODY contains ' -- ' parses fine and scopes
+    correctly; the hint must not claim its scope fell back."""
+    mod = _load_gate_module()
+    cmd = ('git commit -m "$(cat <<\'EOF\'\n'
+           'reverted the earlier approach -- see notes\n'
+           'EOF\n)"')
+    assert mod.message_shape_hint(cmd) == "", (
+        "hint fired on correctly-parsed heredoc prose containing ' -- '")
+    print("PASS test_hint_silent_on_heredoc_prose_containing_double_dash")
+
+
+def test_hint_silent_on_chained_git_log_pathspec():
+    """Review finding F2 (MAJOR), second trigger: a legitimately chained
+    `git log ... -- <path>` before the commit is not stranded wreckage."""
+    mod = _load_gate_module()
+    cmd = 'git log --oneline -1 -- hooks/\ngit commit -m "a\nb"'
+    assert mod.message_shape_hint(cmd) == "", (
+        "hint fired on a chained `git log -- <path>`")
+    print("PASS test_hint_silent_on_chained_git_log_pathspec")
+
+
+def test_hint_silent_on_env_prefixed_git_command():
+    """Review finding N2. A chained git command carrying a legitimate `--` is
+    not wreckage even when an env-assignment prefixes it -- `s[0]` is then
+    `GIT_PAGER=cat`, not `git`. Classified via git_commit_parse's own
+    _segment_git_subcommand_and_args, which skips env-assign tokens."""
+    mod = _load_gate_module()
+    cmd = 'GIT_PAGER=cat git log --oneline -- hooks/\ngit commit -m "a\nb"'
+    assert mod.message_shape_hint(cmd) == "", (
+        "hint fired on an env-prefixed `git log -- <path>`")
+    print("PASS test_hint_silent_on_env_prefixed_git_command")
+
+
+def test_hint_silent_on_multiline_message_with_attached_pathspec():
+    """Review finding F6: the 'pathspec recovered' branch was never actually
+    exercised -- the earlier test used a single-line command, which returns at
+    the newline guard before reaching it. A heredoc-fed multi-line message WITH
+    a pathspec reaches that branch and must stay silent."""
+    mod = _load_gate_module()
+    cmd = ('git commit -m "$(cat <<\'EOF\'\ntitle\n\nbody\nEOF\n)" '
+           '-- hooks/unrelated.py')
+    assert mod.message_shape_hint(cmd) == "", (
+        "hint fired despite the pathspec being attached")
+    print("PASS test_hint_silent_on_multiline_message_with_attached_pathspec")
+
+
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
 
 if __name__ == "__main__":
