@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+"""Tests for append-event-log.py's duplicate-entry guard (TDD -- written before
+the implementation).
+
+THE DEFECT THIS GUARDS (2026-08-12): the same prepared entry was appended to
+event_log.md TWICE, byte-identical (5,054 chars, md5 c00d2cbc0b68). Nothing
+detected it; it was found by hand days-of-work later. With 30+ concurrent
+sessions and a documented block-loss incident already on record, a silent
+double-append is a real corruption vector.
+
+WHY THE GUARD MUST KEY ON CONTENT, NOT THE HEADER: repeated headers are
+LEGITIMATE and routine. The allow-hook-test-failure override protocol writes
+5 entries in one day under a byte-identical '## ' header, each with a
+different body (different timestamps/reasons) -- verified in the live log:
+5 same-header entries, 5 distinct body md5s. A header-based guard would block
+mandatory mechanical record-keeping. Only an EXACT content match is a duplicate.
+
+WHY REFUSING IS SAFE HERE: this script's whole design is "the append must always
+succeed" (it spools rather than fails). Skipping an exact duplicate does not
+violate that -- the content is ALREADY in the log, so the caller's intent is
+already satisfied and nothing can be lost. Exit stays 0 so `&&` caller chains
+(both pre-push gates use them) do not break.
+
+Run: python maintenance/_tests/test_append_event_log_duplicate_guard.py
+Pure stdlib. ASCII-only output (Windows cp1252 console).
+"""
+import importlib.util
+import os
+import shutil
+import sys
+import tempfile
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+APPEND = os.path.join(os.path.dirname(HERE), "append-event-log.py")
+
+results = []
+
+
+def expect(label, cond, detail=""):
+    results.append((bool(cond), label))
+    print("  %s %s%s" % ("PASS" if cond else "FAIL:", label,
+                         "" if cond else "  -- " + str(detail)))
+
+
+def load():
+    spec = importlib.util.spec_from_file_location("append_event_log", APPEND)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+HEADERLESS = "---\nname: event-log\n---\n\n"
+E1 = "## 2026-08-12 - First entry\n\nBody of the first entry.\n"
+E2 = "## 2026-08-12 - Second entry\n\nBody of the second entry.\n"
+# Same header as E1, DIFFERENT body -- the override-protocol shape.
+E1_SAME_HDR = "## 2026-08-12 - First entry\n\nA DIFFERENT body, same header.\n"
+
+
+def make_log(tmp, entries=()):
+    p = os.path.join(tmp, "event_log.md")
+    content = HEADERLESS
+    for e in entries:
+        content += e.strip() + "\n\n"
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(content)
+    return p
+
+
+def run(m, log, entry, extra=None):
+    """Invoke main() with a temp entry file. Returns (exit_code, log_text)."""
+    fd, ef = tempfile.mkstemp(suffix=".md")
+    os.close(fd)
+    # newline="" is REQUIRED: without it Windows translates "\n" -> "\r\n" on write,
+    # so a deliberately-CRLF fixture becomes "\r\r\n" on disk and reads back with
+    # DOUBLED blank lines. That is a test artifact, not real input, and it silently
+    # made the CRLF case exercise the wrong thing (caught 2026-08-12).
+    with open(ef, "w", encoding="utf-8", newline="") as f:
+        f.write(entry)
+    argv = ["--entry-file", ef, "--log", log] + list(extra or [])
+    try:
+        rc = m.main(argv)
+    finally:
+        os.remove(ef)
+    with open(log, encoding="utf-8") as f:
+        return rc, f.read()
+
+
+def main():
+    m = load()
+    print("append-event-log.py duplicate-guard tests")
+
+    # --- 1. the actual 2026-08-12 defect: exact duplicate must NOT land twice
+    tmp = tempfile.mkdtemp()
+    log = make_log(tmp, [E1])
+    rc, txt = run(m, log, E1)
+    expect("exact duplicate is not appended a second time",
+           txt.count("## 2026-08-12 - First entry") == 1,
+           "count=%d" % txt.count("## 2026-08-12 - First entry"))
+    expect("exact duplicate returns exit 0 (never breaks && chains)", rc == 0, "rc=%s" % rc)
+    shutil.rmtree(tmp, ignore_errors=True)
+
+    # --- 2. REGRESSION GUARD: same header + different body MUST still append.
+    # This is the override-protocol case (5x/day under one header in the live log).
+    tmp = tempfile.mkdtemp()
+    log = make_log(tmp, [E1])
+    rc, txt = run(m, log, E1_SAME_HDR)
+    expect("same header, DIFFERENT body still appends (override protocol)",
+           txt.count("## 2026-08-12 - First entry") == 2,
+           "count=%d" % txt.count("## 2026-08-12 - First entry"))
+    expect("  ...and both bodies are present",
+           "Body of the first entry." in txt and "A DIFFERENT body, same header." in txt)
+    expect("same-header append returns exit 0", rc == 0, "rc=%s" % rc)
+    shutil.rmtree(tmp, ignore_errors=True)
+
+    # --- 3. a genuinely new entry still appends, newest-first
+    tmp = tempfile.mkdtemp()
+    log = make_log(tmp, [E1])
+    rc, txt = run(m, log, E2)
+    expect("novel entry appends", "## 2026-08-12 - Second entry" in txt)
+    expect("novel entry lands NEWEST-first (above the existing entry)",
+           txt.index("Second entry") < txt.index("First entry"))
+    expect("novel append returns exit 0", rc == 0, "rc=%s" % rc)
+    shutil.rmtree(tmp, ignore_errors=True)
+
+    # --- 4. duplicate detection survives trailing-whitespace / EOL differences
+    tmp = tempfile.mkdtemp()
+    log = make_log(tmp, [E1])
+    rc, txt = run(m, log, E1.replace("\n", "\r\n") + "\n\n   ")
+    expect("CRLF + trailing-whitespace variant is still caught as a duplicate",
+           txt.count("## 2026-08-12 - First entry") == 1,
+           "count=%d" % txt.count("## 2026-08-12 - First entry"))
+    shutil.rmtree(tmp, ignore_errors=True)
+
+    # --- 4b. blank-line drift (same content, different vertical spacing) is a duplicate
+    tmp = tempfile.mkdtemp()
+    log = make_log(tmp, [E1])
+    spaced = E1.replace("\n\n", "\n\n\n")
+    rc, txt = run(m, log, spaced)
+    expect("blank-line-drift variant is caught as a duplicate",
+           txt.count("## 2026-08-12 - First entry") == 1,
+           "count=%d" % txt.count("## 2026-08-12 - First entry"))
+    shutil.rmtree(tmp, ignore_errors=True)
+
+    # --- 5. --allow-duplicate forces the append through
+    tmp = tempfile.mkdtemp()
+    log = make_log(tmp, [E1])
+    rc, txt = run(m, log, E1, extra=["--allow-duplicate"])
+    expect("--allow-duplicate overrides the guard",
+           txt.count("## 2026-08-12 - First entry") == 2,
+           "count=%d" % txt.count("## 2026-08-12 - First entry"))
+    expect("--allow-duplicate returns exit 0", rc == 0, "rc=%s" % rc)
+    shutil.rmtree(tmp, ignore_errors=True)
+
+    # --- 6. empty log (no existing entries) is not mistaken for a duplicate
+    tmp = tempfile.mkdtemp()
+    log = make_log(tmp, [])
+    rc, txt = run(m, log, E1)
+    expect("first-ever entry into an empty log appends",
+           txt.count("## 2026-08-12 - First entry") == 1)
+    shutil.rmtree(tmp, ignore_errors=True)
+
+    # --- 7. the pure helper is directly testable and header-insensitive
+    if hasattr(m, "is_duplicate_entry"):
+        expect("is_duplicate_entry: exact match -> True",
+               m.is_duplicate_entry(HEADERLESS + E1, E1) is True)
+        expect("is_duplicate_entry: same header, different body -> False",
+               m.is_duplicate_entry(HEADERLESS + E1, E1_SAME_HDR) is False)
+        expect("is_duplicate_entry: absent -> False",
+               m.is_duplicate_entry(HEADERLESS + E1, E2) is False)
+    else:
+        expect("is_duplicate_entry helper exists", False, "not defined")
+
+    passed = sum(1 for ok, _ in results if ok)
+    print("\n%d/%d passed" % (passed, len(results)))
+    sys.exit(0 if passed == len(results) else 1)
+
+
+if __name__ == "__main__":
+    main()
