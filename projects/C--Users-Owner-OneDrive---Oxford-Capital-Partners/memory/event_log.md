@@ -5,12 +5,33 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-04T17:00:00.000Z
+  modified: 2026-08-12T20:13:19.038Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-08-12 — Dark-fleet root cause is HOST SLEEP, not app closure; Gabriel rules "never sleep on AC"
+
+**Trigger.** Gabriel asked why `ora-am-brief` hadn't fired today. It had — at 11:13:21 ET, 5h13m past its 06:00 slot — and completed, writing the Rate Snapshot page at 11:20 ET (`prefetch_status: OK`). Proved from **work product**, not `lastRunAt`, which is stamped at dispatch and is not admissible as execution evidence (`reference_scheduler_lastrunat_stamped_at_dispatch`).
+
+**Root cause — a second, distinct dark-fleet mechanism.** The standing doctrine frames catch-up bursts as "Desktop app closed → chain builds up → drains on reopen." That is not what happened:
+
+- Kernel-Power / Power-Troubleshooter events show **zero power-state transitions 08-11 19:38:20 → 08-12 11:00:17 ET (15h22m)** — host in S0 Modern Standby.
+- First task fire came **13 seconds after resume** (`ora-health-guard` 11:00:32). 10 CC tasks backfilled 11:00:32–11:15:19 across cron slots 05:15→10:10.
+- **The app was never closed** — oldest `claude.exe` PIDs alive continuously since 08-11 17:01:19, spanning the whole dark window.
+- Power config: `STANDBYIDLE` = `0x2a30` = **3 h idle on AC *and* DC**; `HIBERNATEIDLE` 0; scheme Balanced; only S0 Low Power Idle available (S1/S2/S3 blocked by firmware + Device Guard).
+
+So the host sleeps nightly even when plugged in and stays dark past the 05:15/06:00/07:05 slots until touched. 08-11's burst was genuinely app-closure (machine woke 16:59:36, app launched 17:01:19, drain 17:01:36) — two consecutive late mornings, two different proximate mechanisms, one shared exposure.
+
+**Collateral finding — `ora-am-brief` mis-diagnoses its own late fire.** Its 08-12 run note asserts "Desktop app opened ~11:04 after an overnight offline window." Both halves wrong (app open throughout; resume was 11:00:17). It infers app-closure from lateness with no visibility into power events. Treat Block A run-note causation as narrative, not evidence.
+
+**Also observed:** `ora-sofr-direct-prefetch` STEP 4 verified at 11:14 and logged "no supersede"; `ora-am-brief` superseded it at 11:20. Values matched exactly (am-brief independently pulled and confirmed all five SOFR fields), so no data harm — but the STEP 4 verify window is narrower than the supersede latency it is meant to detect. Not patched this session.
+
+**Ruling (Gabriel).** Never sleep on AC — `powercfg -change standby-timeout-ac 0`, DC left at 3 h. Chosen over a 05:45 wake timer (unreliable under S0 Modern Standby) and over retiming the brief (helps 1 of ~10 tasks in the overnight window). Operator-run by policy; **not yet applied — `STANDBYIDLE` AC still read `0x2a30` at 15:50 ET.** Verify it reads `0x00000000` before treating this as closed.
+
+Detail and re-check procedure appended to `reference_fleet_throttle_skip_catchup_burst.md`.
 
 ## 2026-08-12 — ora-site-exposure-probe v1.1 → v1.2 (reject-`000` retry loop + ALARM-UNVERIFIED verdict)
 
@@ -23,9 +44,35 @@ Changes to `~/.claude/scheduled-tasks/ora-site-exposure-probe/SKILL.md`:
 
 Probe function smoke-tested live before landing: `/scripts/build-dist.mjs` 404, control-random 404, control-root 200.
 
-**Committed via an isolated temp index (Gabriel-directed).** The `.claude` checkout was heavily contaminated: ~116 uncommitted changes across 11+ live sessions, AND — the part that matters — the real index already had 8 files STAGED by another session (incl. a 930-line `property_register_snapshot_diff.py` and three other task SKILL.mds). That makes the bare-`git commit` step of [[reference_event_log_uncommitted_backlog]] actively unsafe here: it assumes an empty index, and would have swept all 8 foreign files into this commit. Technique used instead: `GIT_INDEX_FILE` pointing at a scratch index seeded from HEAD, the isolated 13-line event_log hunk applied via `git apply --cached`, SKILL.md added whole, then commit from that temp index — the real `.git/index` is never written, so the other session's staged work survives intact. Follow-up needed after any commit made this way: the real index still holds the two committed paths at their pre-commit blobs, so `git status` there will misreport them as staged reverts until `git reset -- <those two paths>` refreshes them. **Extend that reference memory with the non-empty-index case.**
+**Committed via an isolated temp index (Gabriel-directed).** The `.claude` checkout was heavily contaminated: ~116 uncommitted changes across 11+ live sessions, AND — the part that matters — the real index already had 8 files STAGED by another session (incl. a 930-line `property_register_snapshot_diff.py` and three other task SKILL.mds). That makes the bare-`git commit` step of [[reference_event_log_uncommitted_backlog]] actively unsafe here: it assumes an empty index, and would have swept all 8 foreign files into this commit. Technique used instead: `GIT_INDEX_FILE` pointing at a scratch index seeded from HEAD, the isolated 13-line event_log hunk applied via `git apply --cached`, SKILL.md added whole, then commit from that temp index — the real `.git/index` is never written, so the other session's staged work survives intact. Follow-up needed after any commit made this way: the real index still holds the two committed paths at their pre-commit blobs, so `git status` there will misreport them as staged reverts until `git reset -- <those two paths>` refreshes them. **Extend that reference memory with the non-empty-index case.** — DONE same session: [[reference_event_log_uncommitted_backlog]] now carries a step-7 index precondition, a "necessary but NOT sufficient" caveat on the 2026-07-17 bare-commit prescription, a temp-index variant section with the staged-revert repair, and two new What-NOT-to-do bullets; [[feedback_pathspec_commit_discards_index_splice]] cross-links the variant as preferable to unstaging a live session's work; [[INDEX_reference]]'s hook updated so the warning surfaces at recall.
 
 Landed on branch `feat/model-canary-probe-step25` (the branch that happened to be checked out — no branch switch attempted, since `checkout` on a contaminated shared tree is prohibited). The SKILL.md description-line change is unavoidably a single blended hunk: the 2026-08-03 model re-canary text and this v1.2 changelog both live on that one line, so they cannot be separated — and that canary text belongs on this branch anyway.
+
+## 2026-08-11 — governor-drift-probe.py EXIT 1 for the first time — a memory file that DOCUMENTS drift, not a governor breach
+
+**Trigger.** Scheduled `ora-cc-schematic-refresh` run (Mon 14:15 ET, rev 2026-08-11a). Producer-clobber pre-check clean (artifact REV == source REV 2026-08-09b). All five probes re-run live, exit codes captured unpiped.
+
+**Finding.** `governor-drift-probe.py` returned **EXIT 1** — the first non-green governor probe recorded in this refresh series (exit 0 on 08-09a/b, 07-27a, 07-23a). All 3 hits are in a single file: `memory/reference_notion_pipeline_tracker_stale_governor_fields.md` lines 3, 19, 20, each flagged "DSCR governor appears as 1.75 (canonical is 1.25x)". That file is a memory note written the same day that *documents* a stale Notion Acquisition Pipeline Tracker field whose description read "hard floor 1.75". The probe carries no exemption for prose whose subject IS the drift, so it flags the description of the defect as the defect.
+
+**Hard Invariant 4 holds — three independent checks.** (1) Those 3 hits are the only hits on the entire scan surface; no code, model, skill or config file flagged. (2) Canonical constants unchanged: DSCR 1.25x, LTV 40% aggregate / 65% per-property refi ceiling. (3) The flagged file is git-`??` untracked — uncommitted working-tree content no clone or live consumer reads. It was also actively being written: its text visibly changed between two probe runs minutes apart during this pass, so another session is mid-edit. Recorded and left alone rather than reworded under another writer's hand, per the shared-checkout single-writer rule.
+
+**Open — fix belongs to one of two places, neither in this task's scope** (read-diagnose-publish only): reword the memory note so the stale figure is not quoted bare, or teach the probe a documented-drift exemption of the kind it already carries for the companion-anchored 65/40 pairing. Whoever owns that file should also add its MEMORY.md index line — `memory-integrity-probe.py` (EXIT 1, 221 indexed / 223 present) reports it plus `reference_refute_gate_excludes_server_workbook.md` as present-but-unlisted, and re-reports this same governor drift, so the three reported issues collapse to two real objects.
+
+**Method note.** The probe short-circuits on drift and printed no "N files scanned" line, so rev 08-09a's 861-file figure was deliberately dropped from the artifact rather than carried forward — reporting it would claim an observation this run did not make.
+
+**Also observed, not new.** `oxford-command-center` went dirty → fully clean (untracked `data/alert-state/` gone; main==origin/main @`b9a58c2`). Fleet VERDICT ATTENTION with collisions 0 but 5 missed cycles and 1,154 throttle skips/24h across 16 tasks — that pattern is already characterized and given a standing verdict in this log's earlier 2026-08-11 Health Guard FAIL-aging entry (catch-up-burst / global_limit contention, operational lever only); not re-litigated here. `doctrine-integrity` improved, exit 0 with warnings 10 → 4 (aging tombstones 6 → 0, workspace-pointer staleness cleared, index hook 514 → 169 chars). `confidentiality-guard` 131/131, fourth consecutive green. Both mandatory cross-checks (enabledPlugins 7 keys/7 true, fleet stat lines) came back unchanged, so no structural settings.json change needed attribution under the v1.2 git-log-first rule.
+
+## 2026-08-11 — Deal-stage sync: 4484 Robertson Road — Madison, WI — (none) → Candidate (Notion)
+
+Detected by ora-open-sessions-board's reconciliation step; no corresponding entry existed. Tripwire only — see Notion for the actual decision context.
+
+## 2026-08-11 — Deal-stage sync: Pike Plaza Portfolio — Indianapolis, IN — (none) → Passed (Notion)
+
+Detected by ora-open-sessions-board's reconciliation step; no corresponding entry existed. Tripwire only — see Notion for the actual decision context.
+
+## 2026-08-11 — Deal-stage sync: 754 Old State Route 74 — Cincinnati, OH — LOI Executed → Under Contract (Notion)
+
+Detected by ora-open-sessions-board's reconciliation step; no corresponding entry existed. Tripwire only — see Notion for the actual decision context.
 
 ## 2026-08-11 — Health Guard FAIL-aging follow-up: 2 stale FAILs closed out / 2 genuine specs handed to Code surface
 
