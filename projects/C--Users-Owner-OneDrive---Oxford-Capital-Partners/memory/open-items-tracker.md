@@ -32,6 +32,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
+| [OI-126](#OI-126) | 2026-08-12 | session 08df9f95 (scheduled `ora-doctrine-integrity-guard` run), investigating why merged `hooks/**` fixes were not live | **TRANSIENT — may self-close.** The primary `~/.claude` checkout cannot move onto `main` because `worktrees/_push-main-tmp` holds that branch (git allows a branch in one worktree only), so PR #51 and #55 are merged but INERT in the live pre-push chain: the confidentiality suite's 131 assertions ENV-SKIP on every worktree push, and a load-induced failure still hard-blocks with no retry. `_push-main-tmp` is NOT stale — actively used, clean, and its owning session is idle awaiting input. Local `main` (`9e6c00a`) already carries #47/#49/#51/#55 and is 4 ahead / 0 behind `origin/main`. Resolution is for that session to release the worktree; the ~117 uncommitted files in the primary checkout are unverified against the 48 incoming commits, so nobody should force the switch |
 | [OI-119](#OI-119) | 2026-08-11 | `pre-push` hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) | Pre-push gate is **flaky under its own load and hard-blocks any session's push**: across 3 consecutive pushes of one branch, **two different** tests failed (`test_allocate_oi_id.py`, `test-claim-file-collision.py`) with two clean runs of the same suite between them. The gate retries tests that *time out* but not those that error, so each flake looks like a real regression and the tempting escape is a 60-min multi-use override token |
 | [OI-118](#OI-118) | 2026-08-11 | `.gitignore:61`, found wiring ora-health-guard to the double-fire guard | `.gitignore`'s `/scheduled-tasks/*/*` makes every `_shared/` helper edit **invisible to `git status`** on any branch predating that file's force-add — and git then **silently overwrites** the file on `checkout`/`merge`/`rebase` to main (verified by reproduction; the same file without the ignore rule aborts with exit 1). Standing trap for the whole guard toolkit |
 | [OI-009](#OI-009) | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Verify the 93 Notion Tenant DB rows with no workbook counterpart against primary leases (low priority) |
@@ -4699,6 +4700,46 @@ Gabriel's call.
 
 **Auto-check:** none yet. A cheap one: fail if any path matched by `.gitignore` is also tracked on `origin/main`.
 
+### OI-126
+**Status:** OPEN — **TRANSIENT.** Expected to self-close once `_push-main-tmp` is released. If it is gone and the
+primary checkout is on `main`, close this without further work.
+**Opened:** 2026-08-12
+**Source:** session 08df9f95 (an unattended `ora-doctrine-integrity-guard` scheduled run that Gabriel took over
+interactively), while investigating why merged `hooks/**` fixes were not taking effect
+**Description:** The primary checkout `C:/Users/Owner/.claude` sits on `feat/model-canary-probe-step25`
+(19 ahead / 48 behind `origin/main`, ~117 uncommitted files). It **cannot** be moved onto `main`, because
+`C:/Users/Owner/.claude/worktrees/_push-main-tmp` has `main` checked out and git permits a branch in exactly one
+worktree. This is a git constraint, not neglect.
+
+Consequence: PR #51 and #55 are merged but **inert**. Both are `hooks/**` changes that only take effect once the
+primary checkout is on a ref containing them. Until then the live pre-push chain runs the pre-#51/#55 versions —
+`test-confidentiality-guard.py` ENV-SKIPs on every worktree push (131 assertions silently not running), and a
+load-induced test failure hard-blocks a push with no retry (the OI-119 symptom).
+
+**Verified, not inferred (2026-08-12):**
+
+| Claim | Evidence |
+|---|---|
+| `_push-main-tmp` is NOT a stale leftover | reflog: created 15:59, `merge origin/main` at 15:59 and 16:03, `git push orig…` at 16:25; index rewritten 16:12; 0 uncommitted |
+| Nothing in `~/.claude` creates it | no match in any `.py`/`.sh`/`.ps1`; created by hand by a session |
+| Owner is `local_25942895` | its transcript enumerates `repo-housekeeping.json` among **its own** claim files; last-activity matches the worktree owner record to ~3s |
+| Local `main` already has all four PRs | `#47` script present, `#49` 3 refs, `#51` 2 refs, `#55` 8 refs — checked by CONTENT, since squash-merges leave no ancestry |
+| Local `main` is 4 ahead / 0 behind `origin/main` | those 4 are the owning session's unpushed merge commits |
+
+**Resolution:** the owning session releases `_push-main-tmp`, then the primary checkout moves to `main`. **Do not
+force it** — the ~117 uncommitted files are other sessions' work and were NOT verified to survive a checkout
+against the 48 incoming commits. Doctrine forbids `checkout`/`reset`/`rebase` on a contaminated tree.
+
+**Why this wasn't handed off directly:** `send_message` is unavailable *from* unattended sessions, and the target
+is itself a scheduled-task session that cannot receive. A copy-paste handoff was given to Gabriel instead.
+
+**Search-tooling gotcha found here (worth its own note):** ripgrep honours `.gitignore`, so a `Grep` sweep for
+`_push-main-tmp` returned NOTHING while a plain `grep -r` found the one reference — in
+`obsidian-fleet-mirror/session-state.d/`, which is gitignored. That reference is what identified the owning
+session. **Any search for runtime/session state must not rely on ripgrep's defaults.**
+
+---
+
 ### OI-119
 **Status:** OPEN (diagnosed and reproduced; fix is a judgement call between three options)
 **Opened:** 2026-08-11
@@ -4707,6 +4748,23 @@ Gabriel's call.
 **Description:** The pre-push gate runs the whole tracked test suite and **blocks the push on any failure**.
 `test_allocate_oi_id.py` is flaky under the concurrency that gate itself creates, so it can hard-block a push
 that has nothing to do with it — as it did here, on a change touching none of the code it exercises.
+
+> **FIX SHIPPED 2026-08-12 — [PR #55](https://github.com/ZeOoba/ora-claude-config/pull/55), merged. Status left OPEN deliberately: closing it is the author's call, not mine.**
+> Option "retry a failing file once" was put to Gabriel and chosen. `_run_one()` now gives ANY failing file one
+> rerun at the NORMAL budget, not just a timed-out one. Deliberately `elif`, so a timed-out file (which already
+> spent the doubled rerun) never also gets this one — no file can pay three budgets. The doubled budget still
+> keys on `timed_out` rather than rc, preserving the 2026-07-26 REFUTE finding, now asserted via per-call budget
+> lists instead of a bare spawn count. A recovered flake is disclosed by name as FLAKY; a genuine failure fails
+> both runs and still blocks.
+> Independent review caught a real defect in the first draft: a run-1 FAIL whose rerun printed `CANNOT RUN:`
+> reclassified to env-skip — non-blocking AND invisible, since the flaky disclosure scans passes only. Forced
+> back to FAIL, with a regression fixture. Suite 90 → 98 assertions.
+> **Caveat:** this was diagnosed independently on 2026-08-12 before finding this item — duplicated effort, and the
+> arithmetic matched (`9/12` = the three coupled assertions of the 12-thread test failing together). The flake was
+> never reproduced on demand across three attempts, so the root cause is inferred from that signature, not proven.
+> The companion `test-claim-file-collision.py` flake noted above was NOT investigated and may be a different cause.
+> Not fixed here: the symmetric pre-existing hole where a TIMED-OUT run 1 followed by an env-skip rerun is
+> non-blocking — the "ran far enough to fail proves it can run" rationale does not transfer to a timeout.
 
 **Reproduced, not inferred (2026-08-11):**
 
