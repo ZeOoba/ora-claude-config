@@ -1,6 +1,6 @@
 ---
 name: ora-deal-aging-sla
-description: Weekday counterparty-aging SLA — computes days-since-last-outbound per open deal ask (broker/counsel/lender) via live Outlook search; drafts (never sends) a nudge past ratified per-class thresholds (broker 5bd/counsel 7bd/lender 7bd, ratified 2026-07-18). Also reports Notion-vs-Outlook posture mismatches (STEP 3b) and drafted-but-unshipped LOIs past their own stated expiration (STEP 3c) as first-class findings. Draft-only, Hard Invariant 1. v1.4. [MODEL: UNVERIFIABLE | checked 2026-07-21]
+description: Weekday counterparty-aging SLA — computes days-since-last-outbound per open deal ask (broker/counsel/lender) via live Outlook search; drafts (never sends) a nudge past ratified per-class thresholds (broker 5bd/counsel 7bd/lender 7bd, ratified 2026-07-18). Also reports Notion-vs-Outlook posture mismatches (STEP 3b) and drafted-but-unshipped LOIs past their own stated expiration (STEP 3c) as first-class findings. Draft-only, Hard Invariant 1. v1.4. [MODEL: claude-opus-5 observed | checked 2026-08-12 via live-run transcript canary]
 output_contract:
   version: 1
   blocks:
@@ -30,13 +30,43 @@ CHANGELOG — v1.1 (2026-07-24, per Gabriel): STEP 1's data-source id corrected 
 
 AUTOMATION-BUDGET JUSTIFICATION: Closes a real, already-realized gap. On 2026-07-13 the ORA Monday Sync flagged 754 Old State Route 74 (Cincinnati) as "31 days stale" on a PSA draft awaiting counsel — a stall that reached 36-38 days before a weekly board caught it by chance, not by design. Deal-command-board (weekly, Monday) tracks days-in-STAGE against Notion timestamps; it does not track days-since-last-OUTBOUND-TOUCH against the actual counterparty thread, and it only runs once a week. This task is the daily (weekday) counterpart, keyed on the live Outlook thread rather than a Notion date field that can go stale exactly when work is happening off-Notion.
 
+## STEP 0 — DOUBLE-FIRE ENTRY GUARD (added 2026-08-09; run before STEP 1)
+
+**This task has double-sent twice.** On **2026-07-20** it emailed at 11:02 and again at 23:31. On **2026-08-09**, during the overnight-offline catch-up burst (`ora-health-guard` woke 219 min late), it emailed at **08:59:11** and again at **09:20:09** — two summaries of the same date, seven minutes apart in content and twenty-one in delivery, with different headline text because STEP 7 lets the run compose it. Nothing stood it down. Each fire also posts its own dated child page, so a double-fire leaves two `Deal Aging SLA — {DATE}` pages under the Ops Hub.
+
+Run this as the first action of the run:
+
+```
+python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-deal-aging-sla --block main --run-id <run_id> --ttl-min 30
+```
+
+- **Exit 10** → today's run already completed. Log `BLOCK_MAIN_ALREADY_COMPLETE_TODAY`, **exit without drafting, posting, or emailing**, and report it as a NORMAL skip (not a miss) citing the earlier run's Notion page.
+- **Exit 11** → another fire is live. Stand down identically.
+- **Exit 0** → proceed to STEP 1.
+
+Once STEP 7 lands, run the full command (a short form exits 2 and nothing is recorded):
+
+```
+python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-deal-aging-sla --block main --run-id <run_id> --notion-page-id <STEP 7 page id> --email-sent-at <ISO8601>
+```
+
+If the run aborts instead, record that rather than leaving the claim dangling:
+
+```
+python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py fail --task ora-deal-aging-sla --block main --run-id <run_id> --error "<what broke>"
+```
+
+**Only the run that holds the claim may call `complete` or `fail`.** A run that stood down at STEP 0 (exit 10 or 11) calls NEITHER — it did not claim anything, and calling `fail` would release the live run's claim. A non-owner is refused with exit 12 and nothing is written. Full contract: `_shared/README-DOUBLE-FIRE-GUARD.md`. **Do not "fix" a double-fire by retiming this task's cron** — the burst is documented fleet-wide behavior; the guard belongs here.
+
+The nudge **drafts** are exempt from the concern (they are drafts, never sends, per Hard Invariant 1), but a duplicate run still creates duplicate drafts, so the guard covers the whole run rather than the send alone.
+
 GUARD CONDITION: If the Notion Acquisition Pipeline Tracker is unreachable, or zero deals have a qualifying open outbound ask (see STEP 2), still post STEP 7's dated child page (stating the guard condition triggered) and exit — do not halt, do not fabricate a deal list or an aging number. **A zero-qualifying-ask run is not an early exit from STEP 3b(b):** run the posture check on the internal-gate exclusions first, because "nothing qualifies" is itself frequently a stale-tracker artifact, and report any mismatches on the page before exiting.
 
 ---
 
 ## STEP 1 — Pull active pipeline deals
 
-Query the Notion Acquisition Pipeline Tracker (data source `collection://bcfe4a03-7e61-4ac1-a0bb-c44174fa138b`) via `notion-query-data-sources` (SQL mode). Pull: Deal Name, Address, Stage, Next Action, Deal Owner, Broker / Source, Key Attorney, Lender, Last Updated, `date:Last Activity:start`, `date:Target Close Date:start`, **`LOI Status`, `date:LOI Expiration Date:start`** (added 2026-08-05, v1.4, for STEP 3c).
+Query the Notion Acquisition Pipeline Tracker (data source `collection://bcfe4a03-7e61-4ac1-a0bb-c44174fa138b`) via `notion-query-data-sources` (SQL mode). Pull: Deal Name, Address, Stage, Next Action, Deal Owner, Broker / Source, Key Attorney, Lender, Last Updated, `date:Last Activity:start`, `date:Target Close Date:start`, **`LOI Status`, `date:LOI Expiration Date:start`** (added 2026-08-05, v1.4, for STEP 3c), **`date:Next Action Date:start`** (added 2026-08-11, for the missed-commitment check below), **`Listing Ask (Verified)`, `date:Listing Ask Verified On:start`, `Listing Ask Source`, `Total SF`** (added 2026-08-12, for STEP 3e — these three ask fields are written by `ora-deal-sourcing-scan` STEP 5B and exist on the tracker as of 2026-08-12; a run that omits them from the pull makes STEP 3e silently return zero, which would read as "no contradictions" when it really means "did not look").
 
 **SQL mode is ENTITLEMENT-GATED and fails nondeterministically — the view-mode fallback below is mandatory, not optional (added 2026-08-03 after the gate fired again).** `notion-query-data-sources` in SQL mode returns `validation_error` / `entitlement_required` (*"Your workspace has reached the usage limit for Query Data Source… upgrade to Business"*, `source: mcp_tool_upsell`) once the quota is drawn down. **This is a gate on the MCP tool's tier, NOT a Notion plan limit and NOT a workspace data allowance — never recommend a Notion upgrade to fix it, and never retry the same SQL call in a loop, which just burns the same quota.** It is quota-based and therefore nondeterministic: it passes some runs and fails others depending on what else drew from the quota that day (`ora-pm-ledger` DEFECT 2 measured the same gate from the other side on 2026-07-16). On an entitlement error, do NOT halt and do NOT treat it as a guard condition — walk this ladder:
 
@@ -124,6 +154,36 @@ Why this is first-class output and not a footnote: on a zero-breach run the mism
 4. **Report-only. Do not draft a nudge and do not run an Outlook search for this class.** There is no counterparty thread to check — by definition the document never went out — so STEP 5/6 do not apply here. The action this surfaces is internal (send it now with a fresh expiration, or kill/re-draft), not a counterparty follow-up.
 5. Report each flagged deal as: deal name · address · `LOI Expiration Date` · days past expiration · Stage · Deal Owner. Add to STEP 7's completion page as its own titled section, "Drafted LOIs past expiration," distinct from the STEP 3b mismatch section.
 
+## STEP 3d — Missed self-imposed commitment check (added 2026-08-11)
+
+This is the signal the task could not previously produce at all. STEPS 3/3b/3c all age a deal against *elapsed time* or an *external* date (last outbound, LOI expiration). None of them can tell "quiet by design" from "we set ourselves a date and blew through it" — and the second is a different, more embarrassing failure, because the commitment was ORA's own.
+
+1. Resolve each deal's next-action date by the chain in `ora-deal-command-board` STEP 2b: `date:Next Action Date:start` → an explicit ISO date parsed from `Next Action` prose → null. Keep the two sites in sync, as with the stage-exclusion list.
+2. Flag a deal when its resolved next-action date is **in the past** AND `date:Last Activity:start` is **on or before** that date — the date came due and nothing was logged against it since. If `Last Activity` post-dates it, the commitment was acted on; do not flag.
+3. **The PARKED exclusion still applies, but resolves differently here.** A parked deal with a past-due re-check date is reported as **"re-check due"**, not as an SLA breach — Gabriel's park instructions routinely carry an explicit revisit date (e.g. 5515 Catfish Court, parked 2026-07-24 "Revisit 2026-08-14"), and that date coming due is the park working as designed, not a lapse.
+4. Where the date came from prose rather than the column, say so on the row — a flag resting on a parsed string is weaker evidence than one resting on a stamped field.
+5. `DATE DIVERGENCE` rows (column and prose disagree) are reported as divergence and **never** flagged as missed on the strength of whichever date is older. Report both; let a human resolve which was meant.
+
+Report as its own titled section in STEP 7, "Missed self-imposed dates," distinct from the 3b mismatch and 3c expiration sections.
+
+## STEP 3e — Verified-ask contradiction check (added 2026-08-12)
+
+**Why this is its own step and not a fourth STEP 3b class.** STEP 3b is defined as *the tracker's claim vs the live Outlook thread*. This check never opens Outlook — both sides of the comparison sit inside the same tracker row: a **stamped field** against the row's own **prose**. Folding it into 3b would blur what 3b means, and the skill's own history says otherwise anyway — 3c and 3d were each added as separate steps with their own report sections rather than as new 3b classes. Same pattern here.
+
+**The gap it closes.** On 2026-08-11 `ora-deal-sourcing-scan` verified 4484 Robertson Road's published ask at $2,950,000 off the live listing detail page and emailed it. Thirty-six minutes later the tracker row was re-stamped still recording the ask as "NOT YET KNOWN — verified null" and still instructing the deal owner to ask the broker for a price on a call the next morning. This run's 3b/3c/3d checks were all clean and this task reported it only as an out-of-class finding, by hand. As of 2026-08-12 the scan writes `Listing Ask (Verified)` / `Listing Ask Verified On` / `Listing Ask Source` (its STEP 5B), so the contradiction is now mechanically detectable and must not depend on a human noticing.
+
+**Run for every pulled deal, independent of STEP 2's classification** — a deal in an internal gate or PARKED is exactly where this rots unnoticed.
+
+1. **Flag** a deal when `Listing Ask (Verified)` is populated AND its `Next Action` prose still treats the price as unknown or still instructs someone to obtain it. Treat as price-unknown language, case-insensitively: "not yet known", "verified null", "price unknown", "pending an OM", "awaiting OM", "asking price for sale", "ask the broker", "what are you guiding", "request price", "pending price", "TBD". Match on intent, not on this exact list — the list is illustrative, not exhaustive.
+2. **Do NOT flag** when the prose already reflects the number (it quotes the ask, or is written as a response to it). The check exists to catch a row that has not caught up, not to nag about phrasing.
+3. **NEVER recompute a basis floor here, and never mirror the RCT table into this task.** The per-market replacement-cost floors live in `acquisition-underwriting` (authoritative) and are already mirrored once, in `ora-deal-sourcing-scan`, which carries its own drift warning about that mirror. A third copy is a third thing to rot, and this is a counterparty-clock task with no replacement-cost competence. The contradiction is fully detectable without a floor: a populated field against price-unknown prose is a contradiction on its face.
+4. **Safe arithmetic only.** If `Total SF` is populated you MAY report `Listing Ask (Verified) / Total SF` as a marketed $/SF for context — that is two tracker fields divided, no benchmark involved. If the sourcing scan recorded a gate verdict (e.g. FAIL-BASIS) cite it *as the scan's verdict, attributed*, and never restate it as this task's own finding.
+5. **Stale-ask context, not a defect.** If `date:Listing Ask Verified On:start` is materially older than `date:Last Activity:start`, say so on the row — the ask may itself have moved since it was read. This is reported as context; it is never a flag on its own.
+6. **A null `Listing Ask (Verified)` is not a flag.** Most rows predate the 2026-08-12 fields and not every pipeline deal is on-market or picked up by the scan. Report the count separately as `[NO VERIFIED ASK — not on-market, or not yet scanned]`, never folded into either the flagged or the clean tally. Same verified-null-vs-inferred-null convention as STEP 3c.
+7. **Report-only, and do not reconcile.** Never edit `Next Action` to absorb the number — that is a posture-field write, still barred by the guardrails, and rewriting it destroys the evidence that the two systems diverged. The row is the handoff.
+
+Report each flagged deal as: deal name · `Listing Ask (Verified)` · marketed $/SF if computable · `Listing Ask Verified On` · what the prose still asserts · `Listing Ask Source`. Its own titled STEP 7 section, "Verified ask vs stale price posture," distinct from the 3b, 3c and 3d sections.
+
 ## STEP 4 — Per-class thresholds (PARAMETERIZED — do not hardcode inline)
 
 Ratified by Gabriel, 2026-07-18 — confirmed as proposed, no amendment:
@@ -169,7 +229,15 @@ $mail.Save()
 
 ## STEP 7 — Completion reporting
 
-Post a NEW DATED CHILD PAGE under the Notion Ops Hub parent page (`32b6ecd8-9e59-81f2-b329-df3fd0e25062`), titled exactly `"Deal Aging SLA — {YYYY-MM-DD}"` (today's date) — a distinct page created fresh each run, never an appended row/block inside an existing page's body (an append isn't reliably freshness-checkable by a downstream contract-verification pass; a new titled child page is — this is the standard pattern for every task that posts a completion record to the Ops Hub, see `ora-deal-command-board` STEP 6). Its content lists: deals scanned, deals with a qualifying open ask, deals breaching by class, deals suppressed for confidentiality, deals flagged `[NO OUTBOUND FOUND — VERIFY MANUALLY]`, how many nudges were drafted, and — as its own titled section with one row per finding, not as prose — every **posture mismatch** from STEP 3b, including any deal whose STEP 2 classification the check changed. When there are zero breaches but one or more mismatches, the mismatch section is the substance of the report and the summary email must lead with it rather than with the "0 breaches" headline. Also add STEP 3c's **"Drafted LOIs past expiration"** section (one row per flagged deal, plus the `[NO EXPIRATION DATA]` count) — on a run with zero breaches, zero mismatches, and one or more STEP 3c flags, that section becomes the substance of the report instead. Then email a one-paragraph summary to `ggoldberg@oxfordra.net` ONLY (no cc — routing canon) via `C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1`. On a COM failure for either the drafts or the summary send: retry once, then flag loudly in the Notion Ops Hub page if the retry also fails — do not halt the run.
+Post a NEW DATED CHILD PAGE under the Notion Ops Hub parent page (`32b6ecd8-9e59-81f2-b329-df3fd0e25062`), titled exactly `"Deal Aging SLA — {YYYY-MM-DD}"` (today's date) — a distinct page created fresh each run, never an appended row/block inside an existing page's body (an append isn't reliably freshness-checkable by a downstream contract-verification pass; a new titled child page is — this is the standard pattern for every task that posts a completion record to the Ops Hub, see `ora-deal-command-board` STEP 6). Its content lists: deals scanned, deals with a qualifying open ask, deals breaching by class, deals suppressed for confidentiality, deals flagged `[NO OUTBOUND FOUND — VERIFY MANUALLY]`, how many nudges were drafted, and — as its own titled section with one row per finding, not as prose — every **posture mismatch** from STEP 3b, including any deal whose STEP 2 classification the check changed. When there are zero breaches but one or more mismatches, the mismatch section is the substance of the report and the summary email must lead with it rather than with the "0 breaches" headline. Also add STEP 3c's **"Drafted LOIs past expiration"** section (one row per flagged deal, plus the `[NO EXPIRATION DATA]` count) — on a run with zero breaches, zero mismatches, and one or more STEP 3c flags, that section becomes the substance of the report instead. Also add STEP 3e's **"Verified ask vs stale price posture"** section (one row per flagged deal, plus the `[NO VERIFIED ASK]` count). **Escalation order when the run is otherwise quiet:** a STEP 3e flag outranks 3c and 3d for the headline, because a deal owner walking into a broker call believing the price is unknown when the firm has already verified it is a live, dated exposure rather than a backlog item — if breaches and 3b mismatches are both zero, lead the email with 3e. Then email a one-paragraph summary to `ggoldberg@oxfordra.net` ONLY (no cc — routing canon) via `C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1`.
+
+**PRE-SEND SENT-ITEMS PROBE (mandatory, immediately before that send).** Layer 2 of the STEP 0 guard:
+
+```
+powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: Deal Aging SLA - {YYYY-MM-DD}>"
+```
+
+Probe the **dated stem** `Deal Aging SLA - {YYYY-MM-DD}` and nothing more. The headline this step composes is run-specific and the leading tag is inconsistent — on 2026-08-09 the two sends were `Deal Aging SLA - 2026-08-09: 0 breaches - Patterson returned…` and `[ORA] Deal Aging SLA - 2026-08-09 - 0 breaches, 1 posture mismatch…`. The stem matches both (matching is substring and normalization-tolerant); the full subject would match neither. Exit 10 → do NOT send, log `MAIN_EMAIL_ALREADY_IN_SENT_ITEMS`, record a NORMAL skip, and still call `block-sentinel.py complete` so the state file re-converges. Exit 1 → fail open: send, and record the probe gap on the Notion page. On a COM failure for either the drafts or the summary send: retry once, then flag loudly in the Notion Ops Hub page if the retry also fails — do not halt the run.
 
 ---
 
