@@ -1218,6 +1218,92 @@ def test_ledger_files_excluded_source_pin():
     print("  PASS test_ledger_files_excluded_source_pin")
 
 
+def test_intervening_qualifier_dscr_floor_flags_unit():
+    """GAP (2026-08-11): GOV_KEYWORDS held the CONTIGUOUS literal 'dscr floor', so any qualifier
+    between the metric and its floor-word defeated the is_gov gate and the whole equality branch
+    was skipped. 'DSCR hard floor 1.40x' is the exact phrasing the 2026-08-11 Notion defect used
+    ('hard floor 1.75'), so this false negative sat on the most likely real-world drift wording."""
+    m = _load_probe_module()
+    for line in ("DSCR hard floor 1.40x per property.",
+                 "DSCR absolute floor 1.40x per property.",
+                 "Per-property DSCR minimum floor 1.40x."):
+        out = m.scan_line(line)
+        assert any("DSCR" in o for o in out), (
+            "drifted DSCR floor with an intervening qualifier must flag: %r -> %r" % (line, out))
+    print("  PASS test_intervening_qualifier_dscr_floor_flags_unit")
+
+
+def test_ratified_perproperty_refi_ceiling_prose_stays_clean_unit():
+    """REGRESSION PIN for the reverted LTV half (2026-08-11). Extending the same intervening-
+    qualifier pairing to LTV armed prose describing the RATIFIED per-property 65% refi ceiling
+    (debt-maturity.DESIGN.md:18) and flagged 65 != 40 -- a false positive on a legitimate figure,
+    caught by the E2E test. The LTV half was reverted; this pins the line that exposed it so a
+    future LTV attempt fails HERE, at the unit layer, instead of surfacing as a whole-tree E2E
+    break. Closing the LTV gap requires widening LTV suppression first (see probe comment)."""
+    m = _load_probe_module()
+    line = "| Per-property LTV vs the **65% refi ceiling** | **No** (warehouse side) |"
+    assert m.scan_line(line) == [], (
+        "ratified 65%% per-property refi-ceiling prose must not flag: %r" % (m.scan_line(line),))
+    print("  PASS test_ratified_perproperty_refi_ceiling_prose_stays_clean_unit")
+
+
+def test_known_gap_value_between_metric_and_boundword_unit():
+    """KNOWN GAP, PINNED DELIBERATELY (2026-08-11, surfaced in independent review).
+
+    The metric-VALUE-boundword order does not arm: the value's own decimal point is a '.', and the
+    gap class excludes '.' to stop the gate crossing a sentence. So "DSCR 1.40x minimum" is NOT
+    detected even though its extractor (RE_DSCR_DECL_REV) exists. Pre-existing -- the old contiguous
+    keywords missed it too -- so this is not a regression, but it sits inside the class the
+    intervening-qualifier fix advertises closing, and is pinned rather than left silent.
+
+    THIS TEST ASSERTS CURRENT (WRONG) BEHAVIOUR. When the gap is closed, FLIP these asserts to
+    expect a finding -- do not delete the test. The obvious fix (allow a dot only between digits)
+    was measured and REJECTED: it makes "DSCR of 1.42 with a 10 min cure period" report 1.42 as a
+    drifted governor. Close the EXTRACTOR side first."""
+    m = _load_probe_module()
+    for line in ("DSCR 1.40x minimum per property.", "DSCR 1.40 floor per property."):
+        assert m.scan_line(line) == [], (
+            "known-gap pin is stale -- this line now flags, so CLOSE the gap and flip this "
+            "assert: %r -> %r" % (line, m.scan_line(line)))
+    # The same shape DOES flag once any ordinary governor keyword is present -- proof that only the
+    # arming gate, not the extractor, is missing.
+    assert m.scan_line("DSCR 1.40x minimum per property (governor)."), \
+        "extractor for the value-first shape must still work when the line is armed"
+    print("  PASS test_known_gap_value_between_metric_and_boundword_unit")
+
+
+def test_intervening_qualifier_canonical_stays_clean_unit():
+    """Arming the line must not by itself create a finding: canonical values stay clean."""
+    m = _load_probe_module()
+    assert m.scan_line("DSCR hard floor 1.25x per property.") == [], "canonical must stay clean"
+    print("  PASS test_intervening_qualifier_canonical_stays_clean_unit")
+
+
+def test_qualifier_gate_requires_the_metric_token_unit():
+    """PRECISION GUARDRAIL: the fix must pair the METRIC token with its floor/ceiling word, never
+    admit a bare 'hard floor' as a governor signal -- 'hard floor' is also a physical building
+    term, and a standalone keyword would arm unrelated property prose.
+
+    Also pins ALL FOUR clause enders. Excluding only '.' was not enough: ';' '!' and '?' each let
+    the gap cross into an unrelated rent/area figure that RE_DSCR_THRESH then captured as a DSCR
+    threshold -- a NEW false positive introduced by the first cut of this fix and caught in
+    independent review, not by the suite. One case per boundary character, so a future narrowing of
+    the gap class fails here rather than in a whole-tree scan."""
+    m = _load_probe_module()
+    for line in ("Suite B has a hard floor and a 32.0 ft clear-height ceiling.",
+                 "The tenant's hard floor covers 1.40 acres of the yard.",
+                 "The deal's actual DSCR came in at 1.42 last quarter.",
+                 "DSCR is disclosed quarterly. The rent floor is 1.40 psf.",
+                 "DSCR fine; rent floor is 1.40 psf.",
+                 "DSCR solid! The rent floor is 1.40 psf.",
+                 "DSCR ok? The rent floor is 1.40 psf.",
+                 "DSCR steady; unit floor area 1.40 acres."):
+        assert m.scan_line(line) == [], (
+            "non-governor prose must NOT be armed by the qualifier fix: %r -> %r"
+            % (line, m.scan_line(line)))
+    print("  PASS test_qualifier_gate_requires_the_metric_token_unit")
+
+
 def main():
     assert os.path.isfile(PROBE), "probe not found: %s" % PROBE
     test_fleet_roots_are_scanned_unit()
@@ -1284,6 +1370,11 @@ def main():
     test_acquisition_underwriting_skill_file_clean()
     test_test_files_excluded_from_scan_unit()
     test_event_log_excluded_e2e()
+    test_intervening_qualifier_dscr_floor_flags_unit()
+    test_ratified_perproperty_refi_ceiling_prose_stays_clean_unit()
+    test_known_gap_value_between_metric_and_boundword_unit()
+    test_intervening_qualifier_canonical_stays_clean_unit()
+    test_qualifier_gate_requires_the_metric_token_unit()
     print("ALL GOVERNOR-PROBE TESTS PASS")
 
 
