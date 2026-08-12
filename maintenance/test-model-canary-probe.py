@@ -187,6 +187,52 @@ sev, code, _ = mcp_probe.classify("t", "claude-opus-5", "2026-07-16",
                                   "claude-opus-5", None)
 expect("unreadable anchor -> no stale verdict", sev == "ok" and code == "OBSERVED")
 
+# ------------------------------------------------------------------ MIXED_RUN
+# REAL SHAPE, ora-appsec-sweep 2026-08-12 (session f74b697f): the scheduled
+# portion started on claude-fable-5 (its `model: fable` frontmatter pin WAS
+# honoured) and switched to claude-opus-4-8 at row 109 / 19:54Z, with no human
+# turn anywhere near the switch. One run, two models, zero sidechain rows.
+# Plurality voting reported whichever led at sample time, so the SAME task read
+# claude-fable-5 mid-run and claude-opus-4-8 once complete -- two different
+# "observations" of one fire in one day. The winner is a voting artifact.
+MIXED = {"claude-fable-5": 32, "claude-opus-4-8": 45}
+
+sev, code, detail = mcp_probe.classify("t", "claude-fable-5", "2026-08-12",
+                                       "claude-opus-4-8", "2026-07-26",
+                                       counts=MIXED)
+expect("mixed run, tag matches a model present -> info MIXED_RUN (not CONTRADICTED)",
+       sev == "info" and code == "MIXED_RUN", "%s/%s" % (sev, code))
+expect("MIXED_RUN detail reports the full breakdown, not just the winner",
+       "claude-fable-5" in detail and "claude-opus-4-8" in detail
+       and "32" in detail and "45" in detail, detail)
+
+sev, code, detail = mcp_probe.classify("t", "claude-opus-5", "2026-08-12",
+                                       "claude-opus-4-8", "2026-07-26",
+                                       counts=MIXED)
+expect("mixed run, tag matches NOTHING present -> stays ACTION CONTRADICTED",
+       sev == "action" and code == "CONTRADICTED", "%s/%s" % (sev, code))
+expect("CONTRADICTED on a mixed run names every model, not one winner",
+       "claude-fable-5" in detail and "claude-opus-4-8" in detail, detail)
+
+# A pure run must be entirely unaffected by the new parameter.
+sev, code, _ = mcp_probe.classify("t", "claude-opus-5", "2026-08-09",
+                                  "claude-opus-5", "2026-07-26",
+                                  counts={"claude-opus-5": 81})
+expect("pure run + counts -> unchanged ok OBSERVED",
+       sev == "ok" and code == "OBSERVED", "%s/%s" % (sev, code))
+
+# counts is optional: every existing caller passing no counts must behave as before.
+sev, code, _ = mcp_probe.classify("t", "claude-sonnet-5", "2026-08-09",
+                                  "claude-opus-5", "2026-07-26")
+expect("counts omitted -> legacy behaviour preserved (CONTRADICTED)",
+       sev == "action" and code == "CONTRADICTED", "%s/%s" % (sev, code))
+
+# Tag-shape gaps still outrank mixing: an untagged task is a real gap either way.
+sev, code, _ = mcp_probe.classify("t", None, None, "claude-opus-4-8",
+                                  "2026-07-26", counts=MIXED)
+expect("untagged outranks MIXED_RUN", sev == "action" and code == "UNTAGGED",
+       "%s/%s" % (sev, code))
+
 # ------------------------------------------------------------ read_description
 with tempfile.TemporaryDirectory() as td:
     p = os.path.join(td, "SKILL.md")

@@ -202,8 +202,14 @@ def observe_models(rows):
     return (counts, inj, cut)
 
 
+def format_breakdown(counts):
+    """-> 'claude-opus-4-8 x45, claude-fable-5 x32', busiest first."""
+    return ", ".join("%s x%d" % (k, v)
+                     for k, v in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
+
+
 def classify(task_id, tag_model, tag_date, observed, anchor,
-             upgradable_is_action=False):
+             upgradable_is_action=False, counts=None):
     """-> (severity, code, detail) where severity is 'action'|'info'|'ok'.
 
     observed is the winning bare model id, or None when nothing usable was seen.
@@ -229,6 +235,25 @@ def classify(task_id, tag_model, tag_date, observed, anchor,
     if tag_date is None:
         return ("action", "UNDATED",
                 "tag carries an id but no checked/set date; observed %s" % observed)
+    # A scheduled portion is not guaranteed to be single-model. ora-appsec-sweep
+    # 2026-08-12 started on claude-fable-5 (its `model: fable` frontmatter pin
+    # honoured) and switched to claude-opus-4-8 mid-run, no human turn involved.
+    # `observed` is only the PLURALITY winner, so on a mixed run it flips with
+    # sample timing -- that task read claude-fable-5 mid-run and claude-opus-4-8
+    # once complete, i.e. two contradictory "observations" of one fire in one
+    # day. Never let that artifact masquerade as a tag defect: report the whole
+    # breakdown instead, and reserve CONTRADICTED for a tag matching NOTHING
+    # actually seen.
+    if counts and len(counts) > 1:
+        if tag_model in counts:
+            return ("info", "MIXED_RUN",
+                    "run spans %d models (%s); tag %s matches one of them -- "
+                    "the plurality winner %s is a sampling artifact, not a defect"
+                    % (len(counts), format_breakdown(counts), tag_model, observed))
+        return ("action", "CONTRADICTED",
+                "run spans %d models (%s); NONE matches tag %s"
+                % (len(counts), format_breakdown(counts), tag_model))
+
     if tag_model != observed:
         return ("action", "CONTRADICTED",
                 "tag asserts %s but the task fires on %s" % (tag_model, observed))
@@ -373,7 +398,7 @@ def main():
         desc = read_description(t.get("filePath") or "")
         raw_tag, tag_model, tag_date = parse_model_tag(desc)
 
-        observed, sampled, went_inter = None, 0, None
+        observed, sampled, went_inter, won_counts = None, 0, None, None
         for sess in (by_task.get(tid) or [])[:a.max_sessions_per_task]:
             jp = transcript_for(sess)
             if not jp:
@@ -387,6 +412,7 @@ def main():
             if not counts:
                 continue
             observed = max(counts.items(), key=lambda kv: kv[1])[0]
+            won_counts = counts
             went_inter = cut < len(rows)
             break
 
@@ -394,7 +420,7 @@ def main():
             unverifiable.append((tid, sampled))
 
         sev, code, detail = classify(tid, tag_model, tag_date, observed, anchor,
-                                     a.include_upgradable)
+                                     a.include_upgradable, counts=won_counts)
         rec = {"task": tid, "code": code, "detail": detail,
                "tag_model": tag_model, "tag_date": tag_date,
                "observed": observed, "went_interactive": went_inter,
