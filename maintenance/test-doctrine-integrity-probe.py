@@ -923,6 +923,71 @@ def test_memory_index_hookless_entry_no_warn():
     print("  PASS test_memory_index_hookless_entry_no_warn")
 
 
+# --- Check 14: four-site stage-exclusion list sync (2026-08-12) ------------
+# Regression origin: ora-health-guard block 4d carried only THREE of the five
+# terminal stage values while ora-deal-aging-sla and ora-deal-command-board
+# carried all five (ratified 2026-07-27, extended to 4d 2026-08-03). The rule
+# that all four sites stay identical is stated only in prose inside the four
+# SKILL.mds; nothing mechanical noticed the gap, and a human found it weeks
+# later. NOTE the assertion is value-PRESENCE, not byte-identity: the four
+# sites legitimately differ in syntax (4d spaces its commas, weekly-hygiene
+# states an inclusion list in backticked prose), so a byte comparison would
+# fail against correct files on day one.
+
+
+def test_stage_sync_quiet_when_all_four_carry_all_five():
+    mod = _load_probe_module()
+    full = " ".join("'%s'" % v for v in mod.STAGE_TERMINAL_VALUES)
+    srcs = [(lbl, full) for lbl, _ in mod.STAGE_EXCLUSION_SITES]
+    out = mod.check_stage_exclusion_sync(srcs)
+    assert out == [], "expected silence when all four carry all five, got %r" % out
+    print("  PASS test_stage_sync_quiet_when_all_four_carry_all_five")
+
+
+def test_stage_sync_flags_the_historical_three_of_five_gap():
+    """The actual 2026-08-03 defect: 4d carried three of the five."""
+    mod = _load_probe_module()
+    full = " ".join("'%s'" % v for v in mod.STAGE_TERMINAL_VALUES)
+    partial = " ".join("'%s'" % v for v in mod.STAGE_TERMINAL_VALUES[:3])
+    out = mod.check_stage_exclusion_sync(
+        [("ora-health-guard", partial), ("ora-deal-aging-sla", full)])
+    assert len(out) == 1, "expected exactly one flagged site, got %r" % out
+    assert "ora-health-guard" in out[0], out[0]
+    assert "Reneg Only" in out[0], "must name WHICH values are missing: %s" % out[0]
+    print("  PASS test_stage_sync_flags_the_historical_three_of_five_gap")
+
+
+def test_stage_sync_catches_hyphen_substituted_for_em_dash():
+    """The documented silent-failure trap: a hyphen never matches the value."""
+    mod = _load_probe_module()
+    hyphenated = " ".join("'%s'" % v.replace("—", "-")
+                          for v in mod.STAGE_TERMINAL_VALUES)
+    out = mod.check_stage_exclusion_sync([("ora-health-guard", hyphenated)])
+    assert out, "a hyphen must NOT satisfy an em-dash value -- that is the trap"
+    print("  PASS test_stage_sync_catches_hyphen_substituted_for_em_dash")
+
+
+def test_stage_sync_reports_every_bad_site_not_just_the_first():
+    """Mirrors check_identity_drift's lesson: a first-hit-only report lets the
+    rest survive a 'fixed it' claim."""
+    mod = _load_probe_module()
+    partial = " ".join("'%s'" % v for v in mod.STAGE_TERMINAL_VALUES[:2])
+    out = mod.check_stage_exclusion_sync(
+        [("a", partial), ("b", partial), ("c", partial)])
+    assert len(out) == 3, "expected all three reported, got %d: %r" % (len(out), out)
+    print("  PASS test_stage_sync_reports_every_bad_site_not_just_the_first")
+
+
+def test_stage_sync_accepts_backticked_inclusion_form():
+    """ora-weekly-hygiene check C states the same five as an inclusion list in
+    backticked prose. That is the sanctioned complement form, not drift."""
+    mod = _load_probe_module()
+    inclusion = ", ".join("`'%s'`" % v for v in mod.STAGE_TERMINAL_VALUES)
+    out = mod.check_stage_exclusion_sync([("ora-weekly-hygiene", inclusion)])
+    assert out == [], "backticked inclusion form must not be flagged: %r" % out
+    print("  PASS test_stage_sync_accepts_backticked_inclusion_form")
+
+
 def _load_probe_module():
     import importlib.util
     spec = importlib.util.spec_from_file_location("doctrine_integrity_probe", PROBE)
@@ -1379,6 +1444,11 @@ def main():
     test_worktree_baseref_fresh_warns()
     test_worktree_baseref_non_dict_worktree_key_warns()
     test_live_probe_reports_worktree_baseref_ok()
+    test_stage_sync_quiet_when_all_four_carry_all_five()
+    test_stage_sync_flags_the_historical_three_of_five_gap()
+    test_stage_sync_catches_hyphen_substituted_for_em_dash()
+    test_stage_sync_reports_every_bad_site_not_just_the_first()
+    test_stage_sync_accepts_backticked_inclusion_form()
     print("ALL DOCTRINE-PROBE TESTS PASS")
 
 
