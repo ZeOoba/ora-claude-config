@@ -4882,6 +4882,61 @@ escape is the `allow-hook-test-failure` override token — which is a 60-minute,
 tracked test suite, minted to get past a known-flaky test. That is exactly how a *real* failure eventually gets
 waved through, and it is the same shape as the 2026-08-09 OI-111 orphan that blocked every session's push.
 
+**Escalation 2026-08-12 — the timeout-retry path is not sufficient either, and the predicted override happened.**
+Pushing `task/snapshot-refresh-rationale-correction` (a docs-only commit touching two `scheduled-tasks/*/SKILL.md`
+files, zero hook code, zero blast-radius files) was hard-blocked by `hooks/tests/test-eos-review-gate.py`:
+
+| Signal | Value |
+|---|---|
+| Gate result | `73 pass, 1 fail, 1 env-skip (of 75)` |
+| Failing test | `hooks/tests/test-eos-review-gate.py`, exit 124, `TIMEOUT after 180s` — **after a timeout retry** |
+| Same test standalone, same machine | `ALL REVIEW-GATE TESTS PASS (55)`, exit 0, `real 2m25.937s` (**145.9s**) |
+| Headroom vs the 180s per-test budget | **34.1s, ~19%** — inverts under load |
+| Others in the same run | `test-git-prepush-scan.py`, `test-memory-orphan-link-guard.py` needed the doubled-budget rerun |
+
+**(1) The tolerance path itself now fails.** The widening above records `test-eos-review-gate.py` only ever
+appearing as a *non-blocking* `timeout-retry`. On 2026-08-12 it exhausted that retry and hard-blocked. So the
+gate's flake tolerance is not merely blind to non-timeout errors — its per-test timeout budget is too tight for
+a test that legitimately needs ~146s, which makes the retry a coin-flip rather than a fix. `hooks/eos-review-gate.py`
+was unmodified at the time (last change `e39ce4c`, two weeks prior), so this is budget headroom, not a regression.
+
+**(2) The override escape this item warned about was taken.** With the diagnosis in hand Gabriel authorized it
+in-turn, and an `allow-hook-test-failure` token was written to land `46cf1e2`. That is precisely the sequence
+this item predicted — *"exactly how a real failure eventually gets waved through"* — reached here on a false
+positive, with a measurement to justify it. The next one may not arrive with a 146s-vs-180s number attached.
+**Treat the running count of override tokens minted against this gate as the item's real severity signal.**
+
+A per-test budget derived from a measured baseline (or a `slow-test` allow-list carrying a longer budget) would
+close the timeout half without touching the `PermissionError` half. Reserved-but-unused id from the session that
+filed this escalation: **OI-127** (orphan by design — the ledger does not reclaim reservations).
+
+**THIRD-PARTY CONFIRMATION, same day (2026-08-12, `ora-task-integrity-guard` session `f4c30f1b`).** An
+unrelated session hit this independently while pushing a 32-line SKILL.md description-text change (zero hook
+code). **Three consecutive pushes blocked**, which is the strongest evidence yet for the "property of the gate,
+not one test" reading — and therefore for option 1 over options 2/3, which each fix a single test:
+
+| Attempt | Gate result | Hard-blocked on |
+|---|---|---|
+| 1 | 2 fail | `test-eos-review-gate.py`, `test-git-prepush-scan.py` |
+| 2 | 1 fail (76/77 pass) | `test-eos-review-gate.py` |
+| 3 | 2 fail (75/77 pass) | `test-eos-review-gate.py`, `test-memory-orphan-link-guard.py` |
+
+Every failure `exit 124, TIMEOUT after 180s`, **after** the doubled-budget retry; never an assertion failure.
+**The blocking set rotates between runs** — only `test-eos-review-gate.py` is constant — and the tests needing
+a doubled-budget rerun rotate too (`test-claim-work-lib`, `test-confidentiality-guard`, `test-config-write-guard`,
+`test-git-prepush-doctrine-gate-worktree`, `test-commit-hygiene-guard`, `test-git-prepush-scan` each appeared).
+Machine state: **63 node/claude processes, CPU pegged at 100%**. No override token was minted — the session
+declined to bypass the gate and routed the decision to Gabriel, who landed the work another way.
+
+**DIAGNOSTIC TRAP worth carrying on this item.** Two of those three pushes reported **exit 0 while the push had
+failed**, because the command piped `git push` into `tail` and the shell returned the pipe's status
+([[feedback_piped_gate_exit_masking]]). Only an unpiped run surfaced `REAL_EXIT=1`. Anyone diagnosing this gate
+from a piped transcript will conclude the push succeeded and the branch is on the remote when it is not.
+
+*(Ported 2026-08-12 from the primary `~/.claude` checkout, commit `92163b6`, where session `e0f8485e` originally
+landed this escalation — that branch is diverged from `main` (see [OI-131](#OI-131)) so it was not otherwise
+reaching this copy of the tracker. Content is verbatim; this note documents provenance only.)*
+
 **Options (Gabriel's call), roughly cheapest first.** Note the widening above changes their relative weight:
 options 2 and 3 fix ONE test, and a second test has already flaked, so only option 1 (or reducing the gate's
 parallelism) addresses the actual class.
