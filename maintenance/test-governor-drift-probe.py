@@ -1247,29 +1247,73 @@ def test_ratified_perproperty_refi_ceiling_prose_stays_clean_unit():
     print("  PASS test_ratified_perproperty_refi_ceiling_prose_stays_clean_unit")
 
 
-def test_known_gap_value_between_metric_and_boundword_unit():
-    """KNOWN GAP, PINNED DELIBERATELY (2026-08-11, surfaced in independent review).
+def test_value_between_metric_and_boundword_flags_unit():
+    """GAP NOW CLOSED (2026-08-12). Was pinned as a known gap on 2026-08-11: the
+    metric-VALUE-boundword order did not arm, because the value's own decimal is a '.' and the
+    qualifier gap class excludes '.' to stop the gate crossing a sentence. "DSCR 1.40x minimum"
+    went undetected even though its extractor (RE_DSCR_DECL_REV) existed.
 
-    The metric-VALUE-boundword order does not arm: the value's own decimal point is a '.', and the
-    gap class excludes '.' to stop the gate crossing a sentence. So "DSCR 1.40x minimum" is NOT
-    detected even though its extractor (RE_DSCR_DECL_REV) exists. Pre-existing -- the old contiguous
-    keywords missed it too -- so this is not a regression, but it sits inside the class the
-    intervening-qualifier fix advertises closing, and is pinned rather than left silent.
-
-    THIS TEST ASSERTS CURRENT (WRONG) BEHAVIOUR. When the gap is closed, FLIP these asserts to
-    expect a finding -- do not delete the test. The obvious fix (allow a dot only between digits)
-    was measured and REJECTED: it makes "DSCR of 1.42 with a 10 min cure period" report 1.42 as a
-    drifted governor. Close the EXTRACTOR side first."""
+    Closed with a SECOND, value-abutting arming pattern rather than by loosening the first: the
+    decimal now lives INSIDE the pattern, so it can never be confused with a sentence boundary.
+    The rejected alternative (allow a dot anywhere between digits in the gap) is still rejected --
+    it reports "DSCR of 1.42 with a 10 min cure period" as governor drift; see the FP guard test."""
     m = _load_probe_module()
-    for line in ("DSCR 1.40x minimum per property.", "DSCR 1.40 floor per property."):
+    for line in ("DSCR 1.40x minimum per property.",
+                 "DSCR 1.40 floor per property.",
+                 "DSCR 1.40x min per property."):
+        out = m.scan_line(line)
+        assert any("DSCR" in o for o in out), (
+            "value-between-metric-and-boundword drift must flag: %r -> %r" % (line, out))
+    # Canonical in the same shape must stay clean -- arming is not a finding.
+    assert m.scan_line("DSCR 1.25x minimum per property.") == [], \
+        "canonical value in the value-first shape must not flag"
+    print("  PASS test_value_between_metric_and_boundword_flags_unit")
+
+
+def test_value_abutting_arming_does_not_flag_durations_unit():
+    """FP GUARD for the value-abutting pattern (2026-08-12). The whole reason the simpler
+    digit-dot fix was rejected: bare 'min' is a DURATION unit as often as it is 'minimum'. These
+    must never report a governor finding -- pinned so a future loosening of the value-abutting
+    pattern fails here rather than turning cure periods and uptime prose into Hard-Invariant-4
+    findings."""
+    m = _load_probe_module()
+    for line in ("DSCR of 1.42 with a 10 min cure period",
+                 "DSCR poller downtime 1.5 min today.",
+                 "Cure period is 30 min; DSCR of 1.42 reported.",
+                 "DSCR came in at 1.42; minimum lease term 3 yrs."):
         assert m.scan_line(line) == [], (
-            "known-gap pin is stale -- this line now flags, so CLOSE the gap and flip this "
-            "assert: %r -> %r" % (line, m.scan_line(line)))
-    # The same shape DOES flag once any ordinary governor keyword is present -- proof that only the
-    # arming gate, not the extractor, is missing.
-    assert m.scan_line("DSCR 1.40x minimum per property (governor)."), \
-        "extractor for the value-first shape must still work when the line is armed"
-    print("  PASS test_known_gap_value_between_metric_and_boundword_unit")
+            "duration/unrelated prose must NOT flag: %r -> %r" % (line, m.scan_line(line)))
+    print("  PASS test_value_abutting_arming_does_not_flag_durations_unit")
+
+
+def test_ltv_extractor_spans_intervening_qualifier_unit():
+    """GAP 2 CLOSED (2026-08-12). "LTV hard ceiling 75%" was ARMED all along -- "hard ceiling" is a
+    GOV_KEYWORDS token (N6) -- but yielded nothing, because the EXTRACTOR RE_LTV_ANCHOR required
+    contiguous "ltv ceiling" (\\s* only), so the qualifier defeated it. The 2026-08-11 revision
+    blamed the arming gate; independent review corrected the attribution to the extractors, and
+    this closes it there.
+
+    Widening the extractor is safe with respect to the ratified 65% refi-ceiling false positive
+    that caused the earlier revert, because that line is gated out by ARMING, not by extraction --
+    pinned by test_ratified_perproperty_refi_ceiling_prose_stays_clean_unit, which must keep
+    passing alongside this."""
+    m = _load_probe_module()
+    out = m.scan_line("LTV hard ceiling 75% on an aggregate basis.")
+    assert any("LTV" in o for o in out), (
+        "drifted LTV ceiling with an intervening qualifier must flag: %r" % (out,))
+    assert m.scan_line("LTV hard ceiling 40% on an aggregate basis.") == [], \
+        "canonical LTV ceiling in the same shape must stay clean"
+
+    # BOUNDARY, asserted deliberately: extraction is only half the requirement -- the line must
+    # ALSO be armed. "LTV absolute maximum 75%" carries no GOV_KEYWORDS token (unlike "hard
+    # ceiling", N6), so it stays clean even though the widened extractor can now read it. This is
+    # the arming gate working as designed, NOT a residual extractor bug: closing it would require
+    # widening LTV ARMING, which is the change that false-positived on the ratified 65%
+    # per-property refi ceiling and was reverted. Documented so the next reader does not "fix"
+    # this by reopening that hole.
+    assert m.scan_line("LTV absolute maximum 75% on an aggregate basis.") == [], (
+        "unarmed LTV prose must stay clean -- widening LTV ARMING is the reverted change")
+    print("  PASS test_ltv_extractor_spans_intervening_qualifier_unit")
 
 
 def test_intervening_qualifier_canonical_stays_clean_unit():
@@ -1372,7 +1416,9 @@ def main():
     test_event_log_excluded_e2e()
     test_intervening_qualifier_dscr_floor_flags_unit()
     test_ratified_perproperty_refi_ceiling_prose_stays_clean_unit()
-    test_known_gap_value_between_metric_and_boundword_unit()
+    test_ltv_extractor_spans_intervening_qualifier_unit()
+    test_value_between_metric_and_boundword_flags_unit()
+    test_value_abutting_arming_does_not_flag_durations_unit()
     test_intervening_qualifier_canonical_stays_clean_unit()
     test_qualifier_gate_requires_the_metric_token_unit()
     print("ALL GOVERNOR-PROBE TESTS PASS")
