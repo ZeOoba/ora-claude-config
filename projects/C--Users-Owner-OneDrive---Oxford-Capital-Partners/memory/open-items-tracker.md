@@ -32,6 +32,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
+| [OI-130](#OI-130) | 2026-08-12 | session 08df9f95, observed across 6 PRs merged that day into `ora-claude-config` | **CodeRabbit's PR check reports `pass` when it is RATE-LIMITED and never reviewed the diff.** Measured: **5 of 6** PRs merged 2026-08-12 (#45, #49, #51, #55, #65) showed `check=pass` with `detail=Review rate limited` AND a "Review limit reached — we couldn't start this review" comment; only #47 was genuinely reviewed. A green check that means "nobody looked" is indistinguishable from one that means "looked and found nothing", so any human or agent treating it as a review gate is trusting a fail-open signal. Nothing landed unreviewed today (independent LOCAL reviews ran and caught a Critical on #47 and an Important on #55), so this is trust-calibration, not a live breach. Fix is a judgement call: treat CodeRabbit as advisory-only and document it, gate on the comment body rather than the check conclusion, or raise the plan limit |
 | [OI-126](#OI-126) | 2026-08-12 | session 08df9f95 (scheduled `ora-doctrine-integrity-guard` run), investigating why merged `hooks/**` fixes were not live | **TRANSIENT — may self-close.** The primary `~/.claude` checkout cannot move onto `main` because `worktrees/_push-main-tmp` holds that branch (git allows a branch in one worktree only), so PR #51 and #55 are merged but INERT in the live pre-push chain: the confidentiality suite's 131 assertions ENV-SKIP on every worktree push, and a load-induced failure still hard-blocks with no retry. `_push-main-tmp` is NOT stale — actively used, clean, and its owning session is idle awaiting input. Local `main` (`9e6c00a`) already carries #47/#49/#51/#55 and is 4 ahead / 0 behind `origin/main`. Resolution is for that session to release the worktree; the ~117 uncommitted files in the primary checkout are unverified against the 48 incoming commits, so nobody should force the switch |
 | [OI-119](#OI-119) | 2026-08-11 | `pre-push` hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) | Pre-push gate is **flaky under its own load and hard-blocks any session's push**: across 3 consecutive pushes of one branch, **two different** tests failed (`test_allocate_oi_id.py`, `test-claim-file-collision.py`) with two clean runs of the same suite between them. The gate retries tests that *time out* but not those that error, so each flake looks like a real regression and the tempting escape is a 60-min multi-use override token |
 | [OI-118](#OI-118) | 2026-08-11 | `.gitignore:61`, found wiring ora-health-guard to the double-fire guard | `.gitignore`'s `/scheduled-tasks/*/*` makes every `_shared/` helper edit **invisible to `git status`** on any branch predating that file's force-add — and git then **silently overwrites** the file on `checkout`/`merge`/`rebase` to main (verified by reproduction; the same file without the ignore rule aborts with exit 1). Standing trap for the whole guard toolkit |
@@ -2619,6 +2620,53 @@ their real contact info.
 server-side (the handler already does `db.from('tenants').select(...)` for the IDOR check — just add
 `contact_email`/`name` to that select and use it) instead of trusting the request body. Low priority,
 not blocking; noted here so it isn't lost, not because it's urgent.
+**Auto-check:** none.
+
+### OI-130
+**Status:** OPEN — trust-calibration, not a live breach. Fix is a judgement call between three options below.
+**Opened:** 2026-08-12
+**Source:** session 08df9f95 (an unattended `ora-doctrine-integrity-guard` run taken over interactively),
+observed across six PRs merged into `ora-claude-config` that day
+**Description:** CodeRabbit's PR status check reports a **passing** conclusion when it is rate-limited and has
+**not reviewed the diff at all**. The check and the "I didn't look" notice live in different places: `gh pr checks`
+shows `pass`, while the reason sits only in a PR comment body.
+
+**Measured, not impression (2026-08-12):**
+
+| PR | `gh pr checks` | detail | "Review limit reached" comment |
+|---|---|---|---|
+| #45 | pass | Review rate limited | yes |
+| #47 | pass | Review completed | — (genuinely reviewed) |
+| #49 | pass | Review rate limited | yes |
+| #51 | pass | Review rate limited | yes |
+| #55 | pass | Review rate limited | yes |
+| #65 | pass | Review rate limited | yes |
+
+**5 of 6.** The comment reads: *"you've reached your PR review limit, so we couldn't start this review… Next
+review available in: 13 minutes"* — the plan's included-review quota, which a busy day exhausts. This repo saw
+~10 PRs from multiple concurrent sessions that day.
+
+**Why it matters:** a green check that means "nobody looked" is indistinguishable, at a glance, from one that
+means "looked and found nothing". Anyone — human or agent — treating that check as the review gate is trusting a
+signal that fails OPEN. Compare two failure modes closed the same day: `scrub-before-optin.py` reporting
+`SCRUB CLEAN` when it could not read the file, and the pre-push gate reclassifying a real failure as a
+non-blocking ENV-SKIP (OI-119). Same shape, three different systems.
+
+**Not a live breach.** Nothing merged that day was actually unreviewed: independent LOCAL reviews ran on every
+substantive change and earned their keep — a **Critical** on #47 (an unscannable snapshot recorded as CLEAN) and
+an **Important** on #55 (a real failure reclassified non-blocking and invisible). CodeRabbit never caught either;
+it just looked like a second gate.
+
+**Three options (Gabriel's call):**
+1. **Advisory-only, documented** — accept CodeRabbit as best-effort and write down that its check conclusion is
+   NOT evidence of review. Cheapest; changes nothing mechanical.
+2. **Gate on the comment, not the conclusion** — a small pre-merge check that greps the CodeRabbit comment for
+   "Review limit reached" and treats it as *not reviewed*. Honest signal, but another moving part to maintain.
+3. **Raise the plan limit** — usage-based reviews are offered in the same comment ($0.25/file past the quota).
+   Only worth it if CodeRabbit is meant to be load-bearing, which today's evidence says it is not.
+
+**Caveat on scope:** measured on one repo (`ora-claude-config`) on one day. Whether other repos' CodeRabbit
+integrations behave the same way was NOT checked.
 **Auto-check:** none.
 
 ### OI-111
