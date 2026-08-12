@@ -32,7 +32,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
-| [OI-130](#OI-130) | 2026-08-12 | session 08df9f95, observed across 6 PRs merged that day into `ora-claude-config` | **CodeRabbit's PR check reports `pass` when it is RATE-LIMITED and never reviewed the diff.** Measured: **5 of 6** PRs merged 2026-08-12 (#45, #49, #51, #55, #65) showed `check=pass` with `detail=Review rate limited` AND a "Review limit reached — we couldn't start this review" comment; only #47 was genuinely reviewed. A green check that means "nobody looked" is indistinguishable from one that means "looked and found nothing", so any human or agent treating it as a review gate is trusting a fail-open signal. Nothing landed unreviewed today (independent LOCAL reviews ran and caught a Critical on #47 and an Important on #55), so this is trust-calibration, not a live breach. Fix is a judgement call: treat CodeRabbit as advisory-only and document it, gate on the comment body rather than the check conclusion, or raise the plan limit |
+| [OI-130](#OI-130) | 2026-08-12 | session 08df9f95 (path A, 6 PRs) + session 663673c8 (path B, PR #70), both in `ora-claude-config` | **CodeRabbit's PR check reports `pass` on PRs it never reviewed — via TWO distinct routes.** **(A) Rate-limited:** 5 of 6 PRs merged 2026-08-12 (#45, #49, #51, #55, #65) showed `check=pass`, `detail=Review rate limited`, plus a "Review limit reached — we couldn't start this review" comment; only #47 was genuinely reviewed. **(B) Non-default base:** CodeRabbit declines every PR whose base is not the repo default branch and still reports `check=pass`, `detail=Review skipped: reviews are disabled for this base branch` — **deterministic, every time**, not sporadic. Verified on PR #70 (base `feat/model-canary-probe-step25`): 0 reviews, 0 review comments, empty `reviewDecision`, one bot comment that IS the skip notice — and it **merged in that state** at 2026-08-12T22:23:07Z. A green check meaning "nobody looked" is indistinguishable from one meaning "looked and found nothing"; both routes fail OPEN. Path B is structurally induced by ORA practice — any change depending on unmerged work must target a feature branch, which is what OI-131's branch divergence keeps producing. Fix: advisory-only + documented, or gate on a real review body existing (must cover BOTH notices, not just the rate-limit string), or raise the plan limit; path B additionally has a direct config fix |
 | [OI-126](#OI-126) | 2026-08-12 | session 08df9f95 (scheduled `ora-doctrine-integrity-guard` run), investigating why merged `hooks/**` fixes were not live | **TRANSIENT — may self-close.** The primary `~/.claude` checkout cannot move onto `main` because `worktrees/_push-main-tmp` holds that branch (git allows a branch in one worktree only), so PR #51 and #55 are merged but INERT in the live pre-push chain: the confidentiality suite's 131 assertions ENV-SKIP on every worktree push, and a load-induced failure still hard-blocks with no retry. `_push-main-tmp` is NOT stale — actively used, clean, and its owning session is idle awaiting input. Local `main` (`9e6c00a`) already carries #47/#49/#51/#55 and is 4 ahead / 0 behind `origin/main`. Resolution is for that session to release the worktree; the ~117 uncommitted files in the primary checkout are unverified against the 48 incoming commits, so nobody should force the switch |
 | [OI-119](#OI-119) | 2026-08-11 | `pre-push` hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) | Pre-push gate is **flaky under its own load and hard-blocks any session's push**: across 3 consecutive pushes of one branch, **two different** tests failed (`test_allocate_oi_id.py`, `test-claim-file-collision.py`) with two clean runs of the same suite between them. The gate retries tests that *time out* but not those that error, so each flake looks like a real regression and the tempting escape is a 60-min multi-use override token |
 | [OI-118](#OI-118) | 2026-08-11 | `.gitignore:61`, found wiring ora-health-guard to the double-fire guard | `.gitignore`'s `/scheduled-tasks/*/*` makes every `_shared/` helper edit **invisible to `git status`** on any branch predating that file's force-add — and git then **silently overwrites** the file on `checkout`/`merge`/`rebase` to main (verified by reproduction; the same file without the ignore rule aborts with exit 1). Standing trap for the whole guard toolkit |
@@ -2623,13 +2623,22 @@ not blocking; noted here so it isn't lost, not because it's urgent.
 **Auto-check:** none.
 
 ### OI-130
-**Status:** OPEN — trust-calibration, not a live breach. Fix is a judgement call between three options below.
-**Opened:** 2026-08-12
-**Source:** session 08df9f95 (an unattended `ora-doctrine-integrity-guard` run taken over interactively),
-observed across six PRs merged into `ora-claude-config` that day
-**Description:** CodeRabbit's PR status check reports a **passing** conclusion when it is rate-limited and has
-**not reviewed the diff at all**. The check and the "I didn't look" notice live in different places: `gh pr checks`
-shows `pass`, while the reason sits only in a PR comment body.
+**Status:** OPEN — trust-calibration. Two routes to the same fail-open signal: path A (rate-limited) is sporadic
+and had no unreviewed merge; path B (non-default base branch) is deterministic and DID merge a PR with zero
+CodeRabbit review. Fix is a judgement call between the four options below; options 1 and 2 are the only ones
+covering both paths.
+**Opened:** 2026-08-12 (path A) · path B folded in 2026-08-12
+**Source:** path A — session 08df9f95 (an unattended `ora-doctrine-integrity-guard` run taken over interactively),
+observed across six PRs merged into `ora-claude-config` that day. Path B — session 663673c8, folded in the same
+day from PR #70 in the same repo.
+**Description:** CodeRabbit's PR status check reports a **passing** conclusion when it has **not reviewed the diff
+at all**. The check and the "I didn't look" notice live in different places: `gh pr checks` shows `pass`, while the
+reason sits only in a PR comment body. **Two independent routes reach this same end state** — one sporadic and
+load-driven (A), one deterministic and structural (B). A fix aimed at only one of them leaves the other open.
+
+---
+
+#### Path A — rate-limited (sporadic, load-driven)
 
 **Measured, not impression (2026-08-12):**
 
@@ -2646,27 +2655,82 @@ shows `pass`, while the reason sits only in a PR comment body.
 review available in: 13 minutes"* — the plan's included-review quota, which a busy day exhausts. This repo saw
 ~10 PRs from multiple concurrent sessions that day.
 
+---
+
+#### Path B — base branch is not the repository default (deterministic, structural)
+
+CodeRabbit **declines to review any PR whose base is not the repo's default branch**, posts only a notice, and
+still reports a **passing** check. Verified via the GitHub API on 2026-08-12 (not inferred) against
+`ZeOoba/ora-claude-config` **PR #70**, base `feat/model-canary-probe-step25`, head
+`task/snapshot-refresh-rationale-correction`:
+
+| probe | result |
+|---|---|
+| `gh pr checks 70` | `CodeRabbit  pass` — detail: *"Review skipped: reviews are disabled for this base branch"* |
+| `gh api .../pulls/70/comments -q 'length'` | `0` (no inline review comments) |
+| `gh api .../pulls/70/reviews -q 'length'` | `0` (no review objects) |
+| `gh pr view 70 --json reviewDecision` | empty |
+| issue-level bot comments | exactly one — and it **is** the skip notice |
+
+The comment body reads: *"Review skipped — Auto reviews are disabled on base/target branches other than the
+default branch."* followed by *"Please check the settings in the CodeRabbit UI or the `.coderabbit.yaml` file in
+this repository."* There is no `.coderabbit.yaml` at the repo root, so this is the CodeRabbit-UI default, not a
+committed choice.
+
+**PR #70 then MERGED in that exact state** — 2026-08-12T22:23:07Z, merge commit `6c2685c`, into
+`feat/model-canary-probe-step25`. Re-verified post-merge: still 0 reviews, still 0 review comments. So this is not
+a hypothetical; a change landed on 2026-08-12 carrying a green CodeRabbit check for a review that never ran.
+
+**Why path B deserves its own entry rather than a footnote on A:**
+
+1. **Deterministic, not sporadic.** Path A depends on that day's quota burn — it may or may not fire on any given
+   PR. Path B fires on **every** non-default-base PR, **every time**. That also makes it *cheaply* guardable in a
+   way A is not: assert the base ref before merge, or assert that a real review body exists rather than merely
+   that a bot comment is present.
+2. **Structurally induced by ORA practice, not an accident.** PR #70 targeted a feature branch *deliberately*: it
+   edits a section of `scheduled-tasks/ora-cc-snapshot-refresh/SKILL.md` that does not exist on `main` (it arrived
+   in commit `1706bc2` on that branch). A PR into `main` would have carried **17 commits, 16 of them unrelated
+   work from other sessions** (verified: `git rev-list --count origin/main..origin/task/snapshot-refresh-rationale-correction`
+   → 17). Any change that depends on unmerged work hits this — which is precisely the situation OI-131's config-repo
+   branch divergence keeps producing. Expect path B to recur until that divergence is resolved.
+
 **Why it matters:** a green check that means "nobody looked" is indistinguishable, at a glance, from one that
 means "looked and found nothing". Anyone — human or agent — treating that check as the review gate is trusting a
 signal that fails OPEN. Compare two failure modes closed the same day: `scrub-before-optin.py` reporting
 `SCRUB CLEAN` when it could not read the file, and the pre-push gate reclassifying a real failure as a
 non-blocking ENV-SKIP (OI-119). Same shape, three different systems.
 
-**Not a live breach.** Nothing merged that day was actually unreviewed: independent LOCAL reviews ran on every
-substantive change and earned their keep — a **Critical** on #47 (an unscannable snapshot recorded as CLEAN) and
-an **Important** on #55 (a real failure reclassified non-blocking and invisible). CodeRabbit never caught either;
-it just looked like a second gate.
+**Not a live breach — path A.** Nothing merged on path A that day was actually unreviewed: independent LOCAL
+reviews ran on every substantive change and earned their keep — a **Critical** on #47 (an unscannable snapshot
+recorded as CLEAN) and an **Important** on #55 (a real failure reclassified non-blocking and invisible).
+CodeRabbit never caught either; it just looked like a second gate.
 
-**Three options (Gabriel's call):**
+**Path B, same question, NOT verified.** PR #70 merged with zero CodeRabbit review. Whether an independent LOCAL
+review ran on it was not checked here, so path B is recorded as an unverified-coverage case, not as a clean one.
+Do not read path A's "nothing landed unreviewed" onto it.
+
+**Options (Gabriel's call):**
 1. **Advisory-only, documented** — accept CodeRabbit as best-effort and write down that its check conclusion is
-   NOT evidence of review. Cheapest; changes nothing mechanical.
-2. **Gate on the comment, not the conclusion** — a small pre-merge check that greps the CodeRabbit comment for
-   "Review limit reached" and treats it as *not reviewed*. Honest signal, but another moving part to maintain.
+   NOT evidence of review. Cheapest; changes nothing mechanical. Covers **both** paths.
+2. **Gate on evidence of review, not on the check conclusion** — a small pre-merge check. Note the trap: the
+   obvious version greps the comment for "Review limit reached" and would **silently miss path B**, whose notice
+   says "Auto reviews are disabled on base/target branches other than the default branch". Gate on the *positive*
+   signal instead — `pulls/N/reviews` non-empty, or a review body that actually exists — so any future
+   skip-with-a-different-string is caught too. Covers both paths; one moving part to maintain.
 3. **Raise the plan limit** — usage-based reviews are offered in the same comment ($0.25/file past the quota).
-   Only worth it if CodeRabbit is meant to be load-bearing, which today's evidence says it is not.
+   Fixes **path A only**; a non-default-base PR stays unreviewed at any quota. Only worth it if CodeRabbit is
+   meant to be load-bearing, which today's evidence says it is not.
+4. **Enable auto-review on non-default base branches** (path B only) — the skip notice points at the CodeRabbit UI
+   setting or a `.coderabbit.yaml`, neither of which this repo currently sets. Cheap and targeted, but it raises
+   review volume and therefore feeds path A. Do not adopt 4 without 1 or 2.
 
-**Caveat on scope:** measured on one repo (`ora-claude-config`) on one day. Whether other repos' CodeRabbit
-integrations behave the same way was NOT checked.
+**Cheapest partial regardless of choice:** assert the base ref. A PR whose base is not the default branch is
+*known* to be unreviewed by CodeRabbit — that requires no comment parsing at all.
+
+**Caveat on scope:** path A measured on one repo (`ora-claude-config`) on one day; path B on one PR in that same
+repo. Whether other repos' CodeRabbit integrations behave the same way was NOT checked — though path B's cause is
+a documented CodeRabbit setting rather than a load condition, so it should reproduce anywhere the setting is left
+at its default.
 **Auto-check:** none.
 
 ### OI-111
