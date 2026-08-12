@@ -32,6 +32,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
+| [OI-140](#OI-140) | 2026-08-12 | Hit live while verifying the [OI-136](#OI-136) filing against a `git show HEAD:` extract — the checker reported a defect that existed only in the working tree | **MEDIUM** `maintenance/check-open-items-duplicate-ids.py` **silently ignores its CLI path argument** and always reads the canonical tracker. `main()` does `path = tracker_path()` (line 180) → `TRACKER_PATH_OVERRIDE or DEFAULT_TRACKER_PATH`; **`sys.argv` appears zero times in the file** — no argparse, no positional handling. Passing a nonexistent path still returns a normal clean canonical report, because the `COULD NOT READ %s ... treat as a check failure` branch is unreachable from the CLI. Three things make it read as a working feature: it prints the path it checked, it formats a path into that error branch, and it accepts an argument without complaint. **Tests do not catch it** — `_tests/test_check_open_items_duplicate_ids.py` drives `main()`'s read path by assigning `codc.TRACKER_PATH_OVERRIDE` (a module attribute), so the logic is covered and the entry point never is. **Production caller is unaffected**: `ora-weekly-hygiene` Block N passes no argument. The harm is ad-hoc verification of a worktree copy / candidate edit / `HEAD` extract, which silently returns a verdict about a *different file* — false FAIL (blaming your copy for a live-file defect) or false PASS (your broken copy looks clean because the live one is). A verification tool that answers about an artifact you did not name is the [[feedback_verified_null_vs_inferred_null]] failure in its purest form |
 | [OI-139](#OI-139) | 2026-08-12 | `fleet-status.py`'s `find_missed_cycles()` CRON-AWARE GUARD fix (commits `40b6176`/`30d2869`, merged to `main` and pushed as `08e0daa`); Cowork handoff "Health Guard FAIL-Aging Follow-Up" 2026-08-11, `scheduled-tasks/ora-health-guard/SKILL.md` C.1.1 | **LOW — accepted tradeoff, documented, not a defect.** The 2026-08-11 fix that made the missed-cycle detector cron-aware (escalate only past `max(24h, 1.5x own cadence)`, replacing the flat 24h wall that produced 8/13 false positives on 2026-08-10) is pure cadence math with no runtime signal for "was this a genuine catch-up burst." The superseded per-run SKILL.md logic additionally suppressed a `gap ≈ 1x interval` entry only when a late wake was detected *that run*, and otherwise escalated immediately as a likely phantom dispatch or dead task — a signal the code-level threshold structurally cannot see. **Consequence:** a task that misses exactly one slot with the machine fully up (no catch-up excuse available) now surfaces one cycle later than the old per-run logic could have caught it. Deliberate, Gabriel-approved simplification (the 2026-08-11 Cowork handoff spec explicitly specified the 1.5x-cadence rule) — do not re-litigate the threshold on this row alone. **Re-open only if a real single-slot dead-task/phantom-dispatch incident is observed and traced to this specific gap** — do not preemptively bolt an A.0-style runtime signal back into the code threshold without one |
 | [OI-138](#OI-138) | 2026-08-12 | hit live while committing two markdown memory files (OI-133 filing); `hooks/eos-review-gate.py` | **MEDIUM — ROUTED to the `hooks-override-auth-eos-gate-msg` workstream (session `e23f4c54`), same file, different defect from the `--record`/config-write-guard message fix.** The gate's BLOCKING path does not apply the pathspec scoping its own `--key --cmd` path does, so it scores *other live sessions' working-tree files* into an unrelated commit. Measured: unscoped `--key` → 3 foreign paths (`hooks/lib/claim_work.py`, `hooks/tests/test-claim-work-lib.py`, `scheduled-tasks/ora-pm-ledger/property_register_snapshot_diff.py`); `--key --cmd '<the pathspec commit>'` → `paths: []`, `key: ""`. **The gate already computes the right answer — the block just doesn't ask it that way.** Using the pathspec form of `git commit` did NOT change the block. Second, and worse — **CONFIRMED, not a guess: the block and `--record` key off DIFFERENT computations, so the gate is unclearable by its own documented procedure.** Both are deterministic and they disagree: the block reported `03b8fb93055b` on two separate attempts minutes apart, while `--key` returned `ef91d37feb7e…` on four consecutive runs. A review recorded via `--record` therefore lands under a key the block never looks for, and **an override is the only exit** — which is exactly how a security gate degrades into a formality. **Why it matters:** in a checkout with 125 dirty files across 15+ sessions this fires on nearly every commit regardless of content, so the gate gets overridden as routine — that is the failure mode, not the inconvenience |
 | [OI-136](#OI-136) | 2026-08-12 | `event_log.md` entries committed as `75ab0de`, cross-read against this session's own two declined overrides | **HIGH** `allow-hook-test-failure` normalised: **5 uses across 4 sessions inside 47 minutes** (16:32:04–17:19:23 local, 2026-08-12; `e89ddd24` twice). Every one cites the *same* cause — a load-induced `exit 124` TIMEOUT on `test-eos-review-gate.py` that passes in isolation — i.e. all 5 are [OI-057](#OI-057)/[OI-059](#OI-059), not 5 independent judgement calls. **No protocol was broken**: each token records explicit in-turn authorization, exactly as `rules.md` requires. That is the finding — the control worked as designed and was still worn down, because a gate that false-blocks makes overriding the *rational* move, and the reasons converge to a script ("timeout not assertion, passes standalone"). The security property `allow-hook-test-failure` protects is that a human weighs a **real** test failure; 5-for-5 on one known flake trains the reflex to approve without weighing, so the next genuine failure inherits that reflex. Mitigated indirectly by `c29ec95` (budget 90→240) but **not addressed**: nothing caps, counts, or alerts on override frequency, and nothing distinguishes "5th override this hour for the same flake" from "first override this month for a novel failure". Needs a rate/repeat signal, not a stricter gate |
@@ -5724,3 +5725,62 @@ after. That is one override that should never have been needed.
 **Related:** [[reference_refute_differential_harness]] (the required verification shape for guard/scope regex
 changes), [OI-129](#OI-129) (the sibling class where a gate asserts on live shared state and blocks unrelated
 sessions' pushes — same failure shape, different gate).
+
+### OI-140
+**Status:** OPEN
+**Opened:** 2026-08-12
+**Severity:** MEDIUM
+**Source:** Hit live 2026-08-12 while verifying the [OI-136](#OI-136) filing had committed intact. A
+`git show HEAD:open-items-tracker.md` extract was checked with this tool; it reported an
+`ORPHANED_SECTION OI-137` that does **not** exist in that extract (confirmed: 0 rows, 0 sections for OI-137 in
+HEAD) but does exist in the live working tree. The tool had silently answered about a different file.
+**Description:** `maintenance/check-open-items-duplicate-ids.py` accepts a path argument on the command line
+and **discards it**. `main()` (line 180) does:
+
+    path = tracker_path()          # -> TRACKER_PATH_OVERRIDE or DEFAULT_TRACKER_PATH
+
+`sys.argv` appears **zero times** in the 197-line file — no `argparse`, no positional handling, no error on an
+unexpected argument. `TRACKER_PATH_OVERRIDE` (line 73) is documented "test seam only" and is settable only by
+importing the module and assigning the attribute, never from a shell.
+
+**Why it reads as a working feature rather than an unimplemented one.** Three signals actively suggest the
+argument was honoured:
+1. Every report prints the file it checked — but that is `path` from the default, not your argument, and the
+   two are easy to conflate when the default is the file you usually mean.
+2. There is a fully-formed read-failure branch: `COULD NOT READ %s (%s) -- treat as a check failure, not a
+   clean result.` It is **unreachable from the CLI**. Passing a nonexistent path returns a normal, clean,
+   canonical report — verified: `check-open-items-duplicate-ids.py <path-that-does-not-exist>` exits with the
+   canonical file's verdict.
+3. It never rejects the argument, so there is no feedback that it was ignored.
+
+**Why the tests do not catch it.** `maintenance/_tests/test_check_open_items_duplicate_ids.py` covers
+`main()`'s file-read path — including the missing-file case — by assigning `codc.TRACKER_PATH_OVERRIDE`
+directly (lines ~154-181). That is a module attribute, not the command line. The result is a suite that
+genuinely exercises the read logic while leaving the **entry point** untested, so the seam that makes the code
+testable is also what conceals that the CLI never reaches it. Worth generalising: a `*_OVERRIDE` test seam
+tests the function, never the invocation.
+
+**Blast radius is narrower than it looks — record this so nobody over-fixes.** The production caller,
+`ora-weekly-hygiene` Block N, invokes the script with **no argument at all**, so the scheduled weekly check has
+always been correct and is unaffected. The harm is confined to ad-hoc/interactive use: validating a worktree
+copy, a candidate edit, a `git show HEAD:` extract, or a PR branch's version. In those cases the tool returns a
+verdict about an artifact the caller did not name, in **both** directions:
+- **False FAIL** — your copy is blamed for a defect that exists only in the live tracker (the case that
+  surfaced this; live had a half-filed OI-137 from another session).
+- **False PASS** — your genuinely broken copy reports clean because the live tracker happens to be clean. This
+  is the dangerous direction, and on a shared checkout with a dozen sessions editing this file, the live
+  tracker's state is effectively random with respect to your edit.
+
+This is [[feedback_verified_null_vs_inferred_null]] in a verification tool: a result that looks verified but is
+an answer to a question you did not ask. Any session that "confirmed" a tracker copy with this tool has an
+unverified copy.
+
+**Candidate fixes (not yet chosen, smallest first):**
+- Reject unexpected arguments — two lines, and it converts a silent wrong answer into a loud one. This alone
+  removes the hazard even if no path support is ever added.
+- Or accept a real positional path (`argparse`, defaulting to the canonical tracker) and add ONE test that
+  drives the script through `subprocess` rather than the attribute seam, so the entry point is covered.
+- Whichever is chosen, keep `TRACKER_PATH_OVERRIDE` — the seam is fine; the gap is that nothing tests argv.
+**Auto-check:** none. Detection today is manual and accidental.
+**Related:** [OI-136](#OI-136) (filed in the same session; this defect surfaced while verifying it),
+[[feedback_verified_null_vs_inferred_null]], [[feedback_absence_claims_need_verification_before_building]].
