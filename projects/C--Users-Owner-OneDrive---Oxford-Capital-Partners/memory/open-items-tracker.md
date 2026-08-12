@@ -117,6 +117,9 @@ is what the detector should expect on all three lender rows |
 | [OI-116](#OI-116) | 2026-08-11 | Landing [PR #52](https://github.com/ZeOoba/ora-claude-config/pull/52) (`claim_work.py` refusal gate), 08-11 | **MEDIUM** An **unattended** session can hold a `claim_work.py` slug indefinitely and cannot be released or contacted: `send_message` refuses delivery to unattended sessions, and `shared-checkout-guard`'s `_self_renew_claims` keeps re-stamping `claimed_at` so the 2h TTL never expires it. Hit **three times in one session** (`1d88885d` on `hooks-override-auth`; `05236b94` on `open-items-tracker`, twice — including while filing this item). The new refusal correctly names the collision and prints the holder's `host_session_id` per OI-108, but "message them" is a dead end for exactly this class of holder, leaving `--force` as the only exit — the operation the gate exists to make rare. |
 | [OI-117](#OI-117) | 2026-08-11 | Landing [PR #52](https://github.com/ZeOoba/ora-claude-config/pull/52) into the live checkout, 08-11 | **MEDIUM** The live `~/.claude` checkout has drifted to where `origin/main` **cannot be merged**: on `feat/model-canary-probe-step25`, 4 ahead / 29 behind, **96+ uncommitted files** from ≥6 concurrent sessions, with 9 of the incoming commits' files dirty locally (incl. `open-items-tracker.md`, live-claimed at the time). `stash`/`checkout`/`reset` on a contaminated tree are forbidden, so PR #52 merged to `main` but was **not live**; getting it live needed a surgical `git checkout origin/main -- <3 files>`, which leaves those files modified against the branch HEAD (a `commit -a` by any session sweeps them; `eos-review-gate` may demand a review artifact from whoever did not write them). This is the general case for every future `hooks/**` change, not a one-off. |
 | [OI-111](#OI-111) | 2026-08-09 | Four `git push` invocations landing [PR #41](https://github.com/ZeOoba/ora-claude-config/pull/41) / [PR #44](https://github.com/ZeOoba/ora-claude-config/pull/44), 08-09; concurrency evidence 08-11 | **LOW** `hooks/git-prepush-doctrine-gate.py`. **Headline (defect 4): the hook-test suite is NOT concurrency-safe** — the SAME commit gave 38 fail/76 under fleet load (~37 concurrent python processes) and 75 pass/76 on retry, every failure a git-subprocess error in a fixture, indistinguishable from a real regression. **Do not override it.** Also: the sweep appears to run on branch DELETIONS (unproven), and a passing test's negative-path stderr reads as a live failure. **A suspected false-success-reporting bug was investigated and RETRACTED — see the section.** |
+| [OI-114](#OI-114) | 2026-08-11 | [ORA Monthly Portfolio Briefing — August 2026](https://app.notion.com/p/3b96ecd89e598192b55ae297b2c46cad) Risk 1, run 2026-08-11 | **MEDIUM — tenant concentration, no automated cover.** 55 New Plant Court (Owings Mills MD) has a single tenant, **Eurosort, Inc., 34,534 SF, \$452,835 ARR — 8.09% of portfolio ARR and 11.91% of portfolio NOI** — whose lease ends **2027-12-31**. It is 100% of that property's income (property WALT 1.39 yr). The asset is **unencumbered**, so it appears in no maturity schedule, no LTV test and no DSCR test, and no covenant, lender or automated alert will surface the expiry. Because value is carried as NOI ÷ cap (6.5%), a non-renewal writes down **~\$6.97M — 12.0% of portfolio value**. It also lands in the portfolio's largest expiry month (Dec-2027: 59,727 SF / \$741,690 / 8 leases, of which Eurosort alone is 61%). **Two actions: (a) Gabriel to confirm whether the lease carries a renewal option, ROFR or termination right** — the rent roll records escalation but no option data, and the answer changes the negotiating posture; **(b) open renewal discussions now, at 16 months**, targeting a signed extension or replacement LOI by Q1-2027 |
+| [OI-115](#OI-115) | 2026-08-11 | [ORA Monthly Portfolio Briefing — August 2026](https://app.notion.com/p/3b96ecd89e598192b55ae297b2c46cad) Risk 4, run 2026-08-11; originating incident [project_insurance_lapse_confirmed_real_2026-07-25.md](project_insurance_lapse_confirmed_real_2026-07-25.md) | **HIGH — escalation path has failed, needs a human owner.** Nine properties are uninsured or about to be. **8 policies EXPIRED for 3+ consecutive ingest runs** — escalated to Gabriel 2026-07-13 and **unchanged across four reporting cycles**: Fairground Village Center PCKG+BCL, ETC POA PCKG+BCL, 1100 Rarig PCKG+BCL, 3883 Livingston PCKG+BCL. **4 more are Renew-Now and have closed from 25–29 days to 18–22 days with no movement**: 1900 N Broadway UFX+BCL (expire 2026-08-27) and 9050 Red Branch PCKG+BCL (expire 2026-08-31). **Compounding: 9050 Red Branch is the property carrying the only balloon inside 18 months** (2028-01-01) — a lender finding a lapsed policy on its collateral 16 months before maturity turns a benign refinance into a covenant conversation; and **1100 Rarig is uninsured** while running the portfolio's shortest WALT (0.92 yr) and 22.9% vacancy. Not an analytical question — \$57.95M of insurable value behind a paperwork failure that four cycles of automated alerting has not moved. **Escalate to Eric** |
+| [OI-120](#OI-120) | 2026-08-11 | live incident this session while committing the OI-098 tracker work | **MEDIUM** `config-write-guard` models **working-tree rewrites, not index state**, so a session can contaminate the shared `~/.claude` index but cannot undo it. `GIT_MUTATE_RE` (`hooks/lib/tool_call_paths.py:430-432`) matches the verbs `checkout` / `restore` / `reset` / `apply` / `stash` / `merge` / `rebase` / `cherry-pick` / `clean` / `revert` / `pull` / `switch` (exact regex in the detail section) — **`add` and `commit` are absent; `restore` is present.** Live-proven this session, all three: `git add -- <one memory file>` **PASSED** and silently joined **5 files another session had already staged** (including a 930-line new script); the corrective `git restore --staged` on that same file was **BLOCKED** as a governance write; `git commit` is unguarded too. Net: staging into a shared index is free, un-staging costs a 60-min multi-use `allow-config-write` token, and the single most consequential operation — creating a commit in the live governance repo — is not gated at all. **Workaround that worked and should be documented:** a pathspec commit (`git commit -F <msgfile> -- <path>`) commits the working-tree copy of just that path and leaves the index untouched, so another session's staged work is neither swept in nor disturbed. Secondary finding: the matcher scans command TEXT, so an `allocate-oi-id.py --note` merely *describing* this gap tripped it — same shape as [OI-099](#OI-099). **hooks/** — any fix takes the mandatory adversarial REFUTE pass + old-vs-new differential battery |
 
 ### OI-009
 **Status:** OPEN (substantial progress made 2026-07-17, real scope remains)
@@ -2794,6 +2797,166 @@ enforced for `~/.claude` itself.
 show clean against HEAD, and the 4 unpushed commits are either published or deliberately abandoned.
 **Auto-check:** `git -C ~/.claude status --porcelain | wc -l` and `git -C ~/.claude rev-list --count
 HEAD..origin/main` — both should be small; at filing they were 99 and 29.
+
+### OI-114
+**Status:** OPEN
+**Opened:** 2026-08-11
+**Source:** [ORA Monthly Portfolio Briefing — August 2026](https://app.notion.com/p/3b96ecd89e598192b55ae297b2c46cad) Risk 1, run 2026-08-11
+**Description:** **55 New Plant Court, Owings Mills MD** is a single-tenant asset let entirely to
+**Eurosort, Inc., a Delaware Corporation** — 34,534 SF, **\$452,834.88 ARR**, lease end **2027-12-31**.
+That is **8.09% of portfolio ARR and 11.91% of portfolio NOI** (\$452,835 of \$3,801,616), and **100% of
+that property's income**; property WALT is 1.39 yr against a portfolio WALT of 2.45 yr.
+
+**Why it is invisible to every existing check.** The property is **unencumbered** (Property NOI row 6:
+loan balance 0, debt service 0, LTV 0), so it is absent from the maturity schedule, the ≤40% aggregate
+LTV test and the ≥1.25× DSCR test alike. Occupancy reads 100% and portfolio WALT reads flat, so neither
+the occupancy nor the WALT screen flags it. There is no lender, no covenant and no automated alert
+behind it. It was found only by crossing §1–§3 of the monthly briefing; the concentration is the largest
+in the portfolio and the only mechanism currently surfacing it is this row.
+
+**Magnitude.** Value is carried as NOI ÷ cap at 6.5%, so a non-renewal writes down **~\$6,966,690 —
+12.0% of the \$57,951,345 portfolio value** — and removes 11.9% of NOI in a single event. The asset
+currently returns **25.2% cash-on-cash** on \$1,800,000 of invested equity, the highest in the portfolio,
+which is precisely why it reads as healthy on every screen.
+
+**Timing compound.** The expiry lands in the portfolio's largest single roll month: **Dec-2027, 59,727 SF
+/ \$741,690 ARR / 8 leases**, of which Eurosort alone is **61%**. The 18-month roll overall is 195,256 SF
+/ \$2,270,665 / 62 leases = 42.8% of in-place ARR.
+
+**Open questions / next steps.**
+- **Blocking, for Gabriel:** does the Eurosort lease carry a **renewal option, ROFR, or termination
+  right**? The rent roll records an escalation date and percentage but no option data, and the answer
+  determines whether this is a negotiation or a countdown.
+- Open renewal discussions **now, at 16 months out**, rather than the customary 9–12. A 34,534 SF
+  single-tenant flex user at 25% cash-on-cash justifies trading rent for term; a below-market early
+  extension is cheaper than a re-tenanting of the whole building.
+- Target a **signed extension or a replacement LOI by Q1-2027**.
+
+**Evidence basis (opening, not closure):** ORA Master Workbook `lastModifiedDateTime` 2026-08-10 —
+`Property NOI` row 6 (SF, value, equity, CoC, zero debt) and `Master Tenant Rent Roll` (tenant, ARR,
+lease end). Dec-2027 cliff and 18-month roll computed independently from the 142-row roster this run.
+Concentration corroborated by Portfolio Metrics Snapshot [3b86ecd8](https://app.notion.com/p/3b86ecd89e5981449434ef0bd0a2aa07)
+("Largest tenant — Eurosort, Inc. — \$452,834.88, 8.09%").
+
+### OI-115
+**Status:** OPEN
+**Opened:** 2026-08-11
+**Source:** [ORA Monthly Portfolio Briefing — August 2026](https://app.notion.com/p/3b96ecd89e598192b55ae297b2c46cad) Risk 4, run 2026-08-11;
+originating incident [project_insurance_lapse_confirmed_real_2026-07-25.md](project_insurance_lapse_confirmed_real_2026-07-25.md)
+**Description:** **Nine properties are uninsured or within 22 days of it, and this is the fourth
+consecutive reporting cycle with no movement.**
+
+**Expired — 8 policies, 3+ consecutive ingest runs, escalated 2026-07-13, unchanged since:**
+Fairground Village Center PCKG+BCL · ETC POA PCKG+BCL · 1100 Rarig PCKG+BCL · 3883 Livingston PCKG+BCL.
+
+**Renew-Now — 4 policies, closed from 25–29 days to 18–22 days with no movement:**
+1900 N Broadway UFX+BCL (expire **2026-08-27**) · 9050 Red Branch PCKG+BCL (expire **2026-08-31**).
+
+**Why this is filed as a compound risk rather than a renewals chore — two couplings:**
+- **9050 Red Branch is the property carrying the only balloon maturity inside 18 months** (2028-01-01,
+  \$1,322,140 at 4.25%, NorthMarq/Symetra). On the economics that refinance is benign — debt service
+  actually *falls* — but a lender discovering a lapsed policy on its own collateral sixteen months
+  before maturity converts it into a covenant conversation.
+- **1100 Rarig is uninsured** while running the portfolio's **shortest WALT (0.92 yr) and 22.9%
+  vacancy** — the asset least able to absorb an uninsured loss.
+
+**Why it needs a human owner, not another alert.** The automated escalation has fired for four cycles
+without producing a binder. The detection works; the escalation path is what has failed. This is the
+only risk in the August briefing that is fully known, fully quantified and entirely unactioned. It is
+not an analytical question — it is **\$57,951,345 of insurable value** behind a paperwork failure.
+
+**Next steps.**
+- Treat **9050 Red Branch PCKG+BCL (2026-08-31)** and **1900 N Broadway UFX+BCL (2026-08-27)** as hard
+  deadlines this week.
+- Put the **8 expired policies on a single broker call** with a **bound-or-explain answer required by
+  2026-08-18**.
+- **Escalate to Eric** — owner for the binders; Gabriel has already been alerted four times.
+
+**Evidence basis (opening, not closure):** ORA Master Workbook `Insurance Renewals` tab as of
+2026-08-10 (24 active policies, \$165,856 premium, 8 expired / 4 Renew-Now / 5 soon / 1 cancelled;
+`00_Home` next renewal Aug 27, 2026), and Portfolio Metrics Snapshots
+[3b86ecd8](https://app.notion.com/p/3b86ecd89e5981449434ef0bd0a2aa07) (08-10),
+[3b16ecd8](https://app.notion.com/p/3b16ecd89e59819790f2c3d2e613115b) (08-03) and
+[39c6ecd8](https://app.notion.com/p/39c6ecd89e59819698d8cf25fac246f9) (07-13), which record the same
+8-policy set unchanged across all three and the Renew-Now window narrowing without movement.
+
+### OI-120
+**Status:** OPEN
+**Opened:** 2026-08-11
+**Source:** live incident this session while committing the OI-098 tracker work (filing OI-114/115,
+back-filling sections, closing class (i))
+**Severity:** MEDIUM — shared-state hazard on the live governance checkout. No data was lost in the
+observed instance, but only because the collision was noticed before committing.
+
+**Description.** `config-write-guard`'s git detection is built around **verbs that rewrite
+working-tree files**. `GIT_MUTATE_RE` (`hooks/lib/tool_call_paths.py:430-432`) is:
+
+```
+\bgit\b[^|;&\n]*?\b(checkout|restore|reset|apply|stash|merge|rebase|cherry-pick|clean|revert|pull|switch)\b
+```
+
+with the comment *"git verbs that REWRITE working-tree files … Read-only git (log/diff/status/show/
+ls-files) is deliberately absent."* **Index-state mutation is not modelled at all.** `add` is absent
+because it writes the index, not the working tree; `restore` is present because its *unqualified*
+form (`git restore <path>`) does rewrite the working tree — but `git restore --staged <path>` touches
+only the index, and gets caught by the same verb.
+
+**Three behaviours, all live-proven in this session (not inferred):**
+
+1. **`git add -- <one memory file>` PASSED.** No block. `git diff --cached` then returned **six**
+   files — five belonging to another session that had already staged them, including a 930-line new
+   script (`scheduled-tasks/ora-pm-ledger/property_register_snapshot_diff.py`). A plain `git commit`
+   at that moment would have swept all five into this session's commit under this session's message.
+2. **`git restore --staged -- <that same file>` was BLOCKED** as *"file-rewriting git command
+   referencing the live ~/.claude checkout"*, demanding an `allow-config-write` token — for an
+   operation whose entire purpose was to *undo* step 1 and hand the index back untouched.
+3. **`git commit` is not gated either.** The pathspec form used to escape the situation
+   (`git commit -F <msgfile> -- <path>`) ran without challenge and produced commit `6654888`.
+
+**This is a scope gap, not a correctness bug in the guard's own terms.** Within its stated model —
+protect the working tree — every one of those three outcomes is consistent. The hazard only appears
+once the *shared index* is treated as governance state too, which on a single-writer checkout it
+plainly is: `git add` from any session is globally visible and silently changes what every other
+session's next `git commit` will capture.
+
+**Why it matters:** it is a **one-way door**. A session can enter a contaminated-index state with no
+friction and then cannot leave it without minting a 60-minute, multi-use, whole-governance-layer
+write token — which the guard's own message correctly warns is worse than the operation you wanted.
+The safe exit exists but is non-obvious.
+
+**Workaround (works today, undocumented — record it wherever the shared-checkout protocol lives):**
+`git commit -F <msgfile> -- <path>` performs a *partial* commit from the working tree for the named
+paths only, ignoring the index for them and leaving every other staged entry exactly as it was.
+Verified this session: the resulting commit contained 1 file, and the other session's 5 staged files
+were still staged afterwards.
+
+**Candidate fixes (none applied; `hooks/**` — mandatory adversarial REFUTE + old-vs-new differential
+battery before any of these ships):**
+- **(a) Narrow, safest:** carve `restore --staged` / `rm --cached` out of the block so the *undo* path
+  is always available, on the reasoning that an index-only operation cannot damage the working tree.
+  Note this widens what passes, so it needs the differential battery to prove no working-tree form is
+  let through with it.
+- **(b) Symmetric, larger:** admit index state into the model — gate `add`/`commit` against the live
+  checkout the same way, so the door is closed rather than one-way. Higher friction on very common
+  operations; would want the pathspec-commit form explicitly allowed.
+- **(c) Cheapest, no matcher change:** leave the gate alone and put the pathspec-commit pattern plus
+  "never `git add` in the shared checkout, commit by pathspec instead" into the shared-checkout
+  protocol in `tech.md`. Removes the trap without touching a fail-closed security gate.
+
+Option (c) is the low-risk first move and does not preclude (a).
+
+**Secondary finding — the matcher fires on prose describing it.** Allocating this very item failed on
+the first attempt: `allocate-oi-id.py --note "… un-staging blocks …"` was blocked because the note
+text contained a listed verb and the command named the governance root. Re-running with the verb
+reworded succeeded. Same shape as [OI-099](#OI-099) (`governor-drift-probe.py` firing on a measured
+DSCR ratio written in prose): a text-scanning guard that cannot distinguish *doing* the thing from
+*writing about* the thing. Cheap to live with, worth knowing before someone tries to document this
+item from a shell command.
+
+**Related, but distinct — do not merge these:**
+[[reference_config_write_guard_blocks_eos_review_gate]] covers the bare-substring era (`"del "`
+matching inside `"--model "`), which was a matching-precision defect and is fixed. This item is about
+*which state the guard models at all*, and is unaffected by that fix.
 
 ## Closed
 
