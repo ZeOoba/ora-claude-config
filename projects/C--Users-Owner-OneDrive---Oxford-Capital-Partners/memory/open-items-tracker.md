@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-08-12T22:11:32.788Z
+  modified: 2026-08-12T22:22:49.954Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -32,6 +32,8 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
+| [OI-139](#OI-139) | 2026-08-12 | `fleet-status.py`'s `find_missed_cycles()` CRON-AWARE GUARD fix (commits `40b6176`/`30d2869`, merged to `main` and pushed as `08e0daa`); Cowork handoff "Health Guard FAIL-Aging Follow-Up" 2026-08-11, `scheduled-tasks/ora-health-guard/SKILL.md` C.1.1 | **LOW — accepted tradeoff, documented, not a defect.** The 2026-08-11 fix that made the missed-cycle detector cron-aware (escalate only past `max(24h, 1.5x own cadence)`, replacing the flat 24h wall that produced 8/13 false positives on 2026-08-10) is pure cadence math with no runtime signal for "was this a genuine catch-up burst." The superseded per-run SKILL.md logic additionally suppressed a `gap ≈ 1x interval` entry only when a late wake was detected *that run*, and otherwise escalated immediately as a likely phantom dispatch or dead task — a signal the code-level threshold structurally cannot see. **Consequence:** a task that misses exactly one slot with the machine fully up (no catch-up excuse available) now surfaces one cycle later than the old per-run logic could have caught it. Deliberate, Gabriel-approved simplification (the 2026-08-11 Cowork handoff spec explicitly specified the 1.5x-cadence rule) — do not re-litigate the threshold on this row alone. **Re-open only if a real single-slot dead-task/phantom-dispatch incident is observed and traced to this specific gap** — do not preemptively bolt an A.0-style runtime signal back into the code threshold without one |
+| [OI-138](#OI-138) | 2026-08-12 | hit live while committing two markdown memory files (OI-133 filing); `hooks/eos-review-gate.py` | **MEDIUM — ROUTED to the `hooks-override-auth-eos-gate-msg` workstream (session `e23f4c54`), same file, different defect from the `--record`/config-write-guard message fix.** The gate's BLOCKING path does not apply the pathspec scoping its own `--key --cmd` path does, so it scores *other live sessions' working-tree files* into an unrelated commit. Measured: unscoped `--key` → 3 foreign paths (`hooks/lib/claim_work.py`, `hooks/tests/test-claim-work-lib.py`, `scheduled-tasks/ora-pm-ledger/property_register_snapshot_diff.py`); `--key --cmd '<the pathspec commit>'` → `paths: []`, `key: ""`. **The gate already computes the right answer — the block just doesn't ask it that way.** Using the pathspec form of `git commit` did NOT change the block. Second, and worse — **CONFIRMED, not a guess: the block and `--record` key off DIFFERENT computations, so the gate is unclearable by its own documented procedure.** Both are deterministic and they disagree: the block reported `03b8fb93055b` on two separate attempts minutes apart, while `--key` returned `ef91d37feb7e…` on four consecutive runs. A review recorded via `--record` therefore lands under a key the block never looks for, and **an override is the only exit** — which is exactly how a security gate degrades into a formality. **Why it matters:** in a checkout with 125 dirty files across 15+ sessions this fires on nearly every commit regardless of content, so the gate gets overridden as routine — that is the failure mode, not the inconvenience |
 | [OI-136](#OI-136) | 2026-08-12 | `event_log.md` entries committed as `75ab0de`, cross-read against this session's own two declined overrides | **HIGH** `allow-hook-test-failure` normalised: **5 uses across 4 sessions inside 47 minutes** (16:32:04–17:19:23 local, 2026-08-12; `e89ddd24` twice). Every one cites the *same* cause — a load-induced `exit 124` TIMEOUT on `test-eos-review-gate.py` that passes in isolation — i.e. all 5 are [OI-057](#OI-057)/[OI-059](#OI-059), not 5 independent judgement calls. **No protocol was broken**: each token records explicit in-turn authorization, exactly as `rules.md` requires. That is the finding — the control worked as designed and was still worn down, because a gate that false-blocks makes overriding the *rational* move, and the reasons converge to a script ("timeout not assertion, passes standalone"). The security property `allow-hook-test-failure` protects is that a human weighs a **real** test failure; 5-for-5 on one known flake trains the reflex to approve without weighing, so the next genuine failure inherits that reflex. Mitigated indirectly by `c29ec95` (budget 90→240) but **not addressed**: nothing caps, counts, or alerts on override frequency, and nothing distinguishes "5th override this hour for the same flake" from "first override this month for a novel failure". Needs a rate/repeat signal, not a stricter gate |
 | [OI-057](#OI-057) | 2026-08-03 | Reopened 2026-08-12 by a recurrence of the original symptom; originally push of event_log.md commit `8b61f20`, 2026-08-03 | **REOPENED 2026-08-12** — symptom side of [OI-059](#OI-059). Closed 08-04 on a re-measurement at **56 dirty files** (76.6s, 55/55); that is real load but not the load that matters, and this item's own closing instruction ("only a push under comparable multi-session load tests it") was not met. At **26 sessions / 117 dirty files / 16 cores at 100% / 53 python processes** the symptom returned in its original form: a real push hard-blocked when `test-eos-review-gate.py` AND `test-memory-orphan-link-guard.py` each blew the 90s budget *and* the 180s retry, then both passed in isolation on the same loaded box (55/55 in 140s; 79/79 in 105s). Spawn-cutting (option (a), done in `6dc5df3`) was the right cause-directed target and still proved insufficient — the dominant term is per-spawn cost under contention (**348ms→1390ms** vs ~30-50ms idle), not spawn count. Note this item rejected "(b) a larger budget" on the grounds of a **per-file roster that would rot**; that objection stands but does not cover raising the *global* `PER_TEST_TIMEOUT_SECONDS`, which is what `c29ec95` did (90→240, ceiling 180s→480s). Mitigation, not fix: the symptom recurs whenever load outruns whatever budget is set. Closes only when gate pass/fail is decoupled from machine load. **Do not re-close on a quiet-machine push** |
 | [OI-059](#OI-059) | 2026-08-03 | Reopened 2026-08-12 from a false pre-push block; originally [open-items-tracker.md#OI-057](open-items-tracker.md#OI-057) root-cause pass, 2026-08-03 | **REOPENED 2026-08-12** (closed 08-04 on `6dc5df3`, spawns 559→199 / 272→147). That closure was validated at ~56 dirty files and a few live sessions and **did not survive 26-session concurrency**: `test-eos-review-gate.py` and `test-memory-orphan-link-guard.py` each blew the 90s budget AND the 180s retry and hard-blocked a real push, then both passed in isolation on the same loaded box (55/55 in 140s; 79/79 in 105s). Root cause is process-creation cost under contention — bare `python -c pass` measured **348ms then 1390ms** minutes apart vs ~30-50ms idle, on 16 cores at 100% with 53 python processes — which no in-test optimisation controls, and further spawn cuts would mean cutting hook invocations that this item and [OI-061](#OI-061) both forbid. **Mitigated, not fixed, in `c29ec95`** (`PER_TEST_TIMEOUT_SECONDS` 90→240, ceiling 180s→480s, plus 3 stale docstring claims corrected). Stays open because gate reliability is still coupled to machine load; the real fix bounds the load or decouples pass/fail from wall-clock. **Do not re-close on a quiet-machine push** — that is what produced the premature 08-04 close. Mirror item [OI-057](#OI-057) recurred identically and should be reopened with it |
@@ -3167,6 +3169,48 @@ resolved, treat `origin/main` as NOT authoritative for `event_log.md`.
 refs). A cheap external one: warn when `git rev-list --count origin/main..HEAD` on the config repo
 exceeds ~10, or when the two branches' `event_log.md` newest-entry dates differ by more than a day.
 
+### OI-137
+**Status:** OPEN
+**Opened:** 2026-08-12
+**Source:** surfaced as a control run while verifying [PR #268](https://github.com/ZeOoba/oxford-command-center/pull/268)'s test failures were pre-existing; re-confirmed against `origin/main` at `c5db68c`
+**Severity:** MEDIUM-HIGH (Spine A and Spine B materially disagree on NOI for 3 owned properties; NOI feeds valuation, DSCR and the capital-allocation surface)
+**Description:** `npm run reconcile:noi-crosscheck` FAILS on `main`: 14 properties checked, **3 errors,
+4 warnings**. All three errors are the same shape — the workbook NOI vastly exceeds the warehouse
+`oxfordNoi`:
+| Property | Workbook NOI | Warehouse oxfordNoi | Drift | Delta |
+|---|---|---|---|---|
+| 3875-3883 E Livingston Ave, Columbus OH | $98,550 | $8,638 | 91.23% | $89,912 |
+| 3034 Westerville Rd, Columbus OH | $117,660 | $29,387 | 75.02% | $88,273 |
+| 9620 E State Route 350, Raytown MO | $108,438 | $27,614 | 74.53% | $80,824 |
+
+Combined NOI disagreement across the three: **$259,009**. Not a test flake — reproduced on two
+separate runs hours apart, on an unmodified clean checkout, at two different `main` commits.
+**Why nobody has noticed:** `npm run gate` includes `reconcile:noi-crosscheck`, but **`gate:ci`
+does not** (`gate:ci` = typecheck, lint, check:dev-css, test, reconcile:snapshot, build,
+check:bundle). So the LOCAL Done-bar gate has been red on `main` while every PR's CI gate goes
+green — including PR #268's, which passed CI the same day this was failing. Any session that runs
+the full local gate hits this and may wrongly attribute it to their own branch.
+**Leads, NOT root cause — do not treat these as findings:** (a) two of the three ratios are almost
+exactly one quarter (warehouse/workbook = 25.0% Westerville, 25.5% Raytown; Livingston is the
+outlier at 8.8%), which would be consistent with a partial period being compared against an
+annualised figure — unverified. (b) All three have only **2** committed rows in `import_batches`
+(period_start 2025-01-01) versus 3 for most in-tolerance properties. **This correlation does NOT
+hold**: `2203-2207-northwood-dr-salisbury-md` also has 2 batches and ties out at 1.06%. Batch count
+alone therefore does not explain it — recorded so the next person does not re-derive a rule that
+has a live counterexample.
+**Which side is wrong is UNKNOWN.** Per `CLAUDE.md` the live Master Workbook is first for firm
+figures, which makes the warehouse the more likely suspect, but that is doctrine, not evidence —
+nothing here has been traced to a specific parse, period-selection, or ownership-share bug. Do not
+"fix" either side until one is proven wrong.
+**How to apply:** start from `scripts/reconcile-noi-crosscheck.ts` and the `oxfordNoi` derivation,
+and check period selection first (which window each side reports, and whether the warehouse figure
+is being annualised). Confirm against a single property end to end — Livingston is the sharpest
+signal at 91%. Separately decide whether `gate:ci` should include this step; if it should not, the
+local `gate` failing on `main` needs to be visible some other way, because today it is silent.
+**Auto-check:** none in the probe's vocabulary (git/registry only, not repo scripts). The natural
+one is CI: adding `reconcile:noi-crosscheck` to `gate:ci` would make this self-reporting — that is
+itself the decision above, not a free action.
+
 ## Closed
 
 | ID | Opened | Closed | Source | One-line |
@@ -5435,7 +5479,13 @@ test exercises, and the push succeeded on a clean retry with 0 failures.
 visible as a pattern rather than as one session's bad luck.
 
 ### OI-132
-**Status:** FIX APPLIED 2026-08-12 (option 2, shipped as `ora-sofr-direct-prefetch` **v1.2**) — but kept **OPEN**,
+**Status:** FIX APPLIED 2026-08-12 — options 2 **and 3** both shipped (`ora-sofr-direct-prefetch` **v1.2** then
+**v1.3**). Option 3 adds STEP 4b: a closed-enum `supersede_status` (`NO_PATCH_NEEDED` · `NOT_EXPECTED` ·
+`EXPECTED_NOT_YET_OBSERVED` · `OBSERVED` · `FAILED`) appended one line per run to
+`maintenance/_state/sofr-supersede-status.log`, on **every** terminating path including no-ops and failures — a
+log that recorded only successes would have no denominator and could not produce a rate. Write path verified live
+2026-08-12 via Desktop Commander (creates, appends, `Select-String`-countable). Passive telemetry: nothing
+consumes it and it raises no alarm. Kept **OPEN**,
 because the fix is a wording/branching change that cannot be confirmed until the next catch-up burst puts both
 producers in the same window. Nothing observable changes on a normal-cadence day, when `am_brief_pending` is
 false and the flat "landed" path is already correct. Close only after a run log shows the EXPECTED wording on a
@@ -5602,3 +5652,75 @@ own merits, the right call.
 **Auto-check:** none. Detection today is manual: grep `event_log.md` for "allow-hook-test-failure".
 **Related:** [OI-057](#OI-057) and [OI-059](#OI-059) (the defect generating the overrides — both reopened
 2026-08-12), `hooks/git-prepush-hook-tests-gate.py` (gate + the "override normalised is a gate disabled" note).
+
+### OI-138
+**Status:** OPEN — **ROUTED to session `e23f4c54`**, which holds the `hooks-override-auth-eos-gate-msg` claim on
+this same file. Filed as an OI rather than sent directly because the discovering session was an unattended
+scheduled-task run, where `send_message` is unavailable. This is a **different defect** from that session's
+current work (which is about the blocking message handing the operator a `--record` command that
+`config-write-guard` then blocks) — but it lives in the same file, so it is probably one pass. It is not a
+request to drop that work.
+**Opened:** 2026-08-12
+**Source:** hit live while committing two markdown memory files (the OI-133 filing + a new reference memory);
+`hooks/eos-review-gate.py`
+**Severity:** MEDIUM — no data loss; the cost is that a security gate fires on commits it has no business
+gating, and therefore gets overridden as routine.
+
+**Defect 1 — the blocking path ignores pathspec scoping.** A commit containing two `.md` memory files was
+blocked, demanding an independent review of three files the commit does not touch, all owned by other live
+sessions:
+
+| Scored path | Gate's reason |
+|---|---|
+| `hooks/lib/claim_work.py` | `hooks/**` enforcement code |
+| `hooks/tests/test-claim-work-lib.py` | `hooks/**` enforcement code |
+| `scheduled-tasks/ora-pm-ledger/property_register_snapshot_diff.py` | scheduled-task registry |
+
+The first two are almost certainly session `e23f4c54`'s own PR #59 working tree — the sharpest form of the bug:
+one session's in-flight edits block an unrelated session's markdown commit.
+
+Measured in repo `C:/Users/Owner/.claude`:
+
+```
+python hooks/eos-review-gate.py --key
+  paths: ['hooks/lib/claim_work.py','hooks/tests/test-claim-work-lib.py',
+          'scheduled-tasks/ora-pm-ledger/property_register_snapshot_diff.py']
+  key:   ef91d37feb7e...
+
+python hooks/eos-review-gate.py --key --cmd 'git commit -m "x" -- <my.md>'
+  paths: []   key: ""
+```
+
+**The gate already computes the correct answer; the block simply does not ask it that way.** Using the
+pathspec form of `git commit` did NOT change the block — it fired with the unscoped path set either way.
+
+**Defect 2 — CONFIRMED: the block and `--record` key off different computations, so the gate cannot be
+cleared by its own documented procedure.** This was initially filed as "the key looks unstable"; that framing
+was wrong and is corrected here. Both sides are **deterministic**, and they **disagree**:
+
+| Code path | Key | Observations |
+|---|---|---|
+| PreToolUse block | `03b8fb93055b` | stable across 2 blocks, minutes apart |
+| `--key` (what `--record` keys off) | `ef91d37feb7e…` | stable across 4 consecutive runs |
+
+It is therefore NOT content churn from other sessions editing foreign files. The two code paths simply compute
+different keys. The consequence is the serious part: a reviewer dispatched per step 1 and recorded per step 2
+writes an artifact under `ef91d37f…`, while the block looks for `03b8fb93055b` — **it can never match, so no
+amount of correct reviewing will clear this gate.** The single-use override is the only exit, which is exactly
+how a security control degrades into a formality. Fixing Defect 1 (scoping) without also reconciling these two
+key computations will NOT restore a working review path.
+
+**Suggested direction (the owning session's call):** have the block derive its path set from the actual commit
+invocation — the same logic `--cmd` already implements — falling back to the unscoped scan only when the
+command cannot be parsed. Because this is security-gate scope logic, run the old-vs-new differential battery
+per [[reference_refute_differential_harness]] and judge deltas, not absolutes: narrowing scope must NOT let a
+bare `git commit` with no pathspec sweep blast-radius files in unreviewed. That case is the whole point of the
+gate and must still block.
+
+**Live precedent for the cost:** Gabriel approved a single-use `allow-unreviewed-commit` override on the
+evidence above to land commit `01ae05b` (two `.md` files, scoped key empty). Token was removed immediately
+after. That is one override that should never have been needed.
+
+**Related:** [[reference_refute_differential_harness]] (the required verification shape for guard/scope regex
+changes), [OI-129](#OI-129) (the sibling class where a gate asserts on live shared state and blocks unrelated
+sessions' pushes — same failure shape, different gate).
