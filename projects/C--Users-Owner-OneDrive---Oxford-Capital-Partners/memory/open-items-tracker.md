@@ -4904,3 +4904,25 @@ test exercises, and the push succeeded on a clean retry with 0 failures.
 
 **Auto-check:** none. A cheap one: have the gate print which tests it retried and why, so a recurring flake is
 visible as a pattern rather than as one session's bad luck.
+
+**Escalation evidence, 2026-08-12 — five same-day override tokens (the severity signal this item asked to
+track).** Filed as OI-135 (allocator-assigned) before checking for a duplicate; folded in here instead of
+landing as its own tracker entry, since it is the same gate/class OI-119 already covers and OI-129 explicitly
+warns not to re-split. `OI-127` (allocated by session `e0f8485e`, reservation log only, no tracker entry filed
+yet) looks like the same near-duplicate — whoever lands it should fold it in here too rather than opening a
+third entry.
+
+| Time (local) | Session | Failing test(s) | Push contents |
+|---|---|---|---|
+| 16:32:04 | `d37e22c1` | `test-eos-review-gate.py`, exit 124 | `feat/model-canary-probe-step25` |
+| 16:38:29 | `b0e10e03` | `test-eos-review-gate.py` + 7 siblings, exit 124 | ora-deal-sourcing-scan STEP 5B + ora-deal-aging-sla STEP 3e |
+| 16:38:47 | `e0f8485e` | `test-eos-review-gate.py`, exit 124 | `46cf1e2` — doc-only SKILL.md rationale correction, zero blast-radius files |
+| 17:03:00 | `e89ddd24` | same gate | health-guard threshold fix + OI-098 tracker-structure merge |
+| 17:19:23 | `e89ddd24` | same gate, second push | (as above, retry) |
+
+All five: `exit 124` TIMEOUT, never an assertion — standalone reruns pass clean in 145s–5m08s against the
+gate's 180s per-test budget, and every one needed a Gabriel-authorized `allow-hook-test-failure` override to
+land. Source: `event_log.md` commit `75ab0de` (2026-08-12). Five tokens against this gate in under an hour,
+under 12–16+ concurrent sessions — reinforces **option 1 / 1b** over the per-test options 2/3, since the
+failing test varies by run (plain `test-eos-review-gate.py` alone in three of five, seven further siblings
+in the fourth) — a budget-vs-load mismatch across the whole suite, not one flaky test.
