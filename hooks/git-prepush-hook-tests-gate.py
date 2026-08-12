@@ -52,8 +52,12 @@ test-eos-review-gate.py — the suite's runtime outlier — blew the flat
 when rerun in isolation moments later: an environmental load flake (same class as the
 known intermittent npm-test access-violation flake), not a regression. The rerun's
 result is authoritative — a second timeout, or any non-timeout failure surfaced by the
-rerun, is a real blocking FAIL, since a test that cannot finish inside DOUBLE the
-budget even once signals a genuine hang, not load. A non-timeout failure is NEVER
+rerun, is a real blocking FAIL. NOTE (2026-08-12): the original justification for that
+rule — "a test that cannot finish inside DOUBLE the budget even once signals a genuine
+hang, not load" — is FALSE, and was disproved in the field; see "LOAD, NOT HANG" below.
+Exceeding the doubled budget is still treated as blocking, because a gate that retries
+forever gates nothing, but do NOT read a second timeout as evidence of a hang: diagnose
+it before overriding. A non-timeout failure is NEVER
 retried: a deterministic assertion failure must not get two bites at the gate. A file
 that recovered on the rerun is disclosed in the summary ("timeout-retry ... not
 blocking") so flakes stay visible instead of being silently eaten.
@@ -66,16 +70,38 @@ subprocess.Popen with a counter around a full run (NOT by counting call sites �
 of `make_repo(`/`run_hook(` undercounts badly, because two loops call the fixture once
 per iteration and the `def` line matches too):
   559 spawns per run = 451 git + 108 Python.
-Of the git spawns, 365 come from the make_repo() fixture (73 runtime calls x 5: init +
+Of the git spawns, 365 came from the make_repo() fixture (73 runtime calls x 5: init +
 2x config + add + commit) and the rest from direct git() helper calls. So 48 was an
-~11.6x undercount, and THE FIXTURE IS THE MAJORITY OF THE COST (365 of 559) — anyone
+~11.6x undercount, and THE FIXTURE WAS THE MAJORITY OF THE COST (365 of 559) — anyone
 optimising against the old number would have gone after the hook invocations, i.e. the
 wrong half, and would also have been tempted to break the subprocess boundary that is
 itself part of what a security-gate test must verify.
-Wall-clock for that file alone on an otherwise-idle machine: 46-67s observed across
-runs, against the 90s PER_TEST_TIMEOUT_SECONDS below. That thin and variable a margin
-is the whole reason the retry above exists; under real multi-session load it exceeds
-90s (absorbed by the retry) and can exceed 180s (a hard block). Fix: OI-059.
+
+FIXED 2026-08-04 by `6dc5df3` (OI-061): the shared `hooks/tests/lib/gitfixture.py`
+template-and-copytree helper pays the fixture's ~5 spawns ONCE per process instead of
+per call, cutting test-eos-review-gate.py 559 -> 199 spawns and
+test-memory-orphan-link-guard.py 272 -> 147. OI-059 and OI-057 were both CLOSED on
+2026-08-04 on the strength of that measurement. The paragraph above is retained for its
+measurement METHOD (wrap subprocess.Popen with a counter; do NOT count call sites), not
+as current figures.
+
+LOAD, NOT HANG (2026-08-12) — why PER_TEST_TIMEOUT_SECONDS is now 240, not 90.
+The OI-059 closure held only at the load it was validated against (~56 dirty files, a
+handful of live sessions). It did not survive real concurrency. On 2026-08-12 a push hit
+26 concurrent sessions, 117 dirty files, 16 logical cores pinned at 100%, 5.6 GB free of
+32 GB, and 53 simultaneous python processes. Both spawn-heavy files blew the 90s budget
+AND the 180s retry, hard-blocking the push. Rerun in isolation minutes later, on the same
+still-loaded box, BOTH PASSED: test-eos-review-gate.py 55/55 in 140s,
+test-memory-orphan-link-guard.py 79/79 in 105s. Bare `python -c pass` spawn cost measured
+348ms and then 1390ms across two samples minutes apart, against ~30-50ms idle — so the
+dominant term is process-creation cost under contention, which no amount of in-test
+optimisation controls. Post-fix spawn counts are already near the floor: cutting further
+means cutting hook invocations, which OI-059 and OI-061 both forbid, since the subprocess
+boundary is part of what these tests exist to verify. Hence a budget raise rather than
+another optimisation pass. If this false-blocks again, RAISE THE BUDGET or fix the load —
+do not "optimise" the tests by collapsing their subprocess boundary, and do not reach for
+the allow-hook-test-failure override as the routine remedy: an override normalised is a
+gate disabled.
 
 OVERRIDE (shared contract, hooks/lib/override_tokens.py — same shape as the doctrine
 gate's allow-doctrine-drift). A token lives at
@@ -124,9 +150,18 @@ from override_tokens import Tier, token_grants, describe_token  # noqa: E402
 
 HOOK_TEST_FAILURE = Tier("allow-hook-test-failure", "hook-test-failure", 3600, single_use=False)
 APPEND_LOG_SCRIPT = os.path.join(CLAUDE_DIR, "maintenance", "append-event-log.py")
-PER_TEST_TIMEOUT_SECONDS = 90
+# RAISED 90 -> 240 on 2026-08-12 (Gabriel-directed) after the 90/180 pair produced a
+# FALSE BLOCK on a real push: test-eos-review-gate.py and test-memory-orphan-link-guard.py
+# both blew the 180s retry budget, then both passed cleanly when rerun in isolation
+# minutes later (55/55 in 140s, 79/79 in 105s). See "LOAD, NOT HANG" in the module
+# docstring. 240 is set against the 140s worst observed run plus headroom for the
+# spawn-cost variance measured that day: 348ms -> 1390ms per bare python spawn across two
+# samples minutes apart, ~30-40x the idle cost, on a 16-core box pinned at 100% CPU with
+# 53 concurrent python processes. A tighter budget re-earns the false block; the cost of
+# this one is that a genuine hang now takes up to 480s to surface.
+PER_TEST_TIMEOUT_SECONDS = 240
 # One rerun at PER_TEST_TIMEOUT_SECONDS * this, for first-run timeouts ONLY (load-flake
-# policy — see the module docstring). A doubled budget covers the 559-spawn outlier
+# policy — see the module docstring). A doubled budget covers the spawn-heavy outliers
 # generically; deliberately NOT a per-file known-slow roster, which would rot.
 TIMEOUT_RETRY_MULTIPLIER = 2
 ENV_SKIP_SENTINEL = "CANNOT RUN:"
