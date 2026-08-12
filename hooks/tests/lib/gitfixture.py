@@ -5,7 +5,9 @@ WHY (open-items-tracker.md#OI-061): 13 test files each hand-rolled their own rep
 fixture at ~5 process spawns per repo (`git init` + 2x `git config` + `git add` +
 `git commit`). Measured 2026-08-03: test-eos-review-gate.py alone paid 365 of its 559
 spawns there (73 runtime make_repo() calls), running 44-67s idle but 141.7s under real
-multi-session load -- i.e. OVER the pre-push gate's 90s per-file budget. The
+multi-session load -- i.e. OVER the pre-push gate's then-90s per-file budget (raised to
+240s on 2026-08-12 after this fixture's savings still proved insufficient at 26-session
+concurrency -- see "LOAD, NOT HANG" in git-prepush-hook-tests-gate.py). The
 second-worst file sat at 51% of budget with nothing pathological about it, so this was
 a wall the next growing file would hit too.
 
