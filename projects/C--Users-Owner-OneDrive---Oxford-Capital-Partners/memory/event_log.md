@@ -12,6 +12,21 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-12 — ora-site-exposure-probe v1.1 → v1.2 (reject-`000` retry loop + ALARM-UNVERIFIED verdict)
+
+Gabriel-approved off this date's scheduled run (verdict CLEAN, 30/30 paths 404, headers 6/6). Closes the hardening item the 2026-07-29 run raised and left open: Step 2 issued its 30-request matrix back-to-back with no `000` handling, so a throttled client-side connection failure returned `000` on all 24 root paths and was only caught because that run's session re-ran the matrix manually. Nothing in the task text stopped a future run from recording `000` as a pass.
+
+Changes to `~/.claude/scheduled-tasks/ora-site-exposure-probe/SKILL.md`:
+- Step 2: mandatory `probe()` function — rejects `000`, retries 3× with 2s backoff, 1s inter-path pacing. Plus a mandatory CONTROL pair (`/` MUST be 200, a random nonexistent path MUST be 404) so a blanket-404 or blanket-failure mode cannot read as a perfect pass.
+- Step 4: new **ALARM-UNVERIFIED** verdict for any path still `000` after 3 attempts or a failed control pair. Explicitly NOT a CLEAN-with-caveat — an unresolved exposure question sends the alarm email.
+- Steps 5/6: verdict enum extended; raw per-path status incl. `000` + attempt count must be recorded; silence reserved for CLEAN alone; email next-step text added for the UNVERIFIED case.
+
+Probe function smoke-tested live before landing: `/scripts/build-dist.mjs` 404, control-random 404, control-root 200.
+
+**Committed via an isolated temp index (Gabriel-directed).** The `.claude` checkout was heavily contaminated: ~116 uncommitted changes across 11+ live sessions, AND — the part that matters — the real index already had 8 files STAGED by another session (incl. a 930-line `property_register_snapshot_diff.py` and three other task SKILL.mds). That makes the bare-`git commit` step of [[reference_event_log_uncommitted_backlog]] actively unsafe here: it assumes an empty index, and would have swept all 8 foreign files into this commit. Technique used instead: `GIT_INDEX_FILE` pointing at a scratch index seeded from HEAD, the isolated 13-line event_log hunk applied via `git apply --cached`, SKILL.md added whole, then commit from that temp index — the real `.git/index` is never written, so the other session's staged work survives intact. Follow-up needed after any commit made this way: the real index still holds the two committed paths at their pre-commit blobs, so `git status` there will misreport them as staged reverts until `git reset -- <those two paths>` refreshes them. **Extend that reference memory with the non-empty-index case.**
+
+Landed on branch `feat/model-canary-probe-step25` (the branch that happened to be checked out — no branch switch attempted, since `checkout` on a contaminated shared tree is prohibited). The SKILL.md description-line change is unavoidably a single blended hunk: the 2026-08-03 model re-canary text and this v1.2 changelog both live on that one line, so they cannot be separated — and that canary text belongs on this branch anyway.
+
 ## 2026-08-11 — Health Guard FAIL-aging follow-up: 2 stale FAILs closed out / 2 genuine specs handed to Code surface
 
 **Trigger.** `ora-health-guard-fail-aging-nudge` catch-up run (missed 08-03 and 08-10 slots) found memory-integrity-probe RESOLVED (PASS 2026-08-10 12:28 ET) and two open stale escalations: BEACON GAP (open since 08-05) and RATE SNAPSHOT STALE (crossed 48h ~4h before the check). Full findings: Notion `3b96ecd8-9e59-8150-a986-e39514f3e19f` ("[ACTION] Health Guard FAIL Aging — 2026-08-11"). Gabriel then asked for root-cause + fixes on all open items in-session (Cowork).
