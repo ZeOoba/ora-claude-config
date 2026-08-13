@@ -177,6 +177,22 @@ def format_report(result, path):
 
 
 def main():
+    # OI-140 (2026-08-13, smallest candidate fix chosen): this script never
+    # parsed argv, so `check-open-items-duplicate-ids.py <any-path>` silently
+    # checked the CANONICAL tracker instead and reported a verdict about a
+    # file the caller never named -- a false PASS/FAIL depending on which
+    # copy happened to be clean. TRACKER_PATH_OVERRIDE stays the only way to
+    # target another file (module-attribute test seam, unchanged); a CLI
+    # argument is unsupported and now says so loudly instead of pretending to
+    # honor it. See open-items-tracker.md#OI-140 for the full writeup.
+    if len(sys.argv) > 1:
+        sys.stderr.write(
+            "check-open-items-duplicate-ids.py: takes no command-line arguments "
+            "(got %r) -- it always checks the canonical tracker (%s). There is no "
+            "CLI path override; TRACKER_PATH_OVERRIDE is a module-attribute test "
+            "seam only, not reachable from argv. See open-items-tracker.md#OI-140.\n"
+            % (sys.argv[1:], DEFAULT_TRACKER_PATH))
+        return 2
     path = tracker_path()
     try:
         with open(path, "r", encoding="utf-8") as fh:
