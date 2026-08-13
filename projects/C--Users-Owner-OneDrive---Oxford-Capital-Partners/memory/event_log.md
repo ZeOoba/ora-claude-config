@@ -12,6 +12,29 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-13 — Setup-improvement follow-up from agent-skills intake: 2 of 3 items built
+
+- Following the same-day `addyosmani/agent-skills` intake (see prior entry), Gabriel asked whether to build the 3 unactioned setup-improvement candidates. Ruled per-item via AskUserQuestion (framing protocol: hypothesis + confidence stated first).
+- **Built — `/debug.md` untrusted-error-output line:** added a short section citing `rules.md` §21's Verify-before-acting tier for scraped MCP/CI/API error text — no config-write-guard involved (commands/*.md other than CLAUDE.md aren't gated).
+- **Built — CLAUDE.md Done-bar extraction:** discovered CLAUDE.md was actually at 1766 words (locale-corrected — bare `wc -w` undercounts ~140, `reference_claude_md_wc_w_locale_undercounts.md`), past the 1700 WARN threshold, not merely close to it as assumed at intake time. Grepped 27 files citing "Done bar"/"MANDATORY adversarial REFUTE"/"financial-decision code"/"security-gate code" — all restate the concept or reference "CLAUDE.md's Done bar" as a location, none exact-phrase-dependent, so extraction was safe. Moved the full Done-bar clause verbatim to new `reference_engineering_os_done_bar.md`, left a condensed pointer in CLAUDE.md. Result: 1766→1715 words, back inside the 1694-1755 "don't trim" band. Required a second `allow-config-write` session token (Gabriel's explicit in-turn confirmation both times, per the config-write-guard hook's own protocol).
+- **Skipped (Gabriel agreed) — `/ship` quantified rollback threshold:** no live-traffic deploy targets today for either `/ship` target (brain-mirror, ora-pm) to threshold against; deferred until one exists.
+- New reference files: `reference_engineering_os_done_bar.md`. Updated: `commands/debug.md`, `CLAUDE.md`, `INDEX_reference.md`.
+- Same shared-checkout caveat as the prior entry — `~/.claude` dirty count climbed to 162 (still pre-existing `_scheduled_tasks_backup/*` WIP unrelated to this session, plus this session's own new files); no overlap with session `61d8ae99`'s `hooks/**` scope. Not committed (no commit requested).
+
+## 2026-08-13 — External-artifact-intake: addyosmani/agent-skills evaluated, 4 fragments adopted
+
+- Gabriel pointed at a local clone (`Business/agent-skills-main/`) of the public repo `addyosmani/agent-skills` (MIT, v0.6.6) and asked whether anything should be implemented into ORA's Claude Code setup. Ran the `external-artifact-intake` skill's full evaluate → compare → harvest → rule → graft → log sequence.
+- Confirmed `security-auditor` agent + `security-and-hardening` skill (already sourced from this repo, vetted 2026-07-18) are still byte-identical to the source — not re-litigated.
+- Comparison (via a dispatched research agent that read both sides in full): the repo's 8-command DEFINE→SHIP lifecycle and remaining 23 skills are superseded by ORA's Engineering OS (L1-L7 lanes) + `superpowers` + `pr-review-toolkit` — same shape, but ORA's has model-tier dispatch, worktree isolation, confidentiality gating, and a mandatory adversarial REFUTE pass the source repo lacks entirely. `webperf`/`web-performance-auditor.md` superseded by ORA's own `website-perfection` skill.
+- Presented 4 adoption candidates to Gabriel via AskUserQuestion (all recommended, all adopted):
+  1. Cross-model (Gemini/Codex CLI) REFUTE escalation, from `doubt-driven-development` → new file `reference_refute_cross_model_escalation.md`, pointed to from CLAUDE.md's Done-bar REFUTE clause (config-write-guard-gated edit; landed only after a second explicit in-turn confirmation and an `allow-config-write` session token).
+  2. Hypothesis+confidence-% ruling-question framing, from `interview-me` → folded into `feedback_interactive_decision_questions.md`.
+  3. Trust-tier taxonomy (Trusted/Verify-before-acting/Untrusted) for loaded external content, from `context-engineering` → new `rules.md` §21.
+  4. Task-sizing gate (XS-XL, "and"-in-title signal, 5-file ceiling), from `planning-and-task-breakdown` → appended to `~/.claude/commands/plan.md`.
+- Full record + 3 unactioned setup-improvement candidates (debug.md untrusted-error-output line, extracting Done-bar detail out of CLAUDE.md, /ship rollback-threshold gap): `reference_agent_skills_repo_intake_2026-08-13.md`.
+- Disposition: **SUPERSEDED** (framework) + **4 fragments FILED**. The cloned repo directory itself is not referenced as a running dependency anywhere in ORA's setup.
+- Note: session-start flagged `~/.claude` as dirty (154→160 files, pre-existing WIP unrelated to this session — `_scheduled_tasks_backup/*`) with session `61d8ae99` concurrently active on unrelated `hooks/**` override/auth work; all edits in this entry were scoped to `rules.md`, `feedback_interactive_decision_questions.md`, `commands/plan.md`, `CLAUDE.md`, `INDEX_reference.md`, and two new reference files — none overlapping that session's stated `hooks/**` scope. Not committed this session (no commit requested).
+
 ## 2026-08-09 — Claim-holder "phantom sessions" root-caused to two disjoint session-id namespaces; claim_work.py fixed (OI-108); guard pause lifted after the mtime fix landed (OI-107 CLOSED)
 
 Follow-on from the same-day guard handoff relay. Three threads, all closed.

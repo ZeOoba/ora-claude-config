@@ -17,3 +17,6 @@ Any task with >3 steps or any irreversible action.
 - Always show the file inventory before writing anything.
 - Flag CONFIDENTIAL if any step involves a `confidential-terms.json` term.
 - For coding plans, hand the result to **superpowers:writing-plans** so tasks are TDD-shaped.
+
+## Task-sizing gate (coding plans)
+Before finalizing any step/task list for coding work, size each task: XS (1 file, single function/config change) · S (1-2 files, one endpoint/component) · M (3-5 files, one feature slice) · L (5-8 files, multi-component) · XL (8+ files). Break down anything L or larger. Other signals a task is really two: the title contains "and"; it touches two independent subsystems; acceptance criteria need more than 3 bullets.
