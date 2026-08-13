@@ -170,6 +170,42 @@ def main():
     else:
         expect("is_duplicate_entry helper exists", False, "not defined")
 
+    # --- 8. REGRESSION (found in code review): a '## ' markdown sub-heading
+    # inside an entry BODY must not be mistaken for a new entry boundary. Real
+    # entries in the live log use '## ' sub-headings in their text -- only a
+    # DATED header ('## YYYY-MM-DD') starts a new entry.
+    body_subheading_entry = (
+        "## 2026-08-12 - Entry with a sub-heading\n\n"
+        "Intro line.\n\n"
+        "## Not a dated header\n\n"
+        "More body text under the sub-heading."
+    )
+    if hasattr(m, "entry_blocks"):
+        blocks = list(m.entry_blocks(HEADERLESS + body_subheading_entry + "\n"))
+        expect("entry_blocks: a '## ' body sub-heading does not split the entry",
+               len(blocks) == 1, "got %d blocks" % len(blocks))
+    else:
+        expect("entry_blocks helper exists", False, "not defined")
+
+    tmp = tempfile.mkdtemp()
+    log = make_log(tmp, [body_subheading_entry])
+    rc, txt = run(m, log, body_subheading_entry)
+    expect("re-appending an entry with a '## ' sub-heading IS caught as a duplicate",
+           txt.count("## 2026-08-12 - Entry with a sub-heading") == 1,
+           "count=%d" % txt.count("## 2026-08-12 - Entry with a sub-heading"))
+    shutil.rmtree(tmp, ignore_errors=True)
+
+    # --- 9. REGRESSION: dated headers still split correctly (must not overcorrect
+    # into treating the whole log as one block)
+    tmp = tempfile.mkdtemp()
+    log = make_log(tmp, [E1, E2])
+    if hasattr(m, "entry_blocks"):
+        with open(log, encoding="utf-8") as f:
+            blocks = list(m.entry_blocks(f.read()))
+        expect("entry_blocks: two real dated entries still yield two blocks",
+               len(blocks) == 2, "got %d blocks" % len(blocks))
+    shutil.rmtree(tmp, ignore_errors=True)
+
     passed = sum(1 for ok, _ in results if ok)
     print("\n%d/%d passed" % (passed, len(results)))
     sys.exit(0 if passed == len(results) else 1)
