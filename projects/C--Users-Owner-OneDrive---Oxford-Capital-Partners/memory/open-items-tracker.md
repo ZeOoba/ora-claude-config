@@ -98,6 +98,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | [OI-115](#OI-115) | 2026-08-11 | [ORA Monthly Portfolio Briefing — August 2026](https://app.notion.com/p/3b96ecd89e598192b55ae297b2c46cad) Risk 4, run 2026-08-11; originating incident [project_insurance_lapse_confirmed_real_2026-07-25.md](project_insurance_lapse_confirmed_real_2026-07-25.md) | **HIGH — escalation path has failed, needs a human owner.** Nine properties are uninsured or about to be. **8 policies EXPIRED for 3+ consecutive ingest runs** — escalated to Gabriel 2026-07-13 and **unchanged across four reporting cycles**: Fairground Village Center PCKG+BCL, ETC POA PCKG+BCL, 1100 Rarig PCKG+BCL, 3883 Livingston PCKG+BCL. **4 more are Renew-Now and have closed from 25–29 days to 18–22 days with no movement**: 1900 N Broadway UFX+BCL (expire 2026-08-27) and 9050 Red Branch PCKG+BCL (expire 2026-08-31). **Compounding: 9050 Red Branch is the property carrying the only balloon inside 18 months** (2028-01-01) — a lender finding a lapsed policy on its collateral 16 months before maturity turns a benign refinance into a covenant conversation; and **1100 Rarig is uninsured** while running the portfolio's shortest WALT (0.92 yr) and 22.9% vacancy. Not an analytical question — \$57.95M of insurable value behind a paperwork failure that four cycles of automated alerting has not moved. **Escalate to Eric** |
 | [OI-120](#OI-120) | 2026-08-11 | live incident this session while committing the OI-098 tracker work | **MEDIUM** `config-write-guard` models **working-tree rewrites, not index state**, so a session can contaminate the shared `~/.claude` index but cannot undo it. `GIT_MUTATE_RE` (`hooks/lib/tool_call_paths.py:430-432`) matches the verbs `checkout` / `restore` / `reset` / `apply` / `stash` / `merge` / `rebase` / `cherry-pick` / `clean` / `revert` / `pull` / `switch` (exact regex in the detail section) — **`add` and `commit` are absent; `restore` is present.** Live-proven this session, all three: `git add -- <one memory file>` **PASSED** and silently joined **5 files another session had already staged** (including a 930-line new script); the corrective `git restore --staged` on that same file was **BLOCKED** as a governance write; `git commit` is unguarded too. Net: staging into a shared index is free, un-staging costs a 60-min multi-use `allow-config-write` token, and the single most consequential operation — creating a commit in the live governance repo — is not gated at all. **Workaround that worked and should be documented:** a pathspec commit (`git commit -F <msgfile> -- <path>`) commits the working-tree copy of just that path and leaves the index untouched, so another session's staged work is neither swept in nor disturbed. Secondary finding: the matcher scans command TEXT, so an `allocate-oi-id.py --note` merely *describing* this gap tripped it — same shape as [OI-099](#OI-099). **hooks/** — any fix takes the mandatory adversarial REFUTE pass + old-vs-new differential battery |
 | [OI-124](#OI-124) | 2026-08-12 | root-cause trace of the two split rows repaired in [#57](https://github.com/ZeOoba/ora-claude-config/pull/57) | **MEDIUM — ROOT CAUSE IDENTIFIED for the split-table-row defect [OI-098](#OI-098) had carried as unknown.** Both splits (`OI-092`, `OI-095`) trace by `git log -S` to a **single commit, `57d0acf` (2026-08-05)**, whose own message names the method: *"isolated via hash-object/update-index"*. Two things combined: (1) the row text was **hard-wrapped at ~100 columns** — continuation widths 98/98/100/101/101/101/102/102/103/104, matching this file's prose-wrapping convention — which is correct for a section body and **fatal for a table row**, since a Markdown row must be exactly one line; and (2) writing the content as a blob straight into the index **bypasses the working tree entirely**, so no editor, no renderer and no diff of the rendered table ever saw the result. The blob-injection technique is itself a reasonable response to a contaminated shared checkout (cf. [OI-120](#OI-120)) — the defect is that it removes the last human/tool check that would have caught a malformed row. **Impact: live 6 days and survived 7 subsequent commits to the same file**, silently ending the table for every row after the break. **Distinct from the other mechanism** already in OI-098's history (a blank line inside the table, which pushed OI-095/096/097 out) — same symptom, different cause; do not treat one fix as covering both. Cheap detector proposed, green today: every line matching `^\| \[OI-` must end in an unescaped pipe character |
+| [OI-142](#OI-142) | 2026-08-12 | `ora-skills` `pending_reimport.py` sweep investigation, this session | **MEDIUM** `exception-detection`'s runtime cache held a v1.3 `SKILL.md` (installed live 2026-08-11) with **zero commit anywhere in `ora-skills` git history** — traced to session `89c314f4-a39e-43b4-8d1b-6b38d91774f7`, which appears to have packaged and Save-skill-installed straight from its own uncommitted working tree. `repo_first_check.py` Check 5 only fires at commit time and cannot catch an install that never gets committed at all. Recovered via backfill commit `85abbbc`; root cause of the bypass and a durable fix are still open |
 
 ### OI-009
 **Status:** OPEN (substantial progress made 2026-07-17, real scope remains)
@@ -5101,3 +5102,43 @@ land. Source: `event_log.md` commit `75ab0de` (2026-08-12). Five tokens against 
 under 12–16+ concurrent sessions — reinforces **option 1 / 1b** over the per-test options 2/3, since the
 failing test varies by run (plain `test-eos-review-gate.py` alone in three of five, seven further siblings
 in the fourth) — a budget-vs-load mismatch across the whole suite, not one flaky test.
+
+### OI-142
+**Status:** OPEN
+**Opened:** 2026-08-12
+**Severity:** MEDIUM
+**Source:** Surfaced investigating a `tools/pending_reimport.py` sweep hit on `exception-detection`
+(`ora-skills`) with no ledger entry. Diffing repo HEAD vs. the runtime cache vs. the (then-uncommitted)
+working tree showed the cache held a **v1.3** `SKILL.md` (installed live 2026-08-11 17:30) with zero commit
+anywhere in `ora-skills` git history — `git log -- exception-detection/SKILL.md` jumped straight from v1.2
+(`b723118`, 2026-07-21) to the backfill commit (`85abbbc`, 2026-08-12, Gabriel-directed) that landed v1.3 and
+same-day v1.4 content together. Session-transcript search traced the v1.3 content to session
+`89c314f4-a39e-43b4-8d1b-6b38d91774f7`, which appears to have packaged and Save-skill-installed directly from
+its own uncommitted working tree on 2026-08-11, never committing.
+**Description:** The whole `pending_reimport.py` / `repo_first_check.py` discipline assumes one direction of
+drift — repo commits land, the manual Save-skill click lags behind (`_staging/PENDING_REIMPORT.md`'s entire
+model). This incident ran the other way: a skill was installed into the live runtime cache with no
+corresponding commit ever landing, so for roughly 24h `ora-skills` git HEAD did not describe what was actually
+live for `exception-detection`, and nothing in the sweep flags that class of gap — `sweep_drift()` only
+compares content, never asks whether the cache's content exists in git history *at all*. It surfaced only
+because a human diffed the working tree by hand while chasing an unrelated ledger question.
+
+Not yet established: whether session `89c314f4` packaged+installed directly (deliberately or by mistake
+skipping `git commit`), or whether a different path (e.g. a manual `package_skills.py` run against a dirty
+tree followed by a Save-skill click, by that session or another) produced the same result. `Check 5` in
+`tools/hooks/pre-commit` (`repo_first_check.py --check-staged`, added 2026-08-03 after four prior REPO-FIRST
+violations — acquisition-underwriting v4.5/v4.6, disposition-analysis, parcel-data-recovery) exists for
+exactly this failure class but fires **only at commit time**; it cannot catch an install that never gets
+committed at all, which is what appears to have happened here.
+
+**Candidate fixes (not yet chosen):**
+- Extend the sweep to flag any runtime-cache skill body whose content matches **no blob in git history**
+  (not merely "differs from HEAD"). `pending_reimport.py` already does exactly this classification for shared
+  repo-root deps (`_file_history_hashes()` / `classify_shared_copy()` → `CACHE-AHEAD`); generalizing it to a
+  skill's own bundled files would catch this class going forward instead of relying on a human noticing.
+- Or: have `package_skills.py` refuse (or loudly warn) when packaging from a source tree that has uncommitted
+  changes, closing the gap at the point of install rather than only detecting it after the fact.
+
+**Related:** ora-skills commit `85abbbc` (the backfill that recovered this instance);
+[[feedback_verified_null_vs_inferred_null]] (same shape — a sweep that reads "no candidates" as "verified
+in sync" rather than "didn't check this direction").
