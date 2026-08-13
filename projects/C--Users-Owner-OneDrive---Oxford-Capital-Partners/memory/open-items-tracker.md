@@ -4989,3 +4989,51 @@ land. Source: `event_log.md` commit `75ab0de` (2026-08-12). Five tokens against 
 under 12–16+ concurrent sessions — reinforces **option 1 / 1b** over the per-test options 2/3, since the
 failing test varies by run (plain `test-eos-review-gate.py` alone in three of five, seven further siblings
 in the fourth) — a budget-vs-load mismatch across the whole suite, not one flaky test.
+
+**Sixth token, and the first IDLE measurement — one file is over budget with zero contention (2026-08-12,
+session `e23f4c54`).** `OI-144` was allocator-assigned for this before I read the item; folded in here rather
+than filed separately, per OI-129 and the OI-135/OI-127 precedent two paragraphs up. The id stays reserved and
+unused.
+
+| Time (local) | Session | Failing test | Push contents |
+|---|---|---|---|
+| ~19:5x | `e23f4c54` | `test-memory-orphan-link-guard.py`, exit 124 after the retry | `feat/mutation-testing-harness` — two NEW test-infra files, nothing imports them |
+
+Landed via `--no-verify` on Gabriel's explicit in-turn call ([PR #75](https://github.com/ZeOoba/ora-claude-config/pull/75)) rather than a sixth
+`allow-hook-test-failure` token — worth noting for the severity tally this item tracks, since a `--no-verify`
+push leaves *less* audit trail than the token it avoided: no gate record at all, versus a token with a stated
+reason.
+
+**What is new here, and why it sharpens the option-1 choice.** Every prior data point is a run *under* gate
+load, framed above as budget-vs-load. This one was measured STANDALONE ON AN OTHERWISE-IDLE MACHINE:
+
+| Measurement | Result |
+|---|---|
+| `test-memory-orphan-link-guard.py`, standalone, idle | **192.7s, rc=0 (PASSES)** |
+| Gate budget (`PER_TEST_TIMEOUT_SECONDS`) | 90s |
+| Doubled budget on the timeout retry | 180s |
+| `test-mutation-lib.py` (the branch's own new suite), standalone | 2.4s |
+
+So this file **cannot pass the gate at any concurrency** — it exceeds even the doubled retry budget with zero
+load, which no amount of reducing worker count (option 1b) will fix. That does not overturn the
+budget-vs-load diagnosis for the *other* failures; it adds a second, independent cause sitting underneath it:
+at least one file whose idle runtime is already over the retry ceiling. Consequences for the fix:
+
+1. Option 1's new budget must clear the slowest file's IDLE runtime with real headroom, not merely absorb
+   contention. 192.7s idle means a 180s ceiling is under water before the first concurrent session starts.
+   Whoever picks the number should MEASURE the slowest files idle rather than scaling the old value.
+2. Option 1b (lower concurrency) is now insufficient alone, on this file's evidence.
+3. A per-file cause, measured — NOT folded into the budget decision, and worth fixing on its own.
+   `test-memory-orphan-link-guard.py` invokes the hook **70 times**, each a fresh `sys.executable` spawn, and
+   each invocation runs its own `git` subprocesses inside `_git()` (`memory-orphan-link-guard.py:308-318`).
+   192.7s / 70 = **~2.75s per invocation**, which accounts for essentially the whole runtime. My first guess
+   was wrong and is recorded here so nobody re-checks it: this is NOT the OI-061 shape. That item was about
+   per-call REPO CONSTRUCTION and was fixed by the shared `gitfixture` template — which this file already
+   imports and uses (line 7, and one `repo_with_commit` call). The remaining cost is hook-invocation count,
+   which `gitfixture` does not address. The OI-061 playbook therefore does not transfer; the analogous move
+   would be amortizing the 70 spawns (batching cases into fewer hook runs, or exercising the hook in-process
+   where a case does not need the subprocess boundary), which is a different piece of work and should be
+   scoped as such.
+
+**Not caused by the change that surfaced it:** the branch is `main` plus two new files that nothing imports,
+and its own suite runs in 2.4s.
