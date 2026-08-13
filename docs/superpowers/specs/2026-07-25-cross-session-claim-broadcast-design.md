@@ -150,8 +150,15 @@ convention without a code change, only a doc note (this file + the
 `session-context.md` active-context block).
 
 **Since Phase 2, a slug is no longer the only axis.** `repo-housekeeping` (added
-2026-07-26) was the last collision shape answered with vocabulary alone; the very
-next one could not be, because both sessions had *correct* slugs. Prefer
+2026-07-26) was the last collision shape answered with vocabulary alone until
+`ora-skills` (added 2026-08-12 — two sessions handed the same remediation prompt,
+caught only by reading the other's transcript; that repo's own tech.md §2 git-state
+rule is blind to a concurrent session because commits there carry the machine's
+shared human author identity rather than a per-session one, so git identity cannot
+answer *"is this HEAD mine?"* — the two rules are complementary and both apply).
+The same-file collision later on 2026-07-26 — four sessions on
+`ora-weekly-hygiene/SKILL.md`, two holding *correct* but different slugs — could
+not be answered with vocabulary, which is what forced `--paths`. Prefer
 `--paths` whenever the work is scoped to specific files or a directory — it is
 the axis that actually catches a same-file collision, and it composes with any
 slug rather than competing with it.
