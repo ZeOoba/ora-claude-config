@@ -134,6 +134,29 @@ def any_finding(result):
                 or result["orphaned_sections"])
 
 
+def collision_finding(result):
+    """True only for findings that can NEVER be a legitimate transient state.
+
+    An OI item is filed as two separate writes -- a table row and a `### OI-NNN`
+    detail section -- so a reader that lands between them legitimately sees an
+    orphaned section, or a row whose section has not been written yet. Those are
+    mid-edit states on a file that several sessions edit concurrently, not defects.
+
+    A DUPLICATE id is categorically different: no filing sequence ever needs two
+    rows (or two sections) carrying the same id, so a duplicate is a real collision
+    regardless of when you observe it. This is the OI-027 class -- the reason this
+    probe exists.
+
+    Use this for BLOCKING assertions against the live canonical tracker. Use
+    any_finding() for reporting, which is deliberately broader and still drives
+    main()'s exit code -- that is how the weekly hygiene sweep surfaces orphans
+    (it is what found OI-111/OI-112). Added 2026-08-12: the test suite's
+    live-tracker assertion used any_finding(), so any session sitting between its
+    two writes failed the pre-push gate for every other session on the machine.
+    """
+    return bool(result["duplicate_rows"] or result["duplicate_sections"])
+
+
 def format_report(result, path):
     lines = []
     if not any_finding(result):
