@@ -15,12 +15,15 @@ manually running the suite would ever have caught it. Run: python
 test-git-prepush-hook-tests-gate.py (exit 0 = pass)
 """
 import contextlib
+import glob
 import importlib.util
 import io
+import json
 import os
 import stat
 import sys
 import tempfile
+from datetime import datetime, timedelta
 
 HOOKS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 spec = importlib.util.spec_from_file_location(
@@ -578,6 +581,200 @@ with tempfile.TemporaryDirectory() as _td:
            "â€”" not in _written and "â€" not in _written,
            repr([l for l in _written.splitlines() if "â" in l][:1]))
 
+# --- failure_signature(): stable id for the CURRENT set of genuinely-failing files ----
+sig_a = gt.failure_signature([
+    {"file": "test-b.py", "status": "fail"},
+    {"file": "test-a.py", "status": "fail"},
+])
+sig_a_reordered = gt.failure_signature([
+    {"file": "test-a.py", "status": "fail"},
+    {"file": "test-b.py", "status": "fail"},
+])
+expect("failure_signature: order-independent (same failing set, reversed input order)",
+       sig_a == sig_a_reordered, "%r vs %r" % (sig_a, sig_a_reordered))
+
+sig_diff_output = gt.failure_signature([
+    {"file": "test-b.py", "status": "fail", "output": "totally different trace\n"},
+    {"file": "test-a.py", "status": "fail", "output": "another trace\n"},
+])
+expect("failure_signature: ignores output/rc, keys ONLY on the failing file set",
+       sig_a == sig_diff_output)
+
+sig_one_file = gt.failure_signature([{"file": "test-a.py", "status": "fail"}])
+expect("failure_signature: a different failing SET -> a different signature",
+       sig_one_file != sig_a)
+
+sig_no_fail = gt.failure_signature([
+    {"file": "test-a.py", "status": "pass"},
+    {"file": "test-b.py", "status": "env-skip"},
+])
+expect("failure_signature: pass/env-skip never contribute -- empty failing set is its "
+       "own stable id, same as an empty results list",
+       sig_no_fail == gt.failure_signature([]))
+expect("failure_signature: returns a short hex id, not the raw file list",
+       len(sig_no_fail) == 12 and all(c in "0123456789abcdef" for c in sig_no_fail),
+       repr(sig_no_fail))
+
+# --- override_frequency() / record_override_use(): rolling-window JSONL round-trip ----
+with tempfile.TemporaryDirectory() as _td:
+    _usage_log = os.path.join(_td, "override-usage-log.jsonl")
+    _prev_usage = gt.OVERRIDE_USAGE_LOG_OVERRIDE
+    gt.OVERRIDE_USAGE_LOG_OVERRIDE = _usage_log
+    try:
+        expect("override_frequency: missing file -> (0, 0), not an error",
+               gt.override_frequency("sig-fresh") == (0, 0))
+
+        base_now = datetime(2026, 8, 12, 12, 0, 0)
+        gt.record_override_use("sess-a", "sig-x", now=base_now)
+        expect("override_frequency: one record, same signature, in-window -> (1, 1)",
+               gt.override_frequency("sig-x", now=base_now) == (1, 1))
+        expect("override_frequency: a DIFFERENT signature is isolated -> (0, 0)",
+               gt.override_frequency("sig-y", now=base_now) == (0, 0))
+
+        gt.record_override_use("sess-b", "sig-x", now=base_now)
+        expect("override_frequency: two uses, two distinct sessions -> (2, 2)",
+               gt.override_frequency("sig-x", now=base_now) == (2, 2))
+
+        gt.record_override_use("sess-a", "sig-x", now=base_now)
+        expect("override_frequency: the SAME session overriding twice grows the count "
+               "but not the distinct-session count -> (3, 2)",
+               gt.override_frequency("sig-x", now=base_now) == (3, 2))
+
+        # window_hours: a record outside the DEFAULT window is excluded; the same
+        # record is still visible under a wider explicit window, and excluded again
+        # under a narrower one -- proves the parameter is actually consulted, not just
+        # accepted and ignored.
+        gt.record_override_use("sess-e", "sig-w", now=base_now - timedelta(hours=2))
+        expect("override_frequency: default 24h window includes a 2h-old record",
+               gt.override_frequency("sig-w", now=base_now) == (1, 1))
+        expect("override_frequency: an explicit narrower window (1h) excludes it",
+               gt.override_frequency("sig-w", now=base_now, window_hours=1) == (0, 0))
+        expect("override_frequency: a record OLDER than the default window is excluded",
+               gt.override_frequency(
+                   "sig-x", now=base_now + timedelta(hours=gt.OVERRIDE_FREQUENCY_WINDOW_HOURS + 1)
+               ) == (0, 0))
+
+        # Malformed-line resilience: one corrupt line must not blind the scan to others.
+        with open(_usage_log, "a", encoding="utf-8") as f:
+            f.write("not json at all\n")
+            f.write(json.dumps({"ts": "not-a-timestamp", "session_id": "sess-c",
+                                 "signature": "sig-x"}) + "\n")
+            f.write(json.dumps({"session_id": "sess-d", "signature": "sig-x"}) + "\n")  # no ts
+            # VALID json, NOT a dict -- rec.get(...) on a list/int would raise
+            # AttributeError if not guarded, crashing override_frequency() (and with it
+            # main()) rather than skipping one bad line. Regression test for the fix
+            # found in this session's own adversarial pass.
+            f.write("[1, 2, 3]\n")
+            f.write("42\n")
+        expect("override_frequency: malformed / bad-timestamp / missing-field / "
+               "valid-json-but-not-a-dict lines are ALL SKIPPED, not fatal -- the 3 "
+               "good prior records for sig-x are still counted, and no exception "
+               "escapes the call",
+               gt.override_frequency("sig-x", now=base_now) == (3, 2),
+               "got %r" % (gt.override_frequency("sig-x", now=base_now),))
+
+        # session_id=None (current_session_id() can return this on a headless push with
+        # no CLAUDE_CODE_SESSION_ID) must record and count cleanly, not crash.
+        gt.record_override_use(None, "sig-none", now=base_now)
+        expect("override_frequency: session_id=None records/counts without crashing",
+               gt.override_frequency("sig-none", now=base_now) == (1, 1))
+    finally:
+        gt.OVERRIDE_USAGE_LOG_OVERRIDE = _prev_usage
+
+# --- record_override_use(): write-failure resilience -----------------------------------
+# Mirrors log_override_use()'s own defensive posture: this is called AFTER the push has
+# already been allowed, so a state-file write failure must be visibility-only and must
+# NEVER raise back into main() (which would turn a passing push into a crash).
+_prev_usage = gt.OVERRIDE_USAGE_LOG_OVERRIDE
+gt.OVERRIDE_USAGE_LOG_OVERRIDE = os.path.join(
+    "Z:\\definitely\\does\\not\\exist\\on\\this\\machine", "override-usage-log.jsonl")
+try:
+    gt.record_override_use("sess-a", "sig-unwritable", now=datetime(2026, 8, 12))
+    expect("record_override_use: an unwritable path does not raise", True)
+except Exception as e:
+    expect("record_override_use: an unwritable path does not raise", False, repr(e))
+finally:
+    gt.OVERRIDE_USAGE_LOG_OVERRIDE = _prev_usage
+
+# --- override_frequency_note(): message formatting, both tenses and both pluralizations
+expect("override_frequency_note: singular count/session both read naturally",
+       gt.override_frequency_note(1, 1, 24, verb="has now been")
+       == "  This exact failure has now been overridden 1 time by 1 distinct session in "
+          "the last 24h -- weigh that pattern, not just this instance.\n")
+expect("override_frequency_note: plural count/session both read naturally",
+       gt.override_frequency_note(3, 2, 24, verb="already has been")
+       == "  This exact failure already has been overridden 3 times by 2 distinct "
+          "sessions in the last 24h -- weigh that pattern, not just this instance.\n")
+
+# --- main(): end-to-end wiring ---------------------------------------------------------
+# The note appears in the right branch with the right tense, records itself on an
+# override, and stays SILENT on a clean first block -- "overridden 0 times" would be
+# noise, not signal, on the very first encounter of a novel failure.
+with tempfile.TemporaryDirectory() as _td:
+    _usage_log = os.path.join(_td, "override-usage-log.jsonl")
+    _log = os.path.join(_td, "event_log.md")
+    with io.open(_log, "w", encoding="utf-8") as _f:
+        _f.write("---\nname: event_log\n---\n\n# ORA Event Log\n\nintro\n\n"
+                 "## 2026-01-01 - seed\n\nbody\n")
+    freq_root = tempfile.mkdtemp(prefix="gt-freqcounter-")
+    write_dummy_test(freq_root, "test-always-fails.py", "import sys; sys.exit(1)\n")
+
+    _prev_usage = gt.OVERRIDE_USAGE_LOG_OVERRIDE
+    _prev_event = gt.EVENT_LOG_OVERRIDE
+    _prev_tests_dir = gt.TESTS_DIR_OVERRIDE
+    gt.OVERRIDE_USAGE_LOG_OVERRIDE = _usage_log
+    gt.EVENT_LOG_OVERRIDE = _log
+    gt.TESTS_DIR_OVERRIDE = freq_root
+    os.environ["CLAUDE_CODE_SESSION_ID"] = SESSION
+
+    with tempfile.TemporaryDirectory() as sessions_root:
+        os.environ["ORA_OVERRIDE_SESSIONS_DIR"] = sessions_root
+        try:
+            # First block on a novel failure: nothing to report yet -> no frequency note.
+            _err = io.StringIO()
+            with contextlib.redirect_stderr(_err):
+                rc1 = gt.main()
+            expect("main: first block on a novel failure -> BLOCKED, exit 1",
+                   rc1 == 1, "got %r" % rc1)
+            expect("main: first block -> NO frequency note (nothing to report yet)",
+                   "This exact failure" not in _err.getvalue(),
+                   repr(_err.getvalue()[-300:]))
+
+            # Mint a token and override once.
+            mint(sessions_root, SESSION, good_token())
+            _err = io.StringIO()
+            with contextlib.redirect_stderr(_err):
+                rc2 = gt.main()
+            expect("main: overridden -> exit 0 (push allowed)", rc2 == 0, "got %r" % rc2)
+            expect("main: overridden -> frequency note present, correct tense/count",
+                   "has now been overridden 1 time by 1 distinct session"
+                   in _err.getvalue(), repr(_err.getvalue()[-400:]))
+            with io.open(_usage_log, encoding="utf-8") as _f:
+                _usage_written = _f.read()
+            expect("main: overridden -> the use was actually appended to the state file",
+                   os.path.exists(_usage_log) and SESSION in _usage_written,
+                   repr(_usage_written))
+
+            # Second block on the SAME failure, no token this time: BLOCKED again, but
+            # now the PRIOR override must be visible before a new token is minted.
+            for f in glob.glob(os.path.join(sessions_root, SESSION, "overrides", "*")):
+                os.remove(f)
+            _err = io.StringIO()
+            with contextlib.redirect_stderr(_err):
+                rc3 = gt.main()
+            expect("main: second block, no token -> BLOCKED again, exit 1",
+                   rc3 == 1, "got %r" % rc3)
+            expect("main: second block -> shows the PRIOR override before a new one is "
+                   "minted, in the 'already has been' tense",
+                   "already has been overridden 1 time by 1 distinct session"
+                   in _err.getvalue(), repr(_err.getvalue()[-400:]))
+        finally:
+            gt.OVERRIDE_USAGE_LOG_OVERRIDE = _prev_usage
+            gt.EVENT_LOG_OVERRIDE = _prev_event
+            gt.TESTS_DIR_OVERRIDE = _prev_tests_dir
+            os.environ.pop("ORA_OVERRIDE_SESSIONS_DIR", None)
+            os.environ.pop("CLAUDE_CODE_SESSION_ID", None)
+
 # --- override_active(): smoke-test the shared contract is wired with the RIGHT tier ---
 # (token_grants()/parse_token()'s own exhaustive adversarial matrix — duplicate keys,
 # oversized, future-dated, path-traversal session ids, etc — is already covered by
@@ -611,6 +808,12 @@ with tempfile.TemporaryDirectory() as td:
     with open(tmp_log, "w", encoding="utf-8") as f:
         f.write("# test log\n\n## 2000-01-01 — seed\n\n- seed entry\n")
     gt.EVENT_LOG_OVERRIDE = tmp_log
+    # Isolates record_override_use()'s state-file write the same way EVENT_LOG_OVERRIDE
+    # isolates the event_log append above -- without this, test (d) below (a real
+    # override) writes to the CANONICAL hooks/_state/override-usage-log.jsonl. Not reset
+    # afterward, matching this block's own EVENT_LOG_OVERRIDE convention: nothing later
+    # in this script needs canonical either.
+    gt.OVERRIDE_USAGE_LOG_OVERRIDE = os.path.join(td, "override-usage-log-test.jsonl")
 
     real_run_suite = gt.run_suite
 
