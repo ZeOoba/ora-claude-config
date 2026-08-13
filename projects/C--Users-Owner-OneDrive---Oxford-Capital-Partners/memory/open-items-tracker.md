@@ -5654,6 +5654,8 @@ own merits, the right call.
 **Related:** [OI-057](#OI-057) and [OI-059](#OI-059) (the defect generating the overrides — both reopened
 2026-08-12), `hooks/git-prepush-hook-tests-gate.py` (gate + the "override normalised is a gate disabled" note).
 
+**Session handoff note (2026-08-13, session b34ec269):** checked before starting related punch-list work (a wrapper script + a documented polling-claim-loop default were the actual items owned this session) -- confirmed via `hooks/active-work/hooks-override-auth.json` that session `4ead3171` still holds a live claim on this exact fix ("add an override-frequency counter to the pre-push hook-tests gate block message (OI-136 candidate fix 2, Gabriel-directed)") and confirmed via `git log -- hooks/git-prepush-hook-tests-gate.py hooks/lib/override_tokens.py` that nothing has landed for it yet (latest commit there is the unrelated `c29ec95` timeout-budget change). Not duplicated; no code touched.
+
 ### OI-138
 **Status:** OPEN — **ROUTED to session `e23f4c54`**, which holds the `hooks-override-auth-eos-gate-msg` claim on
 this same file. Filed as an OI rather than sent directly because the discovering session was an unattended
