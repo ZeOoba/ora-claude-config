@@ -183,8 +183,27 @@ SKILL_SCAN_ROOTS = (CLAUDE_DIR / "skills", LIVE_CLAUDE_DIR / "plugins", WORKSPAC
 # deliberately minimal. DO NOT add bare "outputs": 01_Workspace/outputs/ is a real
 # skill home for several Cowork skills, and pruning it once hid them so they passed
 # only via the allowlist (review of c9dcdb9, finding #1).
-SKILL_PRUNE_DIRS = {".git", "__pycache__", "node_modules", "backups", "_archive",
-                    "02_outputs", "_state", "_manifest", ".obsidian"}
+SKILL_PRUNE_DIRS = {".git", "__pycache__", "node_modules", "third_party", "backups",
+                    "_archive", "02_outputs", "_state", "_manifest", ".obsidian"}
+# "third_party" added 2026-08-13: LIVE_CLAUDE_DIR/plugins/marketplaces/chrome-devtools-
+# plugins bundles a vendored LLVM test-fixture tree (third_party/devtools-frontend/.../
+# third_party/llvm/src/clang/test/Driver/Inputs/...) nested deep enough to exceed Windows
+# MAX_PATH (260 chars). os.walk's onerror hook was catching 60-140 FileNotFoundError
+# [WinError 3] there EVERY run -- 100% deterministic, not the transient "OneDrive offline?"
+# case the degraded-scan fallback below was written for -- which set `degraded=True`
+# unconditionally and silently downgraded EVERY unresolved skill token file-wide from
+# MISSING to a WARN, defeating this check's entire purpose. CORRECTION (independent
+# review, 2026-08-13): this prune is NOT a no-op for skill-dir coverage -- unlike
+# node_modules, this third_party tree genuinely contains 28 vendored Chromium/DevTools
+# SKILL.md dirs (e.g. devtools-ci, gerrit-cli, code-review-workflow) under
+# .../third_party/devtools-frontend/.agents/skills/. None are referenced anywhere in
+# CLAUDE.md's "Skill precedence" section, so pruning them costs nothing today -- and it
+# is the SAFE direction: leaving them scannable would let an ORA token accidentally
+# resolve [OK] against an unrelated vendored Chromium dev-workflow skill that merely
+# happens to share a name (the same false-PRESENT class the dated-archive-prefix fix
+# below guards against), rather than failing closed to MISSING as it now would. If a
+# real ORA skill token ever collides with one of these 28 names, this prune is why it
+# would report MISSING -- check here first before assuming the skill itself vanished.
 # The exact-name set above missed the LIVE archive convention, "_archive_<date>[_suffix]"
 # (fixed 2026-07-24, same class as governor-drift-probe's iter_files gap). Four such dirs sit
 # under Claude_Workspace/00_Governance/Scheduled/ holding 11 SKILL.md files, so RETIRED skills
