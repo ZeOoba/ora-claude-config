@@ -43,9 +43,19 @@ actual harm -- the content was a pure duplicate both times.
 """
 import argparse
 import os
+import re
 import subprocess
 import sys
 import time
+
+# A real entry header is a DATED '## YYYY-MM-DD ...' line (see insert_newest's and
+# this module's own docstrings). A bare '## ' prefix is NOT sufficient: entry
+# bodies routinely contain markdown '## ' sub-headings (three such lines exist in
+# the live event_log.md today), and treating every '## '-prefixed line as a new
+# entry boundary silently splits a single entry into fragments -- which in turn
+# makes is_duplicate_entry() compare fragments instead of the whole entry and
+# miss an exact duplicate (found in code review, 2026-08-12).
+ENTRY_HEADER_RE = re.compile(r"^## \d{4}-\d{2}-\d{2}\b")
 
 LOG = os.path.join(os.path.expanduser("~"), ".claude", "projects",
                    "C--Users-Owner-OneDrive---Oxford-Capital-Partners",
@@ -85,6 +95,59 @@ def insert_newest(content, entry):
     return content[:idx].rstrip() + "\n\n" + entry + "\n\n" + content[idx:]
 
 
+def normalize_entry(text):
+    """Canonical form for duplicate comparison: LF endings, no per-line trailing
+    whitespace, outer whitespace stripped. Two entries differing only in EOL or
+    trailing spaces are the SAME entry here (a Cowork-prepared entry handed to
+    Code routinely picks up CRLF on the way)."""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = "\n".join(ln.rstrip() for ln in text.split("\n")).strip()
+    # Collapse runs of blank lines so an entry re-prepared with different vertical
+    # spacing still reads as the same entry. Markdown renders 2+ blanks identically,
+    # so this cannot merge two genuinely different entries.
+    while "\n\n\n" in text:
+        text = text.replace("\n\n\n", "\n\n")
+    return text
+
+
+def entry_blocks(content):
+    """Yield each dated-'## YYYY-MM-DD'-headed entry block from the log body,
+    skipping YAML frontmatter (so a '## ' inside it is never treated as an entry).
+
+    Matches on ENTRY_HEADER_RE, NOT a bare '## ' prefix -- a body-text markdown
+    sub-heading (e.g. '## Cross-repo worktree staleness/collision sweep ...',
+    present in the live log) must stay part of its parent entry, not start a new
+    one."""
+    body_start = 0
+    if content.startswith("---\n"):
+        end = content.find("\n---\n", 4)
+        if end != -1:
+            body_start = end + len("\n---\n")
+    lines = content[body_start:].split("\n")
+    idxs = [i for i, ln in enumerate(lines) if ENTRY_HEADER_RE.match(ln)]
+    for k, i in enumerate(idxs):
+        j = idxs[k + 1] if k + 1 < len(idxs) else len(lines)
+        yield "\n".join(lines[i:j])
+
+
+def is_duplicate_entry(content, entry):
+    """True iff `entry` already exists in `content` as a whole, content-identical
+    '## ' block.
+
+    KEYS ON THE FULL BLOCK, NEVER THE HEADER ALONE -- repeated headers are
+    legitimate and routine. The allow-hook-test-failure override protocol writes
+    five entries in a single day under a byte-identical header, each with a
+    different body; a header-based check would block mandatory mechanical
+    record-keeping. Only an exact content match is a duplicate.
+
+    Compares whole blocks rather than substring-searching, so a short entry whose
+    text happens to appear inside a longer one is not a false positive."""
+    n = normalize_entry(entry)
+    if not n:
+        return False
+    return any(normalize_entry(b) == n for b in entry_blocks(content))
+
+
 def spool_dir_for(log):
     """Directory holding entries that could not be written yet (lock contention)."""
     return log + ".pending"
@@ -101,15 +164,51 @@ def spool_entry(log, entry, now_ns):
     return p
 
 
-def _atomic_insert(log, entry):
-    """One mtime-guarded read + newest-first insert + atomic replace. Returns True on
-    success; raises on lock/other error (caller decides retry/spool)."""
+def _is_duplicate_fail_open(content, entry, allow_duplicate):
+    """is_duplicate_entry(), but a check failure never blocks an append -- same
+    fail-open contract the standalone guard had before it moved in here."""
+    if allow_duplicate:
+        return False
+    try:
+        return is_duplicate_entry(content, entry)
+    except Exception:
+        return False
+
+
+def _atomic_insert(log, entry, allow_duplicate=False):
+    """One mtime-guarded read + duplicate-check + newest-first insert + atomic
+    replace. Returns True if written, False if a content-identical entry was
+    already present (nothing written -- see is_duplicate_entry); raises on
+    lock/other error (caller decides retry/spool).
+
+    THE DUPLICATE CHECK LIVES HERE, INSIDE THE SAME MTIME-GUARDED CYCLE AS THE
+    WRITE (2026-08-12 -- found in code review of the FIRST version of this
+    guard, which read the log separately, before the retry loop, as a one-shot
+    pre-check). That separate read was a TOCTOU window: two processes racing to
+    append the SAME entry could both read before either wrote, both see
+    "not a duplicate", and both write -- reproducing the exact double-append
+    this guard exists to prevent. Checking here means every retry attempt
+    re-reads and re-checks fresh content, so a concurrent writer that lands the
+    same entry between this attempt and the last is caught on the next one; the
+    mtime guard already forces a fresh read on any interleaving write, and the
+    duplicate check now shares that same freshness guarantee instead of running
+    once, before the loop starts. Verified with two real OS processes racing to
+    append identical content against the same file (test_separate_processes...
+    -style subprocess race, not thread interleaving) -- exactly one copy lands.
+
+    THIS IS ALSO WHY drain_spool NEEDS NO SEPARATE DUPLICATE CHECK OF ITS OWN
+    (closes a second, independent finding from the same review): it replays
+    spooled entries through this same function, so a spooled entry that turns
+    out to already be in the log (e.g. two locked runs both spooled the same
+    content) is silently recognized and discarded here, not blindly rewritten."""
     st_before = os.stat(log).st_mtime_ns
     with open(log, encoding="utf-8") as f:
         content = f.read()
-    new = insert_newest(content, entry)
     if os.stat(log).st_mtime_ns != st_before:
         raise BlockingIOError("log changed mid-read")
+    if _is_duplicate_fail_open(content, entry, allow_duplicate):
+        return False
+    new = insert_newest(content, entry)
     tmp = log + ".tmp-append"
     try:
         with open(tmp, "w", encoding="utf-8") as f:
@@ -129,22 +228,28 @@ def _atomic_insert(log, entry):
     return True
 
 
-def _inplace_insert(log, entry):
+def _inplace_insert(log, entry, allow_duplicate=False):
     """Fallback for when os.replace is blocked (e.g. another process holds `log`
     open without FILE_SHARE_DELETE -- proven 2026-07-16, see memory
     reference_event_log_app_handle_lock.md) but direct reads/writes to the same
-    path still succeed. Same mtime-guard as _atomic_insert, PLUS a pre-write
-    backup (so a partial/interrupted write is always recoverable; removed once
-    the read-back verify proves it redundant) and a post-write read-back verify
-    (so a silent corruption is never trusted as success). Returns True on
-    success; raises on any check failure -- caller decides whether to retry or
-    spool, and the backup is left on disk for recovery."""
+    path still succeed. Same mtime-guard AND duplicate check as _atomic_insert
+    (see its docstring -- the check must live on this path too, since
+    _insert_or_inplace can fall back here after the atomic path raises, and a
+    fresh read on this path needs the same freshness guarantee), PLUS a
+    pre-write backup (so a partial/interrupted write is always recoverable;
+    removed once the read-back verify proves it redundant) and a post-write
+    read-back verify (so a silent corruption is never trusted as success).
+    Returns True if written, False if already a content-identical duplicate
+    (nothing written); raises on any check failure -- caller decides whether to
+    retry or spool, and the backup is left on disk for recovery."""
     st_before = os.stat(log).st_mtime_ns
     with open(log, encoding="utf-8") as f:
         content = f.read()
-    new = insert_newest(content, entry)
     if os.stat(log).st_mtime_ns != st_before:
         raise BlockingIOError("log changed mid-read")
+    if _is_duplicate_fail_open(content, entry, allow_duplicate):
+        return False
+    new = insert_newest(content, entry)
     backup = log + ".inplace-backup"
     with open(backup, "w", encoding="utf-8") as f:
         f.write(content)
@@ -164,22 +269,25 @@ def _inplace_insert(log, entry):
     return True
 
 
-def _insert_or_inplace(log, entry, try_inplace):
+def _insert_or_inplace(log, entry, try_inplace, allow_duplicate=False):
     """Try the atomic (os.replace) insert; if it fails (not a malformed-entry
     ValueError) and `try_inplace` is set, fall back to _inplace_insert. Returns
-    True on success via either path. A ValueError from either path propagates
-    immediately (malformed entry -- retrying or falling back cannot help). If
-    both paths fail, raises the ATOMIC path's exception, since that's the one
-    callers already log per-attempt."""
+    True if written, False if recognized as a content-identical duplicate and
+    correctly left unwritten (see _atomic_insert) -- both are successful,
+    exception-free outcomes; only the caller needs to tell them apart. A
+    ValueError from either path propagates immediately (malformed entry --
+    retrying or falling back cannot help). If both paths fail, raises the
+    ATOMIC path's exception, since that's the one callers already log
+    per-attempt."""
     try:
-        return _atomic_insert(log, entry)
+        return _atomic_insert(log, entry, allow_duplicate)
     except ValueError:
         raise
     except Exception as atomic_exc:
         if not try_inplace:
             raise
         try:
-            return _inplace_insert(log, entry)
+            return _inplace_insert(log, entry, allow_duplicate)
         except ValueError:
             raise
         except Exception:
@@ -190,7 +298,20 @@ def drain_spool(log, attempts=3):
     """Replay spooled entries (oldest-first) into `log`. Stops at the first one that
     still can't be written -- leaves it and the rest for next time (nothing is lost).
     A malformed spooled entry is discarded so it can't wedge the queue forever.
-    Returns the count successfully drained."""
+    Returns the count successfully drained.
+
+    DUPLICATE-SAFE WITHOUT ITS OWN CHECK (2026-08-12, closes a code-review finding):
+    each spooled entry replays through _insert_or_inplace -> _atomic_insert /
+    _inplace_insert, which now does its own duplicate check on every attempt (see
+    _atomic_insert's docstring). A spooled entry that turns out to already be in
+    `log` -- e.g. two locked runs both failed to write the SAME content and both
+    spooled it -- is silently recognized and left unwritten rather than being
+    blindly reinserted. Never pass allow_duplicate=True here: a queued, unattended
+    replay is exactly the case where forcing a duplicate through has no one to
+    confirm it. The return value is intentionally NOT inspected below -- both
+    "wrote" (True) and "recognized as an existing duplicate" (False) are
+    successful, exception-free outcomes, and either way the spool file has been
+    durably resolved and can be removed."""
     d = spool_dir_for(log)
     if not os.path.isdir(d):
         return 0
@@ -280,6 +401,9 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="Append a newest-first event_log entry.")
     ap.add_argument("--entry-file", help="file holding the entry markdown; stdin if omitted")
     ap.add_argument("--log", default=LOG, help="target log (default: canonical event_log.md)")
+    ap.add_argument("--allow-duplicate", action="store_true",
+                    help="append even if a content-identical entry already exists "
+                         "(default: skip it and exit 0)")
     a = ap.parse_args(argv)
     if a.entry_file:
         with open(a.entry_file, encoding="utf-8") as f:
@@ -318,10 +442,31 @@ def main(argv=None):
     except Exception as e:
         sys.stderr.write("spool drain skipped: %s\n" % e)
 
+    # DUPLICATE GUARD (2026-08-12; hardened against a TOCTOU race found in code
+    # review the same day -- see _atomic_insert's docstring for the full story).
+    # The check is NOT a separate pre-read here: it happens inside
+    # _insert_or_inplace, on the SAME mtime-guarded content this attempt is about
+    # to write from, on every attempt of the loop below -- so a concurrent writer
+    # that lands the identical entry between attempts is caught fresh next time,
+    # not missed by a stale one-shot read taken before the loop started.
+    #
+    # Skipping cannot lose anything: a content-identical block is ALREADY in the
+    # log, so the caller's intent is already satisfied. Exit stays 0 so `&&`
+    # chains (both pre-push gates use them) never break -- consistent with this
+    # script's "the append must always succeed" design. FAIL-OPEN by construction
+    # (see _is_duplicate_fail_open): a check failure falls through to a normal
+    # write attempt, never blocks one.
     for attempt in range(6):
         try_inplace = (attempt + 1) >= INPLACE_FALLBACK_AFTER
         try:
-            _insert_or_inplace(a.log, entry, try_inplace)
+            wrote = _insert_or_inplace(a.log, entry, try_inplace, a.allow_duplicate)
+            if not wrote:
+                sys.stderr.write(
+                    "SKIPPED: a content-identical entry is already in %s.\n"
+                    "  Nothing was appended. Pass --allow-duplicate to force.\n"
+                    % os.path.basename(a.log))
+                print("skipped (duplicate): %s" % header)
+                return 0
             with open(a.log, encoding="utf-8") as f:
                 if header in f.read():
                     print("appended: %s" % header)
