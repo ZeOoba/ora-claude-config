@@ -43,9 +43,19 @@ actual harm -- the content was a pure duplicate both times.
 """
 import argparse
 import os
+import re
 import subprocess
 import sys
 import time
+
+# A real entry header is a DATED '## YYYY-MM-DD ...' line (see insert_newest's and
+# this module's own docstrings). A bare '## ' prefix is NOT sufficient: entry
+# bodies routinely contain markdown '## ' sub-headings (three such lines exist in
+# the live event_log.md today), and treating every '## '-prefixed line as a new
+# entry boundary silently splits a single entry into fragments -- which in turn
+# makes is_duplicate_entry() compare fragments instead of the whole entry and
+# miss an exact duplicate (found in code review, 2026-08-12).
+ENTRY_HEADER_RE = re.compile(r"^## \d{4}-\d{2}-\d{2}\b")
 
 LOG = os.path.join(os.path.expanduser("~"), ".claude", "projects",
                    "C--Users-Owner-OneDrive---Oxford-Capital-Partners",
@@ -101,15 +111,20 @@ def normalize_entry(text):
 
 
 def entry_blocks(content):
-    """Yield each '## '-headed entry block from the log body, skipping YAML
-    frontmatter (so a '## ' inside it is never treated as an entry)."""
+    """Yield each dated-'## YYYY-MM-DD'-headed entry block from the log body,
+    skipping YAML frontmatter (so a '## ' inside it is never treated as an entry).
+
+    Matches on ENTRY_HEADER_RE, NOT a bare '## ' prefix -- a body-text markdown
+    sub-heading (e.g. '## Cross-repo worktree staleness/collision sweep ...',
+    present in the live log) must stay part of its parent entry, not start a new
+    one."""
     body_start = 0
     if content.startswith("---\n"):
         end = content.find("\n---\n", 4)
         if end != -1:
             body_start = end + len("\n---\n")
     lines = content[body_start:].split("\n")
-    idxs = [i for i, ln in enumerate(lines) if ln.startswith("## ")]
+    idxs = [i for i, ln in enumerate(lines) if ENTRY_HEADER_RE.match(ln)]
     for k, i in enumerate(idxs):
         j = idxs[k + 1] if k + 1 < len(idxs) else len(lines)
         yield "\n".join(lines[i:j])
