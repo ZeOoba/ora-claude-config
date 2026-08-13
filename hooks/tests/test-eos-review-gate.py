@@ -9,12 +9,15 @@ capture, and what the working-tree content of a risk path actually hashes to.
 Shape follows hooks/tests/test-eos-plan-gate.py.
 """
 
+import concurrent.futures
+import io
 import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 
 # This test spins up its own throwaway git repos in temp dirs. When invoked as part of
 # the real pre-push hook chain, git sets GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE (etc.) in
@@ -1299,19 +1302,118 @@ def test_hint_silent_on_multiline_message_with_attached_pathspec():
 
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
 
+
+class _ThreadRoutedStdout:
+    """A stdout stand-in that routes each thread's writes to that thread's own buffer.
+
+    contextlib.redirect_stdout CANNOT be used here: it swaps the process-global
+    sys.stdout, so concurrent workers overwrite each other's redirect and restore it in
+    the wrong order. Measured, not theorised -- the first cut of this runner used it and
+    the suite printed ONE of 55 PASS lines, no summary, and still exited 0. A test
+    harness that loses results while reporting success is the worst possible failure on
+    a security gate, so the routing is per-thread and the summary is asserted below.
+    """
+
+    def __init__(self, real):
+        self._real = real
+        self._tl = threading.local()
+
+    def set_buffer(self, buf):
+        self._tl.buf = buf
+
+    def _target(self):
+        return getattr(self._tl, "buf", None) or self._real
+
+    def write(self, s):
+        return self._target().write(s)
+
+    def flush(self):
+        return self._target().flush()
+
+    def isatty(self):
+        return False
+
+
+def _run_one(t):
+    """Run one test with its stdout captured per-thread, so parallel workers neither
+    interleave nor lose output. Returns (name, ok, captured_stdout, error_or_None)."""
+    buf = io.StringIO()
+    routed = isinstance(sys.stdout, _ThreadRoutedStdout)
+    try:
+        if routed:
+            sys.stdout.set_buffer(buf)
+        t()
+    except Exception as exc:
+        # Exception, not AssertionError: a test that raises anything else (KeyError on
+        # a missing output field, say) used to escape this handler and abort the RUN,
+        # so every test sorted after it was silently never executed and the suite
+        # printed no summary at all. A crash is a failure, and the run must continue.
+        return t.__name__, False, buf.getvalue(), "%s: %s" % (type(exc).__name__, exc)
+    finally:
+        if routed:
+            sys.stdout.set_buffer(None)  # never leave a dead buffer installed
+    return t.__name__, True, buf.getvalue(), None
+
+
 if __name__ == "__main__":
+    # PARALLEL RUNNER (2026-08-12). This file is dominated by process-startup cost, not
+    # by its own logic: it makes ~194 run_hook/run_cli calls, each spawning a fresh
+    # interpreter, and measurement put the mean spawn at 0.726s of which 0.512s is BARE
+    # python startup -- i.e. ~70% of the suite's wall clock was interpreter bootstrap.
+    # Sequentially that is ~141s on a quiet machine and 300s+ under real multi-session
+    # load, against the pre-push gate's 180s budget. It had already been optimised once
+    # (OI-061, the shared git-fixture template: 559 spawns -> ~194, 141.7s -> 76.6s) and
+    # regressed anyway, because that fix removed spawns while this one removes the WAIT.
+    #
+    # Threads, not processes: every spawn is a subprocess.run() that releases the GIL, so
+    # the startups overlap. Fidelity is unchanged -- each test still executes the real
+    # hook through the real CLI boundary, same asserts, same subprocess semantics. Only
+    # the scheduling changed.
+    #
+    # Isolation holds by construction: each test builds its own repo (mkdtemp) and its
+    # own sessions dir, and passes env per-call rather than mutating os.environ.
+    # Set EOS_RG_TEST_WORKERS=1 to force the old serial order when debugging a failure
+    # (also the honest way to re-measure the serial baseline on this machine).
+    try:
+        _workers = int(os.environ.get("EOS_RG_TEST_WORKERS", "") or 0)
+    except ValueError:
+        _workers = 0
+    if _workers <= 0:
+        _workers = min(8, (os.cpu_count() or 4))
+
+    # Pre-warm the shared fixture template SERIALLY. gitfixture caches templates in a
+    # module-level dict with no lock; two workers racing to build the same key would
+    # both copytree into a half-built template. One serial call makes every later read
+    # a plain dict hit. Without this the parallelism itself would be the bug.
+    make_repo()
+
     failures = 0
-    for t in TESTS:
+    if _workers == 1:
+        results = [_run_one(t) for t in TESTS]
+    else:
+        _real_stdout = sys.stdout
+        sys.stdout = _ThreadRoutedStdout(_real_stdout)
         try:
-            t()
-        except Exception as exc:
-            # Exception, not AssertionError: a test that raises anything else
-            # (KeyError on a missing output field, say) used to escape this
-            # handler and abort the RUN, so every test sorted after it was
-            # silently never executed and the suite printed no summary at all.
-            # A crash is a failure, and the run must continue past it.
+            with concurrent.futures.ThreadPoolExecutor(max_workers=_workers) as pool:
+                # map preserves input order, so output stays deterministic and diffable
+                # regardless of completion order.
+                results = list(pool.map(_run_one, TESTS))
+        finally:
+            sys.stdout = _real_stdout
+
+    # RESULT-LOSS GUARD: the first cut of this runner silently dropped 54 of 55 results
+    # and still exited 0. Never trust the parallel path to have reported everything --
+    # assert the count before printing a pass summary.
+    assert len(results) == len(TESTS), (
+        "runner lost results: got %d of %d -- refusing to report a verdict"
+        % (len(results), len(TESTS)))
+
+    for name, ok, out, err in results:
+        if out:
+            sys.stdout.write(out)
+        if not ok:
             failures += 1
-            print("FAIL %s: %s: %s" % (t.__name__, type(exc).__name__, exc))
+            print("FAIL %s: %s" % (name, err))
     if failures:
         print("%d REVIEW-GATE TEST(S) FAILED" % failures)
         sys.exit(1)

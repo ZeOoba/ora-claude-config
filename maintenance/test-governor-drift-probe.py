@@ -1218,6 +1218,287 @@ def test_ledger_files_excluded_source_pin():
     print("  PASS test_ledger_files_excluded_source_pin")
 
 
+def test_intervening_qualifier_dscr_floor_flags_unit():
+    """GAP (2026-08-11): GOV_KEYWORDS held the CONTIGUOUS literal 'dscr floor', so any qualifier
+    between the metric and its floor-word defeated the is_gov gate and the whole equality branch
+    was skipped. 'DSCR hard floor 1.40x' is the exact phrasing the 2026-08-11 Notion defect used
+    ('hard floor 1.75'), so this false negative sat on the most likely real-world drift wording."""
+    m = _load_probe_module()
+    for line in ("DSCR hard floor 1.40x per property.",
+                 "DSCR absolute floor 1.40x per property.",
+                 "Per-property DSCR minimum floor 1.40x."):
+        out = m.scan_line(line)
+        assert any("DSCR" in o for o in out), (
+            "drifted DSCR floor with an intervening qualifier must flag: %r -> %r" % (line, out))
+    print("  PASS test_intervening_qualifier_dscr_floor_flags_unit")
+
+
+def test_ratified_perproperty_refi_ceiling_prose_stays_clean_unit():
+    """REGRESSION PIN for the reverted LTV half (2026-08-11). Extending the same intervening-
+    qualifier pairing to LTV armed prose describing the RATIFIED per-property 65% refi ceiling
+    (debt-maturity.DESIGN.md:18) and flagged 65 != 40 -- a false positive on a legitimate figure,
+    caught by the E2E test. The LTV half was reverted; this pins the line that exposed it so a
+    future LTV attempt fails HERE, at the unit layer, instead of surfacing as a whole-tree E2E
+    break. Closing the LTV gap requires widening LTV suppression first (see probe comment)."""
+    m = _load_probe_module()
+    line = "| Per-property LTV vs the **65% refi ceiling** | **No** (warehouse side) |"
+    assert m.scan_line(line) == [], (
+        "ratified 65%% per-property refi-ceiling prose must not flag: %r" % (m.scan_line(line),))
+    print("  PASS test_ratified_perproperty_refi_ceiling_prose_stays_clean_unit")
+
+
+def test_value_between_metric_and_boundword_flags_unit():
+    """GAP NOW CLOSED (2026-08-12). Was pinned as a known gap on 2026-08-11: the
+    metric-VALUE-boundword order did not arm, because the value's own decimal is a '.' and the
+    qualifier gap class excludes '.' to stop the gate crossing a sentence. "DSCR 1.40x minimum"
+    went undetected even though its extractor (RE_DSCR_DECL_REV) existed.
+
+    Closed with a SECOND, value-abutting arming pattern rather than by loosening the first: the
+    decimal now lives INSIDE the pattern, so it can never be confused with a sentence boundary.
+    The rejected alternative (allow a dot anywhere between digits in the gap) is still rejected --
+    it reports "DSCR of 1.42 with a 10 min cure period" as governor drift; see the FP guard test."""
+    m = _load_probe_module()
+    for line in ("DSCR 1.40x minimum per property.",
+                 "DSCR 1.40 floor per property.",
+                 "DSCR 1.40x min per property."):
+        out = m.scan_line(line)
+        assert any("DSCR" in o for o in out), (
+            "value-between-metric-and-boundword drift must flag: %r -> %r" % (line, out))
+    # Canonical in the same shape must stay clean -- arming is not a finding.
+    assert m.scan_line("DSCR 1.25x minimum per property.") == [], \
+        "canonical value in the value-first shape must not flag"
+    print("  PASS test_value_between_metric_and_boundword_flags_unit")
+
+
+def test_value_abutting_arming_does_not_flag_durations_unit():
+    """FP GUARD for the value-abutting pattern (2026-08-12). The whole reason the simpler
+    digit-dot fix was rejected: bare 'min' is a DURATION unit as often as it is 'minimum'. These
+    must never report a governor finding -- pinned so a future loosening of the value-abutting
+    pattern fails here rather than turning cure periods and uptime prose into Hard-Invariant-4
+    findings."""
+    m = _load_probe_module()
+    for line in ("DSCR of 1.42 with a 10 min cure period",
+                 "DSCR poller downtime 1.5 min today.",
+                 "Cure period is 30 min; DSCR of 1.42 reported.",
+                 "DSCR came in at 1.42; minimum lease term 3 yrs."):
+        assert m.scan_line(line) == [], (
+            "duration/unrelated prose must NOT flag: %r -> %r" % (line, m.scan_line(line)))
+    print("  PASS test_value_abutting_arming_does_not_flag_durations_unit")
+
+
+def test_ltv_reverse_ceiling_vetoes_non_ltv_subjects_unit():
+    """FP CLASS CLOSED (2026-08-12, MAJOR finding from independent review).
+
+    RE_LTV_CEIL_REV fires on any "N% ceiling|maximum" anywhere on an ARMED line and needs no 'ltv'
+    token -- that is deliberate, so "This 65% ceiling is the acquisition governor" is caught. But
+    once the DSCR side started arming the value-first shape, a line could be armed purely by a DSCR
+    statement and this pass would then read an unrelated capped percentage as an LTV ceiling. That
+    is realistic buy-box list prose, and one false positive flips the weekly gate red.
+
+    Closed by VETOING on the percentage's subject -- not by requiring positive LTV evidence. The
+    requirement form was implemented first and reverted: see
+    test_ltv_subject_veto_does_not_silence_real_declarations_unit for the five real declarations it
+    silenced and why the direction matters."""
+    m = _load_probe_module()
+    for line in ("DSCR 1.25x minimum; underwrite vacancy 10% maximum.",
+                 "DSCR 1.25 floor, TI cap 12% maximum of TDC.",
+                 "DSCR 1.25x minimum with parking ratio 2.0 and site coverage 45% maximum."):
+        assert m.scan_line(line) == [], (
+            "an unrelated capped percentage on a DSCR-armed line must NOT read as an LTV "
+            "ceiling: %r -> %r" % (line, m.scan_line(line)))
+    # The reverse-order pass must KEEP its reason for existing. Exact string, not a substring
+    # match: a weaker assertion passes even when the WRONG percentage is reported.
+    assert m.scan_line("This 65% ceiling is the acquisition governor.") == \
+        ["LTV ceiling 65% != canonical 40%"], \
+        "reverse-order LTV ceiling on a genuine governor declaration must still flag, and must "\
+        "report the ceiling's own value"
+    print("  PASS test_ltv_reverse_ceiling_vetoes_non_ltv_subjects_unit")
+
+
+def test_ltv_subject_veto_does_not_silence_real_declarations_unit():
+    """THE REGRESSION GUARD for how this false positive is fixed (2026-08-12).
+
+    The FIRST attempt at this fix REQUIRED a positive LTV-side governor marker near the value. It
+    closed the false positives and silently broke five realistic drift declarations that had
+    flagged since 2026-07-08 -- verified against baseline ba2b0a8 -- because it reused
+    _governor_declared_nearby, a helper whose short before-reach and plural/canonical-phrase
+    exemptions are tuned to err toward DETECTION when used to VETO, and therefore err toward
+    SILENCE when used as a REQUIREMENT. Independent review caught it.
+
+    These five are the exact lines that broke. They pin the DIRECTION of the fix: suppression must
+    stay subject-scoped. If someone reworks this into a positive-evidence gate again, this test
+    fails first."""
+    m = _load_probe_module()
+    for line in ("Under the 1.25x DSCR governor we now allow a 65% maximum.",
+                 "Governors: DSCR 1.25x floor and 65% maximum.",
+                 "DSCR floor 1.25x and 65% ceiling.",
+                 "minimum DSCR 1.25x, 65% maximum leverage.",
+                 "Governor note: raised the ceiling to 55% maximum effective today."):
+        assert any("LTV" in o for o in m.scan_line(line)), (
+            "a real governor declaration must NOT be silenced by the FP fix: %r -> %r"
+            % (line, m.scan_line(line)))
+    # A distant subject mention must not reach the ceiling's own value (veto is deliberately short).
+    assert m.scan_line("vacancy 5% assumed; LTV ceiling 65%.") == \
+        ["LTV ceiling 65% != canonical 40%"], \
+        "a subject elsewhere on the line must not suppress a genuine ceiling"
+
+    # THE VETO'S OWN REACH, pinned in both dimensions -- these were lost to the first cut of the
+    # veto itself and found only by comparing against the 5-week baseline, not against HEAD.
+    # (a) 'coverage' must NOT be a vetoing subject: DSCR is the debt-service-COVERAGE ratio, so it
+    #     appears in genuine governor prose exactly where a paired LTV ceiling is declared.
+    for line in ("Debt service coverage floor; 65% maximum governor.",
+                 "Governor: coverage 1.30x; 65% ceiling.",
+                 "Governor -- coverage-based sizing, 65% maximum.",
+                 "Governor: debt service coverage 1.25x floor and 65% ceiling."):
+        assert any("LTV" in o for o in m.scan_line(line)), (
+            "'coverage' must not veto -- it is the DSCR's own word: %r -> %r"
+            % (line, m.scan_line(line)))
+    # (b) the reach must not cross a clause ender into the previous clause's subject.
+    for line in ("Governor: assume 5% vacancy; leverage 55% maximum.",
+                 "Governor: vacancy 5%; 55% maximum."):
+        assert any("LTV" in o for o in m.scan_line(line)), (
+            "a previous clause's subject must not suppress this clause's ceiling: %r -> %r"
+            % (line, m.scan_line(line)))
+    print("  PASS test_ltv_subject_veto_does_not_silence_real_declarations_unit")
+
+
+def test_ltv_subject_veto_reach_semantics_unit():
+    """Pins the two defects the veto helper itself shipped with (2026-08-12, found in review).
+
+    (a) A DECIMAL POINT IS NOT A CLAUSE ENDER. The first cut computed the clause boundary with a
+        raw rfind('.'), so "2.5x" truncated the lookback window and cut the subject out of it --
+        reopening the exact false-positive class this veto exists to close, on prose that is dense
+        with decimal multiples precisely because it is DSCR-adjacent.
+
+    (b) THE SUBJECT MUST END INSIDE THE WINDOW, and must not be separated from the value by a bound
+        word. The first cut accepted any subject merely OVERLAPPING the window, which stretched
+        suppression past the helper's own stated theory ("the subject sits immediately before the
+        value") and silenced a line that flagged at baseline. An intervening ceiling word means the
+        value binds to the ceiling, not to the subject."""
+    m = _load_probe_module()
+    for line in ("DSCR 1.25x minimum, vacancy at 2.5x turnover 10% maximum.",
+                 "TI cap 1.5x factor, 12% maximum of TDC on a DSCR floor 1.25x basis."):
+        assert m.scan_line(line) == [], (
+            "a decimal must not be read as a clause ender: %r -> %r" % (line, m.scan_line(line)))
+    for line in ("Governor: at 95% occupancy the ceiling is 65% maximum.",):
+        assert any("LTV" in o for o in m.scan_line(line)), (
+            "a bound word between subject and value means the value is the ceiling: %r -> %r"
+            % (line, m.scan_line(line)))
+
+    # (c) AN INTERVENING PERCENT DISPROVES OWNERSHIP. The subject owns that earlier figure, so the
+    # later one is still a ceiling. Without this the veto leapfrogs a real figure -- the same
+    # failure the refi machinery's percent-free gaps exist to prevent. These are the "and" form of
+    # the clause-crossing lines already pinned above: swap the semicolon for "and" and, before this
+    # guard, the line went dark.
+    for line in ("Governor: vacancy 5% assumed and 65% maximum.",
+                 "Governor: vacancy 8% and 65% maximum leverage.",
+                 "Governor: vacancy .5% assumed and 65% maximum."):
+        assert any("LTV" in o for o in m.scan_line(line)), (
+            "an intervening percent means the subject owns the EARLIER figure, so this one must "
+            "still flag: %r -> %r" % (line, m.scan_line(line)))
+    print("  PASS test_ltv_subject_veto_reach_semantics_unit")
+
+
+def test_ltv_house_separator_styles_still_flag_unit():
+    """The arming-gate doctrine comment explicitly blesses ',' ':' and the house '--' style as
+    plausible governor DECLARATIONS. An earlier cut of this fix tightened the anchor gap to
+    exclude them, which silenced exactly the phrasings that comment protects; that tightening was
+    reverted in favour of the subject veto. Pinned so it is not reintroduced."""
+    m = _load_probe_module()
+    for line in ("LTV -- hard ceiling 75%", "LTV: hard ceiling 55%.", "LTV, hard ceiling, 75%",
+                 "LTV ceiling, revised, 65%"):
+        assert any("LTV" in o for o in m.scan_line(line)), (
+            "house separator style must still flag: %r -> %r" % (line, m.scan_line(line)))
+    print("  PASS test_ltv_house_separator_styles_still_flag_unit")
+
+
+def test_ltv_anchor_window_respects_the_subject_veto_unit():
+    """FP CLASS CLOSED (2026-08-12, same review), second mechanism. RE_LTV_ANCHOR can bind a
+    ceiling word that belongs to a different noun ("LTV steady, maximum TI 12% of TDC"), and the
+    anchor's 40-char window then read that subject's percentage as the declared LTV ceiling.
+
+    Fixed with the same subject veto as the reverse pass, NOT by tightening the anchor gap: an
+    earlier cut did tighten it (two adjacent words, no comma, no 'governor' token) and thereby
+    silenced the ',' ':' and house '--' separator styles that the arming-gate doctrine comment
+    explicitly protects -- see test_ltv_house_separator_styles_still_flag_unit."""
+    m = _load_probe_module()
+    for line in ("Governor note: LTV steady, maximum TI 12% of TDC.",
+                 "LTV governor maximum vacancy 10% assumed."):
+        assert m.scan_line(line) == [], (
+            "a percentage owned by a non-LTV subject must not be read as the anchored LTV "
+            "ceiling: %r -> %r"
+            % (line, m.scan_line(line)))
+    # Genuine qualifier forms must survive -- this is the gap the 08-12 change existed to close.
+    for line in ("LTV hard ceiling 75% on an aggregate basis.",
+                 "LTV absolute maximum 75% is the acquisition governor.",
+                 "Acquisition governor: LTV ceiling 65%."):
+        assert any("LTV" in o for o in m.scan_line(line)), (
+            "adjectival-qualifier LTV ceiling must still flag: %r -> %r" % (line, m.scan_line(line)))
+    print("  PASS test_ltv_anchor_window_respects_the_subject_veto_unit")
+
+
+def test_ltv_extractor_spans_intervening_qualifier_unit():
+    """GAP 2 CLOSED (2026-08-12). "LTV hard ceiling 75%" was ARMED all along -- "hard ceiling" is a
+    GOV_KEYWORDS token (N6) -- but yielded nothing, because the EXTRACTOR RE_LTV_ANCHOR required
+    contiguous "ltv ceiling" (\\s* only), so the qualifier defeated it. The 2026-08-11 revision
+    blamed the arming gate; independent review corrected the attribution to the extractors, and
+    this closes it there.
+
+    Widening the extractor is safe with respect to the ratified 65% refi-ceiling false positive
+    that caused the earlier revert, because that line is gated out by ARMING, not by extraction --
+    pinned by test_ratified_perproperty_refi_ceiling_prose_stays_clean_unit, which must keep
+    passing alongside this."""
+    m = _load_probe_module()
+    out = m.scan_line("LTV hard ceiling 75% on an aggregate basis.")
+    assert any("LTV" in o for o in out), (
+        "drifted LTV ceiling with an intervening qualifier must flag: %r" % (out,))
+    assert m.scan_line("LTV hard ceiling 40% on an aggregate basis.") == [], \
+        "canonical LTV ceiling in the same shape must stay clean"
+
+    # BOUNDARY, asserted deliberately: extraction is only half the requirement -- the line must
+    # ALSO be armed. "LTV absolute maximum 75%" carries no GOV_KEYWORDS token (unlike "hard
+    # ceiling", N6), so it stays clean even though the widened extractor can now read it. This is
+    # the arming gate working as designed, NOT a residual extractor bug: closing it would require
+    # widening LTV ARMING, which is the change that false-positived on the ratified 65%
+    # per-property refi ceiling and was reverted. Documented so the next reader does not "fix"
+    # this by reopening that hole.
+    assert m.scan_line("LTV absolute maximum 75% on an aggregate basis.") == [], (
+        "unarmed LTV prose must stay clean -- widening LTV ARMING is the reverted change")
+    print("  PASS test_ltv_extractor_spans_intervening_qualifier_unit")
+
+
+def test_intervening_qualifier_canonical_stays_clean_unit():
+    """Arming the line must not by itself create a finding: canonical values stay clean."""
+    m = _load_probe_module()
+    assert m.scan_line("DSCR hard floor 1.25x per property.") == [], "canonical must stay clean"
+    print("  PASS test_intervening_qualifier_canonical_stays_clean_unit")
+
+
+def test_qualifier_gate_requires_the_metric_token_unit():
+    """PRECISION GUARDRAIL: the fix must pair the METRIC token with its floor/ceiling word, never
+    admit a bare 'hard floor' as a governor signal -- 'hard floor' is also a physical building
+    term, and a standalone keyword would arm unrelated property prose.
+
+    Also pins ALL FOUR clause enders. Excluding only '.' was not enough: ';' '!' and '?' each let
+    the gap cross into an unrelated rent/area figure that RE_DSCR_THRESH then captured as a DSCR
+    threshold -- a NEW false positive introduced by the first cut of this fix and caught in
+    independent review, not by the suite. One case per boundary character, so a future narrowing of
+    the gap class fails here rather than in a whole-tree scan."""
+    m = _load_probe_module()
+    for line in ("Suite B has a hard floor and a 32.0 ft clear-height ceiling.",
+                 "The tenant's hard floor covers 1.40 acres of the yard.",
+                 "The deal's actual DSCR came in at 1.42 last quarter.",
+                 "DSCR is disclosed quarterly. The rent floor is 1.40 psf.",
+                 "DSCR fine; rent floor is 1.40 psf.",
+                 "DSCR solid! The rent floor is 1.40 psf.",
+                 "DSCR ok? The rent floor is 1.40 psf.",
+                 "DSCR steady; unit floor area 1.40 acres."):
+        assert m.scan_line(line) == [], (
+            "non-governor prose must NOT be armed by the qualifier fix: %r -> %r"
+            % (line, m.scan_line(line)))
+    print("  PASS test_qualifier_gate_requires_the_metric_token_unit")
+
+
 def main():
     assert os.path.isfile(PROBE), "probe not found: %s" % PROBE
     test_fleet_roots_are_scanned_unit()
@@ -1284,6 +1565,18 @@ def main():
     test_acquisition_underwriting_skill_file_clean()
     test_test_files_excluded_from_scan_unit()
     test_event_log_excluded_e2e()
+    test_intervening_qualifier_dscr_floor_flags_unit()
+    test_ratified_perproperty_refi_ceiling_prose_stays_clean_unit()
+    test_ltv_reverse_ceiling_vetoes_non_ltv_subjects_unit()
+    test_ltv_subject_veto_does_not_silence_real_declarations_unit()
+    test_ltv_subject_veto_reach_semantics_unit()
+    test_ltv_house_separator_styles_still_flag_unit()
+    test_ltv_anchor_window_respects_the_subject_veto_unit()
+    test_ltv_extractor_spans_intervening_qualifier_unit()
+    test_value_between_metric_and_boundword_flags_unit()
+    test_value_abutting_arming_does_not_flag_durations_unit()
+    test_intervening_qualifier_canonical_stays_clean_unit()
+    test_qualifier_gate_requires_the_metric_token_unit()
     print("ALL GOVERNOR-PROBE TESTS PASS")
 
 
