@@ -14,6 +14,9 @@ import sys
 import tempfile
 import uuid
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+import gitfixture  # noqa: E402  (shared repo fixture -- open-items-tracker.md#OI-061)
+
 # This test spins up its own throwaway git repos in temp dirs. When invoked as part of
 # the real pre-push hook chain, git sets GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE (etc.) in
 # this process's environment so IT can operate on the outer repo -- but those same vars
@@ -44,6 +47,60 @@ def _unique_branch_name(prefix="wt-branch"):
     ~/.claude's own .git for hours, colliding with later unrelated test runs. A unique
     suffix per call means even a leaked run can never collide with another."""
     return "%s-%s" % (prefix, uuid.uuid4().hex[:12])
+
+
+# --- Whole-directory-pair template cache (2026-08-12) ------------------------------
+# This file measured at 179 git spawns / 189 total (94% of wall time), the worst
+# offender not already covered by shared lib/gitfixture.py, because it hand-rolls
+# (bare-origin, local-clone) repo PAIRS and rebuilds each from scratch on every use.
+# Two of the three such shapes are genuinely REPEATED with the same content -- the ones
+# templated here: _mk_bare_origin_with_seed's origin (x3 via _mk_repo) and
+# _mk_repo_with_history's pair (x5, the single biggest cost -- ~50 of the 179 spawns).
+# _mk_origin_and_clone_state's pair is called only twice, once per trunk_name ("main",
+# "master") -- two DIFFERENT cache keys, never a repeat -- so it is deliberately left
+# hand-rolled; caching it would add indirection for zero measured savings.
+#
+# gitfixture.py's public API (blank_repo/repo_with_commit) only templates a SINGLE
+# repo, not an origin+local PAIR with the local already fetched from the origin -- so
+# this is a locally-scoped extension of the same technique (build once, `shutil.
+# copytree` per call), not a change to the shared module. Kept local deliberately:
+# gitfixture is depended on by 13+ files, and this shape is specific to a scanner test
+# that needs a REACHABLE-history origin, not a general-purpose fixture.
+#
+# SAFETY ARGUMENT for why copying the pair together is correct despite `origin`'s
+# absolute path going stale after the copy (a fresh local repo's .git/config still
+# names the OLD origin.git location): every call site using this cache fetches from
+# origin during INITIAL SETUP ONLY, then works purely against already-fetched refs
+# (refs/remotes/origin/main, local objects) for the rest of that test case -- verified
+# by reading every call site AND git-prepush-confidential-scan.py's own baseline-
+# resolution code before writing this cache, not assumed. If a future test needs to
+# push/fetch AGAIN after setup, it must NOT use this cache; build fresh instead.
+_PAIR_TEMPLATES = {}
+
+
+def _build_pair_template(key, builder):
+    """Build directory-pair shape `key` once via `builder(root) -> None` (writes into
+    a fresh `root`), cache the resulting root, return it. `builder` does the real git
+    spawns; every LATER call for the same key costs zero spawns."""
+    root = _PAIR_TEMPLATES.get(key)
+    if root is not None:
+        return root
+    root = tempfile.mkdtemp(prefix="pps-tpl-")
+    builder(root)
+    _PAIR_TEMPLATES[key] = root
+    return root
+
+
+def _clone_pair(key, builder):
+    """Materialise a fresh, independent copy of directory-pair shape `key` (building
+    the template on first use) and return its root. Every file under the template is
+    duplicated -- the caller owns a real, mutable directory tree, indistinguishable
+    from one built fresh, at zero subprocess cost after the first call."""
+    template = _build_pair_template(key, builder)
+    dest = tempfile.mkdtemp(prefix="pps-repo-")
+    shutil.copytree(template, dest, dirs_exist_ok=True)  # matches gitfixture._clone_template
+    return dest
+
 
 HOOKS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 spec = importlib.util.spec_from_file_location(
@@ -91,7 +148,13 @@ def _git(*args, cwd, check=True):
 
 def _mk_origin_and_clone_state(trunk_name):
     """A local repo with an `origin` remote (a real bare repo) that has fetched a
-    `trunk_name` branch -- mirrors a real clone/fetch. Returns (local_dir, origin_dir)."""
+    `trunk_name` branch -- mirrors a real clone/fetch. Returns (local_dir, origin_dir).
+
+    DELIBERATELY NOT templated via _clone_pair, unlike the two shapes below: this is
+    called exactly twice, once each for "main" and "master" -- two DIFFERENT cache
+    keys, so a template cache would build fresh both times and save nothing while
+    adding indirection to a security-gate test file for no measured benefit. Left as
+    the plain hand-rolled form on purpose."""
     root = tempfile.mkdtemp()
     origin_dir = os.path.join(root, "origin.git")
     local_dir = os.path.join(root, "local")
@@ -261,38 +324,49 @@ def _run_gate_on(repo, stdin_text):
         input=stdin_text, capture_output=True, text=True, cwd=repo)
 
 
-def _mk_bare_origin_with_seed(root):
+def _mk_bare_origin_with_seed():
     """A bare repo with one commit on `main`, unrelated to anything a caller later
     commits -- used as an `origin` remote so the fixed gate's default-branch baseline
     resolves (mirrors a real clone having fetched), the same way it always must for a
     genuine push. Callers built on top of this share no history with it, so their
     own commits have no merge-base with origin/main -- the orphan-branch case -- and
     are scanned in FULL, preserving this file's original "one commit, fully scanned"
-    fixture semantics under the new bounded-range logic."""
-    origin_dir = os.path.join(root, "origin.git")
-    seed = os.path.join(root, "seed")
-    subprocess.run(["git", "init", "-q", "--bare", origin_dir], check=True)
-    subprocess.run(["git", "init", "-q", seed], check=True)
-    _git("config", "user.email", "t@example.invalid", cwd=seed)
-    _git("config", "user.name", "t", cwd=seed)
-    with open(os.path.join(seed, "SEED.md"), "w", encoding="utf-8") as f:
-        f.write("unrelated origin seed\n")
-    _git("add", "-A", cwd=seed)
-    _git("commit", "-q", "-m", "seed", cwd=seed)
-    _git("branch", "-M", "main", cwd=seed)
-    _git("remote", "add", "origin", origin_dir, cwd=seed)
-    _git("push", "-q", "origin", "main", cwd=seed)
-    return origin_dir
+    fixture semantics under the new bounded-range logic.
+
+    TEMPLATED (2026-08-12): the seed content is fixed, so origin.git is byte-identical
+    on every call -- 3 callers via _mk_repo. The scratch "seed" working tree that
+    builds it is discarded immediately after the push (never returned, never reused),
+    so it lives OUTSIDE the cached template and is not copied on later calls."""
+    def _build(root):
+        origin_dir = os.path.join(root, "origin.git")
+        seed = tempfile.mkdtemp(prefix="pps-seed-scratch-")
+        try:
+            subprocess.run(["git", "init", "-q", "--bare", origin_dir], check=True)
+            subprocess.run(["git", "init", "-q", seed], check=True)
+            _git("config", "user.email", "t@example.invalid", cwd=seed)
+            _git("config", "user.name", "t", cwd=seed)
+            with open(os.path.join(seed, "SEED.md"), "w", encoding="utf-8") as f:
+                f.write("unrelated origin seed\n")
+            _git("add", "-A", cwd=seed)
+            _git("commit", "-q", "-m", "seed", cwd=seed)
+            _git("branch", "-M", "main", cwd=seed)
+            _git("remote", "add", "origin", origin_dir, cwd=seed)
+            _git("push", "-q", "origin", "main", cwd=seed)
+        finally:
+            shutil.rmtree(seed, ignore_errors=True)
+
+    root = _clone_pair(("bare_origin_with_seed",), _build)
+    return os.path.join(root, "origin.git")
 
 
 def _mk_repo(filename, content):
-    root = tempfile.mkdtemp()
-    origin_dir = _mk_bare_origin_with_seed(root)
-    repo = os.path.join(root, "repo")
-    for cmd in (["git", "init", "-q", repo],
-                ["git", "-C", repo, "config", "user.email", "t@example.invalid"],
-                ["git", "-C", repo, "config", "user.name", "t"],
-                ["git", "-C", repo, "remote", "add", "origin", origin_dir],
+    origin_dir = _mk_bare_origin_with_seed()
+    # The local half's init+config is a fixed shape (same identity every call) --
+    # gitfixture already templates exactly this, so use it directly rather than
+    # duplicating the technique. remote add + fetch stay live: they need this call's
+    # actual origin_dir path and genuinely talk to it, so they cannot be cached.
+    repo = gitfixture.blank_repo(prefix="pps-repo-", identity=("t@example.invalid", "t"))
+    for cmd in (["git", "-C", repo, "remote", "add", "origin", origin_dir],
                 ["git", "-C", repo, "fetch", "-q", "origin"]):
         subprocess.run(cmd, capture_output=True)
     with open(os.path.join(repo, filename), "w", encoding="utf-8") as fh:
@@ -339,22 +413,44 @@ expect("scan_diff returns labels, never the matched value",
 def _mk_repo_with_history():
     """(local_dir, origin_dir) -- origin/main has one commit with a placeholder-shaped
     credential string (mirrors the real a6f0689/secrets.env.example repro), already
-    fetched into the local clone."""
-    root = tempfile.mkdtemp()
-    origin_dir = os.path.join(root, "origin.git")
+    fetched into the local clone.
+
+    TEMPLATED (2026-08-12): this is the file's single biggest spawn cost -- 5 call
+    sites (cases 1/2/3/5/6 below), each rebuilding a byte-identical origin+local pair
+    from scratch before adding its OWN further commits on top. Verified every caller
+    before converting this: none re-fetches or re-pushes against origin_dir after this
+    function returns (see the safety-argument comment above _PAIR_TEMPLATES), and
+    _resolve_default_baseline / the scan itself both operate on local refs and objects
+    only -- confirmed by reading git-prepush-confidential-scan.py directly, not
+    assumed.
+
+    After copying, this repoints `local`'s origin remote at its OWN copy's origin.git,
+    not the shared template's (caught in independent review). Without this the copied
+    local repo's config still names the template's path -- harmless for every current
+    caller since none touches origin again, but only by convention, and a future test
+    that DID push/fetch post-setup would silently mutate the shared template and poison
+    every later copy in the same run, with no error to signal it. One extra spawn per
+    call turns that from a documentation-enforced invariant into a structural one."""
+    def _build(root):
+        origin_dir = os.path.join(root, "origin.git")
+        local_dir = os.path.join(root, "local")
+        subprocess.run(["git", "init", "-q", "--bare", origin_dir], check=True)
+        subprocess.run(["git", "init", "-q", local_dir], check=True)
+        _git("config", "user.email", "t@example.invalid", cwd=local_dir)
+        _git("config", "user.name", "t", cwd=local_dir)
+        with open(os.path.join(local_dir, "secrets.env.example"), "w", encoding="utf-8") as f:
+            f.write('# ANTHROPIC_API_KEY="sk-ant-REPLACE_ME"\n')
+        _git("add", "-A", cwd=local_dir)
+        _git("commit", "-q", "-m", "old placeholder commit (already public)", cwd=local_dir)
+        _git("branch", "-M", "main", cwd=local_dir)
+        _git("remote", "add", "origin", origin_dir, cwd=local_dir)
+        _git("push", "-q", "origin", "main", cwd=local_dir)
+        _git("fetch", "-q", "origin", cwd=local_dir)
+
+    root = _clone_pair(("repo_with_history",), _build)
     local_dir = os.path.join(root, "local")
-    subprocess.run(["git", "init", "-q", "--bare", origin_dir], check=True)
-    subprocess.run(["git", "init", "-q", local_dir], check=True)
-    _git("config", "user.email", "t@example.invalid", cwd=local_dir)
-    _git("config", "user.name", "t", cwd=local_dir)
-    with open(os.path.join(local_dir, "secrets.env.example"), "w", encoding="utf-8") as f:
-        f.write('# ANTHROPIC_API_KEY="sk-ant-REPLACE_ME"\n')
-    _git("add", "-A", cwd=local_dir)
-    _git("commit", "-q", "-m", "old placeholder commit (already public)", cwd=local_dir)
-    _git("branch", "-M", "main", cwd=local_dir)
-    _git("remote", "add", "origin", origin_dir, cwd=local_dir)
-    _git("push", "-q", "origin", "main", cwd=local_dir)
-    _git("fetch", "-q", "origin", cwd=local_dir)
+    origin_dir = os.path.join(root, "origin.git")
+    _git("remote", "set-url", "origin", origin_dir, cwd=local_dir)
     return local_dir, origin_dir
 
 
