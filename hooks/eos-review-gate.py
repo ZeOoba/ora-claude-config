@@ -130,6 +130,7 @@ try:
     from git_commit_parse import (
         candidate_paths, find_commit_segment, git_lines, has_all_flag,
         is_git_commit, pathspec_arg_paths, pending_add_paths, repo_root,
+        tokenize_cmd_segments, _segment_git_subcommand_and_args,
     )
     PARSE_CONTRACT_LOADED = True
 except Exception:
@@ -539,7 +540,89 @@ def valid_review(session_id, key):
 # messaging
 # ---------------------------------------------------------------------------
 
-def build_message(repo, rels, session_id, key, artifact_state):
+def message_shape_hint(cmd):
+    """OI-122. PURE DIAGNOSTIC: reads already-computed parse state and returns
+    advisory TEXT ONLY. It can never change which paths this gate blocks on --
+    callers append it to the message and nothing else.
+
+    tokenize_cmd_segments() attaches a trailing `-- <pathspec>` correctly for a
+    single-line `-m` and for the fleet-sanctioned heredoc-fed multi-line form.
+    A DIRECTLY-QUOTED multi-line `-m "a<newline>b"` is not a recognized
+    construct, so per-line tokenization strands the pathspec in a disconnected
+    segment, find_commit_segment() never sees it, and scope falls back to the
+    no-pathspec set (staged + pending-add + `-a`-modified). In a busy shared
+    checkout that surfaces as a false BLOCK on ANOTHER session's staged files.
+
+    Why this is a message fix and not a tokenizer fix: rounds 2 and 3 of
+    tokenize_cmd_segments both tried to track quote state across arbitrary
+    content, and both shipped false ALLOWs -- a decoy `-- <path>` leaking as
+    the real pathspec, a real commit hidden behind a decoy `--dry-run`, plus
+    O(n^2) blowup (see git_commit_parse.py:327-376). Fail-CLOSED friction with
+    an accurate message beats fail-OPEN silence. Do not reopen that.
+
+    DETECTION (review finding F2): the signal is a bare `--` token STRANDED in
+    a tokenized segment that is not a command invocation of its own -- i.e. the
+    wreckage of a broken message -- NOT a regex over raw command text. Regexing
+    raw text also matched `--` used as ASCII punctuation inside a heredoc body,
+    and a legitimately chained `git log ... -- <path>`, firing confidently-wrong
+    advice on commits that parsed and scoped perfectly well.
+
+    Segments are classified with git_commit_parse's own
+    _segment_git_subcommand_and_args rather than a bare `s[0] != "git"` test,
+    so an env-assignment prefix (`GIT_PAGER=cat git log ... -- <path>`) is not
+    mistaken for wreckage (review finding N2).
+
+    ACCEPTED RESIDUALS, both minor and both self-correcting because the worst
+    case is one wasted read of an advisory paragraph:
+      - N1: a chained NON-git command carrying a legitimate bare `--`
+        (`npm test -- --grep auth`, `kubectl exec ... --`) alongside a
+        no-pathspec commit still trips this. Classifying arbitrary commands is
+        out of scope for a diagnostic.
+      - N3: if a stranded message line happens to BEGIN with the word "git",
+        that segment classifies as a git invocation and the hint stays silent
+        on a real case. Fails toward silence, matching this function's stance.
+
+    Recomputes find_commit_segment/tokenize_cmd_segments rather than reusing
+    earlier results; both are pure and deterministic over `cmd`. Returns ""
+    whenever it cannot be confident, so the default is silence, never a
+    misleading claim."""
+    if not isinstance(cmd, str) or "\n" not in cmd:
+        return ""  # single-line commands attach their pathspec fine
+    commit_args = find_commit_segment(cmd)
+    if commit_args is not None and "--" in commit_args:
+        return ""  # pathspec recovered -- nothing to explain
+    if not [s for s in tokenize_cmd_segments(cmd)
+            if s and "--" in s and _segment_git_subcommand_and_args(s) is None]:
+        return ""  # no stranded pathspec wreckage -- say nothing
+    return (
+        "\nIF THIS COMMIT WAS MEANT TO BE PATHSPEC-SCOPED, READ THIS FIRST -- "
+        "the paths above may not be yours. This command carries a `--` "
+        "pathspec separator, but its `-m` message is a directly-quoted "
+        "multi-line string, which this parser cannot attach a pathspec "
+        "through. The pathspec was stranded, so scope fell back to the "
+        "no-pathspec set (staged + pending-add + `-a`-modified) -- in a shared "
+        "checkout that can include another session's staged files, which your "
+        "commit would not actually land.\n"
+        "  Re-run with a SINGLE-LINE `-m`, or a heredoc-fed message -- both "
+        "attach the pathspec correctly. The heredoc terminator must sit at "
+        "column 0, so copy the following EXACTLY, without adding indentation:\n"
+        "\n"
+        "git commit -m \"$(cat <<'EOF'\n"
+        "<title>\n"
+        "\n"
+        "<body>\n"
+        "EOF\n"
+        ")\" -- <path>\n"
+        "\n"
+        "  Do NOT mint an override token for this. Do NOT record a review "
+        "verdict over the fallback set either: the artifact is keyed to those "
+        "paths and their digests, so a later plain `git commit` from THIS "
+        "session that sweeps the same files would validate against it and "
+        "land them unreviewed.\n"
+    )
+
+
+def build_message(repo, rels, session_id, key, artifact_state, shape_hint=""):
     listing = "\n".join(
         "  - %s   [%s]" % (r, risk_reason(r)) for r in rels[:8])
     more = "" if len(rels) <= 8 else "\n  ... and %d more" % (len(rels) - 8)
@@ -605,11 +688,11 @@ def build_message(repo, rels, session_id, key, artifact_state):
         "files afterward and it stops matching -- re-review, do not re-record.\n\n"
         "If Gabriel has approved landing this UNREVIEWED, write a single-use "
         "override token:\n%s\n"
-        "Current review state: %s\n"
+        "Current review state: %s\n%s"
         % (len(rels), "no matching review artifact", listing, more,
            ", ".join(accepted_models()), invocation,
            override_tokens.describe_token(session_id, tier),
-           artifact_state)
+           artifact_state, shape_hint)
     )
 
 
@@ -824,7 +907,8 @@ def main():
             return
 
     message = build_message(repo, rels, session_id, key,
-                            artifact_state_note(session_id, key))
+                            artifact_state_note(session_id, key),
+                            message_shape_hint(cmd))
     if mode == "warn":
         sys.stderr.write("WARNING (eos-review-gate, warn mode -- not blocking): "
                          + message + "\n")
