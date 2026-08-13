@@ -32,8 +32,11 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
+| [OI-146](#OI-146) | 2026-08-13 | session `1de11c79`, 3 spurious `exit 124` push timeouts while landing PR [#67](https://github.com/ZeOoba/ora-claude-config/pull/67) and [#83](https://github.com/ZeOoba/ora-claude-config/pull/83) | **An in-flight worktree/branch enforces its OWN BASE's pre-push gates — not the live checkout's — invisible until it rebases.** `hooks/git-prepush-hook-tests-gate.py` runs from the pushing branch's copy; a branch cut before a gate fix lands keeps failing under the OLD rules even after `main` is fixed. Concretely: `bcbca32` raised `PER_TEST_TIMEOUT_SECONDS` 90→240s on `main`, but a branch cut from before that commit still had `90`, so its 180s doubled-budget retry (2×90) kept timing out on a test that ran clean in 122s — well inside 240s, hopeless against 180s. Three consecutive pushes were misread as load contention; rebasing onto current `origin/main` cleared it with 0 failures. Given this repo's worktree+PR convention and a dozen-plus concurrent sessions, every gate improvement (budget, retry policy, a new check) is invisible to already-open branches until they rebase — a fixed problem looks unfixed, and the honest diagnosis ("stale base") gets misread as "gate flaky under load" (see [OI-119](#OI-119), and OI-135/OI-127 — same budget defect, PR [#67](https://github.com/ZeOoba/ora-claude-config/pull/67)/[#85](https://github.com/ZeOoba/ora-claude-config/pull/85) — not linked as `#`-anchors here since neither section has landed on `main` yet). Fix direction: `git-prepush-hook-tests-gate.py` (or a wrapping pre-push hook) could diff its own file's blob hash against `origin/main`'s and print a loud one-line note — "gate is N commits behind origin/main; rebase before diagnosing a failure as load" — before running the suite. Advisory only; must not block, since a deliberately-pinned base is sometimes correct |
 | [OI-130](#OI-130) | 2026-08-12 | session 08df9f95 (path A, 6 PRs) + session 663673c8 (path B, PR #70), both in `ora-claude-config` | **CodeRabbit's PR check reports `pass` on PRs it never reviewed — via TWO distinct routes.** **(A) Rate-limited:** 5 of 6 PRs merged 2026-08-12 (#45, #49, #51, #55, #65) showed `check=pass`, `detail=Review rate limited`, plus a "Review limit reached — we couldn't start this review" comment; only #47 was genuinely reviewed. **(B) Non-default base:** CodeRabbit declines every PR whose base is not the repo default branch and still reports `check=pass`, `detail=Review skipped: reviews are disabled for this base branch` — **deterministic, every time**, not sporadic. Verified on PR #70 (base `feat/model-canary-probe-step25`): 0 reviews, 0 review comments, empty `reviewDecision`, one bot comment that IS the skip notice — and it **merged in that state** at 2026-08-12T22:23:07Z. A green check meaning "nobody looked" is indistinguishable from one meaning "looked and found nothing"; both routes fail OPEN. Path B is structurally induced by ORA practice — any change depending on unmerged work must target a feature branch, which is what OI-131's branch divergence keeps producing. Fix: advisory-only + documented, or gate on a real review body existing (must cover BOTH notices, not just the rate-limit string), or raise the plan limit; path B additionally has a direct config fix |
+| [OI-141](#OI-141) | 2026-08-12 | `ora-appsec-sweep` 2026-08-12 fire (session `f74b697f`), re-observed at Gabriel's request | **MEDIUM** A scheduled run is **not single-model**: this one ran `claude-fable-5` for ~28 min then switched to `claude-opus-4-8` mid-run, main chain, no human turn. Its `model: fable` frontmatter pin **is** honoured at start — reversing its own tag's "not honored" claim — but does not hold. Probe now reports `MIXED_RUN` (`f852a45`) instead of plurality-voting; the retag itself is **deferred** because no single id describes the run. |
 | [OI-126](#OI-126) | 2026-08-12 | session 08df9f95 (scheduled `ora-doctrine-integrity-guard` run), investigating why merged `hooks/**` fixes were not live | **TRANSIENT — may self-close.** The primary `~/.claude` checkout cannot move onto `main` because `worktrees/_push-main-tmp` holds that branch (git allows a branch in one worktree only), so PR #51 and #55 are merged but INERT in the live pre-push chain: the confidentiality suite's 131 assertions ENV-SKIP on every worktree push, and a load-induced failure still hard-blocks with no retry. `_push-main-tmp` is NOT stale — actively used, clean, and its owning session is idle awaiting input. Local `main` (`9e6c00a`) already carries #47/#49/#51/#55 and is 4 ahead / 0 behind `origin/main`. Resolution is for that session to release the worktree; the ~117 uncommitted files in the primary checkout are unverified against the 48 incoming commits, so nobody should force the switch |
+| [OI-127](#OI-127) | 2026-08-12 | session `e0f8485e`, hitting pre-push failures under concurrent load | **DUPLICATE — superseded by OI-135; no separate investigation needed.** Same defect, same file, same number: `hooks/git-prepush-hook-tests-gate.py`'s 180s per-test timeout budget is too low under concurrent load, so healthy tests exit-124 and hard-block a push. OI-127 (20:52Z) is the EARLIER reservation; OI-135 (22:00Z, Gabriel-directed, filed by session `2fb76021`) covers the same finding with fuller evidence — 5 sessions hit exit-124 on `test-eos-review-gate.py` and siblings on 2026-08-12, 180s budget vs ~150–300s actual under 12–16+ concurrent sessions, all clearing on rerun. Filed only to close the orphan reservation and stop a third session re-deriving it. **Track the fix under OI-135.** Closely related to [OI-119](#OI-119) (same gate, flakiness rather than timeout) |
 | [OI-119](#OI-119) | 2026-08-11 | `pre-push` hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) | Pre-push gate is **flaky under its own load and hard-blocks any session's push**: across 3 consecutive pushes of one branch, **two different** tests failed (`test_allocate_oi_id.py`, `test-claim-file-collision.py`) with two clean runs of the same suite between them. The gate retries tests that *time out* but not those that error, so each flake looks like a real regression and the tempting escape is a 60-min multi-use override token |
 | [OI-118](#OI-118) | 2026-08-11 | `.gitignore:61`, found wiring ora-health-guard to the double-fire guard | `.gitignore`'s `/scheduled-tasks/*/*` makes every `_shared/` helper edit **invisible to `git status`** on any branch predating that file's force-add — and git then **silently overwrites** the file on `checkout`/`merge`/`rebase` to main (verified by reproduction; the same file without the ignore rule aborts with exit 1). Standing trap for the whole guard toolkit |
 | [OI-009](#OI-009) | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Verify the 93 Notion Tenant DB rows with no workbook counterpart against primary leases (low priority) |
@@ -4886,6 +4889,71 @@ Gabriel's call.
 
 **Auto-check:** none yet. A cheap one: fail if any path matched by `.gitignore` is also tracked on `origin/main`.
 
+### OI-141
+**Status:** OPEN — probe fix landed (`f852a45`, hardened after independent code review found the
+fix's first cut silently downgraded `OBSERVATION_STALE` on any mixed+stale run); the retag and the
+doctrine question below remain open
+**Opened:** 2026-08-12
+**Source:** `ora-appsec-sweep` 2026-08-12 fire, session `f74b697f-cc6f-48f6-818b-8de7d95b393e`,
+re-observed at Gabriel's in-turn request after `model-canary-probe` flagged it `CONTRADICTED`
+**Severity:** MEDIUM — no data at risk, but it invalidates an assumption the whole model-tag
+standard rests on, and it silently produced contradictory observations of the same fire.
+
+**Description.** The model-tag doctrine assumes a scheduled run has *a* model — one id per fire,
+per-session and non-deterministic ([[reference_scheduled_task_model_standard]]). That is wrong.
+This fire ran **two** models on the **main chain**:
+
+| Rows | Model | From |
+|---|---|---|
+| 12–103 | `claude-fable-5` (32 msgs) | 19:26:51Z |
+| 109–236 | `claude-opus-4-8` (45 msgs) | 19:54:29Z |
+
+Zero sidechain rows, so this is **not** subagent contamination — the obvious first hypothesis,
+and it was checked and disproved (`isSidechain` is `false` on every row; the fable and opus rows
+are byte-identical in shape, differing only in timestamp). The scheduled portion cuts at row 244,
+so the switch at row 109 has **no human turn anywhere near it** — nobody ran `/model`.
+
+**Two consequences, both material:**
+
+1. **`model: fable` IS honoured, and that reverses a recorded finding.** This task's own tag says
+   `frontmatter model: fable still NOT honored on CC/MCP (server-pin)` (checked 2026-08-03). The
+   pin *was* honoured for the first ~28 minutes and then fell back. This is the
+   [[feedback_agent_model_pin_not_held_end_to_end]] class — previously seen on Agent dispatches,
+   now confirmed for a **task's own frontmatter pin**.
+2. **Plurality voting manufactured a contradiction.** `observe_models()` collapsed the counts with
+   `max()`, so the same task read `claude-fable-5` when sampled mid-run and `claude-opus-4-8` once
+   complete — two contradictory "observations" of one fire within one day, with the 45/32 margin
+   never surfaced. Fixed in `f852a45`: a run spanning >1 model now reports `MIXED_RUN` (info) when
+   the tag matches any model present, and `CONTRADICTED` naming *every* model when it matches none.
+
+**Retag deliberately DEFERRED.** No single id describes this run, and the tag parser takes the
+first token of the value, so any compound tag still resolves to one id. **Post-fix update
+(2026-08-12 review): `claude-fable-5` no longer "keeps tripping CONTRADICTED whenever opus wins the
+plurality"** — that was only true of the pre-fix probe, which collapsed a mixed run to its
+plurality winner and compared against that single value. With the fix, `claude-fable-5` (a model
+genuinely present in the run) now produces a *stable* `info MIXED_RUN` every time, regardless of
+which model wins the plurality on a given sample. It remains the least-bad single-value option, not
+because it dodges an alarm, but because it is the one id in the run actually backed by a durable
+signal (the task's own `model: fable` frontmatter pin) rather than a coin-flip server assignment —
+though picking it would still assert a false fact (that the run is purely fable) and is still not
+done here. `claude-opus-4-8` erases finding (1) above and flips as soon as the fallback timing
+shifts; `UNVERIFIABLE` reads as "never looked" when we looked and found two. **The open question is what a
+MODEL tag should mean for a task whose model changes mid-run** — that is Gabriel's call, and it
+likely wants a doctrine amendment in [[reference_scheduled_task_model_standard]] rather than a
+tag edit.
+
+**Not affected:** the 17-task retag merged earlier the same day ([PR #68](https://github.com/ZeOoba/ora-claude-config/pull/68))
+was audited against this — all 17 were **100% pure single-model** observations, zero mixtures. Those
+tags stand. See also OI-128 (the `--apply` mode, which must grow a MIXED guard before it writes) —
+**flagged in review as unresolvable (2026-08-12): `[[OI-128]]` matches no section in this tracker,
+and no `--apply` flag exists under `maintenance/`.** Root cause found the same day: OI-128's filing
+commit (`e6c532a`) is real but stranded on `feat/model-canary-probe-step25`, which never merged to
+`main` — the same divergence class OI-131 already tracks. Not re-filed here; once that branch (or
+just this commit) lands, the `[[OI-128]]` link will resolve on its own.
+
+**Auto-check:** `model-canary-probe.py` reports `MIXED_RUN` every run; `maintenance/test-model-canary-probe.py`
+carries 7 assertions built from this exact session's shape.
+
 ### OI-126
 **Status:** OPEN — **TRANSIENT.** Expected to self-close once `_push-main-tmp` is released. If it is gone and the
 primary checkout is on `main`, close this without further work.
@@ -4923,6 +4991,101 @@ is itself a scheduled-task session that cannot receive. A copy-paste handoff was
 `_push-main-tmp` returned NOTHING while a plain `grep -r` found the one reference — in
 `obsidian-fleet-mirror/session-state.d/`, which is gitignored. That reference is what identified the owning
 session. **Any search for runtime/session state must not rely on ripgrep's defaults.**
+
+---
+
+### OI-146
+**Status:** OPEN — diagnosed and reproduced 3 times; not yet fixed
+**Opened:** 2026-08-13 (id allocated same day by session `1de11c79`)
+**Source:** hit directly while landing [PR #67](https://github.com/ZeOoba/ora-claude-config/pull/67) and
+[PR #83](https://github.com/ZeOoba/ora-claude-config/pull/83) — three consecutive pushes of independently
+committed, verified-locally branches timed out at push, each initially misdiagnosed as concurrent-load
+contention before the real cause was found.
+**Severity:** MEDIUM — pure friction (wasted retries, misdirected diagnosis), never a false ALLOW. A stale gate
+can only be MORE conservative than the live one (older/tighter budgets, missing new checks), never less.
+
+**Symptom.** A branch/worktree that was current when created starts failing its own pre-push hook-tests gate
+after a fix to that gate lands on `main` — specifically, the same commit that timed out at 180s pushed clean
+with 0 failures immediately after a `git rebase origin/main`, no code change involved.
+
+**Root cause.** `hooks/git-prepush-hook-tests-gate.py` is not a fixed piece of infrastructure the whole fleet
+shares live — it is **committed content**, and `git push` runs whichever copy the *pushing* branch's working tree
+currently has. A worktree created via `git worktree add ... <old-base>` (this repo's standard pattern for
+isolated landing) freezes that copy at creation time. Any subsequent improvement to the gate itself —
+`PER_TEST_TIMEOUT_SECONDS`, retry policy, a new check — is real on `main` and invisible to every already-open
+branch until each one individually rebases.
+
+**Concrete reproduction, 2026-08-13.** `bcbca32` raised `PER_TEST_TIMEOUT_SECONDS` from 90 to 240 on `main`
+(landing the OI-135 fix). Branch `fix/model-floor-test-live-session-assertion` was cut from `99c462f`, before
+that commit, so its working copy still read 90. The gate's own doubled-budget retry rule (2× the per-test
+timeout) meant it retried failing tests at 180s — comfortably short of the 240s the *live* checkout already
+enforced. `hooks/tests/test-memory-orphan-link-guard.py`, timed in isolation on this exact branch: **122.1s,
+exit 0, 79/79 passed** — well inside 240s, essentially guaranteed to lose to a 180s ceiling under any concurrent
+load at all. Three pushes of the identical commit timed out this way; `git rebase origin/main` (picking up
+`bcbca32`) made the fourth push clean.
+
+**Why this reads as something else.** The gate's own retry messaging (`timeout-retry (timed out under load,
+passed on the doubled-budget rerun; not blocking)`) is written from the live-checkout's perspective and gives no
+signal that the *budget itself*, not the load, might be the variable. Combined with genuinely high concurrent
+session counts most evenings, a stale-base timeout and a real load-induced timeout produce byte-identical
+symptoms. The session that hit this initially attributed it to load contention (a reasonable read given the
+evening's session count) before checking the base and finding the real cause.
+
+**Not a new defect class — a compounding one.** [OI-119](#OI-119) documents the gate's baseline flakiness under
+its own load. OI-135/[OI-127](#OI-127) (budget too low for concurrent load, fixed by `bcbca32`) is the
+specific defect whose fix this item's reproduction happened to straddle. OI-146 is the meta-finding sitting on
+top of both: **any** gate fix, not just that one budget number, has this same rollout lag across open branches,
+for as long as the fleet keeps worktree-per-task as its landing pattern.
+
+**Fix direction.** Advisory, not blocking — a deliberately pinned/frozen base is sometimes intentional, so this
+must never itself become a false block. Have `git-prepush-hook-tests-gate.py` (or a thin wrapper hook run before
+it) diff its own file's current git blob hash against `origin/main`'s copy of the same path before running the
+suite; if they differ, print one loud line — e.g. `NOTE: this branch's pre-push gate is N commits behind
+origin/main (last synced <sha>) — a failure here may be a stale gate, not your change; rebase before spending
+time on retries.` Cheap (one `git rev-parse`/`git cat-file` pair, no new process), and it converts a
+misdiagnosis into a one-line hint the first time it would otherwise cost three retries.
+
+**Do not treat this as owned by, or blocking, whatever gate defect prompted the next reproduction of it.** This
+item exists to be the standing pointer for *that* class of confusion generally.
+
+**Related:** [OI-119](#OI-119) (baseline gate flakiness under load — the confound this item's timeouts were
+initially mistaken for) · OI-135/[OI-127](#OI-127) (the specific budget fix this item's reproduction
+rode along with, `bcbca32`) · [PR #67](https://github.com/ZeOoba/ora-claude-config/pull/67),
+[PR #83](https://github.com/ZeOoba/ora-claude-config/pull/83), [PR #85](https://github.com/ZeOoba/ora-claude-config/pull/85)
+(all merged) — the three branches whose push histories produced this diagnosis.
+
+---
+
+### OI-127
+**Status:** DUPLICATE — superseded by OI-135. Filed only to close an orphan reservation; do not investigate separately.
+**Opened:** 2026-08-12 (id reserved 2026-08-12T20:52:45Z by session `e0f8485e`; row written 2026-08-12 by session
+`1de11c79` during an orphan-reservation sweep, with the reserving session inactive on it and holding no claim)
+**Severity:** see OI-135 — this row carries no independent severity assessment.
+
+**Why this row exists.** The id was reserved and the row never written, so `allocate-oi-id.py --report` listed it
+as an orphan. Sixty-eight minutes later a different session (`2fb76021`) reserved **OI-135** for the same defect
+and filed it with fuller evidence. Leaving OI-127 as a bare reservation invites a third session to re-derive the
+same finding a third time; writing it as a full standalone row would put two live items in the tracker for one
+defect. Hence a pointer.
+
+**The defect (tracked under OI-135, not here).** `hooks/git-prepush-hook-tests-gate.py` applies a 180s per-test
+timeout budget. Under concurrent load that budget is below the real runtime of several suites, so healthy tests
+exit-124 and the gate hard-blocks the push. Measured on 2026-08-12: 5 sessions hit exit-124 on
+`test-eos-review-gate.py` and siblings, ~150–300s actual against the 180s budget under 12–16+ concurrent
+sessions, **all clearing on rerun**.
+
+Independently corroborated the same day: the push of `oi122-gate-msg` (PR #67) emitted
+`timeout-retry (timed out under load, passed on the doubled-budget rerun; not blocking)` naming
+`test-commit-hygiene-guard.py`, `test-eos-review-gate.py`, and `test-memory-orphan-link-guard.py` — i.e. the
+doubled-budget rerun path already exists and works; the first-pass budget is what is mis-set.
+
+**Do not fix from this row.** Track the fix, evidence, and any REFUTE pass under **OI-135**. Note that OI-135's
+own row/section may still be in flight on branch `docs/oi-135-prepush-timeout-budget` and is deliberately NOT
+linked here as `#OI-135`: the anchor does not resolve until that lands, and `memory-integrity-probe.py`
+hard-fails on dead pointers into the tracker. Convert to a real link once the section exists.
+
+**Related:** [OI-119](#OI-119) — same gate, the *flakiness* failure mode (errored tests are not retried) rather
+than the timeout budget. A fix for one should be checked against the other.
 
 ---
 
