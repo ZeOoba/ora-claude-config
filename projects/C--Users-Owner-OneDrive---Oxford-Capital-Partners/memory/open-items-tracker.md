@@ -33,7 +33,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
 | [OI-130](#OI-130) | 2026-08-12 | session 08df9f95 (path A, 6 PRs) + session 663673c8 (path B, PR #70), both in `ora-claude-config` | **CodeRabbit's PR check reports `pass` on PRs it never reviewed — via TWO distinct routes.** **(A) Rate-limited:** 5 of 6 PRs merged 2026-08-12 (#45, #49, #51, #55, #65) showed `check=pass`, `detail=Review rate limited`, plus a "Review limit reached — we couldn't start this review" comment; only #47 was genuinely reviewed. **(B) Non-default base:** CodeRabbit declines every PR whose base is not the repo default branch and still reports `check=pass`, `detail=Review skipped: reviews are disabled for this base branch` — **deterministic, every time**, not sporadic. Verified on PR #70 (base `feat/model-canary-probe-step25`): 0 reviews, 0 review comments, empty `reviewDecision`, one bot comment that IS the skip notice — and it **merged in that state** at 2026-08-12T22:23:07Z. A green check meaning "nobody looked" is indistinguishable from one meaning "looked and found nothing"; both routes fail OPEN. Path B is structurally induced by ORA practice — any change depending on unmerged work must target a feature branch, which is what OI-131's branch divergence keeps producing. Fix: advisory-only + documented, or gate on a real review body existing (must cover BOTH notices, not just the rate-limit string), or raise the plan limit; path B additionally has a direct config fix |
-| [OI-141](#OI-141) | 2026-08-12 | `ora-appsec-sweep` 2026-08-12 fire (session `f74b697f`), re-observed at Gabriel's request | **MEDIUM** A scheduled run is **not single-model**: this one ran `claude-fable-5` for ~28 min then switched to `claude-opus-4-8` mid-run, main chain, no human turn. Its `model: fable` frontmatter pin **is** honoured at start — reversing its own tag's "not honored" claim — but does not hold. Probe now reports `MIXED_RUN` (`9ae5d43`) instead of plurality-voting; the retag itself is **deferred** because no single id describes the run. |
+| [OI-141](#OI-141) | 2026-08-12 | `ora-appsec-sweep` 2026-08-12 fire (session `f74b697f`), re-observed at Gabriel's request | **MEDIUM** A scheduled run is **not single-model**: this one ran `claude-fable-5` for ~28 min then switched to `claude-opus-4-8` mid-run, main chain, no human turn. Its `model: fable` frontmatter pin **is** honoured at start — reversing its own tag's "not honored" claim — but does not hold. Probe now reports `MIXED_RUN` (`f852a45`) instead of plurality-voting; the retag itself is **deferred** because no single id describes the run. |
 | [OI-126](#OI-126) | 2026-08-12 | session 08df9f95 (scheduled `ora-doctrine-integrity-guard` run), investigating why merged `hooks/**` fixes were not live | **TRANSIENT — may self-close.** The primary `~/.claude` checkout cannot move onto `main` because `worktrees/_push-main-tmp` holds that branch (git allows a branch in one worktree only), so PR #51 and #55 are merged but INERT in the live pre-push chain: the confidentiality suite's 131 assertions ENV-SKIP on every worktree push, and a load-induced failure still hard-blocks with no retry. `_push-main-tmp` is NOT stale — actively used, clean, and its owning session is idle awaiting input. Local `main` (`9e6c00a`) already carries #47/#49/#51/#55 and is 4 ahead / 0 behind `origin/main`. Resolution is for that session to release the worktree; the ~117 uncommitted files in the primary checkout are unverified against the 48 incoming commits, so nobody should force the switch |
 | [OI-119](#OI-119) | 2026-08-11 | `pre-push` hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) | Pre-push gate is **flaky under its own load and hard-blocks any session's push**: across 3 consecutive pushes of one branch, **two different** tests failed (`test_allocate_oi_id.py`, `test-claim-file-collision.py`) with two clean runs of the same suite between them. The gate retries tests that *time out* but not those that error, so each flake looks like a real regression and the tempting escape is a 60-min multi-use override token |
 | [OI-118](#OI-118) | 2026-08-11 | `.gitignore:61`, found wiring ora-health-guard to the double-fire guard | `.gitignore`'s `/scheduled-tasks/*/*` makes every `_shared/` helper edit **invisible to `git status`** on any branch predating that file's force-add — and git then **silently overwrites** the file on `checkout`/`merge`/`rebase` to main (verified by reproduction; the same file without the ignore rule aborts with exit 1). Standing trap for the whole guard toolkit |
@@ -4888,7 +4888,9 @@ Gabriel's call.
 **Auto-check:** none yet. A cheap one: fail if any path matched by `.gitignore` is also tracked on `origin/main`.
 
 ### OI-141
-**Status:** OPEN — probe half fixed (`9ae5d43`); the retag and the doctrine question are open
+**Status:** OPEN — probe fix landed (`f852a45`, hardened after independent code review found the
+fix's first cut silently downgraded `OBSERVATION_STALE` on any mixed+stale run); the retag and the
+doctrine question below remain open
 **Opened:** 2026-08-12
 **Source:** `ora-appsec-sweep` 2026-08-12 fire, session `f74b697f-cc6f-48f6-818b-8de7d95b393e`,
 re-observed at Gabriel's in-turn request after `model-canary-probe` flagged it `CONTRADICTED`
@@ -4919,21 +4921,33 @@ so the switch at row 109 has **no human turn anywhere near it** — nobody ran `
 2. **Plurality voting manufactured a contradiction.** `observe_models()` collapsed the counts with
    `max()`, so the same task read `claude-fable-5` when sampled mid-run and `claude-opus-4-8` once
    complete — two contradictory "observations" of one fire within one day, with the 45/32 margin
-   never surfaced. Fixed in `9ae5d43`: a run spanning >1 model now reports `MIXED_RUN` (info) when
+   never surfaced. Fixed in `f852a45`: a run spanning >1 model now reports `MIXED_RUN` (info) when
    the tag matches any model present, and `CONTRADICTED` naming *every* model when it matches none.
 
 **Retag deliberately DEFERRED.** No single id describes this run, and the tag parser takes the
-first token of the value, so any compound tag still resolves to one id. Every single-value option
-is unstable: `claude-fable-5` keeps tripping `CONTRADICTED` whenever opus wins the plurality;
-`claude-opus-4-8` erases finding (1) and flips as soon as the fallback timing shifts;
-`UNVERIFIABLE` reads as "never looked" when we looked and found two. **The open question is what a
+first token of the value, so any compound tag still resolves to one id. **Post-fix update
+(2026-08-12 review): `claude-fable-5` no longer "keeps tripping CONTRADICTED whenever opus wins the
+plurality"** — that was only true of the pre-fix probe, which collapsed a mixed run to its
+plurality winner and compared against that single value. With the fix, `claude-fable-5` (a model
+genuinely present in the run) now produces a *stable* `info MIXED_RUN` every time, regardless of
+which model wins the plurality on a given sample. It remains the least-bad single-value option, not
+because it dodges an alarm, but because it is the one id in the run actually backed by a durable
+signal (the task's own `model: fable` frontmatter pin) rather than a coin-flip server assignment —
+though picking it would still assert a false fact (that the run is purely fable) and is still not
+done here. `claude-opus-4-8` erases finding (1) above and flips as soon as the fallback timing
+shifts; `UNVERIFIABLE` reads as "never looked" when we looked and found two. **The open question is what a
 MODEL tag should mean for a task whose model changes mid-run** — that is Gabriel's call, and it
 likely wants a doctrine amendment in [[reference_scheduled_task_model_standard]] rather than a
 tag edit.
 
 **Not affected:** the 17-task retag merged earlier the same day ([PR #68](https://github.com/ZeOoba/ora-claude-config/pull/68))
 was audited against this — all 17 were **100% pure single-model** observations, zero mixtures. Those
-tags stand. See also [[OI-128]] (the `--apply` mode, which must grow a MIXED guard before it writes).
+tags stand. See also OI-128 (the `--apply` mode, which must grow a MIXED guard before it writes) —
+**flagged in review as unresolvable (2026-08-12): `[[OI-128]]` matches no section in this tracker,
+and no `--apply` flag exists under `maintenance/`.** Root cause found the same day: OI-128's filing
+commit (`e6c532a`) is real but stranded on `feat/model-canary-probe-step25`, which never merged to
+`main` — the same divergence class OI-131 already tracks. Not re-filed here; once that branch (or
+just this commit) lands, the `[[OI-128]]` link will resolve on its own.
 
 **Auto-check:** `model-canary-probe.py` reports `MIXED_RUN` every run; `maintenance/test-model-canary-probe.py`
 carries 7 assertions built from this exact session's shape.
