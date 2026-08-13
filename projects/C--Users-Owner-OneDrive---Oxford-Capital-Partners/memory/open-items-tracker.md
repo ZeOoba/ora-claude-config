@@ -32,6 +32,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
+| [OI-146](#OI-146) | 2026-08-13 | session `1de11c79`, 3 spurious `exit 124` push timeouts while landing PR [#67](https://github.com/ZeOoba/ora-claude-config/pull/67) and [#83](https://github.com/ZeOoba/ora-claude-config/pull/83) | **An in-flight worktree/branch enforces its OWN BASE's pre-push gates — not the live checkout's — invisible until it rebases.** `hooks/git-prepush-hook-tests-gate.py` runs from the pushing branch's copy; a branch cut before a gate fix lands keeps failing under the OLD rules even after `main` is fixed. Concretely: `bcbca32` raised `PER_TEST_TIMEOUT_SECONDS` 90→240s on `main`, but a branch cut from before that commit still had `90`, so its 180s doubled-budget retry (2×90) kept timing out on a test that ran clean in 122s — well inside 240s, hopeless against 180s. Three consecutive pushes were misread as load contention; rebasing onto current `origin/main` cleared it with 0 failures. Given this repo's worktree+PR convention and a dozen-plus concurrent sessions, every gate improvement (budget, retry policy, a new check) is invisible to already-open branches until they rebase — a fixed problem looks unfixed, and the honest diagnosis ("stale base") gets misread as "gate flaky under load" (see [OI-119](#OI-119), and OI-135/OI-127 — same budget defect, PR [#67](https://github.com/ZeOoba/ora-claude-config/pull/67)/[#85](https://github.com/ZeOoba/ora-claude-config/pull/85) — not linked as `#`-anchors here since neither section has landed on `main` yet). Fix direction: `git-prepush-hook-tests-gate.py` (or a wrapping pre-push hook) could diff its own file's blob hash against `origin/main`'s and print a loud one-line note — "gate is N commits behind origin/main; rebase before diagnosing a failure as load" — before running the suite. Advisory only; must not block, since a deliberately-pinned base is sometimes correct |
 | [OI-130](#OI-130) | 2026-08-12 | session 08df9f95 (path A, 6 PRs) + session 663673c8 (path B, PR #70), both in `ora-claude-config` | **CodeRabbit's PR check reports `pass` on PRs it never reviewed — via TWO distinct routes.** **(A) Rate-limited:** 5 of 6 PRs merged 2026-08-12 (#45, #49, #51, #55, #65) showed `check=pass`, `detail=Review rate limited`, plus a "Review limit reached — we couldn't start this review" comment; only #47 was genuinely reviewed. **(B) Non-default base:** CodeRabbit declines every PR whose base is not the repo default branch and still reports `check=pass`, `detail=Review skipped: reviews are disabled for this base branch` — **deterministic, every time**, not sporadic. Verified on PR #70 (base `feat/model-canary-probe-step25`): 0 reviews, 0 review comments, empty `reviewDecision`, one bot comment that IS the skip notice — and it **merged in that state** at 2026-08-12T22:23:07Z. A green check meaning "nobody looked" is indistinguishable from one meaning "looked and found nothing"; both routes fail OPEN. Path B is structurally induced by ORA practice — any change depending on unmerged work must target a feature branch, which is what OI-131's branch divergence keeps producing. Fix: advisory-only + documented, or gate on a real review body existing (must cover BOTH notices, not just the rate-limit string), or raise the plan limit; path B additionally has a direct config fix |
 | [OI-141](#OI-141) | 2026-08-12 | `ora-appsec-sweep` 2026-08-12 fire (session `f74b697f`), re-observed at Gabriel's request | **MEDIUM** A scheduled run is **not single-model**: this one ran `claude-fable-5` for ~28 min then switched to `claude-opus-4-8` mid-run, main chain, no human turn. Its `model: fable` frontmatter pin **is** honoured at start — reversing its own tag's "not honored" claim — but does not hold. Probe now reports `MIXED_RUN` (`f852a45`) instead of plurality-voting; the retag itself is **deferred** because no single id describes the run. |
 | [OI-126](#OI-126) | 2026-08-12 | session 08df9f95 (scheduled `ora-doctrine-integrity-guard` run), investigating why merged `hooks/**` fixes were not live | **TRANSIENT — may self-close.** The primary `~/.claude` checkout cannot move onto `main` because `worktrees/_push-main-tmp` holds that branch (git allows a branch in one worktree only), so PR #51 and #55 are merged but INERT in the live pre-push chain: the confidentiality suite's 131 assertions ENV-SKIP on every worktree push, and a load-induced failure still hard-blocks with no retry. `_push-main-tmp` is NOT stale — actively used, clean, and its owning session is idle awaiting input. Local `main` (`9e6c00a`) already carries #47/#49/#51/#55 and is 4 ahead / 0 behind `origin/main`. Resolution is for that session to release the worktree; the ~117 uncommitted files in the primary checkout are unverified against the 48 incoming commits, so nobody should force the switch |
@@ -4990,6 +4991,68 @@ is itself a scheduled-task session that cannot receive. A copy-paste handoff was
 `_push-main-tmp` returned NOTHING while a plain `grep -r` found the one reference — in
 `obsidian-fleet-mirror/session-state.d/`, which is gitignored. That reference is what identified the owning
 session. **Any search for runtime/session state must not rely on ripgrep's defaults.**
+
+---
+
+### OI-146
+**Status:** OPEN — diagnosed and reproduced 3 times; not yet fixed
+**Opened:** 2026-08-13 (id allocated same day by session `1de11c79`)
+**Source:** hit directly while landing [PR #67](https://github.com/ZeOoba/ora-claude-config/pull/67) and
+[PR #83](https://github.com/ZeOoba/ora-claude-config/pull/83) — three consecutive pushes of independently
+committed, verified-locally branches timed out at push, each initially misdiagnosed as concurrent-load
+contention before the real cause was found.
+**Severity:** MEDIUM — pure friction (wasted retries, misdirected diagnosis), never a false ALLOW. A stale gate
+can only be MORE conservative than the live one (older/tighter budgets, missing new checks), never less.
+
+**Symptom.** A branch/worktree that was current when created starts failing its own pre-push hook-tests gate
+after a fix to that gate lands on `main` — specifically, the same commit that timed out at 180s pushed clean
+with 0 failures immediately after a `git rebase origin/main`, no code change involved.
+
+**Root cause.** `hooks/git-prepush-hook-tests-gate.py` is not a fixed piece of infrastructure the whole fleet
+shares live — it is **committed content**, and `git push` runs whichever copy the *pushing* branch's working tree
+currently has. A worktree created via `git worktree add ... <old-base>` (this repo's standard pattern for
+isolated landing) freezes that copy at creation time. Any subsequent improvement to the gate itself —
+`PER_TEST_TIMEOUT_SECONDS`, retry policy, a new check — is real on `main` and invisible to every already-open
+branch until each one individually rebases.
+
+**Concrete reproduction, 2026-08-13.** `bcbca32` raised `PER_TEST_TIMEOUT_SECONDS` from 90 to 240 on `main`
+(landing the OI-135 fix). Branch `fix/model-floor-test-live-session-assertion` was cut from `99c462f`, before
+that commit, so its working copy still read 90. The gate's own doubled-budget retry rule (2× the per-test
+timeout) meant it retried failing tests at 180s — comfortably short of the 240s the *live* checkout already
+enforced. `hooks/tests/test-memory-orphan-link-guard.py`, timed in isolation on this exact branch: **122.1s,
+exit 0, 79/79 passed** — well inside 240s, essentially guaranteed to lose to a 180s ceiling under any concurrent
+load at all. Three pushes of the identical commit timed out this way; `git rebase origin/main` (picking up
+`bcbca32`) made the fourth push clean.
+
+**Why this reads as something else.** The gate's own retry messaging (`timeout-retry (timed out under load,
+passed on the doubled-budget rerun; not blocking)`) is written from the live-checkout's perspective and gives no
+signal that the *budget itself*, not the load, might be the variable. Combined with genuinely high concurrent
+session counts most evenings, a stale-base timeout and a real load-induced timeout produce byte-identical
+symptoms. The session that hit this initially attributed it to load contention (a reasonable read given the
+evening's session count) before checking the base and finding the real cause.
+
+**Not a new defect class — a compounding one.** [OI-119](#OI-119) documents the gate's baseline flakiness under
+its own load. OI-135/[OI-127](#OI-127) (budget too low for concurrent load, fixed by `bcbca32`) is the
+specific defect whose fix this item's reproduction happened to straddle. OI-146 is the meta-finding sitting on
+top of both: **any** gate fix, not just that one budget number, has this same rollout lag across open branches,
+for as long as the fleet keeps worktree-per-task as its landing pattern.
+
+**Fix direction.** Advisory, not blocking — a deliberately pinned/frozen base is sometimes intentional, so this
+must never itself become a false block. Have `git-prepush-hook-tests-gate.py` (or a thin wrapper hook run before
+it) diff its own file's current git blob hash against `origin/main`'s copy of the same path before running the
+suite; if they differ, print one loud line — e.g. `NOTE: this branch's pre-push gate is N commits behind
+origin/main (last synced <sha>) — a failure here may be a stale gate, not your change; rebase before spending
+time on retries.` Cheap (one `git rev-parse`/`git cat-file` pair, no new process), and it converts a
+misdiagnosis into a one-line hint the first time it would otherwise cost three retries.
+
+**Do not treat this as owned by, or blocking, whatever gate defect prompted the next reproduction of it.** This
+item exists to be the standing pointer for *that* class of confusion generally.
+
+**Related:** [OI-119](#OI-119) (baseline gate flakiness under load — the confound this item's timeouts were
+initially mistaken for) · OI-135/[OI-127](#OI-127) (the specific budget fix this item's reproduction
+rode along with, `bcbca32`) · [PR #67](https://github.com/ZeOoba/ora-claude-config/pull/67),
+[PR #83](https://github.com/ZeOoba/ora-claude-config/pull/83), [PR #85](https://github.com/ZeOoba/ora-claude-config/pull/85)
+(all merged) — the three branches whose push histories produced this diagnosis.
 
 ---
 
