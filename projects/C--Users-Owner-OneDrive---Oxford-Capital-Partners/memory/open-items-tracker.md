@@ -34,7 +34,6 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 |----|--------|--------|----------|
 | [OI-130](#OI-130) | 2026-08-12 | session 08df9f95 (path A, 6 PRs) + session 663673c8 (path B, PR #70), both in `ora-claude-config` | **CodeRabbit's PR check reports `pass` on PRs it never reviewed — via TWO distinct routes.** **(A) Rate-limited:** 5 of 6 PRs merged 2026-08-12 (#45, #49, #51, #55, #65) showed `check=pass`, `detail=Review rate limited`, plus a "Review limit reached — we couldn't start this review" comment; only #47 was genuinely reviewed. **(B) Non-default base:** CodeRabbit declines every PR whose base is not the repo default branch and still reports `check=pass`, `detail=Review skipped: reviews are disabled for this base branch` — **deterministic, every time**, not sporadic. Verified on PR #70 (base `feat/model-canary-probe-step25`): 0 reviews, 0 review comments, empty `reviewDecision`, one bot comment that IS the skip notice — and it **merged in that state** at 2026-08-12T22:23:07Z. A green check meaning "nobody looked" is indistinguishable from one meaning "looked and found nothing"; both routes fail OPEN. Path B is structurally induced by ORA practice — any change depending on unmerged work must target a feature branch, which is what OI-131's branch divergence keeps producing. Fix: advisory-only + documented, or gate on a real review body existing (must cover BOTH notices, not just the rate-limit string), or raise the plan limit; path B additionally has a direct config fix |
 | [OI-126](#OI-126) | 2026-08-12 | session 08df9f95 (scheduled `ora-doctrine-integrity-guard` run), investigating why merged `hooks/**` fixes were not live | **TRANSIENT — may self-close.** The primary `~/.claude` checkout cannot move onto `main` because `worktrees/_push-main-tmp` holds that branch (git allows a branch in one worktree only), so PR #51 and #55 are merged but INERT in the live pre-push chain: the confidentiality suite's 131 assertions ENV-SKIP on every worktree push, and a load-induced failure still hard-blocks with no retry. `_push-main-tmp` is NOT stale — actively used, clean, and its owning session is idle awaiting input. Local `main` (`9e6c00a`) already carries #47/#49/#51/#55 and is 4 ahead / 0 behind `origin/main`. Resolution is for that session to release the worktree; the ~117 uncommitted files in the primary checkout are unverified against the 48 incoming commits, so nobody should force the switch |
-| [OI-127](#OI-127) | 2026-08-12 | session `e0f8485e`, hitting pre-push failures under concurrent load | **DUPLICATE — superseded by OI-135; no separate investigation needed.** Same defect, same file, same number: `hooks/git-prepush-hook-tests-gate.py`'s 180s per-test timeout budget is too low under concurrent load, so healthy tests exit-124 and hard-block a push. OI-127 (20:52Z) is the EARLIER reservation; OI-135 (22:00Z, Gabriel-directed, filed by session `2fb76021`) covers the same finding with fuller evidence — 5 sessions hit exit-124 on `test-eos-review-gate.py` and siblings on 2026-08-12, 180s budget vs ~150–300s actual under 12–16+ concurrent sessions, all clearing on rerun. Filed only to close the orphan reservation and stop a third session re-deriving it. **Track the fix under OI-135.** Closely related to [OI-119](#OI-119) (same gate, flakiness rather than timeout) |
 | [OI-119](#OI-119) | 2026-08-11 | `pre-push` hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) | Pre-push gate is **flaky under its own load and hard-blocks any session's push**: across 3 consecutive pushes of one branch, **two different** tests failed (`test_allocate_oi_id.py`, `test-claim-file-collision.py`) with two clean runs of the same suite between them. The gate retries tests that *time out* but not those that error, so each flake looks like a real regression and the tempting escape is a 60-min multi-use override token |
 | [OI-118](#OI-118) | 2026-08-11 | `.gitignore:61`, found wiring ora-health-guard to the double-fire guard | `.gitignore`'s `/scheduled-tasks/*/*` makes every `_shared/` helper edit **invisible to `git status`** on any branch predating that file's force-add — and git then **silently overwrites** the file on `checkout`/`merge`/`rebase` to main (verified by reproduction; the same file without the ignore rule aborts with exit 1). Standing trap for the whole guard toolkit |
 | [OI-009](#OI-009) | 2026-07-17 | [project_tenant_db_no_sync_rootcause.md](project_tenant_db_no_sync_rootcause.md) | Verify the 93 Notion Tenant DB rows with no workbook counterpart against primary leases (low priority) |
@@ -4927,39 +4926,6 @@ session. **Any search for runtime/session state must not rely on ripgrep's defau
 
 ---
 
-### OI-127
-**Status:** DUPLICATE — superseded by OI-135. Filed only to close an orphan reservation; do not investigate separately.
-**Opened:** 2026-08-12 (id reserved 2026-08-12T20:52:45Z by session `e0f8485e`; row written 2026-08-12 by session
-`1de11c79` during an orphan-reservation sweep, with the reserving session inactive on it and holding no claim)
-**Severity:** see OI-135 — this row carries no independent severity assessment.
-
-**Why this row exists.** The id was reserved and the row never written, so `allocate-oi-id.py --report` listed it
-as an orphan. Sixty-eight minutes later a different session (`2fb76021`) reserved **OI-135** for the same defect
-and filed it with fuller evidence. Leaving OI-127 as a bare reservation invites a third session to re-derive the
-same finding a third time; writing it as a full standalone row would put two live items in the tracker for one
-defect. Hence a pointer.
-
-**The defect (tracked under OI-135, not here).** `hooks/git-prepush-hook-tests-gate.py` applies a 180s per-test
-timeout budget. Under concurrent load that budget is below the real runtime of several suites, so healthy tests
-exit-124 and the gate hard-blocks the push. Measured on 2026-08-12: 5 sessions hit exit-124 on
-`test-eos-review-gate.py` and siblings, ~150–300s actual against the 180s budget under 12–16+ concurrent
-sessions, **all clearing on rerun**.
-
-Independently corroborated the same day: the push of `oi122-gate-msg` (PR #67) emitted
-`timeout-retry (timed out under load, passed on the doubled-budget rerun; not blocking)` naming
-`test-commit-hygiene-guard.py`, `test-eos-review-gate.py`, and `test-memory-orphan-link-guard.py` — i.e. the
-doubled-budget rerun path already exists and works; the first-pass budget is what is mis-set.
-
-**Do not fix from this row.** Track the fix, evidence, and any REFUTE pass under **OI-135**. Note that OI-135's
-own row/section may still be in flight on branch `docs/oi-135-prepush-timeout-budget` and is deliberately NOT
-linked here as `#OI-135`: the anchor does not resolve until that lands, and `memory-integrity-probe.py`
-hard-fails on dead pointers into the tracker. Convert to a real link once the section exists.
-
-**Related:** [OI-119](#OI-119) — same gate, the *flakiness* failure mode (errored tests are not retried) rather
-than the timeout budget. A fix for one should be checked against the other.
-
----
-
 ### OI-119
 **Status:** OPEN (diagnosed and reproduced; fix is a judgement call between three options)
 **Opened:** 2026-08-11
@@ -5136,6 +5102,54 @@ land. Source: `event_log.md` commit `75ab0de` (2026-08-12). Five tokens against 
 under 12–16+ concurrent sessions — reinforces **option 1 / 1b** over the per-test options 2/3, since the
 failing test varies by run (plain `test-eos-review-gate.py` alone in three of five, seven further siblings
 in the fourth) — a budget-vs-load mismatch across the whole suite, not one flaky test.
+
+**Sixth token, and the first IDLE measurement — one file is over budget with zero contention (2026-08-12,
+session `e23f4c54`).** `OI-144` was allocator-assigned for this before I read the item; folded in here rather
+than filed separately, per OI-129 and the OI-135/OI-127 precedent two paragraphs up. The id stays reserved and
+unused.
+
+| Time (local) | Session | Failing test | Push contents |
+|---|---|---|---|
+| ~19:5x | `e23f4c54` | `test-memory-orphan-link-guard.py`, exit 124 after the retry | `feat/mutation-testing-harness` — two NEW test-infra files, nothing imports them |
+
+Landed via `--no-verify` on Gabriel's explicit in-turn call ([PR #75](https://github.com/ZeOoba/ora-claude-config/pull/75)) rather than a sixth
+`allow-hook-test-failure` token — worth noting for the severity tally this item tracks, since a `--no-verify`
+push leaves *less* audit trail than the token it avoided: no gate record at all, versus a token with a stated
+reason.
+
+**What is new here, and why it sharpens the option-1 choice.** Every prior data point is a run *under* gate
+load, framed above as budget-vs-load. This one was measured STANDALONE ON AN OTHERWISE-IDLE MACHINE:
+
+| Measurement | Result |
+|---|---|
+| `test-memory-orphan-link-guard.py`, standalone, idle | **192.7s, rc=0 (PASSES)** |
+| Gate budget (`PER_TEST_TIMEOUT_SECONDS`) | 90s |
+| Doubled budget on the timeout retry | 180s |
+| `test-mutation-lib.py` (the branch's own new suite), standalone | 2.4s |
+
+So this file **cannot pass the gate at any concurrency** — it exceeds even the doubled retry budget with zero
+load, which no amount of reducing worker count (option 1b) will fix. That does not overturn the
+budget-vs-load diagnosis for the *other* failures; it adds a second, independent cause sitting underneath it:
+at least one file whose idle runtime is already over the retry ceiling. Consequences for the fix:
+
+1. Option 1's new budget must clear the slowest file's IDLE runtime with real headroom, not merely absorb
+   contention. 192.7s idle means a 180s ceiling is under water before the first concurrent session starts.
+   Whoever picks the number should MEASURE the slowest files idle rather than scaling the old value.
+2. Option 1b (lower concurrency) is now insufficient alone, on this file's evidence.
+3. A per-file cause, measured — NOT folded into the budget decision, and worth fixing on its own.
+   `test-memory-orphan-link-guard.py` invokes the hook **70 times**, each a fresh `sys.executable` spawn, and
+   each invocation runs its own `git` subprocesses inside `_git()` (`memory-orphan-link-guard.py:308-318`).
+   192.7s / 70 = **~2.75s per invocation**, which accounts for essentially the whole runtime. My first guess
+   was wrong and is recorded here so nobody re-checks it: this is NOT the OI-061 shape. That item was about
+   per-call REPO CONSTRUCTION and was fixed by the shared `gitfixture` template — which this file already
+   imports and uses (line 7, and one `repo_with_commit` call). The remaining cost is hook-invocation count,
+   which `gitfixture` does not address. The OI-061 playbook therefore does not transfer; the analogous move
+   would be amortizing the 70 spawns (batching cases into fewer hook runs, or exercising the hook in-process
+   where a case does not need the subprocess boundary), which is a different piece of work and should be
+   scoped as such.
+
+**Not caused by the change that surfaced it:** the branch is `main` plus two new files that nothing imports,
+and its own suite runs in 2.4s.
 
 ### OI-142
 **Status:** OPEN
