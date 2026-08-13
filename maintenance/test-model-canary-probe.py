@@ -233,6 +233,72 @@ sev, code, _ = mcp_probe.classify("t", None, None, "claude-opus-4-8",
 expect("untagged outranks MIXED_RUN", sev == "action" and code == "UNTAGGED",
        "%s/%s" % (sev, code))
 
+# ...and the other two shape gaps, so requirement 6 is pinned at all three points
+# rather than one (the first cut only covered UNTAGGED).
+sev, code, _ = mcp_probe.classify("t", "claude-fable-5", None, "claude-opus-4-8",
+                                  "2026-07-26", counts=MIXED)
+expect("undated outranks MIXED_RUN", sev == "action" and code == "UNDATED",
+       "%s/%s" % (sev, code))
+
+sev, code, _ = mcp_probe.classify("t", "UNVERIFIABLE", "2026-07-08",
+                                  "claude-opus-4-8", "2026-07-26", counts=MIXED)
+expect("UPGRADABLE outranks MIXED_RUN", code == "UPGRADABLE", "%s/%s" % (sev, code))
+
+# REGRESSION GUARD (found in review, 2026-08-12): the first cut of MIXED_RUN
+# returned BEFORE the anchor check, so a mixed run with a stale tag date silently
+# lost its OBSERVATION_STALE action and reported info MIXED_RUN instead -- a
+# pre-existing verdict downgraded to info, which drops the task off the guard's
+# action list entirely. Staleness is ORTHOGONAL to mixing: "this tag predates the
+# lineup anchor and needs re-observing" is still true, arguably more so, when the
+# run turns out to be mixed.
+sev, code, detail = mcp_probe.classify("t", "claude-fable-5", "2026-07-01",
+                                       "claude-opus-4-8", "2026-07-26",
+                                       counts=MIXED)
+expect("mixed run + stale date -> still ACTION OBSERVATION_STALE, not info",
+       sev == "action" and code == "OBSERVATION_STALE", "%s/%s" % (sev, code))
+expect("stale verdict on a mixed run still shows the breakdown",
+       "claude-fable-5" in detail and "claude-opus-4-8" in detail, detail)
+
+# The pure equivalent must be untouched by that restructure.
+sev, code, _ = mcp_probe.classify("t", "claude-opus-5", "2026-07-01",
+                                  "claude-opus-5", "2026-07-26",
+                                  counts={"claude-opus-5": 50})
+expect("pure run + stale date -> ACTION OBSERVATION_STALE (unchanged)",
+       sev == "action" and code == "OBSERVATION_STALE", "%s/%s" % (sev, code))
+
+# A single-entry counts must never enter the mixed branch, including when it
+# DISAGREES with the tag -- only the agreeing case was covered before.
+sev, code, _ = mcp_probe.classify("t", "claude-sonnet-5", "2026-08-09",
+                                  "claude-opus-5", "2026-07-26",
+                                  counts={"claude-opus-5": 12})
+expect("single-entry counts that disagrees -> legacy CONTRADICTED, not MIXED_RUN",
+       sev == "action" and code == "CONTRADICTED", "%s/%s" % (sev, code))
+
+sev, code, _ = mcp_probe.classify("t", "claude-opus-5", "2026-08-09",
+                                  "claude-opus-5", "2026-07-26", counts={})
+expect("empty counts -> legacy path, ok OBSERVED", sev == "ok" and code == "OBSERVED",
+       "%s/%s" % (sev, code))
+
+# ------------------------------------------------------------ format_breakdown
+expect("breakdown is busiest-first",
+       mcp_probe.format_breakdown({"a-model": 3, "b-model": 40})
+       == "b-model x40 (93%), a-model x3 (7%)",
+       mcp_probe.format_breakdown({"a-model": 3, "b-model": 40}))
+expect("breakdown breaks ties alphabetically, not by dict order",
+       mcp_probe.format_breakdown({"zeta-model": 5, "alpha-model": 5})
+       == "alpha-model x5 (50%), zeta-model x5 (50%)",
+       mcp_probe.format_breakdown({"zeta-model": 5, "alpha-model": 5}))
+expect("breakdown of an empty dict is empty, not a crash",
+       mcp_probe.format_breakdown({}) == "", repr(mcp_probe.format_breakdown({})))
+
+# A 1-message minority must not read like an even split -- the share is what
+# lets a human tell `x1 (1%)` from `x32 (42%)`. Requirement 2 has no minimum
+# share by design (thresholds rot), so the percentage carries that judgement.
+_, _, detail = mcp_probe.classify("t", "claude-fable-5", "2026-08-12",
+                                  "claude-opus-5", "2026-07-26",
+                                  counts={"claude-opus-5": 99, "claude-fable-5": 1})
+expect("lopsided mixed run exposes the minority share", "(1%)" in detail, detail)
+
 # ------------------------------------------------------------ read_description
 with tempfile.TemporaryDirectory() as td:
     p = os.path.join(td, "SKILL.md")
