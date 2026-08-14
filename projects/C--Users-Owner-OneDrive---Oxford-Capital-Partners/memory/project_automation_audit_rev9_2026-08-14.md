@@ -1,0 +1,27 @@
+---
+name: project-automation-audit-rev9-2026-08-14
+description: "ORA Automation Audit Revision 9 (2026-08-14) — skills-only usage-frequency ranking + top-skill token-cost recs + keep/ask calls on the 49-skill zero-usage tail; also first revision to enforce the new 4-entry rev-band cap"
+metadata:
+  node_type: memory
+  type: project
+  originSessionId: f6b9d0b7-2ead-4c85-83b4-4e6ae0c83271
+  modified: 2026-08-14T21:36:31.089Z
+---
+
+Gabriel asked for a skills-only pass: which skills get used most/least, concrete improvements for the heavy hitters, prune calls on the long tail. Ran via `ora-setup-audit`, published as Revision 9 of the "ORA Automation Audit" artifact (same URL): https://claude.ai/code/artifact/8b29049b-d7a0-4394-a602-d51e52fd21e7
+
+**Real per-skill telemetry exists and was used for the first time this way:** `~/.claude.json#skillUsage` holds actual `usageCount`/`lastUsedAt` for 102 name-variants, 797 logged invocations total (CC/MCP surface only — Cowork/LAMS invocations are structurally invisible to it, per the skill's existing Guardrails; a zero means "not invoked from Code," never "not used"). Top 15 skills = 504/797 (63%) of all logged usage, dominated by the Engineering-OS debug/build lane and superpowers process skills.
+
+**6 skills are split-counted across a bare name and a plugin-qualified name for the same skill** (namespace migrations left old-name counts stranded): `systematic-debugging` (61+11=72), `register-scheduled-task` (39+14=53), `writing-plans` (27+1=28), `finishing-a-development-branch` (21+1=22), `package-and-stage-skill` (11+1=12), `using-superpowers` (8+2=10). Any future read of raw `skillUsage` should merge these before ranking — reading either half alone undercounts by up to 18%.
+
+**Top-skill improvement recs (3 measured directly, honest about the rest):** `ora-skills`-repo skills are locally measurable; superpowers-marketplace and built-in Engineering-OS lane skills (`debug`, `solo`, `build`, `research`, etc.) are not mirrored to any locally-readable file, so no size claim was made about them rather than guessing. Concrete finding: `register-scheduled-task` (2,885w, rank 3, 53 invocations) and `daily-brief` (4,681w, rank 11, 22 manual + runs unattended 7×/week via `ora-am-brief`) are both good candidates for the `acquisition-underwriting`-style core+reference-file split — high-frequency and large. `package-and-stage-skill` (4,806w, the largest of the three measured) is lower priority given only 12 invocations.
+
+**Zero-usage tail (49 of 103 live skills) sorted into 4 buckets, not one flat prune list** — per the skill's own rarity-is-neutral guardrail: ~18 are CLAUDE.md-named or a direct dependency of one (never-flag by the skill's own rule), ~8 have real recent use visible only in event_log/MEMORY.md (Cowork/LAMS-side, invisible to CC telemetry — e.g. `masterlease-revision-cycle`'s own changelog says "proven twice on 2026-08-04"), ~15 are legitimately rare by business cadence or too new to have accumulated usage (annual tax-appeal season, ~24mo credential rotation, built yesterday), and only **4 skills had no protection found either way**: `evidence-dossier-drafting`, `file-reconciliation`, `conversation-archival`, `explain-usage` — flagged `ask`, not asserted dead.
+
+**2 new data-quality findings:** `anthropic-skills:capex-budgeting` is live today with a 2026-08-12 update, contradicting Revision 5's record that Gabriel confirmed it unpublished from the store 2026-08-09 alongside 5 siblings that do remain absent — unresolved, needs a direct answer on whether it was ever really unpublished. `submarket-spatial-analysis` has one real invocation logged under an `ora-operations-extensions:` plugin prefix that matches no key in current `enabledPlugins` (5 keys) — an orphaned plugin registration, not chased further.
+
+**1 in-flight item noted, not a defect:** `lease-addendum` (committed today, `c29471e`, CLAUDE.md-canonical as the sole path for lease amendments) is already built and acceptance-tested — it caught and fixed a real docProps metadata defect on a live 9050 Red Branch Rd addendum same-day — but hasn't gone through `package-and-stage-skill`'s Cowork install step yet, so it's absent from this session's loaded catalog.
+
+**First revision to enforce the new rev-band cap (`ora-setup-audit` v1.3 Step 4a, added Revision 8, "takes effect starting Revision 9").** Adding Revision 9 pushed the inline count to 5; archived Revision 5 (the oldest) to a new companion file `~/.claude/artifacts/ora-automation-audit-history.md`, replaced it with a collapsed pointer line, and established the durable working copy at `~/.claude/artifacts/ora-automation-audit.html` per the Schematic's DURABLE SOURCE pattern — future revisions should Read + targeted-Edit that file instead of WebFetching the full published artifact.
+
+**How to apply:** Before citing this artifact's zero-usage-skill KPI tile, use Revision 9's number (49, corrected) — the "19/14" figure carried since Revision 7 was under-scoped against a smaller, older catalog snapshot, not a real change in skill health. The `capex-budgeting` unpublish contradiction and the `ora-operations-extensions` orphaned-plugin finding are both still open — neither was chased to ground truth this pass. See [Automation Audit Rev 8](project_automation_audit_rev8_2026-08-14.md) for the prior revision's plugin/fleet/token-bloat findings, which this pass did not re-verify (skills-only scope).
