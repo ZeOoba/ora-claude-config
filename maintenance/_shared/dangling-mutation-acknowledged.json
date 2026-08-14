@@ -5,5 +5,26 @@
     "tool": "mcp__scheduled-tasks__update_scheduled_task",
     "acknowledged": "2026-08-03",
     "reason": "The founding incident for this probe. The 2026-07-29 one-time canary-recheck reached the correct conclusion and called update_scheduled_task on ora-site-exposure-probe, but the session ended at that call and the write never landed. REMEDIATED 2026-08-03: the task was re-canaried off its 2026-07-29 fire and retagged claude-opus-5 by hand, verified live via list_scheduled_tasks. Kept here rather than deleted so the probe's first true positive stays auditable; it would otherwise re-alarm daily until it ages out of the 14-day lookback."
+  },
+  {
+    "session_id": "local_4891d65d-ff8d-4016-abb8-c2c77eafd163",
+    "task_id": "ora-skill-cache-drift-alert",
+    "tool": "mcp__scheduled-tasks__update_scheduled_task",
+    "acknowledged": "2026-08-10",
+    "reason": "VERIFIED MOOT, NOT RE-APPLIED. The 2026-08-09 self-retirement session for ora-skill-cache-drift-alert crashed (errorCategory process_crashed, workspace-trust stderr) at its final call, which was update_scheduled_task setting that task's own description to the RETIRED banner text. The write never landed. It does not need re-applying: the task's own delete_scheduled_task call had been refused earlier in that same session ('Refusing to delete the scheduled task that launched this session'), and a later session completed the retirement properly under the CC/MCP delete-first order -- verified 2026-08-10 by ora-task-integrity-guard: zero occurrences of the id in the live CC/MCP scheduled-tasks.json, no folder at the canonical path, spec archived at scheduled-tasks/_archive_2026-08-09_retired/ora-skill-cache-drift-alert/. A description retag on a registry entry that no longer exists is unapplyable and unnecessary; the retirement banner is already in the archived SKILL.md frontmatter. Kept here so the true positive stays auditable rather than re-alarming daily until it ages out of the 14-day lookback."
+  },
+  {
+    "session_id": "local_8b353d25-eea9-49ea-93b7-36f4d6cf240b",
+    "task_id": "ora-doctrine-integrity-guard",
+    "tool": "Bash",
+    "acknowledged": "2026-08-14",
+    "reason": "VERIFIED LANDED, NOTHING TO RE-APPLY. Flagged by ora-task-integrity-guard 2026-08-14. The final call (2026-08-12T21:16:43Z, cliSessionId 08df9f95-e63f-4994-9ac0-ef0b1bdbd57c) was a retry of `git push -u origin docs/oi-130-coderabbit-false-green` from worktree .claude/worktrees/oi130. Verified 2026-08-14: `git ls-remote --heads origin` returns refs/heads/docs/oi-130-coderabbit-false-green at 57463b8, which is byte-identical to the oi130 worktree HEAD -- the push completed and only its tool_result was never recorded. Paired with the ora-appsec-sweep entry below: both sessions died 9 seconds apart (21:16:43 and 21:16:52), so the cause was a host-level kill, not two independent write failures. Kept here so the pair stays auditable rather than re-alarming daily until it ages out of the 14-day lookback."
+  },
+  {
+    "session_id": "local_a98c31bd-b0a9-431e-b8c6-ea00a96ac60f",
+    "task_id": "ora-appsec-sweep",
+    "tool": "Edit",
+    "acknowledged": "2026-08-14",
+    "reason": "VERIFIED LANDED, NOTHING TO RE-APPLY. Flagged by ora-task-integrity-guard 2026-08-14. The final call (2026-08-12T21:16:52Z, cliSessionId f74b697f-cc6f-48f6-818b-8de7d95b393e) was an Edit on memory/open-items-tracker.md restoring a newline that an earlier edit in the same session had consumed, which had joined the OI-086 and OI-088 table rows onto one line. Verified 2026-08-14 against the live file: zero occurrences of the joined form ('debits || [OI-088]'), OI-086 terminates line 94 and OI-088 begins line 95 on its own -- the repair is present. Paired with the ora-doctrine-integrity-guard entry above: both sessions died 9 seconds apart on 2026-08-12, a host-level kill rather than two independent write failures. Kept here so the pair stays auditable rather than re-alarming daily until it ages out of the 14-day lookback."
   }
 ]
