@@ -15,6 +15,8 @@
 - [Open Items Tracker](open-items-tracker.md) — canonical punch-list; other files POINT here, never restate item text
 - [Ops Decision Log](ops_decision_log.md) — recurring operational yes/no calls; companion to deal-decision-ledger.md
 - [Active Projects](projects.md) — deal pipeline · E. Fulton (declassified) · React brain · oxfordra.net · PM/lease/governance
+- **PENDING (uncommitted, staging contention):** [OI-140 CLI-arg fix](reference_oi140_check_open_items_duplicate_ids_cli_fix_2026-08-13.md) (live checkout working tree, verified working, not yet committed)
+- [isolated_commit.py repair wrapper](reference_isolated_commit_repair_wrapper_2026-08-13.md) — LANDED 08-13 18:22 ET (`522075e8`, ported from worktree `26acfe9`), 54/54 tests re-verified green on the primary checkout
 - **OPEN/BLOCKED:** [broker OM intake BROKEN in prod 08-04](project_broker_pipeline_blobs_v1_outage_2026-08-04.md) (V1 fns can't auto-provision Blobs; PR #64 ≠ fixed; no data lost) · [open-items-tracker worktree/HEAD divergence 07-20](project_open_items_tracker_worktree_head_divergence.md) (don't force-resync) · [event_log IWNS block loss](project_event_log_iwns_block_loss_unattributed_2026-07-21.md) (recovered; cause open)
 - **PLANNED, awaiting Gabriel:** [acquisition-underwriting doctrine review](project_acquisition_underwriting_doctrine_review_2026-07-18.md) (9 items) · [artifact-content top-5](project_artifact_content_top5_plan_2026-07-18.md) · [setup-improvement top-5](project_setup_improvement_top5_plan_2026-07-18.md) + [Plan 2 design](project_plan2_effect_verification_design_2026-07-18.md)
 - [oxfordra.net SEO Audit](project_oxfordra_seo_audit_2026-07.md) — 84/100; open: portfolio SF/counts, FAQ order, /markets redirect
