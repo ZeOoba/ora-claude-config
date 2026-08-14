@@ -769,6 +769,90 @@ def test_exit_code_is_never_one():
     check("exit codes are only ever 0 or 2", ok)
 
 
+def test_block_message_covers_the_governance_cli_invocation_case():
+    # WHY (2026-08-12, live-hit twice in one session). The block message offered
+    # exactly two exits: "it was a READ -> use Read/Grep/Glob" and "it's a REAL edit
+    # -> do it in a worktree". Neither fits the case that actually keeps firing --
+    # INVOKING a governance CLI whose writes land in paths this guard already
+    # EXEMPTS. eos-review-gate's own blocking text tells the operator to run
+    # `eos-review-gate.py --record ... --notes "<prose>"`; review prose routinely
+    # carries an ASCII arrow ("199/204 -> 204/204"), and ">" is a write indicator,
+    # so the sanctioned way to clear the review gate is blocked by this one. The
+    # only exit the message then named was minting a 60-min multi-use
+    # governance-WIDE token -- the same "false positive forces a strictly broader
+    # privilege" security regression the 2026-08-03 word-anchoring fix in
+    # tool_call_paths.py was written to kill (see its _BOUNDED_VERBS note, which
+    # fixed the `--model ` -> "del " half of this same deadlock).
+    #
+    # The arrow itself CANNOT simply be un-armed: `echo x ->f` is a real redirect
+    # that truncates f in bash, so ">" stays an indicator and the fix belongs in
+    # the guidance, not the matcher.
+    r = Rig()
+    gate = r.path("hooks", "eos-review-gate.py")
+    rc, _, err = r.run(payload("Bash", {
+        "command": 'python "%s" --record --verdict approved --model claude-fable-5 '
+                   '--notes "199/204 -> 204/204"' % gate}))
+    check("record-with-arrow-in-notes still blocks (matcher unchanged)", rc == 2,
+          "rc=%s" % rc)
+    check("block message flags the governance-CLI invocation case",
+          "GOVERNANCE-TOOL INVOCATION" in err, "err=%r" % err)
+
+    # SCOPE THE ASSERTIONS TO THE NEW PARAGRAPH, NOT TO ALL OF stderr. The message
+    # ECHOES the blocked command back on its `target:` line, so a bare `"->" in err`
+    # or `"worktree" in err` is satisfied by the probe's own input (and "worktree"
+    # was already in the pre-existing REAL-edit paragraph) -- both passed against
+    # the un-fixed message when this test was first run RED. One paragraph per
+    # line, matching the rest of the block text.
+    guidance = next((l for l in err.splitlines()
+                     if "GOVERNANCE-TOOL INVOCATION" in l), "")
+    check("...naming the exempt destinations such tools actually write to",
+          "hooks/sessions" in guidance and "hooks/active-work" in guidance,
+          "guidance=%r" % guidance)
+    check("...and explaining the prose write indicator, arrow included",
+          "ASCII arrow" in guidance, "guidance=%r" % guidance)
+    check("...and why the arrow stays armed rather than being exempted",
+          "redirect" in guidance, "guidance=%r" % guidance)
+    check("...and pointing at the worktree copy of the TOOL as the re-run route",
+          "worktree" in guidance, "guidance=%r" % guidance)
+    check("...and steering off the token, which is the over-broad exit here",
+          "do NOT mint" in guidance, "guidance=%r" % guidance)
+
+    # Second live shape: a governance-path READ compounded with an unrelated write
+    # (cleaning up a scratchpad file). The matcher sees the whole command, so the
+    # actionable advice is to split it -- not to mint anything.
+    rc, _, err = r.run(payload("Bash", {
+        "command": 'python "%s" release s; rm -f /tmp/scratch.py'
+                   % r.path("hooks", "lib", "claim_work.py")}))
+    check("read compounded with an unrelated write still blocks", rc == 2,
+          "rc=%s" % rc)
+    guidance = next((l for l in err.splitlines()
+                     if "GOVERNANCE-TOOL INVOCATION" in l), "")
+    check("...and the message says to split the command up",
+          "split" in guidance, "guidance=%r" % guidance)
+
+    # The pre-existing exits must survive the addition -- this is guidance ADDED
+    # alongside them, not a replacement.
+    check("the READ guidance is still present", "IF THIS WAS A READ" in err,
+          "err=%r" % err)
+    check("the REAL-edit worktree guidance is still present",
+          "Preferred path for a REAL edit" in err, "err=%r" % err)
+    check("the token mechanism is still named", "allow-config-write" in err,
+          "err=%r" % err)
+
+
+def test_governance_cli_guidance_is_advice_only_not_an_exemption():
+    # The guidance must not have quietly become a matcher carve-out: the same
+    # commands still BLOCK (asserted above), and a real write dressed up as a
+    # governance-CLI invocation still blocks too.
+    r = Rig()
+    rc, _, err = r.run(payload("Bash", {
+        "command": 'python "%s" --record --notes "x" > "%s"'
+                   % (r.path("hooks", "eos-review-gate.py"),
+                      r.path("hooks", "evil.py"))}))
+    check("a real redirect into hooks/ alongside --record still blocks", rc == 2,
+          "rc=%s err=%r" % (rc, err))
+
+
 if __name__ == "__main__":
     test_blocks_hooks_write_without_token()
     test_blocks_settings_claude_md_registry_without_token()
@@ -807,6 +891,8 @@ if __name__ == "__main__":
     test_claim_log_itself_is_never_gated()
     test_fail_open_on_garbage_input()
     test_exit_code_is_never_one()
+    test_block_message_covers_the_governance_cli_invocation_case()
+    test_governance_cli_guidance_is_advice_only_not_an_exemption()
     if _failures:
         print("\n%d FAILURE(S): %s" % (len(_failures), ", ".join(_failures)))
         sys.exit(1)

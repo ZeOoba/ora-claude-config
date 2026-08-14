@@ -40,6 +40,12 @@ import os
 import sys
 import datetime
 
+try:
+    from zoneinfo import ZoneInfo
+    _ET = ZoneInfo("America/New_York")
+except Exception:
+    _ET = None          # tzdata unavailable -- nominal interval falls back to a flat 24h
+
 for _s in (sys.stdout, sys.stderr):
     try:
         _s.reconfigure(encoding="utf-8", errors="replace")
@@ -49,10 +55,78 @@ for _s in (sys.stdout, sys.stderr):
 HOME = os.path.expanduser("~")
 DEFAULT_STORE = os.path.join(HOME, ".claude", "maintenance", "_state",
                              "health-guard-beacon.json")
-# Cron is `15 5 * * *` -- daily INCLUDING weekends -- so one missed cycle plus margin.
-# Same threshold the Notion beacon and the GitHub Actions watchdog use; keep in step.
-STALE_HOURS = 26.0
+# Cron is `15 5 * * *` -- daily INCLUDING weekends.
+NOMINAL_INTERVAL_HOURS = 24.0
+CRON_HOUR, CRON_MINUTE = 5, 15          # ora-health-guard's own cron slot, ET
+# CRON-AWARE TOLERANCE (2026-08-11, replaces the old flat STALE_HOURS=26.0):
+# a flat wall misfired live on 2026-08-09->08-10 (27.4h) and 2026-08-10->08-11
+# (28.9h) -- both runs completed, each just woke late that morning, and the
+# two latenesses stacked past 26h with no missed cycle. Tolerance is now the
+# nominal 24h interval plus how late THIS read is against the 05:15 ET slot
+# (bounded to [0, 24h) by construction -- see _todays_lateness_hours), which
+# absorbs a stacked-late-wake gap while a genuine multi-day outage (the real
+# 2026-08-05->08-09 99.4h gap) is nowhere near even the widest possible
+# tolerance (<48h) and still fires STALE.
+# NOTE: the off-machine GitHub Actions watchdog (ZeOoba/ora-cowork-watchdog,
+# health-guard-beacon.yml) independently hardcodes a flat 26h check against
+# the NOTION mirror of this beacon -- it is a separate repo this session
+# cannot reach and now diverges from the local logic below. Flagged as a
+# follow-up, not fixed here.
 MAX_ENTRIES = 30          # ~a month of daily runs; bounded so the file cannot grow forever
+
+
+def _todays_lateness_hours(now):
+    """Hours since the most recent 05:15 ET boundary at/before `now`. Always
+    in [0, 24) by construction -- this measures how late TODAY's wake is
+    against the cron slot, not accumulated multi-day drift, so it cannot by
+    itself mask a genuine multi-day outage.
+
+    `now` is normalized to ET first (2026-08-11 adversarial-review finding):
+    CRON_HOUR/CRON_MINUTE are ET, but read_beacon()'s `now_iso` accepts any
+    offset -- including the 'Z'-suffixed UTC form lastRunAt is stored in
+    elsewhere in this codebase -- and a bare `.replace(hour=...)` on a
+    non-ET-offset `now` silently reinterpreted that wall-clock number in the
+    wrong zone, inflating the tolerance by the full UTC-ET offset (verified:
+    4h) with no error. Falls back to `now` as-is if tzdata is unavailable or
+    `now` is naive, matching the pre-fix behavior in that degraded case."""
+    if _ET is not None and now.tzinfo is not None:
+        now = now.astimezone(_ET)
+    slot = now.replace(hour=CRON_HOUR, minute=CRON_MINUTE, second=0, microsecond=0)
+    if now < slot:
+        slot -= datetime.timedelta(days=1)
+    return (now - slot).total_seconds() / 3600.0
+
+
+def _nominal_interval_hours(now):
+    """Real elapsed hours between today's and yesterday's 05:15 ET cron slot.
+    24h on an ordinary day -- but the scheduler fires on LOCAL WALL CLOCK, so
+    this is genuinely 23h or 25h across a DST transition, not 24h (regression
+    caught by adversarial review 2026-08-11: a fixed 24.0 constant falsely
+    read STALE on the Oct31->Nov1 2026 fall-back day even though both runs
+    were exactly on time, because the real elapsed interval was 25h). Uses
+    zoneinfo to resolve each date's own ET offset rather than shifting `now`'s
+    fixed-offset tzinfo by a naive timedelta, which would not observe the
+    transition at all. Falls back to the flat NOMINAL_INTERVAL_HOURS if the
+    system has no tzdata for America/New_York or `now` is naive."""
+    if _ET is None or now.tzinfo is None:
+        return NOMINAL_INTERVAL_HOURS
+    now_et = now.astimezone(_ET)
+    today = now_et.date()
+    if now_et.time() < datetime.time(CRON_HOUR, CRON_MINUTE):
+        today -= datetime.timedelta(days=1)
+    yesterday = today - datetime.timedelta(days=1)
+    today_slot = datetime.datetime(today.year, today.month, today.day,
+                                   CRON_HOUR, CRON_MINUTE, tzinfo=_ET)
+    yesterday_slot = datetime.datetime(yesterday.year, yesterday.month, yesterday.day,
+                                       CRON_HOUR, CRON_MINUTE, tzinfo=_ET)
+    # Both share the SAME ZoneInfo instance, so a direct subtraction silently
+    # takes Python's naive-subtraction fast path and drops the DST
+    # adjustment entirely (verified empirically: 24h instead of 25h across
+    # the fall-back transition) -- round-trip through a fixed-offset zone
+    # (UTC) first so the subtraction is forced through each datetime's own
+    # resolved utcoffset().
+    utc = datetime.timezone.utc
+    return (today_slot.astimezone(utc) - yesterday_slot.astimezone(utc)).total_seconds() / 3600.0
 
 
 def _now_iso():
@@ -123,7 +197,8 @@ def read_beacon(path, now_iso=None):
     Returns {verdict, gap_hours, last_run_et, last_entry, notion_gap_explained,
              last_notion_write_et}.
 
-      verdict OK       -- ran within STALE_HOURS
+      verdict OK       -- ran within tolerance (NOMINAL_INTERVAL_HOURS + today's
+                          own wake-lateness against the 05:15 ET slot)
       verdict STALE    -- genuinely silent too long (a real missed cycle)
       verdict UNKNOWN  -- no readable store; explicitly NOT a pass
 
@@ -147,7 +222,8 @@ def read_beacon(path, now_iso=None):
                 "last_notion_write_et": None}
 
     gap = (now - ts).total_seconds() / 3600.0
-    verdict = "OK" if gap <= STALE_HOURS else "STALE"
+    tolerance = _nominal_interval_hours(now) + _todays_lateness_hours(now)
+    verdict = "OK" if gap <= tolerance else "STALE"
 
     last_notion = next((e.get("last_run_et") for e in reversed(entries)
                         if e.get("notion_written")), None)
@@ -157,6 +233,7 @@ def read_beacon(path, now_iso=None):
     notion_explained = bool(verdict == "OK" and not last.get("notion_written"))
 
     return {"verdict": verdict, "gap_hours": round(gap, 2),
+            "tolerance_hours": round(tolerance, 2),
             "last_run_et": last.get("last_run_et"), "last_entry": last,
             "notion_gap_explained": notion_explained,
             "last_notion_write_et": last_notion}
