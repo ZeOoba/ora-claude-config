@@ -124,6 +124,15 @@ obsidian-fleet-mirror/session-state.d/
 !/scheduled-tasks/_shared/Send-OutreachQueueEmail.ps1
 !/scheduled-tasks/_shared/EMAIL_DELIVERY.md
 !/scheduled-tasks/_shared/README-SEND-PATTERN.md
+# (2026-08-09) Double-fire entry guard. Same durability rationale as send-via-outlook.ps1:
+# these are now load-bearing for ora-am-brief and ora-deal-aging-sla, and an unversioned
+# guard that silently truncates fails OPEN -- the tasks would resume double-sending with
+# no error anywhere. Named individually per the allow-list rule above; still no glob, and
+# nothing here can catch `*.dat`.
+!/scheduled-tasks/_shared/block-sentinel.py
+!/scheduled-tasks/_shared/test-block-sentinel.py
+!/scheduled-tasks/_shared/outlook-sent-probe.ps1
+!/scheduled-tasks/_shared/README-DOUBLE-FIRE-GUARD.md
 
 # 2c) Memory (projects/.../memory/) — versioned 2026-07-15 for durability, same rationale
 #     as 2b: this /* default-deny (introduced in the SAME 2026-07-12 commit as 2b) never
@@ -151,6 +160,12 @@ hooks/sessions/
 # durable config, and MUST never be re-minted with a stale mtime/timestamp by a
 # clone/checkout the way the override sentinels were (668f9d4).
 hooks/active-work/
+# git-prepush-hook-tests-gate.py's override-frequency counter (OI-136 candidate fix 2,
+# 2026-08-12): an append-only JSONL of every allow-hook-test-failure USE, grown on every
+# override across the fleet. Same reasoning as maintenance/_state/phantom-dispatch.json
+# above (per-machine, ever-growing, read only to compute a rolling-window count) --
+# tracking it would churn a commit on every override use for no reader.
+hooks/_state/override-usage-log.jsonl
 # Human-authorization override sentinels (allow-external-send / allow-website-change /
 # allow-doctrine-drift). NEVER track one: the gates validate a sentinel by mtime age, and
 # git stamps a checked-out file with CHECKOUT time -- so a tracked token is re-minted with
