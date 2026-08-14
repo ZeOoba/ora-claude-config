@@ -32,6 +32,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
+| [OI-150](#OI-150) | 2026-08-13 | session `15f5b972`, landing a `settings.json` deny-rule change (PR [#97](https://github.com/ZeOoba/ora-claude-config/pull/97)) from an isolated worktree | **UNCONFIRMED — needs investigation.** `hooks/eos-review-gate.py`'s automatic blast-radius independent-review dispatch (ratified in [[feedback_auto_review_blast_radius_gate]] — `settings.json` is explicitly in its trigger scope) did not visibly fire when a `git commit -- settings.json` was run from `~/.claude/worktrees/land-commit-hygiene`, no BLOCKED/WARNING line, no override needed. Traced as far as `git_commit_parse.repo_root()`, which correctly resolves a worktree's own toplevel via `git rev-parse --show-toplevel` (not the bug) — could not go further because the diff was already committed by the time the silence was noticed, so `scope_for_cmd()`'s behavior at commit time couldn't be reproduced post-hoc (nothing was staged anymore). An independent review (`pr-review-toolkit:code-reviewer`, opus) was obtained manually as a substitute before the PR was opened, so the specific diff was not shipped unreviewed — but if the gate genuinely doesn't fire from a worktree, every blast-radius commit made the sanctioned "do it in an isolated worktree" way (the exact pattern this repo's own docs recommend, e.g. `config-write-guard.py`'s own block message) silently skips the review it's supposed to force. Needs: reproduce deliberately (stage a `settings.json` change in a fresh worktree, commit, capture the hook's stdout/stderr directly rather than inferring from the outer command's success) and read `scope_for_cmd()` end to end |
 | [OI-146](#OI-146) | 2026-08-13 | session `1de11c79`, 3 spurious `exit 124` push timeouts while landing PR [#67](https://github.com/ZeOoba/ora-claude-config/pull/67) and [#83](https://github.com/ZeOoba/ora-claude-config/pull/83) | **An in-flight worktree/branch enforces its OWN BASE's pre-push gates — not the live checkout's — invisible until it rebases.** `hooks/git-prepush-hook-tests-gate.py` runs from the pushing branch's copy; a branch cut before a gate fix lands keeps failing under the OLD rules even after `main` is fixed. Concretely: `bcbca32` raised `PER_TEST_TIMEOUT_SECONDS` 90→240s on `main`, but a branch cut from before that commit still had `90`, so its 180s doubled-budget retry (2×90) kept timing out on a test that ran clean in 122s — well inside 240s, hopeless against 180s. Three consecutive pushes were misread as load contention; rebasing onto current `origin/main` cleared it with 0 failures. Given this repo's worktree+PR convention and a dozen-plus concurrent sessions, every gate improvement (budget, retry policy, a new check) is invisible to already-open branches until they rebase — a fixed problem looks unfixed, and the honest diagnosis ("stale base") gets misread as "gate flaky under load" (see [OI-119](#OI-119), and OI-135/OI-127 — same budget defect, PR [#67](https://github.com/ZeOoba/ora-claude-config/pull/67)/[#85](https://github.com/ZeOoba/ora-claude-config/pull/85) — not linked as `#`-anchors here since neither section has landed on `main` yet). Fix direction: `git-prepush-hook-tests-gate.py` (or a wrapping pre-push hook) could diff its own file's blob hash against `origin/main`'s and print a loud one-line note — "gate is N commits behind origin/main; rebase before diagnosing a failure as load" — before running the suite. Advisory only; must not block, since a deliberately-pinned base is sometimes correct |
 | [OI-130](#OI-130) | 2026-08-12 | session 08df9f95 (path A, 6 PRs) + session 663673c8 (path B, PR #70), both in `ora-claude-config` | **CodeRabbit's PR check reports `pass` on PRs it never reviewed — via TWO distinct routes.** **(A) Rate-limited:** 5 of 6 PRs merged 2026-08-12 (#45, #49, #51, #55, #65) showed `check=pass`, `detail=Review rate limited`, plus a "Review limit reached — we couldn't start this review" comment; only #47 was genuinely reviewed. **(B) Non-default base:** CodeRabbit declines every PR whose base is not the repo default branch and still reports `check=pass`, `detail=Review skipped: reviews are disabled for this base branch` — **deterministic, every time**, not sporadic. Verified on PR #70 (base `feat/model-canary-probe-step25`): 0 reviews, 0 review comments, empty `reviewDecision`, one bot comment that IS the skip notice — and it **merged in that state** at 2026-08-12T22:23:07Z. A green check meaning "nobody looked" is indistinguishable from one meaning "looked and found nothing"; both routes fail OPEN. Path B is structurally induced by ORA practice — any change depending on unmerged work must target a feature branch, which is what OI-131's branch divergence keeps producing. Fix: advisory-only + documented, or gate on a real review body existing (must cover BOTH notices, not just the rate-limit string), or raise the plan limit; path B additionally has a direct config fix |
 | [OI-141](#OI-141) | 2026-08-12 | `ora-appsec-sweep` 2026-08-12 fire (session `f74b697f`), re-observed at Gabriel's request | **MEDIUM** A scheduled run is **not single-model**: this one ran `claude-fable-5` for ~28 min then switched to `claude-opus-4-8` mid-run, main chain, no human turn. Its `model: fable` frontmatter pin **is** honoured at start — reversing its own tag's "not honored" claim — but does not hold. Probe now reports `MIXED_RUN` (`f852a45`) instead of plurality-voting; the retag itself is **deferred** because no single id describes the run. |
@@ -5353,3 +5354,50 @@ committed at all, which is what appears to have happened here.
 **Related:** ora-skills commit `85abbbc` (the backfill that recovered this instance);
 [[feedback_verified_null_vs_inferred_null]] (same shape — a sweep that reads "no candidates" as "verified
 in sync" rather than "didn't check this direction").
+
+---
+
+### OI-150
+**Status:** OPEN — UNCONFIRMED, needs deliberate reproduction
+**Opened:** 2026-08-13 (session `15f5b972`)
+**Source:** landing a `settings.json` deny-rule change ([PR #97](https://github.com/ZeOoba/ora-claude-config/pull/97))
+from an isolated worktree, `~/.claude/worktrees/land-commit-hygiene`.
+**Severity:** UNKNOWN pending reproduction — if real, it is a gap in a security-relevant control
+(`hooks/eos-review-gate.py`'s automatic blast-radius review dispatch), but this session obtained an
+independent review manually as a substitute, so no diff shipped unreviewed on this occasion.
+
+**Symptom.** `feedback_auto_review_blast_radius_gate.md` ratifies that `settings.json` changes get an
+**automatic, blocking** independent-reviewer dispatch via `hooks/eos-review-gate.py`, enforced as a
+PreToolUse hook on `git commit`. A `git commit -- settings.json` run from an isolated worktree produced
+no BLOCKED line, no WARNING line, and no override-token prompt — the commit simply succeeded, as if the
+gate either did not fire or determined the diff was out of scope.
+
+**What was and wasn't checked.** `hooks/lib/git_commit_parse.repo_root(cmd, cwd)` was tested directly
+against the exact commit command and cwd: it correctly returns the *worktree's own* toplevel via
+`git rev-parse --show-toplevel` (worktrees have a valid, distinct toplevel; this is not a `.git`-file
+detection bug). That rules out the most obvious "repo root not found -> silent allow" theory. The next
+candidate, `scope_for_cmd()` (defined in `hooks/eos-review-gate.py` itself, not the shared lib), was
+**not** successfully tested — by the time the silence was noticed, the diff was already committed, so
+nothing was staged and a post-hoc call to `scope_for_cmd()` could not reproduce the at-commit-time state.
+A live PreToolUse hook's actual stdout/stderr is also not visible from the outer Bash tool call result in
+this session, so it's possible the hook DID run and print something that was simply not surfaced — that
+is untested, not ruled out.
+
+**Why this matters even though nothing shipped unreviewed here.** `config-write-guard.py`'s own block
+message recommends doing exactly this — "Preferred path for a REAL edit: do this work in an isolated
+worktree... worktree copies are not gated" — for a DIFFERENT gate (config-write-guard itself, which is
+Edit/Write-scoped and correctly does NOT apply to worktree copies by design). If `eos-review-gate.py`
+*also* goes quiet from a worktree, but for the wrong reason (a bug, not a deliberate scope decision the
+way config-write-guard's is), then the sanctioned pattern for making a safe settings.json/hooks/** edit
+would silently skip the review that pattern is supposed to force — the two gates would need to agree on
+whether "worktree" means "safe to relax" or not, and right now that's unconfirmed for eos-review-gate.
+
+**Needs:** in a disposable worktree, stage a trivial `settings.json` change, run `git commit` with the
+hook's own debug/verbose path if one exists (or temporarily instrument it), and capture the hook's actual
+stdout/stderr directly rather than inferring behavior from whether the outer `git commit` call succeeded.
+Read `scope_for_cmd()` (not `repo_root()`) end to end against a worktree cwd. If the gate does have a
+worktree carve-out, confirm it's deliberate and documented (mirroring config-write-guard's own explicit
+worktree exemption) rather than an accidental gap.
+
+**Related:** [[feedback_auto_review_blast_radius_gate]] (the ratified doctrine this would undermine);
+`hooks/config-write-guard.py` (the DELIBERATE worktree exemption this may be conflated with).
