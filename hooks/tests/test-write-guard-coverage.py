@@ -136,6 +136,24 @@ def config_case(shape):
                      "ORA_CHIP_CLAIMS_LOG": _CONFIG_LOG}
 
 
+# lint-config-guard.py (OI-148, 2026-08-13) -- pre-create the protected target
+# so _file_state sees 'exists' (the guard is EXISTING-FILE-ONLY by design; a
+# non-existent target is a deliberate first-time-create pass-through, not a
+# guard gap -- see that file's own module docstring).
+_LINT_ROOT = tempfile.mkdtemp(prefix="wgc-lint-root-")
+_LINT_SESS = tempfile.mkdtemp(prefix="wgc-lint-sess-")
+with open(os.path.join(_LINT_ROOT, "eslint.config.js"), "w", encoding="utf-8") as _f:
+    _f.write("export default []")
+
+
+def lint_config_case(shape):
+    target = os.path.join(_LINT_ROOT, "eslint.config.js").replace("\\", "/")
+    payload = {"session_id": "meta-s1", "tool_name": shape.tool_name,
+               "tool_input": shape.build(target)}
+    return payload, {"ORA_LINT_CONFIG_GUARD_ROOT": _LINT_ROOT,
+                     "ORA_OVERRIDE_SESSIONS_DIR": _LINT_SESS}
+
+
 GUARDS = [
     GuardSpec("registry-write-guard.py",
               lambda s: s.kind == "file" and s.tool_name in LEGACY_TOOLS,
@@ -146,6 +164,17 @@ GUARDS = [
     GuardSpec("config-write-guard.py",
               lambda s: True,
               config_case, blocked_exit2, "config-write-guard.py"),
+    # lint-config-guard.py is contracted to every FILE and MOVE shape (it
+    # resolves real write_targets() for those, same as config-write-guard.py)
+    # but NOT shell shapes here -- its shell-text matcher requires the LITERAL
+    # "oxford-command-center" marker (a fixed constant, not derived from the
+    # ORA_LINT_CONFIG_GUARD_ROOT test seam), so a shell Shape built against
+    # this meta-test's temp root would never match; that path is already
+    # covered directly in hooks/tests/test-lint-config-guard.py's own shell
+    # cases instead.
+    GuardSpec("lint-config-guard.py",
+              lambda s: s.kind in ("file", "move"),
+              lint_config_case, blocked_exit2, "lint-config-guard.py"),
 ]
 
 
