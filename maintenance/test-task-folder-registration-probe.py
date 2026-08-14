@@ -123,6 +123,36 @@ expect("find_orphaned_registrations: disabled entry with missing file is NOT fla
 expect("find_orphaned_registrations: no entries -> []",
        tfrp.find_orphaned_registrations([], exists_fn=lambda p: True) == [])
 
+# --- find_archived_registrations (added 2026-08-14, closing the ora-cam-reconciliation-annual
+#     blind spot: an entry whose folder was moved under _archive_* keeps existing on disk at
+#     its NEW path, so find_orphaned_registrations's plain os.path.isfile check can never catch
+#     it -- confirmed 2 months of zero alarms, 2026-06-11 to 2026-08-14, for exactly this case) ---
+archive_entries = [
+    {"id": "ora-live", "enabled": True,
+     "filePath": r"C:\Users\Owner\OneDrive - Oxford Capital Partners\Documents\Claude\Scheduled\ora-live\SKILL.md"},
+    {"id": "ora-cam-reconciliation-annual", "enabled": True,
+     "filePath": r"C:\Users\Owner\OneDrive - Oxford Capital Partners\Documents\Claude\Scheduled\_archive_2026-06-11_orphans\ora-cam-reconciliation-annual\SKILL.md"},
+    {"id": "ora-paused-archived", "enabled": False,
+     "filePath": r"C:\Users\Owner\.claude\scheduled-tasks\_archive_2026-08-09_retired\ora-paused-archived\SKILL.md"},
+    {"id": "ora-forward-slash-archived", "enabled": True,
+     "filePath": "C:/Users/Owner/.claude/scheduled-tasks/_archive_2026-08-13_retired/ora-forward-slash-archived/SKILL.md"},
+]
+archived = tfrp.find_archived_registrations(archive_entries)
+expect("find_archived_registrations: flags the enabled entry under an _archive_* segment",
+       "ora-cam-reconciliation-annual" in archived, repr(archived))
+expect("find_archived_registrations: does not flag a normal live entry",
+       "ora-live" not in archived)
+expect("find_archived_registrations: disabled archived entry is NOT flagged (mirrors orphaned-check convention)",
+       "ora-paused-archived" not in archived)
+expect("find_archived_registrations: catches forward-slash paths too, not just backslash",
+       "ora-forward-slash-archived" in archived)
+expect("find_archived_registrations: sorted output",
+       archived == sorted(archived))
+expect("find_archived_registrations: no entries -> []",
+       tfrp.find_archived_registrations([]) == [])
+expect("find_archived_registrations: entry with no filePath -> not flagged, not a crash",
+       tfrp.find_archived_registrations([{"id": "ora-nopath", "enabled": True, "filePath": None}]) == [])
+
 # --- store_discovery.store_name / skill_folder_root (regression: probe originally passed
 #     the label straight to discover_store() instead of resolving it to a store name first) ---
 expect("store_name: cc -> claude-code-sessions", sd.store_name("cc") == "claude-code-sessions")
