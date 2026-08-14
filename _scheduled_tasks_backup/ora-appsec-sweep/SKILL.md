@@ -1,6 +1,6 @@
 ---
 name: ora-appsec-sweep
-description: General application-security sweep of ora-pm (live tenant portal, Stripe ACH) and oxford-command-center — secret scan (working tree + full git history), lockfile CVE audit, AR-ledger/balance-display schema review, tenant-portal auth/injection pass, and OWASP-LLM checks scoped to ORA's actual agent surfaces (hooks, MCP connectors, scheduled-task registries). REPORT-ONLY: findings go to Notion Ops Hub + open-items-tracker.md; never rotates, never pushes, never auto-fixes. Reads suppressions.md before reporting. Dispatches the per-repo review to the security-auditor agent (Fable-pinned). v1.3 (2026-07-24: Gabriel ratified Option C — the never-below-Fable floor is carried by the `security-auditor` Agent dispatch, not this task's own model; adds a MANDATORY DISPATCH INTEGRITY GATE that alarms rather than silently falling back to inline review, since inline review runs at the orchestrator's below-floor model). v1.2 (2026-07-24: MODEL PIN claim corrected — a transcript canary on the 2026-07-22 run DISPROVED the assumption that this task runs on Fable; see MODEL PIN note. Documentation only, no procedural change). v1.1 (2026-07-22: dispatch-to-agent simplification + fixed a duplicate-YAML-frontmatter defect that predated this version; see STATUS note). v1.0 registered 2026-07-20 (Plan 4b/4a) after a manual, Gabriel-supervised first run (2026-07-19). [MODEL: claude-opus-4-8 — frontmatter `model: fable` NOT honored on CC/MCP (server-pin) | checked 2026-07-24 via live-run transcript canary]
+description: General application-security sweep of ora-pm (live tenant portal, Stripe ACH) and oxford-command-center — secret scan (working tree + full git history), lockfile CVE audit, AR-ledger/balance-display schema review, tenant-portal auth/injection pass, and OWASP-LLM checks scoped to ORA's actual agent surfaces (hooks, MCP connectors, scheduled-task registries). REPORT-ONLY: findings go to Notion Ops Hub + open-items-tracker.md; never rotates, never pushes, never auto-fixes. Reads suppressions.md before reporting. Dispatches the per-repo review to the security-auditor agent (Fable-pinned). v1.5 (2026-08-12: added a fourth, POST-HOC DISPATCH INTEGRITY GATE assertion — a model-floor probe (maintenance/check-dispatch-model-floor.py) that reads the subagent transcripts after the run and alarms via a `⚠️ MODEL-FLOOR BREACH` email if any subagent fell back below the Fable floor mid-run; closes the OI-052 blind spot that assertions 1–3, being spawn-time only, cannot see. Report-only; findings from a fallen-back subagent stay usable, the breach is just made visible). v1.4 (2026-08-03, Gabriel-directed re-canary): model re-observed off the 2026-08-01T01:06Z scheduled fire, session local_0a029d90 — claude-opus-5 across all 93 scheduled-portion assistant messages. Supersedes the 07-24 claude-opus-4-8 finding, which predated the 2026-07-26 Opus 5 lineup rollout. That session DID continue interactively (human turn late in the run), i.e. exactly the case where get_session's single model field is untrustworthy — so the authoritative transcript-cut method was used and the interactive tail was excluded; here both methods happened to agree. The frontmatter model: fable pin is STILL not honored on CC/MCP (server-pin, Claude Code issue #48976) — unchanged finding, and the reason the Fable floor rides on the security-auditor Agent dispatch rather than this task. v1.3 (2026-07-24: Gabriel ratified Option C — the never-below-Fable floor is carried by the security-auditor Agent dispatch, not this task's own model; adds a MANDATORY DISPATCH INTEGRITY GATE that alarms rather than silently falling back to inline review, since inline review runs at the orchestrator's below-floor model). v1.2 (2026-07-24: MODEL PIN claim corrected — a transcript canary on the 2026-07-22 run DISPROVED the assumption that this task runs on Fable; see MODEL PIN note. Documentation only, no procedural change). v1.1 (2026-07-22: dispatch-to-agent simplification + fixed a duplicate-YAML-frontmatter defect that predated this version; see STATUS note). v1.0 registered 2026-07-20 (Plan 4b/4a) after a manual, Gabriel-supervised first run (2026-07-19). [MODEL: claude-opus-5 observed — frontmatter model: fable still NOT honored on CC/MCP (server-pin) | checked 2026-08-03 via live-run transcript canary]
 model: fable
 ---
 
@@ -164,11 +164,37 @@ After EACH per-repo Agent call, assert ALL of the following before using its out
    design replaced, and it runs below the floor.
 3. `model: "fable"` was passed explicitly on the call (never omitted, never inherited).
 
-If ANY assertion fails for a repo: do NOT silently continue. Mark that repo's section
+Assertions 1–3 are SPAWN-TIME checks — they confirm the dispatch happened and was pinned. They are
+structurally blind to a mid-run FALLBACK, where a subagent begins on `claude-fable-5` and then drops
+to the orchestrator's below-floor model partway through, with the below-floor tier producing the
+actual findings report (observed on BOTH the 2026-07-31 fire — fable → opus-5 — and the 2026-08-12
+fire — fable → opus-4-8). One post-hoc assertion closes that blind spot (OI-052):
+
+4. **(POST-HOC — run ONCE after BOTH repos' dispatches, not per-repo)** Every subagent HELD the Fable
+   floor for its full run, not merely at spawn. Run:
+   `python ~/.claude/maintenance/check-dispatch-model-floor.py --session $CLAUDE_CODE_SESSION_ID`
+   Exit 0 = every subagent held the floor end-to-end; exit 1 = at least one subagent ran below Fable
+   or fell back mid-run; exit 2 = the transcripts could not be read (verified-null — treat as a gate
+   failure, NEVER a pass; an unverifiable floor is not a held floor). Quote the probe's per-agent
+   table verbatim in the completion report either way.
+
+If assertion 1, 2, or 3 fails for a repo: do NOT silently continue. Mark that repo's section
 `DISPATCH FAILED — FINDINGS NOT PRODUCED AT THE REQUIRED MODEL FLOOR`, omit any inline substitute
 findings, and email ggoldberg@oxfordra.net (subject prefix `⚠️ ORA AppSec Sweep — DISPATCH FAILURE`)
 via the standard Outlook COM path, in addition to the normal reporting. A dispatch failure is a
 first-class alarm even when the sweep finds nothing.
+
+If assertion 4 fails (probe exit 1 or 2): this is DIFFERENT from a dispatch failure — the findings
+ARE from the real subagent and remain usable (do NOT discard them and do NOT substitute inline
+review). But the security judgment breached the Fable floor for part of its run, so record a
+`MODEL-FLOOR BREACH (OI-052)` line in the completion report AND email ggoldberg@oxfordra.net (subject
+prefix `⚠️ ORA AppSec Sweep — MODEL-FLOOR BREACH`) via the standard Outlook COM path, with the probe's
+output pasted in. This alarm is the whole point of OI-052: it turns a silent mid-run fallback into a
+visible signal rather than letting a "CLEAN, Fable-floor held" claim carry an invisible asterisk.
+NOTE (as of 2026-08-12): the fallback is currently the NORM, not the exception — both fires to date
+tripped it — so until the platform holds the pin for the duration (Claude Code issue #48976), expect
+this alarm to fire every run; that is correct behaviour, not a probe defect. Do NOT "fix" it by
+loosening the floor or deleting the assertion.
 
 **FIRST LIVE TEST — the 2026-07-29 fire.** This dispatch has never actually executed: the 2026-07-22
 run made zero Agent calls because v1.1 (which introduced the dispatch) was authored during that very
