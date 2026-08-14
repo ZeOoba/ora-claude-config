@@ -53,7 +53,7 @@
 - Sourcing: 5 entry points — `county-parcel-screen` (off-market county records) · `deal-flow-triage` agent (inbound broker/listing batch) · `deal-recon` agent (instant single-target first-look) · `verified-deal-recon` workflow (adversarially-verified pre-screen, default) · `acquisition-underwriting` SCREEN mode (buy-box scorecard).
 - Scheduling: any "schedule this"/recurring-task ask routes to `register-scheduled-task` (dual-fleet, ratified) — never the generic `schedule` skill, which has no fleet/routing awareness.
 - Morning brief: "morning brief"/"daily brief" phrasing routes to `daily-brief` (ORA's sourced pipeline) — the generic `morning` skill only on explicit `/morning`.
-- Setup audit/prune: `claude-setup-audit` is the sole skill for "audit/optimize/declutter my Claude Code setup" — check it before building a parallel one.
+- Setup audit/prune: `ora-setup-audit` is the sole skill for "audit/optimize/declutter my Claude Code setup" — check it before building a parallel one.
 - If a referenced skill is absent on the current surface, say so — never improvise its procedure.
 - Debugging/code-audit: generic "debug"/"fix errors"/"code audit" routes through Engineering OS's `/debug` lane first; `code-debugging-optimizations` applies once explicitly named or handed off from `/debug`. Its autonomous-mode (no approval gates on edits/commits) never overrides Invariant 2's oxfordra.net confirmation.
 - Code review: bare code-reviewer agent → pr-review-toolkit's (self-contained); coderabbit's collides but needs an uninstalled CLI.
