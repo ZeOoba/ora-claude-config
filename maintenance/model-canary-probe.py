@@ -202,21 +202,47 @@ def observe_models(rows):
     return (counts, inj, cut)
 
 
+def format_breakdown(counts):
+    """-> 'claude-opus-4-8 x45 (58%), claude-fable-5 x32 (42%)', busiest first,
+    ties broken alphabetically so output is deterministic across runs.
+
+    The percentage carries a judgement the raw counts don't: a 1-message
+    fallback (x1, 1%) should read very differently from a genuine near-even
+    split (x32, 42%), and MIXED_RUN has no minimum-share threshold by design
+    (thresholds rot) -- so the reader needs the share to make that call."""
+    total = sum(counts.values())
+    if not total:
+        return ""
+    return ", ".join(
+        "%s x%d (%d%%)" % (k, v, round(100.0 * v / total))
+        for k, v in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
+
+
 def classify(task_id, tag_model, tag_date, observed, anchor,
-             upgradable_is_action=False):
+             upgradable_is_action=False, counts=None):
     """-> (severity, code, detail) where severity is 'action'|'info'|'ok'.
 
     observed is the winning bare model id, or None when nothing usable was seen.
     Never returns 'action' on absence alone -- absence is the caller's
     unverifiable bucket, which is reported separately and never as clean.
 
+    counts is the optional {model_id: msg_count} the winner was drawn from.
+    Omit it (or pass a single-entry / empty dict) for the legacy single-model
+    path -- every pre-existing caller is unaffected. When it holds >1 entry the
+    run is MIXED: a tag matching any model actually present reads as info
+    MIXED_RUN rather than a defect (the plurality winner is a sampling
+    artifact, not ground truth -- see the block below), while a tag matching
+    NONE of them still reads as CONTRADICTED. Tag-shape gaps and staleness are
+    both checked independently of mixedness, so neither can be silently
+    swallowed by it.
+
     UPGRADABLE is INFO by default, deliberately. `UNVERIFIABLE` is one of the
     four RATIFIED buckets, not a gap -- it was the honest baseline before a
     cheap observation method existed. Flagging all ~17 of them as actions every
     run would leave the probe permanently non-zero, which trains readers to
     ignore it. The real gaps are UNTAGGED / UNDATED / CONTRADICTED /
-    OBSERVATION_STALE. Pass --include-upgradable when deliberately running an
-    upgrade sweep."""
+    OBSERVATION_STALE / MIXED_RUN-with-no-matching-tag. Pass --include-upgradable
+    when deliberately running an upgrade sweep."""
     if observed is None:
         return ("info", "NO_OBSERVATION",
                 "no usable scheduled-portion model in the sampled session(s)")
@@ -229,13 +255,51 @@ def classify(task_id, tag_model, tag_date, observed, anchor,
     if tag_date is None:
         return ("action", "UNDATED",
                 "tag carries an id but no checked/set date; observed %s" % observed)
-    if tag_model != observed:
+    # A scheduled portion is not guaranteed to be single-model. ora-appsec-sweep
+    # 2026-08-12 started on claude-fable-5 (its `model: fable` frontmatter pin
+    # honoured) and switched to claude-opus-4-8 mid-run, no human turn involved.
+    # `observed` is only the PLURALITY winner, so on a mixed run it flips with
+    # sample timing -- that task read claude-fable-5 mid-run and claude-opus-4-8
+    # once complete, i.e. two contradictory "observations" of one fire in one
+    # day. Never let that artifact masquerade as a tag defect: report the whole
+    # breakdown instead, and reserve CONTRADICTED for a tag matching NOTHING
+    # actually seen.
+    #
+    # Mixedness is deliberately a FLAG, not an early return -- the first cut of
+    # this fix returned as soon as it detected a mixed run, which put it ahead
+    # of the anchor check below and silently downgraded a pre-existing ACTION
+    # (OBSERVATION_STALE) to an info on any mixed run with a stale tag date
+    # (caught in review, 2026-08-12, before merge). Staleness is ORTHOGONAL to
+    # mixing: "this tag predates the lineup anchor and needs re-observing" does
+    # not stop being true just because the run also turned out to be mixed.
+    mixed = bool(counts) and len(counts) > 1
+    breakdown = format_breakdown(counts) if mixed else None
+
+    if mixed and tag_model not in counts:
+        return ("action", "CONTRADICTED",
+                "run spans %d models (%s); NONE matches tag %s"
+                % (len(counts), breakdown, tag_model))
+    if not mixed and tag_model != observed:
         return ("action", "CONTRADICTED",
                 "tag asserts %s but the task fires on %s" % (tag_model, observed))
     if anchor and tag_date < anchor:
-        return ("action", "OBSERVATION_STALE",
-                "tag %s predates lineup anchor %s; re-observed %s (unchanged)"
-                % (tag_date, anchor, observed))
+        detail = ("tag %s predates lineup anchor %s; re-observed %s (unchanged)"
+                  % (tag_date, anchor, observed))
+        if mixed:
+            detail += "; run spans %d models (%s)" % (len(counts), breakdown)
+        return ("action", "OBSERVATION_STALE", detail)
+    if mixed:
+        # A max() tie means there is no real "winner" -- only name one when the
+        # count data actually supports the claim, so the phrase never implies a
+        # plurality that does not exist.
+        top = sorted(counts.values(), reverse=True)
+        winner_clause = (
+            (" -- the plurality winner %s is a sampling artifact, not a defect"
+             % observed) if top[0] != top[1] else
+            " -- tied, no single plurality winner; both are genuine observations")
+        return ("info", "MIXED_RUN",
+                "run spans %d models (%s); tag %s matches one of them%s"
+                % (len(counts), breakdown, tag_model, winner_clause))
     return ("ok", "OBSERVED", "tag matches observation (%s)" % observed)
 
 
@@ -373,7 +437,7 @@ def main():
         desc = read_description(t.get("filePath") or "")
         raw_tag, tag_model, tag_date = parse_model_tag(desc)
 
-        observed, sampled, went_inter = None, 0, None
+        observed, sampled, went_inter, won_counts = None, 0, None, None
         for sess in (by_task.get(tid) or [])[:a.max_sessions_per_task]:
             jp = transcript_for(sess)
             if not jp:
@@ -387,6 +451,7 @@ def main():
             if not counts:
                 continue
             observed = max(counts.items(), key=lambda kv: kv[1])[0]
+            won_counts = counts
             went_inter = cut < len(rows)
             break
 
@@ -394,11 +459,15 @@ def main():
             unverifiable.append((tid, sampled))
 
         sev, code, detail = classify(tid, tag_model, tag_date, observed, anchor,
-                                     a.include_upgradable)
+                                     a.include_upgradable, counts=won_counts)
         rec = {"task": tid, "code": code, "detail": detail,
                "tag_model": tag_model, "tag_date": tag_date,
                "observed": observed, "went_interactive": went_inter,
-               "sessions_sampled": sampled}
+               "sessions_sampled": sampled,
+               # Full breakdown, not just the plurality winner -- without this
+               # a downstream consumer of model-canary.json can only learn a
+               # run was mixed by string-parsing `detail`.
+               "observed_counts": won_counts}
         (actions if sev == "action" else infos if sev == "info" else oks).append(rec)
 
     print("model-canary-probe  scope=cc-enabled-recurring  in_scope=%d exempt=%d "
@@ -424,6 +493,13 @@ def main():
     # but it is also the reason a single-sample tag is a point-in-time
     # observation rather than a durable property, and the distribution is the
     # only place that stays visible.
+    # NOTE (2026-08-12 review): this still counts one vote per TASK (the
+    # plurality winner), same as before -- a minority model inside a mixed run
+    # is not folded in here, because "minority: X on N task(s)" below reads as
+    # a task count and switching this to a message count would silently break
+    # that phrasing. The full per-task breakdown is not lost, though: it now
+    # rides on each record's "observed_counts" (see rec{} above) for anyone who
+    # needs the true message-level split.
     dist = {}
     for r in actions + infos + oks:
         if r["observed"]:

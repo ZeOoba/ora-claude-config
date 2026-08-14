@@ -1,6 +1,6 @@
 ---
 name: ora-pm-ledger
-description: ORA Evening Ledger — consolidated daily close. Runs three blocks in order at one cadence — A Notion Daily Digest (every day), B Outbox QC Sweep (weekdays only), C EOD Action Ledger (every day). Restored 2026-07-08 from three separately-archived block specs after the 2026-07-05 CC/MCP registry loss destroyed the original consolidated file; routing/send-path/paths corrected to current canon during restoration (see RESTORATION NOTE at bottom). CC canonical file inlined 2026-07-08 (second restoration same day) to remove a redirect-to-OneDrive pattern that had already broken twice. Re-enabled 2026-07-09 (Gabriel-approved, post-recovery-stabilization confirmation). Block A edit-detection coverage gaps fixed 2026-07-16 (see AMENDMENT NOTE at bottom). [MODEL: UNVERIFIABLE | checked 2026-07-08]
+description: ORA Evening Ledger — consolidated daily close. Runs three blocks in order at one cadence — A Notion Daily Digest (every day), B Outbox QC Sweep (weekdays only), C EOD Action Ledger (every day). Restored 2026-07-08 from three separately-archived block specs after the 2026-07-05 CC/MCP registry loss destroyed the original consolidated file; routing/send-path/paths corrected to current canon during restoration (see RESTORATION NOTE at bottom). CC canonical file inlined 2026-07-08 (second restoration same day) to remove a redirect-to-OneDrive pattern that had already broken twice. Re-enabled 2026-07-09 (Gabriel-approved, post-recovery-stabilization confirmation). Block A edit-detection coverage gaps fixed 2026-07-16 (see AMENDMENT NOTE at bottom). [MODEL: claude-opus-5 observed | checked 2026-08-12 via live-run transcript canary]
 output_contract:
   version: 1
   blocks:
@@ -95,10 +95,32 @@ either fleet. Run it before anything else:
    weekdays-only): if that block's email AND its durable copy already exist for
    `{TODAY}`, **SKIP it** — do not re-send, do not re-post. Run only the block(s)
    with no evidence of today's delivery.
-3. **If all applicable blocks are already delivered:** no-op. Append ONE line to the
-   day's `EOD Action Ledger — {TODAY}` Ops Hub page: "ora-pm-ledger {TODAY}: duplicate
-   same-day fire suppressed by de-dupe guard — prior run already delivered A/B/C."
+3. **If all applicable blocks are already delivered:** no-op.
+   **READ the day's `EOD Action Ledger — {TODAY}` Ops Hub page BEFORE writing to it.**
+   Scan its content for an existing suppression line — match on the stable substring
+   `duplicate same-day fire suppressed by de-dupe guard` (not on the whole sentence,
+   which carries run-specific evidence detail that varies between passes).
+   - **Already present ⇒ append NOTHING.** The fact is already recorded; a second copy
+     adds no information. The guard is satisfied — proceed to step 4 having written
+     nothing at all.
+   - **Absent ⇒ append ONE line:** "ora-pm-ledger {TODAY}: duplicate same-day fire
+     suppressed by de-dupe guard — prior run already delivered A/B/C." Optionally
+     follow it with a short parenthetical citing the evidence (send timestamps, the
+     Ops Hub pages found, and the cause — e.g. catch-up burst vs. a real double
+     registration).
+
    Send NOTHING; do NOT write HTML fallbacks (those are for send FAILURES only).
+
+   **Why the read-first step exists (added 2026-08-11).** This append is the guard's
+   ONLY write, and it was not idempotent: step 3 said "Append ONE line" with no
+   existence check, so every pass that reached it wrote another copy. Observed live
+   2026-08-11 — the 17:02 ET catch-up burst delivered A/B/C, then the 18:00 ET cron
+   slot produced TWO guard passes ~2 minutes apart (18:01 and 18:03); the second
+   would have double-appended had it not read the page first. The deliverables were
+   correctly protected throughout — the defect was confined to the suppression note.
+   Consequence if reintroduced: a repeatedly-retried or burst-fired slot silently
+   accretes identical lines onto the day's ledger, which is the durable audit record
+   of what the guard actually did. Do NOT "simplify" this back to a bare append.
 4. Proceed to the surviving blocks only after this guard clears.
 
 ---
@@ -1278,3 +1300,33 @@ this note was written — not merely selftested offline.
 
 **Not done:** Property Register has the same uniform-stamp problem and no
 detector. That gap is unchanged and is not implicitly closed by this note.
+
+## AMENDMENT NOTE (2026-08-11, evening — §0.5 step 3 append made idempotent)
+
+**The de-dupe guard's own write was not de-duped.** Step 3 read "Append ONE line"
+with no existence check, so every pass reaching it appended another copy. The guard
+protected the three DELIVERABLES correctly — the defect was confined to its
+suppression note, which lands on the day's `EOD Action Ledger` Ops Hub page, i.e.
+the durable audit record of what the guard did.
+
+**Observed live, not theorized.** The 2026-08-11 18:00 ET fire found A/B/C already
+delivered by the 17:02 ET catch-up burst (machine dark 08-10 21:34 → 08-11 17:00 ET).
+That slot then produced TWO guard passes ~2 minutes apart: the 18:01 pass appended
+the suppression line, and the 18:03 pass would have appended an identical second copy
+had it not read the page first. Left unfixed, any repeatedly-retried or burst-fired
+slot accretes duplicate lines indefinitely.
+
+**Fixed:** step 3 now mandates READ-before-write against the ledger page, matching on
+the stable substring `duplicate same-day fire suppressed by de-dupe guard` (not the
+full sentence, which carries per-run evidence detail that varies between passes).
+Present ⇒ write nothing and proceed to step 4. Absent ⇒ append the one line, with an
+optional evidence parenthetical. A "do NOT simplify this back to a bare append"
+warning and the failure mode are recorded inline at §0.5 so the check is not
+optimized away by a future reader who sees only a redundant-looking read.
+
+**Not changed:** the guard's detection logic (steps 1, 2, 4) is untouched — it already
+re-derives its answer mechanically each run and needed no change. No routing,
+send-path, cadence, block logic, or registry change. Content-only edit to §0.5, made
+by direct editing of this file; `update_scheduled_task` was deliberately NOT used,
+since it drops non-owned frontmatter keys and would have silently deleted this file's
+`output_contract` block (OI-109).

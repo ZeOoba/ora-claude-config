@@ -188,7 +188,12 @@ def materialize_pushed_commit(repo_root=None):
         remote (the push carries no such content), so this is a lost hygiene tripwire, not
         lost egress control -- the scheduled live probe runs still cover it."""
     repo_root = repo_root or REPO_ROOT_OVERRIDE or CLAUDE_DIR
-    worktree_path = tempfile.mkdtemp(prefix="ora-doctrine-push-")
+    # Sweep BEFORE creating this run's dir, so debris from a run that died before its
+    # finally (see sweep_stale_push_worktrees) is collected by the next push rather than
+    # accumulating forever. Best-effort by construction: it cannot raise, and its result
+    # is deliberately ignored -- cleanup must never gate a push.
+    sweep_stale_push_worktrees(repo_root=repo_root)
+    worktree_path = tempfile.mkdtemp(prefix=SCRATCH_WORKTREE_PREFIX)
     try:
         # `git worktree add` refuses a non-empty target, and on some git versions an
         # already-EXISTING-but-empty one too -- remove the mkdtemp()-created dir and
@@ -240,6 +245,140 @@ def remove_worktree(worktree_path, repo_root=None):
             "(%s) -- harmless but stale; `git worktree prune` clears it later.\n"
             % (worktree_path, detail))
         shutil.rmtree(worktree_path, ignore_errors=True)
+
+
+SCRATCH_WORKTREE_PREFIX = "ora-doctrine-push-"
+# 6h: a gate run lives for seconds. Anything this old is debris, not a peer. Deliberately
+# far above any plausible run so the concurrency guard has enormous margin -- the cost of
+# sweeping too late is a stale directory; the cost of sweeping too early is eating a live
+# probe's worktree and fail-closed-blocking someone else's push.
+SCRATCH_WORKTREE_MAX_AGE_SECONDS = 6 * 3600
+
+
+def _only_scratch_registrations_missing(repo_root):
+    """True when every registered worktree whose DIRECTORY is absent is one of ours
+    (SCRATCH_WORKTREE_PREFIX). Gates the prune leg -- see the long comment at its call
+    site for why --expire cannot carry that guarantee on its own.
+
+    Fails CLOSED (returns False, i.e. skip the prune) on any parse or subprocess trouble:
+    an unreadable worktree list is exactly the state in which we cannot prove a prune is
+    safe, and abstaining costs only a cosmetic stale registration."""
+    try:
+        result = subprocess.run(["git", "worktree", "list", "--porcelain"],
+                                cwd=repo_root, capture_output=True, text=True,
+                                encoding="utf-8", errors="replace", env=_clean_git_env())
+        if result.returncode != 0:
+            return False
+        for line in (result.stdout or "").splitlines():
+            if not line.startswith("worktree "):
+                continue
+            path = line[len("worktree "):].strip()
+            if not path or os.path.isdir(path):
+                continue                       # present: prune will not touch it anyway
+            if not os.path.basename(path.rstrip("/\\")).startswith(SCRATCH_WORKTREE_PREFIX):
+                return False                   # someone else's missing dir: do not prune
+        return True
+    except Exception:
+        return False
+
+
+def sweep_stale_push_worktrees(repo_root=None, temp_root=None,
+                               max_age_seconds=SCRATCH_WORKTREE_MAX_AGE_SECONDS,
+                               skip_path=None, now=None):
+    """Janitor for scratch worktrees LEFT BY EARLIER RUNS. Best-effort, never raises an
+    Exception, never influences the gate's decision. Returns (dirs_removed, prune_ran).
+
+    (KeyboardInterrupt/SystemExit DO propagate -- they are BaseException, not Exception.
+    That is correct: Ctrl-C during a push should kill the hook, not be swallowed by its
+    janitor. Do not "fix" this by catching BaseException.)
+
+    remove_worktree() already cleans up in a finally, so why this exists: two leak modes
+    escape a finally by construction, both observed live on 2026-08-09 (9 worktrees
+    registered against the real repo, the oldest dating from 08-06):
+      (A) the process never reaches the finally -- a pre-push hook dies with the push it
+          is gating (Ctrl-C, terminal close, SIGKILL). No in-process handler can cover
+          that; only a LATER run can. Hence sweeping at START, not only at end.
+      (B) `git worktree remove` fails, remove_worktree() falls back to rmtree and records
+          the leftover as "harmless but stale; `git worktree prune` clears it later" --
+          and nothing ever ran that prune. "Later" is not a mechanism.
+
+    THE SAFETY PROPERTY, which matters more than the cleanup: this must never touch a
+    CONCURRENTLY RUNNING gate's worktree. Pushes from different sessions overlap
+    routinely. Deleting a live scratch dir mid-probe would make the probe fail to read
+    its own tree, and this gate is fail-closed -- so a hygiene sweep would become a
+    spurious push block, which is strictly worse than the debris it removes. Two
+    independent guards: an age threshold (a live run's dir is seconds old) and an
+    explicit skip_path. The prune leg is guarded SEPARATELY, by
+    _only_scratch_registrations_missing() -- NOT by --expire, which an independent review
+    disproved as a protection for exactly the aged registrations that matter. See the
+    comment at the prune call site.
+
+    Only SCRATCH_WORKTREE_PREFIX names are eligible: this owns its own debris and nothing
+    else's. temp_root/now exist so the janitor's OWN tests can drive it against a fixture
+    dir. Note what that does NOT claim: the suite's other tests reach this function
+    through materialize_pushed_commit() and do sweep the real %TEMP% -- at the production
+    6h threshold, i.e. inside the same safety envelope as production, which is why that is
+    acceptable rather than merely unnoticed."""
+    removed = 0
+    prune_ran = False
+    try:
+        repo_root = repo_root or REPO_ROOT_OVERRIDE or CLAUDE_DIR
+        temp_root = temp_root or tempfile.gettempdir()
+        now = time.time() if now is None else now
+        skip_norm = os.path.normcase(os.path.abspath(skip_path)) if skip_path else None
+
+        try:
+            entries = os.listdir(temp_root)
+        except OSError:
+            entries = []
+        for name in entries:
+            if not name.startswith(SCRATCH_WORKTREE_PREFIX):
+                continue
+            path = os.path.join(temp_root, name)
+            if not os.path.isdir(path):
+                continue
+            if skip_norm and os.path.normcase(os.path.abspath(path)) == skip_norm:
+                continue
+            try:
+                age = now - os.stat(path).st_mtime
+            except OSError:
+                continue                      # cannot age it => cannot prove it is debris
+            if age < max_age_seconds:
+                continue                      # young enough to be a live peer: leave it
+            shutil.rmtree(path, ignore_errors=True)
+            if not os.path.isdir(path):
+                removed += 1
+
+        # Clear registrations whose directories are already gone -- leak mode (B), plus
+        # anything the loop above just deleted.
+        #
+        # PRUNE ONLY WHEN EVERY MISSING-DIRECTORY REGISTRATION IS OUR OWN DEBRIS.
+        # `--expire` alone is NOT sufficient, and an earlier revision of this function was
+        # wrong to claim it was (independent review, 2026-08-09, disproved empirically):
+        # for the "gitdir file points to non-existent location" branch git does not consult
+        # --expire at all once the admin files are older than the window. The long-lived
+        # developer worktrees under .claude/.claude/worktrees/ are unlocked and routinely
+        # far older than that (one was 123h at the time of writing), so a single transient
+        # stat failure on one of their paths -- AV hold, OneDrive hiccup, a dir renamed for
+        # a moment -- during ANY of the ~27 concurrent sessions' pushes would drop its
+        # registration permanently ("fatal: not a git repository" when the path returns).
+        # That is someone else's work destroyed by a hygiene sweep, so the sweep now
+        # abstains entirely whenever it sees a missing-dir entry it does not own. The
+        # rmtree leg above has already reclaimed the disk either way; the registration is
+        # cosmetic and the next push retries. --expire is retained as defence in depth.
+        expire = "now" if max_age_seconds <= 0 else "%d.seconds.ago" % int(max_age_seconds)
+        try:
+            if _only_scratch_registrations_missing(repo_root):
+                subprocess.run(["git", "worktree", "prune", "--expire", expire],
+                               cwd=repo_root, capture_output=True, text=True,
+                               encoding="utf-8", errors="replace", env=_clean_git_env())
+                prune_ran = True
+        except Exception:
+            pass
+    except Exception:
+        # Deliberately total. Nothing this function can hit is worth failing a push over.
+        pass
+    return removed, prune_ran
 
 
 def run_doctrine_probe():

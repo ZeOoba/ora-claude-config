@@ -274,6 +274,30 @@ def test_multifire_cron_collides_on_shared_fire_time():
           "expected a 13:40 collision between the two tasks, got %r" % (data,))
 
 
+# 16. --json's per-task tasks[] entries expose last_run_at directly (added
+# 2026-08-12, closes the gap flagged in reference_ora_session_sweep_lams_
+# registry_gap.md: a caller cross-referencing lastRunAt for date-sourcing
+# had to fall back to re-parsing the registry file paths fleet-status.py
+# prints, duplicating discover_registries() logic, because the JSON output
+# had id/fleet/enabled/cron but not lastRunAt even though the human-readable
+# table already prints it and the registry itself always carries the field).
+def test_json_tasks_expose_last_run_at():
+    tasks = [
+        task("ran-before", cron="0 6 * * *", created_days_ago=5,
+             last_run="2026-08-01T12:00:00.000Z"),
+        task("never-ran", cron="0 8 1 1,4,7,10 *", created_days_ago=1),
+    ]
+    data, _ = run(tasks)
+    by_id = {t["id"]: t for t in (data or {}).get("tasks", [])}
+    check("test_json_tasks_expose_last_run_at_present",
+          data is not None
+          and by_id.get("ran-before", {}).get("last_run_at") == "2026-08-01T12:00:00.000Z",
+          "expected ran-before's last_run_at echoed verbatim, got %r" % (data,))
+    check("test_json_tasks_expose_last_run_at_null_when_never_ran",
+          data is not None and by_id.get("never-ran", {}).get("last_run_at") is None,
+          "expected never-ran's last_run_at to be null, got %r" % (data,))
+
+
 if __name__ == "__main__":
     test_all_healthy_is_ok()
     test_quarterly_not_yet_due_is_not_overdue()
@@ -290,6 +314,7 @@ if __name__ == "__main__":
     test_same_time_overlapping_weekday_range_still_collides()
     test_multifire_cron_counted_in_am_pileup()
     test_multifire_cron_collides_on_shared_fire_time()
+    test_json_tasks_expose_last_run_at()
     if _failures:
         print("\n%d FAILURE(S): %s" % (len(_failures), ", ".join(_failures)))
         sys.exit(1)

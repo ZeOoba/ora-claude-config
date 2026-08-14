@@ -37,6 +37,7 @@
 - [portfolio.json generatedAt churn](reference_portfolio_json_generatedat_commit_churn.md) — RESOLVED 07-27; dirty ≠ lease data changed
 - Setup audits: [07-09](project_claude-setup-audit-2026-07-09.md) (migration CLOSED; 15/21 resolved) · [07-16](project_claude-setup-audit-2026-07-16.md) (G1-G8 done; chip TERMINAL, needs Gabriel)
 - [eos-review-gate shipped](project_eos_review_gate_shipped_2026-07-24.md) — blast-radius commit review gate, `c53c69c`
+- **⚠️ [Run-once guard EXISTS as block-sentinel.py](reference_run_once_guard_is_block_sentinel_not_run_once_guard_ps1.md)** — shipped 08-09 (PR #39/#40); NOT `run-once-guard.ps1`, exits are 10/11/12 not 3/4. Re-specced from scratch once already — verify before building
 - [Governor-LTV remediation PR #233](project_governor_ltv_remediation_2026-07-24.md) — 11 shipped; OPEN: debt-scoring per-property ltv gap + silent-refusal reload path
 - [Northwood/EGFLLC loan miscategorized 07-27](project_northwood_egflc_loan_miscategorized_2026-07-27.md) — RESOLVED 08-03; workbook LTV cells now correct, stop applying the manual back-out
 - CLOSED (detail in each file): [Tenant DB renewal-watch view](project_tenant_db_renewal_watch_view_2026-07-22.md) · [Tenant DB sync](project_tenant_db_no_sync_rootcause.md) · [orphan-guard timing](project_orphan_guard_timing_2026-07-24.md) · [autonomy-gate indirection ceiling](project_autonomy_gate_indirection_ceiling_followup.md) · [bash-guard indirection gap](project_bash_guard_indirection_gap.md) · [owner-outreach stale-guard](project_owner_outreach_stale_guard_watch.md) · [Lighthouse perf/CSP](reference_oxfordra_lighthouse_csp_fix_2026-07-21.md)
@@ -93,6 +94,7 @@
 - [External AI Governance Proposals](feedback_external_ai_governance_proposals.md) — merged selectively; Hard Invariants supreme
 - [Auto-review blast-radius gate](feedback_auto_review_blast_radius_gate.md) — 07-24: blocking for hooks/financial code; needs an AgentTool carve-out
 - [Artifact staleness scan false positives](feedback_artifact_staleness_scan_mtime_false_positives.md) — mtime can't measure a live-read artifact; LIVE/FROZEN/HYBRID convention
+- [Sweep-then-verify](feedback_sweep_then_verify.md) — grep-inventory before multi-instance edits, re-grep after to prove zero remain
 
 ---
 *Index holds pointers, not narration — history in [event_log.md](event_log.md).*
