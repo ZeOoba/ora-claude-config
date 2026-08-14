@@ -12,6 +12,42 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-14 — ora-open-sessions-board answered.json fix pushed to origin; main checkout fast-forwarded
+
+Followed up on the earlier same-day fix (`upsert-answered-sessions.py` + SKILL.md STEP 6(a) hardening, commit `5665a80`). Gabriel: "push it."
+
+**Push blocked, then routed through an isolated worktree.** The main `~/.claude` checkout was ahead 98 / behind 14 of `origin/feat/model-canary-probe-step25`, and a direct `git merge` in the main checkout aborted cleanly on other sessions' uncommitted work (`event_log.md`, an untracked `maintenance/check-dispatch-model-floor.py`) — correctly refused rather than clobbering it. Created `.claude/worktrees/push-open-sessions-board-fix` off commit `5665a80` (matching this repo's existing tmp-push-worktree convention) and merged origin's 14 ahead commits there instead, where no foreign uncommitted WIP was in the way.
+
+**Two real conflicts, both resolved losslessly.** `maintenance/_state/fleet-heartbeat.json` — took HEAD's newer timestamp (a regenerated probe artifact, not history, so last-writer-wins is correct). `event_log.md` — both conflict hunks had a literally empty origin-side range, confirmed programmatically before touching anything (`ours=41435/15353 chars, theirs=0 chars` each), so stripping the conflict markers and keeping HEAD's content was content-preserving by construction — nothing from either side was discarded.
+
+Merged as `9784e87`, pushed straight onto `origin/feat/model-canary-probe-step25` (fast-forward, `c68db52..9784e87`). Pre-push doctrine-integrity-probe and hook-tests-gate both ran clean (77 pass / 0 fail / 1 expected env-skip).
+
+**Main checkout synced.** Fast-forwarded local `feat/model-canary-probe-step25` from `5665a80` to `9784e87` (`git merge --ff-only`). Only one file actually differed between the two commits (`maintenance/check-dispatch-model-floor.py`, new from origin) — it existed here as an untracked duplicate; verified byte-identical to origin's version before removing it so the fast-forward could recreate it as tracked. `event_log.md`'s committed content was unchanged between the two commits, so this session's own uncommitted append there was untouched by the sync. Checkout now shows 0 ahead / 0 behind origin.
+
+**Cleanup.** Removed the now-fully-merged worktree and its `tmp-push-open-sessions-board-fix` branch (verified an ancestor of both origin and the local main branch first — no unique content lost).
+
+**Two `allow-config-write` override tokens minted and deleted, both citing Gabriel's explicit in-turn approval** ("yes, go ahead" for a co-mingled-commit correction earlier the same session; "sync the main checkout with the pushed commit" for this fast-forward) — each deleted immediately after its write landed, per the rules.md override protocol.
+
+**One incident during the same-session lead-up, already corrected:** an earlier bare `git commit` after `git add` on only the 2 intended files swept in another session's already-staged `hooks/workbook-write-guard.py` + `settings.json` (same failure class the repo-housekeeping session's own close-out entry logged the same day as `e799f01`). Caught via `git show --stat` before reporting done; corrected with `git reset --soft HEAD~1` + a pathspec-scoped unstage + re-commit, restoring the foreign files to their prior staged-then-modified state. Not pushed anywhere before the correction, so no history rewrite was needed.
+
+## 2026-08-14 — 9050 Red Branch Rd Second Addendum: docProps Title metadata corrected
+
+Both the original defective draft (`Lease 9050 Red Branch Road -- Suite C Ahmed Kareem MLC Academy Maryland LLC Second Addendum 8-2026.docx`) and Gabriel's independently hand-corrected `2026-08-14_9050-Red-Branch-Suite-C_Second-Addendum-REVISED_v03.docx` carried a stale `docProps/core.xml` Title of "SIXTH ADDENDUM TO LEASE" against a "SECOND ADDENDUM TO LEASE" body — a cloned-template artifact never updated, and a live traceability hazard independent of the substantive novation defects the acceptance test targeted. Found via the new `lease-addendum` skill's QC gate (check 9, ordinal consistency) during that skill's build and acceptance-testing (same-day, see prior entry). Fixed in place via python-docx on both files; re-ran `scripts/addendum_qc.py --m3b --state MD` to confirm: check 9 now clears on both, no other findings disturbed (original still correctly fails its 9 other real defects at exit 1; REVISED_v03 now has only the MD § 3-101(a) recordation-threshold advisory remaining, exit 0).
+
+## 2026-08-14 — Open-sessions board: ora-am-brief workflow-candidates fixes verified already-committed
+
+Board item "Workflow candidates investigation" (session `local_0f2d9e98-9de2-4907-8b0b-09e53ce94847`, 2026-08-13) asked whether to commit 4 ora-am-brief fixes (Action Overdue Notion formula, Block C late-fire cutoff, heartbeat_block_id retirement, C.5.7 AR-feed cross-check). Gabriel: "Commit it." Verification before acting found nothing to commit — `git diff HEAD -- scheduled-tasks/ora-am-brief/SKILL.md` is clean; all 3 file-based fixes are already present in HEAD via commit `e27fbfc` (authored 2026-08-14 15:23 ET, part of today's dirty-tree-backlog isolated-commit sweep). The 4th fix (Action Overdue formula) was a direct Notion DDL edit, not git-tracked, and was already confirmed live by the session itself. No new commit made — nothing left to do.
+
+## 2026-08-14 — ora-open-sessions-board: answered.json upsert hardened (prose gap closed)
+
+Root-caused the 2026-08-12 gap where the board's 5 decided items all logged correctly to event_log.md but none were written to answered.json, causing 3 (local_e69b7e30, local_2278a298, local_c689f07f) to resurface on 2026-08-14 and be re-decided from scratch. STEP 6(a) bundled two actions in one sentence: the event-log half had always been a concrete `append-event-log.py` call, but the answered.json half was bare prose ("upsert each decided sessionId into answered.json") with no script behind it — the enforced half landed, the unenforced half silently didn't.
+
+Fix: added `maintenance/upsert-answered-sessions.py` (mirrors append-event-log.py's pattern — atomic write, but fail-loud instead of fail-open: it re-reads the file after writing and exits non-zero if any sessionId didn't actually land, since a silent write gap here is the exact bug being closed). STEP 6(a) now calls it as a copy-paste command instead of describing the action in words. Updated SKILL.md to v1.3 and synced the registry via `update_scheduled_task` (frontmatter description + body were previously identical between file and registry; verified still identical after the sync via `list_scheduled_tasks`).
+
+Verified the script standalone against a scratch copy of answered.json (upsert + preserve-existing-keys path, and a missing-required-field failure path) before wiring it into the SKILL.md — did not touch the live answered.json directly.
+
+Note: the ~/.claude checkout has an active `repo-housekeeping` claim (session 39572813, dirty-tree backlog resolution) with a generic same-file-collision hook that fired on both the new script and SKILL.md edits; `git status`/`git log` confirmed no actual competing edit landed on either file. Left uncommitted per that claim, consistent with single-writer doctrine — the housekeeping session or Gabriel should fold this in on the next commit pass.
+
 ## 2026-08-14 -- Dirty-tree triage: session close-out (~/.claude, repo-housekeeping claim)
 
 Resolved the ~/.claude uncommitted backlog from 182 dirty entries down to 40 across ~65 isolated
