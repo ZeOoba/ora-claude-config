@@ -29,7 +29,7 @@
   },
   "37a6ecd8-9e59-81ba-b5e7-df00cbffc2b3": {
     "deal": "754 Old State Route 74 — Cincinnati, OH",
-    "stage": "LOI Executed"
+    "stage": "Under Contract"
   },
   "37b6ecd8-9e59-8152-9781-c9477aaf2786": {
     "deal": "470 McCormick Blvd — Columbus, OH",
@@ -69,6 +69,14 @@
   },
   "3a46ecd8-9e59-81bb-8974-da9fd33ec8b7": {
     "deal": "2196 Port Sheldon Street — Jenison, MI",
+    "stage": "Passed"
+  },
+  "3b96ecd8-9e59-8177-8862-c05879a52ff7": {
+    "deal": "4484 Robertson Road — Madison, WI",
+    "stage": "Candidate"
+  },
+  "3b96ecd8-9e59-8187-910f-f728748470aa": {
+    "deal": "Pike Plaza Portfolio — Indianapolis, IN",
     "stage": "Passed"
   }
 }
