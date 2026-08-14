@@ -47,6 +47,7 @@
 ## Skill tie-breaks (descriptions route; prefer the narrowest match)
 - Deal evaluation: `acquisition-underwriting` is the single funnel (modes SCREEN · SNAPSHOT · COMPS · UNDERWRITE · FULL; subsumes `deal-screen`/`cap-rate-snapshot`/`market-comp-analyzer`). Pre-screen default: `verified-deal-recon` (bare `deal-recon` agent = first-look only). FULL mode's 12-section IC memo (pre-mortem + Edge-scan floor mandatory) beats `document-assembly` Template 2 (fallback only). Then `deal-comparison` → `loi-generation`.
 - LOI: `loi-generation` is the SOLE path — never document-assembly's generic template (it skips the QC gate).
+- Lease addenda: `lease-addendum` is the SOLE path for amendments/modifications to a lease already in effect (MINIMAL AMENDMENT doctrine, 4 modules, 7-state overlay, 16-check QC gate, guaranty exhibit for tenant substitutions) — never document-assembly's former Template 6 (retired; no mechanism for novation consent/security-deposit disposition/insurance reissuance). New leases still route to `masterlease-jurisdiction-rebase` + `lease-form-qc`.
 - Comms drafting: `tenant-email` (tenants) · `communication-intelligence` (broker/lender/vendor/attorney/external). Tenant-directed formal letters (renewal offers, notices) route to `document-assembly`'s templates, not `tenant-email`, when the deliverable is a standalone formal DOCX/letter rather than an email body — email body vs. letter format is the tie-break, not subject matter. Exception scans: `exception-detection` (live Notion/HubSpot) · `portfolio-anomaly-scout` (file-export sweeps).
 - Market research: `market-monitor` for conditions/trends/vacancy/rent-growth · `acquisition-underwriting` COMPS mode for single-property comps (subsumes retired `rent-comp`) · `submarket-spatial-analysis` for its narrow ask.
 - PSA review: `deal-execution` Workflow 2A is the funnel for any inbound PSA draft — `psa-reconciliation` (fact-cascade) and `legal-intelligence` (redline) are its sub-steps, not entry points.
@@ -56,7 +57,7 @@
 - Setup audit/prune: `ora-setup-audit` is the sole skill for "audit/optimize/declutter my Claude Code setup" — check it before building a parallel one.
 - If a referenced skill is absent on the current surface, say so — never improvise its procedure.
 - Debugging/code-audit: generic "debug"/"fix errors"/"code audit" routes through Engineering OS's `/debug` lane first; `code-debugging-optimizations` applies once explicitly named or handed off from `/debug`. Its autonomous-mode (no approval gates on edits/commits) never overrides Invariant 2's oxfordra.net confirmation.
-- Code review: bare code-reviewer agent → pr-review-toolkit's (self-contained); coderabbit's collides but needs an uninstalled CLI. `requesting-code-review`'s dispatch step routes to native `/code-review` on the diff, not a bare subagent — it subsumes the inline template. `code-review:code-review` plugin retired 08-14 (collided with native `/code-review`, strictly narrower).
+- Code review: bare code-reviewer agent → pr-review-toolkit's; `requesting-code-review` routes to native `/code-review` on the diff, not a bare subagent. Detail: tech.md §3g.
 
 ## Autonomy
 - Complete tasks in one pass; no clarifying questions when the request is unambiguous, deterministic. Chain cross-app work (Notion/HubSpot/QB/M365) from one pre-flight plan, not turn-by-turn.
