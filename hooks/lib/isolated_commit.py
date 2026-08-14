@@ -333,13 +333,234 @@ def stage_isolated_replacement(repo_root, rel_path, old_text, new_text, ref="HEA
         shutil.rmtree(scratch, ignore_errors=True)
 
 
+def commit_isolated_replacement(repo_root, rel_path, old_text, new_text, message,
+                                ref="HEAD", allow_other_staged_paths=False):
+    """`stage_isolated_replacement`, then commit it, then repair the working
+    tree -- the three-step sequence CLAUDE.md's friction queue named
+    (2026-08-13: "leaves a staged-revert every time (fired 4/4)").
+
+    WHY the repair step. `stage_isolated_replacement` never touches the
+    working tree by design (see its docstring) -- correct for staging, but
+    the module's documented finish step was just "run `git commit` yourself",
+    which leaves the working tree exactly where it was. When the working
+    tree already equals `new_text` (the common case: a session's own Edit
+    already put it there, and this tool is only isolating that hunk from
+    other sessions' unrelated dirty files) that's a harmless no-op diff. But
+    when this tool is used to REPAIR already-committed shared content back to
+    a known-good `new_text` -- e.g. de-duplicating a colliding tracker row --
+    the working tree keeps whatever it had before, which can still be the
+    bad/stale content that motivated the fix. Either way, HEAD now says
+    `new_text` while the working tree may not, so the file reads as "dirty"
+    against the fix that was just committed -- and the next broad `git add -A
+    && git commit` (this session's or another's) commits the working tree's
+    stale version straight back over the fix, silently reverting it. Four
+    sessions today independently rediscovered the same third command by hand
+    (`git checkout HEAD -- <rel_path>`) to close that gap; this function
+    makes it automatic and unmissable instead of a step to remember.
+
+    Commits with a BARE `git commit -m message` -- deliberately NOT `git
+    commit -m message -- rel_path`. Reproduced live while building this
+    function (2026-08-13): a pathspec-scoped commit does not commit the
+    isolated INDEX content this module just staged -- for a path named on
+    the command line, `git commit <pathspec>` re-derives what to commit from
+    the WORKING TREE, as if running `git add <pathspec>` immediately before
+    the commit, discarding whatever was already staged for it. Concretely:
+    stage "old middle line" -> "new middle line" via
+    `stage_isolated_replacement` while the working tree still reads "old
+    middle line" (the REPAIR use case above) and `git commit -m msg --
+    doc.md` reports "nothing to commit, working tree clean" -- it compared
+    the unchanged WORKING TREE against HEAD and saw no diff, never looking at
+    the index at all. `_assert_no_other_staged_changes` (enforced inside
+    `stage_isolated_replacement` above, before this function ever calls `git
+    commit`) already guarantees nothing besides `rel_path` is staged relative
+    to `ref` -- unless the caller opts in via `allow_other_staged_paths`, the
+    exact case that makes a bare commit safe: there is nothing else in the
+    index for it to sweep in. NOTE: when `allow_other_staged_paths=True` and
+    other files WERE staged, the bare commit lands all of them together (as
+    documented on `allow_other_staged_paths` above) -- but the repair/verify
+    steps below only cover `rel_path`. Those other committed paths keep
+    whatever latent working-tree/HEAD divergence they already had; this
+    function does not repair them too.
+
+    Raises ValueError/RuntimeError on any failure, same as
+    `stage_isolated_replacement`. If the commit itself fails, the isolated
+    hunk is still safely staged and nothing is lost -- the error says so. If
+    the commit succeeds but the repair step is skipped or fails, the error
+    names the exact manual command to finish with; the commit is never rolled
+    back.
+
+    The repair step NEVER blindly overwrites the working tree (independent
+    review, 2026-08-13, C-NEW-1): a plain `git checkout HEAD -- rel_path`
+    would silently and irrecoverably destroy any OTHER content already
+    sitting in the working tree for this path -- most dangerously, another
+    session's unrelated uncommitted edit to this SAME file, exactly the data
+    class `stage_isolated_replacement` exists to protect (see its own
+    docstring and this module's WHY paragraph at the top). Before checking
+    out, the working tree is classified with `git diff --quiet <sha> --
+    rel_path` against BOTH the pre-fix commit and the new HEAD -- git's own
+    filter-aware notion of "matches", the same primitive already trusted for
+    the final belt-and-braces check below, NOT a hash comparison.
+
+    TWO hash-based versions of this check were tried and BOTH were wrong in
+    opposite directions (independent review round 2, C-NEW-2, reproduced
+    live): a plain `git hash-object` (filtered) false-refuses a file
+    committed under a DIFFERENT core.autocrlf setting than the current one
+    even when the working tree is exactly what that commit produced, and
+    `git hash-object --no-filters` (raw bytes) false-refuses the FAR MORE
+    COMMON case -- an ordinary `git checkout`-smudged working tree (e.g. an
+    LF blob checked out to CRLF under this machine's core.autocrlf=true) --
+    because raw-byte identity is strictly stronger than "git considers this
+    equivalent to that commit". Neither single hash mode expresses git's own
+    equivalence relation; `git diff` does, because it applies the same
+    clean/smudge filters symmetrically in both directions. If the working
+    tree matches the NEW HEAD already, the checkout is skipped entirely (nothing
+    to do). If it matches the pre-fix commit, checkout is safe (nothing to
+    lose). Otherwise it is left untouched and reported loudly, never
+    overwritten.
+
+    ACCEPTED RESIDUAL (independent review round 3): the classify-then-checkout
+    window itself is a narrow TOCTOU -- a concurrent write to `rel_path` in
+    the few milliseconds between the `_matches` check and the `git checkout`
+    below could still be clobbered, and unlike the commit-sweep race below
+    this one is not detectable after the fact (the final belt-and-braces diff
+    would simply pass, the overwritten content already gone). Unpreventable
+    at the git-CLI level without file locking; accepted because the window is
+    orders of magnitude narrower than the multi-second stage-then-manually-
+    commit gap this function replaces, and the net exposure reduction is large.
+
+    Also verifies, when `allow_other_staged_paths` is False, that the commit
+    that just landed touched ONLY `rel_path` (independent review, I-NEW-1):
+    `_assert_no_other_staged_changes` is checked before the patch is staged,
+    but this checkout's shared checkout doctrine is explicit that other
+    sessions commit continuously, so a same-window `git add` by another
+    session between that check and this function's `git commit` cannot be
+    prevented at the git-CLI level. It can be detected after the fact and
+    surfaced immediately rather than reported as a clean success.
+    """
+    repo_root = _toplevel(repo_root)
+    rel_path_norm = rel_path.replace("\\", "/")
+
+    # Resolve `ref` to a concrete commit sha UP FRONT, before staging/committing
+    # anything: if `ref` is "HEAD" (the default), HEAD itself will point at the
+    # NEW commit once this function's own commit lands, so re-resolving `ref`
+    # after that point would no longer name the pre-fix commit.
+    old_sha_p = _run(["git", "rev-parse", ref], cwd=repo_root)
+    if old_sha_p.returncode != 0:
+        raise RuntimeError("isolated_commit: cannot resolve ref %s -- %s" % (
+            ref, (old_sha_p.stderr or "").strip()[:300]))
+    old_commit_sha = old_sha_p.stdout.strip()
+
+    stage_isolated_replacement(repo_root, rel_path_norm, old_text, new_text,
+                               ref=ref, allow_other_staged_paths=allow_other_staged_paths)
+
+    commit = _run(["git", "commit", "-m", message], cwd=repo_root)
+    if commit.returncode != 0:
+        raise RuntimeError(
+            "isolated_commit: git commit failed after staging -- %s (the isolated "
+            "hunk is still staged against %s; nothing was lost -- resolve and run a "
+            "BARE `git commit -m <message>` by hand, NOT `git commit -m <message> -- "
+            "%s`: a pathspec-scoped commit re-derives from the working tree, not the "
+            "staged index, and can silently discard the isolated hunk)" % (
+                (commit.stderr or "").strip()[:500], ref, rel_path_norm))
+
+    commit_sha_p = _run(["git", "rev-parse", "HEAD"], cwd=repo_root)
+    commit_sha = commit_sha_p.stdout.strip() if commit_sha_p.returncode == 0 else "<unknown>"
+
+    if not allow_other_staged_paths:
+        swept_p = _run(["git", "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"],
+                       cwd=repo_root)
+        if swept_p.returncode != 0:
+            raise RuntimeError(
+                "isolated_commit: commit %s landed but `git diff-tree` failed while "
+                "verifying it touched only %s -- %s. The commit already happened; "
+                "check it by hand (`git show --stat %s`)." % (
+                    commit_sha, rel_path_norm, (swept_p.stderr or "").strip()[:300],
+                    commit_sha))
+        swept_paths = set(l.strip() for l in (swept_p.stdout or "").splitlines() if l.strip())
+        if swept_paths != {rel_path_norm}:
+            raise RuntimeError(
+                "isolated_commit: commit %s landed but touched %s, not just {%r} -- "
+                "another session's staged change was very likely swept in during the "
+                "window between stage_isolated_replacement's pre-flight check and this "
+                "commit (this checkout's own doctrine: other sessions commit "
+                "continuously, and a state confirmed minutes ago is not guaranteed "
+                "current). The commit already happened and cannot be silently undone "
+                "-- investigate %s immediately." % (
+                    commit_sha, sorted(swept_paths), rel_path_norm, commit_sha))
+
+    # Classify the working tree against git's own notion of "matches", not a
+    # hash. `git diff --quiet <sha> -- path` returns 0 (no difference), 1 (a
+    # difference), or >1 (an actual error) -- treat only >1 as failure.
+    def _matches(sha):
+        p = _run(["git", "diff", "--quiet", sha, "--", rel_path_norm], cwd=repo_root)
+        if p.returncode not in (0, 1):
+            raise RuntimeError(
+                "isolated_commit: commit %s succeeded, but `git diff --quiet %s -- "
+                "%s` failed while checking it's safe to sync the working tree -- %s. "
+                "Working tree was NOT touched; check the file by hand." % (
+                    commit_sha, sha, rel_path_norm, (p.stderr or "").strip()[:300]))
+        return p.returncode == 0
+
+    matches_new = _matches("HEAD")
+    if matches_new:
+        # Working tree already reads as the new HEAD (through filters) --
+        # nothing to repair; skip the checkout rather than run a needless no-op.
+        pass
+    elif _matches(old_commit_sha):
+        repair = _run(["git", "checkout", "HEAD", "--", rel_path_norm], cwd=repo_root)
+        if repair.returncode != 0:
+            raise RuntimeError(
+                "isolated_commit: commit %s succeeded but syncing the working tree "
+                "to the new HEAD failed -- %s. The commit is safe; run `git checkout "
+                "HEAD -- %s` by hand to finish (working tree may still show a stale "
+                "diff until you do)." % (
+                    commit_sha, (repair.stderr or "").strip()[:300], rel_path_norm))
+    else:
+        raise RuntimeError(
+            "isolated_commit: commit %s succeeded, but the working tree copy of %s "
+            "matches neither the pre-fix nor the post-fix content -- something else "
+            "(very likely another session's uncommitted edit to this same file) is "
+            "sitting there. Refusing to overwrite it with `git checkout`. The commit "
+            "is safe; the working tree was deliberately left untouched. If you intend "
+            "to discard that other content yourself, run `git checkout HEAD -- %s` by "
+            "hand." % (commit_sha, rel_path_norm, rel_path_norm))
+
+    # Belt-and-braces, matching this module's existing post-apply verification
+    # discipline: confirm the working tree actually has NO diff against the
+    # new HEAD, rather than trusting `git checkout`'s exit code alone.
+    #
+    # Deliberately `git diff --quiet HEAD`, NOT a raw-bytes-vs-new_text
+    # comparison: `git checkout` re-applies checkout-time filters (notably
+    # core.autocrlf), so on this machine (autocrlf=true) the working tree
+    # copy legitimately gets CRLF line endings even though `new_text` (and
+    # the blob `_show`/`build_replacement` worked from) is LF-only -- a
+    # byte-exact comparison against `new_text` would fail on every such file
+    # despite the working tree being correctly synced. `git diff` compares
+    # through the same filters in the other direction, so it reports "no
+    # difference" exactly when the working tree matches what was committed,
+    # independent of which line-ending convention the checkout wrote to
+    # disk. (Found live writing this function's own test: the first version
+    # of this check used the byte comparison and false-failed here.)
+    diff_check = _run(["git", "diff", "--quiet", "HEAD", "--", rel_path_norm],
+                      cwd=repo_root)
+    if diff_check.returncode != 0:
+        raise RuntimeError(
+            "isolated_commit: commit %s and repair both reported success, but "
+            "`git diff HEAD -- %s` still shows a difference -- refusing to report "
+            "success silently. Check the file by hand." % (commit_sha, rel_path_norm))
+
+
 def main():
     import argparse  # lazy: CLI-only, matches claim_work.py's convention
     p = argparse.ArgumentParser(
         description="Stage an exact old-text -> new-text replacement into the "
                      "git index only, without touching other uncommitted "
-                     "changes to the same file. Run `git commit` yourself "
-                     "afterward -- this only stages.")
+                     "changes to the same file. Without --message, only "
+                     "stages -- run `git commit` yourself afterward. With "
+                     "--message, also commits (a BARE `git commit`, never "
+                     "pathspec-scoped -- see commit_isolated_replacement's "
+                     "docstring for why) and syncs the working tree to the "
+                     "new HEAD.")
     p.add_argument("rel_path", help="Repo-relative path to the file")
     p.add_argument("--old", required=True,
                    help="Path to a file containing the exact old text (read "
@@ -357,6 +578,13 @@ def main():
                         "which would sweep any other staged file in under your "
                         "message too. Only pass this if you deliberately intend "
                         "to commit that whole staged set.")
+    p.add_argument("--message",
+                   help="If given, also commit (a BARE `git commit -m MESSAGE`, "
+                        "never pathspec-scoped -- a pathspec commit re-derives from "
+                        "the working tree, not the staged index, and can silently "
+                        "discard the isolated hunk) and sync the working tree to the "
+                        "new HEAD. Omit to only stage, matching this tool's original "
+                        "behavior.")
     args = p.parse_args()
 
     # newline="": read --old/--new exactly as written, matching the
@@ -368,18 +596,33 @@ def main():
     with open(args.new, encoding="utf-8", newline="") as f:
         new_text = f.read()
 
+    repo_root = os.path.abspath(args.repo_root)
+    # `is not None`, not truthiness: `--message ""` must still take the commit
+    # path (and let git reject the empty message itself) rather than silently
+    # falling back to stage-only, which would surprise a caller who explicitly
+    # passed --message.
+    do_commit = args.message is not None
     try:
-        stage_isolated_replacement(os.path.abspath(args.repo_root), args.rel_path,
-                                   old_text, new_text, ref=args.ref,
-                                   allow_other_staged_paths=args.allow_other_staged)
+        if do_commit:
+            commit_isolated_replacement(repo_root, args.rel_path, old_text, new_text,
+                                        args.message, ref=args.ref,
+                                        allow_other_staged_paths=args.allow_other_staged)
+        else:
+            stage_isolated_replacement(repo_root, args.rel_path, old_text, new_text,
+                                       ref=args.ref,
+                                       allow_other_staged_paths=args.allow_other_staged)
     # UnicodeDecodeError added (delta review): `_show`'s strict utf-8 decode of a
     # non-UTF-8 blob previously escaped this catch and surfaced as a raw
     # traceback instead of the clean ERROR: path every other failure mode uses.
     except (ValueError, RuntimeError, UnicodeDecodeError) as e:
         print("ERROR: %s" % e)
         return 1
-    print("Staged isolated replacement in %s (against %s). Working tree "
-          "untouched -- run `git commit` to finish." % (args.rel_path, args.ref))
+    if do_commit:
+        print("Committed isolated replacement in %s (against %s) and synced the "
+              "working tree to the new HEAD." % (args.rel_path, args.ref))
+    else:
+        print("Staged isolated replacement in %s (against %s). Working tree "
+              "untouched -- run `git commit` to finish." % (args.rel_path, args.ref))
     return 0
 
 
