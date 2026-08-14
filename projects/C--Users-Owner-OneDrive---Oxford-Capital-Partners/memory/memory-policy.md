@@ -5,6 +5,7 @@ metadata:
   node_type: memory
   type: governance
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
+  modified: 2026-08-14T18:30:50.076Z
 ---
 
 # ORA Memory Governance Policy (v2 — 2026-06-03)
@@ -50,6 +51,9 @@ Superseded or historical files move to `memory/_archive/` with a `_<reason>_<YYY
 ## 5. What to save / not save
 **Save immediately:** corrections → `rules.md`; new contacts → `people.md`; deal decisions/milestones → `projects.md` (current) + `event_log.md` (the decision); validated market data → `markets.md`; system/tool/path changes → `tech.md` (+ `event_log.md`); financial conventions → `standards.md`.
 **Don't save:** transient one-off task detail, raw data dumps (save the insight), content already in CLAUDE.md, unflagged speculation.
+
+### 5a. Flush checkpoint (added 2026-08-14, harvested from external-artifact review of `task-observer`/"one-skill-to-rule-them-all" — see `event_log.md`)
+"Save immediately" is a soft prompt that doesn't reliably survive cognitive load in long sessions — the insight arrives mid-flow and gets deferred past the point of recall. Tie the save-check to an action that already happens rather than trusting memory: roughly every 3rd `TaskUpdate`/TodoWrite completion, and whenever presenting a finished deliverable (artifact, file send, PR), pause and ask "does this stretch contain a correction, a confirmed judgment call, or a fact that belongs in memory?" — write it then, don't defer to end-of-session recall.
 
 ## 6. Naming
 Lowercase, descriptive, no date suffixes on living docs (dates live inside / in the event log). Archived files take a dated suffix.
