@@ -58,7 +58,10 @@ def test_all_fable_passes():
         expect("all-fable => 2 rows", len(rows) == 2)
 
 
-def test_fallback_block_fails():
+def test_fallback_to_below_floor_model_fails():
+    # A fallback whose destination is BELOW the floor fails — but via the
+    # below-floor message.model, not the fallback block itself. Under the FABLE
+    # floor, the opus-4-8 tail is below floor.
     with tempfile.TemporaryDirectory() as d:
         write_agent(d, "agent-a.jsonl", [
             _msg(FABLE),
@@ -66,8 +69,65 @@ def test_fallback_block_fails():
             _msg("claude-opus-4-8"),
         ])
         status, rows = cdmf.scan_subagents_dir(d, FR)
-        expect("fallback => status 1", status == 1, "got %d" % status)
-        expect("fallback flagged", rows[0]["saw_fallback"] is True)
+        expect("fallback-to-below-floor => status 1", status == 1, "got %d" % status)
+        expect("fallback recorded (informational)", rows[0]["saw_fallback"] is True)
+        expect("failure attributed to below-floor model, not the block",
+               rows[0]["first_violation"] is not None and "model" in rows[0]["first_violation"])
+
+
+def test_fallback_to_compliant_tier_passes():
+    # OI-052 ruling (2026-08-14): a mid-run fallback whose destination is AT/ABOVE
+    # the floor is COMPLIANT and must NOT alarm. Under the OPUS floor, fable→opus-4-8
+    # with a fallback block present => PASS. This is the exact shape of the live sweep.
+    opus_floor = cdmf.floor_rank("claude-opus-4-8")
+    with tempfile.TemporaryDirectory() as d:
+        write_agent(d, "agent-a.jsonl", [
+            _msg(FABLE),
+            _msg("claude-opus-4-8", blocks=[{"type": "fallback"}]),
+            _msg("claude-opus-4-8"),
+        ])
+        status, rows = cdmf.scan_subagents_dir(d, opus_floor)
+        expect("fallback-to-compliant-tier => status 0", status == 0, "got %d" % status)
+        expect("fallback still recorded for the report", rows[0]["saw_fallback"] is True)
+        expect("no violation on a compliant fallback", rows[0]["first_violation"] is None)
+
+
+def test_below_opus_fallback_fails_under_opus_floor():
+    # A drop below Opus (sonnet) under the Opus floor DOES fail.
+    opus_floor = cdmf.floor_rank("claude-opus-4-8")
+    with tempfile.TemporaryDirectory() as d:
+        write_agent(d, "agent-a.jsonl", [_msg(FABLE), _msg("claude-sonnet-5")])
+        status, _ = cdmf.scan_subagents_dir(d, opus_floor)
+        expect("below-opus under opus floor => status 1", status == 1, "got %d" % status)
+
+
+def test_fallback_block_to_field_ranked_directly():
+    # Residual-closer: a fallback event carries `to`. If `to` is below floor, it is
+    # a violation EVEN IF message.model never updated (stays at the requested tier).
+    opus_floor = cdmf.floor_rank("claude-opus-4-8")
+    with tempfile.TemporaryDirectory() as d:
+        # message.model stays FABLE (looks compliant) but the block says it fell to sonnet.
+        rec = json.dumps({"message": {"model": FABLE,
+                                      "content": [{"type": "fallback",
+                                                   "from": FABLE, "to": "claude-sonnet-5"}]}})
+        write_agent(d, "agent-a.jsonl", [_msg(FABLE), rec])
+        status, rows = cdmf.scan_subagents_dir(d, opus_floor)
+        expect("block `to` below floor => status 1 despite compliant message.model",
+               status == 1, "got %d" % status)
+        expect("violation attributes to the fallback destination",
+               rows[0]["first_violation"] and "fallback to below-floor" in rows[0]["first_violation"])
+
+
+def test_fallback_block_to_opus_is_compliant():
+    # The live-sweep shape: block `to` = opus under the Opus floor => compliant.
+    opus_floor = cdmf.floor_rank("claude-opus-4-8")
+    with tempfile.TemporaryDirectory() as d:
+        rec = json.dumps({"message": {"model": "claude-opus-5",
+                                      "content": [{"type": "fallback",
+                                                   "from": FABLE, "to": "claude-opus-5"}]}})
+        write_agent(d, "agent-a.jsonl", [_msg(FABLE), rec])
+        status, _ = cdmf.scan_subagents_dir(d, opus_floor)
+        expect("block `to`=opus under opus floor => status 0", status == 0, "got %d" % status)
 
 
 def test_below_floor_model_fails():
@@ -146,15 +206,19 @@ def test_bom_first_line_breach_is_caught():
         expect("BOM + first-line breach => status 1", status == 1, "got %d" % status)
 
 
-def test_dict_content_fallback_is_caught():
+def test_dict_content_fallback_is_detected_but_informational():
     # REFUTE F3: a fallback block delivered as a dict (not a list) or with drifted
-    # casing must still be caught.
+    # casing must still be DETECTED (so it appears in the report). But detection is
+    # informational — with the resulting model at/above the floor it does NOT fail
+    # (OI-052 ruling). Here the message.model stays FABLE, so under the FABLE floor
+    # nothing is below floor => status 0, but saw_fallback is recorded.
     with tempfile.TemporaryDirectory() as d:
         rec = json.dumps({"message": {"model": FABLE, "content": {"type": "Fallback"}}})
         write_agent(d, "agent-a.jsonl", [_msg(FABLE), rec])
         status, rows = cdmf.scan_subagents_dir(d, FR)
-        expect("dict/cased fallback => status 1", status == 1, "got %d" % status)
-        expect("dict fallback flagged", rows[0]["saw_fallback"] is True)
+        expect("dict/cased fallback detected (informational) => status 0", status == 0,
+               "got %d" % status)
+        expect("dict fallback still recorded", rows[0]["saw_fallback"] is True)
 
 
 def test_top_level_model_breach_is_caught():
