@@ -230,6 +230,15 @@
             "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/memory-nag-correction.py\""
           }
         ]
+      },
+      {
+        "matcher": "mcp__scheduled-tasks__update_scheduled_task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/scheduled-task-update-postguard.py\""
+          }
+        ]
       }
     ],
     "PreToolUse": [
@@ -340,6 +349,15 @@
             "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/memory-orphan-link-guard.py\""
           }
         ]
+      },
+      {
+        "matcher": "mcp__scheduled-tasks__update_scheduled_task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/scheduled-task-update-preguard.py\""
+          }
+        ]
       }
     ],
     "SessionStart": [
@@ -414,10 +432,8 @@
   },
   "enabledPlugins": {
     "superpowers@superpowers-marketplace": true,
-    "claude-code-setup@claude-plugins-official": true,
-    "claude-md-management@claude-plugins-official": true,
-    "hookify@claude-plugins-official": true,
-    "code-review@claude-plugins-official": true,
+    "claude-md-management@claude-plugins-official": false,
+    "code-review@claude-plugins-official": false,
     "commit-commands@claude-plugins-official": true,
     "pr-review-toolkit@claude-plugins-official": true
   },
