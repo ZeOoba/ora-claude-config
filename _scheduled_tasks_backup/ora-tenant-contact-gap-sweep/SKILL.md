@@ -1,6 +1,6 @@
 ---
 name: ora-tenant-contact-gap-sweep
-description: Weekly sweep of Notion Tenant Database for active/M2M tenants missing Primary Contact or Contact Email; posts a consolidated gap list to Notion Operations Hub so PM-platform backfill is tracked centrally instead of being re-discovered ad hoc in each Lease Expiration Brief.
+description: Weekly sweep of Notion Tenant Database for active/M2M tenants missing Primary Contact or Contact Email; posts a consolidated gap list to Notion Operations Hub so PM-platform backfill is tracked centrally instead of being re-discovered ad hoc in each Lease Expiration Brief. Retimed 2026-07-30 (automation-health-monitor workflow-optimization follow-up) from 8:00 AM to 10:50 AM ET after its first-ever fire (Mon 07-27) landed 246min late -- same Monday-AM machine-offline pattern that already forced ora-monday-sync/ora-lease-expiration-brief off their original slots. [MODEL: claude-sonnet-5 | set 2026-07-30]
 ---
 
 This is an automated run of a scheduled task for Gabriel Goldberg, Oxford Realty Advisors (ORA). The user is not present — execute autonomously, make reasonable choices, note them in the output. This task only posts a report to Notion (no external sends, no tenant/counterparty contact).
