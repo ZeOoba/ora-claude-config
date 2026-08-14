@@ -1,14 +1,18 @@
 ---
 name: reference-isolated-commit-repair-wrapper-2026-08-13
-description: isolated_commit.py gained a commit_isolated_replacement() stage->commit->repair wrapper; two independent-review rounds caught real bugs (pathspec-commit discards the staged hunk; hash-based safety checks are wrong in both directions) before it shipped
+description: isolated_commit.py gained a commit_isolated_replacement() stage->commit->repair wrapper; two independent-review rounds caught real bugs (pathspec-commit discards the staged hunk; hash-based safety checks are wrong in both directions) before it shipped. LANDED on the primary checkout 2026-08-13 18:22 ET (522075e), 54/54 tests verified green there.
 metadata: 
   node_type: memory
   type: reference
   originSessionId: b34ec269-3c65-4bc6-ba23-039298513853
-  modified: 2026-08-13T04:32:07.625Z
+  modified: 2026-08-13T23:49:09.766Z
 ---
 
-`hooks/lib/isolated_commit.py` (the temp-index isolated-staging tool) gained `commit_isolated_replacement()` — stages an isolated hunk, commits it, and syncs the working tree to the new HEAD in one call/CLI flag (`--message`). Built in a worktree (`.claude/worktrees/isolated-commit-wrapper`, branch `feature/isolated-commit-repair-wrapper`), not yet merged to the live checkout as of 2026-08-13 (pending `eos-review-gate` final sign-off + landing).
+`hooks/lib/isolated_commit.py` (the temp-index isolated-staging tool) gained `commit_isolated_replacement()` — stages an isolated hunk, commits it, and syncs the working tree to the new HEAD in one call/CLI flag (`--message`). Built in a worktree (`.claude/worktrees/isolated-commit-wrapper`, branch `feature/isolated-commit-repair-wrapper`, commit `26acfe9`).
+
+**LANDED 2026-08-13.** Ported byte-identical into the primary checkout's live branch (`feat/model-canary-probe-step25`) as commit `522075e8`, one minute after the worktree commit — same session, same day, before this memory's original "pending" note was written up. Re-verified independently: `git diff 26acfe9:hooks/lib/isolated_commit.py HEAD:hooks/lib/isolated_commit.py` on the primary checkout returns empty (byte-identical), and `python hooks/tests/test-isolated-commit.py` run directly from `hooks/tests/` (not pytest — no pytest module installed; this file is a self-contained `check()`-harness script) reports **54/54 passed**. The worktree itself is now stale/behind — its branch carries ~30 unrelated commits since main diverged further; do not attempt to merge it wholesale, the feature is already live via 522075e.
+
+**How to apply:** `commit_isolated_replacement()` is available for use now on the live checkout — no further landing action needed. Prefer it over the old manual stage-then-commit-then-remember-to-checkout sequence for any isolated fix to a shared single-writer file (`open-items-tracker.md`, `event_log.md`, scheduled-task registries, etc.) in a dirty multi-session checkout. Note it is NOT yet on `origin/main` (feat/model-canary-probe-step25 is still 19 ahead / behind origin/main per [[project_primary_checkout_main_move_blocked_2026-08-12]]) — it works locally in this checkout today, but isn't yet backed up/mergeable upstream until that branch's larger divergence is resolved.
 
 **Why it exists.** `stage_isolated_replacement()` (the original function) never touches the working tree by design — correct for staging, but its documented finish step was "run `git commit` yourself," which leaves the working tree wherever it was. When used to REPAIR already-committed shared content (not just isolate a live local edit), that's a latent revert: HEAD says the fix, the working tree doesn't, and the next broad `git add -A && git commit` (anyone's) silently reverts the fix. Four sessions in one day independently rediscovered the same manual third step (`git checkout HEAD -- <path>`). This wraps all three.
 
