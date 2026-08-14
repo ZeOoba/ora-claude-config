@@ -56,7 +56,7 @@
 - Setup audit/prune: `ora-setup-audit` is the sole skill for "audit/optimize/declutter my Claude Code setup" — check it before building a parallel one.
 - If a referenced skill is absent on the current surface, say so — never improvise its procedure.
 - Debugging/code-audit: generic "debug"/"fix errors"/"code audit" routes through Engineering OS's `/debug` lane first; `code-debugging-optimizations` applies once explicitly named or handed off from `/debug`. Its autonomous-mode (no approval gates on edits/commits) never overrides Invariant 2's oxfordra.net confirmation.
-- Code review: bare code-reviewer agent → pr-review-toolkit's (self-contained); coderabbit's collides but needs an uninstalled CLI.
+- Code review: bare code-reviewer agent → pr-review-toolkit's (self-contained); coderabbit's collides but needs an uninstalled CLI. `requesting-code-review`'s dispatch step routes to native `/code-review` on the diff, not a bare subagent — it subsumes the inline template. `code-review:code-review` plugin retired 08-14 (collided with native `/code-review`, strictly narrower).
 
 ## Autonomy
 - Complete tasks in one pass; no clarifying questions when the request is unambiguous, deterministic. Chain cross-app work (Notion/HubSpot/QB/M365) from one pre-flight plan, not turn-by-turn.
