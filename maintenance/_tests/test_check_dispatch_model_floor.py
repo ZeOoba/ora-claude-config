@@ -58,7 +58,10 @@ def test_all_fable_passes():
         expect("all-fable => 2 rows", len(rows) == 2)
 
 
-def test_fallback_block_fails():
+def test_fallback_to_below_floor_model_fails():
+    # A fallback whose destination is BELOW the floor fails — but via the
+    # below-floor message.model, not the fallback block itself. Under the FABLE
+    # floor, the opus-4-8 tail is below floor.
     with tempfile.TemporaryDirectory() as d:
         write_agent(d, "agent-a.jsonl", [
             _msg(FABLE),
@@ -66,8 +69,65 @@ def test_fallback_block_fails():
             _msg("claude-opus-4-8"),
         ])
         status, rows = cdmf.scan_subagents_dir(d, FR)
-        expect("fallback => status 1", status == 1, "got %d" % status)
-        expect("fallback flagged", rows[0]["saw_fallback"] is True)
+        expect("fallback-to-below-floor => status 1", status == 1, "got %d" % status)
+        expect("fallback recorded (informational)", rows[0]["saw_fallback"] is True)
+        expect("failure attributed to below-floor model, not the block",
+               rows[0]["first_violation"] is not None and "model" in rows[0]["first_violation"])
+
+
+def test_fallback_to_compliant_tier_passes():
+    # OI-052 ruling (2026-08-14): a mid-run fallback whose destination is AT/ABOVE
+    # the floor is COMPLIANT and must NOT alarm. Under the OPUS floor, fable→opus-4-8
+    # with a fallback block present => PASS. This is the exact shape of the live sweep.
+    opus_floor = cdmf.floor_rank("claude-opus-4-8")
+    with tempfile.TemporaryDirectory() as d:
+        write_agent(d, "agent-a.jsonl", [
+            _msg(FABLE),
+            _msg("claude-opus-4-8", blocks=[{"type": "fallback"}]),
+            _msg("claude-opus-4-8"),
+        ])
+        status, rows = cdmf.scan_subagents_dir(d, opus_floor)
+        expect("fallback-to-compliant-tier => status 0", status == 0, "got %d" % status)
+        expect("fallback still recorded for the report", rows[0]["saw_fallback"] is True)
+        expect("no violation on a compliant fallback", rows[0]["first_violation"] is None)
+
+
+def test_below_opus_fallback_fails_under_opus_floor():
+    # A drop below Opus (sonnet) under the Opus floor DOES fail.
+    opus_floor = cdmf.floor_rank("claude-opus-4-8")
+    with tempfile.TemporaryDirectory() as d:
+        write_agent(d, "agent-a.jsonl", [_msg(FABLE), _msg("claude-sonnet-5")])
+        status, _ = cdmf.scan_subagents_dir(d, opus_floor)
+        expect("below-opus under opus floor => status 1", status == 1, "got %d" % status)
+
+
+def test_fallback_block_to_field_ranked_directly():
+    # Residual-closer: a fallback event carries `to`. If `to` is below floor, it is
+    # a violation EVEN IF message.model never updated (stays at the requested tier).
+    opus_floor = cdmf.floor_rank("claude-opus-4-8")
+    with tempfile.TemporaryDirectory() as d:
+        # message.model stays FABLE (looks compliant) but the block says it fell to sonnet.
+        rec = json.dumps({"message": {"model": FABLE,
+                                      "content": [{"type": "fallback",
+                                                   "from": FABLE, "to": "claude-sonnet-5"}]}})
+        write_agent(d, "agent-a.jsonl", [_msg(FABLE), rec])
+        status, rows = cdmf.scan_subagents_dir(d, opus_floor)
+        expect("block `to` below floor => status 1 despite compliant message.model",
+               status == 1, "got %d" % status)
+        expect("violation attributes to the fallback destination",
+               rows[0]["first_violation"] and "fallback to below-floor" in rows[0]["first_violation"])
+
+
+def test_fallback_block_to_opus_is_compliant():
+    # The live-sweep shape: block `to` = opus under the Opus floor => compliant.
+    opus_floor = cdmf.floor_rank("claude-opus-4-8")
+    with tempfile.TemporaryDirectory() as d:
+        rec = json.dumps({"message": {"model": "claude-opus-5",
+                                      "content": [{"type": "fallback",
+                                                   "from": FABLE, "to": "claude-opus-5"}]}})
+        write_agent(d, "agent-a.jsonl", [_msg(FABLE), rec])
+        status, _ = cdmf.scan_subagents_dir(d, opus_floor)
+        expect("block `to`=opus under opus floor => status 0", status == 0, "got %d" % status)
 
 
 def test_below_floor_model_fails():
@@ -146,15 +206,19 @@ def test_bom_first_line_breach_is_caught():
         expect("BOM + first-line breach => status 1", status == 1, "got %d" % status)
 
 
-def test_dict_content_fallback_is_caught():
+def test_dict_content_fallback_is_detected_but_informational():
     # REFUTE F3: a fallback block delivered as a dict (not a list) or with drifted
-    # casing must still be caught.
+    # casing must still be DETECTED (so it appears in the report). But detection is
+    # informational — with the resulting model at/above the floor it does NOT fail
+    # (OI-052 ruling). Here the message.model stays FABLE, so under the FABLE floor
+    # nothing is below floor => status 0, but saw_fallback is recorded.
     with tempfile.TemporaryDirectory() as d:
         rec = json.dumps({"message": {"model": FABLE, "content": {"type": "Fallback"}}})
         write_agent(d, "agent-a.jsonl", [_msg(FABLE), rec])
         status, rows = cdmf.scan_subagents_dir(d, FR)
-        expect("dict/cased fallback => status 1", status == 1, "got %d" % status)
-        expect("dict fallback flagged", rows[0]["saw_fallback"] is True)
+        expect("dict/cased fallback detected (informational) => status 0", status == 0,
+               "got %d" % status)
+        expect("dict fallback still recorded", rows[0]["saw_fallback"] is True)
 
 
 def test_top_level_model_breach_is_caught():
@@ -239,48 +303,33 @@ def test_unknown_floor_name():
     expect("fable floor resolves", cdmf.floor_rank("fable") == 100)
 
 
-def test_real_session_transcripts_scan_cleanly():
-    """Integration check that the probe runs against REAL transcripts, not fixtures.
-
-    FIXED 2026-08-14: this previously asserted `status == 1` — that the current
-    session's subagent transcripts MUST contain a floor violation. That held only
-    in the 2026-08-12 session it was authored in, whose transcripts carried the
-    mid-run opus-4-8 fallback that motivated OI-052. It reads CLAUDE_CODE_SESSION_ID,
-    so in every LATER session it asserted against whatever that session happened to
-    dispatch — and a session that dispatched a compliant subagent (correctly pinned
-    at or above the fable floor) scored status 0 and FAILED the test. The gate then
-    blocked the push. Net effect: it passed only when a session dispatched nothing
-    at all, or when it actually breached the floor — rewarding the bad state and
-    punishing the good one. Confirmed live 2026-08-14: a session whose sole subagent
-    was 11/11 claude-fable-5 could not push.
-
-    Detection of a below-floor model is NOT weakened by this change: it is already
-    asserted on synthetic fixtures above (test_scan_flags_below_floor /
-    test_scan_flags_midrun_fallback), which is where a behavioural assertion belongs
-    — a frozen fixture, not live session data that decays and varies by session.
-    What remains here is the part only real data can prove: that the scanner parses
-    real transcripts and returns a valid verdict rather than a tooling error.
-    Same class as [[feedback_prompt_current_state_prose]] — a baked current-state
-    anchor rots, in a test fixture just as in prose.
-    """
-    sid = os.environ.get("CLAUDE_CODE_SESSION_ID")
-    if not sid:
-        print("  (skip) real-session check — no CLAUDE_CODE_SESSION_ID")
-        return
-    d = os.path.join(cdmf.CLAUDE, "projects", cdmf.PROJECT, sid, "subagents")
-    if not os.path.isdir(d):
-        print("  (skip) real-session check — %s absent" % d)
-        return
-    status, rows = cdmf.scan_subagents_dir(d, FR)
-    if not rows:
-        print("  (skip) real-session check — no transcripts yet")
-        return
-    # A valid verdict is 0 (every dispatch at/above the floor) or 1 (a breach
-    # found). Anything else -- notably 2, the VERIFIED-NULL "could not look"
-    # status -- means the scanner failed to read real transcripts, which is the
-    # only failure this real-data check can legitimately assert.
-    expect("real transcripts => scanner returns a valid verdict, not a tooling error",
-           status in (0, 1), "got status %d over %d rows" % (status, len(rows)))
+# REMOVED 2026-08-12: test_real_session_transcripts_catch_the_2026_08_12_fallback.
+#
+# It read CLAUDE_CODE_SESSION_ID, scanned THAT LIVE SESSION's real subagents/
+# dir, and asserted status == 1 -- i.e. it asserted that the running session's
+# own dispatches contain a floor violation. It was authored from a session whose
+# subagent had genuinely fallen back, which froze that session's state into a
+# permanent expectation. Because this suite runs in the pre-push hook-tests gate,
+# the effect was inverted: a session whose dispatches were CLEAN scored 0, failed
+# the assertion, and was hard-blocked from pushing, while a session that actually
+# breached the floor passed. Doing the right thing was the failing condition.
+#
+# Nothing was substituted for it, deliberately. Both properties it claimed to
+# protect are already pinned deterministically above -- the catch behaviour by
+# test_below_floor_model_fails and test_violation_outranks_verified_null (which
+# uses the exact floor-then-fallback shape), and the clean case by
+# test_all_fable_passes. Verified by mutation: disabling the probe's below-floor
+# branch fails those assertions, and forcing it always-on fails the clean ones.
+# Adding fixture tests for the same paths was tried and dropped as duplicate
+# weight in a suite that hard-blocks every push.
+#
+# KNOWN GAP, accepted: this was the suite's only contact with real on-disk
+# transcripts, so a harness schema drift (say message.model relocating) would now
+# pass the fixtures. The probe fails CLOSED on that -- it surfaces as status 2
+# (verified-null), never a false PASS -- so this is a follow-up, not a hole. A
+# skip-based smoke test asserting only that the probe RUNS cleanly on real
+# transcripts (status in (0, 1), every row model-bearing), with no verdict
+# assertion, would close it without reintroducing the live-state coupling.
 
 
 if __name__ == "__main__":

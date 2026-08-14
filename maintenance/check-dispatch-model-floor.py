@@ -15,9 +15,21 @@ post-hoc assertion: it reads the subagent transcripts AFTER the run and fails if
 any subagent ran below the floor or shows a fallback block.
 
 WHAT IT CHECKS, per agent-*.jsonl transcript in a session's subagents dir:
-  1. every assistant message's model is AT OR ABOVE the floor (default: fable), and
-  2. no message carries a content block of type "fallback".
-Either a below-floor model value or a fallback block is a VIOLATION.
+  every assistant message's model is AT OR ABOVE the floor. A below-floor model
+  value is the VIOLATION.
+
+A content block of type "fallback" is RECORDED as informational context, NOT a
+standalone violation — what matters is the tier it fell TO. Two independent signals
+establish that tier, and either one below the floor is a violation:
+  - the per-line `message.model` (this harness writes the actual served tier onto
+    post-fallback lines: a run shows `claude-fable-5` then `claude-opus-4-8`), and
+  - the fallback event's own `to` field
+    (`{"type":"fallback","from":"claude-fable-5","to":"claude-opus-5"}`), ranked
+    directly so a below-floor fallback is caught even if message.model never updated.
+A fallback whose destination is AT OR ABOVE the floor is compliant and must not
+alarm. Gabriel RULED 2026-08-14 that a mid-run fallback to an OPUS tier is
+compliant with never-below-Fable (OI-052 closed); the sweep therefore invokes this
+with `--floor claude-opus-4-8`, and only a drop BELOW Opus trips it.
 
 FAIL-CLOSED ON ABSENCE. A missing subagents dir, or a dir with zero agent-*.jsonl
 files, is a TOOLING ERROR (exit 2), never a silent PASS — an unverifiable floor
@@ -94,6 +106,7 @@ def scan_transcript(path, floor):
     does not poison line 1 into a parse failure that hides a first-line breach."""
     models = {}
     saw_fallback = False
+    first_fallback_line = None
     first_violation = None
     model_bearing = 0
     parse_failures = 0
@@ -115,7 +128,10 @@ def scan_transcript(path, floor):
                 if not isinstance(msg, dict):
                     continue
                 # Fallback block: content may be a list OR a single dict, and the
-                # type string casing may drift — normalize both.
+                # type string casing may drift — normalize both. Recorded for the
+                # report as informational context only; it is NOT a violation on
+                # its own (the post-fallback tier is judged by message.model rank
+                # below — see the module docstring / OI-052 ruling).
                 content = msg.get("content")
                 blocks = content if isinstance(content, list) else (
                     [content] if isinstance(content, dict) else [])
@@ -123,8 +139,20 @@ def scan_transcript(path, floor):
                     if isinstance(block, dict) and \
                             str(block.get("type", "")).lower() == "fallback":
                         saw_fallback = True
-                        if first_violation is None:
-                            first_violation = "fallback block at line %d" % lineno
+                        if first_fallback_line is None:
+                            first_fallback_line = lineno
+                        # The harness fallback event carries its destination tier
+                        # (`{"type":"fallback","from":...,"to":...}`). Rank `to`
+                        # directly, so a fallback to a BELOW-floor tier is caught
+                        # even if message.model never updated to reflect it — this
+                        # closes the "trust message.model" residual. A fallback to
+                        # an at/above-floor tier (e.g. opus under the opus floor)
+                        # is compliant and sets no violation.
+                        to_model = block.get("to")
+                        if isinstance(to_model, str) and model_rank(to_model) < floor \
+                                and first_violation is None:
+                            first_violation = \
+                                "fallback to below-floor model %r at line %d" % (to_model, lineno)
                 # Model id normally lives at message.model; tolerate a top-level
                 # model key too (schema drift). A present-but-non-string model is
                 # coerced to a sentinel so it ranks unknown instead of crashing.
@@ -142,7 +170,8 @@ def scan_transcript(path, floor):
     except (OSError, UnicodeDecodeError) as e:
         return {
             "file": os.path.basename(path),
-            "models": {}, "saw_fallback": False, "first_violation": None,
+            "models": {}, "saw_fallback": False, "first_fallback_line": None,
+            "first_violation": None,
             "model_bearing_lines": 0, "parse_failures": 0,
             "read_error": "%s: %s" % (type(e).__name__, e),
         }
@@ -150,6 +179,7 @@ def scan_transcript(path, floor):
         "file": os.path.basename(path),
         "models": models,
         "saw_fallback": saw_fallback,
+        "first_fallback_line": first_fallback_line,
         "first_violation": first_violation,
         "model_bearing_lines": model_bearing,
         "parse_failures": parse_failures,
@@ -176,7 +206,9 @@ def scan_subagents_dir(subagents_dir, floor):
     if not files:
         return 2, []
     rows = [scan_transcript(p, floor) for p in files]
-    violated = any(r["saw_fallback"] or r["first_violation"] for r in rows)
+    # A fallback block is NOT a violation on its own (OI-052 ruling) — only a
+    # below-floor message.model is. saw_fallback is carried for the report only.
+    violated = any(r["first_violation"] for r in rows)
     # "Can't certify clean" — any of: a transcript with no model-bearing lines, a
     # line that failed to parse (evidence destruction), or a file we couldn't read.
     verified_null = any(
@@ -227,8 +259,6 @@ def main(argv=None):
         models = ", ".join("%s=%d" % (m, c) for m, c in sorted(r["models"].items())) \
             or "(no model-bearing lines)"
         flags = []
-        if r["saw_fallback"]:
-            flags.append("FALLBACK")
         if r["first_violation"]:
             flags.append(r["first_violation"])
         if r.get("read_error"):
@@ -237,22 +267,28 @@ def main(argv=None):
             flags.append("%d UNPARSEABLE LINE(S) - cannot certify" % r["parse_failures"])
         if r["model_bearing_lines"] == 0 and not r.get("read_error"):
             flags.append("VERIFIED-NULL (no model-bearing lines)")
-        bad = (r["saw_fallback"] or r["first_violation"]
-               or r.get("read_error") or r.get("parse_failures", 0) > 0
-               or r["model_bearing_lines"] == 0)
+        # A fallback is NOT a failure — only a below-floor model.model is.
+        bad = (r["first_violation"] or r.get("read_error")
+               or r.get("parse_failures", 0) > 0 or r["model_bearing_lines"] == 0)
         mark = "FAIL" if bad else "OK"
-        print("  [%s] %s - %s%s" % (
+        # Fallback shown as informational context on the row (even on an OK row).
+        info = ""
+        if r["saw_fallback"]:
+            info = "  (info: fell back mid-run @line %s; destination tier judged by model rank above)" \
+                % r.get("first_fallback_line")
+        print("  [%s] %s - %s%s%s" % (
             mark, r["file"], models,
-            ("  <<< " + "; ".join(flags)) if flags else ""))
+            ("  <<< " + "; ".join(flags)) if flags else "", info))
 
     if status == 0:
-        print("RESULT: PASS - every subagent held the %s floor for its full run." % args.floor)
+        print("RESULT: PASS - every subagent held the %s floor end-to-end "
+              "(mid-run fallbacks to a compliant tier are allowed)." % args.floor)
     elif status == 1:
-        print("RESULT: FAIL - a subagent ran below the %s floor or fell back mid-run. "
-              "Per Option C the security judgment breached the model floor." % args.floor)
+        print("RESULT: FAIL - a subagent ran BELOW the %s floor (its message.model "
+              "dropped under the floor)." % args.floor)
     else:
-        print("RESULT: TOOLING ERROR - a transcript had no model-bearing lines; "
-              "the floor could not be verified. Treated as NOT held.")
+        print("RESULT: TOOLING ERROR - the floor could not be verified "
+              "(unreadable / unparseable / no model-bearing lines). Treated as NOT held.")
     return status
 
 
