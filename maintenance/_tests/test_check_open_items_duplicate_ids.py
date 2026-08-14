@@ -182,11 +182,52 @@ with tempfile.TemporaryDirectory() as td:
     expect("main: unreadable tracker path -> exit 1 (failure, not silent clean)",
            rc == 1, "got %r" % rc)
 
-# --- the CANONICAL tracker itself, right now, must be clean (this is also the
-# regression guard for the actual OI-027 fix made earlier this session) -------------
+# --- collision_finding(): which findings are NEVER a legitimate transient state -----
+# The canonical-tracker assertion below runs against a live file that several sessions
+# edit concurrently. An OI item is filed as two separate writes (a table row and a
+# `### OI-NNN` detail section), so between them the tracker legitimately holds an
+# orphaned section or a row with no section. That is a mid-edit state, not a defect,
+# and it must not fail this suite for every other session on the machine.
+# A DUPLICATE id is different: no filing sequence ever needs two rows carrying the same
+# id, so a duplicate is always a real collision no matter when you look.
+# any_finding() keeps its broader meaning -- it drives the probe's exit code, which is
+# how the weekly hygiene sweep surfaces orphans -- so this is an ADDITIVE predicate.
+only_orphan = {"duplicate_rows": [], "duplicate_sections": [],
+               "orphaned_sections": ["OI-125"], "missing_sections": ["OI-121"]}
+dup_row = {"duplicate_rows": [{"id": "OI-027", "count": 2}], "duplicate_sections": [],
+           "orphaned_sections": [], "missing_sections": []}
+dup_section = {"duplicate_rows": [], "duplicate_sections": [{"id": "OI-027", "count": 2}],
+               "orphaned_sections": [], "missing_sections": []}
+spotless = {"duplicate_rows": [], "duplicate_sections": [],
+            "orphaned_sections": [], "missing_sections": []}
+
+expect("collision_finding: transient orphan/missing section is NOT a collision",
+       codc.collision_finding(only_orphan) is False, "got %r" % (only_orphan,))
+expect("collision_finding: duplicate row IS a collision",
+       codc.collision_finding(dup_row) is True)
+expect("collision_finding: duplicate section IS a collision",
+       codc.collision_finding(dup_section) is True)
+expect("collision_finding: spotless is not a collision",
+       codc.collision_finding(spotless) is False)
+# Regression guard: the broader predicate must KEEP flagging orphans, or the weekly
+# sweep silently stops reporting them (that sweep is what found OI-111/OI-112).
+expect("any_finding still flags an orphaned section (exit-code semantics unchanged)",
+       codc.any_finding(only_orphan) is True)
+expect("any_finding still flags a duplicate row",
+       codc.any_finding(dup_row) is True)
+
+# --- the CANONICAL tracker itself, right now, must be free of ID COLLISIONS ----------
+# (regression guard for the actual OI-027 fix). Deliberately NOT asserting full
+# cleanliness: see collision_finding() above -- a concurrent session mid-filing an item
+# would otherwise fail this test, and with it every push on the machine.
 real = codc.check(open(codc.DEFAULT_TRACKER_PATH, encoding="utf-8").read())
 expect("canonical open-items-tracker.md has zero id collisions right now",
-       codc.any_finding(real) is False, "got %r" % real)
+       codc.collision_finding(real) is False, "got %r" % real)
+if real["orphaned_sections"] or real["missing_sections"]:
+    print("  note: canonical tracker currently has orphaned=%r missing=%r -- advisory "
+          "only, likely a concurrent mid-filing; `maintenance/check-open-items-"
+          "duplicate-ids.py` reports these." % (real["orphaned_sections"],
+                                                real["missing_sections"]))
 
 passed = sum(1 for ok, _ in results if ok)
 print("check-open-items-duplicate-ids tests: %d/%d passed" % (passed, len(results)))
