@@ -89,6 +89,8 @@ GUARD_CHAIN = [
     "eos-claude-md-guard",
     "memory-index-guard",
     "rules-md-guard",
+    "lint-config-guard",  # OI-148, 2026-08-13 -- Edit/Write/MultiEdit into an
+    # existing oxford-command-center lint/format/typecheck config
 ]
 
 

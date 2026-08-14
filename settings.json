@@ -107,6 +107,9 @@
       "Bash(rm -rf /c/Users/Owner )",
       "Bash(rm -rf C:/)",
       "Bash(rm -rf C:/*)",
+      "Bash(rm -rf *worktrees/*)",
+      "Bash(rm -rf *worktrees)",
+      "Bash(rm -rf *worktrees\\*)",
       "Bash(del /s *)",
       "Bash(format *)",
       "Edit(.env*)",
@@ -297,6 +300,15 @@
         ]
       },
       {
+        "matcher": "NotebookEdit|Bash|mcp__.*(write_file|edit_block|move_file|start_process|interact_with_process|write_pdf)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/lint-config-guard.py\""
+          }
+        ]
+      },
+      {
         "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash|mcp__excel__.*|mcp__.*(write_file|edit_block|move_file|start_process|interact_with_process|write_pdf)",
         "hooks": [
           {
@@ -347,6 +359,15 @@
           {
             "type": "command",
             "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/memory-orphan-link-guard.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/commit-hygiene-guard.py\""
           }
         ]
       },

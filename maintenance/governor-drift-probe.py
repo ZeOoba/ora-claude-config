@@ -229,7 +229,20 @@ RE_DSCR_PIVOT_DECOY = re.compile(
 # Taking only the FIRST percent is the FP guard: if the ceiling is canonical 40%, any later
 # percent ("max LTV 40% and 25% basis discount", "ceiling 40% with 8% yield") is a DIFFERENT
 # metric and is left alone -- this holds even when a connective (not a list delimiter) joins them.
-RE_LTV_ANCHOR = re.compile(r"ltv\s*(?:ceiling|maximum|max)|(?:ceiling|maximum|max)\s*ltv", re.I)
+# GAP 2 CLOSED 2026-08-12: the first alternative required CONTIGUOUS "ltv ceiling" (\s* only), so a
+# qualifier defeated it exactly as the contiguous GOV_KEYWORDS literals defeated is_gov -- "LTV hard
+# ceiling 75%" was ARMED ("hard ceiling" is a GOV_KEYWORDS token, N6) yet extracted nothing. The
+# 2026-08-11 revision misattributed this to the arming gate; independent review corrected it to the
+# extractor, and the middle alternative closes it here.
+# Bounded like the DSCR gate (clause enders, non-greedy) and deliberately NARROWER: bare "max" is
+# NOT allowed across a gap, only contiguously. "maximum" spelled in full is a rare non-LTV
+# collocation, but a gapped bare "max" would reach unrelated percents ("ltv ... vacancy 15% max").
+# Safe against the ratified 65% per-property refi-ceiling false positive that forced the earlier
+# revert, because that line is excluded by ARMING, not by extraction -- pinned by
+# test_ratified_perproperty_refi_ceiling_prose_stays_clean_unit.
+RE_LTV_ANCHOR = re.compile(r"ltv\s*(?:ceiling|maximum|max)"
+                           r"|ltv[^.;!?\n]{0,16}?(?:ceiling|maximum)\b"
+                           r"|(?:ceiling|maximum|max)\s*ltv", re.I)
 # LTV ceiling, REVERSE WORD ORDER (2026-07-08): the NUMBER-then-keyword form "65% ceiling" /
 # "65% maximum" on a governor line that carries NO literal "ltv" -- the LTV analog of the reverse
 # DSCR gap above. "This 65% ceiling is the acquisition governor" never enters the ltv-gated LTV
@@ -384,16 +397,30 @@ GOV_KEYWORDS = ("governor", "hard filter", "hard screen", "hard acquisition",
 # Arming a line is NOT a finding -- every equality check, veto and suppressor downstream still
 # applies unchanged; this only decides whether the line is looked at at all.
 #
-# KNOWN GAP 1 -- metric-VALUE-boundword order ("DSCR 1.40x minimum") does NOT arm, because the
-# value's own decimal point is a '.' and the gap class excludes it. The extractor for that shape
-# already exists (RE_DSCR_DECL_REV, 2026-07-08) and is unreachable on a line whose only governor
-# signal is this phrasing. Pre-existing (the old contiguous keywords missed it too), NOT a
-# regression of this change, but disclosed here because it sits inside the class this fix
-# advertises closing. Pinned by test_known_gap_value_between_metric_and_boundword_unit.
-# The obvious fix -- allow a dot only between digits, (?<=[0-9])\.(?=[0-9]) -- was implemented and
-# REJECTED on measurement: it makes "DSCR of 1.42 with a 10 min cure period" flag 1.42 as a drifted
-# governor, turning a cure period into a Hard-Invariant-4 finding. Closing this needs the EXTRACTOR
-# side tightened first, not a wider gate.
+# DO NOT extend the exclusion set past clause enders. ',' ':' '--' '|' and parentheses deliberately
+# still cross the gap: "DSCR, hard floor, 1.40x" and the house "DSCR -- hard floor 1.40x" style are
+# plausible governor DECLARATIONS, so blacklisting those separators would convert a visible false
+# positive into a silent false negative -- the wrong side of this guard's bias. A markdown table row
+# ("| DSCR | floor | 1.40x |") arming is a TRUE positive, not collateral damage. Recommended
+# explicitly in independent review 2026-08-12; a future "hardening" pass should not undo it.
+#
+# GAP 1 -- CLOSED 2026-08-12 (was a known gap for one day). The metric-VALUE-boundword order
+# ("DSCR 1.40x minimum") did not arm, because the value's own decimal is a '.' and the gap class
+# above excludes it -- so the extractor for that shape (RE_DSCR_DECL_REV, 2026-07-08) was
+# unreachable on any line whose only governor signal was this phrasing.
+#
+# Closed by ADDING a second, value-abutting pattern rather than loosening the first. The decimal
+# lives INSIDE the pattern, so it can never be mistaken for a sentence boundary, and bare "min" is
+# accepted ONLY after an explicit x/× -- because "min" is a duration unit at least as often as it is
+# "minimum". That distinction is the whole fix: the simpler alternative (allow a dot between digits
+# anywhere in the gap) was implemented and REJECTED on measurement, since it reports "DSCR of 1.42
+# with a 10 min cure period" as governor drift. Duration prose is pinned clean by
+# test_value_abutting_arming_does_not_flag_durations_unit.
+#
+# Note on why this is safe to arm at all: the probe SKIPS its own source file and every test file
+# (main(): self_path / skip_names / _is_test_file), so the example strings quoted in these comments
+# and in the test suite are never scanned in a real run. An earlier review believed this gap needed
+# new self-file exemption machinery before it could close; that machinery already existed.
 #
 # KNOWN GAP 2 -- DSCR ONLY; there is no LTV analog. It was implemented, tested and REVERTED because
 # it armed prose describing the RATIFIED per-property 65% refi ceiling, e.g.
@@ -407,13 +434,20 @@ GOV_KEYWORDS = ("governor", "hard filter", "hard screen", "hard acquisition",
 # nothing -- the binding constraint is the LTV EXTRACTORS (RE_LTV_ANCHOR needs a contiguous "ltv
 # ceiling"; RE_LTV_NEAR's window is shorter than " hard ceiling "), not is_gov.
 RE_GOV_DSCR_BOUND = re.compile(r"\bdscr\b[^.;!?\n]{0,24}?\b(?:floor|minimum|min)\b", re.I)
+# Value-abutting order: dscr ... <value> [x] <bound-word>. Bare "min" REQUIRES the x/× (duration
+# guard, see GAP 1 above); "floor"/"minimum" spell themselves out and do not.
+RE_GOV_DSCR_VALUE_BOUND = re.compile(
+    r"\bdscr\b[^.;!?\n]{0,24}?[0-9]+\.[0-9]+\s*(?:[x×]\s*(?:floor|minimum|min)|floor|minimum)\b",
+    re.I)
 
 
 def _is_gov_line(low):
     """True when the line carries a governor-DECLARATION signal: a GOV_KEYWORDS token, or the DSCR
-    metric token paired with its bound-word across a short intra-sentence gap."""
+    metric token paired with its bound-word -- either across a short intra-sentence gap
+    ("DSCR hard floor 1.40x") or with the value between the two ("DSCR 1.40x minimum")."""
     return (any(k in low for k in GOV_KEYWORDS)
-            or RE_GOV_DSCR_BOUND.search(low) is not None)
+            or RE_GOV_DSCR_BOUND.search(low) is not None
+            or RE_GOV_DSCR_VALUE_BOUND.search(low) is not None)
 
 # --- Portfolio-level DSCR qualifier (2026-07-08) --------------------------------------------
 # Gabriel-ratified doctrine (2026-07-08): "DSCR of 1.25 for each property and 1.75 for the entire
@@ -646,6 +680,96 @@ def _in_spans(vs, ve, spans):
 # None of these sit within +-40 of any real-skill VETO-tier member (full-file test enforces this).
 ACQ_DECL_NEARBY = ("acquisition", "buy box", "buy-box", "hard filter", "hard screen",
                    "hard ceiling", "hard cap", "floor", "dscr floor", "minimum dscr", "min dscr")
+# NON-LTV PERCENT SUBJECTS (2026-08-12). A veto, NOT a positive gate -- that distinction is the
+# whole lesson of this fix. The first attempt REQUIRED an LTV-side governor marker near the value;
+# it closed the false positives but silenced five realistic drift declarations that had flagged
+# since 2026-07-08, because it reused _governor_declared_nearby -- a helper whose short before-reach
+# and plural/canonical-phrase exemptions are tuned to err toward DETECTION when vetoing, and
+# therefore err toward SILENCE when used as a requirement. Caught in independent review.
+#
+# Vetoing on the subject instead keeps the module's stated bias (suppression tight, detection over
+# silence): every confirmed false positive names an explicit non-LTV subject immediately before the
+# percentage ("vacancy 10% maximum", "TI cap 12% maximum", "site coverage 45% maximum"), while a
+# real governor declaration never does. Bare "cap" is deliberately ABSENT from the list: "LTV cap
+# 65%" is ceiling-declaration phrasing, so vetoing on "cap" would suppress it. (It happens not to be
+# detected today for an unrelated reason -- no extractor accepts bare "cap" as a ceiling word -- but
+# the veto list must not be the thing standing in the way if that is ever closed.)
+# Bare "coverage" is deliberately ABSENT: DSCR *is* the debt-service-COVERAGE ratio, so "coverage"
+# is the one candidate subject that routinely appears in genuine governor prose right where a
+# paired LTV ceiling is declared ("Governor: coverage 1.30x; 65% ceiling."). Listing it silenced
+# real declarations. Only the two-word "site coverage" is a non-LTV subject, and it alone is what
+# closes the site-coverage false positive.
+NON_LTV_PCT_SUBJECTS = ("vacancy", "occupancy", "tenant improvement", "ti", "parking",
+                        "site coverage", "exit cap", "cap rate", "downtime",
+                        "cure", "credit loss", "concession")
+RE_NON_LTV_SUBJECT = re.compile(
+    r"\b(?:" + "|".join(re.escape(t) for t in NON_LTV_PCT_SUBJECTS) + r")\b", re.I)
+# How far back to look for the subject that owns the percentage. Deliberately SHORT: the subject of
+# a percentage sits immediately before it, so a distant mention elsewhere on the line ("vacancy 5%
+# assumed; LTV ceiling 65%") must not suppress a real ceiling.
+NON_LTV_SUBJECT_REACH = 24
+# A clause ender, EXCLUDING the '.' of a decimal. Raw rfind(".") treated "2.5x" as a sentence
+# boundary and truncated the veto window, reopening the very false positives this closes -- and
+# DSCR-adjacent prose is dense with decimal multiples. The module already reasons about this
+# distinction in the GAP-1 arming comment.
+RE_CLAUSE_END = re.compile(r"[;!?]|\.(?!\d)")
+RE_LTV_BOUND_WORD = re.compile(r"\b(?:ceiling|maximum|max)\b", re.I)
+# ACCEPTED RESIDUALS, recorded so they are decisions and not rediscoveries:
+#   * a listed subject sitting directly before a genuine explicit ceiling still suppresses it
+#     ("LTV ceiling net of TI allowances: 65%."). Inherent to any subject veto; phrasing is rare,
+#     and the alternative -- requiring positive evidence -- is the mistake this fix reverted.
+#   * terse site-coverage prose that drops the "site" ("coverage 45% maximum") now flags. That is
+#     the deliberate cost of keeping bare "coverage" off the list: detection over silence.
+#   * a DOUBLED bound word around the subject's own figure ("vacancy ceiling 10% maximum") flags:
+#     the first bound word satisfies the between-test. Redundant phrasing, no observed instance.
+#   * an abbreviation or ellipsis between subject and value ("vacancy (i.e. stabilized) 10%
+#     maximum") truncates the lookback and lets the figure through. Both residuals are FP-direction
+#     only -- window truncation can never manufacture silence, so neither can hide real drift.
+
+
+def _nonltv_subject_owns(low, vs):
+    """True when a non-LTV subject noun owns the percentage at index `vs`, meaning the figure
+    belongs to that subject rather than to an LTV ceiling.
+
+    CLAUSE-BOUNDED, matching this module's house convention everywhere else: the reach never
+    crosses a clause ender, so a previous clause's subject cannot suppress this clause's ceiling
+    ("Governor: assume 5% vacancy; leverage 55% maximum." must still flag).
+
+    Whole-line finditer + span overlap rather than a substring slice: slicing manufactures a word
+    boundary at the cut, so a token severed mid-word can match by pure offset coincidence (a slice
+    landing inside "multi" leaves a bare "ti"). That is the Hole-4 defect already documented in
+    _governor_declared_nearby's docstring; this follows the same precedent."""
+    lo = max(0, vs - NON_LTV_SUBJECT_REACH)
+    clause = -1
+    for cm in RE_CLAUSE_END.finditer(low[:vs]):
+        clause = cm.start()
+    if clause >= lo:
+        lo = clause + 1
+    if lo >= vs:
+        return False
+    for mm in RE_NON_LTV_SUBJECT.finditer(low):
+        # The subject must END inside the window. An earlier cut accepted any subject merely
+        # OVERLAPPING it, which let a subject sit up to a full reach before the value with whole
+        # phrases in between -- wider than this helper's own stated theory, and it silenced a
+        # baseline-flagged line.
+        if not lo <= mm.end() <= vs:
+            continue
+        # ...and a bound word BETWEEN the subject and the value means the value binds to the
+        # ceiling, not to the subject: "at 95% occupancy the ceiling is 65% maximum" declares a
+        # ceiling. In every confirmed false positive the bound word sits after the value
+        # ("vacancy 10% maximum") or before the subject ("maximum TI 12%"), never between.
+        if RE_LTV_BOUND_WORD.search(low[mm.end():vs]):
+            continue
+        # ...and an intervening PERCENT disproves ownership outright: the subject demonstrably owns
+        # that earlier figure, not this one ("Governor: vacancy 5% assumed and 65% maximum." -- the
+        # vacancy is the 5%, and the 65% ceiling must still flag). Without this the veto leapfrogs a
+        # real figure, which is the same failure the refi machinery's percent-free gaps exist to
+        # prevent. Percent-based deliberately, NOT digit-based: "at 2.5x turnover" carries digits
+        # but no percent, and a digit guard would reopen the decimal false positives above.
+        if "%" in low[mm.end():vs]:
+            continue
+        return True
+    return False
 
 def _spans_overlap(a0, a1, b0, b1):
     return a0 < b1 and a1 > b0
@@ -877,7 +1001,12 @@ def scan_line(raw):
                     pm = RE_LTV_NUM.search(window)
                     # skip the percent if it is the corrected-away old value of an LTV correction note
                     if pm and not any(s <= base + pm.start(1) < e for (s, e) in ltv_corr_spans):
-                        _flag_ltv(pm.group(1))
+                        # ...and skip it when a non-LTV subject owns it: the anchor can bind a
+                        # ceiling word that belongs to another noun ("LTV steady, maximum TI 12% of
+                        # TDC"), and the window would then read that subject's percentage as the
+                        # declared LTV ceiling. Same veto as the reverse pass, same reason.
+                        if not _nonltv_subject_owns(low, base + pm.start(1)):
+                            _flag_ltv(pm.group(1))
                 if not cmp_hits:  # proximity fallback only when no comparator-bound value was found
                     for m in RE_LTV_NEAR.finditer(low):
                         # skip a POST-CLOSE-REFI LTV sizing figure (e.g. "refi ... 65% LTV" against
@@ -908,6 +1037,14 @@ def scan_line(raw):
                 if any(s <= vs < e for (s, e) in ltv_corr_spans):
                     continue
                 if _refi_qualified(low, vs):
+                    continue
+                # NON-LTV SUBJECT VETO (2026-08-12, MAJOR review finding). This pass needs no 'ltv'
+                # token, so on a line armed by something else it read ANY capped percentage as an
+                # LTV ceiling -- "DSCR 1.25x minimum; underwrite vacancy 10% maximum." reported a
+                # 10% LTV ceiling. Suppress only when the percentage demonstrably belongs to another
+                # subject; do NOT require positive LTV evidence (see NON_LTV_PCT_SUBJECTS for why
+                # the requirement form silenced real declarations).
+                if _nonltv_subject_owns(low, vs):
                     continue
                 _flag_ltv(m.group(1))
     return out
