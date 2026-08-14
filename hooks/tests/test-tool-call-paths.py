@@ -567,6 +567,242 @@ def test_indicator_partition_is_total():
               tcp.shell_may_write(cmd), cmd)
 
 
+# ------------------------------------------------- recursive delete (2026-08-14)
+# THE GAP THIS CLOSES. shell_may_write() has flagged `rm ` since the module was
+# written, but every consumer (config-write-guard, workbook-write-guard,
+# ora-autonomy-gate) only ever BLOCKS when a write indicator is ALSO paired with a
+# governance-path marker. So:
+#     rm -rf ~/.claude/hooks/     -> blocked (governance marker)
+#     rm -rf /                    -> blocked (settings.json deny rule)
+#     rm -rf ~/Documents/deals    -> COMPLETELY UNGUARDED
+#     rm -rf .                    -> COMPLETELY UNGUARDED
+# recursive_delete() is a SEPARATE predicate that answers "is this a recursive
+# tree deletion?" with NO path condition at all, so a consumer can gate on the
+# destructiveness of the ACT rather than on where it is aimed.
+#
+# DELIBERATELY ADDITIVE: it does not touch shell_may_write(), SHELL_WRITE_
+# INDICATORS, _BOUNDED_VERBS or the separator class. Widening any of those would
+# change behavior for all three consumers at once -- the exact move that produced
+# the 2026-08-03 robocopy regression and the PR#32 eos-review-gate deadlock.
+def test_recursive_delete_detects_every_flag_spelling():
+    """Every spelling of "delete this tree" that GNU/BSD rm actually accepts."""
+    firing = [
+        "rm -rf C:/Users/Owner/Documents/deals",
+        "rm -fr C:/Users/Owner/Documents/deals",
+        "rm -r -f C:/Users/Owner/Documents/deals",
+        "rm -f -r C:/Users/Owner/Documents/deals",
+        "rm --recursive --force C:/Users/Owner/Documents/deals",
+        "rm --force --recursive C:/Users/Owner/Documents/deals",
+        "rm -r --force C:/Users/Owner/Documents/deals",
+        "rm --recursive -f C:/Users/Owner/Documents/deals",
+        "rm -Rf C:/Users/Owner/Documents/deals",      # BSD/GNU capital -R
+        "rm -R C:/Users/Owner/Documents/deals",
+        "rm -rfv C:/Users/Owner/Documents/deals",     # bundled with -v
+        "rm -vrf C:/Users/Owner/Documents/deals",
+        "rm -irf C:/Users/Owner/Documents/deals",
+        "rm -r .",                                    # the bare-cwd form
+        "rm -rf .",
+        "rm -rf ..",
+        "RM -RF C:/Users/Owner/Documents/deals",      # case
+        "sudo rm -rf /var/lib/thing",
+        "/usr/bin/rm -rf /var/lib/thing",
+        "./rm -rf x",
+        "rm\t-rf\tC:/Users/Owner/Documents/deals",    # tab separated
+        "rm -rf 'C:/Users/Owner/My Deals'",           # quoted target
+        'rm -rf "C:/Users/Owner/My Deals"',
+        "foo && rm -rf bar",                          # chained
+        "cd /tmp; rm -rf build",
+        "test -d x || rm -rf x",
+        "make clean | rm -rf dist",
+        "find . -name node_modules -exec rm -rf {} +",
+        "for d in a b; do rm -rf $d; done",
+    ]
+    for cmd in firing:
+        check("recursive delete detected: %r" % cmd,
+              tcp.is_recursive_delete(cmd), cmd)
+
+
+def test_recursive_delete_force_only_is_still_recursive_free():
+    """`-r` WITHOUT `-f` still deletes the tree -- `-f` only suppresses prompts,
+    and a hook-driven shell is non-interactive anyway, so there is nothing to
+    prompt. Recursion is the destructive property; force is metadata."""
+    d = tcp.recursive_delete("rm -r C:/Users/Owner/Documents/deals")
+    check("rm -r (no -f) is a recursive delete", d is not None)
+    check("rm -r (no -f) reports force=False", d is not None and d.force is False)
+    d = tcp.recursive_delete("rm -rf C:/Users/Owner/Documents/deals")
+    check("rm -rf reports force=True", d is not None and d.force is True)
+
+
+def test_recursive_delete_does_not_fire_on_benign_commands():
+    """The false positives that would break ordinary work. `docker run --rm` is
+    the load-bearing one: the module's existing lookbehind excludes `-`
+    specifically to keep it benign (test_anchoring_details_are_pinned), and this
+    detector must not re-break it."""
+    benign = [
+        "docker run --rm img",                  # THE carve-out that must survive
+        "docker run --rm -v /data:/data -it ubuntu bash",
+        "docker run --rm=true img",
+        "podman run --rm --recursive-thing img",
+        "rm file.txt",                          # delete, but not recursive
+        "rm -f file.txt",                       # force, but not recursive
+        "rm *.tmp",
+        "rmdir C:/Users/Owner/Documents/empty",  # different command entirely
+        "rmdir /s /q C:/Users/Owner/Documents",  # cmd.exe form -- NOT covered
+        "grep -r pattern C:/Users/Owner/Documents",
+        "grep --recursive pattern .",           # recursive, but not a delete
+        "ls -R C:/Users/Owner/Documents",
+        "cp -r src dst",                        # recursive copy, not a delete
+        "confirm -rf x",                        # 'rm' inside a word
+        "alarm -rf x",
+        "python train.py --model resnet -r 5",
+        "git add -A",
+        "echo please confirm the value",
+        "Remove-Item -Recurse -Force x",        # PS form -- NOT covered here
+    ]
+    for cmd in benign:
+        check("benign, not a recursive delete: %r" % cmd,
+              not tcp.is_recursive_delete(cmd), cmd)
+
+
+def test_recursive_delete_is_segment_scoped():
+    """A `-r` belonging to a DIFFERENT command in the same line must not arm an
+    unrelated `rm`. Without segment scoping, `rm x.txt && ls -R` reads as a tree
+    deletion -- a false positive on two individually-benign commands."""
+    not_firing = [
+        "rm x.txt && ls -R",
+        "rm x.txt; grep -r pattern .",
+        "ls -R . && rm x.txt",
+        "grep -r rm notes.txt",
+        "grep --recursive rm notes.txt",
+        "cp -r a b | rm x.txt",
+    ]
+    for cmd in not_firing:
+        check("segment-scoped, not a recursive delete: %r" % cmd,
+              not tcp.is_recursive_delete(cmd), cmd)
+    # ...but the flag and the verb in the SAME segment still fire, including when
+    # an earlier segment is entirely innocent.
+    for cmd in ["ls -R . && rm -rf x", "grep -r p . ; rm -rf build"]:
+        check("same-segment pairing still fires: %r" % cmd,
+              tcp.is_recursive_delete(cmd), cmd)
+
+
+def test_recursive_delete_ignores_flags_that_are_not_rms():
+    """REFUTE differential finding (2026-08-14). The first implementation matched
+    the recursive bundle as `-[a-z]*r[a-z]*`, i.e. ANY single-dash flag containing
+    the letter "r". So `find . -type d -name rm -print` read as a tree deletion --
+    the `rm` is find's search ARGUMENT and `-print` is find's flag, not rm's.
+
+    The hand-written corpus missed this entirely; only the adversarial battery
+    surfaced it. Pinned here as its own class, because the same shape recurs
+    across every tool whose flags contain an r."""
+    for cmd in ["find . -type d -name rm -print && ls -R",
+                "find . -name rm -print",
+                "find . -name rm -perm 644",
+                "find . -name rm -newer ref.txt",
+                "find . -name rm -prune",
+                "ls rm -color",
+                "sort rm -reverse"]:
+        check("non-rm flag containing 'r' does not arm rm: %r" % cmd,
+              not tcp.is_recursive_delete(cmd), cmd)
+    # ...and rm's OWN option letters in any bundle still do
+    for flag in ("-r", "-R", "-rf", "-fr", "-Rf", "-rfv", "-vrf", "-irf",
+                 "-rd", "-dr", "-rfi", "--recursive"):
+        check("rm option bundle %r still arms rm" % flag,
+              tcp.is_recursive_delete("rm %s x" % flag), flag)
+    # a bundle with NO r is not recursive, however forceful
+    for flag in ("-f", "-i", "-d", "-v", "-fv", "-fi", "--force"):
+        check("rm option bundle %r is not recursive" % flag,
+              not tcp.is_recursive_delete("rm %s x" % flag), flag)
+
+
+def test_recursive_delete_sees_through_ifs_word_splitting():
+    """REFUTE differential finding (2026-08-14), the good direction: the battery
+    expected `rm${IFS}-rf${IFS}/tmp/x` to evade, and it does not. bash expands
+    ${IFS} to whitespace, so this IS a real recursive delete, and the detector
+    catches it because `$` and `}` are neither word characters nor hyphens.
+    Pinned so a future separator change cannot silently lose it."""
+    check("${IFS} word-splitting evasion is detected",
+          tcp.is_recursive_delete("rm${IFS}-rf${IFS}/tmp/x"))
+
+
+def test_recursive_delete_extracts_targets():
+    d = tcp.recursive_delete("rm -rf C:/Users/Owner/Documents/deals")
+    check("single target extracted",
+          d is not None and d.targets == ["C:/Users/Owner/Documents/deals"],
+          "got %s" % (d.targets if d else None))
+    d = tcp.recursive_delete("rm -rf build dist .cache")
+    check("multiple targets extracted",
+          d is not None and d.targets == ["build", "dist", ".cache"],
+          "got %s" % (d.targets if d else None))
+    d = tcp.recursive_delete('rm -rf "C:/Users/Owner/My Deals"')
+    check("quoted target keeps its space and loses its quotes",
+          d is not None and d.targets == ["C:/Users/Owner/My Deals"],
+          "got %s" % (d.targets if d else None))
+    d = tcp.recursive_delete("rm -rf 'C:/Users/Owner/My Deals'")
+    check("single-quoted target keeps its space and loses its quotes",
+          d is not None and d.targets == ["C:/Users/Owner/My Deals"],
+          "got %s" % (d.targets if d else None))
+    d = tcp.recursive_delete("rm -rf -- ./x")
+    check("bare -- separator is not reported as a target",
+          d is not None and d.targets == ["./x"],
+          "got %s" % (d.targets if d else None))
+    d = tcp.recursive_delete("rm -rf build > log.txt")
+    check("redirect tail is not reported as a target",
+          d is not None and d.targets == ["build"],
+          "got %s" % (d.targets if d else None))
+    # target case is PRESERVED -- a consumer rendering a block message must show
+    # the operator the path they actually typed
+    d = tcp.recursive_delete("rm -rf C:/Users/Owner/OneDrive/Deals")
+    check("target case preserved",
+          d is not None and d.targets == ["C:/Users/Owner/OneDrive/Deals"],
+          "got %s" % (d.targets if d else None))
+
+
+def test_recursive_delete_survives_unicode_evasion():
+    """Same posture as the rest of the module: NFKC + Cf/Mn stripping happens
+    before matching, so a zero-width space wedged into the flag does not hide
+    the deletion."""
+    check("ZWSP inside the flag bundle still detected",
+          tcp.is_recursive_delete("rm -r\u200bf C:/Users/Owner/Documents/deals"))
+    check("ZWSP between verb and flag still detected",
+          tcp.is_recursive_delete("rm\u200b -rf C:/Users/Owner/Documents/deals"))
+
+
+def test_recursive_delete_rejects_garbage():
+    check("non-string -> None", tcp.recursive_delete(None) is None)
+    check("non-string -> not is_recursive_delete", not tcp.is_recursive_delete(123))
+    check("empty string -> None", tcp.recursive_delete("") is None)
+    check("no rm at all -> None", tcp.recursive_delete("ls -R .") is None)
+
+
+def test_recursive_delete_is_a_strict_subset_of_shell_may_write():
+    """STRUCTURAL INVARIANT, and the reason this change is safe for all three
+    consumers. Every recursive delete is already write-shaped under the OLD
+    predicate, so the new detector adds a CLASSIFICATION, never a new
+    may_write=True. If this ever fails, shell_may_write has been altered and the
+    'purely additive' claim is void."""
+    for cmd in ["rm -rf C:/Users/Owner/Documents/deals", "rm -r .",
+                "rm --recursive --force build", "foo && rm -rf bar",
+                "rm -Rf x", "sudo rm -rf /var/lib/thing"]:
+        check("recursive delete implies may_write: %r" % cmd,
+              (not tcp.is_recursive_delete(cmd)) or tcp.shell_may_write(cmd), cmd)
+
+
+def test_governance_path_deletes_are_unchanged():
+    """The pre-existing governance-paired behavior must be bit-identical -- this
+    change may not alter what shell_may_write says about anything."""
+    for cmd in ["rm -rf C:/Users/Owner/.claude/hooks/",
+                "rm C:/Users/Owner/.claude/hooks/x.py",
+                "del C:/Users/Owner/.claude/hooks/x.py",
+                "rm -rf hooks/", "rm hooks/x.py"]:
+        check("governance delete still write-shaped: %r" % cmd,
+              tcp.shell_may_write(cmd), cmd)
+    for cmd in ["docker run --rm img", "cat model.json", "git add -A",
+                "python gate.py --record --model=claude-fable-5"]:
+        check("benign still not write-shaped: %r" % cmd,
+              not tcp.shell_may_write(cmd), cmd)
+
+
 if __name__ == "__main__":
     test_primary_write_path_native()
     test_primary_write_path_dc_write_file_both_prefixes_both_arg_names()
@@ -597,6 +833,17 @@ if __name__ == "__main__":
     test_composite_writers_are_separator_agnostic()
     test_widening_the_separator_is_strictly_broadening()
     test_indicator_partition_is_total()
+    test_recursive_delete_detects_every_flag_spelling()
+    test_recursive_delete_force_only_is_still_recursive_free()
+    test_recursive_delete_does_not_fire_on_benign_commands()
+    test_recursive_delete_is_segment_scoped()
+    test_recursive_delete_ignores_flags_that_are_not_rms()
+    test_recursive_delete_sees_through_ifs_word_splitting()
+    test_recursive_delete_extracts_targets()
+    test_recursive_delete_survives_unicode_evasion()
+    test_recursive_delete_rejects_garbage()
+    test_recursive_delete_is_a_strict_subset_of_shell_may_write()
+    test_governance_path_deletes_are_unchanged()
     if _failures:
         print("\n%d FAILURE(S): %s" % (len(_failures), ", ".join(_failures)))
         sys.exit(1)

@@ -477,6 +477,141 @@ def shell_analysis(tool_name, tool_input):
     return ShellAnalysis(tool_name, text, shell_may_write(text), False)
 
 
+# ------------------------------------------------ recursive tree delete (2026-08-14)
+# THE GAP THIS CLOSES. Everything above answers "does this command write?" -- and
+# every consumer of that answer (config-write-guard.py, workbook-write-guard.py,
+# ora-autonomy-gate.py) only BLOCKS when the write indicator is ALSO paired with a
+# path marker for the surface that guard protects. The comment on _BOUNDED_VERBS
+# says so explicitly: "All 19 flag only when ALSO paired with a governance-path
+# marker." That pairing is correct for those guards -- and it leaves a hole:
+#     rm -rf ~/.claude/hooks/     -> blocked (governance marker)
+#     rm -rf /                    -> blocked (settings.json deny rule)
+#     rm -rf ~/Documents/deals    -> UNGUARDED
+#     rm -rf .                    -> UNGUARDED
+# A recursive tree deletion is destructive because of WHAT IT DOES, not because of
+# where it points, so it needs a predicate with no path condition at all.
+#
+# WHY THIS IS A SEPARATE FUNCTION RATHER THAN A WIDENING. Widening
+# SHELL_WRITE_INDICATORS / _BOUNDED_VERBS / _VERB_SEPARATOR changes shell_may_write()
+# for ALL THREE consumers simultaneously. That shared-matcher move is exactly what
+# produced the 2026-08-03 robocopy regression (anchoring silently un-flagged real
+# writers) and the PR#32 eos-review-gate deadlock (a false positive forced a
+# strictly BROADER governance-wide token). recursive_delete() touches none of that
+# machinery: shell_may_write(), its regexes and its indicator tuples are unchanged,
+# byte for byte. A consumer opts in by CALLING this; until one does, behavior is
+# identical. test_recursive_delete_is_a_strict_subset_of_shell_may_write pins the
+# structural half of that claim, and the differential battery pins the empirical
+# half (zero deltas on shell_may_write across the adversarial corpus).
+#
+# SCOPE, stated honestly (see also the PR body). This detects POSIX `rm` with a
+# recursive flag. It does NOT detect the Windows-native equivalents -- `rmdir /s`,
+# `del /s`, `Remove-Item -Recurse` -- nor Python `shutil.rmtree`, nor any form
+# reached through value indirection ($VAR, a variable holding the whole command,
+# a script file). Those are deliberate non-goals of THIS change, not oversights;
+# each needs its own false-positive analysis, and `Remove-Item -Recurse` already
+# has a settings.json deny rule for the Bash tool.
+#
+# FORCE IS NOT REQUIRED. `-f` only suppresses the interactive prompt, and a
+# hook-driven shell is non-interactive, so there is nothing to suppress: `rm -r x`
+# destroys the tree just as thoroughly as `rm -rf x`. Recursion is the destructive
+# property; `force` is reported as metadata for a consumer that wants to rank
+# severity.
+RecursiveDelete = namedtuple("RecursiveDelete", "command recursive force targets")
+
+# A command SEGMENT boundary. Scoping matters: without it, the individually-benign
+# `rm x.txt && ls -R` reads as a tree deletion, because a `-r` belonging to a
+# different command would arm the `rm`.
+_SEGMENT_SPLIT_RE = re.compile(r"[;&|\n]+")
+
+# `rm` as its own command word. The LOOKBEHIND IS THE SAME `(?<![\w-])` THE
+# BOUNDED VERBS USE, and for the same two reasons: `-` keeps `docker run --rm`
+# benign (a deliberate, separately-pinned carve-out -- re-breaking it is a
+# regression), and `\w` keeps `confirm`/`alarm` benign. The trailing `(?![\w-])`
+# is what separates `rm` from `rmdir`, which is a different command with a
+# different flag grammar and is deliberately out of scope.
+_RM_VERB_RE = re.compile(r"(?<![\w-])rm(?![\w-])", re.IGNORECASE)
+
+# A recursive flag in any spelling rm accepts: `--recursive`, or a short-option
+# bundle containing r/R (`-r`, `-rf`, `-fr`, `-vrf`, `-irf`, `-Rf`). The
+# `--recursive` alternative must come FIRST -- the short-bundle branch cannot
+# match a double dash (its second `-` fails the lookbehind), so without the long
+# alternative `--recursive` would go undetected.
+#
+# THE BUNDLE IS RESTRICTED TO rm's OWN SHORT OPTIONS (rRfiIdv), not `[a-z]`.
+# Caught by the REFUTE differential battery, which the hand-written test corpus
+# had missed: `-[a-z]*r[a-z]*` matches ANY single-dash flag containing the letter
+# "r", so `find . -type d -name rm -print` read as a recursive delete -- the `rm`
+# there is a search ARGUMENT and `-print` is find's flag, not rm's. Same class
+# would have hit `-perm`, `-newer`, `-prune`. Restricting the character class to
+# the options GNU/BSD rm actually accepts kills the whole class at once while
+# keeping every real bundle (verified by the exhaustive permutation sweep in the
+# differential harness: 0 bundles fire without an r, 0 bundles with an r stay
+# silent).
+_RM_SHORT_OPTS = "rfidv"  # r/R recursive, f force, i/I prompt, d dir, v verbose
+_RECURSIVE_FLAG_RE = re.compile(
+    r"(?<![\w-])--recursive(?![\w-])"
+    r"|(?<![\w-])-[%s]*r[%s]*(?![\w-])" % (_RM_SHORT_OPTS, _RM_SHORT_OPTS),
+    re.IGNORECASE)
+_FORCE_FLAG_RE = re.compile(
+    r"(?<![\w-])--force(?![\w-])"
+    r"|(?<![\w-])-[%s]*f[%s]*(?![\w-])" % (_RM_SHORT_OPTS, _RM_SHORT_OPTS),
+    re.IGNORECASE)
+
+# Argument tokens, quote-aware so a quoted path keeps its spaces.
+_ARG_TOKEN_RE = re.compile(r"\"[^\"]*\"|'[^']*'|[^\s\"']+")
+# A redirect ends the operand list (`rm -rf build > log.txt` deletes build, not log).
+_REDIRECT_TOKEN_RE = re.compile(r"^\d*[<>]")
+
+
+def _delete_targets(rest):
+    """Operands of an `rm` invocation: non-flag tokens up to the first redirect,
+    with surrounding quotes removed and original case preserved."""
+    targets = []
+    for m in _ARG_TOKEN_RE.finditer(rest):
+        token = m.group(0)
+        if _REDIRECT_TOKEN_RE.match(token):
+            break
+        if token.startswith("-"):
+            continue  # a flag, or the bare `--` end-of-options separator
+        if token[:1] in ("\"", "'") and token[-1:] == token[:1] and len(token) >= 2:
+            token = token[1:-1]
+        if token:
+            targets.append(token)
+    return targets
+
+
+def recursive_delete(command):
+    """RecursiveDelete if `command` textually performs a recursive `rm`, else None.
+
+    NO PATH CONDITION -- that is the whole point. Static text analysis only, with
+    the same honest limit as shell_may_write(): value indirection (a variable
+    holding the path or the flags, a command assembled at run time, a script file)
+    is not statically decidable, so False here is never proof of safety."""
+    if not isinstance(command, str) or not command:
+        return None
+    text = normalize_text(command)
+    targets, force = [], False
+    hit = False
+    for segment in _SEGMENT_SPLIT_RE.split(text):
+        for m in _RM_VERB_RE.finditer(segment):
+            rest = segment[m.end():]
+            if not _RECURSIVE_FLAG_RE.search(rest):
+                continue
+            hit = True
+            force = force or bool(_FORCE_FLAG_RE.search(rest))
+            for t in _delete_targets(rest):
+                if t not in targets:
+                    targets.append(t)
+    if not hit:
+        return None
+    return RecursiveDelete(text, True, force, targets)
+
+
+def is_recursive_delete(command):
+    """True if `command` textually performs a recursive `rm`, anywhere."""
+    return recursive_delete(command) is not None
+
+
 # --------------------------------------------------------------------- shape registry
 class Shape(object):
     """One write-capable tool-call shape, with a payload factory for tests.
