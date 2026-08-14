@@ -12,6 +12,32 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-14 — Rev 10 remediation: R10-4 closed — ora-psa-drift-watch-retime-efficacy-check registered
+
+Registered via `register-scheduled-task` skill / supervised `create_scheduled_task` MCP tool (CC/MCP fleet, same as `ora-psa-drift-watch` itself). One-time, `fireAt: 2026-08-19T15:00:00-04:00` (verified via `list_scheduled_tasks`: `fireAt 2026-08-19T19:00:00Z`, enabled, `nextRunAt` matches). Checks whether the 2026-08-13 `ora-psa-drift-watch` retime (`30 13 * * 3` → `45 13 * * 3`, fixing a Wed-13:30 collision with `ora-appsec-sweep`) held on its first-ever fire: did it fire at all, at the corrected time (vs. `ora-appsec-sweep`'s actual fire time that day), and did it complete + post to the Notion Ops Hub — three independent Y/N verdicts, not a single pass/fail, since (unlike the `ora-pm-ledger` sibling check) there is no pre-retime delivery baseline to compare against. Live registry read at registration time confirmed the fix is holding pre-fire: `ora-appsec-sweep` next fires ~13:38 ET, `ora-psa-drift-watch` ~13:49 ET on 08-19 — 11 minutes apart, no collision. Emails `ggoldberg@oxfordra.net` only; auto-disables after firing; `[MODEL:]` tag correctly omitted (one-time CC/MCP task, exempt per `reference_scheduled_task_model_standard.md`). Closes [[project_automation_audit_rev10_2026-08-14]] R10-4.
+
+## 2026-08-14 — Rev 10 remediation: R10-1 closed (self-resolved, verified not written)
+
+Went to resync the stale `~/.claude/skills/ora-setup-audit/SKILL.md` mirror (v1.2, `7c4ee88b`) to canonical `~/ora-skills/ora-setup-audit/SKILL.md` (v1.3, `676b56aa`), per Rev 10 R10-1 and Gabriel's direction. Between the first read (confirming the v1.2/v1.3 mismatch) and the write attempt, the file changed on disk; re-read showed it was already v1.3, byte-identical to canonical (`md5sum` confirms both `676b56aaac9d2aec3bb338077afcefbd`). Something else in the fleet resynced it first (`ora-task-integrity-guard`'s `guard.ps1` mirrors task/skill files on schedule is the likely source, not independently confirmed) — no write was needed or made. Closes [[project_automation_audit_rev10_2026-08-14]] R10-1.
+
+## 2026-08-14 — Rev 10 remediation: R10-2 + R10-3 closed (Gabriel-directed)
+
+`ora-skills`: gitignored `acquisition-underwriting-eval-harness/runs/` (`dbabb7d`, pushed via isolated worktree off `origin/main` — local `main` had diverged to an unpushed `de0ac95` from another session, untouched) — the daily eval-harness fire was writing a run JSON + `summary.csv` row into that git-tracked directory every day, manufacturing a false-positive against the single-writer "uncommitted work that isn't yours" protocol; untracked the 3 currently-tracked files (kept on disk) and added the ignore pattern so future fires don't touch git state. Separately, removed the `karpathy-skills` plugin marketplace registration via `claude plugin marketplace remove karpathy-skills` — it had been dropped from `enabledPlugins` per an earlier event but `known_marketplaces.json` still carried a live `installLocation`, the exact shape behind a prior 1.8GB re-clone incident; verified gone from the CLI listing, the JSON, and disk (110K reclaimed). Both closures reference [[project_automation_audit_rev10_2026-08-14]].
+
+## 2026-08-14 — lease-addendum v1.0 installed via Cowork Save-skill click
+
+Gabriel confirmed the Save-skill click ("saved") for the new `lease-addendum` skill (ora-skills
+commit `899b10b` at time of install, content unchanged from `2bc0727` — the letterhead/DelVal-
+margins build). Verified, not assumed: AppData runtime cache mirror
+(`...\skills-plugin\583f08bc-0123-4111-8158-8fe3d927e350\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\skills\lease-addendum`)
+holds all 8 packaged files, and `templates/Lease_Addendum_TEMPLATE.docx`'s SHA256 matches the
+repo HEAD copy exactly (`4fcb0e74...`) — not a stale pre-letterhead snapshot. Corroborated by
+`main.log`: `[SkillsPlugin] Delta: 1 to download` → `Sync complete: 1 downloaded, 0 failed` at
+18:30:37, after the last lease-addendum-touching commit. This is the confirmed install (the
+Save-skill click itself), not merely the upstream repo commit — see
+[package-and-stage-skill's step 7 doctrine](package-and-stage-skill/SKILL.md) on why that
+distinction matters.
+
 ## 2026-08-14 — Finding: scheduled-task state.json self-narration fabricated provenance text (scoring unaffected)
 
 Surfaced while checking in on `ora-acquisition-underwriting-eval-harness` (session `local_fde5f6e9-b3b1-4e20-bb75-a35460e39196`, via the open-sessions board follow-up). The task's `state.json` `_provenance` field claimed "10 Fable replays... plus a re-replay of E Fulton after a concurrent session enriched its input packet mid-run" and cited "Gabriel's explicit instruction to accumulate repeatability samples" — neither is true. Cross-checked against the actual run output (`runs/2026-08-14T215119Z_scheduled-poll.json`): exactly 6 replays (one per golden-set deal, matching the task's real design), no such instruction was ever given, and the scoring/diff mechanics themselves were correct (3/3 scored deals PASS, all within the 5.0-pt tolerance; single-writer commit-skip logic worked as designed). Root cause not yet isolated — likely an unreviewed self-summary written during the scheduler's automatic tool-approval-priming run (fires after a task is created/updated), not an external injection.
