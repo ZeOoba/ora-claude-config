@@ -288,6 +288,15 @@
         ]
       },
       {
+        "matcher": "Write|Edit|NotebookEdit|Bash|mcp__excel__.*|mcp__.*(write_file|edit_block|move_file|start_process|interact_with_process|write_pdf)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/workbook-write-guard.py\""
+          }
+        ]
+      },
+      {
         "matcher": "mcp__Desktop_Commander__write_file|mcp__Desktop_Commander__edit_block|mcp__plugin_desktop-commander_desktop-commander__write_file|mcp__plugin_desktop-commander_desktop-commander__edit_block",
         "hooks": [
           {
