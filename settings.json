@@ -288,7 +288,7 @@
         ]
       },
       {
-        "matcher": "Write|Edit|NotebookEdit|Bash|mcp__excel__.*|mcp__.*(write_file|edit_block|move_file|start_process|interact_with_process|write_pdf)",
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash|mcp__excel__.*|mcp__.*(write_file|edit_block|move_file|start_process|interact_with_process|write_pdf)",
         "hooks": [
           {
             "type": "command",

@@ -31,6 +31,7 @@ CONTRACT:
 Run: python test-workbook-write-guard.py
 Stdlib only. ASCII-only. Windows (`python`).
 """
+import importlib.util
 import json
 import os
 import subprocess
@@ -39,6 +40,22 @@ import tempfile
 
 HOOKS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOOK = os.path.join(HOOKS_DIR, "workbook-write-guard.py")
+
+# WHITE-BOX handle on the module (REFUTE round 3, third-review finding): round 3's
+# own regression tests (test_variable_bound_save_path_blocks et al) drove the hook
+# only as a black-box subprocess and asserted the OVERALL exit code. That let a real
+# bug in `_resolve_identifier_literal` (the `r?` prefix sat INSIDE the capture group,
+# so `\1` backreferenced "r'" instead of "'", making a lone r-prefixed assignment --
+# the idiomatic Windows-path form -- resolve to NOTHING) survive self-testing
+# entirely: the "should block" case passed via fail-toward-block, and the "should
+# allow" case passed via an unrelated literal-clearing path, so the resolver's own
+# return value was never actually checked. Importing the module directly lets these
+# tests assert on `_resolve_identifier_literal`'s and `_arg_verdict`'s own return
+# values, not just an externally-observable side effect that can pass for the wrong
+# reason.
+_spec = importlib.util.spec_from_file_location("workbook_write_guard", HOOK)
+wwg = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(wwg)
 
 SID = "test-session-0123456789abcdef"
 WB_NAME = "Master Excel Template Company Wide -- Oxford.xlsx"
@@ -158,6 +175,167 @@ def test_dc_start_process_openpyxl_save_blocks():
     rc, err = run("mcp__Desktop_Commander__start_process",
                   {"command": "python -c \"import openpyxl; wb.save(r'%s')\"" % WB})
     check("DC start_process openpyxl save blocks", blocked(rc, err), repr(err[:200]))
+
+
+def test_resolve_identifier_literal_actually_resolves():
+    """WHITE-BOX (REFUTE round 3, third-review finding): asserts on
+    `_resolve_identifier_literal`'s own return value, not an externally-observable
+    side effect that can pass for the wrong reason (see the module-level comment on
+    the `wwg` import for the exact bug this catches -- a lone r-prefixed assignment,
+    the idiomatic Windows-path form, resolved to NOTHING before the fix)."""
+    text = "p=r'%s'; wb.save(p)" % WB.lower().replace("\\", "/")
+    resolved = wwg._resolve_identifier_literal(text, "p")
+    check("r-prefixed single assignment actually resolves",
+          resolved is not None and WB_NAME.lower() in resolved,
+          repr(resolved))
+    text_plain = "p='%s'; wb.save(p)" % WB.lower().replace("\\", "/")
+    resolved_plain = wwg._resolve_identifier_literal(text_plain, "p")
+    check("plain-quoted (no r-prefix) single assignment also resolves",
+          resolved_plain is not None and WB_NAME.lower() in resolved_plain,
+          repr(resolved_plain))
+
+
+def test_resolve_identifier_literal_last_assignment_wins():
+    """WHITE-BOX: two assignments to the same name -- resolution must use the LAST
+    one (matching normal execution order), not silently span across both (the
+    round-3 bug's second symptom: `r?` inside the capture group let the failed
+    match on the first r-string bleed into matching across both statements)."""
+    text = "p=r'%s'; p=r'%s'" % (OTHER.lower().replace("\\", "/"),
+                                  WB.lower().replace("\\", "/"))
+    resolved = wwg._resolve_identifier_literal(text, "p")
+    check("double assignment resolves to the LAST (master) value",
+          resolved is not None and WB_NAME.lower() in resolved
+          and "scratch" not in resolved, repr(resolved))
+
+
+def test_variable_bound_save_path_blocks():
+    """REFUTE round 3, finding R1 (verified live against the first argument-scoped
+    fix): binding the path to a variable once, then saving via the variable,
+    defeated a check that only inspected the save call's OWN argument text."""
+    rc, err = run("Bash", {"command": "python -c \"import openpyxl; p=r'%s'; "
+                                      "wb=openpyxl.load_workbook(p); wb.save(p)\""
+                                      % WB})
+    check("p = master; wb.save(p) blocks", blocked(rc, err), repr(err[:200]))
+
+
+def test_double_assignment_to_master_blocks():
+    """REFUTE round 3, third-review finding: reproduces the reviewer's exact
+    counter-example live end-to-end. Rebind `p` to an unrelated file, THEN to the
+    master, then save via `p` -- the realistic accident shape (a script that writes
+    an output file, rebinds the path variable, then saves the master)."""
+    rc, err = run("Bash", {"command": "python -c \"import openpyxl; p=r'%s'; "
+                                      "p=r'%s'; wb.save(p)\"" % (OTHER, WB)})
+    check("p=other; p=master; wb.save(p) blocks (double assignment)",
+          blocked(rc, err), repr(err[:200]))
+    rc, err = run("Bash", {"command": "python -c \"import pandas as pd; "
+                                      "p=r'%s'; p=r'%s'; w=pd.ExcelWriter(p); "
+                                      "df.to_excel(w)\"" % (OTHER, WB)})
+    check("ExcelWriter double assignment to master blocks", blocked(rc, err),
+          repr(err[:200]))
+    # Control: reversed order (master first, then rebound away) must ALLOW --
+    # confirms this is genuinely tracking the LAST assignment, not just "the
+    # workbook's name appears somewhere in the command" (which the outer
+    # _names_workbook gate would also see here, but must not be what decides it).
+    rc, err = run("Bash", {"command": "python -c \"import openpyxl; p=r'%s'; "
+                                      "p=r'%s'; wb.save(p)\"" % (WB, OTHER)})
+    check("p=master; p=other; wb.save(p) allowed (control, last wins)",
+          rc == 0, repr(err[:200]))
+
+
+def test_variable_bound_save_to_other_file_allowed():
+    """The same mechanism must not fail-toward-block a variable bound to an
+    UNRELATED file -- only resolving to the master should block."""
+    rc, err = run("Bash", {"command": "python -c \"import openpyxl; p=r'%s'; "
+                                      "wb=openpyxl.Workbook(); wb.save(p)\""
+                                      % OTHER})
+    check("p = other file; wb.save(p) allowed", rc == 0, repr(err[:160]))
+
+
+def test_excelwriter_constructor_targeting_master_blocks():
+    """REFUTE round 3, R1: pandas' ExcelWriter names its target at CONSTRUCTION,
+    not at to_excel() -- the object handed to to_excel() is normally a writer,
+    not a path, so the constructor call is the only place the real target
+    appears in text."""
+    rc, err = run("Bash", {"command": "python -c \"import pandas as pd; "
+                                      "w=pd.ExcelWriter(r'%s'); "
+                                      "df.to_excel(w,'S'); w.close()\"" % WB})
+    check("ExcelWriter(master) constructor blocks", blocked(rc, err), repr(err[:200]))
+    rc, err = run("Bash", {"command": "python -c \"import pandas as pd; "
+                                      "pd.ExcelWriter(r'%s', mode='a', "
+                                      "engine='openpyxl')\"" % WB})
+    check("ExcelWriter(master, mode='a') append blocks", blocked(rc, err),
+          repr(err[:200]))
+
+
+def test_xlsxwriter_workbook_constructor_targeting_master_blocks():
+    rc, err = run("Bash", {"command": "python -c \"import xlsxwriter; "
+                                      "xlsxwriter.Workbook(r'%s').close()\"" % WB})
+    check("xlsxwriter.Workbook(master).close() blocks", blocked(rc, err),
+          repr(err[:200]))
+
+
+def test_to_excel_with_unresolvable_writer_object_allowed():
+    """A writer-OBJECT argument to to_excel() that this cannot trace to a literal
+    (the ordinary case -- it's an object, not a path) must NOT fail toward block,
+    or the round-2 read-master-write-elsewhere fix regresses for every real
+    ExcelWriter usage pattern."""
+    rc, err = run("Bash", {"command": "python -c \"import pandas as pd; "
+                                      "pd.read_excel(r'%s'); w=make_writer(); "
+                                      "df.to_excel(w)\"" % WB})
+    check("to_excel(unresolvable writer var) allowed", rc == 0, repr(err[:160]))
+
+
+def test_attribute_access_save_arg_fails_toward_block():
+    """`wb.save(wb.path)` -- the argument is an attribute access, not a literal or
+    a resolvable identifier. Not provably safe -> fails toward block."""
+    rc, err = run("Bash", {"command": "python -c \"import openpyxl; "
+                                      "wb=openpyxl.load_workbook(r'%s'); "
+                                      "wb.save(wb.path)\"" % WB})
+    check("wb.save(wb.path) fails toward block", blocked(rc, err), repr(err[:200]))
+
+
+def test_read_master_write_other_literal_path_allowed():
+    """REGRESSION GUARD for a bug caught in this session's own self-testing before
+    it ever reached review: the round-3 fix's first pass had NO positive check for
+    "this argument is a well-formed literal for some OTHER file" -- so a genuine
+    save to a different file, once it failed the master-name check, fell all the
+    way through to the unresolvable/fail-toward-block branch. This is the exact
+    scenario round 2 was built to fix; it must stay fixed."""
+    rc, err = run("Bash", {"command": "python -c \"import openpyxl; "
+                                      "wb=openpyxl.load_workbook(r'%s', "
+                                      "read_only=True); out=openpyxl.Workbook(); "
+                                      "out.save(r'%s')\"" % (WB, OTHER)})
+    check("read master, save other (literal path) allowed", rc == 0, repr(err[:200]))
+
+
+def test_com_exemption_requires_real_invocation_phrase():
+    """REFUTE round 3, finding R2 (verified live): the original COM exemption fired
+    on any of 3 short words ANYWHERE in the command, so a plain copy or a real
+    openpyxl save decorated with a trailing comment mentioning 'comobject' was
+    exempted with no COM invocation present at all."""
+    rc, err = run("Bash", {"command": "python -c \"import openpyxl; "
+                                      "wb=openpyxl.load_workbook(r'%s'); "
+                                      "wb.save(r'%s')\"  # comobject decoration"
+                                      % (WB, WB)})
+    check("openpyxl save + decorative 'comobject' comment still blocks",
+          blocked(rc, err), repr(err[:200]))
+    # A PURE copy/move command (no python writer marker either way) decorated with
+    # the literal COM phrase is the documented, deliberately ACCEPTED residual (see
+    # the hook's own _COM_INVOCATION_RE comment) -- closing it needs real command
+    # parsing, not text matching. Pinned here as a KNOWN state, not asserted closed.
+    rc, err = run("Bash", {"command": 'copy /Y t.xlsx "%s" # -ComObject '
+                                      'Excel.Application' % WB})
+    check("plain copy + decorative COM phrase: documented accepted residual "
+          "(allowed)", rc == 0, repr(err[:200]))
+
+
+def test_com_exemption_still_allows_real_com():
+    rc, err = run("Bash", {"command": "powershell -NoProfile -Command "
+                                      "\"$x=New-Object -ComObject "
+                                      "Excel.Application; $wb=$x.Workbooks."
+                                      "Open('%s'); $wb.Save(); $wb.Close()\""
+                                      % WB})
+    check("real Excel COM invocation still allowed", rc == 0, repr(err[:200]))
 
 
 def test_documented_indirection_ceiling_is_allowed():
@@ -287,6 +465,18 @@ if __name__ == "__main__":
     test_excel_mcp_tool_name_case_insensitive()
     test_pandas_to_excel_blocks()
     test_dc_start_process_openpyxl_save_blocks()
+    test_resolve_identifier_literal_actually_resolves()
+    test_resolve_identifier_literal_last_assignment_wins()
+    test_variable_bound_save_path_blocks()
+    test_double_assignment_to_master_blocks()
+    test_variable_bound_save_to_other_file_allowed()
+    test_excelwriter_constructor_targeting_master_blocks()
+    test_xlsxwriter_workbook_constructor_targeting_master_blocks()
+    test_to_excel_with_unresolvable_writer_object_allowed()
+    test_attribute_access_save_arg_fails_toward_block()
+    test_read_master_write_other_literal_path_allowed()
+    test_com_exemption_requires_real_invocation_phrase()
+    test_com_exemption_still_allows_real_com()
     test_documented_indirection_ceiling_is_allowed()
     test_excel_mcp_read_class_allowed()
     test_excel_mcp_write_to_other_workbook_allowed()
