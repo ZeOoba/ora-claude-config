@@ -1,6 +1,21 @@
 ---
 name: ora-friday-closeout
 description: Friday 4:30 PM ET — week closeout ledger (Part A) + week-ahead synthesis (Part B). v2.1 (2026-07-18): Part A gained a report-only LOI Throughput line (Gabriel-carried-forward item from the 2026-07 setup-review plan). v2.0 (2026-07-16, Fleet Ledger v2 ruling C1): absorbed the retired CC task ora-week-ahead-briefing verbatim as Part B — one Friday session, one email, one Notion page; the CC twin was retired same day. [MODEL: claude-sonnet-5 | set 2026-07-08]
+output_contract:
+  version: 1
+  blocks:
+    - id: block-friday-closeout-mail
+      artifact:
+        type: sent_mail
+        mailbox: "ggoldberg@oxfordra.net"
+        subject_pattern: "ORA Friday Closeout & Week Ahead — {DATE}"
+        recipient: "ggoldberg@oxfordra.net"
+      freshness_window_hours: 180
+      expected_on:
+        cron: "30 16 * * 5"
+      on_missing_severity: alarm
+      is_primary_health_signal: true
+      notes: "Sent unconditionally at step 2 via the COM path; no Notion artifact is written on every run, so the mail is the only every-run signal. Window is 180h = weekly cadence (168h) plus slack, mirroring the CC convention of 30h for a daily cron; a tighter window would false-alarm on any audit day after the fire, and a detector people learn to ignore is worse than none."
 ---
 
 You are running the ORA Friday Closeout for Gabriel Goldberg, Oxford Realty Advisors. Purpose: close the week with an honest ledger of done vs open (Part A), then set up the coming week (Part B). One session, ONE email, ONE Notion page covering both parts.
