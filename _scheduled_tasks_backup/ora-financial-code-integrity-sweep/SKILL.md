@@ -1,6 +1,6 @@
 ---
 name: ora-financial-code-integrity-sweep
-description: Weekly (Mon 1:30 PM ET) adversarial integrity sweep of financial-decision code in oxford-command-center — runs the refute-financial-change workflow against the last 7 days of warehouse/scoring/NOI/capital-config commits; Notion completion row always, emails ggoldberg only on a real defect or tooling failure. v1.0 2026-06-13. Restored 2026-07-07. Refuter tier raised opus->fable with opus fallback per-lens, 2026-07-10 (CLAUDE.md governor/financial-code floor). Path scope rebuilt as directory globs (file-list missed the debt module) + rate-limit retry subcase 8a, 2026-07-24. [MODEL: UNVERIFIABLE | checked 2026-07-08]
+description: Weekly (Mon 1:30 PM ET) adversarial integrity sweep of financial-decision code in oxford-command-center — runs the refute-financial-change workflow against the last 7 days of warehouse/scoring/NOI/capital-config commits; Notion completion row always, emails ggoldberg only on a real defect or tooling failure. v1.0 2026-06-13. Restored 2026-07-07. Refuter tier raised opus->fable with opus fallback per-lens, 2026-07-10 (CLAUDE.md governor/financial-code floor). Path scope rebuilt as directory globs (file-list missed the debt module) + rate-limit retry subcase 8a, 2026-07-24. [MODEL: claude-opus-5 observed | checked 2026-08-12 via live-run transcript canary]
 ---
 
 ORA Financial-Code Integrity Sweep — weekly adversarial review of capital-allocation code. Self-contained; you start fresh with no memory of prior runs. Surface: Claude Code (CC/MCP fleet). This is a READ-ONLY review task — do not edit, stage, commit, or push anything in the repo.
@@ -15,6 +15,14 @@ FINANCIAL-CODE PATHS (the review scope — only changes touching these matter):
   server/warehouse/**   (ALL of it — including migrations, the debt module, sync writers, and
                          the "delivery-only" route files: the 2026-07-24 sweep's root-cause
                          defect lived in debt-api.ts, a route file)
+  server/workbook/**    (ALL of it — parse.ts produces the loans/NOI/debt-service snapshot and
+                         debt-service-crosscheck.ts audits the next-12-month figure; BOTH sit in
+                         the annualDebtService chain feeding debt-scoring.ts (the DSCR verdict) and
+                         src/analytics/engine.ts. Added 2026-08-11 — see the lesson below.)
+  server/sources/notion-deals.ts, server/brain.ts, scripts/extract-workbook.ts,
+                        (the three portfolio.json WRITERS — a snapshot writer that publishes seed
+                         placeholders over live data is a financial-data defect even though it does
+                         no arithmetic; 2026-08-11's HIGH lived in brain.ts)
   server/macro/**, src/analytics/**, server/overlay.ts,
   src/contracts/warehouse.ts, src/contracts/macro.ts, src/contracts/debt.ts, src/contracts/loan.ts,
   src/brain/anomaly-insights.ts, src/brain/principal-digest.ts
@@ -24,15 +32,37 @@ FINANCIAL-CODE PATHS (the review scope — only changes touching these matter):
   window. Directory globs, not file lists — new financial files must be in scope by default.
   This list intentionally tracks scripts/check-refute-required.ts's isFinancialSourcePath, but
   BROADER: files that script exempts as delivery-only still get swept here.)
+  (2026-08-11 lesson — the SAME failure mode, one directory over: none of that week's four
+  financial commits touched server/warehouse/** at all. They landed in server/workbook/, which
+  was not on this list, so a literal reading would have reported CLEAN while a HIGH and three
+  MEDIUMs sat in the window. The 07-24 rebuild widened `warehouse` to a glob but never asked what
+  OTHER directories hold financial code. The gate script had the identical hole and was fixed the
+  same day. STRUCTURAL FIX, do not skip it: step 2 below now requires running the log WITHOUT path
+  filters and diffing against the scoped log — an empty scoped log plus a non-empty unscoped log
+  means THIS LIST IS STALE, not that the week was clean.)
 
 STEPS:
 1. PRE-FLIGHT: confirm the repo exists and git works. If not, write a Notion completion row noting the failure and STOP (do not fabricate a result).
-2. SCOPE THE WINDOW: compute the review range. Run:
+2. SCOPE THE WINDOW: compute the review range. Run BOTH logs — the unscoped one is not optional:
+     git log --since="7 days ago" --pretty=format:"%h %ad %s" --date=short
      git log --since="7 days ago" --pretty=format:"%h %ad %s" --date=short -- <financial paths above>
    and
      git diff --stat "@{7 days ago}"..HEAD -- <financial paths above>
    Capture the commit list, the changed-file list, and the diffstat.
-3. GUARD — NO-CHANGE WEEK: if NO commits in the window touched the financial-code paths, do NOT run the workflow. Write a Notion completion row "CLEAN — no financial-code changes in the trailing 7 days" with the date, and STOP. Do NOT send an email on a clean week (the Notion row + ora-automation-health-monitor cover liveness).
+   2a. SCOPE-STALENESS GATE (mandatory, added 2026-08-11 after this failed twice): compare the two
+   logs. If the SCOPED log is empty while the UNSCOPED log is not, do NOT conclude "clean week" —
+   read the unscoped commits' actual changed files (`git log --name-only`) and ask whether any touch
+   financial-decision code sitting in a directory this list does not name. Both 2026-07-24 and
+   2026-08-11 were caught exactly here; on 08-11 the scoped log was EMPTY while four financial
+   commits (900 insertions, incl. a 748-line new debt module) sat in the window. Sweep what you
+   find, and report the scope defect itself as a finding — the list is a cache of where financial
+   code lived when it was written, never an authority on where it lives now.
+3. GUARD — NO-CHANGE WEEK: if NO commits in the window touched financial-code paths AND step 2a
+   found nothing outside the list, do NOT run the workflow. Write a Notion completion row "CLEAN — no
+   financial-code changes in the trailing 7 days" with the date, and STOP. Do NOT send an email on a
+   clean week (the Notion row + ora-automation-health-monitor cover liveness). A "clean" row is a
+   POSITIVE claim that the window was reviewed — never write one to record that the scope matched
+   nothing.
 4. RUN THE ADVERSARIAL WORKFLOW: if there ARE financial-code changes, invoke the saved refute workflow via the Workflow tool:
      Workflow({ scriptPath: "C:\\Users\\Owner\\oxford-command-center\\.claude\\workflows\\refute-financial-change.js", args: { changeSet: "<PROSE: list the commits (hash + subject), the changed files, and the diffstat from step 2. Tell the refuters to review the COMMITTED diff for the exact range with: git diff <oldest-sha>^..HEAD -- <the financial paths>. Summarize what each changed file does.>", greenContext: "These changes already passed the gate when merged. Probe the EDGES the test corpus does not exercise — a green gate does not prove correctness on unencountered data. Hunt for: governor-invariant bypass (DSCR<1.25 / LTV>0.40 ever persisted), NOI sign/double-count, basis-mixing, non-total-order comparators, null/empty-cohort/singleton gaps, atomicity holes." } })
    The workflow runs 3 fable refuters (correctness · determinism · edges), each falling back to opus per-lens if Fable is unavailable, and returns { verdicts, anyRealDefect, worstSeverityRank, succeeded, allFailed }.
