@@ -4,7 +4,7 @@ description: "recordedSkips 'global_limit' events are the Desktop scheduler's ow
 metadata:
   type: reference
   originSessionId: 41bfc8fa-2412-44b6-a527-f9a4631e86f5
-  modified: 2026-08-12T19:55:27.252Z
+  modified: 2026-08-12T22:29:34.677Z
 ---
 
 **What the metric means.** `recordedSkips[taskId]` entries with `reason: "global_limit"` are written by
@@ -173,13 +173,28 @@ post-outage recovery snapshot, not a normal-cadence run." Do not re-raise this a
 (same day, mtime 17:16 ET) added cross-producer alert dedup so its email and A.0's cross-reference
 each other instead of arriving as two apparently independent discoveries.
 
-**OPEN (unresolved 2026-08-11):** `ora-health-guard-fail-aging-nudge` was `global_limit`-skipped at
-17:02:27 ET; the registry shows `lastRunAt 21:03:28Z` (17:03:28 ET) but the monitor, writing at
-17:16 ET, recorded no same-day `lastRunAt`. Either a genuine ~60s retry (monitor false-positive,
-self-healed) or a cleared-but-never-attached dispatch stamp
-([[reference_scheduler_lastrunat_stamped_at_dispatch]]) — **not separable from registry data alone.**
-Resolve via `main.log` retry lines after 17:02:27 plus a work-product check, never by trusting
-`lastRunAt`.
+**RESOLVED 2026-08-12 via `main.log` — it was a genuine retry, NOT a phantom dispatch.**
+`ora-health-guard-fail-aging-nudge` was `global_limit`-skipped 17:02:27, respawned **exactly 60s
+later** (`Spawning new session … missed: '2026-08-11T13:00:00.000Z'`), logged `Confirmed task run`
+17:03:28, and ran tools continuously to ~17:09. So `lastRunAt 21:03:28Z` is real work, and the
+monitor's PRODUCER-STALE-OUTPUT finding was a **self-healed false positive** — it read the registry
+at 17:02:28, one second after the throttle and 59 seconds before the spawn. Its Step 0.08
+"retried-successfully" cross-reference could not fire because the retry had not happened yet. A
+finding from a monitor that runs *inside* a drain has a ~60s blind spot by construction; re-check
+`main.log` before acting on one.
+
+**The cap is `limit=3` — this is the number that explains burst duration.** During the drain the CC
+dispatcher logged `global_limit (active=7, limit=3)`; `per_task_limit` is `(active=1, limit=1)`.
+Both dispatchers (`[ScheduledTasks]` LAMS, `[CCDScheduledTasks]` CC/MCP) show the same cap. A ~19-task
+backlog draining 3 at a time on 60s retries IS the ~104-minute drain — the duration is arithmetic,
+not a fault. No user-editable config exists (exhaustively confirmed 2026-08-11; see
+`automation-health-monitor` SKILL.md Step 0.08 CONCURRENCY-CAP INVESTIGATION — cite it, don't re-search).
+
+**False lead, do not chase:** `[ScheduledTasks] Not auto-approving "<mcp tool>" … rule(s) not in
+stored approvals` lines are ROUTINE, not a failure. They appear across most LAMS tasks on a normal
+day (2026-08-11: automation-health-monitor 104, ora-lease-expiration-brief 84, ora-monday-sync 74) —
+and automation-health-monitor, which logged the MOST, still completed and sent its alert email.
+Distinct from [[reference_scheduled_task_approved_permissions]]'s no-op'd-write case; don't conflate.
 
 The lever for burst adjacency is uptime (or a freshness short-circuit inside the task), **never** a
 cron change, which the burst ignores by construction. And per
