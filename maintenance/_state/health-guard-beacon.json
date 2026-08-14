@@ -15,6 +15,78 @@
       "failed_connectors": "none",
       "notion_written": true,
       "notion_error": "timestamp corrected 2026-08-05 from the backfill stamp 2026-08-05T11:26:53 to the run's real time (session spawned 05:25:04 ET, beacon page stamped 05:35 ET); connectors themselves were clean this run"
+    },
+    {
+      "last_run_et": "2026-08-09T09:01:36-04:00",
+      "status": "DEGRADED",
+      "subject_sent": "\u2705 ORA Connector Pre-Flight \u2014 2026-08-09 \u2014 Notion OK",
+      "failed_connectors": "none",
+      "notion_written": true,
+      "notion_error": null
+    },
+    {
+      "last_run_et": "2026-08-10T12:26:04-04:00",
+      "status": "DEGRADED",
+      "subject_sent": "\u2705 ORA Connector Pre-Flight \u2014 2026-08-10 \u2014 Notion OK",
+      "failed_connectors": "none",
+      "notion_written": true,
+      "notion_error": null
+    },
+    {
+      "last_run_et": "2026-08-11T17:18:12-04:00",
+      "status": "DEGRADED",
+      "subject_sent": "\u2705 ORA Connector Pre-Flight \u2014 2026-08-11 \u2014 Notion OK",
+      "failed_connectors": "none",
+      "notion_written": true,
+      "notion_error": null
+    },
+    {
+      "last_run_et": "2026-08-12T11:05:34-04:00",
+      "status": "DEGRADED",
+      "subject_sent": "\u2705 ORA Connector Pre-Flight \u2014 2026-08-12 \u2014 Notion OK",
+      "failed_connectors": "none",
+      "notion_written": false,
+      "notion_error": null
+    },
+    {
+      "last_run_et": "2026-08-12T11:06:44-04:00",
+      "status": "DEGRADED",
+      "subject_sent": "\u2705 ORA Connector Pre-Flight \u2014 2026-08-12 \u2014 Notion OK",
+      "failed_connectors": "none",
+      "notion_written": true,
+      "notion_error": null
+    },
+    {
+      "last_run_et": "2026-08-13T10:57:05-04:00",
+      "status": "DEGRADED",
+      "subject_sent": "\u2705 ORA Connector Pre-Flight \u2014 2026-08-13 \u2014 Notion OK",
+      "failed_connectors": "none",
+      "notion_written": false,
+      "notion_error": null
+    },
+    {
+      "last_run_et": "2026-08-13T10:58:14-04:00",
+      "status": "DEGRADED",
+      "subject_sent": "\u2705 ORA Connector Pre-Flight \u2014 2026-08-13 \u2014 Notion OK",
+      "failed_connectors": "none",
+      "notion_written": true,
+      "notion_error": null
+    },
+    {
+      "last_run_et": "2026-08-14T08:05:22-04:00",
+      "status": "OK",
+      "subject_sent": "\u2705 ORA Connector Pre-Flight \u2014 2026-08-14 \u2014 Notion OK",
+      "failed_connectors": "none",
+      "notion_written": false,
+      "notion_error": null
+    },
+    {
+      "last_run_et": "2026-08-14T08:06:24-04:00",
+      "status": "OK",
+      "subject_sent": "\u2705 ORA Connector Pre-Flight \u2014 2026-08-14 \u2014 Notion OK",
+      "failed_connectors": "none",
+      "notion_written": true,
+      "notion_error": null
     }
   ]
 }
