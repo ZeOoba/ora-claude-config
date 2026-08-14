@@ -1,0 +1,30 @@
+<h2>LAMS/Cowork Fleet: Cadence + Model-Tag Policy Pass — 2026-08-05</h2>
+<p>Mirrors today's CC/MCP-side pass (same event_log.md date). Full audit + rulings logged to
+event_log.md.</p>
+
+<h3>Cadence (policy: no routine &gt;1x/day)</h3>
+<p>Live registry pulled via <code>list_scheduled_tasks</code>: 27 enabled recurring + 2 pending
+one-time. Composition matched the last known roster exactly — no drift. 26/27 recurring tasks
+already ≤1x/day. One exception found:</p>
+<ul>
+<li><b>ora-cowork-heartbeat</b> — was 2x/day (05:50 + 17:50 ET). <b>Ruling: cut to 1x/day</b>
+(now 05:50 ET only). <b>Known accepted gap:</b> the GitHub Actions watchdog's 16h alert
+threshold is now shorter than the heartbeat's 24h interval — expect a daily false stale-alarm
+until the watchdog threshold is separately widened past 24h (repo: ZeOoba/ora-cowork-watchdog,
+not touched this pass).</li>
+</ul>
+
+<h3>Model tags (policy: default claude-sonnet-5)</h3>
+<p>No task carries a non-standard model id — no LAMS task required the disable/recreate cycle.
+Found and fixed 9 items, all cosmetic (description-field only, no cron/prompt change):</p>
+<ul>
+<li><b>1 missing tag</b> — ora-counsel-review-standard-positions-2027 (one-time, 2027). Tagged.</li>
+<li><b>8 stale-dated tags</b> (tag predated the task's own last content revision by 3–22 days) —
+automation-health-monitor, ora-skill-store-drift-check, ora-skill-text-audit, ora-om-intake-ocr,
+ora-lease-expiration-brief, ora-monday-sync, ora-friday-closeout, ora-stale-pipeline-nudge. All
+re-tagged <code>[MODEL: claude-sonnet-5 | set 2026-08-05]</code>.</li>
+</ul>
+
+<p><b>Net:</b> 27/27 enabled recurring + 2/2 enabled one-time LAMS tasks tagged claude-sonnet-5,
+current as of today. All changes verified via <code>list_scheduled_tasks</code>. No JSON splicing;
+MCP tools only per register-scheduled-task doctrine.</p>
