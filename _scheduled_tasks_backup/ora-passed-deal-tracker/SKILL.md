@@ -27,10 +27,17 @@ RESTORATION NOTE: Re-registered 2026-07-07 after the 2026-07-05 machine migratio
 5. Each logged trade calibrates two things (report, do not auto-adjust — this is a HARD RULE, not a suggestion):
    - RCT: implied $/SF vs RCT v02 point ± band for that market (flag if outside band);
    - P(exec) bands: did deals in each seller-signal band trade near ORA's walk?
-   Tabulate cumulative evidence; recommendations go to the December back-test
-   (`annual-cycle` rhythm) — weights and bands move ONLY there, and only with Gabriel's
-   explicit sign-off. Do not duplicate the back-test in this task, and never write to
-   any governor constant or Buy Box weight/band file directly from this task.
+   Tabulate cumulative evidence; recommendations go to the December back-test, run
+   from `~/ora-skills/annual-cycle/SKILL.md` — weights and bands move ONLY there,
+   and only with Gabriel's explicit sign-off. Do not duplicate the back-test in
+   this task, and never write to any governor constant or Buy Box weight/band
+   file directly from this task.
+
+   **Repo path, not a skill name (2026-08-05):** `annual-cycle` was unpublished
+   from the skill store (audit-driven fleet cleanup — usageCount 1 lifetime), so
+   it is no longer Claude-invocable by name. The workflow itself is unchanged and
+   the repo directory is untouched; read the SKILL.md directly rather than
+   expecting the model to discover it by name.
 
 ## Output
 6. If zero trades detected: one-line "no trades" note to Ops Hub; NO email.
