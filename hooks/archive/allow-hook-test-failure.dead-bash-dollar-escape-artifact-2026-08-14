@@ -1,0 +1,3 @@
+scope: hook-test-failure
+session: 15f5b972-9fcc-4292-90d9-bee7020ac2bf
+reason: OI-149 (filed 2026-08-13) -- doctrine-integrity-probe's plugin-skill allowlist is stale, flags morning/register-scheduled-task/schedule as unresolved even though all 3 are live installed anthropic-skills plugin skills. Unrelated to this diff (memory/docs/maintenance additions only). Gabriel approved in-turn, same known cause he already overrode today for OI-148/PR#94.

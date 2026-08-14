@@ -1,9 +1,61 @@
 ---
 name: ora-deal-sourcing-scan
-description: Weekly on-market deal-sourcing scan (Tuesdays) — searches new industrial/flex listings across ORA's nine target markets, applies the basis/physical hard floors as a GATE, scores survivors, dedupes against the Notion Deal Sourcing Log, mechanically detects price cuts off the stored first-sighting ask, and emails a ranked digest. Restored 2026-07-07 — no replacement task applies the scoring rubric or writes to the Deal Sourcing Log. [MODEL: UNVERIFIABLE | checked 2026-07-08]
+description: Weekly on-market deal-sourcing scan (Tuesdays) — searches new industrial/flex listings across ORA's ten target markets, applies the basis/physical hard floors as a GATE, scores survivors, dedupes against the Notion Deal Sourcing Log, mechanically detects price cuts off the stored first-sighting ask, and emails a ranked digest. Restored 2026-07-07 — no replacement task applies the scoring rubric or writes to the Deal Sourcing Log. [MODEL: claude-opus-5 observed | checked 2026-08-12 via live-run transcript canary]
 ---
 
-ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.3, 2026-07-14).
+ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.5, 2026-08-11).
+
+v2.5 — LOUISVILLE KY LEG ADDED; THE SCAN IS NOW TEN MARKETS, NOT NINE (2026-08-11,
+coverage fix + mirror sync, no scoring weight changed). Louisville was ratified as the
+10th canonical cluster by Gabriel on 2026-08-05 (target-markets.json v1.7, now v1.8) and
+was added to the Notion Acquisition Pipeline Tracker's Market select the same day — but
+NOTHING EVER ADDED IT TO THIS SCAN. It was a live, ratified target market with no
+scanning leg for six days, and the 2026-08-11 run covered nine markets while the firm's
+own canon said ten. That is the defect this version closes. Louisville is ENTRY-PHASE,
+so it scores Market 14/20, not 20 — and per Ruling 3 entry clusters earn NO satellite
+eligibility until ORA's first closed deal validates the cluster. Also added: the
+Louisville RCT row to the Step 3A mirrored table, and Louisville brokerages to Step 1
+(incl. KCREA / kcrea.com, a Kentucky-specific listing platform none of the other nine
+markets has — worth trying alongside the Yardi network).
+
+v2.5 LOUISVILLE DENOMINATOR — RESOLVED, AND NOT BY A PROXY. An earlier draft of this
+version carried an OPEN CONFLICT note here, because `acquisition-underwriting` had just
+been given a [PROXY: Columbus] figure while `target-markets.json` v1.8 carried a
+[PROXY: Indianapolis] one. BOTH WERE WRONG. Louisville is in the C&W 2025 guide, and the
+extract has been in THIS TASK'S OWN FOLDER all along:
+  skills/cw-2025-construction-costs.json  (45 markets, small25/med25/large25 per market)
+Louisville small25 = $135.28 -> LOW $237.07 -> clears at $82.97/SF (<=1995), $94.83 (>=2005).
+That sourced row is now in acquisition-underwriting and is mirrored above; the [PROXY] tag
+is GONE and Louisville does NOT carry DENOMINATOR-SENSITIVE.
+CHECK THAT FILE FIRST for any per-market hard cost — it is faster and better-sourced than
+any proxy, and the C&W flipbook itself is canvas-rendered with no text layer, so scraping
+it fails. CLOSED 2026-08-12 (Gabriel): `target-markets.json`'s Louisville `replacement_cost` block —
+which carried hard $143.46 (Indianapolis proxy) and the false claim "Louisville is NOT in the
+C&W guide" — was DELETED. Louisville is the only cluster with no replacement_cost block, by
+decision. The other nine clusters KEEP theirs (Gabriel, 2026-08-12): their numbers are correct
+and match the C&W hard costs behind RCT v03, and the blocks carry provenance that exists
+nowhere else (2024 comparatives, YoY %, land $/acre, small-bay extrapolations). They are
+RETAINED AS PROVENANCE, NOT AS A DENOMINATOR. Never read a denominator from
+target-markets.json — its operative benchmark was RETIRED 2026-07-14; RCT v03 in
+`acquisition-underwriting` is the only one.
+
+v2.4 — CONSTRUCTION TYPE IS NOW DETERMINABLE (2026-08-04, procedural fix, no scoring
+weight or governor changed): the Step 1 instruction to settle construction type by
+looking at listing photos was UNEXECUTABLE as written — WebFetch returns text only, so
+on the 2026-08-04 run all nine market agents returned UNKNOWN for every candidate.
+Because UNKNOWN scores identically to PEMB (2/5), that silently suppressed ~3 points
+across essentially the entire scan. Step 1 now carries a working browser-pane procedure
+(resize viewport FIRST — a fresh pane is 0x0 and renders nothing, which is what past
+runs misread as "screenshot failed"; then extract `.property-details-gallery` image
+URLs, download at ?width=1400, and Read them). It also documents the two traps that
+produce a CONFIDENTLY WRONG answer: the `.similarproperty` carousel serves OTHER
+buildings' photos (on 4111 Founders Blvd, every image on the page was another
+property's), and the image CDN keys on the GUID so reconstructed URLs silently return
+a duplicate image. Validated same-day: 7267 Park Cir Dr confirmed precast, 3717 Jonlen
+Dr confirmed block; both Notion rows corrected 2/5 -> 5/5. Coverage is partial by
+nature — some listings genuinely have an empty gallery, and a verified "no photos
+exist" is a legitimate UNKNOWN. NOTE the by-product that outweighed the 3 points: the
+Jonlen interior photos exposed a taproom/arcade build-out that Step 2.5 zero-credits.
 
 v2.3 — BASIS DENOMINATOR RECONCILED TO RCT v03 (Gabriel, 2026-07-14, governor-level):
 This scan had been running its own basis benchmark. It no longer does. THE FIRM HAS
@@ -59,7 +111,7 @@ app reinstall; recovered from the 2026-06-22 fleet snapshot.)
 ROLE & PURPOSE
 Run the weekly on-market sourcing scan for Oxford Realty Advisors (ORA), a private
 buyer of Class B/C shallow-bay industrial/flex. Each run finds newly listed (or
-re-listed / price-cut) properties in ORA's nine target markets, screens them against
+re-listed / price-cut) properties in ORA's ten target markets, screens them against
 the buy-box, scores survivors, writes them to the Notion Deal Sourcing Log, and emails
 a ranked digest. This task covers the ON-MARKET channel; the
 off-market distress channel is owned by ora-distress-signal-monitor — do not
@@ -70,12 +122,16 @@ CANONICAL INPUTS
   Read it each run from EITHER of these (first that loads wins):
     1) C:\Users\Owner\ora-skills\target-markets.json  (authoritative — the canonical ora-skills git repo; repointed 2026-07-09 when the third clone at Claude_Workspace\01_Workspace\.claude\skills\ was archived per THIRD_CLONE=RECONCILE-COMMITS)
     2) skills/target-markets.json  (local mirror in this task folder — materialized 2026-07-09; refresh it whenever the canonical file changes)
-  The file carries the nine clusters with submarkets, demand drivers, and market
+  The file carries the ten clusters with submarkets, demand drivers, and market
   metrics (incl. sale $/SF benchmarks usable for the basis-vs-replacement score).
   ONLY IF BOTH are unreachable, fall back to the embedded list below and flag
-  staleness in the email. Nine clusters: Columbus OH, Cincinnati OH, Kansas City
+  staleness in the email. TEN clusters: Columbus OH, Cincinnati OH, Kansas City
   MO/KS, Indianapolis IN, Madison WI, Maryland Baltimore/DC (established) +
-  entry-phase Grand Rapids MI, Richmond VA, Des Moines IA.
+  entry-phase Grand Rapids MI, Richmond VA, Des Moines IA, LOUISVILLE KY.
+  (Louisville ratified as the 10th canonical cluster by Gabriel 2026-08-05 in
+  target-markets.json v1.7/v1.8; the scan only began covering it 2026-08-11 —
+  it was a live cluster with no scanning leg for six days. Entry-phase, so
+  Market scores 14/20, not 20.)
 - Scoring methodology: restated in full below so this prompt is self-contained.
   CITATION CORRECTED 2026-07-14 — this task previously cited
   "20260517_ORA_Investment-Candidates-Ranking_v01.xlsx (Methodology sheet)". THAT FILE
@@ -100,7 +156,7 @@ ORA BUY-BOX (screening filter — apply unchanged)
 - Physical floors: >=200A power, >=2 stalls/1,000 SF parking, functional clear height.
 - Mezzanine/2nd-floor SF on slab = 0% credit unless independently functional.
 - Instant disqualifiers: retail-only; office-only; multifamily; auto-use tenancy;
-  ground lease <30 yr; environmental remediation >20% of price; outside the nine
+  ground lease <30 yr; environmental remediation >20% of price; outside the ten
   clusters; institutional Class A pricing (>$130/SF without exceptional justification).
 - CAPACITY NOTE (re-verify current deal status EVERY run before applying): IF a
   Columbus acquisition is under contract, bandwidth favors the $1.5-6M sleeve over
@@ -112,7 +168,7 @@ ORA BUY-BOX (screening filter — apply unchanged)
   (bcfe4a03) each run and say in the digest which way you found it.
 
 STEP 1 — PULL NEW LISTINGS (preceding ~8 days; widen to ~30 if prior run missed)
-For each of the nine clusters, web-search for newly listed industrial/flex product:
+For each of the ten clusters, web-search for newly listed industrial/flex product:
 - Query patterns: "[metro] industrial property for sale [current month/year]",
   "[metro] flex warehouse listing", "[metro] industrial investment offering
   memorandum new".
@@ -132,7 +188,16 @@ For each of the nine clusters, web-search for newly listed industrial/flex produ
      Indy, Lee & Associates; Madison — Oakbrook, Founders 3, Colliers WI;
      Maryland — MacKenzie, St. John Properties resales, NAI KLNB; Grand Rapids —
      Colliers West MI, NAI Wisinski; Richmond — Porter Realty, Colliers Richmond,
-     Cushman Thalhimer; Des Moines — CBRE Hubbell, R&R Realty, NAI Iowa.
+     Cushman Thalhimer; Des Moines — CBRE Hubbell, R&R Realty, NAI Iowa;
+     Louisville — Cushman & Wakefield | Commercial Kentucky
+     (commercialkentucky.com, VERIFIED), CBRE Louisville. LOUISVILLE HAS A
+     SOURCE THE OTHER NINE DO NOT: **KCREA (kcrea.com)**, the Kentucky
+     Commercial Real Estate Alliance — a regional MLS-style listing platform
+     with dedicated Louisville industrial for-sale pages. Try it alongside the
+     Yardi network; it may carry inventory the national aggregators miss.
+     Additional local Louisville brokerages are NOT yet verified — surface
+     whichever firms appear as listing brokers on the first run and record
+     them here rather than guessing at names.
   3) Crexi / LoopNet gated detail pages — open ONLY the logged-out public version via
      Claude-in-Chrome when no aggregator/broker page is available. NEVER log in, NEVER
      bypass a paywall or CAPTCHA. If still inaccessible, note it and move on.
@@ -178,9 +243,73 @@ For each of the nine clusters, web-search for newly listed industrial/flex produ
 - Record for each candidate: address, metro/submarket, SF, asking price, $/SF,
   year built, occupancy/tenancy, clear height, parking, power (if stated),
   CONSTRUCTION TYPE (masonry / brick / block / tilt-up / precast / PEMB-metal /
-  hybrid — see the Construction & envelope score in Step 3B; if the listing does not
-  state it, LOOK: listing photos and street view usually settle it in seconds, and
-  it is worth 3 points), broker + firm, listing URL, date first seen.
+  hybrid — see the Construction & envelope score in Step 3B), broker + firm,
+  listing URL, date first seen.
+
+  *** HOW TO ACTUALLY DETERMINE CONSTRUCTION TYPE (added 2026-08-04 — the previous
+  instruction was just "LOOK: listing photos usually settle it in seconds", and on the
+  2026-08-04 run ALL NINE market agents reported it as impossible and returned UNKNOWN
+  for every candidate. UNKNOWN scores the same as PEMB (2/5), so that silently
+  suppressed ~3 points on essentially the whole scan. The instruction was wrong, not
+  the agents — WebFetch returns text only and cannot see images. Use this instead: ***
+  1. Read the listing text first. A minority state it outright ("masonry", "precast
+     concrete", "pre-engineered steel", "block"). Cheapest win; take it and stop.
+  2. Otherwise open the listing in the BROWSER PANE (preview_start / navigate), then:
+     a. FIRST resize the viewport — `resize_window` with explicit width/height
+        (e.g. 1280x900). A fresh pane reports 0x0 and NOTHING renders or decodes;
+        this is almost certainly what past runs experienced as "screenshot failed to
+        composite". Confirm with `window.innerWidth` before trusting an empty result.
+     b. Extract gallery image URLs via javascript_tool:
+        document.querySelectorAll('.property-details-gallery img')
+        Dedupe on the src with the ?query stripped.
+     c. Download at full size with curl, appending `?width=1400`, then Read the file
+        (Read renders images). Classify from wall texture: regular 8x16 coursing +
+        mortar joints = BLOCK/CMU · large panels with vertical joints, often fluted =
+        TILT-UP/PRECAST · ribbed/corrugated metal skin with standing-seam roof = PEMB ·
+        brick = MASONRY. Interior shots are just as diagnostic as exteriors (exposed
+        block walls + steel bar-joist roof reads masonry immediately).
+  *** TWO TRAPS THAT WILL PRODUCE A WRONG ANSWER — BOTH HIT ON 2026-08-04: ***
+  - ATTRIBUTION. CommercialSearch/CommercialCafe pages carry a "similar properties"
+    carousel (`.similarproperty`, `.carousel.listings`). Its photos are OTHER
+    BUILDINGS. On 4111 Founders Blvd every single image on the page belonged to the
+    carousel, and the most prominent one was actually 3717 Jonlen Dr — scoring it
+    would have assigned that building's construction to the wrong deal. ALWAYS scope
+    the query to `.property-details-gallery` and CHECK THE `alt` ATTRIBUTE, which
+    carries either the subject address or the subject listing title. If alt does not
+    match the subject, DISCARD the image.
+  - THE CDN KEYS ON THE GUID, NOT THE FILENAME. URLs look like
+    `cdn.commercialsearch.com/images/<GUID>/<name>.jpeg`. Reusing one GUID with
+    different filenames returns THE SAME IMAGE every time (verified: four "different"
+    downloads came back byte-identical, same md5). Never construct these URLs — always
+    take the full href per image from the DOM.
+  - NOT EVERY IMAGE IS DIAGNOSTIC. Filter out aerials, site plans, location maps and
+    marketing overlays — they cannot resolve wall material. The filename is the tell
+    (`Zoomed In Aerial.jpg`, `Site Plan .jpg`, `Location Map.jpg`, `Cover Photo`).
+    A gallery of nothing but aerials is a VERIFIED-ATTEMPT UNKNOWN, not a hit.
+  EXPECTED COVERAGE — DO NOT TREAT A LOW HIT-RATE AS A BUG. Measured across 15 listings
+  on 2026-08-04: **3 resolved** (7267 Park Cir Dr precast · 3717 Jonlen Dr block ·
+  5740 W Minnesota St PEMB) · **4 had images but only non-diagnostic aerials/site plans**
+  (1310 S West St · 4197 Reardon Rd · 8840 N Greenview Dr · 2800 Annapolis Rd) ·
+  **8 had a `.property-details-gallery` containing ZERO images** (4111 Founders Blvd ·
+  1621 Dana Ave · 1330 Kemper Meadow · 12033 Best Place · 1900 Benhill Ave ·
+  6380 Beulah Rd · 1255 N Main St · 1255 N Winchester St · 1437 Gentry St). So roughly
+  **1 in 5 candidates is resolvable from photos** — still infinitely better than the
+  previous 0 in 9, but budget accordingly. For the other ~80%, the broker call remains
+  the ONLY route and the Next Action must continue to say "CONFIRM CONSTRUCTION".
+  A verified "no photos exist" is a real result: record UNKNOWN and note the gallery was
+  empty, so the next run does not repeat the attempt. Do NOT report UNKNOWN without
+  having actually run steps 1-2.
+  *** THE BY-PRODUCTS OUTWEIGH THE 3 POINTS — the real reason to do this. *** Every
+  resolvable listing on 2026-08-04 yielded something the listing TEXT never disclosed:
+  3717 Jonlen's interiors exposed a taproom/arcade build-out that Step 2.5 zero-credits ·
+  5740 W Minnesota revealed United Rentals as the in-place credit tenant AND triggered
+  the PEMB basis-distortion warning · 8840 N Greenview's aerial showed a SEPARATE
+  0.90-acre parcel marketed at $250,000 beside the building ask · 2800 Annapolis's aerial
+  showed a narrow TRIANGULAR site pinched against an active rail line (no expansion, poor
+  truck circulation) · 7267 Park Cir Dr showed a cell tower on the parcel. None of that
+  appears in any listing description. Inspect the photos even when construction type is
+  already settled from text — and note that the "non-diagnostic" aerials still produced
+  three of those five findings.
 
 STEP 2 — ELIGIBILITY GATE
 Keep a candidate only if: (a) industrial/flex/office-warehouse product; (b) in a
@@ -242,6 +371,7 @@ BASIS TEST (ratified by Gabriel 2026-07-14):
     Grand Rapids     $253.11         $ 88.59            $101.24   [PROXY — WEAKEST]
     Richmond         $232.97         $ 81.54            $ 93.19   [PROXY]
     Des Moines       $231.66         $ 81.08            $ 92.66   [PROXY]
+    Louisville       $237.07         $ 82.97            $ 94.83
   (Table mirrored for convenience. acquisition-underwriting WINS on any disagreement.)
 
 WHY THE FLOOR IS 65%, NOT 25% — READ THIS BEFORE YOU "CORRECT" IT:
@@ -418,7 +548,14 @@ On each run:
 
 STEP 5 — WRITE TO NOTION (canonical record — write BEFORE email)
 Create/update Deal Sourcing Log records: Deal Name / Address; Metro / Submarket;
-Source; Status = "New Lead" (or existing status on update); Asking Price;
+Source; **`Listing URL`** (the working public URL captured in Step 1 — field added
+2026-08-12; before that STEP 1 was told to capture a URL for every listing and STEP 5 had
+NOWHERE TO WRITE IT, so every run captured one and silently discarded it. That is why no
+historical row can have its ask provenance reconstructed, and why STEP 5B's cross-write had
+to fall back to document provenance. Write it on creation AND whenever a re-sighting loads a
+different working URL; leave blank only when the ask came from an OM or a broker directly,
+i.e. when there genuinely is no listing page); Status = "New Lead" (or existing status on
+update); Asking Price;
 **Ask at First Sighting + First Sighted (on creation only)**; Total SF; Price / SF
 (FUNCTIONAL — per Step 2.5); Year Built; Buy Box Score (100); **Verdict** (T1 PURSUE /
 T2 WATCH / PASS / KILLED); **Floor Result** (PASS / FAIL-BASIS / FAIL-YIELD /
@@ -427,6 +564,100 @@ Contact; Date Seen; Notes / Flags (gate outcome FIRST, then score breakdown, the
 pre-mortem, the benchmark used and whether the deal sits near the floor line, plus
 PRICE CUT / RE-LIST / REQUEST PRICE / PROVISIONAL / SUB-SCALE flags); Next Action
 (what to do, and the decision rule — e.g. "decline if the ask implies over $105/SF").
+
+STEP 5B — CROSS-WRITE THE VERIFIED ASK TO THE ACQUISITION PIPELINE TRACKER
+(added 2026-08-12, Gabriel-directed in-turn. Closes a real 36-minute-fuse defect: on
+2026-08-11 this scan verified 4484 Robertson Road's published ask at $2,950,000
+($116.14/SF marketed vs a Madison floor of $80.18 — FAIL-BASIS) and emailed it, but
+nothing wrote it to the pipeline tracker. The tracker row was re-stamped 36 minutes
+LATER, still recording the ask as "NOT YET KNOWN — verified null" and still instructing
+the deal owner to ask the broker for a price on a call the next morning. Two ORA systems
+held contradictory states because this task had a read of the tracker but no write.)
+
+WHEN THIS RUNS: for every scanned candidate that matches an EXISTING row in the
+Acquisition Pipeline Tracker (bcfe4a03-7e61-4ac1-a0bb-c44174fa138b). STEP 4 already
+fetches that tracker to avoid re-surfacing active deals as leads — reuse that same fetch
+and the same normalized-address match key (street-number + street-name, SF within 2%).
+Do NOT issue a second pull.
+
+*** "VERIFIED" IS A HARD PRECONDITION, NOT A LABEL. *** Write ONLY if this run actually
+loaded a listing DETAIL page and read the ask off it. If the candidate is PROVISIONAL
+(index-only or snippet-only, no detail page ever loaded — see Step 1's source ladder),
+you have NOT verified anything: do NOT write, and say so in the digest. Writing an
+index-page figure into the tracker would launder an unconfirmed number into the deal
+record, which is strictly worse than leaving the field null. Precedent: in July, four
+index-only Kansas City finds produced one confirmed, two corrected (including a price
+understated by $125K) and one dead listing.
+
+WRITE EXACTLY THESE THREE FIELDS, AND NOTHING ELSE:
+  - `Listing Ask (Verified)`     (number/dollar) — the ask as published on the detail page,
+                                                   OR read out of an OM (see provenance below).
+  - `Listing Ask Verified On`    (date)          — the date THIS run read it. Always stamp.
+  - `Listing Ask Source`         (url/text)      — WHERE THE FIGURE ACTUALLY CAME FROM. Never
+                                                   leave this blank on a fresh write; never
+                                                   invent or reconstruct it.
+
+*** PROVENANCE MUST MATCH THE REAL SOURCE — A URL IS NOT ALWAYS AVAILABLE (amended 2026-08-12).
+*** The original wording required "the working public URL captured in Step 1", which assumed every
+verified ask comes from a web listing. It does not, and that assumption pressures a run into pasting
+in a URL that does not actually publish the figure — fabricated provenance, the exact thing this field
+exists to prevent. Worked case: 4484 Robertson Road's $2,950,000 was resolved by OCR of
+`OM 4484 Robertson Road Madison, WI 53714_OCR.pdf`, while the only public listing (LoopNet) shows
+*price upon request* and 403s to automated fetch — so a LoopNet URL there would have CONTRADICTED the
+figure it claimed to source. Write whichever of these is true:
+  - listing page verified this run  → the working public URL.
+  - OM / broker document            → the document filename plus how it was read, e.g.
+                                      `OM <file>.pdf (OCR-resolved YYYY-MM-DD)`. Say so plainly if
+                                      no public listing publishes the ask.
+  - broker stated it directly       → `Broker <name> <firm>, <channel> YYYY-MM-DD`.
+Never cite a source that does not itself carry the number. If the only available URL shows
+price-upon-request, that URL is NOT the provenance — the document or conversation is.
+
+*** NEVER WRITE `Purchase Price`. *** This is the whole point of the three dedicated
+fields, ratified by Gabriel 2026-08-12 over the simpler option of reusing `Purchase Price`:
+  (a) `Purchase Price` feeds TWO formulas — `Price Per SF` (= Purchase Price / Total SF)
+      and `Replacement Cost Ratio`. The latter is ALREADY KNOWN-BROKEN (still computing
+      against $95/SF, an RCT v01-era denominator, vs RCT v03's $228-254; flagged to
+      Gabriel 2026-08-11, unfixed pending his sign-off because it is governor-adjacent).
+      A broker marketing figure written to `Purchase Price` would silently propagate into
+      both, one of them wrong by ~2.5x, and would surface on six views as a deal price.
+  (b) `Purchase Price` blank is MEANINGFUL — it is a verified null meaning "no underwritten
+      or agreed price yet." Overwriting it destroys that signal.
+  (c) `Purchase Price` already carries three different meanings across existing rows (ask /
+      IC-memo recommended advance / blank-pending). Do not add a fourth.
+An ask is broker marketing. `Purchase Price` is what ORA would or did pay. They are
+different quantities and they now live in different fields — keep it that way.
+
+ALSO NEVER WRITE, from this task, on a pipeline-tracker row: `Next Action`, `Stage`,
+`LOI Status`, `PSA Status`, `Last Activity`, `Last Updated`, `Notes`, `Kill Reason`.
+Those are posture and clock fields owned by the deal owner and by `ora-deal-aging-sla`,
+which measures staleness against them — a scan touching them would reset the very clock
+another task exists to watch. This mirrors that task's own standing guardrail.
+
+OVERWRITE RULE (deliberately the OPPOSITE of `Ask at First Sighting`):
+  - `Ask at First Sighting` in the Deal Sourcing Log is WRITE-ONCE — it is a historical
+    baseline and overwriting it destroys the price-cut signal.
+  - `Listing Ask (Verified)` is a CURRENT-STATE field — overwrite it freely whenever a
+    newer run verifies a different published ask, and re-stamp `Listing Ask Verified On`.
+    The stamp is what makes the figure trustworthy; a value without a fresh date is a
+    figure of unknown age. Never write the value without the date.
+  - If the ask is UNCHANGED, still re-stamp `Listing Ask Verified On` — "re-confirmed
+    today" is a different and more useful fact than "last seen three weeks ago."
+
+DO NOT CREATE PIPELINE-TRACKER ROWS. This step only UPDATES rows that already exist.
+A scanned listing with no tracker row stays in the Deal Sourcing Log where it belongs;
+promoting a lead into the acquisition pipeline is Gabriel's decision, not a scan's.
+
+REPORT IT. In the Step 6 digest, add a short "Pipeline tracker cross-writes" line naming
+each row written (deal, ask, verified-on) and each match that was SKIPPED as PROVISIONAL.
+A silent write to the deal record is not acceptable — the digest is the audit trail.
+
+FLAG THE CONTRADICTION, DO NOT RESOLVE IT. If the matched row's `Next Action` prose makes
+a claim the verified ask contradicts — "price not yet known", "ask the broker for a
+number", a stale price expectation — say so explicitly in the digest as a named finding,
+LEADING the item. Do NOT edit the prose to fix it. That is the deal owner's call, and
+rewriting it would erase the evidence that the two systems had diverged. (`ora-deal-aging-sla`
+reports posture divergence the same way and for the same reason.)
 
 STEP 6 — EMAIL DIGEST
 Send TO ggoldberg@oxfordra.net ONLY — per the 2026-05-15 routing directive, re-ratified 2026-06-10: only the Daily Brief cc's egoldberg.

@@ -1,0 +1,10 @@
+[
+  {
+    "path": "hooks/confidential-terms.json",
+    "reason": "2026-08-14 -- NEVER committed by design. This is the confidential-deal roster (Hard Invariant 3); CLAUDE.md's Backup line is explicit that deal terms are never committed to ora-claude-config. Tracked code legitimately references it by path and must keep doing so. Its absence from a fresh checkout is intended, not a backup gap: the guards that read it fail open when it is missing."
+  },
+  {
+    "path": "scheduled-tasks/ora-open-sessions-board/answered.json",
+    "reason": "2026-08-14 -- deliberate per-run runtime state, already on the reviewed-exempt list at maintenance/_shared/task-folder-runtime-state-allowlist.json (same bar, added by Gabriel only). Referenced from that allowlist file itself, which is what surfaces it here. Losing it degrades safely; it is not a durable engine."
+  }
+]
