@@ -114,7 +114,39 @@ BULK_FIELD_RATIO = 0.5
 def _people(v):
     return "|".join(sorted(p.get("id", "") for p in v or []))
 
-def norm_prop(p):
+def _array_digest(arr, _depth=0):
+    """Order-sensitive content digest of a rollup array's elements (OI-151).
+
+    Elements of a rollup array are themselves Notion property-value objects, so
+    each is normalized through norm_prop -- the same stripping that protects a
+    top-level property from volatile metadata (SKIP_TYPES) applies here too, which
+    is what keeps this from churning every run. Anything not property-shaped (the
+    selftest uses bare ints) falls back to a sorted-key JSON dump.
+
+    Depth-guarded because a rollup array can in principle carry another rollup;
+    unbounded recursion here would be a crash in an unattended 18:00 run, which is
+    strictly worse than the blind spot this closes. Beyond the limit we degrade to
+    the JSON dump rather than giving up.
+
+    sha1 is a fingerprint here, not a security primitive: the only property needed
+    is that different content produces a different token.
+    """
+    parts = []
+    for el in arr:
+        if isinstance(el, dict) and el.get("type") and _depth < 3:
+            try:
+                v = norm_prop(el, _depth=_depth + 1)
+            except Exception:
+                v = None
+            # A skipped (None) element still has to occupy a slot, or dropping a
+            # metadata element would read as identical to it never existing.
+            parts.append("\x00" if v is None else str(v))
+        else:
+            parts.append(json.dumps(el, sort_keys=True, default=str))
+    return hashlib.sha1("\x1f".join(parts).encode("utf-8")).hexdigest()[:12]
+
+
+def norm_prop(p, _depth=0):
     """Return a stable plain-text value for one Notion property object, or None to skip."""
     t = p.get("type")
     if t in SKIP_TYPES:
@@ -162,7 +194,19 @@ def norm_prop(p):
             d = r.get("date") or {}
             return "%s/%s" % (d.get("start", ""), d.get("end", "") or "")
         if rt == "array":
-            return "[array:%d]" % len(r.get("array", []))
+            arr = r.get("array", [])
+            # OI-151: this used to fingerprint by LENGTH ALONE, so swapping one
+            # element for another kept the token identical and the change was a
+            # SILENT false negative -- precisely the failure class this script
+            # exists to prevent (see the module docstring). Latent while every
+            # row's relations are empty; live the moment they are populated.
+            # The empty case deliberately keeps the exact legacy token so this
+            # change causes ZERO diff churn against snapshots written before it
+            # -- today all 14 rows are empty, so the first run after this lands
+            # reports no spurious edits.
+            if not arr:
+                return "[array:0]"
+            return "[array:%d:%s]" % (len(arr), _array_digest(arr, _depth))
         return str(r.get(rt, ""))
     # unknown/unhandled type: best-effort stable repr
     return json.dumps(p.get(t), sort_keys=True, default=str)
@@ -348,7 +392,20 @@ def _http_page(db_id, token, body):
                 time.sleep(2 * (attempt + 1))
                 continue
             raise
-        except urllib.error.URLError:
+        except OSError:
+            # OI-152: this was `except urllib.error.URLError`, which covers a
+            # failure to CONNECT but not a timeout reading the RESPONSE BODY --
+            # `json.load(r)` runs inside this try, and a socket read timeout
+            # there raises TimeoutError, which is neither HTTPError nor
+            # URLError. So the exact "one Notion hiccup = a lost run" case the
+            # comment above promises to absorb still died on first occurrence
+            # if the hiccup landed mid-body. OSError is the common base of
+            # URLError, TimeoutError and the socket errors (ConnectionReset,
+            # etc.), so this widens to the whole transient-network family
+            # without reaching non-network failures: a malformed body raises
+            # JSONDecodeError (a ValueError) and is still not retried, because
+            # it is not transient. HTTPError is matched by the clause above
+            # first, so its status-code logic is unchanged.
             if attempt < 2:
                 time.sleep(2 * (attempt + 1))
                 continue
@@ -504,8 +561,33 @@ def selftest():
     # ---- rollup + unique_id normalization (this DB is rollup-heavy: 14 of them) ----
     check(norm_prop({"type": "rollup", "rollup": {"type": "number", "number": 12345.0}}) == repr(12345.0),
           "norm_prop: numeric rollup normalizes stably")
-    check(norm_prop({"type": "rollup", "rollup": {"type": "array", "array": [1, 2, 3]}}) == "[array:3]",
-          "norm_prop: array rollup normalizes to a stable length token")
+    # OI-151 regression battery. The old behaviour was a bare length token, which
+    # made an equal-length element swap invisible -- a silent false negative.
+    _arr = lambda a: norm_prop({"type": "rollup", "rollup": {"type": "array", "array": a}})
+    check(_arr([]) == "[array:0]",
+          "norm_prop: EMPTY array rollup keeps the exact legacy token (no diff churn on landing)")
+    check(_arr([1, 2, 3]).startswith("[array:3:"),
+          "norm_prop: non-empty array rollup still carries its length, plus a content digest")
+    check(_arr([1, 2, 3]) == _arr([1, 2, 3]),
+          "norm_prop: identical array content digests identically (no spurious daily churn)")
+    check(_arr([1, 2, 3]) != _arr([1, 2, 4]),
+          "norm_prop: OI-151 -- an EQUAL-LENGTH element swap now changes the token")
+    check(_arr([1, 2, 3]) != _arr([3, 2, 1]),
+          "norm_prop: array digest is order-sensitive (a reorder is a real change)")
+    check(_arr([{"type": "rich_text", "rich_text": [{"plain_text": "Ada"}]}])
+          != _arr([{"type": "rich_text", "rich_text": [{"plain_text": "Grace"}]}]),
+          "norm_prop: property-shaped elements normalize through norm_prop and differ by content")
+    check(_arr([{"type": "rich_text", "rich_text": [{"plain_text": "Ada"}]}])
+          == _arr([{"type": "rich_text", "rich_text": [{"plain_text": "Ada"}]}]),
+          "norm_prop: property-shaped elements with identical content digest identically")
+    # A rollup nested inside a rollup array must not recurse without bound: the
+    # depth guard has to degrade to a JSON dump rather than raise in an unattended run.
+    _nested = {"type": "rollup", "rollup": {"type": "array", "array": [
+        {"type": "rollup", "rollup": {"type": "array", "array": [
+            {"type": "rollup", "rollup": {"type": "array", "array": [
+                {"type": "rollup", "rollup": {"type": "array", "array": [1]}}]}}]}}]}}
+    check(isinstance(norm_prop(_nested), str) and norm_prop(_nested).startswith("[array:1:"),
+          "norm_prop: deeply nested rollup arrays are depth-guarded, not a RecursionError")
     check(norm_prop({"type": "unique_id", "unique_id": {"prefix": "PROP", "number": 7}}) == "PROP7",
           "norm_prop: unique_id (Property ID) normalizes")
     check(norm_prop({"type": "last_edited_time", "last_edited_time": "2026-07-12T17:16:00Z"}) is None,
