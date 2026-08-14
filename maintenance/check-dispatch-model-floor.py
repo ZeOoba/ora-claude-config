@@ -19,14 +19,17 @@ WHAT IT CHECKS, per agent-*.jsonl transcript in a session's subagents dir:
   value is the VIOLATION.
 
 A content block of type "fallback" is RECORDED as informational context, NOT a
-standalone violation. This harness writes the actual served tier into
-`message.model` on the post-fallback lines (observed: a run shows `claude-fable-5`
-then `claude-opus-4-8` once it falls back), so the per-line model rank already
-answers "did the run hold the floor?" — a fallback whose destination is AT OR
-ABOVE the floor is compliant and must not alarm. Gabriel RULED 2026-08-14 that a
-mid-run fallback to an OPUS tier is compliant with never-below-Fable (OI-052
-closed); the sweep therefore invokes this with `--floor claude-opus-4-8`, and only
-a drop BELOW Opus (which shows up as a below-floor `message.model`) trips it.
+standalone violation — what matters is the tier it fell TO. Two independent signals
+establish that tier, and either one below the floor is a violation:
+  - the per-line `message.model` (this harness writes the actual served tier onto
+    post-fallback lines: a run shows `claude-fable-5` then `claude-opus-4-8`), and
+  - the fallback event's own `to` field
+    (`{"type":"fallback","from":"claude-fable-5","to":"claude-opus-5"}`), ranked
+    directly so a below-floor fallback is caught even if message.model never updated.
+A fallback whose destination is AT OR ABOVE the floor is compliant and must not
+alarm. Gabriel RULED 2026-08-14 that a mid-run fallback to an OPUS tier is
+compliant with never-below-Fable (OI-052 closed); the sweep therefore invokes this
+with `--floor claude-opus-4-8`, and only a drop BELOW Opus trips it.
 
 FAIL-CLOSED ON ABSENCE. A missing subagents dir, or a dir with zero agent-*.jsonl
 files, is a TOOLING ERROR (exit 2), never a silent PASS — an unverifiable floor
@@ -138,6 +141,18 @@ def scan_transcript(path, floor):
                         saw_fallback = True
                         if first_fallback_line is None:
                             first_fallback_line = lineno
+                        # The harness fallback event carries its destination tier
+                        # (`{"type":"fallback","from":...,"to":...}`). Rank `to`
+                        # directly, so a fallback to a BELOW-floor tier is caught
+                        # even if message.model never updated to reflect it — this
+                        # closes the "trust message.model" residual. A fallback to
+                        # an at/above-floor tier (e.g. opus under the opus floor)
+                        # is compliant and sets no violation.
+                        to_model = block.get("to")
+                        if isinstance(to_model, str) and model_rank(to_model) < floor \
+                                and first_violation is None:
+                            first_violation = \
+                                "fallback to below-floor model %r at line %d" % (to_model, lineno)
                 # Model id normally lives at message.model; tolerate a top-level
                 # model key too (schema drift). A present-but-non-string model is
                 # coerced to a sentinel so it ranks unknown instead of crashing.

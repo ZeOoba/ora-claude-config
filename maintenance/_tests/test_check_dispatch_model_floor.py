@@ -101,6 +101,35 @@ def test_below_opus_fallback_fails_under_opus_floor():
         expect("below-opus under opus floor => status 1", status == 1, "got %d" % status)
 
 
+def test_fallback_block_to_field_ranked_directly():
+    # Residual-closer: a fallback event carries `to`. If `to` is below floor, it is
+    # a violation EVEN IF message.model never updated (stays at the requested tier).
+    opus_floor = cdmf.floor_rank("claude-opus-4-8")
+    with tempfile.TemporaryDirectory() as d:
+        # message.model stays FABLE (looks compliant) but the block says it fell to sonnet.
+        rec = json.dumps({"message": {"model": FABLE,
+                                      "content": [{"type": "fallback",
+                                                   "from": FABLE, "to": "claude-sonnet-5"}]}})
+        write_agent(d, "agent-a.jsonl", [_msg(FABLE), rec])
+        status, rows = cdmf.scan_subagents_dir(d, opus_floor)
+        expect("block `to` below floor => status 1 despite compliant message.model",
+               status == 1, "got %d" % status)
+        expect("violation attributes to the fallback destination",
+               rows[0]["first_violation"] and "fallback to below-floor" in rows[0]["first_violation"])
+
+
+def test_fallback_block_to_opus_is_compliant():
+    # The live-sweep shape: block `to` = opus under the Opus floor => compliant.
+    opus_floor = cdmf.floor_rank("claude-opus-4-8")
+    with tempfile.TemporaryDirectory() as d:
+        rec = json.dumps({"message": {"model": "claude-opus-5",
+                                      "content": [{"type": "fallback",
+                                                   "from": FABLE, "to": "claude-opus-5"}]}})
+        write_agent(d, "agent-a.jsonl", [_msg(FABLE), rec])
+        status, _ = cdmf.scan_subagents_dir(d, opus_floor)
+        expect("block `to`=opus under opus floor => status 0", status == 0, "got %d" % status)
+
+
 def test_below_floor_model_fails():
     with tempfile.TemporaryDirectory() as d:
         # No explicit fallback block, but the model itself dropped below the floor.
