@@ -1,12 +1,16 @@
 ---
 name: reference-command-center-mirror-deploy-gap
-description: "deploy-mirror.ps1 (and its hourly scheduled task) builds+deploys whatever is on the local oxford-command-center checkout — it never runs git pull, so merged main PRs silently don't reach brain.oxfordra.net until someone manually pulls"
+description: "Running history of the brain.oxfordra.net hourly mirror-deploy path. The original 'never pulls' gap is FIXED (PR #192, 2026-07-09) — deploy-mirror.ps1 now fetches + `git merge --ff-only origin/main` before baking and throws on failure. Live open items are the kill-class alerting blind spot and the unbounded gate-check curl (PR #248, unmerged)."
 metadata: 
   node_type: memory
   type: reference
   originSessionId: ba7f63af-5a1b-4911-aa2a-99d3aa12b01a
-  modified: 2026-07-31T15:42:36.662Z
+  modified: 2026-08-04T00:01:28.205Z
 ---
+
+> **STATUS BANNER (added 2026-08-03).** The "never pulls" gap named in this file's title and in the 2026-07-09 finding below is **FIXED and has been since PR #192** — do not cite it as current. Verified live 2026-08-03 against `scripts/deploy-mirror.ps1`: `:173` `git fetch origin` (via `Invoke-GitFetchCapture`) → `:199` `git merge --ff-only origin/main` → `:200` throws and aborts the deploy on failure. Everything from the 2026-07-09 finding through PR #202 is **historical record**; the live open items are the kill-class alerting blind spot (2026-07-27 / 2026-07-31 entries) and the unbounded gate-check curl ([PR #248](https://github.com/ZeOoba/oxford-command-center/pull/248), unmerged as of 2026-07-31).
+>
+> Separately, note the deploy **re-bakes from the workbook, not from `data/snapshots/portfolio.json`** — `scripts/bake-mirror.ts:104` calls `parseWorkbook(workbookPath())` directly. So mirror data freshness is independent of the `ora-lease-snapshot-refresh` cadence, and a workbook correction reaches brain.oxfordra.net on the next hourly fire regardless of git or snapshot state. Confirmed 2026-08-03 when a Northwood loan recategorization did exactly that. See [[reference_parseleases_vacancy_block_phantom_leases_2026-08-03]] for the adjacent parser path.
 
 **Finding (2026-07-09):** Gabriel asked to see the live command center and it did not reflect the just-merged Mission-Control retokenization (PRs #186–#191 — tokens/fonts/radii/themes, KpiStat/TierBoard/Sidebar/Badge consumers, contrast fixes). Root cause: the local checkout at `C:\Users\Owner\oxford-command-center` was 7 commits behind `origin/main`. `scripts/deploy-mirror.ps1` (run hourly by the "ORA Command Center - Mirror Deploy" Windows scheduled task, see `scripts/register-mirror-task.ps1`) does `Set-Location $repo` and immediately bakes+builds+`wrangler pages deploy`s — **it never runs `git pull`**. So the hourly job kept redeploying stale pre-retokenization code with a fresh data snapshot ("STATIC · baked Nm ago" only reflects data freshness, not code freshness — easy to misread as "everything is current").
 

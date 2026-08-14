@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 5e4a9dbe-c799-4e0e-b709-059286471562
-  modified: 2026-08-09T18:10:05.650Z
+  modified: 2026-08-13T17:52:35.039Z
 ---
 
 **The trap:** `doctrine-integrity-probe.py` prints `CLAUDE.md size: NNNN words (warn > 1700, fail > 1850)` on every pre-push. At ~1694 words this reads as "nearly at the limit — trim it." **That reading is backwards and acting on it damages doctrine.**
@@ -24,3 +24,5 @@ metadata:
 4. If the WARN line itself is the irritant, the honest fix is **recalibrating WORD_BUDGET_WARN upward**, not shrinking the file to satisfy a marker. That edits a guard constant — needs deliberate sign-off.
 
 **Why this was easy to get wrong:** the rationale was recorded only in an archived audit file that MEMORY.md does not link, so it was undiscoverable without a targeted grep — a live instance of the "one fact, one home" failure the doctrine warns about. See [[feedback_verify_before_repeating_session_claims]]: a threshold printed next to a count is not self-explanatory; read the calibration before acting on it.
+
+**A second, mechanical trap on top of the above (2026-08-13):** don't even trust a bare `wc -w CLAUDE.md` for the count itself — this shell's locale undercounts it by ~140 words. See [[reference_claude_md_wc_w_locale_undercounts]]. Always read the count from `doctrine-integrity-probe.py` directly.

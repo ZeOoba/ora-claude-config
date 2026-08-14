@@ -1,6 +1,6 @@
 ---
 name: ora-am-brief
-description: ORA Morning Brief — single sequential AM session (cron `0 6 * * *`). Four blocks in order — A) Treasury/Rate prefetch (weekdays) -> B) Daily Brief 9-section report via the installed daily-brief skill (every day) -> C) Inbox Pre-Brief triage (weekdays) -> D) Cash Position Snapshot (Mondays). MIGRATED to CC/MCP 2026-07-16 (Gabriel-directed): the LAMS/Cowork sandbox has no local COM access, so the email leg on this task structurally could not send (confirmed: no send for the 2026-07-16 edition despite 7/13-7/15 sending fine) — this fleet has proven COM sends today via the same `send-via-outlook.ps1` path (ora-pm-ledger, automation-health-monitor, Command Center Daily Brief all sent clean). Content carried over verbatim from the LAMS spec with three CC/MCP-surface adaptations: (1) Block B's critical-dates sub-section now cites the Command Center alerts engine as authoritative rather than independently deriving lease/debt dates from a live Notion read (Gabriel-ratified 2026-07-16, closing the recurring two-briefs-disagree defect); (2) Block D drops the Cowork-only `mcp__cowork__update_artifact` step and reads the Master Workbook directly at its confirmed local path; (3) NON-MUTATION GUARANTEE's output list drops "the Cowork cash artifact." The superseded LAMS registration is being retired separately. [MODEL: claude-sonnet-5 | checked 2026-07-16 (verb corrected 2026-07-27 by automation-health-monitor — task migrated to CC/MCP 2026-07-16 but retained the LAMS-only "set" verb for 11 days; CC/MCP model is observed, not settable, per reference_scheduled_task_model_standard.md)]
+description: ORA Morning Brief — single sequential AM session (cron `0 6 * * *`). Four blocks in order — A) Treasury/Rate prefetch (weekdays) -> B) Daily Brief 9-section report via the installed daily-brief skill (every day) -> C) Inbox Pre-Brief triage (weekdays) -> D) Cash Position Snapshot (Mondays). MIGRATED to CC/MCP 2026-07-16 (Gabriel-directed): the LAMS/Cowork sandbox has no local COM access, so the email leg on this task structurally could not send (confirmed: no send for the 2026-07-16 edition despite 7/13-7/15 sending fine) — this fleet has proven COM sends today via the same `send-via-outlook.ps1` path (ora-pm-ledger, automation-health-monitor, Command Center Daily Brief all sent clean). Content carried over verbatim from the LAMS spec with three CC/MCP-surface adaptations: (1) Block B's critical-dates sub-section now cites the Command Center alerts engine as authoritative rather than independently deriving lease/debt dates from a live Notion read (Gabriel-ratified 2026-07-16, closing the recurring two-briefs-disagree defect); (2) Block D drops the Cowork-only `mcp__cowork__update_artifact` step and reads the Master Workbook directly at its confirmed local path; (3) NON-MUTATION GUARANTEE's output list drops "the Cowork cash artifact." The superseded LAMS registration is being retired separately. [MODEL: claude-opus-5 observed | checked 2026-08-09 via live-run transcript canary]
 output_contract:
   version: 1
   blocks:
@@ -77,6 +77,75 @@ This task fires **daily at 06:00 ET** (`0 6 * * *`). Determine today's day-of-we
 
 This task EMITS outputs only: Notion pages/blocks, emails, and durable state/heartbeat files under `Claude_Workspace\_state\`. It MUST NOT write `settings.json`, `~/.claude/` config, or any memory file.
 
+## DOUBLE-FIRE ENTRY GUARD (added 2026-08-09 — run as STEP 0 of every block)
+
+**The incident.** 2026-08-09 (Sunday): the machine was offline overnight, `ora-health-guard` reported waking **219 minutes late**, and the whole fleet fired in a catch-up burst. **This task fired twice.** The first fire published Notion page `3b76ecd8-9e59-8160-bb0f-c6b5c925a278` ("Daily Brief — 2026-08-09") and sent "ORA Daily Brief - Sunday, August 9 2026" to ggoldberg cc egoldberg at **09:06:58 ET**. A second fire landed at **09:11 ET** (registry `lastRunAt 2026-08-09T13:11:04Z`). It only avoided re-sending the email and clobbering the page because the session happened to read the artifact first and **stood down by hand**. Nothing in this spec made it do that. (The registry stores only the latest `lastRunAt`, so which fire was the scheduled catch-up and which the replay is not determinable from it — that ambiguity is itself why the guard has to live here, at the task's own entry.)
+
+**Root cause.** Block B had no entry guard. Its only dedup was the daily-brief skill's *Patch 3* pre-create check, which (a) dedups the **Notion page only** — the Outlook COM send is unconditional — and (b) on "exactly 1 match" issues `notion-update-page replace_content`, i.e. it **OVERWRITES**, because it assumes any match is its own retry artifact rather than a completed prior run's output. Blocks A, C and D have the identical exposure; a duplicate Block D cash email in a Monday burst is the same defect.
+
+**Do NOT "fix" this by retiming the cron or suppressing catch-up behavior.** The burst is documented, intended fleet-wide behavior (both fleets fire only while the Desktop app is open). The guard belongs at this task's entry.
+
+### The mechanism
+
+Two independent layers. Neither is sufficient alone — keep both.
+
+**Layer 1 — per-block, per-ET-date sentinel.** State file:
+
+```
+C:\Users\Owner\OneDrive - Oxford Capital Partners\Claude_Workspace\_state\ora-am-brief-block-completion.json
+```
+
+Shape: `{ "<YYYY-MM-DD>": { "blockA|blockB|blockC|blockD": { status, runId, claimedAt, notionPageId, emailSentAt } } }`.
+
+That path is deliberate: `Claude_Workspace\_state\` is the **one** location the NON-MUTATION GUARANTEE above already permits this task to write, so the guard stays inside the existing envelope and adds no new write surface.
+
+Helper: `C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py` (shared across the fleet; see `_shared/README-DOUBLE-FIRE-GUARD.md`).
+
+**Layer 2 — Outlook Sent Items pre-send probe** (Blocks B and D, the two that email). Immediately before the COM send, ask the mail store whether today's subject is already there. This survives loss of the state file, which is a **real** risk: `_state\` is on OneDrive and can be rolled back or briefly unavailable to a sync conflict. Helper: `_shared\outlook-sent-probe.ps1`.
+
+### Step 0 — claim (before ANY generation work in the block)
+
+Run this as the block's first action, substituting the block id (`blockA`/`blockB`/`blockC`/`blockD`). Use ONE `run_id` for the whole session:
+
+```
+python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-am-brief --block blockB --run-id <session run_id> --ttl-min 30
+```
+
+Act on the exit code — it is the whole contract:
+
+| Exit | Decision | What this block does |
+|---|---|---|
+| **0** | `PROCEED` | Claimed. Do the block's work normally. |
+| **10** | `SKIP_ALREADY_COMPLETE` | Today's block is already COMPLETE. **Log `BLOCK_<X>_ALREADY_COMPLETE_TODAY`, skip the block entirely, and record it in the end-of-session run summary as a NORMAL skip** so `ora-health-guard` / `automation-health-monitor` do not read it as a miss. Do not regenerate, do not republish, do not email. |
+| **11** | `STAND_DOWN_IN_PROGRESS` | Another fire claimed this block less than the TTL ago and is live right now. **Stand down** — skip the block, log `BLOCK_<X>_IN_PROGRESS_ELSEWHERE`, record as a NORMAL skip. |
+| **any other** | tooling failure, not a decision | **Fail open: run the block normally**, and put the exit code and stderr verbatim on that block's run-summary line. Exit 2 means the command was malformed (usually a missing `--task`/`--block`); 9009 or 127 means the interpreter was not found. These are NOT skip signals — treating a broken guard as "already done" would silently suppress the brief, which is worse than a duplicate. |
+
+An `IN_PROGRESS` record **older** than the TTL is treated as a crashed run: the helper re-claims and returns `PROCEED` (`logToken` = `BLOCK_<X>_RECLAIMED_STALE_IN_PROGRESS`). **The TTL is load-bearing in both directions.** A COMPLETE-only sentinel does not stop two *overlapping* fires, because fire #2 arrives while fire #1 is still generating. An IN_PROGRESS sentinel with no expiry permanently wedges the task after any crash.
+
+### Step N — complete (immediately after the block's outputs land)
+
+```
+python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-am-brief --block blockB --run-id <run_id> --notion-page-id <page id> --email-sent-at <ISO8601 of the successful send>
+```
+
+Call `complete` only **after** the block's durable outputs exist. If the block genuinely failed, call `fail` instead (`--error "<what broke>"`) — that releases the claim immediately so a legitimate operator retry does not have to wait out the TTL. Leaving a block silently `IN_PROGRESS` is the one state to avoid.
+
+**Every block that CLAIMED must terminate in `complete` or `fail`. A block that did NOT claim calls neither.**
+
+- Claim returned exit 0 → you own the block → you must finish with `complete` or `fail`.
+- Claim returned exit 10 or 11 → **you own nothing. Call NEITHER.** A stood-down fire is not a failed fire; calling `fail` here would release the *live* fire's claim and let a third fire run concurrently. The helper refuses a non-owner with exit 12 and writes nothing, but do not rely on that — just don't call it.
+- `complete` on a block that was never claimed is refused (exit 12). The one legitimate exception is re-converging after the state file was lost, which needs `--adopt` passed explicitly (see B.SEND.0). Without `--adopt` a fabricated `COMPLETE` would suppress every later fire that ET date, silently, reported as a NORMAL skip — the worst outcome this design can produce.
+
+### Fail-open
+
+The helper fails open by design: an unreadable/corrupt state file, an untakeable lock, or any internal error yields `PROCEED` with the degradation reported in `stateFileError`. Surface that string in the run summary, but never let the guard itself be the reason the brief stops going out. Layer 2 is what catches a duplicate when Layer 1 has degraded.
+
+### Manual re-runs
+
+`--force` overrides a `COMPLETE` record (`logToken` = `BLOCK_<X>_FORCED_OVERRIDE`). This exists because deliberate manual all-blocks runs are real and must stay possible — one happened on 2026-08-09 at 10:51 ET, a human-directed verification run that legitimately re-ran every block on a Sunday. **`--force` is for a human asking in-session, never for an unattended retry.** A scheduled fire must never pass it.
+
+**A forced re-run must bypass BOTH layers or it cannot re-send.** Layer 2 would still find the earlier message in Sent Items and suppress the email, so a forced run would re-publish Notion and silently skip the mail. Pass `-Force` to `outlook-sent-probe.ps1` as well (it returns `FORCED`/exit 0 without touching Outlook). Same rule: human-directed only.
+
 ## HARD SCOPE BOUNDARY — NO ENGINEERING WORK, EVER (added 2026-07-26 after a live incident)
 
 This task's job is Blocks A–D above, full stop. It has none of the scaffolding engineering work actually needs — no TDD discipline, no gate:ci loop, no code review, no worktree-collision awareness — and unattended/scheduled execution makes it the wrong venue even when the request looks reasonable in the moment. Accordingly, this task MUST NOT, in any repository (`oxford-command-center`, `website-canonical`, `ora-skills`, `ora-pm`, this `~/.claude` repo, or any other):
@@ -95,7 +164,13 @@ ORA context (Block B): ~600K SF shallow-bay industrial/flex, ~140 tenants, ~27 p
 
 BLOCK A — RATE/TREASURY PREFETCH (run FIRST, weekdays only; SKIP Sat/Sun & US federal holidays — on skip days proceed straight to the brief; the brief's own weekend freshness window covers it). You are the interest-rate data producer; Notion is the canonical store — do NOT depend on writing any SharePoint/OneDrive _state file.
 
-A.1 FETCH (best-effort, record every gap; never retry a source more than twice): (a) UST constant-maturity yields, prior trading day's close, 2Y/5Y/10Y/30Y minimum (more tenors where available; interpolate unconfirmed intermediates and tag [DERIVED]) — try U.S. Treasury daily par-yield XML (…/pages/xml?data=daily_treasury_yield_curve&field_tdr_date_value_month=YYYYMM) first, then web_search (dshort/Forbes/CNBC/StreetStats). (b) SOFR — overnight print plus 30/90/180-day averages and SOFR Index via NY Fed JSON API (markets.newyorkfed.org/api/rates/secured/sofr/last/5.json and /sofrai/last/3.json); CME Term SOFR is license-gated — mark LICENSE-GATED/n/a. This CC/MCP surface reaches the NY Fed API directly (no 403 — that gap was specific to the Cowork hosted-fetch tooling), so this run should obtain these fields itself rather than relying on `ora-sofr-direct-prefetch`'s later patch — but do NOT characterize that task's later run as a no-op. **PUBLICATION WINDOW (verified 2026-07-24 — this drives everything below).** The NY Fed publishes overnight SOFR at **approximately 8:00 a.m. ET**, and the SOFR Averages and Index "shortly after" it (Federal Reserve Bank of New York, *Additional Information About Reference Rates*). This task fires at **06:00 ET — two hours BEFORE publication.** So on an on-schedule run the newest data that EXISTS is overnight SOFR only through **D−2** (D−1's print lands ~08:00 on D) and SOFR Averages/Index only through **D−1**. Confirmed against the Rate History log: the 2026-07-16 run, fetched at exactly 06:00 ET, carried the 07-15 SOFRAI print and the 07-14 overnight rate (3.63 — 07-15's actual print was 3.64), whereas the 07-24 run at 10:40 ET, after publication, carried the same-day 07-24 print. Consequently `ora-sofr-direct-prefetch` (weekdays ~10:10 AM ET, i.e. after the publication window) typically advances the 30/90/180-day average and Index rows to a genuinely newer effective date — a substantive refresh, not a confirmation (and not a required dependency in either direction). It is a confirmation ONLY on catch-up-burst days when THIS run fires after ~10:10 ET and has actually compared the values. **Never write a forward-looking claim about that task into the page** — the 2026-07-21 run published "`ora-sofr-direct-prefetch` … is a no-op confirmation this run — all SOFR fields already obtained here" while itself carrying 07-20 averages, which the 10:10 task then correctly advanced to the 07-21 print. State a match only retrospectively, and only when this run actually observed it. **SOFR ROW LABELING (hard rule).** Every SOFR strip row must carry the `effectiveDate` the API returned for THAT row — never a date inferred from `prior_trading_day`, never one carried across rows. The header's `prior_trading_day` anchors the **UST close only**; UST and SOFR publish on different latencies, so on an on-schedule 06:00 run the SOFR strip legitimately sits one business day behind that header. That lag is EXPECTED: state it plainly in the row notes, do NOT let it alone set SOURCE_DEGRADED, and do NOT paper over it — it is exactly what the 10:10 task closes. The 2026-07-16 06:00 run printed `prior_trading_day: 2026-07-15` while its SOFR Spot row held the 07-14 rate; a figure printed under a header date it does not belong to is a labeling fabrication, not a rounding detail. (c) Spreads & credit — compute 10Y−2Y bp; BBB OAS (BAMLC0A4CBBB) via fred MCP if loaded, else web_search (FRED HTTP is usually blocked here — do not rely on it); 30Y FRM via web_search "Freddie Mac PMMS 30-year fixed". (d) CME FedWatch — next FOMC date + hold/cut/hike probabilities (best-effort, cite as-of date); Fed funds target range.
+A.0 ENTRY GUARD — `block-sentinel.py claim --task ora-am-brief --block blockA --run-id <run_id> --ttl-min 30`, per DOUBLE-FIRE ENTRY GUARD above. Exit 10 → log `BLOCK_A_ALREADY_COMPLETE_TODAY`, skip Block A, record a NORMAL skip, and carry the EXISTING snapshot's `prefetch_status`/`fetched_at` forward for Block B Section 3 and Block C.0.5 by reading the "Rate Snapshot — Current" page rather than re-fetching. Exit 11 → stand down the block. A.3 overwrites a fixed page via `replace_content`, so an unguarded second fire silently destroys the first fire's snapshot and appends a duplicate Rate History row. After A.3 succeeds, run the full command (every field is required; a short form exits 2 and Block A silently never records COMPLETE):
+
+```
+python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-am-brief --block blockA --run-id <run_id> --notion-page-id 35e6ecd8-9e59-814f-ae22-fe99464084d1
+```
+
+A.1 FETCH (best-effort, record every gap; never retry a source more than twice): (a) UST constant-maturity yields, prior trading day's close, 2Y/5Y/10Y/30Y minimum (more tenors where available; interpolate unconfirmed intermediates and tag [DERIVED]) — try U.S. Treasury daily par-yield XML (…/pages/xml?data=daily_treasury_yield_curve&field_tdr_date_value_month=YYYYMM) first, then web_search (dshort/Forbes/CNBC/StreetStats). (b) SOFR — overnight print plus 30/90/180-day averages and SOFR Index via NY Fed JSON API (markets.newyorkfed.org/api/rates/secured/sofr/last/5.json and /sofrai/last/3.json); CME Term SOFR is license-gated — mark LICENSE-GATED/n/a. This CC/MCP surface reaches the NY Fed API directly for a **curl-based fetch** (no 403 — that gap was specific to the Cowork hosted-fetch tooling) — but that does NOT hold for the WebFetch tool specifically. The 2026-08-04 06:00 backfill run confirmed the NY Fed API returns **HTTP 403 via WebFetch** (and the Treasury XML endpoint in (a) above **times out via WebFetch** too) while both return cleanly via curl. Fetch both sources with a local curl/`Invoke-RestMethod` call (e.g. Desktop Commander `start_process`), not the WebFetch tool. So this run should obtain these fields itself rather than relying on `ora-sofr-direct-prefetch`'s later patch — but do NOT characterize that task's later run as a no-op. **PUBLICATION WINDOW (verified 2026-07-24 — this drives everything below).** The NY Fed publishes overnight SOFR at **approximately 8:00 a.m. ET**, and the SOFR Averages and Index "shortly after" it (Federal Reserve Bank of New York, *Additional Information About Reference Rates*). This task fires at **06:00 ET — two hours BEFORE publication.** So on an on-schedule run the newest data that EXISTS is overnight SOFR only through **D−2** (D−1's print lands ~08:00 on D) and SOFR Averages/Index only through **D−1**. Confirmed against the Rate History log: the 2026-07-16 run, fetched at exactly 06:00 ET, carried the 07-15 SOFRAI print and the 07-14 overnight rate (3.63 — 07-15's actual print was 3.64), whereas the 07-24 run at 10:40 ET, after publication, carried the same-day 07-24 print. Consequently `ora-sofr-direct-prefetch` (weekdays ~10:10 AM ET, i.e. after the publication window) typically advances the 30/90/180-day average and Index rows to a genuinely newer effective date — a substantive refresh, not a confirmation (and not a required dependency in either direction). It is a confirmation ONLY on catch-up-burst days when THIS run fires after ~10:10 ET and has actually compared the values. **Never write a forward-looking claim about that task into the page** — the 2026-07-21 run published "`ora-sofr-direct-prefetch` … is a no-op confirmation this run — all SOFR fields already obtained here" while itself carrying 07-20 averages, which the 10:10 task then correctly advanced to the 07-21 print. State a match only retrospectively, and only when this run actually observed it. **SOFR ROW LABELING (hard rule).** Every SOFR strip row must carry the `effectiveDate` the API returned for THAT row — never a date inferred from `prior_trading_day`, never one carried across rows. The header's `prior_trading_day` anchors the **UST close only**; UST and SOFR publish on different latencies, so on an on-schedule 06:00 run the SOFR strip legitimately sits one business day behind that header. That lag is EXPECTED: state it plainly in the row notes, do NOT let it alone set SOURCE_DEGRADED, and do NOT paper over it — it is exactly what the 10:10 task closes. The 2026-07-16 06:00 run printed `prior_trading_day: 2026-07-15` while its SOFR Spot row held the 07-14 rate; a figure printed under a header date it does not belong to is a labeling fabrication, not a rounding detail. (c) Spreads & credit — compute 10Y−2Y bp; BBB OAS (BAMLC0A4CBBB) via fred MCP if loaded, else web_search (FRED HTTP is usually blocked here — do not rely on it); 30Y FRM via web_search "Freddie Mac PMMS 30-year fixed". (d) CME FedWatch — next FOMC date + hold/cut/hike probabilities (best-effort, cite as-of date); Fed funds target range.
 
 A.2 STATUS: OK = 2Y/5Y/10Y/30Y confirmed + overnight SOFR confirmed + BBB OAS via any source + FedWatch retrieved + data is prior trading day (a FRED-only outage with BBB OAS recovered elsewhere is still OK). SOURCE_DEGRADED = UST OK but secondary sources partial/lagged. STALE_DATA = only data obtainable is ≥2 business days old. FAILED = 10Y and overnight SOFR both unobtainable.
 
@@ -112,7 +187,27 @@ Carry the resulting `prefetch_status`, `fetched_at`, and any `prefetch_errors[]`
 
 ---
 
-BLOCK B — DAILY BRIEF. Run the daily-brief skill (installed skill; do not pin a version number here, it resolves by name) exactly as written, including Section 0 pre-flight schema integrity check, WITH ONE OVERRIDE (below) to Section 4's critical-dates sourcing. Produce the full ORA Daily Brief and post to Notion per the skill's routing table. Delivery: send the HTML brief via Outlook COM using C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1 to ggoldberg@oxfordra.net with cc egoldberg@oxfordra.net (the Daily Brief is the SOLE sanctioned cc to Eric — routing canon 2026-06-10). On non-zero send exit: retry once, then flag the failure loudly in the Notion completion row — do NOT halt. If the send path is unavailable, complete the brief, post it to Notion, and record the send-path gap prominently in the completion row.
+BLOCK B — DAILY BRIEF.
+
+**B.0 ENTRY GUARD (first action in this block, before the daily-brief skill is invoked at all).** Run `block-sentinel.py claim --task ora-am-brief --block blockB --run-id <run_id> --ttl-min 30` per DOUBLE-FIRE ENTRY GUARD above. Exit 10 → log `BLOCK_B_ALREADY_COMPLETE_TODAY`, **skip the entire block** (no regeneration, no Notion write, no email), record a NORMAL skip in the run summary, and continue to Block C. Exit 11 → stand down identically. **This is the guard whose absence caused the 2026-08-09 double-fire** — Block B is the task's primary health signal and the only block that cc's Eric, so a duplicate here is the most visible failure this task can produce.
+
+**B.0.1 OVERRIDE — the daily-brief skill's Patch 3 must NOT overwrite a completed prior run.** Patch 3 (`daily-brief` SKILL.md, "Pre-create dedup guard") says: on *exactly 1* existing "Daily Brief — [DATE]" page, `notion-update-page command=replace_content`. That rule assumes any same-day match is **this run's own retry artifact**. During a catch-up burst it is not — it is a *completed earlier fire's published brief*, and replacing it destroys a brief Gabriel may already have read and acted on. For THIS task, Patch 3's "exactly 1 match" branch is overridden: if a same-day page exists that **this session did not create**, do NOT `replace_content`. Treat it as a completed prior run — log `BLOCK_B_PRIOR_PAGE_PRESENT`, skip publication and the email, and record a NORMAL skip. **Then terminate the claim**: this run DID claim blockB at B.0, so it must not be left `IN_PROGRESS` — call `complete --task ora-am-brief --block blockB --run-id <run_id> --notion-page-id <the existing page's id>`, citing the prior run's page rather than one of your own. (`complete`, not `fail`: the artifact for this ET date exists and is good. Marking it `fail` would release the claim and invite the next fire to regenerate the very brief you just declined to overwrite.) Overwrite is permitted only for a page this same `run_id` created earlier in this session (a genuine retry). Patch 3's 0-match branch (create) and 2+-match branch (create canonical, retitle older as `🗑️ … [DUPLICATE — SUPERSEDED by …]`) are unchanged. *This override is task-local; the same latent defect exists upstream in the shared `daily-brief` skill for any future consumer and is filed as a follow-up.*
+
+Run the daily-brief skill (installed skill; do not pin a version number here, it resolves by name) exactly as written, including Section 0 pre-flight schema integrity check, WITH ONE OVERRIDE (below) to Section 4's critical-dates sourcing. Produce the full ORA Daily Brief and post to Notion per the skill's routing table. Delivery: send the HTML brief via Outlook COM using C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1 to ggoldberg@oxfordra.net with cc egoldberg@oxfordra.net (the Daily Brief is the SOLE sanctioned cc to Eric — routing canon 2026-06-10). On non-zero send exit: retry once, then flag the failure loudly in the Notion completion row — do NOT halt. If the send path is unavailable, complete the brief, post it to Notion, and record the send-path gap prominently in the completion row.
+
+**B.SEND.0 — PRE-SEND SENT-ITEMS PROBE (mandatory, immediately before the COM send).** Layer 2 of the double-fire guard. Write the exact subject you are about to send to a UTF-8 temp file and probe:
+
+```
+powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt with the full dated subject>"
+```
+
+- **Exit 10** (`ALREADY_SENT`) → **do NOT send.** Log `BLOCK_B_EMAIL_ALREADY_IN_SENT_ITEMS` with the matched `sentOn` from the probe's JSON, and record a NORMAL skip. Still record COMPLETE so the state file re-converges with reality — this is precisely the state-file-lost path, and if this run never held a claim you must say so explicitly by adding `--adopt`: `... complete --task ora-am-brief --block blockB --run-id <run_id> --adopt --email-sent-at <the probe's matched sentOn>`. Use the **probe's** `sentOn`, not now — the email went out on the earlier fire, and recording the current time would misdate the artifact.
+- **Exit 0** (`NOT_SENT`) → proceed with the send.
+- **Exit 1** (`PROBE_ERROR`) → **fail open: proceed with the send** and record the probe gap in the run summary. Layer 1 has already returned PROCEED by this point; suppressing a real brief because a probe broke is a worse failure than a duplicate.
+
+Pass the **full dated** subject, not a bare prefix — the subject must be specific enough to be unambiguous. On 2026-08-09 Sent Items held *both* "ORA Daily Brief - Sunday, August 9 2026" (this task, 09:06:58) and "[ORA Command Center] Daily Brief — 2026-08-09" (a different producer, 09:00:20); a probe string loose enough to match the wrong one would suppress a real brief. Use `-SubjectFile`, never a literal `-Subject` on the command line, because non-ASCII subject characters are mangled in transit (same hazard `send-via-outlook.ps1` documents). Matching is normalization-tolerant by design: the spec subject here is written with an em-dash but the message actually in the store uses a plain hyphen, and an exact match would have missed it.
+
+**B.COMPLETE — after the brief is published AND the send resolves**, call `block-sentinel.py complete --task ora-am-brief --block blockB --run-id <run_id> --notion-page-id <captured page id> --email-sent-at <ISO8601>`. If the block failed, call `fail` instead.
 
 **OVERRIDE — critical-dates authority (added 2026-07-16, Gabriel-ratified):** the daily-brief skill's own Section 4b/4c logic independently re-derives lease expirations and debt/insurance dates from a live Notion read. This caused a live incident on 2026-07-16.
 
@@ -164,12 +259,20 @@ If the `_state` folder does not exist at run time, create it before the heartbea
 
 Canonical Notion parent UUID for all Ops Hub operations in this block: `32b6ecd8-9e59-81f2-b329-df3fd0e25062`. Never pass the truncated 8-char form — the Notion MCP rejects it.
 
+## C.00 — ENTRY GUARD (before C.0)
+
+Run `block-sentinel.py claim --task ora-am-brief --block blockC --run-id <run_id> --ttl-min 30` per DOUBLE-FIRE ENTRY GUARD above. Exit 10 → log `BLOCK_C_ALREADY_COMPLETE_TODAY`, skip Block C, record a NORMAL skip. Exit 11 → stand down. Only on exit 0 proceed to C.0.
+
+This precedes the heartbeat write deliberately: C.0's heartbeat is an *observability* record (it proves the block was entered), not a mutual-exclusion primitive — it appends unconditionally, so a second fire writes a second `status=ENTERED` line and then re-does the whole sweep. The entry guard is what decides whether the block runs; the heartbeat records what happened once it does.
+
+Call `block-sentinel.py complete --task ora-am-brief --block blockC --run-id <run_id> --notion-page-id <C.7 page id> --email-sent-at <ISO8601>` at C.9, alongside the run summary.
+
 ## C.0 — HEARTBEAT WRITE-FIRST GUARD
 
 Before any other work in this block, write a heartbeat entry durable independent of the rest of the block's success path:
 1. **State-file mirror (primary signal).** Append one line `pre-brief-heartbeat: <ISO 8601 UTC> :: status=ENTERED :: run_id=<uuid>` to `…\Claude_Workspace\_state\inbox-pre-brief-heartbeat.log`. Create `_state` if missing.
-2. **Notion mirror (secondary signal).** Update the dedicated heartbeat block on the Ops Hub page (UUID `32b6ecd8-9e59-81f2-b329-df3fd0e25062`) — block ID in `…/_state/heartbeat-blocks.json` under key `ora-inbox-pre-brief.heartbeat_block_id`. If this file/key doesn't exist yet (first run after restoration), create the block and record its ID.
-3. Only after the state-file write succeeds, proceed. If the Notion mirror fails, log `HEARTBEAT_NOTION_MIRROR_FAILED` and continue.
+2. **Notion secondary mirror — RETIRED 2026-08-13.** The prior instruction here ("update the dedicated heartbeat block on the Ops Hub page, block ID in `heartbeat-blocks.json` under `ora-inbox-pre-brief.heartbeat_block_id`; create it and record the ID on first run") never once succeeded across every run on record since 2026-05-14 — `heartbeat_block_id` stayed `null` through the 2026-08-09 manual verification run and every scheduled fire since, because the Notion MCP's block-insert call does not return the created block's ID, so this task could never complete the "record its ID" half of its own instruction. Do not re-attempt this pattern; it is a structural gap in the available tooling, not a one-off miss. `last_run_page_id` in `heartbeat-blocks.json` already serves as the practical pointer to the most recent run, and the state-file mirror above is the actual primary signal `ora-health-guard`/`automation-health-monitor` read. If a Notion-visible cross-fleet heartbeat is wanted again, it needs a block created once by hand in the Notion UI (capturing a stable ID up front) rather than an unattended run attempting self-creation.
+3. Only after the state-file write succeeds, proceed.
 4. On any subsequent failure, update the heartbeat line in place to `:: status=ENTERED → FAILED :: stage=<step-N> :: error=<message>` before exiting.
 
 ## C.0.5 — RATE PREFETCH SIGNAL READ
@@ -184,6 +287,9 @@ Informational only — does NOT change urgency scoring or inbox classification.
 
 ## C.1 — INBOX SWEEP
 Use `mcp__c0ea3c01-b8f1-4371-aa06-08a1449f59fc__outlook_email_search` to retrieve all messages in Gabriel's Inbox where receivedDateTime falls in the window. **Timeframe:** 4:30 PM ET prior business day → 6:30 AM ET today. **On Monday runs, sweep from 4:30 PM ET previous Friday.**
+
+**LATE-FIRE WINDOW EXTENSION (added 2026-08-13 — formalizes ad hoc judgment applied on both 2026-08-12 and 2026-08-13).** The 6:30 AM cutoff assumes an on-time 06:00 fire. During a catch-up burst (overnight machine-offline; this task actually fires hours later) the fixed cutoff leaves a real gap unswept by ANY run: tomorrow's window starts at 4:30 PM today, so 6:30 AM–[actual fire time] would never be covered. **If this run's actual start time is after 6:30 AM ET, extend the window end to the run's start time instead of 6:30 AM.** State the extension explicitly at the top of C.6 output (see template below) — do not silently widen the window without flagging it. This does not apply to the 4:30 PM start boundary, which stays fixed (or the prior-Friday 4:30 PM start on Monday runs).
+
 Exclude: newsletters/marketing blasts (mailchimp, hubspot.com/email, sendgrid, constantcontact, mktomail, etc.); out-of-office auto-replies; calendar invitations; internal Eric ↔ Gabriel ↔ ORA-internal-only threads (no external counterparty).
 
 ## C.2 — COUNTERPARTY CLASSIFICATION
@@ -236,10 +342,19 @@ Render at the BOTTOM of C.6, after ACTIVITY SUMMARY:
 ```
 Cap at 10 most recent actionable items ("+N more — run /open-sessions in Code for the full list" if more). This scheduled session itself never appears. If none: "✅ No Claude sessions awaiting you." If the probe errors: print `⚠ open-sessions probe failed: <reason>` and continue.
 
+## C.5.7 — AR / COLLECTIONS COVERAGE CROSS-CHECK (added 2026-08-13)
+
+**The incident.** The 2026-08-13 run classified an Eric→PM thread about Marileaves' outstanding balance as HIGH (Tenant/Collections), then separately noticed — only by chance, not by a standing rule — that Marileaves does not appear on that morning's dated AR/delinquency feed cited in Block B §4c (the `[ORA PM] N Delinquent Tenants — [date]` report). This is a real coverage gap: either the balance lives outside the PM feed's scope, or the tenant sits under a different entity name in that system, and either way an accounting email was about to go out to the tenant without anyone having reconciled the two sources.
+
+**The rule.** Whenever a swept message (C.1–C.2) discusses a tenant's outstanding balance, payment plan, collections referral, or eviction/default status, cross-check that tenant's name (and any known entity aliases from the Notion Tenant DB) against Block B §4c's AR/delinquency feed for this run — reuse the artifact already fetched for §4c, do not re-fetch. If the tenant is **not** on that feed, add one line to the message's item in C.6: `⚠ NOT ON [date] AR FEED — reconcile before further correspondence.` If the tenant **is** on the feed, no additional note is needed.
+
+**Do not treat this as a §4c defect to fix by adding fields.** §4c's "no aging, no collection status" gap is a known, separately-documented structural limit of the PM-platform export chain (see §4c's own coverage-gap callout) — this cross-check is narrower and cheaper: it only asks whether the tenant is *present at all*, which the feed can already answer without any schema change.
+
 ## C.6 — TRIAGE OUTPUT
 ```
 ORA INBOX PRE-BRIEF — [YYYY-MM-DD]
 Window: [start datetime] → [end datetime] ET
+[If C.1's late-fire extension applied: > [!warning] Window extended beyond spec — fired [actual time] ET instead of 06:00; the 6:30 ET cutoff would have left a gap no run covers, so the window was extended to [actual time].]
 Total messages swept: [n] | Excluded as noise: [n] | For triage: [n]
 
 ═══ RED FLAGS — ACT BEFORE 9:00 AM ═══
@@ -265,9 +380,21 @@ Total messages swept: [n] | Excluded as noise: [n] | For triage: [n]
 Post to Notion Ops Hub (parent UUID `32b6ecd8-9e59-81f2-b329-df3fd0e25062`) as a new page: Title "Inbox Pre-Brief — YYYY-MM-DD"; Tags: pre-brief, inbox, [day-of-week]; auto-archive after 14 days. Tool: `notion-create-pages` with `parent: { type: "page_id", page_id: "32b6ecd8-9e59-81f2-b329-df3fd0e25062" }`. Apply the same publication guard as Block B (capture id, retry once, verify via `notion-fetch` not search).
 
 ## C.8 — EMAIL DELIVERY
+
+**Pre-send Sent-Items probe first** (Layer 2, same contract as B.SEND.0): probe `outlook-sent-probe.ps1 -SubjectFile <temp .txt>` with the **dated stem** `ORA Inbox Pre-Brief - [YYYY-MM-DD]`, not the full subject — the tail carries live counts (`— [n] for triage, [n] RED`) that legitimately differ between two runs on the same day, so probing the full string would fail to match the earlier send and wave a duplicate through. Exit 10 → do NOT send; log `BLOCK_C_EMAIL_ALREADY_IN_SENT_ITEMS` and record a NORMAL skip. Exit 1 → fail open: send, and record the probe gap.
+
 Send via Outlook COM — `C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1` (SOLE send path). `-To "ggoldberg@oxfordra.net"` (no `-Cc` — only Block B retains the egoldberg cc), `-Subject "ORA Inbox Pre-Brief — [YYYY-MM-DD] — [n] for triage, [n] RED"`, `-BodyFile <temp .html>`, `-BodyFormat html`. On non-zero COM exit: retry once, then flag — do NOT halt.
 
 ## C.9 — RUN SUMMARY
+
+**First, close the entry guard claimed at C.00** — Block C's outputs (C.7 Notion page, C.8 email) have landed, so record it before writing the summary:
+
+```
+python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-am-brief --block blockC --run-id <run_id> --notion-page-id <C.7 page id> --email-sent-at <ISO8601>
+```
+
+If Block C aborted, call `fail --task ora-am-brief --block blockC --run-id <run_id> --error "<what broke>"` instead. Leaving blockC `IN_PROGRESS` after its outputs shipped is the failure mode to avoid: the next fire past the TTL would re-sweep and re-send.
+
 Log: run completed [timestamp]; messages processed [n]; Notion page [URL]; email sent [confirmation]; errors [list or "none"].
 
 ## BLOCK C — ERROR HANDLING
@@ -279,6 +406,12 @@ Log: run completed [timestamp]; messages processed [n]; Notion page [URL]; email
 # BLOCK D — CASH POSITION SNAPSHOT (Mondays only)
 
 Multi-entity cash consolidation across the Master Workbook with reserve thresholds and distribution-availability flags. Email to Gabriel (only). **Run only on Mondays** (the Master Workbook is freshly ingested Mon 05:45 by `ora-master-workbook-ingest`, so the 06:00 read is post-ingest).
+
+**D.0 ENTRY GUARD (first action in this block).** Run `block-sentinel.py claim --task ora-am-brief --block blockD --run-id <run_id> --ttl-min 30` per DOUBLE-FIRE ENTRY GUARD above. Exit 10 → log `BLOCK_D_ALREADY_COMPLETE_TODAY`, skip the block, record a NORMAL skip. Exit 11 → stand down. **A Monday catch-up burst is exactly when this fires twice** — a duplicate "ORA Cash Position" email carrying reserve-floor and distribution-headroom figures is the same defect as the Block B duplicate, and is arguably worse: two cash snapshots of the same date invite a reader to treat the second as an update.
+
+**D.SEND.0 — pre-send Sent-Items probe** (Layer 2, same contract as B.SEND.0): probe with the full dated subject `ORA Cash Position - [date]`. Exit 10 → do NOT send; log `BLOCK_D_EMAIL_ALREADY_IN_SENT_ITEMS`, record a NORMAL skip, and still call `complete` so the state file re-converges. Exit 1 → fail open: send, and record the probe gap. Note the `[ALERT]` prefix below changes the subject — probe on the un-prefixed dated stem so a first send that alerted and a second that would not still match each other.
+
+Call `block-sentinel.py complete --task ora-am-brief --block blockD --run-id <run_id> --notion-page-id <page id> --email-sent-at <ISO8601>` once the Notion page and the send both resolve.
 
 Email via the Outlook COM helper (`_shared\send-via-outlook.ps1`) — the SOLE send path.
 
@@ -295,6 +428,14 @@ Output:
 - If any reserve falls below policy floor: prefix the subject line with "[ALERT]" and flag immediately in the body.
 - (Dropped on this surface, 2026-07-16 migration: the LAMS spec's `mcp__cowork__update_artifact` refresh of an `ora-cash-position` Cowork artifact — that tool doesn't exist here. The Notion page + email above are this surface's durable outputs; if a live cash artifact is wanted again, it needs a Cowork-side session to maintain it.)
 
+**D.9 — CLOSE THE ENTRY GUARD.** Once the Notion page and the email both resolve, close the claim taken at D.0:
+
+```
+python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-am-brief --block blockD --run-id <run_id> --notion-page-id <page id> --email-sent-at <ISO8601>
+```
+
+If Block D aborted, call `fail --task ora-am-brief --block blockD --run-id <run_id> --error "<what broke>"` instead.
+
 Format: ORA Institutional Style Guide v1.0+.
 
 ---
@@ -302,3 +443,13 @@ Format: ORA Institutional Style Guide v1.0+.
 # END-OF-SESSION RUN SUMMARY
 
 After all applicable blocks complete, emit a one-line-per-block status (block · ran/skipped · output · send result) to the session log so ora-health-guard and automation-health-monitor can confirm the merged AM session fired cleanly. A skipped block (weekend Block A/C, non-Monday Block D) is a NORMAL state, not an error.
+
+**Guard skips are NORMAL skips too (added 2026-08-09).** A block skipped by the DOUBLE-FIRE ENTRY GUARD — `BLOCK_<X>_ALREADY_COMPLETE_TODAY`, `BLOCK_<X>_IN_PROGRESS_ELSEWHERE`, `BLOCK_<X>_EMAIL_ALREADY_IN_SENT_ITEMS`, `BLOCK_B_PRIOR_PAGE_PRESENT` — must be reported in the same NORMAL-skip class as a weekend Block A. It is **not** a miss: the artifact for that ET date exists, it was produced by the earlier fire, and the run summary should say so and cite it. `ora-health-guard` and `automation-health-monitor` read this summary; classing a correctly-suppressed duplicate as a failure would train a false alarm into the fleet and, worse, invite a "fix" that removes the guard. Use this shape:
+
+```
+Block B · SKIPPED (guard: BLOCK_B_ALREADY_COMPLETE_TODAY) · artifact 3b76ecd8-… published 09:06 ET by run <prior runId> · email already in Sent Items 09:06:58 · NORMAL
+```
+
+Also surface any `stateFileError` from the sentinel verbatim on its block's line, and any `"persisted": false`. The guard fails open, so a degraded state file shows up as a block that ran normally — those two fields are the only trace, and they are the early warning that Layer 1 is not protecting the task.
+
+**Terminal-state sweep (do this last).** For every block that claimed successfully this session (`claim` exit 0), confirm it ended in `complete` or `fail`. Run `block-sentinel.py status --task ora-am-brief --block <blockId>` — it is read-only and creates nothing — and if any block is still `IN_PROGRESS`, close it now and say so in the summary. A block whose outputs shipped but whose claim was never closed is invisible today and causes a duplicate tomorrow: the next fire past the TTL treats the dangling claim as a crashed run and regenerates everything.

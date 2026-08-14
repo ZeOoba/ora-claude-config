@@ -1,6 +1,32 @@
 ---
 name: ora-critical-deadlines-scan
 description: Weekly Thursday 9:05 AM ET — scans the Notion Ops Hub Critical Deadlines Tracker for entries due within 60 days or already passed with Status still Active/Upcoming; flags to Gabriel. Closes the gap found 2026-07-26 (no existing task monitored this database; King Energy Northwood's 7/5/2026 ITC/NTP deadline sat unconfirmed with no alert). [MODEL: claude-sonnet-5 | set 2026-07-26]
+output_contract:
+  version: 1
+  blocks:
+    - id: block-critical-deadlines-ops-hub-post
+      artifact:
+        type: notion_page
+        title_pattern: "Critical Deadlines Scan — {DATE}"
+        parent_id: "32b6ecd8-9e59-81f2-b329-df3fd0e25062"
+      freshness_window_hours: 180
+      expected_on:
+        cron: "5 9 * * 4"
+      on_missing_severity: alarm
+      is_primary_health_signal: true
+      notes: "Verified against the live 2026-07-30 post (leading alarm-clock emoji; matched on text). Window is 180h = weekly cadence (168h) plus slack, mirroring the CC convention of 30h for a daily cron; a tighter window would false-alarm on any audit day after the fire, and a detector people learn to ignore is worse than none."
+    - id: block-critical-deadlines-mail
+      artifact:
+        type: sent_mail
+        mailbox: "ggoldberg@oxfordra.net"
+        subject_pattern: "Critical Deadlines Scan — {DATE}"
+        recipient: "ggoldberg@oxfordra.net"
+      freshness_window_hours: 180
+      expected_on:
+        cron: "5 9 * * 4"
+      on_missing_severity: warn
+      is_primary_health_signal: false
+      notes: "SEVERITY IS warn, NOT alarm, DELIBERATELY: the exact sent subject string has not yet been observed in Sent Items -- only the SKILL.md -Subject argument, whose date placeholder does not fix a format (a sibling task emits a plain hyphen where this one is assumed to emit an em dash). Promote to alarm once a real send is observed to match. The verified Notion block above carries the alarm. Window is 180h = weekly cadence (168h) plus slack, mirroring the CC convention of 30h for a daily cron; a tighter window would false-alarm on any audit day after the fire, and a detector people learn to ignore is worse than none."
 ---
 
 You are running the weekly ORA Critical Deadlines scan. This task is self-contained — you have no memory of prior runs.

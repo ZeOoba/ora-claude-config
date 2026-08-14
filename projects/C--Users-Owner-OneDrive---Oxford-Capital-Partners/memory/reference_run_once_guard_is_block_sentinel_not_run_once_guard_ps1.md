@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 0c822226-ba45-4abd-891f-49ca84a7b30d
-  modified: 2026-08-11T21:26:06.603Z
+  modified: 2026-08-11T22:02:34.940Z
 ---
 
 The CC/MCP scheduled-task **run-once / double-fire entry guard already exists** and has since 2026-08-09 (PRs #39, #40, merged to `origin/main`). Verify before building — it has now been re-specced from scratch at least once (2026-08-11) as if absent.
