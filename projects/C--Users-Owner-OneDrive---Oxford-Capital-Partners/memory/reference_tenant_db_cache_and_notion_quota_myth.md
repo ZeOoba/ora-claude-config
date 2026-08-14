@@ -1,11 +1,11 @@
 ---
 name: reference-tenant-db-cache-and-notion-quota-myth
-description: "Notion query quota is a mistaken diagnosis (real cause: gated MCP tool, not a Notion plan limit); a daily Tenant DB cache already exists via ora-pm-ledger but no other skill reads it yet"
+description: "Notion query quota is a mistaken diagnosis (real cause: gated MCP tool, not a Notion plan limit) — re-confirmed 2026-08-04, and it can strike MID-PAGINATION leaving a silently partial baseline that becomes a duplicate-manufacturing bug; notion-search/notion-fetch stay alive. A daily Tenant DB cache already exists via ora-pm-ledger but no other skill reads it yet"
 metadata: 
   node_type: memory
   type: reference
   originSessionId: 156b1fa9-1de0-442e-aacf-4c9ef378327f
-  modified: 2026-07-21T16:40:27.918Z
+  modified: 2026-08-04T15:15:34.318Z
 ---
 
 # The "Notion query quota" isn't real — and a daily Tenant DB cache already exists
@@ -30,6 +30,28 @@ don't treat it as "Notion is out of quota." Use `notion-search`/`notion-fetch` i
 cache below. [[open-items-tracker]] OI-009's Northwood incident (2026-07-17) describes a wait-and-retry
 that "worked" — that was likely the quota actually resetting on a *different*, session-level gate, not
 proof the workspace-level story is correct. Don't generalize that incident's framing.
+
+### 1b. RE-CONFIRMED 2026-08-04 — and it can strike MID-PAGINATION
+
+`ora-deal-sourcing-scan` hit this cap while paginating the Deal Sourcing Log (`9a6ae219…`) for its
+Step 4 dedupe baseline: pages 1–3 returned (194 active rows), page 4 refused. Two retries several
+minutes apart stayed capped — **the "wait and retry" from OI-009 did not work here**, so treat a cap
+as lasting for the run, not as a blip. Confirms §1 exactly: `notion-search` and `notion-fetch` both
+kept working normally *after* `query_data_sources` was dead, and were used to finish the job.
+
+**The hazard this creates:** a mid-pagination cap leaves a **silently partial** baseline. For any
+dedupe-before-write skill that is a duplicate-manufacturing bug — precisely the 2026-07-21 incident
+that put the "no LIMIT" guard in `ora-deal-sourcing-scan` Step 4.
+
+**How to apply — two things that rescued the 08-04 run:**
+1. **Sort order buys you a provable subset.** Ordering by a title column puts every numeric street
+   address ahead of every letter-initial title, so a baseline that reaches the first letter-titled row
+   is *complete for numeric addresses* even if later pages are missing. State the residual gap
+   (letter-titled rows embedding an address) rather than claiming a full baseline.
+2. **`notion-search` with `data_source_url` is the targeted fallback** — semantic search over one data
+   source, un-capped, good for confirming a handful of specific candidates are absent.
+3. If neither closes the gap, **defer the write and say so loudly in the deliverable.** A digest that
+   reports "write deferred, here is why" beats a log with duplicate rows in it.
 
 ## 2. A daily Tenant DB cache already exists
 
