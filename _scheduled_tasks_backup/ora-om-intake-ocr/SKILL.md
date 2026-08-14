@@ -1,13 +1,20 @@
 ---
 name: ora-om-intake-ocr
-description: Weekly OM intake pass — detect new PDFs in Investment Candidates folder, OCR image-only scans, gate-screen new candidates (Buy Box Stage 0), extract structured fields via Brain server, report. Wednesdays 6:15 AM ET. v1.2 (2026-06-15). [MODEL: claude-sonnet-5 | set 2026-07-13]
+description: Weekly OM intake pass — detect new PDFs in Investment Candidates folder, OCR image-only scans, gate-screen new candidates (Buy Box Stage 0), sweep stale seen-backlog OMs that were never gate-screened, extract structured fields via Brain server, report. Wednesdays 6:15 AM ET. v1.4 (2026-08-12): added Step 3.6 stale seen-backlog sweep (closes the gap that let "OM  Dollar General  Cincinnati OH.pdf" sit un-gated for ~2 months); OCR now Tesseract-backed (winget-installed 2026-08-12) with a Ghostscript deviation (blocked by non-admin session — see Step 2 note). v1.3 (2026-07-29): corrected Folder: path (missing \Business\ segment; pointed to a nonexistent location). [MODEL: claude-sonnet-5 | set 2026-07-13]
 ---
 
 RESTORATION NOTE: Re-registered 2026-07-07 after the 2026-07-05 machine migration orphaned this task (folder survived on disk; registry entry was lost). Content restored verbatim from the surviving SKILL.md — no logic changes.
 
+PATH FIX (2026-07-29): the Folder: path below was missing a `\Business\` segment and pointed
+to a location that does not exist on disk — confirmed via filesystem search during the
+2026-07-29 run (167 PDFs found under the corrected path; 0 under the old one). That run's
+manifest (`_intake\manifest.json`) had also drifted, with a stale `root` field pointing at a
+dead `(1)` OneDrive conflict-copy path; that field was corrected the same run. Both fixes are
+corrective only — no other logic changed.
+
 # ORA OM Intake & OCR Pass (weekly)
 
-Folder: `C:\Users\Owner\OneDrive - Oxford Capital Partners\Investment Candidates -- 2026`
+Folder: `C:\Users\Owner\OneDrive - Oxford Capital Partners\Business\Investment Candidates -- 2026`
 
 ## Step 0 — Heartbeat (always first)
 Append `{ts, event: "run-start"}` to the `runLog` array of `_intake\manifest.json`
@@ -28,6 +35,19 @@ For each intake PDF, test for extractable text (pdftotext first 3 pages; <100 ch
 Image-only → `ocrmypdf --skip-text` to a sibling file named `<original>_OCR.pdf`.
 Never modify the original. If ocrmypdf unavailable, install via pip (--break-system-packages).
 Record OCR success/failure per file.
+Prereqs (fixed 2026-08-12): Tesseract-OCR installed via `winget install --id UB-Mannheim.TesseractOCR`
+(user-scope, no admin needed) — add `C:\Program Files\Tesseract-OCR` to PATH if a fresh session
+doesn't see it (`$env:Path = 'C:\Program Files\Tesseract-OCR;' + $env:Path`). Ghostscript could
+NOT be installed the same way — its Inno Setup installer requires admin elevation and the
+scheduled-task session has no interactive UAC session to approve it (winget has no Ghostscript
+package as of 2026-08-12; the official installer at
+github.com/ArtifexSoftware/ghostpdl-downloads hangs/silently fails without a click-through).
+This is a soft deviation, not a blocker: `ocrmypdf --skip-text` still completes successfully and
+produces a searchable `_OCR.pdf` without Ghostscript — the optimizer just leaves a subset of
+images unoptimized ("[WinError 2]... image could not be processed by the optimizer, left
+unchanged, output file is still valid") for ~9% less compression. If Tesseract itself is ever
+missing again, reinstall with the winget command above — do not re-attempt Ghostscript
+unsupervised; flag it for Gabriel to install interactively if full optimization is ever needed.
 
 ## Step 3 — Gate-screen new OMs (Buy Box v1.0)
 For each NEW property OM (not models/memos/leases), read the OCR'd copy and apply
@@ -55,6 +75,25 @@ If extraction succeeds (ok=true, fieldCount > 0): store fields for Step 4.
 If Brain server is unavailable (connection refused / timeout / any error): skip silently —
 log "Brain offline — no field extraction" in the candidate note. Never block gate-logging on
 extraction failure.
+
+## Step 3.6 — Stale seen-backlog sweep (periodic, runs every execution)
+Added 2026-08-12 after "OM  Dollar General  Cincinnati OH.pdf" was found sitting with
+status="seen-backlog-2026-06-10" and no "gate" field for ~2 months — it was seeded into the
+manifest in bulk on 2026-06-11 without ever being individually gate-screened, and because its
+size/mtime never changed, Step 1's diff never re-surfaced it. A file only re-enters screening
+today if it changes; this step catches the ones that never do.
+On every run, scan the FULL manifest.files array (not just this run's new/changed set) for
+entries where: (a) the filename looks like a property OM by ORA's naming convention (starts
+with "OM " case-insensitive — supporting docs such as Costar reports, rent rolls, LOIs, models,
+memos, and ORA-generated owner-outreach output are exempt, same as Step 3), AND (b) status
+starts with "seen" (seen-backlog-* or seen-YYYY-MM-DD), AND (c) there is no "gate" key present.
+For each match (oldest mtime first, cap 15 per run to bound runtime): gate-screen it now per
+Step 3 (Stage 0 only), using its `_OCR.pdf` sibling if one exists, else pdftotext/live OCR.
+Write a "gate" result and bump status to "gate-flagged-{date}" or "gate-passed-{date}", same as
+any other gate-screened file. Gate-passing results still route through Step 4's Notion
+dedup-check before writing. If more than 15 stale matches remain after the cap, log the residual
+count in the run-complete runLog note so it visibly drains over consecutive weekly runs instead
+of silently persisting.
 
 ## Step 4 — Log
 Gate-passing new candidates → Notion Deal Sourcing Log
