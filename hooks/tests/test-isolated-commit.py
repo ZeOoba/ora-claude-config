@@ -266,6 +266,165 @@ check("I1 regression: staged content still has CRLF on unchanged lines",
 check("I1 regression: no bare LF was introduced (no \\r stripped)",
       b"\n" not in staged_bytes.replace(b"\r\n", b""), staged_bytes)
 
+# --- commit_isolated_replacement: the "staged-revert" regression (friction queue,
+# 2026-08-13, "fired 4/4 today") -- stage_isolated_replacement + a manual `git
+# commit` leaves the working tree wherever it was, which is a LATENT REVERT: the
+# next broad `git add -A && git commit` would commit the working tree's stale
+# content straight back over the fix just made. commit_isolated_replacement must
+# leave the working tree exactly equal to the new HEAD, with git status clean for
+# that path, so no revert is possible. ---
+repo8 = gitfixture.repo_with_commit(files={"doc.md": DOC})
+# The working tree is untouched (still literally the committed DOC, i.e. still has
+# "old middle line") -- simulating the repair use case, where the fix is applied
+# straight from a known-good ref rather than reflecting a live local edit.
+ic.commit_isolated_replacement(repo8, "doc.md", "old middle line", "NEW middle line",
+                               "fix: repair doc.md")
+
+committed8 = git(repo8, "show", "HEAD:doc.md").stdout
+check("commit_isolated_replacement: commit contains the replacement",
+      "NEW middle line" in committed8, committed8)
+check("commit_isolated_replacement: commit message applied",
+      git(repo8, "log", "-1", "--format=%s").stdout.strip() == "fix: repair doc.md")
+
+with open(os.path.join(repo8, "doc.md"), encoding="utf-8") as f:
+    working8 = f.read()
+check("commit_isolated_replacement: working tree synced to the new HEAD "
+      "(no latent revert)", working8 == committed8, working8)
+
+status8 = git(repo8, "status", "--porcelain").stdout
+check("commit_isolated_replacement: git status is clean for doc.md after repair "
+      "(the exact gap the manual 3-step process kept leaving open)",
+      "doc.md" not in status8, status8)
+
+# --- commit_isolated_replacement: still refuses when another path is staged
+# (reuses stage_isolated_replacement's guarantee -- must not silently sweep a
+# concurrent session's in-progress `git add` into the bare commit) ---
+repo10 = gitfixture.repo_with_commit(files={"doc.md": DOC, "other.md": "other\n"})
+with open(os.path.join(repo10, "other.md"), "a", encoding="utf-8") as f:
+    f.write("another session's in-progress edit\n")
+git(repo10, "add", "other.md")
+threw = False
+try:
+    ic.commit_isolated_replacement(repo10, "doc.md", "old middle line",
+                                   "NEW middle line", "fix: repair doc.md")
+except RuntimeError:
+    threw = True
+check("commit_isolated_replacement: refuses when another path is already staged",
+      threw)
+check("commit_isolated_replacement: refusal left doc.md uncommitted",
+      git(repo10, "log", "--oneline").stdout.count("\n") == 1,
+      git(repo10, "log", "--oneline").stdout)
+check("commit_isolated_replacement: the other session's staged file is untouched",
+      "other.md" in git(repo10, "diff", "--cached", "--name-only").stdout)
+
+# --- commit_isolated_replacement: MUST NOT destroy a concurrent session's
+# uncommitted edit to the SAME file during the repair step (independent review,
+# 2026-08-13, C-NEW-1 -- a real defect caught before this ever shipped). The
+# working tree holds content that is NEITHER the pre-fix nor the post-fix blob
+# (another session's unrelated line, appended after the fix's target region) --
+# `git checkout HEAD -- doc.md` must be refused, not silently overwrite it. ---
+repo11 = gitfixture.repo_with_commit(files={"doc.md": DOC})
+with open(os.path.join(repo11, "doc.md"), "a", encoding="utf-8") as f:
+    f.write("an unrelated line another session added, uncommitted\n")
+with open(os.path.join(repo11, "doc.md"), encoding="utf-8") as f:
+    other_session_edit = f.read()
+
+threw = False
+try:
+    ic.commit_isolated_replacement(repo11, "doc.md", "old middle line",
+                                   "NEW middle line", "fix: repair doc.md")
+except RuntimeError:
+    threw = True
+check("C-NEW-1: refuses to repair when the working tree holds a third, "
+      "unrecognized version of the file", threw)
+
+committed11 = git(repo11, "show", "HEAD:doc.md").stdout
+check("C-NEW-1: the commit itself still landed (only the checkout was skipped)",
+      "NEW middle line" in committed11, committed11)
+
+with open(os.path.join(repo11, "doc.md"), encoding="utf-8") as f:
+    working11_after = f.read()
+check("C-NEW-1: the other session's uncommitted edit was NOT destroyed",
+      working11_after == other_session_edit, working11_after)
+check("C-NEW-1: specifically, their exact line survives",
+      "an unrelated line another session added, uncommitted" in working11_after,
+      working11_after)
+
+# --- commit_isolated_replacement: CRLF end-to-end (regression pin for the
+# autocrlf false-failure found live while building the `git diff --quiet`
+# verification -- see scenario 7's identical setup rationale above) ---
+repo12 = gitfixture.blank_repo()
+subprocess.run(["git", "-C", repo12, "config", "core.autocrlf", "false"],
+               capture_output=True)
+with open(os.path.join(repo12, "doc.md"), "wb") as f:
+    f.write(DOC.replace("\n", "\r\n").encode("utf-8"))
+subprocess.run(["git", "-C", repo12, "add", "-A"], capture_output=True)
+subprocess.run(["git", "-C", repo12, "-c", "user.email=t@t.t", "-c", "user.name=t",
+               "commit", "-qm", "crlf init"], capture_output=True)
+subprocess.run(["git", "-C", repo12, "config", "core.autocrlf", "true"],
+               capture_output=True)
+
+crlf_error = None
+try:
+    ic.commit_isolated_replacement(repo12, "doc.md", "old middle line", "NEW middle line",
+                                   "fix: repair crlf doc.md")
+except (ValueError, RuntimeError) as e:
+    crlf_error = e
+check("CRLF end-to-end: commit_isolated_replacement does not false-fail on an "
+      "autocrlf-rewritten working tree", crlf_error is None, crlf_error)
+
+committed12_bytes = subprocess.run(["git", "-C", repo12, "show", "HEAD:doc.md"],
+                                   capture_output=True).stdout
+check("CRLF end-to-end: commit contains the replacement",
+      b"NEW middle line" in committed12_bytes, committed12_bytes)
+status12 = git(repo12, "status", "--porcelain").stdout
+check("CRLF end-to-end: git status clean after repair (no latent revert, "
+      "even with autocrlf rewriting the checkout)", status12.strip() == "", status12)
+
+# --- commit_isolated_replacement: MUST NOT false-refuse an ordinary
+# autocrlf-SMUDGED working tree (independent review round 2, 2026-08-13,
+# C-NEW-2 -- the first fix for C-NEW-1 used `git hash-object --no-filters`,
+# which compares RAW bytes and false-refuses here: an LF blob checked out
+# under core.autocrlf=true legitimately becomes CRLF on disk, byte-different
+# from the blob it was checked out FROM even though git itself considers the
+# tree clean. repo12 above does NOT catch this -- its blob is already CRLF,
+# so raw bytes match trivially; this fixture specifically forces a real
+# smudge via `git checkout` so the working tree and the blob genuinely
+# differ byte-for-byte while `git diff` still reports no difference. ---
+repo13 = gitfixture.repo_with_commit(files={"doc.md": DOC})
+subprocess.run(["git", "-C", repo13, "config", "core.autocrlf", "true"],
+               capture_output=True)
+os.remove(os.path.join(repo13, "doc.md"))
+co = subprocess.run(["git", "-C", repo13, "checkout", "--", "doc.md"],
+                    capture_output=True)
+with open(os.path.join(repo13, "doc.md"), "rb") as f:
+    smudged_bytes = f.read()
+check("setup: the re-checked-out working file is genuinely CRLF (a real smudge, "
+      "not a no-op)", b"\r\n" in smudged_bytes, smudged_bytes)
+raw_blob_bytes = subprocess.run(["git", "-C", repo13, "show", "HEAD:doc.md"],
+                                capture_output=True).stdout
+check("setup: the smudged working file's raw bytes genuinely differ from the "
+      "raw blob (proves this exercises the real hazard, not a coincidence)",
+      smudged_bytes != raw_blob_bytes, (smudged_bytes, raw_blob_bytes))
+check("setup: git itself considers the working tree clean despite that byte "
+      "difference", git(repo13, "status", "--porcelain").stdout.strip() == "")
+
+smudge_error = None
+try:
+    ic.commit_isolated_replacement(repo13, "doc.md", "old middle line", "NEW middle line",
+                                   "fix: repair smudged doc.md")
+except (ValueError, RuntimeError) as e:
+    smudge_error = e
+check("C-NEW-2: commit_isolated_replacement does not false-refuse an ordinary "
+      "autocrlf-smudged (not byte-identical, but git-equivalent) working tree",
+      smudge_error is None, smudge_error)
+
+committed13 = git(repo13, "show", "HEAD:doc.md").stdout
+check("C-NEW-2: commit contains the replacement",
+      "NEW middle line" in committed13, committed13)
+status13 = git(repo13, "status", "--porcelain").stdout
+check("C-NEW-2: git status clean after repair", status13.strip() == "", status13)
+
 
 passed = sum(1 for ok, _ in results if ok)
 print("\nisolated-commit tests: %d/%d passed" % (passed, len(results)))
