@@ -33,7 +33,17 @@ GATE_PATH = os.path.join(CLAUDE_DIR, "hooks", "git-prepush-doctrine-gate.py")
 WRITER_PATH = os.path.join(MAINT, "_shared", "write-doctrine-status.py")
 REAL_CLAUDE_MD = os.path.join(CLAUDE_DIR, "CLAUDE.md")
 
-EXPECTED_KEYS = {"last_check", "source", "doctrine_probe", "governor_probe", "guard_orphans"}
+# "memory_probe" added 2026-08-14: it is a real, intentional field of the snapshot
+# built by maintenance/_shared/write-doctrine-status.py (which has its own dedicated
+# tests asserting the key is present and defaults to {exit_code: None, summary: None}),
+# but this key set was never updated when that stage shipped. Because both assertions
+# below compare with ==, the stale set failed on the EXTRA key rather than a missing
+# one -- so the gate's own test suite had been red since, blocking every push that
+# ran the hook-tests gate. Keep this set in sync with write-doctrine-status.py's
+# build_snapshot(); an == comparison is deliberate (it catches silent schema drift in
+# both directions) and is exactly why it must be updated when the schema grows.
+EXPECTED_KEYS = {"last_check", "source", "doctrine_probe", "governor_probe",
+                 "memory_probe", "guard_orphans"}
 
 
 def _load(path, modname):

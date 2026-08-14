@@ -188,7 +188,23 @@ SLASH_SKILL_ALLOWLIST = {"code-review"}
 WORKSPACE = HOME / "OneDrive - Oxford Capital Partners" / "Claude_Workspace"
 # plugins/ is gitignored (locally installed, not a repo-content dir) -> pinned to
 # LIVE_CLAUDE_DIR always, same reasoning as the other pinned paths above.
-SKILL_SCAN_ROOTS = (CLAUDE_DIR / "skills", LIVE_CLAUDE_DIR / "plugins", WORKSPACE)
+# ORA's own skill SOURCE repo (CLAUDE.md: "ORA-built skills source: ZeOoba/ora-skills").
+# Declared here rather than at its former home further down because SKILL_SCAN_ROOTS
+# needs it; the identity-emitter specs below still use the same constant.
+ORA_SKILLS_ROOT = HOME / "ora-skills"
+# ADDED 2026-08-14 (OI-149, Gabriel-approved): ora-skills was NOT scanned, so any skill
+# whose only real dir lives there read as MISSING no matter what. That is what actually
+# broke `register-scheduled-task` -- it has a real, current dir at ora-skills/register-
+# scheduled-task/. OI-149's filed remedy was to add all three flagged names to
+# PLUGIN_SKILL_ALLOWLIST; for THIS one that would have been precisely the masking
+# regression the CAUTION above forbids, hiding a resolvable dir behind an allowlist
+# entry. The gap was latent for every other ora-skills-only skill too, not just this one.
+# Accepted tradeoff, named explicitly: a skill that exists in ora-skills SOURCE but is
+# installed on no surface now resolves as present. That is a weaker guarantee than
+# before -- source presence is not installed presence -- but it is strictly better than
+# the status quo, which was a permanent false MISSING that blocked every push.
+SKILL_SCAN_ROOTS = (CLAUDE_DIR / "skills", LIVE_CLAUDE_DIR / "plugins", WORKSPACE,
+                    ORA_SKILLS_ROOT)
 # Pruned ONLY for correctness (backup/archive copies) and speed (the top-level
 # 02_Outputs artifact tree). Resolution is by SKILL.md presence (see
 # collect_skill_dirs), which already excludes non-skill junk, so the prune list is
@@ -243,7 +259,22 @@ SKILL_TOKEN_RE = re.compile(r"`([a-z][a-z0-9-]*(?:\{[a-z0-9-]+\})?)`")
 # Kept as an empty set rather than deleted: the resolution logic still branches on it,
 # and a genuinely plugin-only skill could legitimately need it again. The CAUTION above
 # still governs -- do not add an entry to paper over a stale outputs/ copy.
-PLUGIN_SKILL_ALLOWLIST: set[str] = set()
+# REPOPULATED 2026-08-14 (OI-149, Gabriel-approved) with exactly the two names that
+# satisfy the CAUTION above -- verified, not assumed. Both were checked against all four
+# SKILL_SCAN_ROOTS (including ora-skills, added the same day): neither has a SKILL.md dir
+# on ANY of them, so there is no real dir for an entry here to mask. Both are supplied by
+# the harness/plugin catalog and are live in the session skill listing.
+#   - "morning": Anthropic-provided; CLAUDE.md's morning-brief tie-break names it as the
+#     generic fallback that only fires on an explicit /morning (ora-am-brief and
+#     daily-brief, its ORA counterparts, DO resolve via real dirs and are not listed).
+#   - "schedule": Anthropic-provided; CLAUDE.md's scheduling tie-break names it only to
+#     ROUTE AWAY from it ("never the generic `schedule` skill"). It is referenced
+#     precisely so the doctrine can forbid it, which is still a reference the probe must
+#     be able to resolve.
+# The third name flagged with these two, `register-scheduled-task`, is deliberately NOT
+# here: it has a real dir at ora-skills/register-scheduled-task/ and now resolves through
+# the scan. Adding it would have been the masking regression the CAUTION describes.
+PLUGIN_SKILL_ALLOWLIST: set[str] = {"morning", "schedule"}
 
 # The "Skill precedence" block names orchestration primitives that are NOT SKILL.md
 # skills and must resolve against their own homes, else they false-positive as MISSING:
@@ -828,7 +859,7 @@ IDENTITY_TITLE_KEYS = {
 _IDENT_SEP = " \t\"'*_|:,-—–·•()\r\n"
 _QUOTED_LITERAL_RE = re.compile(r'"([^"\n]{1,120})"|\'([^\'\n]{1,120})\'')
 
-ORA_SKILLS_ROOT = HOME / "ora-skills"
+# (ORA_SKILLS_ROOT is declared up beside SKILL_SCAN_ROOTS, which needs it -- 2026-08-14.)
 # Document generators live beside the deal data they draw on, not in a repo.
 OUTREACH_GENERATOR_DIR = (HOME / "OneDrive - Oxford Capital Partners"
                           / "Business" / "Investment Candidates -- 2026")
@@ -1144,7 +1175,8 @@ def apply_content_root_override(root):
     SCHEDULED_TASKS_DIR = root / "scheduled-tasks"
     PRETOOLUSE_DISPATCHER = root / "hooks" / "pretooluse-dispatcher.py"
     AM_BRIEF_SKILL = root / "scheduled-tasks" / "ora-am-brief" / "SKILL.md"
-    SKILL_SCAN_ROOTS = (root / "skills", LIVE_CLAUDE_DIR / "plugins", WORKSPACE)
+    SKILL_SCAN_ROOTS = (root / "skills", LIVE_CLAUDE_DIR / "plugins", WORKSPACE,
+                        ORA_SKILLS_ROOT)
 
 
 def main():
