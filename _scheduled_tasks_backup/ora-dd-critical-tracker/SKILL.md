@@ -1,6 +1,32 @@
 ---
 name: ora-dd-critical-tracker
 description: Weekly Thursday 9:35 AM ET -- scans the Acquisition Pipeline for open DD-Critical items (flood/zoning/replacement-cost/reassessed-tax per Buy Box doctrine) so they surface automatically instead of relying on the weekly Monday Sync to notice them. Built 2026-07-27 per Gabriel's workflow-optimization list (the 808 Rhoads / 250 NW 10th St class of finding). [MODEL: claude-sonnet-5 | set 2026-07-27]
+output_contract:
+  version: 1
+  blocks:
+    - id: block-dd-critical-ops-hub-post
+      artifact:
+        type: notion_page
+        title_pattern: "DD-Critical Tracker -- {DATE}"
+        parent_id: "32b6ecd8-9e59-81f2-b329-df3fd0e25062"
+      freshness_window_hours: 180
+      expected_on:
+        cron: "35 9 * * 4"
+      on_missing_severity: alarm
+      is_primary_health_signal: true
+      notes: "NOTE THE DOUBLE HYPHEN: verified against the live 2026-07-27 post, which uses '--' where the sibling trackers use an em dash. A guessed em-dash pattern would never match and would sit permanently red. Window is 180h = weekly cadence (168h) plus slack, mirroring the CC convention of 30h for a daily cron; a tighter window would false-alarm on any audit day after the fire, and a detector people learn to ignore is worse than none."
+    - id: block-dd-critical-mail
+      artifact:
+        type: sent_mail
+        mailbox: "ggoldberg@oxfordra.net"
+        subject_pattern: "ORA DD-Critical Tracker -- {DATE}"
+        recipient: "ggoldberg@oxfordra.net"
+      freshness_window_hours: 180
+      expected_on:
+        cron: "35 9 * * 4"
+      on_missing_severity: warn
+      is_primary_health_signal: false
+      notes: "SEVERITY IS warn, NOT alarm, DELIBERATELY: the exact sent subject string is not yet observed in Sent Items -- only the SKILL.md -Subject argument, whose date placeholder does not fix a format. Promote to alarm once a real send is confirmed to match. The verified Notion block above carries the alarm. Window is 180h = weekly cadence (168h) plus slack, mirroring the CC convention of 30h for a daily cron; a tighter window would false-alarm on any audit day after the fire, and a detector people learn to ignore is worse than none."
 ---
 
 You are running ora-dd-critical-tracker for Gabriel Goldberg, Oxford Realty Advisors (ORA). This is a scheduled, unattended run -- execute autonomously, make reasonable judgment calls, and note them in your output. Do not ask clarifying questions.
