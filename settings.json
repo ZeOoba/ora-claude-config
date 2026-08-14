@@ -107,6 +107,8 @@
       "Bash(rm -rf /c/Users/Owner )",
       "Bash(rm -rf C:/)",
       "Bash(rm -rf C:/*)",
+      "Bash(rm -rf *worktrees/*)",
+      "Bash(rm -rf *worktrees\\*)",
       "Bash(del /s *)",
       "Bash(format *)",
       "Edit(.env*)",
