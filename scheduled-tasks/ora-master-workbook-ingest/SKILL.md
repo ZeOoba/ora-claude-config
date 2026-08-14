@@ -1,6 +1,6 @@
 ---
 name: ora-master-workbook-ingest
-description: Weekly Monday 05:45 ET producer — re-ingests the live ORA Master Workbook (cell-accurate local read-only extraction, 49 tabs), refreshes the Notion Portfolio Intelligence Dashboard, writes a dated Portfolio Metrics snapshot, maintains the Open Workbook Corrections register, updates DSOR freshness state. Keeps the canonical data mirror within 7-day freshness for downstream consumers. Conditional email to ggoldberg only on failure/material drift/insurance escalation. v1.3 2026-08-03 (read-only openpyxl promoted to PRIMARY read path; mandatory tie-out battery incl. rent-roll→NOI gross income; STEP 4e corrections register; STEP 6(b) already-escalated carve-out). [MODEL: UNVERIFIABLE | checked 2026-07-08]
+description: Weekly Monday 05:45 ET producer — re-ingests the live ORA Master Workbook (cell-accurate local read-only extraction, 49 tabs), refreshes the Notion Portfolio Intelligence Dashboard, writes a dated Portfolio Metrics snapshot, maintains the Open Workbook Corrections register, updates DSOR freshness state. Keeps the canonical data mirror within 7-day freshness for downstream consumers. Conditional email to ggoldberg only on failure/material drift/insurance escalation. v1.3 2026-08-03 (read-only openpyxl promoted to PRIMARY read path; mandatory tie-out battery incl. rent-roll→NOI gross income; STEP 4e corrections register; STEP 6(b) already-escalated carve-out). [MODEL: claude-opus-5 observed | checked 2026-08-12 via live-run transcript canary]
 output_contract:
   version: 1
   blocks:

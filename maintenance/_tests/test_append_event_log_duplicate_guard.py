@@ -27,6 +27,7 @@ Pure stdlib. ASCII-only output (Windows cp1252 console).
 import importlib.util
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 
@@ -169,6 +170,119 @@ def main():
                m.is_duplicate_entry(HEADERLESS + E1, E2) is False)
     else:
         expect("is_duplicate_entry helper exists", False, "not defined")
+
+    # --- 8. REGRESSION (found in code review): a '## ' markdown sub-heading
+    # inside an entry BODY must not be mistaken for a new entry boundary. Real
+    # entries in the live log use '## ' sub-headings in their text -- only a
+    # DATED header ('## YYYY-MM-DD') starts a new entry.
+    body_subheading_entry = (
+        "## 2026-08-12 - Entry with a sub-heading\n\n"
+        "Intro line.\n\n"
+        "## Not a dated header\n\n"
+        "More body text under the sub-heading."
+    )
+    if hasattr(m, "entry_blocks"):
+        blocks = list(m.entry_blocks(HEADERLESS + body_subheading_entry + "\n"))
+        expect("entry_blocks: a '## ' body sub-heading does not split the entry",
+               len(blocks) == 1, "got %d blocks" % len(blocks))
+    else:
+        expect("entry_blocks helper exists", False, "not defined")
+
+    tmp = tempfile.mkdtemp()
+    log = make_log(tmp, [body_subheading_entry])
+    rc, txt = run(m, log, body_subheading_entry)
+    expect("re-appending an entry with a '## ' sub-heading IS caught as a duplicate",
+           txt.count("## 2026-08-12 - Entry with a sub-heading") == 1,
+           "count=%d" % txt.count("## 2026-08-12 - Entry with a sub-heading"))
+    shutil.rmtree(tmp, ignore_errors=True)
+
+    # --- 9. REGRESSION: dated headers still split correctly (must not overcorrect
+    # into treating the whole log as one block)
+    tmp = tempfile.mkdtemp()
+    log = make_log(tmp, [E1, E2])
+    if hasattr(m, "entry_blocks"):
+        with open(log, encoding="utf-8") as f:
+            blocks = list(m.entry_blocks(f.read()))
+        expect("entry_blocks: two real dated entries still yield two blocks",
+               len(blocks) == 2, "got %d blocks" % len(blocks))
+    shutil.rmtree(tmp, ignore_errors=True)
+
+    # --- 10. TOCTOU RACE (found in code review): N SEPARATE OS PROCESSES racing
+    # to append BYTE-IDENTICAL content to the same fresh log must land exactly
+    # ONE copy. Threads share a process (and the GIL serializes their file I/O
+    # in ways real sessions never experience); real sessions are separate
+    # processes, so this races the CLI itself -- same style as
+    # test_allocate_oi_id.py's test_separate_processes_are_unique.
+    #
+    # Why this reliably catches the bug rather than depending on rare timing:
+    # the FIRST version of this guard checked for a duplicate ONCE, in a
+    # separate read BEFORE the retry loop -- so every racing process sees
+    # "not yet a duplicate" and enters the loop. The write loop's mtime-guard
+    # then legitimately makes every process but the winner retry on
+    # BlockingIOError -- but the old code's retry attempts were NOT
+    # duplicate-aware, so a losing process's LATER attempt would blindly
+    # re-insert after the winner had already landed the same entry. That is
+    # not a narrow timing window: with N processes racing for a single fresh
+    # slot, most of them lose the first attempt and retry, so most of them
+    # would have re-appended on old code. The fix re-checks freshly on every
+    # attempt (see _atomic_insert), so a loser's retry now recognizes the
+    # winner's entry and skips instead of duplicating it.
+    tmp = tempfile.mkdtemp()
+    log = make_log(tmp, [])
+    race_file = os.path.join(tmp, "race_entry.md")
+    race_entry = ("## 2026-08-12 - Race entry\n\n"
+                  "Byte-identical content from every racing process.\n")
+    with open(race_file, "w", encoding="utf-8", newline="") as f:
+        f.write(race_entry)
+
+    N = 8
+    procs = [subprocess.Popen(
+        [sys.executable, APPEND, "--entry-file", race_file, "--log", log],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        for _ in range(N)]
+    outs = [p.communicate(timeout=60) for p in procs]  # (stdout, stderr) each;
+    rcs = [p.returncode for p in procs]                # must communicate() BEFORE
+                                                         # reading returncode, or a
+                                                         # full pipe can deadlock a
+                                                         # racing process indefinitely
+
+    with open(log, encoding="utf-8") as f:
+        final = f.read()
+    count = final.count("## 2026-08-12 - Race entry")
+    expect("%d racing OS processes appending IDENTICAL content -> exactly 1 copy" % N,
+           count == 1,
+           "count=%d landed; returncodes=%s; stdouts=%s"
+           % (count, rcs, [o[0].strip() for o in outs]))
+    expect("every racing process exits 0 (winner AND all skippers -- never breaks && chains)",
+           all(rc == 0 for rc in rcs), rcs)
+    shutil.rmtree(tmp, ignore_errors=True)
+
+    # --- 11. DRAIN-SPOOL DUPLICATE (found in code review, second finding): two
+    # locked runs that both spooled the SAME entry content must not both land it
+    # when the spool drains. drain_spool() has no duplicate check of its own --
+    # it relies entirely on _atomic_insert/_inplace_insert doing it (see their
+    # docstrings) -- so this proves that reliance actually holds, not just that
+    # the shared helper exists.
+    tmp = tempfile.mkdtemp()
+    log = make_log(tmp, [E1])  # E1 already landed via some other path
+    spool_dir = log + ".pending"
+    os.makedirs(spool_dir, exist_ok=True)
+    for name in ("1.md", "2.md"):  # two independently-spooled copies, same content
+        with open(os.path.join(spool_dir, name), "w", encoding="utf-8", newline="") as f:
+            f.write(E1)
+
+    drained = m.drain_spool(log)
+
+    with open(log, encoding="utf-8") as f:
+        final = f.read()
+    expect("drain_spool resolves both spooled entries (written OR recognized-duplicate)",
+           drained == 2, "drained=%d" % drained)
+    expect("a spooled entry that duplicates one already in the log is NOT reinserted",
+           final.count("## 2026-08-12 - First entry") == 1,
+           "count=%d" % final.count("## 2026-08-12 - First entry"))
+    expect("both spool files are cleared -- a recognized duplicate doesn't wedge the queue",
+           not os.listdir(spool_dir), os.listdir(spool_dir))
+    shutil.rmtree(tmp, ignore_errors=True)
 
     passed = sum(1 for ok, _ in results if ok)
     print("\n%d/%d passed" % (passed, len(results)))

@@ -116,6 +116,7 @@
 - [Auto-review blast-radius gate](feedback_auto_review_blast_radius_gate.md) — 07-24: blocking for hooks/financial code; needs an AgentTool carve-out
 - [config-write-guard: no fast-path](feedback_config_write_guard_no_fast_path.md) — 08-14: investigated and declined; single-line ≠ low-risk in hooks/settings.json/CLAUDE.md
 - [Artifact staleness scan false positives](feedback_artifact_staleness_scan_mtime_false_positives.md) — mtime can't measure a live-read artifact; LIVE/FROZEN/HYBRID convention
+- [Sweep-then-verify](feedback_sweep_then_verify.md) — grep-inventory before multi-instance edits, re-grep after to prove zero remain
 
 ---
 *Index holds pointers, not narration — history in [event_log.md](event_log.md).*

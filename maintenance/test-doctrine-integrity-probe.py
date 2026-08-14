@@ -1304,6 +1304,7 @@ def test_dated_archive_dirs_pruned_from_skill_scan():
     assert m._is_pruned_skill_dir("_staging_2026-01-01")
     assert m._is_pruned_skill_dir("backups")
     assert m._is_pruned_skill_dir("node_modules")
+    assert m._is_pruned_skill_dir("third_party")
     # TIGHT: requires the separator, so a live skill dir must NOT be pruned. Over-pruning a
     # resolver is ALSO a false negative (skill reads MISSING when it is present), so both
     # directions are unsafe here -- keep the match anchored to the archive convention.

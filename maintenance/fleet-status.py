@@ -260,10 +260,25 @@ def cadence_buffer_days(expr):
 # 3-day gap was only recoverable from the scheduler's own run log). A clean
 # "0" from this check means "no CURRENTLY open miss", not "nothing was ever
 # missed" -- do not report it as a historical census.
-MISSED_CYCLE_GRACE_HOURS = 24  # generous: fleet only fires while the Desktop
+MISSED_CYCLE_GRACE_HOURS = 24  # floor: fleet only fires while the Desktop
                                # app is open, so some lateness is normal and
-                               # expected, not a fault. Flags only once a task
-                               # is more than a full day late to its own cadence.
+                               # expected, not a fault.
+MISSED_CYCLE_INTERVAL_MULTIPLE = 1.5  # CRON-AWARE GUARD (2026-08-11, closes the
+                               # 2026-08-10 [CORRECTION]: the raw gap jumps to
+                               # ~1x a task's own cadence the instant its cron
+                               # time passes unfired -- a healthy weekly task
+                               # mid-catch-up reads gap~=168h against a flat
+                               # 24h wall and is flagged every week. Escalating
+                               # only past 1.5x a task's OWN interval lets one
+                               # un-dispatched slot pass silently (normal
+                               # catch-up) while >=2 missed slots (>=2x
+                               # interval, always > 1.5x) still escalates
+                               # unconditionally -- the ora-cc-schematic-refresh
+                               # founding case (2x/week, 13 days =~ 3.7
+                               # intervals) is the regression this must keep
+                               # catching. The 24h floor still applies for
+                               # short/frequent cadences so a multi-fire cron
+                               # with a small own-interval isn't over-sensitized.
 
 def _local_utc_offset():
     """Best-effort fixed UTC offset for 'now' on this machine (cron is evaluated
@@ -317,12 +332,53 @@ def most_recent_expected_fire_utc(expr, now_local, lookback_days=400):
     return None
 
 
-def find_missed_cycles(tasks, now_local=None, grace_hours=MISSED_CYCLE_GRACE_HOURS):
+def _own_interval_hours(expr, expected_utc, hops=8):
+    """This task's own TYPICAL cadence in hours: the SMALLEST gap among the
+    last `hops` consecutive fire-to-fire steps ending at expected_utc.
+
+    Walking back just ONE hop is not safe: for a weekday-only or multi-fire
+    cron, the single most-recent hop varies with WHEN you sample. Sampled
+    right at the day's/week's first fire, that one hop is the weekend/day-
+    boundary outlier (e.g. Fri 19:40 -> Mon 07:40 = 60h for a 3x/weekday
+    cron, or Fri -> Mon = 72h for a weekday-only daily cron) rather than the
+    task's true cadence (6h / 24h) -- which inflates the missed-cycle
+    threshold enough to hide several real consecutive misses (found via
+    adversarial review 2026-08-11: a 3x/weekday cron missing 5 straight
+    fires, gap ~89h, went unflagged because the single-hop interval was 60h
+    -> threshold 90h). Taking the MIN across several hops finds the task's
+    true tightest cadence regardless of where in its cycle `now_local` lands
+    -- for a perfectly uniform cadence (daily, weekly) every hop is equal so
+    this returns the same value the single-hop version did.
+
+    Returns None if fewer than 2 fires can be located (falls back to the
+    flat grace floor)."""
+    offset_td = _local_utc_offset()
+    fires_utc = [expected_utc]
+    cursor_local = expected_utc + offset_td
+    for _ in range(hops):
+        cursor_local = cursor_local - datetime.timedelta(minutes=1)
+        prior_utc = most_recent_expected_fire_utc(expr, cursor_local)
+        if prior_utc is None:
+            break
+        fires_utc.append(prior_utc)
+        cursor_local = prior_utc + offset_td
+    if len(fires_utc) < 2:
+        return None
+    gaps = [(fires_utc[i] - fires_utc[i + 1]).total_seconds() / 3600.0
+            for i in range(len(fires_utc) - 1)]
+    return min(gaps)
+
+
+def find_missed_cycles(tasks, now_local=None, grace_hours=MISSED_CYCLE_GRACE_HOURS,
+                        interval_multiple=MISSED_CYCLE_INTERVAL_MULTIPLE):
     """Recurring, enabled tasks that HAVE fired before but whose lastRunAt is
-    older than their most recent expected cron fire time by more than
-    grace_hours. Silent-single-cycle-miss detector -- see module docstring
-    above for the incident this closes (OI-031 / ora-master-workbook-ingest
-    2026-07-20)."""
+    older than their most recent expected cron fire time by more than the
+    CRON-AWARE GUARD threshold: max(grace_hours, interval_multiple x the
+    task's own cadence). Silent-single-cycle-miss detector -- see module
+    docstring above for the incident this closes (OI-031 /
+    ora-master-workbook-ingest 2026-07-20), and MISSED_CYCLE_INTERVAL_MULTIPLE
+    above for the 2026-08-10 false-positive incident that made the threshold
+    cadence-aware rather than a flat wall."""
     now_local = now_local or datetime.datetime.now()
     out = []
     for t in tasks:
@@ -337,13 +393,20 @@ def find_missed_cycles(tasks, now_local=None, grace_hours=MISSED_CYCLE_GRACE_HOU
         if expected_utc is None:
             continue  # unparseable/non-fixed cadence -- don't guess
         gap = expected_utc - last_run_utc
-        if gap > datetime.timedelta(hours=grace_hours):
+        interval_hours = _own_interval_hours(t.get("cronExpression"), expected_utc)
+        threshold_hours = grace_hours
+        if interval_hours is not None:
+            threshold_hours = max(grace_hours, interval_multiple * interval_hours)
+        if gap > datetime.timedelta(hours=threshold_hours):
             out.append({
                 "id": t.get("id"), "fleet": t.get("_fleet"),
                 "cron": t.get("cronExpression"),
                 "expected_fire_utc": expected_utc.isoformat() + "Z",
                 "last_run_utc": last_run_utc.isoformat() + "Z",
                 "gap_hours": round(gap.total_seconds() / 3600.0, 1),
+                "own_interval_hours": (round(interval_hours, 1)
+                                       if interval_hours is not None else None),
+                "threshold_hours": round(threshold_hours, 1),
             })
     return out
 
@@ -489,7 +552,8 @@ def main():
                                   for lbl, _ in regs},
             "tasks": [{"id": t.get("id"), "fleet": t.get("_fleet"),
                        "enabled": t.get("enabled", True),
-                       "cron": t.get("cronExpression")} for t in tasks],
+                       "cron": t.get("cronExpression"),
+                       "last_run_at": t.get("lastRunAt")} for t in tasks],
             "total": len(tasks), "enabled": len(enabled), "disabled": len(disabled),
             "never_ran": [t.get("id") for t in never_ran],
             "never_ran_overdue": [t.get("id") for t in never_ran_overdue],
