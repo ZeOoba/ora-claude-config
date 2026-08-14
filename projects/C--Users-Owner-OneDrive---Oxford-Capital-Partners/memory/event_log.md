@@ -12,6 +12,37 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-14 -- Dirty-tree triage: continuation after session interruption (~/.claude, repo-housekeeping claim)
+
+Resumed the dirty-tree triage after a session interruption (computer sleep). Re-scanned and found
+the earlier "hot workbook-guard cluster" had mostly settled (100min-9 days) while a tighter ~13-file
+subset was still live (sub-30-min mtimes, `hooks/workbook-write-guard.py` touched again mid-pass).
+Committed the settled remainder in 5 isolated commits: 5 standalone maintenance scripts + their test
+(host-availability-report.py, backup-session-context.py, dispatch-skip-probe.py, wake-cause-probe.ps1,
+snapshot-validate.py), 9 generated `maintenance/_state/*` files + 2 cross-session handoff notes, the
+`_ora-fleet-deadman-task.xml` Windows Task Scheduler export, the pre-resave Master Workbook safety
+copy, and (Gabriel-confirmed) archived 4 stale 2026-08-05 LAMS staging drafts whose content already
+lives in event_log.md.
+
+**Residual 20, all governed or actively contested, none forced through:**
+- Governed (`hooks/**` + `CLAUDE.md` + `settings.json`), no in-turn token minted this pass:
+  CLAUDE.md (one new line: `lease-addendum` skill tie-break, retiring document-assembly Template 6),
+  hooks/lib/claim_work.py + test, hooks/tests/test-workbook-write-guard.py, hooks/workbook-write-
+  guard.py, settings.json, hooks/archive/allow-hook-test-failure.dead-bash-dollar-escape-artifact-
+  2026-08-14 (confirms another session already found and archived the `hooks/sessions$SID/` bug
+  artifact flagged in the prior close-out entry), hooks/lib/scheduled_task_frontmatter.py,
+  hooks/scheduled-task-update-{pre,post}guard.py, hooks/tests/test-scheduled-task-update-guard.py.
+- Live workstream, confirmed still moving mid-pass: _scheduled_tasks_backup + scheduled-tasks copies
+  of ora-cc-schematic-refresh and ora-master-workbook-ingest, open-items-tracker.md,
+  reference_memory_dir_not_in_single_writer_list_2026-08-14.md,
+  reference_skill_eval_harness_gap_2026-08-14.md, reference_openpyxl_resave_breaks_exceljs_
+  workbook_parse_2026-08-14.md, and a brand-new scheduled-tasks/ora-acquisition-underwriting-eval-
+  harness/ (0.7min old at last check) -- the live implementation of the eval-harness-gap memory item.
+
+Dirty-entry count: 41 -> 20. Branch: 6 ahead of origin/feat/model-canary-probe-step25, no longer
+reporting "behind" (origin caught up during this pass; still out of scope). Claim `repo-housekeeping`
+released at pass close.
+
 ## 2026-08-14 — ora-open-sessions-board answered.json fix pushed to origin; main checkout fast-forwarded
 
 Followed up on the earlier same-day fix (`upsert-answered-sessions.py` + SKILL.md STEP 6(a) hardening, commit `5665a80`). Gabriel: "push it."
