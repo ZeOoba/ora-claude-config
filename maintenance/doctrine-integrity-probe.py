@@ -15,9 +15,10 @@ Checks:
   3. Repo names (EOS section: oxford-command-center, website-canonical, oxford-site,
                  ora-pm) -> directory C:/Users/Owner/<repo> should exist  [WARN only]
   4. Skills named in the "Skill precedence" section -> must resolve as a real
-     SKILL.md skill directory on EITHER surface: Code (~/.claude plugins + skills)
-     or Cowork (the OneDrive workspace), or be a genuinely plugin-only skill in
-     PLUGIN_SKILL_ALLOWLIST. Backup/archive copies are excluded.         [MISSING -> fail]
+     SKILL.md skill directory on EITHER surface: Code (~/.claude plugins + skills,
+     or the ora-skills repo) or Cowork (the OneDrive workspace), or be a genuinely
+     plugin-only skill in PLUGIN_SKILL_ALLOWLIST.
+     Backup/archive copies are excluded.                                [MISSING -> fail]
      The section header itself is required; its absence/rename is drift  [MISSING -> fail]
      NOTE: this check is cross-surface ON PURPOSE. Scanning only the Code surface
      produced a false "dead skill" finding during the 2026-06-06 setup review;
@@ -169,14 +170,26 @@ SLASH_SKILL_ALLOWLIST = {"code-review"}
 
 # --- Skill check (cross-surface) ---
 # Skills span TWO surfaces and CLAUDE.md "Skill precedence" routes across BOTH:
-#   Code surface   -> ~/.claude/skills + ~/.claude/plugins
+#   Code surface   -> ~/.claude/skills + ~/.claude/plugins + the ora-skills repo
 #   Cowork surface -> the OneDrive workspace
 # Backup/archive trees are pruned so a deleted skill that lingers only in a backup
 # still reports MISSING (correct), and so the live skill is found wherever it sits.
 WORKSPACE = HOME / "OneDrive - Oxford Capital Partners" / "Claude_Workspace"
+# CLAUDE.md's own "Site repo canon" pointer names this as "ORA-built skills
+# source: github.com/ZeOoba/ora-skills" -- the canonical live home for
+# ORA-authored Code-surface skills. Most of them ALSO have a Cowork outputs/
+# mirror under WORKSPACE (found via that root instead), but a skill that loses
+# its mirror -- or never had one -- previously resolved nowhere and false-
+# MISSING'd (proven 2026-08-14: register-scheduled-task, whose only copy left
+# on disk is C:/Users/Owner/ora-skills/register-scheduled-task/SKILL.md; its
+# WORKSPACE mirror survives only under an _archive/ prune). Defined here
+# (rather than only at its original IDENTITY_EMITTER_SPECS use below) so both
+# checks share one constant instead of two independently-hand-maintained paths.
+ORA_SKILLS_ROOT = HOME / "ora-skills"
 # plugins/ is gitignored (locally installed, not a repo-content dir) -> pinned to
 # LIVE_CLAUDE_DIR always, same reasoning as the other pinned paths above.
-SKILL_SCAN_ROOTS = (CLAUDE_DIR / "skills", LIVE_CLAUDE_DIR / "plugins", WORKSPACE)
+SKILL_SCAN_ROOTS = (CLAUDE_DIR / "skills", LIVE_CLAUDE_DIR / "plugins", WORKSPACE,
+                     ORA_SKILLS_ROOT)
 # Pruned ONLY for correctness (backup/archive copies) and speed (the top-level
 # 02_Outputs artifact tree). Resolution is by SKILL.md presence (see
 # collect_skill_dirs), which already excludes non-skill junk, so the prune list is
@@ -250,7 +263,20 @@ SKILL_TOKEN_RE = re.compile(r"`([a-z][a-z0-9-]*(?:\{[a-z0-9-]+\})?)`")
 # Kept as an empty set rather than deleted: the resolution logic still branches on it,
 # and a genuinely plugin-only skill could legitimately need it again. The CAUTION above
 # still governs -- do not add an entry to paper over a stale outputs/ copy.
-PLUGIN_SKILL_ALLOWLIST: set[str] = set()
+#
+# REPOPULATED 2026-08-14 (pre-push gate false failure): "morning" and "schedule" are
+# named in CLAUDE.md's Skill tie-breaks section ("the generic `morning` skill", "the
+# generic `schedule` skill") purely to say ORA's own skills (daily-brief,
+# register-scheduled-task) take precedence over them -- but the generic skills
+# themselves are genuine Claude Code built-ins with NO on-disk SKILL.md anywhere:
+# verified absent from ~/.claude/skills, ~/.claude/plugins (incl. every installed
+# marketplace), the ora-skills repo, and the Cowork WORKSPACE tree. Unlike the
+# re-operations case above, there is no real dir to find by widening the scan --
+# these ship inside the harness itself, the same class SLASH_SKILL_ALLOWLIST covers
+# for slash commands (e.g. code-review). Do not treat their presence here as
+# precedent for any *ORA-authored* skill going missing -- verify no real dir exists
+# on any surface first, per the CAUTION above.
+PLUGIN_SKILL_ALLOWLIST: set[str] = {"morning", "schedule"}
 
 # The "Skill precedence" block names orchestration primitives that are NOT SKILL.md
 # skills and must resolve against their own homes, else they false-positive as MISSING:
@@ -835,7 +861,9 @@ IDENTITY_TITLE_KEYS = {
 _IDENT_SEP = " \t\"'*_|:,-—–·•()\r\n"
 _QUOTED_LITERAL_RE = re.compile(r'"([^"\n]{1,120})"|\'([^\'\n]{1,120})\'')
 
-ORA_SKILLS_ROOT = HOME / "ora-skills"
+# ORA_SKILLS_ROOT is defined earlier, alongside SKILL_SCAN_ROOTS (the skill-scan
+# root list this same path was added to 2026-08-14) -- reused here rather than
+# redefined so the two checks can't drift onto different paths.
 # Document generators live beside the deal data they draw on, not in a repo.
 OUTREACH_GENERATOR_DIR = (HOME / "OneDrive - Oxford Capital Partners"
                           / "Business" / "Investment Candidates -- 2026")
