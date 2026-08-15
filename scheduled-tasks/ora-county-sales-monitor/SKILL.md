@@ -1,0 +1,35 @@
+---
+name: ora-county-sales-monitor
+description: Monthly Tier A industrial sales/transfer pull (Franklin OH, Baltimore Co MD, Polk IA) per county-sales-monitor skill — upserts to the Notion County Sales Comps DB, emails a ggoldberg-only digest. v0.4 (2026-08-15 pilot: 304 txns, 3 registry docs fixes). [MODEL: UNVERIFIABLE | checked 2026-08-15]
+---
+
+You are the monthly recurring run of ORA's `county-sales-monitor` skill (Oxford Realty Advisors, industrial sales/transfer market-intelligence feed). Read the full spec before doing anything: `C:\Users\Owner\.claude\skills\county-sales-monitor\SKILL.md` — it defines the exact methodology (Steps 0-8), size gate, non-arms-length flagging, and row schema. Also read `C:\Users\Owner\.claude\skills\county-parcel-screen\references\county-endpoints.v1.json`, `county-endpoints.md`, and `market-status.md` for endpoint URLs and field names (`county-endpoints.md` was patched 2026-08-15 with 3 fields the first pilot discovered for these exact counties — read it, don't rediscover from scratch).
+
+## Scope (locked — do not expand without a human ruling)
+Tier A only: **Franklin County OH (Columbus), Baltimore County MD (Maryland), Polk County IA (Des Moines)**. Do not touch Tier B or Tier C counties, do not add Louisville/Jefferson Co KY — all deliberately out of scope until a human expands them.
+
+## Window
+Default: trailing 30 days from today (Step 1 of the skill). Building SF < 150,000, keep unpublished-SF rows (never drop).
+
+## This is NOT the first run — upsert, don't blind-insert
+The Notion database already holds rows from the 2026-08-15 pilot (304 transactions) plus every prior monthly run. Data source: `collection://63a5e6b3-2655-4e0c-9843-3102d78adc0d` (database `County Sales Comps`, https://app.notion.com/p/311cf71222d14a56aa33da354cb3a1ea). Before writing:
+1. Query the data source (use `notion-fetch` on the data source URL, or a `query_data_sources` call if available) for existing rows in the relevant counties.
+2. Compute this run's key set: `County + Parcel ID + Sale Date + Sale Price` (matches the skill's Step 1 late-posted-diff key).
+3. A transaction whose key already exists: skip (do not duplicate). A transaction with a new key inside the current window: insert. A transaction with a new key but a sale date OUTSIDE the current 30-day window (i.e., it posted late) belongs in a `LATE-POSTED` flag per Step 1 — insert it, flagged, with its true (older) sale date.
+4. If querying existing rows is genuinely not possible with available tools, do NOT fall back to blind-inserting — stop and escalate in the email instead (see escalation below) rather than risk duplicating the database.
+
+## Property schema (exact names, same as the pilot)
+`Property Address` (title), `County` (select: `Franklin OH`/`Baltimore Co MD`/`Polk IA` — add a new select option only for these three, never invent others), `State` (select: `OH`/`MD`/`IA`), `Market` (select: `Columbus`/`Maryland`/`Des Moines`), `Parcel ID`, `Sale Date`, `Sale Price`, `Building SF`, `SF Source`, `Price PSF`, `Buyer`, `Seller`, `Use Code`, `Use Description`, `Flags` (multi-select: `NONARMS`/`CONTRACT-SALE`/`MULTI-PARCEL`/`LATE-POSTED`/`ORA-AFFILIATED`/`SF-UNPUBLISHED`), `Source`, `Run Date` (today's date for every row written this run).
+
+## Ground rules
+- Never fabricate rows, field values, or a "clean" result if a pull failed. If a county's endpoint has drifted or is unreachable, say so explicitly in the email rather than silently producing a thin or empty digest.
+- Do not run owner-scoring, buy-box gates, or any exclusion tier beyond government/exempt (Step 3) — this is market intelligence, not an acquisition screen. That is county-parcel-screen's job, not this one.
+- If you find a genuine, confirmable gap in county-parcel-screen's `county-endpoints.md` (a field that's drifted, a new undocumented field), do NOT edit that file yourself from an unattended run — note it in the email under a "QUESTIONS FOR GABRIEL / findings to review" heading instead. That file is shared and single-writer; unattended edits to it are out of scope for this task.
+
+## Deliver
+1. Upsert new/updated rows into the Notion data source per the rules above.
+2. Send an email via Outlook COM: `powershell.exe -File "C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1" -To "ggoldberg@oxfordra.net" -Subject "[ORA] County Sales Monitor - Monthly Digest - <today's ISO date>" -BodyFile <path to an HTML file you write> -BodyFormat html`. This is the SOLE send path — no other method, no cc (the ora-am-brief Daily Brief cc-Eric exception does not apply here). On a non-zero exit code: retry once after a short pause; if it fails twice, note the failure in this run's completion summary rather than silently dropping the digest.
+3. Email body: per-county count of new transactions this run, coverage line for each of the 3 counties (including "0 new transactions" as a real, valid result — distinguish that from "county endpoint unreachable," which is a finding, not a quiet zero), median $/SF where derivable, any LATE-POSTED rows found, and a short "QUESTIONS FOR GABRIEL" section for anything genuinely ambiguous or a real data-quality finding (per the ground rules above) — never fabricate an answer to fill that section, and omit it entirely if there is nothing real to raise.
+
+## If this is the very first run and the 30-day window logic or upsert query genuinely cannot execute
+Do not guess. Send the email anyway with an honest explanation of what blocked the run and what a human needs to check, rather than silently failing with nothing sent.
