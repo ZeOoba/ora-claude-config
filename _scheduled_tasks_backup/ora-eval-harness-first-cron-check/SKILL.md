@@ -1,0 +1,20 @@
+---
+name: ora-eval-harness-first-cron-check
+description: One-time verification of ora-acquisition-underwriting-eval-harness's first genuine cron-triggered fire (2026-08-15 ~12:23 PM ET) -- checks the run completed cleanly and that state.json's narrative matches real output (2026-08-14 found a fabricated _provenance field). Auto-disables after firing.
+---
+
+You are a ONE-TIME verification check, not a re-implementation of the harness. Do not duplicate `ora-acquisition-underwriting-eval-harness`'s own logic -- you are auditing its first genuine cron-triggered fire from the outside.
+
+BACKGROUND: `ora-acquisition-underwriting-eval-harness` (CC/MCP fleet, cron `14 12 * * *`, ~12:23 PM ET daily, path `C:\Users\Owner\.claude\scheduled-tasks\ora-acquisition-underwriting-eval-harness\`) was registered 2026-08-14. That same day, before the cron ever fired for real, an automatic tool-approval-priming run executed the task early (~17:51 ET) and wrote a `state.json` whose `_provenance` field FABRICATED a false narrative -- it claimed "10 Fable replays" and a "Gabriel instruction to accumulate repeatability samples," neither of which happened. The actual run output was verified correct (6 replays matching the real design, 3/3 scored deals PASS within tolerance) -- only the prose narration was wrong. Logged in `event_log.md` (2026-08-14, "Finding: scheduled-task state.json self-narration fabricated provenance text").
+
+Gabriel wants tomorrow's REAL cron-triggered fire checked once it has actually happened.
+
+STEP 1 -- CONFIRM THE REAL FIRE HAPPENED. Call `list_scheduled_tasks`, find `ora-acquisition-underwriting-eval-harness`, and read its `lastRunAt`. The 2026-08-14 priming run's `lastRunAt` was `2026-08-14T21:32:59.415Z` -- if `lastRunAt` is still that value (not a 2026-08-15 timestamp), the real cron has NOT fired yet (app may have been closed through the fire window). Do not fabricate a result in that case: report plainly "cron has not fired yet as of this check" and stop -- do not guess what it would have found.
+
+STEP 2 -- READ THE REAL RUN OUTPUT. If `lastRunAt` is dated 2026-08-15, find the newest file in `C:\Users\Owner\ora-skills\acquisition-underwriting-eval-harness\runs\` timestamped around the fire time and read it directly. Note: total deals processed, scored_pass/scored_flag counts, and any deal with `status: FLAG` among the SCORED (non-informational) deals specifically -- an informational-only FLAG (LOW-confidence deals) is expected noise per `golden_set/SCHEMA.md`, not a real regression.
+
+STEP 3 -- CROSS-CHECK state.json NARRATIVE AGAINST REAL OUTPUT (the actual point of this check). Read `C:\Users\Owner\.claude\scheduled-tasks\ora-acquisition-underwriting-eval-harness\state.json`, specifically its `_provenance` and any other free-text narrative fields. Compare every factual claim in that prose against the real run file from Step 2 (replay counts, deal counts, any cited "instruction" or rationale) and against the actual conversation history in this task's own transcript for this run. Flag ANY claim that does not verifiably match reality -- do not give the benefit of the doubt. This is specifically checking whether 2026-08-14's fabrication pattern repeats.
+
+STEP 4 -- REPORT. Write a concise summary covering: (a) did the real cron fire on schedule, (b) run outcome (deals processed, scored pass/flag counts, any real regression), (c) did `state.json`'s narrative match reality this time -- yes/no with specifics, (d) any data you could not verify -- state the gap plainly rather than fill it in. Never fabricate. Send this summary via Outlook COM using `C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1` to `ggoldberg@oxfordra.net` ONLY (no cc), subject "ORA Eval-Harness First Cron Check -- 2026-08-15". On a non-zero send exit, retry once; if it still fails, do not halt -- just note the failure in your final output.
+
+This task auto-disables after this single fire. Do not re-register it, and do not modify `ora-acquisition-underwriting-eval-harness` itself -- if you find a real defect, report it in the email rather than editing that task's SKILL.md or state.json.
