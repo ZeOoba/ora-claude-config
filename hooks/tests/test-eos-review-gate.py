@@ -9,12 +9,15 @@ capture, and what the working-tree content of a risk path actually hashes to.
 Shape follows hooks/tests/test-eos-plan-gate.py.
 """
 
+import concurrent.futures
+import io
 import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 
 # This test spins up its own throwaway git repos in temp dirs. When invoked as part of
 # the real pre-push hook chain, git sets GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE (etc.) in
@@ -248,6 +251,109 @@ def test_risk_file_without_review_blocks():
     assert_blocked(rc, err, "no review artifact")
     assert "--record" in err, "block must tell the operator how to record a review"
     print("PASS test_risk_file_without_review_blocks")
+
+
+def _record_line(err):
+    """The line of the block message that hands the operator the --record command."""
+    return next((l for l in err.splitlines() if "--record" in l and "--verdict" in l),
+                "")
+
+
+def _config_write_guard_verdict(command):
+    """Run config-write-guard.py over `command` and return 'BLOCKED' or 'allowed'.
+
+    CROSS-GUARD, deliberately: the defect being pinned is not inside this gate at
+    all, it is that this gate's remediation command is refused by the OTHER gate.
+    Only a real run of that guard can prove the printed command is usable. Isolated
+    via the guard's documented test seams, so it never reads the live tree.
+
+    NOT THE LOAD-BEARING ASSERTION, and it cannot be (independent review, 2026-08-12,
+    finding 82). Seaming ORA_CONFIG_GUARD_ROOT to a temp dir is what keeps this test
+    off the live tree, but it also means the guard classifies drive-qualified tokens
+    against THAT root -- so a regression back to an absolute LIVE hooks/ path would
+    still come back "allowed" here. The structural `":/" not in line` check in the
+    caller is what actually pins that; this run proves the shape end-to-end against a
+    real guard process. Do not delete the structural check as redundant with this.
+    The early return below is the same class: a checkout without the guard silently
+    skips the cross-check, which is acceptable only because the caller's own
+    assertions still run."""
+    guard = os.path.join(HERE, "config-write-guard.py")
+    if not os.path.isfile(guard):
+        return "allowed"  # guard absent from this checkout -- nothing to prove
+    env = dict(os.environ)
+    env["ORA_CONFIG_GUARD_ROOT"] = tempfile.mkdtemp(prefix="eos-rg-cwg-root-")
+    env["ORA_OVERRIDE_SESSIONS_DIR"] = tempfile.mkdtemp(prefix="eos-rg-cwg-sess-")
+    env["ORA_CHIP_CLAIMS_LOG"] = os.path.join(
+        tempfile.mkdtemp(prefix="eos-rg-cwg-log-"), "chip-claims.log")
+    proc = subprocess.run(
+        [sys.executable, guard], capture_output=True, text=True, env=env,
+        input=json.dumps({"session_id": "s" * 32, "tool_name": "Bash",
+                          "tool_input": {"command": command}}))
+    return "BLOCKED" if proc.returncode == 2 else "allowed"
+
+
+def test_record_hint_is_a_command_the_write_guard_permits():
+    # WHY (2026-08-12, hit live). This gate printed its --record command spelled with
+    # os.path.abspath(__file__) -- i.e. the LIVE C:/Users/Owner/.claude/hooks/ path.
+    # config-write-guard's matcher is "write indicator + governance-path marker
+    # anywhere in the command", and ">" matches inside an ASCII arrow, which review
+    # prose is full of ("199/204 -> 204/204"). So following this gate's own
+    # instructions verbatim was blocked by that guard, whose only named exit was
+    # minting a 60-min multi-use governance-WIDE token to satisfy one artifact
+    # write. Same class as the `--model ` -> "del " deadlock tool_call_paths.py
+    # word-anchored on 2026-08-03: a false positive that forces a strictly broader
+    # privilege. The repo-relative spelling carries no governance marker at all, so
+    # it is not gated -- and the tool resolves its artifact path absolutely, so the
+    # review still lands in the live hooks/sessions/ tree either way.
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "hooks/eos-review-gate.py", "# this repo carries its own copy\n")
+    write(repo, "hooks/new-guard.py", "x = 1\n")
+    git(repo, "add", "-A")
+    rc, out, err = run_hook('git commit -m "add guard"', repo, tmp)
+    assert_blocked(rc, err, "no review artifact")
+
+    line = _record_line(err)
+    assert line, "block message must still hand over a --record command: %r" % err
+    assert "hooks/eos-review-gate.py" in line, (
+        "record hint must still name the tool: %r" % line)
+    # Structural, not a spelling match: ANY drive-qualified path on this line puts a
+    # governance marker back into the command the operator is told to run.
+    assert ":/" not in line and ":\\" not in line, (
+        "record hint must not carry an absolute path when the repo has its own "
+        "copy: %r" % line)
+
+    # END-TO-END: the printed command, with the arrow that caused the live block,
+    # must actually clear config-write-guard.
+    armed = line.strip().replace("<what was reviewed and found>", "199/204 -> 204/204")
+    armed = armed.replace("<pinned-id>", LADDER_TOP)
+    verdict = _config_write_guard_verdict(armed)
+    assert verdict == "allowed", (
+        "the record command this gate prints is refused by config-write-guard: "
+        "%r -> %s" % (armed, verdict))
+
+    # And the operator is warned about the indicator, since the fallback spelling
+    # below (and any hand-typed absolute path) still carries it.
+    assert "arrow" in err, (
+        "block message must warn that an ASCII arrow in --notes reads as a "
+        "redirect: %r" % err)
+    print("PASS test_record_hint_is_a_command_the_write_guard_permits")
+
+
+def test_record_hint_falls_back_to_the_absolute_path_off_repo():
+    # A repo that does NOT carry its own copy of the gate (any non-~/.claude repo
+    # with financial-decision code) has no relative spelling to offer, so the
+    # absolute path is still correct there -- and the arrow warning is what keeps
+    # that form usable.
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "hooks/new-guard.py", "x = 1\n")
+    git(repo, "add", "-A")
+    rc, out, err = run_hook('git commit -m "add guard"', repo, tmp)
+    assert_blocked(rc, err, "no review artifact")
+    line = _record_line(err)
+    assert "eos-review-gate.py" in line and (":/" in line or ":\\" in line), (
+        "off-repo fallback must still print a runnable absolute path: %r" % line)
+    assert "arrow" in err, "the arrow warning must be present in the fallback too"
+    print("PASS test_record_hint_falls_back_to_the_absolute_path_off_repo")
 
 
 def test_valid_review_allows():
@@ -1042,21 +1148,272 @@ def test_warn_mode_does_not_consume_override_token():
     print("PASS test_warn_mode_does_not_consume_override_token")
 
 
+def _hint_fixture(prefix):
+    """Repo with one non-risk path and one risk path, both staged."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix=prefix)
+    write(repo, "src/ui/button.tsx", "export const B = 1\n")
+    write(repo, "hooks/unrelated.py", "y = 1\n")
+    git(repo, "add", "-A")
+    return repo, tmp
+
+
+def test_multiline_quoted_message_emits_shape_hint():
+    """OI-122. A directly-quoted MULTI-LINE `-m` detaches the trailing pathspec
+    (the tokenizer recognizes heredocs, not this shape), so scope falls back to
+    the whole index and an unrelated staged risk file blocks the commit. The
+    block message must SAY that, rather than steering to an override -- which
+    is what actually happened on 2026-08-11 and spent a ratified exception on a
+    commit that carried zero blast-radius files."""
+    repo, tmp = _hint_fixture("eos-rg-hint-")
+    cmd = 'git commit -m "title line\n\nbody line" -- src/ui/button.tsx'
+    rc, out, err = run_hook(cmd, repo, tmp)
+    assert_blocked(rc, err, "multi-line quoted message falls back to whole index")
+    assert "multi-line" in err, "hint must name the message shape: %s" % err
+    assert "heredoc" in err, "hint must offer the heredoc remedy: %s" % err
+    print("PASS test_multiline_quoted_message_emits_shape_hint")
+
+
+def test_heredoc_message_keeps_pathspec_attached():
+    """The fleet-sanctioned heredoc form must keep scoping correctly -- this is
+    the behaviour the hint points people TO, so it is load-bearing. Guards
+    against any future 'fix' that regresses tokenization."""
+    repo, tmp = _hint_fixture("eos-rg-heredoc-")
+    cmd = ('git commit -m "$(cat <<\'EOF\'\n'
+           'title line\n\nbody line\n'
+           'EOF\n'
+           ')" -- src/ui/button.tsx')
+    rc, out, err = run_hook(cmd, repo, tmp)
+    assert_allowed(rc, err, "heredoc-fed message keeps the pathspec attached")
+    print("PASS test_heredoc_message_keeps_pathspec_attached")
+
+
+def test_shape_hint_silent_when_pathspec_attached():
+    """The hint is a DIAGNOSTIC, not a scope change: when the pathspec attaches
+    correctly and the risk file is genuinely in it, the commit still blocks and
+    the hint must stay silent."""
+    repo, tmp = _hint_fixture("eos-rg-nohint-")
+    rc, out, err = run_hook('git commit -m "touch hook" -- hooks/unrelated.py',
+                            repo, tmp)
+    assert_blocked(rc, err, "risk file genuinely inside the pathspec")
+    assert "directly-quoted multi-line" not in err, (
+        "hint must not fire when the pathspec attached: %s" % err)
+    print("PASS test_shape_hint_silent_when_pathspec_attached")
+
+
+def test_shape_hint_does_not_change_blocked_path_set():
+    """Hard invariant: adding the hint must not alter WHICH paths the gate
+    blocks on, nor its exit code. Review finding F3: an earlier version of this
+    test discarded both return codes, so it passed under a warn-mode downgrade
+    (rc 0 + WARNING -- a genuine fail-open) and on a full revert. Assert the
+    block itself, not just a substring of stderr."""
+    repo, tmp = _hint_fixture("eos-rg-inv-")
+    rc_fb, _, err_fb = run_hook('git commit -m "a\n\nb" -- src/ui/button.tsx',
+                                repo, tmp)
+    rc_sc, _, err_sc = run_hook('git commit -m "a" -- hooks/unrelated.py',
+                                repo, tmp)
+    assert_blocked(rc_fb, err_fb, "fall-back scope must still BLOCK")
+    assert_blocked(rc_sc, err_sc, "scoped commit must still BLOCK")
+    assert "hooks/unrelated.py" in err_fb, (
+        "fall-back scope must still report the risk file: %s" % err_fb)
+    assert "hooks/unrelated.py" in err_sc, (
+        "scoped commit must still report the risk file: %s" % err_sc)
+    print("PASS test_shape_hint_does_not_change_blocked_path_set")
+
+
+def _load_gate_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("gate_mod_under_test", HOOK)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_hint_remedy_template_actually_parses():
+    """Review finding F1 (MAJOR). The heredoc example the hint tells a blocked
+    operator to copy must ITSELF tokenize with the pathspec attached. The first
+    version indented every rendered line for display, including the terminator
+    -- bash requires it at column 0, and this parser's own exact-match
+    terminator rule fails on an indented one, so copying the remedy reproduced
+    the very false block it was explaining, in a loop."""
+    mod = _load_gate_module()
+    hint = mod.message_shape_hint('git commit -m "a\n\nb" -- src/x.tsx')
+    assert hint, "fixture must trigger the hint"
+    start = hint.index('git commit -m "$(cat')
+    end = hint.index('" -- <path>', start) + len('" -- <path>')
+    tpl = (hint[start:end].replace("<title>", "t")
+                          .replace("<body>", "b")
+                          .replace("<path>", "src/x.tsx"))
+    sys.path.insert(0, os.path.join(HERE, "lib"))
+    from git_commit_parse import find_commit_segment
+    args = find_commit_segment(tpl)
+    assert args is not None and "--" in args, (
+        "the hint's own remedy template strands its pathspec: %r -> %r"
+        % (tpl, args))
+    print("PASS test_hint_remedy_template_actually_parses")
+
+
+def test_hint_silent_on_heredoc_prose_containing_double_dash():
+    """Review finding F2 (MAJOR). `--` is this fleet's house punctuation. A
+    heredoc-fed message whose BODY contains ' -- ' parses fine and scopes
+    correctly; the hint must not claim its scope fell back."""
+    mod = _load_gate_module()
+    cmd = ('git commit -m "$(cat <<\'EOF\'\n'
+           'reverted the earlier approach -- see notes\n'
+           'EOF\n)"')
+    assert mod.message_shape_hint(cmd) == "", (
+        "hint fired on correctly-parsed heredoc prose containing ' -- '")
+    print("PASS test_hint_silent_on_heredoc_prose_containing_double_dash")
+
+
+def test_hint_silent_on_chained_git_log_pathspec():
+    """Review finding F2 (MAJOR), second trigger: a legitimately chained
+    `git log ... -- <path>` before the commit is not stranded wreckage."""
+    mod = _load_gate_module()
+    cmd = 'git log --oneline -1 -- hooks/\ngit commit -m "a\nb"'
+    assert mod.message_shape_hint(cmd) == "", (
+        "hint fired on a chained `git log -- <path>`")
+    print("PASS test_hint_silent_on_chained_git_log_pathspec")
+
+
+def test_hint_silent_on_env_prefixed_git_command():
+    """Review finding N2. A chained git command carrying a legitimate `--` is
+    not wreckage even when an env-assignment prefixes it -- `s[0]` is then
+    `GIT_PAGER=cat`, not `git`. Classified via git_commit_parse's own
+    _segment_git_subcommand_and_args, which skips env-assign tokens."""
+    mod = _load_gate_module()
+    cmd = 'GIT_PAGER=cat git log --oneline -- hooks/\ngit commit -m "a\nb"'
+    assert mod.message_shape_hint(cmd) == "", (
+        "hint fired on an env-prefixed `git log -- <path>`")
+    print("PASS test_hint_silent_on_env_prefixed_git_command")
+
+
+def test_hint_silent_on_multiline_message_with_attached_pathspec():
+    """Review finding F6: the 'pathspec recovered' branch was never actually
+    exercised -- the earlier test used a single-line command, which returns at
+    the newline guard before reaching it. A heredoc-fed multi-line message WITH
+    a pathspec reaches that branch and must stay silent."""
+    mod = _load_gate_module()
+    cmd = ('git commit -m "$(cat <<\'EOF\'\ntitle\n\nbody\nEOF\n)" '
+           '-- hooks/unrelated.py')
+    assert mod.message_shape_hint(cmd) == "", (
+        "hint fired despite the pathspec being attached")
+    print("PASS test_hint_silent_on_multiline_message_with_attached_pathspec")
+
+
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
 
+
+class _ThreadRoutedStdout:
+    """A stdout stand-in that routes each thread's writes to that thread's own buffer.
+
+    contextlib.redirect_stdout CANNOT be used here: it swaps the process-global
+    sys.stdout, so concurrent workers overwrite each other's redirect and restore it in
+    the wrong order. Measured, not theorised -- the first cut of this runner used it and
+    the suite printed ONE of 55 PASS lines, no summary, and still exited 0. A test
+    harness that loses results while reporting success is the worst possible failure on
+    a security gate, so the routing is per-thread and the summary is asserted below.
+    """
+
+    def __init__(self, real):
+        self._real = real
+        self._tl = threading.local()
+
+    def set_buffer(self, buf):
+        self._tl.buf = buf
+
+    def _target(self):
+        return getattr(self._tl, "buf", None) or self._real
+
+    def write(self, s):
+        return self._target().write(s)
+
+    def flush(self):
+        return self._target().flush()
+
+    def isatty(self):
+        return False
+
+
+def _run_one(t):
+    """Run one test with its stdout captured per-thread, so parallel workers neither
+    interleave nor lose output. Returns (name, ok, captured_stdout, error_or_None)."""
+    buf = io.StringIO()
+    routed = isinstance(sys.stdout, _ThreadRoutedStdout)
+    try:
+        if routed:
+            sys.stdout.set_buffer(buf)
+        t()
+    except Exception as exc:
+        # Exception, not AssertionError: a test that raises anything else (KeyError on
+        # a missing output field, say) used to escape this handler and abort the RUN,
+        # so every test sorted after it was silently never executed and the suite
+        # printed no summary at all. A crash is a failure, and the run must continue.
+        return t.__name__, False, buf.getvalue(), "%s: %s" % (type(exc).__name__, exc)
+    finally:
+        if routed:
+            sys.stdout.set_buffer(None)  # never leave a dead buffer installed
+    return t.__name__, True, buf.getvalue(), None
+
+
 if __name__ == "__main__":
+    # PARALLEL RUNNER (2026-08-12). This file is dominated by process-startup cost, not
+    # by its own logic: it makes ~194 run_hook/run_cli calls, each spawning a fresh
+    # interpreter, and measurement put the mean spawn at 0.726s of which 0.512s is BARE
+    # python startup -- i.e. ~70% of the suite's wall clock was interpreter bootstrap.
+    # Sequentially that is ~141s on a quiet machine and 300s+ under real multi-session
+    # load, against the pre-push gate's 180s budget. It had already been optimised once
+    # (OI-061, the shared git-fixture template: 559 spawns -> ~194, 141.7s -> 76.6s) and
+    # regressed anyway, because that fix removed spawns while this one removes the WAIT.
+    #
+    # Threads, not processes: every spawn is a subprocess.run() that releases the GIL, so
+    # the startups overlap. Fidelity is unchanged -- each test still executes the real
+    # hook through the real CLI boundary, same asserts, same subprocess semantics. Only
+    # the scheduling changed.
+    #
+    # Isolation holds by construction: each test builds its own repo (mkdtemp) and its
+    # own sessions dir, and passes env per-call rather than mutating os.environ.
+    # Set EOS_RG_TEST_WORKERS=1 to force the old serial order when debugging a failure
+    # (also the honest way to re-measure the serial baseline on this machine).
+    try:
+        _workers = int(os.environ.get("EOS_RG_TEST_WORKERS", "") or 0)
+    except ValueError:
+        _workers = 0
+    if _workers <= 0:
+        _workers = min(8, (os.cpu_count() or 4))
+
+    # Pre-warm the shared fixture template SERIALLY. gitfixture caches templates in a
+    # module-level dict with no lock; two workers racing to build the same key would
+    # both copytree into a half-built template. One serial call makes every later read
+    # a plain dict hit. Without this the parallelism itself would be the bug.
+    make_repo()
+
     failures = 0
-    for t in TESTS:
+    if _workers == 1:
+        results = [_run_one(t) for t in TESTS]
+    else:
+        _real_stdout = sys.stdout
+        sys.stdout = _ThreadRoutedStdout(_real_stdout)
         try:
-            t()
-        except Exception as exc:
-            # Exception, not AssertionError: a test that raises anything else
-            # (KeyError on a missing output field, say) used to escape this
-            # handler and abort the RUN, so every test sorted after it was
-            # silently never executed and the suite printed no summary at all.
-            # A crash is a failure, and the run must continue past it.
+            with concurrent.futures.ThreadPoolExecutor(max_workers=_workers) as pool:
+                # map preserves input order, so output stays deterministic and diffable
+                # regardless of completion order.
+                results = list(pool.map(_run_one, TESTS))
+        finally:
+            sys.stdout = _real_stdout
+
+    # RESULT-LOSS GUARD: the first cut of this runner silently dropped 54 of 55 results
+    # and still exited 0. Never trust the parallel path to have reported everything --
+    # assert the count before printing a pass summary.
+    assert len(results) == len(TESTS), (
+        "runner lost results: got %d of %d -- refusing to report a verdict"
+        % (len(results), len(TESTS)))
+
+    for name, ok, out, err in results:
+        if out:
+            sys.stdout.write(out)
+        if not ok:
             failures += 1
-            print("FAIL %s: %s: %s" % (t.__name__, type(exc).__name__, exc))
+            print("FAIL %s: %s" % (name, err))
     if failures:
         print("%d REVIEW-GATE TEST(S) FAILED" % failures)
         sys.exit(1)

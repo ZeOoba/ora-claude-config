@@ -537,6 +537,33 @@ def _block_governance(label, detail, session_id):
         "access to the entire governance layer -- strictly worse than the read you "
         "wanted. Instead use the Read/Grep/Glob tools (never gated), or run the read "
         "without naming the governance tree in the command text.\n"
+        # ADDED 2026-08-12. The two exits above cover "it was a read" and "it is a
+        # real edit"; neither fits the case that keeps firing in practice --
+        # INVOKING a governance CLI whose writes land in paths this guard already
+        # exempts. eos-review-gate's own block text hands the operator
+        # `eos-review-gate.py --record ... --notes "<prose>"`, and review prose
+        # routinely carries an ASCII arrow, so the sanctioned way to clear the
+        # review gate is blocked here -- with minting a governance-WIDE token as
+        # the only named exit. That is the same "false positive forces a strictly
+        # broader privilege" regression tool_call_paths.py's 2026-08-03 word
+        # anchoring was written to kill (it fixed the `--model ` -> "del " half of
+        # this identical deadlock; the ">" half is not fixable in the matcher --
+        # `echo x ->f` is a real redirect -- so it is fixed here, in the guidance).
+        "IF THIS WAS A GOVERNANCE-TOOL INVOCATION, NOT AN EDIT (added 2026-08-12): "
+        "do NOT mint a token either. The write indicator is often PROSE rather than "
+        "a verb -- '>' matches inside an ASCII arrow, so "
+        "`eos-review-gate.py --record ... --notes \"199/204 -> 204/204\"` reads as a "
+        "redirect while the live script path supplies the governance marker (the "
+        "arrow stays armed on purpose: `echo x ->f` IS a real redirect that "
+        "truncates f). The matcher also reads the WHOLE command, so a governance "
+        "path paired with an unrelated write (`...; rm -f <scratch file>`) trips it "
+        "-- split them into separate calls. Governance CLIs (eos-review-gate.py "
+        "--record, lib/claim_work.py claim|release|renew) resolve their write "
+        "targets absolutely, into hooks/sessions/ and hooks/active-work/ -- both "
+        "EXEMPT here, as is hooks/state/ -- so re-run the "
+        "command against a WORKTREE checkout's copy of the tool (worktree paths are "
+        "exempt, and the tool still writes to the live tree), or reword the "
+        "argument carrying the indicator.\n"
         "Preferred path for a REAL edit: do this work in an isolated worktree "
         "(git worktree add .claude/worktrees/<name>) and land it via review -- "
         "worktree copies are not gated.\n"

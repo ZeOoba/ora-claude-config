@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """SessionStart hook -- broadcast any live cross-session claims on shared ~/.claude
 subsystems (hooks-override-auth, open-items-tracker, oxford-command-center-data,
-repo-housekeeping, and any other slug a session chooses to claim -- see
+repo-housekeeping, ora-skills, and any other slug a session chooses to claim -- see
 hooks/lib/claim_work.py).
 
 WHY: reference_concurrent_session_duplicate_hardening_work.md logs 6 recorded
@@ -20,6 +20,16 @@ override/auth work, not general repo maintenance. See reference_concurrent_sessi
 duplicate_hardening_work.md's 2026-07-25/26 entry. The mechanism itself needed no
 code change (slugs are already free-form, see claim_work.py); only the documented,
 named vocabulary grew.
+
+`ora-skills` ADDED 2026-08-12, for the same reason and with the same zero-code-change
+shape: two sessions were handed the same remediation prompt and both began work, caught
+only when the second read the first's session transcript ~15 minutes in. ora-skills was
+deliberately outside this vocabulary because tech.md Sec2 gives it its own single-writer
+rule (`git log -1` + `git status` before editing a SKILL.md) -- but that rule cannot see
+a concurrent session, because commits there carry the machine's shared human author
+identity rather than a per-session one, so git identity cannot answer "is this HEAD
+mine?". Both rules now apply; neither replaces the other. See claim_work.py's ORA-SKILLS
+note.
 
 `ora-skills-housekeeping` ADDED 2026-08-15 (Automation Audit Rev 10 remediation
 follow-up): `repo-housekeeping`'s own scope is the ~/.claude checkout, but sessions
