@@ -570,7 +570,7 @@ def test_indicator_partition_is_total():
 # ------------------------------------------------- recursive delete (2026-08-14)
 # THE GAP THIS CLOSES. shell_may_write() has flagged `rm ` since the module was
 # written, but every consumer (config-write-guard, workbook-write-guard,
-# ora-autonomy-gate) only ever BLOCKS when a write indicator is ALSO paired with a
+# lint-config-guard) only ever BLOCKS when a write indicator is ALSO paired with a
 # governance-path marker. So:
 #     rm -rf ~/.claude/hooks/     -> blocked (governance marker)
 #     rm -rf /                    -> blocked (settings.json deny rule)
@@ -775,17 +775,42 @@ def test_recursive_delete_rejects_garbage():
     check("no rm at all -> None", tcp.recursive_delete("ls -R .") is None)
 
 
-def test_recursive_delete_is_a_strict_subset_of_shell_may_write():
-    """STRUCTURAL INVARIANT, and the reason this change is safe for all three
-    consumers. Every recursive delete is already write-shaped under the OLD
-    predicate, so the new detector adds a CLASSIFICATION, never a new
-    may_write=True. If this ever fails, shell_may_write has been altered and the
-    'purely additive' claim is void."""
+def test_recursive_delete_implies_may_write_on_common_forms():
+    """NOT a strict-subset invariant -- see the known-broadenings test right
+    below for the two documented exceptions. This pins the common-case overlap:
+    an ordinary recursive delete is already write-shaped under the OLD
+    predicate, so for these forms the new detector adds a CLASSIFICATION, not a
+    new may_write=True. If any of THESE specific commands ever stops being
+    write-shaped, shell_may_write has been altered and the additivity claim
+    (proven by the diff + differential battery, not by this test) needs
+    re-checking."""
     for cmd in ["rm -rf C:/Users/Owner/Documents/deals", "rm -r .",
                 "rm --recursive --force build", "foo && rm -rf bar",
                 "rm -Rf x", "sudo rm -rf /var/lib/thing"]:
         check("recursive delete implies may_write: %r" % cmd,
               (not tcp.is_recursive_delete(cmd)) or tcp.shell_may_write(cmd), cmd)
+
+
+def test_recursive_delete_known_broadenings_over_shell_may_write():
+    """The two DOCUMENTED, INTENTIONAL exceptions to the test above -- pinned
+    explicitly so they read as known and tracked, not as a silently broken
+    invariant. Both are real recursive deletes that this detector correctly
+    flags and that shell_may_write's OLD predicate misses -- a gap in
+    shell_may_write, not a defect here. If either of these ever becomes
+    write-shaped too (shell_may_write widens to cover it), that's progress and
+    this test should be updated to say so, not treated as a regression."""
+    verb_exe = "rm.exe -rf C:/Users/Owner/Documents/deals"
+    check("rm.exe is recursive-delete-detected", tcp.is_recursive_delete(verb_exe))
+    check("rm.exe is NOT write-shaped under the old predicate (known gap: "
+          "_BOUNDED_VERB_RE's separator class lacks '.')",
+          not tcp.shell_may_write(verb_exe), verb_exe)
+
+    ifs_evasion = "rm${IFS}-rf${IFS}/tmp/x"
+    check("${IFS} evasion is recursive-delete-detected",
+          tcp.is_recursive_delete(ifs_evasion))
+    check("${IFS} evasion is NOT write-shaped under the old predicate (known "
+          "gap: shell_may_write does not expand ${IFS})",
+          not tcp.shell_may_write(ifs_evasion), ifs_evasion)
 
 
 def test_governance_path_deletes_are_unchanged():
@@ -842,7 +867,8 @@ if __name__ == "__main__":
     test_recursive_delete_extracts_targets()
     test_recursive_delete_survives_unicode_evasion()
     test_recursive_delete_rejects_garbage()
-    test_recursive_delete_is_a_strict_subset_of_shell_may_write()
+    test_recursive_delete_implies_may_write_on_common_forms()
+    test_recursive_delete_known_broadenings_over_shell_may_write()
     test_governance_path_deletes_are_unchanged()
     if _failures:
         print("\n%d FAILURE(S): %s" % (len(_failures), ", ".join(_failures)))

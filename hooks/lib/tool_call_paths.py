@@ -480,7 +480,7 @@ def shell_analysis(tool_name, tool_input):
 # ------------------------------------------------ recursive tree delete (2026-08-14)
 # THE GAP THIS CLOSES. Everything above answers "does this command write?" -- and
 # every consumer of that answer (config-write-guard.py, workbook-write-guard.py,
-# ora-autonomy-gate.py) only BLOCKS when the write indicator is ALSO paired with a
+# lint-config-guard.py) only BLOCKS when the write indicator is ALSO paired with a
 # path marker for the surface that guard protects. The comment on _BOUNDED_VERBS
 # says so explicitly: "All 19 flag only when ALSO paired with a governance-path
 # marker." That pairing is correct for those guards -- and it leaves a hole:
@@ -499,9 +499,23 @@ def shell_analysis(tool_name, tool_input):
 # strictly BROADER governance-wide token). recursive_delete() touches none of that
 # machinery: shell_may_write(), its regexes and its indicator tuples are unchanged,
 # byte for byte. A consumer opts in by CALLING this; until one does, behavior is
-# identical. test_recursive_delete_is_a_strict_subset_of_shell_may_write pins the
-# structural half of that claim, and the differential battery pins the empirical
-# half (zero deltas on shell_may_write across the adversarial corpus).
+# identical -- proven by the diff itself (0 deletions, a single contiguous
+# insertion) and by the differential battery (zero deltas on shell_may_write,
+# shell_analysis, and normalize_text across an 11k-command adversarial corpus,
+# independently re-run and confirmed 2026-08-15).
+#
+# NOT A STRICT SUBSET, and the module does not claim to be one. Two known,
+# INTENTIONAL broadenings exist where this detector correctly flags a real
+# recursive delete that shell_may_write's OLD predicate misses:
+#   - `rm.exe -rf x` / any `verb.exe` spelling -- _BOUNDED_VERB_RE's separator
+#     class lacks `.`, so shell_may_write is blind to the .exe form on Windows.
+#   - `rm${IFS}-rf${IFS}/x` -- bash's ${IFS} word-splitting evasion.
+# test_recursive_delete_known_broadenings_over_shell_may_write pins both as
+# documented, expected divergences -- not a defect in this detector, and not
+# evidence against the additivity claim (which is about shell_may_write's
+# UNCHANGED behavior, never about this detector matching it exactly). It is,
+# however, a reason shell_may_write's own verb/separator handling should
+# eventually widen -- tracked separately, out of scope here.
 #
 # SCOPE, stated honestly (see also the PR body). This detects POSIX `rm` with a
 # recursive flag. It does NOT detect the Windows-native equivalents -- `rmdir /s`,
@@ -543,10 +557,23 @@ _RM_VERB_RE = re.compile(r"(?<![\w-])rm(?![\w-])", re.IGNORECASE)
 # "r", so `find . -type d -name rm -print` read as a recursive delete -- the `rm`
 # there is a search ARGUMENT and `-print` is find's flag, not rm's. Same class
 # would have hit `-perm`, `-newer`, `-prune`. Restricting the character class to
-# the options GNU/BSD rm actually accepts kills the whole class at once while
-# keeping every real bundle (verified by the exhaustive permutation sweep in the
-# differential harness: 0 bundles fire without an r, 0 bundles with an r stay
-# silent).
+# the options GNU rm actually accepts closes THAT false-positive class (verified
+# by the permutation sweep in the differential harness over GNU's option set: 0
+# bundles fire without an r, 0 bundles with an r stay silent) while keeping every
+# real GNU bundle. Two things this restriction does NOT do, stated honestly
+# rather than left for a reader to discover: (1) BSD/macOS rm's own short options
+# outside {r,f,i,d,v} -- e.g. `-P`, `-W`, `-x` -- are false NEGATIVES here (`rm
+# -rfP x` does not arm), since this machine's differential corpus only exercises
+# GNU coreutils; (2) restricting the CHARACTER CLASS does not give `rm` a notion
+# of command position, so a bundle-shaped `-r`/`-rf` still arms even when `rm`
+# is itself an ARGUMENT to something else, not the command being run -- `git rm
+# -r --cached node_modules` (does not delete from disk), `grep rm -r .`, `history
+# | grep 'rm -rf'`, and a shell comment `# rm -rf x` all currently read as a
+# recursive delete. Both gaps are real and both are deferred, same as every
+# other SCOPE item above: nothing consumes this detector yet, so nothing new
+# blocks on either gap today. A consumer wiring this into an actual guard must
+# close (2) first -- command-position false positives are the operationally
+# damaging class, not a cosmetic one.
 _RM_SHORT_OPTS = "rfidv"  # r/R recursive, f force, i/I prompt, d dir, v verbose
 _RECURSIVE_FLAG_RE = re.compile(
     r"(?<![\w-])--recursive(?![\w-])"
