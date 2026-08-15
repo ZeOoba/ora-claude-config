@@ -12,6 +12,7 @@
 ## Projects & system
 - [county-sales-monitor skill draft 08-15](project_county_sales_monitor_skill_draft_2026-08-15.md) — v0.2 DRAFT; cadence/delivery/scope ratified (monthly, Notion DB, Tier A only, Louisville deferred); pilot build not started
 - [Dangling worktree landing 08-15](project_dangling_worktree_landing_2026-08-15.md) — CLOSED: PRs #110/#112/#113/#114 merged, 2 others already-landed-elsewhere; settings.json dupe-registration collision found+fixed, PR #105 now CLEAN
+- [Multi-repo triage landed 08-15](project_multirepo_triage_landed_2026-08-15.md) — 4-repo dirty/PR/worktree sweep; oxford-command-center PRs #276/#277/#278 landed (OI-049/050/051 plan, confidentiality gate, debt-book-trust), 17 stale worktrees/branches removed, 0 open PRs left anywhere
 - [System of Record](00_system_of_record.md) — architecture + cold-start runbook + fleet/connector/secret inventory
 - [Event Log](event_log.md) — append-only system changes, deal milestones, decisions (newest first)
 - [Open Items Tracker](open-items-tracker.md) — canonical punch-list; other files POINT here, never restate item text
