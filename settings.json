@@ -363,6 +363,15 @@
         ]
       },
       {
+        "matcher": "mcp__scheduled-tasks__update_scheduled_task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/scheduled-task-update-preguard.py\""
+          }
+        ]
+      },
+      {
         "matcher": "Bash",
         "hooks": [
           {
