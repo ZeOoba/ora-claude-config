@@ -133,12 +133,14 @@ Exit 1 = block (a real test failure, no valid override) — git pre-push convent
 """
 import concurrent.futures
 import glob
+import hashlib
 import importlib.util
+import json
 import os
 import subprocess
 import sys
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
 
 HOOK_DIR = os.path.dirname(os.path.abspath(__file__))
 CLAUDE_DIR = os.path.dirname(HOOK_DIR)
@@ -202,6 +204,15 @@ TEST_FILE_PATTERNS = ("test-*.py", "test_*.py")
 # None -> canonical.
 TESTS_DIR_OVERRIDE = None
 EVENT_LOG_OVERRIDE = None
+
+# Test seam only (mirrors EVENT_LOG_OVERRIDE): when set, the override-frequency counter
+# reads/writes THIS path instead of the canonical state file. None -> canonical.
+OVERRIDE_USAGE_LOG_OVERRIDE = None
+OVERRIDE_USAGE_LOG_PATH = os.path.join(CLAUDE_DIR, "hooks", "_state", "override-usage-log.jsonl")
+# How far back "how many times has this exact failure been overridden" looks. 24h
+# matches OI-136's own framing ("N times today") without hardcoding a calendar day
+# boundary that would reset mid-incident.
+OVERRIDE_FREQUENCY_WINDOW_HOURS = 24
 
 
 def default_tests_dir():
@@ -283,27 +294,87 @@ def _run_one(path):
     calls it."""
     rc, output, timed_out = run_test_file(path)
     timeout_retried = False
+    fail_retried = False
+    first_output = None
+    status = classify(rc, output)
     if timed_out:
         timeout_retried = True
         rc, output, _ = run_test_file(
             path, timeout=PER_TEST_TIMEOUT_SECONDS * TIMEOUT_RETRY_MULTIPLIER)
+        status = classify(rc, output)
+    elif status == "fail":
+        # ONE rerun for a FAILING file too (2026-08-10). Load-flake protection used to
+        # cover only timeouts, but an oversubscribed host does not always produce a
+        # timeout: a wall-clock-sensitive concurrency test fails its ASSERTIONS instead
+        # and landed in the one category with no retry, blocking the push outright.
+        # Live case: maintenance/_tests/test_allocate_oi_id.py races 12 threads against a
+        # 30s lock-wait budget; under this gate's own 8-worker pool one thread missed the
+        # deadline and all three of its coupled assertions fell together (9/12). It
+        # passed cleanly on the very next push.
+        #
+        # This does NOT weaken the gate: a genuine failure fails both runs and still
+        # blocks. What it removes is a single unlucky sample deciding a push. Deliberately
+        # `elif`, so one file can never cost three budgets -- a timed-out file already
+        # spent the doubled rerun and does not also get this one.
+        #
+        # The rerun uses the NORMAL budget: the doubled budget exists for timeouts
+        # specifically, and keying it on anything but run_test_file()'s timed_out flag is
+        # the exact confusion a 2026-07-26 REFUTE review corrected (a child that merely
+        # EXITS 124 is a deterministic failure, not a hang).
+        fail_retried = True
+        first_output = output
+        rc, output, _ = run_test_file(path)
+        status = classify(rc, output)
+        if status == "env-skip":
+            # A rerun that declares "CANNOT RUN:" after run 1 genuinely FAILED must not
+            # become a non-blocking skip. Run 1 executed far enough to fail its
+            # assertions, which is proof the file CAN run in this environment -- so an
+            # env-skip on run 2 is a changed precondition (a sibling worker's lock,
+            # fixture handle, or resource state), not a real inability to execute.
+            # Without this, a real failure both stops blocking AND vanishes from the
+            # report, because format_summary()'s flaky list scans passes only. Found by
+            # independent review 2026-08-10, reproduced against the first draft.
+            status = "fail"
+            output = (output or "") + (
+                "\n[gate] rerun reported ENV-SKIP, but the FIRST run failed -- a file "
+                "that ran far enough to fail has proven it can run here, so this is a "
+                "FAIL, not a skip.\n")
     return {
         "file": display_name(path),
         "rc": rc,
-        "status": classify(rc, output),
+        "status": status,
         "output": output,
         "timeout_retried": timeout_retried,
+        "fail_retried": fail_retried,
+        # Run 1's output, kept ONLY when a fail-retry still failed: the two runs can fail
+        # with different signatures, and discarding the first sample is exactly the
+        # diagnostic this policy makes more valuable.
+        "first_output": first_output if (fail_retried and status == "fail") else None,
     }
 
 
 def run_suite(root=None):
-    """[{"file", "rc", "status", "output", "timeout_retried"}] for every discovered
-    test file, in DISCOVERY (sorted) order. A first-run timeout (the timed_out flag
-    from run_test_file, NOT the rc — so a child that merely exits 124 is a
-    deterministic failure, no retry) gets one rerun at the doubled budget; the
-    rerun's rc/output replace the first run's and are what classify() judges.
-    timeout_retried records that the rerun happened, whatever its outcome, so the
-    summary can disclose it.
+    """[{"file", "rc", "status", "output", "timeout_retried", "fail_retried",
+    "first_output"}] for every discovered test file, in DISCOVERY (sorted) order.
+
+    Retry policy — at most ONE rerun per file, never two:
+      * A first-run TIMEOUT (the timed_out flag from run_test_file, NOT the rc — so a
+        child that merely exits 124 is a deterministic failure, not a hang) gets one
+        rerun at the DOUBLED budget.
+      * Otherwise a first-run FAIL gets one rerun at the NORMAL budget (2026-08-10):
+        load-flake protection previously covered only timeouts, but an oversubscribed
+        host also makes wall-clock-sensitive tests fail their ASSERTIONS, which had no
+        retry and blocked the push outright.
+      * An ENV-SKIP is never rerun. And a fail-retry whose rerun reports env-skip is
+        forced back to FAIL — run 1 proved the file can execute here, so run 2's
+        "CANNOT RUN:" is a changed precondition, not an inability to run. Without that,
+        a real failure would stop blocking AND vanish from the report.
+
+    The rerun's rc/output replace the first run's and are what classify() judges;
+    first_output preserves run 1's output when a fail-retry still failed, so a file
+    that fails two DIFFERENT ways is diagnosable. timeout_retried / fail_retried record
+    that a rerun happened, whatever its outcome, so the summary can disclose it — a
+    recovered flake is always named, never silently swallowed.
 
     Runs discovered files CONCURRENTLY, bounded by MAX_PARALLEL_TESTS (2026-07-26,
     OI-028 root cause). WHY: a live push trace showed this gate running all ~54
@@ -332,6 +403,23 @@ def any_real_failure(results):
     return any(r.get("status") == "fail" for r in results)
 
 
+def failure_signature(results):
+    """A short, stable id for the CURRENT set of genuinely-failing files (status=="fail"
+    only; pass/env-skip never contribute). Same failing files -> same signature
+    regardless of run order, output content, or exit code -- two runs of the identical
+    flake rarely produce byte-identical output, and the frequency counter exists to
+    answer "does THIS test file keep needing an override", not "did the exact same
+    stack trace happen twice". Sorted, so worker-thread completion order (run_suite()
+    already restores discovery order, but this does not depend on that) never changes
+    the id."""
+    failing = sorted(r["file"] for r in results if r.get("status") == "fail")
+    return hashlib.sha256("\n".join(failing).encode("utf-8")).hexdigest()[:12]
+
+
+def override_usage_log_path():
+    return OVERRIDE_USAGE_LOG_OVERRIDE or OVERRIDE_USAGE_LOG_PATH
+
+
 def format_summary(results):
     """A human-readable report: counts, then the tail of every FAIL's output (enough
     to diagnose without re-running by hand), then a one-line list of ENV-SKIPs."""
@@ -342,15 +430,42 @@ def format_summary(results):
              % (len(passed), len(failed), len(skipped), len(results))]
     for r in failed:
         tail = "\n".join((r["output"] or "").splitlines()[-8:])
-        # .get(): stubbed/legacy result dicts may predate the timeout_retried key.
-        note = ", after a timeout retry" if r.get("timeout_retried") else ""
+        # .get(): stubbed/legacy result dicts may predate the retry keys.
+        if r.get("timeout_retried"):
+            note = ", after a timeout retry"
+        elif r.get("fail_retried"):
+            # Say it failed TWICE, so nobody reads a blocked push as one bad sample.
+            note = ", failed twice (reran once)"
+        else:
+            note = ""
         lines.append("--- FAIL: %s (exit %s%s) ---\n%s" % (r["file"], r["rc"], note, tail))
+        # Both runs failed: show run 1 too. They can fail with DIFFERENT signatures, and
+        # that divergence is the strongest signal that the file is racy rather than
+        # deterministically broken.
+        first = r.get("first_output")
+        # Compare the FULL outputs, not the tails. `tail` is 8 lines and a first-run
+        # excerpt is 5, so comparing those two declared "failed differently" for
+        # byte-identical failures whose output ran past 5 lines -- i.e. most real
+        # tracebacks -- pointing the reader at "racy" when the evidence says
+        # deterministic. Truncation is for DISPLAY only.
+        if first and first.strip() != (r["output"] or "").strip():
+            first_tail = "\n".join(first.splitlines()[-5:])
+            if first_tail.strip():
+                lines.append("    (first run failed differently:)\n%s" % first_tail)
     if skipped:
         lines.append("env-skip (not blocking): " + ", ".join(r["file"] for r in skipped))
     recovered = [r for r in passed if r.get("timeout_retried")]
     if recovered:
         lines.append("timeout-retry (timed out under load, passed on the doubled-budget "
                      "rerun; not blocking): " + ", ".join(r["file"] for r in recovered))
+    # Disclosed, never swallowed: trading a blocked push for an INVISIBLE flake would be
+    # a worse bug than the one the fail-retry policy fixes. A file listed here is a real
+    # flake and wants fixing, even though it did not block this push.
+    flaky = [r for r in passed if r.get("fail_retried")]
+    if flaky:
+        lines.append("fail-retry (FAILED once, passed on the rerun; not blocking, but "
+                     "this file is FLAKY and should be fixed): "
+                     + ", ".join(r["file"] for r in flaky))
     return "\n".join(lines)
 
 
@@ -427,6 +542,98 @@ def log_override_use(session_id=None, reason=None):
                 pass
 
 
+def record_override_use(session_id, signature, now=None):
+    """Append one line to the override-frequency JSONL (OI-136 candidate fix 2: "a
+    visible counter in the gate's block message ... so the approver weighs the pattern,
+    not just the instance"). Best-effort, same posture as log_override_use()'s event_log
+    append: this is a visibility aid, not a security control -- decide()'s exit code
+    never reads this file -- so a write failure must never block or fail the push."""
+    now = now or datetime.now()
+    path = override_usage_log_path()
+    record = {
+        "ts": now.strftime("%Y-%m-%dT%H:%M:%S"),
+        "session_id": session_id or "<unknown>",
+        "signature": signature,
+    }
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+    except OSError as e:  # pragma: no cover - defensive
+        sys.stderr.write(
+            "pre-push hook-tests gate: override used but the frequency-counter append "
+            "FAILED (%s) -- not blocking, this is visibility only.\n" % e)
+
+
+def override_frequency(signature, now=None, window_hours=None):
+    """(count, distinct_session_count) of override uses recorded for this exact failure
+    signature within the rolling window. Call AFTER record_override_use() for the same
+    `now` and the count/session-count returned include the just-recorded use -- that
+    keeps the message's arithmetic trivial ("this failure has now been overridden N
+    times") instead of requiring the caller to add 1 and re-derive session-set
+    membership by hand.
+
+    Missing or unreadable state file reads as (0, 0), never an error or a crash: a fresh
+    machine, a wiped state file, or the file simply not existing yet must not be
+    mistaken for repeat-override history, and must never be why a push fails. A
+    malformed line (bad JSON, a missing field) is skipped rather than aborting the scan
+    -- one corrupt line must not blind the counter to every other line in the file."""
+    window_hours = (OVERRIDE_FREQUENCY_WINDOW_HOURS if window_hours is None
+                     else window_hours)
+    now = now or datetime.now()
+    cutoff = now - timedelta(hours=window_hours)
+    path = override_usage_log_path()
+    sessions = set()
+    count = 0
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except OSError:
+        return (0, 0)
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        # A line can be VALID JSON and still not be a record -- e.g. a bare number or a
+        # JSON array from a future writer, a truncated append, or a stray non-JSONL line.
+        # rec.get(...) below would raise AttributeError on anything but a dict, which
+        # would propagate out of override_frequency() uncaught and crash main() itself
+        # (found in this session's own REFUTE pass, not by an external report).
+        if not isinstance(rec, dict):
+            continue
+        if rec.get("signature") != signature:
+            continue
+        try:
+            ts = datetime.strptime(rec["ts"], "%Y-%m-%dT%H:%M:%S")
+        except (KeyError, TypeError, ValueError):
+            continue
+        if ts < cutoff:
+            continue
+        count += 1
+        sessions.add(rec.get("session_id"))
+    return (count, len(sessions))
+
+
+def _pluralize_count(n, singular="time", plural="times"):
+    return "%d %s" % (n, singular if n == 1 else plural)
+
+
+def override_frequency_note(count, distinct_sessions, window_hours, verb):
+    """The human-readable line shared by both the BLOCKED and OVERRIDDEN message paths.
+    `verb` distinguishes "already has been" (blocked, informational) from "has now been"
+    (overridden, this use included) so the tense matches what actually happened."""
+    session_word = "session" if distinct_sessions == 1 else "sessions"
+    return (
+        "  This exact failure %s overridden %s by %d distinct %s in the last %dh -- "
+        "weigh that pattern, not just this instance.\n"
+        % (verb, _pluralize_count(count), distinct_sessions, session_word, window_hours)
+    )
+
+
 def main():
     for _stream in (sys.stdout, sys.stderr):
         try:
@@ -486,6 +693,15 @@ def main():
             "pre-push: hook test failure present but OVERRIDDEN - session %s holds a valid "
             "allow-hook-test-failure token. Push ALLOWED; the override was logged to "
             "event_log.md.\n" % session_id)
+        # OI-136 candidate fix 2: surface the pattern, not just this instance. Recorded
+        # AFTER the decision is made and the push is already allowed -- this is a
+        # visibility aid on a decision already taken, never a gate on it.
+        signature = failure_signature(results)
+        now = datetime.now()
+        record_override_use(session_id, signature, now=now)
+        count, distinct_sessions = override_frequency(signature, now=now)
+        sys.stderr.write(override_frequency_note(
+            count, distinct_sessions, OVERRIDE_FREQUENCY_WINDOW_HOURS, verb="has now been"))
     elif exit_code != 0:
         sys.stderr.write(
             "pre-push BLOCKED: the tracked test suite has a real failure (see report above). "
@@ -496,6 +712,16 @@ def main():
             sys.stderr.write(
                 "  NOTE: this push carries no CLAUDE_CODE_SESSION_ID, so no override can be "
                 "honored here at all. Fix the failure — do not try to mint a token.\n")
+        # Same visibility, before any token is minted: an approver deciding whether to
+        # authorize a NEW override should see how often this exact failure already has
+        # been. Read-only -- blocking a push must never itself write to the counter, or
+        # every retry of a still-broken push would inflate its own frequency count.
+        signature = failure_signature(results)
+        count, distinct_sessions = override_frequency(signature, now=datetime.now())
+        if count > 0:
+            sys.stderr.write(override_frequency_note(
+                count, distinct_sessions, OVERRIDE_FREQUENCY_WINDOW_HOURS,
+                verb="already has been"))
     return exit_code
 
 

@@ -58,6 +58,49 @@ GUARD = os.path.join(HOOK_DIR, "confidentiality-guard.py")
 TERMS_FILE = os.path.join(HOOK_DIR, "confidential-terms.json")
 
 
+def _git_common_dir(start_dir):
+    """Absolute path to the repo's shared .git dir (identical for every worktree
+    of the same repo), or None on any failure. Uses _clean_env() so a leaked
+    GIT_COMMON_DIR from the outer pre-push invocation cannot redirect it."""
+    try:
+        p = subprocess.run(["git", "-C", start_dir, "rev-parse", "--git-common-dir"],
+                           capture_output=True, text=True, timeout=5, env=_clean_env())
+    except Exception:
+        return None
+    if p.returncode != 0:
+        return None
+    out = p.stdout.strip()
+    if not out:
+        return None
+    if not os.path.isabs(out):
+        out = os.path.normpath(os.path.join(start_dir, out))
+    return out
+
+
+def _main_worktree_terms_file():
+    """confidential-terms.json in the MAIN worktree, or None if unresolvable or
+    already the path we just tried.
+
+    WHY (2026-08-10): hooks/confidential-terms.json is gitignored, so
+    `git worktree add` never checks it out -- this suite therefore printed
+    "CANNOT RUN" and ENV-SKIPped on EVERY push from a linked worktree, which is
+    now how most pushes happen. The production code under test,
+    git-prepush-confidential-scan.py, solved exactly this on 2026-07-12 by
+    falling back to the main worktree's copy; the TEST never inherited that
+    fallback, so the guard's own suite quietly stopped running while the guard
+    itself stayed fully covered. Deliberately mirrors that function so both
+    resolve the roster identically -- change them together."""
+    common_dir = _git_common_dir(HOOK_DIR)
+    if common_dir is None:
+        return None
+    # Assumes <repo-root>/hooks/confidential-terms.json -- the same layout
+    # TERMS_FILE itself relies on.
+    candidate = os.path.join(os.path.dirname(common_dir), "hooks", "confidential-terms.json")
+    if os.path.normcase(os.path.abspath(candidate)) == os.path.normcase(os.path.abspath(TERMS_FILE)):
+        return None  # already the file we just tried
+    return candidate
+
+
 def _load_guard_module():
     """Import confidentiality-guard.py as a module so a unit test can call its
     internal stdin-decode helper directly, without a subprocess. Needed for the
@@ -127,11 +170,45 @@ def _write_synthetic_terms_file():
 
 def load_live_terms():
     global ACTIVE_TERMS_FILE
-    try:
-        with open(TERMS_FILE, encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception as e:
-        print("CANNOT RUN: confidential-terms.json unreadable (%s) — suite requires the live terms file." % e)
+    # Try this checkout's copy, then the MAIN worktree's -- the same two-step the
+    # production scan uses. CANNOT RUN (-> ENV-SKIP) only if BOTH are unreadable,
+    # which now means a genuinely broken roster rather than "you pushed from a
+    # worktree", the case that was silently skipping this suite on most pushes.
+    # Callables, not values: the fallback must stay LAZY so a readable local roster
+    # never spawns a `git rev-parse` subprocess -- production resolves it only on
+    # failure, and the mirror should match that too.
+    data, errors = None, []
+    for get_candidate in (lambda: TERMS_FILE, _main_worktree_terms_file):
+        candidate = get_candidate()
+        if candidate is None:
+            continue
+        try:
+            with open(candidate, encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            # Record EVERY candidate's error, not just the first. In a worktree the
+            # first is always an unremarkable "no such file" for the local path, and
+            # keeping only that one would report a missing file while the ACTUAL
+            # fault -- e.g. a corrupt main roster -- stayed invisible.
+            errors.append("%s: %s" % (candidate, e))
+            continue
+        if data is None:
+            # A file containing literal JSON `null` PARSES fine and yields None.
+            # Breaking here would consume the candidate and never try the fallback,
+            # even with a perfectly good main roster. Production's _read_json treats
+            # a null parse as unreadable and falls through for exactly this reason --
+            # this keeps the two resolvers honest about the "change them together"
+            # contract above.
+            errors.append("%s: parsed to null (no roster object)" % candidate)
+            continue
+        # Guard SUBPROCESSES must read the same file this function parsed, or the
+        # suite would assert against one roster while the guard used another.
+        ACTIVE_TERMS_FILE = candidate
+        break
+    if data is None:
+        print("CANNOT RUN: confidential-terms.json unreadable — suite requires the live "
+              "terms file, and the main-worktree fallback did not resolve either. "
+              "Tried: %s" % ("; ".join(errors) if errors else "no candidate path resolved"))
         sys.exit(1)
     always, context = [], []
     for key, deal in data.items():

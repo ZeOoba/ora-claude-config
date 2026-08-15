@@ -52,4 +52,6 @@ mid-merge: [[project-eos-review-gate-shipped-2026-07-24]].
 Related: [[feedback-fixture-shaped-tests-certify-dead-branches]] ·
 [[feedback-refute-pass-proactive-default]] · [[feedback-interactive-decision-questions]] ·
 [[reference-stale-merge-head-poisons-graph]] ·
-[[reference-autocrlf-defeats-content-hash-gates]]
+[[reference-autocrlf-defeats-content-hash-gates]] ·
+`docs/review-lenses.md` (BLAST-RADIUS grep lens for missed call sites, added 2026-08-13 —
+a technique to apply within a review this gate already triggered, not a new trigger)
