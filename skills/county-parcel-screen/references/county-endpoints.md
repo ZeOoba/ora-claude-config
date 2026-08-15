@@ -26,6 +26,13 @@
 - Parse with python-calamine (`CalamineWorkbook.from_path`); openpyxl is unusable on the 507K-row TaxDetail.
 - Franklin delinquency base rate (2026-07-15): 41,659 of 506,988 county parcels carry prior/penalty > 0 (~8.2%);
   industrial 10–80K SF ran 171/1,154 (14.8%) — elevated vs the county base but not dramatically.
+- **Validity signal (found via county-sales-monitor pilot, 2026-08-15):** the GIS parcel layer's `VALID` field
+  exists in the live schema but was null on 100% of a 205-parcel industrial pull — not usable. The Transfer*.txt
+  files carry an `IsValid` field ('T'/'F') that IS well-populated and is the usable non-arms-length signal.
+- **Bulk-file recording lag (same pilot):** the live GIS layer's SALEDATE can run ~1 month ahead of the newest
+  Tax Accounting transfer-file drop (e.g. GIS showed sales through 08-14 while the newest Transfer* folder was
+  still the 07-15 drop) — a windowed pull against Transfer*.txt alone will miss the most recent weeks' deeds
+  until the next monthly folder posts. Not a bug, a recurring gap to diff against on repeat runs.
 
 ## Hamilton County OH (Cincinnati) — RICH REST, NO COMMERCIAL SF
 - REST: https://services.arcgis.com/JyZag7oO4NteHGiq/arcgis/rest/services/Open_Data/FeatureServer/51
@@ -146,6 +153,15 @@
   confirm true $/SF against the actual recent sale price per finalist. ZIP factors range wildly 0.85-3.46
   (21227=2.24, 21030=1.06, 21222=3.46); county 1.639 is fallback only. HOLD-FIX F1: MD records consideration
   cleanly — only 1 nominal <$25K transfer in the universe (far fewer $0 re-titlings than Ohio).
+- **CONVEY1 code (found via county-sales-monitor pilot, 2026-08-15):** a `CONVEY1` conveyance-type field exists
+  on the layer and correlates strongly with null CONSIDR1 — in a 50-parcel industrial pull, `CONVEY1=4` accounted
+  for 23 of 25 no-consideration "transfers." The code's meaning is genuinely undocumented anywhere public found
+  so far (likely deeds of trust / corrective deeds / distributions / foreclosure-related, not sham sales — true
+  $0/<$25K nominal sales stayed rare, 0 of 50). Treat CONVEY1=4 as a strong null-consideration correlate, not a
+  confirmed non-sale-type classification, until the code is actually decoded.
+- **Seller/grantor name gap:** neither the state MdProperty layer nor the county `Property/MapServer/1` join
+  exposes prior-owner/grantor — both are current-owner-only. Grantor-based nominal-transfer tests (shared
+  surname) cannot run for Baltimore Co on this data; don't assume they can.
 - Delinquency: none in-layer; Stage 2 = Baltimore County tax-sale/delinquent-tax list (separate pull).
 
 ## Census ACS (any market)
@@ -393,7 +409,11 @@ ORA county-parcel-screen pipeline · verified 2026-06-09
 - **Key inventory fields:** `dp` (14-digit district/parcel — primary key), `gp` (12-digit GIS geoparcel), `occupancy_group` (WHS/OFF/RTL/APT/LND/ATO/…), `occupancy` + `occupancy_descr` (46 Warehouse, 25C Office & Warehouse, 20A Industrial Light, 48 Warehouse Condo, 44 Warehouse Transit, 35C Retail & Warehouse, 47 Warehouse Mini = self-storage, 37 Auto Repair, 20B Industrial Heavy…), `class` (B Commercial / I Industrial / C Commercial Exempt / M Res3+ / combos), `land_full/bldg_full/total_full` (assessed @100% market), `*_adj` (post-board), `gross_area` (building SF — populated), `year_built`, `bldg_class`, `grade`, `condition`, `air_cond_area`, `sprinkle_area`, `land_area` (lot SF), `title_holder1/2`, `contract_buyer1/2` (Iowa contract sales — live contract purchasers), `transfer_th1` (current-owner deed date) + `book/pg`, full mail address block (`mail_name`, `mail_line1`, `mail_city/state/zip`), `occupant` (DBA), `x,y` (IA State Plane N, ft), `tif`, `zoning`, `school_district`, `jurisdiction`.
 - **Commercial sales (countywide, 1987→current, refreshed continuously):**
   `https://web.assess.co.polk.ia.us/info/web/exports/comm/sales/polk/POLKCOUNTY.csv` (~13 MB, 21,324 rows)
-  Fields: `dp`, `gp`, `sale_date`, `price`, `instrument` (**Deed | Contract** — Iowa contract sales explicit), `seller`, `buyer`, `book/pg`, plus the full CAMA snapshot of the sold parcel (`total_full`, `gross_area`, occupancy…), `dps`/`gps` (all parcels in multi-parcel sales), `initial_entry_date`.
+  Fields: `dp`, `gp`, `sale_date`, `price`, `instrument` (**Deed | Contract** — Iowa contract sales explicit), `seller`, `buyer`, `book/pg`, `quality` (Iowa DOR standard sale-validity classification — Arms Length / Landlord to Tenant / Family / Adjoining or Non-Res Adjacent Land / Partial Assessment / No Consideration / Foreclosure / Estate Transfer / etc. — **found via county-sales-monitor pilot, 2026-08-15, not previously documented here; a strong non-arms-length signal, use it before falling back to price/ratio heuristics**), plus the full CAMA snapshot of the sold parcel (`total_full`, `gross_area`, occupancy…), `dps`/`gps` (all parcels in multi-parcel sales), `initial_entry_date`.
+- **`gps` multi-parcel rollup gap (same pilot):** member parcel IDs in `gps` sometimes don't exist in the *current*
+  inventory CSV snapshot (3 of 18 multi-parcel deeds in a 12-month pull) — Iowa assessors appear to retire old
+  parcel IDs after combining them post-acquisition. A naive SF sum across `gps` members can silently undercount;
+  treat an incomplete `gps` join as SF-unknown, not zero.
 - **Quirks:** occupancy codes carry trailing spaces — strip; inventory has **no sale price** (join sales on `dp`); `transfer_th1` dates exist pre-1987 with no matching sale row (NO-PRICE); WAF (Akamai/boomerang) tolerates python urllib with a plain UA; per-parcel pages at `/cgi-bin/web/tt/form.cgi?tt=cinvenform` (queryable web API forms also exist under `query.cgi`).
 
 ### 2. Polk County GIS
