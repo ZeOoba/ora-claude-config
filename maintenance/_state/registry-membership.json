@@ -1,5 +1,5 @@
 {
- "ts": "2026-07-28T08:53:55",
+ "ts": "2026-08-14T15:07:12",
  "fleets": {
   "cc": [
    "ora-aaos-expire-leases",
@@ -10,6 +10,7 @@
    "ora-calibration-snapshot",
    "ora-cc-schematic-refresh",
    "ora-cc-snapshot-refresh",
+   "ora-claude-setup-audit",
    "ora-command-center-mirror-drift-check",
    "ora-deal-aging-sla",
    "ora-deal-command-board",
@@ -24,6 +25,7 @@
    "ora-monthly-portfolio-briefing",
    "ora-open-sessions-board",
    "ora-pm-ledger",
+   "ora-psa-drift-watch",
    "ora-site-exposure-probe",
    "ora-sofr-direct-prefetch",
    "ora-task-integrity-guard",
@@ -34,7 +36,6 @@
    "automation-health-monitor",
    "ora-ar-export-freshness-nudge",
    "ora-bearmode-refresh",
-   "ora-cam-reconciliation-annual",
    "ora-capex-idea-stage-nudge",
    "ora-consolidate-memory-monthly",
    "ora-cowork-heartbeat",
@@ -45,6 +46,7 @@
    "ora-gis-endpoint-liveping",
    "ora-health-guard-fail-aging-nudge",
    "ora-ic-memo-pipeline-reconciliation",
+   "ora-insurance-renewal-monitor",
    "ora-lease-expiration-brief",
    "ora-monday-sync",
    "ora-om-intake-ocr",

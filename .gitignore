@@ -86,6 +86,14 @@ obsidian-fleet-mirror/session-state.d/
 # uniform-stamp Notion source (see SKILL.md A.1). Durable engine, not scratch. Its `state/`
 # sibling stays untracked on purpose, same reasoning as the two entries above.
 !/scheduled-tasks/ora-pm-ledger/capex_snapshot_diff.py
+# (2026-08-14) Same loss class, same per-file rule: ora-pm-ledger's Property Register
+# snapshot-diff engine — the third and last A.1 uniform-stamp detector (SKILL.md A.2 step 2,
+# built 2026-08-11). Durable engine, not scratch: without it a Property Register edit is
+# undetectable, because all 14 rows share one batch-write `last_edited_time`. Caught by
+# task-folder-backup-completeness-probe (guard STEP 2.8) — it shipped three days after its
+# two siblings were force-tracked here and inherited none of their coverage. Its `state/`
+# sibling stays untracked on purpose, same reasoning as the three entries above.
+!/scheduled-tasks/ora-pm-ledger/property_register_snapshot_diff.py
 
 # (2026-07-17, Gabriel-authorized) 2b covered live task SKILL.mds but not retired ones: a
 # _archive_*_retired/<id>/SKILL.md sits one level deeper than */SKILL.md matches, so EVERY
