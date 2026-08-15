@@ -15,12 +15,15 @@ manually running the suite would ever have caught it. Run: python
 test-git-prepush-hook-tests-gate.py (exit 0 = pass)
 """
 import contextlib
+import glob
 import importlib.util
 import io
+import json
 import os
 import stat
 import sys
 import tempfile
+from datetime import datetime, timedelta
 
 HOOKS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 spec = importlib.util.spec_from_file_location(
@@ -219,6 +222,8 @@ expect("run_suite: statuses match", by_file == {
 # failure must not get two bites at the gate.
 retry_root = tempfile.mkdtemp(prefix="gt-retry-")
 retry_marker = os.path.join(retry_root, "flaky-first-run.marker")
+fail_retry_marker = os.path.join(retry_root, "flaky-fail-first-run.marker")
+envskip_retry_marker = os.path.join(retry_root, "fail-then-envskip.marker")
 write_dummy_test(retry_root, "test-flaky-timeout.py",
                  "import os, sys, time\n"
                  "marker = %r\n"
@@ -236,6 +241,44 @@ write_dummy_test(retry_root, "test-plain-fail.py",
 # review finding, 2026-07-26).
 write_dummy_test(retry_root, "test-fake-124.py",
                  "print('deterministically exiting 124')\nimport sys; sys.exit(124)\n")
+# Fails on the first run, passes on the second -- a LOAD-INDUCED failure, the shape a
+# wall-clock-sensitive concurrency test takes when the host is oversubscribed. Before
+# 2026-08-10 only TIMEOUTS earned a rerun, so this class blocked the push outright:
+# maintenance/_tests/test_allocate_oi_id.py's 12-thread test lost all three of its
+# coupled assertions (9/12) on a live push and passed cleanly on retry.
+write_dummy_test(retry_root, "test-flaky-fail.py",
+                 "import os, sys\n"
+                 "marker = %r\n"
+                 "if not os.path.exists(marker):\n"
+                 "    open(marker, 'w').close()\n"
+                 "    print('boom: load-induced failure')\n"
+                 "    sys.exit(1)\n"
+                 "print('ok on rerun')\n"
+                 "sys.exit(0)\n" % fail_retry_marker)
+# A control that passes first time: proves the rerun is scoped to FAILURES and does not
+# silently double the whole suite's subprocess count on a healthy push.
+write_dummy_test(retry_root, "test-passes-first-try.py",
+                 "print('green on the first run')\nimport sys; sys.exit(0)\n")
+# REGRESSION (independent review, 2026-08-10): run 1 genuinely FAILS, run 2 declares
+# CANNOT RUN. The first draft reclassified this as env-skip -- non-blocking AND absent
+# from the report, since the flaky disclosure scans passes only. That let a real failure
+# through silently, falsifying the policy's own "a real failure fails both runs and still
+# blocks" claim. Run 1 proved the file CAN execute here, so this must stay a FAIL.
+write_dummy_test(retry_root, "test-fail-then-envskip.py",
+                 "import os, sys\n"
+                 "marker = %r\n"
+                 "if not os.path.exists(marker):\n"
+                 "    open(marker, 'w').close()\n"
+                 "    print('boom: a real assertion failure')\n"
+                 "    sys.exit(1)\n"
+                 "print('CANNOT RUN: precondition vanished on the rerun')\n"
+                 "sys.exit(1)\n" % envskip_retry_marker)
+# An honest ENV-SKIP: must be run exactly ONCE and never retried. Asserted by SPAWN
+# COUNT, not just status -- otherwise a future refactor of the elif chain could start
+# rerunning env-skips with nothing failing.
+write_dummy_test(retry_root, "test-always-envskip.py",
+                 "print('CANNOT RUN: no roster in this environment')\n"
+                 "import sys; sys.exit(1)\n")
 
 # Record every run_test_file() call (file + timeout arg) while still really running the
 # subprocess, so retry COUNT and the retry's enlarged BUDGET are asserted directly
@@ -287,16 +330,72 @@ fake124_calls = [c for c in _rtf_calls if c[0] == "test-fake-124.py"]
 expect("timeout-retry: a timed-out file is run exactly TWICE, never more",
        len(flaky_calls) == 2 and len(hung_calls) == 2,
        "got flaky=%r hung=%r" % (flaky_calls, hung_calls))
-expect("timeout-retry: a non-timeout failure is run exactly ONCE",
-       len(plain_calls) == 1, "got %r" % (plain_calls,))
-expect("timeout-retry: a deterministic exit-124 is run exactly ONCE (flag, not rc, "
-       "triggers the retry)", len(fake124_calls) == 1, "got %r" % (fake124_calls,))
+# POLICY CHANGE 2026-08-10: a failing file now earns ONE rerun too, not just a
+# timed-out one -- so these are TWICE, where they were ONCE before. The REFUTE finding
+# these assertions were written to protect is unchanged and re-asserted just below: the
+# TIMEOUT retry still keys on run_test_file()'s timed_out FLAG, never on the exit code,
+# so a child that merely exits 124 gets a plain-budget rerun like any other failure and
+# never the doubled budget.
+expect("fail-retry: a non-timeout failure is run exactly TWICE, never more",
+       len(plain_calls) == 2, "got %r" % (plain_calls,))
+expect("fail-retry: a deterministic exit-124 is run exactly TWICE, never more",
+       len(fake124_calls) == 2, "got %r" % (fake124_calls,))
+expect("fail-retry: the failure rerun uses the NORMAL budget, not the doubled one "
+       "(flag, not rc, still gates the timeout retry)",
+       [c[1] for c in plain_calls] == [None, None]
+       and [c[1] for c in fake124_calls] == [None, None],
+       "got plain=%r fake124=%r" % (plain_calls, fake124_calls))
 expect("timeout-retry: the rerun gets a DOUBLED budget (base 3 -> retry 6)",
        len(flaky_calls) == 2 and flaky_calls[0][1] is None and flaky_calls[1][1] == 6,
        "got %r" % (flaky_calls,))
 
 expect("any_real_failure: a timeout-retried PASS does not block",
        gt.any_real_failure([flaky]) is False)
+
+# --- fail-retry: a load-induced failure earns ONE rerun (2026-08-10) -------------------
+flaky_fail = retry_by_file.get("test-flaky-fail.py", {})
+expect("fail-retry: fails once, passes on the rerun -> pass (not blocking)",
+       flaky_fail.get("status") == "pass", "got %r" % (flaky_fail,))
+expect("fail-retry: the recovered pass is marked fail_retried",
+       flaky_fail.get("fail_retried") is True, "got %r" % (flaky_fail,))
+expect("fail-retry: a recovered flake does not block the push",
+       gt.any_real_failure([flaky_fail]) is False)
+expect("fail-retry: a file that fails TWICE is still a real FAIL",
+       plain.get("status") == "fail" and plain.get("fail_retried") is True,
+       "got %r" % (plain,))
+flaky_fail_calls = [c for c in _rtf_calls if c[0] == "test-flaky-fail.py"]
+expect("fail-retry: the recovered flake is run exactly TWICE, never more",
+       len(flaky_fail_calls) == 2, "got %r" % (flaky_fail_calls,))
+# Asserted against a REAL passing dummy in this same root -- not a name that happens to
+# match nothing, which would pass vacuously no matter what the policy did.
+firstpass_calls = [c for c in _rtf_calls if c[0] == "test-passes-first-try.py"]
+expect("fail-retry: a first-run PASS is never rerun",
+       len(firstpass_calls) == 1, "got %r" % (firstpass_calls,))
+expect("fail-retry: a first-run PASS is not marked fail_retried",
+       retry_by_file.get("test-passes-first-try.py", {}).get("fail_retried") is False,
+       "got %r" % (retry_by_file.get("test-passes-first-try.py"),))
+expect("fail-retry: a timed-out file is NOT also fail-retried (one rerun total, so a "
+       "push can never pay three budgets for one file)",
+       hung.get("fail_retried") is False and len(hung_calls) == 2,
+       "got %r calls=%r" % (hung, hung_calls))
+
+# --- fail-retry must not become an ENV-SKIP escape hatch (review finding, 2026-08-10) --
+fail_envskip = retry_by_file.get("test-fail-then-envskip.py", {})
+expect("fail-retry: run-1 FAIL + run-2 'CANNOT RUN' stays a FAIL, never env-skip",
+       fail_envskip.get("status") == "fail", "got %r" % (fail_envskip,))
+expect("fail-retry: that FAIL still blocks the push",
+       gt.any_real_failure([fail_envskip]) is True, "got %r" % (fail_envskip,))
+expect("fail-retry: and it is marked fail_retried so the report can explain itself",
+       fail_envskip.get("fail_retried") is True, "got %r" % (fail_envskip,))
+
+always_skip = retry_by_file.get("test-always-envskip.py", {})
+always_skip_calls = [c for c in _rtf_calls if c[0] == "test-always-envskip.py"]
+expect("fail-retry: an honest ENV-SKIP is still env-skip",
+       always_skip.get("status") == "env-skip", "got %r" % (always_skip,))
+expect("fail-retry: an ENV-SKIP is run exactly ONCE, never retried",
+       len(always_skip_calls) == 1, "got %r" % (always_skip_calls,))
+expect("fail-retry: an ENV-SKIP is not marked fail_retried",
+       always_skip.get("fail_retried") is False, "got %r" % (always_skip,))
 
 # Visibility: a flake that recovered must be DISCLOSED in the report, not silently
 # eaten, and the twice-timed-out FAIL block must still appear with its exit code.
@@ -307,6 +406,31 @@ expect("format_summary: discloses the timeout-retried pass by name",
 expect("format_summary: twice-timed-out FAIL block survives with exit 124",
        "test-hung.py" in retry_summary and "124" in retry_summary,
        "got %r" % retry_summary)
+# Silently swallowing a recovered flake would trade a blocked push for an INVISIBLE
+# flake -- the one failure mode the 2026-08-10 fail-retry policy must not introduce.
+expect("format_summary: discloses the fail-retried pass by name",
+       "test-flaky-fail.py" in retry_summary and "fail-retry" in retry_summary,
+       "got %r" % retry_summary)
+expect("format_summary: a file that failed TWICE is reported as failing twice, not as "
+       "a recovered flake",
+       "failed twice" in retry_summary and "test-plain-fail.py" in retry_summary,
+       "got %r" % retry_summary)
+# REGRESSION (review, 2026-08-10): the divergence check compared an 8-line tail against a
+# 5-line one, so two IDENTICAL failures longer than 5 lines rendered "first run failed
+# differently" -- telling the reader the file is racy when the evidence says
+# deterministic. Compare full outputs; truncate only for display.
+_identical = {"file": "f.py", "rc": 1, "status": "fail", "timeout_retried": False,
+              "fail_retried": True,
+              "output": "l1\nl2\nl3\nl4\nl5\nl6\nl7\n",
+              "first_output": "l1\nl2\nl3\nl4\nl5\nl6\nl7\n"}
+expect("format_summary: identical double-failures are NOT reported as differing",
+       "failed differently" not in gt.format_summary([_identical]),
+       "got %r" % gt.format_summary([_identical]))
+_diverged = dict(_identical, first_output="l1\nl2\nl3\nl4\nl5\nl6\nDIFFERENT\n")
+expect("format_summary: genuinely divergent double-failures ARE reported, with run 1",
+       "failed differently" in gt.format_summary([_diverged])
+       and "DIFFERENT" in gt.format_summary([_diverged]),
+       "got %r" % gt.format_summary([_diverged]))
 
 # --- run_suite(): CONCURRENT execution (2026-07-26, OI-028 root cause) ----------------
 # A live push trace showed the pre-push hook-tests gate taking 137s wall-clock for ~54
@@ -457,6 +581,200 @@ with tempfile.TemporaryDirectory() as _td:
            "â€”" not in _written and "â€" not in _written,
            repr([l for l in _written.splitlines() if "â" in l][:1]))
 
+# --- failure_signature(): stable id for the CURRENT set of genuinely-failing files ----
+sig_a = gt.failure_signature([
+    {"file": "test-b.py", "status": "fail"},
+    {"file": "test-a.py", "status": "fail"},
+])
+sig_a_reordered = gt.failure_signature([
+    {"file": "test-a.py", "status": "fail"},
+    {"file": "test-b.py", "status": "fail"},
+])
+expect("failure_signature: order-independent (same failing set, reversed input order)",
+       sig_a == sig_a_reordered, "%r vs %r" % (sig_a, sig_a_reordered))
+
+sig_diff_output = gt.failure_signature([
+    {"file": "test-b.py", "status": "fail", "output": "totally different trace\n"},
+    {"file": "test-a.py", "status": "fail", "output": "another trace\n"},
+])
+expect("failure_signature: ignores output/rc, keys ONLY on the failing file set",
+       sig_a == sig_diff_output)
+
+sig_one_file = gt.failure_signature([{"file": "test-a.py", "status": "fail"}])
+expect("failure_signature: a different failing SET -> a different signature",
+       sig_one_file != sig_a)
+
+sig_no_fail = gt.failure_signature([
+    {"file": "test-a.py", "status": "pass"},
+    {"file": "test-b.py", "status": "env-skip"},
+])
+expect("failure_signature: pass/env-skip never contribute -- empty failing set is its "
+       "own stable id, same as an empty results list",
+       sig_no_fail == gt.failure_signature([]))
+expect("failure_signature: returns a short hex id, not the raw file list",
+       len(sig_no_fail) == 12 and all(c in "0123456789abcdef" for c in sig_no_fail),
+       repr(sig_no_fail))
+
+# --- override_frequency() / record_override_use(): rolling-window JSONL round-trip ----
+with tempfile.TemporaryDirectory() as _td:
+    _usage_log = os.path.join(_td, "override-usage-log.jsonl")
+    _prev_usage = gt.OVERRIDE_USAGE_LOG_OVERRIDE
+    gt.OVERRIDE_USAGE_LOG_OVERRIDE = _usage_log
+    try:
+        expect("override_frequency: missing file -> (0, 0), not an error",
+               gt.override_frequency("sig-fresh") == (0, 0))
+
+        base_now = datetime(2026, 8, 12, 12, 0, 0)
+        gt.record_override_use("sess-a", "sig-x", now=base_now)
+        expect("override_frequency: one record, same signature, in-window -> (1, 1)",
+               gt.override_frequency("sig-x", now=base_now) == (1, 1))
+        expect("override_frequency: a DIFFERENT signature is isolated -> (0, 0)",
+               gt.override_frequency("sig-y", now=base_now) == (0, 0))
+
+        gt.record_override_use("sess-b", "sig-x", now=base_now)
+        expect("override_frequency: two uses, two distinct sessions -> (2, 2)",
+               gt.override_frequency("sig-x", now=base_now) == (2, 2))
+
+        gt.record_override_use("sess-a", "sig-x", now=base_now)
+        expect("override_frequency: the SAME session overriding twice grows the count "
+               "but not the distinct-session count -> (3, 2)",
+               gt.override_frequency("sig-x", now=base_now) == (3, 2))
+
+        # window_hours: a record outside the DEFAULT window is excluded; the same
+        # record is still visible under a wider explicit window, and excluded again
+        # under a narrower one -- proves the parameter is actually consulted, not just
+        # accepted and ignored.
+        gt.record_override_use("sess-e", "sig-w", now=base_now - timedelta(hours=2))
+        expect("override_frequency: default 24h window includes a 2h-old record",
+               gt.override_frequency("sig-w", now=base_now) == (1, 1))
+        expect("override_frequency: an explicit narrower window (1h) excludes it",
+               gt.override_frequency("sig-w", now=base_now, window_hours=1) == (0, 0))
+        expect("override_frequency: a record OLDER than the default window is excluded",
+               gt.override_frequency(
+                   "sig-x", now=base_now + timedelta(hours=gt.OVERRIDE_FREQUENCY_WINDOW_HOURS + 1)
+               ) == (0, 0))
+
+        # Malformed-line resilience: one corrupt line must not blind the scan to others.
+        with open(_usage_log, "a", encoding="utf-8") as f:
+            f.write("not json at all\n")
+            f.write(json.dumps({"ts": "not-a-timestamp", "session_id": "sess-c",
+                                 "signature": "sig-x"}) + "\n")
+            f.write(json.dumps({"session_id": "sess-d", "signature": "sig-x"}) + "\n")  # no ts
+            # VALID json, NOT a dict -- rec.get(...) on a list/int would raise
+            # AttributeError if not guarded, crashing override_frequency() (and with it
+            # main()) rather than skipping one bad line. Regression test for the fix
+            # found in this session's own adversarial pass.
+            f.write("[1, 2, 3]\n")
+            f.write("42\n")
+        expect("override_frequency: malformed / bad-timestamp / missing-field / "
+               "valid-json-but-not-a-dict lines are ALL SKIPPED, not fatal -- the 3 "
+               "good prior records for sig-x are still counted, and no exception "
+               "escapes the call",
+               gt.override_frequency("sig-x", now=base_now) == (3, 2),
+               "got %r" % (gt.override_frequency("sig-x", now=base_now),))
+
+        # session_id=None (current_session_id() can return this on a headless push with
+        # no CLAUDE_CODE_SESSION_ID) must record and count cleanly, not crash.
+        gt.record_override_use(None, "sig-none", now=base_now)
+        expect("override_frequency: session_id=None records/counts without crashing",
+               gt.override_frequency("sig-none", now=base_now) == (1, 1))
+    finally:
+        gt.OVERRIDE_USAGE_LOG_OVERRIDE = _prev_usage
+
+# --- record_override_use(): write-failure resilience -----------------------------------
+# Mirrors log_override_use()'s own defensive posture: this is called AFTER the push has
+# already been allowed, so a state-file write failure must be visibility-only and must
+# NEVER raise back into main() (which would turn a passing push into a crash).
+_prev_usage = gt.OVERRIDE_USAGE_LOG_OVERRIDE
+gt.OVERRIDE_USAGE_LOG_OVERRIDE = os.path.join(
+    "Z:\\definitely\\does\\not\\exist\\on\\this\\machine", "override-usage-log.jsonl")
+try:
+    gt.record_override_use("sess-a", "sig-unwritable", now=datetime(2026, 8, 12))
+    expect("record_override_use: an unwritable path does not raise", True)
+except Exception as e:
+    expect("record_override_use: an unwritable path does not raise", False, repr(e))
+finally:
+    gt.OVERRIDE_USAGE_LOG_OVERRIDE = _prev_usage
+
+# --- override_frequency_note(): message formatting, both tenses and both pluralizations
+expect("override_frequency_note: singular count/session both read naturally",
+       gt.override_frequency_note(1, 1, 24, verb="has now been")
+       == "  This exact failure has now been overridden 1 time by 1 distinct session in "
+          "the last 24h -- weigh that pattern, not just this instance.\n")
+expect("override_frequency_note: plural count/session both read naturally",
+       gt.override_frequency_note(3, 2, 24, verb="already has been")
+       == "  This exact failure already has been overridden 3 times by 2 distinct "
+          "sessions in the last 24h -- weigh that pattern, not just this instance.\n")
+
+# --- main(): end-to-end wiring ---------------------------------------------------------
+# The note appears in the right branch with the right tense, records itself on an
+# override, and stays SILENT on a clean first block -- "overridden 0 times" would be
+# noise, not signal, on the very first encounter of a novel failure.
+with tempfile.TemporaryDirectory() as _td:
+    _usage_log = os.path.join(_td, "override-usage-log.jsonl")
+    _log = os.path.join(_td, "event_log.md")
+    with io.open(_log, "w", encoding="utf-8") as _f:
+        _f.write("---\nname: event_log\n---\n\n# ORA Event Log\n\nintro\n\n"
+                 "## 2026-01-01 - seed\n\nbody\n")
+    freq_root = tempfile.mkdtemp(prefix="gt-freqcounter-")
+    write_dummy_test(freq_root, "test-always-fails.py", "import sys; sys.exit(1)\n")
+
+    _prev_usage = gt.OVERRIDE_USAGE_LOG_OVERRIDE
+    _prev_event = gt.EVENT_LOG_OVERRIDE
+    _prev_tests_dir = gt.TESTS_DIR_OVERRIDE
+    gt.OVERRIDE_USAGE_LOG_OVERRIDE = _usage_log
+    gt.EVENT_LOG_OVERRIDE = _log
+    gt.TESTS_DIR_OVERRIDE = freq_root
+    os.environ["CLAUDE_CODE_SESSION_ID"] = SESSION
+
+    with tempfile.TemporaryDirectory() as sessions_root:
+        os.environ["ORA_OVERRIDE_SESSIONS_DIR"] = sessions_root
+        try:
+            # First block on a novel failure: nothing to report yet -> no frequency note.
+            _err = io.StringIO()
+            with contextlib.redirect_stderr(_err):
+                rc1 = gt.main()
+            expect("main: first block on a novel failure -> BLOCKED, exit 1",
+                   rc1 == 1, "got %r" % rc1)
+            expect("main: first block -> NO frequency note (nothing to report yet)",
+                   "This exact failure" not in _err.getvalue(),
+                   repr(_err.getvalue()[-300:]))
+
+            # Mint a token and override once.
+            mint(sessions_root, SESSION, good_token())
+            _err = io.StringIO()
+            with contextlib.redirect_stderr(_err):
+                rc2 = gt.main()
+            expect("main: overridden -> exit 0 (push allowed)", rc2 == 0, "got %r" % rc2)
+            expect("main: overridden -> frequency note present, correct tense/count",
+                   "has now been overridden 1 time by 1 distinct session"
+                   in _err.getvalue(), repr(_err.getvalue()[-400:]))
+            with io.open(_usage_log, encoding="utf-8") as _f:
+                _usage_written = _f.read()
+            expect("main: overridden -> the use was actually appended to the state file",
+                   os.path.exists(_usage_log) and SESSION in _usage_written,
+                   repr(_usage_written))
+
+            # Second block on the SAME failure, no token this time: BLOCKED again, but
+            # now the PRIOR override must be visible before a new token is minted.
+            for f in glob.glob(os.path.join(sessions_root, SESSION, "overrides", "*")):
+                os.remove(f)
+            _err = io.StringIO()
+            with contextlib.redirect_stderr(_err):
+                rc3 = gt.main()
+            expect("main: second block, no token -> BLOCKED again, exit 1",
+                   rc3 == 1, "got %r" % rc3)
+            expect("main: second block -> shows the PRIOR override before a new one is "
+                   "minted, in the 'already has been' tense",
+                   "already has been overridden 1 time by 1 distinct session"
+                   in _err.getvalue(), repr(_err.getvalue()[-400:]))
+        finally:
+            gt.OVERRIDE_USAGE_LOG_OVERRIDE = _prev_usage
+            gt.EVENT_LOG_OVERRIDE = _prev_event
+            gt.TESTS_DIR_OVERRIDE = _prev_tests_dir
+            os.environ.pop("ORA_OVERRIDE_SESSIONS_DIR", None)
+            os.environ.pop("CLAUDE_CODE_SESSION_ID", None)
+
 # --- override_active(): smoke-test the shared contract is wired with the RIGHT tier ---
 # (token_grants()/parse_token()'s own exhaustive adversarial matrix — duplicate keys,
 # oversized, future-dated, path-traversal session ids, etc — is already covered by
@@ -490,6 +808,12 @@ with tempfile.TemporaryDirectory() as td:
     with open(tmp_log, "w", encoding="utf-8") as f:
         f.write("# test log\n\n## 2000-01-01 — seed\n\n- seed entry\n")
     gt.EVENT_LOG_OVERRIDE = tmp_log
+    # Isolates record_override_use()'s state-file write the same way EVENT_LOG_OVERRIDE
+    # isolates the event_log append above -- without this, test (d) below (a real
+    # override) writes to the CANONICAL hooks/_state/override-usage-log.jsonl. Not reset
+    # afterward, matching this block's own EVENT_LOG_OVERRIDE convention: nothing later
+    # in this script needs canonical either.
+    gt.OVERRIDE_USAGE_LOG_OVERRIDE = os.path.join(td, "override-usage-log-test.jsonl")
 
     real_run_suite = gt.run_suite
 

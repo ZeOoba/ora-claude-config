@@ -971,5 +971,56 @@ check("...and still covers both",
 shutil.rmtree(root, ignore_errors=True)
 
 print()
+print("== ORDERING: read_active_claims / claims_touching return NEWEST-FIRST ==")
+# WHY (2026-08-11): the newest-first order is a CONTRACT, not an incidental sort.
+# shared-checkout-guard.py (~line 442) consumes it as `reversed(_claims_on(...))`
+# specifically so that, under its who[:4] display cap, the OLDEST claims survive
+# eviction -- four fresh filler claims must not push out the one long-running claim
+# that actually matters (adversarial review finding L4). Nothing in this suite
+# asserted the order until now, so flipping or dropping claim_work's
+# `out.sort(key=age_minutes)` would silently invert the guard's priority while every
+# test stayed green. Explicit `now=` throughout: ages are the thing under test, so
+# they must not depend on wall-clock or on how many suites the pre-push gate is
+# running in parallel (MAX_PARALLEL_TESTS=8).
+#
+# The slugs are chosen so age order differs from FILENAME order -- read_active_claims
+# sorts names alphabetically for its MAX_CLAIM_FILES cap before sorting by age, so
+# alphabetical slugs would let a dropped age-sort pass by accident.
+root = tempfile.mkdtemp(prefix="claim-order-")
+now = datetime.datetime(2026, 8, 11, 12, 0, 0)
+SHARED = "hooks/lib/claim_work.py"
+ORDER_CLAIMS = [                      # (slug, session, minutes old)
+    ("aged-thirty", "sess-old", 30),
+    ("middling-five", "sess-mid", 5),
+    ("brandnew-one", "sess-new", 1),
+]
+for slug, sess, mins in ORDER_CLAIMS:  # written oldest-first: not the expected order
+    cw.write_claim(slug, sess, "work by " + sess, base_dir=root,
+                    now=now - datetime.timedelta(minutes=mins),
+                    paths=[SHARED, "hooks/%s-only.py" % slug])
+
+claims = cw.read_active_claims(base_dir=root, now=now)
+check("read_active_claims returns claims NEWEST-FIRST",
+      [c["slug"] for c in claims],
+      ["brandnew-one", "middling-five", "aged-thirty"])
+check("...i.e. age_minutes ascending",
+      [round(c["age_minutes"]) for c in claims], [1, 5, 30])
+check("...and reversing it yields the OLDEST-first order the guard displays",
+      [c["slug"] for c in reversed(claims)],
+      ["aged-thirty", "middling-five", "brandnew-one"])
+
+# claims_touching() is the function shared-checkout-guard actually calls; it filters
+# read_active_claims but must not re-order it.
+touching = cw.claims_touching([SHARED], base_dir=root, now=now)
+check("claims_touching on a shared path preserves NEWEST-FIRST",
+      [c["slug"] for c in touching],
+      ["brandnew-one", "middling-five", "aged-thirty"])
+check("...and excluding one session leaves the rest still newest-first",
+      [c["slug"] for c in cw.claims_touching([SHARED], base_dir=root, now=now,
+                                              exclude_session="sess-mid")],
+      ["brandnew-one", "aged-thirty"])
+shutil.rmtree(root, ignore_errors=True)
+
+print()
 print("RESULT: %d/%d passed" % (sum(results), len(results)))
 sys.exit(0 if all(results) else 1)

@@ -1,6 +1,7 @@
 """Cross-session claim/broadcast primitive for ad-hoc work on shared ~/.claude
-subsystems that have no per-path single-writer rule (unlike ora-skills,
-scheduled-task registries, workflows/).
+subsystems that have no per-path single-writer rule (unlike scheduled-task
+registries and workflows/), PLUS ora-skills, which has one that cannot see the
+case this module catches -- see ORA-SKILLS below.
 
 SLUGS ARE FREE-FORM (2026-08-15 clarification, prompted by an ora-skills-scoped
 maintenance task defaulting to the generic 'repo-housekeeping' slug for lack of a
@@ -28,6 +29,21 @@ subsystem you're about to fix" convention the same reference file predicted, gen
 to a small free-form vocabulary of subsystem slugs (see docs/superpowers/specs/
 2026-07-25-cross-session-claim-broadcast-design.md for the full design and why each
 choice below matches an already-ratified pattern elsewhere in this codebase).
+
+ORA-SKILLS ADDED 2026-08-12 (vocabulary only, no mechanism change -- same shape as
+`repo-housekeeping`, see active-work-broadcast.py): two sessions were handed the same
+remediation prompt and both started work; the second caught it only by reading the
+first's session transcript, ~15 minutes in. ora-skills was originally EXCLUDED here
+because tech.md Sec2 already gives it a single-writer rule -- check `git log -1` +
+`git status` before editing any SKILL.md. That rule is retained and still governs (it
+catches the stale-HEAD / dirty-tree case a claim cannot), but it is structurally blind
+to a CONCURRENT session: commits there carry the machine's shared human author identity
+(as of 2026-08-12, 195 "Gabriel Goldberg" + 40 "ZE OOBA"/"ZeOoba"/"Ze Ooba"), never a
+per-session one, so git state cannot answer "is this HEAD mine?". The checking session
+saw a clean tree and a normal-looking recent commit and correctly concluded nothing was
+wrong. A claim names the SESSION, which is the axis git identity does not carry. The two
+rules are COMPLEMENTARY -- run both, and pass `--paths` (per the spec's Phase 2, the
+slug alone cannot distinguish two honest claims on one file).
 
 DESIGN, one line each:
   * One JSON file per claim (hooks/active-work/<slug>.json), never a shared file --
@@ -684,13 +700,13 @@ def main():
     c = sub.add_parser("claim", help="Register a claim on a subsystem slug")
     c.add_argument("slug", help="e.g. hooks-override-auth, open-items-tracker, "
                                  "oxford-command-center-data, repo-housekeeping, "
-                                 "ora-skills-housekeeping. Free-form -- coin a new, "
-                                 "narrower slug for a distinct repo/subsystem rather "
-                                 "than reusing repo-housekeeping for everything ~/.claude"
-                                 "-side (that slug's own scope is the ~/.claude checkout "
-                                 "itself, not ora-skills or other repos beneath it); see "
-                                 "active-work-broadcast.py's docstring for how the "
-                                 "vocabulary has grown before.")
+                                 "ora-skills, ora-skills-housekeeping. Free-form -- coin "
+                                 "a new, narrower slug for a distinct repo/subsystem "
+                                 "rather than reusing repo-housekeeping for everything "
+                                 "~/.claude-side (that slug's own scope is the ~/.claude "
+                                 "checkout itself, not ora-skills or other repos beneath "
+                                 "it); see active-work-broadcast.py's docstring for how "
+                                 "the vocabulary has grown before.")
     c.add_argument("description", help="One line: what you're doing and why")
     c.add_argument("--title")
     # action="extend" (not the former bare nargs="*"): with plain nargs, argparse
