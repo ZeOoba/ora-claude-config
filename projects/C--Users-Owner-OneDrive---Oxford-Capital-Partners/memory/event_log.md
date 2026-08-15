@@ -12,6 +12,10 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-15 — capex-budgeting ruling now tracked as OI-157 (cross-reference only)
+
+Addendum to the "capex-budgeting 2026-08-13 reimport RULED accidental" entry directly below (a concurrent session independently reached Gabriel with the same question and logged the same ruling first). Filing the pending manual action as [[open-items-tracker]] OI-157 (commit `7c9740a`) so it stays tracked to closure rather than living only as prose here — the store-side unpublish click is still Gabriel's alone to make (no tool on this surface reaches the claude.ai Skills store). No new facts in this entry; see the fuller entry below for the evidence chain.
+
 ## 2026-08-14 — Rev 10 remediation: R10-4 closed — ora-psa-drift-watch-retime-efficacy-check registered
 
 Registered via `register-scheduled-task` skill / supervised `create_scheduled_task` MCP tool (CC/MCP fleet, same as `ora-psa-drift-watch` itself). One-time, `fireAt: 2026-08-19T15:00:00-04:00` (verified via `list_scheduled_tasks`: `fireAt 2026-08-19T19:00:00Z`, enabled, `nextRunAt` matches). Checks whether the 2026-08-13 `ora-psa-drift-watch` retime (`30 13 * * 3` → `45 13 * * 3`, fixing a Wed-13:30 collision with `ora-appsec-sweep`) held on its first-ever fire: did it fire at all, at the corrected time (vs. `ora-appsec-sweep`'s actual fire time that day), and did it complete + post to the Notion Ops Hub — three independent Y/N verdicts, not a single pass/fail, since (unlike the `ora-pm-ledger` sibling check) there is no pre-retime delivery baseline to compare against. Live registry read at registration time confirmed the fix is holding pre-fire: `ora-appsec-sweep` next fires ~13:38 ET, `ora-psa-drift-watch` ~13:49 ET on 08-19 — 11 minutes apart, no collision. Emails `ggoldberg@oxfordra.net` only; auto-disables after firing; `[MODEL:]` tag correctly omitted (one-time CC/MCP task, exempt per `reference_scheduled_task_model_standard.md`). Closes [[project_automation_audit_rev10_2026-08-14]] R10-4.
