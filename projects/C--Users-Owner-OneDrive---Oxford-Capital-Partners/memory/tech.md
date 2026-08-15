@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-04T22:22:38.031Z
+  modified: 2026-08-14T21:34:01.463Z
 ---
 
 # ORA Tech Stack & Reference
@@ -86,6 +86,11 @@ The old VERDICT logic flagged ATTENTION on ANY never-ran task, ANY expired one-t
 - CLAUDE.md's Engineering OS "Calibrate" line names 8 guards but, as of this trim, no longer spells out two operational details, kept here instead: **`eos-plan-gate`** blocks after 4+ unplanned edits in a session; bypass by writing a non-empty one-line reason to `hooks/sessions/<id>/override` (e.g. `echo reason: <why> > hooks/sessions/<id>/override` — an empty/whitespace-only file is rejected, presence alone no longer counts, per `eos-plan-gate.py`). **`eos-claude-md-guard`** is the PreToolUse deny that enforces CLAUDE.md's word-budget and bare-date rules (gates CLAUDE.md's own edits specifically, by path match).
 - All 8 named guards fail open on internal error, same posture as the write-guards in §3b above.
 - Note: CLAUDE.md's guard-liveness check (`doctrine-integrity-probe.py` Check 11) requires the literal 8 backtick-quoted guard names to stay inline on that line — do not relocate the names themselves out of CLAUDE.md, only their explanatory detail.
+
+## 3g. Code-review tie-break — alt-tool/retired-plugin detail (trimmed from CLAUDE.md, word-budget pass 2026-08-14)
+- `requesting-code-review`'s dispatch step routing to native `/code-review` on the diff (rather than a bare subagent) subsumes that skill's own inline review template — the inline template is redundant once the native command handles dispatch.
+- `coderabbit` collides with the same review surface but needs an uninstalled CLI, so it is not a live alternative.
+- The `code-review:code-review` plugin retired 2026-08-14 — it collided with the native `/code-review` command and was strictly narrower (no diff-dispatch routing of its own).
 
 ## 4. MCP connectors
 

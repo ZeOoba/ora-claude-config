@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: aaca643c-9e99-4ebe-940a-7c81b182eeaf
-  modified: 2026-08-14T18:31:09.441Z
+  modified: 2026-08-14T20:55:57.760Z
 ---
 
 # memory/ living docs missing from the single-writer list
@@ -14,6 +14,12 @@ metadata:
 
 **Why this wasn't fixed immediately:** Gabriel's ruling (2026-08-14) was to route this into the next `ora-setup-audit` run rather than patch CLAUDE.md ad hoc off a single external-repo comparison — the audit skill is the canonical place to scope and verify a change like this against the rest of the concurrency/hygiene surface (`dirty-tree-triage`, the ora-skills claim protocol, `memory-integrity-probe.py`) rather than adding a narrow carve-out in isolation.
 
-**How to apply:** when the next `ora-setup-audit` (or a dedicated concurrency review) runs, evaluate whether `memory/` needs (a) inclusion in the CLAUDE.md single-writer list, (b) a lighter-weight script analogous to `append-event-log.py` for the append-style files, or (c) no change if the actual collision rate across 14+ concurrent sessions is negligible in practice. Close this reference once ruled on.
+**Investigated further (2026-08-14, same day):** `memory/` IS git-tracked in the `~/.claude` repo (299 files under `git ls-files`) — unlike the precedent case `reference_workflows_dir_single_writer_gap.md` (RESOLVED 2026-07-16 by making `workflows/` git-tracked so `git status` could see concurrent edits). But tracking alone doesn't help here: `git status --short` on the memory path shows **all 299 files as `A ` (staged, uncommitted)** right now — the directory carries a permanent large backlog rather than a clean baseline, so a standard single-writer `git status` check can't distinguish "my session's fresh edit this turn" from "part of the standing backlog." The workflows/ fix pattern (git-track it) doesn't transfer directly; this needs either a real commit cadence for `memory/` or a different detection mechanism (mtime sweep, per the workflows/ precedent's fallback, or a script gate like `event_log.md`'s).
+
+Also confirmed: `open-items-tracker.md` and `ops_decision_log.md` — both append-style like `event_log.md` — have no equivalent script gate. `allocate-oi-id.py` only allocates collision-safe IDs for the tracker; it doesn't guard the append/write itself the way `append-event-log.py`'s mtime-guard + atomic-replace + spool does. Same open question applies to both.
+
+**How to apply:** when the next `ora-setup-audit` (or a dedicated concurrency review) runs, evaluate for `memory/`, `open-items-tracker.md`, and `ops_decision_log.md`: (a) whether the `memory/` backlog should be committed down to a clean baseline so `git status` becomes a useful signal again, (b) whether `open-items-tracker.md`/`ops_decision_log.md` need a lighter-weight script analogous to `append-event-log.py`, or (c) no change if the actual collision rate across 14+ concurrent sessions is negligible in practice. Close this reference once ruled on.
+
+**Related finding, same family (2026-08-14, observed live):** `claim_work.py` claims have no session-lifecycle hook — a session can finish its work, merge its PR, and archive while still holding a live claim. Observed directly: session `c6b22b22` ("Insights," PR #275 merged, archived) still held the `hooks-override-auth` claim 105+ minutes after finishing; another session had to `release --force` it before new hooks/ work could proceed without a --force takeover. The claim's 2h TTL masks this — it eventually self-expires, but in the meantime it reads as "occupied" to every other session's SessionStart broadcast even though the work is done. Same open question as the append-gate ones above: when the next `ora-setup-audit` runs, evaluate whether `claim_work.py` should auto-release on session end/archive (if the harness exposes that event) or whether the TTL is judged short enough already.
 
 **Not adopted from the source artifact:** its own concurrency-safety mechanism (numbering discipline via inline bash `grep -oP` snippets, archival re-read-merge, structural-invariant counts) — worth knowing as a reference pattern, but ORA's existing script-based approach (`append-event-log.py`, `allocate-oi-id.py`) is already more robust than embedding unverified bash in a skill file. See [external-artifact disposition](event_log.md) for the full ruling.

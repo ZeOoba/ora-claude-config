@@ -1,5 +1,5 @@
 ﻿{
-    "ts":  "2026-08-14T11:59:51.9809186Z",
+    "ts":  "2026-08-15T18:31:41.0280016Z",
     "windowHours":  24,
     "powercfg":  {
                      "standbyidle_ac_secs":  0,
@@ -7,110 +7,68 @@
                      "standbyidle_dc_secs":  10800
                  },
     "coldStarts":  [
-                       "2026-08-13T10:50:46.0000000",
-                       "2026-08-13T23:17:18.0000000"
+
                    ],
     "resumes":  [
-                    "2026-08-14T02:20:41.0000000",
-                    "2026-08-14T07:57:20.0000000"
+                    "2026-08-14T17:13:36.0000000",
+                    "2026-08-15T14:27:56.0000000"
                 ],
     "findings":  [
-                     "[CAUSE] MODERN-STANDBY x3 enter event(s) in window -- host was in S0 low-power idle. STANDBYIDLE=Never on AC does NOT prevent this; do not read a clean STANDBYIDLE as evidence the host stayed awake.",
-                     "[CAUSE] SCHEDULER-COLD-START x2 at 08-13 10:50:46, 08-13 23:17:18 -- a cold Initialized means the app process did not exist before that moment. The scheduler cannot dispatch a slot that falls while the process is absent, and Claude Desktop does not auto-start after a reboot."
+                     "[CAUSE] MODERN-STANDBY x3 enter event(s) in window -- host was in S0 low-power idle. STANDBYIDLE=Never on AC does NOT prevent this; do not read a clean STANDBYIDLE as evidence the host stayed awake."
                  ],
     "unverifiable":  [
-
+                         "User32 1074 unreadable: No events were found that match the specified selection criteria."
                      ],
     "events":  [
                    {
-                       "time":  "2026-08-13T08:54:00.3597178-04:00",
-                       "kind":  "MODERN-STANDBY-EXIT",
-                       "detail":  "The system is exiting Modern Standby"
+                       "time":  "2026-08-14T17:11:30.8722225-04:00",
+                       "kind":  "SLEEP-ENTER",
+                       "detail":  "The system is entering sleep."
                    },
                    {
-                       "time":  "2026-08-13T08:54:00.3644848-04:00",
+                       "time":  "2026-08-14T17:11:45.5351035-04:00",
+                       "kind":  "SLEEP-EXIT",
+                       "detail":  "The system has resumed from sleep."
+                   },
+                   {
+                       "time":  "2026-08-14T17:13:34.3168203-04:00",
                        "kind":  "MODERN-STANDBY-ENTER",
                        "detail":  "The system is entering Modern Standby"
                    },
                    {
-                       "time":  "2026-08-13T10:50:33.1114001-04:00",
+                       "time":  "2026-08-14T17:13:36.0109223-04:00",
                        "kind":  "MODERN-STANDBY-EXIT",
                        "detail":  "The system is exiting Modern Standby"
                    },
                    {
-                       "time":  "2026-08-13T18:51:36.5682881-04:00",
-                       "kind":  "WU-INSTALL",
-                       "detail":  "Installation Started: Windows has started installing the following update: 9NRZT3Q9R3DL-Microsoft.WindowsAppRuntime.2"
+                       "time":  "2026-08-14T21:00:09.8123508-04:00",
+                       "kind":  "SLEEP-ENTER",
+                       "detail":  "The system is entering sleep."
                    },
                    {
-                       "time":  "2026-08-13T18:51:40.2931157-04:00",
-                       "kind":  "WU-INSTALL",
-                       "detail":  "Installation Successful: Windows successfully installed the following update: 9NRZT3Q9R3DL-Microsoft.WindowsAppRuntime.2"
+                       "time":  "2026-08-14T21:00:21.8439521-04:00",
+                       "kind":  "SLEEP-EXIT",
+                       "detail":  "The system has resumed from sleep."
                    },
                    {
-                       "time":  "2026-08-13T21:09:38.0772443-04:00",
-                       "kind":  "WU-INSTALL",
-                       "detail":  "Installation Started: Windows has started installing the following update: 9NZKPSTSNW4P-Microsoft.XboxGamingOverlay"
-                   },
-                   {
-                       "time":  "2026-08-13T21:09:39.3470866-04:00",
-                       "kind":  "WU-INSTALL",
-                       "detail":  "Installation Successful: Windows successfully installed the following update: 9NZKPSTSNW4P-Microsoft.XboxGamingOverlay"
-                   },
-                   {
-                       "time":  "2026-08-13T21:10:01.9052136-04:00",
-                       "kind":  "WU-INSTALL",
-                       "detail":  "Installation Started: Windows has started installing the following update: 9N7R5S6B0ZZH-B9ECED6F.ASUSPCAssistant"
-                   },
-                   {
-                       "time":  "2026-08-13T21:10:03.5461054-04:00",
-                       "kind":  "WU-INSTALL",
-                       "detail":  "Installation Successful: Windows successfully installed the following update: 9N7R5S6B0ZZH-B9ECED6F.ASUSPCAssistant"
-                   },
-                   {
-                       "time":  "2026-08-13T23:15:52.0611736-04:00",
-                       "kind":  "RESTART-INITIATED",
-                       "detail":  "The process C:\\Windows\\system32\\winlogon.exe (LAPTOP-CSHSCBE6) has initiated the restart of computer LAPTOP-CSHSCBE6 on behalf of user LAPTOP-CSHSCBE6\\Owner for the following reason: No title for this reason could be found"
-                   },
-                   {
-                       "time":  "2026-08-13T23:16:04.4857459-04:00",
-                       "kind":  "SHUTDOWN-TRANSITION",
-                       "detail":  "The kernel power manager has initiated a shutdown transition."
-                   },
-                   {
-                       "time":  "2026-08-13T23:16:08.1144463-04:00",
-                       "kind":  "REBOOT-PREPARED",
-                       "detail":  "The system has prepared for a system initiated reboot from Active."
-                   },
-                   {
-                       "time":  "2026-08-13T23:27:44.5995663-04:00",
-                       "kind":  "WU-INSTALL",
-                       "detail":  "Installation Started: Windows has started installing the following update: Security Intelligence Update for Microsoft Defender Antivirus - KB2267602 (Version 1.457.153.0) - Current Channel (Broad)"
-                   },
-                   {
-                       "time":  "2026-08-13T23:27:50.1360499-04:00",
-                       "kind":  "WU-INSTALL",
-                       "detail":  "Installation Successful: Windows successfully installed the following update: Security Intelligence Update for Microsoft Defender Antivirus - KB2267602 (Version 1.457.153.0) - Current Channel (Broad)"
-                   },
-                   {
-                       "time":  "2026-08-14T00:28:48.5030309-04:00",
+                       "time":  "2026-08-15T14:27:54.1370934-04:00",
                        "kind":  "MODERN-STANDBY-ENTER",
                        "detail":  "The system is entering Modern Standby"
                    },
                    {
-                       "time":  "2026-08-14T02:20:38.5534123-04:00",
+                       "time":  "2026-08-15T14:27:55.8506088-04:00",
                        "kind":  "MODERN-STANDBY-EXIT",
                        "detail":  "The system is exiting Modern Standby"
                    },
                    {
-                       "time":  "2026-08-14T02:20:38.5617483-04:00",
+                       "time":  "2026-08-15T14:28:19.1023924-04:00",
+                       "kind":  "WU-INSTALL",
+                       "detail":  "Installation Started: Windows has started installing the following update: Security Intelligence Update for Microsoft Defender Antivirus - KB2267602 (Version 1.457.169.0) - Current Channel (Broad)"
+                   },
+                   {
+                       "time":  "2026-08-15T14:28:29.0353868-04:00",
                        "kind":  "MODERN-STANDBY-ENTER",
                        "detail":  "The system is entering Modern Standby"
-                   },
-                   {
-                       "time":  "2026-08-14T07:57:19.9617777-04:00",
-                       "kind":  "MODERN-STANDBY-EXIT",
-                       "detail":  "The system is exiting Modern Standby"
                    }
                ]
 }
