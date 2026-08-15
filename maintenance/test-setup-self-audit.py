@@ -173,6 +173,80 @@ finally:
     ssa.CLAUDE = _orig_claude
     ssa.results.clear()
 
+# --- check_skill_mirror_drift / find_skill_mirror_drift (2026-08-15) ---
+# Automation Audit Rev 10 finding R10-1: a scheduled ora-setup-audit run loaded a
+# STALE local ~/.claude/skills/ora-setup-audit/SKILL.md mirror instead of the
+# canonical ~/ora-skills copy, because nothing detected the two had diverged.
+# check_skills() (above) validates frontmatter STRUCTURE across all mirrors; it
+# never compares CONTENT between the repo and the local ~/.claude/skills copy of
+# the same skill -- this check closes that specific gap.
+_orig_ora_skills = ssa.ORA_SKILLS_DIR
+_orig_claude2 = ssa.CLAUDE
+try:
+    repo_root = tempfile.mkdtemp()
+    local_root = tempfile.mkdtemp()
+    ssa.ORA_SKILLS_DIR = repo_root
+    ssa.CLAUDE = local_root  # check_skill_mirror_drift reads os.path.join(CLAUDE, "skills")
+    local_skills_dir = os.path.join(local_root, "skills")
+    os.makedirs(local_skills_dir)
+
+    # 1. A skill that exists ONLY in the repo (the common case -- most skills are
+    #    never locally mirrored at all) is not drift.
+    os.makedirs(os.path.join(repo_root, "only-in-repo"))
+    with open(os.path.join(repo_root, "only-in-repo", "SKILL.md"), "w") as f:
+        f.write("repo only")
+    ssa.results.clear()
+    ssa.check_skill_mirror_drift()
+    expect("mirror-drift: no shared skills -> OK",
+           ssa.results[-1]["status"] == "OK", str(ssa.results[-1]))
+
+    # 2. A skill mirrored in both places with IDENTICAL content -> OK, not flagged.
+    os.makedirs(os.path.join(repo_root, "same-skill"))
+    os.makedirs(os.path.join(local_skills_dir, "same-skill"))
+    with open(os.path.join(repo_root, "same-skill", "SKILL.md"), "w") as f:
+        f.write("v1 content")
+    with open(os.path.join(local_skills_dir, "same-skill", "SKILL.md"), "w") as f:
+        f.write("v1 content")
+    ssa.results.clear()
+    ssa.check_skill_mirror_drift()
+    expect("mirror-drift: identical mirrored copy -> OK",
+           ssa.results[-1]["status"] == "OK", str(ssa.results[-1]))
+
+    # 3. A skill mirrored in both places with DIVERGED content -> WARN, names it.
+    #    This is the exact R10-1 shape: the local copy is stale relative to repo.
+    with open(os.path.join(local_skills_dir, "same-skill", "SKILL.md"), "w") as f:
+        f.write("STALE v0 content")
+    ssa.results.clear()
+    ssa.check_skill_mirror_drift()
+    expect("mirror-drift: diverged mirrored copy -> WARN, names the skill",
+           ssa.results[-1]["status"] == "WARN" and "same-skill" in ssa.results[-1]["detail"],
+           str(ssa.results[-1]))
+
+    # 4. Missing repo dir entirely -> SKIP, never a false OK/WARN.
+    ssa.ORA_SKILLS_DIR = os.path.join(repo_root, "does-not-exist")
+    ssa.results.clear()
+    ssa.check_skill_mirror_drift()
+    expect("mirror-drift: missing repo dir -> SKIP",
+           ssa.results[-1]["status"] == "SKIP", str(ssa.results[-1]))
+finally:
+    ssa.ORA_SKILLS_DIR = _orig_ora_skills
+    ssa.CLAUDE = _orig_claude2
+    ssa.results.clear()
+
+# find_skill_mirror_drift as a pure function, independent of the check_*/add() glue.
+_d1, _d2 = tempfile.mkdtemp(), tempfile.mkdtemp()
+os.makedirs(os.path.join(_d1, "x"))
+os.makedirs(os.path.join(_d2, "x"))
+with open(os.path.join(_d1, "x", "SKILL.md"), "w") as f:
+    f.write("a")
+with open(os.path.join(_d2, "x", "SKILL.md"), "w") as f:
+    f.write("b")
+expect("find_skill_mirror_drift: pure fn detects content divergence",
+       ssa.find_skill_mirror_drift(_d1, _d2) == ["x"],
+       ssa.find_skill_mirror_drift(_d1, _d2))
+expect("find_skill_mirror_drift: pure fn returns [] with no divergence",
+       ssa.find_skill_mirror_drift(_d1, _d1) == [])
+
 npass = sum(1 for ok, _ in results if ok)
 print(f"setup-self-audit tests: {npass}/{len(results)} pass")
 sys.exit(0 if npass == len(results) else 1)
