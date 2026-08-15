@@ -131,14 +131,7 @@
     ],
     "defaultMode": "bypassPermissions"
   },
-  "worktree": {
-    "baseRef": "head"
-  },
   "model": "claude-sonnet-5",
-  "statusLine": {
-    "type": "command",
-    "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/statusline-command.py\""
-  },
   "skillOverrides": {
     "agents-sdk": "off",
     "cloudflare": "off",
@@ -451,6 +444,13 @@
       }
     ]
   },
+  "worktree": {
+    "baseRef": "head"
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/statusline-command.py\""
+  },
   "enabledPlugins": {
     "superpowers@superpowers-marketplace": true,
     "claude-md-management@claude-plugins-official": false,
@@ -463,18 +463,6 @@
       "source": {
         "source": "github",
         "repo": "anthropics/claude-plugins-official"
-      }
-    },
-    "anthropic-agent-skills": {
-      "source": {
-        "source": "github",
-        "repo": "anthropics/skills"
-      }
-    },
-    "obsidian-skills": {
-      "source": {
-        "source": "github",
-        "repo": "kepano/obsidian-skills"
       }
     }
   },

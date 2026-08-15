@@ -1,9 +1,10 @@
 {
- "ts": "2026-08-14T15:07:12",
+ "ts": "2026-08-15T14:32:08",
  "fleets": {
   "cc": [
    "ora-aaos-expire-leases",
    "ora-aaos-publish-contracts",
+   "ora-acquisition-underwriting-eval-harness",
    "ora-am-brief",
    "ora-appsec-sweep",
    "ora-broker-touch-cadence",
