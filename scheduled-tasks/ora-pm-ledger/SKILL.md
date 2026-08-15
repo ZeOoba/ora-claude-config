@@ -166,13 +166,17 @@ table of being wrong. It was not. Version + endpoint, not permissions.)
 | Deal Sourcing Log | 2026-07-15 | 2026-03-22 | ✅ **LIVE — varies.** |
 | Broker Relationships | 2026-04-05 21:03 | 2026-04-05 20:06 | ✅ **LIVE — varies.** |
 | Tenant Database | 2026-03-30 | 2026-03-22 | ❌ **FROZEN.** Notion itself reports `last_edited_time == created_time`. A zero is a false negative. |
-| Property Register | 2026-07-12 | 2026-07-12 | ❌ **Uniform stamp** — all 14 rows share ONE identical timestamp. That is a batch write, not editing. An earlier read of this as "live" was WRONG. |
+| Property Register | 2026-07-12 | 2026-07-12 | ❌ **Uniform stamp** — all 14 rows share ONE identical timestamp (re-verified live 2026-08-11, still `2026-07-12T17:16:00` on every row). That is a batch write, not editing. An earlier read of this as "live" was WRONG. **Detector built 2026-08-11 — see `property_register_snapshot_diff.py` (§A.2 step 2, same as the Tenant DB and CapEx).** This was the LAST A.1 source without one; that gap is now closed. |
 | CapEx & Maintenance Log | 2026-07-26 | 2026-07-26 | ❌ **Uniform stamp.** The table is no longer empty (6 rows) and every row shares ONE identical timestamp, same failure mode as Property Register: a batch write, not editing. **Detector built 2026-07-27 — see `capex_snapshot_diff.py` (§A.2 step 2, same as the Tenant DB).** The "0 rows, can never report an edit" claim once here was true on 2026-07-16 and is not true now — do not repeat it. |
 
 **Net: Section A (Deal Pipeline) has fully trustworthy, precise, quota-free edit
 detection via REST. Section B does not, and no read path will fix it** — Tenant
 DB is frozen at the source, and Property Register and CapEx & Maintenance Log
-both only ever show their last bulk sync (uniform-stamp).
+both only ever show their last bulk sync (uniform-stamp). **As of 2026-08-11 all
+three Section B sources instead have snapshot-diff detectors** (`tenant_db_*`,
+`capex_*`, `property_register_*`), which is the only mechanism that works when
+the timestamp column is untrustworthy. Section B's *timestamp* is still useless;
+its *change detection* is now sound.
 
 **The uniform-date tell:** when newest == oldest across every row, the column is
 reporting a bulk sync, not edits. Only trust a source whose dates VARY.
@@ -370,9 +374,13 @@ Use all of the following signals and merge, deduping by page ID:
 
    The no-network `--selftest` covers added/removed/changed + field-level + first-run
    baseline, **plus cross-day (date-derived-only movement ⇒ 0 changed; a real edit
-   alongside it still detected), pre-fix→post-fix migration, and the bulk-field guard** —
-   13 assertions, all passing. Any future change to this script MUST keep the cross-day
-   cases: a same-day rerun is not a valid test for a date-sensitive diff.
+   alongside it still detected), pre-fix→post-fix migration, and the bulk-field guard**,
+   as well as pagination (incl. the `has_more` + null-cursor stop), `load_prev()`'s
+   corruption/archive fallback, and `decide_persist()`'s 50% collapse boundary —
+   24 assertions, all passing (count re-measured 2026-08-11; this note said 13, which was
+   true when written and had drifted as assertions were added). Any future change to this
+   script MUST keep the cross-day cases: a same-day rerun is not a valid test for a
+   date-sensitive diff.
 
    Only if the SCRIPT itself errors (token unreadable, REST
    down) does Tenant DB revert to a COVERAGE GAP — a clean 0-diff is now a REAL
@@ -392,12 +400,86 @@ Use all of the following signals and merge, deduping by page ID:
    live at build time — its two formulas, `Annualized Reserve` and `Yield on
    Cost`, are ratios of static numeric inputs, a legitimate change signal, not
    calendar drift), so `TIME_DERIVED_FIELDS` is empty; the bulk-field guard is
-   the backstop if one is ever added later. `--selftest` is 21 assertions
+   the backstop if one is ever added later. `--selftest` is 31 assertions
    (diff engine, the exclusion mechanism proven against a synthetic field name
    since no real one exists yet, the bulk-field guard incl. the 50% boundary,
-   pagination, and `load_prev()` corruption fallback), all passing. Property
-   Register remains the one source in §A.1 with no detector — same gap, not
-   yet built.
+   pagination, `load_prev()` corruption fallback, and the full `decide_persist()`
+   battery — 0-row refusals, the degraded-load branch, the allowed clean
+   first-run 0-row persist, and the 50% collapse boundary), all passing.
+   (Count re-measured 2026-08-11; this note said 21 and omitted `decide_persist`
+   entirely, which was true when written — that function was added by the
+   2026-07-27 independent-review fix after this paragraph was drafted.)
+
+   **✅ BUILT 2026-08-11 — `property_register_snapshot_diff.py` (same folder,
+   same pattern). This closes the LAST A.1 source without a detector** — the gap
+   the 2026-07-27 amendment note left explicitly open. Section B (Property
+   Register) MUST invoke:
+   ```
+   C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \
+     C:/Users/Owner/.claude/scheduled-tasks/ora-pm-ledger/property_register_snapshot_diff.py \
+     --run --date {TODAY}
+   ```
+   Same `RESULT_JSON=` contract, same `state/property-register-*.json` storage
+   shape. Parse it and fold `added/removed/changed` (plus `warnings` whenever
+   non-empty) into Section B, exactly as for the other two. A clean 0-diff is a
+   REAL "no edits today."
+
+   ⚠ **`persisted: false` means the run REFUSED to trust its own pull — treat
+   that as a COVERAGE GAP and do NOT report the diff.** The script refuses on a
+   0-row pull, on a >=50% row collapse, and on a degraded prior-snapshot load;
+   in each case `added/removed/changed` are still present in `RESULT_JSON` but
+   describe an untrustworthy comparison (a collapse, for instance, will list
+   real properties as "removed"). `baseline` is also false on any refusal, so
+   `baseline: true` now means a baseline genuinely was established. Also revert
+   to a COVERAGE GAP if the SCRIPT itself errors.
+
+   **Unlike CapEx, this database DOES carry date-derived formula fields — two of
+   them — so `TIME_DERIVED_FIELDS` is NOT empty here.** Confirmed live at build
+   time by reading each formula's expression, not inferred from its name:
+   `Days to Loan Maturity` (`dateBetween(<Loan Maturity Date>, now(), "days")`)
+   and `Loan Maturity Flag` (the same driver, banded into 🔴/🟡 strings). The flag
+   is the nastier of the two: it moves rarely, so an unexcluded band flip looks
+   exactly like a human edit. Three OTHER formulas are ratios of static inputs
+   and are deliberately KEPT as real change signals — `Estimated NOI`, `LTV`,
+   `Occupancy %`. **`LTV` is governor-adjacent** (invariant 4), so excluding
+   formulas by TYPE rather than by NAME would have silently blinded this
+   detector to LTV movement; `--selftest` asserts LTV still diffs. The raw
+   `Loan Maturity Date` is also kept, so a human changing a maturity date is
+   still detected — only the derived counter and flag are dropped.
+
+   The 14 rollup fields are KEPT: a rollup moving means something real changed in
+   a related database. Each rollup's source property was checked individually at
+   build time to confirm none reaches a calendar-derived formula (notably none
+   touch the Tenant DB's five date-derived fields). The bulk-field guard is the
+   backstop if one is ever repointed.
+
+   **One deliberate divergence from the CapEx sibling:** a 0-row pull here
+   ALWAYS refuses to persist, even on a first-ever run. CapEx was legitimately
+   empty before 2026-07-26, so a clean 0-row baseline was a real state there. A
+   Property Register holding zero rows would mean Oxford owns no properties —
+   never true — so 0 rows is always an access failure (revoked/narrowed
+   integration scope, or the DB unshared; Notion answers 200 with an empty
+   result set in all those cases) and must never establish a baseline.
+
+   `--selftest` is 58 assertions, all passing. Beyond the CapEx battery it adds:
+   assertions against the REAL production `TIME_DERIVED_FIELDS` constant (so a
+   future edit that empties or renames it fails loudly), a cross-day case whose
+   drift includes a maturity-flag BAND FLIP, an assertion that a real `LTV` move
+   is still detected alongside that drift, rollup/`unique_id` normalization, and
+   the 0-row-first-run refusal. Verified live at build time: baseline of 14 rows,
+   exit 0; the two excluded fields are structurally ABSENT from the persisted
+   snapshot (0 of 14 rows) so drift cannot enter the diff at all; and a
+   differential harness against the real 14 rows showed 0/14 changed with the
+   exclusion vs 14/14 changed + 2 bulk-field warnings without it — the control
+   that proves the test can actually fail.
+
+   ⚠ **Not yet observed: a genuine cross-day production run.** The first real one
+   is the next scheduled fire. Two mitigations make this weaker than it sounds:
+   the excluded fields never enter the stored snapshot (so calendar drift is
+   structurally impossible, not merely filtered), and no row currently has
+   `Loan Maturity Date` populated at all — the drift risk is LATENT and arms only
+   when maturity dates are entered. Do not let a first clean cross-day run be
+   read as proof the exclusion was unnecessary.
 
    **⚠ DEFECT 2 — `notion-query-data-sources` is ENTITLEMENT-GATED and will
    hard-fail mid-run.** Measured live 2026-07-16: after ~5 queries the tool
@@ -855,8 +937,12 @@ report:**
 - Outlook M365 connector · Notion MCP (LP Database for Check E; Ops Hub for
   posting) · ORA Voice Register v1.0+ (canonical Strike list).
 - `outbox_qc_window.py` + `state/outbox-qc-coverage.json` (sweep-window planner,
-  retro-sweep mode — B.2). No network; pure local state. `--selftest` covers the
-  interval algebra with 20 assertions.
+  retro-sweep mode — B.2). No network; pure local state. `--selftest` is 32
+  assertions covering the interval algebra plus span validation (inverted and
+  zero-length spans rejected), state-file corruption/truncation handling, atomic
+  write with no `.tmp` residue, prune honouring an injected clock rather than the
+  wall clock, and DST spring-forward leaving no residual gap. (Count re-measured
+  2026-08-11; this line said 20, true when written.)
 
 ---
 
@@ -1248,6 +1334,9 @@ correctly shows 07-23 as a full missed day plus four evening tails.
 evening-tail cases, today-capped-at-now, idempotent re-commit, the lookback clamp with
 explicit dropped reporting, the `tracking_since` floor, out-of-order/overlapping commit
 merges, weekend flagging, and sub-minute sliver suppression. All passing.
+*(Dated record — 20 was the count that shipped on 2026-07-24. It has since grown to 32;
+the live figure lives in §B.8, which is the one to trust. Left unedited on purpose: this
+is an amendment note describing what landed that day, not live guidance.)*
 
 **Not changed:** Block B remains read-only and Mon–Fri; routing and send-path unchanged;
 retro findings are pattern notes only and never trigger a corrective send.
@@ -1300,6 +1389,111 @@ this note was written — not merely selftested offline.
 
 **Not done:** Property Register has the same uniform-stamp problem and no
 detector. That gap is unchanged and is not implicitly closed by this note.
+*(Superseded 2026-08-11 — that gap is now closed; see the amendment note below.
+This paragraph is kept as the record of what was true on 2026-07-27.)*
+
+## AMENDMENT NOTE (2026-08-11 — Property Register detector built; last A.1 gap closed)
+
+The gap the 2026-07-27 note above left explicitly open is closed.
+`property_register_snapshot_diff.py` applies the established snapshot+diff
+pattern to Property Register — the last of the six §A.1 database sources without
+an edit detector, and an item carried in every EOD Action Ledger since.
+
+**Uniform stamp re-verified live before building**, not assumed: all 14 rows
+still report `2026-07-12T17:16:00`, so a `last_edited_time` query against this
+database returns 0 rows whether or not anything changed.
+
+**The build's one real finding — this database is NOT like CapEx.** CapEx's
+`TIME_DERIVED_FIELDS` is legitimately empty. Property Register carries **two**
+calendar-derived formula fields, found by reading each formula's expression live
+rather than guessing from names: `Days to Loan Maturity`
+(`dateBetween(<Loan Maturity Date>, now(), "days")`) and `Loan Maturity Flag`
+(the same driver, banded). Had these been left in, the detector would have
+reproduced the exact defect that made `tenant_db_snapshot_diff.py` report 267 of
+298 rows changed when only 5 were really edited (2026-07-24). Three sibling
+formulas — `Estimated NOI`, `LTV`, `Occupancy %` — are ratios of static inputs
+and are KEPT; `LTV` is governor-adjacent, so a type-based exclusion would have
+silently blinded the detector to it. Exclusion is therefore BY NAME, and
+`--selftest` asserts both halves of that.
+
+**A vacuous test was caught and fixed during the refute pass.** The first
+cross-day verification mutated the two calendar fields on the real 14 rows and
+reported a clean pass — but the mutation loop had applied **0** changes, because
+no property currently has `Loan Maturity Date` populated, so both formulas
+evaluate to null. It proved nothing. Re-run with the future state forced in
+(maturity dates populated, counter ticked, band flipped on all 14 rows) it is
+non-vacuous, and a differential control with the exclusion disabled shows
+**14/14 rows changed + 2 bulk-field warnings** versus **0/14** with it — the
+control that proves the test is capable of failing.
+
+**Consequence worth carrying:** the drift risk here is LATENT, not active. It
+arms the moment maturity dates are entered into this database (the Master
+Workbook shows real maturities of 2028–2032 that simply are not in Notion yet).
+A first clean cross-day run must NOT be read as evidence the exclusion was
+unnecessary.
+
+**Independent review (2026-08-11) found four defects worth recording, all fixed
+and regression-tested:**
+
+1. **A refused run still claimed a baseline.** `baseline` was computed as
+   `prev is None`, independent of whether anything persisted — so a 0-row pull
+   caused by revoked integration access printed *"Baseline established"* and set
+   `baseline: true` in `RESULT_JSON` while persisting nothing. A digest parsing
+   that JSON would have reported an access outage as a clean no-edits day: an
+   inferred null presented as a verified one, which is the exact failure this
+   whole snapshot-diff approach exists to prevent. `baseline` is now
+   `prev is None and persisted`, the summary line says REFUSED, and §A.2 above
+   now instructs the caller to treat `persisted: false` as a COVERAGE GAP.
+2. **A MISSING `latest` file was handled less safely than a CORRUPT one.**
+   Corruption fell back to the newest dated archive with a warning; deletion
+   returned "no baseline" with no warning, which silently disabled both the
+   degraded-load refusal and the collapse guard. A 6-of-14 partial-access pull
+   then persisted cleanly and the next run would have reported 8 spurious
+   properties as newly ACQUIRED. Missing now takes the same archive fallback.
+3. **The bulk-field guard's denominator was diluted.** It divided by all current
+   rows rather than by rows present in both snapshots, so a derived field
+   drifting on a populated subset (e.g. the 5 of 14 properties that carry a
+   loan) scored 36% and never warned — while the docstring leaned on that guard
+   as the safety net for keeping the 14 rollup fields. Now denominated by
+   compared rows. The warning text was also softened: it previously advised
+   "consider adding it to TIME_DERIVED_FIELDS", which on a schema rename would
+   have counselled an unattended agent to exclude `LTV` itself.
+4. **Three assertions were vacuous.** The `0-row + degraded-load` branch of
+   `decide_persist` became decision-redundant once every 0-row pull refuses
+   unconditionally; deleting the branch left all three of its tests passing.
+   They now assert that branch's distinguishing message.
+
+Also added: detection of Notion's 25-item truncation on relation/people/rollup
+arrays (latent today — every relation on this database is currently empty — but
+it would otherwise make a 26th tenant undetectable), `--date` validation so an
+unsubstituted `{TODAY}` placeholder fails loudly instead of writing an archive
+under a name the fallback can never match, and an offline `_pages` seam so
+`run()`'s reporting path is regression-tested end to end rather than only
+through its pure helpers. Assertions 39 → 58.
+
+**One review finding was checked and NOT accepted.** The review argued the
+differential control below was confounded by field-set asymmetry (`<absent>` →
+value) rather than by real drift. Re-verified directly: in the control both
+snapshots are rebuilt with the exclusion disabled, so both carry the two fields
+with genuinely different values (`'400'` → `'399'`, `'AMBER 1-2 Years'` →
+`'RED < 1 Year'`), and the diff contains **zero** `<absent>` markers. The review
+reproduced a different setup — a stored baseline lacking the fields versus a
+rebuilt snapshot carrying them — and attributed it to this one. The control
+stands as written.
+
+**Divergence from the CapEx sibling, deliberate:** a 0-row pull here always
+refuses to persist, even on a first-ever run. An empty Property Register is
+never a real state, so 0 rows is always an access failure, not an empty table.
+
+`--selftest` 58 assertions, all passing. Live `--run` established a 14-row
+baseline (exit 0), and the two excluded fields are structurally absent from the
+persisted snapshot — drift cannot enter the diff at all, rather than being
+filtered out at compare time.
+
+**Not done:** no genuine cross-day production run has happened yet; the next
+scheduled fire is the first. §A.1's Reality table, §A.2 step 2 and the "Net:"
+summary were updated. No routing, send-path, cadence or registry change — this
+was a content-only edit to the spec plus one new script.
 
 ## AMENDMENT NOTE (2026-08-11, evening — §0.5 step 3 append made idempotent)
 

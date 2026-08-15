@@ -405,18 +405,46 @@ def main():
         json.dump({"ts": ts, "fleets": current, "missing_streaks": streaks},
                   f, indent=1)
 
-    line = (f"{ts} cc={len(current.get('cc', []))} lams={len(current.get('lams', []))}"
+    # ROSTER ANNOTATION (2026-08-14). This line used to read a bare `cc=29 lams=26`.
+    # One-time fireAt tasks are excluded from the recurring set BY DESIGN (see
+    # enabled_onetime_detail's note), so those numbers are correct but do NOT match
+    # `list_scheduled_tasks`, which returns recurring + pending one-time. The
+    # session-context block and the roster file have carried "+N pending one-time"
+    # since 2026-07-18, but THIS log line never did — and it is the artifact monitors
+    # actually read. automation-health-monitor re-derived "lams=26 vs live 28 = the
+    # 2 one-time entries" from scratch on 2026-08-14, at least the second time that
+    # reconciliation had been done by hand. Annotate it at the source instead.
+    def _roster(label):
+        rec = len(current.get(label, []))
+        ot = len(current_onetime.get(label) or [])
+        return f"{label}={rec}" + (f"(+{ot} one-time={rec + ot})" if ot else "")
+
+    line = (f"{ts} {_roster('cc')} {_roster('lams')}"
             f" drops={drops or '-'} regressions={regressions or '-'} adds={adds or '-'}"
             f" missing_stores={missing_stores or '-'}")
     try:
         with open(LOG, "a", encoding="utf-8") as f:
             f.write(line + "\n")
-    except Exception:
-        pass
+    except Exception as e:
+        # HARDENED 2026-08-05: this used to be a bare `pass` -- a log-append
+        # failure was invisible on stdout while STATE (registry-membership.json)
+        # still wrote fine, so the run looked clean even though its append-only
+        # audit trail silently stopped growing (found during the 2026-08-04/
+        # 08-05 ora-task-integrity-guard investigation: this file's newest line
+        # was stuck at 2026-08-03T16:20:04 for 2 consecutive days with zero
+        # WARN anywhere). Printing WARN matches the fail-soft convention already
+        # used below for the fleet-roster and session-context writes in this
+        # same function -- SKILL.md STEP 1.5 already treats any WARN line here
+        # as worth surfacing, so this alone closes most of the silent-miss gap.
+        print(f"  WARN registry-membership.log append failed: {e}")
 
     print("ORA REGISTRY-MEMBERSHIP PROBE (dual-fleet)")
     for label in ("cc", "lams"):
-        print(f"  {label}: {len(current.get(label, []))} enabled recurring")
+        rec = len(current.get(label, []))
+        ot = len(current_onetime.get(label) or [])
+        tail = (f" (+{ot} pending one-time = {rec + ot} total, which is what "
+                f"list_scheduled_tasks returns)" if ot else "")
+        print(f"  {label}: {rec} enabled recurring{tail}")
 
     # Write the FULL roster file first (generated artifact; fail-soft), then the
     # compact session-context block that points at it (Phase 4, 2026-07-29).

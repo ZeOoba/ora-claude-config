@@ -1,10 +1,10 @@
 ---
 name: reference-fleet-throttle-skip-catchup-burst
-description: "recordedSkips 'global_limit' events are the Desktop scheduler's own concurrency cap rejecting a task's fire attempt, with a ~60s auto-retry; NOT a cron misconfiguration. Diagnosed 2026-07-20 investigating why ora-deal-aging-sla kept 5/10 recent throttle-skips post-retime. Root cause: catch-up-burst -- app closed past several tasks' scheduled fire times, then multiple overdue tasks (across BOTH cc and lams registries) hit the same global concurrency ceiling within seconds of each other when the app reopened. Some tasks (ora-sofr-direct-prefetch, ora-deal-command-board) won a free slot after 1 retry; ora-deal-aging-sla lost 5 straight retries (~4 min) before going dormant until the app's next open, ~14h later. No config/cron fix exists for this -- it's the app's own scheduler arbitration, outside ~/.claude's control surface."
+description: "recordedSkips 'global_limit' events are the Desktop scheduler's own concurrency cap rejecting a task's fire attempt, with a ~60s auto-retry; NOT a cron misconfiguration. Diagnosed 2026-07-20 investigating why ora-deal-aging-sla kept 5/10 recent throttle-skips post-retime. Root cause: catch-up-burst -- app closed past several tasks' scheduled fire times, then multiple overdue tasks (across BOTH cc and lams registries) hit the same global concurrency ceiling within seconds of each other when the app reopened. Some tasks (ora-sofr-direct-prefetch, ora-deal-command-board) won a free slot after 1 retry; ora-deal-aging-sla lost 5 straight retries (~4 min) before going dormant until the app's next open, ~14h later. No config/cron fix exists for this -- it's the app's own scheduler arbitration, outside ~/.claude's control surface. 2026-08-12: a SECOND, distinct dark-fleet mechanism confirmed -- host S0 Modern Standby sleep with the Desktop app still OPEN (STANDBYIDLE was 3h on AC and DC). Check Kernel-Power events, not the process list, before concluding app-closure; and prove execution from work product, never lastRunAt."
 metadata:
   type: reference
   originSessionId: 41bfc8fa-2412-44b6-a527-f9a4631e86f5
-  modified: 2026-07-24T16:45:11.470Z
+  modified: 2026-08-12T22:29:34.677Z
 ---
 
 **What the metric means.** `recordedSkips[taskId]` entries with `reason: "global_limit"` are written by
@@ -131,6 +131,129 @@ either as root cause. Per the top-of-file verdict, the documented lever remains 
 fleet-integrity runner (LAMS twin retired), so disabling it to silence the metric would blind the
 exact check that catches registry loss. Its `nextRunAt` stayed correct (next day 07:14 ET)
 throughout, so scheduled execution was never at risk; only the skip metric was polluted.
+
+**RECURRED 2026-08-11, and surfaced a THIRD consequence: burst adjacency gets misread as a cadence
+collision, and nearly bought a pointless retime.** ~28h outage (Mon ~12:42 ET → Tue ~17:01 ET); on
+reopen, 19 CC tasks drained serially at ~5-min intervals 21:01Z→22:45Z, with **1,199 throttle skips
+in 24h across 16 tasks**. `ora-cc-snapshot-refresh` (`15 6 * * 1`) and `ora-lease-snapshot-refresh`
+(`40 7 * * 1-5`) both regenerated `portfolio.json` 6 minutes apart (22:39Z/22:45Z) on a **Tuesday**.
+I reported that as cadence clustering and recommended staggering; Gabriel reasonably said to do it.
+It was wrong — the two are on different day-sets and sit **85 minutes apart** on their only shared
+day (Monday), and `fleet-status.py` reported `same-time collisions 0` across all 59 tasks on both
+fleets. They were adjacent in the **drain queue**, which cron does not control. A retime would have
+fixed nothing and would have discarded the deliberate 2026-07-27 thin-the-AM-window placement.
+
+**Rule: close `lastRunAt` timestamps are NOT evidence of a cron collision.** Before proposing any
+retime, confirm all four:
+1. `python ~/.claude/maintenance/fleet-status.py` → `same-time collisions`. It reads BOTH fleets; the
+   CC-only `list_scheduled_tasks` cannot see LAMS crons. Zero collisions ⇒ nothing to stagger.
+2. Day-of-week of the run vs. the task's cron day-set — a Monday-only task running Tuesday evening
+   did not run on cadence.
+3. Trailing-24h throttle-skip volume — hundreds-to-thousands across a dozen-plus tasks ⇒ burst.
+4. A serial ~5-min ladder across many *unrelated* tasks in `lastRunAt` ⇒ drain order, not coincidence.
+
+**`ora-health-guard` Block A.0 DID alert on this outage — verified, not assumed.** Checked via the
+mail store (the actual record of what went out), not the transcript:
+`outlook-sent-probe.ps1 -SubjectFile <file containing exactly "Overnight machine-offline detected">`
+returned `ALREADY_SENT` / exit 10, matching `🌙 Overnight machine-offline detected — ora-health-guard
+woke 708min late — 2026-08-11`, `sentOn 2026-08-11T17:05:00` ET, to Gabriel, no cc. Threshold logic,
+4-minute latency, and routing canon all correct — **A.0 is working; do not re-investigate it as a
+defect.** That probe invocation is the reusable way to answer "did this task's alert actually fire on
+date X" — the subject stem is deliberately undated and anchored at position 0, and `-OnDate` scopes
+by Outlook's own `SentOn` (host clock = ET). Note the throttle-skip count is a METRIC, not an alarm
+channel, and `missed single cycle (currently open)` was 0 — so nothing else was expected to surface.
+
+**`automation-health-monitor` also alerted, and did NOT false-all-clear despite running 2nd in the
+drain.** It ran 21:02:28Z (17:02 ET), ~103 min before the drain finished, and emailed
+`⚠️ Cowork Automation Alert — ora-health-guard-fail-aging-nudge + CC/MCP dispatch-throttle 2026-08-11`
+at 17:07:57 ET (probe: `ALREADY_SENT`). The "monitor runs too early in a burst to verify the batch"
+concern is ALREADY MITIGATED by its **Step 0.03** (v1.18, added 2026-08-09 after the prior outage):
+it classifies `MULTI-DAY-OUTAGE-DETECTED` and stamps the report "treat this run's findings as a
+post-outage recovery snapshot, not a normal-cadence run." Do not re-raise this as a gap. Its v1.19
+(same day, mtime 17:16 ET) added cross-producer alert dedup so its email and A.0's cross-reference
+each other instead of arriving as two apparently independent discoveries.
+
+**RESOLVED 2026-08-12 via `main.log` — it was a genuine retry, NOT a phantom dispatch.**
+`ora-health-guard-fail-aging-nudge` was `global_limit`-skipped 17:02:27, respawned **exactly 60s
+later** (`Spawning new session … missed: '2026-08-11T13:00:00.000Z'`), logged `Confirmed task run`
+17:03:28, and ran tools continuously to ~17:09. So `lastRunAt 21:03:28Z` is real work, and the
+monitor's PRODUCER-STALE-OUTPUT finding was a **self-healed false positive** — it read the registry
+at 17:02:28, one second after the throttle and 59 seconds before the spawn. Its Step 0.08
+"retried-successfully" cross-reference could not fire because the retry had not happened yet. A
+finding from a monitor that runs *inside* a drain has a ~60s blind spot by construction; re-check
+`main.log` before acting on one.
+
+**The cap is `limit=3` — this is the number that explains burst duration.** During the drain the CC
+dispatcher logged `global_limit (active=7, limit=3)`; `per_task_limit` is `(active=1, limit=1)`.
+Both dispatchers (`[ScheduledTasks]` LAMS, `[CCDScheduledTasks]` CC/MCP) show the same cap. A ~19-task
+backlog draining 3 at a time on 60s retries IS the ~104-minute drain — the duration is arithmetic,
+not a fault. No user-editable config exists (exhaustively confirmed 2026-08-11; see
+`automation-health-monitor` SKILL.md Step 0.08 CONCURRENCY-CAP INVESTIGATION — cite it, don't re-search).
+
+**False lead, do not chase:** `[ScheduledTasks] Not auto-approving "<mcp tool>" … rule(s) not in
+stored approvals` lines are ROUTINE, not a failure. They appear across most LAMS tasks on a normal
+day (2026-08-11: automation-health-monitor 104, ora-lease-expiration-brief 84, ora-monday-sync 74) —
+and automation-health-monitor, which logged the MOST, still completed and sent its alert email.
+Distinct from [[reference_scheduled_task_approved_permissions]]'s no-op'd-write case; don't conflate.
+
+The lever for burst adjacency is uptime (or a freshness short-circuit inside the task), **never** a
+cron change, which the burst ignores by construction. And per
+[[reference_cron_retime_rearms_executed_slot]] a needless retime is not free — it can duplicate-fire
+an already-completed slot.
+
+**RECURRED 2026-08-12 — and the mechanism was HOST SLEEP WITH THE APP STILL OPEN, which this file's
+standing framing ("app closed → chain builds up → burst on reopen") does not cover.** Gabriel asked
+why `ora-am-brief` "hadn't fired." It had — the distinguishing evidence:
+
+- **Power log, not the process list, is the detector.** `Get-WinEvent` System / Kernel-Power +
+  Power-Troubleshooter showed **zero power-state events from 2026-08-11 19:38:20 → 08-12 11:00:17 ET
+  (15h22m)**. The machine sat in S0 Modern Standby overnight.
+- **First fire after resume was 13 seconds later** (`ora-health-guard` 11:00:32 vs the 11:00:18
+  resume). 10 CC tasks then backfilled 11:00:32–11:15:19 spanning cron slots 05:15→10:10. That
+  13-second resume→fire coupling is the cleanest burst signature on record — the scheduler resumed
+  the instant the host did.
+- **The app was never closed.** Oldest `claude.exe` PIDs alive continuously since 08-11 17:01:19,
+  i.e. across the entire dark window. So "is the Desktop app open?" is NOT sufficient to explain a
+  burst — check power events before concluding app-closure. (The 08-11 burst above WAS app-closure:
+  machine woke 16:59:36, app launched 17:01:19, drain began 17:01:36. Two consecutive late mornings,
+  two *different* proximate mechanisms.)
+- **Root cause is a power setting, and it is quantified:** `SUB_SLEEP / STANDBYIDLE` =
+  `0x2a30` = **10800 s = 3 h idle on AC *and* DC**; `HIBERNATEIDLE` = 0 (disabled); scheme Balanced;
+  only S0 Low Power Idle available (S1/S2/S3 all unavailable — Device Guard + firmware). So the host
+  sleeps every night regardless of being plugged in, and stays dark past the 05:15/06:00/07:05 slots
+  until touched.
+
+**`lastRunAt` was NOT what proved it ran** — per [[reference_scheduler_lastrunat_stamped_at_dispatch]]
+that value is stamped at dispatch (and again at stale-clear), so it cannot evidence execution. The
+proof was an **output** check: the Rate Snapshot page carried `prefetch_status: OK` /
+`fetched_at: 2026-08-12 11:20 ET` with a full Block A rewrite. Registry timestamps opened the
+question; the work product closed it.
+
+**Defect worth knowing: `ora-am-brief` mis-diagnoses its own late fire in its run note.** Its
+2026-08-12 note asserts *"Desktop app opened ~11:04 after an overnight offline window."* Both halves
+are wrong — the app was open throughout, and the resume was 11:00:17. The brief has no visibility
+into power events or process lifetimes and is inferring app-closure from lateness alone. Treat that
+sentence in any Block A run note as narrative, not evidence, and do not let it steer remediation
+toward "remember to open the app" when the lever is the sleep timeout.
+
+**Ruling (Gabriel, 2026-08-12): never sleep on AC** — `powercfg -change standby-timeout-ac 0`,
+DC left at 3 h. Chosen over a 05:45 wake timer because wake timers are unreliable under S0 Modern
+Standby, and over retiming the brief because retiming helps only one of the ~10 tasks in the
+overnight window. Claude cannot apply this (system-setting change is operator-run by policy).
+
+**APPLIED AND VERIFIED 2026-08-12 ~16:00 ET** — Gabriel ran it; `STANDBYIDLE` AC now reads
+`0x00000000` (NEVER), DC unchanged at `0x2a30` (3 h), HIBERNATEIDLE 0/0. Two things this does NOT
+close, so don't read the verified setting as proof the symptom is gone:
+1. **On battery the original failure is fully intact** — DC is still 3 h by design. An overnight on
+   battery reproduces the 08-12 dark window exactly.
+2. **`UNATTENDSLEEP` could not be read** — the setting is hidden by default in this scheme
+   (`powercfg /query` returns no index for it; revealing it needs
+   `powercfg /attributes SUB_SLEEP 7bc4a2f9-d8fc-4469-b07b-33eb785aaca0 -ATTRIB_HIDE`). Irrelevant
+   while AC never sleeps, but it becomes the governing timeout if anyone later adopts the
+   wake-timer approach.
+
+**The setting is verified; the FIX is not.** Confirmation requires observing an on-time 06:00 ET fire
+— check `ora-am-brief`'s work product (Rate Snapshot `fetched_at`), not `lastRunAt`, on 2026-08-13.
 
 Related: [[reference_fleet_status_dual_read]] (dual-registry read mechanics),
 [[reference_lean_ram_toolkit]] (the RAM ceiling this throttle protects),

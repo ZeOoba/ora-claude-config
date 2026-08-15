@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 72e9c1ee-b97a-4644-bd90-b89f2488af01
-  modified: 2026-07-25T15:10:41.631Z
+  modified: 2026-08-05T10:32:07.310Z
 ---
 
 The 2026-07-16 lease-expiration remediation corrected the Notion Tenant DB (and the workbook was already right), but **the HubSpot Lease Renewal deals built from the same March 2026 import were never touched**. Found 2026-07-25 by the ora-am-brief §4b HubSpot cross-check.

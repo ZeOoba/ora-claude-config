@@ -15,9 +15,12 @@ CURRENT-STATE ONLY. This file is OVERWRITTEN every run -- it answers "what did t
 check find?", NOT "what has ever happened" (that append-only history is memory/event_log.md).
 Mirrors the snapshot discipline already used by maintenance/_state/registry-membership.json.
 
-USABLE BY BOTH CALLERS by design:
+USABLE BY MULTIPLE CALLERS by design:
   - the git pre-push doctrine gate runs ONLY the doctrine probe -> passes governor_* = None,
-  - a future daily scheduled task runs BOTH probes -> passes governor_rc / governor_summary too.
+  - ora-cc-schematic-refresh (2x/week) runs all three probes -> passes governor_rc/_summary
+    and memory_rc/_summary too (added 2026-08-13, closing the gap where governor-drift-probe.py
+    and memory-integrity-probe.py had no durable log of their own -- their results previously
+    survived only inside the System Schematic artifact's prose, unlike the doctrine probe).
 
 Pure stdlib. No package install. Import by path (this file is hyphenated, so importlib
 util.spec_from_file_location -- the idiom already used in maintenance/_tests/test_hardening.py).
@@ -36,7 +39,8 @@ DEFAULT_STATUS_PATH = os.path.join(_MAINT_DIR, "_state", "doctrine-status.json")
 
 
 def build_snapshot(source, doctrine_rc, doctrine_summary,
-                   governor_rc=None, governor_summary=None, guard_orphans=None, now=None):
+                   governor_rc=None, governor_summary=None, guard_orphans=None,
+                   memory_rc=None, memory_summary=None, now=None):
     """The pure, in-memory snapshot dict. Separated from the write so it is trivially
     testable and so the (in-memory) build can never be the thing that raises during a
     best-effort write. `now` is injectable for deterministic tests."""
@@ -46,14 +50,18 @@ def build_snapshot(source, doctrine_rc, doctrine_summary,
         "source": source,
         "doctrine_probe": {"exit_code": doctrine_rc, "summary": doctrine_summary},
         "governor_probe": {"exit_code": governor_rc, "summary": governor_summary},
+        # memory-integrity-probe.py result -- same optional/None-when-not-run shape as
+        # governor_probe above. Added 2026-08-13.
+        "memory_probe": {"exit_code": memory_rc, "summary": memory_summary},
         # None/empty -> [] ; any iterable of WARN strings passes through unchanged.
         "guard_orphans": list(guard_orphans) if guard_orphans else [],
     }
 
 
 def write_status(source, doctrine_rc, doctrine_summary,
-                 governor_rc=None, governor_summary=None, guard_orphans=None, path=None):
-    """Atomically write the current doctrine/governor health snapshot to
+                 governor_rc=None, governor_summary=None, guard_orphans=None,
+                 memory_rc=None, memory_summary=None, path=None):
+    """Atomically write the current doctrine/governor/memory health snapshot to
     maintenance/_state/doctrine-status.json (or `path` for tests). OVERWRITES.
 
     source            "pre-push" | "scheduled".
@@ -61,6 +69,8 @@ def write_status(source, doctrine_rc, doctrine_summary,
     doctrine_summary  short string ("clean", a [MISSING]/[WARN] line, or a count).
     governor_rc /     governor-drift-probe.py exit code + summary; None when the caller
       governor_summary  did not run the governor probe this invocation (the pre-push gate).
+    memory_rc /       memory-integrity-probe.py exit code + summary; None when the caller
+      memory_summary    did not run the memory probe this invocation (the pre-push gate).
     guard_orphans     optional list of guard-liveness WARN strings; None/empty -> [].
     path              target override (tests); None -> DEFAULT_STATUS_PATH.
 
@@ -76,7 +86,8 @@ def write_status(source, doctrine_rc, doctrine_summary,
     target = path or DEFAULT_STATUS_PATH
     try:
         snapshot = build_snapshot(source, doctrine_rc, doctrine_summary,
-                                  governor_rc, governor_summary, guard_orphans)
+                                  governor_rc, governor_summary, guard_orphans,
+                                  memory_rc, memory_summary)
         # Temp file MUST be on the same volume/dir as the target for os.replace to be
         # atomic. If target's dir does not exist, mkstemp raises -> caught below (best-effort).
         target_dir = os.path.dirname(os.path.abspath(target))

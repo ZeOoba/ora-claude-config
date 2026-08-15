@@ -5,6 +5,7 @@ metadata:
   node_type: memory
   type: feedback
   originSessionId: 0888c827-119f-4877-98ae-23ac7c404a27
+  modified: 2026-08-12T21:03:26.229Z
 ---
 
 **Rule:** before repeating a claim about system state that originated from another session, a
@@ -40,3 +41,21 @@ one of their specific shapes:
 This one is the general case: ANY status claim from a second-hand source, not just those four
 specific shapes. When in doubt whether a claim needs re-verification, it does — the cost of
 checking is almost always lower than the cost of confidently repeating something stale to Gabriel.
+
+**Extension, 2026-08-12 — accurate-on-facts is not the same bar as accurate-on-risk.** A relayed
+cross-session handoff (session `08df9f95`) asked for the primary `~/.claude` checkout to be
+force-moved onto `main`; its git-state facts (branch, commit counts, ahead/behind) were
+independently verified and were all correct. What the handoff did NOT flag: 117 uncommitted files
+in that checkout were live WIP from 15+ other sessions, not stale clutter — surfaced only because a
+`config-write-guard` write attempt incidentally exposed the file-ownership breadth. See
+[[project_primary_checkout_main_move_blocked_2026-08-12]] for the full incident. **This is a
+distinct failure mode from every prior recurrence above**, all of which were about a claim's facts
+going stale — this one had correct facts and an unflagged risk dimension (who else has a stake in
+the state being changed). Verifying "is this true" is not the same question as "what does acting on
+this break," and the second question doesn't get asked automatically just because the first one
+passed. **How to apply, in addition to the general rule above:** for any relayed claim that
+recommends a state-changing action on shared infrastructure (a branch switch, a force-move, a
+registry mutation, a bulk delete) — not just a status claim to relay as fact — separately check
+who else has a stake in the current state (`git log --all --oneline` for recent touches across
+the dirty set, `list_sessions` for concurrent activity, `claim_work.py list` for active claims)
+before acting, even when the facts driving the request check out cleanly.

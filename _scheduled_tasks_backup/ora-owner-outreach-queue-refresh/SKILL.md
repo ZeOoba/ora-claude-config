@@ -1,6 +1,21 @@
 ---
 name: ora-owner-outreach-queue-refresh
 description: Weekly Phase-1+2 owner-outreach pipeline — refreshes the queue, upserts only net-new owners into the Notion Owner Outreach Queue DB, regenerates the T1 letter pack (DOCX+PDF), emails a summary to ggoldberg only. Draft-only — nothing sent to owners. Retimed 2026-07-21 (Gabriel-directed) from 10:00 AM to 10:55 AM ET, same root cause/fix as ora-monday-sync (see that task's description). v1.2 (2026-07-12): on this fully-unattended path, a STALE master now pauses Notion page-creation and routes to a QUESTIONS FOR GABRIEL email section instead of auto-proceeding. v1.3 (2026-07-14): STEP 1's STALE GUARD now checks the reported vintage against a STANDING RATIFICATIONS list before halting. [MODEL: claude-sonnet-5 | set 2026-07-13]
+output_contract:
+  version: 1
+  blocks:
+    - id: block-owner-outreach-mail
+      artifact:
+        type: sent_mail
+        mailbox: "ggoldberg@oxfordra.net"
+        subject_pattern: "ORA Owner-Outreach — Weekly — {DATE}"
+        recipient: "ggoldberg@oxfordra.net"
+      freshness_window_hours: 180
+      expected_on:
+        cron: "55 10 * * 1"
+      on_missing_severity: alarm
+      is_primary_health_signal: true
+      notes: "STEP 5's summary email is the ONLY every-run artifact: the Notion Owner Outreach Queue upsert happens only when net-new owners exist, and the STALE GUARD can halt before it. Both the proceed and halt paths still email. Window is 180h = weekly cadence (168h) plus slack, mirroring the CC convention of 30h for a daily cron; a tighter window would false-alarm on any audit day after the fire, and a detector people learn to ignore is worse than none."
 ---
 
 RESTORATION NOTE: Re-registered 2026-07-07 after the 2026-07-05 machine migration orphaned this task (folder survived on disk; registry entry was lost). Content restored verbatim from the surviving SKILL.md — no logic changes.

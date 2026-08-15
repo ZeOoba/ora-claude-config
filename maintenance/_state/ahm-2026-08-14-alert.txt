@@ -1,0 +1,59 @@
+CROSS-REFERENCE, NOT A NEW DISCOVERY. This is the automation-health-monitor
+follow-up to an incident you were already alerted about twice this morning.
+
+FINDING (1 of 1)
+  ora-cowork-heartbeat  --  ALERT-LATE, +127 min
+  Expected fire 2026-08-14 05:50 ET (09:50Z) / actual dispatch 07:57:23 ET (11:57:23Z)
+
+ROOT CAUSE -- same incident as this morning's two existing alerts
+  The host sat in Modern Standby (S0ix) low-power idle from 00:28:48 until
+  07:57:19 ET. The whole 05:15 / 05:50 / 06:00 ET AM cluster fell inside that
+  window with the app suspended. Already alerted by:
+    - ora-health-guard Block A.0 wake-lateness alert, 08:00:41 ET (woke 163 min late)
+    - [ACTION] Health Guard -- 2026-08-14 -- 1 FAIL, 08:10 ET
+  NOT sleep-config drift: power_sleep_ac is NEVER (0x00000000), A.0b INTACT.
+  The DC index 0x00002a30 (3h) is the ratified 2026-08-12 configuration.
+
+WHY THIS IS LOW SEVERITY
+  The task completed. Its beacon is FRESH -- the Notion heartbeat page recorded
+  2026-08-14T11:58:22Z, well inside the external watchdog's 16h threshold.
+  Only the timing was off. No functional failure.
+  Flagged at all only because ora-cowork-heartbeat is DAILY cadence, so Step
+  0.5b carry-forward suppression is unavailable to it.
+
+EVERYTHING ELSE IS CLEAN
+  LAMS fleet 28/28 enabled -- 12 verified, 0 warn-late, 15 HISTORICAL
+    (already-reported weekly/monthly lateness, suppressed per Step 0.5b)
+  Producer beacons     5 due, 5 fresh, 0 stale
+  Contract freshness   7 declared, 0 due today (Mon/Thu cadences)
+  Model currency       28/28 on claude-sonnet-5
+  Dispatcher throttle  2 ids, both THROTTLED-THEN-RECOVERED, 0 open
+  Outlook COM          confirmed healthy -- 11 automated sends today
+
+REGISTRY DIFF -- 2 deletions since 2026-08-13, BOTH EXPLAINED, 0 regressions
+  1. ora-cam-reconciliation-annual (annual, Jan 15) -- deleted. Its SKILL.md
+     folder has been in _archive_2026-06-11_orphans since 2026-06-11, so the
+     registry entry was a two-month-old dangling orphan. Detected independently
+     by registry-membership-probe at 08:00:31 ET today.
+
+     >> OPEN QUESTION FOR YOU (raised in today's event_log, still unanswered):
+        does the annual CAM-reconciliation duty need re-registering before its
+        Jan 15 2027 cadence, or was it superseded? Worth a decision soon --
+        ora-cam-data-backfill fires TOMORROW (2026-08-15) specifically to prep
+        the 2027-01-15 CAM cycle, so the prep task exists while the
+        reconciliation task it feeds does not.
+
+  2. ora-counsel-review-standard-positions -- deleted. Disabled, expired
+     one-time (fireAt 2026-08-03); the long-tracked purge. Successor
+     ora-counsel-review-standard-positions-2027 is live.
+
+ALSO SENT TODAY, sharing context (not duplicates -- different findings):
+  [ALARM] CC Mirror Deploy down 9 runs, 14:51Z -- RECOVERED 15:03Z
+  [ORA Command Center] Mirror deploy still failing (escalated), 14:00Z
+  Separate root cause (master workbook unparseable after an openpyxl re-save).
+
+Full report, including the five open items carried from the CC/MCP fleet:
+https://app.notion.com/p/3bc6ecd89e5981f983bbe1f702b10f36
+
+-- automation-health-monitor v1.22, LAMS/Cowork surface
+   Audit window 2026-08-13T15:20Z -> 2026-08-14T15:22Z
