@@ -271,8 +271,8 @@ Call `block-sentinel.py complete --task ora-am-brief --block blockC --run-id <ru
 
 Before any other work in this block, write a heartbeat entry durable independent of the rest of the block's success path:
 1. **State-file mirror (primary signal).** Append one line `pre-brief-heartbeat: <ISO 8601 UTC> :: status=ENTERED :: run_id=<uuid>` to `…\Claude_Workspace\_state\inbox-pre-brief-heartbeat.log`. Create `_state` if missing.
-2. **Notion mirror (secondary signal).** Update the dedicated heartbeat block on the Ops Hub page (UUID `32b6ecd8-9e59-81f2-b329-df3fd0e25062`) — block ID in `…/_state/heartbeat-blocks.json` under key `ora-inbox-pre-brief.heartbeat_block_id`. If this file/key doesn't exist yet (first run after restoration), create the block and record its ID.
-3. Only after the state-file write succeeds, proceed. If the Notion mirror fails, log `HEARTBEAT_NOTION_MIRROR_FAILED` and continue.
+2. **Notion secondary mirror — RETIRED 2026-08-13.** The prior instruction here ("update the dedicated heartbeat block on the Ops Hub page, block ID in `heartbeat-blocks.json` under `ora-inbox-pre-brief.heartbeat_block_id`; create it and record the ID on first run") never once succeeded across every run on record since 2026-05-14 — `heartbeat_block_id` stayed `null` through the 2026-08-09 manual verification run and every scheduled fire since, because the Notion MCP's block-insert call does not return the created block's ID, so this task could never complete the "record its ID" half of its own instruction. Do not re-attempt this pattern; it is a structural gap in the available tooling, not a one-off miss. `last_run_page_id` in `heartbeat-blocks.json` already serves as the practical pointer to the most recent run, and the state-file mirror above is the actual primary signal `ora-health-guard`/`automation-health-monitor` read. If a Notion-visible cross-fleet heartbeat is wanted again, it needs a block created once by hand in the Notion UI (capturing a stable ID up front) rather than an unattended run attempting self-creation.
+3. Only after the state-file write succeeds, proceed.
 4. On any subsequent failure, update the heartbeat line in place to `:: status=ENTERED → FAILED :: stage=<step-N> :: error=<message>` before exiting.
 
 ## C.0.5 — RATE PREFETCH SIGNAL READ
@@ -287,6 +287,9 @@ Informational only — does NOT change urgency scoring or inbox classification.
 
 ## C.1 — INBOX SWEEP
 Use `mcp__c0ea3c01-b8f1-4371-aa06-08a1449f59fc__outlook_email_search` to retrieve all messages in Gabriel's Inbox where receivedDateTime falls in the window. **Timeframe:** 4:30 PM ET prior business day → 6:30 AM ET today. **On Monday runs, sweep from 4:30 PM ET previous Friday.**
+
+**LATE-FIRE WINDOW EXTENSION (added 2026-08-13 — formalizes ad hoc judgment applied on both 2026-08-12 and 2026-08-13).** The 6:30 AM cutoff assumes an on-time 06:00 fire. During a catch-up burst (overnight machine-offline; this task actually fires hours later) the fixed cutoff leaves a real gap unswept by ANY run: tomorrow's window starts at 4:30 PM today, so 6:30 AM–[actual fire time] would never be covered. **If this run's actual start time is after 6:30 AM ET, extend the window end to the run's start time instead of 6:30 AM.** State the extension explicitly at the top of C.6 output (see template below) — do not silently widen the window without flagging it. This does not apply to the 4:30 PM start boundary, which stays fixed (or the prior-Friday 4:30 PM start on Monday runs).
+
 Exclude: newsletters/marketing blasts (mailchimp, hubspot.com/email, sendgrid, constantcontact, mktomail, etc.); out-of-office auto-replies; calendar invitations; internal Eric ↔ Gabriel ↔ ORA-internal-only threads (no external counterparty).
 
 ## C.2 — COUNTERPARTY CLASSIFICATION
@@ -339,10 +342,19 @@ Render at the BOTTOM of C.6, after ACTIVITY SUMMARY:
 ```
 Cap at 10 most recent actionable items ("+N more — run /open-sessions in Code for the full list" if more). This scheduled session itself never appears. If none: "✅ No Claude sessions awaiting you." If the probe errors: print `⚠ open-sessions probe failed: <reason>` and continue.
 
+## C.5.7 — AR / COLLECTIONS COVERAGE CROSS-CHECK (added 2026-08-13)
+
+**The incident.** The 2026-08-13 run classified an Eric→PM thread about Marileaves' outstanding balance as HIGH (Tenant/Collections), then separately noticed — only by chance, not by a standing rule — that Marileaves does not appear on that morning's dated AR/delinquency feed cited in Block B §4c (the `[ORA PM] N Delinquent Tenants — [date]` report). This is a real coverage gap: either the balance lives outside the PM feed's scope, or the tenant sits under a different entity name in that system, and either way an accounting email was about to go out to the tenant without anyone having reconciled the two sources.
+
+**The rule.** Whenever a swept message (C.1–C.2) discusses a tenant's outstanding balance, payment plan, collections referral, or eviction/default status, cross-check that tenant's name (and any known entity aliases from the Notion Tenant DB) against Block B §4c's AR/delinquency feed for this run — reuse the artifact already fetched for §4c, do not re-fetch. If the tenant is **not** on that feed, add one line to the message's item in C.6: `⚠ NOT ON [date] AR FEED — reconcile before further correspondence.` If the tenant **is** on the feed, no additional note is needed.
+
+**Do not treat this as a §4c defect to fix by adding fields.** §4c's "no aging, no collection status" gap is a known, separately-documented structural limit of the PM-platform export chain (see §4c's own coverage-gap callout) — this cross-check is narrower and cheaper: it only asks whether the tenant is *present at all*, which the feed can already answer without any schema change.
+
 ## C.6 — TRIAGE OUTPUT
 ```
 ORA INBOX PRE-BRIEF — [YYYY-MM-DD]
 Window: [start datetime] → [end datetime] ET
+[If C.1's late-fire extension applied: > [!warning] Window extended beyond spec — fired [actual time] ET instead of 06:00; the 6:30 ET cutoff would have left a gap no run covers, so the window was extended to [actual time].]
 Total messages swept: [n] | Excluded as noise: [n] | For triage: [n]
 
 ═══ RED FLAGS — ACT BEFORE 9:00 AM ═══

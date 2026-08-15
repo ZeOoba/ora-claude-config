@@ -1,6 +1,6 @@
 ---
 name: ora-skill-text-audit
-description: Monthly skill-body grep for stale references (13 pattern classes) — day 15 of each month, 9:45 AM local. Clean pass → Notion log only; findings → email Gabriel, [ACTION REQUIRED] prefix for CRITICAL. v1.9 2026-07-16. [MODEL: claude-sonnet-5 | set 2026-07-13]
+description: Monthly skill-body grep for stale references (14 pattern classes) — day 15 of each month, 9:45 AM local. Clean pass → Notion log only; findings → email Gabriel, [ACTION REQUIRED] prefix for CRITICAL. v1.10 2026-07-29 (class n added: description token-budget lint, Phase-4 blueprint). v1.9 2026-07-16. [MODEL: claude-sonnet-5 | set 2026-07-13]
 ---
 
 RESTORATION NOTE: Re-registered 2026-07-07 after the 2026-07-05 machine migration orphaned this task (folder survived on disk; registry entry was lost). Content restored verbatim from the surviving SKILL.md — no logic changes.
@@ -13,11 +13,11 @@ Run ORA Skill Text Audit v1.9 (monthly cadence).
 
 1. List all installed skills via `mcp__skills__list_skills`.
 2. For each skill in `C:\Users\Owner\AppData\Roaming\Claude\local-agent-mode-sessions\skills-plugin\...\skills` (and any user-skills folder), read SKILL.md.
-3. Grep each SKILL.md body for the **THIRTEEN stale-reference classes** below.
+3. Grep each SKILL.md body for the **FOURTEEN stale-reference classes** below (class n reads the frontmatter description, not the body).
 4. For each finding, capture: skill name, line number, snippet, finding class (a-m), severity, and recommended remediation.
 5. Apply conditional notification (see §Notification).
 
-## Pattern Library — THIRTEEN classes (v1.9)
+## Pattern Library — FOURTEEN classes (v1.10)
 
 **a. Legacy email.** `ze@oxfordra.net` — superseded by ggoldberg@/egoldberg@ per CLAUDE.md.
 
@@ -68,6 +68,8 @@ Root-cause history: F9 (`ora-skill-store-drift-check`, resolves at location 2) a
 **l. Routing-canon violation (v1.4, 2026-07-09).** Grep every SKILL.md body for `egoldberg` and flag any LIVE send instruction, recipient list, or cc that routes to egoldberg@oxfordra.net outside the sole sanctioned exception: the `ora-am-brief` Daily Brief cc (CLAUDE.md routing canon). Allow: historical/changelog context ("removed", "rescinded", "corrected", "retired"), and text that merely STATES the canon/exception (e.g. "only Daily Brief retains egoldberg cc") rather than routing to it. As of 2026-07-09 `ora-am-brief` is the ONLY sanctioned exception — if Gabriel ratifies another (e.g. a repaired Command Center Daily Brief), add it to this class FIRST, then to the canon statement. Severity 🔴 CRITICAL — these hits ride the [ACTION REQUIRED] email.
 
 **m. Bare user-misaddress (v1.6, 2026-07-16).** Grep every SKILL.md body for "Ze" or "Ze Ooba" used as a form of address to the user in prose (e.g., "present to Ze", "sign as Ze Ooba", "ask Ze for approval") — CLAUDE.md's identity invariant requires "Gabriel"/"Gabriel Goldberg" (formal: "Mr. Goldberg"). This is distinct from class (a), which only catches the legacy email `ze@oxfordra.net`: the bare-name form has already caused two CRITICAL production incidents that class (a) missed — communication-intelligence's Standard Signature Block (found 2026-07-08, fixed v1.1) and document-assembly's user-address references (found 2026-07-15, fixed v1.3) — both caught only by ad hoc manual review because this was never a codified pattern. Allow historical/changelog context ("was 'Ze Ooba', corrected to Gabriel") and genuine unrelated proper nouns after context review. Severity 🔴 CRITICAL — same tier as class (a): both risk outbound mail signed with the wrong name.
+
+**n. Description token-budget lint (v1.10, 2026-07-29 — Phase-4 blueprint item, Gabriel-approved).** For each skill's frontmatter `description` field ONLY (not the body): flag (1) length > 1536 characters — the Code-surface listing cap (`skillListingMaxDescChars`), beyond which the description is truncated in the session listing anyway while still being synced/stored in full; and (2) TWO OR MORE version-changelog fragments matching `v\d+\.\d+ (\d{4}-\d{2}-\d{2}` — changelog prose in a description costs recurring tokens in EVERY session's skill listing without aiding routing; it belongs in the skill BODY (a single trailing version tag is fine and exempt). Recommended remediation is always MOVE-TO-BODY, never deletion: trigger vocabulary (the phrases that make the skill auto-route) must be preserved verbatim — a description trim that drops trigger terms is a routing regression, which is worse than the tokens it saves. Severity 🟢 LOW (single finding) / 🟡 MEDIUM (>2500 chars or >3 changelog fragments). Report as a batch table (skill · desc length · changelog-fragment count), not one finding per skill.
 
 ## Severity Matrix
 
