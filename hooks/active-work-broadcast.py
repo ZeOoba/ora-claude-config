@@ -31,6 +31,17 @@ identity rather than a per-session one, so git identity cannot answer "is this H
 mine?". Both rules now apply; neither replaces the other. See claim_work.py's ORA-SKILLS
 note.
 
+`ora-skills-housekeeping` ADDED 2026-08-15 (Automation Audit Rev 10 remediation
+follow-up): `repo-housekeeping`'s own scope is the ~/.claude checkout, but sessions
+kept reaching for it for ora-skills-repo work too, for lack of a documented
+alternative -- there was never a code reason to, slugs have been free-form since
+07-26 above, only the printed vocabulary hadn't grown to cover that repo. Prefer
+this slug (or another repo-scoped one) over `repo-housekeeping` when the work's
+actual scope is a different repo under ~/.claude -- see claim_work.py's own
+"SLUGS ARE FREE-FORM" docstring section for why a distinct slug matters here (it
+keeps unrelated claims independently visible instead of one silently overwriting
+another's broadcast).
+
 DELIVERY: emits ONLY via hookSpecificOutput.additionalContext, never systemMessage --
 per reference_hook_systemmessage_not_model_visible.md, systemMessage is user-visible
 but INVISIBLE to the model, so a hook meant to steer agent behavior that used
