@@ -170,6 +170,11 @@ BACKUP_SWEEP_TRANSIENT_DIRS = {
     "tasks", "telemetry", "todos", "worktrees",
     # append-event-log.py staging (drains into event_log.md; transient by design)
     "_tmp_entries",
+    # 2026-08-15 (Gabriel-directed): harness usage telemetry -- per-session facets/
+    # + session-meta/ JSON and generated report-*.html. Derived, per-session,
+    # regenerable, and machine-local; same class as telemetry/ and sessions/ above.
+    # Carries no doctrine, so there is nothing here the private-remote backup needs.
+    "usage-data",
     # NEVER track (invariant 3): confidential staging must not reach the remote.
     # daemon/ (above) additionally holds key files -- also never track.
     "_confidential-staging",
