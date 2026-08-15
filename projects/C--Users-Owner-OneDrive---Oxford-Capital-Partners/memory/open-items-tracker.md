@@ -107,6 +107,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | [OI-089](#OI-089) | 2026-08-05 | ora-appsec-sweep 2026-08-05 (oxford-command-center @ `175e3f9`, security-auditor dispatch) | **MEDIUM** oxford-command-center `/api/actions/om-extract` (`server/index.ts:358-414`) validates only `file.name.endsWith('.pdf')` plus a 25 MB cap — no `%PDF-` magic-byte check — then feeds the buffer to `pdf-parse` and, with a `dealId`, writes it verbatim into the live OneDrive deal-document tree. Arbitrary non-PDF content can be persisted into business storage under a `.pdf` name. Reach is local-only (see [OI-050](#OI-050)). The filename sanitization and `resolve()`-prefix traversal assertion at `:400-405` are correct and should be preserved as-is |
 | [OI-090](#OI-090) | 2026-08-05 | ora-appsec-sweep 2026-08-05 (oxford-command-center @ `175e3f9`, security-auditor dispatch) | **MEDIUM** oxford-command-center has no rate or concurrency limit on `/api/ai` (`server/index.ts:460-493`), `/api/documents/search` (`:447-453`) or `/api/actions/om-extract` (`:358`). Per-request bounds are good (`maxTurns: 8`, `max_tokens: 16000`, 25 MB cap) but nothing bounds concurrent or repeated calls, and each `/api/ai` call spends real Anthropic tokens against the machine's key. OWASP-LLM10 unbounded consumption; combined with [OI-050](#OI-050)'s unauthenticated cross-site write path this is the cheapest denial-of-wallet route in the repo. ora-pm's equivalent gap was closed under OI-038/044; occ has no counterpart |
 | [OI-091](#OI-091) | 2026-08-05 | ora-appsec-sweep 2026-08-05 (oxford-command-center @ `175e3f9`, security-auditor dispatch) | **MEDIUM** oxford-command-center `.claude/hooks/file-guard.mjs:144-159` applies its documented fail-open to the HARD-DENY paths, not just the sentinel-overridable architect-owned list: `findRepoRoot` walks up looking for `CLAUDE.md` and `continue`s (unpoliced) if none is found, and skips any target whose owning root is neither ancestor nor descendant of the session root. A worktree or checkout without a root `CLAUDE.md`, or a path form that breaks `relative()` matching (junction, `\\?\`, 8.3 short name, UNC), therefore leaves `data/overlay.json`, `data/warehouse/**`, `.claude/settings.json` and `.claude/hooks/**` unprotected by this hook; the `permissions.deny` globs are path-form-sensitive in the same way. LLM06/excessive-agency: an agent session on an unusual path form can edit its own guardrails. Requires an already-agentic session, so MEDIUM not HIGH. Any fix here is security-gate hook logic: mandatory adversarial REFUTE pass + the old-vs-new differential battery |
+| [OI-111](#OI-111) | 2026-08-09 | four `git push` invocations landing [PR #41](https://github.com/ZeOoba/ora-claude-config/pull/41) and [PR #44](https://github.com/ZeOoba/ora-claude-config/pull/44) (both merged, `c8ea74e` / `6b197f1`) from the `ora-entry-market-scan` session; reconciled 2026-08-15 from two independently-diverged accounts, see section | **LOW** `hooks/git-prepush-doctrine-gate.py`. Two open items remain (Defect 1: possible branch-deletion mis-sweep, unproven; Defect 3: test-sourced stderr reads as a live failure, cosmetic). Both higher-severity claims this item originally carried have since been retracted or closed — Defect 2 (a reporting bug) was RETRACTED 2026-08-09 as a misreading of its own evidence, and Defect 4 (hook-test suite "not concurrency-safe") was investigated 2026-08-12 and found to be a wall-clock budgeting issue with zero assertion failures, not a safety defect. **RECONCILIATION NOTE, needs Gabriel's confirmation:** the Defect-4 closure is HEAD's account; main's account never engaged with that investigation and still frames Defect 4 as open and unretracted ("do not fix by overriding"). Taken as controlling here because it is later and specifically investigative, but this is a judgment call, not a fact both sources agree on — see section |
 | [OI-112](#OI-112) | 2026-08-09 | residual from landing [PR #46](https://github.com/ZeOoba/ora-claude-config/pull/46) (`a880b39`, merged) during the `ora-health-guard` session `1ce540e5` | **LOW** The shared `~/.claude` checkout is parked on `feat/model-canary-probe-step25`, merged long ago as [PR #38](https://github.com/ZeOoba/ora-claude-config/pull/38), so `a880b39` is not reachable from the checked-out branch and the **live** `hooks/git-prepush-doctrine-gate.py` lacks the scratch-worktree janitor that PR #46 merged to `main`. Cosmetic and self-limiting; Gabriel decided in-turn 2026-08-09 to leave it rather than switch branches under other sessions' work. Row restored 2026-08-10 by `ora-weekly-hygiene` Block N |
 | [OI-113](#OI-113) | 2026-08-10 | `ora-weekly-hygiene` Block M (unsigned draft-to-signature nudge), run 2026-08-10 | **LOW** Outbound lease document for **392 Morrison Rd** (thread "Re: Morrison Rd", sent 2026-08-03 19:11 ET with attachment, body "Updated Security Deposit. This one should be good.") has sat **5 business days** with no counterparty reply observed in the 45-day mailbox scan. No Notion/HubSpot/e-sign completion marker found either way — per Block M step 3, silence is not evidence of progress, so it stays flagged. Confirm whether it was signed or needs a nudge |
 | [OI-096](#OI-096) | 2026-08-05 | OI-094 range audit, finding (a); promoted out per Gabriel ruling 2026-08-05 | **RESOLVED 2026-08-05.** `485 S Walnut St` rows 45 and 46 BOTH carried `2028-09-26` — r45 was the final regular payment (`E`=1,365), r46 is the payoff (`D`=253,365 = 252,000 principal + 1,365 interest, `E`=1,365). `'External Loans Summary'!H16` sums column `E` over a date predicate, so it picks up **both** rows' $1,365, counting the same September interest twice. Bites when 2028-09-26 enters the forward-12-month window, ~Oct 2027. Small ($1,365) but a genuine over-count, and the same shape as the OI-092 defect. It is also why the OI-092 detector retry must key on **distinct dates, not row counts** — the withdrawn draft false-fired "13 payments" on exactly this pair |
@@ -2730,7 +2731,189 @@ server-side (the handler already does `db.from('tenants').select(...)` for the I
 not blocking; noted here so it isn't lost, not because it's urgent.
 **Auto-check:** none.
 
-<!-- OI-111 deferred (2026-08-14/15): HEAD and origin/main carried mutually contradictory row + detail-section content for this item -- opposite technical conclusions about whether the pre-push hook-test suite has a genuine concurrency-safety defect (HEAD: measured 08-12, closed as a budgeting issue; main: unretracted "38 fail/37 pass, do not fix by overriding"). Deliberately withheld from this merge -- no row, no section -- pending Gabriel's decision, to avoid asserting either contradictory claim as settled. Both full candidate texts are recoverable from this commit's merge parents. Resolved as its own follow-up commit in a dedicated worktree. -->
+### OI-111
+**Status:** OPEN
+**Opened:** 2026-08-09
+**Source:** four `git push` invocations while landing [PR #41](https://github.com/ZeOoba/ora-claude-config/pull/41) and [PR #44](https://github.com/ZeOoba/ora-claude-config/pull/44) (both merged, `c8ea74e` / `6b197f1`) from the `ora-entry-market-scan` session
+**Severity:** LOW — a timing/ergonomics issue. Downgraded from MEDIUM when the Defect 2 correctness claim behind that grade was retracted, and Defect 4's concurrency-safety claim was independently investigated and closed as a budgeting issue (2026-08-12). What remains is Defect 1 (unproven) and Defect 3 (minor, cosmetic).
+**Owner note:** `hooks/git-prepush-doctrine-gate.py` was under active edit by session `1ce540e5` / host `local_2648ba07-…` when this was found; their PR #46 (`a880b39`) has since merged. Filed here rather than messaged because `send_message` is unavailable from an unattended (scheduled-task) session.
+
+**RECONCILIATION NOTE (2026-08-15):** this item diverged into two independently-written accounts (HEAD and origin/main branches of the `ora-claude-config` repo) that never saw each other's work. Both made genuine, non-overlapping progress — main correctly retracted Defect 2 and added Defect 3 and the counter-evidence paragraph below; HEAD independently investigated and closed Defect 4. This section merges both. The one place they actually conflict: HEAD's Defect-4 closure is taken as controlling below, but main's account was written without knowledge of that investigation and never had a chance to rebut it — this is a judgment call about which account supersedes, not a resolved factual agreement, and should be confirmed rather than assumed final.
+
+**Defect 1 (OPEN) — the full sweep appears to run on branch DELETIONS, where there are no incoming
+objects to validate.** `git push origin --delete` for two merged branches timed out the client at 120s;
+the FIRST delete landed and the SECOND did not. The same deletion via `gh api -X DELETE
+repos/ZeOoba/ora-claude-config/git/refs/heads/<branch>` returned instantly (exit 0). A delete-only
+refspec carries no objects, so the doctrine probe and the `hooks/tests` suite have nothing to check.
+`grep` for zero-SHA / delete handling in the gate found none. **Not proven** — the gate's stdout was not
+captured on that invocation, so the 120s is consistent with, but does not by itself demonstrate, a full
+sweep. Reproduce by pushing a delete with output captured.
+
+**Defect 2 — RETRACTED 2026-08-09, same session, before this item was ever pushed.** Originally filed as
+"`error: failed to push some refs` printed on a push that SUCCEEDED", graded MEDIUM as a correctness bug
+in failure reporting. **That was a misreading of my own evidence.** The observed sequence was: first
+attempt printed the error, a retry was killed by the client at 120s, and the branch was later found on
+the remote at the correct SHA. I attributed the landing to the *first* attempt. A later blocked push,
+captured in full, shows the gate prints an explicit `--- FAIL: <test> ---` reason alongside
+`failed to push some refs` **and the ref genuinely does not land** — i.e. reporting is accurate. The far
+likelier reading is that the first attempt genuinely failed and the killed-at-120s **retry succeeded**.
+Recorded rather than deleted so the wrong conclusion is not re-derived from the same raw symptom.
+
+**Defect 3 (OPEN, minor) — deliberate negative-path test stderr is indistinguishable from a real
+failure.** `maintenance/_tests/test_check_open_items_duplicate_ids.py` exercises the unreadable-tracker
+branch, so gate output contains `open-items-tracker ID check: COULD NOT READ <tmp>\does-not-exist.md
+... treat as a check failure, not a clean result.` verbatim. It is a *passing test asserting a failure
+path*, but it renders exactly like a live check failure and cost real debugging time here. Prefixing
+test-sourced stderr, or suppressing it on pass, would fix it.
+
+**Defect 4 — CLOSED 2026-08-12, folded into candidate fix (c) below. Not a separate defect.**
+
+Filed 2026-08-11 as an unverified relay ("the `hooks/tests` suite is not concurrency-safe"), reproduced
+2026-08-12, and closed the same day because the reproduction disproved the safety claim and confirmed a
+budgeting problem already tracked as fix (c). **The suite is not concurrency-unsafe: zero assertion
+failures were observed in either condition.** Every non-pass was `rc=124`, a wall-clock timeout, and all
+six load-induced timeouts passed in isolation at 27–65s — inside even the single 90s budget. The gate's
+own `TIMEOUT_RETRY_MULTIPLIER=2` absorbs them, so no push was ever actually blocked by this. Safety and
+budgeting have opposite fixes, and only the budgeting one is real; the measurement now lives in fix (c),
+where it is actionable. **The relayed magnitude (38 failures) never reproduced — worst observed was 6 —
+and must not be cited.** Full measurement, methodology, and the original relay are retained below for
+provenance; nothing here needs separate tracking.
+
+<b>Retained detail (closed — the live claim is fix (c)):</b>
+
+**MEASURED 2026-08-12** (session `e4ed7e05`, HEAD `1706bc2`, working tree carrying 115 uncommitted
+changes of which 2 are under `hooks/` — `claim_work.py` and `test-claim-work-lib.py`, the PR #52 WIP.
+Both conditions ran against the **identical** tree, so the delta is attributable to load, not to code.)
+
+Harness: replicated `git-prepush-hook-tests-gate.py`'s own contract — same three `TEST_ROOTS`, same
+two-pattern glob, `python <file>` per subprocess with exit 0 = pass, `PER_TEST_TIMEOUT_SECONDS=90`,
+`MAX_PARALLEL_TESTS=8`, `CANNOT RUN:` treated as ENV-SKIP. The **first-run** result was recorded raw,
+with the gate's timeout-retry deliberately not implemented, so the retry could be evaluated separately.
+Load was generated by a second concurrent copy of the whole suite — what a fleet burst actually looks
+like — on a 16-core machine.
+
+| Condition | Files | PASS | TIMEOUT | **Assertion FAIL** | Wall |
+|---|---|---|---|---|---|
+| Ambient (other sessions live, no injected load) | 75 | 73 | 2 | **0** | 135.2s |
+| Under a concurrent second suite copy | 75 | 69 | 6 | **0** | 200.7s |
+
+Timed out under load: `test-commit-provenance-guard` · `test-config-write-guard` ·
+`test-claim-work-lib` · `test-git-prepush-scan` · `test-memory-orphan-link-guard` ·
+`test-eos-review-gate`. All six then **passed in isolation at 27–65s** — every one inside even the
+*single* 90s budget, never mind the doubled one.
+
+**The relayed diagnosis "not concurrency-safe" is not what is happening.** Across both conditions the
+suite produced **zero assertion failures**. No test computed a wrong answer, saw another test's state,
+or raced on a shared file. Every single non-pass was `rc=124`, a wall-clock timeout: subprocess-heavy
+files run 1.4–3× slower under contention and blow a *flat* per-file budget. That is a **budgeting**
+defect, not a **safety** defect, and the two have opposite fixes — "make the tests concurrency-safe"
+would be work against a problem that does not exist.
+
+**Denominator corroborates the relay's provenance:** discovery finds **75** files (44 `hooks/tests` +
+31 across the `maintenance` roots); the relayed line said 76. Close enough to confirm they were looking
+at this suite. **The relayed magnitude did NOT reproduce:** they reported 38 failures, I measured 6 at
+worst. Either their real fleet load far exceeded a 2-copy proxy, or the figure is unreliable — note
+this item's own timing evidence above records "`hook-tests-gate` 38/39", a *pass* count from a partial
+run, which the 38 may be a garbled recollection of. **The 38 figure remains unreproduced; do not cite it.**
+
+**The gate already absorbs this, by design and in fact.** `TIMEOUT_RETRY_MULTIPLIER=2` grants each
+timed-out file exactly one rerun at 180s, and the gate's own docstring documents this exact phenomenon
+found 2026-07-26 (`test-eos-review-gate.py` blowing 90s during a push with three other live sessions,
+then passing all 48 of its tests on isolated rerun). **All six of my timeouts recovered on rerun**, so
+a real push in the loaded condition would NOT have been blocked — the gate would have disclosed them as
+"timeout-retry … not blocking" and let it through. Defect 4 as originally relayed is therefore **already
+mitigated**.
+
+**VERDICT — what actually survives, and it is not what was filed.** Two things the reproduction found
+that the mitigation does not cover:
+
+1. **Two files timed out with no injected load at all** — `test-eos-review-gate` and
+   `test-memory-orphan-link-guard`, at merely ambient session activity. The retry catches them, but the
+   flat 90s budget is now marginal at *baseline*, not just under bursts. Every file added to the suite
+   makes this worse.
+2. **The suite outruns the push timeout.** It took **135s ambient / 200s under load**, against the
+   **120s client-side timeout** this item already documents in its own timing evidence (two of four
+   observed pushes exceeded it). The timeout-retry makes this *worse*, not better: a retried file adds
+   up to another 180s to a run that already exceeds the client budget.
+
+Both are **candidate fix (c)** in the "Candidate fix (NOT applied)" block below — "if the full
+`hooks/tests` suite is genuinely intended to run on every push, budget it against the client timeout" —
+which was written before this evidence existed and is now measured rather than suspected. **Recommend
+folding Defect 4 into fix (c) and closing it as a separate line item**, since "the suite is unsafe under
+concurrency" is disproven and "the suite is too slow for its budget" is already tracked there.
+
+<details><summary>Original unverified relay, retained for provenance</summary>
+
+**⚠️ UNVERIFIED RELAY — NOT independently reproduced** *(superseded 2026-08-12 by the measurement above)*
+
+**Provenance, stated plainly because it is unusual.** This was reported by session `e047be2a`, which
+claimed `open-items-tracker` on 2026-08-11 ~17:15 ET specifically to add it here, and then ended
+without writing it. The entire surviving record is the one-line description that session supplied to
+`claim_work.py`, captured verbatim from the collision warning:
+
+> "Add defect 4 (hook-test suite is not concurrency-safe) to OI-111. Evidence: same commit 38/76 fail
+> under fleet load vs 75/76 clean on retry."
+
+**Why the record is only one line — my error, recorded so the gap is not mistaken for theirs.** The
+`ora-weekly-hygiene` run of 2026-08-10 (session `e4ed7e05`) claimed the same slug while `e047be2a` held
+it live. The then-current `claim_work.py` **clobbered** the existing claim and only warned afterwards,
+destroying their broadcast; that build had no `restore` subcommand and no claim history, so it could not
+be undone, and their internal id could not be resolved to a host session id for a handoff message. Their
+work was consequently never filed by them. **This is exactly the failure mode that PR #52 fixed** —
+`claim` now refuses on collision (exit 3, writes nothing), `--force`/`--steal` preserves the displaced
+claim, and `restore <slug>` puts it back. Had that shipped a day earlier this defect would carry their
+own evidence instead of a relayed line.
+
+**What is and is not established.** The claim is that the same commit yields **38 of 76 failures under
+fleet load** but **75 of 76 clean on retry** — i.e. roughly half the suite fails non-deterministically
+when other sessions are running, and passes in isolation. I did **not** observe either run. No transcript
+survives (`search_session_transcripts` for the finding returns nothing). Treat the two ratios as reported
+figures, not measurements, until reproduced.
+
+**Why it is worth carrying anyway.** It is the same subsystem as Defects 1–3: if the suite the pre-push
+gate runs is itself load-flaky, then a gate failure is not evidence of a real defect, and the natural
+response — retry until green — is indistinguishable from suppressing a true failure. That interacts
+directly with Defect 2 (a push that succeeded while reporting failure) and with the timing evidence
+above, where two of four observed pushes exceeded the 120s client timeout. A flaky suite and a slow one
+have the same symptom and opposite fixes.
+
+**Possible gap:** `e047be2a` may have held further working notes, including a defect 3 distinct from the
+numbering above. Nothing beyond the quoted line was recoverable.
+
+**Next step to promote this from relay to finding:** run `hooks/tests` concurrently against a loaded
+fleet and against an idle machine on the same commit, and compare pass counts. If the split reproduces,
+replace this block with the observed evidence and drop the UNVERIFIED marker; if it does not, close
+Defect 4 explicitly rather than leaving it to decay.
+
+*This step was carried out 2026-08-12 — see the measurement at the top of Defect 4. Outcome: the
+degradation reproduced, the "not concurrency-safe" characterization did not, and the 38-failure
+magnitude did not.*
+
+</details>
+
+**Auto-check:** none. Re-measure with the harness described above if the suite grows materially or
+`PER_TEST_TIMEOUT_SECONDS` / `MAX_PARALLEL_TESTS` change.
+
+**Counter-evidence — the gate works, and caught a genuine defect in this very item.** The push filing
+OI-111 was correctly BLOCKED with `orphaned_sections: ['OI-111']`: the entry had a `### OI-111` detail
+section but no row in the Open table, which the tracker convention requires. That is a real
+convention violation the gate caught before it reached `main`. Any fix to defects 1 and 3 must preserve
+this behaviour. Post-fix the suite reports 74 pass / 0 fail / 1 env-skip.
+
+**Timing observed:** push-with-content → doctrine-integrity-probe + `hook-tests-gate` 73/74, completed
+but slow · second push → 38/39, killed at 120s · delete push (2 branches) → killed at 120s, 1 of 2
+applied · this item's clean push → 74/75, completed. PR #46 added 141 lines of scratch-worktree sweeping
+at gate start, which adds to rather than relieves the startup cost.
+
+**Candidate fix (NOT applied):** (a) early-exit on a delete-only refspec; (b) mark or suppress
+test-sourced stderr so it cannot read as a live check failure; (c) budget the suite against the client
+timeout — it is at ~75 assertions and growing.
+**Closing condition:** a delete push completes inside the client timeout with output captured showing
+either an early exit or a justified full run, and gate output distinguishes test-sourced stderr from a
+live check failure. Defect 2 needs no action — it is retracted. Defect 4 needs no action — it is closed.
+**Related:** [OI-112](open-items-tracker.md#OI-112) covers separate defects in the same gate (branch
+staleness), the two are independent and neither blocks the other.
+
 ### OI-112
 **Status:** OPEN
 **Opened:** 2026-08-09
