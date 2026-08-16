@@ -162,6 +162,98 @@ def find_archived_registrations(entries):
     return sorted(out)
 
 
+def _git_differs_from_upstream(path, run=None):
+    """True if `path` on disk differs from the branch's UPSTREAM ref.
+
+    Returns None for "no verdict" -- not a git repo, path untracked, no
+    upstream configured, git missing, or any git failure. None is never a
+    finding, matching this probe's fail-open posture throughout.
+
+    Two decisions here are load-bearing, both learned from a live false-alarm
+    run (2026-08-16, 21 of ~32 CC tasks flagged by a first cut):
+
+    1. UPSTREAM, not HEAD. The failure this check exists to catch is a task
+       merged to origin while the checkout the scheduler reads sits BEHIND it
+       -- in the confirmed ora-passed-deal-tracker case the on-disk file
+       matched local HEAD (588ec1b) exactly, and only differed from origin.
+       Comparing against HEAD calls that clean and misses the entire bug.
+    2. `git diff`, not a byte compare against `git show`. This repo runs
+       core.autocrlf=true, so a blob's LF bytes never equal the working
+       tree's CRLF bytes and a raw comparison flags nearly every file. Asking
+       git to diff applies the same clean/smudge filters git itself uses, so
+       line endings and any future filter are handled by definition.
+
+    Injectable `run` for tests."""
+    import subprocess
+    run = run or subprocess.run
+    d = os.path.dirname(path) or "."
+    try:
+        top = run(["git", "-C", d, "rev-parse", "--show-toplevel"],
+                  capture_output=True, timeout=15)
+        if top.returncode != 0:
+            return None
+        root = top.stdout.decode("utf-8", "replace").strip()
+        if not root:
+            return None
+        up = run(["git", "-C", root, "rev-parse", "--abbrev-ref", "@{upstream}"],
+                 capture_output=True, timeout=15)
+        if up.returncode != 0:
+            return None          # no upstream -- nothing to be behind
+        ref = up.stdout.decode("utf-8", "replace").strip()
+        if not ref:
+            return None
+        r = run(["git", "-C", root, "diff", "--quiet", ref, "--", path],
+                capture_output=True, timeout=30)
+        if r.returncode == 0:
+            return False         # identical to upstream
+        if r.returncode == 1:
+            return True          # differs
+        return None              # 128 etc (untracked, bad ref) -- no verdict
+    except Exception:
+        return None              # fail-open, same posture as the whole probe
+
+
+def find_stale_vs_git(entries, differs=None):
+    """entries: [{'id','filePath','enabled',...}]. Sorted ids of ENABLED
+    entries whose on-disk SKILL.md differs from its branch's UPSTREAM ref.
+
+    WHY (OI-170, 2026-08-16): the scheduler resolves filePath against the LIVE
+    WORKING TREE, not git. So a SKILL.md can be authored, reviewed, merged via
+    PR and present on origin while the checkout the scheduler actually reads
+    still holds the old bytes -- merged and inert, with nothing detecting it.
+    Confirmed live: ora-passed-deal-tracker's two-layer double-fire guard
+    merged as b734674 (PR #116 / c16667c) while the primary checkout sat at
+    588ec1b, so the live file had ZERO hits for its own guard tokens. Every
+    git-side check said the guard had shipped; it would have stayed inert
+    through the 2026-09-15 06:30 ET dual-fleet fire had a human not looked.
+
+    The three existing checks structurally cannot catch this. UNREGISTERED,
+    ORPHANED_REGISTRATION and ARCHIVED_BUT_REGISTERED all reason about whether
+    the filePath EXISTS (or where it lives); a merged-but-not-checked-out
+    SKILL.md exists at exactly the right path with the wrong contents, which
+    is clean by all three.
+
+    Catches, symmetrically: merged-but-not-pulled (the OI-170 case), a local
+    edit never committed/pushed, and reverted-in-tree.
+
+    Unanswerable cases yield NO finding (see _git_differs_from_upstream): a
+    task folder outside any git repo -- which is exactly the LAMS/Cowork
+    fleet's normal configuration, its SKILL.mds living under OneDrive -- is a
+    legitimate setup, not drift. Only ENABLED entries, matching both sibling
+    checks' convention. Pure given its injectable."""
+    differs = differs or _git_differs_from_upstream
+    out = []
+    for e in entries:
+        if not e.get("enabled"):
+            continue
+        fp = e.get("filePath") or ""
+        if not fp:
+            continue
+        if differs(fp) is True:   # None (no verdict) and False are both clean
+            out.append(e["id"])
+    return sorted(out)
+
+
 def _read_text(path):
     try:
         return open(path, encoding="utf-8", errors="replace").read()
@@ -201,10 +293,11 @@ def main():
         unregistered = find_unregistered(folder_texts, registered_ids)
         orphaned = find_orphaned_registrations(entries)
         archived = find_archived_registrations(entries)
+        stale = find_stale_vs_git(entries)
 
         lines.append(f"{label}: folders={len(folders)} registry_entries={len(entries)} "
                      f"unregistered={unregistered or '-'} orphaned={orphaned or '-'} "
-                     f"archived={archived or '-'}")
+                     f"archived={archived or '-'} stale_vs_git={stale or '-'}")
 
         if unregistered:
             print(f"  [ACTION] UNREGISTERED in {label}: {', '.join(unregistered)} -- "
@@ -224,7 +317,16 @@ def main():
                   "live. Retire the registry entry (or restore the folder to its live path "
                   "if the archive was a mistake). (ora-cam-reconciliation-annual failure mode.)")
             bad = True
-        if not unregistered and not orphaned and not archived:
+        if stale:
+            print(f"  [ACTION] STALE_VS_GIT in {label}: {', '.join(stale)} -- "
+                  "the SKILL.md on disk differs from the blob committed at HEAD. The "
+                  "scheduler reads the WORKING TREE, not git, so a task can be merged "
+                  "and still inert: pull the branch into this checkout, or commit the "
+                  "local edit. (ora-passed-deal-tracker double-fire-guard failure mode: "
+                  "merged as b734674 while the live file had zero hits for its own "
+                  "guard tokens.)")
+            bad = True
+        if not unregistered and not orphaned and not archived and not stale:
             print(f"  OK -- {label} folders and registry reconcile cleanly.")
 
     ts = datetime.datetime.now().isoformat(timespec="seconds")
