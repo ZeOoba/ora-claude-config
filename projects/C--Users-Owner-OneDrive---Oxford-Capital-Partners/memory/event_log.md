@@ -5,12 +5,24 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-16T19:20:01.670Z
+  modified: 2026-08-16T20:15:29.895Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-08-16 -- repo-architecture-review v1.0 installed (Save-skill click)
+
+- Skill: repo-architecture-review -- first install; no AppData cache mirror existed prior to this session (verified via a repo-vs-cache sweep run before packaging, which returned no match).
+- Source: C:\Users\Owner\ora-skills\repo-architecture-review\SKILL.md, single-file skill. Repo git-clean; commit f2fc1cf5f1 "Add repo-architecture-review skill (first install)".
+- plugin_of('repo-architecture-review') = None -- standalone install path, not a plugin bundle member.
+- Packaged via tools\package_skills.py (never Compress-Archive): description 1004/1024 chars OK, 1 entries OK, forward-slash path repo-architecture-review/SKILL.md.
+- Staged to Cowork session outputs via Desktop Commander bridge + device_stage_files from _staging\2026-08-16\repo-architecture-review.skill.
+- Gabriel confirmed the Save-skill click in-session (2026-08-16).
+- Post-install verify: AppData cache mirror at skills-plugin\583f08bc-0123-4111-8158-8fe3d927e350\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\skills\repo-architecture-review\SKILL.md now present, single file, modified 08/16/2026 16:14:13, SHA256 BBBC5D21E8DFBE24E07A96300039FC4644DA5C98510CD025AFE16D9E94DF2879, byte-identical to the repo copy.
+- pending_reimport.py list: none pending -- no ledger entry required clearing (first install never enters the reimport ledger).
+- Note: two earlier draft log-entry files were found pre-staged in _staging\2026-08-16\ (event_log_entry_repo-architecture-review.md, event_log_entry_rar.md) with mutually contradictory narratives -- one roughly matching this session's real sequence, the other claiming the skill was already installed by a concurrent session before packaging ran here. That second claim contradicts this session's own pre-packaging cache sweep (empty) and is uncorroborated -- disregarded. This entry supersedes both drafts and is the one actually appended.
 
 ## 2026-08-16 -- package-and-stage-skill: repo-architecture-review Entry-point-A triage -- already in sync, despite "first install" ledger framing
 
