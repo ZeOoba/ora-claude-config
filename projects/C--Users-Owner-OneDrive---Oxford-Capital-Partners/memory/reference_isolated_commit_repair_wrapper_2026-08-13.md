@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: b34ec269-3c65-4bc6-ba23-039298513853
-  modified: 2026-08-13T23:49:09.766Z
+  modified: 2026-08-16T18:02:42.111Z
 ---
 
 `hooks/lib/isolated_commit.py` (the temp-index isolated-staging tool) gained `commit_isolated_replacement()` — stages an isolated hunk, commits it, and syncs the working tree to the new HEAD in one call/CLI flag (`--message`). Built in a worktree (`.claude/worktrees/isolated-commit-wrapper`, branch `feature/isolated-commit-repair-wrapper`, commit `26acfe9`).
@@ -29,3 +29,5 @@ Both bugs were caught by an independently dispatched reviewer (`pr-review-toolki
 Final suite: 54/54 tests passing, including a fixture (`repo13`) that forces a genuine `git checkout` smudge (not just a coincidentally-matching one) to specifically pin the second bug.
 
 **How to apply:** when this lands in the live checkout, prefer `commit_isolated_replacement()`/`--message` over the old manual stage-then-commit-then-remember-to-checkout sequence for any isolated fix to a shared single-writer file (`open-items-tracker.md`, `event_log.md`, scheduled-task registries, etc.) in a dirty multi-session checkout.
+
+**UPDATE 2026-08-16 — it IS on `origin/main` now; the landing caveat is obsolete.** This note's "NOT yet on `origin/main` ... isn't yet backed up/mergeable upstream until that branch's larger divergence is resolved" no longer holds. Verified: `git show origin/main:hooks/lib/isolated_commit.py | grep -c "def commit_isolated_replacement"` returns 1, and `origin/main`'s tip is a merge of `feat/model-canary-probe-step25` (PR #120). The divergence resolved through ordinary PR merges, not the blocked-branch scenario the caveat assumed. Use `commit_isolated_replacement()` with no landing caveat. Both git gotchas recorded above are unaffected and still correct — and the CRLF/LF half of the second one bit again on 2026-08-16: `--old`/`--new` must match the **ref blob's** bytes (LF here), not the smudged working tree's (CRLF), because the tool builds from `_show(ref)`, not from disk.
