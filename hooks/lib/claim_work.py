@@ -3,6 +3,21 @@ subsystems that have no per-path single-writer rule (unlike scheduled-task
 registries and workflows/), PLUS ora-skills, which has one that cannot see the
 case this module catches -- see ORA-SKILLS below.
 
+SLUGS ARE FREE-FORM (2026-08-15 clarification, prompted by an ora-skills-scoped
+maintenance task defaulting to the generic 'repo-housekeeping' slug for lack of a
+narrower one on record): `claim <slug>` accepts ANY string -- there is no fixed
+enum anywhere in this module. The four names printed in --help
+(hooks-override-auth, open-items-tracker, oxford-command-center-data,
+repo-housekeeping) are a DOCUMENTED VOCABULARY that has grown by precedent (see
+active-work-broadcast.py's docstring for the 2026-07-26 repo-housekeeping
+addition), not a closed set enforced anywhere. When a task's scope is a distinct
+repo or subsystem repo-housekeeping doesn't already cover -- e.g. ora-skills --
+coin a new slug (ora-skills-housekeeping) rather than reusing repo-housekeeping
+for everything ~/.claude-side; a distinct slug keeps BOTH claims independently
+visible (see paths_conflict()'s "prefer a distinct slug" guidance, printed on a
+provably-disjoint collision), where reusing one slug for unrelated work would
+make the second claim silently overwrite the first's broadcast.
+
 WHY (2026-07-25, task_17998414): reference_concurrent_session_duplicate_hardening_work.md
 logs 6 recorded collisions where two sessions independently duplicated work on the same
 shared subsystem without knowing about each other -- most severely, two sessions each
@@ -685,7 +700,13 @@ def main():
     c = sub.add_parser("claim", help="Register a claim on a subsystem slug")
     c.add_argument("slug", help="e.g. hooks-override-auth, open-items-tracker, "
                                  "oxford-command-center-data, repo-housekeeping, "
-                                 "ora-skills")
+                                 "ora-skills, ora-skills-housekeeping. Free-form -- coin "
+                                 "a new, narrower slug for a distinct repo/subsystem "
+                                 "rather than reusing repo-housekeeping for everything "
+                                 "~/.claude-side (that slug's own scope is the ~/.claude "
+                                 "checkout itself, not ora-skills or other repos beneath "
+                                 "it); see active-work-broadcast.py's docstring for how "
+                                 "the vocabulary has grown before.")
     c.add_argument("description", help="One line: what you're doing and why")
     c.add_argument("--title")
     # action="extend" (not the former bare nargs="*"): with plain nargs, argparse
