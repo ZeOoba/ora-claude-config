@@ -130,8 +130,11 @@ def check(text):
 
 
 def any_finding(result):
+    # broken_anchors included 2026-08-16: it is reported as [ACTION], and an
+    # [ACTION] that leaves exit 0 is the same "reads as no action" failure this
+    # escalation exists to remove -- just relocated from humans to scripts.
     return bool(result["duplicate_rows"] or result["duplicate_sections"]
-                or result["orphaned_sections"])
+                or result["orphaned_sections"] or result.get("broken_anchors"))
 
 
 def collision_finding(result):
@@ -157,7 +160,69 @@ def collision_finding(result):
     return bool(result["duplicate_rows"] or result["duplicate_sections"])
 
 
-def format_report(result, path):
+# A CROSS-FILE link into the tracker: `](open-items-tracker.md#OI-NNN)`.
+#
+# NOT the bare fragment form `](#OI-NNN)`. That distinction is the whole feature.
+# The first cut matched only the bare form, which in the live memory dir appears
+# ONLY inside open-items-tracker.md itself (the row self-links this function
+# excludes) -- so external_anchor_refs() returned the empty set in production and
+# the escalation could never fire. Every one of the ~11 real referring files
+# (event_log.md, ops_decision_log.md, reference_oi140_*.md, ...) uses the
+# cross-file form.
+#
+# The bare form must ALSO stay unmatched here for a second reason: inside some
+# other file, `](#OI-42)` is a fragment link into THAT file's own anchors and has
+# nothing to do with the tracker. Counting it would escalate the tracker's OI-42
+# row over an unrelated link.
+ANCHOR_REF_RE = re.compile(r"\]\(\s*open-items-tracker\.md#OI-(\d+)\s*\)",
+                           re.IGNORECASE)
+
+
+def external_anchor_refs(memory_dir=None, tracker_file=None):
+    """{"OI-NNN"} referenced as `](#OI-NNN)` from memory files OTHER than the
+    tracker itself.
+
+    WHY THE EXCLUSION IS THE WHOLE POINT: every tracker row links to its own
+    anchor (`| [OI-166](#OI-166) |`), so counting the tracker would mark every
+    sectionless row as "linked" and escalate all of them -- which is just the
+    old INFO line with a louder label. Only a reference from ANOTHER file is
+    evidence that someone, somewhere, expects that anchor to resolve.
+
+    Returns an empty set on any I/O trouble: this only ever ESCALATES severity,
+    so failing to read a sibling file must not invent findings."""
+    if memory_dir is None:
+        memory_dir = os.path.dirname(tracker_path())
+    if tracker_file is None:
+        tracker_file = os.path.basename(tracker_path())
+    refs = set()
+    try:
+        names = os.listdir(memory_dir)
+    except OSError:
+        return refs
+    for name in names:
+        if not name.endswith(".md") or name == tracker_file:
+            continue
+        try:
+            with open(os.path.join(memory_dir, name), encoding="utf-8",
+                      errors="replace") as fh:
+                text = fh.read()
+        except OSError:
+            continue
+        for num in ANCHOR_REF_RE.findall(text):
+            refs.add("OI-%s" % num)
+    return refs
+
+
+def split_missing(result, refs):
+    """(broken_links, benign) -- sectionless rows something else links to, and
+    the rest. Pure, so tests can drive it without a filesystem."""
+    missing = result.get("missing_sections", [])
+    broken = [m for m in missing if m in refs]
+    benign = [m for m in missing if m not in refs]
+    return broken, benign
+
+
+def format_report(result, path, refs=None):
     lines = []
     if not any_finding(result):
         lines.append("open-items-tracker ID check: clean (%d rows, %d unique ids, "
@@ -165,9 +230,13 @@ def format_report(result, path):
                           result["row_count"], result["unique_row_count"],
                           result["section_count"], path))
     else:
+        # broken_anchors included in the count: without it a broken-anchor-only
+        # run printed "0 finding(s)" directly above its own [ACTION] line and
+        # exited 1 -- reintroducing the human/machine mismatch M2 removed.
         lines.append("open-items-tracker ID check: %d finding(s) -- %s" % (
             len(result["duplicate_rows"]) + len(result["duplicate_sections"])
-            + len(result["orphaned_sections"]), path))
+            + len(result["orphaned_sections"])
+            + len(result.get("broken_anchors") or []), path))
         for d in result["duplicate_rows"]:
             lines.append("[ACTION] DUPLICATE_ROW %s appears in %d table rows -- "
                           "two items were independently assigned the same id; "
@@ -190,12 +259,23 @@ def format_report(result, path):
                           "section but NO table row in Open or Closed -- likely a "
                           "row lost during an edit, or the stale half of a "
                           "collision that was renumbered elsewhere." % (sid, sid))
-    if result["missing_sections"]:
+    broken, benign = split_missing(result, refs or set())
+    if broken:
+        # ESCALATED FROM [INFO] 2026-08-16. The old line lumped these together and
+        # said an external link "would" resolve to nothing -- hypothetically. When
+        # one ACTUALLY does, that is a broken cross-reference in the memory graph,
+        # and it sat unnoticed precisely because [INFO] reads as "no action".
+        lines.append("[ACTION] BROKEN_ANCHOR %d row(s) have no '### OI-NNN' detail "
+                      "section AND are linked with '#OI-NNN' from another memory "
+                      "file, so those links resolve to nothing: %s. Fix by adding "
+                      "the detail section, or by repointing the referring file at "
+                      "what it actually meant."
+                      % (len(broken), ", ".join(broken)))
+    if benign:
         lines.append("[INFO] %d row(s) have no matching '### OI-NNN' detail section "
-                      "(not itself a defect -- a one-line row is often the whole "
-                      "story -- but any external '#OI-NNN' link to one of these "
-                      "currently resolves to nothing): %s"
-                      % (len(result["missing_sections"]), ", ".join(result["missing_sections"])))
+                      "and nothing links to them (not a defect -- a one-line row is "
+                      "often the whole story): %s"
+                      % (len(benign), ", ".join(benign)))
     return "\n".join(lines)
 
 
@@ -227,7 +307,15 @@ def main():
         return 1
 
     result = check(text)
-    print(format_report(result, path))
+    # Split BEFORE reporting, and fold the result back into `result`, so the
+    # human report, RESULT_JSON and the exit code all describe the same thing.
+    # Computing it only inside format_report() left machine consumers blind to
+    # the one finding class newly labelled [ACTION].
+    refs = external_anchor_refs()
+    broken, benign = split_missing(result, refs)
+    result["broken_anchors"] = broken
+    result["missing_sections_benign"] = benign
+    print(format_report(result, path, refs))
     print("RESULT_JSON=%s" % json.dumps(result))
     return 1 if any_finding(result) else 0
 
