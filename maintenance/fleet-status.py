@@ -411,6 +411,105 @@ def find_missed_cycles(tasks, now_local=None, grace_hours=MISSED_CYCLE_GRACE_HOU
     return out
 
 
+def find_cross_fleet_duplicates(tasks):
+    """Tasks registered under the SAME id on more than one fleet.
+
+    This is a DIFFERENT condition from a same-time collision and deliberately has
+    its own detector, because the two have different -- and differently dangerous
+    -- remedies. A collision is fixed by retiming one task: cheap and reversible.
+    A cross-fleet duplicate is fixed by retiring one COPY, which is hazardous:
+    the Cowork Scheduled-sidebar delete is folder-destructive, the two fleets take
+    opposite archive/delete orderings, and a same-id pair can share a SKILL.md
+    path, so deleting one can silently destroy the other.
+
+    Detected independently of cron, on purpose: two copies of one task with
+    DIFFERENT schedules are still a duplicate, and the old time-bucketed logic
+    could not see them at all.
+
+    Root incident (Automation Audit R13-3, 2026-08-16): ora-passed-deal-tracker
+    was registered on both fleets mid-migration. The old collision loop deduped
+    its member list by task id and dropped the fleet, so it surfaced as a
+    same-time "collision" containing a single name -- which reads as nonsense and
+    led a reader to recommend retiring the wrong copy.
+
+    Also catches a duplicate REGISTRATION on a single fleet (same id twice in one
+    registry -- a documented failure mode, 2026-07-08). That case must not fall
+    through: find_collisions() now skips same-id pairs, so if this detector
+    required two DISTINCT fleets, a single-fleet duplicate would be invisible to
+    both. Such entries are reported with cross_fleet=False, since the remedy is
+    different again (drop the redundant registration, no cross-fleet hazard).
+
+    Returns {task_id: {"fleets": [...], "crons": [...], "enabled": [...],
+                       "cross_fleet": bool}}.
+    """
+    seen = {}
+    for t in tasks:
+        tid = t.get("id")
+        if not tid:
+            continue
+        seen.setdefault(tid, []).append(t)
+    dups = {}
+    for tid, group in seen.items():
+        if len(group) < 2:
+            continue
+        fleets = []
+        for t in group:
+            f = t.get("_fleet")
+            if f not in fleets:
+                fleets.append(f)
+        dups[tid] = {
+            "fleets": fleets,
+            "crons": [t.get("cronExpression") for t in group],
+            "enabled": [bool(t.get("enabled")) for t in group],
+            "cross_fleet": len(fleets) > 1,
+        }
+    return dups
+
+
+def find_collisions(tasks):
+    """Genuine same-time collisions: DIFFERENT tasks sharing a fire time and a day.
+
+    Two guards apply, and both exist because of real false positives:
+      * crons_share_a_day() -- Mon 13:30 vs Wed 13:30 never actually coincide.
+      * same-id pairs are excluded -- those are cross-fleet duplicates, reported
+        by find_cross_fleet_duplicates() instead (R13-3, 2026-08-16).
+
+    A duplicate does NOT mask a genuine collision at the same time: if a third,
+    distinct task also fires then, that pairing is still reported here.
+
+    CAVEAT -- this compares cron EXPRESSIONS, not actual dispatch times. The
+    scheduler applies a small deterministic per-task delay to recurring fires for
+    load balancing (observed 2026-08-16: `0 9 * * *` dispatches ~09:07, `40 9 * * *`
+    ~09:47). That delay is not present in the registry this script reads, so it
+    cannot be modelled here. A reported collision therefore means "same scheduled
+    minute", which is the right thing to keep clean, but is not proof two tasks
+    truly execute simultaneously.
+    """
+    hm = {}
+    for t in tasks:
+        # cron_hms(), not cron_hm(): a multi-fire task (e.g. "40 7,13,19 * * 1-5")
+        # must be grouped into EVERY fire-time bucket it occupies, or it collides
+        # invisibly with a task sharing just one of those times (2026-08-09 fix).
+        for key in (cron_hms(t.get("cronExpression")) or []):
+            hm.setdefault(key, []).append((t.get("id", "?"), t.get("cronExpression")))
+    collisions = {}
+    for k, group in hm.items():
+        if len(group) < 2:
+            continue
+        real_ids = []
+        for i in range(len(group)):
+            for j in range(i + 1, len(group)):
+                if group[i][0] == group[j][0]:
+                    continue  # same task on two fleets -- a duplicate, not a collision
+                if crons_share_a_day(group[i][1], group[j][1]):
+                    for tid in (group[i][0], group[j][0]):
+                        if tid not in real_ids:
+                            real_ids.append(tid)
+        if real_ids:
+            collisions["%02d:%02d" % k] = real_ids
+    return collisions
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--registry")
@@ -492,29 +591,12 @@ def main():
             recent_skip_counts[tid] = n
     recent_skip_total = sum(recent_skip_counts.values())
 
-    # collisions: tasks sharing the same fixed (hour, minute) AND at least one
-    # actual calendar day (cron_hm() alone ignores dom/month/dow -- e.g. Mon 13:30
-    # vs Wed 13:30 used to false-positive as a collision; see crons_share_a_day()).
-    hm = {}
-    for t in tasks:
-        # cron_hms(), not cron_hm(): a multi-fire task (e.g. "40 7,13,19 * * 1-5")
-        # must be grouped into EVERY fire-time bucket it occupies, or it collides
-        # invisibly with a task sharing just one of those times (2026-08-09 fix).
-        for key in (cron_hms(t.get("cronExpression")) or []):
-            hm.setdefault(key, []).append((t.get("id", "?"), t.get("cronExpression")))
-    collisions = {}
-    for k, group in hm.items():
-        if len(group) < 2:
-            continue
-        real_ids = []
-        for i in range(len(group)):
-            for j in range(i + 1, len(group)):
-                if crons_share_a_day(group[i][1], group[j][1]):
-                    for tid in (group[i][0], group[j][0]):
-                        if tid not in real_ids:
-                            real_ids.append(tid)
-        if real_ids:
-            collisions["%02d:%02d" % k] = real_ids
+    # Two SEPARATE conditions, deliberately not conflated (R13-3, 2026-08-16):
+    # genuine same-time collisions between DIFFERENT tasks, and the same task id
+    # registered on both fleets. See each function's docstring for why the remedies
+    # differ and why merging them once produced a "collision" containing one name.
+    collisions = find_collisions(tasks)
+    cross_fleet_dups = find_cross_fleet_duplicates(tasks)
 
     # AM pileup 05:00-09:30. cron_hms(), not cron_hm(): a multi-fire task only
     # needs ONE of its fire times inside the window to count once (2026-08-09
@@ -541,6 +623,8 @@ def main():
         verdict_flags.append("%d throttle skip(s) in the last 24h" % recent_skip_total)
     if collisions:
         verdict_flags.append("%d schedule collisions" % len(collisions))
+    if cross_fleet_dups:
+        verdict_flags.append("%d task(s) registered on BOTH fleets" % len(cross_fleet_dups))
     verdict = "OK" if not verdict_flags else "ATTENTION -- " + "; ".join(verdict_flags)
 
     if args.json:
@@ -570,6 +654,7 @@ def main():
             "recent_skip_events_24h": recent_skip_total,
             "recent_tasks_with_skips": recent_skip_counts,
             "collisions": collisions,
+            "cross_fleet_duplicates": cross_fleet_dups,
             "am_pileup_count": len(am_pileup),
             "verdict": verdict,
         }, indent=2))
@@ -621,6 +706,15 @@ def main():
           ", ".join("%s=%d" % kv for kv in sorted(recent_skip_counts.items())) or "-"))
     print("  same-time collisions %d   %s" % (len(collisions),
           "; ".join("%s:{%s}" % (k, ",".join(v)) for k, v in sorted(collisions.items())) or "-"))
+    print("  duplicate registrations %d %s" % (len(cross_fleet_dups),
+          "; ".join("%s{%s%s}" % (tid, "+".join(str(f) for f in d["fleets"]),
+                                  "" if d["cross_fleet"] else " SAME-FLEET x%d" % len(d["crons"]))
+                    for tid, d in sorted(cross_fleet_dups.items())) or "-"))
+    if cross_fleet_dups:
+        print("      NOTE: same task id on BOTH registries -- NOT a collision, and NOT safe to")
+        print("      'clean up' casually: the sidebar delete is folder-destructive, the fleets take")
+        print("      opposite archive/delete orderings, and a pair can share one SKILL.md path.")
+        print("      Check each task's registry description for a deliberate migration first.")
     print("  AM pileup (05-0930). %d tasks" % len(am_pileup))
 
     # health verdict (non-fatal; reporting tool). Recalibrated 2026-07-14: the prior
