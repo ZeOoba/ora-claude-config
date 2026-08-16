@@ -255,21 +255,58 @@ def _sized_in(names_bodies, subindexes):
             fh.write(body)
     return mip.sized_index_files(tmp, os.path.join(tmp, "MEMORY.md"), subindexes)
 
-sized = _sized_in([("MEMORY.md", "x" * 10), ("INDEX_reference.md", "y" * 20)],
-                  ["INDEX_reference.md"])
+
+def _sized_only(names_bodies, subindexes):
+    """Just the sized list, for cases that do not care about the unstattable channel."""
+    return _sized_in(names_bodies, subindexes)[0]
+
+sized = _sized_only([("MEMORY.md", "x" * 10), ("INDEX_reference.md", "y" * 20)],
+                    ["INDEX_reference.md"])
 expect("sized_index_files returns the root FIRST, then each sub-index, with real byte sizes",
        sized == [("MEMORY.md", 10), ("INDEX_reference.md", 20)], "got %r" % (sized,))
 
-sized = _sized_in([("MEMORY.md", "x" * 10)], [])
+sized = _sized_only([("MEMORY.md", "x" * 10)], [])
 expect("no sub-indexes -> root only (pre-split behaviour unchanged)",
        sized == [("MEMORY.md", 10)], "got %r" % (sized,))
 
-# A sub-index that vanished between collect_indexed_links() and the stat must not invent a
-# size finding -- check 1 already reports it as an orphan pointer, and a probe that cannot
-# look must not manufacture findings.
-sized = _sized_in([("MEMORY.md", "x" * 10)], ["INDEX_missing.md"])
-expect("an unstattable sub-index is skipped, not invented as a size finding",
+# --- the two skip reasons are NOT the same, and must not be collapsed ------------------
+# GONE: deleted between collect_indexed_links() and the stat. Skipped SILENTLY -- check 1
+# already reports it as an orphan pointer, and a probe that cannot look must not invent a
+# finding.
+sized, unstattable = _sized_in([("MEMORY.md", "x" * 10)], ["INDEX_missing.md"])
+expect("a VANISHED sub-index is skipped, not invented as a size finding",
        sized == [("MEMORY.md", 10)], "got %r" % (sized,))
+expect("a VANISHED sub-index is not reported as unstattable (it is an orphan, not a lock)",
+       unstattable == [], "got %r" % (unstattable,))
+
+# PRESENT BUT UNREADABLE: any other OSError. The file is still adopted and still growing;
+# it just was not measured. Skipping that silently means the gate quietly stops covering a
+# file while still reporting OK -- the exact blind-spot class this check exists to close.
+# Simulated by monkeypatching getsize, since producing a real lock is platform-specific.
+_real_getsize = os.path.getsize
+
+
+def _getsize_locking(path):
+    if os.path.basename(path) == "INDEX_locked.md":
+        raise PermissionError(13, "The process cannot access the file")
+    return _real_getsize(path)
+
+
+tmp = tempfile.mkdtemp(prefix="mip_locked_")
+for _n, _b in (("MEMORY.md", "x" * 10), ("INDEX_locked.md", "y" * 20)):
+    with open(os.path.join(tmp, _n), "w", encoding="utf-8") as fh:
+        fh.write(_b)
+os.path.getsize = _getsize_locking
+try:
+    sized, unstattable = mip.sized_index_files(tmp, os.path.join(tmp, "MEMORY.md"),
+                                               ["INDEX_locked.md"])
+finally:
+    os.path.getsize = _real_getsize
+expect("a LOCKED sub-index is left out of the sized set (cannot measure what will not stat)",
+       sized == [("MEMORY.md", 10)], "got %r" % (sized,))
+expect("a LOCKED sub-index IS reported as unstattable -- coverage loss must not be silent",
+       len(unstattable) == 1 and unstattable[0][0] == "INDEX_locked.md",
+       "got %r" % (unstattable,))
 
 # --- the LIVE corpus: every sub-index is now actually under the gate ------------------
 # NOT an exact-count assertion. sized_index_files() deliberately SKIPS a sub-index it
@@ -284,7 +321,7 @@ expect("an unstattable sub-index is skipped, not invented as a size finding",
 # nothing outside the adopted sub-index set sneaks in. Both hold regardless of a race.
 live_idx = open(mip.INDEX, encoding="utf-8").read()
 _, live_subs = mip.collect_indexed_links(live_idx, mip.MEM)
-live_sized = mip.sized_index_files(mip.MEM, mip.INDEX, live_subs)
+live_sized, live_unstattable = mip.sized_index_files(mip.MEM, mip.INDEX, live_subs)
 expect("live run gates the root FIRST",
        live_sized and live_sized[0][0] == "MEMORY.md", "got %r" % (live_sized,))
 expect("live run gates only the root plus sub-indexes MEMORY.md adopts (race-tolerant)",
@@ -297,15 +334,35 @@ expect("every gated entry carries a non-negative byte size",
 # The `<=` above is deliberately weak, so on its own it would still pass if
 # sized_index_files() regressed to returning the root alone -- i.e. the exact defect this
 # whole change fixes. The deterministic fixture cases above catch that, and so does this:
-# every sub-index STILL on disk must have been gated. Existence is re-checked after the
-# fact on purpose -- a file that vanished before the sized call is also absent now, so it
-# is simply not asserted about, while a file present now was present then (memory files do
-# not reappear). That asymmetry is what makes this both meaningful and race-tolerant.
+# every sub-index that can still be MEASURED must have been gated.
+#
+# The predicate is os.path.getsize in a try/except -- NOT os.path.exists. That distinction
+# is the whole point: sized_index_files() skips on a stat FAILURE, and "missing" is only
+# one way to fail. A file locked mid-os.replace, or held by an AV or indexer, raises
+# PermissionError while remaining perfectly present, so exists() answers True about a file
+# that could not be measured and the assertion fails on a healthy tree. Asking the same
+# question the code asks is what makes this sound; an earlier version asked a different one
+# and claimed, wrongly, that the two could not diverge.
+#
+# Anything that fails to stat NOW is excluded from the claim and surfaced separately below,
+# so a real lock is reported rather than silently tolerated.
+def _measurable(name):
+    try:
+        os.path.getsize(os.path.join(mip.MEM, name))
+        return True
+    except OSError:
+        return False
+
+
 live_gated = {n for n, _ in live_sized}
-still_present = [n for n in live_subs if os.path.exists(os.path.join(mip.MEM, n))]
-expect("every sub-index still on disk was gated (regression guard: root-only collection)",
-       all(n in live_gated for n in still_present),
-       "still_present=%r gated=%r" % (still_present, sorted(live_gated)))
+measurable = [n for n in live_subs if _measurable(n)]
+expect("every measurable sub-index was gated (regression guard: root-only collection)",
+       all(n in live_gated for n in measurable),
+       "measurable=%r gated=%r unstattable=%r" % (
+           measurable, sorted(live_gated), live_unstattable))
+expect("nothing reported unstattable also appears in the sized set (channels are disjoint)",
+       not ({n for n, _ in live_unstattable} & live_gated),
+       "unstattable=%r gated=%r" % (live_unstattable, sorted(live_gated)))
 
 passed = sum(1 for ok, _ in results if ok)
 print("memory-integrity-probe tests: %d/%d passed" % (passed, len(results)))
