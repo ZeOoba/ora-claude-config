@@ -38,15 +38,123 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    (collection://9a6ae219-85a3-4621-899c-c757fd062f8b): Status in
    {Passed, Dead, Screened} OR Verdict in {PASS, KILLED} OR notes contain
    GATE-FLAGGED / FLOOR-FLAGGED — i.e., everything ORA saw and did not buy.
+
+   **2a — LOST-AT-LOI arm (added 2026-08-16, P3 lost-deal ledger).** Additionally
+   include every row where `LOI Outcome` in {LOST, PENDING, WINNER-BUSTED}. These
+   are deals ORA actually bid on, and they are a DIFFERENT question from an
+   ordinary pass: a pass tests the screen, a loss tests the bid. Rows on this arm
+   get the Step 4b structured treatment, not just the prose log.
+
+   **Do NOT gate this arm on the Acquisition Pipeline Tracker's `LOI Status`
+   field — it is unreliable and disagrees with the Sourcing Log** (verified
+   2026-08-16: `1333 Research Road` reads `Not Submitted` in the Pipeline Tracker
+   while its Sourcing Log row reads `LOI Submitted`; `511 Industrial Mile Road`
+   reads `Submitted` with no LOI Expiration Date). Same failure shape as the
+   known-bad HubSpot `closedate` field. The Sourcing Log's `LOI Outcome` is the
+   only field this task may branch on.
+
+   **Watch for duplicate rows.** The Sourcing Log carries more than one row for
+   at least one deal (`511 Industrial Mile Road` — `3446ecd8…` Status=Reviewing
+   and `37c6ecd8…` Status=Dead, differing broker names, same address and SF).
+   Match on normalized address, not on row identity, and never count two rows as
+   two losses. Surface any newly-detected duplicate in the QUESTIONS FOR GABRIEL
+   block rather than silently merging.
 3. For each (batch by market): check for a sale/trade since last run via
-   (a) `CoStar Exports\` folder under `Investment Candidates -- 2026\`
-   (Gabriel drops exports; Excel preferred), then (b) web search
+   (a) the **County Sales Comps** Notion database FIRST — see below — then
+   (b) `CoStar Exports\` folder under `Investment Candidates -- 2026\`
+   (Gabriel drops exports; Excel preferred), then (c) web search
    (county auditor transfer records, Crexi/LoopNet sold listings, press).
    NO broker outreach — data gaps go to Gabriel as structured questions.
+
+   **3a — query County Sales Comps before searching (added 2026-08-16).** The
+   `county-sales-monitor` skill already accumulates recorded industrial sales into
+   a Notion comps database on its own monthly cycle (304 transactions at launch).
+   Read the data source id from `~/.claude/skills/county-sales-monitor/SKILL.md`
+   rather than hardcoding it here. Querying it is cheaper and cleaner than
+   re-searching the web for a deed this fleet already recorded, and it yields a
+   `RECORDED-DEED` confidence rather than a press-release inference.
+
+   Join on normalized street address, plus parcel id where the row carries one.
+   Match guards, all mandatory:
+   - **Date sanity** — the sale must post-date `LOI Sent Date` (or `First Sighted`
+     if no LOI), and fall within ~24 months of it.
+   - **Price sanity** — winning price within 0.3x–3.0x of the last known ask.
+     Outside that band, flag; do not match.
+   - **NONARMS rows NEVER auto-classify.** county-sales-monitor already flags
+     non-arms-length/nominal transfers. A seller re-titling their own LLC looks
+     identical to a sale to a new buyer from the outside. Inherit the flag and
+     route the row to QUESTIONS FOR GABRIEL.
+   - **Ambiguity is a null, not a guess.** Two candidate parcels, address variants,
+     suite splits → `Winning Price Confidence = UNCONFIRMED` and surface it. Never
+     silently pick the closer match.
+
+   **Coverage is partial and must be stated, not implied.** The comps DB covers
+   Franklin OH, Baltimore Co MD, and Polk IA only (Tier A). That is real coverage
+   for Columbus, partial for Maryland (Baltimore Co ≠ Salisbury/Easton/Cambridge),
+   and ZERO for Indianapolis, Cincinnati, Kansas City, Madison, Grand Rapids,
+   Richmond, and Louisville — those fall through to (b)/(c) as before. **Missouri
+   and Kansas are non-disclosure states: consideration is never published, so a
+   Kansas City winning price can only ever be BROKER-RELAYED or UNCONFIRMED, and
+   never RECORDED-DEED.** Say which channel produced each price. Do not expand
+   county-sales-monitor's county coverage from this task — that is that skill's
+   own documented next phase.
 4. On a detected trade, log to the deal's Notion row ("Exception Outcome" if an
    exception, else "Notes / Flags"): clearing price, date, buyer if public, and
    CLEARING PRICE vs ORA WALK delta ($ and %). Also append one line to the
    Exception Register tab logic if the deal was an exception.
+
+   **4b — LOST-AT-LOI rows: write STRUCTURED fields, not prose (added 2026-08-16).**
+   For any watch-list row that arrived via the Step 2a arm, the free-text log above
+   is not sufficient — it is unqueryable, which is the whole defect this arm exists
+   to fix. Populate the Block B properties on the Deal Sourcing Log row:
+   `LOI Outcome` · `Winning Price` · `Winning Price Confidence` · `Winner Entity`
+   (grantee exactly as recorded) · `Winner Type` · `Winner Close Date` ·
+   `Days LOI to Close` · `Winner Implied Basis (% RCT LOW)` (winning price +2%
+   closing ÷ RCT v03 LOW for that market) · `Loss Class` · `Loss Evidence`.
+
+   `Delta vs ORA Offer $` and `Delta vs ORA Offer %` are formulas — do not write them.
+
+   **Then run the classifier.** Two orthogonal questions, then a label. Compare the
+   `Winning Price` to `ORA Max Defensible Price` — the price at which the deal first
+   breached a Stage 1 floor, **fixed at LOI time and never recomputed now**;
+   recomputing it at outcome time is hindsight bias and is prohibited.
+
+   | Rule | Condition | Loss Class |
+   |---|---|---|
+   | R1 | Winning > Max Defensible | **BASIS-DISCIPLINE** — matching required breaching a ratified floor. Losing was the strategy working. **No action.** |
+   | R2 | Winning ≤ ORA Offer Price | **EXECUTION** — winner paid the same or less and still won. Speed/certainty/credibility loss. The only terms-free execution proof available. |
+   | R3 | Offer < Winning ≤ Max Defensible, gap ≤ 5% of offer | **PRICE-MARGINAL** — inside noise. Break toward EXECUTION only on hard terms evidence; else UNCLASSIFIED. |
+   | R4 | Offer < Winning ≤ Max Defensible, gap > 5% | **BASIS-ELECTIVE** — ORA could have paid it and chose not to stretch. A judgment call for the back-test, not a defect. |
+   | R5 | Winner Type ∈ {Owner-User, 1031 Buyer} AND Winning > Max Defensible + 10% | **NON-COMPARABLE BUYER** (subclass of BASIS-DISCIPLINE) — an owner-user prices imputed rent and SBA leverage; a 1031 buyer prices a deadline. Never winnable. A sourcing lesson at most, never a bidding one. |
+   | R6 | Winner's contract terminates / property returns to market | **WINNER-BUSTED** — discipline vindicated AND a re-engagement trigger (see 4c). |
+
+   **`ORA Max Defensible Price` blank ⇒ `Loss Class = UNCLASSIFIED`. Always.** Without
+   it neither Q1 nor the R3/R4 split can be evaluated, and a label asserted without it
+   is fabricated. Say so in `Loss Evidence` and put the row in QUESTIONS FOR GABRIEL.
+   The same applies where `Walk Price` and `ORA Offer Price` contradict each other
+   (live example: `511 Industrial Mile Road` carries Walk $930,000 against a
+   $1,450,000 LOI — those cannot both be right, so that row is held UNCLASSIFIED).
+
+   **`Loss Evidence` is mandatory and must carry a citation** — source document,
+   Notion row, deed reference, or named broker plus date. A classification with no
+   source line is invalid; downgrade it to UNCLASSIFIED rather than shipping it.
+
+   **This task NEVER proposes a higher offer, never recomputes a walk price, and
+   never recommends bidding more.** BASIS-DISCIPLINE is a SUCCESS label. The one
+   pro-action output permitted is the 4c re-engagement flag, which is a patience
+   play, not a bid escalation. Weights and bands still move only at the December
+   back-test with Gabriel's sign-off (Step 5 hard rule — unchanged).
+
+   **4c — WINNER-BUSTED re-engagement (Gabriel-ratified 2026-08-16: flag + tickler).**
+   When a winner's contract busts, set `LOI Outcome = WINNER-BUSTED`,
+   `Loss Class = WINNER-BUSTED`, tick `Re-Engagement Flag`, and set
+   `Re-Engagement Tickler Date` to a concrete follow-up date. Report it in the email.
+   Do **not** draft or send the re-engagement mail — outbound counterparty contact
+   needs Gabriel's in-turn confirmation. This generalizes the pattern Gabriel already
+   built by hand for `511 Industrial Mile Road`, where a dedicated one-time task
+   (`ora-511-industrial-fallout-check`, firing 2026-08-21) asks the broker whether the
+   competing contract survived DD and financing. A row whose tickler date has passed
+   with the flag still set is itself reportable — `808 Rhoads Avenue` sat 50+ days.
 
 ## Calibration use
 5. Each logged trade calibrates two things (report, do not auto-adjust — this is a HARD RULE, not a suggestion):
@@ -67,6 +175,14 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
 ## Output
 6. If zero trades detected: one-line "no trades" note to Ops Hub; NO email.
 
+   **Exception (added 2026-08-16): an overdue re-engagement tickler still emails.**
+   Before taking this branch, check for Sourcing Log rows where
+   `Re-Engagement Flag` is ticked and `Re-Engagement Tickler Date` has passed. A
+   bust-and-re-engage window is time-sensitive and does not depend on a new trade
+   being detected, so if any such row exists, take the Step 7 path instead and
+   report it — otherwise the one output with a live clock is the one output that
+   silently never sends. Zero trades AND zero overdue ticklers → this branch.
+
    **Close the entry guard on this path too.** This is the easy one to miss: the zero-trades branch sends nothing, so there is no send step to hang the terminal call off, and a run that ends here still holds the claim it took at Step 0. Once the Ops Hub note lands:
 
    ```
@@ -82,6 +198,29 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    FROM ggoldberg@oxfordra.net TO ggoldberg@oxfordra.net ONLY (no egoldberg cc —
    routing canon: only the Daily Brief retains that exception),
    ending with a "QUESTIONS FOR GABRIEL" block for any unverifiable trades.
+
+   **"LOI POST-MORTEMS" section (added 2026-08-16).** If any Step 2a row resolved
+   this sweep, add a section with ONE line per newly-resolved outcome:
+   deal · ORA offer · winning price (confidence) · winner type · Loss Class ·
+   evidence citation. Also list any row whose `Re-Engagement Tickler Date` has
+   passed with `Re-Engagement Flag` still ticked. **If nothing resolved, print
+   nothing** — no "no post-mortems this month" filler, no synthetic content.
+
+   **MANDATORY sample-size banner.** While the count of rows with a `Loss Class`
+   other than UNCLASSIFIED is **under 10**, every LOI POST-MORTEMS section must
+   open with, verbatim:
+
+   ```
+   INSUFFICIENT SAMPLE (n=X) — per-deal lessons only; no trend claim.
+   ```
+
+   This is not decoration. At ORA's velocity (~5–12 LOIs/yr, ~3–8 losses)
+   distinguishing a 70/30 basis-vs-execution split from a 30/70 needs ≈10–15
+   classified losses — 18–36 months of accumulation. As of 2026-08-16 the
+   classified count is **1**. Individual rows are actionable immediately (one
+   confirmed R2 loss justifies fixing the proof-of-funds package on its own);
+   *distributional* claims are not, and must not be made. This ledger is
+   supposed to be boring for its first year.
    **Subject line (added 2026-07-21 — pm-ledger Check I, Frozen-Date Subject):** use the
    date this email is actually sent (`YYYY-MM-DD`, today's real date at send time), e.g.
    "ORA Passed-Deal Tracker — Monthly Sweep — 2026-08-15". Never use the nominal "15th"
