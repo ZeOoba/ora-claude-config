@@ -42,6 +42,7 @@ Orphans read as unmerged data and cost a real investigation to clear, which is t
 actual harm -- the content was a pure duplicate both times.
 """
 import argparse
+import datetime
 import os
 import re
 import subprocess
@@ -93,6 +94,44 @@ def insert_newest(content, entry):
     if idx is None:
         return content.rstrip() + "\n\n" + entry + "\n"
     return content[:idx].rstrip() + "\n\n" + entry + "\n\n" + content[idx:]
+
+
+def stamp_modified(content, when=None):
+    """Refresh the frontmatter `modified:` timestamp. Pure when `when` is given.
+
+    WHY THIS EXISTS (2026-08-16): the harness refreshes `modified:` only when IT
+    writes a file via Edit/Write. A script write -- which is what this tool does --
+    bypasses that, so every append left the field reading older than the file
+    actually was, and the drift compounds silently: event_log.md had taken 8
+    entries across 4 days while still claiming `modified: 2026-08-12T20:13:19Z`.
+    Memory tooling uses that field to judge how current, and therefore how
+    trustworthy, a file is, so a stale stamp makes the canonical append-only log
+    look less reliable than it is.
+
+    `when` is a parameter rather than an internal datetime.now() so this stays a
+    pure, deterministically-testable function -- the same property insert_newest()
+    documents about itself. Callers supply the clock.
+
+    Deliberately conservative in two ways:
+      * only the frontmatter block is rewritten, so a 'modified:' appearing in the
+        BODY of an entry is never touched;
+      * a file with no frontmatter, or frontmatter carrying no `modified:` key, is
+        returned unchanged -- this does not invent a key the file never had.
+    """
+    if when is None:
+        when = datetime.datetime.now(datetime.timezone.utc)
+    stamp = when.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    if not content.startswith("---\n"):
+        return content
+    end = content.find("\n---\n", 4)
+    if end == -1:
+        return content
+    head, rest = content[:end], content[end:]
+    new_head, n = re.subn(r"(?m)^(\s*modified:[ \t]*).*$",
+                          lambda m: m.group(1) + stamp, head, count=1)
+    if n == 0:
+        return content
+    return new_head + rest
 
 
 def normalize_entry(text):
@@ -208,7 +247,7 @@ def _atomic_insert(log, entry, allow_duplicate=False):
         raise BlockingIOError("log changed mid-read")
     if _is_duplicate_fail_open(content, entry, allow_duplicate):
         return False
-    new = insert_newest(content, entry)
+    new = stamp_modified(insert_newest(content, entry))
     tmp = log + ".tmp-append"
     try:
         with open(tmp, "w", encoding="utf-8") as f:
@@ -249,7 +288,7 @@ def _inplace_insert(log, entry, allow_duplicate=False):
         raise BlockingIOError("log changed mid-read")
     if _is_duplicate_fail_open(content, entry, allow_duplicate):
         return False
-    new = insert_newest(content, entry)
+    new = stamp_modified(insert_newest(content, entry))
     backup = log + ".inplace-backup"
     with open(backup, "w", encoding="utf-8") as f:
         f.write(content)
