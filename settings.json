@@ -240,7 +240,16 @@
         ]
       },
       {
-        "matcher": "Bash|NotebookEdit|mcp__.*netlify.*-updater",
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/pretooluse-dispatcher.py\" --chain bash"
+          }
+        ]
+      },
+      {
+        "matcher": "NotebookEdit|mcp__.*netlify.*-updater",
         "hooks": [
           {
             "type": "command",
@@ -258,7 +267,7 @@
         ]
       },
       {
-        "matcher": "NotebookEdit|Bash|mcp__.*notion-(create|update|append|duplicate|move|comment)|mcp__.*OUTLOOK_(SEND|CREATE_DRAFT|SEND_DRAFT|FORWARD|REPLY)",
+        "matcher": "NotebookEdit|mcp__.*notion-(create|update|append|duplicate|move|comment)|mcp__.*OUTLOOK_(SEND|CREATE_DRAFT|SEND_DRAFT|FORWARD|REPLY)",
         "hooks": [
           {
             "type": "command",
@@ -276,7 +285,7 @@
         ]
       },
       {
-        "matcher": "NotebookEdit|Bash|mcp__excel__.*|mcp__.*(write_file|edit_block|move_file|start_process|interact_with_process|write_pdf)",
+        "matcher": "NotebookEdit|mcp__excel__.*|mcp__.*(write_file|edit_block|move_file|start_process|interact_with_process|write_pdf)",
         "hooks": [
           {
             "type": "command",
@@ -285,7 +294,7 @@
         ]
       },
       {
-        "matcher": "NotebookEdit|Bash|mcp__.*(write_file|edit_block|move_file|start_process|interact_with_process|write_pdf)",
+        "matcher": "NotebookEdit|mcp__.*(write_file|edit_block|move_file|start_process|interact_with_process|write_pdf)",
         "hooks": [
           {
             "type": "command",
@@ -294,7 +303,7 @@
         ]
       },
       {
-        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash|mcp__excel__.*|mcp__.*(write_file|edit_block|move_file|start_process|interact_with_process|write_pdf)",
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|mcp__excel__.*|mcp__.*(write_file|edit_block|move_file|start_process|interact_with_process|write_pdf)",
         "hooks": [
           {
             "type": "command",
@@ -312,56 +321,11 @@
         ]
       },
       {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/eos-evidence-gate.py\""
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/eos-review-gate.py\""
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/commit-provenance-guard.py\""
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/memory-orphan-link-guard.py\""
-          }
-        ]
-      },
-      {
         "matcher": "mcp__scheduled-tasks__update_scheduled_task",
         "hooks": [
           {
             "type": "command",
             "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/scheduled-task-update-preguard.py\""
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/commit-hygiene-guard.py\""
           }
         ]
       }
