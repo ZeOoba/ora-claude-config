@@ -253,7 +253,8 @@ def _sized_in(names_bodies, subindexes):
     for name, body in names_bodies:
         with open(os.path.join(tmp, name), "w", encoding="utf-8") as fh:
             fh.write(body)
-    return mip.sized_index_files(tmp, os.path.join(tmp, "MEMORY.md"), subindexes)
+    return mip.sized_index_files(tmp, os.path.getsize(os.path.join(tmp, "MEMORY.md")),
+                                 subindexes)
 
 
 def _sized_only(names_bodies, subindexes):
@@ -298,8 +299,8 @@ for _n, _b in (("MEMORY.md", "x" * 10), ("INDEX_locked.md", "y" * 20)):
         fh.write(_b)
 os.path.getsize = _getsize_locking
 try:
-    sized, unstattable = mip.sized_index_files(tmp, os.path.join(tmp, "MEMORY.md"),
-                                               ["INDEX_locked.md"])
+    sized, unstattable = mip.sized_index_files(
+        tmp, _real_getsize(os.path.join(tmp, "MEMORY.md")), ["INDEX_locked.md"])
 finally:
     os.path.getsize = _real_getsize
 expect("a LOCKED sub-index is left out of the sized set (cannot measure what will not stat)",
@@ -321,7 +322,8 @@ expect("a LOCKED sub-index IS reported as unstattable -- coverage loss must not 
 # nothing outside the adopted sub-index set sneaks in. Both hold regardless of a race.
 live_idx = open(mip.INDEX, encoding="utf-8").read()
 _, live_subs = mip.collect_indexed_links(live_idx, mip.MEM)
-live_sized, live_unstattable = mip.sized_index_files(mip.MEM, mip.INDEX, live_subs)
+live_sized, live_unstattable = mip.sized_index_files(
+    mip.MEM, os.path.getsize(mip.INDEX), live_subs)
 expect("live run gates the root FIRST",
        live_sized and live_sized[0][0] == "MEMORY.md", "got %r" % (live_sized,))
 expect("live run gates only the root plus sub-indexes MEMORY.md adopts (race-tolerant)",
@@ -344,22 +346,34 @@ expect("every gated entry carries a non-negative byte size",
 # question the code asks is what makes this sound; an earlier version asked a different one
 # and claimed, wrongly, that the two could not diverge.
 #
-# Anything that fails to stat NOW is excluded from the claim and surfaced separately below,
-# so a real lock is reported rather than silently tolerated.
-def _measurable(name):
-    try:
-        os.path.getsize(os.path.join(mip.MEM, name))
-        return True
-    except OSError:
-        return False
-
-
+# THE CLAIM IS AGAINST BOTH CHANNELS, and a leftover gets ONE re-observation.
+#
+# Two earlier versions of this assertion raced, in the same way each time: they compared a
+# set observed INSIDE sized_index_files (call it T2) against a fresh filesystem sweep taken
+# afterwards (T3), so any file whose state differed between T2 and T3 failed the test on a
+# healthy tree. Re-sweeping with getsize instead of exists narrowed the window but did not
+# close it -- a sub-index locked at T2 lands in `unstattable`, and if the lock clears by T3
+# it looks measurable-but-ungated. The unstattable channel was in the failure MESSAGE but
+# not in the PREDICATE, which is precisely the gap.
+#
+# So: a sub-index is satisfied if it appears in EITHER channel -- gated, or reported
+# unstattable. Anything still missing gets one re-observation, which distinguishes the two
+# things that produce a leftover:
+#   * a RACE (lock, or a delete-then-rename save that leaves a GONE window) -- self-clearing,
+#     so the second call covers it and the claim passes;
+#   * a real REGRESSION to root-only collection -- populates NEITHER channel, on both calls,
+#     so the leftover survives and the test fails. The guard keeps its teeth.
 live_gated = {n for n, _ in live_sized}
-measurable = [n for n in live_subs if _measurable(n)]
-expect("every measurable sub-index was gated (regression guard: root-only collection)",
-       all(n in live_gated for n in measurable),
-       "measurable=%r gated=%r unstattable=%r" % (
-           measurable, sorted(live_gated), live_unstattable))
+live_unstat = {n for n, _ in live_unstattable}
+missing = [n for n in live_subs if n not in live_gated and n not in live_unstat]
+if missing:
+    _sized2, _unstat2 = mip.sized_index_files(mip.MEM, os.path.getsize(mip.INDEX), live_subs)
+    _covered2 = {n for n, _ in _sized2} | {n for n, _ in _unstat2}
+    missing = [n for n in missing if n not in _covered2]
+expect("every adopted sub-index was gated or reported unstattable (regression guard)",
+       not missing,
+       "missing=%r gated=%r unstattable=%r" % (
+           missing, sorted(live_gated), live_unstattable))
 expect("nothing reported unstattable also appears in the sized set (channels are disjoint)",
        not ({n for n, _ in live_unstattable} & live_gated),
        "unstattable=%r gated=%r" % (live_unstattable, sorted(live_gated)))
