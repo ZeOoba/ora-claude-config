@@ -530,6 +530,82 @@ def _refi_qualified(low, val_start):
         return False
     return True
 
+# --- Deal-specific stabilization-conditioned covenant qualifier (2026-08-15) -----------------
+# A deal-pipeline file legitimately narrates ONE deal's LENDER covenant that only clears at
+# stabilization -- the live trigger is projects.md's 754 Old State Route 74 row: "transition-year
+# DSCR breaches (clears the 1.75x floor only at Yr3+ stabilization) → all-cash close mandatory".
+# That is the PROPERTY'S OWN projected DSCR measured against a deal-specific loan covenant across
+# a lease-up timeline, NOT a restatement of ORA's canonical acquisition governor (CANON_DSCR
+# 1.25x). The phrase arms _is_gov via the dscr..value..floor pairing (RE_GOV_DSCR_VALUE_BOUND),
+# and the value then flags in BOTH the 1.75 sentinel (branch 1) and the equality pass (branch 2)
+# -- a false positive of exactly the class _portfolio_qualified / _refi_qualified exist for, and
+# one no existing suppressor catches (no portfolio token, no refi frame, no correction note).
+#
+# _stabilization_qualified() SUPPRESSES a DSCR flag ONLY when the value is unambiguously framed
+# as a stabilization/lease-up-timeline covenant figure. Detection-over-silence bias -- suppression
+# is a false negative -- so it is kept TIGHT with the same guard structure as its two precedents:
+#   * VETO first on any acquisition-governor marker on the line (STAB_GOV_MARKERS =
+#     ACQ_GOV_MARKERS + PERDEAL_MARKERS + the arming-vocabulary alignment tokens, see below): a
+#     genuine acquisition-governor declaration dressed up in stabilization language ("hard
+#     acquisition governor ... DSCR floor 1.75x at stabilization") must STILL flag.
+#   * VETO if the value is itself declared AS "the governor" -- the literal token within the same
+#     direction-aware reach _refi_qualified uses -- so "DSCR 1.75x at stabilization (the
+#     governor)" is never masked.
+#   * VETO structurally on RE_GOV_DSCR_BOUND anywhere on the line (2026-08-15 REFUTE
+#     remediation): a metric-then-bound-word pairing ("DSCR minimum", "DSCR hard floor") is a
+#     governor DECLARATION shape regardless of word order, so no token list has to enumerate
+#     orderings ("dscr minimum" vs "minimum dscr") -- the gap closes by construction. This can
+#     never veto the legitimate covenant narration, because that shape puts the VALUE between
+#     the metric and its bound-word ("clears the 1.75x floor") and the value's own decimal
+#     point sits in RE_GOV_DSCR_BOUND's clause-ender exclusion class, so BOUND cannot match
+#     across it. RE_GOV_DSCR_VALUE_BOUND is deliberately NOT a veto -- it matches the covenant
+#     narration itself (it is what arms the line) and would kill the intended suppression.
+#   * Then REQUIRE an explicit stabilization/lease-up marker in CLOSE PROXIMITY to the value:
+#     a qualifier substring inside a window around val_start (the _portfolio_qualified bare-word
+#     pattern, widened to 40 because the real line reads "1.75x floor only at Yr3+ stabilization"
+#     -- 'stabiliz' ends 33 chars after the value). A stray "stabilized" far away on a long line
+#     cannot be used to mask a governor drift elsewhere on that line.
+# DSCR-only by design: the deal-covenant shape is a DSCR ratio conditioned on lease-up years;
+# widening it to LTV would be new suppression surface with no observed false positive behind it.
+# YEAR TOKENS (2026-08-15 REFUTE remediation): the yr1/yr2/yr3/"year N" qualifiers were bare
+# substrings, so "year 2" matched INSIDE "year 2026" -- every dated doctrine line near a DSCR
+# value qualified for suppression. They are now a digit-bounded regex: the year digit must be
+# 1-3 and must NOT be followed by another digit ("yr3+" still matches; "year 2026" cannot).
+STABILIZATION_QUALIFIERS = ("stabiliz", "lease-up", "lease up", "transition-year",
+                            "transition year")
+RE_STAB_YEAR = re.compile(r"(?<![a-z0-9])(?:yr\s?|year\s)[1-3](?!\d)")
+# STABILIZATION-ONLY veto extension (2026-08-15 REFUTE remediation): every GOV_KEYWORDS token
+# that can ARM is_gov must also be able to VETO this suppressor -- a veto vocabulary narrower
+# than the arming vocabulary is a structural hole (a line armed SOLELY by "hard cap"/
+# "self-imposed"/"disqualif" was suppressible here while carrying real drift). These tokens are
+# deliberately NOT added to the shared ACQ_GOV_MARKERS: ratified refi doctrine treats a
+# "self-imposed ... post-close" sizing cap as a legitimate refi figure (pinned by
+# test_reverse_order_refi_suppression_unit), so widening the SHARED list would convert that
+# visible-and-correct suppression into a false positive. The stabilization suppressor has no
+# such ratified counter-case, so it takes the full arming vocabulary as veto. "governor" itself
+# stays proximity-scoped (the veto below), and "dscr minimum" is carried both here and by the
+# structural RE_GOV_DSCR_BOUND veto -- belt-and-suspenders on a Hard-Invariant-4 guard.
+STAB_GOV_MARKERS = ACQ_GOV_MARKERS + ("dscr minimum", "hard cap", "hard ceiling",
+                                      "self-imposed", "disqualif")
+
+def _stabilization_qualified(low, val_start):
+    """True when the DSCR value at index `val_start` (in already-lower-cased `low`) is
+    unambiguously a deal-specific STABILIZATION-CONDITIONED covenant figure (a projected DSCR
+    that only clears its lender floor at lease-up/stabilization) and the drift flag should be
+    suppressed. TIGHT by design (suppression is a false negative): an acquisition-governor
+    marker anywhere on the line, a metric+bound-word declaration pairing anywhere on the line
+    (RE_GOV_DSCR_BOUND), or the value being declared AS "the governor" nearby, each veto
+    suppression so a real acquisition-governor drift still flags."""
+    if any(m in low for m in STAB_GOV_MARKERS):
+        return False
+    if RE_GOV_DSCR_BOUND.search(low) is not None:
+        return False
+    if "governor" in low[max(0, val_start - 25):val_start + 40]:
+        return False
+    window = low[max(0, val_start - 40):val_start + 40]
+    return (any(q in window for q in STABILIZATION_QUALIFIERS)
+            or RE_STAB_YEAR.search(window) is not None)
+
 # --- Refi-sizing CONSTRUCT member-value spans (2026-07-11; redesigned after adversarial review) --
 # _refi_qualified() is LINE-scoped and its ACQ_GOV_MARKERS veto misfires on the v3.8-ratified skill
 # text: post-2026-07-11 doctrine, "per-property governor: LESSER of 65% LTV and 1.25x DSCR"
@@ -873,7 +949,8 @@ def scan_line(raw):
         while idx != -1:
             safe = (any(s <= idx < e for (s, e) in dscr_corr_spans)
                     or any(s <= idx < e for (s, e) in sentinel_prose_spans)
-                    or _portfolio_qualified(low, idx))
+                    or _portfolio_qualified(low, idx)
+                    or _stabilization_qualified(low, idx))
             if not safe:
                 out.append("DSCR governor appears as 1.75 (canonical is %sx)" % CANON_DSCR)
                 break
@@ -931,6 +1008,14 @@ def scan_line(raw):
             # acquisition governor. Vetoed by any acquisition-governor marker or a value declared AS
             # the governor (see _refi_qualified), so a real per-deal governor drift still flags.
             if _refi_qualified(low, vs):
+                continue
+            # skip a deal-specific STABILIZATION-CONDITIONED covenant DSCR (a projected property
+            # DSCR that only clears its lender floor at lease-up/stabilization -- e.g. "clears the
+            # 1.75x floor only at Yr3+ stabilization") -- a deal-financing narration, not the
+            # acquisition governor. Vetoed by any acquisition-governor marker or a value declared
+            # AS the governor (see _stabilization_qualified), so a real governor drift dressed in
+            # stabilization language still flags.
+            if _stabilization_qualified(low, vs):
                 continue
             # skip a DSCR value that IS the bps rate-pricing tier's band member (a refi input) --
             # member-scoped, so a floor declared elsewhere on the line still flags. Vetoed if the

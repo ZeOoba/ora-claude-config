@@ -1499,6 +1499,120 @@ def test_qualifier_gate_requires_the_metric_token_unit():
     print("  PASS test_qualifier_gate_requires_the_metric_token_unit")
 
 
+def test_stabilization_conditioned_covenant_suppressed_unit():
+    """2026-08-15 FP fix: a deal-pipeline row narrating ONE deal's LENDER covenant that only
+    clears at stabilization -- "transition-year DSCR breaches (clears the 1.75x floor only at
+    Yr3+ stabilization) -> all-cash close mandatory" (the live projects.md shape) -- is the
+    property's own projected DSCR against a deal-specific loan covenant, NOT a restatement of
+    the canonical acquisition governor. It armed _is_gov via the dscr..value..floor pairing and
+    flagged in BOTH the 1.75 sentinel and the equality pass; no existing suppressor (portfolio,
+    refi, correction) caught it. Must now scan clean."""
+    m = _load_probe_module()
+    clean = [
+        # paraphrase of the actual projects.md:27 fragment (deal name elided):
+        "Substantive: transition-year DSCR breaches (clears the 1.75x floor only at Yr3+ "
+        "stabilization) → all-cash close mandatory; anchor tenant ~50% of rents rolls 5/2027.",
+        # same covenant shape, non-sentinel value + lease-up wording:
+        "Lender covenant: projected DSCR clears the 1.40x floor only after lease-up "
+        "stabilization in year 3.",
+    ]
+    for line in clean:
+        out = m.scan_line(line)
+        assert out == [], (
+            "stabilization-conditioned deal covenant must be suppressed; line=%r got=%r"
+            % (line[:90], out))
+    print("  PASS test_stabilization_conditioned_covenant_suppressed_unit")
+
+
+def test_stabilization_language_does_not_mask_governor_drift_unit():
+    """REFUTE guard for the fix above -- the test that catches an overly-broad suppression: the
+    SAME stabilization language plus an explicit acquisition-governor marker (or the value
+    declared AS the governor) is a REAL governor drift dressed up in stabilization words, and
+    must STILL flag."""
+    m = _load_probe_module()
+    # ACQ_GOV_MARKERS veto ("hard acquisition governor" / "dscr floor"):
+    out1 = m.scan_line("Hard acquisition governor: DSCR floor 1.75x, even at Yr3+ stabilization.")
+    assert any("1.75" in o for o in out1), (
+        "acq-governor marker must veto stabilization suppression; got %r" % out1)
+    out2 = m.scan_line("Per-deal DSCR floor now 1.40x once the asset reaches stabilization.")
+    assert any("1.40" in o for o in out2), (
+        "per-deal marker must veto stabilization suppression; got %r" % out2)
+    # value declared AS the governor nearby (within the _refi_qualified-precedent +40 reach):
+    out3 = m.scan_line("DSCR clears 1.40x at stabilization (the governor).")
+    assert any("1.40" in o for o in out3), (
+        "a value declared AS the governor must not be masked by stabilization words; got %r" % out3)
+    print("  PASS test_stabilization_language_does_not_mask_governor_drift_unit")
+
+
+def test_stabilization_qualifier_does_not_mask_reversed_word_order_unit():
+    """2026-08-15 REFUTE remediation (holes 1/2/5/7): "DSCR minimum" (metric-then-bound-word,
+    reversed from the "minimum dscr"/"min dscr" literals in ACQ_GOV_MARKERS) arms is_gov via
+    RE_GOV_DSCR_BOUND but escaped every marker veto, so _stabilization_qualified silently
+    suppressed REAL governor declarations. Fixed structurally: RE_GOV_DSCR_BOUND matching
+    anywhere on the line vetoes stabilization suppression -- the declaration shape pairs metric
+    and bound-word directly, while the legitimate covenant narration puts the VALUE between
+    them ("clears the 1.75x floor"), whose decimal point RE_GOV_DSCR_BOUND cannot cross."""
+    m = _load_probe_module()
+    # hole 1 -- reversed word order, non-sentinel drift value:
+    out = m.scan_line("DSCR minimum raised to 1.40x at stabilization.")
+    assert any("1.40" in o for o in out), (
+        "reversed-order 'DSCR minimum' declaration must flag despite stabilization word; got %r" % out)
+    # hole 2 -- same gap masking the historical 1.75 drift sentinel itself (worst case):
+    out = m.scan_line("DSCR minimum 1.75x during lease-up only.")
+    assert any("1.75" in o for o in out), (
+        "reversed-order declaration must not mask the 1.75 sentinel; got %r" % out)
+    # hole 5 -- 'yr3' used in an unrelated exit-cap-timing sense inside the proximity window:
+    out = m.scan_line("Yr3 exit cap 7.0%; DSCR minimum 1.40x.")
+    assert any("1.40" in o for o in out), (
+        "exit-cap 'Yr3' must not qualify a separate declared minimum for suppression; got %r" % out)
+    # hole 7 -- multi-value line: the qualifier modifies the FIRST (legitimate) value but the
+    # proximity window also swallowed the SECOND (drifted) value in the next clause:
+    out = m.scan_line("Covenant clears 1.75x at Yr3 stabilization; DSCR minimum now 1.40x.")
+    assert any("1.40" in o for o in out), (
+        "a drifted declaration in the next clause must flag even beside a covenant value; got %r" % out)
+    print("  PASS test_stabilization_qualifier_does_not_mask_reversed_word_order_unit")
+
+
+def test_stabilization_qualifier_veto_covers_arming_vocabulary_unit():
+    """2026-08-15 REFUTE remediation (holes 3/4): "hard cap"/"self-imposed"/"disqualif" ARM
+    is_gov (GOV_KEYWORDS) but were absent from the suppressor's veto list, so a governor
+    declaration whose only signal was one of them was suppressible by a nearby lease-up word.
+    Fixed by STAB_GOV_MARKERS -- the stabilization suppressor's veto vocabulary is a superset
+    of the arming vocabulary (scoped to this suppressor only; the shared ACQ_GOV_MARKERS is
+    unchanged because ratified refi doctrine legitimately writes "self-imposed ... post-close"
+    sizing caps, pinned by test_reverse_order_refi_suppression_unit)."""
+    m = _load_probe_module()
+    # hole 3 -- "hard cap" + "self-imposed" arm but did not veto:
+    out = m.scan_line("Self-imposed hard cap: DSCR 1.10x during lease-up.")
+    assert any("1.10" in o for o in out), (
+        "'hard cap'/'self-imposed' governor declaration must flag despite lease-up word; got %r" % out)
+    # hole 4 -- "disqualif" arms but did not veto:
+    out = m.scan_line("DSCR below 1.10x disqualified pre-stabilization.")
+    assert any("1.10" in o for o in out), (
+        "'disqualif' governor declaration must flag despite stabilization word; got %r" % out)
+    print("  PASS test_stabilization_qualifier_veto_covers_arming_vocabulary_unit")
+
+
+def test_stabilization_qualifier_does_not_mask_year_YYYY_dates_unit():
+    """2026-08-15 REFUTE remediation (hole 6, worst surface): the bare-substring qualifier
+    "year 2" matched INSIDE "year 2026" (any "year 20xx" date), so ordinary dated doctrine
+    prose near a DSCR value qualified for suppression across the whole memory/skill tree.
+    Fixed: year tokens are now the digit-bounded RE_STAB_YEAR regex (digit 1-3, not followed
+    by another digit), so dates can never qualify while genuine "Yr3+"/"year 3" lease-up
+    framing still can."""
+    m = _load_probe_module()
+    out = m.scan_line("Fiscal year 2026 doctrine: DSCR minimum now 1.40x.")
+    assert any("1.40" in o for o in out), (
+        "'year 2026' date must not qualify a drifted declaration for suppression; got %r" % out)
+    # boundary semantics of the replacement regex itself:
+    assert m.RE_STAB_YEAR.search("year 2026") is None, "date 'year 2026' must not match RE_STAB_YEAR"
+    assert m.RE_STAB_YEAR.search("only at yr3+ stabilization") is not None, (
+        "'yr3+' lease-up framing must still match RE_STAB_YEAR")
+    assert m.RE_STAB_YEAR.search("stabilization in year 3.") is not None, (
+        "'year 3' lease-up framing must still match RE_STAB_YEAR")
+    print("  PASS test_stabilization_qualifier_does_not_mask_year_YYYY_dates_unit")
+
+
 def main():
     assert os.path.isfile(PROBE), "probe not found: %s" % PROBE
     test_fleet_roots_are_scanned_unit()
@@ -1577,6 +1691,11 @@ def main():
     test_value_abutting_arming_does_not_flag_durations_unit()
     test_intervening_qualifier_canonical_stays_clean_unit()
     test_qualifier_gate_requires_the_metric_token_unit()
+    test_stabilization_conditioned_covenant_suppressed_unit()
+    test_stabilization_language_does_not_mask_governor_drift_unit()
+    test_stabilization_qualifier_does_not_mask_reversed_word_order_unit()
+    test_stabilization_qualifier_veto_covers_arming_vocabulary_unit()
+    test_stabilization_qualifier_does_not_mask_year_YYYY_dates_unit()
     print("ALL GOVERNOR-PROBE TESTS PASS")
 
 
