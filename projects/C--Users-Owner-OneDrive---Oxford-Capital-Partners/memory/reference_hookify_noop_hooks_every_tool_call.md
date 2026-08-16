@@ -5,10 +5,12 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 76023481-9a6c-40ff-b91f-8bd263f287d8
-  modified: 2026-08-16T21:12:34.936Z
+  modified: 2026-08-16T21:19:15.626Z
 ---
 
 **Status: HISTORICAL. hookify is not firing as of 2026-08-13.** Do not go looking for a toggle to disable — there is nothing to turn off. This note is kept for the method lesson, which is the durable part.
+
+**And there is no durable toggle to find, in either direction.** hookify was never enabled Code-side: it appears in neither `~/.claude/settings.json` `enabledPlugins` nor `~/.claude/plugins/installed_plugins.json`. Every reference lives in **per-session ephemeral config** at `AppData/Roaming/Claude/local-agent-mode-sessions/.../local_<uuid>/.claude/.claude.json` — the LAMS/Cowork surface creates a fresh `.claude` home per session. That is also how it could stop appearing after 08-13 without anyone disabling anything, and why searching `~/.claude` for a hookify switch will always come up empty.
 
 ## What was true, until 2026-08-13
 
