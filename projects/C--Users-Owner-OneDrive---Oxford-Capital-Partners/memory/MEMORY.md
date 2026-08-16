@@ -21,12 +21,14 @@
 - **OPEN/BLOCKED:** [broker OM intake BROKEN in prod 08-04](project_broker_pipeline_blobs_v1_outage_2026-08-04.md) (V1 fns can't auto-provision Blobs; PR #64 ≠ fixed; no data lost) · [open-items-tracker worktree/HEAD divergence 07-20](project_open_items_tracker_worktree_head_divergence.md) (don't force-resync) · [event_log IWNS block loss](project_event_log_iwns_block_loss_unattributed_2026-07-21.md) (recovered; cause open) · [primary checkout main-move blocked 08-12](project_primary_checkout_main_move_blocked_2026-08-12.md) (117+ uncommitted files span 15+ sessions' WIP; don't force-switch, isolated worktree only) · [rent-comp retirement process gap 08-13](project_rent_comp_retirement_process_gap_2026-08-13.md) (data restored 08-12; no-dependency-check + no-skip-gate PROCESS gaps still open, task_cf7b9098 spawned)
 - **PENDING (uncommitted, staging contention):** [OI-140 CLI-arg fix](reference_oi140_check_open_items_duplicate_ids_cli_fix_2026-08-13.md) (live checkout working tree, verified working, not yet committed)
 - [isolated_commit.py repair wrapper](reference_isolated_commit_repair_wrapper_2026-08-13.md) — LANDED 08-13
+- [Live checkout 132 behind 08-15](project_live_checkout_132_behind_settings_json_overlap_2026-08-15.md) — `~/.claude` 132 commits behind its own remote tip; dirty set collides with another session
 - **PLANNED, awaiting Gabriel:** [artifact-content top-5](project_artifact_content_top5_plan_2026-07-18.md) · [setup-improvement top-5](project_setup_improvement_top5_plan_2026-07-18.md) + [Plan 2 design](project_plan2_effect_verification_design_2026-07-18.md)
 - [Acquisition-underwriting eval harness — PILOTED + scheduled 08-14](reference_skill_eval_harness_gap_2026-08-14.md) — merged `ora-skills` main; poll registered (`ora-acquisition-underwriting-eval-harness`)
 - **[Automation Audit Rev 10 08-14](project_automation_audit_rev10_2026-08-14.md)** — first UNATTENDED run; it loaded a STALE v1.2 copy of its own skill (repo is v1.3); eval-harness dirties `ora-skills` daily; 3 zero-plugin marketplaces
 - [Rev 9 remediation FULLY CLOSED 08-15](project_audit_rev9_remediation_landed_2026-08-14.md) — splits reimported live; capex-budgeting + 5 siblings confirmed Removed via Claude in Chrome
 - [Automation Audit Rev 9 08-14](project_automation_audit_rev9_2026-08-14.md) — skills-only: usage ranking, top-skill token recs, 49-skill zero-usage tail sorted keep/ask; first rev under the new 4-band cap
 - [Automation Audit Rev 8 08-14](project_automation_audit_rev8_2026-08-14.md) — FULLY CLOSED
+- [Automation Audit Rev 7 08-13](project_automation_audit_rev7_2026-08-13.md) — 5 findings (schematic bloat, fleet, plugins, routing); none executed, all pending sign-off
 - [oxfordra.net SEO Audit](project_oxfordra_seo_audit_2026-07.md) — 84/100; open: portfolio SF/counts, FAQ order, /markets redirect
 - [oxfordra.net LCP render delay 08-12](project_oxfordra_lcp_render_delay_2026-08-12.md) — forced-reflow FIXED + live (PR #66); OPEN residual: ~1s@8x Layout cost persists
 - [oxfordra.net desktop Perf 98 not 100 08-13](project_oxfordra_desktop_perf_98_not_100_2026-08-13.md) — scoring-curve residue, not a defect; CLS culprit unidentified
@@ -92,6 +94,8 @@
 - [Alert-engine "duplicate" emails 08-11](reference_alert_engine_duplicate_emails_diagnosis_2026-08-11.md) — `bytes=` in the send log is the discriminator. Also: `property_insurance_policies.property_id` holds POLICY slugs, matching 0 of 14 properties
 - [CC snapshot DQ-flag alert was count, not severity](reference_cc_snapshot_refresh_dq_flag_alert_is_count_not_severity.md) — FIXED 08-11; never read `Data-quality flags: 1` as an exception — check `severity`
 - [ora-session-sweep LAMS registry gap 08-11](reference_ora_session_sweep_lams_registry_gap.md) — OI-121, OPEN: `list_scheduled_tasks` saw CC/MCP only
+- **[AM-cluster late wake root cause 08-13](reference_am_cluster_late_wake_root_cause_2026-08-13.md)** — WU reboots killed the app ~33min pre-slot; no launch-at-logon entry. NOT sleep config — stop re-deriving that hypothesis
+- [check-open-items ignores its path arg](reference_check_open_items_ignores_path_arg.md) — takes NO args, always reads the canonical tracker while PRINTING the path you passed
 - **→ [Reference sub-index](INDEX_reference.md)** — 108 pointers across tooling, standards, fleet/skill/Notion/workflow gotchas, git/event_log/Windows hazards, Command Center, hooks & guards. **Not auto-loaded — open it before debugging any tooling failure or assuming a gotcha is unrecorded.**
 - [update_scheduled_task DROPS non-owned frontmatter keys](reference_update_scheduled_task_drops_frontmatter_keys.md) — a `description` retag deletes `output_contract`; diff vs HEAD after every call
 - [Task description lives in TWO stores](reference_skill_description_registry_file_desync.md) — editing SKILL.md alone desyncs the registry; sync both, verify by sha
@@ -106,6 +110,7 @@
 - [Verified null vs inferred null](feedback_verified_null_vs_inferred_null.md) — a zero that could mean "couldn't look" is a FAILURE
 - [Absence claims need verification before building](feedback_absence_claims_need_verification_before_building.md) — "nothing checks X" usually means it exists but is disconnected; grep before you build
 - [Refute pass — proactive by default](feedback_refute_pass_proactive_default.md) — run before declaring done
+- [Sweep, then verify](feedback_sweep_then_verify.md) — a first grep/edit pass misses instances QC later catches; take the full inventory first, re-grep after to prove zero
 - [Polling-claim loop is the default](feedback_polling_claim_loop_default_2026-08-13.md) — contested claim/staged state: wait+recheck (1-4 min cleared it), don't force
 - [Check active claims before optimization-queue work](feedback_check_active_claims_before_optimization_queue_work_2026-08-13.md) — 2 of 9 batch items were already claimed by other live sessions
 - [REFUTE differential harness](reference_refute_differential_harness.md) — guard/probe regex edits: old-vs-new differential battery; judge deltas, not absolutes
