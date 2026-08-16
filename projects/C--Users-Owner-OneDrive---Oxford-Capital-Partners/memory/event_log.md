@@ -5,12 +5,69 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-12T20:13:19.038Z
+  modified: 2026-08-16T19:20:01.670Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-08-16 -- ora-passed-deal-tracker LAMS twin disabled (closes 2026-08-15 open follow-up)
+
+Gabriel manually flipped the LAMS/Cowork `ora-passed-deal-tracker` task to disabled via the Cowork app's own Scheduled-sidebar toggle (not the delete/trash icon), confirmed in-turn 2026-08-16.
+
+Neither Code nor Cowork has any tool that reaches the local LAMS scheduled-task registry -- confirmed by a full `ToolSearch` sweep this session: the only scheduler-adjacent tools available anywhere are `mcp__scheduled-tasks__*` (CC/MCP-only, verified) and `RemoteTrigger` (claude.ai's cloud routine/webhook API, unrelated to the local Windows LAMS store -- almost certainly what a Cowork chat session's `mcp__claude-code-remote__list_triggers` actually is, explaining why it found only one irrelevant cloud "System health check" trigger). This closes the open question from the 2026-08-15 entry about whether Code's tooling reaches the LAMS registry: it does not, and neither does an agent session on the Cowork surface -- the toggle genuinely required a manual human click in the app UI, not a prompt to any agent.
+
+Verification note: this closure rests on Gabriel's direct report of the manual click, not on a tool-verified `enabled:false` read-back -- no tool on either surface can read LAMS registry state either. Documenting as the accepted evidence standard for this specific gap (a UI-only surface with no programmatic read path), not as a general exception to evidence-before-assertion.
+
+`ora-passed-deal-tracker` is now single-registered and live only on CC/MCP (`30 6 15 * *`, next run 2026-09-15).
+
+## 2026-08-16 — fleet-status.py: cross-fleet duplicates no longer reported as same-time collisions (PR #124)
+
+The collision loop built its member list from `t.get("id")` and discarded `_fleet`, then deduped by id — so a task registered on BOTH fleets collapsed to a single-element list and printed as `same-time collisions 1  06:30:{ora-passed-deal-tracker}`. A collision of one. It caused real harm before it was fixed: Automation Audit Revision 13 read that line and recommended retiring the **CC** copy, which is the wrong direction — `ora-passed-deal-tracker`'s own registry `description` records a deliberate Gabriel-directed LAMS→CC migration (item T3-12, 2026-08-15), so CC is the intended survivor. A same-id cross-fleet delete is folder-destructive, so acting on that recommendation could have destroyed the live copy.
+
+Split into two detectors with different remedies: `find_collisions()` (different tasks sharing a fire time — retime one, cheap) now skips same-id pairs, and the new `find_cross_fleet_duplicates()` reports duplicate registrations **independently of cron**, so two copies on different schedules are caught — those were invisible to the old time-bucketed logic entirely. Verdict gained a distinct "registered on BOTH fleets" flag; `--json` gained `cross_fleet_duplicates` (the `collisions` key kept its name and shape, so consumers are unaffected). Text output now carries a safety note pointing at the registry `description` — the field whose provenance corrected the wrong recommendation in the first place.
+
+A refute pass caught a regression the fix itself introduced: excluding same-id pairs from `find_collisions()` would have made a duplicate registration on a SINGLE fleet (the documented 2026-07-08 duplicate-id failure mode) invisible to both detectors. Now reported with `cross_fleet: false`.
+
+**Not fixed, documented instead:** the probe compares cron EXPRESSIONS, not dispatch times. Recurring fires carry a deterministic load-balancing offset (observed `0 9 * * *` → ~09:07, `40 9 * * *` → ~09:47) that is absent from the registry the script reads, so it cannot be modelled there. A reported collision means "same scheduled minute", not proof of simultaneous execution.
+
+Tests: new `maintenance/_tests/test_fleet_status_collisions.py`, 9 cases, red before implementation. Regressions green (`test_fleet_status_missed_cycle.py` 20, `test-fleet-status.py` full). Consumers verified rather than assumed: `--summary` renders for `ora-health-guard`, `memory-integrity-probe.py` still parses `--json`. Pre-push doctrine gate passed in full (guards 8/8, hook-tests-gate 87/0).
+
+Same session also retimed two genuine collisions (`ora-pm-daily-crons` `0 9 * * *`→`40 9 * * *`; `ora-county-sales-monitor` `15 10 15 * *`→`25 10 15 * *`), taking collisions 3→1, and fixed the FRED MCP connector, which had been failing silently since `uv run --with mcp` began resolving mcp 2.0.0 (FastMCP moved out of `mcp.server.fastmcp`) — pinned to `mcp<2`. Detail: `memory/project_automation_audit_rev13_2026-08-16.md`.
+
+## 2026-08-16 — Notion Tenant Database: Lease Status backfilled on 36 rows
+
+Closed one of the two data-quality gaps `ora-lease-expiration-dashboard`'s first run flagged (DQ Flag #1: 36/138 non-retired rows, ~110,860 SF / ~$1.37M annual rent, ~22% of portfolio SF, had `Lease Status` unset).
+
+**Method:** pulled all 36 rows (`b12f4cfd-a995-4755-8341-6435ae8173b4`) plus every field that could argue against "Active" — `Monthly Rent`, `Lease Expiration`, `Notice Given Date`, `Lease Default / Cure Status`, `AR Balance`/`AR Aging Bucket`. Every row showed positive rent (most cross-verified against rent rolls/executed leases in the row's own `Notes`, from prior OI-009-class reconciliation passes), a future expiration date, zero notice-given date, zero default/cure status. No signal supported Vacant, Month-to-Month, Notice Given, or Expired for any row. Confirmed with Gabriel before writing (all-36-as-Active, including the Lamar Advertising billboard-easement line item, which fits "Active" best of the 5 available options despite not being a conventional tenant space).
+
+**Executed:** 36 `notion-update-page` calls (`Lease Status: "Active"`), all succeeded. Verified via a fresh COUNT query — zero rows with `Lease Status IS NULL` remain among non-retired tenants.
+
+**Not touched:** the other DQ flags from the same run (Market Rent PSF unpopulated on all 138 rows; Tenant Grade on only 1; Columbia Imaging's missing Lease Expiration date; Triple Threat Kansas City's duplicate open HubSpot task) — those need their own evidence-gathering pass, not addressed here.
+
+**Why:** this field directly gates `ora-lease-expiration-dashboard`'s active-tenant filter (`Lease Status IN Active/Month-to-Month/Notice Given`) — 36 rows sitting outside every bucket meant ~22% of portfolio SF was invisible to the weekly rollover-risk analysis and the renewal-escalation queue.
+**How to apply:** next week's dashboard run should show a materially different active-tenant count/SF total than the first run's 99/389,683 SF, since these 36 rows now qualify for bucket analysis.
+
+## 2026-08-16 — Filed OI-166..OI-170 from the passed-deal-tracker session; shipped fixes for two (PR #123)
+
+Gabriel-directed ("File all and proceed with fixing all of them"). Five findings from the double-fire-guard session, ids allocated via `allocate-oi-id.py`. Two fixed and landed as [PR #123](https://github.com/ZeOoba/ora-claude-config/pull/123); three filed with fix direction and deliberately not built.
+
+**OI-170 — the root cause of the whole session.** The scheduler resolves a registry `filePath` against the LIVE WORKING TREE, not git, so a SKILL.md can be merged to origin and still inert on disk. Added a fourth check, `STALE_VS_GIT`, to `task-folder-registration-probe.py`. The three existing checks structurally could not catch it — all reason about whether the filePath *exists*; this file existed at the right path with the wrong bytes.
+
+**OI-166 — cross-slug claim collision.** `claim` refused only on the SAME slug, so the two sessions that raced this file earlier today (`open-items-tracker` vs `repo-housekeeping` over the same two paths) could not collide. `claims_touching()` already existed but was wired only into `shared-checkout-guard`'s Edit/Write path, firing *after* a file is touched. Now consulted at claim time. WARN, never refuse — the module endorses distinct slugs as a feature and `_path_overlap` matches by prefix, so refusing would let a directory-level claim deny every narrower one.
+
+**Three defects were caught before landing, and none of them by re-reading the diff — worth recording, because the pattern is the lesson:**
+1. *Running it live:* compared against `HEAD` instead of `@{upstream}`. In the real incident the on-disk file MATCHED local HEAD (`588ec1b`) and differed only from origin — the first cut would have declared the very bug it was written for clean. Unit tests all passed.
+2. *Running it live:* byte-compared against `git show`. `core.autocrlf=true`, so a blob's LF never equals the worktree's CRLF — **21 of ~32** CC tasks flagged. A check that noisy is worse than no check. Now delegates to `git diff`, which applies git's own filters.
+3. *Independent review* (`claude-fable-5`, ratified blast-radius rule, dispatched under the standing carve-out): the same-slug filter compared the RAW `args.slug` against `claims_touching`'s SANITIZED filename stem — the exact trap `find_claim()`'s docstring documents from a **2026-08-04** review. Same defect class, same file, four months apart, caught only because the gate forced an independent pass. Fixed via `_safe_filename(args.slug)[:-5]`; reviewer re-verified the amended content and returned LAND.
+
+**Filed, deliberately NOT fixed** — recorded so this reads as a judgment call, not an omission:
+- **OI-167** (config-write-guard blocks pure reads; 5 trips this session). The matcher is ratified un-narrowable — [[feedback_autonomy_gate_matcher_cannot_be_safely_narrowed]] logs FOUR attempts that each found a real bypass, the fourth using a real shell tokenizer and failing on a more fundamental problem. A fifth would be the fifth failure. Session `6797e01b` also holds `hooks-override-auth` for that same false-positive class — building here would be the exact duplicated-work collision OI-166 exists to prevent.
+- **OI-168** (pre-push gate vs the 120s default tool timeout). Not a repo defect; the gate is doing its job. Fix is documentation or a fast path, and speeding the sweeps by weakening them would be a bad trade.
+- **OI-169** (a worktree was emptied to 0 entries by another session while this one was live in it, breaking `hooks/lib/claim_work.py` — which is itself the sanctioned escape hatch for OI-167). Cleanup does not consult live claims, which already record `cwd`.
+
+Verification: 43/43 probe tests (13 new), 204/204 `claim-work-lib`, 39/39 `claim-file-collision`, 86/86 `hook-tests-gate`; live probe clean on both fleets after the fix; `_git_differs_from_upstream` correct against a known-dirty file, a known-clean file, and a non-repo OneDrive path.
 
 ## 2026-08-16 — R13-4 archival dispatch STOOD DOWN: opened on a falsified premise, already remediated by the split
 
@@ -35,6 +92,64 @@ The 2 orphans understate it: in a clone the ~30 files listed only in that sub-in
 **Corroborated independently:** `INDEX_reference.md` measures **18,361 B — larger than the root index it was split out of**, and check 0 stats `MEMORY.md` only, so no WARN or HARD covers any sub-index. The split moved the bound rather than removing it. That finding is the other session's; this pass confirms the byte figure.
 
 **Process finding.** Both probes green throughout (`267 files indexed, 267 present`, exit 0; doctrine-integrity exit 0) — the dispatch was never gated by a failing check, only by a stale prose premise. A brief carrying baked byte counts and a "currently blocked" claim is the `feedback_prompt_current_state_prose` failure mode: measure before acting on a number someone else wrote down.
+
+## 2026-08-16 — WIP rescue: committed a dead session's open-items/MEMORY work to unblock the branch, then hand-reconciled the merge
+
+Gabriel-directed in-turn ("that session's dead, commit its work and fast-forward"). The branch sat `behind 4` and could not advance: the 4 incoming memory-integrity commits (`86f864d`..`3786be0`) rewrite `memory/MEMORY.md` and `memory/open-items-tracker.md`, and both files carried uncommitted work from a session that had exited. Git correctly refused (`read-tree -n -m` → "Entry 'MEMORY.md' not uptodate"), and the three ways past it — `stash`/`reset`/`checkout` — are all forbidden on a contaminated tree and would each have destroyed ~130 lines.
+
+- **Settledness was verified, not assumed.** Two-pass mtime/size check: the file's last write was 14:16:20 ET (+130 lines) and was unchanged on the second pass. Worth noting the WIP grew +128 → +130 *between* the first analysis and the commit — a single final flush landed after Gabriel declared the session dead, so the "is it settled" question was live, not theoretical. Its own closing text self-describes the pass as "reporting, not close-out", leaving OI close-out calls to Gabriel.
+- **Rescued as `64e3745`, verbatim and unreviewed**, with provenance in the message: not this session's work. Scope deliberately limited to the two files that BLOCKED the merge. The rest of the dirty set (`_scheduled_tasks_backup/*`, `maintenance/_state/health-guard-beacon.json`, `event_log.md`, 2 untracked dirs) could not be attributed with evidence and may belong to live sessions — left untouched.
+- **It was never a fast-forward.** Once the WIP was committed both sides had rewritten the same two files, so this became a real merge (`6045784`). `MEMORY.md` auto-merged; `open-items-tracker.md` produced exactly ONE conflict — the `modified:` frontmatter stamp. Took the later value (18:16:20.232Z) rather than minting a fresh one, so the field still points at a real write.
+- **Union verified four ways rather than eyeballed:** 0 residual conflict markers; OI-147/148/149 — filed *independently on both sides* — appear exactly once each; set difference vs origin is empty (no origin row dropped); 160 rows merged = 160 local vs 153 origin, the rescued WIP being a strict superset that adds OI-137, OI-143, OI-161–165.
+- **Pre-existing defect left alone:** `### OI-092/093/094/095` detail headers are duplicated (2/3/3/2) *identically on both sides*. This merge neither created nor fixed them. Flagged, not touched — out of scope, and fixing it inside a merge would have hidden it.
+- Pre-commit snapshots of both files held outside the repo as a rescue backstop.
+
+**Concurrency note — two sessions raced this.** Mid-merge, the same-file collision hook surfaced session `30b5a31f` holding `repo-housekeeping` for "dirty-tree-triage on live ~/.claude: attribute+settle MEMORY.md/open-items-tracker.md blocking the pull", i.e. *this exact task*, plus `6d6043de`/`86069241` with recorded edits to the same file. Its claim was released by the time the merge committed, so no collision materialized. But the near-miss is the finding: I held `open-items-tracker` and it held `repo-housekeeping` — **two different slugs covering the same paths**, so neither claim's exit-3 refusal could fire. `--paths` overlap is recorded but does not gate. Slug-granularity, not the claim mechanism, is the gap.
+
+**Unrelated observation:** this session's own git worktree (`.claude/worktrees/wizardly-hamilton-626cbd`) was emptied to 0 entries by another session mid-task while still checked out, which broke `python hooks/lib/claim_work.py` from that path. Fell back to the live copies. Worth knowing before relying on a worktree surviving a long session.
+
+## 2026-08-16 — OI-162 fix: ora-pm daily crons moved into the CC/MCP fleet; two new problems surfaced, unresolved
+
+Registered `ora-pm-daily-crons` (CC/MCP, cron `0 9 * * *`, runs the existing `C:\Users\Owner\ora-pm-cron\ping-crons.ps1` verbatim rather than re-implementing it) and disabled the standalone Windows Task Scheduler task "ORA PM Crons" that previously owned this cadence, so [OI-162](open-items-tracker.md#OI-162) is fixed for the daily half — `automation-health-monitor` now sees this automation via the standard `list_scheduled_tasks` sweep.
+
+**Two things found while doing this, neither fixed yet:**
+1. **"ORA PM Crons" has been failing since 2026-08-15.** `cron.log`'s last real entry is 2026-08-14; `Get-ScheduledTaskInfo` showed a 2026-08-16 11:45 AM `LastRunTime` (not even the scheduled 9:00 AM slot) with `LastTaskResult 0x8007042B` and zero log output — it errored before reaching any of its own logging code. `ping-crons.ps1 -SelfTest` passes clean (12/12) when run interactively from this session, so the script's own logic is sound; the failure is specific to the Interactive-logon Task Scheduler execution context (register-task.ps1 requires the user logged on). Root cause not yet diagnosed. Two real days of critical-dates-alerts/delinquency-check pings (and any digest they'd have sent) were silently missed.
+2. **`trigger-billing.ps1` (monthly ACH billing trigger) has NO scheduled trigger anywhere on this machine.** No Windows Scheduled Task exists for it (verified: only "ORA PM Crons" was registered; nothing named billing/trigger-billing in `schtasks /query` or the Task Scheduler library), and its own env var (`ORA_PM_CRON_SECRET`) is unset at both Machine and User scope — contrary to the ora-pm README's "Setup & Run" table, which lists it as if scheduled ("1st of month"). Whether monthly billing has been run by hand each month, or not run at all, is unverified from this machine — needs Gabriel to confirm before anything is automated here, since it fires real Stripe ACH autopay.
+
+Did not register a monthly-billing fleet task pending that confirmation — creating new automated ACH-charging infrastructure is a bigger decision than fixing fleet visibility for something already running. OI-162 left OPEN (not closed) until the monthly half and the daily-task failure root cause are resolved.
+
+## 2026-08-16 — ora-passed-deal-tracker: double-fire guard now LIVE in the primary checkout (merge landed; LAMS twin still OPEN)
+
+Closes the "merged but NOT live in the working tree" half of the 2026-08-16 entry below. The guard (PR #116, `c16667c`) had merged to the integration branch as `b734674`, but the primary `~/.claude` checkout sat at `588ec1b` and never carried it — and the scheduler resolves the registry `filePath` against the **live working tree, not git**, so `scheduled-tasks/ora-passed-deal-tracker/SKILL.md` still had zero guard hits. Merged `origin/feat/model-canary-probe-step25` into the local branch with `--no-ff`; the guard is now live ahead of the 2026-09-15 06:30 ET fire.
+
+- **No conflict, and none refereed.** The branch had diverged 1-ahead/2-behind, which read as a `maintenance/_state/fleet-heartbeat.json` conflict risk — it was not one. The two sides touch **disjoint** files: local `588ec1b` changed only `fleet-heartbeat.json`, the incoming diff only `SKILL.md` (the second incoming commit is just the merge commit). Confirmed conflict-free with `git merge-tree` (exit 0) *before* merging. No side of `fleet-heartbeat.json` was taken, hand-merged, or regenerated — both sides survive as committed.
+- **Verified live, not merely merged:** `git merge-base --is-ancestor c16667c HEAD` → 0; `grep -cE "block-sentinel|outlook-sent-probe"` against the **working-tree** file → 7 (was 0). Both referenced helpers exist and resolve: `_shared/block-sentinel.py`, `_shared/outlook-sent-probe.ps1`, `_shared/README-DOUBLE-FIRE-GUARD.md`.
+- **Both output exits close the claim** — the failure mode that would have made the guard worse than none. Terminal calls confirmed on the live file at Step 6 zero-trades (`complete`, no `--email-sent-at`, line 73), Step 7b trades (`complete`, line 115), Step 9 abort (`fail`, line 125). A guard wired only around the email would have left `IN_PROGRESS` dangling every quiet month, and the next fire past the 30-min TTL would then re-sweep.
+- **Registry untouched and still correct:** `enabled: true`, cron `30 6 15 * *`, `nextRunAt 2026-09-15T10:34:44Z`, `path` → the file just updated. Frontmatter `description` deliberately not edited (it is mirrored in the registry; editing the file alone desyncs the two stores) — verified no `+/-` on the frontmatter in `git diff 588ec1b HEAD`.
+- **Additive-only in a shared checkout.** The 13 uncommitted paths (incl. `memory/MEMORY.md`, `memory/event_log.md`, `memory/open-items-tracker.md` — sessions `86069241` / `87156ce5` / `80163fb8`) were byte-for-byte unchanged by the merge; `git status` lists the identical set before and after. Held `repo-housekeeping` via `claim_work.py` for the duration. A `config-write-guard` override was minted for the live `git merge` on Gabriel's in-turn direction and revoked immediately after.
+- **Left unpushed on purpose.** The branch is now ahead 2 — my merge plus another session's `588ec1b`, which was already local-only when this started. Pushing would publish their commit as a side effect, so that call is not this session's to make.
+
+**Still OPEN — unchanged by this:** the LAMS/Cowork twin remains `enabled: true` on the identical cron `30 6 15 * *`. It needs an `enabled:false` toggle from a **Cowork** session; the taskId is identical on both fleets, so a Code-side `update_scheduled_task` would likely disable the wrong (CC) copy. Layer 1's state file is keyed per task and both fleets resolve the same OneDrive path, so cross-fleet dedup works by construction — but only for a fleet whose SKILL.md actually calls `claim`, and the LAMS copy does not. Interim mitigation if the toggle slips past 2026-09-15: paste Step 0 into the LAMS copy verbatim.
+
+## 2026-08-16 — ora-passed-deal-tracker: LAMS twin toggle still OPEN; double-fire guard merged but NOT live in the working tree
+
+Two distinct open threads on the same 2026-09-15 06:30 ET deadline, found during the `ora-am-brief` Sunday run while investigating the CC copy's `lastRunAt: null`.
+
+**1. LAMS twin disable — STILL OPEN, unchanged from the 2026-08-15 T3-12 entry.** The LAMS/Cowork registry still carries `ora-passed-deal-tracker` as `enabled: true`, cron `30 6 15 * *`, `filePath` `OneDrive - Oxford Capital Partners\Documents\Claude\Scheduled\ora-passed-deal-tracker\SKILL.md`, `lastRunAt 2026-08-15T18:28:04.621Z`, `lastScheduledFor 2026-08-15T10:30:00.000Z`. The CC/MCP copy is also `enabled: true` at the same cron with `nextRunAt 2026-09-15T10:34:44Z`. Both fleets will fire on 2026-09-15 unless the LAMS side is toggled off.
+
+Gabriel asked (2026-08-16) whether this could be done from the CC/MCP surface. It cannot, and attempting it is actively hazardous: **the taskId is identical on both fleets**, `list_scheduled_tasks` from CC/MCP returns 37 CC-only entries with no LAMS visibility, so `update_scheduled_task(taskId:"ora-passed-deal-tracker", enabled:false)` issued from Code would most likely disable the **CC copy** — the one meant to survive — leaving the LAMS copy (which has no Outlook COM path) firing and producing nothing. Requires a Cowork-session `enabled:false` toggle. **Never the Scheduled-sidebar delete/trash icon** — folder-destructive, and the standing warning that it can break a same-id task on the other fleet is not theoretical here, because the ids collide.
+
+**2. New finding — the 2026-08-15 LAMS run produced no durable artifact.** `lastRunAt` advanced, but the newest `Passed-Deal Tracker` Notion page is **2026-07-15**, and `_shared/send-log.txt` has no entry for the task on 2026-08-15. Empirically confirms the stated migration rationale (LAMS cannot reach `send-via-outlook.ps1`) and means the August monthly cycle produced no output on either fleet. Do not read the LAMS `lastRunAt` as evidence the August sweep happened.
+
+**3. Double-fire guard — MERGED, but NOT yet live.** PR #116 (`claude/passed-deal-tracker-double-fire-guard`, commit `c16667c`) added the two-layer guard — `block-sentinel.py claim --block main` entry guard plus an `outlook-sent-probe.ps1` pre-send probe, with terminal `complete`/`fail` on **both** the Step 6 zero-trades path and the Step 7 trades path. It merged into the integration branch `feat/model-canary-probe-step25` as `b734674`, **not into main** — `origin/main` does not carry the file at all.
+
+The primary `~/.claude` checkout is at `588ec1b` on that same branch and is **2 commits behind origin**, so `git merge-base --is-ancestor c16667c HEAD` returns NO and the live working-tree `scheduled-tasks/ora-passed-deal-tracker/SKILL.md` still has **zero** hits for `block-sentinel` / `outlook-sent-probe`. The scheduler resolves `filePath` against the live working tree, not against git — **so the guard is merged but inert.** A merged PR is not a live change here, the same way it is not a live deploy for oxfordra.net.
+
+**Why:** both items land on the same hard date. If neither is closed, 2026-09-15 fires the task twice with nothing to dedupe it; if only the guard is made live, the duplicate is caught but the LAMS copy still burns a run producing nothing; if only the LAMS toggle happens, the CC copy runs unguarded against catch-up bursts.
+
+**How to apply:** (a) toggle the LAMS twin `enabled:false` from a **Cowork** session, then verify the LAMS entry reads `enabled:false` with its folder intact (DISABLE, not RETIRE) and the CC entry still reads `enabled:true` / `nextRunAt 2026-09-15T10:34:44Z`. (b) Bring the primary checkout current with `origin/feat/model-canary-probe-step25` so the guard becomes live — but note the tree is contaminated (`memory/MEMORY.md` and `memory/open-items-tracker.md` were uncommitted and owned by another session at the time of this check, and the checkout is documented SINGLE-WRITER), so do it from a dedicated session with a `git status` check first; never `checkout`/`reset`/`stash`/`branch -f` the shared tree. (c) After the pull, re-grep the live file for `block-sentinel` and `outlook-sent-probe` and confirm the guard reaches both the Step 6 and Step 7 exits — a guard wired only around the email leaves the claim dangling `IN_PROGRESS` on every quiet month.
+
+**Provenance note:** written from the unattended `ora-am-brief` session `80163fb8`, on Gabriel's explicit in-turn instruction. That task's NON-MUTATION GUARANTEE otherwise bars it from writing any memory file; the exception was taken deliberately and is recorded here rather than left silent. Appended via `maintenance/append-event-log.py` (the sole sanctioned writer), not an Edit-anchored header write.
 
 ## 2026-08-15 — ora-passed-deal-tracker / ora-pm-ledger / deal_sourcing_snapshot_diff.py WIP attributed to session local_895ab863 (T3-12 fleet migration)
 
