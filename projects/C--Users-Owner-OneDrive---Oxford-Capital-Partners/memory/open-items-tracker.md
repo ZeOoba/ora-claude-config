@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-08-16T01:59:23.989Z
+  modified: 2026-08-16T18:16:20.232Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -32,6 +32,13 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
+| [OI-162](#OI-162) | 2026-08-16 | Cross-repo architecture-diagram review (Gabriel-directed, this session) | **MEDIUM — daily half FIXED 2026-08-16** (`ora-pm-daily-crons` now in the CC/MCP fleet, old Windows task disabled); monthly-billing has **no scheduler trigger anywhere**, and the old daily task was found already failing since 08-15 — both still open, needs Gabriel's input, see detail section |
+| [OI-163](#OI-163) | 2026-08-16 | Cross-repo architecture-diagram review (Gabriel-directed, this session); corroborates [[project_aaos_agent_coordination_layer]] | **MEDIUM** AAOS self-grades v1.0 feature-complete (216 tests, 6 gate reviews, 5 ADRs) but its own README/`DELIVERABLES-MANIFEST.md` confirm the one thing it exists to prove — a live Code↔Cowork round-trip through the seam — has never happened; `t-cowork-seam-confirm.json` sits queued, unconsumed. Only `expire-leases.py` runs unattended in production; the rest is dormant, unexercised infrastructure. Fix: force one real round-trip, or stop treating it as shipped |
+| [OI-164](#OI-164) | 2026-08-16 | Cross-repo architecture-diagram review (Gabriel-directed, this session); related [OI-142](#OI-142) | **MEDIUM** ora-skills' git repo and the Cowork AppData runtime cache are two independently-writable copies of every skill, reconciled only by after-the-fact drift detection, not prevented structurally. README documents 3 same-session cache-ahead drifts (2026-08-04); OI-142's zero-commit install is another instance of the same root cause. Fix direction: point Cowork's skill import at the git source directly if the platform allows it, removing the second copy rather than diffing it better |
+| [OI-165](#OI-165) | 2026-08-16 | Cross-repo architecture-diagram review (Gabriel-directed, this session) | **CLOSED 2026-08-16** — `netlify.toml` build command now chains `build-kb.mjs && build-dist.mjs`; verified locally end to end, Gabriel-confirmed past the site-tree gate. See detail section |
+| [OI-161](#OI-161) | 2026-08-15 | Investigation of OI-137/OI-143's orphaned sections (Gabriel-directed, this session) | **Recurring authoring-gap**, distinct from OI-160's merge-loss mechanism: a batch-filing commit writes a full `### OI-NNN` detail section but never adds the matching Open-table row — 2 independent instances found (OI-137 via `1cfbc3c`, OI-143 via `7463e48`), both invisible to the Open table since filing (2026-08-12/08-14) until this session's audit |
+| [OI-143](#OI-143) | 2026-08-12 | surfaced while root-causing [OI-137](#OI-137); split out because it is materially wider than that cross-check | **MEDIUM** `server/workbook/parse.ts:403` coalesces a missing/unparseable expense cell to `0`, indistinguishable from a genuine zero — feeds Spine A's NOI/DSCR/valuation for 4+ properties; no governor breach today, root cause of part of OI-137's drift. Row restored 2026-08-16 (this session) — see [OI-161](#OI-161) |
+| [OI-137](#OI-137) | 2026-08-12 | surfaced as a control run while verifying PR #268's test failures were pre-existing | **MEDIUM-HIGH** `npm run reconcile:noi-crosscheck` FAILS on `main` — Spine A (workbook) vs Spine B (warehouse) NOI disagree by 74–91% ($259,009 combined) on 3 properties (Livingston, Westerville, Raytown); root-caused to a structural mismatch (forward-looking vs historical-actuals NOI), not a data error — `gate:ci` doesn't run this check so the failure is invisible to CI. Row restored 2026-08-16 (this session) — see [OI-161](#OI-161) |
 | [OI-160](#OI-160) | 2026-08-15 | Investigation of the missing OI-157 row while checking its status (Gabriel-directed, this session) | **RECURRENCE of the OI-098/OI-124 merge-conflict row-loss class.** OI-157 was silently dropped from this file TWICE during same-day `feat/model-canary-probe-step25` merge activity (`318de35`, then `ba93c70`) — once from a genuine 3-way conflict, once when a clean surviving copy on one parent still wasn't picked up. `git log -S` (pickaxe) in its default mode found neither removal, since it skips merge-commit diffs unless run with `-m` — a real audit blind spot. Not yet root-caused or fixed; see full section for the git evidence |
 | [OI-159](#OI-159) | 2026-08-15 | Manual T3-5 cross-check (Gabriel-directed workflow-optimization pass), ahead of `ora-tenant-hubspot-reconciliation`'s next scheduled run (2026-09-01) | **DATE-MISMATCH** Medspeed, LLC — workbook `leaseEnd 2029-08-31`, `status Active`; HubSpot deal "Medspeed — Lease Renewal 2026-08-31" still `appointmentscheduled`, `closedate 2026-08-31`. Lease renewed in the workbook but the original HubSpot renewal deal was never closed out |
 | [OI-158](#OI-158) | 2026-08-15 | Manual T3-5 cross-check (Gabriel-directed workflow-optimization pass), ahead of `ora-tenant-hubspot-reconciliation`'s next scheduled run (2026-09-01) | **DATE-MISMATCH** Sky Shield — workbook `leaseEnd 2029-08-31`, `status Active`; HubSpot deal "Sky Shield — Lease Renewal 2026-09-30" still `appointmentscheduled`, `closedate 2026-09-30`. Lease renewed in the workbook but the original HubSpot renewal deal was never closed out — same failure class as the 2026-07-16 lease-date correction (J&R/Stone Crest/Chesapeake), different symptom: stale open deal rather than stale wrong date |
@@ -155,6 +162,45 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 **Source:** [project_automation_audit_rev10_2026-08-14.md](project_automation_audit_rev10_2026-08-14.md) R10-12; investigated in `~/ora-skills/.superpowers/sdd/task-6-report.md`; ruling made in-session 2026-08-15; row lost to merge-conflict resolution and re-filed 2026-08-15/16 (this session) — see [OI-160](#OI-160)
 **Description:** `capex-budgeting` was accidentally republished to the Cowork skill store 2026-08-13 (a batch Save-skill click clearing an unrelated PENDING_REIMPORT queue caused a new registration, `main.log` enabled count 51→52) — 4 days after Gabriel confirmed it unpublished 2026-08-09 alongside 5 sibling skills (`annual-cycle`, `cash-position-monitor`, `deal-retirement`, `investor-relations`, `vendor-management`, all confirmed still absent from the live catalog, consistent with remaining correctly unpublished). Gabriel ruled 2026-08-15: accidental, unpublish it again.
 **Evidence:** Filed in commit `7c9740a` (2026-08-15 14:43:31 -0400). Per `event_log.md` (2026-08-15): Gabriel first toggled Share off via the claude.ai Skills page (verified persisted after navigating away and back), then — noting capex-budgeting still appeared in the account's "your skills" search unlike the fully-removed 5 siblings — escalated via the overflow menu's **Remove** action ("Remove skill? You can always add this skill again later by re-uploading it" — confirmed reversible, not destructive data loss). Confirmed removal via a follow-up search: "capex-budgeting" → "No skills match your search", matching the other 5 unpublish-siblings exactly. The tracker row itself was independently confirmed lost from this file during two same-day merges before it could ever be formally closed (see [OI-160](#OI-160)) — re-filed directly as CLOSED now that the underlying real-world action is independently verified done.
+
+### OI-161
+**Status:** OPEN
+**Opened:** 2026-08-15
+**Source:** Investigation of OI-137/OI-143's orphaned sections while checking their status (Gabriel-directed, this session)
+**Description:** **Recurring authoring-gap, distinct from OI-160's merge-conflict mechanism.** A batch-filing commit writes a full `### OI-NNN` narrative detail section but never adds the matching one-line Open-table row — the section then sits invisible to anyone scanning the Open table, with no removing commit to find (there was never a row to remove). Two independent instances confirmed via `git log -G"^### OI-NNN"`: `### OI-137`'s header was introduced in `1cfbc3c` ("memory(OI-138): file the eos-review-gate scoping + key-mismatch defect") — that commit added a proper row for its own headline item, OI-138, but only the bare section for OI-137. `### OI-143`'s header was introduced in `7463e48` ("file OI-143/147-154, root-cause OI-137, close OI-148") — same pattern: rows landed for OI-147/148/149 in that commit, OI-143 got only its section. Both orphaned sections described real, substantive, still-open defects (OI-137: NOI cross-check failure; OI-143: silent-zero expense parsing) that were effectively invisible to the tracker's own purpose for 2-4 days each. `check-open-items-duplicate-ids.py`'s existing `ORPHANED_SECTION` check already detects this class (that is how both were found) — the gap is upstream, at authoring time, not detection time. Not yet fixed: no mechanism stops a session from writing a section without its row in the first place; the duplicate-id checker is currently audit-only (report, not gate). Candidate fix: wire `check-open-items-duplicate-ids.py`'s orphan/missing findings into the pre-push doctrine gate (WARN first, per the OI-id enforcement rollout precedent) so a session filing an item gets caught before the commit lands, not days later during an unrelated investigation.
+
+### OI-162
+**Status:** OPEN — daily half FIXED 2026-08-16, monthly half + a newly-found failure still open
+**Opened:** 2026-08-16
+**Source:** Cross-repo architecture-diagram review (Gabriel-directed, this session) — `ora-pm/README.md` "Architecture" diagram + "Setup & Run" section
+**Description:** **MEDIUM** ora-pm's three cron jobs (`monthly-billing`, `critical-dates-alerts`, `delinquency-check`) have no native Cloudflare Pages trigger, so they're driven by two standalone Windows Task Scheduler entries — `scripts/trigger-billing.ps1` (1st of month) and a separate "ORA PM Crons" task running `C:\Users\Owner\ora-pm-cron\ping-crons.ps1` (daily 9am). The README states plainly this second task is "not part of the ORA fleet/`create_scheduled_task` registry." `automation-health-monitor`'s own trigger description scopes it to "the live dual-fleet scheduled-task registries (CC/MCP + LAMS/Cowork)" via `list_scheduled_tasks` — neither of these two ora-pm tasks lives in either registry, so they are structurally invisible to the one system that exists to catch a silently-stopped automation. Stakes are non-trivial: `monthly-billing` confirms off-session ACH PaymentIntents portfolio-wide, and since OI-047 removed direct email from the Worker, `ping-crons.ps1` is the *sole* delivery path (via Outlook COM) for the critical-dates and delinquency digests — if that task stops firing, both the money-movement job and the human-visible alerting for it go dark with no monitoring signal.
+**Fix direction:** register both tasks through `register-scheduled-task`/`create_scheduled_task` so they land in an audited registry, or (if that path can't reach a non-ORA-fleet Windows box) build an ora-pm-specific equivalent of `automation-health-monitor` that checks these two tasks' last-run evidence directly.
+**Progress 2026-08-16 (this session):** Registered `ora-pm-daily-crons` in the CC/MCP fleet (`0 9 * * *`, invokes the existing `ping-crons.ps1` verbatim rather than re-implementing it) and disabled the standalone "ORA PM Crons" Windows task so there is exactly one trigger, not two racing at 9am. Verified via `list_scheduled_tasks` (`cronExpression: "0 9 * * *"`, `nextRunAt: 2026-08-17T13:06:31Z`, ~20h out — passes the step-4c sanity check). **Two things surfaced doing this, both still open, full detail in [event_log.md 2026-08-16](event_log.md#2026-08-16):**
+1. **The old "ORA PM Crons" task had already been failing since 2026-08-15** — `cron.log`'s last real entry is 08-14; today's `LastRunTime` shows a non-9am timestamp with `LastTaskResult 0x8007042B` and zero log output, meaning it errored before its own logging code ran. `ping-crons.ps1 -SelfTest` passes 12/12 interactively, so this is an execution-context failure (Interactive-logon principal), not a script-logic bug. Root cause not diagnosed. Two days of alert/delinquency pings were silently missed — the new fleet task should fix reliability going forward (fleet tasks already run unattended reliably elsewhere), but the miss itself is not backfilled.
+2. **`trigger-billing.ps1` (monthly ACH billing) has no scheduler trigger anywhere on this machine at all** — not a fleet-visibility gap but an apparent total absence of automation, contradicting the README's "Setup & Run" table. `ORA_PM_CRON_SECRET` is unset at both Machine and User env scope. Unverified whether Gabriel runs this by hand monthly or it simply hasn't been running. **Deliberately NOT registered as a new fleet cron** — creating new unattended ACH-charging automation is a bigger decision than fixing visibility for something already running, and needs Gabriel's explicit confirmation first (how it's been triggered to date, and whether to automate it now). This is why OI-162 stays OPEN rather than closing.
+
+### OI-163
+**Status:** OPEN
+**Opened:** 2026-08-16
+**Source:** Cross-repo architecture-diagram review (Gabriel-directed, this session) — `AAOS/README.md` §1 and its cited `docs/DELIVERABLES-MANIFEST.md`; corroborates the existing memory pointer [[project_aaos_agent_coordination_layer]] ("real infra; Cowork round-trip unreachable from Code")
+**Description:** **MEDIUM** AAOS (`C:\Users\Owner\AAOS`) is a filesystem-based Code↔Cowork task-queue/handoff protocol over an OneDrive-synced "seam" — no daemon, no network listener. It self-grades as v1.0 feature-complete: 216 unit/integration tests (all green), 6 documented adversarial gate reviews, 5 ADRs. But the README states directly that the one capability the whole system exists to prove — a live, same-session round-trip confirming a real Cowork session can read/write the seam — "has explicitly still [been] open": `t-cowork-seam-confirm.json` sits queued and unconsumed in the live seam as of this review. `docs/DELIVERABLES-MANIFEST.md` additionally records that none of the six phase gates received explicit Gabriel sign-off before the next phase began — each was presented and the project simply proceeded. In production, only `tools/expire-leases.py` actually runs unattended (`ora-aaos-expire-leases`, CC/MCP fleet, 3x/day since 2026-07-10); every other component (task lifecycle CLIs, handoffs, the Notion projection publisher) is unexercised outside its own test suite.
+**Fix direction:** either force one genuine live round-trip (a real task created by Code, leased/completed by an actual Cowork session) to validate the core claim, or stop counting AAOS as shipped/production infrastructure in future audits until it is — right now it is unproven maintenance surface with a real (if patched) history of concurrency bugs (see the README's own event-log clobbering note).
+
+### OI-164
+**Status:** OPEN
+**Opened:** 2026-08-16
+**Source:** Cross-repo architecture-diagram review (Gabriel-directed, this session) — `ora-skills/README.md` "Dual-write discipline" and "Cowork-side skill edits" sections; related [OI-142](#OI-142)
+**Description:** **MEDIUM** The `ora-skills` git repo (source of truth) and the Cowork AppData runtime-cache mirror are two independently-writable copies of every installed skill. Reconciliation is entirely after-the-fact drift *detection* — `tools/hooks/pre-commit` Check 4 (`sync_appdata_mirror.py --check-staged`) on every commit, plus a separate full-sweep `tools/repo_first_check.py` a session is supposed to remember to run before non-trivial work — not structural prevention of the second write surface existing at all. The README documents this has already produced real incidents, not just theoretical risk: `masterlease-jurisdiction-rebase` drifted cache-ahead of the repo three times in one session (2026-08-04), twice caught only by manual diffing because nothing ran the check automatically. [OI-142](#OI-142) is an independent instance of the same root cause: `exception-detection`'s runtime cache held a v1.3 `SKILL.md` with zero commit anywhere in git history, installed straight from an uncommitted working tree via Cowork's "Save skill" — `repo_first_check.py` Check 5 only fires at commit time and structurally cannot catch an install that never gets committed.
+**Fix direction:** the root cause is having two write surfaces for one artifact; better/faster drift detection only bounds how long a divergence survives, not whether it occurs. If Cowork's skill-import mechanism can ever be pointed at reading directly from the git source (rather than importing into a separate cache copy), that removes the second copy structurally instead of continuing to invest in diffing it after the fact.
+
+### OI-165
+**Status:** CLOSED
+**Opened:** 2026-08-16
+**Closed:** 2026-08-16
+**Source:** Cross-repo architecture-diagram review (Gabriel-directed, this session) — `website-canonical/README.md` "Build & deploy flow" diagram and accompanying prose
+**Description:** **LOW** `scripts/build-kb.mjs` builds the `/api/chat` assistant's `netlify/edge-functions/knowledge-base.json` from `scripts/meta.md` plus 8 public pages, but is deliberately excluded from `netlify.toml`'s build command (`node scripts/build-dist.mjs` only) — the README states this directly: "editing a page does not change what the assistant knows until it is re-run" by hand. There is no CI check, pre-commit hook, or any other mechanism flagging that the committed `knowledge-base.json` has gone stale relative to `scripts/meta.md` or the site pages it's built from — so the chat assistant can silently serve outdated firm facts (leadership, markets, deal parameters, contact info) for an unbounded period after a real content edit, with zero signal that it happened.
+**Fix direction:** fold `build-kb.mjs` into the Netlify build command (it's a local, deterministic, no-external-call step — cheap to run on every build) or, if the hand-run cadence is intentional, add a pre-commit/CI check that compares `knowledge-base.json`'s content hash against a hash of `meta.md` + the pages it's built from and fails/warns on mismatch.
+**Evidence:** Gabriel confirmed in-turn 2026-08-16 ("Yes, do the website KB build fix"), authorizing the write past Hard Invariant 2's site-tree gate. `netlify.toml`'s `[build] command` changed from `node scripts/build-dist.mjs` to `node scripts/build-kb.mjs && node scripts/build-dist.mjs`. Verified locally by running the new chained command end to end: `build-kb.mjs` regenerated `netlify/edge-functions/knowledge-base.json` (pages=9, chars=37327, only the `generatedAt` timestamp changed vs. the prior committed copy — confirming site content hadn't actually drifted since 08-13, this just closes the future gap) and `build-dist.mjs` completed with its own required-file/leak/HTML-count checks passing (`OK — 40 root entries -> dist/ (18 pages)`, no failures). README's diagram + prose updated to describe the new automated behavior. No deploy performed — that stays a separate confirmation per Hard Invariant 2.
 
 ### OI-009
 **Status:** OPEN (substantial progress made 2026-07-17, real scope remains)
@@ -6634,3 +6680,86 @@ worktree exemption) rather than an accidental gap.
 
 **Related:** [[feedback_auto_review_blast_radius_gate]] (the ratified doctrine this would undermine);
 `hooks/config-write-guard.py` (the DELIBERATE worktree exemption this may be conflated with).
+
+### OI-147
+**Status:** CLOSED — REJECTED 2026-08-13; nothing landed, everything reverted
+**Opened:** 2026-08-13
+**Source:** ECC repo intake ([external-artifact-intake](../../skills/external-artifact-intake) ruling,
+Gabriel 2026-08-13)
+**Severity:** n/a — closed as rejected. Recorded so the approach is not re-attempted.
+**Auto-check:** none
+
+**Do not re-attempt the quote-state-narrowing approach without reading the evidence first.** A real
+recursive-descent tokenizer (`hooks/lib/shell_tokenizer.py`, adapting ECC's `gateguard-fact-force.js`
+technique) was built as a downgrade-only narrowing of `ora-autonomy-gate.py` Gate 2b. It classified all
+3 historical bypass commands correctly, killed 6/8 mutants (2 proven equivalent), and passed 72 tests.
+
+**Killed in Round 1 of the mandated 3-round adversarial gauntlet** (`pr-review-toolkit:code-reviewer`,
+opus), on a sandbox-verified live bypass: quoting a path operand (`cp evil.html 'oxford-site/index.html'`)
+or wrapping in an interpreter (`bash -c "..."`, `eval "..."`) makes the tokenizer confidently and wrongly
+classify the write as inert — because **quoting suppresses metacharacter interpretation, it does not
+remove text from the command's argument vector.** That is categorically different from the quote-state
+bugs rounds 1–3 (2026-07-16) found, and is not fixable by deepening the parser: it needs shell
+command-semantics modelling (which command consumes which argument, and whether it writes), a strictly
+larger problem. Independently found: unbounded `$()`-nesting recursion threw an uncaught `RecursionError`
+that `main()` does not catch, crashing Gate 2b entirely rather than skipping the narrowing — an
+attacker-triggerable disable of Hard Invariant 2's sole enforcement, strictly worse than a narrowing bug.
+
+A 5th attempt needs a command-semantics model, not a better tokenizer.
+
+**Related:** [[feedback_autonomy_gate_matcher_cannot_be_safely_narrowed]] (Round 4 section — full
+evidence trail); [OI-148](#OI-148) (the companion intake item, which did land).
+
+### OI-148
+**Status:** CLOSED — LANDED on `main` 2026-08-13 as PR [#94](https://github.com/ZeOoba/ora-claude-config/pull/94), `25ac9ec`
+**Opened:** 2026-08-13
+**Source:** ECC repo intake ([external-artifact-intake](../../skills/external-artifact-intake) ruling,
+Gabriel 2026-08-13)
+**Auto-check:** none
+
+`hooks/lint-config-guard.py` — a fail-closed guard (pattern: ECC's `config-protection.js`, adapted to
+this codebase's own override-token contract) blocking silent edits to EXISTING `eslint.config.js` /
+`tsconfig.json` / `tsconfig.node.json` / `functions/tsconfig.json` / `vitest.config.ts` /
+`.prettierrc.json` in `oxford-command-center`. Scope ratified as occ-only.
+
+Three rounds of independent adversarial review found and fixed: a `settings.json` routing gap
+(`move_file`/`write_pdf` unrouted), the wrong integration pattern (moved into
+`pretooluse-dispatcher.py`'s `GUARD_CHAIN`), a LIVE sandbox-confirmed shell quote-split bypass
+(`ts''config.json`, fixed via ported `_dequote`/`_decaret`/`_shell_variants`), and a whole-command
+worktree exemption narrowed to token-scoped (ported `_blank_exempt`). `eos-review-gate` verdict
+recorded (approved, `claude-opus-4-8`).
+
+**Evidence:** 26/26 own tests pass; shared `test-write-guard-coverage.py` meta-test green (4th
+`GuardSpec` added, 16/16 shapes routed, no double-routing); cherry-picked cleanly onto a fresh
+`origin/main`-based branch and re-verified there, not just on the dev branch, before pushing. Pushed
+under a Gabriel-approved `allow-hook-test-failure` override — the pre-push block was
+[OI-149](#OI-149) (an unrelated stale probe allowlist), not this diff.
+
+**Documented, NOT fixed — an explicit follow-up rather than silently expanded scope:** `package.json`'s
+own `lint`/`typecheck` script strings (`--max-warnings 0` etc.) achieve the same threat model with a
+smaller diff, and are outside the ratified 6-file scope. Needs its own scoping decision from Gabriel.
+
+### OI-149
+**Status:** OPEN — symptom no longer reproduces as of 2026-08-16; awaiting close-out ratification
+**Opened:** 2026-08-13
+**Source:** hit while landing [OI-148](#OI-148), PR [#94](https://github.com/ZeOoba/ora-claude-config/pull/94)
+— the pre-push gate blocked on this and was overridden (Gabriel approved in-turn)
+**Severity:** LOW — pure friction. It blocked pushes indiscriminately, never allowed a bad one.
+**Auto-check:** none
+
+**Symptom, as filed 2026-08-13.** `maintenance/test-doctrine-integrity-probe.py`'s known-plugin-skill
+allowlist was stale: it flagged `morning`, `register-scheduled-task` and `schedule` as unresolved when
+all three are live installed `anthropic-skills` plugin skills. Because the probe gates every push, this
+blocked ANY push regardless of diff content — it was hit while landing an unrelated `hooks/**` change.
+
+**Re-check 2026-08-16 (this session, `ora-health-guard` follow-up).** The symptom is gone. Live
+`maintenance/doctrine-integrity-probe.py` now resolves all three:
+`morning -> (plugin-provided skill; no local skill dir)`,
+`register-scheduled-task -> skill dir 'register-scheduled-task' (Code/Cowork surface)`,
+`schedule -> (plugin-provided skill; no local skill dir)` — all `[OK]`, probe exit 0
+("all referenced commands, local files and skills resolve"). `test-doctrine-integrity-probe.py` also
+runs fully green (ALL DOCTRINE-PROBE TESTS PASS).
+
+**Left OPEN deliberately.** The fix was not attributed to a specific commit in this pass, so what
+closed it is unverified — and this session's remit was reporting, not close-out. Gabriel's call to
+close. Do not re-file this as a new item; re-check the two commands above first.
