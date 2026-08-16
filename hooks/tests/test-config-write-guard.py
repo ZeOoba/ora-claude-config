@@ -203,6 +203,17 @@ def test_delete_bypasses_found_by_independent_review():
         "rm${IFS}-rf${IFS}/",
         "rm${IFS}-rf${IFS}~/Documents/deals",
         "rm${IFS}-rf${IFS}C:/Users/Owner",
+        # --- fourth review pass, 2026-08-16 -------------------------------
+        # INPUT fd-duplication: the shared _FD_DUP_RE covers only `>&`/`&>`, so
+        # `<&` kept its `&` and still severed the segment.
+        "rm -rf 0<&1 /",
+        "rm -rf <&- ~/Documents/deals",
+        "rm -rf 3<&0 C:/Users/Owner",
+        # Substitution-ordering hazard: ${IFS} normalization rewrote
+        # `2>${IFS}&1` to `2> &1`, breaking the contiguity fd-dup stripping
+        # needs, so the `&` survived to the segment splitter.
+        "rm -rf 2>${IFS}&1 ~/Documents/deals",
+        "rm -rf 2>${IFS}&1 /",
     ]
     for cmd in must_block:
         rc, _, err = r.run(payload("Bash", {"command": cmd}))
