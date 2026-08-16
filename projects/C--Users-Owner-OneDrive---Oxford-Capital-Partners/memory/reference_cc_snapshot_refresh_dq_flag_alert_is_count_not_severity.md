@@ -5,16 +5,22 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1de11c79-1c29-4ad7-8e6b-20c60c5f8279
-  modified: 2026-08-12T22:11:45.742Z
+  modified: 2026-08-16T19:08:13.077Z
 ---
 
 `ora-cc-snapshot-refresh`'s Step 5(b) escalates to email on **any** `Data-quality flags: N` where N > 0. There is **no severity gate**. The extract's flag list carries a `severity` field (`info` / `warn`), and Step 5(b) ignores it.
 
 One flag is **permanent and intentional**:
 
-> `severity: "info"` · `loans · name` — "Loan Index row 24 is tombstoned in the workbook and was skipped, so it cannot claim a snapshot id or warehouse key", `rawValue: "⚠ DUPLICATE OF ROW 22 — DO NOT USE"`
+> `severity: "warn"` (**was** `info` when this note was written — see the 2026-08-16 correction below) · `loans · name` — "Loan Index row 24 is tombstoned in the workbook and was skipped, so it cannot claim a snapshot id or warehouse key", `rawValue: "⚠ DUPLICATE OF ROW 22 — DO NOT USE"`
 
 That raw value is a deliberate annotation Eric put in the workbook, correctly honored by the tombstone-row guard. It is not a defect and will not go away.
+
+**⛔ CORRECTION 2026-08-16 — the `info` severity above was ALREADY STALE when this file was written, and it invalidates the fix recorded below.** The tombstone flag was bumped `info` → `warn` in `490d89f` (2026-08-11 18:15:14 -0400, "fix(deals): close the seed-wipe hole on portfolio.json's third writer"), deliberately: skipping the row removes its balance from aggregate debt, moving portfolio LTV in the **falsely-clearing** direction against Hard Invariant 4's 40% ceiling, and `info` is "too quiet for that" (`server/workbook/parse.ts:655-658`). The severity-gate fix `1706bc2` landed **2026-08-12 15:42:50 -0400 — ~21 hours LATER** — yet was written around the belief that the permanent flag was `info`.
+
+**Consequence: the gate is INEFFECTIVE for its own motivating case.** `SKILL.md:53` says "Email only if at least one entry is `severity: "warn"`"; the permanent flag *is* `warn`; therefore a clean exit-0 no-drift run **still emails `[ALERT]` every Monday**. The alert fatigue this fix was created to eliminate was never actually eliminated. Verified 2026-08-16 by reading `data/snapshots/portfolio.json` → `dataQuality[]` directly (single entry, `severity: "warn"`) and `/api/health` → `flagCount: 1`.
+
+Gabriel ruled 2026-08-16 (in-turn, multiple-choice): **leave the parse.ts flag as-is** — the `warn` is accurate, the row carries no balance (`C24:G24` are all `='Portfolio Summary — Internal'!#REF!`), and one standing amber flag is the correct price of never silently dropping a loan row. That ruling covers the PARSER only; the downstream alert gate above is a separate open question. Do NOT "fix" this by downgrading parse.ts back to `info` — that re-opens the governor-guard hole `490d89f` closed.
 
 **Consequence:** a clean exit-0, no-drift run still fires an `[ALERT]` email every Monday. First observed 2026-08-11 (run at 22:40:40Z, a catch-up fire; Notion note `3b96ecd8-9e59-81ee-b03b-d5423f8762a7`).
 
