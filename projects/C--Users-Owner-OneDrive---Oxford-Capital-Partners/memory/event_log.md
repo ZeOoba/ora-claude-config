@@ -12,6 +12,40 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-15 — ora-passed-deal-tracker / ora-pm-ledger / deal_sourcing_snapshot_diff.py WIP attributed to session local_895ab863 (T3-12 fleet migration)
+
+Attributed three pieces of uncommitted WIP found sitting in the shared `~/.claude` checkout during this session's open-items-tracker check (session 86069241): an untracked `scheduled-tasks/ora-passed-deal-tracker/` task folder, a 150-line modification to `scheduled-tasks/ora-pm-ledger/SKILL.md`, and a new staged 917-line `scheduled-tasks/ora-pm-ledger/deal_sourcing_snapshot_diff.py`.
+
+**Owner:** session `local_895ab863-bef7-4013-8712-fa043397e9a9` ("Deal Sourcing Log snapshot-diff detector") — confirmed via `list_sessions`/`search_session_transcripts`, active/running at time of check (last activity 2026-08-16T01:45Z).
+
+**What it's doing:** all three files are one coherent piece of work — Gabriel-directed workflow-optimization item **T3-12**, moving `ora-passed-deal-tracker` from the LAMS/Cowork fleet to CC/MCP. Root cause per the new SKILL.md's own RESTORATION NOTE: the LAMS surface has no path to `scheduled-tasks/_shared/send-via-outlook.ps1` (the sole Outlook-COM send script), and this task's Step 7 requires it — confirmed failing live 2026-08-15 with a real "SEND FAILURE — ora-passed-deal-tracker — no COM access" surfaced by a `ora-pm-ledger` run. `ora-pm-ledger/SKILL.md`'s own changes and the new `deal_sourcing_snapshot_diff.py` detector appear to be the same session's related follow-on work, matching the session's own title.
+
+**Why:** recorded for attribution only — no conflict with anything this session (86069241) touched (`dispatch-skip-probe.py`, `event_log.md`, `open-items-tracker.md` vs. their `ora-pm-ledger`/`ora-passed-deal-tracker`/`deal_sourcing_snapshot_diff.py`), so no coordination action was taken beyond identifying the owner.
+
+**How to apply:** the SKILL.md flags that the LAMS twin (`OneDrive...\Documents\Claude\Scheduled\ora-passed-deal-tracker\`) still needs to be disabled/retired from a Cowork session to avoid a duplicate run on the 15th — that's the real open follow-up here, owned by session local_895ab863, not this one. Don't re-attribute this WIP to session `8d81172d` (governor-drift-probe fix) or `e9ff9ae1` (OI-158/159) — three distinct concurrent sessions were active in the same checkout this window.
+
+## 2026-08-15 — projects.md "1.75x DSCR" governor-drift flag confirmed a probe false positive, not a data error
+
+Investigated the `test-governor-drift-probe.py::test_event_log_excluded_e2e` failure surfaced during the earlier `dispatch-skip-probe.py` push (session 86069241): the live probe flagged `memory/projects.md:27` (754 Old State Route 74, Cincinnati-Batavia Pike) for a DSCR figure of 1.75x against the canonical 1.25x governor.
+
+**Verdict: `projects.md` was correct all along.** The line reads "transition-year DSCR breaches (clears the 1.75x floor only at Yr3+ stabilization) → all-cash close mandatory" — the 1.75x is a **lender's DSCR loan covenant** specific to financing this property (the property can't clear that covenant until Year 3 stabilization, hence the all-cash-close requirement in the interim). This is a different figure from ORA's own 1.25x underwriting governor (the buy-box floor for pursuing a deal at all) — the two aren't in conflict; the probe's pattern matching didn't distinguish a third-party lender covenant from ORA's canonical floor.
+
+**Already fixed, independently, by a concurrent session.** Session `8d81172d` was live-editing `governor-drift-probe.py` and `test-backup-session-context.py` at the same time this was being investigated; their fix landed as commit `af38151` ("stop 2 real false positives, then close 7 false-negative holes an adversarial pass found"). Re-running the probe post-fix confirms clean: `governor-drift-probe OK -- 1034 files scanned, DSCR 1.25x / LTV 40% consistent`.
+
+**Why:** closes the loop on a hook-tests-gate failure this session encountered mid-push (worked around at the time via an `allow-hook-test-failure` override token that ultimately went unused once the fix landed) — confirms no governor-constant or deal-data correction was ever needed.
+
+**How to apply:** don't re-flag 754 Old State Route 74's "1.75x floor" language as governor drift in any future audit — it's a sourced lender covenant, correctly documented. No edit to `projects.md` or the DSCR/LTV governor constants was made or is warranted.
+
+## 2026-08-15 -- ora-passed-deal-tracker moved LAMS -> CC/MCP (T3-12, Gabriel-directed)
+
+Confirmed live failure: ora-pm-ledger's 2026-08-15 run flagged "SEND FAILURE -- ora-passed-deal-tracker -- Email summary could NOT be sent -- no COM access." Root cause: the task was registered on the LAMS/Cowork fleet, but its own Step 7 calls the Windows-host Outlook COM script (`C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1`), which that surface has no path to. Gabriel ruled: move to CC/MCP (matches register-scheduled-task's own surface-selection rule -- filesystem/data work belongs on CC/MCP, not LAMS).
+
+Re-registered on CC/MCP via `create_scheduled_task` (same id, same cron `30 6 15 * *`, content unchanged apart from the restoration note) -- verified via the tool's own creation response (next run Tue 2026-09-15 06:30 AM ET). No JSON edits.
+
+**Open follow-up, not yet closed:** the LAMS twin at `OneDrive - Oxford Capital Partners\Documents\Claude\Scheduled\ora-passed-deal-tracker\` is still live and will fire in parallel on the 15th unless disabled -- Code surface cannot reach the LAMS scheduler state to pause it (RULE 1 -- MCP ONLY, register/update from the surface the task runs on). Needs a Cowork-session `enabled: false` toggle (never the sidebar delete/trash icon) before the next 15th.
+
+Also open: register-scheduled-task v2.9 (new step 4c, fire-time sanity check) is edited in the `C:\Users\Owner\ora-skills` checkout but NOT YET COMMITTED -- held pending Gabriel confirmation per shared-checkout hygiene (one other unattributed uncommitted file was present in that checkout at edit time).
+
 ## 2026-08-15 — feat/model-canary-probe-step25's 146-behind divergence reconciled and pushed
 
 Gabriel: "claim the 146-behind reconciliation" -> "go ahead" -> "proceed with the override" (3-step authorization across the investigation).

@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-08-14T17:01:20.102Z
+  modified: 2026-08-16T16:11:58.004Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -32,6 +32,9 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
+| [OI-160](#OI-160) | 2026-08-15 | Investigation of the missing OI-157 row while checking its status (Gabriel-directed, this session) | **RECURRENCE of the OI-098/OI-124 merge-conflict row-loss class.** OI-157 was silently dropped from this file TWICE during same-day `feat/model-canary-probe-step25` merge activity (`318de35`, then `ba93c70`) — once from a genuine 3-way conflict, once when a clean surviving copy on one parent still wasn't picked up. `git log -S` (pickaxe) in its default mode found neither removal, since it skips merge-commit diffs unless run with `-m` — a real audit blind spot. Not yet root-caused or fixed; see full section for the git evidence |
+| [OI-159](#OI-159) | 2026-08-15 | Manual T3-5 cross-check (Gabriel-directed workflow-optimization pass), ahead of `ora-tenant-hubspot-reconciliation`'s next scheduled run (2026-09-01) | **DATE-MISMATCH** Medspeed, LLC — workbook `leaseEnd 2029-08-31`, `status Active`; HubSpot deal "Medspeed — Lease Renewal 2026-08-31" still `appointmentscheduled`, `closedate 2026-08-31`. Lease renewed in the workbook but the original HubSpot renewal deal was never closed out |
+| [OI-158](#OI-158) | 2026-08-15 | Manual T3-5 cross-check (Gabriel-directed workflow-optimization pass), ahead of `ora-tenant-hubspot-reconciliation`'s next scheduled run (2026-09-01) | **DATE-MISMATCH** Sky Shield — workbook `leaseEnd 2029-08-31`, `status Active`; HubSpot deal "Sky Shield — Lease Renewal 2026-09-30" still `appointmentscheduled`, `closedate 2026-09-30`. Lease renewed in the workbook but the original HubSpot renewal deal was never closed out — same failure class as the 2026-07-16 lease-date correction (J&R/Stone Crest/Chesapeake), different symptom: stale open deal rather than stale wrong date |
 | [OI-156](#OI-156) | 2026-08-14 | [event_log.md 2026-08-14](event_log.md#2026-08-14) "Finding: scheduled-task state.json self-narration fabricated provenance text" | **LOW/MEDIUM** No sanity-check exists on scheduled-task `state.json` self-written narrative/`_provenance` fields. 2026-08-14: `ora-acquisition-underwriting-eval-harness`'s priming run wrote a `_provenance` field claiming "10 Fable replays" and a "Gabriel instruction to accumulate repeatability samples" -- neither true (real output: 6 replays, no such instruction). Scoring/replay mechanics were correct; only the prose was fabricated. Candidate fix: a lightweight cross-check (claimed replay counts / cited instructions vs. real `runs/*.json` output) before trusting narrative text, scoped to `ora-setup-audit` or a standalone guard. Not yet built. A one-time follow-up (`ora-eval-harness-first-cron-check`, fires 2026-08-15 13:30 ET) checks whether the pattern repeats on this task's first genuine cron fire, but that's a single-instance spot-check, not the general-purpose sanity-check this item tracks |
 | [OI-154](#OI-154) | 2026-08-14 | ora-task-integrity-guard follow-up session, PR [#99](https://github.com/ZeOoba/ora-claude-config/pull/99) | **MEDIUM** CLAUDE.md's inline 8-guard `Guards:` roster restore (reverting half of `8438df1`, which silently disabled doctrine-integrity-probe Check 11) is edited in the working tree but NOT COMMITTED — another session holds unrelated staged files, and the isolated-commit path finishes with a bare `git commit` that would sweep them in. Until it lands, Check 11 is still disabled on the branch |
 | [OI-153](#OI-153) | 2026-08-14 | ora-task-integrity-guard 2026-08-14 STEP 2.8 alarm (`property_register_snapshot_diff.py`, third occurrence of the class) | **MEDIUM** No add-time enforcement for the `.gitignore` per-file backup ladder: `task-folder-backup-completeness-probe.py` is wired ONLY into the daily guard, so a git-ignored-and-unbacked task-folder file is caught next-day at the earliest. A `git-prepush-backup-coverage` gate would fit the existing `git-prepush-*` hook family exactly |
@@ -126,6 +129,32 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | [OI-117](#OI-117) | 2026-08-11 | Landing [PR #52](https://github.com/ZeOoba/ora-claude-config/pull/52) into the live checkout, 08-11 | **MEDIUM** The live `~/.claude` checkout has drifted to where `origin/main` **cannot be merged**: on `feat/model-canary-probe-step25`, 4 ahead / 29 behind, **96+ uncommitted files** from ≥6 concurrent sessions, with 9 of the incoming commits' files dirty locally (incl. `open-items-tracker.md`, live-claimed at the time). `stash`/`checkout`/`reset` on a contaminated tree are forbidden, so PR #52 merged to `main` but was **not live**; getting it live needed a surgical `git checkout origin/main -- <3 files>`, which leaves those files modified against the branch HEAD (a `commit -a` by any session sweeps them; `eos-review-gate` may demand a review artifact from whoever did not write them). This is the general case for every future `hooks/**` change, not a one-off. |
 | [OI-124](#OI-124) | 2026-08-12 | root-cause trace of the two split rows repaired in [#57](https://github.com/ZeOoba/ora-claude-config/pull/57) | **MEDIUM — ROOT CAUSE IDENTIFIED for the split-table-row defect [OI-098](#OI-098) had carried as unknown.** Both splits (`OI-092`, `OI-095`) trace by `git log -S` to a **single commit, `57d0acf` (2026-08-05)**, whose own message names the method: *"isolated via hash-object/update-index"*. Two things combined: (1) the row text was **hard-wrapped at ~100 columns** — continuation widths 98/98/100/101/101/101/102/102/103/104, matching this file's prose-wrapping convention — which is correct for a section body and **fatal for a table row**, since a Markdown row must be exactly one line; and (2) writing the content as a blob straight into the index **bypasses the working tree entirely**, so no editor, no renderer and no diff of the rendered table ever saw the result. The blob-injection technique is itself a reasonable response to a contaminated shared checkout (cf. [OI-120](#OI-120)) — the defect is that it removes the last human/tool check that would have caught a malformed row. **Impact: live 6 days and survived 7 subsequent commits to the same file**, silently ending the table for every row after the break. **Distinct from the other mechanism** already in OI-098's history (a blank line inside the table, which pushed OI-095/096/097 out) — same symptom, different cause; do not treat one fix as covering both. Cheap detector proposed, green today: every line matching `^\| \[OI-` must end in an unescaped pipe character |
 | [OI-142](#OI-142) | 2026-08-12 | `ora-skills` `pending_reimport.py` sweep investigation, this session | **MEDIUM** `exception-detection`'s runtime cache held a v1.3 `SKILL.md` (installed live 2026-08-11) with **zero commit anywhere in `ora-skills` git history** — traced to session `89c314f4-a39e-43b4-8d1b-6b38d91774f7`, which appears to have packaged and Save-skill-installed straight from its own uncommitted working tree. `repo_first_check.py` Check 5 only fires at commit time and cannot catch an install that never gets committed at all. Recovered via backfill commit `85abbbc`; root cause of the bypass and a durable fix are still open |
+
+### OI-158
+**Status:** OPEN
+**Opened:** 2026-08-15
+**Source:** Manual T3-5 cross-check (Gabriel-directed workflow-optimization pass), applying `ora-tenant-hubspot-reconciliation`'s existing Step 3d (DATE-MISMATCH) logic ahead of its next scheduled run (2026-09-01, 08:15 ET)
+**Description:** **DATE-MISMATCH** — Sky Shield. Workbook (`portfolio.json`-derived source of record): `leaseEnd 2029-08-31`, `status Active` — the lease was renewed to a new multi-year term. HubSpot deal "Sky Shield — Lease Renewal 2026-09-30" is still `dealstage=appointmentscheduled`, `closedate=2026-09-30` — the original pre-renewal deal was never closed out to reflect the executed renewal. Same failure class as the 2026-07-16 lease-date correction (J&R/Stone Crest/Chesapeake — see [reference_hubspot_missed_lease_date_correction.md](reference_hubspot_missed_lease_date_correction.md)), different symptom: a stale open deal rather than a stale wrong date. Recommended correction (not applied — this task never writes to HubSpot itself): advance the deal to `closedwon` with `closedate` matching the executed renewal, or close it out and open a fresh renewal-tracking deal per current process. `ora-tenant-hubspot-reconciliation`'s 2026-09-01 run should independently re-surface and can formally close this.
+
+### OI-159
+**Status:** OPEN
+**Opened:** 2026-08-15
+**Source:** Manual T3-5 cross-check (Gabriel-directed workflow-optimization pass), applying `ora-tenant-hubspot-reconciliation`'s existing Step 3d (DATE-MISMATCH) logic ahead of its next scheduled run (2026-09-01, 08:15 ET)
+**Description:** **DATE-MISMATCH** — Medspeed, LLC. Workbook (`portfolio.json`-derived source of record): `leaseEnd 2029-08-31`, `status Active` — the lease was renewed to a new multi-year term. HubSpot deal "Medspeed — Lease Renewal 2026-08-31" is still `dealstage=appointmentscheduled`, `closedate=2026-08-31` — the original pre-renewal deal was never closed out. Same pattern and same recommended correction as [OI-158](#OI-158); filed as a separate item per this tracker's one-row-per-finding convention.
+
+### OI-160
+**Status:** OPEN
+**Opened:** 2026-08-15
+**Source:** Investigation of the missing OI-157 row while checking its status (Gabriel-directed, this session, 2026-08-15/16)
+**Description:** **RECURRENCE of the OI-098/OI-124 merge-conflict row-loss failure class.** OI-157 (filed correctly in commit `7c9740a`) was silently dropped from this file not once but TWICE during same-day merge activity on the `feat/model-canary-probe-step25` line: (1) merge `318de35` ("Merge branch 'feat/model-canary-probe-step25' into reconcile/canary-146-merge-2026-08-15") listed this file among its CONFLICTS; one parent (`a343dae`) had the OI-157 row, the other (`fa1fc5c`) didn't, and the resolution kept the version without it. (2) The next merge, `ba93c70` (merging `origin/feat/model-canary-probe-step25` back into the working branch), had a CLEAN surviving copy on one parent (`ff9451d`, count=1) and the already-lost copy on the other (`318de35`, count=0) — yet the result was 0 again, meaning even a live, uncontested copy sitting one merge away wasn't picked up. Confirmed via `git show <parent>:<path> | grep -c OI-157` on all four parent/result pairs. `git log -S` (pickaxe) in its default mode found NEITHER removal — it silently skips merge-commit diffs unless run with `-m`, which is exactly how this class of loss hides from a routine `-S` audit; only `git log --merges -SOI-157 -m` surfaced the two merges. Distinct from OI-098's split-row/blank-line mechanisms — same symptom (a row vanishes with no visible removing commit under a normal `-S` search), different, unexamined cause (merge-conflict resolution, not a formatting defect in a single-parent commit). Not yet root-caused (was this an agent-resolved conflict that didn't diff-review the result before committing?) or fixed. Candidate detector: a periodic sweep comparing `git log --merges -m` diff output across recent merges touching `open-items-tracker.md`/`event_log.md`, flagging any merge where a row/section present on a parent is absent from the result.
+
+### OI-157
+**Status:** CLOSED
+**Opened:** 2026-08-15
+**Closed:** 2026-08-15
+**Source:** [project_automation_audit_rev10_2026-08-14.md](project_automation_audit_rev10_2026-08-14.md) R10-12; investigated in `~/ora-skills/.superpowers/sdd/task-6-report.md`; ruling made in-session 2026-08-15; row lost to merge-conflict resolution and re-filed 2026-08-15/16 (this session) — see [OI-160](#OI-160)
+**Description:** `capex-budgeting` was accidentally republished to the Cowork skill store 2026-08-13 (a batch Save-skill click clearing an unrelated PENDING_REIMPORT queue caused a new registration, `main.log` enabled count 51→52) — 4 days after Gabriel confirmed it unpublished 2026-08-09 alongside 5 sibling skills (`annual-cycle`, `cash-position-monitor`, `deal-retirement`, `investor-relations`, `vendor-management`, all confirmed still absent from the live catalog, consistent with remaining correctly unpublished). Gabriel ruled 2026-08-15: accidental, unpublish it again.
+**Evidence:** Filed in commit `7c9740a` (2026-08-15 14:43:31 -0400). Per `event_log.md` (2026-08-15): Gabriel first toggled Share off via the claude.ai Skills page (verified persisted after navigating away and back), then — noting capex-budgeting still appeared in the account's "your skills" search unlike the fully-removed 5 siblings — escalated via the overflow menu's **Remove** action ("Remove skill? You can always add this skill again later by re-uploading it" — confirmed reversible, not destructive data loss). Confirmed removal via a follow-up search: "capex-budgeting" → "No skills match your search", matching the other 5 unpublish-siblings exactly. The tracker row itself was independently confirmed lost from this file during two same-day merges before it could ever be formally closed (see [OI-160](#OI-160)) — re-filed directly as CLOSED now that the underlying real-world action is independently verified done.
 
 ### OI-009
 **Status:** OPEN (substantial progress made 2026-07-17, real scope remains)
@@ -3752,6 +3781,7 @@ single check turns today's silent coalesce into a visible one.
 
 | ID | Opened | Closed | Source | One-line |
 |----|--------|--------|--------|----------|
+| [OI-157](#OI-157) | 2026-08-15 | 2026-08-15 | Filed `7c9740a`; row lost to merge-conflict resolution, re-filed 2026-08-15/16 (this session) — see [OI-160](#OI-160) | RESOLVED — `capex-budgeting` was accidentally republished 2026-08-13 (batch Save-skill click side effect), Gabriel ruled it accidental and unpublished it again via the claude.ai Skills page, escalated to Remove after Share-off left it still visible, confirmed removed via search ("No skills match your search"), matching the other 5 2026-08-09 unpublish-siblings |
 | [OI-148](#OI-148) | 2026-08-13 | 2026-08-13 | ECC repo intake ([external-artifact-intake](../../skills/external-artifact-intake) ruling, Gabriel 2026-08-13); merged as PR [#94](https://github.com/ZeOoba/ora-claude-config/pull/94), `25ac9ec` | LANDED on `main`. `hooks/lint-config-guard.py` — fail-closed guard (pattern: ECC's `config-protection.js`, adapted to this codebase's own override-token contract) blocking silent edits to EXISTING `eslint.config.js`/`tsconfig.json`/`tsconfig.node.json`/`functions/tsconfig.json`/`vitest.config.ts`/`.prettierrc.json` in `oxford-command-center` (scope ratified: occ only). 3 rounds of independent adversarial review (`pr-review-toolkit:code-reviewer`, opus) found and fixed: a settings.json routing gap (`move_file`/`write_pdf` unrouted), wrong integration pattern (moved into `pretooluse-dispatcher.py`'s `GUARD_CHAIN`), a LIVE sandbox-confirmed shell quote-split bypass (`ts''config.json`, fixed via ported `_dequote`/`_decaret`/`_shell_variants`), and a whole-command worktree exemption narrowed to token-scoped (ported `_blank_exempt`). `eos-review-gate` verdict recorded (approved, `claude-opus-4-8`). **Evidence:** 26/26 own tests pass; shared `test-write-guard-coverage.py` meta-test green (4th `GuardSpec` added, 16/16 shapes routed, no double-routing); cherry-picked cleanly onto a fresh `origin/main`-based branch and re-verified there (not just the dev branch) before pushing. Pushed under a Gabriel-approved `allow-hook-test-failure` override — the pre-push block was [OI-149](#OI-149) (unrelated stale probe allowlist), not this diff. **Documented, not fixed — explicit follow-up, not silently expanded scope:** `package.json`'s own `lint`/`typecheck` script strings (`--max-warnings 0` etc.) achieve the same threat model with a smaller diff and are out of the ratified 6-file scope; needs its own scoping decision from Gabriel. Companion item [OI-147](#OI-147) (same intake, Gate 2b hardening) was rejected after a full build + adversarial gauntlet — see that row and [[feedback_autonomy_gate_matcher_cannot_be_safely_narrowed]] Round 4 |
 | [OI-087](#OI-087) | 2026-08-05 | 2026-08-12 | ora-appsec-sweep 2026-08-05 (both repos, security-auditor dispatch); fixed via `hono@^4.12.34` bump, both PRs merged 2026-08-12 | RESOLVED — `hono` raised to `^4.12.34` (lockfile 4.13.1) in both repos, clearing the CORS ReDoS GHSA-8j4g-w8fx-2239 (and 3 other `<4.12.34` hono advisories in occ). PRs: ora-pm [#21](https://github.com/ZeOoba/ora-pm/pull/21) squash `caa5849`, oxford-command-center [#270](https://github.com/ZeOoba/oxford-command-center/pull/270) squash `4187b78`. Each verified pre-merge: hono cleared from `npm audit`, typecheck 0, lint 0, tests green (ora-pm 427; occ 3354); occ CI gate + refute-required + CodeRabbit all green. Floor raised in package.json (not just the lockfile) so a reinstall can't regress. Pre-existing dev-only advisories (nanoid on ora-pm; react-router/sharp/etc. on occ) are [OI-017](#OI-017)'s, untouched |
 | [OI-100](#OI-100) | 2026-08-05 | 2026-08-12 | Gabriel ruling 2026-08-05 (rescope approved); design pass that session | CLOSED — MERGED AND LIVE. Fix commit `9ad6146` (pre-push doctrine gate validates the pushed commit, not the working tree) merged to `origin/main` via `230da82` on 2026-08-05; independent review + adversarial REFUTE both APPROVED, 14/14 new tests + 37/37 existing + full probe suite green. Tracker wording lagged the actual merge by a week (see detail section); verified 2026-08-12 that `9ad6146` is an `origin/main` ancestor and the live `hooks/git-prepush-doctrine-gate.py` matches it exactly — closing now that the wording matches reality |
@@ -6604,3 +6634,86 @@ worktree exemption) rather than an accidental gap.
 
 **Related:** [[feedback_auto_review_blast_radius_gate]] (the ratified doctrine this would undermine);
 `hooks/config-write-guard.py` (the DELIBERATE worktree exemption this may be conflated with).
+
+### OI-147
+**Status:** CLOSED — REJECTED 2026-08-13; nothing landed, everything reverted
+**Opened:** 2026-08-13
+**Source:** ECC repo intake ([external-artifact-intake](../../skills/external-artifact-intake) ruling,
+Gabriel 2026-08-13)
+**Severity:** n/a — closed as rejected. Recorded so the approach is not re-attempted.
+**Auto-check:** none
+
+**Do not re-attempt the quote-state-narrowing approach without reading the evidence first.** A real
+recursive-descent tokenizer (`hooks/lib/shell_tokenizer.py`, adapting ECC's `gateguard-fact-force.js`
+technique) was built as a downgrade-only narrowing of `ora-autonomy-gate.py` Gate 2b. It classified all
+3 historical bypass commands correctly, killed 6/8 mutants (2 proven equivalent), and passed 72 tests.
+
+**Killed in Round 1 of the mandated 3-round adversarial gauntlet** (`pr-review-toolkit:code-reviewer`,
+opus), on a sandbox-verified live bypass: quoting a path operand (`cp evil.html 'oxford-site/index.html'`)
+or wrapping in an interpreter (`bash -c "..."`, `eval "..."`) makes the tokenizer confidently and wrongly
+classify the write as inert — because **quoting suppresses metacharacter interpretation, it does not
+remove text from the command's argument vector.** That is categorically different from the quote-state
+bugs rounds 1–3 (2026-07-16) found, and is not fixable by deepening the parser: it needs shell
+command-semantics modelling (which command consumes which argument, and whether it writes), a strictly
+larger problem. Independently found: unbounded `$()`-nesting recursion threw an uncaught `RecursionError`
+that `main()` does not catch, crashing Gate 2b entirely rather than skipping the narrowing — an
+attacker-triggerable disable of Hard Invariant 2's sole enforcement, strictly worse than a narrowing bug.
+
+A 5th attempt needs a command-semantics model, not a better tokenizer.
+
+**Related:** [[feedback_autonomy_gate_matcher_cannot_be_safely_narrowed]] (Round 4 section — full
+evidence trail); [OI-148](#OI-148) (the companion intake item, which did land).
+
+### OI-148
+**Status:** CLOSED — LANDED on `main` 2026-08-13 as PR [#94](https://github.com/ZeOoba/ora-claude-config/pull/94), `25ac9ec`
+**Opened:** 2026-08-13
+**Source:** ECC repo intake ([external-artifact-intake](../../skills/external-artifact-intake) ruling,
+Gabriel 2026-08-13)
+**Auto-check:** none
+
+`hooks/lint-config-guard.py` — a fail-closed guard (pattern: ECC's `config-protection.js`, adapted to
+this codebase's own override-token contract) blocking silent edits to EXISTING `eslint.config.js` /
+`tsconfig.json` / `tsconfig.node.json` / `functions/tsconfig.json` / `vitest.config.ts` /
+`.prettierrc.json` in `oxford-command-center`. Scope ratified as occ-only.
+
+Three rounds of independent adversarial review found and fixed: a `settings.json` routing gap
+(`move_file`/`write_pdf` unrouted), the wrong integration pattern (moved into
+`pretooluse-dispatcher.py`'s `GUARD_CHAIN`), a LIVE sandbox-confirmed shell quote-split bypass
+(`ts''config.json`, fixed via ported `_dequote`/`_decaret`/`_shell_variants`), and a whole-command
+worktree exemption narrowed to token-scoped (ported `_blank_exempt`). `eos-review-gate` verdict
+recorded (approved, `claude-opus-4-8`).
+
+**Evidence:** 26/26 own tests pass; shared `test-write-guard-coverage.py` meta-test green (4th
+`GuardSpec` added, 16/16 shapes routed, no double-routing); cherry-picked cleanly onto a fresh
+`origin/main`-based branch and re-verified there, not just on the dev branch, before pushing. Pushed
+under a Gabriel-approved `allow-hook-test-failure` override — the pre-push block was
+[OI-149](#OI-149) (an unrelated stale probe allowlist), not this diff.
+
+**Documented, NOT fixed — an explicit follow-up rather than silently expanded scope:** `package.json`'s
+own `lint`/`typecheck` script strings (`--max-warnings 0` etc.) achieve the same threat model with a
+smaller diff, and are outside the ratified 6-file scope. Needs its own scoping decision from Gabriel.
+
+### OI-149
+**Status:** OPEN — symptom no longer reproduces as of 2026-08-16; awaiting close-out ratification
+**Opened:** 2026-08-13
+**Source:** hit while landing [OI-148](#OI-148), PR [#94](https://github.com/ZeOoba/ora-claude-config/pull/94)
+— the pre-push gate blocked on this and was overridden (Gabriel approved in-turn)
+**Severity:** LOW — pure friction. It blocked pushes indiscriminately, never allowed a bad one.
+**Auto-check:** none
+
+**Symptom, as filed 2026-08-13.** `maintenance/test-doctrine-integrity-probe.py`'s known-plugin-skill
+allowlist was stale: it flagged `morning`, `register-scheduled-task` and `schedule` as unresolved when
+all three are live installed `anthropic-skills` plugin skills. Because the probe gates every push, this
+blocked ANY push regardless of diff content — it was hit while landing an unrelated `hooks/**` change.
+
+**Re-check 2026-08-16 (this session, `ora-health-guard` follow-up).** The symptom is gone. Live
+`maintenance/doctrine-integrity-probe.py` now resolves all three:
+`morning -> (plugin-provided skill; no local skill dir)`,
+`register-scheduled-task -> skill dir 'register-scheduled-task' (Code/Cowork surface)`,
+`schedule -> (plugin-provided skill; no local skill dir)` — all `[OK]`, probe exit 0
+("all referenced commands, local files and skills resolve"). `test-doctrine-integrity-probe.py` also
+runs fully green (ALL DOCTRINE-PROBE TESTS PASS).
+
+**Left OPEN deliberately.** The fix was not attributed to a specific commit in this pass, so what
+closed it is unverified — and this session's remit was reporting, not close-out. Gabriel's call to
+close. Do not re-file this as a new item; re-check the two commands above first.
