@@ -203,6 +203,54 @@ try:
 finally:
     shutil.rmtree(d, ignore_errors=True)
 
+# --- 5b. a truncating in-place failure must stay RECOVERABLE --------------------
+# The in-place fallback opens the log "w", truncating before any bytes land. A
+# failure after that point leaves the log damaged, and the pre-write backup holds
+# the only copy of the original. The first version of _unwind deleted it anyway
+# ("the live log is untouched in all failure paths" -- true before the in-place
+# path existed, false after): a probe drove an ENOSPC-shaped failure through it
+# and got a 0-byte log with backup and archive both gone. Unrecoverable loss of
+# the canonical log, caused by the recovery path itself.
+print("truncating in-place failure stays recoverable")
+d, p = _mklog(_seed())
+try:
+    original = open(p, encoding="utf-8").read()
+    real_atomic, real_inplace = rollover._atomic_swap, rollover._inplace_write
+
+    def _blocked(log, new_live, mtime_before):
+        raise OSError("simulated app handle lock -- os.replace blocked")
+
+    def _truncate_then_fail(log, new_live, mtime_before):
+        with open(log, "w", encoding="utf-8"):
+            pass                      # truncated; zero bytes written
+        raise OSError(28, "simulated ENOSPC after truncation")
+
+    rollover._atomic_swap, rollover._inplace_write = _blocked, _truncate_then_fail
+    try:
+        rc = rollover.main(["--log", p, "--keep-min", "100"])
+    finally:
+        rollover._atomic_swap, rollover._inplace_write = real_atomic, real_inplace
+
+    check("main() reports failure", rc == 1, "(got %r)" % rc)
+    now = open(p, encoding="utf-8").read() if os.path.exists(p) else ""
+    backup_left = os.path.exists(p + ".rollover-backup")
+    adir = os.path.join(d, "_archive")
+    archive_left = os.path.isdir(adir) and bool(os.listdir(adir))
+    check("original content is recoverable somewhere",
+          now == original or backup_left or archive_left,
+          "(log==orig:%s backup:%s archive:%s)" % (now == original, backup_left, archive_left))
+    check("live log restored in place", now == original,
+          "(size %d, original %d)" % (len(now), len(original)))
+    # and once restored, the scratch is cleaned so a re-run still works
+    if now == original:
+        check("scratch cleared after successful restore",
+              not backup_left and not archive_left,
+              "(backup:%s archive:%s)" % (backup_left, archive_left))
+        rc2 = rollover.main(["--log", p, "--keep-min", "100"])
+        check("re-run succeeds after restore", rc2 == 0, "(got %r)" % rc2)
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+
 # --- 6. regression: unlocked rollover still behaves --------------------------
 print("regressions")
 d, p = _mklog(_seed())
