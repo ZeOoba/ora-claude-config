@@ -176,6 +176,15 @@ BACKUP_SWEEP_TRANSIENT_DIRS = {
     # regenerable, and machine-local; same class as telemetry/ and sessions/ above.
     # Carries no doctrine, so there is nothing here the private-remote backup needs.
     "usage-data",
+    # 2026-08-16 (Gabriel-directed): harness worktree root. Distinct from the
+    # "worktrees" entry above -- that one sits under .claude/, this is a sibling
+    # top-level dir (config-write-guard.py's token-boundary matcher documents the
+    # same two-name distinction). Every child is a git worktree: a checkout of a
+    # commit that is already ON the remote, so backing it up stores nothing the
+    # backup does not already have, and a worktree of a repo carrying deal terms
+    # would drag them off-machine. Transient by construction -- created and
+    # removed per feature branch, and empty between them.
+    ".claude-worktrees",
     # NEVER track (invariant 3): confidential staging must not reach the remote.
     # daemon/ (above) additionally holds key files -- also never track.
     "_confidential-staging",
