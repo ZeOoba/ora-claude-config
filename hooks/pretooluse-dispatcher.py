@@ -64,8 +64,32 @@ So each matcher had ONLY Edit|Write|MultiEdit removed:
 
 IF YOU ADD A GUARD to the Edit/Write path, add it to GUARD_CHAIN here -- NOT as
 a new settings.json PreToolUse entry -- or it will run twice on Edit/Write.
-Conversely a guard needing Bash/NotebookEdit/MCP coverage still needs its own
-settings.json entry; this dispatcher only ever handles Edit|Write|MultiEdit.
+
+=============================================================================
+SECOND CHAIN ADDED 2026-08-16 (OI-176) -- THE Bash PARTITION
+=============================================================================
+The same technique was then applied to the Bash token, so this file now serves
+TWO chains, selected by `--chain`:
+
+  GUARD_CHAIN      (default, no argument)  <- settings.json matcher Edit|Write|MultiEdit
+  BASH_GUARD_CHAIN (--chain bash)          <- settings.json matcher Bash
+
+They are SEPARATE constants and must stay that way: only 4 of the 10 Bash
+guards are also in GUARD_CHAIN. Collapsing them into one list would run
+eos-plan-gate / shared-checkout-guard / eos-claude-md-guard / rules-md-guard /
+registry-write-guard / memory-index-guard on Bash where they do not belong, and
+drop workbook-write-guard plus the five Bash-only gates where they do -- the
+same class of silent miscoverage the Edit/Write partition above exists to
+avoid. Validated at wiring: 30/30 decision-equivalent vs the real 10-process
+chain, and 22 tools with byte-identical ORDERED guard coverage.
+
+So: a guard needing NotebookEdit or MCP coverage still needs its own
+settings.json entry. A guard needing Edit/Write goes in GUARD_CHAIN; a guard
+needing Bash goes in BASH_GUARD_CHAIN. `--selfcheck` validates both.
+
+LANDING ORDER: this file must reach the live hooks dir BEFORE a settings.json
+that passes `--chain bash`. A dispatcher without the selector ignores argv and
+would silently run the Edit/Write chain on Bash.
 """
 import io
 import importlib.util
@@ -92,6 +116,43 @@ GUARD_CHAIN = [
     "lint-config-guard",  # OI-148, 2026-08-13 -- Edit/Write/MultiEdit into an
     # existing oxford-command-center lint/format/typecheck config
 ]
+
+# settings.json PreToolUse order for the Bash matchers (OI-176, 2026-08-16).
+#
+# SAME partition technique as the Edit/Write chain above, applied to a DIFFERENT
+# token, and deliberately a SEPARATE constant -- the two chains are NOT
+# interchangeable. Ten guards fire on Bash; only four of them are also in
+# GUARD_CHAIN. Reusing one chain for both tokens is the exact trap the header
+# warns about: it would start running eos-plan-gate/shared-checkout-guard/
+# eos-claude-md-guard/rules-md-guard/registry-write-guard/memory-index-guard on
+# Bash (where they do not belong) and drop workbook-write-guard and the five
+# Bash-only gates (where they do).
+#
+# Order mirrors settings.json PreToolUse file order, verified 2026-08-16:
+#   2 ora-autonomy-gate, 4 confidentiality-guard, 6 config-write-guard,
+#   7 lint-config-guard, 8 workbook-write-guard, 10 eos-evidence-gate,
+#   11 eos-review-gate, 12 commit-provenance-guard, 13 memory-orphan-link-guard,
+#   15 commit-hygiene-guard
+BASH_GUARD_CHAIN = [
+    "ora-autonomy-gate",
+    "confidentiality-guard",
+    "config-write-guard",
+    "lint-config-guard",
+    "workbook-write-guard",
+    "eos-evidence-gate",
+    "eos-review-gate",
+    "commit-provenance-guard",
+    "memory-orphan-link-guard",
+    "commit-hygiene-guard",
+]
+
+# --chain <name> selects which chain to run. Default stays the Edit/Write chain
+# so the existing settings.json entry (which passes no argument) is unaffected.
+CHAINS = {
+    "editwrite": GUARD_CHAIN,
+    "bash": BASH_GUARD_CHAIN,
+}
+DEFAULT_CHAIN = "editwrite"
 
 
 class _StdinShim:
@@ -190,7 +251,8 @@ def run_guard(name, raw):
         return 0, "", "", "failed"
 
 
-def main():
+def main(chain=None):
+    chain = GUARD_CHAIN if chain is None else chain
     try:
         raw = sys.stdin.buffer.read()
     except Exception:
@@ -211,17 +273,17 @@ def main():
     # with an explicit, actionable message rather than either (a) silently
     # dropping that guard's protection, or (b) relaying the launcher's own
     # exit-2 as if some guard had deliberately blocked.
-    missing = [n for n in GUARD_CHAIN if not os.path.isfile(guard_path(n))]
+    missing = [n for n in chain if not os.path.isfile(guard_path(n))]
     if missing:
         print("BLOCKED (pretooluse-dispatcher): guard script(s) missing from %s: %s\n"
               "The PreToolUse security layer is incomplete, so this write is refused.\n"
-              "Restore the file(s) or correct GUARD_CHAIN, then re-run "
+              "Restore the file(s) or correct the guard chain, then re-run "
               "`python hooks/pretooluse-dispatcher.py --selfcheck`."
               % (HOOKS_DIR, ", ".join(missing)), file=sys.stderr)
         return 2
 
     stdouts = []
-    for name in GUARD_CHAIN:
+    for name in chain:
         rc, out, err, _mode = run_guard(name, raw)
         if out and out.strip():
             stdouts.append(out)
@@ -286,18 +348,44 @@ def emit_stdout(chunks):
 
 
 def selfcheck():
-    missing = [n for n in GUARD_CHAIN
-               if not os.path.isfile(os.path.join(HOOKS_DIR, n + ".py"))]
-    if missing:
-        print("MISSING guard files: %s" % ", ".join(missing))
-        return 1
-    print("selfcheck OK -- %d guards present, chain order:" % len(GUARD_CHAIN))
-    for i, n in enumerate(GUARD_CHAIN, 1):
-        print("  %d. %s" % (i, n))
-    return 0
+    """Assert every guard in EVERY chain exists. A chain is only as good as its
+    files, and a typo in either list must fail loudly here rather than at the
+    first Bash call of the day."""
+    rc = 0
+    for label in sorted(CHAINS):
+        chain = CHAINS[label]
+        missing = [n for n in chain
+                   if not os.path.isfile(os.path.join(HOOKS_DIR, n + ".py"))]
+        if missing:
+            print("MISSING guard files in chain %r: %s" % (label, ", ".join(missing)))
+            rc = 1
+            continue
+        print("chain %r OK -- %d guards present, order:" % (label, len(chain)))
+        for i, n in enumerate(chain, 1):
+            print("  %d. %s" % (i, n))
+    return rc
+
+
+def _chain_from_argv(argv):
+    """--chain <name>. Unknown or missing name is a CONFIGURATION EMERGENCY, not
+    a decision: silently falling back to the wrong chain would run the wrong
+    guard set on every call and never announce itself. Signalled by returning
+    None so the caller can fail closed."""
+    if "--chain" not in argv:
+        return CHAINS[DEFAULT_CHAIN]
+    i = argv.index("--chain")
+    if i + 1 >= len(argv):
+        return None
+    return CHAINS.get(argv[i + 1])
 
 
 if __name__ == "__main__":
     if "--selfcheck" in sys.argv:
         sys.exit(selfcheck())
-    sys.exit(main())
+    _chain = _chain_from_argv(sys.argv)
+    if _chain is None:
+        print("BLOCKED (pretooluse-dispatcher): --chain given an unknown or "
+              "missing name; known chains: %s.\nRefusing to guess which guard "
+              "set applies." % ", ".join(sorted(CHAINS)), file=sys.stderr)
+        sys.exit(2)
+    sys.exit(main(_chain))
