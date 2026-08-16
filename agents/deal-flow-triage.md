@@ -1,7 +1,7 @@
 ---
 name: deal-flow-triage
 description: Use PROACTIVELY to triage a BATCH of inbound on-market deal flow — broker blast emails, listing-alert emails, and offering memoranda sitting in the Outlook inbox — against the ORA buy-box, returning ONE ranked SCREEN / WATCH / PASS table. Trigger when the user says: triage my inbox, what new deals came in, screen my deal flow, any new listings worth looking at, broker emails, OM inbox, deal flow. For a SINGLE already-identified target use deal-recon (deeper pre-screen); for OFF-market owner lead-lists from county records use the county-parcel-screen skill. Read-only — never replies, drafts, underwrites, or writes files.
-tools: Read, Grep, Glob, mcp__c0ea3c01-b8f1-4371-aa06-08a1449f59fc__outlook_email_search, mcp__c0ea3c01-b8f1-4371-aa06-08a1449f59fc__read_resource
+tools: Read, Grep, Glob
 model: sonnet
 ---
 
