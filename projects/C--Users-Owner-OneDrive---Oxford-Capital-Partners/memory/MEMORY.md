@@ -73,6 +73,7 @@
 - [update_scheduled_task DROPS non-owned frontmatter keys](reference_update_scheduled_task_drops_frontmatter_keys.md) — a `description` retag deletes `output_contract`; diff vs HEAD after every call
 - [Task description lives in TWO stores](reference_skill_description_registry_file_desync.md) — editing SKILL.md alone desyncs the registry; sync both, verify by sha
 - [SKILL.md frontmatter is deliberately NOT strict YAML](reference_skill_frontmatter_lenient_parse.md) — the harness parses line-wise, so ~97/147 fleet SKILL.md fail `yaml.safe_load` **by design**; do NOT mass-quote to satisfy it
+- **⛔ [AR subsystem EXISTS but is DARK 08-16](reference_ar_subsystem_exists_but_dark_2026-08-16.md)** — `server/ar/` is complete, tested (PR #230, 2 refute rounds) and has NEVER run; `data/ar/` doesn't exist, so **$204,788 of AR is invisible** to CC/brief. Detectors, matcher, regime registry all already built. Do NOT rebuild — 3 sessions nearly did
 
 ## Rules & governance
 - [Standing Rules & Preferences](rules.md) — working-style, Outlook-only email, QB Desktop, Netlify, CSP, confidentiality
