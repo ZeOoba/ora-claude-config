@@ -162,6 +162,16 @@
 - **Seller/grantor name gap:** neither the state MdProperty layer nor the county `Property/MapServer/1` join
   exposes prior-owner/grantor — both are current-owner-only. Grantor-based nominal-transfer tests (shared
   surname) cannot run for Baltimore Co on this data; don't assume they can.
+- **RECORDING LAG — TRADATE runs ~4+ months behind, not weeks (found via county-sales-monitor's Notion
+  data, 2026-08-15):** a monthly-distribution check on the pilot's 45-row pull showed a hard taper — 8
+  transactions in Feb 2026, 3 in Mar, 3 in Apr, **zero from May through the pull date (mid-Aug)** — despite
+  the pull window running current. This is far worse than Franklin OH's ~1-month bulk-file lag. Treat this
+  as the statewide MdProperty layer's normal behavior, not a one-off: **a windowed pull against this county
+  will structurally read as "quiet" for the most recent 3-4 months even when real sales are happening.**
+  Do not read a string of low/zero recent-month counts here as a coverage regression on its own — check the
+  distribution shape (a gradual multi-month taper, consistent with lag) against a genuine cutoff (a source
+  that previously had current data and now returns nothing at all, which IS a real regression) before
+  escalating either way.
 - Delinquency: none in-layer; Stage 2 = Baltimore County tax-sale/delinquent-tax list (separate pull).
 
 ## Census ACS (any market)

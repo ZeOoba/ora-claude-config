@@ -13,8 +13,8 @@ description: >
   markets are a documented next phase. MARKET INTELLIGENCE, not sourcing: does
   NOT replace county-parcel-screen (off-market owner call lists, motivated
   sellers, delinquent-tax/estate leads). Single-property comp grids route to
-  acquisition-underwriting COMPS mode. v0.2 DRAFT (2026-08-15) — not yet
-  piloted, no scheduled task.
+  acquisition-underwriting COMPS mode. v0.5 (2026-08-15) — piloted (304
+  transactions live in Notion) and scheduled monthly (ora-county-sales-monitor).
 ---
 
 # county-sales-monitor
@@ -67,7 +67,14 @@ county verified individually before it's trusted in a real digest.
   MdProperty CAMA layer (`JURSCODE='BACO'`), with owner names recovered by the
   join to the county `bcgis Property/MapServer/1` layer (`ACCTID[4:]` = TAXPIN).
   `SQFTSTRC` building SF ~89% populated. Nominal transfers are rare here (1 in
-  the whole industrial universe) — unlike Ohio.
+  the whole industrial universe) — unlike Ohio. **Known recording lag, found
+  2026-08-15 via the pilot's own Notion data: TRADATE runs ~4+ months behind**
+  (the 45-row pilot pull showed a clean taper 8→3→3 across Feb-Apr 2026, then
+  zero from May through the mid-August pull date). Worse than Franklin's
+  ~1-month bulk-file lag. A monthly run will structurally read this county as
+  "quiet" for its most recent 3-4 months — that is expected source behavior,
+  not a coverage regression, and Step 8's regression check must not conflate
+  the two (see Step 8 below).
 - **Polk IA** (Des Moines) — `POLKCOUNTY.csv` commercial sales export, 1987 to
   current, refreshed continuously: `sale_date`, `price`, `instrument`
   (Deed | Contract), `seller`, `buyer`, book/pg, plus the CAMA snapshot
@@ -248,6 +255,14 @@ markets, median $/SF where derivable, plus any coverage regression (a Tier A
 county that returned nothing when it previously returned something is a
 **finding**, not an empty result) — with a link to the Notion database view.
 
+**Exception, Baltimore Co MD only:** its TRADATE lag runs ~4+ months (see the
+Tier A coverage note above), so a run reporting few or zero new Baltimore Co
+transactions is EXPECTED, not a regression — do not flag it as one on its own.
+Only escalate Baltimore Co as a real finding if the pattern itself changes:
+e.g. a prior run had current data and a later run's most-recent date is now
+OLDER (the lag window widening further), or the query errors outright. Judge
+by the shape of the date distribution, not the raw new-row count.
+
 Internal only. Routing per ORA canon: `ggoldberg@oxfordra.net` ONLY, no cc.
 Recorded sales are public record, but the digest is ORA work product — it is not
 an external surface and must not be forwarded outside the firm without review
@@ -356,6 +371,15 @@ valuation input); Baltimore Co assessments run ~64% below recent industrial
 sales, so ratio-based arm's-length tests must be per-county, never global.
 
 ## Changelog
+- **v0.5 (2026-08-15):** Post-pilot QC pass on the live Notion data (304 rows
+  queried directly, not just re-read from agent reports) confirmed row counts
+  and key-uniqueness clean, but surfaced one real finding the original pilot
+  reports missed: Baltimore Co MD's TRADATE field runs ~4+ months behind
+  (clean taper Feb-Apr 2026, zero May-Aug despite the window running current)
+  — worse than Franklin's known ~1-month lag. Documented in the Tier A
+  coverage note and carved out of Step 8's coverage-regression check so the
+  monthly scheduled task doesn't misread expected Baltimore Co quiet months
+  as a finding. Same fact added to county-parcel-screen's `county-endpoints.md`.
 - **v0.4 (2026-08-15):** First live pilot run executed — all three Tier A
   counties, 12-month window (2025-08-15 to 2026-08-15), 304 transactions
   written to the Notion database (Franklin OH 179, Polk IA 80, Baltimore Co
