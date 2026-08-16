@@ -780,6 +780,32 @@ def test_recursive_delete_requires_command_position():
               tcp.is_recursive_delete(cmd), cmd)
 
 
+def test_shared_fd_dup_re_is_not_widened_for_recursive_delete():
+    """The round-4 reviewer suggested widening `_FD_DUP_RE` to cover `<&`.
+    Doing that literally would have been a REGRESSION, and this test pins why.
+
+    `_FD_DUP_RE` is applied inside shell_may_write() to decide whether a command
+    writes at all. Stripping MORE text there means fewer commands read as
+    writers -- silently weakening config-write-guard, workbook-write-guard and
+    lint-config-guard simultaneously. That shared-matcher move is the documented
+    cause of the 2026-08-03 robocopy regression and the PR#32 deadlock. So the
+    wider pattern lives in a SEPARATE constant used only by recursive_delete()."""
+    check("shared _FD_DUP_RE still excludes input duplication",
+          tcp._FD_DUP_RE.search("0<&1") is None,
+          "shared pattern must stay narrow: %r" % tcp._FD_DUP_RE.pattern)
+    check("recursive-delete pattern DOES cover input duplication",
+          tcp._RD_FD_DUP_RE.search("0<&1") is not None,
+          "wide pattern: %r" % tcp._RD_FD_DUP_RE.pattern)
+    check("both still cover output duplication",
+          tcp._FD_DUP_RE.search("2>&1") is not None
+          and tcp._RD_FD_DUP_RE.search("2>&1") is not None)
+    # A real `&&` chain must survive BOTH patterns -- eating it would merge two
+    # commands into one segment and change what the detector reads.
+    for pat in (tcp._FD_DUP_RE, tcp._RD_FD_DUP_RE):
+        check("`&&` is not eaten by %r" % pat.pattern,
+              pat.search("ls && rm -rf build") is None)
+
+
 def test_recursive_delete_extracts_targets():
     d = tcp.recursive_delete("rm -rf C:/Users/Owner/Documents/deals")
     check("single target extracted",
@@ -919,6 +945,7 @@ if __name__ == "__main__":
     test_recursive_delete_is_segment_scoped()
     test_recursive_delete_ignores_flags_that_are_not_rms()
     test_recursive_delete_requires_command_position()
+    test_shared_fd_dup_re_is_not_widened_for_recursive_delete()
     test_recursive_delete_sees_through_ifs_word_splitting()
     test_recursive_delete_extracts_targets()
     test_recursive_delete_survives_unicode_evasion()
