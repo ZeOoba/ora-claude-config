@@ -38,6 +38,7 @@
 - [entry-market-scan defects 08-04](reference_entry_market_scan_defects_2026-08-04.md) — `Gate Review` field: blank = awaiting Gabriel, never placeholder it
 - [5515 Catfish Court broker-correspondence claim is FALSE](reference_catfish_court_broker_correspondence_claim_false.md) — 08-14 re-check is a warm follow-up, not a cold call
 - [808 Rhoads real broker is Elford, not Koon/Menninger](reference_808_rhoads_real_broker_is_elford_not_koon.md) — Deal went OUT of contract 06-26; seller wants ~$3.5M vs the $2.86M LOI plan
+- **⛔ [511 Industrial Mile — duplicate rows + walk/offer conflict 08-16](reference_511_industrial_mile_duplicate_rows_and_walk_offer_conflict_2026-08-16.md)** — ORA's ONLY priced LOI loss ($1.575M won vs ORA's $1.45M). TWO Sourcing Log rows; Walk $930K sits BELOW the actual $1.45M offer, so Loss Class is held UNCLASSIFIED — don't pick a number. Re-engagement tickler fires 08-21. Pipeline `LOI Status` is unreliable — never branch on it
 - [Delinquency collection-status blind spot](reference_delinquency_report_collection_status_blindspot.md) — "no action taken" is inferred; wrong 4 of 6 tenants
 - [Columbus Suburban default/vacate 07-28](tenant_columbus_suburban_default_2026-07-28.md) — ORA-T-105 gone; $20,457 owed, PM misspells name "Suburan"; vacate ≠ contract expiry
 - [Rent-roll vacancy convention changed 08-01](reference_rent_roll_vacancy_convention_change_2026-08-01.md) — occupancy 98.6%→94.9% is definitional, not deterioration

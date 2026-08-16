@@ -12,6 +12,26 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-16 — P3 Lost-Deal Post-Mortem Ledger BUILT (Gabriel-ratified, shipped)
+
+Structured basis-vs-execution capture for LOI losses. Extension of existing machinery — no new database, no new scheduled task, no new skill.
+
+**Notion Deal Sourcing Log** (`collection://9a6ae219…`): +24 additive properties. Block A (10, written at LOI time by loi-generation) · Block B (12, written at outcome time by the tracker) · 2 formulas (`Delta vs ORA Offer $` / `%`). No existing option UUIDs touched.
+
+**`ora-passed-deal-tracker` SKILL.md** (CC/MCP, `30 6 15 * *`): new Step 2a (LOST-AT-LOI watch arm) · 3a (query County Sales Comps before web search; NONARMS/date/price guards; MO+KS non-disclosure stated) · 4b (structured Block B write + R1–R6 classifier) · 4c (WINNER-BUSTED → flag + tickler) · Step 6 exception so an overdue tickler still emails on a zero-trade month · Step 7 "LOI POST-MORTEMS" section with mandatory `INSUFFICIENT SAMPLE (n=X)` banner until n≥10. Frontmatter `description` deliberately untouched (registry-mirrored). **UNCOMMITTED** in the shared `~/.claude` checkout — 31 files there are 6+ other sessions' WIP and moving HEAD would disrupt them. File is live regardless; scheduled tasks read the file, not git.
+
+**ora-skills PR #43 MERGED** (`b53e11a`, origin/main): loi-generation Phase 6c (v1.5→v1.6) + deliverables item 10 + T1 manual-capture protocol; corrected a stale line in `acquisition-underwriting/references/outcome-feedback-and-backtest.md` that still read "No `ora-passed-deal-tracker` task is registered today" (false since 2026-08-15). PR initially carried two stowaway commits (`b0499f6` market-monitor, `f2fc1cf` repo-architecture-review) inherited from unpushed local main; dropped via `rebase --onto origin/main` before merge on Gabriel's ruling. Both remain safe and unpushed on local main.
+
+**Backfill, 2026 YTD, 5 rows, all cited:** 511 Industrial Mile (LOST, $1.575M vs ORA $1.45M, BROKER-RELAYED, held **UNCLASSIFIED**) · 470 McCormick (EXPIRED-UNSENT → EXECUTION, offer price deliberately NULL — an unsent LOI has no offer price) · 754 Old State Rt 74 (WON) · 1333 Research Rd + 2040 S Hamilton (PENDING).
+
+**Ratified by Gabriel 2026-08-16:** 5% PRICE-MARGINAL band · 10% non-comparable-buyer overlay · Max Defensible = first-floor-breach price, fixed at LOI time, never recomputed at outcome time · WINNER-BUSTED → flag + dated tickler (not auto-drafted email) · backfill depth 2026 YTD · losses reach Gabriel by broker email or phone call.
+
+**Design invariant:** BASIS-DISCIPLINE is a SUCCESS label. Nothing in the ledger proposes a higher offer or recomputes a walk price. Weights/bands still move only at the December back-test with Gabriel's sign-off.
+
+**Defects surfaced, NOT fixed:** (1) 511 Industrial Mile has TWO Sourcing Log rows (`3446ecd8…` Reviewing / `37c6ecd8…` Dead, different brokers) — tracker now matches on normalized address so it can't double-count, duplicate itself stands. (2) 511's Walk Price ($930K) sits BELOW its actual $1.45M LOI — contradiction blocks classification, needs Gabriel. (3) Acquisition Pipeline Tracker `LOI Status` is unreliable (`1333 Research Road` reads Not Submitted there, LOI Submitted in Sourcing Log) — never branch on it. (4) E Fulton has no valid `LOI Outcome` value (ORA-terminated post-LOI on Phase II) — vocabulary gap, left unlabeled rather than force-fit. (5) 808 Rhoads has no Sourcing Log row at all. (6) `Kill Reason` populated on 1 of 20 Pipeline rows.
+
+Classified-loss count is **n=1**. Read-outs carry the INSUFFICIENT SAMPLE banner for ~18–36 months. Memory: `reference_511_industrial_mile_duplicate_rows_and_walk_offer_conflict_2026-08-16.md`.
+
 ## 2026-08-16 -- package-and-stage-skill v1.19 installed (Save-skill click)
 
 - Skill: package-and-stage-skill v1.19 -- doctrine update, commit 0661c8a "never trust pre-staged _staging drafts + archive-on-clear", authored this session after finding two mutually contradictory pre-staged event_log_entry drafts for an unrelated repo-architecture-review install earlier in the day.
