@@ -65,10 +65,21 @@ GOV_PROBE = os.path.join(HOME, ".claude", "maintenance", "governor-drift-probe.p
 # enough to fire soon: the corpus grows monotonically (~112 bytes of index per new memory)
 # and HARD does NOT scale, so a real structural decision IS approaching. When WARN fires
 # the lever is archival-with-inbound-ref-repair or splitting the index -- NOT prose
-# trimming, which is now known to buy almost nothing. NOTE: splitting is currently blocked
-# by check 1 below, which requires every top-level *.md to be linked from MEMORY.md
-# ITSELF; a sub-index would leave every file it lists reported as "unlisted". Amending
-# check 1 to follow sub-indexes is the structural fix and is a separate, signed-off change.
+# trimming, which is now known to buy almost nothing.
+#
+# SPLITTING IS NO LONGER BLOCKED. This comment used to say a sub-index would leave every
+# file it lists reported as "unlisted" and that amending check 1 was "a separate, signed-off
+# change" -- that amendment LANDED 2026-08-03 (collect_indexed_links, below), and the split
+# has since been used twice: INDEX_reference.md and INDEX_projects_system.md. The stale
+# wording outlived the code by ~2 weeks and misbriefed a whole archival task on 2026-08-16,
+# which is why it is called out rather than quietly deleted: text sitting next to a constant
+# is read as current. See reference_memory_index_size_gate_is_a_runway_marker.
+#
+# Both thresholds apply to MEMORY.md AND to every sub-index it adopts (2026-08-16, Gabriel).
+# Sub-indexes were ungated for the first two weeks of their existence, which let
+# INDEX_reference.md reach 18,361 B -- larger than the 16,936 B root it was split out of --
+# with nothing that would ever warn. Gating only the root means the fix for a bounded
+# artifact silently creates an unbounded child.
 MEMORY_WARN_BYTES = 21500     # runway marker below HARD (see calibration above)
 MEMORY_HARD_BYTES = 24400     # 24.4KB Read-tool limit -- a real constraint, do not raise
 
@@ -239,6 +250,66 @@ def collect_indexed_links(index_text, mem_dir):
     return links, followed
 
 
+def sized_index_files(mem_dir, index_path, subindexes):
+    """[(name, bytes)] for the root index and every sub-index it adopts, root FIRST.
+
+    Split from the gate itself so the thresholds can be tested without fixtures and the
+    collection can be tested without threshold arithmetic -- the original defect was
+    entirely in the collection step (only MEMORY.md was ever stat'd), so that step needs
+    its own coverage.
+
+    A sub-index that cannot be stat'd is SKIPPED, not reported: collect_indexed_links()
+    only returns sub-indexes it successfully read, so a failure here is a race against a
+    concurrent write, and check 1 already reports a missing sub-index as an orphan
+    pointer. A probe that cannot look must not invent a finding.
+    """
+    sized = [("MEMORY.md", os.path.getsize(index_path))]
+    for name in subindexes:
+        try:
+            sized.append((name, os.path.getsize(os.path.join(mem_dir, name))))
+        except OSError:
+            continue
+    return sized
+
+
+def size_gate(sized):
+    """(issues, warnings) for the byte size of each index file. Pure -- no I/O.
+
+    Byte size, not line count: `·` separators and other non-ASCII are multi-byte in UTF-8.
+
+    SUB-INDEXES ARE GATED AS THE ROOT IS -- same constants, same severities (Gabriel,
+    2026-08-16). A sub-index past HARD is exactly as unreadable in one Read call as the
+    root would be, so demoting it to a warning would rebuild, one level down, the blind
+    spot this check exists to close. Every breaching file is reported, not just the first.
+
+    Thresholds are exclusive (`>`), preserving the root's pre-existing behaviour.
+    """
+    issues, warnings = [], []
+    for name, nbytes in sized:
+        is_root = (name == "MEMORY.md")
+        if nbytes > MEMORY_HARD_BYTES:
+            issues.append(
+                "%s is %d bytes, over the %d-byte Read-tool limit -- it no longer "
+                "fits in one Read call; compact now, not on the next pass" % (
+                    name, nbytes, MEMORY_HARD_BYTES))
+        elif nbytes > MEMORY_WARN_BYTES:
+            lever = ("The lever here is ARCHIVAL (move dead entries to _archive/ AND repair "
+                     "the inbound refs in other memory files, which is what makes it "
+                     "non-trivial) or SPLITTING the index"
+                     if is_root else
+                     "The lever here is ARCHIVAL, or splitting this sub-index further; note "
+                     "a sub-index and the MEMORY.md trim that adopts it must land in the SAME "
+                     "commit (head_orphans reads sub-indexes from HEAD, not disk)")
+            warnings.append(
+                "%s is %d bytes, past the %d-byte runway marker (%d bytes left before the "
+                "%d-byte Read-tool limit). %s -- NOT prose trimming, which is measured to "
+                "buy almost nothing (see the calibration comment on MEMORY_WARN_BYTES). "
+                "Do not delete live pointers to satisfy this number." % (
+                    name, nbytes, MEMORY_WARN_BYTES, MEMORY_HARD_BYTES - nbytes,
+                    MEMORY_HARD_BYTES, lever))
+    return issues, warnings
+
+
 def head_orphans():
     """Basenames linked by HEAD's MEMORY.md but absent from HEAD's tree -- i.e. exactly the
     pointers a fresh clone would find broken. Sorted; empty when the check cannot apply.
@@ -331,35 +402,29 @@ def main():
     issues, warnings = [], []
 
     # --- 0. size gate --- MEMORY.md is read whole into every session's context, so its
-    # byte size (not line count -- `·` separators and other non-ASCII are multi-byte in
-    # UTF-8) is bounded on both ends: WARN past the compaction target, hard-fail only if
-    # it would no longer fit in one Read call.
-    try:
-        idx_bytes = os.path.getsize(INDEX)
-    except OSError as e:
-        sys.stderr.write("[ACTION] cannot stat MEMORY.md: %s\n" % e)
-        sys.exit(2)
-    if idx_bytes > MEMORY_HARD_BYTES:
-        issues.append(
-            "MEMORY.md is %d bytes, over the %d-byte Read-tool limit -- it no longer "
-            "fits in one Read call; compact now, not on the next pass" % (idx_bytes, MEMORY_HARD_BYTES))
-    elif idx_bytes > MEMORY_WARN_BYTES:
-        warnings.append(
-            "MEMORY.md is %d bytes, past the %d-byte runway marker (%d bytes left before "
-            "the %d-byte Read-tool limit). The lever here is ARCHIVAL (move dead entries "
-            "to _archive/ AND repair the inbound refs in other memory files, which is what "
-            "makes it non-trivial) or SPLITTING the index -- NOT prose trimming, which is "
-            "measured to buy almost nothing (see the calibration comment on "
-            "MEMORY_WARN_BYTES). Do not delete live pointers to satisfy this number." % (
-                idx_bytes, MEMORY_WARN_BYTES, MEMORY_HARD_BYTES - idx_bytes, MEMORY_HARD_BYTES))
-
-    # --- 1. index reconciliation ---
+    # byte size is bounded on both ends: WARN past the compaction target, hard-fail only if
+    # it would no longer fit in one Read call. Since 2026-08-16 this covers every sub-index
+    # MEMORY.md adopts as well -- those files absorb the root's growth, so gating only the
+    # root leaves the growth itself unmeasured (see size_gate's docstring).
+    #
+    # The index is READ here rather than in check 1, because the sub-index list the gate
+    # needs is derived from its links. Check 1 reuses `idx`/`linked`/`subindexes` below.
     try:
         idx = open(INDEX, encoding="utf-8").read()
     except Exception as e:
         sys.stderr.write("[ACTION] cannot read MEMORY.md: %s\n" % e)
         sys.exit(2)
     linked, subindexes = collect_indexed_links(idx, MEM)
+    try:
+        sized = sized_index_files(MEM, INDEX, subindexes)
+    except OSError as e:
+        sys.stderr.write("[ACTION] cannot stat MEMORY.md: %s\n" % e)
+        sys.exit(2)
+    size_issues, size_warnings = size_gate(sized)
+    issues.extend(size_issues)
+    warnings.extend(size_warnings)
+
+    # --- 1. index reconciliation ---
     present = {os.path.basename(p) for p in glob.glob(os.path.join(MEM, "*.md"))}
     present.discard("MEMORY.md")  # the root index is not an entry in itself
     # ...and a SUB-index legitimately links back home ("Sub-index of MEMORY.md"), which
