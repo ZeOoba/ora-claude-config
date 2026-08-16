@@ -244,20 +244,56 @@ def main(argv=None):
     with open(backup, "w", encoding="utf-8") as f:
         f.write(text)
 
-    # The archive and backup are already on disk at this point, so a failure to
-    # swap the live log is not a clean no-op: the archive duplicates content that
-    # is STILL live, and the "refusing to overwrite existing archive file" guard
-    # above then rejects every re-run. A transient, self-clearing app handle lock
-    # would wedge rollover until someone cleaned up by hand. Both scratch files
-    # are therefore removed on any failure path -- the live log is untouched in
-    # all of them, so there is nothing in either file worth keeping.
+    # The archive and backup are already on disk here, so a failed swap is not a
+    # clean no-op: the archive duplicates content that is STILL live, and the
+    # "refusing to overwrite existing archive file" guard above then rejects every
+    # re-run -- a transient, self-clearing app handle lock would wedge rollover
+    # until someone cleaned up by hand. So the scratch files must go.
+    #
+    # But they may only go once the live log is PROVEN intact. The in-place
+    # fallback opens the log with mode "w", which truncates before any bytes
+    # land, so a failure after that point leaves the log damaged and the backup
+    # holding the only copy of the original. An earlier version of this function
+    # deleted the backup unconditionally on the strength of "the live log is
+    # untouched in all failure paths" -- true before the in-place path existed,
+    # false after it. A probe drove an ENOSPC-shaped failure through it and the
+    # log came back 0 bytes with backup and archive both gone: a recoverable
+    # failure turned into total, unrecoverable loss of the canonical log.
+    #
+    # Restore first, verify, and only then discard. If the log cannot be put
+    # back, keep EVERYTHING and say so loudly -- a wedged rollover is a nuisance,
+    # a destroyed event_log.md is not recoverable from anywhere else on disk.
     def _unwind(reason):
+        try:
+            with open(a.log, encoding="utf-8") as fh:
+                current = fh.read()
+        except OSError:
+            current = None
+
+        restored = (current == text)
+        if not restored:
+            try:
+                with open(a.log, "w", encoding="utf-8") as fh:
+                    fh.write(text)
+                with open(a.log, encoding="utf-8") as fh:
+                    restored = (fh.read() == text)
+            except OSError:
+                restored = False
+
+        if not restored:
+            sys.stderr.write(
+                "%s -- AND the live log could not be restored to its original "
+                "content. The original is preserved at %s and the archived tail at "
+                "%s; BOTH LEFT IN PLACE DELIBERATELY. Restore by hand before "
+                "running rollover again.\n" % (reason, backup, archive_path))
+            return
+
         for scratch in (archive_path, backup, a.log + ".tmp-rollover"):
             try:
                 os.remove(scratch)
             except OSError:
                 pass
-        sys.stderr.write("%s -- live log left UNCHANGED; archive and backup removed "
+        sys.stderr.write("%s -- live log verified intact; archive and backup removed "
                           "so a re-run is not blocked by the archive-exists guard\n" % reason)
 
     try:
