@@ -272,12 +272,40 @@ expect("an unstattable sub-index is skipped, not invented as a size finding",
        sized == [("MEMORY.md", 10)], "got %r" % (sized,))
 
 # --- the LIVE corpus: every sub-index is now actually under the gate ------------------
+# NOT an exact-count assertion. sized_index_files() deliberately SKIPS a sub-index it
+# cannot stat, so `len(live_sized) == 1 + len(live_subs)` would additionally assert that
+# no concurrent write happened between collect_indexed_links() and sized_index_files() --
+# something this test cannot control and has no business claiming. The memory dir is
+# written by many sessions at once (the 2026-08-16 split rewrote MEMORY.md twice inside a
+# single minute), and this file is swept by the pre-push hook-tests gate, so that race
+# would surface as a spurious FAIL blocking an unrelated push.
+#
+# What is actually being verified is the WIRING -- that the root is gated first and that
+# nothing outside the adopted sub-index set sneaks in. Both hold regardless of a race.
 live_idx = open(mip.INDEX, encoding="utf-8").read()
 _, live_subs = mip.collect_indexed_links(live_idx, mip.MEM)
 live_sized = mip.sized_index_files(mip.MEM, mip.INDEX, live_subs)
-expect("live run gates the root plus every sub-index MEMORY.md adopts",
-       len(live_sized) == 1 + len(live_subs) and live_sized[0][0] == "MEMORY.md",
+expect("live run gates the root FIRST",
+       live_sized and live_sized[0][0] == "MEMORY.md", "got %r" % (live_sized,))
+expect("live run gates only the root plus sub-indexes MEMORY.md adopts (race-tolerant)",
+       len(live_sized) <= 1 + len(live_subs)
+       and all(n == "MEMORY.md" or n in live_subs for n, _ in live_sized),
        "subs=%r sized=%r" % (live_subs, live_sized))
+expect("every gated entry carries a non-negative byte size",
+       all(isinstance(b, int) and b >= 0 for _, b in live_sized), "got %r" % (live_sized,))
+
+# The `<=` above is deliberately weak, so on its own it would still pass if
+# sized_index_files() regressed to returning the root alone -- i.e. the exact defect this
+# whole change fixes. The deterministic fixture cases above catch that, and so does this:
+# every sub-index STILL on disk must have been gated. Existence is re-checked after the
+# fact on purpose -- a file that vanished before the sized call is also absent now, so it
+# is simply not asserted about, while a file present now was present then (memory files do
+# not reappear). That asymmetry is what makes this both meaningful and race-tolerant.
+live_gated = {n for n, _ in live_sized}
+still_present = [n for n in live_subs if os.path.exists(os.path.join(mip.MEM, n))]
+expect("every sub-index still on disk was gated (regression guard: root-only collection)",
+       all(n in live_gated for n in still_present),
+       "still_present=%r gated=%r" % (still_present, sorted(live_gated)))
 
 passed = sum(1 for ok, _ in results if ok)
 print("memory-integrity-probe tests: %d/%d passed" % (passed, len(results)))
