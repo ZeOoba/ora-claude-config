@@ -725,6 +725,61 @@ def test_recursive_delete_sees_through_ifs_word_splitting():
           tcp.is_recursive_delete("rm${IFS}-rf${IFS}/tmp/x"))
 
 
+def test_recursive_delete_requires_command_position():
+    """`rm` must be the command being RUN, not a word that merely appears.
+
+    THE GAP THIS CLOSES (named in tool_call_paths.py's own SCOPE comment as
+    "the operationally damaging class, not a cosmetic one"): the detector had no
+    notion of command position, so any line CONTAINING the word `rm` next to an
+    r-bundle flag armed it -- including lines that delete nothing at all. That is
+    the false-positive class a consumer must not inherit: `git rm -r --cached`
+    unstages without touching disk, and blocking it would break ordinary work
+    while teaching people to route around the guard."""
+    not_firing = [
+        "git rm -r --cached node_modules",       # unstages; does NOT touch disk
+        "git rm -rf --cached build",
+        "grep rm -r .",                          # searching FOR the text "rm"
+        "grep -r 'rm -rf' .",
+        "rg 'rm -rf' -r .",
+        "# rm -rf /tmp/x",                       # a shell COMMENT
+        "  # rm -rf ~/Documents/deals",
+        "echo rm -rf x",                         # printing, not deleting
+        "echo 'rm -rf /' > note.txt",
+        "man rm -r",
+        "which rm -r",
+        "type rm -r",
+    ]
+    for cmd in not_firing:
+        check("not in command position, must not fire: %r" % cmd,
+              not tcp.is_recursive_delete(cmd), cmd)
+
+    # ...and every genuine invocation form must STILL fire. A command-position
+    # rule that silences real deletes is a worse defect than the one it fixes.
+    firing = [
+        "rm -rf C:/Users/Owner/Documents/deals",         # the bare case
+        "sudo rm -rf /var/tmp/x",                        # privilege wrapper
+        "env rm -rf /var/tmp/x",
+        "command rm -rf /var/tmp/x",
+        "nohup rm -rf /var/tmp/x",
+        "time rm -rf /var/tmp/x",
+        "xargs rm -rf",                                  # the classic pipe sink
+        "FOO=bar rm -rf /var/tmp/x",                     # env assignment prefix
+        "/bin/rm -rf /var/tmp/x",                        # absolute path form
+        "./rm -rf x",
+        "rm.exe -rf x",                                  # pinned Windows broadening
+        "rm${IFS}-rf${IFS}/tmp/x",                       # pinned IFS broadening
+        "ls && rm -rf build",                            # command position of ITS segment
+        "cd /tmp; rm -rf x",
+        "false || rm -rf x",
+        # -exec HANDS OFF command position: find really does run this rm.
+        "find . -name node_modules -exec rm -rf {} +",
+        "find . -type d -execdir rm -rf {} ;",
+    ]
+    for cmd in firing:
+        check("genuine recursive delete, must still fire: %r" % cmd,
+              tcp.is_recursive_delete(cmd), cmd)
+
+
 def test_recursive_delete_extracts_targets():
     d = tcp.recursive_delete("rm -rf C:/Users/Owner/Documents/deals")
     check("single target extracted",
@@ -863,6 +918,7 @@ if __name__ == "__main__":
     test_recursive_delete_does_not_fire_on_benign_commands()
     test_recursive_delete_is_segment_scoped()
     test_recursive_delete_ignores_flags_that_are_not_rms()
+    test_recursive_delete_requires_command_position()
     test_recursive_delete_sees_through_ifs_word_splitting()
     test_recursive_delete_extracts_targets()
     test_recursive_delete_survives_unicode_evasion()
