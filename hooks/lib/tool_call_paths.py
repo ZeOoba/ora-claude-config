@@ -532,6 +532,29 @@ def shell_analysis(tool_name, tool_input):
 # severity.
 RecursiveDelete = namedtuple("RecursiveDelete", "command recursive force targets")
 
+# fd-duplication redirects, WIDER than the shared _FD_DUP_RE: this one also
+# covers INPUT duplication (`0<&1`, `<&-`, `3<&0`), which the shared pattern
+# omits.
+#
+# WHY A SECOND PATTERN RATHER THAN WIDENING _FD_DUP_RE. The round-4 reviewer
+# suggested widening the shared one to `\d*[<>]&\d*`. That would have been a
+# behavior change to shell_may_write(), which applies _FD_DUP_RE at line ~452 to
+# decide whether a command writes at all -- stripping MORE text there means fewer
+# commands read as writers, silently weakening config-write-guard,
+# workbook-write-guard and lint-config-guard at once. That is precisely the
+# shared-matcher regression the 2026-08-03 robocopy incident and the PR#32
+# eos-review-gate deadlock were caused by, and which this whole change set has
+# been careful to avoid. A separate constant used ONLY by recursive_delete()
+# keeps the additivity guarantee intact.
+_RD_FD_DUP_RE = re.compile(r"\d*[<>]&\d*-?|&>{1,2}")
+
+# A redirect operator separated from its `&` by whitespace (`2> &1`). This exists
+# because ${IFS} normalization CREATES that shape: `2>${IFS}&1` becomes `2> &1`,
+# which no longer matches the contiguous fd-dup pattern, so the `&` survived to
+# _SEGMENT_SPLIT_RE and severed the command from its operand (round-4 finding 2).
+# Re-joining is done BEFORE fd-dup stripping so ordering cannot matter.
+_SPACED_FD_DUP_RE = re.compile(r"([<>])\s+&")
+
 # `${IFS}` / `$IFS` -- bash's word separator, used as a whitespace evasion.
 # Normalized to a real space before parsing so that firing and target extraction
 # agree; see the pre-parse block in recursive_delete().
@@ -746,7 +769,15 @@ def recursive_delete(command):
     NO PATH CONDITION -- that is the whole point. Static text analysis only, with
     the same honest limit as shell_may_write(): value indirection (a variable
     holding the path or the flags, a command assembled at run time, a script file)
-    is not statically decidable, so False here is never proof of safety."""
+    is not statically decidable, so False here is never proof of safety.
+
+    SCOPE: detects ACCIDENTAL and CARELESS recursive deletes. It is NOT an
+    adversarial control and no caller should treat it as one. This matches
+    pre-expansion command text, and the shell has unboundedly many spellings that
+    expand to the same operand ($'\\057', a variable holding the path, encode-then-
+    pipe-to-sh). Four independent review rounds closed every idiom a
+    non-adversarial operator would plausibly type; the remainder is that infinite
+    tail, and it is open by design rather than by omission."""
     if not isinstance(command, str) or not command:
         return None
     text = normalize_text(command)
@@ -771,7 +802,8 @@ def recursive_delete(command):
     #    layer then failed to honor. Normalizing here keeps firing and extraction
     #    consistent by construction, rather than fixing them in two places.
     text = _IFS_TOKEN_RE.sub(" ", text)
-    text = _FD_DUP_RE.sub(" ", text)
+    text = _SPACED_FD_DUP_RE.sub(r"\1&", text)  # re-join `2> &1` that IFS created
+    text = _RD_FD_DUP_RE.sub(" ", text)
 
     targets, force = [], False
     hit = False
