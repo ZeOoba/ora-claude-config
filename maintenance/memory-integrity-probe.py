@@ -258,18 +258,36 @@ def sized_index_files(mem_dir, index_path, subindexes):
     entirely in the collection step (only MEMORY.md was ever stat'd), so that step needs
     its own coverage.
 
-    A sub-index that cannot be stat'd is SKIPPED, not reported: collect_indexed_links()
-    only returns sub-indexes it successfully read, so a failure here is a race against a
-    concurrent write, and check 1 already reports a missing sub-index as an orphan
-    pointer. A probe that cannot look must not invent a finding.
+    Returns (sized, unstattable) -- the second being [(name, error)] for sub-indexes that
+    are still THERE but could not be measured.
+
+    THE TWO FAILURE MODES ARE NOT THE SAME, and collapsing them (as the first version of
+    this function did, with a bare `except OSError: continue`) hides a real hole:
+
+    * GONE (FileNotFoundError) -- deleted or renamed between collect_indexed_links() and
+      here, i.e. a race against a concurrent write. Skipped silently and correctly: check 1
+      already reports it as an orphan pointer, and a probe that cannot look must not invent
+      a finding.
+    * PRESENT BUT UNREADABLE (any other OSError -- a Windows lock during an os.replace, an
+      AV or indexer holding the handle, a permission fault). The file is still adopted by
+      the index and still growing; it simply was not measured. Skipping that silently means
+      the size gate quietly stops covering a file while continuing to report OK, which is
+      the same class of blind spot this whole check exists to close. It is reported.
+
+    Reported as a WARNING by the caller rather than raised: this probe runs unattended in
+    the daily health guard, so a transient lock must not crash it (exit 2) -- but it must
+    not pass in silence either.
     """
     sized = [("MEMORY.md", os.path.getsize(index_path))]
+    unstattable = []
     for name in subindexes:
         try:
             sized.append((name, os.path.getsize(os.path.join(mem_dir, name))))
-        except OSError:
+        except FileNotFoundError:
             continue
-    return sized
+        except OSError as e:
+            unstattable.append((name, str(e)))
+    return sized, unstattable
 
 
 def size_gate(sized):
@@ -416,13 +434,20 @@ def main():
         sys.exit(2)
     linked, subindexes = collect_indexed_links(idx, MEM)
     try:
-        sized = sized_index_files(MEM, INDEX, subindexes)
+        sized, unstattable = sized_index_files(MEM, INDEX, subindexes)
     except OSError as e:
+        # Only the ROOT's getsize can reach here; sub-index failures are handled inside.
         sys.stderr.write("[ACTION] cannot stat MEMORY.md: %s\n" % e)
         sys.exit(2)
     size_issues, size_warnings = size_gate(sized)
     issues.extend(size_issues)
     warnings.extend(size_warnings)
+    for name, err in unstattable:
+        warnings.append(
+            "sub-index %s is present but could not be measured (%s) -- it was NOT size-gated "
+            "this run, so the gate's coverage is incomplete until this clears. Re-run once "
+            "the writer releases it; if it persists, the file is locked or unreadable rather "
+            "than merely busy." % (name, err))
 
     # --- 1. index reconciliation ---
     present = {os.path.basename(p) for p in glob.glob(os.path.join(MEM, "*.md"))}
