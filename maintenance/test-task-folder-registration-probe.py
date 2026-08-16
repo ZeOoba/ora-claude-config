@@ -162,6 +162,68 @@ expect("skill_folder_root: cc resolves to an expanded, non-empty path",
        bool(sd.skill_folder_root("cc")) and "%USERPROFILE%" not in sd.skill_folder_root("cc"))
 expect("skill_folder_root: unknown label -> None", sd.skill_folder_root("nope") is None)
 
+# --- find_stale_vs_git (OI-170): on-disk SKILL.md vs the blob committed at HEAD ---------------
+#     The scheduler reads the WORKING TREE, not git, so a merged-but-not-checked-out SKILL.md
+#     exists at the right path with the wrong bytes -- clean by all three sibling checks.
+#     Both dependencies are injected, so nothing here shells out to git or touches a live tree.
+_STALE_ENTRY = [{"id": "ora-t1", "filePath": "/x/SKILL.md", "enabled": True}]
+
+
+def _stale(entries, verdict):
+    return tfrp.find_stale_vs_git(entries, differs=lambda p: verdict)
+
+
+expect("find_stale_vs_git: matches upstream -> clean",
+       _stale(_STALE_ENTRY, False) == [])
+expect("find_stale_vs_git: differs from upstream -> flagged (the OI-170 case)",
+       _stale(_STALE_ENTRY, True) == ["ora-t1"])
+expect("find_stale_vs_git: no verdict (None) -> NOT a finding",
+       _stale(_STALE_ENTRY, None) == [])
+expect("find_stale_vs_git: disabled entry -> skipped (matches sibling checks)",
+       _stale([{"id": "ora-t1", "filePath": "/x/SKILL.md", "enabled": False}],
+              True) == [])
+expect("find_stale_vs_git: entry with no filePath -> not flagged, not a crash",
+       _stale([{"id": "ora-t1", "filePath": None, "enabled": True}], True) == [])
+expect("find_stale_vs_git: no entries -> []", tfrp.find_stale_vs_git([]) == [])
+expect("find_stale_vs_git: sorted output",
+       _stale([{"id": "ora-z", "filePath": "/z/SKILL.md", "enabled": True},
+               {"id": "ora-a", "filePath": "/a/SKILL.md", "enabled": True}],
+              True) == ["ora-a", "ora-z"])
+
+
+# _git_differs_from_upstream: git's exit codes, and never raising.
+def _fake_git(*results):
+    """Each call returns the next (returncode, stdout) in sequence."""
+    seq = iter(results)
+
+    def run(*_a, **_k):
+        rc, out = next(seq)
+        return type("R", (), {"returncode": rc, "stdout": out})()
+    return run
+
+
+_TOP = (0, b"/repo\n")
+_UP = (0, b"origin/main\n")
+expect("_git_differs_from_upstream: diff exit 0 -> False (identical)",
+       tfrp._git_differs_from_upstream(
+           "/repo/x/SKILL.md", run=_fake_git(_TOP, _UP, (0, b""))) is False)
+expect("_git_differs_from_upstream: diff exit 1 -> True (differs)",
+       tfrp._git_differs_from_upstream(
+           "/repo/x/SKILL.md", run=_fake_git(_TOP, _UP, (1, b""))) is True)
+expect("_git_differs_from_upstream: diff exit 128 -> None (no verdict, not a finding)",
+       tfrp._git_differs_from_upstream(
+           "/repo/x/SKILL.md", run=_fake_git(_TOP, _UP, (128, b""))) is None)
+expect("_git_differs_from_upstream: NO upstream configured -> None (nothing to be behind)",
+       tfrp._git_differs_from_upstream(
+           "/repo/x/SKILL.md", run=_fake_git(_TOP, (128, b""))) is None)
+expect("_git_differs_from_upstream: not a git repo -> None (the LAMS/OneDrive case)",
+       tfrp._git_differs_from_upstream(
+           "/x/SKILL.md", run=_fake_git((128, b""))) is None)
+expect("_git_differs_from_upstream: git raising -> None, not an exception",
+       tfrp._git_differs_from_upstream(
+           "/x/SKILL.md",
+           run=lambda *a, **k: (_ for _ in ()).throw(OSError("no git"))) is None)
+
 # --- summary -------------------------------------------------------------------------------
 passed = sum(1 for ok, _ in results if ok)
 print("\ntask-folder-registration-probe tests: %d/%d passed" % (passed, len(results)))
