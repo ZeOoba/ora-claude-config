@@ -92,6 +92,56 @@ def task(id_, cron=None, fire_at=None, enabled=True, last_run=None, created_days
 
 
 # 1. All-healthy synthetic fleet -> VERDICT: OK.
+
+def test_registration_age_annotates_never():
+    """A bare NEVER reads as "dead". On 2026-08-16 that inference nearly retired
+    the WORKING half of a dual-fleet pair: ora-passed-deal-tracker's CC copy had
+    never fired because it was registered THAT MORNING on a monthly cron."""
+    import importlib.util, tempfile, datetime
+    spec = importlib.util.spec_from_file_location("fs_mod", HOOK)
+    fs = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fs)
+
+    log = "\n".join([
+        "2026-07-08T10:00:00 cc=1 lams=1 drops=- regressions=- "
+        "adds={'lams': ['ora-passed-deal-tracker']} missing_stores=-",
+        "2026-08-16T11:47:46 cc=3 lams=1 drops=- regressions=- "
+        "adds={'cc': ['ora-county-sales-monitor', 'ora-passed-deal-tracker']} "
+        "missing_stores=-",
+        "",
+    ])
+    fd, path = tempfile.mkstemp(suffix=".log"); os.close(fd)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(log)
+    try:
+        reg = fs.registration_dates(path)
+        # The line ends with `missing_stores=-`, so an end-of-line anchor after
+        # `adds={...}` matched nothing and silently returned {} -- which looks
+        # exactly like "no registrations recorded".
+        check("adds parsed despite trailing missing_stores=", len(reg) == 3, repr(reg))
+        # Keyed by (fleet, id): the same taskId legitimately lives on BOTH fleets,
+        # and collapsing them reported the LAMS birthday for the CC copy -- i.e.
+        # "6 weeks old and never fired", the false 'dead' reading itself.
+        check("CC copy carries its own registration date",
+              reg.get("cc:ora-passed-deal-tracker") == "2026-08-16", repr(reg))
+        check("LAMS original keeps its earlier date",
+              reg.get("lams:ora-passed-deal-tracker") == "2026-07-08", repr(reg))
+        now = datetime.datetime(2026, 8, 16, 12, 0)
+        check("same-day registration reads 'registered today'",
+              fs.never_label("ora-passed-deal-tracker", "cc", reg, now)
+              == "NEVER (registered today)",
+              fs.never_label("ora-passed-deal-tracker", "cc", reg, now))
+        check("older registration reports its age",
+              "39d ago" in fs.never_label("ora-passed-deal-tracker", "lams", reg, now),
+              fs.never_label("ora-passed-deal-tracker", "lams", reg, now))
+        check("unknown registration yields a BARE NEVER, never a guessed age",
+              fs.never_label("ora-nope", "cc", reg, now) == "NEVER")
+        check("missing log yields {} rather than raising",
+              fs.registration_dates(path + ".nope") == {})
+    finally:
+        os.unlink(path)
+
+
 def test_all_healthy_is_ok():
     tasks = [
         task("daily-a", cron="0 6 * * *", created_days_ago=1, last_run=recent_iso()),
@@ -306,6 +356,7 @@ if __name__ == "__main__":
     test_onetime_future_fire_not_flagged()
     test_onetime_normal_completion_not_flagged()
     test_onetime_missed_fire_flagged()
+    test_registration_age_annotates_never()
     test_onetime_stuck_enabled_flagged()
     test_recent_skips_counted_old_skips_decay()
     test_old_skip_burst_alone_is_ok()
