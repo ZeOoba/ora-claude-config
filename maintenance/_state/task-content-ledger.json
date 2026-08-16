@@ -1,14 +1,15 @@
 ﻿{
     "version":  2,
-    "updated":  "2026-08-14T08:01:00",
+    "updated":  "2026-08-15T14:31:54",
     "tasks":  {
                   "automation-health-monitor":  {
-                                                    "current":  "8EB0E74EE60CD2339A157E6C0BF9232571A3CFA0CED79E7230459D3AB90EBC66",
+                                                    "current":  "9C6A9DA1E6CBF450193D9578F9C256EF53924D63397B6AC8E9EC25D54B0307EA",
                                                     "history":  [
                                                                     "41D87E9606790069176A5D2F65424C64C1F0FCCA15B967B349B5517D4F02E472",
                                                                     "21491AE6A325554D9D86ADEF830ADF66ECE8A5F46DD03172AFDB30200B36C3E4",
                                                                     "BD4E4D7CA7B2CC259566BF8F75275C0879288EB9F4FA04C7E67AA69E95F65656",
-                                                                    "8EB0E74EE60CD2339A157E6C0BF9232571A3CFA0CED79E7230459D3AB90EBC66"
+                                                                    "8EB0E74EE60CD2339A157E6C0BF9232571A3CFA0CED79E7230459D3AB90EBC66",
+                                                                    "9C6A9DA1E6CBF450193D9578F9C256EF53924D63397B6AC8E9EC25D54B0307EA"
                                                                 ],
                                                     "pending":  null
                                                 },
@@ -33,6 +34,13 @@
                                                                  ],
                                                      "pending":  null
                                                  },
+                  "ora-acquisition-underwriting-eval-harness":  {
+                                                                    "current":  "20C39D6545142FCC89B06A196E461B668E3F90FF2A3E249A08D52A9A9429CE9C",
+                                                                    "history":  [
+                                                                                    "20C39D6545142FCC89B06A196E461B668E3F90FF2A3E249A08D52A9A9429CE9C"
+                                                                                ],
+                                                                    "pending":  null
+                                                                },
                   "ora-am-brief":  {
                                        "current":  "061C6036F557F30AF8875418435CD66917F8EC87EF23BEA61599DB1A2667918A",
                                        "history":  [
@@ -50,10 +58,11 @@
                                                                  "pending":  null
                                                              },
                   "ora-appsec-sweep":  {
-                                           "current":  "03A0DFEE05DD8B7890727D5A9EF017C143A960BC5A40400FDE1F8B752A65DD08",
+                                           "current":  "415F8F7B47DD9D98FCC5B697F11DC8A320F6EB00A070F20661E8EB19C3E521D4",
                                            "history":  [
                                                            "7CE3876CC97D93F9498512733E811926EB68A2DA2EF2FE0B596D02DE921DEA6F",
-                                                           "03A0DFEE05DD8B7890727D5A9EF017C143A960BC5A40400FDE1F8B752A65DD08"
+                                                           "03A0DFEE05DD8B7890727D5A9EF017C143A960BC5A40400FDE1F8B752A65DD08",
+                                                           "415F8F7B47DD9D98FCC5B697F11DC8A320F6EB00A070F20661E8EB19C3E521D4"
                                                        ],
                                            "pending":  null
                                        },
@@ -107,10 +116,11 @@
                                                      "pending":  null
                                                  },
                   "ora-cc-schematic-refresh":  {
-                                                   "current":  "150F12BFCDCEA1830E3E27EB8F0CFEBC42790DE931697A6DA2732F105E5D5389",
+                                                   "current":  "66647D37A74A1CBCDE194844D44E841A2C3CAC68406E69778EFAE4B92F27AAAA",
                                                    "history":  [
                                                                    "47B2C9A0056CE189B497FD10BEC3120D6B53D519BCA494BE810143293039F689",
-                                                                   "150F12BFCDCEA1830E3E27EB8F0CFEBC42790DE931697A6DA2732F105E5D5389"
+                                                                   "150F12BFCDCEA1830E3E27EB8F0CFEBC42790DE931697A6DA2732F105E5D5389",
+                                                                   "66647D37A74A1CBCDE194844D44E841A2C3CAC68406E69778EFAE4B92F27AAAA"
                                                                ],
                                                    "pending":  null
                                                },
@@ -227,6 +237,13 @@
                                                             ],
                                                 "pending":  null
                                             },
+                  "ora-eval-harness-first-cron-check":  {
+                                                            "current":  "920F52444BA5C2F881AF01B43E1EF66BFC2C742AD1CC1775FC9936A3A53E6AB5",
+                                                            "history":  [
+                                                                            "920F52444BA5C2F881AF01B43E1EF66BFC2C742AD1CC1775FC9936A3A53E6AB5"
+                                                                        ],
+                                                            "pending":  null
+                                                        },
                   "ora-exit-cap-spotcheck":  {
                                                  "current":  "A64ADB45C372D791F89C9E2818BAB9A6D0E3B9747087F757C411B54F20380CE0",
                                                  "history":  [
@@ -258,13 +275,14 @@
                                                     "pending":  null
                                                 },
                   "ora-health-guard":  {
-                                           "current":  "9D56050C76C5722391A8A8BB6F34CE4C2132BA9E724DDD74532CB9F7401C5A80",
+                                           "current":  "E5A587E6F42446790F4F94E980A2F536743EB3D3FB954423020470E838FA3D52",
                                            "history":  [
                                                            "967802DBD102D8611E9AB9301505EB893113AA7F090C84E90A8F8E30500C243E",
                                                            "50AAB2FDC6C9C7E45A2657DA4FF44900F054913118C569E15198ED4277D85830",
                                                            "A80E7DAEC86C5452E8BB14DC2E277A3071F4091F10BA81F959077FFB343459D2",
                                                            "519710848DA0752FCEDB631D81B60D2486FF18FE2C02FDA1596C8251BB15C977",
-                                                           "9D56050C76C5722391A8A8BB6F34CE4C2132BA9E724DDD74532CB9F7401C5A80"
+                                                           "9D56050C76C5722391A8A8BB6F34CE4C2132BA9E724DDD74532CB9F7401C5A80",
+                                                           "E5A587E6F42446790F4F94E980A2F536743EB3D3FB954423020470E838FA3D52"
                                                        ],
                                            "pending":  null
                                        },
@@ -308,10 +326,11 @@
                                                      "pending":  null
                                                  },
                   "ora-master-workbook-ingest":  {
-                                                     "current":  "776F2937E24AE18B014F1EAB7998D23958B1C97C6F71486F4672FD74F1837658",
+                                                     "current":  "C9B8CB6ABE699B7FC760584DF1664C0583F4D8D45029C122185B8E9B89D629EC",
                                                      "history":  [
                                                                      "36171E4FED9CE87ED2D30EE677771DCF1598B749FE2DEF4481341434318C9BF7",
-                                                                     "776F2937E24AE18B014F1EAB7998D23958B1C97C6F71486F4672FD74F1837658"
+                                                                     "776F2937E24AE18B014F1EAB7998D23958B1C97C6F71486F4672FD74F1837658",
+                                                                     "C9B8CB6ABE699B7FC760584DF1664C0583F4D8D45029C122185B8E9B89D629EC"
                                                                  ],
                                                      "pending":  null
                                                  },
@@ -349,11 +368,12 @@
                                             "pending":  null
                                         },
                   "ora-open-sessions-board":  {
-                                                  "current":  "418B6B25BA94B6E066E3A3FAEA144EE115D9BEF3B30E7DFABE8F6E7638E85447",
+                                                  "current":  "D6B2F3F5B2072DF77747679F0968182B6E0D0742FEC1EC1D6275C084E3655029",
                                                   "history":  [
                                                                   "50C024C39C5AC810D990AD39BB1977B6DFD2CAF06AA60893C0938E37AC9CD938",
                                                                   "3206C7F0F4016265EF931022CE4134883E70106CC4834160E0DE12DBF6391E79",
-                                                                  "418B6B25BA94B6E066E3A3FAEA144EE115D9BEF3B30E7DFABE8F6E7638E85447"
+                                                                  "418B6B25BA94B6E066E3A3FAEA144EE115D9BEF3B30E7DFABE8F6E7638E85447",
+                                                                  "D6B2F3F5B2072DF77747679F0968182B6E0D0742FEC1EC1D6275C084E3655029"
                                                               ],
                                                   "pending":  null
                                               },
@@ -394,6 +414,13 @@
                                                           ],
                                               "pending":  null
                                           },
+                  "ora-psa-drift-watch-retime-efficacy-check":  {
+                                                                    "current":  "737B348811FFA1D4FD4D132AED6B4E47A2D2AB6717B9053C7F90DBCC24B12014",
+                                                                    "history":  [
+                                                                                    "737B348811FFA1D4FD4D132AED6B4E47A2D2AB6717B9053C7F90DBCC24B12014"
+                                                                                ],
+                                                                    "pending":  null
+                                                                },
                   "ora-replacement-cost-refresh":  {
                                                        "current":  "8BBC3DB3DA7A970F86B682C7C13BAAE5BF5254F39E2405B8EEC3F44D4C1D25EC",
                                                        "history":  [
@@ -401,6 +428,13 @@
                                                                    ],
                                                        "pending":  null
                                                    },
+                  "ora-rev10-remediation-efficacy-check":  {
+                                                               "current":  "C0F01F2D865037F3A69B9AC6A1C9F761E163743A94E82A070E61AAFA109D3546",
+                                                               "history":  [
+                                                                               "C0F01F2D865037F3A69B9AC6A1C9F761E163743A94E82A070E61AAFA109D3546"
+                                                                           ],
+                                                               "pending":  null
+                                                           },
                   "ora-session-sweep":  {
                                             "current":  "91E69138A957CDFC3429B49D46069C8C0785713A8B9ECD83BF3D014192CA7E32",
                                             "history":  [
@@ -456,9 +490,10 @@
                                                    "pending":  null
                                                },
                   "ora-task-integrity-guard":  {
-                                                   "current":  "3B71D13DC4005FE86632E2E8AC5255BB79E72B126A7FDEECD4A11CCE96701FED",
+                                                   "current":  "0EFC96189ABC9106671B83755F335DA0DC7C565233CA23AA1F8D86BD33DA1E7A",
                                                    "history":  [
-                                                                   "3B71D13DC4005FE86632E2E8AC5255BB79E72B126A7FDEECD4A11CCE96701FED"
+                                                                   "3B71D13DC4005FE86632E2E8AC5255BB79E72B126A7FDEECD4A11CCE96701FED",
+                                                                   "0EFC96189ABC9106671B83755F335DA0DC7C565233CA23AA1F8D86BD33DA1E7A"
                                                                ],
                                                    "pending":  null
                                                },
