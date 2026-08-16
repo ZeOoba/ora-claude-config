@@ -21,11 +21,13 @@ HERE = Path(__file__).resolve().parent
 SCRIPT = HERE / "backup-session-context.py"
 PY = sys.executable
 
-# The scrub resolves its roster as <scrub>/../hooks/confidential-terms.json, and
-# that roster is gitignored -- so a WORKTREE copy of the scrub has no roster and
-# fails OPEN (prints "scan skipped (fail-open)" and still exits 0 "CLEAN").
+# The scrub resolves its roster as <scrub>/../hooks/confidential-terms.json.
+# Whether HERE's sibling roster exists depends on the checkout (gitignored, so
+# absent in a fresh worktree but legitimately PRESENT in the production
+# install) -- so the roster-absent branch is exercised against an ISOLATED
+# staged copy (stage_scrub_tree with roster_body=None), never against HERE.
 # That gives both verdict branches real, unmocked components to test against:
-#   - HERE/scrub-before-optin.py      -> roster absent  -> UNVERIFIED
+#   - staged scrub, no roster staged  -> roster absent  -> UNVERIFIED
 #   - LIVE_SCRUB (the live install)   -> roster present -> CLEAN
 LIVE_SCRUB = Path(r"C:\Users\Owner\.claude\maintenance\scrub-before-optin.py")
 LIVE_ROSTER = Path(r"C:\Users\Owner\.claude\hooks\confidential-terms.json")
@@ -197,22 +199,30 @@ def test_missing_roster_is_never_recorded_as_clean():
     test_corrupt_roster_hits_the_fail_open_branch, which stages a roster that is
     PRESENT but unparseable. This test keeps the weaker property it actually
     pins."""
-    scrub_roster = HERE.parent / "hooks" / "confidential-terms.json"
-    assert not scrub_roster.is_file(), (
-        "this test needs the worktree roster to be ABSENT (it is gitignored); "
-        "found one at %s -- the fail-open branch is no longer being exercised"
-        % scrub_roster)
     with Sandbox() as sb:
-        r = run_backup(sb.args("--scrub", str(HERE / "scrub-before-optin.py")), expect_rc=0)
+        # Environment decoupled 2026-08-15: the old version ran the LIVE scrub at HERE
+        # and ASSERTED the live checkout's hooks/confidential-terms.json did not exist
+        # -- true only in a fresh worktree, so in the production checkout (roster
+        # legitimately present) the precondition itself failed before the behavioral
+        # assertions ever ran. Staging an isolated tree with roster_body=None makes the
+        # staged copy's <scrub>/../hooks/confidential-terms.json resolution absent by
+        # construction, regardless of what the live checkout looks like.
+        staged = stage_scrub_tree(sb.root / "staged", None)
+        if staged is None:
+            print("  SKIP test_missing_roster_is_never_recorded_as_clean (live sources absent)")
+            return
+        assert not (sb.root / "staged" / "hooks" / "confidential-terms.json").is_file(), \
+            "staging with roster_body=None must leave the staged roster ABSENT"
+        r = run_backup(sb.args("--scrub", str(staged)), expect_rc=0)
         ledger = (sb.local / "backup-log.txt").read_text(encoding="utf-8").upper()
         assert "UNVERIFIED" in ledger, \
-            "a fail-open scrub must record UNVERIFIED:\n%s" % ledger
+            "a roster-absent scrub must record UNVERIFIED:\n%s" % ledger
         assert "CLEAN" not in ledger, \
-            "a fail-open scrub must NEVER be recorded as CLEAN:\n%s" % ledger
+            "a roster-absent scrub must NEVER be recorded as CLEAN:\n%s" % ledger
         combined = (r.stdout + r.stderr).lower()
         assert "unverified" in combined, \
             "the run must say out loud that the scan was not verifiable:\n%s" % r.stdout
-    print("  PASS test_missing_roster_is_never_recorded_as_clean (early return)")
+    print("  PASS test_missing_roster_is_never_recorded_as_clean (early return, isolated tree)")
 
 
 def test_missing_scrub_script_is_unverified_not_clean():
@@ -256,6 +266,9 @@ def stage_scrub_tree(root, roster_body):
     The scrub resolves its roster as <scrub>/../hooks/confidential-terms.json, so
     staging is the only way to exercise a roster that is PRESENT but unusable --
     the fail-open branch a roster-existence check can never reach.
+    roster_body=None stages everything EXCEPT the roster file itself, so the
+    staged copy's roster resolution is guaranteed ABSENT no matter what the live
+    checkout's real roster looks like (the roster-missing early return).
     Returns the staged scrub path, or None if the live sources are unavailable."""
     live_maint = Path(r"C:\Users\Owner\.claude\maintenance")
     live_lib = Path(r"C:\Users\Owner\.claude\hooks\lib\secret_patterns.py")
@@ -268,7 +281,8 @@ def stage_scrub_tree(root, roster_body):
     for src in needed[:2]:
         shutil.copy2(str(src), str(root / "maintenance" / src.name))
     shutil.copy2(str(live_lib), str(root / "hooks" / "lib" / "secret_patterns.py"))
-    (root / "hooks" / "confidential-terms.json").write_text(roster_body, encoding="utf-8")
+    if roster_body is not None:
+        (root / "hooks" / "confidential-terms.json").write_text(roster_body, encoding="utf-8")
     return root / "maintenance" / "scrub-before-optin.py"
 
 
