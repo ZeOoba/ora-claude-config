@@ -140,6 +140,33 @@ DESTRUCTIVE_DELETE = Tier("allow-destructive-delete", "destructive-delete", 1800
 #      delete at all -- move to /archive/. This makes both mechanical.
 # Everything else -- relative paths, build artifacts, temp, scratchpad, worktrees
 # -- is ALLOWED, deliberately. A guard people route around protects nothing.
+#
+# ------------------------------------------------------------------------------
+# THREAT MODEL, STATED NARROWLY ON PURPOSE (2026-08-16, after 4 review rounds).
+#
+# THIS IS A RAIL AGAINST ACCIDENTAL AND CARELESS DELETION. IT IS NOT AN
+# ADVERSARIAL CONTROL, and must not be cited as one in any audit, review or
+# design that assumes an agent cannot delete a protected tree.
+#
+# Four independent review rounds drove 10 real defects out of this code, and the
+# fourth could not produce a single bypass a non-adversarial operator would
+# plausibly type. What it COULD still produce, and what remains open by design:
+#   rm -rf $'\057'                  ANSI-C quoting
+#   P=~/Documents; rm -rf $P/deals  a variable holding the path
+#   F=-rf; rm $F ~/Documents/deals  a variable holding the flags
+#   echo <base64> | base64 -d | sh  any encode-then-execute form
+# These are not oversights and they are not closable here. This guard matches
+# PRE-EXPANSION COMMAND TEXT; the shell has unboundedly many spellings that
+# expand to one operand, so no regex over that text can enumerate them. Each
+# round closed a real idiom, but the tail is infinite and patching it further
+# buys asymptotically nothing -- which is why round 4's explicit recommendation
+# was to stop patching and narrow this claim instead.
+#
+# If the threat model genuinely includes an agent that INTENDS to delete, the
+# enforcement point is a layer that observes post-expansion argv (an OS/audit
+# hook), not pre-execution command text. Building that is a separate decision;
+# pretending this is that is the failure mode worth preventing.
+# ------------------------------------------------------------------------------
 _CATASTROPHIC_DELETE = frozenset((
     ".", "..", "/", "\\", "*", "~", "$HOME", "${HOME}", "%USERPROFILE%",
     "./", ".\\", "/*", "~/", "~/*", "$HOME/*",
