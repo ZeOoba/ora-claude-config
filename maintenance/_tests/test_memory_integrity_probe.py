@@ -190,6 +190,95 @@ got = _orphans_in(backlink=True, commit_note_b=False)
 expect("true positive preserved: committed pointer to an UNCOMMITTED file is still reported",
        got == ["note_b.md"], "got %r" % got)
 
+# --- check 0: the size gate covers SUB-INDEXES, not just MEMORY.md -------------------
+# Added 2026-08-16 (Gabriel-ratified). The 2026-08-03 split made sub-indexes the lever
+# that keeps MEMORY.md under the 24.4KB Read-tool limit, but check 0 stat'd `INDEX`
+# (MEMORY.md) ALONE -- so the files absorbing the growth were themselves ungated.
+# Measured the day this was written: INDEX_reference.md was 18,361 B, LARGER than the
+# 16,936 B root index it had been split out of, and ~6KB from the same ceiling, with
+# nothing anywhere that would ever warn. The fix for a bounded artifact had created an
+# unbounded child. Sub-indexes are gated on the SAME constants and the SAME severities
+# as the root: a sub-index past HARD is exactly as unreadable as the root would be, and
+# treating it as a lesser finding rebuilds the blind spot one level down.
+
+W, H = mip.MEMORY_WARN_BYTES, mip.MEMORY_HARD_BYTES
+
+iss, warn = mip.size_gate([("MEMORY.md", W - 1)])
+expect("root under WARN -> silent", (iss, warn) == ([], []), "got %r / %r" % (iss, warn))
+
+iss, warn = mip.size_gate([("MEMORY.md", W + 1)])
+expect("root past WARN -> 1 warning, 0 issues", len(iss) == 0 and len(warn) == 1,
+       "got %r / %r" % (iss, warn))
+
+iss, warn = mip.size_gate([("MEMORY.md", H + 1)])
+expect("root past HARD -> 1 issue, 0 warnings", len(iss) == 1 and len(warn) == 0,
+       "got %r / %r" % (iss, warn))
+
+# the new coverage: identical thresholds and severities for a sub-index
+iss, warn = mip.size_gate([("MEMORY.md", 100), ("INDEX_reference.md", W - 1)])
+expect("sub-index under WARN -> silent", (iss, warn) == ([], []), "got %r / %r" % (iss, warn))
+
+iss, warn = mip.size_gate([("MEMORY.md", 100), ("INDEX_reference.md", W + 1)])
+expect("sub-index past WARN -> 1 warning naming the sub-index",
+       len(iss) == 0 and len(warn) == 1 and "INDEX_reference.md" in warn[0],
+       "got %r / %r" % (iss, warn))
+
+iss, warn = mip.size_gate([("MEMORY.md", 100), ("INDEX_reference.md", H + 1)])
+expect("sub-index past HARD -> a real ISSUE (same severity as root), naming the sub-index",
+       len(iss) == 1 and len(warn) == 0 and "INDEX_reference.md" in iss[0],
+       "got %r / %r" % (iss, warn))
+
+# boundary: the constants are exclusive (> not >=), matching the pre-existing root behaviour.
+# Note H is itself past W, so exactly-at-HARD is not a HARD breach but IS a WARN breach --
+# the two thresholds are separate questions and an earlier version of this test conflated them.
+iss, warn = mip.size_gate([("MEMORY.md", W), ("INDEX_reference.md", W)])
+expect("exactly-at-WARN is not a breach (> semantics preserved, root and sub-index)",
+       (iss, warn) == ([], []), "got %r / %r" % (iss, warn))
+
+iss, warn = mip.size_gate([("INDEX_reference.md", H)])
+expect("exactly-at-HARD is not a HARD breach, but does warn (it is past WARN)",
+       len(iss) == 0 and len(warn) == 1, "got %r / %r" % (iss, warn))
+
+# every breaching file is reported, not just the first
+iss, warn = mip.size_gate([("MEMORY.md", H + 1), ("INDEX_a.md", H + 1), ("INDEX_b.md", W + 1)])
+expect("all breaching index files reported (2 issues + 1 warning)",
+       len(iss) == 2 and len(warn) == 1, "got %r / %r" % (iss, warn))
+
+# --- check 0 wiring: sized_index_files() actually collects the sub-indexes ------------
+# The pure gate above is worthless if main() never hands it a sub-index. This proves the
+# collection step, which is where the original defect lived.
+
+def _sized_in(names_bodies, subindexes):
+    tmp = tempfile.mkdtemp(prefix="mip_size_gate_")
+    for name, body in names_bodies:
+        with open(os.path.join(tmp, name), "w", encoding="utf-8") as fh:
+            fh.write(body)
+    return mip.sized_index_files(tmp, os.path.join(tmp, "MEMORY.md"), subindexes)
+
+sized = _sized_in([("MEMORY.md", "x" * 10), ("INDEX_reference.md", "y" * 20)],
+                  ["INDEX_reference.md"])
+expect("sized_index_files returns the root FIRST, then each sub-index, with real byte sizes",
+       sized == [("MEMORY.md", 10), ("INDEX_reference.md", 20)], "got %r" % (sized,))
+
+sized = _sized_in([("MEMORY.md", "x" * 10)], [])
+expect("no sub-indexes -> root only (pre-split behaviour unchanged)",
+       sized == [("MEMORY.md", 10)], "got %r" % (sized,))
+
+# A sub-index that vanished between collect_indexed_links() and the stat must not invent a
+# size finding -- check 1 already reports it as an orphan pointer, and a probe that cannot
+# look must not manufacture findings.
+sized = _sized_in([("MEMORY.md", "x" * 10)], ["INDEX_missing.md"])
+expect("an unstattable sub-index is skipped, not invented as a size finding",
+       sized == [("MEMORY.md", 10)], "got %r" % (sized,))
+
+# --- the LIVE corpus: every sub-index is now actually under the gate ------------------
+live_idx = open(mip.INDEX, encoding="utf-8").read()
+_, live_subs = mip.collect_indexed_links(live_idx, mip.MEM)
+live_sized = mip.sized_index_files(mip.MEM, mip.INDEX, live_subs)
+expect("live run gates the root plus every sub-index MEMORY.md adopts",
+       len(live_sized) == 1 + len(live_subs) and live_sized[0][0] == "MEMORY.md",
+       "subs=%r sized=%r" % (live_subs, live_sized))
+
 passed = sum(1 for ok, _ in results if ok)
 print("memory-integrity-probe tests: %d/%d passed" % (passed, len(results)))
 sys.exit(0 if passed == len(results) else 1)
