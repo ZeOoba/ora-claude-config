@@ -24,6 +24,7 @@
 - [Live checkout 132 behind 08-15](project_live_checkout_132_behind_settings_json_overlap_2026-08-15.md) — `~/.claude` 132 commits behind its own remote tip; dirty set collides with another session
 - **PLANNED, awaiting Gabriel:** [artifact-content top-5](project_artifact_content_top5_plan_2026-07-18.md) · [setup-improvement top-5](project_setup_improvement_top5_plan_2026-07-18.md) + [Plan 2 design](project_plan2_effect_verification_design_2026-07-18.md)
 - [Acquisition-underwriting eval harness — PILOTED + scheduled 08-14](reference_skill_eval_harness_gap_2026-08-14.md) — merged `ora-skills` main; poll registered (`ora-acquisition-underwriting-eval-harness`)
+- **[Automation Audit Rev 11 08-16](project_automation_audit_rev11_2026-08-16.md)** — narrow follow-up, not full-fleet; README HOOKS→MAINT diagram edge + 7-file `.gitignore` churn fix, both executed; not yet PR'd to main
 - **[Automation Audit Rev 10 08-14](project_automation_audit_rev10_2026-08-14.md)** — first UNATTENDED run; it loaded a STALE v1.2 copy of its own skill (repo is v1.3); eval-harness dirties `ora-skills` daily; 3 zero-plugin marketplaces
 - [Rev 9 remediation FULLY CLOSED 08-15](project_audit_rev9_remediation_landed_2026-08-14.md) — splits reimported live; capex-budgeting + 5 siblings confirmed Removed via Claude in Chrome
 - [Automation Audit Rev 9 08-14](project_automation_audit_rev9_2026-08-14.md) — skills-only: usage ranking, top-skill token recs, 49-skill zero-usage tail sorted keep/ask; first rev under the new 4-band cap

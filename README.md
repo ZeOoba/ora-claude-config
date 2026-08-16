@@ -41,6 +41,7 @@ flowchart TB
         MAINT["maintenance/\nhealth/probe scripts"]
         CFG -->|registers| HOOKS
         CFG -->|exposes| SKILLS
+        HOOKS -->|invokes, e.g. doctrine/governor probes\nduring the git pre-push chain| MAINT
     end
 
     SCHEDULER(("External Windows Task Scheduler\n/ Cowork scheduler"))
@@ -56,7 +57,11 @@ flowchart TB
 session. `settings.json` wires up the hooks and exposes the skills/agents/commands/
 workflows a session can call; the hooks then guard every tool call and session-lifecycle
 event that follows (not drawn as a self-loop — Mermaid rejects an edge from a subgraph's
-own child back to the subgraph). `scheduled-tasks/*/SKILL.md` specs point outward to an
+own child back to the subgraph). `HOOKS -> MAINT` is a real, not illustrative, edge:
+`hooks/git-prepush-doctrine-gate.py` directly launches
+`maintenance/doctrine-integrity-probe.py` as part of the pre-push chain, so a hook calling
+into a maintenance probe is load-bearing, not simplified for the picture.
+`scheduled-tasks/*/SKILL.md` specs point outward to an
 external scheduler node because they're read by the Windows/Cowork scheduler, not by
 this session directly. Below that, the live directory on disk contains the whole session
 and is the only thing that ever pushes to GitHub (dotted arrow, opt-in files only) — the
