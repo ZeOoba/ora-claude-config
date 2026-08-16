@@ -27,10 +27,14 @@ Design rules (mirror the EOS reliability spec):
 
 Usage:  python setup-self-audit.py [--json] [--strict]
 """
-import os, sys, json, re, glob, datetime, traceback, subprocess
+import os, sys, json, re, glob, datetime, traceback, subprocess, hashlib
 
 HOME = os.path.expanduser("~")
 CLAUDE = os.path.join(HOME, ".claude")
+# ADDED 2026-08-15 (Automation Audit R10-1): the canonical skill-source repo.
+# check_skill_mirror_drift() below compares its copies against CLAUDE/skills --
+# module-level so tests can monkeypatch it independently of CLAUDE.
+ORA_SKILLS_DIR = os.path.join(HOME, "ora-skills")
 ROAMING = os.path.join(os.environ.get("APPDATA", os.path.join(HOME, "AppData", "Roaming")), "Claude")
 NOW = datetime.datetime.now(datetime.timezone.utc)
 
@@ -216,6 +220,71 @@ def check_skills():
                 f"no collapsed-heading regression ({census}); not a strict YAML parse")
     except Exception as e:
         add("skill-frontmatter", "SKIP", f"error: {e}")
+
+# ---- Check 2b: SKILL MIRROR CONTENT DRIFT (2026-08-15, Automation Audit R10-1) ----
+# check_skills() above validates frontmatter STRUCTURE across every mirror; it never
+# compares CONTENT between the canonical ~/ora-skills copy and the local
+# ~/.claude/skills copy of the SAME skill. R10-1: a scheduled ora-setup-audit run
+# resolved to a stale local mirror (v1.2) instead of the canonical repo (v1.3) --
+# the mirror was simply never re-synced after the repo moved on. Only a handful of
+# skills are locally mirrored at all (most live in ~/ora-skills only, or the store
+# only); this flags exactly the case where a skill exists in BOTH places and they
+# have gone out of sync, which is the one shape that can silently execute stale logic.
+def _skill_md5(path):
+    try:
+        with open(path, "rb") as f:
+            return hashlib.md5(f.read()).hexdigest()
+    except Exception:
+        return None
+
+
+def find_skill_mirror_drift(repo_skills_dir, local_skills_dir):
+    """Pure filesystem read, no module globals: skill names whose SKILL.md exists
+    under BOTH repo_skills_dir and local_skills_dir with DIFFERENT byte content.
+    A skill present in only one location is not drift -- that is the normal case
+    for the vast majority of skills and carries no divergence risk."""
+    try:
+        repo_names = set(os.listdir(repo_skills_dir)) if os.path.isdir(repo_skills_dir) else set()
+    except Exception:
+        repo_names = set()
+    try:
+        local_names = set(os.listdir(local_skills_dir)) if os.path.isdir(local_skills_dir) else set()
+    except Exception:
+        local_names = set()
+    drift = []
+    for name in sorted(repo_names & local_names):
+        rp = os.path.join(repo_skills_dir, name, "SKILL.md")
+        lp = os.path.join(local_skills_dir, name, "SKILL.md")
+        if not (os.path.isfile(rp) and os.path.isfile(lp)):
+            continue
+        rh, lh = _skill_md5(rp), _skill_md5(lp)
+        if rh is not None and lh is not None and rh != lh:
+            drift.append(name)
+    return drift
+
+
+def check_skill_mirror_drift():
+    try:
+        repo_skills = ORA_SKILLS_DIR
+        local_skills = os.path.join(CLAUDE, "skills")
+        if not os.path.isdir(repo_skills):
+            add("skill-mirror-drift", "SKIP", f"ora-skills repo not found at {repo_skills}")
+            return
+        if not os.path.isdir(local_skills):
+            add("skill-mirror-drift", "SKIP", "no local ~/.claude/skills dir")
+            return
+        drift = find_skill_mirror_drift(repo_skills, local_skills)
+        if drift:
+            add("skill-mirror-drift", "WARN",
+                f"{len(drift)} skill(s) mirrored in BOTH ~/ora-skills and ~/.claude/skills "
+                f"have DIVERGED content -- a scheduled run can resolve to the stale local "
+                f"copy (Automation Audit R10-1 defect class, 2026-08-14/15): "
+                f"{', '.join(drift)}", drift)
+        else:
+            add("skill-mirror-drift", "OK",
+                "no repo<->local ~/.claude/skills mirror content divergence")
+    except Exception as e:
+        add("skill-mirror-drift", "SKIP", f"error: {e}")
 
 # ---- Check 3: SECRET SCAN ----
 # Patterns now come from hooks/lib/secret_patterns.py -- ONE source shared with the pre-push
@@ -523,8 +592,9 @@ def check_skill_overrides():
 def main():
     as_json = "--json" in sys.argv
     strict = "--strict" in sys.argv
-    for fn in (check_fleet, check_skills, check_secrets, check_connectors, check_drift,
-               check_prepush_shim, check_windows_tasks, check_skill_overrides):
+    for fn in (check_fleet, check_skills, check_skill_mirror_drift, check_secrets,
+               check_connectors, check_drift, check_prepush_shim, check_windows_tasks,
+               check_skill_overrides):
         try:
             fn()
         except Exception:

@@ -39,10 +39,23 @@ Exit: 0 = no open DISPATCH-THROTTLED findings   1 = at least one   2 = could not
 """
 import argparse, datetime as dt, json, os, re, sys, time
 
+# Dynamic store resolution (2026-08-15): both registry paths used to hardcode
+# the a6ad2c61.../583f08bc... session UUID pair directly, unlike every other
+# probe (cc-verifier-probe.py, registry-membership-probe.py, fleet-status.py),
+# which already route through the shared discover_store() -- "GUIDs rotate,
+# never hardcode" (store_discovery.store_name() docstring). A reinstall or
+# session-dir rotation would have silently blinded this probe to both fleets.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "_shared"))
+try:
+    import store_discovery as _sd
+except Exception:
+    _sd = None  # fail-open: discover_store() returns None -> REG path is None,
+                # main()'s existing per-fleet try/except already reports that
+                # as "registry unreadable" via could_not_look.
+
 STORES = os.path.join(os.environ.get("APPDATA", r"C:\Users\Owner\AppData\Roaming"), "Claude")
-ORG = r"a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\583f08bc-0123-4111-8158-8fe3d927e350"
-REG = {"cc": os.path.join(STORES, "claude-code-sessions", ORG, "scheduled-tasks.json"),
-       "lams": os.path.join(STORES, "local-agent-mode-sessions", ORG, "scheduled-tasks.json")}
+REG = {"cc": _sd.discover_store("claude-code-sessions") if _sd else None,
+       "lams": _sd.discover_store("local-agent-mode-sessions") if _sd else None}
 LOGDIR = os.path.join(STORES, "logs")
 
 SPAWN = re.compile(r"Spawning new session for scheduled task ([A-Za-z0-9._-]+)")

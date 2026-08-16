@@ -12,6 +12,312 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-15 — feat/model-canary-probe-step25's 146-behind divergence reconciled and pushed
+
+Gabriel: "claim the 146-behind reconciliation" -> "go ahead" -> "proceed with the override" (3-step authorization across the investigation).
+
+Claimed `repo-housekeeping` before starting (matching this checkout's single-writer discipline). Investigation found the reconciliation had **already been done by another session**: a branch `reconcile/canary-146-merge-2026-08-15` existed on origin (pushed, no PR opened) that was verified — via ancestor checks, not assumption — to fully contain both `origin/feat/model-canary-probe-step25`'s tip AND this session's own local HEAD, with zero leftover conflict markers across the tree. Attempted to open a PR from it (`gh pr create`); GitHub rejected it with "No commits between" — origin had already absorbed that exact branch directly onto `feat/model-canary-probe-step25` (`318de35`) in the few minutes between fetches, landed by yet another concurrent session. Local checkout was already a strict superset (2 trivial commits ahead: `ora-county-sales-monitor` scheduled-task registration + a merge of origin's tip) — no local merge was ever actually needed from this session.
+
+**Push blocked by 2 pre-existing hook-test failures, confirmed unrelated to the diff being pushed** (which touched only `scheduled-tasks/ora-county-sales-monitor/SKILL.md`, `skills/county-sales-monitor/SKILL.md`, `references/county-endpoints.md`): `test-backup-session-context.py` failed on a stray `confidential-terms.json` worktree-roster file left by unrelated concurrent worktree activity; `test-governor-drift-probe.py` failed on a false-positive — the probe flagged a real deal's actual DSCR (754 Old State Route 74, 1.75x, UNDER CONTRACT — PSA FULLY EXECUTED) in `projects.md` as canonical-governor drift, unable to distinguish a deal's underwritten DSCR from a mis-stated 1.25x floor. Surfaced both to Gabriel with the diagnosis rather than self-authorizing; he approved in-turn. Minted `allow-hook-test-failure`, pushed successfully, deleted the token immediately after.
+
+**Note from the pre-push hook itself, worth tracking:** "this exact failure has now been overridden 2 times by 2 distinct sessions in the last 24h" (the `test-governor-drift-probe.py` false positive) — a real fix (excluding deal-specific DSCR figures from the drift pattern-match, or narrowing it to lines that actually restate the canonical threshold) is likely warranted rather than continuing to override case-by-case.
+
+Checkout is now fully synced with origin (0 ahead, 0 behind). `repo-housekeeping` claim released.
+
+## 2026-08-15 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `d480def5-7300-49fe-875b-cf807ae8ded6` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel approved in-turn 2026-08-15 ("proceed with the override") to push past 2 pre-push hook-test failures. Both confirmed unrelated to this diff (which only touches scheduled-tasks/ora-county-sales-monitor/SKILL.md, skills/county-sales-monitor/SKILL.md, references/county-endpoints.md): (1) test-backup-session-context.py::test_missing_roster_is_never_recorded_as_clean fails because a hooks/confidential-terms.json worktree roster file is present where the test expects it absent -- left by unrelated concurrent worktree activity elsewhere in this checkout; (2) test-governor-drift-probe.py::test_event_log_excluded_e2e fails because the probe flags a real deal's actual DSCR (754 Old State Route 74, 1.75x, UNDER CONTRACT -- PSA FULLY EXECUTED) in projects.md as a false-positive governor-constant drift -- pattern-matching can't distinguish a deal's underwritten DSCR from a mis-stated canonical 1.25x floor. Neither failure touches or is caused by this diff.
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-08-15 20:43:23 local.
+
+## 2026-08-16 — ora-lease-expiration-dashboard: first live run confirms the rebuild works end-to-end
+
+Registered 2026-08-15 (11:20 AM ET Monday, LAMS/Cowork) per the coverage-gap-1 revival — PART 1 rebuilt against the Notion Tenant Database (`b12f4cfd-a995-4755-8341-6435ae8173b4`) after HubSpot Contacts was confirmed superseded; Composio removed in favor of Outlook COM; `Renewal Status` forward-sync added. First scheduled fire produced `2026-08-16_LeaseExpirationDashboard_Report_v01_1.html` (Downloads), the Notion Operations Hub brief, and the ggoldberg@oxfordra.net email — all three legs of the output contract landed.
+
+**Concrete evidence, not just a UI check this time:** 138 non-retired rows pulled via `query_data_sources` SQL, 99 passed the active filter, 8-window bucketing populated (WALT 2.58/2.68 yr incl./excl. MTM), 20-tenant ≤180-day/MTM escalation queue processed (11 HubSpot tasks created, 9 skipped as already-escalated via the idempotency gate, 0 unresolvable, 12 stale tasks flagged for manual reconciliation incl. 1 tenant — Triple Threat Kansas City, LLC — with 2 duplicate open tasks).
+
+**Design decisions from the draft got validated against real platform behavior, not just theory:**
+- The spec's "treat `Annualized Rent`/`Days to Expiration`/`WALT Contribution` as cross-checks, compute fresh in-script, don't trust blindly" instruction turned out to be load-bearing rather than merely cautious — the run's own DQ Flag #4 reports `query_data_sources` SQL **cannot return formula-field values at all** for this data source. A design that had trusted those fields directly would have had nothing to read.
+- The `HubSpot Contact` link fallback-resolution step (parse URL, else search by name) fired on 6 of the 20 escalation-queue tenants (30%) — the "don't assume every row has it populated" caution in the spec was not hypothetical.
+
+**New data-quality findings from this run, Gabriel's to act on, not fixed here:**
+- `Lease Status` unset on 36/138 rows (~110,860 SF, ~$1,365,867/yr, ~22% of portfolio SF) — correctly excluded from bucket/WALT analysis rather than assumed active; needs a Notion backfill pass.
+- `Market Rent PSF` unpopulated on all 138 rows (`Rent PSF (Annual)` only on ~26) — renewal-probability scoring ran on a reduced heuristic (tenure/AR-aging/MTM/PG/lease-type) instead of the full tenant-intelligence 6-factor model as a direct consequence.
+- `Tenant Grade` populated on only 1 of 138 rows (I.M.H LLC) — not usable as a portfolio-wide second signal this cycle, as anticipated in the draft.
+- Columbia Imaging, Inc. has no `Lease Expiration` date on file at all.
+- Triple Threat Kansas City, LLC: 2 duplicate open HubSpot renewal tasks (CRM-hygiene flag, not auto-closed per the stale-task-reconciliation design).
+
+**Why:** closes the second of coverage-gap-1's two real capability gaps (`ora-weekly-sourcing-digest` closed 2026-08-15) with an actual fired run as evidence, not just a registration claim.
+**How to apply:** the DQ flags above are load-bearing for anyone trusting this dashboard's renewal-probability scores near-term — until the Market Rent PSF/Lease Status backfills land, treat those scores as directionally useful, not the full-confidence 6-factor output the design ultimately intends.
+
+## 2026-08-15 — LAMS registry-visibility gap: independent re-verification + path-hardcoding sweep (follow-up to same-day ora-weekly-sourcing-digest entry)
+
+Independently re-investigated the "task registered via Cowork UI but invisible to a Code-session filesystem sweep" gap flagged in the same-day `ora-weekly-sourcing-digest re-registered on LAMS/Cowork` entry, per a fresh Code-session brief covering both `ora-weekly-sourcing-digest` and `ora-lease-expiration-dashboard`. Reproduced the same null result independently, and closed the two open questions that entry left unresolved.
+
+**No second/alternate LAMS store exists.** `discover_store()` (`_shared/store_discovery.py`, the single shared resolver used by `fleet-status.py`, `registry-membership-probe.py`, `cc-verifier-probe.py`, `setup-self-audit.py`, `emit-fleet-heartbeat.py`) scans two roots: `%APPDATA%\Claude` and an MSIX-packaged `%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\...` path. The MSIX path doesn't exist at all on this machine; a fresh recursive glob of `%APPDATA%\Claude` found exactly one `local-agent-mode-sessions\...\scheduled-tasks.json` — the same file `register-scheduled-task` documents. Biggest-then-newest is moot with one candidate. The documented path is still correct; it isn't stale.
+
+**`list_scheduled_tasks` is fleet-scoped by calling surface, not a bug.** From a Code session it only reaches CC/MCP — confirmed both by a doctrine note baked into `ora-deal-sourcing-scan`'s own v1.4 changelog line and directly: a live call from this session returned 36 tasks, every one an exact CC-fleet id, zero LAMS. A Code session structurally cannot corroborate a LAMS-side UI registration; that check requires an actual Cowork-session `list_scheduled_tasks` call (per the original entry's own follow-up note) or Monday's actual fire.
+
+**`ora-lease-expiration-dashboard`'s premise was wrong, not just unverified.** The same-day entry (line 28/37) already documents it as **not started** — still blocked on a Composio→Outlook-COM rewrite, and Composio/Rube is retired. No archived SKILL.md folder exists for it either — only the unrelated, already-live `ora-lease-expiration-brief` does. It was not registered today; most likely confusion with `ora-lease-expiration-brief` in relaying what Gabriel actually did in the UI.
+
+**Path-hardcoding sweep** (requested scope: `ora-skills` + `.claude/maintenance` for the literal `local-agent-mode-sessions` UUID pair, read-only). Production consumers are clean — all route through the shared `discover_store()`/`store_bases()` helper, which explicitly documents "GUIDs rotate → never hardcode." Two **live** scripts do hardcode the `a6ad2c61-.../583f08bc-...` pair and would silently miss a future UUID rotation: `.claude\maintenance\dispatch-skip-probe.py:42-45` and `ora-skills\tools\pending_reimport.py:64-66`. Also hardcoded but lower-risk (already-run one-off migrations in `_applied/`): `apply-scheduler-maintenance.py`, `scrub-rube-from-registry.py`. Partial hardcodes (store-name path segment, no UUID, still bypassing the shared helper): `restore-skill-governor.py:26`, `setup-self-audit.py:183` (`mirror_root`), `open_sessions_probe.py:32` (`LAMS_STORE`).
+
+**Why:** the original entry left two things open — whether a different/newer LAMS store explains the gap, and whether `ora-lease-expiration-dashboard` was genuinely registered. Both are now closed: no alternate store exists, and that task's registration claim was mistaken. Also surfaces a latent fragility (two live hardcoded-UUID scripts) the original investigation didn't scope.
+
+**How to apply:** `ora-weekly-sourcing-digest` is still NOT independently confirmed from disk — don't treat this entry as resolving it either; the closer is a Cowork-session live check or Monday 11:10 AM ET's actual fire. Don't cite `ora-lease-expiration-dashboard` as registered anywhere downstream (fleet counts, advisory reports) until the Composio→Outlook-COM rewrite actually happens. `dispatch-skip-probe.py` and `pending_reimport.py` should be repointed to `discover_store()` next time either is touched, so a future reinstall/session-dir rotation doesn't silently blind them.
+
+## 2026-08-15 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `bb23bdf4-1f4e-450f-9732-cea1e53a83cc` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel in-turn approved push. 2 failures are confirmed pre-existing environmental artifacts of running hook-tests-gate on the primary checkout (not a worktree): test_missing_roster_is_never_recorded_as_clean explicitly requires hooks/confidential-terms.json to be ABSENT (its own assert says so) but that gitignored file is genuinely present in the real primary checkout; the identical merge content just passed 86/86 in a clean isolated worktree with no such file. test-governor-drift-probe UnicodeDecodeError is a codec issue almost certainly from scanning session 8d81172d concurrently-being-written files (event_log.md/county-sales-monitor SKILL.md dirty + a .tmp file observed). Neither test file was touched by this merge.
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-08-15 20:09:14 local.
+
+## 2026-08-15 — ora-weekly-sourcing-digest re-registered on LAMS/Cowork
+
+Revived per the coverage-gap-1 investigation from the same-day skill-text-audit remediation. Original task retired 2026-07-08 (archived spec: `Documents\Claude\Scheduled\_archive_2026-07-08_retired\ora-weekly-sourcing-digest\SKILL.md`); genuinely gone from both fleets, not a rename.
+
+**Registration path took two detours worth recording as doctrine evidence, not just process trivia:**
+1. A Code session drafted the spec (target-markets.json 10-cluster canon incl. Louisville KY, `[MODEL:]` tag, moved off the 05:00-09:30 pileup window to `10 11 * * 1` matching every sibling Monday task's slot band) and initially handed registration to a Cowork session, expecting `register-scheduled-task`'s documented `create_scheduled_task` MCP tool to be available there.
+2. That Cowork session reported the tool absent from its toolset entirely (confirmed via its own `ToolSearch`), and reported (inaccurately, per direct verification below) that Code held "the real LAMS/CC-MCP tooling" — it doesn't; Code's `create_scheduled_task` is CC/MCP-only per its own tool description (`~/.claude/scheduled-tasks/`), a fact directly verified rather than taken on the Cowork session's word.
+3. Gabriel resolved this by registering directly through the Cowork app's native Scheduled-Task creation UI, sidestepping both agent surfaces' tooling gaps entirely — no doctrine deviation (LAMS fleet, Outlook-COM send path preserved verbatim).
+
+**Verification basis (be precise about this, don't overclaim):** Gabriel visually confirmed the task appears in the Cowork app's Scheduled Tasks list, next-run Monday, after a refresh. A Code-session filesystem sweep (the known LAMS registry `scheduled-tasks.json`, a broad grep across the entire `local-agent-mode-sessions` tree, and a folder check under `Documents\Claude\Scheduled\`) could NOT independently corroborate the entry — no trace found anywhere a Code session can read. This is most likely a blind spot in what this Code session can see into the Cowork app's actual state store (not necessarily this exact registry file), not evidence the registration failed — but it's a real gap between "app UI shows it" and "an agent could verify it from disk," worth closing explicitly rather than silently assuming one side is right.
+
+**Follow-up needed:** the next `list_scheduled_tasks` call from an actual Cowork session (or the next `fleet-status.py` / `automation-health-monitor` run that can see the LAMS fleet) should confirm `ora-weekly-sourcing-digest` fires correctly this coming Monday (11:10 AM ET) and appears in a live enumeration, not just the UI. If it's missing from that next live check, this registration needs to be redone, not assumed still-pending.
+
+**Why:** closes one of the two real capability gaps coverage-gap-1 surfaced (the other, `ora-lease-expiration-dashboard`, still needs a Composio->Outlook-COM rewrite before it can be revived — not started).
+**How to apply:** don't cite this entry alone as proof the task is live — cross-check against the next live fleet enumeration per the follow-up above before relying on it for anything downstream (e.g. before flagging its *absence* as a new finding in a future audit).
+
+## 2026-08-15 — open-items follow-up: F7 + automation-health-monitor Save-skill'd, ledger cleared
+
+Gabriel confirmed the Cowork Save-skill click for `package-and-stage-skill` (v1.17, commit `06f1355` — F7's leftover doc text) and `automation-health-monitor` (v1.5, commit `4021c20` — coverage-gap-1's stale `ora-dashboard-refresh` references), both follow-ups to the same-day skill-text-audit remediation. Verified: `main.log` shows `[SkillsPlugin] Delta: 2 to download` -> `Sync complete: 2 downloaded, 0 failed` at 16:52:15, after both commits; cache-mirror content spot-checks confirm both files landed correctly (package-and-stage-skill's description tail reads "v1.17", the SHARED_ROOT_DEPS prose no longer lists `rent-comp` as a live consumer; automation-health-monitor's description tail reads "v1.5", and both the disclaimer-list and REMEDIATION GUIDANCE fixes for `ora-dashboard-refresh` are present verbatim).
+
+Both cleared from `_staging/PENDING_REIMPORT.md` via `pending_reimport.py clear`.
+
+This closes F7 completely. Two items remain genuinely open, both requiring Gabriel's decision rather than a doc fix: F10 (Notion Louisville KY select color — a 10-second manual UI edit was recommended over an uncertain API drop+re-add against the live pipeline tracker) and coverage-gap-1's two real capability gaps (`ora-weekly-sourcing-digest`, `ora-lease-expiration-dashboard` — both dark/recoverable but need `register-scheduled-task` plus, for the latter, a Composio->Outlook-COM rewrite).
+
+**Why:** completes the human-gated registration step for the two follow-up fixes found while investigating the three open items from the original remediation pass.
+**How to apply:** next `ora-skill-store-drift-check` run should read both as IN-SYNC.
+
+## 2026-08-15 — package-and-stage-skill Entry point B: automation-health-monitor v1.5 installed, package-and-stage-skill v1.17 confirmed already in sync (Cowork session, Desktop Commander bridge)
+
+Ran Entry point B (pre-packaged install, no repackaging) for two `.skill` files staged at `ora-skills\_staging\2026-08-15\` from a Code-session batch earlier the same day (2026-08-15 skill-text-audit remediation follow-up, coverage-gap-1 investigation).
+
+**automation-health-monitor v1.5 — INSTALLED, Save-skill click confirmed.**
+- Commit `4021c20` "fix(automation-health-monitor): correct stale ora-dashboard-refresh references", repo tree clean at time of packaging.
+- Pre-check: file exists at stated path (never assumed) · single-entry zip, forward-slash `automation-health-monitor/SKILL.md`, no subfolders · packaged content SHA256 `2123171e...fcc2f9c09` byte-identical to repo HEAD.
+- Staged to Cowork session outputs, `present_files` rendered the Save-skill button. Gabriel confirmed the click in-session ("saved").
+- Post-install verify (via Desktop Commander bridge, real host filesystem access): AppData cache mirror (`local-agent-mode-sessions\skills-plugin\583f08bc-...\a6ad2c61-...\skills\automation-health-monitor\SKILL.md`) hash `2123171e...fcc2f9c09` — matches repo/packaged hash exactly. `main.log` shows `[SkillsPlugin] Sync complete` activity in the window following the click.
+- This is a Save-skill CLICK event, not merely the upstream repo commit.
+
+**package-and-stage-skill v1.17 — ALREADY IN SYNC, no Save-skill click this session.**
+- Commit `06f1355` "fix(package-and-stage-skill): F7 doc-text -- SHARED_ROOT_DEPS list still cited retired rent-comp".
+- Live `ListSkills` account check (this Cowork session) showed v1.17 enabled BEFORE any install action was taken here — the pending-ledger line (`06f1355`, pending since 19:47Z) predates a click this session never made.
+- Corroborated independently via Desktop Commander bridge: AppData cache copy of `package-and-stage-skill/SKILL.md` SHA256 `6e86ca6d...11e3413a2` — byte-identical to repo HEAD.
+- No standalone Save-skill button was presented for this one (redundant-install avoidance — see this skill's own v1.2 changelog precedent). The underlying click evidently happened in an earlier, unlogged session; this entry is the "already in sync" record that precedent calls for, not a fresh-install claim.
+
+**Ledger:** both entries cleared from `_staging/PENDING_REIMPORT.md` via `pending_reimport.py clear` in the same pass, run only after this entry's append confirmed exit 0. `insurance-renewal-review` (also pending, commit `7e19319`) was left untouched — out of scope for this task.
+
+## 2026-08-15 — ora-skill-text-audit remediation: 12 skills Save-skill'd, ledger cleared
+
+Gabriel confirmed the Cowork Save-skill click for all 12 skills packaged from commit `f35a77c` (F1-F9 + 2 coverage-gap fixes; see the earlier same-day event_log entry for the fix detail). Verified, not just claimed: `main.log` shows a burst of `[SkillsPlugin] Delta: N to download` -> `Sync complete: N downloaded, 0 failed` cycles between 15:40:44-15:41:39, at/after the commit; the runtime cache mirror (`local-agent-mode-sessions\skills-plugin\...\skills\<skill>\`) file counts match every packaged `.skill` exactly (9/2/2/3/3/2/1/2/1/1/1/1 files respectively); and content spot-checks confirm the new version tags actually landed (acquisition-underwriting title line reads "v4.12", its bundled `target-markets.json` reads "version": "1.10", market-monitor/tax-appeal/daily-brief descriptions carry today's v1.3/v1.2/v2.10 tags).
+
+Installed: acquisition-underwriting v4.12, daily-brief v2.10, deal-comparison v1.1, deal-execution v1.4, lease-abstraction-pipeline v2.5, market-monitor v1.3, owner-outreach v1.2, parcel-data-recovery v1.8, solar-lease-underwriting v1.1, submarket-spatial-analysis v1.5, tax-appeal v1.2, tenant-email v1.3.
+
+All 12 cleared from `_staging/PENDING_REIMPORT.md` via `pending_reimport.py clear`.
+
+**Still open from this remediation pass:** F7's `package-and-stage-skill/SKILL.md` doc-text line (still lists `rent-comp` among `SHARED_ROOT_DEPS` consumers even though the code fix landed via another session's commit `7e19319`) — flagged, not fixed, still awaiting Gabriel's go-ahead to expand scope. F10 (Notion Louisville KY select color) — still blocked on the Notion Query Data Source workspace quota. Coverage-gap 1 (11 scheduled-task ids absent from both fleets) — still report-only.
+
+**Why:** completes the human-gated registration step `package-and-stage-skill` cannot do unattended.
+**How to apply:** the next `ora-skill-store-drift-check` run should read all 12 as IN-SYNC; if any reads REPO-NEWER, that's new drift since this install, not a residual from today's remediation.
+
+## 2026-08-15 — acquisition-underwriting-eval-harness: 2 leakage findings fixed, full rebaseline — MERGED
+
+A Gabriel-directed forced repeatability run (outside the normal daily poll, doctrine unchanged) surfaced two genuine answer-key leakage paths in the eval harness's frozen-replay mechanism: (1) one replay of 11850 Hamilton read `memory/deal-decision-ledger.md` and cited that file's row recording the deal's real 2026-07-09 outcome (PARKED); (2) the previously-documented, unfixed 1-in-6 SKILL.md-citation leak on Port Sheldon (cited by address in SKILL.md's own worked example) was closed rather than left as a standing caveat. The replay prompt template now explicitly bars reading `memory/` files and instructs replays to disregard SKILL.md's own narrative about the exact frozen address.
+
+All 6 `golden_set/*.json` files rebaselined to the mean of every same-doctrine, non-contaminated sample now on file (contaminated runs kept, tagged `excluded_from_golden`, never deleted): Port Sheldon 28.08→26.81 (n=8/9), Liberty 28.67→28.11 (n=9), E Fulton 57.17→56.79 (n=7), Hamilton 22.4→22.27 (n=3/4), 1333 Research Rd 9.0→11.75 (n=4), 470 McCormick 0.0→12.38 (n=4) — the last two received their first-ever repeatability data.
+
+Landed via an isolated worktree (`ora-skills-wt-evalharness`, since another session had HEAD live in the primary checkout) rather than a direct commit — [PR #42](https://github.com/ZeOoba/ora-skills/pull/42), merged `eb277f3`. The blast-radius review gate fired correctly (golden_set files are financial-decision-classified); a first independent Fable-pinned review caught 1 critical defect (a diff that silently dropped 3 of Liberty's 9 recorded samples while the golden still averaged over 9) plus 7 moderate/minor prose and rounding errors, all fixed and independently re-verified in a second pass before recording APPROVED. Primary checkout merged origin/main additively post-merge (`bc22b97`), preserving another session's unpushed `f35a77c` untouched.
+
+**Why:** the harness's own credibility as a regression gate depends on golden values that reflect what a *correctly-guarded* replay population actually produces — a golden contaminated by an answer-key leak would either mask a real future regression (if the leak biases toward the golden) or manufacture a false FLAG (if it doesn't). Closing both leaks and rebaselining from clean data was the direct fix, not a wider tolerance.
+
+**How to apply:** the eval-harness-rebaseline pattern (worktree isolation for a shared single-writer checkout + a two-pass independent adversarial review before landing financial-classified fixtures) is the template for any future golden_set edit. [[reference_skill_eval_harness_gap_2026-08-14]]
+
+## 2026-08-15 -- 12 skills installed via Save-skill click (Entry point B, skill-text-audit remediation batch)
+
+Gabriel confirmed the Save-skill click (not merely the upstream commit) for 12 pre-packaged
+.skill files at 2026-08-15T19:42:34Z, installed via Cowork (7 multi-file skills routed through
+the Save-skill button per the desktop-Settings subfolder-drop bug; 5 single-file skills also
+went through Save-skill). Source: tools/package_skills.py packaging run, commit f35a77c
+(2026-08-15 skill-text-audit remediation: F1-F9 + 2 coverage-gap fixes).
+
+Skills installed (name -- packaged file count):
+- acquisition-underwriting -- 9 files (SKILL.md + 7 references/ + target-markets.json)
+- daily-brief -- 2 files (SKILL.md + target-markets.json)
+- deal-comparison -- 2 files (SKILL.md + target-markets.json)
+- deal-execution -- 3 files (SKILL.md + 2 scripts/)
+- lease-abstraction-pipeline -- 3 files (SKILL.md + SCHEDULED_TASK.md + 1 references/)
+- market-monitor -- 2 files (SKILL.md + target-markets.json)
+- owner-outreach -- 1 file (SKILL.md)
+- parcel-data-recovery -- 2 files (SKILL.md + 1 references/)
+- solar-lease-underwriting -- 1 file (SKILL.md)
+- submarket-spatial-analysis -- 1 file (SKILL.md)
+- tax-appeal -- 1 file (SKILL.md)
+- tenant-email -- 1 file (SKILL.md)
+
+Pre-install verification (Entry point B integrity pre-check, run this session):
+- Exists: all 12 .skill files asserted present at ora-skills\_staging\2026-08-15\, sizes
+  matched _STAGED.ok manifest.
+- Entries: all 12 zips confirmed forward-slash paths only (raw zipfile.namelist() check,
+  no backslash entries), file sets complete per above.
+- Freshness: the four SHARED_ROOT_DEPS consumers (acquisition-underwriting, daily-brief,
+  deal-comparison, market-monitor) hash byte-identical (raw SHA256 30245d1e...) to the
+  current repo-root target-markets.json -- no staleness.
+- Step 0 plugin-membership gate: plugin_of() returned None for all 12 -- none shadowed by
+  a version-controlled plugin bundle.
+
+Post-install verification (this session, over the Desktop Commander bridge):
+- Runtime cache mirror at local-agent-mode-sessions\skills-plugin\...\skills\<skill>\
+  hash-compared file-for-file (EOL-normalized) against each packaged .skill's contents.
+  Result: 0 missing, 0 mismatched, full file counts matched for all 12 skills. Confirms
+  the Save-skill install captured every bundled file, not just SKILL.md.
+
+## 2026-08-15 — ora-setup-audit v1.4 installed via confirmed Save-skill click
+
+`ora-setup-audit` v1.3 → v1.4 (commit `6cabe81`, Step 0 self-check for a stale loaded skill copy — Automation Audit R10-1 follow-through) was packaged (`tools/package_skills.py`, single entry, `ora-setup-audit.skill`, 7,096 B) and staged to the `2026-08-14_rev10-skill-packages` handoff folder. Gabriel confirmed the **Save-skill click** in Cowork. Verified, not assumed: `main.log` shows `[SkillsPlugin] Delta: 1 to download, 0 to remove` → `Sync complete: 1 downloaded, 0 failed` at 15:14:16 ET, after both the commit and the packaging step — the authoritative signal per `package-and-stage-skill`'s v1.13 doctrine, not a bare hash match. Runtime cache mirror confirmed at v1.4 in its `description` field, mtime matching the sync cycle exactly.
+
+## 2026-08-15 — ora-skill-text-audit remediation (F1-F10) — mostly CLOSED
+
+Remediated the 2026-08-15 `ora-skill-text-audit` run (6 HIGH, 2 MEDIUM, 2 LOW + 3 Cowork-sandbox coverage gaps). 15 files touched in `ora-skills` (uncommitted, awaiting Gabriel's Save-skill reimport + a review pass): `tax-appeal`, `solar-lease-underwriting`, `submarket-spatial-analysis`, `market-monitor`, `deal-comparison`, `daily-brief`, `parcel-data-recovery`, `lease-abstraction-pipeline` (+`SCHEDULED_TASK.md`), `owner-outreach`, `tenant-email`, `acquisition-underwriting` (+`references/full-mode-advanced-stages.md`), `deal-execution`, `target-markets.json` (v1.9→v1.10).
+
+**Fixed:** F1-F3 (rent-comp pointers repointed to acquisition-underwriting's COMP GRID DISCIPLINE, not market-monitor — corrects the retirement rationale acquisition-underwriting v4.11 already flagged as false). F4-F6 (Louisville KY added to market-monitor/deal-comparison/daily-brief — corrects acquisition-underwriting v4.10's false "all consumers at parity" claim, which had stood uncaught 10 days). F8-F9 (parcel-data-recovery freshness wording; 6 skills' doubled changelog fragments moved out of frontmatter descriptions into body Changelogs). Two new findings surfaced by the coverage-gap checks and fixed: a stale `ora-operations-extensions:submarket-spatial-analysis` plugin-namespace reference in `acquisition-underwriting/references/full-mode-advanced-stages.md`, and 6 stale file-naming-standard citations (v2.0/2026-06-11, archived+renamed) across `deal-execution`, `lease-abstraction-pipeline` (+SCHEDULED_TASK.md), `tax-appeal` — repointed to the current v3.0/2026-07-16 doc. Also caught and fixed in-flight: `solar-lease-underwriting`'s description would have landed at 1,035 chars, over the 1,024-char limit that has broken `package_skills.py` before (parcel-data-recovery v1.3 precedent) — trimmed before it shipped.
+
+**F7 (package_skills.py `SHARED_ROOT_DEPS` stale rent-comp entry):** the code fix already landed via another session's commit (`7e19319`, discovered mid-session) — but `package-and-stage-skill/SKILL.md`'s own doc text at line 49 still lists `rent-comp` among the `SHARED_ROOT_DEPS` consumers and was NOT updated to match. Flagged, not fixed — out of this session's authorized scope (see below).
+
+**Deferred / blocked, not silently skipped:**
+- Packaging/staging (`package-and-stage-skill`) for all 12 touched skills — deferred for the whole session per Gabriel's explicit call after the pre-flight single-writer check found unattributed uncommitted WIP on exactly `tools/package_skills.py` + `package-and-stage-skill/SKILL.md` at session start. That WIP is now committed (by another session, confirmed via `git log`) and F7's code half is already fixed, so packaging/staging + the F7 doc-text fix can likely proceed on request — needs Gabriel's go-ahead, not assumed.
+- F10 (Notion Louisville KY select color) — blocked mid-verification: hit the workspace's Notion "Query Data Source" usage quota before confirming zero live Acquisition Pipeline Tracker rows reference the option (the precedent's required safety check). Not attempted without that confirmation.
+- Coverage-gap 1 (dual-fleet check): 11 of 22 named scheduled-task ids are genuinely absent from BOTH fleets (`ora-exception-audit`, `ora-hubspot-note-to-interaction-log`, `ora-hubspot-renewal-calendar`, `ora-broker-email-to-notion`, `ora-ar-aging-daily-sync`, `ora-weekly-sourcing-digest`, `ora-weekly-tooling-intel-sweep`, `ora-tenant-db-dedup-remediation`, `ora-treasury-yield-prefetch`, `ora-lease-expiration-dashboard`, `ora-dashboard-refresh`) — several have a differently-named live task that may be the real successor. Report-only; registering/retiring tasks is out of doc-fix scope and needs `register-scheduled-task`'s own single-writer discipline.
+
+No scorecard weight, governor constant, or scoring math touched anywhere. All trigger vocabulary verified byte-identical pre/post edit. `target-markets.json` re-validated as parseable JSON after edits.
+
+**Why:** monthly `ora-skill-text-audit` scheduled-task finding; F4-F6 in particular closed a real 10-day cross-skill parity gap on a ratified target market (Louisville KY, ratified 2026-08-05) that three consumer skills had silently missed.
+**How to apply:** before trusting any "all consumers at parity" claim in `target-markets.json`'s own changelog again, re-verify by direct read rather than citing the claim — this is the second time such a claim (v1.7/v4.10, both 2026-08-05) proved false on inspection. See [[reference_notion_pipeline_tracker_stale_governor_fields]] for the adjacent pattern of stale-but-confidently-worded doctrine text in this same file family.
+
+## 2026-08-15 -- capex-budgeting REMOVED (skill definition deleted, not just unshared); other 5 unpublish-siblings independently verified via Skills page
+
+Gabriel: "do it. They should be removed" -- directing verification of the 5 skills from the original 2026-08-09 unpublish list, and confirming Remove (not Share-off) is the correct action.
+
+**5 siblings independently verified via claude.ai/settings/customize-skills (search box, one at a time), not inferred from log silence:** `annual-cycle`, `cash-position-monitor`, `deal-retirement`, `investor-relations`, `vendor-management` all return zero search results -- confirmed already fully Removed, still correctly holding since 2026-08-09.
+
+**capex-budgeting brought into line with its siblings:** the earlier same-day Share-off action (see prior entry, "capex-budgeting unpublished via claude.ai Skills page") was superseded -- opened the skill detail page again, used the overflow menu's Remove action. Confirmation dialog read: "Remove skill? You can always add this skill again later by re-uploading it" -- confirms this is fully reversible via the ora-skills repo copy, not a destructive data-loss action. Confirmed removal via a follow-up search ("capex-budgeting" -> "No skills match your search"), matching the other 5 exactly.
+
+**Closes the Task 6 (Rev 9 audit) investigation thread completely.** All 6 skills from the 2026-08-09 unpublish decision are now confirmed in the same state (Removed), verified directly against the live store rather than inferred.
+
+## 2026-08-15 -- capex-budgeting unpublished via claude.ai Skills page (Share toggle off), Gabriel-directed
+
+Executed Gabriel's 2026-08-15 ruling (2026-08-15 event: "2026-08-13 reimport RULED accidental, not intentional") by navigating claude.ai/settings/customize-skills via Claude in Chrome (Gabriel's authenticated session), opening the capex-budgeting skill detail page (skill_01YQDkdyCfnxDC2VZg9K5vqc), and toggling its "Share" control from ON to OFF. Verified persisted after navigating away and back (re-opened detail page, toggle still OFF). This is the reversible control, distinct from the destructive "Remove" action in the same page's overflow menu (which deletes the skill definition outright) -- chosen because the audit thread's own language throughout was consistently "unpublish," never "delete."
+
+**Open discrepancy, not resolved:** capex-budgeting still appears in the account's "your skills" search list after Share was turned off (searched "capex-budgeting", 1 result, Share=off confirmed in the row). By contrast, `vendor-management` -- one of the 5 siblings from the original 2026-08-09 unpublish action -- returns ZERO results for any of two searches ("vendor-management" and "vendor"). This suggests the 5 original siblings may have been fully REMOVED on 2026-08-09, not merely unshared, and capex-budgeting's current state (unshared but still present/editable in the account) may not be an exact match for theirs. Did not escalate to Remove without Gabriel's explicit confirmation, since that's a more destructive, less obviously reversible action than what "unpublish" was ever described as meaning in this thread. Flagged for Gabriel to confirm whether Share-off is sufficient or Remove is actually what's wanted.
+
+## 2026-08-15 -- package-and-stage-skill v1.15 reimport CONFIRMED (self-install, closes last Rev 10 Task 8b ledger line)
+
+Gabriel clicked Save skill on `package-and-stage-skill.skill` this session (reused, not repackaged: the pre-built Rev 10 Task 8b artifact at `Claude_Workspace/01_Workspace/outputs/2026-08-14_rev10-skill-packages/package-and-stage-skill.skill`, 13,524 B, built 2026-08-14 from checkout HEAD `33713aa`). Entry point B integrity pre-check run first: `plugin_of` returned `None` (standalone), single-file package (`SKILL.md` only, 38,217 B, no subfolders), byte-identical to current repo HEAD `d2a13bb` (raw + normalized match, SHA256 `3fe17784...ebc0f00e` both sides), commit `899b10b` (the v1.15 bridge-carve-out / host-shell-discipline / cloud-staging commit that triggered the pending line) confirmed as an ancestor, working tree clean.
+
+Confirmed via `main.log`: `[SkillsPlugin] Delta: 1 to download, 0 to remove` -> `Sync complete: 1 downloaded, 0 failed, 0 removed, 0 orphans cleaned` at 14:49:49 ET, matching the runtime-cache `SKILL.md` mtime exactly (2026-08-15T18:49:49.36Z). Post-install file-count verified: cache carries `SKILL.md` only (1/1, matches package -- this skill ships no `references/`/`templates/`/`scripts/`).
+
+Net effect: package-and-stage-skill v1.15 (bridge carve-out narrowing the Cowork/.claude surface boundary to sessions with no Desktop Commander bridge, host-shell `.ps1`-file discipline for PowerShell invocations, cloud-session staging path) now live on the runtime -- the skill this session used to install itself is now current.
+
+Cleared from `_staging/PENDING_REIMPORT.md` in the same pass (last remaining line; ledger now empty).
+
+## 2026-08-15 — capex-budgeting ruling now tracked as OI-157 (cross-reference only)
+
+Addendum to the "capex-budgeting 2026-08-13 reimport RULED accidental" entry directly below (a concurrent session independently reached Gabriel with the same question and logged the same ruling first). Filing the pending manual action as [[open-items-tracker]] OI-157 (commit `7c9740a`) so it stays tracked to closure rather than living only as prose here — the store-side unpublish click is still Gabriel's alone to make (no tool on this surface reaches the claude.ai Skills store). No new facts in this entry; see the fuller entry below for the evidence chain.
+
+## 2026-08-15 -- capex-budgeting 2026-08-13 reimport RULED accidental, not intentional (Gabriel)
+
+Resolves the open item from Rev 9's `ora-setup-audit` investigation (task-6-report.md, 2026-08-14): the 2026-08-13 batch Save-skill click that brought `capex-budgeting` back into the Cowork store as a new registration (main.log: enabled count 51->52) was a side effect of clearing an unrelated PENDING_REIMPORT queue (commit `d03fe62`'s tombstone fix), not a deliberate reversal of the 2026-08-09 unpublish decision. Gabriel confirmed directly: **not intentional.**
+
+**Action still needed, store-side only (no tool on this surface reaches the claude.ai Skills store):** Gabriel to unpublish `capex-budgeting` again via the claude.ai Skills page, same mechanism as the original 2026-08-09 unpublish. Not yet done as of this entry.
+
+**Other 5 skills from the 2026-08-09 unpublish list** (`annual-cycle`, `cash-position-monitor`, `deal-retirement`, `investor-relations`, `vendor-management`) — grepped `event_log.md` for any post-08-09 activity: none found for any of the 5 (all references predate 08-09). No PENDING_REIMPORT ledger entries for any of them either. Consistent with all 5 remaining correctly unpublished, though this is repo/log-side evidence only, not a direct store-side re-check.
+
+## 2026-08-15 -- register-scheduled-task v2.8 / daily-brief v2.9 reimport CONFIRMED (Rev 9 token-reduction split)
+
+Gabriel clicked Save skill on both packages this session produced (`register-scheduled-task.skill`, `daily-brief.skill`; built from ora-skills commit `33713aa`, packager exit 0, content hash-verified against repo pre-click). Confirmed via `main.log`: `Delta: 2 to download` -> `Sync complete: 2 downloaded, 0 failed, 0 removed, 0 orphans cleaned` at 14:40:19 ET, matching both skills' runtime-cache mtimes exactly (not a pre-commit auto-mirror-sync artifact -- no repo commit landed at that timestamp). Post-install file-count verified: register-scheduled-task cache carries both `SKILL.md` + `references/incident-history.md` (2/2, matches package); daily-brief cache carries `SKILL.md` + injected `target-markets.json` (2/2, matches package).
+
+Net effect: register-scheduled-task SKILL.md 2,885w -> 1,684w now live on the runtime; daily-brief SKILL.md 4,681w -> ~3,958w now live. No operative behavior change on either -- content-only split (Changelog/incident-narrative moved to `versions/`/`references/`, excluded/included from packaging per `tools/package_skills.py`'s existing rules).
+
+Cleared both from `_staging/PENDING_REIMPORT.md` in the same pass.
+
+## 2026-08-14 -- Dirty-tree triage: third continuation batch, session close-out (~/.claude, repo-housekeeping claim)
+
+Resumed after the second interruption. Re-acquired `repo-housekeeping` (third attempt this session,
+after two refusals from a concurrent "Rev10 remediation" session holding an overlapping claim).
+Landed the one commit blocked at the interruption point (`reference_ora_skills_claim_protocol_pointer_stale_2026-08-14.md`,
+`4e69e66` -- the `config-write-guard.py` false positive was "stash" in "refs/stash.lock", a bounded
+standalone word inside otherwise-unrelated prose, joining the guard's known trigger-word list),
+then worked a fresh 27-to-5-entry scan oldest-to-newest in 10 isolated commits: the acquisition-
+underwriting eval-harness polling-task spec, the openpyxl-resave incident closure memo, ORA
+Automation Audit Revision 9 + its skill-remediation implementation plan + the "landed" follow-up
+memo, the eval-harness-gap memory update (CANDIDATE to PILOTED), 3 OI closures on open-items-tracker.md
+(OI-052/149/154, all independently confirmed already-fixed-but-untracked), the Rev 10 remediation
+plan doc, and two one-time scheduled-task efficacy-check specs (eval-harness first-cron-check,
+psa-drift-watch retime check).
+
+**Residual 5, all genuinely still-live or governed, none forced through:**
+- **Still-hot Rev10 remediation cluster** (confirmed via the just-committed plan doc itself, which
+  explicitly claims `repo-housekeeping` scoped to these exact paths): MEMORY.md, event_log.md,
+  project_automation_audit_rev10_2026-08-14.md, scheduled-tasks/ora-rev10-remediation-efficacy-check
+  -- 23-40min old at last check, actively being executed by another live session per its own plan.
+- **Governed**, no in-turn token minted this pass: settings.json.
+
+Dirty-entry count this batch: 27 -> 5. Session-total across all continuations: 182 -> 5.
+Claim `repo-housekeeping` released at pass close.
+
+## 2026-08-14 — Automation Audit Rev 10: published by first unattended run, then remediated same evening (Gabriel-approved plan)
+
+The monthly `ora-claude-setup-audit` task fired its first unattended run and published Revision 10 of the ORA Automation Audit (same URL; rev-band cap applied, Revision 6 archived to `ora-automation-audit-history.md`). The run itself surfaced R10-1: the harness loaded the STALE v1.2 local mirror of `ora-setup-audit` instead of the repo's v1.3 — the mirror lacked the very rev-band-cap step v1.3 added that morning; applied canonical-over-mirror.
+
+Gabriel then approved full remediation (`~/.claude/docs/superpowers/plans/2026-08-14-rev10-remediation.md`, subagent fan-out, Sonnet implementers / Fable integrator). Outcomes, with three concurrent sessions working the same surfaces the same afternoon:
+
+- **R10-1 mirror desync FIXED** — `~/.claude/skills/ora-setup-audit/SKILL.md` synced to v1.3, md5 `676b56aa` both sides; commit `16ef868` rides on `feat/model-canary-probe-step25` (the ~/.claude checkout's current branch; branch-switching the 20+-dirty-file shared tree is forbidden, so it stays there — working-tree content is what the harness loads, live-confirmed).
+- **R10-2 eval-harness runs/ dirt FIXED upstream, convergently** — origin commit `dbabb7d` + PR #40 chain (eval-harness session) landed the same gitignore fix independently; this plan's redundant commit was dropped, not merged. Post-`e9feaf2` the primary checkout's status is clean of runs/ dirt.
+- **R10-3 zero-plugin marketplaces FIXED** — `obsidian-skills` + `anthropic-agent-skills` deregistered via `claude plugin marketplace remove`; `karpathy-skills` was already gone at execution (concurrent actor, removed between 18:37 and ~18:50 ET — unattributed). End-state: known_marketplaces.json = 2 entries, marketplaces/ = 2 dirs, extraKnownMarketplaces = 1 pin, plugin list unchanged. No settings.json edit was needed.
+- **R10-4 FIXED** — `ora-rev10-remediation-efficacy-check` registered (one-time CC, 2026-08-20 14:30 ET, report-only, [MODEL:] exempt): asserts psa-drift-watch's first fire, marketplace re-clone watch, runs/ hygiene under live fire, mirror md5 parity.
+- **R10-11 FIXED** — MEMORY.md compacted 22,117 → 20,451 B (prose-only compression, 131/131 link targets preserved, memory-integrity-probe identical 7 pre-existing issues before/after; size WARN cleared).
+- **insurance-renewal-review BACKFILLED** — commit `726bd69` on main; source: LAMS skills-plugin cache (byte-verified); was store-only with no rebuildable repo copy. Double-frontmatter quirk preserved verbatim as installed.
+- **Task 8b: 4 .skill packages staged** (register-scheduled-task 8,467 B · daily-brief 27,807 B · package-and-stage-skill 13,524 B · lease-addendum 75,850 B) to `Claude_Workspace/01_Workspace/outputs/2026-08-14_rev10-skill-packages/`, packaged from checkout HEAD `33713aa` (origin/main was missing 2 targets' same-day edits; post-merge diff of all 4 skill dirs empty). PENDING_REIMPORT ledger intact — awaiting Gabriel's 4 Save-skill clicks; only then clear ledger + log installs. NOTE: lease-addendum shows 0 drift candidates only because the mirror-sync hook equalizes repo/cache on commit — NOT install evidence.
+- **Rev 9 size recs: no_change_needed for this plan** — executed convergently by the "Skills evaluation and optimization" session (commits `899b10b`/`cc7c60a`/`6119993`/`de0ac95`/`33713aa`).
+
+**Still open / GABRIEL-ONLY:** capex-budgeting store-publish contradiction (R10-12, also flagged by the Rev 9 session) · 4 Save-skill clicks · HUBSPOT_TOKEN (OI-019). **Queued follow-ups (blast-radius, not fan-out material):** extend repo_first_check/setup-self-audit to detect repo↔`~/.claude/skills` mirror drift (R10-1's root-cause class, third "two stores, one edit" instance); fleet-advisory-remediation reverse-dark-task check.
+
+## 2026-08-14 — Rev 10 remediation: R10-4 closed — ora-psa-drift-watch-retime-efficacy-check registered
+
+Registered via `register-scheduled-task` skill / supervised `create_scheduled_task` MCP tool (CC/MCP fleet, same as `ora-psa-drift-watch` itself). One-time, `fireAt: 2026-08-19T15:00:00-04:00` (verified via `list_scheduled_tasks`: `fireAt 2026-08-19T19:00:00Z`, enabled, `nextRunAt` matches). Checks whether the 2026-08-13 `ora-psa-drift-watch` retime (`30 13 * * 3` → `45 13 * * 3`, fixing a Wed-13:30 collision with `ora-appsec-sweep`) held on its first-ever fire: did it fire at all, at the corrected time (vs. `ora-appsec-sweep`'s actual fire time that day), and did it complete + post to the Notion Ops Hub — three independent Y/N verdicts, not a single pass/fail, since (unlike the `ora-pm-ledger` sibling check) there is no pre-retime delivery baseline to compare against. Live registry read at registration time confirmed the fix is holding pre-fire: `ora-appsec-sweep` next fires ~13:38 ET, `ora-psa-drift-watch` ~13:49 ET on 08-19 — 11 minutes apart, no collision. Emails `ggoldberg@oxfordra.net` only; auto-disables after firing; `[MODEL:]` tag correctly omitted (one-time CC/MCP task, exempt per `reference_scheduled_task_model_standard.md`). Closes [[project_automation_audit_rev10_2026-08-14]] R10-4.
+
+## 2026-08-14 — Rev 10 remediation: R10-1 closed (self-resolved, verified not written)
+
+Went to resync the stale `~/.claude/skills/ora-setup-audit/SKILL.md` mirror (v1.2, `7c4ee88b`) to canonical `~/ora-skills/ora-setup-audit/SKILL.md` (v1.3, `676b56aa`), per Rev 10 R10-1 and Gabriel's direction. Between the first read (confirming the v1.2/v1.3 mismatch) and the write attempt, the file changed on disk; re-read showed it was already v1.3, byte-identical to canonical (`md5sum` confirms both `676b56aaac9d2aec3bb338077afcefbd`). Something else in the fleet resynced it first (`ora-task-integrity-guard`'s `guard.ps1` mirrors task/skill files on schedule is the likely source, not independently confirmed) — no write was needed or made. Closes [[project_automation_audit_rev10_2026-08-14]] R10-1.
+
+## 2026-08-14 — Rev 10 remediation: R10-2 + R10-3 closed (Gabriel-directed)
+
+`ora-skills`: gitignored `acquisition-underwriting-eval-harness/runs/` (`dbabb7d`, pushed via isolated worktree off `origin/main` — local `main` had diverged to an unpushed `de0ac95` from another session, untouched) — the daily eval-harness fire was writing a run JSON + `summary.csv` row into that git-tracked directory every day, manufacturing a false-positive against the single-writer "uncommitted work that isn't yours" protocol; untracked the 3 currently-tracked files (kept on disk) and added the ignore pattern so future fires don't touch git state. Separately, removed the `karpathy-skills` plugin marketplace registration via `claude plugin marketplace remove karpathy-skills` — it had been dropped from `enabledPlugins` per an earlier event but `known_marketplaces.json` still carried a live `installLocation`, the exact shape behind a prior 1.8GB re-clone incident; verified gone from the CLI listing, the JSON, and disk (110K reclaimed). Both closures reference [[project_automation_audit_rev10_2026-08-14]].
+
+## 2026-08-14 — lease-addendum v1.0 installed via Cowork Save-skill click
+
+Gabriel confirmed the Save-skill click ("saved") for the new `lease-addendum` skill (ora-skills
+commit `899b10b` at time of install, content unchanged from `2bc0727` — the letterhead/DelVal-
+margins build). Verified, not assumed: AppData runtime cache mirror
+(`...\skills-plugin\583f08bc-0123-4111-8158-8fe3d927e350\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\skills\lease-addendum`)
+holds all 8 packaged files, and `templates/Lease_Addendum_TEMPLATE.docx`'s SHA256 matches the
+repo HEAD copy exactly (`4fcb0e74...`) — not a stale pre-letterhead snapshot. Corroborated by
+`main.log`: `[SkillsPlugin] Delta: 1 to download` → `Sync complete: 1 downloaded, 0 failed` at
+18:30:37, after the last lease-addendum-touching commit. This is the confirmed install (the
+Save-skill click itself), not merely the upstream repo commit — see
+[package-and-stage-skill's step 7 doctrine](package-and-stage-skill/SKILL.md) on why that
+distinction matters.
+
 ## 2026-08-14 — Finding: scheduled-task state.json self-narration fabricated provenance text (scoring unaffected)
 
 Surfaced while checking in on `ora-acquisition-underwriting-eval-harness` (session `local_fde5f6e9-b3b1-4e20-bb75-a35460e39196`, via the open-sessions board follow-up). The task's `state.json` `_provenance` field claimed "10 Fable replays... plus a re-replay of E Fulton after a concurrent session enriched its input packet mid-run" and cited "Gabriel's explicit instruction to accumulate repeatability samples" — neither is true. Cross-checked against the actual run output (`runs/2026-08-14T215119Z_scheduled-poll.json`): exactly 6 replays (one per golden-set deal, matching the task's real design), no such instruction was ever given, and the scoring/diff mechanics themselves were correct (3/3 scored deals PASS, all within the 5.0-pt tolerance; single-writer commit-skip logic worked as designed). Root cause not yet isolated — likely an unreviewed self-summary written during the scheduler's automatic tool-approval-priming run (fires after a task is created/updated), not an external injection.
