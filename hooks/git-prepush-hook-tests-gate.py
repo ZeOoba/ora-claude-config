@@ -346,10 +346,20 @@ def _run_one(path):
         "output": output,
         "timeout_retried": timeout_retried,
         "fail_retried": fail_retried,
-        # Run 1's output, kept ONLY when a fail-retry still failed: the two runs can fail
-        # with different signatures, and discarding the first sample is exactly the
-        # diagnostic this policy makes more valuable.
-        "first_output": first_output if (fail_retried and status == "fail") else None,
+        # Run 1's output, kept on ANY fail-retry (2026-08-16, OI-174).
+        #
+        # It used to be kept only when the rerun ALSO failed. That threw the
+        # sample away in the one case where it is the only evidence that will
+        # ever exist: the rerun PASSES, the push proceeds, and the summary
+        # reports "FLAKY" while the failing assertion is gone forever. Every
+        # such flake was therefore unfalsifiable after the fact -- the only
+        # options were to guess or to wait for a recurrence that discards its
+        # evidence too. The reasoning already in this comment ("discarding the
+        # first sample is exactly the diagnostic this policy makes more
+        # valuable") applies with MORE force to the recovered case, because a
+        # still-failing file can simply be rerun by hand, and a recovered one
+        # cannot be reproduced on demand at all.
+        "first_output": first_output if fail_retried else None,
     }
 
 
@@ -466,7 +476,39 @@ def format_summary(results):
         lines.append("fail-retry (FAILED once, passed on the rerun; not blocking, but "
                      "this file is FLAKY and should be fixed): "
                      + ", ".join(r["file"] for r in flaky))
+        # THE FIRST ATTEMPT'S OUTPUT (2026-08-16, OI-174). Naming the file was
+        # never enough to act on: the rerun passed, so the failure cannot be
+        # reproduced on demand, and without the original assertion there is
+        # nothing to diagnose -- every occurrence reduced to "it flaked again".
+        # This is the only moment that evidence exists.
+        for r in flaky:
+            excerpt = _flake_excerpt(r.get("first_output"))
+            if excerpt:
+                lines.append("  first-attempt failure in %s (rerun passed; this is the "
+                             "only record of it):" % r["file"])
+                for ln in excerpt:
+                    lines.append("    | " + ln)
     return "\n".join(lines)
+
+
+FLAKE_EXCERPT_LINES = 12
+FLAKE_EXCERPT_WIDTH = 200
+
+
+def _flake_excerpt(text, max_lines=None, width=None):
+    """The most diagnostic tail of a failed run's output, bounded.
+
+    TAIL, not head: assertion errors, tracebacks and test-runner summaries land
+    at the END, while the start is usually banner and progress noise. Bounded
+    because this prints on an otherwise-successful push -- a flake report that
+    buries the gate's own verdict under a wall of text would get scrolled past,
+    which is the same invisibility this fix exists to remove."""
+    if not text:
+        return []
+    max_lines = FLAKE_EXCERPT_LINES if max_lines is None else max_lines
+    width = FLAKE_EXCERPT_WIDTH if width is None else width
+    lines = [ln.rstrip() for ln in str(text).splitlines() if ln.strip()]
+    return [ln[:width] for ln in lines[-max_lines:]]
 
 
 def current_session_id():
