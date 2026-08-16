@@ -532,6 +532,11 @@ def shell_analysis(tool_name, tool_input):
 # severity.
 RecursiveDelete = namedtuple("RecursiveDelete", "command recursive force targets")
 
+# `${IFS}` / `$IFS` -- bash's word separator, used as a whitespace evasion.
+# Normalized to a real space before parsing so that firing and target extraction
+# agree; see the pre-parse block in recursive_delete().
+_IFS_TOKEN_RE = re.compile(r"\$\{IFS\}|\$IFS")
+
 # A command SEGMENT boundary. Scoping matters: without it, the individually-benign
 # `rm x.txt && ls -R` reads as a tree deletion, because a `-r` belonging to a
 # different command would arm the `rm`.
@@ -586,25 +591,153 @@ _FORCE_FLAG_RE = re.compile(
 
 # Argument tokens, quote-aware so a quoted path keeps its spaces.
 _ARG_TOKEN_RE = re.compile(r"\"[^\"]*\"|'[^']*'|[^\s\"']+")
-# A redirect ends the operand list (`rm -rf build > log.txt` deletes build, not log).
+# A redirect token (`>log`, `2>/dev/null`, `>`, `2>&1`). It does NOT end the
+# operand list -- shell grammar allows redirects before, between, and after
+# operands -- so _delete_targets skips it rather than stopping (see MAJOR B).
 _REDIRECT_TOKEN_RE = re.compile(r"^\d*[<>]")
+# A redirect operator with NO target attached: the target is the next token.
+_BARE_REDIRECT_RE = re.compile(r"^\d*[<>]{1,2}&?\d*$")
 
 
 def _delete_targets(rest):
     """Operands of an `rm` invocation: non-flag tokens up to the first redirect,
     with surrounding quotes removed and original case preserved."""
-    targets = []
+    # PARTIAL QUOTING IS ONE OPERAND, NOT TWO. `"$HOME"/scratch` and
+    # `~/"my folder"/x` are the CORRECT shell idioms (a tilde must stay unquoted
+    # to expand), but the token regex alternates between quoted and bare runs, so
+    # they arrive as adjacent matches. Splitting them yielded bare `$HOME` and
+    # `~/` operands, which a consumer then read as "delete the whole home tree"
+    # and blocked -- a false positive that forced a broader override token, the
+    # exact regression class this module's 2026-08-03 anchoring work exists to
+    # prevent (independent review 2026-08-16, MAJOR 5). Adjacency = no whitespace
+    # between matches, so merge on position.
+    pieces, spans = [], []
     for m in _ARG_TOKEN_RE.finditer(rest):
         token = m.group(0)
+        if pieces and spans[-1] == m.start():
+            pieces[-1] += token
+        else:
+            pieces.append(token)
+            spans.append(0)
+        spans[-1] = m.end()
+
+    targets = []
+    skip_next = False
+    for token in pieces:
+        if skip_next:
+            skip_next = False
+            continue
         if _REDIRECT_TOKEN_RE.match(token):
-            break
+            # A REDIRECT MAY PRECEDE OPERANDS. This loop used to `break` here,
+            # which silently dropped the real target: `rm -rf 2>/dev/null <path>`
+            # extracted NO operands at all, so the detector fired with an empty
+            # target list and every path-based consumer had nothing to judge --
+            # a clean bypass using a routine error-suppression idiom
+            # (independent re-review 2026-08-16, MAJOR B). Skip the redirect and
+            # keep scanning; only a BARE operator consumes the following token.
+            if _BARE_REDIRECT_RE.match(token):
+                skip_next = True
+            continue
         if token.startswith("-"):
             continue  # a flag, or the bare `--` end-of-options separator
-        if token[:1] in ("\"", "'") and token[-1:] == token[:1] and len(token) >= 2:
-            token = token[1:-1]
+        # Strip quotes wherever they appear, so a merged operand keeps its shape.
+        token = token.replace("\"", "").replace("'", "")
+        # TRAILING GROUP DELIMITERS BELONG TO THE SHELL, NOT THE PATH. `(rm -rf /)`
+        # yields the operand `/)`, and that one extra character defeated every
+        # exact-match block class -- catastrophic literals, the drive-root regex,
+        # and the profile-ancestor test -- while substring markers still matched,
+        # which is exactly why it stayed hidden (independent re-review 2026-08-16,
+        # MAJOR A). Strip only UNBALANCED delimiters, so a real directory named
+        # "Closing (final)" survives intact.
+        for close, open_ in ((")", "("), ("}", "{")):
+            while (token.endswith(close)
+                   and token.count(close) > token.count(open_)):
+                token = token[:-1]
+        while token.endswith("`") and token.count("`") % 2 == 1:
+            token = token[:-1]
         if token:
             targets.append(token)
     return targets
+
+
+# ---- command position (2026-08-16) -------------------------------------------
+# A leading `VAR=value`, which every shell allows before the command word.
+_ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_]\w*=")
+
+# Commands that EXEC their argument, so an `rm` after one is still the thing being
+# run. Deliberately a CLOSED list of exec-wrappers: `git`, `grep`, `echo`, `man`,
+# `which` are NOT here, and that omission is the entire point of this table.
+_EXEC_WRAPPERS = frozenset((
+    "sudo", "doas", "env", "command", "builtin", "exec", "time", "nohup",
+    "nice", "ionice", "stdbuf", "setsid", "xargs", "then", "do", "else", "elif",
+    "timeout", "watch",
+))
+
+# A bare duration/number operand belonging to a wrapper (`timeout 5 rm -rf x`).
+_WRAPPER_OPERAND_RE = re.compile(r"^\d+(\.\d+)?[smhd]?$")
+
+# A path prefix attached directly to the command word: /bin/rm, ./rm, C:\bin\rm.
+_ATTACHED_PATH_RE = re.compile(r"[\w.:$~\\/-]*[\\/]$")
+
+
+def _in_command_position(prefix):
+    """True if `prefix` -- the segment text before an `rm` match -- leaves that
+    `rm` as the command actually being EXECUTED.
+
+    WHY THIS EXISTS. Without it the detector fires on any line that merely
+    CONTAINS `rm` beside an r-bundle: `git rm -r --cached node_modules` (which
+    unstages and never touches disk), `grep rm -r .`, `history | grep 'rm -rf'`,
+    and even the shell comment `# rm -rf x`. The SCOPE note above named that class
+    "the operationally damaging class, not a cosmetic one" and made closing it a
+    precondition for wiring this detector into any guard -- because a guard that
+    blocks `git rm --cached` does not just annoy, it teaches people to route
+    around the guard, which costs more than the gap it closed.
+
+    CONSERVATIVE BY CONSTRUCTION, and the asymmetry is deliberate. Any token this
+    does not RECOGNIZE as an env-assignment or an exec-wrapper makes the position
+    invalid. So an unlisted wrapper (`timeout 5 rm -rf x`, a novel launcher)
+    yields a false NEGATIVE -- the detector stays silent -- never a false positive
+    that blocks real work. For a guard, silence is recoverable and a wrong block
+    is not; the same reasoning the module already applies to value indirection.
+
+    KNOWN FALSE NEGATIVE, stated rather than left to be discovered: an `rm` nested
+    inside a quoted sub-invocation (`bash -c "rm -rf x"`, `ssh host 'rm -rf x'`)
+    reads as not-in-command-position, because its prefix is `bash -c "`. That is
+    the same value-indirection limit recursive_delete() already disclaims, not a
+    new one -- statically, the quoted string is data until the inner shell runs
+    it."""
+    # Subshell / group / command-substitution syntax is POSITION-NEUTRAL: in
+    # `(rm -rf x)`, `{ rm -rf x; }`, `$(rm -rf x)` and backticks, the rm is still
+    # the command being run. Stripping these is load-bearing -- leaving them
+    # unrecognized made a single `(` a deliberate one-character bypass of the
+    # whole guard (independent review 2026-08-16, MAJOR 1).
+    prefix = prefix.replace("$(", " ").replace("`", " ")
+    prefix = re.sub(r"[(){}]", " ", prefix)
+    toks = prefix.split()
+    # `find ... -exec rm -rf {} +` genuinely deletes: -exec HANDS OFF command
+    # position, so everything left of it is find's own arguments, not a caller.
+    # Take the text after the LAST hand-off and validate only that.
+    for i in range(len(toks) - 1, -1, -1):
+        if toks[i].lower() in ("-exec", "-execdir", "-ok", "-okdir"):
+            toks = toks[i + 1:]
+            break
+    prefix = _ATTACHED_PATH_RE.sub(" ", " ".join(toks))
+    seen_wrapper = False
+    for tok in prefix.split():
+        if _ENV_ASSIGN_RE.match(tok):
+            continue
+        if tok.lower() in _EXEC_WRAPPERS:
+            seen_wrapper = True
+            continue
+        if _WRAPPER_OPERAND_RE.match(tok):
+            continue  # `timeout 5 rm -rf x` -- the 5 belongs to the wrapper
+        if seen_wrapper and tok.startswith("-"):
+            continue  # a FLAG OF a recognized wrapper: `sudo -u x rm -rf ...`,
+            # `xargs -0 rm -rf`, `nice -n 10 rm -rf ...`, `env -i rm -rf ...`.
+            # Gated on seen_wrapper so a bare `-flag` before an unrecognized
+            # command still invalidates the position.
+        return False
+    return True
 
 
 def recursive_delete(command):
@@ -617,6 +750,29 @@ def recursive_delete(command):
     if not isinstance(command, str) or not command:
         return None
     text = normalize_text(command)
+
+    # ---- pre-parse normalization (2026-08-16, independent review round 3) ----
+    # BOTH of these separate `rm` from the path it deletes, before any of the
+    # parsing below gets a chance to see them.
+    #
+    # 1. FD-DUPLICATION REDIRECTS. `_SEGMENT_SPLIT_RE` splits on `&`, and `2>&1`
+    #    contains one -- so `rm -rf 2>&1 ~/Documents/deals` was severed into
+    #    `rm -rf 2>` and `1 ~/Documents/deals`. The rm segment kept the flags and
+    #    lost the path, so the detector fired with NO targets and every
+    #    path-based consumer had nothing to block. `2>&1` is among the most
+    #    common shell idioms and is routinely written before the operand, so this
+    #    was careless-agent-plausible, not merely adversarial. Reuses the SAME
+    #    _FD_DUP_RE shell_may_write() already applies for the same reason --
+    #    a second, parallel pattern here would be a divergence waiting to rot.
+    # 2. ${IFS} WORD-SPLITTING. The module advertises seeing through this and
+    #    is_recursive_delete() does fire, but _delete_targets() did not treat it
+    #    as whitespace, so it yielded the junk operand `${IFS}-rf${IFS}/` that no
+    #    consumer could resolve -- the detector claimed a coverage the guard
+    #    layer then failed to honor. Normalizing here keeps firing and extraction
+    #    consistent by construction, rather than fixing them in two places.
+    text = _IFS_TOKEN_RE.sub(" ", text)
+    text = _FD_DUP_RE.sub(" ", text)
+
     targets, force = [], False
     hit = False
     for segment in _SEGMENT_SPLIT_RE.split(text):
@@ -624,6 +780,8 @@ def recursive_delete(command):
             rest = segment[m.end():]
             if not _RECURSIVE_FLAG_RE.search(rest):
                 continue
+            if not _in_command_position(segment[:m.start()]):
+                continue  # `git rm -r --cached`, `grep rm -r .`, `# rm -rf x`
             hit = True
             force = force or bool(_FORCE_FLAG_RE.search(rest))
             for t in _delete_targets(rest):
