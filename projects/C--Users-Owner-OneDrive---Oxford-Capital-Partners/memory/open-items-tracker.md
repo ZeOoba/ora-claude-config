@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-08-16T01:59:23.989Z
+  modified: 2026-08-16T16:11:58.004Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -6634,3 +6634,86 @@ worktree exemption) rather than an accidental gap.
 
 **Related:** [[feedback_auto_review_blast_radius_gate]] (the ratified doctrine this would undermine);
 `hooks/config-write-guard.py` (the DELIBERATE worktree exemption this may be conflated with).
+
+### OI-147
+**Status:** CLOSED — REJECTED 2026-08-13; nothing landed, everything reverted
+**Opened:** 2026-08-13
+**Source:** ECC repo intake ([external-artifact-intake](../../skills/external-artifact-intake) ruling,
+Gabriel 2026-08-13)
+**Severity:** n/a — closed as rejected. Recorded so the approach is not re-attempted.
+**Auto-check:** none
+
+**Do not re-attempt the quote-state-narrowing approach without reading the evidence first.** A real
+recursive-descent tokenizer (`hooks/lib/shell_tokenizer.py`, adapting ECC's `gateguard-fact-force.js`
+technique) was built as a downgrade-only narrowing of `ora-autonomy-gate.py` Gate 2b. It classified all
+3 historical bypass commands correctly, killed 6/8 mutants (2 proven equivalent), and passed 72 tests.
+
+**Killed in Round 1 of the mandated 3-round adversarial gauntlet** (`pr-review-toolkit:code-reviewer`,
+opus), on a sandbox-verified live bypass: quoting a path operand (`cp evil.html 'oxford-site/index.html'`)
+or wrapping in an interpreter (`bash -c "..."`, `eval "..."`) makes the tokenizer confidently and wrongly
+classify the write as inert — because **quoting suppresses metacharacter interpretation, it does not
+remove text from the command's argument vector.** That is categorically different from the quote-state
+bugs rounds 1–3 (2026-07-16) found, and is not fixable by deepening the parser: it needs shell
+command-semantics modelling (which command consumes which argument, and whether it writes), a strictly
+larger problem. Independently found: unbounded `$()`-nesting recursion threw an uncaught `RecursionError`
+that `main()` does not catch, crashing Gate 2b entirely rather than skipping the narrowing — an
+attacker-triggerable disable of Hard Invariant 2's sole enforcement, strictly worse than a narrowing bug.
+
+A 5th attempt needs a command-semantics model, not a better tokenizer.
+
+**Related:** [[feedback_autonomy_gate_matcher_cannot_be_safely_narrowed]] (Round 4 section — full
+evidence trail); [OI-148](#OI-148) (the companion intake item, which did land).
+
+### OI-148
+**Status:** CLOSED — LANDED on `main` 2026-08-13 as PR [#94](https://github.com/ZeOoba/ora-claude-config/pull/94), `25ac9ec`
+**Opened:** 2026-08-13
+**Source:** ECC repo intake ([external-artifact-intake](../../skills/external-artifact-intake) ruling,
+Gabriel 2026-08-13)
+**Auto-check:** none
+
+`hooks/lint-config-guard.py` — a fail-closed guard (pattern: ECC's `config-protection.js`, adapted to
+this codebase's own override-token contract) blocking silent edits to EXISTING `eslint.config.js` /
+`tsconfig.json` / `tsconfig.node.json` / `functions/tsconfig.json` / `vitest.config.ts` /
+`.prettierrc.json` in `oxford-command-center`. Scope ratified as occ-only.
+
+Three rounds of independent adversarial review found and fixed: a `settings.json` routing gap
+(`move_file`/`write_pdf` unrouted), the wrong integration pattern (moved into
+`pretooluse-dispatcher.py`'s `GUARD_CHAIN`), a LIVE sandbox-confirmed shell quote-split bypass
+(`ts''config.json`, fixed via ported `_dequote`/`_decaret`/`_shell_variants`), and a whole-command
+worktree exemption narrowed to token-scoped (ported `_blank_exempt`). `eos-review-gate` verdict
+recorded (approved, `claude-opus-4-8`).
+
+**Evidence:** 26/26 own tests pass; shared `test-write-guard-coverage.py` meta-test green (4th
+`GuardSpec` added, 16/16 shapes routed, no double-routing); cherry-picked cleanly onto a fresh
+`origin/main`-based branch and re-verified there, not just on the dev branch, before pushing. Pushed
+under a Gabriel-approved `allow-hook-test-failure` override — the pre-push block was
+[OI-149](#OI-149) (an unrelated stale probe allowlist), not this diff.
+
+**Documented, NOT fixed — an explicit follow-up rather than silently expanded scope:** `package.json`'s
+own `lint`/`typecheck` script strings (`--max-warnings 0` etc.) achieve the same threat model with a
+smaller diff, and are outside the ratified 6-file scope. Needs its own scoping decision from Gabriel.
+
+### OI-149
+**Status:** OPEN — symptom no longer reproduces as of 2026-08-16; awaiting close-out ratification
+**Opened:** 2026-08-13
+**Source:** hit while landing [OI-148](#OI-148), PR [#94](https://github.com/ZeOoba/ora-claude-config/pull/94)
+— the pre-push gate blocked on this and was overridden (Gabriel approved in-turn)
+**Severity:** LOW — pure friction. It blocked pushes indiscriminately, never allowed a bad one.
+**Auto-check:** none
+
+**Symptom, as filed 2026-08-13.** `maintenance/test-doctrine-integrity-probe.py`'s known-plugin-skill
+allowlist was stale: it flagged `morning`, `register-scheduled-task` and `schedule` as unresolved when
+all three are live installed `anthropic-skills` plugin skills. Because the probe gates every push, this
+blocked ANY push regardless of diff content — it was hit while landing an unrelated `hooks/**` change.
+
+**Re-check 2026-08-16 (this session, `ora-health-guard` follow-up).** The symptom is gone. Live
+`maintenance/doctrine-integrity-probe.py` now resolves all three:
+`morning -> (plugin-provided skill; no local skill dir)`,
+`register-scheduled-task -> skill dir 'register-scheduled-task' (Code/Cowork surface)`,
+`schedule -> (plugin-provided skill; no local skill dir)` — all `[OK]`, probe exit 0
+("all referenced commands, local files and skills resolve"). `test-doctrine-integrity-probe.py` also
+runs fully green (ALL DOCTRINE-PROBE TESTS PASS).
+
+**Left OPEN deliberately.** The fix was not attributed to a specific commit in this pass, so what
+closed it is unverified — and this session's remit was reporting, not close-out. Gabriel's call to
+close. Do not re-file this as a new item; re-check the two commands above first.
