@@ -411,6 +411,30 @@ expect("format_summary: twice-timed-out FAIL block survives with exit 124",
 expect("format_summary: discloses the fail-retried pass by name",
        "test-flaky-fail.py" in retry_summary and "fail-retry" in retry_summary,
        "got %r" % retry_summary)
+# --- recovered-flake evidence (2026-08-16, OI-174) ------------------------------
+# first_output used to be dropped whenever the rerun PASSED -- i.e. in the one
+# case where it is the only evidence that will ever exist. The push proceeds, the
+# summary says "FLAKY", and the failing assertion is gone. Naming the file is not
+# actionable on its own: the rerun passed, so it cannot be reproduced on demand.
+_flake = {"file": "test-load-sensitive.py", "rc": 0, "status": "pass",
+          "output": "ok", "timeout_retried": False, "fail_retried": True,
+          "first_output": "\n".join(
+              ["banner", "", "running", "AssertionError: expected 3 got 4"])}
+_fs = gt.format_summary([_flake])
+expect("format_summary: recovered flake still named",
+       "test-load-sensitive.py" in _fs and "fail-retry" in _fs, "got %r" % _fs)
+expect("format_summary: the FIRST attempt's assertion is now printed",
+       "AssertionError: expected 3 got 4" in _fs, "got %r" % _fs)
+expect("format_summary: excerpt is labelled as the only record",
+       "only record" in _fs, "got %r" % _fs)
+expect("format_summary: a recovered flake with NO captured output degrades "
+       "gracefully rather than printing an empty block",
+       "only record" not in gt.format_summary([dict(_flake, first_output=None)]))
+expect("_flake_excerpt: bounded, tail-biased, blank lines dropped",
+       gt._flake_excerpt("\n".join(["a", ""] + [str(i) for i in range(50)]))
+       == [str(i) for i in range(38, 50)])
+expect("_flake_excerpt: empty/None yield no lines",
+       gt._flake_excerpt(None) == [] and gt._flake_excerpt("") == [])
 expect("format_summary: a file that failed TWICE is reported as failing twice, not as "
        "a recovered flake",
        "failed twice" in retry_summary and "test-plain-fail.py" in retry_summary,
