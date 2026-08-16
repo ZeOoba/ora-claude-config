@@ -12,6 +12,30 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-16 — R13-4 archival dispatch STOOD DOWN: opened on a falsified premise, already remediated by the split
+
+A session was dispatched to reduce `MEMORY.md` below its runway marker by **archival-with-inbound-ref-repair**, framed as urgent (~1 week of headroom) and explicitly barred from splitting. Three of the brief's load-bearing premises were false at dispatch time; verified before any write, so nothing was touched.
+
+- **Size premise falsified.** Brief said 22,688 B with ~1 week to the 24,400 B HARD ceiling. Measured 17,771 B on first look and **16,936 B sixty seconds later** — the file was being rewritten mid-investigation. Final: 16,936 B, **4,564 B below the 21,500 WARN, 7,464 B below HARD** (~2.4 weeks at the quoted ~3.1 KB/week). The urgency did not exist.
+- **"Do not split — it fails a probe check" falsified.** That blocker was removed on 2026-08-03 by `a395aa2` ("feat(memory-probe): teach index reconciliation to follow sub-indexes"). The claim had survived in `reference_memory_index_size_gate_is_a_runway_marker.md` and is what misbriefed the task. It has since been corrected in place by the session doing the split.
+- **Work already in flight.** Session `local_535b3364` ("ora-automation-audit investigation") — *the same session that filed R13-4* — was remediating its own finding via the split lever, moving 32 Projects lines into `INDEX_projects_system.md` (untracked at the time). No claim was registered on the memory index by anyone.
+
+**Gabriel ruled STAND DOWN** (in-turn, multiple-choice): archival is redundant while the split holds, and stays in reserve as an unused second lever. No claim was taken and nothing was written to `MEMORY.md`, the archive, or any ref target — taking the claim would have asserted ownership of work already in progress.
+
+**Hazard found and handed off, not fixed.** `INDEX_projects_system.md` was untracked while the `MEMORY.md` trim depending on it was tracked+modified. `head_orphans()` reads sub-indexes from **HEAD, not disk** (docstring lines 298–309), so committing the trim alone reproduces the `32f3065` class — and `git commit -am` silently skips untracked files. Simulated rather than asserted:
+
+```
+SIMULATED check-3 orphans if the trim is committed WITHOUT the new sub-index: 2
+   - INDEX_projects_system.md
+   - project_automation_audit_rev13_2026-08-16.md
+```
+
+The 2 orphans understate it: in a clone the ~30 files listed only in that sub-index become unreachable from the index, while the authoring machine stays green — blind exactly where the probe runs. Relayed to `local_535b3364` with the evidence; the commit and the R13-4 status line were left to that session rather than edited across the boundary.
+
+**Corroborated independently:** `INDEX_reference.md` measures **18,361 B — larger than the root index it was split out of**, and check 0 stats `MEMORY.md` only, so no WARN or HARD covers any sub-index. The split moved the bound rather than removing it. That finding is the other session's; this pass confirms the byte figure.
+
+**Process finding.** Both probes green throughout (`267 files indexed, 267 present`, exit 0; doctrine-integrity exit 0) — the dispatch was never gated by a failing check, only by a stale prose premise. A brief carrying baked byte counts and a "currently blocked" claim is the `feedback_prompt_current_state_prose` failure mode: measure before acting on a number someone else wrote down.
+
 ## 2026-08-15 — ora-passed-deal-tracker / ora-pm-ledger / deal_sourcing_snapshot_diff.py WIP attributed to session local_895ab863 (T3-12 fleet migration)
 
 Attributed three pieces of uncommitted WIP found sitting in the shared `~/.claude` checkout during this session's open-items-tracker check (session 86069241): an untracked `scheduled-tasks/ora-passed-deal-tracker/` task folder, a 150-line modification to `scheduled-tasks/ora-pm-ledger/SKILL.md`, and a new staged 917-line `scheduled-tasks/ora-pm-ledger/deal_sourcing_snapshot_diff.py`.

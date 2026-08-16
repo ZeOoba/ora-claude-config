@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: feedback
   originSessionId: 506c87f0-3030-45f0-9886-9bd1de4311db
-  modified: 2026-08-03T19:15:08.360Z
+  modified: 2026-08-16T19:00:16.267Z
 ---
 
 Never state repo/world state as a timeless fact inside a prompt, workflow script, or SKILL.md.
@@ -27,4 +27,15 @@ Never state repo/world state as a timeless fact inside a prompt, workflow script
 
 **How to apply as a reader:** before executing any handoff, plan, or prior-session summary, re-derive its claimed starting state — `git log -1` / `git status` for "committed", the artifact on disk for "packaged", the authoritative runtime signal for "installed" — and treat every step as *conditionally* pending. This costs one batch of read-only checks and converts "already-done" from a silent redo into a stated finding. Pre-flight failure analysis already names `already-done` as a failure mode; this is the concrete instance. A handoff author can halve the cost by writing steps as verify-then-act ("confirm `git log -1` is not yet `<subject>`, then commit") rather than as imperatives.
 
-Sweep heuristic: grep workflows/prompts/scheduled-task SKILL.mds for 7-hex shas, hardcoded counts, "un-ratified"/"currently"/"already done" — and grep Notion long-text fields for "clock runs from", "bd elapsed", "days stale", "as of <date>". Related: [[workflows-dir-single-writer-gap]].
+**It also binds the TASK BRIEF itself, and memory is a rot vector into it (added 2026-08-16).** An archival dispatch to cut `MEMORY.md` below its runway marker carried two baked claims, both false on arrival:
+
+- *"MEMORY.md was 22,688 bytes... roughly a week of headroom"* — measured **17,771 B** on first look and **16,936 B sixty seconds later**; the file was being rewritten by another session mid-investigation. The urgency the whole brief rested on did not exist.
+- *"Do NOT split the index — a prior calibration found that fails one of `memory-integrity-probe.py`'s own checks."* True when written; false since **2026-08-03**, when `a395aa2` taught checks 1 and 3 to follow sub-indexes. By dispatch time the split had already been used twice and was the lever *actively* fixing the very finding the brief was raised against.
+
+Two things make this the sharpest instance yet. **First, the rot came out of memory.** The stale "splitting is blocked" sentence was copied from `reference_memory_index_size_gate_is_a_runway_marker`, where it had outlived the code by two weeks — so the corpus that exists to prevent re-derivation instead propagated a false constraint into a work order. A memory file describing *tooling behaviour* decays exactly like a prompt does; the system-reminder on every recalled memory ("verify against current code before asserting as fact") is load-bearing, not boilerplate. **Second, the brief was self-defeating**: had it been followed literally, it would have barred the only lever that was working and spent a destructive archival pass — moving files, rewriting inbound refs across ~267 memory files — to solve a problem already solved.
+
+**What caught it:** measuring before writing. Re-statting the file took one tool call and falsified the premise before anything was moved; the second measurement 60 seconds later is what revealed a live concurrent writer. Cost of the check: seconds. Cost of skipping it: a redundant destructive pass on the most contended file in the stack, plus a write collision.
+
+**How to apply to briefs you RECEIVE:** treat every number and every "currently blocked / not yet / still fails" claim in a task brief as a hypothesis with a timestamp, and re-derive the two or three the plan actually pivots on *before* the first write — the size, the probe's real exit code, who holds the file. If a premise is falsified, say so and stop rather than executing the brief's letter against its intent. **How to apply to briefs you WRITE:** name the check, not the reading — "re-stat MEMORY.md; act only if over WARN" survives the week that "MEMORY.md is 22,688 B" does not.
+
+Sweep heuristic: grep workflows/prompts/scheduled-task SKILL.mds for 7-hex shas, hardcoded counts, "un-ratified"/"currently"/"already done" — and grep Notion long-text fields for "clock runs from", "bd elapsed", "days stale", "as of <date>". For memory files specifically, grep for "currently blocked", "is a separate change", "not yet" next to any tooling claim. Related: [[workflows-dir-single-writer-gap]], [[feedback_verify_before_repeating_session_claims]], [[feedback_findings_decay_recheck_before_writing]].
