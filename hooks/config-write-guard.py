@@ -113,13 +113,119 @@ except Exception:
 # quo), never a NEW hole, and the coverage meta-test pins the lib's presence.
 try:
     from tool_call_paths import (  # noqa: E402
-        GIT_MUTATE_RE, is_shell_tool, normalize_text, shell_analysis,
-        write_targets)
+        GIT_MUTATE_RE, is_shell_tool, normalize_text, recursive_delete,
+        resolve_path, shell_analysis, write_targets)
     TOOL_PATHS_LOADED = True
 except Exception:
     TOOL_PATHS_LOADED = False
 
 CONFIG_WRITE = Tier("allow-config-write", "config-write", 3600)
+DESTRUCTIVE_DELETE = Tier("allow-destructive-delete", "destructive-delete", 1800)
+
+# ------------------------------------------------- recursive tree delete (2026-08-16)
+# WHY THIS CONSUMER EXISTS. tool_call_paths.recursive_delete() shipped 2026-08-14
+# (PR #112) as a path-independent detector and then sat with ZERO callers -- it
+# read as shipped in every changelog while `rm -rf ~/Documents/deals` stayed as
+# unguarded as the day it was filed. This is the consumer that makes it real.
+#
+# SCOPE IS THE WHOLE DESIGN. Blocking every recursive delete would be a
+# false-positive disaster across ~14.7k Bash calls: `rm -rf node_modules` and
+# `rm -rf build` are routine and safe. So this blocks exactly two classes, both
+# of which destroy things that are NOT reproducible:
+#   1. CATASTROPHIC SCOPE -- a bare `.`, `/`, `~`, `$HOME`, `*`, or a drive root.
+#      No legitimate agent-initiated use, and the blast radius is unbounded.
+#   2. BUSINESS-DATA SURFACES -- anything resolving under the user's real document
+#      stores (OneDrive business folders, Documents, Desktop). Hard Invariant 5
+#      already requires permission to delete there, and Invariant 6 says never
+#      delete at all -- move to /archive/. This makes both mechanical.
+# Everything else -- relative paths, build artifacts, temp, scratchpad, worktrees
+# -- is ALLOWED, deliberately. A guard people route around protects nothing.
+_CATASTROPHIC_DELETE = frozenset((
+    ".", "..", "/", "\\", "*", "~", "$HOME", "${HOME}", "%USERPROFILE%",
+    "./", ".\\", "/*", "~/", "~/*", "$HOME/*",
+))
+
+# Reproducible build/ephemeral output. Named explicitly so a business-data rule
+# can never accidentally swallow the routine case.
+_EPHEMERAL_DELETE_NAMES = frozenset((
+    "node_modules", "build", "dist", ".cache", "__pycache__", ".pytest_cache",
+    "target", ".venv", "venv", ".next", ".turbo", "coverage", ".mypy_cache",
+    ".ruff_cache", ".parcel-cache", "out", ".nyc_output", "tmp", "temp",
+))
+
+# Business-data roots, matched on the RESOLVED path so `~`, a relative walk-up,
+# and a junction all land in the same place.
+_PROTECTED_DATA_MARKERS = (
+    os.sep + "onedrive",  # every OneDrive root, business folders included
+    os.sep + "documents", os.sep + "desktop",
+)
+
+# Working areas that live UNDER a protected root but are agent working surface,
+# not business data. CLAUDE.md Hard Invariant 5 names these explicitly as free
+# working surface: "~/.claude, Claude_Workspace, Cowork OS, brain repo".
+_DATA_EXEMPT_MARKERS = (
+    os.sep + "claude_workspace" + os.sep, os.sep + "cowork os" + os.sep,
+    os.sep + ".claude" + os.sep, os.sep + ".claude-worktrees" + os.sep,
+    os.sep + "node_modules" + os.sep, os.sep + "appdata" + os.sep,
+)
+
+
+def _delete_verdict(target):
+    """(reason, detail) if this recursive-delete target must be blocked, else None.
+
+    Conservative: an unrecognized relative path returns None (allow). The two
+    blocked classes are the ones where the loss is not reproducible.
+
+    ORDERING IS LOAD-BEARING. The protected-store test runs BEFORE the ephemeral
+    allowance, not after. With the checks the other way round, any business
+    folder whose leaf name happened to collide with a build-artifact name --
+    `.../Deals/Target`, `.../Insurance/coverage`, `~/Documents/out` -- was
+    silently unprotected, because the leaf matched first and returned allow
+    (independent review 2026-08-16, MAJOR 2). Reproducibility is a property of
+    WHERE a directory lives, not of what it is called."""
+    raw = (target or "").strip().strip("\"'")
+    if not raw:
+        return None
+    # `x/*` deletes exactly what `x` does. Normalize the glob tail off before any
+    # equivalence test, else `./*` and `${HOME}/*` slip past the literal set
+    # (independent review 2026-08-16, MAJOR 3). The `.?` covers the DOTGLOB
+    # spelling: `~/.*` wipes every hidden entry in the profile -- ~/.ssh,
+    # ~/.gitconfig, and ~/.claude, the governance layer itself -- and was allowed
+    # while `~/*` blocked (re-review 2026-08-16, MAJOR C).
+    bare = re.sub(r"[\\/]\.?\*+$", "", raw.strip())
+    bare = bare.rstrip("/\\") or raw
+    if raw in _CATASTROPHIC_DELETE or bare in _CATASTROPHIC_DELETE:
+        return ("catastrophic scope",
+                "%r names an unbounded tree (cwd, filesystem or home root)" % raw)
+    if re.match(r"^[A-Za-z]:[\\/]*$", bare):
+        return ("catastrophic scope", "%r is a drive root" % raw)
+
+    expanded = os.path.expandvars(os.path.expanduser(bare))
+    if not os.path.isabs(expanded):
+        # Relative to an unknown cwd -- not statically decidable. Documented
+        # structural ceiling: `cd <data dir> && rm -rf ./X` is not caught here.
+        return None
+    resolved = resolve_path(expanded)
+    low = resolved.lower().rstrip("\\/")
+
+    # ANCESTOR DELETE. A substring test alone let `rm -rf C:/Users/Owner` through
+    # -- it contains no protected marker itself, yet destroys Documents, Desktop,
+    # OneDrive and ~/.claude wholesale, while `rm -rf ~` (the same tree, spelled
+    # differently) blocked. Anything at or above the profile root is catastrophic
+    # (independent review 2026-08-16, MAJOR 4).
+    profile = resolve_path(os.path.expanduser("~")).lower().rstrip("\\/")
+    if profile and (low == profile or profile.startswith(low + os.sep)):
+        return ("catastrophic scope",
+                "%r is at or above the user profile root (%s)" % (raw, resolved))
+
+    if any(m in low for m in _DATA_EXEMPT_MARKERS):
+        return None
+    if any(m in low for m in _PROTECTED_DATA_MARKERS):
+        return ("business-data surface",
+                "%r resolves into a protected document store (%s)" % (raw, resolved))
+    if os.path.basename(low) in _EPHEMERAL_DELETE_NAMES:
+        return None  # reproducible build output OUTSIDE any protected store
+    return None
 
 CLAIM_TTL_SECONDS = 3600  # rules.md sec 8: <60 min old = active claim/heartbeat
 REGISTRY_BASENAME = "scheduled-tasks.json"
@@ -588,6 +694,31 @@ def _block_claim(label, detail, session_id, log_path):
     sys.exit(2)
 
 
+def _block_destructive_delete(reason, detail, command, session_id):
+    sys.stderr.write(
+        "BLOCKED (config-write-guard): recursive tree deletion -- %s\n"
+        "  target: %s\n"
+        "  command: %s\n"
+        "Recursion is the destructive property here, not the path -- `rm -r x` "
+        "destroys the tree just as thoroughly as `rm -rf x`, and nothing about "
+        "this is recoverable through the Recycle Bin.\n"
+        "ORA doctrine already answers this: Hard Invariant 6 says NEVER delete -- "
+        "move to /archive/ -- and Hard Invariant 5 requires Gabriel's permission "
+        "before any write/move/delete in the OneDrive business folders. Prefer "
+        "`mv <target> <archive dir>/` over deleting; it is reversible and it keeps "
+        "the audit trail.\n"
+        "NOT BLOCKED, so you do not need a token for these: reproducible build "
+        "output (node_modules, build, dist, .cache, __pycache__, target, .venv), "
+        "anything relative to the repo you are in, scratchpad paths, and worktree "
+        "checkouts. If you meant one of those, name it directly instead of a bare "
+        "`.` or an absolute walk into the document store.\n"
+        "If Gabriel has explicitly approved THIS deletion in-turn, write this "
+        "override token and retry:\n%s"
+        % (reason, detail, (command or "").strip()[:200],
+           describe_token(session_id, DESTRUCTIVE_DELETE)))
+    sys.exit(2)
+
+
 # ------------------------------------------------------------------ main
 def main():
     payload = json.loads(sys.stdin.buffer.read().decode("utf-8"))
@@ -636,6 +767,23 @@ def main():
             # else: write-shaped but naming no protected path -- statically
             # unresolvable (value indirection etc.). Documented structural
             # ceiling, same as ora-autonomy-gate.py's HONEST LIMIT: allow.
+
+        # RECURSIVE TREE DELETE (2026-08-16). Checked SEPARATELY from the
+        # may_write branch above, and deliberately so: recursive_delete() carries
+        # no path condition, which is the whole reason it exists -- the classes it
+        # catches (`rm -rf .`, a walk into the document store) are destructive
+        # because of what they DO, not where the governance tree happens to be.
+        # Gating it behind may_write + a governance marker would reproduce exactly
+        # the hole it was written to close.
+        delete = recursive_delete(analysis.command) if analysis is not None else None
+        if delete is not None:
+            for target in delete.targets:
+                verdict = _delete_verdict(target)
+                if verdict is not None:
+                    if token_grants(session_id, DESTRUCTIVE_DELETE) is None:
+                        _block_destructive_delete(verdict[0], verdict[1],
+                                                  delete.command, session_id)
+                    break  # token granted -> allowed
 
     governance_hits = [h for h in hits if h[0] == "governance"]
     claim_hits = [h for h in hits if h[0] == "claim"]
