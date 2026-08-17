@@ -87,6 +87,22 @@
       "failed_connectors": "none",
       "notion_written": true,
       "notion_error": null
+    },
+    {
+      "last_run_et": "2026-08-16T11:53:03-04:00",
+      "status": "OK",
+      "subject_sent": "\u2705 ORA Connector Pre-Flight \u2014 2026-08-16 \u2014 Notion OK",
+      "failed_connectors": "none",
+      "notion_written": false,
+      "notion_error": null
+    },
+    {
+      "last_run_et": "2026-08-16T11:54:15-04:00",
+      "status": "DEGRADED",
+      "subject_sent": "\u2705 ORA Connector Pre-Flight \u2014 2026-08-16 \u2014 Notion OK",
+      "failed_connectors": "none",
+      "notion_written": true,
+      "notion_error": null
     }
   ]
 }
