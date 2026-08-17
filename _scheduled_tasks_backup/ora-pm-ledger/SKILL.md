@@ -163,7 +163,7 @@ table of being wrong. It was not. Version + endpoint, not permissions.)
 | Source | Newest last_edited | Oldest | Reality |
 |---|---|---|---|
 | Acquisition Pipeline Tracker | 2026-07-15 | 2026-03-22 | ✅ **LIVE — varies.** |
-| Deal Sourcing Log | 2026-07-15 | 2026-03-22 | ✅ **LIVE — varies.** |
+| Deal Sourcing Log | 2026-07-15 | 2026-03-22 | ✅ **LIVE — varies.** The timestamp is trustworthy for "did this row change today," but it says nothing about WHAT changed. **Field-level detector added 2026-08-15 — see `deal_sourcing_snapshot_diff.py` (§A.2 step 2, same mechanism as the three Section B siblings, run ALONGSIDE this timestamp check, not instead of it).** |
 | Broker Relationships | 2026-04-05 21:03 | 2026-04-05 20:06 | ✅ **LIVE — varies.** |
 | Tenant Database | 2026-03-30 | 2026-03-22 | ❌ **FROZEN.** Notion itself reports `last_edited_time == created_time`. A zero is a false negative. |
 | Property Register | 2026-07-12 | 2026-07-12 | ❌ **Uniform stamp** — all 14 rows share ONE identical timestamp (re-verified live 2026-08-11, still `2026-07-12T17:16:00` on every row). That is a batch write, not editing. An earlier read of this as "live" was WRONG. **Detector built 2026-08-11 — see `property_register_snapshot_diff.py` (§A.2 step 2, same as the Tenant DB and CapEx).** This was the LAST A.1 source without one; that gap is now closed. |
@@ -177,6 +177,15 @@ three Section B sources instead have snapshot-diff detectors** (`tenant_db_*`,
 `capex_*`, `property_register_*`), which is the only mechanism that works when
 the timestamp column is untrustworthy. Section B's *timestamp* is still useless;
 its *change detection* is now sound.
+
+**As of 2026-08-15, Deal Sourcing Log (Section A) ALSO has a snapshot-diff
+detector** (`deal_sourcing_snapshot_diff.py`) — not because its timestamp is
+broken (it isn't; it stays the working "did this row change" signal) but
+because the timestamp alone cannot say WHAT changed. A broker cutting an
+asking price, a Go/No-Go flip, a status move to Dead — none of that is visible
+from a bare last-edited date. Run both: the REST timestamp check for the
+coarse today/not-today split, the snapshot-diff for field-level detail folded
+underneath it.
 
 **The uniform-date tell:** when newest == oldest across every row, the column is
 reporting a bulk sync, not edits. Only trust a source whose dates VARY.
@@ -480,6 +489,85 @@ Use all of the following signals and merge, deduping by page ID:
    `Loan Maturity Date` populated at all — the drift risk is LATENT and arms only
    when maturity dates are entered. Do not let a first clean cross-day run be
    read as proof the exclusion was unnecessary.
+
+   **✅ BUILT 2026-08-15 — `deal_sourcing_snapshot_diff.py` (same folder, same
+   pattern). Unlike its three Section B siblings, this one is a FIELD-LEVEL
+   ADDITION, not a defect fix** — Deal Sourcing Log's `Last Updated` column is
+   genuinely live (see the A.1 Reality table) and stays in use for the
+   coarse today/not-today check. What it cannot do is say what changed on a
+   row, and for a deal-sourcing log the field-level detail (a price cut, a
+   Go/No-Go flip, a status move to Dead) is the actual signal Gabriel needs.
+   Section A (Deal Sourcing Log) MUST ALSO invoke, alongside the existing
+   REST timestamp check:
+   ```
+   C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \
+     C:/Users/Owner/.claude/scheduled-tasks/ora-pm-ledger/deal_sourcing_snapshot_diff.py \
+     --run --date {TODAY}
+   ```
+   Same `RESULT_JSON=` contract, same `state/deal-sourcing-*.json` storage
+   shape. Parse it and fold `added/removed/changed` (plus `warnings` whenever
+   non-empty) into the Deal Sourcing Log subsection of Section A as
+   field-level detail underneath the timestamp-confirmed row list — do not
+   let the two signals silently duplicate each other in the digest; the
+   timestamp says a row moved, the diff says what moved in it.
+
+   **Diff key is the Notion PAGE ID, never `Deal Name / Address`** — that
+   field is a free-text title an agent or Gabriel can rename at will (address
+   corrections are common in this log) and is not a stable row identity;
+   keying on it would read a rename as one row removed plus a different one
+   added. `--selftest` asserts this directly (a title-only edit under a
+   stable page id must not appear in `added`/`removed`).
+
+   **Endpoint differs from the three siblings.** `9a6ae219…` is a DATA
+   SOURCE id, not a database page id (canonical pair per the A.1 table:
+   database `8d2ddc5177e84cd7b1c0c0f6ef943479` / data source `9a6ae219…`).
+   Query it at `POST /v1/data_sources/9a6ae219-85a3-4621-899c-c757fd062f8b/query`
+   @ `Notion-Version: 2025-09-03` — verified 200 live at build time, 479 rows
+   — matching how the A.1 table documents the multi-source Acquisition
+   Pipeline Tracker, not the single-source `/v1/databases/{id}/query` @
+   2022-06-28 pair the Section B siblings use.
+
+   **Formula field checked live, not inferred from its name.** The schema
+   carries exactly one formula property, `Price Delta vs First Ask`. Pulled
+   sample rows via REST and confirmed it derives only from two static stored
+   numbers on the same row (`Asking Price`, `Ask at First Sighting`) — e.g.
+   `'CUT -7% (2320000 to 2150000)'`, or `'unchanged'` when the two are equal
+   — with no date/`now()` input anywhere in it. This is the same class of
+   signal as the Property Register sibling's governor-adjacent `LTV`: a real,
+   wanted change, not calendar drift. `TIME_DERIVED_FIELDS` is therefore
+   EMPTY (matching CapEx, for the opposite underlying reason — CapEx has no
+   formula fields at all; this database has one, and it was checked and
+   cleared rather than assumed). The bulk-field guard is the backstop if a
+   calendar-derived formula is ever added to this database later, or if this
+   verdict is ever wrong.
+
+   **A 0-row pull ALWAYS refuses to persist, even on a first-ever run** —
+   same divergence from CapEx as the Property Register sibling, for the same
+   reason: this is an accreting log (479 rows at build time; dead/passed
+   deals are marked `Dead`/`Passed`/`KILLED` and stay in the table rather
+   than being removed), so an empty pull is always an access failure, never a
+   real state.
+
+   `--selftest` is 47 assertions, all passing — the diff engine, the
+   page-id-not-title diff key, the real production `TIME_DERIVED_FIELDS`
+   constant (empty, asserted directly so a future addition to it fails
+   loudly without re-verification), a real price-cut case proving the
+   formula field is reported alongside its static input rather than
+   filtered, the bulk-field guard incl. the compared-rows denominator and
+   the 50% boundary, normalization spot-checks, pagination, `load_prev()`
+   corruption/missing-file fallback, the full `decide_persist()` battery,
+   Notion's 25-item relation-truncation detector (this database carries two
+   relation fields, `Owner Outreach Lead` and `Pipeline Deal`), `--date`
+   validation, and an end-to-end `run()` refusal/baseline pass through the
+   `_pages` seam. Verified live at build time: baseline of 479 rows persisted
+   cleanly (exit 0, no warnings), and an immediate same-day re-pull of the
+   real data reported 0 added / 0 removed / 0 changed / 0 warnings across all
+   479 rows — confirming the normalization is stable against production data,
+   not just synthetic fixtures.
+
+   ⚠ **Not yet observed: a genuine cross-day production run**, same caveat as
+   every sibling at its own build time. The first real one is the next
+   scheduled fire.
 
    **⚠ DEFECT 2 — `notion-query-data-sources` is ENTITLEMENT-GATED and will
    hard-fail mid-run.** Measured live 2026-07-16: after ~5 queries the tool
@@ -1524,3 +1612,64 @@ send-path, cadence, block logic, or registry change. Content-only edit to §0.5,
 by direct editing of this file; `update_scheduled_task` was deliberately NOT used,
 since it drops non-owned frontmatter keys and would have silently deleted this file's
 `output_contract` block (OI-109).
+
+## AMENDMENT NOTE (2026-08-15 — Deal Sourcing Log gets a 4th snapshot-diff detector)
+
+**Different motive from the three Section B builds above.** Those three (Tenant DB,
+CapEx, Property Register) exist because their `last_edited_time` column is broken at
+the source. Deal Sourcing Log's is NOT broken — the A.1 Reality table already marked
+it "LIVE — varies," re-confirmed here, and the REST timestamp check stays in use for
+the coarse today/not-today split. `deal_sourcing_snapshot_diff.py` is a field-level
+ADDITION on top of that working signal, not a defect fix: a timestamp says a row
+moved, not what moved in it, and for a deal-sourcing log — a broker cutting an
+asking price, a Go/No-Go flip, a status move to Dead — the field-level detail is
+the actual thing worth reporting to Gabriel.
+
+**Diff key is the Notion PAGE ID, deliberately not `Deal Name / Address`.** That
+title field is free text an agent or Gabriel can and does edit (address
+corrections happen in this log), so it is not a stable row identity — keying on
+it would read a rename as one row removed plus a different one added.
+`--selftest` asserts this directly.
+
+**The one formula field was checked live, not inferred.** The schema carries a
+single formula property, `Price Delta vs First Ask`. Pulled real rows via REST
+and confirmed it derives only from two static stored numbers on the same row
+(`Asking Price`, `Ask at First Sighting`) — e.g. `'CUT -7% (2320000 to
+2150000)'` — with no `now()`/calendar input anywhere in it; two rows with equal
+inputs both read `'unchanged'`, and eight rows with a real gap each matched
+`Asking Price - Ask at First Sighting` exactly. `TIME_DERIVED_FIELDS` is
+therefore empty, and `--selftest` proves the formula is reported alongside its
+static input on a real price-cut case rather than silently filtered — this is
+the specific thing the Tenant DB's 2026-07-24 defect (267/298 false positives
+from an unexcluded calendar formula) makes worth checking explicitly rather
+than assuming from the field's name.
+
+**Endpoint differs from the three Section B siblings.** `9a6ae219…` is a data
+source id, not a database page id. Queried at `POST
+/v1/data_sources/9a6ae219-85a3-4621-899c-c757fd062f8b/query` @
+`Notion-Version: 2025-09-03`, matching how the A.1 table already documents the
+multi-source Acquisition Pipeline Tracker — verified 200 live, 479 rows.
+
+**0-row pulls always refuse to persist, matching Property Register's rule, not
+CapEx's.** This is an accreting log — dead deals are marked
+`Dead`/`Passed`/`KILLED` and stay in the table rather than being removed — so
+an empty pull is always an access failure, never a real state, even on a
+first-ever run.
+
+**Verified live at build time, not just via `--selftest`.** 47 assertions pass
+offline. Live `--run` against the real database established a 479-row baseline
+cleanly (exit 0, no warnings), and an immediate same-day re-`--run` against the
+same 479 live rows reported 0 added / 0 removed / 0 changed / 0 warnings —
+confirming the normalization holds against production data, not only synthetic
+fixtures, before this was wired into a nightly job.
+
+**§A.1's Reality table, the "Net:" summary, and §A.2 step 2 were updated** to
+document the new script and instruct Section A to invoke it alongside (not
+instead of) the existing REST timestamp check. No routing, send-path, cadence,
+or registry change — content-only edit to this file plus one new script,
+`deal_sourcing_snapshot_diff.py`, left uncommitted in the working tree for
+Gabriel's own review and commit.
+
+**Not done:** no genuine cross-day production run has happened yet (same
+caveat every sibling carried at its own build time) — the first real one is
+the next scheduled 18:00 ET fire.
