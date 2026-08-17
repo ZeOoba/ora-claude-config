@@ -805,6 +805,56 @@ def main():
             print("--force given: proceeding with the TAKEOVER. The displaced claim "
                   "is preserved in this claim's `prior_claim` -- restore it with:")
             print("    python claim_work.py restore %s" % args.slug)
+        # OI-166 (2026-08-16): surface a CROSS-SLUG path collision. Everything
+        # above is keyed on the SLUG, so two sessions holding DIFFERENT slugs over
+        # the SAME files never collide and neither refusal can fire. Observed live:
+        # one session held `open-items-tracker` and another `repo-housekeeping`,
+        # both declaring memory/open-items-tracker.md + memory/MEMORY.md, and each
+        # independently root-caused the same blocked pull. Only the other claim
+        # being released first prevented duplicate commits.
+        #
+        # claims_touching() already existed for exactly this query, but was wired
+        # only into the Edit/Write hot path (shared-checkout-guard.py) -- where it
+        # fires AFTER a file is touched, too late to prevent the duplicated
+        # investigation this is meant to catch.
+        #
+        # WARN, never refuse. The module docstring endorses distinct slugs as a
+        # FEATURE ("a distinct slug keeps BOTH claims independently visible"), and
+        # the ratified posture here is fail-open, not a hard lock; refusing would
+        # wedge legitimate broad---paths claims (_path_overlap matches by prefix, so
+        # one directory-level claim would deny every narrower one beneath it).
+        # Making the overlap visible AT CLAIM TIME is what "independently visible"
+        # was always supposed to deliver.
+        # Compare against _safe_filename(slug), NOT the raw slug -- claims_touching()
+        # reports `slug` as the on-disk filename STEM, already sanitized. Same trap
+        # find_claim()'s docstring documents (caught by independent review 2026-08-04)
+        # and this block originally repeated: with a raw comparison, a slug containing
+        # a space would fail to match its own displaced claim and re-report it here as
+        # a DIFFERENT slug's live claim -- asserting "both claims are valid and now
+        # both visible" about a claim write_claim() overwrites on the next line.
+        _own = _safe_filename(args.slug)[:-5]
+        cross = [c for c in claims_touching(args.paths, exclude_session=sid)
+                 if c.get("slug") != _own]
+        if cross:
+            print("")
+            print("WARNING: %d live claim(s) under a DIFFERENT slug already cover "
+                  "path(s) you just claimed. This is NOT refused -- both claims are "
+                  "valid and now both visible -- but check before duplicating work:"
+                  % len(cross))
+            for c in cross:
+                who = attributable_session(c) or "unattributable"
+                # Every field below is agent-supplied and world-writable (slugs are
+                # free-form too), and this stdout is read back by a MODEL -- so all
+                # of it goes through _one_line() for the same reason its docstring
+                # gives: raw text carrying newlines could forge extra output lines.
+                print("  * slug '%s' (session %s)"
+                      % (_one_line(c.get("slug")), _one_line(str(who))[:8]))
+                if c.get("description"):
+                    print("      %s" % _one_line(c["description"]))
+                print("      overlapping path(s): %s"
+                      % _one_line(", ".join(c.get("matched_paths") or [])))
+            print("")
+
         path = write_claim(args.slug, sid, args.description, title=args.title,
                            paths=args.paths, host_session_id=own_host_session_id(),
                            # `holder != sid` deliberately, NOT `colliding`. It covers
