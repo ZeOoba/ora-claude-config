@@ -773,6 +773,85 @@ def _arg(argv, name, default=None):
     return default
 
 
+# Every CLI flag this tool actually reads. Deliberately NOT a list of every
+# "--x" string in this file: --cached/--name-only/--others/--exclude-standard/
+# --verify/--path/--stdin are arguments this script passes to `git`, not flags
+# it accepts. Keep this set in sync when adding a CLI flag; `_flagset_is_consistent()`
+# asserts it against the real `_arg(argv, ...)` call sites.
+_VALUE_FLAGS = ("--repo", "--session", "--cmd", "--model", "--verdict",
+                "--notes", "--notes-file")
+_BOOL_FLAGS = ("--key", "--record")
+KNOWN_CLI_FLAGS = frozenset(_VALUE_FLAGS + _BOOL_FLAGS)
+
+# Stamped into every artifact so version skew is visible AFTER the fact too.
+# OI-181's incident was undiagnosable from the artifact alone: an empty `notes`
+# field looks identical whether the reviewer wrote nothing or the tool silently
+# dropped it. Bump this when the CLI contract changes.
+__version__ = "2026.08.16"
+
+
+def _flagset_is_consistent():
+    """Assert KNOWN_CLI_FLAGS still covers every flag `_arg(argv, ...)` reads.
+
+    Guards against this fix causing the very failure it prevents: if someone
+    adds a CLI flag and forgets this set, `reject_unknown_flags` would reject a
+    LEGITIMATE flag. That fails loudly rather than silently, so it is not a
+    security hole -- but it is a confusing break, and it is cheap to catch.
+    Returns the missing flags, empty when consistent."""
+    try:
+        src = open(os.path.abspath(__file__), encoding="utf-8").read()
+    except OSError:
+        return ()  # cannot read own source -> no information -> stay quiet
+    read_flags = set(re.findall(r'_arg\(argv,\s*"(--[a-z-]+)"', src))
+    return tuple(sorted(read_flags - KNOWN_CLI_FLAGS))
+
+
+def reject_unknown_flags(argv):
+    """Fail LOUDLY on a flag this copy does not understand (OI-181).
+
+    WHY THIS EXISTS. `_arg` is a positional `argv.index()` scan, not argparse,
+    so an unrecognised flag is silently ignored. That is harmless for a typo but
+    not here: on 2026-08-16 a worktree copy predating `--notes-file` was handed
+    `--notes-file <path>`, ignored it, and recorded an APPROVED review artifact
+    with `notes: ""` -- exit 0, no warning. `notes` is not part of the artifact
+    key, so the gate still PASSED and the commit landed. The audit trail for a
+    blast-radius change vanished at exactly the moment it was being created.
+
+    Version skew is the norm, not the exception, because config-write-guard
+    explicitly routes callers to a WORKTREE copy of this tool (the live path is
+    blocked as a governance write). Any worktree branched before a flag was
+    added will silently discard it. Rejecting unknown flags converts that whole
+    class -- every future flag, not just --notes-file -- into a loud failure.
+
+    Scope is deliberately the CLI path only. `main()` (the hook path) never
+    reads argv, and since 2026-08-16 this module is imported and run IN-PROCESS
+    by pretooluse-dispatcher.py, where `sys.argv` belongs to the DISPATCHER
+    (e.g. `--chain bash`). Validating there would block every Bash call."""
+    unknown, i = [], 0
+    while i < len(argv):
+        tok = argv[i]
+        if tok in _VALUE_FLAGS:
+            i += 2  # skip the VALUE, which may legitimately begin with "--"
+            continue
+        if tok in _BOOL_FLAGS:
+            i += 1
+            continue
+        if tok.startswith("--"):
+            unknown.append(tok)
+        i += 1
+    if unknown:
+        raise SystemExit(
+            "eos-review-gate: unrecognised flag(s): %s\n"
+            "This copy of the tool accepts: %s\n"
+            "Refusing to record rather than silently discarding them -- that is "
+            "how a review artifact ends up with empty notes (OI-181).\n"
+            "MOST LIKELY CAUSE: this copy is STALE. config-write-guard routes "
+            "you to a worktree copy, and a worktree branched before the flag "
+            "was added does not have it. Check the live copy at "
+            "~/.claude/hooks/eos-review-gate.py, or rebase this worktree."
+            % (", ".join(unknown), " ".join(sorted(KNOWN_CLI_FLAGS))))
+
+
 def _worktree_risk_rels(root):
     """Every currently at-risk repo-relative path -- staged, tracked-and-
     modified-but-unstaged, AND untracked. Union, not a guess at which specific
@@ -883,6 +962,7 @@ def cli_record(argv):
         "repo": root.replace("\\", "/"),
         "notes": _resolve_notes(argv),
         "ts": int(time.time()),
+        "tool_version": __version__,
     }
     with open(path, "w", encoding="ascii", newline="\n") as fh:
         json.dump(record, fh, indent=2)
@@ -965,6 +1045,17 @@ def main():
 if __name__ == "__main__":
     argv = sys.argv[1:]
     if "--key" in argv or "--record" in argv:
+        # OI-181: reject flags this copy does not understand BEFORE doing any
+        # work. Silently ignoring one is how an approved review artifact ends up
+        # with empty notes. CLI path only -- main() never reads argv, and the
+        # dispatcher runs this module in-process under ITS own sys.argv.
+        _missing = _flagset_is_consistent()
+        if _missing:
+            sys.stderr.write(
+                "eos-review-gate: WARNING -- KNOWN_CLI_FLAGS is out of date; "
+                "_arg() reads %s but the set does not list them. Add them, or "
+                "valid invocations will be rejected.\n" % ", ".join(_missing))
+        reject_unknown_flags(argv)
         try:
             sys.exit(cli_key(argv) if "--key" in argv else cli_record(argv))
         except Exception as exc:  # CLI errors are the operator's to see
