@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: deb373ac-940f-41f2-b5e3-b47443e7bb33
-  modified: 2026-08-12T22:45:55.903Z
+  modified: 2026-08-16T20:04:49.696Z
 ---
 
 **This file previously asserted the opposite. That assertion was wrong and is corrected here — the earlier version is what caused a downstream session to avoid a safe frontmatter edit and to report a non-existent "registry stale by two bumps" drift on 2026-08-12.**
@@ -41,3 +41,15 @@ The prior version proved sync by comparing the SKILL.md `description:` length+sh
 - **Do NOT call `update_scheduled_task` merely to propagate a description.** That call is the hazard (whole-file rewrite + key drop), not the remedy. Reserve it for what it actually owns: `cronExpression`, `enabled`, `fireAt`, `notifyOnCompletion`.
 - If you must call it for a real scheduling change, take a pre-call copy of the SKILL.md and diff after — per the key-drop reference above.
 - A LAMS task's SKILL.md is editable from the CC/MCP surface (it is an ordinary file on disk); only the *registry* write needs the matching fleet's MCP. Scheduling changes to a LAMS task still require Cowork.
+
+## The correction did not stick, and here is what that cost (2026-08-16)
+
+**This file was right for four days and got ignored anyway, because [MEMORY.md](MEMORY.md)'s one-line pointer still carried the PRE-correction claim** — verbatim: *"Task description lives in TWO stores — editing SKILL.md alone desyncs the registry; sync both, verify by sha."* `MEMORY.md` is auto-loaded into every session; this file is not. So a session reads the stale summary, acts on it, and never opens the corrected source. The 2026-08-12 fix corrected the file and left the index asserting its opposite.
+
+A session on 2026-08-16 did exactly that, twice, believing it was following doctrine:
+- `ora-cc-snapshot-refresh` — `update_scheduled_task` called purely to "sync the registry". No-op benefit; harmless only because that file's frontmatter holds just `name` + `description`.
+- `ora-doctrine-integrity-guard` — same call, and it **dropped `output_contract`**, that guard's only liveness signal (it is silent-by-design on a clean run, so losing the block makes its death undetectable). Caught by `scheduled-task-update-postguard` and restored from a pre-call backup. Second time that exact key has been lost this way; the first was 2026-08-09.
+
+Re-verified from scratch that day, so the fact is now confirmed twice independently: CC/MCP 37 tasks, LAMS/Cowork 28 tasks, **zero** entries with a `description` field, and neither registry schema even defines the key. CC keys: `createdAt, cronExpression, cwd, enabled, filePath, fireAt, id, lastRunAt, lastScheduledFor, model, notifySessionId, useWorktree`. LAMS swaps in `approvedPermissions, spaceId, userSelectedFiles, userSelectedFolders, userSelectedProjectUuids`.
+
+**Generalizable lesson, and it is the same one as [OI-171](open-items-tracker.md#OI-171):** correcting a source is only half the fix — every SUMMARY that asserts the old fact has to move with it, or the stale summary keeps driving behavior. An index entry is a claim about its target, and it rots exactly like a spec claim about live data. Related: [[feedback_prompt_current_state_prose]] · [[reference_update_scheduled_task_drops_frontmatter_keys]] · [[feedback_findings_decay_recheck_before_writing]]
