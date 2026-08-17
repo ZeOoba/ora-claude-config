@@ -75,10 +75,14 @@ class Rig(object):
     def path(self, *parts):
         return os.path.join(self.root, *parts).replace("\\", "/")
 
-    def mint_token(self, session_id=SID, scope="config-write", age_seconds=0):
+    def mint_token(self, session_id=SID, scope="config-write", age_seconds=0,
+                   filename=None):
+        # filename defaults to allow-config-write and is NOT derived from scope:
+        # several tests deliberately write a WRONG scope into the RIGHT file to
+        # prove scope mismatch is rejected. A second tier passes it explicitly.
         d = os.path.join(self.sessions, session_id, "overrides")
         os.makedirs(d, exist_ok=True)
-        p = os.path.join(d, "allow-config-write")
+        p = os.path.join(d, filename or "allow-config-write")
         with open(p, "w", encoding="utf-8") as fh:
             fh.write("scope: %s\nsession: %s\nreason: test\n" % (scope, session_id))
         if age_seconds:
@@ -113,6 +117,186 @@ def test_blocks_hooks_write_without_token():
     check("Write to hooks/** without token -> block", rc == 2, "rc=%s err=%r" % (rc, err))
     check("block message names the token mechanism",
           "allow-config-write" in err and "scope" in err, "err=%r" % err)
+
+
+def test_blocks_destructive_recursive_deletes():
+    """The gap PR #112's detector was built for and never actually closed.
+
+    Two classes only -- catastrophic scope and business-data surfaces. Anything
+    reproducible stays allowed; see test_allows_routine_recursive_deletes."""
+    r = Rig()
+    cases = [
+        ("rm -rf ~/Documents/deals", "business-data surface"),
+        ("rm -rf ~/Desktop/x", "business-data surface"),
+        ('rm -rf "C:/Users/Owner/OneDrive - Oxford Capital Partners/Deals"',
+         "business-data surface"),
+        ('rm -r "C:/Users/Owner/OneDrive - Oxford Capital Partners"',
+         "business-data surface"),
+        ("rm -rf .", "catastrophic scope"),
+        ("rm -rf /", "catastrophic scope"),
+        ("rm -rf ~", "catastrophic scope"),
+        ("rm -rf C:\\", "catastrophic scope"),
+    ]
+    for cmd, reason in cases:
+        rc, out, err = r.run(payload("Bash", {"command": cmd}))
+        check("destructive delete blocked: %r" % cmd, rc == 2,
+              "rc=%s err=%r" % (rc, err))
+        check("names the reason (%s): %r" % (reason, cmd), reason in err,
+              "err=%r" % err)
+        check("offers the archive-instead alternative: %r" % cmd,
+              "/archive/" in err and "allow-destructive-delete" in err,
+              "err=%r" % err)
+
+
+def test_delete_bypasses_found_by_independent_review():
+    """Every concrete bypass the 2026-08-16 independent review demonstrated.
+
+    Each of these reached exit 0 against the first cut of this guard. They are
+    pinned as inputs, not as reasoning, so a future refactor that reintroduces
+    any of them fails here rather than in production."""
+    r = Rig()
+    must_block = [
+        # MAJOR 1 -- subshell/brace/substitution was a 1-char bypass.
+        "(rm -rf ~/Documents/deals)",
+        "{ rm -rf ~/Documents/deals; }",
+        "$(rm -rf ~/Documents/deals)",
+        # MAJOR 2 -- ephemeral leaf name inside a protected store.
+        'rm -rf "C:/Users/Owner/OneDrive - Oxford Capital Partners/Insurance/coverage"',
+        'rm -rf "C:/Users/Owner/OneDrive - Oxford Capital Partners/Deals/build"',
+        'rm -rf "C:/Users/Owner/OneDrive - Oxford Capital Partners/Deals/Target"',
+        "rm -rf ~/Documents/out",
+        "rm -rf ~/Desktop/tmp",
+        # MAJOR 3 -- glob-tail spellings of an already-blocked scope.
+        "rm -rf ./*",
+        "rm -rf ${HOME}/*",
+        # MAJOR 4 -- ancestor of every protected store.
+        "rm -rf C:/Users/Owner",
+        # --- second review pass, 2026-08-16 -------------------------------
+        # MAJOR A: a trailing group delimiter glued onto the operand defeated
+        # EVERY exact-match class. The first fix only ever tested the
+        # business-data variant, which matches by SUBSTRING and so masked it.
+        "(rm -rf /)", "(rm -rf .)", "(rm -rf ~)", "(rm -rf C:/)",
+        "(rm -rf C:/Users/Owner)",
+        "`rm -rf C:/Users/Owner`",
+        "{ rm -rf ~/Documents/deals; }",
+        # MAJOR B: a redirect BEFORE the operand dropped the operand entirely.
+        "rm -rf 2>/dev/null ~/Documents/deals",
+        "rm -rf 2> /dev/null ~/Documents/deals",
+        "rm -rf >/dev/null ~/Documents/deals",
+        # MAJOR C: the dotglob spelling wipes ~/.ssh, ~/.gitconfig, ~/.claude.
+        "rm -rf ~/.*",
+        # --- third review pass, 2026-08-16 --------------------------------
+        # MAJOR: an fd-duplication redirect BEFORE the operand. The `&` inside
+        # `2>&1` was read as a command separator, severing rm from its path.
+        # The round-2 tests used only `&`-free redirect forms, which is exactly
+        # why they stayed green while this leaked.
+        "rm -rf 2>&1 ~/Documents/deals",
+        "rm -rf 1>&2 ~/Documents/deals",
+        "rm -rf >&2 ~/Documents/deals",
+        "rm -rf &>/dev/null ~/Documents/deals",
+        "rm -rf &> /dev/null ~/Documents/deals",
+        "rm -rf 2>&1 C:/Users/Owner",        # ancestor class
+        "rm -rf 2>&1 /",                     # catastrophic class
+        # MINOR: ${IFS} evasion -- the detector advertised seeing through this
+        # and fired, but extraction yielded a junk operand the guard could not
+        # resolve, so the guard allowed what the detector had flagged.
+        "rm${IFS}-rf${IFS}/",
+        "rm${IFS}-rf${IFS}~/Documents/deals",
+        "rm${IFS}-rf${IFS}C:/Users/Owner",
+        # --- fourth review pass, 2026-08-16 -------------------------------
+        # INPUT fd-duplication: the shared _FD_DUP_RE covers only `>&`/`&>`, so
+        # `<&` kept its `&` and still severed the segment.
+        "rm -rf 0<&1 /",
+        "rm -rf <&- ~/Documents/deals",
+        "rm -rf 3<&0 C:/Users/Owner",
+        # Substitution-ordering hazard: ${IFS} normalization rewrote
+        # `2>${IFS}&1` to `2> &1`, breaking the contiguity fd-dup stripping
+        # needs, so the `&` survived to the segment splitter.
+        "rm -rf 2>${IFS}&1 ~/Documents/deals",
+        "rm -rf 2>${IFS}&1 /",
+    ]
+    for cmd in must_block:
+        rc, _, err = r.run(payload("Bash", {"command": cmd}))
+        check("review bypass now blocked: %r" % cmd, rc == 2,
+              "rc=%s err=%r" % (rc, err))
+
+    # MAJOR 5 -- correct shell quoting must NOT be blocked. A false positive here
+    # forces a broader override token, which is strictly worse than the gap.
+    must_allow = [
+        'rm -rf "$HOME"/scratch/build',
+        'rm -rf ~/"my folder"/node_modules',
+        'rm -rf "C:/Users/Owner/OneDrive - Oxford Capital Partners/Cowork OS/foo"',
+        # The delimiter strip must be UNBALANCED-only: a real directory whose
+        # name legitimately contains brackets must survive the operand intact.
+        'rm -rf "build/Closing (final)"',
+        "rm -rf build > log.txt",          # redirect AFTER operand, still fine
+        "rm -rf 2>/dev/null node_modules",  # redirect before a routine target
+        "rm -rf C:/Users/OwnerBackup",      # sibling prefix, not the profile
+        # fd-dup stripping must not turn routine deletes into blocks, and a real
+        # `&&` chain must still separate commands rather than being eaten.
+        "rm -rf 2>&1 node_modules",
+        "rm -rf build 2>&1",
+        "ls && rm -rf build",
+        "rm -rf dist && echo done",
+    ]
+    for cmd in must_allow:
+        rc, _, err = r.run(payload("Bash", {"command": cmd}))
+        check("correct quoting not falsely blocked: %r" % cmd, rc == 0,
+              "rc=%s err=%r" % (rc, err))
+
+
+def test_claude_workspace_exemption_is_actually_exercised():
+    """The Claude_Workspace exemption, tested on a NON-ephemeral leaf.
+
+    The original test used `.../Claude_Workspace/tmp`, which passed via the
+    ephemeral-basename rule -- so the exemption it claimed to cover was never
+    exercised (independent review 2026-08-16, MINOR 7)."""
+    r = Rig()
+    cmd = ('rm -rf "C:/Users/Owner/OneDrive - Oxford Capital Partners/'
+           'Claude_Workspace/01_Workspace/sessiondata"')
+    rc, _, err = r.run(payload("Bash", {"command": cmd}))
+    check("Claude_Workspace exempt on a non-ephemeral leaf", rc == 0,
+          "rc=%s err=%r" % (rc, err))
+
+
+def test_allows_routine_recursive_deletes():
+    """A guard people route around protects nothing.
+
+    Reproducible build output, agent working surface (Hard Invariant 5 names
+    ~/.claude and Claude_Workspace as free surface), and the command-position
+    false positives that PR #112's own SCOPE note called "the operationally
+    damaging class" must all sail through untouched."""
+    r = Rig()
+    allowed = [
+        "rm -rf node_modules", "rm -rf build", "rm -rf dist", "rm -rf .venv",
+        "rm -rf __pycache__", "rm -rf .cache",
+        "rm -rf C:/Users/Owner/.claude/.claude-worktrees/foo",
+        'rm -rf "C:/Users/Owner/OneDrive - Oxford Capital Partners/Claude_Workspace/tmp"',
+        "git rm -r --cached node_modules",   # unstages; never touches disk
+        "grep rm -r .", "# rm -rf /tmp/x", "echo rm -rf x",
+        "rm file.txt", "ls -R", "docker run --rm img",
+    ]
+    for cmd in allowed:
+        rc, out, err = r.run(payload("Bash", {"command": cmd}))
+        check("routine command allowed: %r" % cmd, rc == 0,
+              "rc=%s err=%r" % (rc, err))
+
+
+def test_destructive_delete_token_allows():
+    """An explicitly approved deletion clears, on its OWN tier -- a
+    config-write token must not silently authorize a tree deletion."""
+    r = Rig()
+    cmd = "rm -rf ~/Documents/deals"
+    rc, _, err = r.run(payload("Bash", {"command": cmd}))
+    check("blocked without a token", rc == 2, "rc=%s" % rc)
+    r.mint_token(scope="config-write")
+    rc, _, err = r.run(payload("Bash", {"command": cmd}))
+    check("a config-write token does NOT authorize a delete", rc == 2,
+          "rc=%s err=%r" % (rc, err))
+    r.mint_token(scope="destructive-delete", filename="allow-destructive-delete")
+    rc, _, err = r.run(payload("Bash", {"command": cmd}))
+    check("a destructive-delete token allows it", rc == 0,
+          "rc=%s err=%r" % (rc, err))
 
 
 def test_blocks_settings_claude_md_registry_without_token():
@@ -893,6 +1077,11 @@ if __name__ == "__main__":
     test_exit_code_is_never_one()
     test_block_message_covers_the_governance_cli_invocation_case()
     test_governance_cli_guidance_is_advice_only_not_an_exemption()
+    test_blocks_destructive_recursive_deletes()
+    test_delete_bypasses_found_by_independent_review()
+    test_claude_workspace_exemption_is_actually_exercised()
+    test_allows_routine_recursive_deletes()
+    test_destructive_delete_token_allows()
     if _failures:
         print("\n%d FAILURE(S): %s" % (len(_failures), ", ".join(_failures)))
         sys.exit(1)
