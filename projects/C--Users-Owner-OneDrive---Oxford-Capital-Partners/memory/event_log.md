@@ -5,12 +5,24 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-17T14:01:12.082Z
+  modified: 2026-08-17T14:52:15.427Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-08-17 (afternoon) — Dirty-tree triage continued: ora-ar-feed-sweep + 8 output_contract-removal commits, 8 CRLF-noise entries identified as non-actionable
+
+Follow-up to the earlier 2026-08-17 dirty-tree-triage entry. Two more rounds of isolated commits, both after a real settlement wait (background mtime-poll, `dirty-file-owner-report.py` cross-check for `owner_live: false`, and a session-roster check that no currently-running session's title matched the target task names).
+
+**`ora-ar-feed-sweep` (commit `d07731c`):** new weekly AR delinquency-feed sweep task (Mon 8:20 AM), guarded on `server/ar/delinquency-bucketed.ts` existing on `oxford-command-center` main. Settled 20+ min stable before commit. Note: while this was settling, a separate live session merged and **pushed** PR #283 ("activate the dark AR feed — Phase 0") to `oxford-command-center`'s `origin/main` — the guard file now exists, so this task's Guard 1 will pass on its next fire instead of skip-and-email.
+
+**8 `output_contract`-removal commits** (`ora-am-brief`, `ora-broker-touch-cadence`, `ora-deal-aging-sla`, `ora-doctrine-integrity-guard`, `ora-master-workbook-ingest`, `ora-pm-ledger`, `ora-task-integrity-guard`, `ora-weekly-hygiene`): each SKILL.md's `output_contract:` YAML block removed, isolated per file. `dirty-file-owner-report.py` showed `owner_live: false` for all — provenance was scattered/stale (mostly days-old touches, not one coordinated live session), consistent with each task's own recent edit history rather than a single in-flight fleet sweep.
+
+**8 more scheduled-tasks entries are CRLF-normalization noise, not real WIP:** `ora-cc-schematic-refresh`, `ora-deal-sourcing-scan`, `ora-entry-market-scan`, `ora-financial-code-integrity-sweep`, `ora-model-release-watch`, `ora-monthly-portfolio-briefing`, `ora-site-exposure-probe`, `ora-sofr-direct-prefetch` all show `git status` "M" but an empty `git diff` — line-ending bookkeeping only, nothing to commit. Left as-is; worth a `core.autocrlf`/`.gitattributes` look if this recurs across sessions.
+
+Left untouched (still live at time of writing): `open-items-tracker.md` (unrelated active claim, `open-items-tracker-oi127`) and two new memory files (`reference_delete_scheduled_task_resolves_colliding_id_to_local_fleet.md`, `reference_next_action_date_stamping_already_wired_2026-08-12.md`) — both `owner_live: true`.
 
 ## 2026-08-17 — Dirty-tree triage: 13 isolated commits landed across `~/.claude` and `oxford-command-center`, 0 remaining
 
