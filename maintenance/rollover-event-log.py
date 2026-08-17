@@ -26,6 +26,7 @@ import datetime
 import os
 import re
 import sys
+import time
 
 LOG = os.path.join(os.path.expanduser("~"), ".claude", "projects",
                     "C--Users-Owner-OneDrive---Oxford-Capital-Partners",
@@ -33,6 +34,97 @@ LOG = os.path.join(os.path.expanduser("~"), ".claude", "projects",
 ARCHIVE_DIR = os.path.join(os.path.dirname(LOG), "_archive")
 
 HEADER_RE = re.compile(r"^## ", re.MULTILINE)
+
+# Attempts at swapping the live log before giving up, and the attempt at which we
+# also start trying the in-place path. Same shape and rationale as
+# append-event-log.py's retry loop: Claude.exe (the Desktop app) can hold a read
+# handle on event_log.md WITHOUT FILE_SHARE_DELETE for tens of minutes and then
+# release it on its own, which blocks os.replace specifically while leaving plain
+# reads and in-place writes working (Restart Manager diagnosis 2026-07-16 --
+# memory/reference_event_log_app_handle_lock.md). Retrying alone does not clear
+# that hold, so the in-place write is the path that actually gets through it.
+REPLACE_ATTEMPTS = 6
+INPLACE_FALLBACK_AFTER = 3
+
+
+def archive_dir_for(log):
+    """Archive directory that belongs to `log`.
+
+    Derived from the target path, NOT from the module-level LOG constant: the
+    original computed ARCHIVE_DIR once at import time, so `--log <somewhere
+    else>` still wrote its archive into the real memory/_archive. That is not
+    theoretical -- it fired on the first run of this file's own test suite,
+    depositing a synthetic archive beside the live log."""
+    return os.path.join(os.path.dirname(os.path.abspath(log)), "_archive")
+
+
+def _guard_mtime(log, mtime_before):
+    """Raise BlockingIOError if `log` moved under us since it was read."""
+    if os.stat(log).st_mtime_ns != mtime_before:
+        raise BlockingIOError(
+            "event_log.md changed since it was read -- refusing to write stale content")
+
+
+def _atomic_swap(log, new_live, mtime_before):
+    _guard_mtime(log, mtime_before)
+    tmp = log + ".tmp-rollover"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(new_live)
+        os.replace(tmp, log)  # atomic on the same volume; consumes tmp on success
+    except Exception:
+        # os.replace is the only thing that consumes tmp, so a blocked attempt
+        # orphans it -- and the in-place path writes straight to `log` and never
+        # picks it up. append-event-log.py left a ~480KB orphan exactly this way
+        # (2026-07-16) that read as unmerged data and cost a real investigation.
+        # The content is re-derived from `new_live` each attempt, so it is scratch.
+        try:
+            os.remove(tmp)
+        except Exception:
+            pass
+        raise
+    return True
+
+
+def _inplace_write(log, new_live, mtime_before):
+    """Write through a handle that blocks rename but permits direct writes.
+    Carries the same mtime guard plus a post-write read-back verify."""
+    _guard_mtime(log, mtime_before)
+    with open(log, "w", encoding="utf-8") as f:
+        f.write(new_live)
+    with open(log, encoding="utf-8") as f:
+        if f.read() != new_live:
+            raise IOError("in-place rollover read-back mismatch on %s" % log)
+    return True
+
+
+def write_live_log(log, new_live, mtime_before, attempts=REPLACE_ATTEMPTS):
+    """Replace `log` with `new_live`. True on success, False if every attempt
+    failed. Raises BlockingIOError -- WITHOUT retrying -- if a concurrent writer
+    landed an append meanwhile.
+
+    That last case is the hazard the retry itself introduces. `new_live` was
+    computed from a read taken before the archive was written; if another session
+    appends during the retry window, writing it would silently delete their entry
+    from an append-only log. Every attempt therefore re-checks mtime and aborts
+    rather than retrying, which is the same freshness guarantee append-event-log's
+    _atomic_insert gets by re-reading inside its own mtime-guarded cycle."""
+    for attempt in range(attempts):
+        try_inplace = (attempt + 1) >= min(INPLACE_FALLBACK_AFTER, attempts)
+        try:
+            return _atomic_swap(log, new_live, mtime_before)
+        except BlockingIOError:
+            raise
+        except Exception:
+            if try_inplace:
+                try:
+                    return _inplace_write(log, new_live, mtime_before)
+                except BlockingIOError:
+                    raise
+                except Exception:
+                    pass
+            time.sleep(0.2 * (attempt + 1))
+    return False
 
 
 def find_cut_index(lines, keep_min):
@@ -109,7 +201,8 @@ def main(argv=None):
     archived_entries = "".join(lines[cut:])
 
     today = datetime.date.today().isoformat()
-    archive_path = os.path.join(ARCHIVE_DIR, "event_log_%s.md" % today)
+    archive_dir = archive_dir_for(a.log)
+    archive_path = os.path.join(archive_dir, "event_log_%s.md" % today)
 
     # Identify the oldest entry title staying live, for the pointer note.
     kept_headers = [l for l in lines[body_start:cut] if l.startswith("## ")]
@@ -143,7 +236,7 @@ def main(argv=None):
                           "(another session is likely appending; re-run once it's quiet)\n")
         return 1
 
-    os.makedirs(ARCHIVE_DIR, exist_ok=True)
+    os.makedirs(archive_dir, exist_ok=True)
     with open(archive_path, "w", encoding="utf-8") as f:
         f.write(new_archive)
 
@@ -151,10 +244,68 @@ def main(argv=None):
     with open(backup, "w", encoding="utf-8") as f:
         f.write(text)
 
-    tmp = a.log + ".tmp-rollover"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(new_live)
-    os.replace(tmp, a.log)
+    # The archive and backup are already on disk here, so a failed swap is not a
+    # clean no-op: the archive duplicates content that is STILL live, and the
+    # "refusing to overwrite existing archive file" guard above then rejects every
+    # re-run -- a transient, self-clearing app handle lock would wedge rollover
+    # until someone cleaned up by hand. So the scratch files must go.
+    #
+    # But they may only go once the live log is PROVEN intact. The in-place
+    # fallback opens the log with mode "w", which truncates before any bytes
+    # land, so a failure after that point leaves the log damaged and the backup
+    # holding the only copy of the original. An earlier version of this function
+    # deleted the backup unconditionally on the strength of "the live log is
+    # untouched in all failure paths" -- true before the in-place path existed,
+    # false after it. A probe drove an ENOSPC-shaped failure through it and the
+    # log came back 0 bytes with backup and archive both gone: a recoverable
+    # failure turned into total, unrecoverable loss of the canonical log.
+    #
+    # Restore first, verify, and only then discard. If the log cannot be put
+    # back, keep EVERYTHING and say so loudly -- a wedged rollover is a nuisance,
+    # a destroyed event_log.md is not recoverable from anywhere else on disk.
+    def _unwind(reason):
+        try:
+            with open(a.log, encoding="utf-8") as fh:
+                current = fh.read()
+        except OSError:
+            current = None
+
+        restored = (current == text)
+        if not restored:
+            try:
+                with open(a.log, "w", encoding="utf-8") as fh:
+                    fh.write(text)
+                with open(a.log, encoding="utf-8") as fh:
+                    restored = (fh.read() == text)
+            except OSError:
+                restored = False
+
+        if not restored:
+            sys.stderr.write(
+                "%s -- AND the live log could not be restored to its original "
+                "content. The original is preserved at %s and the archived tail at "
+                "%s; BOTH LEFT IN PLACE DELIBERATELY. Restore by hand before "
+                "running rollover again.\n" % (reason, backup, archive_path))
+            return
+
+        for scratch in (archive_path, backup, a.log + ".tmp-rollover"):
+            try:
+                os.remove(scratch)
+            except OSError:
+                pass
+        sys.stderr.write("%s -- live log verified intact; archive and backup removed "
+                          "so a re-run is not blocked by the archive-exists guard\n" % reason)
+
+    try:
+        wrote = write_live_log(a.log, new_live, mtime_before)
+    except BlockingIOError as e:
+        _unwind("%s" % e)
+        return 1
+    if not wrote:
+        _unwind("could not replace %s after %d attempts (atomic and in-place both "
+                 "failed -- see memory/reference_event_log_app_handle_lock.md)"
+                 % (a.log, REPLACE_ATTEMPTS))
+        return 1
 
     with open(a.log, encoding="utf-8") as f:
         written = f.read()
