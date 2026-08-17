@@ -725,6 +725,87 @@ def test_recursive_delete_sees_through_ifs_word_splitting():
           tcp.is_recursive_delete("rm${IFS}-rf${IFS}/tmp/x"))
 
 
+def test_recursive_delete_requires_command_position():
+    """`rm` must be the command being RUN, not a word that merely appears.
+
+    THE GAP THIS CLOSES (named in tool_call_paths.py's own SCOPE comment as
+    "the operationally damaging class, not a cosmetic one"): the detector had no
+    notion of command position, so any line CONTAINING the word `rm` next to an
+    r-bundle flag armed it -- including lines that delete nothing at all. That is
+    the false-positive class a consumer must not inherit: `git rm -r --cached`
+    unstages without touching disk, and blocking it would break ordinary work
+    while teaching people to route around the guard."""
+    not_firing = [
+        "git rm -r --cached node_modules",       # unstages; does NOT touch disk
+        "git rm -rf --cached build",
+        "grep rm -r .",                          # searching FOR the text "rm"
+        "grep -r 'rm -rf' .",
+        "rg 'rm -rf' -r .",
+        "# rm -rf /tmp/x",                       # a shell COMMENT
+        "  # rm -rf ~/Documents/deals",
+        "echo rm -rf x",                         # printing, not deleting
+        "echo 'rm -rf /' > note.txt",
+        "man rm -r",
+        "which rm -r",
+        "type rm -r",
+    ]
+    for cmd in not_firing:
+        check("not in command position, must not fire: %r" % cmd,
+              not tcp.is_recursive_delete(cmd), cmd)
+
+    # ...and every genuine invocation form must STILL fire. A command-position
+    # rule that silences real deletes is a worse defect than the one it fixes.
+    firing = [
+        "rm -rf C:/Users/Owner/Documents/deals",         # the bare case
+        "sudo rm -rf /var/tmp/x",                        # privilege wrapper
+        "env rm -rf /var/tmp/x",
+        "command rm -rf /var/tmp/x",
+        "nohup rm -rf /var/tmp/x",
+        "time rm -rf /var/tmp/x",
+        "xargs rm -rf",                                  # the classic pipe sink
+        "FOO=bar rm -rf /var/tmp/x",                     # env assignment prefix
+        "/bin/rm -rf /var/tmp/x",                        # absolute path form
+        "./rm -rf x",
+        "rm.exe -rf x",                                  # pinned Windows broadening
+        "rm${IFS}-rf${IFS}/tmp/x",                       # pinned IFS broadening
+        "ls && rm -rf build",                            # command position of ITS segment
+        "cd /tmp; rm -rf x",
+        "false || rm -rf x",
+        # -exec HANDS OFF command position: find really does run this rm.
+        "find . -name node_modules -exec rm -rf {} +",
+        "find . -type d -execdir rm -rf {} ;",
+    ]
+    for cmd in firing:
+        check("genuine recursive delete, must still fire: %r" % cmd,
+              tcp.is_recursive_delete(cmd), cmd)
+
+
+def test_shared_fd_dup_re_is_not_widened_for_recursive_delete():
+    """The round-4 reviewer suggested widening `_FD_DUP_RE` to cover `<&`.
+    Doing that literally would have been a REGRESSION, and this test pins why.
+
+    `_FD_DUP_RE` is applied inside shell_may_write() to decide whether a command
+    writes at all. Stripping MORE text there means fewer commands read as
+    writers -- silently weakening config-write-guard, workbook-write-guard and
+    lint-config-guard simultaneously. That shared-matcher move is the documented
+    cause of the 2026-08-03 robocopy regression and the PR#32 deadlock. So the
+    wider pattern lives in a SEPARATE constant used only by recursive_delete()."""
+    check("shared _FD_DUP_RE still excludes input duplication",
+          tcp._FD_DUP_RE.search("0<&1") is None,
+          "shared pattern must stay narrow: %r" % tcp._FD_DUP_RE.pattern)
+    check("recursive-delete pattern DOES cover input duplication",
+          tcp._RD_FD_DUP_RE.search("0<&1") is not None,
+          "wide pattern: %r" % tcp._RD_FD_DUP_RE.pattern)
+    check("both still cover output duplication",
+          tcp._FD_DUP_RE.search("2>&1") is not None
+          and tcp._RD_FD_DUP_RE.search("2>&1") is not None)
+    # A real `&&` chain must survive BOTH patterns -- eating it would merge two
+    # commands into one segment and change what the detector reads.
+    for pat in (tcp._FD_DUP_RE, tcp._RD_FD_DUP_RE):
+        check("`&&` is not eaten by %r" % pat.pattern,
+              pat.search("ls && rm -rf build") is None)
+
+
 def test_recursive_delete_extracts_targets():
     d = tcp.recursive_delete("rm -rf C:/Users/Owner/Documents/deals")
     check("single target extracted",
@@ -863,6 +944,8 @@ if __name__ == "__main__":
     test_recursive_delete_does_not_fire_on_benign_commands()
     test_recursive_delete_is_segment_scoped()
     test_recursive_delete_ignores_flags_that_are_not_rms()
+    test_recursive_delete_requires_command_position()
+    test_shared_fd_dup_re_is_not_widened_for_recursive_delete()
     test_recursive_delete_sees_through_ifs_word_splitting()
     test_recursive_delete_extracts_targets()
     test_recursive_delete_survives_unicode_evasion()
