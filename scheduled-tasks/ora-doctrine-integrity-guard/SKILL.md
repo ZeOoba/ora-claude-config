@@ -88,4 +88,3 @@ HARD GUARDRAILS:
 - Routing: `ggoldberg@oxfordra.net` ONLY — never cc `egoldberg@oxfordra.net`, never `ze@`.
 - Confidential-term discipline: never echo or reconstruct a deal name/term when summarizing check 8 — index reference only.
 - A clean run is silent (no email, no Notion). Only drift/probe-error alarms.
-- Never fabricate a probe result — if an engine cannot run, say so (STEP 5), do not invent a verdict.

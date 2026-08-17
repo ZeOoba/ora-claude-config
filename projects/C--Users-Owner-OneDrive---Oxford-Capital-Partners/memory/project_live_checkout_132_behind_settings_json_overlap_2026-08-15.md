@@ -1,11 +1,11 @@
 ---
 name: project-live-checkout-132-behind-settings-json-overlap
-description: "Live ~/.claude checkout is 132 commits behind origin/feat/model-canary-probe-step25 (PR #106 + #109 merged, not yet pulled); its current dirty set collides with session 39572813's active repo-housekeeping claim on the same files."
+description: "SUPERSEDED 2026-08-16 (gap closed, now behind 4; kept for the settings.json conflict-class lesson) -- Live ~/.claude checkout is 132 commits behind origin/feat/model-canary-probe-step25 (PR #106 + #109 merged, not yet pulled); its current dirty set collides with session 39572813's active repo-housekeeping claim on the same files."
 metadata: 
   node_type: memory
   type: project
   originSessionId: 71202c4a-c638-4821-95ea-6b6a43606cdf
-  modified: 2026-08-15T18:43:35.313Z
+  modified: 2026-08-16T18:02:42.111Z
 ---
 
 **Fact:** as of 2026-08-15, the live `~/.claude` checkout is on `feat/model-canary-probe-step25` at `4db11a0`, **132 commits behind** `origin/feat/model-canary-probe-step25`. That remote tip includes [PR #106](https://github.com/ZeOoba/ora-claude-config/pull/106) (the full main-merge reconciliation — 12 files, verified conflict resolution) and [PR #109](https://github.com/ZeOoba/ora-claude-config/pull/109) (OI-111 reconciliation), both merged 2026-08-15. Neither is live in the checkout that hooks/scripts actually execute from.
@@ -26,3 +26,5 @@ This matches session `39572813`'s active `repo-housekeeping` claim, opened the s
 **Deliberately not done:** no `MEMORY.md` index pointer added yet — `MEMORY.md` is itself one of the contested dirty files in the live checkout (see list above), so editing it now would create exactly the collision this note exists to flag. Add the index entry once session `39572813`'s edit to `MEMORY.md` has landed or cleared.
 
 Related: [[project_primary_checkout_main_move_blocked_2026-08-12]] (a prior instance of the same class of problem — a live checkout unable to advance because of dirty-tree/branch-position issues).
+
+**UPDATE 2026-08-16 — SUPERSEDED; the gap is closed.** Re-measured today via `git rev-list --left-right --count`: the live checkout is **behind 4**, not 132, of `origin/feat/model-canary-probe-step25`. PRs #106/#109 — and since then #118/#119/#120 — are merged and pulled. The `settings.json` conflict this note flagged never came due: `settings.json` is no longer in the live dirty set at all. **Keep** the general lesson (a large behind-count gets reconciled by whoever advances the checkout, never by a blind fast-forward, and an upstream probe change can be a real bug fix rather than staleness). **Discard** the 132 figure and the session-`39572813` collision framing as point-in-time. The "deliberately not done" MEMORY.md pointer was in fact added later and is live in the index.
