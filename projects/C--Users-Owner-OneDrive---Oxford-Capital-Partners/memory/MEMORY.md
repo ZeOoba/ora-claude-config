@@ -79,7 +79,7 @@
 - [update_scheduled_task DROPS non-owned frontmatter keys](reference_update_scheduled_task_drops_frontmatter_keys.md) — a `description` retag deletes `output_contract`; diff vs HEAD after every call
 - **⛔ [Task description lives in ONE store — SKILL.md](reference_skill_description_registry_file_desync.md)** — neither registry holds `description`; a file edit IS durable. NEVER `update_scheduled_task` to "sync" one — that call drops frontmatter keys
 - [SKILL.md frontmatter is deliberately NOT strict YAML](reference_skill_frontmatter_lenient_parse.md) — the harness parses line-wise, so ~97/147 fleet SKILL.md fail `yaml.safe_load` **by design**; do NOT mass-quote to satisfy it
-- **⛔ [AR subsystem EXISTS but is DARK 08-16](reference_ar_subsystem_exists_but_dark_2026-08-16.md)** — `server/ar/` is complete, tested (PR #230, 2 refute rounds) and has NEVER run; `data/ar/` doesn't exist, so **$204,788 of AR is invisible** to CC/brief. Detectors, matcher, regime registry all already built. Do NOT rebuild — 3 sessions nearly did
+- **⚠️ [AR subsystem ran for the first time 08-17](reference_ar_subsystem_exists_but_dark_2026-08-16.md)** — `data/ar/` + `arBalances[]` now populated (~$204,788), but it was a one-off manual run, still unregistered (no inbox, no schedule) and unreviewed by Gabriel. Do NOT rebuild the pipeline — 3 sessions nearly did before this
 
 ## Rules & governance
 - [Standing Rules & Preferences](rules.md) — working-style, Outlook-only email, QB Desktop, Netlify, CSP, confidentiality
