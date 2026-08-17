@@ -45,7 +45,7 @@ Exit 0 = committed, or nothing needed committing this cycle. Exit 1 = skipped (l
 contention or staged-set race) -- transient, retry next cycle. Exit 2 = cannot operate
 (not a git repo, MEM missing) -- a probe/sweep that cannot look must not invent findings.
 """
-import os, re, sys, glob, subprocess, time
+import argparse, os, re, sys, glob, subprocess, time
 
 for _s in (sys.stdout, sys.stderr):
     try: _s.reconfigure(encoding="utf-8", errors="replace")
@@ -261,7 +261,23 @@ def run_sweep(mem_dir=None, quiet_seconds=QUIET_SECONDS, now=None):
     return result
 
 
+def _parse_args(argv):
+    """Real argument parsing -- 2026-08-16 incident: this script previously ignored
+    sys.argv entirely (main() called run_sweep() unconditionally), so probing it with
+    `--help`/`-h` silently ran the REAL sweep instead of printing usage, auto-committing
+    8 memory files outside a caller's intended gating (see event_log.md). No flags are
+    needed for normal (cron-fired) use -- this exists so `-h`/`--help` and an unrecognized
+    argument exit without touching git, instead of falling through to the default action."""
+    ap = argparse.ArgumentParser(
+        description="ORA memory/ commit-cadence sweep. Commits settled (quiet-window, "
+                     "%ds+) changes under memory/ as a mechanical checkpoint -- no "
+                     "arguments needed for normal cron-fired use. See module docstring "
+                     "for the full safety model." % QUIET_SECONDS)
+    return ap.parse_args(argv)
+
+
 def main():
+    _parse_args(sys.argv[1:])  # -h/--help or an unrecognized arg exits here, before any git call
     result = run_sweep()
     print("MEMORY COMMIT SWEEP: %s" % result["message"])
     if result["skipped_recent"]:
