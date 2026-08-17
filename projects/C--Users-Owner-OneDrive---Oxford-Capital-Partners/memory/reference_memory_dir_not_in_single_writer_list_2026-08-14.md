@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: aaca643c-9e99-4ebe-940a-7c81b182eeaf
-  modified: 2026-08-14T20:55:57.760Z
+  modified: 2026-08-17T04:05:24.102Z
 ---
 
 # memory/ living docs missing from the single-writer list
@@ -19,6 +19,8 @@ metadata:
 Also confirmed: `open-items-tracker.md` and `ops_decision_log.md` — both append-style like `event_log.md` — have no equivalent script gate. `allocate-oi-id.py` only allocates collision-safe IDs for the tracker; it doesn't guard the append/write itself the way `append-event-log.py`'s mtime-guard + atomic-replace + spool does. Same open question applies to both.
 
 **How to apply:** when the next `ora-setup-audit` (or a dedicated concurrency review) runs, evaluate for `memory/`, `open-items-tracker.md`, and `ops_decision_log.md`: (a) whether the `memory/` backlog should be committed down to a clean baseline so `git status` becomes a useful signal again, (b) whether `open-items-tracker.md`/`ops_decision_log.md` need a lighter-weight script analogous to `append-event-log.py`, or (c) no change if the actual collision rate across 14+ concurrent sessions is negligible in practice. Close this reference once ruled on.
+
+**PARTIALLY RESOLVED (2026-08-16, Gabriel-directed, in-turn rather than a formal audit pass — narrow enough not to need one).** The specific symptom this predicted happened live the same day: MEMORY.md's Automation Audit pointer line was dropped/reverted by concurrent sessions at least three times in one session (plain Read+Edit racing, exactly as described above). Built `~/.claude/maintenance/update-memory-index-line.py` — mirrors `append-event-log.py`'s mtime-guard + atomic-replace + in-place-fallback + bounded-retry pattern, generalized from "insert newest dated entry" to "upsert any single line matched by a regex" (6 unit tests on the pure transform; proven live against the real, actively-contended MEMORY.md, not just tested in isolation). Any session updating an existing index pointer line should use this instead of a raw Edit. **Still open, unchanged from above:** this covers pointer-line upserts only, not structural edits (consolidation, section reorganization, archival) to MEMORY.md or any of the other 298 `memory/` files, and `open-items-tracker.md`/`ops_decision_log.md`/`claim_work.py` auto-release are all still unaddressed — those remain for the next full `ora-setup-audit` pass, not closed by this narrower fix.
 
 **Related finding, same family (2026-08-14, observed live):** `claim_work.py` claims have no session-lifecycle hook — a session can finish its work, merge its PR, and archive while still holding a live claim. Observed directly: session `c6b22b22` ("Insights," PR #275 merged, archived) still held the `hooks-override-auth` claim 105+ minutes after finishing; another session had to `release --force` it before new hooks/ work could proceed without a --force takeover. The claim's 2h TTL masks this — it eventually self-expires, but in the meantime it reads as "occupied" to every other session's SessionStart broadcast even though the work is done. Same open question as the append-gate ones above: when the next `ora-setup-audit` runs, evaluate whether `claim_work.py` should auto-release on session end/archive (if the harness exposes that event) or whether the TTL is judged short enough already.
 
