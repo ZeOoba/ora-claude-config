@@ -173,25 +173,32 @@ def _stale(entries, verdict):
     return tfrp.find_stale_vs_git(entries, differs=lambda p: verdict)
 
 
-expect("find_stale_vs_git: matches upstream -> clean",
-       _stale(_STALE_ENTRY, False) == [])
-expect("find_stale_vs_git: differs from upstream -> flagged (the OI-170 case)",
-       _stale(_STALE_ENTRY, True) == ["ora-t1"])
+expect("find_stale_vs_git: clean -> no finding",
+       _stale(_STALE_ENTRY, tfrp.STATE_CLEAN) == [])
+expect("find_stale_vs_git: behind upstream -> flagged (the OI-170 case)",
+       _stale(_STALE_ENTRY, tfrp.STATE_BEHIND) == ["ora-t1"])
+expect("find_stale_vs_git: uncommitted -> flagged (content in no commit)",
+       _stale(_STALE_ENTRY, tfrp.STATE_UNCOMMITTED) == ["ora-t1"])
 expect("find_stale_vs_git: no verdict (None) -> NOT a finding",
        _stale(_STALE_ENTRY, None) == [])
 expect("find_stale_vs_git: disabled entry -> skipped (matches sibling checks)",
        _stale([{"id": "ora-t1", "filePath": "/x/SKILL.md", "enabled": False}],
-              True) == [])
+              tfrp.STATE_BEHIND) == [])
 expect("find_stale_vs_git: entry with no filePath -> not flagged, not a crash",
-       _stale([{"id": "ora-t1", "filePath": None, "enabled": True}], True) == [])
+       _stale([{"id": "ora-t1", "filePath": None, "enabled": True}],
+              tfrp.STATE_BEHIND) == [])
 expect("find_stale_vs_git: no entries -> []", tfrp.find_stale_vs_git([]) == [])
 expect("find_stale_vs_git: sorted output",
        _stale([{"id": "ora-z", "filePath": "/z/SKILL.md", "enabled": True},
                {"id": "ora-a", "filePath": "/a/SKILL.md", "enabled": True}],
-              True) == ["ora-a", "ora-z"])
+              tfrp.STATE_BEHIND) == ["ora-a", "ora-z"])
+expect("find_stale_states: carries the per-id reason",
+       tfrp.find_stale_states(_STALE_ENTRY,
+                              state_fn=lambda p: tfrp.STATE_UNCOMMITTED)
+       == {"ora-t1": tfrp.STATE_UNCOMMITTED})
 
 
-# _git_differs_from_upstream: git's exit codes, and never raising.
+# --- OI-182: DIRECTION. The regression that motivated this whole change ------------------------
 def _fake_git(*results):
     """Each call returns the next (returncode, stdout) in sequence."""
     seq = iter(results)
@@ -202,25 +209,108 @@ def _fake_git(*results):
     return run
 
 
-_TOP = (0, b"/repo\n")
-_UP = (0, b"origin/main\n")
-expect("_git_differs_from_upstream: diff exit 0 -> False (identical)",
-       tfrp._git_differs_from_upstream(
-           "/repo/x/SKILL.md", run=_fake_git(_TOP, _UP, (0, b""))) is False)
-expect("_git_differs_from_upstream: diff exit 1 -> True (differs)",
-       tfrp._git_differs_from_upstream(
-           "/repo/x/SKILL.md", run=_fake_git(_TOP, _UP, (1, b""))) is True)
-expect("_git_differs_from_upstream: diff exit 128 -> None (no verdict, not a finding)",
-       tfrp._git_differs_from_upstream(
-           "/repo/x/SKILL.md", run=_fake_git(_TOP, _UP, (128, b""))) is None)
-expect("_git_differs_from_upstream: NO upstream configured -> None (nothing to be behind)",
-       tfrp._git_differs_from_upstream(
-           "/repo/x/SKILL.md", run=_fake_git(_TOP, (128, b""))) is None)
-expect("_git_differs_from_upstream: not a git repo -> None (the LAMS/OneDrive case)",
-       tfrp._git_differs_from_upstream(
-           "/x/SKILL.md", run=_fake_git((128, b""))) is None)
-expect("_git_differs_from_upstream: git raising -> None, not an exception",
-       tfrp._git_differs_from_upstream(
+# Call order inside _git_path_state: rev-parse --show-toplevel, THEN
+# ls-files --error-unmatch (tracked check), THEN diff --quiet HEAD (worktree
+# vs HEAD), THEN [upstream lookup, merge-base, base..upstream, worktree..upstream].
+_TOP = (0, b"/repo\n")           # rev-parse --show-toplevel
+_TRACKED = (0, b"")              # ls-files --error-unmatch  (rc0 = tracked)
+_UNTRACKED = (1, b"")            # ls-files --error-unmatch  (rc1 = untracked)
+_UP = (0, b"origin/main\n")      # rev-parse --abbrev-ref @{upstream}
+_MB = (0, b"abc123\n")           # merge-base HEAD upstream
+_WT_CLEAN = (0, b"")             # diff --quiet HEAD -- path       (worktree == HEAD)
+_WT_DIRTY = (1, b"")             # diff --quiet HEAD -- path       (worktree != HEAD)
+_UPSTREAM_CLEAN = (0, b"")       # diff --quiet upstream -- path   (content identical)
+_UPSTREAM_DIFFERS = (1, b"")     # diff --quiet upstream -- path   (content differs)
+_P = "/repo/x/SKILL.md"
+
+# THE OI-182 REGRESSION: worktree == HEAD, and upstream did NOT touch this path
+# since the merge-base -> we are merely AHEAD (committed, unpushed). Before this
+# fix that produced a finding; it must now be CLEAN.
+expect("OI-182: AHEAD of upstream (base..upstream empty) -> CLEAN, not a finding",
+       tfrp._git_path_state(_P, run=_fake_git(_TOP, _TRACKED, _WT_CLEAN, _UP, _MB,
+                                              (0, b"")))
+       == tfrp.STATE_CLEAN)
+expect("OI-182: BEHIND, content genuinely differs -> STATE_BEHIND",
+       tfrp._git_path_state(_P, run=_fake_git(_TOP, _TRACKED, _WT_CLEAN, _UP, _MB,
+                                              (1, b""), _UPSTREAM_DIFFERS))
+       == tfrp.STATE_BEHIND)
+expect("OI-182: uncommitted short-circuits BEFORE any upstream lookup",
+       tfrp._git_path_state(_P, run=_fake_git(_TOP, _TRACKED, _WT_DIRTY))
+       == tfrp.STATE_UNCOMMITTED)
+expect("OI-182: no upstream configured, clean tree -> CLEAN (cannot be behind)",
+       tfrp._git_path_state(_P, run=_fake_git(_TOP, _TRACKED, _WT_CLEAN, (128, b"")))
+       == tfrp.STATE_CLEAN)
+
+# Same-day follow-up finding #2 (independent review): DIVERGED but content-identical.
+# base..upstream is non-empty (the path's HISTORY diverged) but the worktree-vs-
+# upstream CONTENT check says they match -- confirmed live against real git repos
+# with independently-committed byte-identical fixes. Must be CLEAN, not BEHIND.
+expect("DIVERGED-but-identical: base..upstream non-empty, content matches -> CLEAN",
+       tfrp._git_path_state(_P, run=_fake_git(_TOP, _TRACKED, _WT_CLEAN, _UP, _MB,
+                                              (1, b""), _UPSTREAM_CLEAN))
+       == tfrp.STATE_CLEAN)
+expect("DIVERGED, content also differs -> BEHIND (the real case)",
+       tfrp._git_path_state(_P, run=_fake_git(_TOP, _TRACKED, _WT_CLEAN, _UP, _MB,
+                                              (1, b""), _UPSTREAM_DIFFERS))
+       == tfrp.STATE_BEHIND)
+expect("worktree-vs-upstream content check exit 128 -> None, not a finding",
+       tfrp._git_path_state(_P, run=_fake_git(_TOP, _TRACKED, _WT_CLEAN, _UP, _MB,
+                                              (1, b""), (128, b"")))
+       is None)
+
+# Same-day follow-up finding #1 (independent review): UNTRACKED. `git diff --quiet
+# HEAD -- path` exits 0 for an untracked file (confirmed live) -- it is NOT the
+# rc128 the earlier draft assumed. ls-files --error-unmatch is the correct probe,
+# but (finding #1's SECOND pass, below) only when gated on the file actually
+# existing on disk -- ls-files rc1 alone cannot distinguish "untracked but
+# present" from "path absent entirely", and _git_path_state calls the REAL
+# os.path.isfile (not injected), so these two cases use a real temp file /
+# a real absent path rather than mocking isfile.
+_present_untracked = tempfile.mktemp(suffix=".md")
+with open(_present_untracked, "w", encoding="utf-8") as _f:
+    _f.write("untracked content")
+_absent_path = tempfile.mktemp(suffix=".md")   # deliberately never created
+
+expect("UNTRACKED-AND-PRESENT -> STATE_UNCOMMITTED (verified live: diff exits 0,"
+       " not 128, for an untracked path -- ls-files is the correct gate)",
+       tfrp._git_path_state(_present_untracked, run=_fake_git(_TOP, _UNTRACKED))
+       == tfrp.STATE_UNCOMMITTED)
+os.remove(_present_untracked)
+
+# THE REGRESSION independent review's second pass caught: a brand-new SKILL.md
+# merged to origin and never pulled has NOTHING on disk. ls-files still returns
+# rc1 (same as untracked-present) -- without the isfile guard this misreported
+# STATE_UNCOMMITTED ("commit it or revert it", which is impossible -- there is
+# nothing to commit). It must fall through to step 1 and resolve via the
+# existing upstream logic, landing on the SAME verdict the pre-step-0 function
+# already got right: BEHIND when upstream has it, CLEAN when it does not.
+expect("ABSENT path (ls-files rc1, but NOT on disk) -> falls through, NOT"
+       " STATE_UNCOMMITTED -- resolves via upstream logic to BEHIND",
+       tfrp._git_path_state(_absent_path,
+                            run=_fake_git(_TOP, _UNTRACKED, _WT_CLEAN, _UP, _MB,
+                                          (1, b""), _UPSTREAM_DIFFERS))
+       == tfrp.STATE_BEHIND)
+expect("ABSENT path, upstream doesn't have it either -> CLEAN, not a finding",
+       tfrp._git_path_state(_absent_path,
+                            run=_fake_git(_TOP, _UNTRACKED, _WT_CLEAN, (128, b"")))
+       == tfrp.STATE_CLEAN)
+
+expect("ls-files --error-unmatch failure (not tracked-or-untracked-or-absent) -> None",
+       tfrp._git_path_state(_P, run=_fake_git(_TOP, (2, b""))) is None)
+
+expect("_git_path_state: worktree-vs-HEAD failure (tracked) -> None, no verdict",
+       tfrp._git_path_state(_P, run=_fake_git(_TOP, _TRACKED, (128, b""))) is None)
+expect("_git_path_state: merge-base failure -> None (unrelated histories)",
+       tfrp._git_path_state(_P, run=_fake_git(_TOP, _TRACKED, _WT_CLEAN, _UP,
+                                              (128, b""))) is None)
+expect("_git_path_state: base..upstream exit 128 -> None, not a finding",
+       tfrp._git_path_state(_P, run=_fake_git(_TOP, _TRACKED, _WT_CLEAN, _UP, _MB,
+                                              (128, b"")))
+       is None)
+expect("_git_path_state: not a git repo -> None (the LAMS/OneDrive case)",
+       tfrp._git_path_state("/x/SKILL.md", run=_fake_git((128, b""))) is None)
+expect("_git_path_state: git raising -> None, not an exception",
+       tfrp._git_path_state(
            "/x/SKILL.md",
            run=lambda *a, **k: (_ for _ in ()).throw(OSError("no git"))) is None)
 
