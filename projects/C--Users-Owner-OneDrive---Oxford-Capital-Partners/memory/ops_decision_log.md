@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: local_3a091e05-9759-4627-93c2-c948e6c29e71
-  modified: 2026-07-28T23:46:54.665Z
+  modified: 2026-08-16T21:32:56.654Z
 ---
 
 **Purpose:** a lightweight companion to [deal-decision-ledger.md](deal-decision-ledger.md) (which
@@ -16,6 +16,30 @@ update in place (don't duplicate) if a later session re-confirms or overturns an
 the overturn explicitly rather than silently replacing.
 
 ## Log
+
+### 2026-08-16 — What is the owner-outreach touch ladder, channel, and dispatch model?
+**Answer (Gabriel, via AskUserQuestion), ratified as `outreach-ratification.json` OR-2026-001:**
+- **Ladder:** T1 letter → T2 **CALL** (top slice) → T3 letter (+90d) → T4 letter (+180d). T5 call. Only T1/T3/T4 render; calls are Notion-tracked and must NEVER consume a mail touch.
+- **Channel: postal ONLY.** Cold email is ruled out permanently. Not merely policy — county records carry **no email addresses**, so it is unaddressable without a skip-tracing vendor; and cold volume from `ggoldberg@oxfordra.net` risks the single mailbox every firm automation depends on.
+- **T3 names no price.** Creative structures (1031 runway, IRC §453 carry-back, leaseback) deploy on the CALL only. This supersedes the 2026-06-15 creative-structures doc, which scoped them to a "T3 specific-offer letter." Because no letter carries a number, the whole ladder stays inside the generate-only carve-out with no per-letter approval.
+- **Dispatch: Gabriel hand-addresses everything**, ~50/wk (`--wave-cap 50` standing). He was offered a print-mail vendor and a hybrid and chose full hand-addressing, accepting ~3–5 hrs/wk indefinitely. **"200 qualified leads/month" = 200 letters dispatched**, not 200 net-new parcels.
+- **T2 call slice:** top 5–8/week by Screen Score (tiebreak P1 %). A universal call touch at 50 letters/wk would be ~48 calls/wk, which does not fit alongside addressing.
+- **Targeting:** all 10 canonical clusters incl. Louisville. Metro `Other` deliberately NOT ratified — it holds.
+Any change to template text, metros, cadence, wave cap, signature, or channel is a re-ratification trigger; template SHA-256s hard-fail the pack build.
+
+### 2026-08-16 — Does a malformed date in mail-log.csv hold the parcel, or mail it?
+**Answer (Gabriel, via AskUserQuestion): HOLD, and alarm loudly in the summary email.** This **reverses** the original documented behavior (`return False  # malformed date in log: fail open, letter goes out`). Rationale: mailing an owner twice is unrecoverable, skipping a wave is not — but a *silent* hold would quietly shrink every wave if the log were corrupted, and read as normal attrition. The driver now emits an `[ALARM]` line naming the affected parcels, and the task spec requires that line to LEAD the summary email verbatim.
+
+### 2026-08-16 — Should the cold-outreach carve-out be written into CLAUDE.md's Hard Invariant 1?
+**Answer: NO — dropped; it lives in `session-context.md` only.** Initially approved as a CLAUDE.md edit, then withdrawn on two findings. (1) Under the hand-address ruling **the engine never sends anything** — Invariant 1 bans *sending*, and `owner-outreach` had already generated full packs DRAFT-ONLY for two months without per-letter approval, so the autonomy the carve-out would buy already existed. `outreach-ratification.json` is a *tightening*, not relief. (2) CLAUDE.md is ~9 words from its hard FAIL gate (see the word-budget gotcha in `event_log.md` 2026-08-16), so the edit would have forced an unrequested one-in-one-out trim of the governance file. The `allow-config-write` token minted for the edit was revoked when it was cancelled.
+
+### 2026-08-16 — Ratify the 2026-07-27 off-market master vintage so the held net-new owners can promote?
+**Answer (Gabriel, via AskUserQuestion): RATIFY 2026-07-27.** He was explicitly offered "ratify AND widen STALE_DAYS" and **declined the threshold change** — same posture as the 2026-07-14 precedent below.
+**Context.** The master WAS refreshed on 2026-07-27 (the P1 outreach plan's claim that it was "frozen at 2026-06-10" is WRONG — `_latest_master()` globs by **version number, not date**, and correctly selects `20260727_AllMarkets-OffMarket-Master_v09.xlsx`). Because the 06-10 ratification lapses automatically the instant the vintage changes, every run since has HELD. The 2026-08-10 summary email reported verbatim: "Notion Owner Outreach Queue upsert: **HELD** … No pages created this run", ledger commit SKIPPED, **83 net-new owners** withheld (Columbus 35, Cincinnati 40, Grand Rapids 4, Des Moines 4). Live re-run 2026-08-16: 18,389 scanned / 7,438 t2plus / 5,290 floor-clear / 208 motiv-ok / **187 promoted** / Tier-0 coverage 100% / RECOVER 0.
+**Mechanism.** Added a dated per-vintage entry to `ora-owner-outreach-queue-refresh/SKILL.md` STEP 1 STANDING RATIFICATIONS; struck through (did not delete) the superseded 06-10 entry per that block's own audit rule. Lapses automatically when the vintage changes again.
+**Companion ruling same session — mail history: NONE of the 06-15…08-10 packs were ever physically mailed.** Seeded `mail-log.csv` header-only (`parcel_id,mailed_date,touch_num,pack`) so the 21-day cadence gate starts clean and suppresses nobody incorrectly. Everything to date was draft-only.
+**Standing lesson:** the pipeline was never broken — it asked a question every Monday and the answer sat unread. A held automation that emails a QUESTIONS FOR GABRIEL block is invisible unless someone reads the mail; consider surfacing HELD state in the daily brief.
+Related: [[project_ora_strategic_constraints_2026-08-16]], [[project_owner_outreach_stale_guard_watch]].
 
 ### 2026-07-28 — ora-appsec-sweep confirmed running below the CLAUDE.md never-below-Fable floor for security-gate code (since 2026-07-24) — escalate now or wait?
 **Answer (Gabriel, via AskUserQuestion): accept the gap for now, wait for the Wednesday 2026-07-29 re-canary.** Context: `ora-appsec-sweep`'s scheduled session itself runs on CC/MCP's server-pinned model (confirmed `claude-opus-4-8` via the 2026-07-24 transcript canary; frontmatter `model: fable` is inert on this fleet — see [[reference_scheduled_task_model_standard]]), which is below-floor for security-gate code per CLAUDE.md. No config-level fix exists on this fleet (filed as [anthropics/claude-code#81408](https://github.com/anthropics/claude-code/issues/81408)).

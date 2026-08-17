@@ -5,12 +5,54 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-16T21:57:27.739Z
+  modified: 2026-08-17T01:22:41.586Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-08-16 — Weekly-hygiene items 3-5 remediated: E. Fulton retirement verified, Stall Alert row flagged, 36 deal/session files renamed to ratified schema
+
+Followed up on the 2026-08-16 `ora-weekly-hygiene` run's items 3-5 (items 1-2, SKILL.md's SS4 frozen list + C.1 forward-date test, claimed and handled by a concurrent session, `weekly-hygiene-spec-fixes`/aa080124).
+
+**Item 3 (E. Fulton retired-deal artifacts):** re-checked after flagging a declassification-in-flight concern. Found retirement already executed by a concurrent Gabriel-directed session while this one was investigating — 3 named files + the `efulton-dd-tracker` artifact (Block D's independently-flagged Broken finding, same root cause) moved to `Claude_Workspace/_Archive/2026-08-16_efulton-retired/`, md5/tree-verified, zero inbound references, smoke-test lease fixtures correctly excluded. Verified complete; no further action.
+
+**Item 4 (Stall Alert non-deal row):** Notion Acquisition Pipeline Tracker page `3516ecd8-9e59-8126-a0ac-ca117d8447ea` (Deal ID 5, Stage=Passed, Address/Market both null) renamed from "Stall Alert — 2026-04-29" to "⛔ NOT A DEAL — Stall Alert System Log — 2026-04-29" so it stops silently passing any terminal-stage selection as a real deal. Reversible, Stage/Address/Market left untouched.
+
+**Item 5 (naming violations):** built and executed a rename mapping for the 36 files with a clean schema fit — 14 deal files in `00_Governance/Projects/Leasing Agreement comparison/` (Zettler PSA series + 511 Industrial Mile LOI series + 754 Old State Route 74 redline) to CLAUDE.md's `[DocType]_[Property]_[MMDDYYYY]_v##` deal-file schema, and 22 session-output files (ORA Deliverables 20260421 batch, SharePoint Freshness-Audit series, ORA_Entities input, ORA_MasterDashboard, 2 References handoff docs) to the dashed `YYYY-MM-DD_[Topic]_[DocType]_v##` session-output schema. Zero collisions, zero failures, verified via pre-flight source-exists/target-absent checks on every file. Pre-execution reference sweep (md/txt/json/csv, excluding session transcripts) found zero cross-folder inbound references to any renamed filename, so no downstream reference updates were needed.
+
+**Note:** mid-task, the 14 Leasing Agreement comparison files were found already partially renamed (undashed `YYYYMMDD_` → dashed `YYYY-MM-DD_`, still Property-then-DocType order) by an unidentified concurrent actor — no event_log entry, no active-work claim covering that folder. Rebuilt the mapping against the actual current filenames and proceeded since Gabriel had just confirmed the schema and execution in-turn; flagging here since the intermediate state was never logged by whoever produced it.
+
+**Left deliberately unrenamed** (27 remaining undashed hits): `LeaseApplications_*_pre-*-merge_*` working files, `03_Code` build/script artifacts, `_MANIFEST`/`_state` internal files — none map cleanly to the three ratified schemas without a separate classification call.
+
+**Two open items surfaced but NOT resolved in this pass**, both worth relaying to the SKILL.md-fix session: unresolved deal-file vs reference-library naming-authority question (CLAUDE.md's DocType-first schema vs the 2026-07-17 "reference-library governance" subject-first ratification, Style Guide §3.1 — executed against CLAUDE.md since it's the unconditionally-ratified one and explicitly names deal files); Acquisition Pipeline `Next Action Date` field coverage still 3 of 9 non-terminal rows, unchanged in 5 days.
+
+## 2026-08-16 (evening) — Mirror deploy chain closed out: #279/#280/#281/#282 shipped and live; checkout-auto-update gap surfaced twice, filed OI-183
+
+Follow-on to the same evening's earlier entry (Mirror deploy built the shared checkout's uncommitted WIP). Full incident chain closed this session:
+
+**Shipped and verified live on the machine** (not just merged — each fast-forwarded onto the canonical checkout and confirmed at runtime, since #279 removed the mechanism that used to do this automatically):
+- **#279** — isolated build root (`<repo>-deploy-build`, pinned to `origin/main`). Proven across 4+ consecutive unattended hourly runs (18:00/19:00/20:00 clean; earlier 15:00/17:00 failed honestly on a real defect rather than silently).
+- **#280** — `Test-MirrorRepoAhead`'s reason string corrected. It used to claim "the mirror is deploying code that is not on the remote," which #279 made false by construction; severity/tiering deliberately unchanged (age-based work-loss risk, not mirror content). Landed **dead on disk** after merge — see gap below.
+- **#281** — `origin/main` was red (`TS7016` from an unrelated session's `05f8b55`, pushed direct to main bypassing CI). Fixed with a one-line `.d.mts` declaration; a second masked defect (`no-explicit-any` lint, unreachable while typecheck was failing) surfaced on the first CI run and was fixed in a follow-up push.
+- **#282** — Eric Live Phase 2 W0 (warehouse-bake trigger `shouldBakeWarehouse`, extracted from an untested inline condition and unit-tested — Phase 1b had shipped both the bake and the client fallback but the TRIGGER was never covered, so `public/warehouse.json` was never produced in two months of green tests) + W2 (`/api/*` Cloudflare Access JWT authorization via `node:crypto`, 28 tests with real RSA keypairs, mount-order guard proven by mutation). Rebased onto #280 after 3 upstream changes to `deploy-mirror.ps1` in one evening; merge auto-resolved cleanly but was verified by hand (ordering: sync build root → set `BAKE_WAREHOUSE` → import `.env` → pin `WAREHOUSE_DB` → build inside the build root) rather than trusted because it merged without conflict.
+
+**Gap surfaced twice, filed as [OI-183](open-items-tracker.md#OI-183):** #279 correctly removed `deploy-mirror.ps1`'s `git merge --ff-only` (it was an unattended job mutating a shared tree other sessions build from) but nothing replaced its incidental side effect of keeping the canonical checkout current. #280 merged and sat 1-behind on disk until manually fast-forwarded; #282 did the same, same evening. Not a threat to the mirror (the build root pulls `origin/main` independently, proven by 3 clean runs while the checkout sat behind) but a real threat to anything that reads the canonical checkout unattended — specifically `mirror-run-classify.ps1`, run weekday 10:40 ET by `ora-command-center-mirror-drift-check`, which could silently classify against superseded logic with zero symptom. Not fixed; flagged for a follow-up session.
+
+**Fault B (the intermittent kill) remains open, evidence strengthened.** A targeted PID-latch sampler (armed for the evening, self-expiring 23:15) caught the 21:00 kill directly: beacon left `running` (no exit path ran), and — new this time — PowerShell logged engine-stop (403) two seconds after the process vanished with no correlating clean-shutdown or System-log event, and no sibling process died at the same instant in a full snapshot. Narrows the mechanism to a console-control-class signal delivered to that session, not a scheduler action or machine lifecycle event, but still does not name a source — no process-kill auditing is enabled, and enabling it is a system security-policy change, not undertaken. Score for the evening: 3 killed (14:00, 16:00, 21:00) / 5 clean (13:00, 15:00-and-17:00 failed-honestly-not-killed, 18:00, 19:00, 20:00) of 8 scheduled runs. Every occurrence self-heals on the next hourly fire with correct detection and alerting, so left open by design rather than escalated.
+
+## 2026-08-16 — OI-166/OI-170 guards now LIVE in the working tree; STALE_VS_GIT has a direction-blindness gap (new)
+
+Gabriel-directed ("force it"). PR #123 merged at 15:32 ET, but the fixes sat INERT in the live checkout for ~5.5 hours — **the OI-170 condition, reproduced on OI-170's own fix**. `find_stale_vs_git` had 0 hits in the working tree while every git-side check said it had shipped. Now merged in (`0eeeb82` + merge), verified live: `find_stale_vs_git` 2 hits, `_git_differs_from_upstream` 3, the OI-166 block and its `_safe_filename` fix both present. Suites re-run against the LIVE tree: 43/43 probe, 204/204 claim-work-lib.
+
+**Forced non-destructively.** The merge was blocked by 5 files with uncommitted work. `stash`/`reset`/`checkout` would each have discarded another session's work, so instead each owner's WIP was committed verbatim with provenance (`0eeeb82`) and the merge then ran clean with zero conflicts. Attribution came from `maintenance/dirty-file-owner-report.py` — which is the right tool for this and should be the first move next time, not mtime archaeology: it attributes every dirty file to a session AND marks which sessions are live. Owners: `0888c827` (append-event-log.py, MEMORY.md), `65a7fd4c` (2 untracked _tests files), `4ead3171` (event_log.md); all three reported NOT live, and none of the 4 live sessions (`04649f52`, `aa080124`, `3f365fd1`, `6797e01b`) owned a blocker.
+
+**The settle check earned its keep twice in ~90 seconds.** `maintenance/fleet-status.py` showed a 45-second-old mtime on the first pass — its session committed it a minute later and it dropped out of the blocker set on its own. `project_ora_strategic_constraints` resolved the same way between passes. Both would have been committed on someone else's behalf, unnecessarily, had the first reading been trusted. The blocker set went 5 → 6 → 5 across three samples taken minutes apart.
+
+**NEW GAP in the shipped check — worth a follow-up item.** `find_stale_vs_git` compares on-disk against `@{upstream}` and flags ANY difference, so it is **direction-blind**: it cannot distinguish BEHIND upstream (the OI-170 bug — merged but not pulled) from AHEAD of upstream (committed locally, not yet pushed, which is this checkout's *normal* state at ahead-23). First live run after landing: 5 CC findings, of which **3 are true positives** (`ora-doctrine-integrity-guard`, `ora-pm-ledger`, `ora-weekly-hygiene` — uncommitted edits, so the scheduler is running content that exists nowhere in git, a genuinely valuable catch) and **2 are merely ahead** (`ora-cc-snapshot-refresh`, `ora-passed-deal-tracker`). The 2 are not false in the literal sense — the file does differ from upstream, and unpushed means unbacked-up — but conflating the two directions will produce recurring noise here, and noise is what killed the first cut of this same check (21 of ~32 flagged on CRLF). Fix direction: report the two conditions separately, e.g. compare against the merge-base to determine direction, and only treat BEHIND as the OI-170 alarm.
+
+Left unpushed deliberately: the branch is ahead 23, nearly all of it other sessions' commits. Publishing that is not this session's call.
 
 ## 2026-08-16 — P4 capability audit: dark AR subsystem found; doctrine + tracker landed
 
