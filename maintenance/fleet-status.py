@@ -17,7 +17,7 @@ Usage:
   python fleet-status.py --registry PATH # force a single registry (used by tests)
   python fleet-status.py --json          # machine-readable
 """
-import os, sys, json, glob, argparse, datetime
+import os, sys, json, glob, argparse, datetime, re
 
 for _s in (sys.stdout, sys.stderr):  # UTF-8 safe output on Windows cp1252 pipes
     try:
@@ -210,6 +210,90 @@ def fire_at(t):
     if is_onetime(expr):
         return int(expr)
     return None
+
+
+def membership_log_path():
+    """Path to registry-membership.log, preferring a checkout-local copy and
+    falling back to the canonical live one.
+
+    `_state/` is MACHINE state, not repo content, so it does not exist in a
+    worktree -- and this script is routinely run from one. Resolving only
+    relative to __file__ silently yielded {} there, which looks identical to
+    "no registrations recorded" and would quietly drop the annotation exactly
+    where a reviewer is most likely to be reading. Same reasoning as
+    discover_registries(), which reads the live AppData stores regardless of
+    which checkout is executing."""
+    local = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "_state", "registry-membership.log")
+    if os.path.exists(local):
+        return local
+    return os.path.join(os.path.expanduser("~"), ".claude", "maintenance",
+                        "_state", "registry-membership.log")
+# NOT anchored to end-of-line: the log writes `... adds={...} missing_stores=-`,
+# so an `$` anchor here matched nothing and registration_dates() silently
+# returned {} -- indistinguishable from "no registrations recorded".
+_ADDS_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})T\S*\s.*?adds=\{(.+?)\}")
+_ADDS_FLEET_RE = re.compile(r"'(cc|lams)'\s*:\s*\[(.*?)\]")
+_ADD_ID_RE = re.compile(r"'([a-z0-9][a-z0-9-]*)'")
+
+
+def registration_dates(path=None):
+    """{task_id: 'YYYY-MM-DD'} of when each task FIRST appeared in a registry,
+    read from registry-membership.log's `adds={...}` entries.
+
+    WHY THIS EXISTS: a bare `NEVER` in the LAST RUN column reads as "dead", and
+    on 2026-08-16 that inference nearly retired the working half of a dual-fleet
+    pair -- `ora-passed-deal-tracker`'s CC copy had never fired because it had
+    been registered THAT MORNING on a monthly cron, not because it was broken.
+    Age-since-registration is the one number that separates "new" from "dead",
+    and nothing surfaced it.
+
+    Returns {} on any I/O or parse trouble: this is display sugar, and a probe
+    that dies because an advisory log is missing would be a worse defect than
+    the ambiguity it fixes."""
+    out = {}
+    try:
+        with open(path or membership_log_path(), encoding="utf-8", errors="replace") as fh:
+            lines = fh.readlines()
+    except OSError:
+        return out
+    for line in lines:
+        m = _ADDS_RE.match(line.strip())
+        if not m:
+            continue
+        day = m.group(1)
+        # KEYED BY (fleet, id), NOT id alone. The same taskId legitimately exists
+        # on BOTH fleets, and collapsing them reports the wrong birthday for the
+        # exact case this feature exists for: ora-passed-deal-tracker was first
+        # added to LAMS on 2026-07-08, then registered on CC on 2026-08-16 as
+        # part of the T3-12 migration. A single key answered "2026-07-08" for the
+        # CC copy -- i.e. "6 weeks old and never fired", which is precisely the
+        # false 'dead' reading that nearly got the working copy retired.
+        for fm in _ADDS_FLEET_RE.finditer(m.group(2)):
+            fleet = fm.group(1)
+            for tid in _ADD_ID_RE.findall(fm.group(2)):
+                # FIRST add per fleet wins -- a no-op re-register is not a birth.
+                out.setdefault("%s:%s" % (fleet, tid), day)
+    return out
+
+
+def never_label(task_id, fleet, reg_dates, now_local):
+    """'NEVER' annotated with how long ago the task was registered, when known.
+
+    An unknown registration date yields a bare 'NEVER' rather than a guess --
+    a fabricated age here would be worse than the missing one, since the whole
+    point is to support a keep/retire decision."""
+    day = (reg_dates or {}).get("%s:%s" % (fleet, task_id))
+    if not day:
+        return "NEVER"
+    try:
+        reg = datetime.datetime.strptime(day, "%Y-%m-%d").date()
+    except ValueError:
+        return "NEVER"
+    age = (now_local.date() - reg).days
+    if age <= 0:
+        return "NEVER (registered today)"
+    return "NEVER (registered %dd ago, %s)" % (age, day)
 
 
 def cadence_buffer_days(expr):
@@ -664,6 +748,8 @@ def main():
     for lbl, p in regs:
         print("registry[%s]: %s" % (lbl, p))
     print("=" * 84)
+    reg_dates = registration_dates()
+    now_local = datetime.datetime.now()
     if not args.summary:
         print("%-42s %-5s %-16s %-4s %-5s %s" % ("TASK", "FLEET", "CRON", "EN", "SKIP", "LAST RUN"))
         print("-" * 84)
@@ -677,7 +763,13 @@ def main():
                 cron = str(t.get("cronExpression"))[:16]
             en = "on" if t.get("enabled", True) else "OFF"
             sk = skip_counts.get(t.get("id"), 0)
-            last = (t.get("lastRunAt") or "NEVER")[:19]
+            # Truncate the two cases SEPARATELY: widening one bound for the
+            # annotation also widened it for real timestamps, which previously
+            # displayed at 19 chars and would now print sub-second precision and
+            # offset -- an unintended display change to every task that HAS run.
+            _lr = t.get("lastRunAt")
+            last = (_lr[:19] if _lr else
+                    never_label(t.get("id"), t.get("_fleet"), reg_dates, now_local)[:44])
             print("%-42s %-5s %-16s %-4s %-5s %s" % (tid, t.get("_fleet", "?"), cron, en, sk, last))
         print("-" * 84)
 
