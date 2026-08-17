@@ -250,26 +250,59 @@ def collect_indexed_links(index_text, mem_dir):
     return links, followed
 
 
-def sized_index_files(mem_dir, index_path, subindexes):
+def sized_index_files(mem_dir, root_bytes, subindexes):
     """[(name, bytes)] for the root index and every sub-index it adopts, root FIRST.
+
+    `root_bytes` is passed IN, not stat'd here. The caller has already read MEMORY.md to
+    derive `subindexes` from its links, so it knows the exact on-disk byte count; stat'ing
+    again would add a second, redundant failure point on the most heavily-written file in
+    the corpus, where a transient Windows lock or delete-pending raises PermissionError
+    from stat and would abort the whole probe (exit 2) on a condition that clears by
+    itself. Count the bytes you already read instead. (len(raw) from a BINARY read -- not
+    len(text.encode()), which diverges from on-disk bytes for CRLF content because
+    text-mode reads translate newlines.)
 
     Split from the gate itself so the thresholds can be tested without fixtures and the
     collection can be tested without threshold arithmetic -- the original defect was
     entirely in the collection step (only MEMORY.md was ever stat'd), so that step needs
     its own coverage.
 
-    A sub-index that cannot be stat'd is SKIPPED, not reported: collect_indexed_links()
-    only returns sub-indexes it successfully read, so a failure here is a race against a
-    concurrent write, and check 1 already reports a missing sub-index as an orphan
-    pointer. A probe that cannot look must not invent a finding.
+    Returns (sized, unstattable) -- the second being [(name, error)] for sub-indexes that
+    are still THERE but could not be measured.
+
+    THE TWO FAILURE MODES ARE NOT THE SAME, and collapsing them (as the first version of
+    this function did, with a bare `except OSError: continue`) hides a real hole:
+
+    * GONE (FileNotFoundError) -- deleted or renamed between collect_indexed_links() and
+      here, i.e. a race against a concurrent write. Skipped silently and correctly: check 1
+      already reports it as an orphan pointer, and a probe that cannot look must not invent
+      a finding.
+    * PRESENT BUT UNREADABLE (any other OSError -- a Windows lock during an os.replace, an
+      AV or indexer holding the handle, a permission fault). The file is still adopted by
+      the index and still growing; it simply was not measured. Skipping that silently means
+      the size gate quietly stops covering a file while continuing to report OK, which is
+      the same class of blind spot this whole check exists to close. It is reported.
+
+    Reported as a WARNING by the caller rather than raised: this probe runs unattended in
+    the daily health guard, so a transient lock must not crash it (exit 2) -- but it must
+    not pass in silence either.
+
+    THAT TOLERANCE IS FOR SUB-INDEXES ONLY, and saying so precisely matters because an
+    earlier draft of this docstring claimed it covered everything. If the ROOT index cannot
+    be read, the probe still exits 2 and should: checks 1-3 all reconcile AGAINST that
+    file, so there is no useful work left to do and a green run would be a lie. What this
+    signature removes is the redundant SECOND root failure point (the stat), not the first.
     """
-    sized = [("MEMORY.md", os.path.getsize(index_path))]
+    sized = [("MEMORY.md", root_bytes)]
+    unstattable = []
     for name in subindexes:
         try:
             sized.append((name, os.path.getsize(os.path.join(mem_dir, name))))
-        except OSError:
+        except FileNotFoundError:
             continue
-    return sized
+        except OSError as e:
+            unstattable.append((name, str(e)))
+    return sized, unstattable
 
 
 def size_gate(sized):
@@ -409,20 +442,28 @@ def main():
     #
     # The index is READ here rather than in check 1, because the sub-index list the gate
     # needs is derived from its links. Check 1 reuses `idx`/`linked`/`subindexes` below.
+    # Read ONCE, in binary: len(raw) is the exact on-disk byte count the size gate needs,
+    # so the root is never stat'd separately. That removes a second failure point on the
+    # corpus's hottest file -- a transient lock between the read and a stat would otherwise
+    # abort the whole probe on a self-clearing condition. Decoding is inside the same try:
+    # a UnicodeDecodeError here is as fatal as an unreadable file, and for the same reason.
     try:
-        idx = open(INDEX, encoding="utf-8").read()
+        raw = open(INDEX, "rb").read()
+        idx = raw.decode("utf-8")
     except Exception as e:
         sys.stderr.write("[ACTION] cannot read MEMORY.md: %s\n" % e)
         sys.exit(2)
     linked, subindexes = collect_indexed_links(idx, MEM)
-    try:
-        sized = sized_index_files(MEM, INDEX, subindexes)
-    except OSError as e:
-        sys.stderr.write("[ACTION] cannot stat MEMORY.md: %s\n" % e)
-        sys.exit(2)
+    sized, unstattable = sized_index_files(MEM, len(raw), subindexes)
     size_issues, size_warnings = size_gate(sized)
     issues.extend(size_issues)
     warnings.extend(size_warnings)
+    for name, err in unstattable:
+        warnings.append(
+            "sub-index %s is present but could not be measured (%s) -- it was NOT size-gated "
+            "this run, so the gate's coverage is incomplete until this clears. Re-run once "
+            "the writer releases it; if it persists, the file is locked or unreadable rather "
+            "than merely busy." % (name, err))
 
     # --- 1. index reconciliation ---
     present = {os.path.basename(p) for p in glob.glob(os.path.join(MEM, "*.md"))}
