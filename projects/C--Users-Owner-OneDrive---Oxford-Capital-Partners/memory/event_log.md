@@ -5,12 +5,104 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-17T19:07:21.000Z
+  modified: 2026-08-17T19:37:22.572Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-08-17 -- register-scheduled-task v2.12 packaged + staged (bounded-pause resume rule)
+
+Cloud Cowork session, Desktop Commander bridge live. Gabriel handed over a
+proposed v2.11 -> v2.12 patch ("bulk pause must register its own auto-resume").
+Adopted with corrections and expansions; committed to the repo as 655c346.
+
+WHAT WAS VERIFIED FIRST (read-only, both registries):
+- CC/MCP: 35 of 40 tasks disabled; one-time resume `ora-routine-pause-resume-08-21`
+  registered and enabled, fireAt 2026-08-21 17:00 ET, naming all 35 ids.
+- LAMS/Cowork: 27 of 28 tasks disabled, NO resume of any kind. Sole enabled entry
+  is `ora-counsel-review-standard-positions-2027` (one-time, fires 2027-08-02).
+- Therefore: the CC fleet restores itself Friday; the LAMS fleet does not restore
+  at all. `ora-cowork-heartbeat` and `automation-health-monitor` are both among
+  the disabled LAMS tasks -- the pause silenced the detectors for its own failure.
+- The proposed patch's premise was correct. Its claim that "nothing surfaces that
+  asymmetry" was slightly overstated: the CC resume task's step 6 email carries a
+  reminder line about the LAMS fleet -- but it does not send until 2026-08-21
+  17:00 ET, i.e. at the END of the window rather than the start.
+
+CHANGES BEYOND THE PROPOSED PATCH:
+1. Re-hinged the rule on a BOUNDED pause (stated/implied end) rather than a BULK
+   one. Bulk is the aggravating factor; a single task paused "until Friday" fails
+   identically, and a genuinely open-ended pause has no resume to register.
+2. Added: "pause all routines" is fleet-ambiguous -- resolve against both
+   registries and register one resume per fleet in scope.
+3. Added: never blanket-pause `ora-cowork-heartbeat` / `automation-health-monitor`
+   without saying so in the same turn.
+4. Added: a resume must NOT re-stamp `[MODEL:]` dates. This resolves a live
+   contradiction -- the v2.8 PAUSE bullet says re-tag with a current date on
+   re-enable, while the CC resume task's own step 5 correctly forbids it per
+   memory/feedback_verified_null_vs_inferred_null.md. v2.12 scopes v2.8's rule to
+   a hand re-enable where the model IS observed.
+5. Kept the patch's `fireAt` field name -- verified correct: one-time resume tasks
+   carry `fireAt`, not `cronExpression`/`nextRunAt`.
+6. Incident narrative filed to references/incident-history.md, not SKILL.md
+   (one fact, one home -- the size discipline from package-and-stage-skill v1.20).
+
+PACKAGING: tools/package_skills.py exit 0; description 969/1024 (a first build hit
+1069 and then 1023 -- the step-2a gate caught both before any Save-skill ask, which
+is exactly the silent-rejection trap package-and-stage-skill v1.21 was written for;
+trimmed explanatory text, never trigger vocabulary, to leave 55 chars of headroom).
+2 entries, forward-slash paths. SHA256 fca9f4ff08e852cdc58879d193226694588c7366c19a033a9fdaff1cd840e03d.
+Transferred into the cloud session via the base64+SHA256 bridge fallback (two
+device_request_folder_access dialogs timed out unanswered), byte-identity asserted.
+
+STATUS: STAGED, NOT INSTALLED. Save-skill click pending. Do NOT clear
+_staging/PENDING_REIMPORT.md until the click is confirmed and the AppData cache
+mirror is verified to hold BOTH packaged files.
+
+OPEN ITEM (higher priority than this skill edit): the LAMS fleet still has no
+resume. `ora-lams-routine-pause-resume-08-21` must be registered from a NATIVE
+on-device Cowork session (cloud sessions carry no registry MCP tools -- Rule 1).
+Draft spec staged alongside this entry.
+
+## 2026-08-17 — LAMS-side routine-pause auto-resume could not be registered from a cloud Cowork session; register-scheduled-task doctrine gap identified
+
+Gabriel asked to pause all scheduled routines until Fri 2026-08-21 17:00 ET with
+auto-resume. CC/MCP side succeeded (35 tasks paused; one-time resume task
+`ora-routine-pause-resume-08-21` registered). The LAMS/Cowork-side counterpart
+was dispatched to a cloud-sandbox Cowork session (device-bridge only, no native
+app process) — `list_scheduled_tasks`/`create_scheduled_task`/`update_scheduled_task`
+were absent (confirmed via two ToolSearch passes). Per Rule 1 the session
+correctly stopped rather than improvising a filesystem-splice fix, and did NOT
+register `ora-lams-routine-pause-resume-08-21`. This surface gap was already
+documented same-day in `register-scheduled-task` v2.10/v2.11 (added ahead of or
+concurrent with this incident) — no doctrine action needed there.
+
+**Residual gap identified (not yet fixed):** `register-scheduled-task`'s PAUSE
+section has no rule requiring a bulk-pause operation to register its own
+auto-resume in the SAME supervised session before the pause commits. On the
+LAMS side here, the pause and the resume-registration were split across two
+separate turns/surfaces, and the resume registration silently failed to land
+at all — nothing in the skill enforces symmetry. Proposed fix: a new PAUSE
+subsection requiring bulk-disable operations to register the auto-resume
+task (or confirm it's already registered) in the same pass, on the same
+surface, before/with the disable calls — never as a follow-up. Drafted as a
+proposed v2.12 patch and delivered to Gabriel for review via
+`package-and-stage-skill` (not applied directly — session cannot edit skills
+directly per platform policy). See also `reference_ora_session_sweep_lams_registry_gap.md`
+if it covers related ground (not cross-checked in this session — flag for the
+patch reviewer to reconcile).
+
+**Confirmed already covered, no action taken (would have duplicated existing
+doctrine):** (1) surface-capability preamble for the MCP registry tools — live
+in `register-scheduled-task` v2.10/v2.11 Rule 1 + Dual-fleet registry model
+surface note; (2) `fleet-status.py` as the cross-surface read for both fleets —
+live in `fleet-advisory-remediation` v1.1 Inputs section; (3) LAMS registry
+path pin — already the single source of truth in `CLAUDE.md`'s SCHEDULER
+section and `register-scheduled-task`'s Dual-fleet registry model table;
+adding it to `rules.md` would have violated memory-policy's I3 (one source of
+truth per fact).
 
 ## 2026-08-17 -- register-scheduled-task v2.11 Save-skill click confirmed
 
@@ -84,6 +176,14 @@ Save-skill ask:
 Both signals matching means the Save-skill click already happened (in this session or
 an earlier unlogged one) -- no redundant install ask presented for this package.
 package-and-stage-skill | v1.21 | already in sync | no reimport needed.
+
+## 2026-08-17 — ora-cc-schematic-refresh (REV 2026-08-17a, scheduled Mon 14:15 ET)
+
+Producer-clobber pre-check clean. Two of the five standing probes regressed off 08-16a's all-green reading: `governor-drift-probe.py` returned EXIT 1 (1 hit, `acquisition-buy-box-v1.md:31` — appears to be a probe false-positive on the ratified per-property 65% refi-sizing ceiling, the same dual-governor doctrine the probe already suppresses one line below; Hard Invariant 4 constants themselves untouched); `memory-integrity-probe.py` returned EXIT 1 after 08-16a's first-ever green (281/286, 8 issues: 5 unlisted files from a concurrent session's Automation Audit work, 2 in-git orphan index links for uncommitted files, 1 governor-drift passthrough). MEMORY.md itself improved (22,207 → 21,447 bytes).
+
+Cross-check (b) found real, fully git-attributed drift: `enabledPlugins` 5 keys/3 true/2 false → 5 keys/2 true/3 false — `commit-commands` flipped FALSE, attributed to commit `1242210` (Gabriel, 2026-08-16 17:05 ET, `/doctor` pass, disabled for near-zero usage). Fleet VERDICT stayed ATTENTION: 67 tracked / 65 enabled (cc=39, lams=26) / 2 disabled, up from 66/64/2. Same-time collisions cleared 3 → 0 (two genuine overlaps no longer share a clock time in the live cron table — read as resolved-by-retime). The LAMS copy of `ora-passed-deal-tracker` flipped to disabled while the CC copy stays enabled — a step toward resolving the cross-fleet duplicate flagged at 08-16a, though the dual registration itself persists. Throttle skips reversed direction, 50 → 186 in the last 24h, breaking a three-run decline.
+
+Durable probe-status snapshot written via `write-doctrine-status.py`. One file edit (`artifacts/claude-code-schematic.html`), title-block rev log rolled under the 4-entry cap (08-11a archived to history), per-node keep-2 cap applied to all 8 touched nodes, `node --check` passed, republished in place. No registry writes, no email.
 
 ## 2026-08-17 -- ora-passed-deal-tracker LAMS duplicate: retire held; register-scheduled-task hardened instead
 
@@ -260,6 +360,34 @@ touched by this pass; frontmatter-and-body text only, per Gabriel's scope constr
 copies are gitignored/local-only — git history is the durable backup there per the ora-claude-config
 force-track convention; LAMS copies are the primary backup, OneDrive-native, matching
 `automation-health-monitor`'s established pattern).
+
+## 2026-08-17 — class-n description remediation: automation-health-monitor trimmed 7,249→1,155; reusable tool built; dark folder confirmed already archived
+
+Gabriel-directed follow-up to the two items left open on 2026-08-14.
+
+**Item A — `ora-sleep-fix-verify-0813` dark folder: ALREADY RESOLVED, no action taken.** Found at `~/.claude/scheduled-tasks/_archive_2026-08-14_expired-onetime\ora-sleep-fix-verify-0813` — another session archived it on 08-14. Confirmed absent from both live registries (0 matches in either `scheduled-tasks.json`), and `setup-self-audit` now returns `[ OK ] fleet: 67 registered (64 enabled) across both fleets; 39 folder(s) in the live store; every enabled filePath resolves; no unregistered folders`. Verified rather than redone.
+
+**Item B — class-n description trim, `automation-health-monitor` v1.24 → v1.25.** 7,249 chars / 8 changelog fragments → **1,155 chars / 1 fragment**. Backup at `_state-history/_skill-versions/SKILL.v1.24-2026-08-17-pre-v1.25-desc-trim.md`. `list_scheduled_tasks` re-read after the write: renders correctly, `enabled` true, cron `5 11 * * 1-5` and `nextRunAt` unchanged.
+
+**STALE-PLAN CATCH — worth recording as a process win.** The trim script was authored on 08-14 and hardcoded "v1.24 (2026-08-14)". Before applying it on 08-17 a pre-flight re-read found the file had been edited on **2026-08-16 16:31 by another session**, shipping a real v1.24 (Step 0.57 BLOCKED-AWAITING-GABRIEL). Applying the stale script would have collided with and misattributed that version. Renumbered to v1.25 and re-derived the migration set from the live file. **Trust observation over memory — a plan authored three days ago against a multi-session-edited file is stale input by default.**
+
+**Migration set is computed, never hardcoded.** Some versions exist in the body ONLY as pointers reading "see description field above"; trimming the description makes those dangle and the content is lost. That set differs per file and MOVES: on `automation-health-monitor` it was {v1.20, v1.22} on 08-14 and only {v1.20} by 08-17, because the 08-16 session had backfilled v1.22. v1.20's 1,095-char entry was migrated verbatim into a "MIGRATED FROM FRONTMATTER" body block.
+
+**VERIFIED NULL found.** `v1.16`'s full note is absent from BOTH the body and the description — the body's "see description field above" pointer had been dangling for some time before today. Recorded as a verified null with the one-line summary that survives; NOT reconstructed. The addendum line was rewritten to say so explicitly (per `feedback_verified_null_vs_inferred_null.md`).
+
+**Fleet scope is much larger than one file: 18 of 68 task descriptions breach class n** (10 MEDIUM, 8 LOW), worst `ora-task-integrity-guard` at 7,779 chars, `ora-health-guard` at 5,885 with **7 pointer-only versions**. Hand-editing 18 files invites exactly the migration mistake above, so instead:
+
+**NEW TOOL — `maintenance/desc-classn-remediate.py`.** Modes: `--scan` (fleet breach table incl. per-file pointer-only sets), `--report` (single file), and a guarded remediate that migrates pointer-only fragments verbatim, swaps the description, and **refuses to write** unless all pass: ≤1536 chars · <2 fragments · single line · `[MODEL:]` tag preserved · migrated text verifiably present in the new body · body length not reduced · **trigger vocabulary preserved** (parsed from the OLD description and diffed — class n's own rule is that dropping trigger terms is a routing regression worse than the tokens saved). Self-tested via `--scan`, exit 0.
+
+**Code-surface prompt produced** for the remaining 18: `outputs/2026-08-17_ClassN-Description-Remediation_Prompt_v01.md`. Deliberately NOT a scheduled task — one-pass cleanup, with the 2026-09-15 `ora-skill-text-audit` run as the confirmation gate.
+
+**UNRELATED FINDING, flagged for follow-up — four Windows Scheduled Tasks failing.** `setup-self-audit` returned a new WARN: `ORA Fleet Dead-Man` last result 1 · `ORA Command Center - Mirror Deploy` 3221225786 (0xC000013A, terminated) · `ORA PM Crons` 2147943467 (0x8007006B, ERROR_BAD_LENGTH) · **`ORA Claude Desktop Wake-and-Launch` 2147946720 (0x80070420, ERROR_SERVICE_ALREADY_RUNNING)**. The last one is materially important: a Wake-and-Launch task whose job is getting the Desktop app up in the morning ALREADY EXISTS and is erroring. That sits directly upstream of the 08-14 AM-cluster investigation, which measured first-dispatch spread of 818 min (03:31–17:09) and concluded no cron slot could fix it — **that conclusion was drawn without knowing this task existed**. If Wake-and-Launch can be made reliable the premise changes and the AM cluster may become schedulable again. Step 0.5c (HOST-UNAVAILABLE) remains correct either way — it classifies the symptom honestly — but the root cause may be fixable after all. Recommend investigating before further morning-cadence work.
+
+## 2026-08-17 -- register-scheduled-task v2.10 installed
+
+register-scheduled-task v2.10 (2026-08-17 -- cloud-vs-on-device surface note for registry MCP tools) confirmed installed via Gabriel's Save-skill click in the cloud Cowork session that packaged and delivered it. This entry logs the CLICK itself, not merely the upstream repo commit bdba52b1f64312ba414ae3d0772305a264efce7d.
+
+Confirming evidence (this Code session, 2026-08-17): `python tools\skill_drift_report.py --publish-status register-scheduled-task` returned `INSTALLED (verdict=IN-SYNC, cache_version=v2.10, checked_at=2026-08-17T15:43:48Z)`. AppData runtime cache mirror at `skills-plugin\583f08bc-0123-4111-8158-8fe3d927e350\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\skills\register-scheduled-task\` verified to contain both packaged files (SKILL.md, references\incident-history.md), SHA256-identical to the repo copy at commit bdba52b1.
 
 ## 2026-08-17 (afternoon) — Dirty-tree triage continued: ora-ar-feed-sweep + 8 output_contract-removal commits, 8 CRLF-noise entries identified as non-actionable
 
@@ -6704,3 +6832,46 @@ Four issues triaged in priority order from the 2026-08-05 Automation Health repo
 - 5 tasks now retimed/proposed-retimed around the same "machine not running Sun evening–Mon AM" root cause (monday-sync, lease-expiration-brief, tenant-contact-gap-sweep, session-sweep-proposed) plus broker-touch-cadence's first fire landing in an adjacent risk window — worth solving once at the infra level (a wake trigger / keep-open policy) rather than continuing to retime every new task around it.
 - A step that never executes produces neither a non-zero exit nor a log line — exit-code-only alarm conditions (as ora-task-integrity-guard's STEP 3 was before today) are structurally blind to a step being skipped outright. The freshness-check pattern added today generalizes to any multi-step guard task.
 - ora-health-guard's Notion-outage-vs-dead-task confusion (fixed today) is a pattern worth checking for on any other task whose sole health signal is a single external connector write (e.g., confirm ora-broker-touch-cadence's Ops Hub-row contract has the same failure mode before its next fire).
+
+
+## 2026-08-17 — Zapier doctrine conflict reconciled; rules.md carried a superseded premise
+
+**Trigger:** while revoking Composio's teamspace grant, noticed `ORA-Zapier-API` still
+present as an owned Notion integration, and reported an apparent contradiction between
+the Cowork operating prompt ("Zapier retired, removal ratified 2026-07-16") and the
+Cowork CLAUDE.md ("KEEP CONNECTED, NEVER USE — do not remove the connector").
+
+**Investigated rather than assumed, and the initial framing was wrong.** There is no
+live contradiction between equals — there is one ratified position plus known-stale
+copies. Timeline from the record:
+
+- 2026-04-16 — account "out of space" = capacity-capped.
+- 2026-06-02 / 06-03 — KEPT deliberately, "DO NOT RE-FLAG in future cleanup passes."
+  Premise: capacity-capped not retired; removal would force a needless re-auth later.
+- 2026-06-10 — Gabriel REJECTED Cowork's removal proposal; "6/02 decision stands."
+- ~2026-06-22 — connection de-authed / absent from the live Cowork tool list. **The
+  premise of the keep-connected posture became false here**, silently.
+- 2026-07-16 — Gabriel RATIFIED removal (setup-audit ratification session). `tech.md`
+  §4 and SoR §10 aligned to `state=retired`. Recorded in event_log_2026-07-18 §431.
+
+**Action taken:** `rules.md` §2 still read "**Zapier is out of space** (since
+2026-04-16)". That is not merely outdated phrasing — it is the exact rationale the
+07-16 ratification overturned, sitting in a canonical file where a future session
+would read it as current and could reasonably re-derive the keep-connected posture.
+Rewritten to state the ratified position, with the superseded premise preserved
+inline as audit trail per the never-delete rule.
+
+**Residual, unchanged and now 1 month old:** the "Zapier: KEEP CONNECTED" line lives
+in the Cowork Settings → Preferences operating prompt, which is **Gabriel-edited only**
+— Claude cannot reach it. It was flagged for manual removal on 2026-07-16 and again on
+07-18 and is still present. This is the third flag.
+
+**Lesson (pattern, not incident):** the 07-16 ratification updated `tech.md` and SoR
+but not `rules.md`, and could not update the Cowork prompt. A ratification that changes
+a *premise* needs a sweep of every file repeating that premise, not just the files
+stating the conclusion. Same failure shape as the 2026-07-27 master-vintage hold: the
+decision was made correctly and then failed to propagate.
+
+**Still live, not actioned — needs Gabriel:** `ORA-Zapier-API` remains an owned Notion
+integration with an access token (created 2026-04-26). Deleting it is destructive and
+credential-affecting, so it was reported rather than executed.
