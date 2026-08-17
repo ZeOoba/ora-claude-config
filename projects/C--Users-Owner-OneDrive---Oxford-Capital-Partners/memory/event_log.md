@@ -5,12 +5,113 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-16T20:15:29.895Z
+  modified: 2026-08-16T21:57:27.739Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-08-16 — P4 capability audit: dark AR subsystem found; doctrine + tracker landed
+
+**Finding.** `oxford-command-center`'s `server/ar/` is a complete, tested AR ingestion subsystem (PR #230, two adversarial refute rounds 2026-07-22) that has **never run**: `data/ar/` does not exist, `tenantArrears` is empty, nothing schedules `ar-import-headless.ts`. `$204,788.48` of AR ($172,672.41 active, 31 tenants) is therefore invisible to the Command Center, the daily brief's §4c, and every downstream report — while `_pipeline` computed that same figure from the same eight files on 2026-07-17 into a standalone dashboard nothing reads.
+
+Three consecutive plans would have rebuilt working code (`_pipeline`, then `server/ar/`, then `conditions.ts` — all five Phase-1 detectors already exist). Spec v02 was re-scoped to v03 against a commissioned capability audit; `property_master.property_manager` independently corroborated Gabriel's correction that 3875-3883 E Livingston is Kohr Royer Griffith, not self-managed.
+
+**Landed.**
+- `docs/build-lane-capability-check` → **PR #137**: `/build` gains chain step 0 (capability audit before brainstorming, component→owner map with a grep behind every verified-absent claim) and the ORA rule now names the target repo's code, not just skills/commands/project. Rebased onto `origin/main` first — the original branch point sat on an unrelated feature branch and would have carried 26 files of another session's in-flight work into the PR.
+- `37f5fe3` — MEMORY.md index pointer for the dark AR subsystem (1 insertion, isolated).
+- `b913d89` — tracker rows OI-173/177/178/179 (4 insertions, isolated). OI-173 regularises an **orphan reservation** (id reserved, `spec-liveness-probe.py` written, row never filed); orphaned reservations 6 → 5.
+- P4 artifacts on `feat/p4-pm-reconciliation` in oxford-command-center: capability audit, spec v03, and a six-task Phase 0 plan whose Task 1 needs no code and delivers 26 of 31 tenants.
+
+**Method.** Both memory commits used `commit_isolated_replacement()` after a 16.3-minute two-pass mtime settlement check per `dirty-tree-triage`. They stage only this session's hunks against HEAD; six other sessions' uncommitted rows (OI-163/171/172/174/175/176) and nine other MEMORY.md pointers remain in the working tree, untouched. `allow-config-write` was minted with Gabriel's in-turn approval quoted and deleted immediately after both commits landed.
+
+**Ruled (Gabriel).** Registration, not completion, is what makes work findable — and no probe currently catches the never-registered case (`spec-liveness-probe.py` compares spec claims to live data, so a capability with no spec is outside its edge by construction). Accepted at n=2, relying on step 0 to catch it at design time; **revisit if it recurs a third time.**
+
+## 2026-08-16 — rollover-event-log hardened against the app handle lock (PR #135 merged); a data-loss regression was introduced and caught pre-merge
+
+**Shipped.** `maintenance/rollover-event-log.py` performed a bare `os.replace(tmp, log)` with no retry and no fallback, and it ran AFTER the archive and backup were already on disk. So a blocked swap was not a clean no-op: it left `event_log_<today>.md` holding entries that were still live, and the archive-exists guard then rejected every re-run. The blocking handle is Claude.exe's own read handle opened without `FILE_SHARE_DELETE` ([[reference_event_log_app_handle_lock]]), which **self-clears in ~25 minutes** — so a transient, self-healing lock wedged rollover permanently until manual cleanup.
+
+Fix (PR #135, merged as `7485260`): `write_live_log()` with 6 attempts + in-place fallback from attempt 3, mirroring `append-event-log.py` rather than adding a second pattern; a per-attempt mtime guard raising `BlockingIOError` without retrying; `_unwind()` clearing scratch on failure so a re-run is not blocked; and `archive_dir_for()` so the archive follows `--log`. New `maintenance/test-rollover-event-log.py`, TDD, 27 assertions.
+
+**The `--log` bug was not latent — it fired immediately.** `ARCHIVE_DIR` was computed at import time from the hardcoded `LOG` constant, so `--log <temp>` still wrote its archive into the real `memory/_archive`. The first run of the new test suite deposited a synthetic archive (`event_log_2026-08-16.md`, 36 "detail line N" markers) next to the live log; verified as test output, untracked, and removed.
+
+**Regression introduced and caught before merge — the important part.** `_unwind()` deleted the archive and backup on every failure path, justified by "the live log is untouched in all of them." True before this change (a failed `os.replace` leaves the target alone), FALSE after: `_inplace_write` opens the log with mode `"w"`, truncating before any bytes land. An ENOSPC-shaped probe drove that path and returned a **0-byte `event_log.md` with backup AND archive both deleted** — unrecoverable loss of the canonical append-only log, caused by the recovery path itself, while the failure message reported "live log left UNCHANGED." In that specific failure mode the pre-change code was strictly safer. Fixed in `212c15c`: `_unwind()` now reads back, restores from the in-memory original, verifies, and only then discards; if the restore cannot be verified it keeps backup AND archive and says so. 5 regression assertions added.
+
+**How it was caught, and how it nearly wasn't.** Every mechanical signal was green at the moment the merge question was asked — `MERGEABLE`, `mergeStateStatus: CLEAN`, no branch protection, CodeRabbit "pass". That pass was **"Review rate limited"**, i.e. it never ran: a green that meant "couldn't look," the exact shape [[feedback_verified_null_vs_inferred_null]] warns about. The defect surfaced only from re-reading the diff to answer "can I merge." The first probe was also **wrong** — it patched `io.open`, which does not intercept the module's builtin `open`, so it measured the success path and mislabeled it data loss; retracted, then re-tested by injecting at the function boundary. A broken probe producing a confident verdict is its own hazard.
+
+**Branch/state notes.** Landed via cherry-pick onto a clean `origin/main` base in an isolated worktree — a PR from the original branch would have proposed **19 commits, 18 of them other sessions'**. The shared checkout (`feat/model-canary-probe-step25`) held the defective `0eebbbe` and was a live data-loss hazard from that working tree; closed by cherry-picking the fix as `21a0fb7` (suite 27/27 there). Worktree removed; merged `pr/rollover-handle-lock` deleted. **`fix/rollover-event-log-handle-lock` deliberately KEPT** — it points at the defective `0eebbbe`, but it carries the only remote copy of 9 other sessions' otherwise-unpushed commits. It should be re-pointed or retired once that branch reconciles, not deleted blind.
+
+Shared checkout remains 8 behind / ahead with ~30 dirty files across several live sessions; the reconcile was deliberately not attempted.
+
+## 2026-08-16 — Owner-outreach engine: multi-touch ladder, ratification manifest, suppression enforcement
+
+Built out P1 (Off-Market Owner Outreach Engine) from the supplied plan. Gabriel ratified the ladder, channel, dispatch model, cadence, targeting, and the Hard-Invariant-1 carve-out in one session via successive AskUserQuestion elicitations (decisions recorded in `ops_decision_log.md`).
+
+**The plan's central premise was wrong, in two directions.** It claimed the post-list layer was missing — roughly 60% of it already existed (`owner-outreach` skill v1.2, three scripts, a live LAMS task, a Notion CRM with DNC/Cadence-Status fields). And it claimed lead supply was frozen at vintage 2026-06-10; the master had actually refreshed to `20260727_..._v09.xlsx`, and the 06-10 figure was the *ratification's* vintage, not the master's. Independently corroborated by this day's `ops_decision_log.md` entry (`_latest_master()` globs by version number, not date). Lead supply was never a missing automation layer — it was one lapsed per-vintage ratification, which Gabriel cleared the same day.
+
+**Shipped.**
+- Letter bodies extracted from Python to `letter-templates/t{1,3,4}.txt`. T1 render verified **byte-identical** before/after across 156 letters / 3,285 paragraphs — every 08-14 revision preserved (600,000 SF verifiable-scale open, "study period"→"review period", cut website paragraph, P.S.).
+- Multi-touch ladder: T1 letter → T2 **call** (top slice) → T3 letter (+90d, no terms) → T4 letter (+180d). `--touch {1,3,4}` on both scripts.
+- `outreach-ratification.json` (OR-2026-001) + `ratify_outreach.py`. Template SHA-256s hard-fail the render; the signature block is now rendered FROM the manifest rather than hardcoded, so drift requires re-ratification. `--rehash` refuses to run without `--i-have-gabriels-approval`.
+- Suppression enforcement, fail-closed: `_oo_suppression.json` (Notion pull, agent-written) ∪ `outreach-responses.csv` (local capture). Missing/stale/unreadable snapshot HALTS before the queue rebuild.
+- `log_outreach_response.py` quick-capture. Read directly by the driver, independent of Notion — a quota refusal or lagging sync must never put a letter in front of someone who said stop.
+- 60-assertion test battery (`test_owner_outreach_ladder.py`).
+
+**Latent bug found and fixed: `--released` logged a running mail count as `touch_num`.** T2 is a call, so a parcel's mail history is 1→3→4. A running count would have written 2 for T3 and 3 for T4 — and `stage_eligible()` *reads* that column, so the error would have compounded on every subsequent run. Now logs the manifest's ladder stage.
+
+**Second latent bug: T1 was eligible forever.** The only gate was the 21-day floor, so a parcel mailed months earlier stayed T1-eligible instead of advancing — mechanically the same defect that produced the identical 07-13/21/27 packs. T1 is now never-mailed-only.
+
+**Correction to my own reporting.** I described the suppression gap as a "live defect," implying an owner had asked not to be contacted. The one suppressed row (`31100390001016`, 1889 SE Miehe Dr, Des Moines, Elsie Rae Holdings LLC) is **Parked** — "recent buyer (acquired Sept 2025), low sell propensity", DNC unchecked. Mailing it wastes a letter; it violates no one's wishes. Enforcement still correct, severity overstated.
+
+**Gotchas worth carrying forward.**
+- `session-context.md` is **gitignored** (`.gitignore:12`) and untracked — it cannot be committed. Durability is `maintenance/backup-session-context.py` (scrubbed mirror), not git. Do not re-derive this as "uncommitted WIP".
+- CLAUDE.md's word budget: `wc -w` reports 1706 but the **enforcing gate counts 1841 against its 1850 FAIL line** — ~9 words of headroom, not the ~140 the `wc`-calibrated memory note implies. A carve-out edit was blocked by this and ultimately dropped as unnecessary (the engine never sends; Invariant 1 bans *sending*, and pack generation was already permitted).
+- Notion **SQL mode is quota-metered and this workspace exhausted it mid-session**; view mode is quota-free per the tool contract. The weekly suppression pull uses one SQL query — fine — but the hardening path if it ever bites is view mode.
+- Cold email is structurally impossible here, not merely disallowed: county records carry **no email addresses**, and `send-via-outlook.ps1`'s external-send token is single-use and session-scoped by design.
+
+**Delivered:** `20260816_Owner-Outreach_T1-Letter-Pack_MASTER_v01.docx/.pdf` — 155 letters / 176 properties, rebuilt from the 08-14 queue under all gates (the 08-14 `MASTER_v07` had no hash provenance, no suppression pass, and no PDF). Manifest repointed so `--released` logs the correct set. Nothing has been mailed to date — `mail-log.csv` seeded empty on Gabriel's ruling, a verified null.
+
+## 2026-08-16 — PR #134 merged: acquisition-pipeline detector landed and backed up
+
+Supersedes the "left uncommitted deliberately" line in this day's earlier `acquisition_pipeline_snapshot_diff.py` entry — it was accurate when written and is now stale.
+
+Merged 2026-08-16 21:09 UTC, merge commit `60f84d9`. Verified after merge: `origin/main`'s copies of both `acquisition_pipeline_snapshot_diff.py` and `ora-pm-ledger/SKILL.md` are **byte-identical** to the live running copies, so what is backed up is exactly what executes.
+
+**Branching gotcha worth carrying forward.** The first commit (`c4fcd79`) was made in a worktree cut from `~/.claude`'s HEAD — which was parked on another session's `feat/model-canary-probe-step25`, **17 commits ahead of `origin/main`**, only one of them mine. A PR from that branch would have swept 16 commits of other sessions' unmerged work into the review. Caught before pushing; the fix was to cut a fresh branch from `origin/main` and cherry-pick the single commit (`4d7a54d`), after first confirming `scheduled-tasks/ora-pm-ledger/` was untouched between the two so it would apply cleanly. The cherry-picked file was re-hashed against the reviewed copy before pushing — the `eos-review-gate` artifact is keyed to content, so any divergence would have silently invalidated the approval.
+
+**Standing rule this implies:** before opening a PR from a worktree in a shared checkout, run `git rev-list --count origin/main..HEAD`. Anything above 1 means the branch point is wrong, not that the work is large.
+
+Gate history for the record: `eos-review-gate` blocked the first commit (blast radius: scheduled-task registry). Two independent review passes (Fable 5, per the ratified carve-out) — pass 1 APPROVED-WITH-NITS raising one minor (no runtime detection that the by-name exclusion still matches), fixed; pass 2 APPROVED with non-vacuity proven by mutation. Assertions 62 to 65.
+
+Cleanup done: worktree removed, both local branches and the merged remote branch deleted.
+
+## 2026-08-16 — Notion Tenant Database: Market Rent PSF backfill fully closed (138/138)
+
+Closed the last 3 property groups the original Market Rent PSF backfill deliberately left blank (Easton MD, Salisbury MD, 401 Sunburst Hwy — 55 rows), completed via a Cowork session after the Code-side Notion query quota blocked direct access here for an extended period (verified genuinely stuck across 3 retries over ~1 hour, not a momentary blip — handed off rather than keep polling).
+
+**Values written, all Gabriel-provided (not independently sourced third-party comps, unlike the rest of this backfill):**
+- 29000 Information Ln — Easton MD (23 rows): **$15.20/SF**, Modified Gross — Gabriel's current listing asking rate
+- 2203-2207 Northwood Dr — Salisbury MD (31 rows): **$11.00/SF**, Modified Gross — Gabriel's current listing asking rate
+- 401 Sunburst Hwy (1 row): **$17.00/SF**, NNN — current in-place rent used as its own comp, per Gabriel's explicit direction (this property is auto-service retail, not industrial/flex, unlike every other row in the backfill — its own rent as "market rent" is a deliberate exception, not the circular-comp pattern this session declined to use for Easton/Salisbury's own listings back when only third-party sourcing was being attempted)
+
+**Verified post-write:** a fresh COUNT query confirms zero rows remain with a blank Market Rent PSF across the entire non-retired Tenant Database (138/138 populated) — up from 83/138 after the first pass. A grouped query confirms all 55 rows in these three groups carry the exact intended values, no partial or inconsistent writes.
+
+**Full field now carries three distinct provenance classes, worth remembering when this data is used downstream:** (1) independently-sourced third-party market comps with a basis caveat (Columbus: NNN, C&W Q2 2026; Maryland metro: basis not fully confirmed, MacKenzie Q4 2025), (2) Gabriel's own listing/asking rates (Easton, Salisbury), (3) in-place contract rent used as its own comp for a non-industrial outlier property (Raytown KC's actual figure was also Gabriel's own asking price; 401 Sunburst's is its own current rent). None of these should be silently treated as equivalent, independently-verified market data if this field is ever audited or cited externally.
+
+**Why:** closes DQ Flag #2 from `ora-lease-expiration-dashboard`'s first run completely — the field that was 0% populated on 2026-08-16 morning is now 100% populated by end of day.
+**How to apply:** this week's dashboard run should show Rent vs Market Delta PSF for all 138 tenants, not just the 83 from the first backfill pass.
+
+## 2026-08-16 -- package-and-stage-skill v1.19 installed (Save-skill click)
+
+- Skill: package-and-stage-skill v1.19 -- doctrine update, commit 0661c8a "never trust pre-staged _staging drafts + archive-on-clear", authored this session after finding two mutually contradictory pre-staged event_log_entry drafts for an unrelated repo-architecture-review install earlier in the day.
+- plugin_of('package-and-stage-skill') = None -- standalone install path.
+- Frontmatter description trimmed to 1005/1024 chars (first draft edit landed at 1186, over budget; shortened "Oxford Realty Advisors" to "ORA" and cut the redundant archive-on-clear clause from the description, keeping the full rule in the body + changelog).
+- Packaged via tools\package_skills.py (never Compress-Archive): description 1005/1024 chars OK, 1 entries OK, forward-slash path package-and-stage-skill/SKILL.md.
+- Staged to Cowork session outputs via Desktop Commander bridge + device_stage_files from _staging\2026-08-16\package-and-stage-skill.skill.
+- Gabriel confirmed the Save-skill click in-session (2026-08-16).
+- Post-install verify: AppData cache mirror at skills-plugin\583f08bc-0123-4111-8158-8fe3d927e350\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\skills\package-and-stage-skill\SKILL.md present, single file, modified 08/16/2026 16:41:11, SHA256 D66CC2009B24F235C2906D1B196C5AF44CD1D12C1E988C2DD62E9CB6BFAA65D8, byte-identical to the repo copy.
+- `pending_reimport.py clear package-and-stage-skill` run in this same pass, immediately following this append's confirmed exit 0.
 
 ## 2026-08-16 — P3 Lost-Deal Post-Mortem Ledger BUILT (Gabriel-ratified, shipped)
 
@@ -32,16 +133,25 @@ Structured basis-vs-execution capture for LOI losses. Extension of existing mach
 
 Classified-loss count is **n=1**. Read-outs carry the INSUFFICIENT SAMPLE banner for ~18–36 months. Memory: `reference_511_industrial_mile_duplicate_rows_and_walk_offer_conflict_2026-08-16.md`.
 
-## 2026-08-16 -- package-and-stage-skill v1.19 installed (Save-skill click)
+## 2026-08-16 — P2 Universal Provenance + Refute Layer: Gabriel ruled all four gate questions; plan v02 written
 
-- Skill: package-and-stage-skill v1.19 -- doctrine update, commit 0661c8a "never trust pre-staged _staging drafts + archive-on-clear", authored this session after finding two mutually contradictory pre-staged event_log_entry drafts for an unrelated repo-architecture-review install earlier in the day.
-- plugin_of('package-and-stage-skill') = None -- standalone install path.
-- Frontmatter description trimmed to 1005/1024 chars (first draft edit landed at 1186, over budget; shortened "Oxford Realty Advisors" to "ORA" and cut the redundant archive-on-clear clause from the description, keeping the full rule in the body + changelog).
-- Packaged via tools\package_skills.py (never Compress-Archive): description 1005/1024 chars OK, 1 entries OK, forward-slash path package-and-stage-skill/SKILL.md.
-- Staged to Cowork session outputs via Desktop Commander bridge + device_stage_files from _staging\2026-08-16\package-and-stage-skill.skill.
-- Gabriel confirmed the Save-skill click in-session (2026-08-16).
-- Post-install verify: AppData cache mirror at skills-plugin\583f08bc-0123-4111-8158-8fe3d927e350\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\skills\package-and-stage-skill\SKILL.md present, single file, modified 08/16/2026 16:41:11, SHA256 D66CC2009B24F235C2906D1B196C5AF44CD1D12C1E988C2DD62E9CB6BFAA65D8, byte-identical to the repo copy.
-- `pending_reimport.py clear package-and-stage-skill` run in this same pass, immediately following this append's confirmed exit 0.
+Gabriel ruled the four §9 gate questions on the P2 provenance-layer plan (v01, plan-only, same date). Phase 1 unblocked; Phase 2 authorized in blocking form. Plan v02 at `Claude_Workspace/01_Workspace/outputs/2026-08-16_P2ProvenanceLayer_Plan_v02.md`.
+
+**Rulings.** (1) Tier split — internal debt = Tier A always (stamps CONTESTED until the workbook mutation log ships); insurance + delinquency = Tier B with forced VERIFIED/INFERRED/NOT-CHECKED, escalating to Tier A only on external send or governor cross. This corrected v01, which had put all three in Tier A — both are recurring internal reports, so Tier A converted a bounded cost into a per-run tax, and neither failure was refute-class (delinquency was an inferred null presented as verified; insurance was a true positive hedged for want of provenance). (2) **Tier-A fail-closed blocking at the exit tools RATIFIED**, block from day one with a logged override — same ratification act as eos-review-gate 2026-07-24. (3) `[CORRECTION]` tag convention adopted. (4) Cowork keeps weaker contract-based enforcement; no forced migration of Tier-A production to Code. (5) Master Workbook tamper-evident mutation log authorized as a now-project; out-of-band pipeline probes deferred until after Phase 2.
+
+**Three corrections the pre-build investigation forced.**
+
+- **v01 put the send gate at the evadable layer.** It proposed matching Bash invocations of `send-via-outlook.ps1` (PreToolUse shell text). Per `hooks/lib/email_send_tier.py`'s own docstring, that layer is "structurally blind to value indirection" (OI-007); the non-evadable point is `check_external_send.py`, invoked by the PS1 itself after PowerShell has bound `$To`/`$Cc`. The Tier-A deliverable check rides at layer 2.
+- **The ratified logged override already exists — do not invent a format.** `hooks/lib/override_tokens.py` provides `Tier(scope, ttl, single_use, requires_extra_check)`; `email_send_tier.py` is its EXTERNAL_SEND instantiation. P2 defines a `DELIVERABLE_PROVENANCE` tier in that family. Binding per `reference_provenance_claim_mechanism_already_exists.md` ("do not build a second, parallel claim mechanism") and email_send_tier's drift warning. Consequence: ruling 2 is cheaper to build than v01 estimated.
+- **The correction-rate baseline cannot be reconstructed — reported as a verified null, not a number.** v01 §7 assumed the `feedback_*` corpus was a correction ledger. It is a *tooling* correction ledger: 55 files, overwhelmingly bash/git/hook/workflow corrections, roughly nine touching deliverable discipline. Worse, attribution is absent where the metric needs it — "caught by / found by / surfaced by / Gabriel noticed / manual cross-check" returns 19 occurrences across 16 of 138 `reference_*.md` files. That missing field kills both proposed metrics (primary counts Gabriel-issued corrections; secondary counts refuter-before vs Gabriel-after); neither is computable retroactively. MEMORY.md's Markets section carries ~20 deliverable/data-layer defect entries for the June–August window, but with no attribution and no denominator that is a defect floor, not a baseline — presenting it as one would be the citation theater the plan's §8 exists to prevent. Redesign: sidecar carries `caught_by` from day one, `[CORRECTION]` tags forward, and the first 4–6 weeks of Phase 1 *is* the baseline. Phase 1 must not be judged against a reconstructed number.
+
+**Reuse inventory verified (not assumed).** `hooks/lib/tool_call_paths.py` (`is_write_capable`/`primary_write_path` — the `/outputs/` matcher does not rebuild path extraction); `override_tokens.py`; `check_external_send.py`; `scheduled_task_frontmatter.py` already has `sha256_of()`. `memory-nag-correction.py` is NOT correction-capture despite the name — it corrects the harness's stale MEMORY.md size nag; checked rather than assumed.
+
+**Two hazards that would have silently broken the build.** Advisory output must use `hookSpecificOutput.additionalContext`, never `systemMessage` — the latter is user-visible but model-invisible, the defect class that cost `shared-checkout-guard.py` 168 silent firings over seven days; Tier B/C advisories written the wrong way are inert by construction. And content hashing must not naively sha256 raw bytes for git-tracked deliverables — eos-review-gate routes through `git hash-object --stdin --path <rel>` so autocrlf normalization applies identically on both sides (`reference_autocrlf_defeats_content_hash_gates.md`). Also copied from that gate: hash the bytes that will actually land, not working-tree content — its original version let an edited v2 pass a review keyed to v1.
+
+**Boundary recorded** so no future reader has to guess which gate is authoritative: `eos-review-gate` governs code at `git commit`; `check_external_send` governs recipients at Outlook COM; the new `deliverable-provenance-gate` governs deliverables at COM send / Notion+Excel writes / `/outputs/`. Disjoint questions, disjoint artifacts, shared mechanism only.
+
+No code written this session — plan and rulings only.
 
 ## 2026-08-16 -- repo-architecture-review v1.0 installed (Save-skill click)
 
@@ -63,6 +173,15 @@ Entry point A dispatched for repo-architecture-review (commit f2fc1cf, "Add repo
 
 `pending_reimport.py clear repo-architecture-review` run in this same pass, immediately following this append's confirmed exit 0.
 
+## 2026-08-16 -- repo-architecture-review v1.0 installed (Save-skill click)
+
+- Skill: repo-architecture-review v1.0 -- first install (no prior AppData mirror existed).
+- Source committed to ora-skills repo as f2fc1cf; pre-commit frontmatter gate initially blocked (description 1514/1024 chars) -- trimmed to 1004/1024, all trigger phrases and the ora-setup-audit distinction preserved.
+- Packaged via tools/package_skills.py (never Compress-Archive): description 1004/1024 OK, 1 entries OK, forward-slash path.
+- Staged to Cowork session outputs via Desktop Commander bridge from _staging/2026-08-16/repo-architecture-review.skill; SHA256 verified byte-identical both sides (425a6cf100dcbe298da2a4058add8ff175cbec149b2d804575e277877f8e8db8).
+- Gabriel confirmed Save-skill click 2026-08-16. AppData cache mirror verified present at skills-plugin\583f08bc-0123-4111-8158-8fe3d927e350\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\skills\repo-architecture-review\SKILL.md -- single file, matches the packaged entry set.
+- PENDING_REIMPORT ledger entry cleared this session.
+
 ## 2026-08-16 -- package-and-stage-skill: register-scheduled-task v2.9 installed (Save-skill click confirmed)
 
 Entry point A run for register-scheduled-task, commit 324474c (v2.9, 2026-08-15: post-registration fire-time sanity check -- step 4c added). Pre-check: `plugin_of()` = None (standalone), repo git-clean. Live ListSkills read v2.8 (2026-07-24) before packaging, confirming a genuine version lag vs the repo's v2.9 -- not an already-installed redundant ask. Packaged via `tools\package_skills.py` (exit 0, description 842/1024 chars OK, 2 entries OK: `SKILL.md`, `references/incident-history.md`). Staged device-to-session, byte-identity confirmed by SHA256 (2b76d586e4...c7099, both sides). present_files/SendUserFile surfaced the Save-skill button; routed to Cowork install (multi-file skill).
@@ -72,6 +191,22 @@ Entry point A run for register-scheduled-task, commit 324474c (v2.9, 2026-08-15:
 Gabriel confirmed the Save-skill click (message: "saved") at approx. 2026-08-16 16:08 ET. Post-install verification, same session: live ListSkills now reads register-scheduled-task v2.9 ("2026-08-15") -- flipped from v2.8 pre-click. AppData cache mirror contains both files, byte counts and SHA256 matching the packaged/repo copies exactly (SKILL.md 14863B hash B5A871FA...698ED5; references/incident-history.md 5017B hash 99710A84...50866E2); cache mtime 16:08:28 ET, ~1 min after the package was surfaced (16:07:08 ET) -- consistent with a distinct Save-skill import event.
 
 This entry logs the confirmed Save-skill click itself, not merely the upstream repo commit. `pending_reimport.py clear register-scheduled-task` run in this same pass, after this append's confirmed exit 0.
+
+## 2026-08-16 — Mirror deploy built the shared checkout's uncommitted WIP; isolated build root (PR #279). Separate 14:00 kill is NOT the PT30M mode
+
+Two independent faults on the same afternoon, initially conflated as one. Only the second was breaking the mirror.
+
+**Fault A (recurring, fixed by PR #279).** `deploy-mirror.ps1` fast-forwarded git and then built **whatever was checked out on disk**. The canonical checkout is a multi-session development surface, so that included other sessions' uncommitted work. Another session left an uncommitted `tests/unit/install-git-hooks.test.ts` in `oxford-command-center` at **14:13:31**; it fails `tsc --noEmit` with `TS7016` (no declaration file for the `.mjs` it imports), so `build:mirror` exited **2** and every hourly run from 15:00 on failed identically while `brain.oxfordra.net` kept serving the **13:00** bake. Exact failure point pinned by artifact mtimes: `public/snapshot.json` 15:00:38 and `macro.json` 15:00:42 (bake succeeded) vs `dist/snapshot.json` still 13:00:21 (build never ran).
+
+Same **class** as the 2026-07-09 incident, whose fix added the git fast-forward — that addressed stale code *from origin* and could not address uncommitted *local* work. **Detection was never the gap**: the beacon recorded `outcome: failed / build:mirror failed (2)` and the alert fired (`offline-suppression.json` streakCount 1, classKey `build-mirror`). The deploy simply could not succeed again unattended.
+
+Fix: build from a dedicated worktree pinned to `origin/main` (`<repo>-deploy-build`); the canonical checkout is now a source of git objects and machine state only, never build content. Beacon / alert-state / outbox deliberately STAY in the canonical repo — `mirror-run-classify.ps1` and the health monitor read them from the repo root. `git merge --ff-only` on the shared checkout was **removed**: unnecessary once we stop building from it, and it had an unattended job mutating a tree other sessions work in. Two traps found while building: `git worktree add` provisions no `node_modules` (now lockfile-hash-gated `npm ci`; `clean -fd` not `-fdx` so it survives), and the wrangler arg was a **relative `dist`** which post-isolation would have published the canonical tree's stale dist *while reporting success* — a silent wrong-artifact publish to an external surface, now an absolute path plus a no-`index.html` refusal.
+
+**Fault B (one-off, mechanism identified, originator NOT attributable).** The 14:00 run died 8s in with rc 3221225786 (`0xC000013A`), classifier verdict ALARM_UNEXPLAINED_KILL. **This is not the 2026-07-29 PT30M ExecutionTimeLimit mode — stop reaching for that explanation on short-duration kills.** Evidence: Task Scheduler logged `201`+`102` "successfully completed" at 14:00:10 and **no event 111**, so the scheduler did not terminate it, and PT30M was nowhere near firing at 8 seconds; the PowerShell engine logged event **400** (Available) but **never 403** (Stopped), while both neighbouring `ClaudeFleetMirror` engines logged 400→403 one second apart; the beacon was left `running`, so the script never reached its exit path and `try/catch` never unwound (hence no alert was possible); and there were **zero** System and zero Application events in 13:58–14:02 — no power, sleep, shutdown, or update event. That signature is an external console-control termination inside the interactive session (the task runs `LogonType=Interactive`, sharing the session with ~20 concurrent Claude sessions issuing shell commands). With no process-kill auditing enabled, the originator is not recoverable from existing logs. Did not recur.
+
+**Also observed in the same log sweep, unrelated and unresolved:** an instance launched **04:00:01 finished 11:45:31** — 7h45m against a PT30M limit, with two event `322` "already running" refusals at 11:45:23. Consistent with the laptop sleeping mid-run (wall-clock advances while the process is suspended, and ExecutionTimeLimit evidently does not fire across it). Not investigated further.
+
+The blocking WIP was left untouched (single-writer doctrine — another session's work); Gabriel ruled surface-only. PR #279 makes the deploy immune to it rather than resolving it. Branch `eric-live-phase2` also touches `deploy-mirror.ps1` (adds `-IncludeWarehouse`), so whichever lands second needs a rebase.
 
 ## 2026-08-16 -- package-and-stage-skill: batch reimport triage on 3 ledger-pending skills -- 2 already in sync, 1 genuinely pending
 
@@ -83,6 +218,40 @@ This entry logs the confirmed Save-skill click itself, not merely the upstream r
 
 `pending_reimport.py clear` run for the two already-in-sync skills in this same pass, immediately following this append's confirmed exit 0.
 
+## 2026-08-16 -- MEMORY.md index asserted the OPPOSITE of its own corrected source, and drove a repeat OI-109 key drop
+
+PR #131 merged (spec-liveness-probe, OI-173). Walking its post-merge steps exposed a second instance of the SAME failure class the probe was built for -- this time in the memory layer rather than a task spec.
+
+STEP 1 (probe live) DONE. Placed `maintenance/spec-liveness-probe.py`, its test, and the v1.3 `ora-doctrine-integrity-guard/SKILL.md` into the live checkout, sha-verified against origin/main (the guard file differs from the blob only by CRLF-vs-LF; content identical under `diff --strip-trailing-cr`). Live run: `[OK] 66 spec(s) checked against 1 live flag(s) -- no claim drift`, exit 0; its 14 tests pass from the live path; `fleet-contract-check.py` rc=0; `doctrine-integrity-probe.py` exit 0. Guard next fires 2026-08-17T17:04:55Z, cron `55 12 * * *`. The full 27-commit pull was NOT done: it collides with 5 files holding other sessions' uncommitted WIP (event_log.md, MEMORY.md, open-items-tracker.md, project_ora_strategic_constraints_2026-08-16.md, ora-pm-ledger/SKILL.md). Only the 3 non-colliding files were placed. `config-write-guard` blocked the first attempt; a scoped `allow-config-write` token was minted citing Gabriel's in-turn approval and narrowed to that placement.
+
+STEP 2 (registry description sync) WAS UNNECESSARY, and doing it caused harm. Neither fleet registry stores `description` at all -- re-verified from scratch: CC/MCP 37 tasks, LAMS/Cowork 28 tasks, ZERO entries carrying the field, and neither schema defines it. `list_scheduled_tasks` renders description by reading the SKILL.md at `filePath`. So placing the v1.3 file had ALREADY completed the sync. The `update_scheduled_task` call made "to sync the registry" was a no-op that **dropped `output_contract`** from ora-doctrine-integrity-guard -- that guard's ONLY liveness signal, since it is silent-by-design on a clean run. Caught by `scheduled-task-update-postguard`, restored from a pre-call backup, all fields re-verified (block id, is_primary_health_signal, freshness_window_hours, v1.3 desc, "all six engines", probe invocation, 91 lines). Second loss of that exact key this way; first was 2026-08-09.
+
+ROOT CAUSE, and it is not the tool. `reference_skill_description_registry_file_desync.md` was CORRECTED on 2026-08-12 and has said the right thing for four days: description lives in ONE store, and "Do NOT call update_scheduled_task merely to propagate a description -- that call is the hazard, not the remedy." It was ignored because MEMORY.md's one-line pointer still carried the PRE-correction claim verbatim -- "Task description lives in TWO stores -- editing SKILL.md alone desyncs the registry; sync both, verify by sha." MEMORY.md is auto-loaded into every session; the corrected file is not. The 2026-08-12 fix corrected the source and left the index asserting its opposite, so every subsequent session read the stale summary and acted on it. Two such calls were made 2026-08-16 before the contradiction was noticed.
+
+FIXED: MEMORY.md line 76 rewritten to the corrected claim (ONE store; never retag to "sync"). The reference file gained a section recording the four-day gap, the two calls, and the concrete cost, so the correction now carries evidence rather than assertion.
+
+DECLINED (diminishing returns): hardening `scheduled-task-update-preguard.py` to warn on description-only calls. Its module docstring declares an explicit warn-only SAFETY INVARIANT and it exists for a DIFFERENT incident (a hand-edit being reverted); the postguard already detects and instructs on the key drop; and the actual enforcement gap was the stale index, now closed. More machinery for a now-correct doctrine is not the lever.
+
+GENERALIZABLE, same lesson as OI-171: correcting a source is half the fix. Every SUMMARY asserting the old fact must move with it -- an index entry is a claim about its target and rots exactly like a spec claim about live runtime data. Both of today's incidents are that one shape.
+
+## 2026-08-16 — AI-review vendor evaluation: CodeRabbit can't gate a private repo, and it surfaced that ora-claude-config was never listed as confidential
+
+Triggered by CodeRabbit failing twice on PR #126/#128. Two rulings from Gabriel, plus a governance gap found on the way.
+
+**CodeRabbit is not a usable gate here, and never was.** Its free tier is **public repositories only** ([coderabbit.ai/pricing](https://www.coderabbit.ai/pricing)); private coverage is $24/user/mo (Pro, annual). On this private repo it yields ~1 review then rate-limits — which is exactly what happened: the automatic run on #126 was refused ("you've used all 1 included review currently available under your plan"), #126 **merged unreviewed**, and an explicit `@coderabbitai review` on #128 was refused again ("Review rate limited"). Do not read a CodeRabbit silence as an approval on this repo.
+
+**Alternatives checked against primary sources, not vendor blogs.** Only one is genuinely free for a private repo AND keeps code off third-party infrastructure: **PR-Agent** (MIT, `qodo-ai/pr-agent`) self-hosted as a GitHub Action with your own key. **GitHub Copilot code review** is excluded from Copilot Free, and since **2026-06-01** private-repo reviews consume Actions minutes *plus* AI credits. Gitar/Kodus/Macroscope "free unlimited" claims all traced back to vendor or vendor-adjacent blogs and were **not** verified — do not cite them as fact.
+
+**The real finding: `ora-claude-config` was absent from `confidential-repos.json`** while `/code-review ultra` was already forbidden on four *less* sensitive repos. It is the ~/.claude backup and the largest PII surface of the five — 316 tracked memory files including `people.md` (counsel/title/broker/lender names), `firm.md` (AUM, portfolio, entities), `deal-decision-ledger.md`, `disposition-ledger.md`, and named tenant-default/delinquency records. Verified by `git ls-files --error-unmatch` per file, not inferred. Deal TERMS are scrubbed pre-commit per CLAUDE.md, so the exposure is the corpus, not the confidential-deal roster. **Found while comparing review vendors — no guard flagged it**, so an omission from that list must not be read as a deliberate exclusion.
+
+**Gabriel's rulings (in-turn, multiple-choice):**
+1. **Add `ora-claude-config` to `confidential-repos.json`, and KEEP CodeRabbit** as a deliberate, documented exception. Recorded in the file's new `notes` block. **Scope caveat written into that note:** this list governs `/code-review ultra` only — it has never gated third-party GitHub Apps, which are installed out-of-band and are blocked by nothing in `confidential-repos.json` or `hooks/`. Listing the repo does NOT revoke CodeRabbit's read access; only uninstalling the App would.
+2. **Review path going forward = the local `pr-review-toolkit:code-reviewer` agent on a model tier different from the implementer's** (reviewer ≥ implementer invariant). Zero cost, zero egress, works on private repos. Chosen over paying $24/mo, consistent with [[procurement-stance-deepen-not-migrate]].
+
+**Why the path ruling mattered.** Three defects shipped and were caught this session — the #126 sub-index gate, then a flaky race assertion, then a bare `except OSError` collapsing "file GONE" with "file LOCKED" — **all caught by review, none by a failing test; every bad version was green.** All three reviews were self-reviews by the agent that wrote the code. The gap was never tooling; it was reviewer independence.
+
+Consumers verified safe after the edit: `engineering-router.py` reads only `.get("confidential_repos")` inside a try/except and ignores the new `notes` key; `doctrine-integrity-probe.py` only asserts the file exists. Both probes exit 0 and the router resolves all five repos.
+
 ## 2026-08-16 -- package-and-stage-skill: market-monitor v1.4 installed (Save-skill click confirmed)
 
 Entry point B (pre-packaged install) run for market-monitor v1.4, commit b0499f6 (Columbus submarket assignment corrected; dropped a mislabeled Maryland/Northwood property from the Columbus exposure list), packaged earlier today via tools/package_skills.py from a Code session.
@@ -92,6 +261,115 @@ Pre-check (Cowork session, DC bridge live): `plugin_of('market-monitor')` = None
 Gabriel confirmed the Save-skill click (message: "saved") at approx. 2026-08-16 15:58 ET. Post-install verification, same session: live ListSkills now reads market-monitor v1.4 ("Columbus submarket assignment corrected -- see Changelog"), enabled -- flipped from v1.3 pre-click. AppData cache mirror (`skills-plugin\...\skills\market-monitor\`) contains both files with byte counts and SHA256 matching the packaged/repo copies exactly (SKILL.md 20300B, hash C032727E...F4A11; target-markets.json 45607B, hash 30245D1E...7DDFF); cache mtime 15:57:44 ET, ~9 min after the b0499f6 commit (15:48:53 ET) -- consistent with a distinct Save-skill import event, not the commit-time mirror-sync hook. `main.log` had no matching "market-monitor" Delta/Sync-complete line at time of check; the cache-content match plus the live ListSkills version flip (v1.3 -> v1.4) are logged as the corroborating evidence in its place.
 
 This entry logs the confirmed Save-skill click itself, not merely the upstream repo commit. `pending_reimport.py clear market-monitor` run in this same pass (DC bridge live), after this append's exit 0 was confirmed.
+
+## 2026-08-16 — market-monitor v1.4 Save-skill'd, ledger cleared
+
+Gabriel confirmed the Cowork Save-skill click for market-monitor v1.4 (commit `b0499f6` — Columbus submarket assignment corrected, mislabeled Maryland "Northwood" entry removed). Verified: `main.log` shows `[SkillsPlugin] Delta: 1 to download` -> `Sync complete: 1 downloaded, 0 failed` at 15:56:18 and again at 15:57:43; cache-mirror content spot-check confirms the description tail reads "v1.4 (2026-08-16: Columbus submarket assignment corrected — see Changelog)."
+
+Cleared from `_staging/PENDING_REIMPORT.md` via `pending_reimport.py clear`.
+
+This closes the last actionable item from today's `ora-lease-expiration-dashboard` remediation chain. Two items remain genuinely open, neither actionable from Code: F10 (Notion Louisville KY select color — needs Gabriel's manual UI click) and the Cowork scheduled-task persistence-store investigation (running independently in its own session).
+
+**Why:** completes the human-gated registration step for the worktree-isolated market-monitor fix.
+**How to apply:** next `ora-skill-store-drift-check` run should read market-monitor as IN-SYNC.
+
+## 2026-08-16 — OI-162 monthly-billing batching fix (ora-pm): five review rounds, deadlock class found and closed
+
+Full technical history for the fix documented inline at `ora-pm/server/routes/cron.ts` (POST /monthly-billing header comment) and `ora-pm/scripts/trigger-billing.ps1` — this entry is the pointer that comment refers back to, plus the parts that don't belong in source.
+
+**Trigger:** the first-ever production run of `POST /api/cron/monthly-billing` (August 2026, 139 active leases) hit Cloudflare Workers' per-invocation subrequest limit partway through — the original code issued one DB insert per charge (up to 2/lease) plus one query per autopay-eligible lease. 49 of 139 leases got billed; the other 90 got nothing. Root cause and evidence: [open-items-tracker.md#OI-162](open-items-tracker.md#OI-162).
+
+**Round 1** collapsed charge-posting and the autopay prior-period check to one bulk call each. Adversarial review caught that it only relocated the same O(leases) shape into the per-eligible-lease DEBIT loop, where a subrequest-budget exhaustion between `stripe.paymentIntents.create` (a real ACH debit already initiated) and the `payments` insert that records it would leave no guard against a duplicate debit once Stripe's ~24h idempotency window expired — worse than the bug just fixed.
+
+**Round 2** bulk-fetched the debit inputs too and bounded debit processing to `AUTOPAY_BATCH_LIMIT` leases per invocation, returning a `remaining` count. Review found: nothing consumed `remaining` (silent, permanent under-collection past the limit, not a retry); the HTTP-500-on-failure change lost its own diagnostic body on PowerShell 5.1 (`Invoke-RestMethod`'s catch block doesn't reliably populate `$_.ErrorDetails.Message`); the unbounded prior-check `.in()` query was mis-estimated as safe to "low hundreds" of leases when it actually risks a ~180-200-lease proxy URL-length wall.
+
+**Round 3** added the drain loop to `trigger-billing.ps1`, fixed the body-read, chunked the prior-check at 100 ids, lowered `AUTOPAY_BATCH_LIMIT` 10→8 with documented worst-case subrequest math, and pinned `stripe.ts`'s `maxNetworkRetries: 1` (was unset, silently defaulting to stripe-node v22's 2). Review found the PS error-body fix only handled the `{errorMessages}` shape, missing the `{error}` shape that 401/429/400 responses actually return; a vacuous chunking regression test (asserted a condition true regardless of whether chunking existed); and period-scoping mutations that survived because the test mock didn't actually filter by date, only by lease_id.
+
+**Round 4 (the deep one) — a genuine convergence bug, not just a documentation gap:** applying `AUTOPAY_BATCH_LIMIT` *before* computing which leases actually needed a debit meant a cluster of already-fully-paid (zero-debit) leases at the front of the eligible list could occupy the entire batch every single invocation, forever — zero Stripe calls, zero progress on `remaining`, the drain loop spinning without ever converging. Reviewer proved it empirically (8-of-10 zero-debit case: `remaining` stuck at 2 for 8 straight invocations). Fixed by bulk-fetching debit inputs for the FULL not-yet-collected set first, resolving every lease's debit amount, and applying the batch limit only to leases that actually need a Stripe call.
+
+**Round 5** confirmed round 4's fix converges (independently reproduced with interspersed zero-debit leases and a >100-lease chunking case) and found the SAME convergence-class bug in one more place: a lease whose Stripe call fails *deterministically* every time (closed bank account, revoked mandate, or a bad `STRIPE_SECRET_KEY` failing all of them) never gets a `payments` row, so it re-occupies the same front-of-batch slot on every retry — `remaining` could get stuck at a fixed nonzero value while burning the whole `MAX_INVOCATIONS` budget on doomed leases, previously exiting 0 and surfacing nothing. Also found: a charges-bulk-upsert failure didn't stop the autopay phase from running against charges known not to have been posted (every lease computed a $0 charge total, got silently marked "skipped — nothing outstanding" instead of deferred, and `remaining` read 0 = "nothing left to do").
+
+**Final state:** `trigger-billing.ps1`'s drain loop now breaks and exits 1 (loudly) the moment `remaining` fails to decrease between two calls, instead of silently exhausting `MAX_INVOCATIONS`; `cron.ts` defers the entire autopay phase (not just returning 500) when the charge upsert fails, setting `remaining` to the true outstanding count rather than 0. Also added: a `-TimeoutSec 60` on the PowerShell HTTP call (this endpoint's whole reason for existing is subrequest-budget exhaustion, which can mean a stalled connection rather than a fast failure), and an explicit comment documenting the `AUTOPAY_BATCH_LIMIT × MAX_INVOCATIONS = 64` per-run debit ceiling.
+
+**Status:** the demonstrated production crash (charge-posting) is fully fixed and load-bearing-tested since round 1. The autopay/debit-processing path (batch limit, drain loop, convergence guarantees) is deliberately hardened AHEAD of need — zero leases are autopay-eligible in production today (autopay enrollment isn't reachable from the tenant portal, see [OI-068] in open-items-tracker.md), so none of it has been exercised at real scale yet. 464/464 tests pass repo-wide, typecheck/lint clean. Not deployed — held for Gabriel's review per standing "only commit when asked" convention.
+
+**Open, not fixed (documented, not blocking):** the leases-select query itself is unbounded (fine at 139 rows against Supabase's default `db-max-rows`, unverified for this project); `RATE_LIMIT_KV` is unprovisioned (rate limiting is memory-only per isolate); the actual Cloudflare Workers plan (Free=50 vs Paid=1000 subrequests) is unverified from the repo — all three need a human to check the live Cloudflare/Supabase dashboards, not a code fix. Ordering-based lease starvation (round 5's finding) has a mitigation (the ps1 stall-break) but no server-side fix (e.g. failure-aware lease ordering) — deferred as a real but small future item given zero current autopay usage.
+
+## 2026-08-16 — Remaining open-items batch: Columbia Imaging backfilled, market-monitor Columbus fix, Triple Threat KC already resolved by another session
+
+Closed out the remaining open items from the day's `ora-lease-expiration-dashboard` remediation, each with the mechanism actually appropriate to it rather than forcing all of them into one track:
+
+**Columbia Imaging, Inc. missing Lease Expiration — fixed.** The Notion row was genuinely bare (no SF, no lease start, no Notes — unlike the earlier Lease Status backfill, there was no internal corroborating evidence to infer from). Found the real source: `Rent Roll 07.27.2026 -- 9050 Red Branch rd.xlsx`, row 17 — rent figure ($5,625/mo) matches the Notion record exactly, confirming the row correspondence. Backfilled from that verified source: SF 5,000, Lease Start 2014-03-01, Lease Expiration 2027-02-28, Escalation 3%. Verified post-write via a fresh query.
+
+**Triple Threat Kansas City, LLC duplicate HubSpot task — already resolved, not by this session.** Checked HubSpot directly rather than assume the flag from the dashboard's first run was still live: both duplicate "Renewal Outreach" tasks were auto-closed earlier today (2026-08-16, ~00:42 UTC) by something identifying itself as "ora-lease-expiration-dashboard workflow-optimization pass" — almost certainly a different concurrent session's work overlapping with this one (consistent with the day's pattern of 18-21+ other active sessions). Rationale in the closure notes cites the current Notion Lease Expiration (2029-04-30, 988 days out) as evidence a lease is already in place, with a recommendation for Gabriel to spot-check it's a real renewal and not a data artifact. No action taken here — verified the existing resolution looks legitimate rather than redoing or reversing it.
+
+**market-monitor Columbus submarket assignment — fixed, worktree-isolated.** Two real errors found while sourcing the Columbus market-rent comps earlier today, corrected via an isolated `ora-skills` worktree (`fix/market-monitor-morrison-submarket`, fast-forward merged to main, worktree removed, branch deleted): (1) the Columbus "ORA current exposure" list had never actually assigned any property to a submarket — added a verified per-property mapping (Southeast/Groveport: Zettler, Banwick x2, Livingston; Northeast/Gahanna: E.5th Ave x3, Morrison, Rarig, Westerville; Northwest/Hilliard: Fishel/Dublin), sourced from the same live C&W geolocation check that caught 392 Morrison Rd's mislabeling; (2) "Northwood" had been listed as a Columbus property in that same line — it's actually 2203-2207 Northwood Dr, ORA's Salisbury MD asset, mislabeled in at some unknown prior point. Removed. v1.3 -> v1.4. Packaged and staged for Gabriel's Save-skill install; not yet confirmed installed.
+
+**Declined, explicitly:** Tenant Grade (1/138 populated in the Tenant Database) — this is a subjective tenant-credit-quality judgment call (A-Anchor through D-At Risk), not a fact inferable from existing data or researchable externally the way the other backfills were. Auto-filling it would be fabricating an assessment, not backfilling data. Left for Gabriel/team review.
+
+**Untouched, out of scope of this batch:** F10 (Notion Louisville KY select color) still needs Gabriel's manual UI click; the Cowork scheduled-task persistence-store investigation is running independently in its own session; 401 Sunburst Hwy's retail comp research was never started.
+
+**Why:** "do all remaining open items" from the day's dashboard-driven remediation chain, triaged by what each item actually needed (worktree for the one real repo change, direct research+write for Columbia Imaging, a HubSpot check that turned up already-done work, and an explicit decline for the one item that would have required fabricating judgment rather than sourcing fact).
+**How to apply:** market-monitor v1.4 needs Gabriel's Save-skill click before it's live; everything else in this batch is already confirmed live and verified.
+
+## 2026-08-16 — Notion Tenant Database: Market Rent PSF backfilled on 83 of 138 rows
+
+Closed the second data-quality gap from `ora-lease-expiration-dashboard`'s first run (DQ Flag #2: Market Rent PSF unpopulated on all 138 rows). Unlike the Lease Status backfill, this could not be inferred from data already in the Tenant Database — it required real external market research, sourced and dated, matching `market-monitor`'s own sourcing discipline (CoStar/CBRE/Colliers/local brokerages only, never vendor content-marketing reports).
+
+**Method:** dispatched 3 parallel background research agents (Columbus OH, Maryland, Kansas City MO), each instructed to find current dated submarket comps and explicitly report "NOT FOUND" rather than guess where data didn't exist. Reviewed all three, presented the full per-property table with confidence levels and caveats to Gabriel, and got explicit confirmation before writing anything.
+
+**Written (83 rows, one figure per property, applied to every tenant at that address):**
+- Columbus OH, Southeast/Groveport (Zettler, Banwick x2, Livingston — 27 rows): **$5.93/SF NNN**
+- Columbus OH, Northeast/Gahanna-Airport (E.5th Ave x3, Morrison, Rarig, Westerville — 29 rows): **$7.76/SF NNN**
+- Dublin OH, Northwest/Hilliard (Fishel Dr — 1 row): **$5.96/SF NNN**
+- Source for all Columbus figures: Cushman & Wakefield MarketBeat Industrial Columbus, Q2 2026 (as of 6/30/2026). Caveat: blended weighted-average across all industrial building types, not small-bay-flex-specific (no submarket-level flex breakout exists in current published data) — treat as a conservative floor.
+- Columbia MD (Red Branch Rd — 13 rows): **$14.67/SF**
+- Baltimore City MD (N Broadway — 3 rows): **$13.97/SF**
+- Owings Mills MD (New Plant Court — 1 row): **$13.43/SF**
+- Source: MacKenzie Commercial Real Estate Services Q4 2025 Industrial & Flex Market Report (the only source with genuine submarket granularity for these three; CoStar/CBRE/JLL/Colliers only had metro-wide Baltimore/I-95 corridor aggregates). Caveat: NNN convention not explicitly confirmed in the source text — basis should be verified before this feeds a formal model. Owings Mills submarket mapping (MacKenzie's "Reisterstown Rd" bucket) was a judgment call; an alternate reading ("Baltimore County West," $11.64) exists.
+- Raytown MO / 9620 State 350 (Kansas City — 9 rows): **$10.00/SF, gross** — Gabriel's own current asking price, used deliberately in place of third-party sources after C&W's Kansas City flex figure ($9.55/SF) was found to be suspiciously identical to a different submarket's figure in the same report (flagged by the research agent as a likely source-extraction error, not confirmed data) and CBRE/Colliers' blended figures ($4.93–5.68/SF) didn't isolate flex product. Recorded here as Gabriel's asking price, gross basis — explicitly NOT an independent third-party market comp like the other rows, so it should not be silently compared against the NNN-basis Columbus/Maryland figures without adjustment.
+
+**Left blank, deliberately, not guessed:**
+- Easton MD (29000 Information Ln, 23 rows) and Salisbury MD (2203-2207 Northwood Dr, 31 rows) — genuinely data-thin Eastern Shore markets with zero independent third-party comp coverage from any brokerage/data provider. The only figures found were each property's own current asking listing, which is circular (a property can't be its own market comp). Research agent's recommendation: a direct call to SVN | Miller Commercial Real Estate's Salisbury or Easton office (they manage 3M+ SF on the Eastern Shore) — this is a relationship market, not a published-report market. Needs a phone call, not more web research.
+
+**New finding surfaced along the way, not caused by this backfill:** the Kansas City research agent independently verified against ORA's own public portfolio site (oxfordra.net/portfolio) and found that "401 Sunburst Hwy" — which a Notion Notes field's landlord-entity-name history had led me to assume was a Kansas City property (predecessor address for "Fairground Village Center") — is actually a Maryland Eastern Shore asset, classified as auto-service retail. That assumption error was mine (conflating a landlord entity name change with a property location), caught by the agent's independent verification, not by the original research design. 401 Sunburst Hwy was correctly left out of this backfill (it fell between both research batches) and, since it's retail rather than industrial/flex, needs an entirely different comp methodology if its own Market Rent PSF gap is ever closed — not a simple addition to either existing batch.
+
+**Also surfaced, not fixed here:** the Columbus research corrected a real error in ORA's own data — 392 Morrison Rd is labeled "Southeast, near airport" in market-monitor's submarket notes, but sits in Whitehall (43213), on the John Glenn/Gahanna side (Northeast submarket) — a different airport and submarket than the Rickenbacker-area Southeast properties. Not fixed in market-monitor's doc text as part of this pass; flagging for a future skill-text correction.
+
+**Why:** this field feeds the "Rent vs Market Delta PSF" formula and was meant to support the full 6-factor renewal-probability model in `ora-lease-expiration-dashboard`'s PART 1 — 138 rows with a null value meant that formula and the full scoring model had nothing to compute from.
+**How to apply:** next week's dashboard run should show real Rent vs Market Delta PSF values for the 83 populated rows; Easton/Salisbury/401 Sunburst Hwy will still read as gaps until further work (broker call for the Eastern Shore pair; a retail-specific comp pull for 401 Sunburst). Do not treat the Raytown $10 gross figure as comparable to the NNN-basis figures elsewhere without adjusting for lease structure.
+
+## 2026-08-16 — `acquisition_pipeline_snapshot_diff.py` built; last ora-pm-ledger A.1 detector gap closed
+
+**Found during that day's Block A run:** the Notion Acquisition Pipeline Tracker had flipped to the uniform-stamp signature — all 20 rows carrying one identical `last_edited_time` (2026-08-13). A downgrade, not a freeze (the column still advances), but it left the source judged on a single unverifiable signal, and it was the last of the six §A.1 database sources with no snapshot-diff detector.
+
+**Built the same session.** All six A.1 sources now have one. 62 selftest assertions; live baseline of 20 rows; same-day re-pull 0/0/0 across all 20.
+
+**The build's substantive finding — the nearest template would have shipped a defect.** `deal_sourcing_snapshot_diff.py` shares this database's endpoint form (`/v1/data_sources/{id}/query` @ 2025-09-03) and its `TIME_DERIVED_FIELDS` is EMPTY. This database has a calendar-derived formula, `⏰ Action Overdue`, which both ticks (`OVERDUE 4d`→`5d` daily) and band-flips (`""`→`OVERDUE 1d`). Two rows were already overdue, so the detector would have been broken on day one. Only reading each formula expression live caught it.
+
+**The bulk-field guard could not have served as the backstop.** Only 3 of 20 rows drift per day = 15%, far below the 50% `BULK_FIELD_RATIO`; the guard verifiably stayed silent in the differential control. On a ~20-row table it is structurally incapable of firing on this field.
+
+**Two formulas deliberately KEPT** (exclude by NAME, never TYPE): `Price Per SF`, and `Replacement Cost Ratio` — governor-adjacent, the RCT basis denominator, populated on 13 of 20 rows. A type-based exclusion would have blinded the detector to it, as it would have blinded Property Register to `LTV`.
+
+**Verified against real data, not only fixtures:** a cross-day harness mutated the actual `⏰ Action Overdue` values as Notion would tomorrow, asserting its own non-vacuity first (3 of 20 rows mutated — the gate Property Register's first attempt failed in 2026-08-11 review). Result: 0 changed with the exclusion, 3 without, 0 `<absent>` markers in the control. A real `Stage` edit alongside the drift was still detected.
+
+**Left uncommitted deliberately** — `~/.claude` was a contested shared checkout (22 uncommitted changes, ~9 live sessions). Note `.gitignore:61` (`/scheduled-tasks/*/*`) means the file needs `git add -f` or it is silently excluded from the backup repo; the four sibling scripts are tracked only because they were force-added. Likely the same class as `ora-task-integrity-guard`'s recurring "UNBACKED file" finding.
+
+Files: `scheduled-tasks/ora-pm-ledger/acquisition_pipeline_snapshot_diff.py` (new), `scheduled-tasks/ora-pm-ledger/SKILL.md` (§A.1 Reality table, "Net:" summary, §A.2 step 2, amendment note). No routing, send-path, cadence, or registry change.
+
+## 2026-08-16 -- ora-cc-snapshot-refresh severity gate was inert; ratified-tombstone allowlist added (OI-171)
+
+Gabriel reported the Command Center safety section's `loans · name` flag as an error to fix. It is not a defect: `server/workbook/parse.ts:647-660` deliberately skips tombstoned Loan Index rows so they cannot claim a `debt_positions` key (`ON CONFLICT(id, snapshot_date)`), and emits the flag precisely so the skip is never silent. Workbook `Loan Index!B24` reads `⚠ DUPLICATE OF ROW 22 — DO NOT USE` (index #13, INTERNAL LOAN JOURNALS section) and carries no balance at all -- `C24:G24` are every one `='Portfolio Summary — Internal'!#REF!`. The UI renders it amber/`warn`, not red/`error` (`HealthModule.tsx:118`). `tests/unit/loan-tombstone-row.test.ts` 10/10 pass. Gabriel ruled in-turn (multiple-choice): LEAVE THE PARSER AS-IS.
+
+Root-causing it surfaced a real downstream defect. `ora-cc-snapshot-refresh` STEP 5(b) emailed on "at least one flag of severity `warn` or higher" -- and that permanent flag IS `warn`, so every clean exit-0/no-drift run still sent `[ALERT]`. The v1.1 severity gate (`1706bc2`, 2026-08-12 15:42:50 -0400) was written believing the flag was `info`; `490d89f` (2026-08-11 18:15:14 -0400) had bumped it `info` -> `warn` ~21 HOURS EARLIER, deliberately, because a skipped row removes balance from aggregate debt and moves portfolio LTV in the falsely-clearing direction against Hard Invariant 4's 40% ceiling. Two individually-correct changes; the interaction defeated the gate. The fix intended to stop weekly alert-fatigue never actually stopped it.
+
+FIXED (Gabriel ruled in-turn: "Allowlist the ratified tombstone"). SKILL.md v1.3 adds a RATIFIED-TOMBSTONE ALLOWLIST: clause (b) escalates only on a warn-or-higher flag NOT allowlisted. The single allowlisted flag must match all four of `entity=="loans"`, `field=="name"`, `rawValue` exactly `⚠ DUPLICATE OF ROW 22 — DO NOT USE`, and `issue` containing `Loan Index row 24 is tombstoned`; any deviation (different row, second tombstone, altered marker) is NOT allowlisted and DOES email. Suppression is at the ALERT layer ONLY -- downgrading parse.ts back to `info` was explicitly rejected as re-opening the governor-guard hole.
+
+Both stores synced: SKILL.md body + frontmatter edited in place (the task reads it from disk at runtime, so the fix is live now), then `update_scheduled_task` retagged the registry description to v1.3. OI-109 check clean -- frontmatter keys (`name`, `description`) both intact, `[MODEL: ...]` tag preserved, body 120 lines unchanged, all five diff hunks vs HEAD are the intended edits and nothing foreign. The tool rewrote the file CRLF -> LF as documented (-119 bytes across 119 lines; git now warns `LF will be replaced by CRLF` on this path) -- content verified identical, description byte-for-byte at 5523 chars.
+
+Stale `severity: info` claim corrected in all three places it had propagated: SKILL.md body bullet, SKILL.md frontmatter description, and `reference_cc_snapshot_refresh_dq_flag_alert_is_count_not_severity.md`.
+
+UNVERIFIED until the next run. Task is enabled, cron `15 6 * * 1`, nextRunAt 2026-08-17T10:21:23Z. Real proof is that run posting a Notion note with NO email. Filed as OI-171. NOT COMMITTED -- `~/.claude` had 13-19 uncommitted files across 5 other live sessions, and `open-items-tracker.md` is jointly authored right now (session `6d6043de` working in it).
 
 ## 2026-08-16 -- ora-passed-deal-tracker LAMS twin disabled (closes 2026-08-15 open follow-up)
 
