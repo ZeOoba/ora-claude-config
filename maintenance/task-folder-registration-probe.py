@@ -162,26 +162,82 @@ def find_archived_registrations(entries):
     return sorted(out)
 
 
-def _git_differs_from_upstream(path, run=None):
-    """True if `path` on disk differs from the branch's UPSTREAM ref.
+# _git_path_state verdicts. Only the first two are findings.
+STATE_UNCOMMITTED = "uncommitted"   # worktree differs from HEAD: content in NO commit
+STATE_BEHIND = "behind"             # upstream advanced this path; we lack it
+STATE_CLEAN = "clean"               # identical to HEAD, and not behind (may be AHEAD)
 
-    Returns None for "no verdict" -- not a git repo, path untracked, no
-    upstream configured, git missing, or any git failure. None is never a
-    finding, matching this probe's fail-open posture throughout.
 
-    Two decisions here are load-bearing, both learned from a live false-alarm
-    run (2026-08-16, 21 of ~32 CC tasks flagged by a first cut):
+def _git_path_state(path, run=None):
+    """Classify `path` as STATE_UNCOMMITTED / STATE_BEHIND / STATE_CLEAN, or
+    None for "no verdict".
 
-    1. UPSTREAM, not HEAD. The failure this check exists to catch is a task
-       merged to origin while the checkout the scheduler reads sits BEHIND it
-       -- in the confirmed ora-passed-deal-tracker case the on-disk file
-       matched local HEAD (588ec1b) exactly, and only differed from origin.
-       Comparing against HEAD calls that clean and misses the entire bug.
-    2. `git diff`, not a byte compare against `git show`. This repo runs
-       core.autocrlf=true, so a blob's LF bytes never equal the working
-       tree's CRLF bytes and a raw comparison flags nearly every file. Asking
-       git to diff applies the same clean/smudge filters git itself uses, so
-       line endings and any future filter are handled by definition.
+    None covers not-a-git-repo, no upstream, untracked, git missing, or any
+    git failure, and is never a finding -- this probe's fail-open posture.
+
+    THREE decisions here are load-bearing, each learned from a live run, not
+    from reasoning about the code:
+
+    1. UPSTREAM, not HEAD, for the behind test. The failure this exists to
+       catch is a task merged to origin while the checkout the scheduler reads
+       sits BEHIND -- in the confirmed ora-passed-deal-tracker case the
+       on-disk file matched local HEAD (588ec1b) exactly and differed only
+       from origin. A HEAD-only comparison calls that clean and misses the
+       whole bug.
+    2. `git diff`, never a byte compare against `git show`. core.autocrlf=true
+       here, so a blob's LF never equals the worktree's CRLF; a raw comparison
+       flagged 21 of ~32 CC tasks. Delegating to git applies git's own
+       clean/smudge filters, so line endings and any future filter are handled
+       by definition.
+    3. DIRECTION (OI-182, added after the first live run of the shipped
+       check). Comparing worktree-vs-upstream and flagging ANY difference is
+       direction-blind: it cannot tell BEHIND (merged but not pulled -- the
+       real bug) from AHEAD (committed locally, not yet pushed), and AHEAD is
+       this checkout's normal resting state; it sat at ahead-24 the day this
+       was written. The first live run produced 5 findings of which 2 were
+       merely ahead. Those two are not false in the literal sense -- the file
+       does differ from upstream, and unpushed does mean unbacked-up -- but
+       folding them in with real drift is how a check earns the alarm fatigue
+       that killed this same check's first cut. Direction is resolved against
+       the MERGE-BASE: upstream is only "ahead of us" for a path if the
+       upstream side changed it since the common ancestor.
+    4. Same-day follow-up (independent review): DIVERGED-but-identical.
+       base..upstream alone answers "did the PATH'S HISTORY diverge", not
+       "does the CONTENT actually differ" -- confirmed live, upstream commits
+       a fix and this checkout independently commits the byte-identical fix
+       in its own unrelated commit, and base..upstream is non-empty even
+       though nothing is actually missing. A worktree-vs-upstream CONTENT
+       check settles it regardless of how the history got there.
+    5. Same-day follow-up (independent review): UNTRACKED-BUT-PRESENT. `git
+       diff --quiet HEAD -- path` exits 0 for an untracked file (confirmed
+       live) -- diff never sees a path git isn't tracking; it does not signal
+       "missing from HEAD" the way a deleted-and-still-tracked path does. A
+       registered SKILL.md authored straight into the checkout and never
+       `git add`ed would fall through as "worktree == HEAD" and read
+       STATE_CLEAN -- exactly the "content the scheduler runs that git has
+       never seen" case this whole check exists to name. `ls-files
+       --error-unmatch` (rc1 = not in the index) runs FIRST to close that gap
+       -- BUT gated on `os.path.isfile(path)` (decision 6): rc1 alone is
+       ambiguous.
+    6. Same-day follow-up (independent review, SECOND pass): the decision-5
+       gate as first written conflated "untracked file PRESENT on disk" with
+       "path ABSENT entirely" -- `ls-files --error-unmatch` returns rc1 for
+       both, confirmed live, and cannot tell them apart on its own. Absent is
+       NOT the same failure: a brand-new SKILL.md merged to origin and never
+       pulled has nothing on disk to commit, so reporting STATE_UNCOMMITTED
+       with "commit it or revert it" is actively wrong -- the truth is
+       BEHIND and the fix is "pull". That is the OI-170 incident class
+       applied to a NEW file rather than an edited one. The `isfile` guard
+       splits the two: present-but-untracked reports here; absent falls
+       through to step 1, where `diff --quiet HEAD` correctly reads 0
+       (confirmed live) and the existing upstream logic takes it from
+       there -- landing on BEHIND when upstream has the file, CLEAN/None
+       otherwise.
+
+    Order matters: the untracked and uncommitted tests run FIRST and
+    short-circuit, because content the scheduler reads that exists in no
+    commit at all is strictly worse than being behind, and should be reported
+    as itself.
 
     Injectable `run` for tests."""
     import subprocess
@@ -195,20 +251,87 @@ def _git_differs_from_upstream(path, run=None):
         root = top.stdout.decode("utf-8", "replace").strip()
         if not root:
             return None
+
+        # 0. UNTRACKED, but ONLY when the file actually EXISTS on disk.
+        #    Independent review, second pass, caught the gap in the first
+        #    version of this step: `ls-files --error-unmatch` returns rc1 for
+        #    BOTH "untracked file present on disk" and "path absent
+        #    entirely" -- confirmed live, it cannot tell the two apart. The
+        #    first version treated both as STATE_UNCOMMITTED, which silently
+        #    regressed a brand-new SKILL.md merged to origin and never
+        #    pulled -- nothing on disk to commit, so "commit it or revert
+        #    it" is actively wrong; the truth is BEHIND and the fix is
+        #    "pull". That is the OI-170 incident class applied to a new file
+        #    rather than an edited one -- precisely the case this whole
+        #    check exists to name correctly, and step 0 was mislabeling it.
+        #    The os.path.isfile() guard splits the two: present-but-untracked
+        #    is reported HERE; absent falls through to step 1, where
+        #    `diff --quiet HEAD` correctly reads 0 (confirmed live) and
+        #    proceeds into the upstream logic, landing on BEHIND when
+        #    upstream has the file and CLEAN/None otherwise -- exactly what
+        #    the pre-step-0 version of this function already did right.
+        lf = run(["git", "-C", root, "ls-files", "--error-unmatch", "--", path],
+                 capture_output=True, timeout=15)
+        if lf.returncode == 1 and os.path.isfile(path):
+            return STATE_UNCOMMITTED
+        if lf.returncode not in (0, 1):
+            return None           # git failure -- no verdict, not "untracked"
+
+        # 1. Tracked. Worktree vs HEAD: rc1 => a committed path has a local
+        #    edit never committed. Reported on its own; no upstream needed.
+        wt = run(["git", "-C", root, "diff", "--quiet", "HEAD", "--", path],
+                 capture_output=True, timeout=30)
+        if wt.returncode == 1:
+            return STATE_UNCOMMITTED
+        if wt.returncode != 0:
+            return None          # git failure -- no verdict
+
+        # 2. Worktree matches HEAD. Is upstream ahead of us for this path?
         up = run(["git", "-C", root, "rev-parse", "--abbrev-ref", "@{upstream}"],
                  capture_output=True, timeout=15)
         if up.returncode != 0:
-            return None          # no upstream -- nothing to be behind
+            return STATE_CLEAN   # no upstream: cannot be behind anything
         ref = up.stdout.decode("utf-8", "replace").strip()
         if not ref:
+            return STATE_CLEAN
+
+        mb = run(["git", "-C", root, "merge-base", "HEAD", ref],
+                 capture_output=True, timeout=15)
+        if mb.returncode != 0:
+            return None          # unrelated histories -- no verdict
+        base = mb.stdout.decode("utf-8", "replace").strip()
+        if not base:
             return None
-        r = run(["git", "-C", root, "diff", "--quiet", ref, "--", path],
-                capture_output=True, timeout=30)
-        if r.returncode == 0:
-            return False         # identical to upstream
-        if r.returncode == 1:
-            return True          # differs
-        return None              # 128 etc (untracked, bad ref) -- no verdict
+
+        # base..upstream for this path: did upstream touch it since we diverged?
+        # Empty (rc0) => upstream has nothing we lack => CLEAN (covers pure AHEAD).
+        beh = run(["git", "-C", root, "diff", "--quiet", base, ref, "--", path],
+                  capture_output=True, timeout=30)
+        if beh.returncode == 0:
+            return STATE_CLEAN
+        if beh.returncode != 1:
+            return None
+
+        # Independent review (2026-08-16, same-day follow-up to OI-182) caught
+        # what the base..upstream test alone misses: DIVERGENT commits that
+        # produce byte-identical content. Confirmed live -- upstream commits a
+        # fix, this checkout independently commits the byte-identical fix in
+        # its OWN commit (no shared ancestry for that change), worktree ==
+        # local HEAD == upstream's content. base..upstream is non-empty (the
+        # PATH's history differs), so without this gate that reports BEHIND --
+        # "upstream carries a change we don't have" -- which is false: nothing
+        # is missing, and "pull the branch" fixes nothing. This is exactly the
+        # false-positive class OI-182 exists to eliminate, just one git-graph
+        # shape deeper than "purely ahead". A worktree-vs-upstream CONTENT
+        # check (not commit-graph) is authoritative for what the scheduler
+        # actually runs, so it is the real question regardless of history:
+        wu = run(["git", "-C", root, "diff", "--quiet", ref, "--", path],
+                 capture_output=True, timeout=30)
+        if wu.returncode == 0:
+            return STATE_CLEAN       # content identical despite divergent history
+        if wu.returncode == 1:
+            return STATE_BEHIND      # content genuinely differs -- real finding
+        return None
     except Exception:
         return None              # fail-open, same posture as the whole probe
 
@@ -233,25 +356,42 @@ def find_stale_vs_git(entries, differs=None):
     SKILL.md exists at exactly the right path with the wrong contents, which
     is clean by all three.
 
-    Catches, symmetrically: merged-but-not-pulled (the OI-170 case), a local
-    edit never committed/pushed, and reverted-in-tree.
+    Catches two DISTINCT conditions, reported separately (OI-182) rather than
+    folded together as the first cut did:
+      STATE_UNCOMMITTED -- the bytes the scheduler reads exist in no commit.
+      STATE_BEHIND      -- upstream advanced this path and we do not have it
+                           (the OI-170 case: merged but never pulled).
+    AHEAD of upstream is deliberately NOT a finding. See _git_path_state
+    decision 3: ahead is this checkout's normal resting state, and alarming on
+    it is how the check earns the alarm fatigue that killed its first cut.
 
-    Unanswerable cases yield NO finding (see _git_differs_from_upstream): a
-    task folder outside any git repo -- which is exactly the LAMS/Cowork
-    fleet's normal configuration, its SKILL.mds living under OneDrive -- is a
-    legitimate setup, not drift. Only ENABLED entries, matching both sibling
-    checks' convention. Pure given its injectable."""
-    differs = differs or _git_differs_from_upstream
-    out = []
+    Unanswerable cases yield NO finding (see _git_path_state): a task folder
+    outside any git repo -- which is exactly the LAMS/Cowork fleet's normal
+    configuration, its SKILL.mds living under OneDrive -- is a legitimate
+    setup, not drift. Only ENABLED entries, matching both sibling checks'
+    convention. Pure given its injectable.
+
+    Returns sorted ids, preserving the sibling checks' shape. Use
+    find_stale_states() when the per-id reason is needed."""
+    return sorted(find_stale_states(entries, state_fn=differs))
+
+
+def find_stale_states(entries, state_fn=None):
+    """{id: STATE_*} for ENABLED entries in a finding state. The reason-carrying
+    form of find_stale_vs_git(); main() uses it to name each condition rather
+    than reporting one undifferentiated bucket."""
+    state_fn = state_fn or _git_path_state
+    out = {}
     for e in entries:
         if not e.get("enabled"):
             continue
         fp = e.get("filePath") or ""
         if not fp:
             continue
-        if differs(fp) is True:   # None (no verdict) and False are both clean
-            out.append(e["id"])
-    return sorted(out)
+        st = state_fn(fp)
+        if st in (STATE_UNCOMMITTED, STATE_BEHIND):
+            out[e["id"]] = st
+    return out
 
 
 def _read_text(path):
@@ -293,11 +433,15 @@ def main():
         unregistered = find_unregistered(folder_texts, registered_ids)
         orphaned = find_orphaned_registrations(entries)
         archived = find_archived_registrations(entries)
-        stale = find_stale_vs_git(entries)
+        states = find_stale_states(entries)
+        uncommitted = sorted(i for i, s in states.items() if s == STATE_UNCOMMITTED)
+        behind = sorted(i for i, s in states.items() if s == STATE_BEHIND)
+        stale = sorted(states)
 
         lines.append(f"{label}: folders={len(folders)} registry_entries={len(entries)} "
                      f"unregistered={unregistered or '-'} orphaned={orphaned or '-'} "
-                     f"archived={archived or '-'} stale_vs_git={stale or '-'}")
+                     f"archived={archived or '-'} uncommitted={uncommitted or '-'} "
+                     f"behind_upstream={behind or '-'}")
 
         if unregistered:
             print(f"  [ACTION] UNREGISTERED in {label}: {', '.join(unregistered)} -- "
@@ -317,14 +461,19 @@ def main():
                   "live. Retire the registry entry (or restore the folder to its live path "
                   "if the archive was a mistake). (ora-cam-reconciliation-annual failure mode.)")
             bad = True
-        if stale:
-            print(f"  [ACTION] STALE_VS_GIT in {label}: {', '.join(stale)} -- "
-                  "the SKILL.md on disk differs from the blob committed at HEAD. The "
-                  "scheduler reads the WORKING TREE, not git, so a task can be merged "
-                  "and still inert: pull the branch into this checkout, or commit the "
-                  "local edit. (ora-passed-deal-tracker double-fire-guard failure mode: "
-                  "merged as b734674 while the live file had zero hits for its own "
-                  "guard tokens.)")
+        if uncommitted:
+            print(f"  [ACTION] UNCOMMITTED_VS_GIT in {label}: {', '.join(uncommitted)} -- "
+                  "the SKILL.md on disk differs from HEAD, so the bytes the scheduler "
+                  "actually reads exist in NO commit anywhere. Nothing reviews, backs "
+                  "up, or reproduces this content. Commit it, or revert it.")
+            bad = True
+        if behind:
+            print(f"  [ACTION] BEHIND_UPSTREAM in {label}: {', '.join(behind)} -- "
+                  "upstream carries a change to this SKILL.md that this checkout does "
+                  "not have. The scheduler reads the WORKING TREE, not git, so the task "
+                  "is merged and still INERT until pulled. (ora-passed-deal-tracker "
+                  "double-fire-guard failure mode: merged as b734674 while the live "
+                  "file had zero hits for its own guard tokens.) Pull the branch.")
             bad = True
         if not unregistered and not orphaned and not archived and not stale:
             print(f"  OK -- {label} folders and registry reconcile cleanly.")
