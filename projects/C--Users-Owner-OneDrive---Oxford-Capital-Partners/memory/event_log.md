@@ -5,12 +5,168 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-17T14:52:15.427Z
+  modified: 2026-08-17T16:45:53.079Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-08-17 — orphaned-task-forensics: delinquency-check timeout root-caused and fixed (Gabriel-directed)
+
+Spawned on the `ora-pm-daily-crons` gap flagged in the same session's `fleet-advisory-remediation` pass.
+Doesn't cleanly fit either of this skill's own workflows (not an orphaned/absorbed producer, not a
+lost SKILL.md) — the task is live and firing, one of its two HTTP calls is unreliable. Investigated
+directly since the skill's diagnostic workflows didn't apply; findings and fix presented via
+`AskUserQuestion` before any write, per this skill's Output/Boundaries discipline anyway.
+
+**Symptom:** `ora-pm-daily-crons` (CC/MCP) ran twice today (10:20 AM, 10:48 AM ET) — both times
+`critical-dates-alerts` succeeded (HTTP 200) and `delinquency-check` failed: "The operation has timed
+out." (no HTTP status captured — a genuine client-side request timeout, not a server error response).
+
+**Root cause:** `ping-crons.ps1`'s client-side `-TimeoutSec 240` (set 2026-08-04 after a 22-lease
+post-6-week-backlog run measured ~93s, already over the *original* 90s limit) was itself outgrown.
+This cron did not fire at all 2026-08-15/08-16 (native "ORA PM Crons" disabled 08-16 for the OI-162
+migration; `ora-pm-daily-crons` not yet registered/live), so today's first CC/MCP-fleet run likely hit
+2-3 days of accumulated delinquency computation in one request — the same failure class the 240s bump
+was built for, just outgrown again by a shorter gap. Did not re-probe the live endpoint to confirm the
+exact current delinquent-lease count, since `delinquency-check` commits real late-fee charges
+server-side on every call — not something to trigger just to test, without Gabriel's sign-off.
+
+**Fix (Gabriel-approved, "raise the timeout again"):** bumped `-TimeoutSec` 240 -> 480 in
+`C:\Users\Owner\ora-pm-cron\ping-crons.ps1`, with an inline comment explaining the history (240s was
+already a bump from 90s) so a third recurrence doesn't require re-deriving this from scratch. Not a
+git repo — plain-file edit is the only durability mechanism here. Re-enabled `ora-pm-daily-crons` via
+the supervised `update_scheduled_task` (`enabled: true` only — diffed the SKILL.md before/after per
+the known frontmatter-drop hazard on `description`-bearing calls; byte-identical, confirming that
+hazard is specific to `description` retags, not `enabled`-only calls). Verified live: `enabled: true`,
+`cronExpression` unchanged (`40 9 * * *`), next fire 2026-08-18T13:46:31Z (09:46 ET tomorrow).
+
+**Not yet verified:** tomorrow's normal-cadence (non-backlog) run should confirm the fix holds under
+ordinary daily volume. If it times out again even on a single day's delinquency count, the cause is
+something other than backlog size (Worker-side degradation, D1 query regression) and needs a different
+investigation — flag to Gabriel rather than raising the timeout a third time reflexively.
+
+**Also closes:** ORA PM Crons / OI-162 daily-half gap flagged in the same-session
+`fleet-advisory-remediation` entry above — no working critical-dates-alerts/delinquency-check path
+existed between this fix and the prior entry; now restored.
+
+## 2026-08-17 — fleet-advisory-remediation: 4 native Windows Scheduled Task failures triaged (Code session)
+
+Investigated the `setup-self-audit` `windows-tasks` WARN Gabriel surfaced mid-session (4 native
+Windows Task Scheduler tasks, not either dual-fleet registry — confirmed out of scope for the
+`fleet-advisory-remediation` skill proper, which covers CC/MCP + LAMS/Cowork registries only; pivoted
+to direct `schtasks`/`Get-WinEvent`/`Get-ScheduledTask` diagnostics per the skill's own scope
+boundary).
+
+1. **ORA Claude Desktop Wake-and-Launch — FIXED.** Last Result `0x80070420`
+   (ERROR_SERVICE_ALREADY_RUNNING) was NOT a script bug — `ensure-claude-renderer.ps1` is fail-open
+   on every internal path (every branch, including the catch block, `exit 0`s) and its log has
+   exactly ONE line total (2026-08-05) despite firing daily since 2026-08-04. Root cause confirmed
+   via Task Scheduler's own operational log (event 153): "did not launch task ... as it missed its
+   schedule." The task's `Settings` had no `StartWhenAvailable`, so its 04:45 ET daily trigger is
+   dropped outright (not deferred) on any morning the host is asleep at that exact minute — and this
+   host's first scheduler dispatch varies 03:31-17:09
+   (`reference_am_cluster_late_wake_root_cause_2026-08-13.md`), so most mornings qualify. This is
+   directly upstream of that AM-cluster-lateness investigation: it measured the symptom without
+   knowing this task existed or was silently failing to run at all. Fixed live via
+   `Set-ScheduledTask` (`StartWhenAvailable = $true`; `schtasks.exe` has no CLI switch for this),
+   verified via XML re-export — all other settings/triggers/actions unchanged. Documented in the
+   script header so a future delete-and-recreate via its `/Create` one-liner doesn't silently
+   regress it. Isolated commit `82e4f78`.
+
+2. **ORA Fleet Dead-Man — NOT A DEFECT, working as designed.** `Last Result 1` is the script's own
+   deliberate alarm exit code (confirmed in `fleet-deadman.ps1`: `exit 1` fires only inside the
+   ALARM branch, file-only alert per its own header doctrine — no email, no toast, by design).
+   Today's log entry (`2026-08-17T13:45:39Z`) shows a real but low-severity finding: 1 phantom
+   dispatch in the last 26h, exactly at the script's own alarm threshold. No fix needed.
+
+3. **ORA Command Center - Mirror Deploy — SELF-RESOLVED, no fix needed.** The `0xC000013A`
+   (terminated) result Gabriel saw was a single transient kill; `schtasks /query` now shows
+   `Last Result: 0` on the most recent hourly runs. This is exactly the transient-kill class
+   `ora-command-center-mirror-drift-check`'s own classifier (BENIGN_KILLED_AFTER_COMPLETION /
+   RUN_IN_PROGRESS) exists to absorb.
+
+4. **ORA PM Crons — NEEDS GABRIEL'S DECISION, not touched.** The native task's `Disabled` state is
+   CORRECT and intentional (2026-08-16 OI-162 migration to `ora-pm-daily-crons` on the CC/MCP fleet
+   — do not re-enable, per that task's own SKILL.md instruction). But the intended replacement,
+   `ora-pm-daily-crons`, is ALSO currently `enabled: false` in the live CC/MCP registry, and
+   `cron.log` shows it ran TWICE today (10:20 AM and 10:48 AM ET) with `delinquency-check` timing
+   out both times ("The operation has timed out.") while `critical-dates-alerts` succeeded both
+   times. **There is currently no working automated path for critical-dates-alerts/delinquency-check
+   pinging.** Did not re-enable the task (unknown whether the disable was deliberate pending
+   investigation of the double-run/timeout, or accidental) and did not root-cause the Worker timeout
+   (per this skill's own boundary: stale-producer symptoms route to `orphaned-task-forensics`, never
+   root-caused inline). Flagged to Gabriel for a decision; OI-162 remains OPEN.
+
+**Net:** 1 fixed + verified, 2 confirmed non-issues (1 by-design, 1 self-resolved), 1 handed off as a
+live gap needing Gabriel's call. Logged per fleet-advisory-remediation Step 8 (one consolidated entry,
+not one per line item).
+
+## 2026-08-17 — class-n description remediation: 18 of 18 fleet tasks fixed (Code session)
+
+Cleanup pass on the 2026-08-15 `ora-skill-text-audit` class-n finding (description >1536 chars or
+>=2 changelog fragments — 18 of 68 fleet tasks breaching). Used the pre-built
+`maintenance/desc-classn-remediate.py` (self-tested, gate-refuses on any regression) plus manual
+authoring per task. `automation-health-monitor` (LAMS) was already done separately as v1.25 before
+this pass started; this entry covers the remaining 18.
+
+**MOVE-TO-BODY doctrine held throughout — no changelog content was deleted.** The tool auto-migrated
+pointer-only fragments matching `vX.Y (YYYY-MM-DD` on 11 of 18 tasks. On the other 7 the task's
+changelog used a format the tool's fragment regex doesn't recognize (`vX.Y YYYY-MM-DD` with no
+parens, or `v06`/`v05` with no decimal) — for those the full changelog text was hand-migrated into a
+body "Changelog — MIGRATED FROM FRONTMATTER" section before trimming, since 0-fragments-detected did
+NOT mean nothing needed migrating.
+
+**Genuine dangling-pointer found and closed:** `ora-cowork-heartbeat`'s body already carried a v06
+note that read "corrected stale 2x/day cadence references... see frontmatter changelog" — a real
+POINTER-ONLY hazard the automated scanner could not see (same non-decimal-version blind spot). The
+v06 content was still intact in the frontmatter at the time of this trim and was recovered and
+inlined into the body verbatim, with a note explaining why the tool missed it. Unlike
+`automation-health-monitor`'s pre-existing v1.16 case, this one was NOT unrecoverable — no verified
+null needed here.
+
+**Per-task char counts (before -> after):**
+
+CC/MCP fleet (12, committed to ora-claude-config as an isolated commit, `ba95efe`, on the currently
+checked-out `feat/model-canary-probe-step25` branch — consistent with this repo's established
+dirty-tree-triage isolated-commit pattern, files disjoint from other sessions' concurrent
+memory/*.md WIP):
+- ora-task-integrity-guard: 7779 -> 1148 (0 fragments detected, no-parens format; full v1.1-v1.11 changelog hand-migrated)
+- ora-health-guard: 5885 -> 1067 (7 fragments; tool auto-migrated v1.1-v1.7)
+- ora-cc-snapshot-refresh: 5523 -> 1068 (0 fragments, no-parens format; hand-migrated)
+- ora-lease-snapshot-refresh: 5199 -> 1066 (4 fragments auto-migrated v1.4-v1.7; plus a hand-migrated un-versioned preamble the tool's fragment scan couldn't see)
+- ora-appsec-sweep: 3199 -> 1207 (6 fragments; tool auto-migrated v1.2-v1.6)
+- ora-command-center-mirror-drift-check: 3178 -> 1056 (0 fragments, no-parens format; hand-migrated)
+- ora-entry-market-scan: 2860 -> 1030 (5 fragments; tool auto-migrated v1.1-v1.5)
+- ora-cc-schematic-refresh: 2741 -> 1057 (5 fragments; tool auto-migrated v1.2-v1.6)
+- ora-site-exposure-probe: 2195 -> 840 (0 fragments, no-parens format; hand-migrated)
+- ora-doctrine-integrity-guard: 1852 -> 942 (0 fragments, no-parens format; hand-migrated)
+- ora-open-sessions-board: 1110 -> 716 (2 fragments; tool auto-migrated v1.2,v1.3)
+- ora-aaos-publish-contracts: 1017 -> 715 (2 fragments; tool auto-migrated v1.2,v1.3)
+
+LAMS/Cowork fleet (6, OneDrive-native, no git):
+- ora-skill-store-drift-check: 1546 -> 1063 (5 fragments; tool auto-migrated v1.9-v1.13)
+- ora-stale-pipeline-nudge: 1474 -> 1011 (4 fragments; tool auto-migrated v1.1,v1.2,v2.1 — v2.0 was already dual-stored)
+- ora-cowork-heartbeat: 1789 -> 902 (0 fragments detected; hand-migrated including the dangling-pointer fix above)
+- ora-owner-outreach-queue-refresh: 1134 -> 1007 (3 fragments; tool auto-migrated v1.2,v1.3,v1.4)
+- ora-om-intake-ocr: 711 -> 577 (2 fragments; tool auto-migrated v1.3,v1.4)
+- ora-friday-closeout: 460 -> 413 (2 fragments; tool auto-migrated v2.0,v2.1)
+
+**Verification:** `--scan` re-run at the end reports 0 of 68 breaching. `list_scheduled_tasks`
+(CC/MCP) and a direct read of the LAMS `scheduled-tasks.json` registry (read, not written — the
+config-write-guard hook correctly blocked a `python -c` one-liner that only read the file, confirming
+that guard fires on write-shaped commands regardless of actual behavior; used the Read tool instead)
+both confirm all 18 tasks are still `enabled:true` with unchanged `cronExpression`/`nextRunAt` post-edit
+— the real integration test, since the registry has no `description` field and `list_scheduled_tasks`
+composes it by reading the SKILL.md live. No `cronExpression`, `enabled` flag, or registry entry was
+touched by this pass; frontmatter-and-body text only, per Gabriel's scope constraint.
+
+**Backups:** every trimmed file's pre-trim version copied to
+`<task>/_state-history/_skill-versions/SKILL.<oldver>-2026-08-17-pre-<newver>-classn-trim.md` (CC-fleet
+copies are gitignored/local-only — git history is the durable backup there per the ora-claude-config
+force-track convention; LAMS copies are the primary backup, OneDrive-native, matching
+`automation-health-monitor`'s established pattern).
 
 ## 2026-08-17 (afternoon) — Dirty-tree triage continued: ora-ar-feed-sweep + 8 output_contract-removal commits, 8 CRLF-noise entries identified as non-actionable
 
