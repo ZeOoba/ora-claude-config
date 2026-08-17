@@ -1,11 +1,11 @@
 ---
 name: reference_event_log_uncommitted_backlog
-description: "event_log.md commit convention + TWO ways a shared-checkout commit sweeps in other sessions' work: the git-commit-pathspec gotcha (working-tree re-add, 2026-07-17) and the non-empty-index gotcha (the prescribed bare `git commit` commits foreign STAGED files, 2026-08-12) — plus the temp-index variant that avoids both and the staged-revert repair it leaves behind. Read before committing event_log.md, or any file, when other sessions have uncommitted or staged work in the same checkout."
+description: "event_log.md commit convention + THREE ways a shared-checkout commit goes wrong: the git-commit-pathspec gotcha (working-tree re-add, 2026-07-17), the non-empty-index gotcha (the prescribed bare `git commit` commits foreign STAGED files, 2026-08-12), and the CRLF/text=auto trap where `git apply --cached` rejects a byte-identical base because event_log.md's stored blob holds unnormalized CRLF despite text=auto (2026-08-17, fix: write the blob directly via `git hash-object -w --stdin` + `git update-index --cacheinfo`, no --path) — plus the temp-index variant and the staged-revert repair it leaves behind. Read before committing event_log.md, or any file, when other sessions have uncommitted or staged work in the same checkout."
 metadata:
   node_type: memory
   type: reference
   originSessionId: 0888c827-119f-4877-98ae-23ac7c404a27
-  modified: 2026-08-12T20:12:52.917Z
+  modified: 2026-08-17T17:55:00.000Z
 ---
 
 # event_log.md: who commits it, and how to do it safely when it's tangled
@@ -131,6 +131,57 @@ Also expect `config-write-guard.py` to BLOCK any git write against the live
 requires Gabriel's explicit in-turn approval. Mint it with the approving quote
 as the reason, and delete it as soon as the commit lands rather than leaving
 the 60-minute multi-use window open.
+
+## When `git apply --cached` rejects a byte-identical base (CRLF/text=auto trap, added 2026-08-17)
+
+**The gap:** steps 3-5 assume a clean base (`git show HEAD:<path>`) plus a
+correctly-retargeted patch will always apply. It did not, twice, even after
+confirming the reconstructed base was **byte-identical** to the real HEAD
+blob (`git cat-file -p <blob> == reconstructed base`, verified directly) —
+`git apply --cached --check` still failed with `patch does not apply` at the
+insertion point. Cause: `event_log.md` carries `text=auto` with
+`core.autocrlf=true` (`git check-attr text eol -- event_log.md`), but its
+**stored blob holds raw, unnormalized CRLF** — it predates whatever point
+this repo started renormalizing on write, or was written by a path that
+bypassed the clean filter. Any git plumbing that looks up this path's
+attributes (`git hash-object --path <event_log.md path>`, and evidently
+`git apply`'s own internal text handling for `text=auto` paths) will treat
+the content as normalizable and diverge from what's actually stored,
+even though a byte comparison of the reconstructed base against the real
+blob shows zero difference. First symptom of the same root cause: building
+the new blob via `git hash-object -w --path <path> --stdin` produced a blob
+that diffed the **entire file** (CRLF→LF on every line) instead of a clean
+insert — `git diff --cached --stat` showed thousands of insertions/deletions
+for a 20-line append.
+
+**Fix that worked — skip `git apply` entirely, write the blob directly:**
+
+```bash
+git show HEAD:<path>                       # base content, raw bytes, decode as utf-8
+# construct new_content = base[:insert_point] + your_entry + base[insert_point:]
+# in-memory string concatenation only — do not round-trip through a file with
+# text-mode line-ending translation (see the CRLF note in the isolation script)
+git hash-object -w --stdin                  # NO --path: skips attribute lookup,
+                                             # stores raw bytes as-is, matching
+                                             # how the existing blob is actually stored
+git update-index --cacheinfo 100644,<new-blob-sha>,<path>
+git diff --cached --stat                    # must show ONLY this file, insertions
+                                             # only, no deletions -- if you see a
+                                             # full-file rewrite, you used --path
+                                             # (or --renormalize) somewhere; redo
+                                             # without it
+git diff --cached                           # visually confirm exactly your entry
+git commit -m "..."                         # no pathspec, same rule as step 8 above
+```
+
+This produces the same end state as the `git apply --cached` route (index
+holds base + your entry, working tree untouched) without ever needing the
+patch to context-match, so the CRLF/attribute mismatch never has a chance to
+bite. Prefer this over steps 3-5 for this specific file going forward; the
+`git apply` route may still work fine on other shared files that don't carry
+this blob/attribute inconsistency, but re-verify with `git diff --cached
+--stat` (only your file, only insertions) before trusting either route
+blind.
 
 ## What NOT to do
 
