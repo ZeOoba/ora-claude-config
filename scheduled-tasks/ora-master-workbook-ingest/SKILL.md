@@ -1,36 +1,6 @@
 ---
 name: ora-master-workbook-ingest
 description: Weekly Monday 05:45 ET producer — re-ingests the live ORA Master Workbook (cell-accurate local read-only extraction, 49 tabs), refreshes the Notion Portfolio Intelligence Dashboard, writes a dated Portfolio Metrics snapshot, maintains the Open Workbook Corrections register, updates DSOR freshness state. Keeps the canonical data mirror within 7-day freshness for downstream consumers. Conditional email to ggoldberg only on failure/material drift/insurance escalation. v1.3 2026-08-03 (read-only openpyxl promoted to PRIMARY read path; mandatory tie-out battery incl. rent-roll→NOI gross income; STEP 4e corrections register; STEP 6(b) already-escalated carve-out). [MODEL: claude-opus-5 observed | checked 2026-08-12 via live-run transcript canary]
-output_contract:
-  version: 1
-  blocks:
-    - id: block-portfolio-metrics-snapshot
-      artifact:
-        type: notion_page
-        title_pattern: "Portfolio Metrics Snapshot — {DATE} (Master Workbook ingest)"
-        parent_id: 3386ecd8-9e59-8166-af49-da066dc7ca14
-      freshness_window_hours: 30
-      min_count: 1
-      count_semantics: at_least
-      expected_on:
-        days_of_week: [Mon]
-      skip_condition: "STEP 2 NO-OP GUARD: if the workbook's lastModifiedDateTime is unchanged since the last recorded ingest, the run logs a one-line no-op to Ops Hub and STOPS before STEP 4 — no new snapshot page is written that week. A missing snapshot on a given Monday is not automatically a failure; cross-check the DSOR page (3706ecd8-9e59-813a-b4c7-ecbc2c213fa8) §5/§6 and the Ops Hub for a same-day no-op log line before alarming."
-      on_missing_severity: warn
-      is_primary_health_signal: true
-      notes: "Parent (Knowledge Base) id verified against SKILL.md STEP 4b text. Downgraded to warn, not alarm, because of the documented no-op skip path above — this is a known, accepted limitation of this contract, not an oversight."
-    - id: block-portfolio-dashboard-refresh
-      artifact:
-        type: notion_page
-        page_id: 3396ecd8-9e59-819c-a598-e55dc5581504
-      freshness_window_hours: 30
-      min_count: 1
-      count_semantics: at_least
-      expected_on:
-        days_of_week: [Mon]
-      skip_condition: "Same STEP 2 no-op guard as block-portfolio-metrics-snapshot — the dashboard's 'Last refreshed' line only advances on a non-no-op run."
-      on_missing_severity: info
-      is_primary_health_signal: false
-      notes: "Secondary/redundant signal to the dated snapshot page above; kept at info severity given the same no-op ambiguity."
 ---
 
 PROVENANCE: v1.1 registered 2026-05-30. CC/MCP registry destroyed by the 2026-07-05 app reinstall; restored 2026-07-07 as a thin pointer-stub redirecting to a "corrected" OneDrive spec file. That OneDrive file was itself deleted during the 2026-07-08 fleet reconciliation (not archived — collateral damage from an unrelated cleanup pass; see `~/.claude/_confidential-staging/2026-07-08_LAMS-fleet-recovery/2026-07-08_LAMS-fleet-audit_v01.md`, which covers the LAMS fleet only and does not mention this break), leaving the stub pointing at nothing ahead of the 2026-07-13 05:45 fire. **v1.2 (this file) makes the spec fully self-contained** to eliminate the redirect-to-an-external-file pattern that has now caused two consecutive breakages. Do not reintroduce a pointer to an external spec file for this task.
