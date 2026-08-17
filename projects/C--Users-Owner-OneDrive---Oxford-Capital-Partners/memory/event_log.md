@@ -12,6 +12,26 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-17 -- ora-passed-deal-tracker LAMS duplicate: retire held; register-scheduled-task hardened instead
+
+Dispatched to retire the disabled LAMS/Cowork duplicate of `ora-passed-deal-tracker` (cron `30 6 15 * *`, cross-fleet id collision flagged by `ora-task-integrity-guard`). Retirement itself was NOT performed and remains on hold -- no archive, no delete, both fleet copies unchanged from their pre-session state.
+
+Reason: this cloud Cowork session has no `list_scheduled_tasks`/`delete_scheduled_task`/`create_scheduled_task`/`update_scheduled_task` MCP tools (confirmed absent from the toolset; device bridge only, no native app process). Per register-scheduled-task Rule 1, stopped rather than improvise a filesystem path. `delete_scheduled_task` resolves an id collision by session locality with no fleet parameter (reference_delete_scheduled_task_resolves_colliding_id_to_local_fleet.md) -- deleting from the wrong surface risks the LIVE CC copy, not the disabled LAMS twin.
+
+Found live: `ora-skills` commit `bdba52b1` (register-scheduled-task v2.10, 2026-08-17 11:36:44 -0400) had already documented this exact tool-availability gap ~41 min before this session's pre-flight began, from what reads as the same root incident. Doc-only fix; did not by itself prevent this session's own dispatch into the same gap, since whatever routes task briefs to a surface does not appear to consult the skill text at dispatch time -- flagged as a still-open dispatch-routing question, not resolved this session.
+
+Genuinely missing piece added this session: register-scheduled-task v2.10 documented that a delete can be tested by fleet, but not that it must never be tested by deleting a LIVE task. Committed v2.11 (`ora-skills` `10bac87c`, 2026-08-17 12:52:55 -0400): a RETIRE bullet stating the two safe fleet-resolution checks (`list_scheduled_tasks`'s `path` field; the host surface's own reported client identity, e.g. Desktop Commander `get_config.currentClient`) and explicitly barring `ora-cowork-heartbeat` or any dead-man/heartbeat id as a test target. Queued in `_staging/PENDING_REIMPORT.md` by the post-commit hook; not yet packaged/installed -- needs a `package-and-stage-skill` run and Gabriel's Save-skill click before the platform copy reflects it.
+
+Two further fleet-status.py changes proposed earlier this session (a `disabled_but_present` JSON field; a `--why-fleet` flag) were investigated and NOT implemented -- both already correctly handled by existing code. `registry-membership-probe.py`'s `classify_absent()` already separates "still present but disabled" (WARN, not a drop) from true absence ([ACTION]); the fleet-resolution question is already answerable via Desktop Commander's own `get_config.currentClient`, which the v2.11 change above now points to directly. Correcting the record: my own earlier read of `registry-membership.log`'s `regressions={...}` line as a possible false-removal signal was a misdiagnosis of a field name, not a real gap in the underlying probe logic.
+
+Confirmed stale (evidence, not inference) before deciding whether to touch two claimed files:
+- `hooks/active-work/fleet-status-reconcile.json` (session `6797e01b`, claimed 2026-08-16 20:58:22, "3-way merge... land registration-age annotation from PR #136"): `ora-claude-config` commit `7814838` ("feat(fleet-status): reconcile cross-fleet duplicate detector with registration-age annotation") landed 2026-08-16 21:01:41, 3 minutes after the claim; working tree for `maintenance/fleet-status.py` and `maintenance/test-fleet-status.py` is clean. Claim is stale (never released after landing), not live.
+- `hooks/active-work/open-items-tracker-oi127.json` (claimed 2026-08-12 18:32:53, "file OI-127 as a duplicate pointer to OI-135... via worktree+PR"): merged via `ora-claude-config` PR #85 (`715c346`, 2026-08-13 00:17:37); `git merge-base --is-ancestor` confirms it's on `main`. Claim is stale.
+
+Not touched: `open-items-tracker.md` itself currently carries unrelated, clearly-live uncommitted content in the working tree (8 insertions/5 deletions: OI-186/184/185 filed today, plus OI-078/079/080/081 updated to CODE FIXED/CLOSED with today's date and PR references) -- not explained by either stale claim above. Held off appending the planned fleet-advisory-remediation routing note for `ora-passed-deal-tracker` rather than write into an actively-changing shared file; this is a dirty-tree-triage-shaped situation (attribute via the two-pass mtime check), not a stale-claim one, and wasn't run this session.
+
+Net for the night: one real gap found and closed (register-scheduled-task v2.11, committed, packaging pending); one dispatch-routing question surfaced but not resolved; two proposed script changes investigated and correctly NOT made; two stale claims confirmed with evidence and reported (not yet cleaned up -- claim files still present); the original retire task itself untouched, on hold pending a session with the scheduled-task MCP tools.
+
 ## 2026-08-17 — orphaned-task-forensics: delinquency-check timeout root-caused and fixed (Gabriel-directed)
 
 Spawned on the `ora-pm-daily-crons` gap flagged in the same session's `fleet-advisory-remediation` pass.
