@@ -12,6 +12,79 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-17 -- register-scheduled-task v2.11 Save-skill click confirmed
+
+Gabriel confirmed the Save-skill click for `register-scheduled-task` v2.11
+(commit 10bac87, "id-collision fleet-resolution must never be tested via a live
+delete") in this Cowork session via Entry point B of package-and-stage-skill.
+
+Evidence, not assumed:
+- Live ListSkills call post-confirmation shows register-scheduled-task at
+  description version "v2.11 (2026-08-17)", enabled:true, skill id
+  skill_012MxGsJTLKjD5g4F6jjzsyH -- a NEW id relative to the pre-click id
+  (skill_018MpNnXxwB8JYCrY3roG5oR), corroborating a real re-registration event.
+- Post-install file-completeness + hash verify: every file in the packaged
+  `register-scheduled-task.skill` (SKILL.md, references/incident-history.md --
+  2 files) is present in the runtime cache mirror at
+  `...\skills-plugin\583f08bc-0123-4111-8158-8fe3d927e350\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\skills\register-scheduled-task\`
+  with byte-identical (raw match) SHA256 hashes against the packaged copy.
+
+register-scheduled-task | v2.11 | Save-skill click confirmed | PENDING_REIMPORT line cleared this pass.
+
+## 2026-08-17 -- ora-setup-audit v1.5 Save-skill click confirmed
+
+Gabriel confirmed the Save-skill click for `ora-setup-audit` v1.5 (commit 4697d8a,
+"local-mirror drift is now structurally prevented") in this Cowork session via
+Entry point B of package-and-stage-skill.
+
+Evidence, not assumed:
+- Live ListSkills call post-confirmation shows ora-setup-audit at description version
+  "v1.5", enabled:true, skill id skill_01NJyuc7Fft8zN9QP8TSgiSp -- a NEW id relative
+  to the pre-click id (skill_01PPhkBdT8e1CCYLttaA3Z4Z), corroborating a real
+  re-registration event.
+- Post-install file-completeness + hash verify: the single packaged file (SKILL.md)
+  is present in the runtime cache mirror at
+  `...\skills-plugin\583f08bc-0123-4111-8158-8fe3d927e350\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\skills\ora-setup-audit\`
+  with a byte-identical (raw match) SHA256 hash against the packaged copy.
+
+ora-setup-audit | v1.5 | Save-skill click confirmed | PENDING_REIMPORT line cleared this pass.
+
+## 2026-08-17 -- daily-brief v2.11 Save-skill click confirmed
+
+Gabriel confirmed the Save-skill click for `daily-brief` v2.11 (commit e98c92f,
+"split incident narrative to references/, size fix per Automation Audit Rev 9/15")
+in this Cowork session via Entry point B of package-and-stage-skill.
+
+Evidence, not assumed:
+- Live ListSkills call post-confirmation shows daily-brief at description version
+  "v2.11 (2026-08-16: ...)", enabled:true, skill id skill_01UThCyVdrwCH2Gz7dA91maS --
+  a NEW id relative to the pre-click id (skill_01MEijMjZU3q3idMKYY9f1nU), corroborating
+  a real re-registration event, not a cached description string.
+- Post-install file-completeness + hash verify: every file in the packaged
+  `daily-brief.skill` (SKILL.md, references/incident-history.md, target-markets.json --
+  3 files) is present in the runtime cache mirror at
+  `...\skills-plugin\583f08bc-0123-4111-8158-8fe3d927e350\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\skills\daily-brief\`
+  with byte-identical (raw match) SHA256 hashes against the packaged copy.
+
+daily-brief | v2.11 | Save-skill click confirmed | PENDING_REIMPORT line cleared this pass.
+
+## 2026-08-17 -- package-and-stage-skill already in sync, no reimport needed
+
+Entry point B bridge-first freshness screen (this session, fresh-run) checked
+`package-and-stage-skill` against both required independent signals before any
+Save-skill ask:
+
+- ListSkills (live account call): description string shows "v1.21", enabled:true --
+  matches the staged package's version exactly.
+- Desktop Commander SHA256 compare: repo `C:\Users\Owner\ora-skills\package-and-stage-skill\SKILL.md`
+  vs runtime cache copy at
+  `...\local-agent-mode-sessions\skills-plugin\583f08bc-0123-4111-8158-8fe3d927e350\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\skills\package-and-stage-skill\SKILL.md`
+  -- RAW MATCH (hash 9AF2F56837BE4F1D1890E6D8725FC094AEDAAF6A3BBF3C72E52EFD91859D04AA on both sides).
+
+Both signals matching means the Save-skill click already happened (in this session or
+an earlier unlogged one) -- no redundant install ask presented for this package.
+package-and-stage-skill | v1.21 | already in sync | no reimport needed.
+
 ## 2026-08-17 -- ora-passed-deal-tracker LAMS duplicate: retire held; register-scheduled-task hardened instead
 
 Dispatched to retire the disabled LAMS/Cowork duplicate of `ora-passed-deal-tracker` (cron `30 6 15 * *`, cross-fleet id collision flagged by `ora-task-integrity-guard`). Retirement itself was NOT performed and remains on hold -- no archive, no delete, both fleet copies unchanged from their pre-session state.
