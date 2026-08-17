@@ -27,6 +27,21 @@
 # Install/refresh (run once):
 #   schtasks /Create /TN "ORA Claude Desktop Wake-and-Launch" /SC DAILY /ST 04:45 /F `
 #     /TR "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"C:\Users\Owner\.claude\maintenance\ensure-claude-renderer.ps1\""
+#
+# StartWhenAvailable FIX (2026-08-17, fleet-advisory-remediation): the schtasks /Create
+# form above does NOT set StartWhenAvailable -- without it, a 04:45 trigger that fires
+# while the host is asleep/off is simply ABANDONED (Task Scheduler event 153, "did not
+# launch task ... as it missed its schedule"), not deferred, recording Last Result
+# 0x80070420 (Task Scheduler's generic code for exactly this) even though the script
+# itself is fail-open on every internal path and was never reached. This host's first
+# scheduler dispatch varies 03:31-17:09 (reference_am_cluster_late_wake_root_cause),
+# so a hard 04:45-or-never trigger silently missed most mornings -- the log had exactly
+# ONE line total (2026-08-05) despite running daily since 2026-08-04. Fixed live via:
+#   $t = Get-ScheduledTask -TaskName "ORA Claude Desktop Wake-and-Launch"
+#   $t.Settings.StartWhenAvailable = $true
+#   Set-ScheduledTask -InputObject $t
+# If this task is ever deleted and recreated with the /Create one-liner above, RE-APPLY
+# this immediately after -- schtasks.exe's CLI has no direct switch for this setting.
 
 param([switch]$WhatIf)
 
