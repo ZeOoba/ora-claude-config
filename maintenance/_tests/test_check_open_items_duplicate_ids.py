@@ -220,6 +220,78 @@ expect("any_finding still flags a duplicate row",
 # (regression guard for the actual OI-027 fix). Deliberately NOT asserting full
 # cleanliness: see collision_finding() above -- a concurrent session mid-filing an item
 # would otherwise fail this test, and with it every push on the machine.
+# --- broken-anchor escalation (2026-08-16) -------------------------------
+# A sectionless row was reported [INFO] whether or not anything actually linked
+# to it, so a genuinely broken cross-reference read as "no action" and persisted
+# unnoticed. Escalation is now conditional on a REAL external reference.
+_missing = {"missing_sections": ["OI-101", "OI-102"]}
+_broken, _benign = codc.split_missing(_missing, {"OI-102"})
+expect("split_missing routes a referenced id to broken", _broken == ["OI-102"],
+       "got %r" % _broken)
+expect("split_missing leaves an unreferenced id benign", _benign == ["OI-101"],
+       "got %r" % _benign)
+expect("split_missing with no refs escalates nothing",
+       codc.split_missing(_missing, set()) == ([], ["OI-101", "OI-102"]))
+expect("split_missing tolerates a result with no missing_sections key",
+       codc.split_missing({}, {"OI-102"}) == ([], []))
+
+_rep = codc.format_report(dict(_missing, row_count=2, unique_row_count=2,
+                               section_count=0, duplicate_rows=[],
+                               duplicate_sections=[], orphaned_sections=[]),
+                          "fake.md", {"OI-102"})
+expect("report marks a linked sectionless row [ACTION] BROKEN_ANCHOR",
+       "[ACTION] BROKEN_ANCHOR" in _rep and "OI-102" in _rep, _rep)
+expect("report keeps an unlinked sectionless row [INFO]",
+       "[INFO]" in _rep and "OI-101" in _rep, _rep)
+expect("BROKEN_ANCHOR line does not also list the benign id",
+       "OI-101" not in _rep.split("[INFO]")[0], _rep)
+
+# external_anchor_refs on a REAL temp directory. The first version of this test
+# asserted only that a known sectionless row was absent from the live refs -- which
+# passed for the wrong reason: the regex matched nothing at all, so the set was
+# always empty and the assertion could not tell "exclusion works" from "feature is
+# dead". It green-lit a feature that could never fire in production.
+import tempfile as _tf, shutil as _sh, os as _os
+_d = _tf.mkdtemp(prefix="oi-refs-")
+try:
+    # `with open(...)` -- NOT os.write(os.open(...)), which leaked an unclosed fd
+    # per file. On Windows rmtree(ignore_errors=True) then silently fails on the
+    # open handles, and this test runs on EVERY push via the prepush gate, so it
+    # leaked a temp dir per push indefinitely.
+    def _w(name, body):
+        with open(_os.path.join(_d, name), "wb") as fh:
+            fh.write(body)
+
+    # The form real memory files actually use: a CROSS-FILE link into the tracker.
+    _w("event_log.md", b"see [OI-148](open-items-tracker.md#OI-148) for detail\n")
+    # A BARE fragment link in another file points at THAT file's own anchors and
+    # must NOT be read as a reference to the tracker.
+    _w("other.md", b"internal jump [x](#OI-999)\n")
+    # The tracker's own self-links must be excluded, or every sectionless row
+    # would escalate.
+    _w("open-items-tracker.md",
+       b"| [OI-777](#OI-777) | ... |\n[OI-778](open-items-tracker.md#OI-778)\n")
+    _refs = codc.external_anchor_refs(_d, "open-items-tracker.md")
+    expect("external_anchor_refs finds the cross-file link form actually used",
+           "OI-148" in _refs, "got %r" % _refs)
+    expect("external_anchor_refs ignores a BARE fragment link in another file",
+           "OI-999" not in _refs, "got %r" % _refs)
+    expect("external_anchor_refs excludes the tracker's own file entirely",
+           "OI-777" not in _refs and "OI-778" not in _refs, "got %r" % _refs)
+    expect("external_anchor_refs on a missing dir returns empty, never raises",
+           codc.external_anchor_refs(_os.path.join(_d, "nope"), "x.md") == set())
+finally:
+    _sh.rmtree(_d, ignore_errors=True)
+
+# A broken anchor must drive the EXIT CODE too -- an [ACTION] that leaves exit 0
+# reproduces the "reads as no action" failure for every machine consumer.
+expect("any_finding counts broken_anchors",
+       codc.any_finding({"duplicate_rows": [], "duplicate_sections": [],
+                         "orphaned_sections": [], "broken_anchors": ["OI-148"]}) is True)
+expect("any_finding still ignores merely-sectionless rows",
+       codc.any_finding({"duplicate_rows": [], "duplicate_sections": [],
+                         "orphaned_sections": [], "broken_anchors": []}) is False)
+
 real = codc.check(open(codc.DEFAULT_TRACKER_PATH, encoding="utf-8").read())
 expect("canonical open-items-tracker.md has zero id collisions right now",
        codc.collision_finding(real) is False, "got %r" % real)
