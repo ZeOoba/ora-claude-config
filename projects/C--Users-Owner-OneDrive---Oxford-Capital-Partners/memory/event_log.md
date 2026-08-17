@@ -5,12 +5,22 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-17T02:17:38.346Z
+  modified: 2026-08-17T14:01:12.082Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-08-17 — Dirty-tree triage: 13 isolated commits landed across `~/.claude` and `oxford-command-center`, 0 remaining
+
+Ran `dirty-tree-triage` on request. Scan: 15 dirty entries — 12 in `~/.claude`, 3 in `oxford-command-center`; `ora-skills` and `website-canonical` already clean.
+
+**`~/.claude` (11 commits, `maintenance/dirty-file-owner-report.py` for attribution):** all entries settled 4-22 hours, no live-session owner. 6 stale `_scheduled_tasks_backup/` mirror syncs (`automation-health-monitor`, `ora-cc-snapshot-refresh`, `ora-doctrine-integrity-guard` — OI-173 spec-liveness-probe engine, `ora-owner-outreach-queue-refresh`, `ora-pm-ledger`, `ora-weekly-hygiene`) · `docs/system-inventory.md` (routine `ora-weekly-hygiene` Block H regeneration, 2026-08-16 20:45 ET) · `maintenance/_shared/task-folder-runtime-state-allowlist.json` (new entry, Gabriel-reviewed 2026-08-16) · `memory/event_log.md` (append-only, self-documenting completed work) · new `ora-memory-commit-sweep` task registration + its backup mirror (one commit, a post-commit hook auto-included the mirror) · catch-up backup mirror for the already-committed `ora-pm-daily-crons` task.
+
+**`oxford-command-center` (2 commits):** `data/snapshots/portfolio.json` refresh — **`arBalances` now populated for the first time**, confirming the dark AR subsystem (`reference_ar_subsystem_exists_but_dark_2026-08-16.md`, PR #230) produced live output for the first time: 8 property delinquency xlsx files + `review-queue.json` (8 entries) + tenant-name-to-Notion-slug mapping cache, all dated 2026-08-17 ~09:50 ET, ~4h settled, no owning session found (repo has no provenance/claim tooling). Content verified as well-formed JSON before commit; **not otherwise reviewed for correctness — flagging for Gabriel's attention**, since this closes a previously-invisible ~$204,788 AR gap and this triage pass does not judge WIP content, only attributes/settles/commits it.
+
+No branch-level divergence touched (`~/.claude` now ahead 60/behind 0 against `origin/feat/model-canary-probe-step25`, `oxford-command-center` ahead 3/behind 0 against `origin/main`) — separate decisions, left to Gabriel per the skill's boundaries. Nothing deleted, nothing force-resolved, no `git add -A` used anywhere (isolated `commit_isolated_replacement()` for modified-tracked files, path-scoped `git add` + staged-set verification for new files/dirs).
 
 ## 2026-08-16 — Automation Audit Revision 16: R13-2 skill-mirror drift structurally fixed; R13-1 confirmed already fixed
 
