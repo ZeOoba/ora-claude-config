@@ -1,14 +1,16 @@
 ---
 name: reference-ar-subsystem-exists-but-dark-2026-08-16
-description: "oxford-command-center has a complete, tested AR ingestion + exception capability that has NEVER been run — data/ar/ doesn't exist, so $204,788 of AR is invisible. Do not rebuild it."
+description: "oxford-command-center's AR ingestion subsystem ran for the first time 2026-08-17 (data/ar/ + arBalances now populated, ~$204,788) — but the run was a one-off, unreviewed, and still not scheduled/wired for recurrence. Do not rebuild it; do not assume it's now a live pipeline."
 metadata: 
   node_type: memory
   type: reference
   originSessionId: 3f365fd1-1946-44aa-b52f-d1ec1458c65c
-  modified: 2026-08-16T21:40:20.830Z
+  modified: 2026-08-17T14:02:41.435Z
 ---
 
-**`server/ar/` is a complete, adversarially-reviewed AR ingestion subsystem that has never been run.** Shipped as PR #230 (`feat/ar-balances-feed`), hardened over two refute rounds 2026-07-22. 10 modules + `scripts/ar-import.ts` (334 lines) + `scripts/ar-import-headless.ts` (486 lines, built for a scheduled task), 4 test files.
+**UPDATE 2026-08-17 (dirty-tree-triage):** the dark period ended — `data/ar/processed/` now holds all 8 property delinquency `.xlsx` files, `data/ar/review-queue.json` (8 entries), and a tenant-name mapping cache; `portfolio.json`'s `arBalances[]` is populated for the first time (isolated-committed, `oxford-command-center` commits `0b911d5`/`69ff250`). **This was a one-off run, not registration**, per the "registration ≠ completion" lesson below: no `AR_INBOX`, no scheduled task exists yet (checked both `oxford-command-center/scheduled-tasks/` and `~/.claude/scheduled-tasks/*/SKILL.md` for AR triggers — none found), so nothing will repeat this automatically and nothing will alarm if it goes stale again. **The actual AR figures have not been reviewed by Gabriel** — dirty-tree-triage verified the files as well-formed JSON/XLSX and settled, not as correct. Open follow-ups: (1) Gabriel review the balances against the known $204,788.48 figure from the `_pipeline` HTML dashboard, (2) decide whether to wire a recurring inbox/schedule now that the pipeline is proven to run end-to-end, (3) if this recurs as a manual one-off a second time without registration, that's the n=2→n=3 pattern the "generalized shape" note below already flagged as worth revisiting.
+
+**`server/ar/` is a complete, adversarially-reviewed AR ingestion subsystem that sat unrun from PR #230 (2026-07-22) until 2026-08-17.** Shipped as PR #230 (`feat/ar-balances-feed`), hardened over two refute rounds 2026-07-22. 10 modules + `scripts/ar-import.ts` (334 lines) + `scripts/ar-import-headless.ts` (486 lines, built for a scheduled task), 4 test files.
 
 **Why it produces nothing** (verified 2026-08-16): `data/ar/` does not exist · `data/overlay.json` → `tenantArrears` has **0 entries** · no mapping cache, no review queue on disk · nothing schedules it · nothing moves the eight `Business/A.R. Reports/*.xlsx` (dated 7.15.2026) into `AR_INBOX`.
 
