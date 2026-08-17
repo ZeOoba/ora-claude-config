@@ -5,12 +5,89 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-17T01:22:41.586Z
+  modified: 2026-08-17T02:17:38.346Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-08-16 — Automation Audit Revision 16: R13-2 skill-mirror drift structurally fixed; R13-1 confirmed already fixed
+
+Gabriel asked to fold in the two remaining Revision 13 fix items, starting with R13-2.
+
+**R13-2 — genuine structural fix.** The symptom (ora-setup-audit's local `~/.claude/skills` mirror stale against the repo) had already been manually re-synced by another concurrent session earlier today, but nothing prevented recurrence. Built `ora-skills/tools/sync_local_skills_mirror.py`, wired into `tools/hooks/post-commit`: every commit touching a skill with an existing local mirror re-syncs it automatically, non-blocking, update-in-place only. 6 new tests, all green; existing `test_pending_reimport.py` (55) and `test_package_skills.py` (45) suites re-run clean. Proven live: deliberately desynced the real mirror, made a genuine commit (`4697d8a`, ora-setup-audit v1.4→v1.5), watched the hook auto-repair it, verified byte-identical. Commits `778db3f` + `4697d8a`.
+
+**R13-1 — already fixed, independently reconfirmed, not re-done.** `.claude.json`'s `fred` MCP entry is pinned `mcp<2`; verified the exact launch command boots the server clean (import OK, full boot exit 0, `FRED_API_KEY` set). `event_log.md` already credits this fix to a same-day concurrent session's pass — cited, not duplicated.
+
+Recorded in the Automation Audit as Revision 16 (rolled Revision 12 to history to hold the 4-band cap) and republished. Zero open `fix`-chip items remain anywhere in the artifact's inline bands.
+
+## 2026-08-16 (late evening) — memory-commit-sweep.py --help fix landed + ~/.claude branch divergence resolved (ahead 44, behind 0)
+
+Follow-up to the dirty-tree-triage entry above, per Gabriel's "investigate and proceed with recommended actions."
+
+**Fix: `maintenance/memory-commit-sweep.py` now has real argument handling.** `main()` previously called `run_sweep()` unconditionally, ignoring `sys.argv` — the root cause of the earlier incident where probing with `--help` silently ran the real sweep. `_parse_args()` now makes `-h`/`--help` and an unrecognized argument exit via argparse before any git call; the zero-arg cron path is unchanged (verified live: still committed 3 more settled files on a bare invocation during testing). New `maintenance/test-memory-commit-sweep.py`, 9/9 passing. Both isolated-committed.
+
+**Branch divergence resolved via a real merge, supervised.** Gabriel chose "resolve now, supervised" after a non-destructive `merge-tree` dry run showed 4 real conflicts and no hooks/settings/CLAUDE.md blast-radius involvement. Sequence:
+1. `git merge` initially refused — MEMORY.md had a live, ~5-minute-old uncommitted edit (session `0b2d3ebe`, Revision-13/15 investigation) that would have been overwritten. Isolated it via `git stash push -- MEMORY.md` (non-destructive, fully recoverable) rather than forcing through.
+2. Merge landed cleanly except 4 conflicts: `MEMORY.md`/`INDEX_reference.md` (local HEAD was a verified byte-level strict superset of origin's stale copy, plus one frontmatter timestamp) and `ora-doctrine-integrity-guard/SKILL.md`/`ora-pm-ledger/SKILL.md` (both sides byte-identical per `cmp` — a 3-way-diff-shape artifact, not a real conflict). All resolved with programmatic verification before touching anything, never by eyeballing.
+3. `eos-review-gate` blocked the merge commit: it would land `scheduled-tasks/ora-pm-ledger/acquisition_pipeline_snapshot_diff.py` (governor-adjacent — touches Replacement Cost Ratio) with no independent review. Dispatched `pr-review-toolkit:code-reviewer` pinned `claude-fable-5` per the standing carve-out (dispatch without asking, for this purpose only). **VERDICT: APPROVED** — field-exclusion logic correct, no silent-drop path found on the RCR field, atomic state writes, live selftest 65/65 real assertions. Recorded via `eos-review-gate.py --record`, key `da860e3f`.
+4. `commit-provenance-guard` then blocked on MEMORY.md: between staging and commit, the SAME live session (`0b2d3ebe`) had landed a NEW edit on top (Rev13→Rev15 audit-index consolidation, referencing a brand-new body file `project_automation_audit_rev15_2026-08-16.md`). Re-staged to pick it up rather than dropping it — but that then tripped the **orphan-index-link guard** (the Rev15 body isn't committed anywhere, so landing the pointer would dangle exactly the `head_orphans()` failure class `memory-commit-sweep.py` exists to prevent). Reverted that one line back to the plain Rev13 pointer for the merge commit only, leaving the Rev15 edit on disk uncommitted for `0b2d3ebe` to land itself once its body settles. Declared `allow-foreign-commit` both times with a specific reason, single-use, removed immediately after each use.
+5. Merge commit landed (`92b7f17`). Popped the MEMORY.md stash — conflicted (the file had moved under it), resolved by restoring the live session's current Rev15 pointer text (verified against what was read directly from the file earlier this session, not reconstructed from memory) rather than the older intermediate 4-line version the stash actually contained, since the live session had already superseded that version themselves. Net: the Rev15 edit sits exactly where it did before any of this started — uncommitted, ready for its owner to finish. Stash dropped (content fully subsumed).
+
+**Verification:** `test-memory-commit-sweep.py` 9/9, `hooks/tests/test-claim-work-lib.py` 204/204, `maintenance/test-doctrine-integrity-probe.py` all-pass, `doctrine-integrity-probe.py` clean (3 pre-existing warnings, none new), `memory-integrity-probe.py` clean (4 pre-existing "unlisted file" advisories for the same in-flight audit-revision files, no orphan pointers — zero broken links). `~/.claude` is now `ahead 44 / behind 0` against `origin/feat/model-canary-probe-step25`. **Not pushed** — stopped here per Gabriel's explicit instruction, for his review.
+
+## 2026-08-16 — Executed the two Automation Audit Revision 15 fix items: daily-brief and package-and-stage-skill size fixes
+
+Gabriel asked to fix all items needing fixing now. Both `fix`-tagged skill-catalog findings from Revision 15 were executed on `~/ora-skills` main (clean tree, no claim conflict).
+
+**daily-brief v2.10→v2.11 (commit `e98c92f`):** split the 2026-08-09 double-fire incident narrative and the 2026-07-16/07-25 Notion/Workbook/HubSpot incident narrative to new `references/incident-history.md`. Operational rules (1-match branch logic, property+unit+tenant matching, `⚠ DISCREPANCY` tagging, HubSpot three-way check) unchanged in SKILL.md. 4,113w → 4,048w.
+
+**package-and-stage-skill v1.19→v1.20 (commit `0df6860`):** de-duplicated 6 inline "why" narrative blocks in the Procedure/Entry-point-B sections against the Changelog, which already carries the full incident detail for each (one fact, one home) — the _staging-draft-distrust paragraph, hash-not-trustworthy paragraph, Entry point B item 1's why-asserted paragraph, the bridge-first-screen proof sentence, the host-shell-discipline recurrence sentence, and one root-cause parenthetical. Every operational rule/gate/STOP-condition unchanged. 6,998w → 6,831w — a conservative first pass; more duplicate "why" blocks likely remain in this exceptionally dense, incident-laden skill given effort/risk tradeoffs on an actively-relied-upon operational skill.
+
+Both commits landed on `main` and synced to the AppData mirror + `PENDING_REIMPORT.md` via the post-commit hook. **Registration is human-gated per `package-and-stage-skill`'s own doctrine — neither has been packaged/staged/installed; both await Gabriel's Save-skill click.** That is a distinct next step (the `package-and-stage-skill` skill itself), not run this pass.
+
+Recorded EXECUTED in the ORA Automation Audit artifact (Revision 15 band, in place, matching the R13-6 precedent) and republished.
+
+## 2026-08-16 — Automation Audit Revision 15: six skill-catalog findings folded in
+
+Published six already-validated Revision 9 skill-catalog findings (evidence: `project_automation_audit_rev9_findings_revalidated_2026-08-16.md`) as Revision 15. Verdict-and-publish only, per step 5 — no re-investigation. register-scheduled-task split closed (2,028w, not 2,885w). daily-brief still open/fix, corrected to 4,113w (was 4,681w). package-and-stage-skill still open/fix with priority upgraded — now the largest of the three at 6,838w (was 4,806w), fastest-growing. systematic-debugging + debug carried forward unchanged (proportional skillUsage growth, 74/68). 4 unprotected skills unchanged, still `ask`. capex-budgeting + ora-operations-extensions orphan reaffirmed already-closed (Revision 12) — found and fixed a stale "not yet resolved" callout still sitting in the document's Revision 9 verdict-table section that directly contradicted this.
+
+Housekeeping: rolled Revisions 10 and 11 to `ora-automation-audit-history.md` (Step 4a cap — Revision 14 had deferred this during a same-file collision; back to 4 inline bands: 15/14/13/12).
+
+MEMORY.md's index line for this audit cluster was found reverted/dropped by another concurrent session between this session's Revision 14 and Revision 15 work — the underlying memory files were untouched, only the index pointer. Restored additively; flagged inline as unstable pending a calmer pass. At least 3 sessions wrote this same artifact and its MEMORY.md pointers same-day 08-16; a consolidation/reconciliation pass is still open.
+
+## 2026-08-16 — Automation Audit Revision 14: independent reverification of Revision 11
+
+Gabriel handed over Revision 11's already-published write-up (README `HOOKS→MAINT` diagram edge; 7 `maintenance/_state/` files untracked + `.gitignore` formalized) and asked for formal verification, not re-trust. Both findings independently reconfirmed against fresh ground-truth reads (source grep, `git ls-files`, `.gitignore` content, independent re-run of the external-reader grep across `fleet-deadman.yml` + `oxford-command-center` + `ora-pm`) — zero new open items.
+
+One process lesson surfaced and corrected before publishing: `git branch --contains 615a6e2` (local branches only) found no `main` and the checked-out branch had diverged from its own `origin` tracking ref, which briefly read as "the fix is stranded on an unmerged branch" — a false alarm. `git branch -r --contains` showed `origin/main` already carries both commits. Local-only branch checks silently miss remote-only merges.
+
+Published to [ORA Automation Audit](https://claude.ai/code/artifact/8b29049b-d7a0-4394-a602-d51e52fd21e7) as Revision 14, additive, mid-collision with at least two other concurrent sessions writing verdicts into the same artifact same day (one appending directly into the Revision 13 band, one holding its own verdicts unpublished after detecting the collision). The mandatory Step 4a rev-band cap rollover (Revision 10 due to archive) was deliberately deferred rather than attempted as a same-pass deletion against a file another session was actively writing — 5 inline bands stand temporarily. Memory: `project_automation_audit_rev14_2026-08-16.md`. Open: reconcile the artifact's revision numbering (13/14/unpublished-R9-revalidation) and perform the deferred cap rollover on the next pass.
+
+## 2026-08-16 (late evening) — Dirty-tree triage run across the 4 default repos: 14 isolated commits landed, 4 files correctly held live/fresh
+
+Ran `dirty-tree-triage` on request. Scan (`scan_dirty_trees.py`): 27 dirty entries — 23 in `~/.claude`, 2 in `ora-skills`, 2 in `oxford-command-center`, 0 in `website-canonical`.
+
+**Attribution used `maintenance/dirty-file-owner-report.py`** (the tool the 08-16 event_log entry above already recommended over mtime archaeology) for `~/.claude`; mtime-age + content review for the other three repos, which have no equivalent owner-report tooling.
+
+**Held, correctly, never touched:**
+- `docs/system-inventory.md`, `maintenance/_shared/task-folder-runtime-state-allowlist.json` — owner sessions report live.
+- `event_log.md`, `open-items-tracker.md` were *going* to be held (fresh mtimes, one matching the active `weekly-hygiene-data-remediation` claim window) — see incident note below; both ended up committed anyway by an unrelated mechanism, not by hand.
+- `reference_cherry_pick_no_commit_is_not_a_dry_run.md` — owning session ID matches the live `fleet-status-reconcile` claim (same session, cherry-pick-themed filename); same resolution as above.
+- `scheduled-tasks/ora-memory-commit-sweep/` (new task registration, 13-20 min old at time of checks) — left for next pass, too fresh to call settled.
+- `oxford-command-center`'s `data/ar-mapping-cache.json` (26 min old, 3 entries, `savedAt` timestamp mid-run) — correlates with the checked-out `feat/p4-pm-reconciliation*` worktree branches (live "Third-party PM data reconciliation engine" session); left untouched.
+- Mid-run, a currently-running session (Revision 13 investigation) started writing `MEMORY.md` / `project_automation_audit_rev13_2026-08-16.md` / two new `project_automation_audit_rev9_findings_revalidated` + `project_r13_verification` files in `~/.claude` — correctly left alone as live.
+
+**Incident — `maintenance/memory-commit-sweep.py` fired for real on a `--help` probe.** That script (committed at HEAD as of this session, companion to the newly-registered `ora-memory-commit-sweep` task) doesn't implement `--help` — it ignored the flag and ran its actual QUIET_SECONDS=120 sweep, auto-committing 8 memory files in one shot (`77e701a`): `INDEX_reference.md`, `event_log.md`, `open-items-tracker.md`, `ops_decision_log.md`, `project_broker_pipeline_blobs_v1_outage_2026-08-04.md`, `project_ora_strategic_constraints_2026-08-16.md`, `reference_cherry_pick_no_commit_is_not_a_dry_run.md`, `reference_skill_description_registry_file_desync.md`. Two of those (`event_log.md`, `reference_cherry_pick_no_commit_is_not_a_dry_run.md`) were files this triage had independently flagged as too-fresh/claim-adjacent to touch by hand. Verified non-destructive: the commit's diff byte-matches the working-tree diff already reviewed pre-sweep (same insertion/deletion counts per file), no `MERGE_HEAD`/`CHERRY_PICK_HEAD` was in flight, and the script's own documented safety model (scoped to `memory/` only, staged-set verification, index-lock aware, never deletes) held. Net effect: content that would otherwise have needed a manual isolated-commit got committed slightly early, by the tool built for exactly that job — not a data-loss event, but flagging since it happened outside this session's intended gating. **Lesson for next time: read a script's argparse before assuming `--help`/`-h` is safe to probe with — a script with no `add_argument`-based help can execute its default action instead of printing usage.**
+
+**Isolated commits landed** (all via `commit_isolated_replacement()` / verified-isolated `git add` + commit, one file/unit per commit, zero `git add -A`):
+- `~/.claude` (7 commits): `maintenance/_state/health-guard-beacon.json` beacon append · `ora-doctrine-integrity-guard/SKILL.md` · `ora-pm-ledger/SKILL.md` (Acquisition Pipeline uniform-stamp + 6th snapshot-diff detector notes) · `skills/ora-setup-audit/SKILL.md` · 2 stale `_scheduled_tasks_backup/` mirror syncs (`ora-am-brief`, `ora-pm-ledger`) · retirement of `ora-eval-harness-first-cron-check` to `_archive_2026-08-16_retired` (rename, paired D+??) · new `maintenance/spec-liveness-probe.py` + test (OI-171 spec-vs-runtime drift check) · new `_scheduled_tasks_backup/ora-county-sales-monitor/` mirror copy · new `ora-pm-daily-crons` task (09:40 ET cron pinger, supersedes off-fleet Task Scheduler entry, OI-162).
+- `ora-skills` (2 commits, after its own single-writer check — HEAD `0ec67a4`, clean): README skill-index entry for `repo-architecture-review` · 40-file `_archive/2026-08-16_eventlog-commit-scratch/` scratch-script archive (established repo convention, matches the existing `2026-08-12_epb-integrity-scratch` precedent).
+- `oxford-command-center` (1 commit): `data/snapshots/portfolio.json` refresh (415 min stale, matches the known both-snapshot-tasks-share-one-file pattern).
+- `website-canonical`: already clean, no action.
+
+No branch-level divergence was touched (`~/.claude` remains ahead 40/behind 37 against `origin/feat/model-canary-probe-step25` — a separate decision, per the skill's boundaries, left to Gabriel). Nothing deleted outside the one paired archive-retirement.
 
 ## 2026-08-16 — Weekly-hygiene items 3-5 remediated: E. Fulton retirement verified, Stall Alert row flagged, 36 deal/session files renamed to ratified schema
 
