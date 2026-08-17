@@ -5,10 +5,12 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 65a7fd4c-89ba-4dde-b8d0-a3a0c736cae4
-  modified: 2026-08-16T18:40:36.099Z
+  modified: 2026-08-17T01:47:20.550Z
 ---
 
 Revision 13 of the [ORA Automation Audit](https://claude.ai/code/artifact/8b29049b-d7a0-4394-a602-d51e52fd21e7) and rev `2026-08-16a` of the [Claude Code — System Schematic](https://claude.ai/code/artifact/4ad3530d-f84f-4def-a472-d16ef107e74c), both 2026-08-16, Gabriel-invoked in one pass via [[ora-setup-audit-skill]].
+
+**⛔ PARTIALLY SUPERSEDED same day — see [[project_r13_verification_2026-08-16]].** A live re-check found item 1 (FRED dead) and item 3 (skill-mirror drift) no longer reproduce — both closed between this memory's authorship and the re-check, cause unconfirmed. Item 2's MEMORY.md figure was also overstated (actual 20,443 B / ~9 days runway, not 22,207 B / ~7) and its CLAUDE.md "1,841 words / nine words of headroom" claim does not reconcile with a live `wc -w` (1,706, git-clean) — treat that specific figure as wrong, though the county-sales-monitor tie-break gap it cites is real. Items 4/5 (passed-deal-tracker duplicate, collision retimes) held up and are unaffected.
 
 **Scope split, so a future session doesn't re-run the wrong half:** Revision 12 (same day, earlier) ran thread 1 (plugins & connectors) in full — Rev 13 deliberately does NOT re-litigate it. Rev 13 ran threads 2 (fleet), 3 (skill catalog) and 4 (token gates), which Rev 12 explicitly left unmeasured.
 
