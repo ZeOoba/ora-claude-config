@@ -162,15 +162,21 @@ table of being wrong. It was not. Version + endpoint, not permissions.)
 
 | Source | Newest last_edited | Oldest | Reality |
 |---|---|---|---|
-| Acquisition Pipeline Tracker | 2026-07-15 | 2026-03-22 | ✅ **LIVE — varies.** |
+| Acquisition Pipeline Tracker | 2026-08-13 | 2026-08-13 | ⚠️ **Uniform stamp (re-measured 2026-08-16) — all 20 rows share ONE identical `last_edited_time`.** The earlier "✅ LIVE — varies" reading (2026-07-15 evidence) is SUPERSEDED. This is a DOWNGRADE, not a freeze: the column is still advancing (it moved 2026-08-13), so a zero is probably real — it just has nothing corroborating it. **Detector built 2026-08-16 — see `acquisition_pipeline_snapshot_diff.py` (§A.2 step 2). This was the LAST A.1 source without one; that gap is now closed.** |
 | Deal Sourcing Log | 2026-07-15 | 2026-03-22 | ✅ **LIVE — varies.** The timestamp is trustworthy for "did this row change today," but it says nothing about WHAT changed. **Field-level detector added 2026-08-15 — see `deal_sourcing_snapshot_diff.py` (§A.2 step 2, same mechanism as the three Section B siblings, run ALONGSIDE this timestamp check, not instead of it).** |
 | Broker Relationships | 2026-04-05 21:03 | 2026-04-05 20:06 | ✅ **LIVE — varies.** |
 | Tenant Database | 2026-03-30 | 2026-03-22 | ❌ **FROZEN.** Notion itself reports `last_edited_time == created_time`. A zero is a false negative. |
 | Property Register | 2026-07-12 | 2026-07-12 | ❌ **Uniform stamp** — all 14 rows share ONE identical timestamp (re-verified live 2026-08-11, still `2026-07-12T17:16:00` on every row). That is a batch write, not editing. An earlier read of this as "live" was WRONG. **Detector built 2026-08-11 — see `property_register_snapshot_diff.py` (§A.2 step 2, same as the Tenant DB and CapEx).** This was the LAST A.1 source without one; that gap is now closed. |
 | CapEx & Maintenance Log | 2026-07-26 | 2026-07-26 | ❌ **Uniform stamp.** The table is no longer empty (6 rows) and every row shares ONE identical timestamp, same failure mode as Property Register: a batch write, not editing. **Detector built 2026-07-27 — see `capex_snapshot_diff.py` (§A.2 step 2, same as the Tenant DB).** The "0 rows, can never report an edit" claim once here was true on 2026-07-16 and is not true now — do not repeat it. |
 
-**Net: Section A (Deal Pipeline) has fully trustworthy, precise, quota-free edit
-detection via REST. Section B does not, and no read path will fix it** — Tenant
+**Net (revised 2026-08-16): Section A is NO LONGER uniformly trustworthy on the
+timestamp alone.** Deal Sourcing Log and Broker Relationships still have varying,
+quota-free REST timestamps and remain `sql-confirmed`. **Acquisition Pipeline
+Tracker does not** — it flipped to the uniform-stamp signature (all 20 rows on one
+date) and is now judged by `acquisition_pipeline_snapshot_diff.py`, not by its
+column. **As of 2026-08-16 all SIX A.1 database sources have a snapshot-diff
+detector**, so no source anywhere in Block A now depends on an unverifiable
+timestamp. Section B's timestamps remain useless and no read path will fix it — Tenant
 DB is frozen at the source, and Property Register and CapEx & Maintenance Log
 both only ever show their last bulk sync (uniform-stamp). **As of 2026-08-11 all
 three Section B sources instead have snapshot-diff detectors** (`tenant_db_*`,
@@ -565,9 +571,61 @@ Use all of the following signals and merge, deduping by page ID:
    479 rows — confirming the normalization is stable against production data,
    not just synthetic fixtures.
 
-   ⚠ **Not yet observed: a genuine cross-day production run**, same caveat as
-   every sibling at its own build time. The first real one is the next
-   scheduled fire.
+   ✅ **Cross-day caveat DISCHARGED 2026-08-16.** Its first genuine cross-day
+   production run (2026-08-15 → 2026-08-16, the 18:00 slot) reported 0 added /
+   0 removed / 0 changed / 0 warnings across all 479 rows. No spurious diffs —
+   the empty `TIME_DERIVED_FIELDS` verdict holds against real calendar rollover,
+   not only against fixtures.
+
+   **✅ BUILT 2026-08-16 — `acquisition_pipeline_snapshot_diff.py` (same folder,
+   same pattern). This closes the LAST A.1 source without a detector** — all six
+   now have one. Built the day the Acquisition Pipeline Tracker was found to have
+   flipped to the uniform-stamp signature (see the §A.1 Reality table). Section A
+   (Acquisition Pipeline Tracker) MUST invoke, alongside the existing REST
+   timestamp check:
+   ```
+   C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \
+     C:/Users/Owner/.claude/scheduled-tasks/ora-pm-ledger/acquisition_pipeline_snapshot_diff.py \
+     --run --date {TODAY}
+   ```
+   Same `RESULT_JSON=` contract, same `state/acquisition-pipeline-*.json` storage
+   shape. Parse it and fold `added/removed/changed` (plus `warnings` whenever
+   non-empty) into Section A. Treat `persisted: false` as a COVERAGE GAP.
+
+   **`TIME_DERIVED_FIELDS` is NON-EMPTY here — matching Property Register, and
+   deliberately NOT matching the Deal Sourcing sibling** whose endpoint form it
+   otherwise shares. The schema carries THREE formula fields, each expression read
+   live rather than inferred from its name:
+   - **EXCLUDED — `⏰ Action Overdue`**: `if(prop("Next Action Date") < now(), "OVERDUE " + format(dateBetween(now(), prop("Next Action Date"), "days")) + "d", "")`.
+     Contains both `now()` and `dateBetween`, and fails two ways at once — it
+     **ticks** (`OVERDUE 4d` → `OVERDUE 5d` daily, forever) and it **band-flips**
+     (`""` → `OVERDUE 1d` the day a date passes, indistinguishable from an edit).
+   - **KEPT — `Replacement Cost Ratio`**: a market-keyed ratio of two static
+     stored numbers over a per-market replacement-cost constant. **This is
+     governor-adjacent** — the RCT basis denominator behind ORA's
+     ~35–40%-of-replacement discipline. Excluding formulas by TYPE rather than by
+     NAME would have blinded the detector to it, exactly as it would have blinded
+     Property Register to `LTV`. `--selftest` asserts RCR still diffs.
+   - **KEPT — `Price Per SF`**: ratio of two static stored numbers.
+
+   ⚠ **The bulk-field guard would NOT have caught this one.** Measured against the
+   real 20 rows: exactly 3 drift per day (2 ticks + 1 band-flip) = **15%**, far
+   below the 50% `BULK_FIELD_RATIO`, and the guard stayed silent in the
+   differential control. On a ~20-row table where only rows carrying a Next Action
+   Date can drift, the backstop is structurally incapable of firing on this field.
+   Reading each formula's expression live was the only thing preventing a
+   permanently noisy digest — do not treat the guard as a substitute for it here.
+
+   `--selftest` is 62 assertions, all passing. **Verified live at build time
+   against real data, not only fixtures:** baseline of 20 rows (exit 0, no
+   warnings); an immediate same-day re-pull reported 0/0/0 across all 20; and a
+   real-data cross-day harness mutated the actual `⏰ Action Overdue` values as
+   Notion would tomorrow — **3 of 20 rows mutated (asserted non-vacuous before
+   judging the result**, the exact gate Property Register's first attempt failed
+   in 2026-08-11 review) — giving **0 changed with the exclusion vs 3 changed
+   without it, and zero `<absent>` markers** in the control, so the control is
+   field-set-honest rather than an artifact. A real `Stage` edit landing alongside
+   that drift was still detected, reporting only `Stage`.
 
    **⚠ DEFECT 2 — `notion-query-data-sources` is ENTITLEMENT-GATED and will
    hard-fail mid-run.** Measured live 2026-07-16: after ~5 queries the tool
@@ -1673,3 +1731,59 @@ Gabriel's own review and commit.
 **Not done:** no genuine cross-day production run has happened yet (same
 caveat every sibling carried at its own build time) — the first real one is
 the next scheduled 18:00 ET fire.
+*(Discharged 2026-08-16: that run happened and was clean — 0/0/0 across 479 rows.
+Left unedited above on purpose; this is a dated amendment note, not live guidance.)*
+
+## AMENDMENT NOTE (2026-08-16 — Acquisition Pipeline detector; the last A.1 gap closes)
+
+**Found during that day's Block A run, then fixed the same session.** The 2026-08-16
+digest measured the Acquisition Pipeline Tracker's `last_edited_time` across all 20
+rows and found **one identical date on every row (2026-08-13)** — the uniform-stamp
+signature §A.1 already warns against trusting. The Reality table's "✅ LIVE — varies"
+entry was 2026-07-15 evidence and had gone stale.
+
+**This is a DOWNGRADE, not a freeze — the distinction matters and is now recorded in
+the table.** Unlike the Tenant DB (inert since March 2026), this column is still
+advancing; it moved three days before the observation. So a zero is probably real. It
+simply had nothing corroborating it, which made this the last of the six A.1 database
+sources judged on a single unverifiable signal.
+
+**`acquisition_pipeline_snapshot_diff.py` closes it. All six A.1 sources now have a
+snapshot-diff detector.**
+
+**The build's one real finding — the bulk-field guard could not have saved this.** The
+schema carries three formula fields. Read live rather than name-inferred, one is
+calendar-derived: `⏰ Action Overdue`, which both TICKS (`OVERDUE 4d` → `5d` daily) and
+BAND-FLIPS (`""` → `OVERDUE 1d`). Two rows were already overdue at build time, so the
+detector would have been broken on day one. The usual backstop argument does not apply:
+only 3 of 20 rows drift per day = **15%**, well under the 50% `BULK_FIELD_RATIO`, and
+the guard verifiably stayed silent in the differential control. On a ~20-row table this
+guard is structurally incapable of firing on this field.
+
+**Copying the nearest sibling would have shipped the defect.** `deal_sourcing_snapshot_diff.py`
+shares this database's endpoint form (`/v1/data_sources/{id}/query` @ 2025-09-03) and is
+the natural template — and its `TIME_DERIVED_FIELDS` is EMPTY. Only reading each formula's
+expression live caught the difference.
+
+**Two formulas are deliberately KEPT**, exclusion being BY NAME and never by TYPE:
+`Replacement Cost Ratio` — **governor-adjacent**, the RCT basis denominator behind ORA's
+~35–40%-of-replacement discipline, the direct analogue of Property Register's `LTV` — and
+`Price Per SF`. `--selftest` asserts both still diff.
+
+**Verified live against real data, not only fixtures.** 62 assertions pass. Baseline of
+20 rows (exit 0, no warnings); same-day re-pull 0/0/0 across all 20; and a real-data
+cross-day harness that mutated the actual `⏰ Action Overdue` values as Notion would
+tomorrow. That harness **asserts its own non-vacuity before judging the result** (3 of 20
+rows actually mutated) — the specific gate Property Register's first attempt failed in
+2026-08-11 review, where a mutation loop silently applied 0 changes and "passed". Result:
+**0 changed with the exclusion, 3 without, 0 `<absent>` markers** in the control, and a
+real `Stage` edit alongside the drift still detected.
+
+**Not changed:** no routing, send-path, cadence, or registry change. Content-only edit to
+§A.1's Reality table, the "Net:" summary, and §A.2 step 2, plus one new script. Registration
+untouched — `update_scheduled_task` was deliberately NOT used, since it drops non-owned
+frontmatter keys and would have silently deleted this file's `output_contract` block (OI-109).
+
+**Not done:** no genuine cross-day production run of the new script yet — the first is the
+next scheduled 18:00 ET fire. The real-data drift harness simulates exactly that rollover
+and is the strongest available substitute, but it is a simulation, not the event.

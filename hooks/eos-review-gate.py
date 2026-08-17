@@ -673,6 +673,11 @@ def build_message(repo, rels, session_id, key, artifact_state, shape_hint=""):
         "     %s --record --verdict approved --model <pinned-id> "
         "--notes \"<what was reviewed and found>\"\n"
         "     (`--key` prints the exact key + path list to hand the reviewer.)\n"
+        "     TIP: pass --notes-file <path> instead of --notes to keep the prose "
+        "OUT of the command text entirely -- that is the clean exit when the notes "
+        "themselves would trip config-write-guard (an ASCII arrow, or describing a "
+        "review that involved rm -rf). Write the notes to a scratch file, then "
+        "point --notes-file at it.\n"
         "     NOTE: an ASCII arrow in --notes (\"199/204 -> 204/204\") reads as a "
         "`>` redirect to config-write-guard; combined with an absolute hooks/ path "
         "that BLOCKS, and minting allow-config-write for it would grant far more "
@@ -719,6 +724,46 @@ def artifact_state_note(session_id, key):
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
+def _resolve_notes(argv):
+    """Review notes from `--notes-file <path>` if given, else `--notes <text>`.
+
+    WHY --notes-file EXISTS (2026-08-16). config-write-guard blocks on
+    "write indicator + governance-path marker anywhere in the command text", and
+    a --record invocation necessarily names a live hooks/ path. So the NOTES
+    THEMSELVES can block the recording: describing a security review that
+    involved `rm -rf`, or writing an ASCII arrow (which reads as a `>`
+    redirect), trips the guard. That is a self-inflicted deadlock unique to
+    security work that documents itself -- the more precisely you describe what
+    you reviewed, the more likely you cannot record it.
+
+    The guard's matcher is deliberately NOT narrowable (see
+    feedback_autonomy_gate_matcher_cannot_be_safely_narrowed.md), and minting a
+    governance-wide token to record an artifact is strictly worse than the
+    problem. Moving the prose OUT of the command line removes the trigger
+    without touching the guard at all: the command then contains only a path.
+
+    --notes-file wins when both are supplied, and a read failure is FATAL rather
+    than silently falling back to an empty string -- a review artifact whose
+    notes vanished is worse than one that failed loudly."""
+    path = _arg(argv, "--notes-file")
+    if path:
+        # utf-8-sig, not utf-8: this box is PowerShell-primary, where `>` and
+        # Out-File default to UTF-16LE and Set-Content can emit a UTF-8 BOM.
+        # A BOM is NOT whitespace, so ﻿ survived .strip() straight into the
+        # artifact's notes. UTF-16 still raises -- loudly and by design -- but
+        # the error now says what to do about it.
+        try:
+            with open(path, encoding="utf-8-sig") as fh:
+                return fh.read().strip()
+        except UnicodeDecodeError as e:
+            raise SystemExit(
+                "eos-review-gate: --notes-file %s is not UTF-8 (%s). PowerShell's "
+                "`>` and Out-File default to UTF-16LE -- rewrite it with "
+                "`Set-Content -Encoding utf8` or a UTF-8 heredoc and retry."
+                % (path, e))
+    return _arg(argv, "--notes") or ""
+
 
 def _arg(argv, name, default=None):
     if name in argv:
@@ -836,7 +881,7 @@ def cli_record(argv):
         "reviewer_model": model,
         "paths": rels,
         "repo": root.replace("\\", "/"),
-        "notes": _arg(argv, "--notes") or "",
+        "notes": _resolve_notes(argv),
         "ts": int(time.time()),
     }
     with open(path, "w", encoding="ascii", newline="\n") as fh:
