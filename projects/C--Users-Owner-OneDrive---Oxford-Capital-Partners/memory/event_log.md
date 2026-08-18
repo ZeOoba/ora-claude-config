@@ -5,12 +5,192 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-17T19:37:22.572Z
+  modified: 2026-08-17T21:15:13.337Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-08-17 -- Tax & Basis Register gap-check: 5 remaining priority-1 findings + entity/exchange index filed
+
+Code-surface session, gap-check pass after a concurrent session (`3f365fd1`
+and others) scoped its own Code-side work on the same 2026-08-17 "Tax &
+Settlement systemization" handoff narrowly to skill authoring +
+Metrics-History fact-check + the 2 data-gap items (OI-187/OI-188) it hit
+along the way. Verified `settlement-basis-extraction` (Task 1) was already
+committed and validated -- no action needed there. Confirmed 5 of the
+handoff's 6 priority-1 findings, plus the cost-seg memo correction, were not
+yet anywhere in `.claude`; filed them:
+
+- [OI-189](open-items-tracker.md#OI-189) -- 1100 Rarig: $1,803,121.50 settlement
+  capitalized with zero land allocation
+- [OI-190](open-items-tracker.md#OI-190) -- McGregor Lane parcel on the
+  07/02/2024 settlement but missing from the 2024 Form 8824
+- [OI-191](open-items-tracker.md#OI-191) -- 1100 Rarig $217,346 Section 481(a)
+  adjustment, no Form 3115 on file
+- [OI-192](open-items-tracker.md#OI-192) -- 5600 Sunnyside title-chain gap
+  (1992 individual owners vs. 02/2025 LLC seller, no intervening conveyance
+  documented)
+- [OI-193](open-items-tracker.md#OI-193) -- `2026-07-28_CostSegDispositionPortfolio_Memo_v02.docx`
+  Table 1/2 arithmetic errors ($200K understatement); flagged only, not
+  edited -- the memo lives in a non-Claude OneDrive business folder
+
+Also added [[reference_tax_settlement_entity_and_exchange_index_2026-08-17]]
+(6 entity EINs, the EX-12-*/IPX 1031 exchange-number index 2015-2026, and the
+Fenton Street LLC 2024 status-change note -- it exited rental-flow-through
+holding via five 12.5% zero-gain transfers but federal K-1s still print its
+old 62.5%, EXCEPTIONS tab defect #9, uncorrected).
+
+**Editing discipline:** `open-items-tracker.md` and `MEMORY.md` both carried
+a live same-file-collision warning (session `3f365fd1` working, 4 others with
+recorded edits in the same dirty checkout) at edit time. Both edits were
+kept strictly additive (new rows/lines only, no existing content touched) and
+were NOT committed -- the working tree is jointly authored right now and
+committing risks co-mingling another session's uncommitted hunks. Whoever
+next reconciles this checkout should fold these rows in along with the rest
+of the outstanding WIP.
+
+**Still not located anywhere in `.claude` as of this pass:** the Fenton
+Street K-1 62.5%-vs-actual-0% defect is now captured only inside the entity/
+exchange reference file above (folded in rather than given its own OI row,
+since it's a return-preparation correction, not an open investigation), and
+Task 4's remaining flag-only items (Fenton Street TY2025 MD return image-only
+scan, 7658 Fishel needing a Franklin County re-pull, no Form 4562 for 3
+entities) were not filed by either session -- still open.
+
+## 2026-08-17 -- insurance-renewal-review v2.0 committed; deductible-ladder "47% short" finding corrected; 9620 State 350 open items + CCR scheduler deviation flagged
+
+Code-surface session, following a Cowork insurance-premium-review sprint (7
+properties, 2 analytical errors caught and corrected there). Four actions:
+
+1. **`insurance-renewal-review` skill updated v1.1 -> v2.0** in `ora-skills`
+   ([PR #47](https://github.com/ZeOoba/ora-skills/pull/47), branch
+   `feat/insurance-renewal-review-v2.0-clean`, commit `5953732`). Repo was
+   verified at v1.1 first, not assumed. Changes: text-layer-vs-scan test
+   promoted to Step 1 (v1.x assumed every PDF was a scan); Step 7 rewritten
+   around the `Option 1 - GL limits $2m/4m` quote-header trap; new Step 8
+   ("quoted vs. realized"); Step 9 split into premium reconciliation (9a) and
+   named-insured-by-LOCATION reconciliation (9b); Step 11 makes the HTML
+   dashboard a standard deliverable. `tools/package_skills.py --check-staged`
+   passed; description field measured at exactly 1024 chars (the platform
+   import ceiling -- passes, but has zero headroom for the next revision).
+   `references/ocr-and-extraction-checklist.md` was byte-identical between
+   the staged copy and the repo copy, so no reconciliation was needed there.
+   `ora-skills` had unrelated unattributed WIP (`pma-qc/`, `tools/ora_doc_qc.py`)
+   in the tree at claim time -- confirmed disjoint, staged only this skill's
+   own path. Local `main` was 3 commits ahead of `origin/main` from other
+   session(s) -- branched from `origin/main` instead of local `main` so the
+   PR would not bundle unrelated unpushed work; an earlier attempt did bundle
+   them and was abandoned (its remote branch `feat/insurance-renewal-review-v2.0`
+   is stale on GitHub, unmerged, safe to delete -- left for Gabriel since
+   deleting it needs a force/delete permission this session didn't have).
+
+2. **Deductible-ladder "47% short" finding corrected** (now documented as
+   Step 8's worked example in the skill and in Cowork's
+   `insurance_deductible_ladder.md`). The Erie deductible-buydown quote tab
+   is headed "Option 1 - GL limits $2m/4m" -- every quoted tier assumes GL
+   rebased to $2M/$4M, not held at current limits. An earlier draft compared
+   a bound outcome against the raw quote without noticing this, concluding
+   the credit "came in 47% short." Wrong on both the arithmetic base and the
+   causal claim. Corrected: 3034 Westerville Rd quoted $7,237 at $25K
+   deductible (GL rebased to $2M/$4M), bound a year later at $7,522 on
+   exactly those terms -- 1.4% above the raw quote and under the
+   exposure-adjusted (~$7,600, building value +5.02%) figure. The quote held.
+   Consequence flagged for the Foundation Insurance Group draft letter: four
+   properties currently ABOVE $2M/$4M GL (Fairground Village Center $5m/5m,
+   Muirkirk $5m/5m, 3540 Fifth Ave $3m/3m, 1900 N Broadway $3m/3m) would cut
+   liability limits, not just trade retention, if they took the quoted credit
+   as-is.
+
+3. **9620 E State Route 350 (Raytown MO) mid-cycle carrier switch confirmed,
+   three items left OPEN**: Westchester property policy cancelled mid-term
+   05/28/2026 (signed by Gabriel 06/01/2026, 7.3 of 12 months used); replaced
+   by a bound Hartford Spectrum BOP (37 SBA CB6KKB), anniversary now 05/28
+   (was 10/18). New combined premium $18,885 (was $30,185); AOP deductible
+   $5,000 -> $50,000; new 2% wind/hail deductible ($86,400 exposure); rate/
+   $100 TIV dropped from 0.699 (2.97x book) to 0.437 (1.86x) -- 9620 is no
+   longer the worst-priced asset in the book (3883 Livingston at 1.97x now
+   is). Open, unresolved as of 2026-08-17: (a) broker of record unconfirmed
+   -- three agencies (XPT Partners, Foundation Insurance Group, KNABE
+   Insurance) touched this one property in 8 weeks and no letter names who
+   services it going forward; (b) GL-side transition undocumented -- the
+   signed cancellation covers only the property policy, no cancellation
+   notice supplied for the companion GL policy (GLWF18677015-001) despite
+   Hartford's BOP already bundling GL; (c) short-rate return premium unknown
+   -- the ACORD 35 calculation section was left blank. Full detail in
+   Cowork's `insurance_9620_state350.md`.
+
+4. **Scheduler deviation flagged, not silently fixed**: a weekly "Insurance
+   tracker reconciliation (ORA)" task was registered 2026-08-17 via a cloud
+   Cowork session's `create_trigger` MCP on the **CCR fleet**, not LAMS/
+   Cowork -- because the canonical `create_scheduled_task` MCP was unreachable
+   from that session, and Gabriel explicitly authorized the deviation
+   in-turn. Trigger id `trig_01LK3badqJ5wa7FyCtEE2z5W`, cron `0 13 * * 1`
+   (Mon 13:00 UTC / 9am ET), next run 2026-08-24. This will NOT show up in
+   `automation-health-monitor`'s dual-fleet enumeration unless that skill
+   learns to also check the CCR/`create_trigger` registry, or the task gets
+   re-registered on the correct fleet via `register-scheduled-task`. Not
+   re-registered this session -- flagging only, per the handoff's explicit
+   instruction not to silently fix it.
+
+## 2026-08-17 -- settlement-basis-extraction skill committed; "Metrics History" brain-repo pattern found NOT to exist
+
+Code-surface session, following a Cowork "Taxes + Settlement Statements" project
+systemization sprint (5 items; 4 of 5 delivered there, repo/skill work handed off
+to Code). Three actions taken here:
+
+1. **`settlement-basis-extraction` skill authored and committed** to `ora-skills`
+   (`9ca7a2f`), generalizing the manual 2026-08-17 Tax & Basis Register build
+   (32 settlement PDFs / 27 transactions / 6 entities) into a repeatable HUD-1/
+   ALTA extraction procedure: OCR triage, verbatim transcription + cross-footing,
+   `references/charge-capitalization-taxonomy.md` for closing-charge tagging,
+   land/improvement gap flagging, and 1031-chain-register updates at closing.
+   Passed `tools/package_skills.py --check-staged` frontmatter validation.
+   README inventory bumped 57 -> 58. `ora-skills` had unrelated unattributed WIP
+   (`pma-qc/`, `tools/ora_doc_qc.py`) in the working tree at claim time --
+   confirmed disjoint via `repo_first_check.py` full sweep and staged only this
+   skill's own paths, per single-writer discipline.
+
+2. **The handoff prompt's premise was false, verified rather than assumed:**
+   it asserted the brain repo (`oxford-command-center`) already writes a
+   "Metrics History" table for Leasing/Ops/Market via a "Category 4a/4b
+   write-through" pattern, sourced to the `monthly-close` skill's changelog.
+   Grepped both `oxford-brain-ingest` (which turns out to hold zero code --
+   just ~30 flat CSV exports, not an ingestion layer) and `oxford-command-center`
+   (source + `architecture/database-schema.md`) for "Metrics History",
+   "write-through", "Category 4a/4b": zero matches anywhere. `monthly-close`'s
+   own `## CATEGORY 4` section is QB month-end journal entries, unrelated.
+   What actually exists is four separate purpose-built tables in
+   `data/warehouse/finance.sqlite` (`property_occupancy`, `lease_events`,
+   `prospect_demand_events`, `market_series` -- migrations 004/011-013), two of
+   which (`lease_events`, `market_series`) are schema-only with no live INSERT
+   path anywhere in `server/` or `scripts/`. None carry a generic
+   category/metric/value envelope the new tax or 1031 data could append into.
+   **Did not force either register into this repo.** Correction: a dedicated
+   `property_tax_assessments` + `tax_appeals` pair already exists
+   (`server/warehouse/migrations/020_property_tax.sql`, live importer
+   `scripts/import-assessments.ts`, CSV template
+   `docs/templates/property-tax-assessments.template.csv`) -- the real home for
+   the `CARRYING_COST_TREND` register data once it's pulled out of the
+   Cowork-project-only markdown into a Code-accessible file; nobody has done
+   that ingestion yet. The 1031 exchange chain register has no existing table
+   anywhere -- stays in the Cowork project as source of record per the
+   handoff's own fallback instruction.
+
+3. **Two open data gaps filed to the tracker** rather than re-derived or left
+   implicit: [OI-187](open-items-tracker.md#OI-187) (3034 Westerville Rd ALTA
+   settlement table, 0% legible, needs a clean copy from title/counsel) and
+   [OI-188](open-items-tracker.md#OI-188) (2203-2207 Northwood, no historical
+   tax record anywhere in the `Property Taxes Historical` tree -- same property
+   behind the unresolved $75,011 recognized-boot/related-party 1031 gap, seller
+   and lender both `2900 Loch Raven LLC`).
+
+Untouched, per the handoff's own scope: OCR of the 23 scanned settlement PDFs
+(blocked all session on a OneDrive folder-consent dialog, purely a "retry with
+the desktop app in foreground" task) and the draft Form 4562 request to the
+preparer (drafted in Cowork, not sent -- outbound counterparty send needs
+Gabriel's in-turn confirmation and Code has no send path for it anyway).
 
 ## 2026-08-17 -- register-scheduled-task v2.12 packaged + staged (bounded-pause resume rule)
 
