@@ -5,12 +5,58 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-17T21:15:13.337Z
+  modified: 2026-08-18T00:43:44.957Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-08-17 -- dirty-tree-triage: 4 settled isolated commits landed on `~/.claude`; ora-skills and oxford-command-center left untouched
+
+Ran the `dirty-tree-triage` skill against the default four checkouts. `website-canonical`
+was clean. `~/.claude` had 17 dirty entries; 14 were settled and evidence-attributed,
+landed via `commit_isolated_replacement()` in 4 isolated commits:
+
+- `d27c51e` -- event_log.md + 3 new reference notes (Tax & Basis Register gap-check,
+  insurance-renewal-review v2.0 / 9620 State 350, Metrics-History non-existence-check),
+  attributed to sessions `8f27ce3a` (Tax & Basis import repo systemization) and
+  `8d2515c6` (Insurance renewal review skill v2.0), both settled and not running.
+- `2903132` -- rules.md Zapier status correction, corroborated by an already-committed
+  event_log entry describing the same fix.
+- `39c7f35` -- INDEX_reference.md + reference_ora_pm.md (ora-pm BETA status + N+1
+  delinquency-check timeout finding). No corroborating session found in `list_sessions`
+  -- reported UNATTRIBUTED per triage doctrine, but settled (mtime unchanged across two
+  checks, ~9h stale).
+- `324cb73` -- maintenance/_state FleetPause restore ledger + its debug-script archive +
+  the `ora-routine-pause-resume-08-21` one-time task folder, attributed to session
+  `cd9e6e4e` (Pause routines until Friday 5 PM).
+
+**Left untouched, contested/live:** `MEMORY.md`, `open-items-tracker.md`, and the new
+`project_ora_doc_qc_shared_module_pr48_2026-08-17.md` -- mtime moved BETWEEN two checks
+made ~4 minutes apart (20:31:19->20:35:18 on MEMORY.md), and session `local_ceb1bb01`
+("Retrofit listing/lease QC onto shared module", PR #48) showed `isRunning: true` mid-triage
+before its PR merged. Both `MEMORY.md` and `open-items-tracker.md` are also jointly edited
+by session `local_bd6f4916` (PR #137 merged, closing OI-184) -- multi-session collision,
+not something this skill force-resolves. Leave for the next session to reconcile.
+
+**ora-skills:** single-writer check (step 7) caught the repo mid-merge -- HEAD moved to
+`5f8b65b` (PR #48 merge) and a brand-new `_archive/2026-08-18_superseded_pre_merge_untracked/`
+appeared between the initial scan and the attribution pass, with `tools/ora_doc_qc.py`'s mtime
+seconds old. Stopped per doctrine; nothing touched. Pre-existing dirty entries there
+(`_archive/2026-08-17_item1-reimport-prep/`, `_archive/2026-08-17_register-scheduled-task-v2.10/`,
+`pma-qc/`) still need a fresh triage pass once the merge settles.
+
+**oxford-command-center:** `data/snapshots/portfolio.json` modified-tracked, mtime settled
+(~9h stale), but branch is `ahead 1, behind 1` of origin -- real divergence, out of this
+skill's scope per its own Boundaries section. Also this file is documented
+([[reference_command_center_snapshot_is_tracked_not_ignored]]) as normally auto-committed by
+its own tooling; reported rather than force-committed, since a 9h-stuck auto-commit plus a
+divergent branch together read as an anomaly worth a human look, not a mechanical isolate.
+
+Net: 4 clean isolated commits, 0 files force-resolved, 2 repos correctly left alone on
+evidence (one live merge, one branch divergence + tooling anomaly), 1 file cluster correctly
+reported as still-contested rather than guessed at.
 
 ## 2026-08-17 -- Tax & Basis Register gap-check: 5 remaining priority-1 findings + entity/exchange index filed
 
