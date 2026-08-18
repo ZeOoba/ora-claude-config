@@ -1,0 +1,19 @@
+---
+name: ora-routine-pause-resume-08-21
+description: One-time resume — re-enables the 35 CC/MCP recurring tasks paused 2026-08-17 at Gabriel's request ("pause all routines until Friday 5pm"). Auto-disables after firing. One-time CC/MCP task = MODEL-N/A, exempt from the [MODEL:] tag.
+---
+
+This is a one-time resume task. On 2026-08-17, Gabriel asked to pause all CC/MCP routines until Friday 2026-08-21 5:00 PM ET. You are that resume action.
+
+Re-enable exactly these 35 task ids via update_scheduled_task(taskId, enabled: true) — pass ONLY the `enabled` field on each call (do not touch description/prompt/cronExpression, to avoid reverting any hand-edits made to a task's SKILL.md during the pause window):
+
+ora-master-workbook-ingest, ora-financial-code-integrity-sweep, ora-monthly-portfolio-briefing, ora-health-guard, ora-task-integrity-guard, ora-weekly-hygiene, ora-deal-sourcing-scan, ora-pm-ledger, ora-doctrine-integrity-guard, ora-open-sessions-board, ora-command-center-mirror-drift-check, ora-site-exposure-probe, ora-aaos-expire-leases, ora-aaos-publish-contracts, ora-model-release-watch, ora-calibration-snapshot, ora-entry-market-scan, ora-cc-schematic-refresh, ora-sofr-direct-prefetch, ora-broker-touch-cadence, ora-am-brief, ora-deal-command-board, ora-deal-aging-sla, ora-appsec-sweep, ora-tenant-hubspot-reconciliation, ora-cc-snapshot-refresh, ora-lease-snapshot-refresh, ora-psa-drift-watch, ora-claude-setup-audit, ora-acquisition-underwriting-eval-harness, ora-county-sales-monitor, ora-passed-deal-tracker, ora-pm-daily-crons, ora-memory-commit-sweep, ora-ar-feed-sweep
+
+STEPS:
+1. Call list_scheduled_tasks first. For each id above, confirm it still exists. If any id is missing (retired/renamed during the pause window), skip it and note it as "not found — likely retired during pause" rather than erroring out.
+2. For each id that exists, call update_scheduled_task(taskId: <id>, enabled: true).
+3. Call list_scheduled_tasks again to verify every id from the list (that still exists) now shows enabled: true. If any failed to flip, retry once.
+4. Do NOT touch any task not on this list — in particular, leave the one-time tickler tasks (ora-511-industrial-fallout-check, ora-pm-ledger-retime-efficacy-check, ora-psa-drift-watch-retime-efficacy-check, ora-rev10-remediation-efficacy-check, or any other one-time task) alone; they were never part of this pause.
+5. Note: several of these tasks carry a [MODEL: ... | checked/set YYYY-MM-DD] freshness tag in their description. Re-enabling does NOT constitute re-verification — do not bump those dates in this pass; leave that to the tasks' own normal freshness-check cadence (do not fabricate a "checked" stamp without an actual observation — this is a hard rule per memory/feedback_verified_null_vs_inferred_null.md).
+6. Send ONE summary email via Outlook COM (C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1 — the sole send path) to ggoldberg@oxfordra.net ONLY (no cc). Subject: "CC/MCP routine fleet resumed (paused 08-17 → 08-21)". Body: list of task ids successfully re-enabled, any not-found/skipped ids, any that failed to flip after retry. Include a reminder line: "This resume covers the CC/MCP fleet only. If the LAMS/Cowork fleet (~25 tasks) was also paused on 2026-08-17, verify it was resumed separately from a Cowork session — this task cannot reach that registry." On COM send failure: retry once, and if it still fails, do not halt — the automation-health-monitor will catch a missed send.
+7. Do not fabricate any result. If list_scheduled_tasks or update_scheduled_task calls are unavailable in this session for any reason, stop and note that in whatever output surface is available.
