@@ -31,7 +31,7 @@ feedback_qb_desktop, feedback_netlify_mcp, feedback_less_permission_prompts, fee
 - Gabriel uses **Outlook (Microsoft 365) only**. Never use Gmail for drafts, notifications, automation, or any email delivery.
 - **Send path:** Outlook COM via PowerShell is the SOLE path: `C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1` (uses authenticated desktop profile; no OAuth/tokens). **Composio fallback REMOVED 2026-06-11** (connector gone). On non-zero COM exit: retry once, then flag loudly (Notion completion row; automation-health-monitor producer-beacon check catches the silent send) — do NOT halt, never route through Composio/Rube/Gmail.
 - **Rube is retired (EOL 2026-05-15) — never reference or route to it.**
-- **Zapier is out of space** (since 2026-04-16) — do not recommend or design around Zapier. Use Outlook COM, Power Automate (if premium), or local PowerShell.
+- **Zapier is RETIRED — removal ratified 2026-07-16** (Gabriel, setup-audit ratification session; see `tech.md` §4, SoR §10, event_log_2026-07-18). Never re-auth, never route through it, never design around it. Use Outlook COM, Power Automate (if premium), or local PowerShell. *Corrected 2026-08-17: this line previously read "out of space (since 2026-04-16)", which was the pre-ratification premise. That framing is what justified the 2026-06-02/06-10 "keep connected" posture — capacity-capped, would resume when space freed. That premise became false ~2026-06-22 when the connection was de-authed and disappeared from the live tool list, which is precisely why Gabriel ratified removal on 07-16. Leaving the old wording in place kept a superseded rationale alive in a canonical file.*
 
 ## 3. Digest & report recipients
 
