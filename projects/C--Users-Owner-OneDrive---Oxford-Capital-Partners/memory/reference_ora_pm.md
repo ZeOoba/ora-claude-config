@@ -1,17 +1,29 @@
 ---
 name: reference-ora-pm
-description: ORA PM app (ZeOoba/ora-pm) — local path & oxford-perfection disambiguation, Supabase magic-link redirect whitelist, UX-overhaul roadmap status (Phase 1+2a shipped+pushed, Stripe ACH payments built beyond original scope), 2026-07-16 audit findings pointer, 2026-07-18 test-suite status, and the wrangler pages deploy --branch gotcha (2026-08-04)
+description: ORA PM app (ZeOoba/ora-pm) — BETA status (not live, no tenant paying through it yet), empty-payments-table + N+1 delinquency-check timeout findings (2026-08-17), local path & oxford-perfection disambiguation, Supabase magic-link redirect whitelist, UX-overhaul roadmap status (Phase 1+2a shipped+pushed, Stripe ACH payments built beyond original scope), 2026-07-16 audit findings pointer, 2026-07-18 test-suite status, and the wrangler pages deploy --branch gotcha (2026-08-04)
 metadata: 
   node_type: memory
   type: reference
   originSessionId: 6c6059fc-f17f-4580-94d9-40b005f38973
-  modified: 2026-08-04T22:21:50.124Z
+  modified: 2026-08-17T15:53:13.371Z
 ---
 
 ## ORA PM — ZeOoba/ora-pm
 
 **Repo:** `ZeOoba/ora-pm`
 **Production URL:** `https://ora-pm.pages.dev` (Cloudflare Pages)
+
+## ⛔ STATUS: BETA — not live (Gabriel, 2026-08-17)
+
+**No tenant currently pays rent through ora-pm.** Gabriel confirmed 2026-08-17: this is intentionally pre-launch, being built out for a *future* switch to tenants paying through this software. Real rent collection today happens outside ora-pm entirely (PM company / other channel — the ORA Master Workbook remains the firm's source of record for cash per `CLAUDE.md`).
+
+**Consequence — the daily `delinquency-check` cron digest is not a real signal yet.** Confirmed 2026-08-17: the `payments` table is **completely empty** (`Content-Range: */0`, zero rows, ever) while `charges` has 108 rows going back to a 2026-06-04 backfill. Since `ar_ledger.balance = total_charged − total_paid` ([0010_ar_ledger_property_name.sql:34](file:///C:/Users/Owner/ora-pm/supabase/migrations/0010_ar_ledger_property_name.sql)) and `total_paid` is structurally zero for every lease, every "N Delinquent Tenants" email sent to date (25 on 08-11/08-13/08-14, etc. — see `ping-crons-cron.log`) is gross-billed-since-inception, not real delinquency. Treat every past and current ora-pm delinquency digest as **not meaningful** until Gabriel wires real payment recording (manual entry via `server/routes/payments.ts` and/or the Stripe ACH webhook in `server/routes/webhook.ts`, both already built) and tenants actually start paying through the app. Don't alarm on these numbers or forward them as real AR exceptions in the interim — this supersedes [[reference_delinquency_report_collection_status_blindspot]] in severity (that note assumed some real signal underneath the noise; this one has none yet).
+
+**N+1 timeout bug found the same day — FIXED 2026-08-17, committed not pushed.** `delinquency-check`'s handler did up to 2 sequential Supabase round-trips per AR-ledger row in a `for` loop (no batching). Live-tailed via `wrangler pages deployment tail` 2026-08-17: with 68 positive-balance rows (up from 25 on 08-14, driven by the 08-01 monthly rent-charge batch landing on zero payments) the endpoint reliably exceeded its 240s client timeout — Cloudflare's own log showed the invocation status `Canceled`, still running, no error thrown.
+
+**Fix:** commit `16bd0a1` on local `main` (`fix(cron): batch delinquency-check queries to stay under the cron timeout`) — batches the two existence-checks into 2 bulk `.in()` queries via the file's existing `fetchChunked`/`BULK_QUERY_CHUNK_SIZE` helper (same pattern already used by `monthly-billing` in the same file), leaving the per-row late-fee INSERT untouched. Followed `/debug` (failing regression test first, confirmed 10-calls-pre-fix → ≤2-calls-post-fix; full suite run — caught and correctly resolved an OI-042 raw-error-passthrough tripwire hit by extending `cron.ts`'s existing allowlist under its already-documented operator-only-endpoint rationale; independent code review returned "Ready to merge, Yes" with one Important note addressed inline — the fix also changes error handling from silent-skip-on-query-failure to fail-closed, now called out explicitly in a code comment). 465/465 tests pass, `tsc --noEmit` clean.
+
+**⛔ Not pushed to `origin/main` as of 2026-08-17** — local `main` is 1 commit ahead. Per the deploy gotcha above, this also means it is NOT live at `ora-pm.pages.dev` yet (deploy requires an explicit `wrangler pages deploy` from `main`, separate step). Doesn't matter for now since `ora-pm-daily-crons` is paused (see below) and the app is beta, but push/deploy before re-enabling the cron.
 
 ## Deploy gotcha — `wrangler pages deploy` needs `main` checked out, or it silently ships a preview (2026-08-04)
 
