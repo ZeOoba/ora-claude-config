@@ -1247,6 +1247,77 @@ def test_ratified_perproperty_refi_ceiling_prose_stays_clean_unit():
     print("  PASS test_ratified_perproperty_refi_ceiling_prose_stays_clean_unit")
 
 
+def test_perproperty_refi_ceiling_standalone_bullet_stays_clean_unit():
+    """REGRESSION PIN (governor-drift-probe.py false positive, live on main): the ratified
+    per-property refi-sizing ceiling declared on its OWN bullet -- with no same-line
+    portfolio-aggregate 40% companion and no same-line "LESSER of ... DSCR" construct, because
+    doctrine legitimately states the two governors on SEPARATE bullets -- escaped every existing
+    suppressor and flagged "LTV governor 65%% != canonical 40%%".
+
+    Root cause (acquisition-buy-box-v1.md:31): the literal "LTV ceiling" token arms is_gov (a
+    GOV_KEYWORDS hit); the parenthetical "(per-property refi sizing)" immediately after "ceiling"
+    truncates RE_LTV_ANCHOR's scan window at the "(" clause-splitter, so the anchor pass never
+    reads the 65%% at all; the line falls through to the reverse bare-proximity pass
+    (RE_LTV_NEAR, "65%%** LTV"), which had no per-property/refi framing suppressor for a
+    STANDALONE mention -- every existing one requires either the portfolio-aggregate companion on
+    the same line (the 2026-07-16 pairing suppressor) or a same-line refi construct (LESSER-of /
+    refi-to / DSCR-paired). This was KNOWN GAP 2 in the probe's own comments, deliberately
+    deferred pending a reviewed change -- this is that change.
+
+    This exact wording (acquisition-buy-box-v1.md:31-32, split across two lines by markdown
+    wrapping) is scanned ONE LINE AT A TIME by scan_line(), so the test reproduces line 31 alone,
+    exactly as the probe sees it."""
+    m = _load_probe_module()
+    line = ("- **LTV ceiling (per-property refi sizing):** **≤ 65%** LTV at stabilized "
+            "exit-cap value. Refi debt")
+    out = m.scan_line(line)
+    assert out == [], (
+        "ratified per-property refi-sizing ceiling on its own bullet must not flag; got %r" % out)
+    # Hyphenated doctrine spelling (SKILL.md house style: "refi-sizing") must be equally clean.
+    line_hyphen = "LTV ceiling (per-property refi-sizing): <= 65% LTV at stabilized exit value."
+    out_hyphen = m.scan_line(line_hyphen)
+    assert out_hyphen == [], (
+        "hyphenated 'refi-sizing' spelling must not flag either; got %r" % out_hyphen)
+    print("  PASS test_perproperty_refi_ceiling_standalone_bullet_stays_clean_unit")
+
+
+def test_perproperty_refi_ceiling_standalone_drift_still_flags_unit():
+    """VALUE-LOCK guard for the fix above: a per-property refi-sizing ceiling that has actually
+    DRIFTED off the ratified 65%% -- still on its own bullet, still no aggregate companion -- must
+    still flag. The suppressor is locked to the literal ratified value, not to the "per-property
+    refi sizing" phrase alone, so this is the anti-blinding counterpart to
+    test_perproperty_non_ratified_ltv_still_flags_unit for the standalone-bullet shape."""
+    m = _load_probe_module()
+    for val in ("80", "55", "70"):
+        line = ("- **LTV ceiling (per-property refi sizing):** **<= %s%%** LTV at stabilized "
+                "exit-cap value. Refi debt" % val)
+        out = m.scan_line(line)
+        assert any(val in o for o in out), (
+            "drifted per-property refi-sizing ceiling %s%% must still flag; got %r" % (val, out))
+    print("  PASS test_perproperty_refi_ceiling_standalone_drift_still_flags_unit")
+
+
+def test_perproperty_refi_frame_elsewhere_on_line_does_not_mask_aggregate_drift_unit():
+    """ADVERSARIAL FINDING (independent review, round 1, 2026-08-21): the first cut of the
+    standalone per-property refi-ceiling fix tested "does RE_PERPROPERTY_REFI_FRAME appear
+    ANYWHERE on the line", not whether it actually QUALIFIES the flagged value -- unlike every
+    other suppressor in this module, which is span/proximity-scoped. That let a genuinely drifted
+    AGGREGATE governor slip through whenever the ratified per-property phrase happened to sit
+    elsewhere on the same line (a realistic edit: an author conflating the two governors while
+    narrating a change to the aggregate one). Both lines below flag on the pre-fix module and must
+    still flag now that the frame is required to sit immediately BEFORE the value it qualifies."""
+    m = _load_probe_module()
+    for line in (
+        "Portfolio LTV ceiling raised to 65% given our per-property refi sizing convention.",
+        "Aggregate LTV ceiling 65%; per-property refi sizing unchanged.",
+    ):
+        out = m.scan_line(line)
+        assert any("65" in o for o in out), (
+            "aggregate-governor drift to 65%% must still flag even when the ratified per-property "
+            "refi-sizing phrase sits elsewhere on the line; line=%r got=%r" % (line, out))
+    print("  PASS test_perproperty_refi_frame_elsewhere_on_line_does_not_mask_aggregate_drift_unit")
+
+
 def test_value_between_metric_and_boundword_flags_unit():
     """GAP NOW CLOSED (2026-08-12). Was pinned as a known gap on 2026-08-11: the
     metric-VALUE-boundword order did not arm, because the value's own decimal is a '.' and the
@@ -1681,6 +1752,9 @@ def main():
     test_event_log_excluded_e2e()
     test_intervening_qualifier_dscr_floor_flags_unit()
     test_ratified_perproperty_refi_ceiling_prose_stays_clean_unit()
+    test_perproperty_refi_ceiling_standalone_bullet_stays_clean_unit()
+    test_perproperty_refi_ceiling_standalone_drift_still_flags_unit()
+    test_perproperty_refi_frame_elsewhere_on_line_does_not_mask_aggregate_drift_unit()
     test_ltv_reverse_ceiling_vetoes_non_ltv_subjects_unit()
     test_ltv_subject_veto_does_not_silence_real_declarations_unit()
     test_ltv_subject_veto_reach_semantics_unit()
