@@ -104,6 +104,17 @@ Gabriel clicked **Save skill** in Cowork on the `dirty-tree-triage.skill` packag
 
 Noted in passing: the repo has since moved past this commit with uncommitted v1.2 WIP (stray-clone-by-remote discovery, OI-200) under a live, properly-filed `ora-skills-housekeeping` claim (session `d7aee8c2`) -- correctly left untouched, not a conflict with this install.
 
+## 2026-08-21 -- 3-skill reimport batch (isolated-commit, lease-addendum, loi-generation) installed via Gabriel's Save-skill clicks
+
+Entry point A (fresh package) on the 3 genuinely-pending items out of 5 originally flagged -- a fresh `pending_reimport.py list` re-check found `automation-health-monitor` and `repo-architecture-review` had already been cleared by another concurrent session before this batch ran, so only the remaining 3 were packaged: `isolated-commit` (commit `8a35320`, brand-new skill -- first install ever, no prior cache directory existed), `lease-addendum` (commit `92fdd41`, untracked its vendored `ora_doc_qc.py` in favor of the shared-dep pattern already used by lease-form-qc/listing-agreement-qc/pma-qc -- confirmed registered in `package_skills.py`'s `SHARED_ROOT_DEPS` sourcing from `tools/ora_doc_qc.py` before packaging), and `loi-generation` (commit `3c477f5`, v1.7 merge of colliding v1.6 revisions). All three skill dirs confirmed git-clean and `plugin_of` returned `None` for all three (standalone Save-skill path) before packaging. Packaged via `tools/package_skills.py`, exit 0, frontmatter gate passed on all three (isolated-commit 325/1024, lease-addendum 794/1024 with the injected `scripts/ora_doc_qc.py` confirmed present as the 9th zip entry, loi-generation 912/1024). Staged and handed to a Cowork session for Entry point B present_files + Save-skill clicks (routed via Cowork install, not desktop Settings, since lease-addendum and loi-generation are multi-file). Gabriel confirmed all three clicks.
+
+`main.log` remained stale throughout (last write 2026-08-20 20:51:03). Verification:
+- `isolated-commit`: no prior cache directory existed (first install) -- a cache directory now exists at CreationTime 18:09:32 with content byte-identical to the packaged build. Existence itself is the install signal for a first-ever install; confirmed installed.
+- `lease-addendum`: CreationTime moved 2026-08-14 18:30:37 -> 18:09:32. Confirmed genuine re-import, all 9 packaged files (incl. the injected shared dep) byte-identical.
+- `loi-generation`: CreationTime moved 2026-08-18 15:05:16 -> 18:09:42. Confirmed genuine re-import, all 5 packaged files byte-identical.
+
+No ambiguous cases this batch -- all three cleared from `_staging/PENDING_REIMPORT.md` (`pending_reimport.py clear`) with first-hand confirming evidence for each.
+
 ## 2026-08-21 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
 
 - The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `00eb97d5-5753-4335-93e9-891e19413564` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
