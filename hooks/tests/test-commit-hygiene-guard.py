@@ -601,6 +601,49 @@ try:
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
+# H11 -- independent-review finding (PR #142, Qodo): `add -A -- <pathspec>` is SCOPED by
+# its own pathspec in real git -- -A only means "the whole tree" absent a pathspec on the
+# add itself. Must NOT be read as a sweep.
+tmp = tempfile.mkdtemp()
+try:
+    repo, _ = make_repo(tmp)
+    with open(os.path.join(repo, "plain.txt"), "w", encoding="utf-8") as fh:
+        fh.write("changed\n")
+    rc, ctx, dec = run_guard("git add -A -- plain.txt && git commit -m x", repo)
+    check("H11 add -A scoped by its OWN pathspec: silent",
+          "UNSCOPED" not in ctx, "ctx=%r" % ctx[:300])
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
+# H12 -- independent-review finding (PR #142, Qodo): a sweep add in ONE repo must not
+# taint a commit in a DIFFERENT repo reached via `-C`.
+tmpA, tmpB = tempfile.mkdtemp(), tempfile.mkdtemp()
+try:
+    repoA, _ = make_repo(tmpA)
+    repoB, _ = make_repo(tmpB)
+    with open(os.path.join(repoB, "plain.txt"), "w", encoding="utf-8") as fh:
+        fh.write("changed\n")
+    cmd = 'git -C "%s" add -A && git -C "%s" commit -m x' % (repoA, repoB)
+    rc, ctx, dec = run_guard(cmd, repoA)
+    check("H12 cross-repo sweep add does not taint a different repo's commit",
+          "UNSCOPED" not in ctx, "ctx=%r" % ctx[:300])
+finally:
+    shutil.rmtree(tmpA, ignore_errors=True)
+    shutil.rmtree(tmpB, ignore_errors=True)
+
+# H13 -- guard against over-correcting H11/H12: a SAME-repo sweep add must still warn.
+tmp = tempfile.mkdtemp()
+try:
+    repo, _ = make_repo(tmp)
+    with open(os.path.join(repo, "plain.txt"), "w", encoding="utf-8") as fh:
+        fh.write("changed\n")
+    rc, ctx, dec = run_guard('git -C "%s" add -A && git -C "%s" commit -m x' % (repo, repo),
+                             repo)
+    check("H13 same-repo -C add/commit still warns UNSCOPED",
+          "UNSCOPED" in ctx, "ctx=%r" % ctx[:300])
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
 print("")
 if FAILS:
     print("FAILED: %d" % len(FAILS))

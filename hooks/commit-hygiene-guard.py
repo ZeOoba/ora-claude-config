@@ -90,15 +90,24 @@ an `add` segment's own args are a SWEEP form) and only ever prints.
 Silent whenever the commit carries an explicit `-- <pathspec>` (already scoped, however
 it got staged) or when `add` named explicit paths with no sweep flag.
 
-ACCEPTED GAPS (independent review, 2026-08-21, both noise-direction, neither fixed here):
+ACCEPTED GAPS (independent review, 2026-08-21):
 a separate-token `-m "-a"` (the value, not glued -- `git commit -m "-a"`) is misread by
 the PRE-EXISTING `_cluster_stages_all` scan (same root cause as round-2 finding m8, which
 only fixed the GLUED case) and now surfaces as a visible wrong UNSCOPED advisory instead
-of a silent one; `git add -- -u` (a file literally named `-u`) also misreads as a sweep
-token, since the sweep-token scan does not stop at a `--` inside add's own args. Both fail
-toward noise, never silence, and never block -- tolerated rather than fixed here to avoid
-touching `_cluster_stages_all`'s pre-existing, independently-scoped behavior in the course
-of adding an unrelated advisory.
+of a silent one -- noise-direction, never silence, never blocks; tolerated rather than
+fixed here to avoid touching `_cluster_stages_all`'s pre-existing, independently-scoped
+behavior in the course of adding an unrelated advisory. (`git add -- -u`, a file literally
+named `-u`, was ALSO on this list originally -- Qodo's PR #142 review found the sweep scan
+didn't stop at add's own `--`, and the fix for that [see add_has_own_pathspec above]
+resolved this case as a side effect; removed from this list rather than left stale.)
+
+Silence-direction, from the SAME PR #142 review round: `cd sub && git add -A && cd .. &&
+git commit -m x` -- same repo, but the sweep is recorded against the resolved `repo/sub`
+target while the commit resolves against `repo`, so `_norm_target()`'s literal path
+comparison doesn't match them even though `git add -A` from a subdirectory sweeps the
+WHOLE repo, not just `sub`. Fixing this needs `analyze()` to know the actual git toplevel,
+which would mean adding git calls to a function deliberately kept git-free; tolerated
+under this file's single-operator-cooperative threat model, same as the other gaps here.
 
 Stdlib only. ASCII-only. Windows (`python`).
 """
@@ -262,17 +271,31 @@ def _cluster_stages_all(arg):
     return False
 
 
+def _norm_target(p):
+    """Comparable form of a resolved repo-target path string -- same precision level as
+    the rest of this file's `-C`/`cd` resolution (a literal path comparison, not a real
+    git-toplevel resolution, which analyze() does not have the git calls to do). Good
+    enough for this file's single-operator-cooperative-fleet threat model; see the
+    module's own ACCEPTED GAPS note."""
+    return os.path.normcase(os.path.normpath(p))
+
+
 def analyze(cmd, payload_cwd):
     """Resolve what this command line will actually do, or None when it is not a commit.
 
     Returns dict with exactly these keys: `repo_dir` (resolved against `cd` segments and a
-    relative `git -C`), `stages_all`, `pathspec` (list), `has_add`. Closes review findings
-    M1 (cd-compound), M2 (`git -C`), M3 (`git add && commit` / `commit -am`).
+    relative `git -C`), `stages_all`, `pathspec` (list), `has_add`, `sweep_add`. Closes
+    review findings M1 (cd-compound), M2 (`git -C`), M3 (`git add && commit` / `commit -am`).
     """
     cwd = payload_cwd
     found = None
     has_add = False
-    sweep_add = False
+    # GAP C sweep tracking, keyed by resolved repo target (independent review, PR #142):
+    # a sweep `add` in ONE repo must not taint a `commit` in a DIFFERENT one
+    # (`git -C repo1 add -A && git -C repo2 commit -m x`) -- a bare boolean can't tell
+    # the two apart, so this records the resolved target every sweep add actually
+    # touched, and each commit only consults entries matching ITS OWN resolved target.
+    sweep_add_targets = set()
     for seg in _segments(cmd):
         stripped = _strip_prefixes(seg)
         # Track `cd <path>` so a later segment's repo resolves where the shell will be
@@ -286,18 +309,38 @@ def analyze(cmd, payload_cwd):
             continue
         if sub == "add":
             has_add = True
-            # GAP C: does THIS add's own arg list contain a sweep token? Unlike has_add
-            # (deliberately unrestricted, see the REVERT note just below), this one only
-            # asks about the tokens actually passed to add -- `git add plain.txt` must
-            # stay silent while `git add -A`/`add .`/`add --all`/`add -u` must not. Same
-            # token set pending_add_paths() in hooks/lib/git_commit_parse.py already
-            # treats as "wants everything", kept in sync deliberately rather than
-            # imported: this file has its own independent tokenizer (see module
-            # docstring), so importing one function from the other would still leave
-            # two segment-parsing implementations to keep behavior-equivalent.
-            if any(t in ("-A", "--all", "--no-ignore-removal", "-u", "--update", ".")
-                   for t in rest):
-                sweep_add = True
+            # GAP C: does THIS add's own arg list contain a sweep token, UNSCOPED by a
+            # pathspec? Unlike has_add (deliberately unrestricted, see the REVERT note
+            # just below), this one only asks about the tokens actually passed to add --
+            # `git add plain.txt` must stay silent while `git add -A`/`add .`/
+            # `add --all`/`add -u` must not. Same token set pending_add_paths() in
+            # hooks/lib/git_commit_parse.py already treats as "wants everything", kept
+            # in sync deliberately rather than imported: this file has its own
+            # independent tokenizer (see module docstring), so importing one function
+            # from the other would still leave two segment-parsing implementations to
+            # keep behavior-equivalent.
+            #
+            # SCOPED BY THE ADD'S OWN PATHSPEC (independent review, PR #142): git's `-A`/
+            # `--all` means "the whole tree" only when NO pathspec is given to add itself
+            # -- `git add -A -- plain.txt` is scoped to plain.txt, not a sweep, the same
+            # way an explicit `-- <pathspec>` already scopes a commit elsewhere in this
+            # function. Only the tokens BEFORE add's own `--` are eligible sweep tokens;
+            # a `--` followed by at least one real path means this add is scoped and
+            # never counts as a sweep, regardless of which flags precede it.
+            add_flags = rest
+            add_has_own_pathspec = False
+            if "--" in rest:
+                _idx = rest.index("--")
+                add_flags = rest[:_idx]
+                add_has_own_pathspec = bool([p for p in rest[_idx + 1:] if p])
+            if not add_has_own_pathspec and any(
+                    t in ("-A", "--all", "--no-ignore-removal", "-u", "--update", ".")
+                    for t in add_flags):
+                if dash_c:
+                    add_target = dash_c if os.path.isabs(dash_c) else os.path.join(cwd, dash_c)
+                else:
+                    add_target = cwd
+                sweep_add_targets.add(_norm_target(add_target))
             # DELIBERATELY NOT path-restricted (round-3 finding M5 -- this is a REVERT).
             #
             # Round 2 raised a MINOR false positive: `git add plain.txt && git commit`
@@ -366,7 +409,12 @@ def analyze(cmd, payload_cwd):
             # anything at the time this commit runs) -- a wrong advisory, exactly what
             # this module's own PRECISION POSTURE forbids. Matches "later commit wins":
             # each commit's snapshot reflects only sweep/add activity seen SO FAR.
-            "sweep_add": sweep_add,
+            #
+            # ALSO repo-scoped (independent review, PR #142, Qodo finding): a sweep add
+            # only taints THIS commit if it targeted the SAME resolved repo -- otherwise
+            # `git -C repo1 add -A && git -C repo2 commit -m x` would wrongly warn about
+            # repo2's commit over repo1's sweep.
+            "sweep_add": _norm_target(target) in sweep_add_targets,
             "has_add": has_add,
         }
         # keep scanning: a LATER commit segment wins, matching execution order
