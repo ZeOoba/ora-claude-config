@@ -5,12 +5,782 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-17T14:52:15.427Z
+  modified: 2026-08-21T21:12:22.041Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-08-21 — Skill fleet: manuscript-amendment discipline (754 Old State)
+
+Four skills committed (`ora-skills` 29e78e8) and confirmed installed. Origin: a scanned
+lease at 754 Old State Route 74 whose typed expiry of "May 31, 2030" was struck through in
+ink and replaced by hand with "2027", circled and initialed. Tesseract transcribed the typed
+layer and dropped the manuscript change with no signal. An IC memo (v02) and a full IRR
+model were published on the wrong date before Gabriel caught it. The visual sweep that
+followed found four more hand changes OCR had missed, plus an unexecuted base lease that
+four months of file review had not surfaced.
+
+- **lease-abstraction-pipeline v2.6** — new STEP 2A: mandatory page-image review for every
+  OCR-path document before any field is reported (render, contact-sheet, zoom every economic
+  term / party block / signature page). Adds `EXECUTION_STATUS` and lease-chain-gap checks to
+  every document, +9 STEP 5 quality flags. Rule of record: on a scanned document, OCR text is
+  evidence of the FORM, not of the BARGAIN.
+- **deal-execution v1.5** — LEASE-CHAIN INTEGRITY in Workflow 3 DD (instrument chain, executed
+  counterpart per link, landlord-of-record match, manuscript-amendment catalogue); Workflow 2A
+  item 12 extended so estoppels carry the chain and reproduce hand amendments verbatim.
+- **title-exam-abstraction v1.0** (new) — exam-vs-commitment distinction; the mortgage-location-
+  vs-boundary-survey trap (OAC 4733-38 vs -37); cross-collateral/cross-default as its own
+  category with payoff ≠ parcel release; every exception routed to a deliverable or register item.
+- **estoppel-request-generation v1.0** (new) — estoppels built from the 32-field abstract,
+  pre-filled, each abstraction defect converted into an affirmative certification. Never amends.
+
+**Install verified before clearing the ledger.** main.log showed no SkillsPlugin sync (last
+entry 2026-08-20 20:40), so verification rested on the two NEW skills: the post-commit hook
+reported "no local AppData mirror installed yet — nothing to sync" for both, yet both cache
+directories existed at 17:22 local, three minutes after the 21:19Z commit. The hook could not
+have created them, so only a real Save-skill install could. All four then hashed byte-identical
+(EOL-normalized) to the repo. Ledger entries cleared for the four.
+
+**Observed, not actioned:** five other ledger entries (daily-brief, insurance-renewal-review,
+listing-agreement-qc, register-scheduled-task, settlement-basis-extraction) disappeared between
+this session's read and its clear. `cmd_clear` provably pops only named skills, so another actor
+cleared them; a subsequent always-verify `candidates` sweep shows none of the five has drift, so
+nothing was lost. That sweep did surface **three skills with repo-ahead-of-cache drift and no
+ledger entry at all — `debt-management`, `lease-addendum`, `loi-generation`** — the retroactive-
+blindness case `candidates` exists to catch. Left for Gabriel: they belong to other workstreams
+and packaging/installing them was not in scope.
+
+**Process note:** a cloud Cowork session CAN reach the repo-first path through the Desktop
+Commander bridge. Route: author in-container → SendUserFile → device_commit_files into a
+connected folder → PowerShell copy into `ora-skills` → idempotent patch scripts → pre-flight
+gate → commit → `tools\package_skills.py` → device_stage_files back → SendUserFile renders the
+Save-skill button. Use PowerShell, not `cmd /c` with `set VAR=...&` (breaks on spaced paths).
+Watch line endings: reading utf8 and writing `newline=''` flips CRLF→LF, which `.gitattributes`
+wants but makes a legacy-CRLF blob diff look like a full-file rewrite — verify with `git diff -w`
+and say so in the commit message.
+
+## 2026-08-21 -- repo-architecture-review: cross-repo audit filed OI-197 through OI-201, remediation started
+
+Cowork session ran `repo-architecture-review` across all 10 ZeOoba repos (local
+clones: ora-skills, oxford-command-center, ora-pm, AAOS, website-canonical;
+READMEs via `gh api`: ora-cowork-watchdog, BrainVault, ora-claude-config,
+Claude-Guru-Ooba-; Internal-Accounting-App has no documentation at all). Filed
+5 new items via `allocate-oi-id.py`: OI-197 (circular monitoring dependency
+across 5 scheduler substrates), OI-198 (ora-cowork-watchdog README describes an
+unbuilt systemd producer path), OI-199 (Internal-Accounting-App undocumented,
+uncloned -- the highest financial-consequence repo, structurally blind to this
+audit), OI-200 (stray third writable clone `oxford-command-center-1`, plus 2
+unpushed commits on the primary including a tax recapture absent from every
+mirror deploy since 08-17), OI-201 (ora-pm README stale on the billing/deploy
+path). `check-open-items-duplicate-ids.py` confirmed zero duplicate rows/
+sections. Tracker commit: `6985b46` on `feat/model-canary-probe-step25`.
+
+Also surfaced, not yet actioned: both scheduler fleets have read `EN=OFF`
+since 2026-08-17 (needs Gabriel's decision, not a unilateral resume); ora-pm
+monthly billing still has no trigger anywhere, next billing date 2026-09-01
+(new unattended automation on a money-moving path -- needs explicit
+confirmation before registering).
+
+A Code session picked up remediation same-day per the audit's handoff brief:
+committing the tracker, then working the punch list (A-E) and five workflow
+optimizations (WO-1 through WO-5).
+
+## 2026-08-21 — acquisition-proposal-generation v3.1 INSTALLED (Save-skill click confirmed, not merely committed)
+
+**What happened.** Gabriel clicked **Save skill** in Cowork on the staged
+`acquisition-proposal-generation.skill` package and confirmed it in-session at
+**2026-08-21 16:46 ET**. This entry records the CLICK, not the upstream repo commit —
+the repo commit (`fc78d55`, 2026-08-21 16:31:50 -0400, "Add acquisition-proposal-generation
+skill v3.1") is evidence the skill was authored, never evidence anyone installed it.
+First install of this skill; it is new, not a revision of a previously-installed version.
+
+**Path.** package-and-stage-skill v1.21 Entry point B (pre-packaged install, no repackaging).
+Package built by an earlier Code session at
+`ora-skills\_staging\2026-08-21_acquisition-proposal-generation-reimport\`.
+
+**Pre-check (all green).** Existence ASSERTED, not inferred: 439,052 bytes, mtime 16:39:59.
+SHA256 `1105ff284549d99fd378a3f3c3165610c0791a666f620f3530ded6b9609bd4d6` — matched the
+handoff's expected hash, and the copy staged into session outputs re-hashed identical.
+5 zip entries, all forward-slash, no directory records, expected file set exactly.
+All 5 packaged entries byte-matched the current repo copies. Frontmatter gate:
+`name` == dir, description 966/1024. `plugin_of` = None (standalone path correct).
+Repo tree clean. Not a SHARED_ROOT_DEPS consumer.
+
+**Routed to Cowork Save-skill deliberately.** 5-file skill (`SKILL.md`, `scripts/build.js`,
+`scripts/photos/{1100_rarig,55_newplant,9050_redbranch}.jpg`). Desktop Settings →
+Capabilities was explicitly ruled out per the 2026-07-11 subfolder-drop bug — that path
+would have landed SKILL.md alone and silently discarded the generator.
+
+**Post-install verify — 5/5 files, and the directory was REBUILT, not overwritten.**
+The cache mirror at
+`…\skills-plugin\583f08bc-…\a6ad2c61-…\skills\acquisition-proposal-generation\`
+carries all five files, each hashing MATCH against the repo. Decisive signal: the
+directory's own **CreationTime moved to 16:46:25** (from 16:21:45 pre-click), with every
+file created at 16:46:25 — a genuine platform tear-down-and-re-download. A
+`sync_appdata_mirror.py` content overwrite replaces file bytes in place and leaves the
+directory's CreationTime untouched, so directory re-creation is the discriminator.
+
+**Evidence caveat, recorded deliberately (v1.13 doctrine).** The pre-click state was
+*contaminated* and would have read as "already installed" to a careless pass: `ListSkills`
+already returned the skill enabled at v3.1, and all 5 cache files already hashed identical
+to the repo. Both were untrustworthy — the pre-commit mirror-sync hook had overwritten the
+cache files at 16:31:01–16:31:09 (before the 16:31:50 commit), which is the
+hash-match-by-construction case, and the account-side v3.1 description was consistent with
+a 16:21:45 *pre-commit* build whose contents the hook had already erased locally. The
+ledger still listing the skill pending, plus the absence of any corroborating sync cycle,
+is what correctly kept this on the install path.
+
+**`main.log` was unavailable as corroboration on this machine.** `main.log` has not been
+written since 2026-08-20 20:51:03 ("going down for update"); there is no 2026-08-21
+`SkillsPlugin` activity in any log file in `%APPDATA%\Claude\logs`. Step 2's normal
+Delta→Sync-complete corroboration could not be obtained, so the directory-recreation
+timestamp above was used as the first-hand substitute. **Standing consequence: while the
+desktop build is not writing main.log, the step-2 short-circuit gate cannot be satisfied
+at all — every skill will read as un-corroborated, and cache-directory CreationTime is the
+fallback discriminator.**
+
+**Ledger.** `pending_reimport.py clear acquisition-proposal-generation` run only AFTER
+this append returned exit 0. The other 5 pending entries (daily-brief,
+insurance-renewal-review, listing-agreement-qc, register-scheduled-task,
+settlement-basis-extraction) were left untouched.
+
+**Discrepancy surfaced, not repaired.** The dispatch named 8 other pending skills; the
+ledger holds only 5. `debt-management`, `lease-addendum`, and `loi-generation` are NOT in
+`_staging/PENDING_REIMPORT.md`. Reported, not acted on — out of scope for this task.
+
+## 2026-08-21 -- MEMORY.md archival pass, 918B WARN breach cleared (Automation Audit R17, Gabriel-approved)
+
+Rev 17 of the ORA Automation Audit flagged MEMORY.md at 22,418B, 918B past the
+21,500B WARN runway marker. Gabriel chose "archive stale entries now, with
+ref-repair" over leaving it or splitting the index.
+
+Archived 4 entries, each verified genuinely closed/superseded and checked for
+inbound references before moving:
+- `reference_portfolio_json_notion_seed_fallback_regression.md` (FIXED 08-09, 0 inbound refs)
+- `reference_settings_json_enabledplugins_skilloverrides_attribution_2026-08.md` (resolved, 0 inbound refs)
+- `project_broker_pipeline_blobs_v1_outage_2026-08-04.md` (fully resolved 08-16, 0 inbound refs)
+- `reference_cc_snapshot_refresh_dq_flag_alert_is_count_not_severity.md` (FIXED 08-11, 2 inbound refs in
+  `open-items-tracker.md` -- one `[[wikilink]]`, one literal markdown path link)
+
+All 4 moved to `_archive/<name>_archived_2026-08-21.md` per the archive-not-delete
+policy (memory-policy.md section 4) -- full prose preserved, nothing deleted.
+Corresponding lines removed from MEMORY.md's index. The one literal-path link in
+`open-items-tracker.md` (line ~6960, which would have broken since it pointed at
+the file's pre-move location) was repaired to point at the new archived path; the
+adjacent `[[wikilink]]` reference (name-based, doesn't break on a file move) was
+annotated with the same archived-path note for a future reader's benefit.
+
+**Result:** MEMORY.md 22,544B -> 21,437B (1,107B freed), back under the 21,500B
+WARN marker with 2,963B of headroom to the 24,400B HARD ceiling. Zero orphaned
+links introduced -- both inbound-ref sites in open-items-tracker.md were checked
+and repaired, not just the index.
+
+Full detail: [[project_automation_audit_rev17_2026-08-21]].
+
+## 2026-08-17 -- dirty-tree-triage: 4 settled isolated commits landed on `~/.claude`; ora-skills and oxford-command-center left untouched
+
+Ran the `dirty-tree-triage` skill against the default four checkouts. `website-canonical`
+was clean. `~/.claude` had 17 dirty entries; 14 were settled and evidence-attributed,
+landed via `commit_isolated_replacement()` in 4 isolated commits:
+
+- `d27c51e` -- event_log.md + 3 new reference notes (Tax & Basis Register gap-check,
+  insurance-renewal-review v2.0 / 9620 State 350, Metrics-History non-existence-check),
+  attributed to sessions `8f27ce3a` (Tax & Basis import repo systemization) and
+  `8d2515c6` (Insurance renewal review skill v2.0), both settled and not running.
+- `2903132` -- rules.md Zapier status correction, corroborated by an already-committed
+  event_log entry describing the same fix.
+- `39c7f35` -- INDEX_reference.md + reference_ora_pm.md (ora-pm BETA status + N+1
+  delinquency-check timeout finding). No corroborating session found in `list_sessions`
+  -- reported UNATTRIBUTED per triage doctrine, but settled (mtime unchanged across two
+  checks, ~9h stale).
+- `324cb73` -- maintenance/_state FleetPause restore ledger + its debug-script archive +
+  the `ora-routine-pause-resume-08-21` one-time task folder, attributed to session
+  `cd9e6e4e` (Pause routines until Friday 5 PM).
+
+**Left untouched, contested/live:** `MEMORY.md`, `open-items-tracker.md`, and the new
+`project_ora_doc_qc_shared_module_pr48_2026-08-17.md` -- mtime moved BETWEEN two checks
+made ~4 minutes apart (20:31:19->20:35:18 on MEMORY.md), and session `local_ceb1bb01`
+("Retrofit listing/lease QC onto shared module", PR #48) showed `isRunning: true` mid-triage
+before its PR merged. Both `MEMORY.md` and `open-items-tracker.md` are also jointly edited
+by session `local_bd6f4916` (PR #137 merged, closing OI-184) -- multi-session collision,
+not something this skill force-resolves. Leave for the next session to reconcile.
+
+**ora-skills:** single-writer check (step 7) caught the repo mid-merge -- HEAD moved to
+`5f8b65b` (PR #48 merge) and a brand-new `_archive/2026-08-18_superseded_pre_merge_untracked/`
+appeared between the initial scan and the attribution pass, with `tools/ora_doc_qc.py`'s mtime
+seconds old. Stopped per doctrine; nothing touched. Pre-existing dirty entries there
+(`_archive/2026-08-17_item1-reimport-prep/`, `_archive/2026-08-17_register-scheduled-task-v2.10/`,
+`pma-qc/`) still need a fresh triage pass once the merge settles.
+
+**oxford-command-center:** `data/snapshots/portfolio.json` modified-tracked, mtime settled
+(~9h stale), but branch is `ahead 1, behind 1` of origin -- real divergence, out of this
+skill's scope per its own Boundaries section. Also this file is documented
+([[reference_command_center_snapshot_is_tracked_not_ignored]]) as normally auto-committed by
+its own tooling; reported rather than force-committed, since a 9h-stuck auto-commit plus a
+divergent branch together read as an anomaly worth a human look, not a mechanical isolate.
+
+Net: 4 clean isolated commits, 0 files force-resolved, 2 repos correctly left alone on
+evidence (one live merge, one branch divergence + tooling anomaly), 1 file cluster correctly
+reported as still-contested rather than guessed at.
+
+## 2026-08-17 -- Tax & Basis Register gap-check: 5 remaining priority-1 findings + entity/exchange index filed
+
+Code-surface session, gap-check pass after a concurrent session (`3f365fd1`
+and others) scoped its own Code-side work on the same 2026-08-17 "Tax &
+Settlement systemization" handoff narrowly to skill authoring +
+Metrics-History fact-check + the 2 data-gap items (OI-187/OI-188) it hit
+along the way. Verified `settlement-basis-extraction` (Task 1) was already
+committed and validated -- no action needed there. Confirmed 5 of the
+handoff's 6 priority-1 findings, plus the cost-seg memo correction, were not
+yet anywhere in `.claude`; filed them:
+
+- [OI-189](open-items-tracker.md#OI-189) -- 1100 Rarig: $1,803,121.50 settlement
+  capitalized with zero land allocation
+- [OI-190](open-items-tracker.md#OI-190) -- McGregor Lane parcel on the
+  07/02/2024 settlement but missing from the 2024 Form 8824
+- [OI-191](open-items-tracker.md#OI-191) -- 1100 Rarig $217,346 Section 481(a)
+  adjustment, no Form 3115 on file
+- [OI-192](open-items-tracker.md#OI-192) -- 5600 Sunnyside title-chain gap
+  (1992 individual owners vs. 02/2025 LLC seller, no intervening conveyance
+  documented)
+- [OI-193](open-items-tracker.md#OI-193) -- `2026-07-28_CostSegDispositionPortfolio_Memo_v02.docx`
+  Table 1/2 arithmetic errors ($200K understatement); flagged only, not
+  edited -- the memo lives in a non-Claude OneDrive business folder
+
+Also added [[reference_tax_settlement_entity_and_exchange_index_2026-08-17]]
+(6 entity EINs, the EX-12-*/IPX 1031 exchange-number index 2015-2026, and the
+Fenton Street LLC 2024 status-change note -- it exited rental-flow-through
+holding via five 12.5% zero-gain transfers but federal K-1s still print its
+old 62.5%, EXCEPTIONS tab defect #9, uncorrected).
+
+**Editing discipline:** `open-items-tracker.md` and `MEMORY.md` both carried
+a live same-file-collision warning (session `3f365fd1` working, 4 others with
+recorded edits in the same dirty checkout) at edit time. Both edits were
+kept strictly additive (new rows/lines only, no existing content touched) and
+were NOT committed -- the working tree is jointly authored right now and
+committing risks co-mingling another session's uncommitted hunks. Whoever
+next reconciles this checkout should fold these rows in along with the rest
+of the outstanding WIP.
+
+**Still not located anywhere in `.claude` as of this pass:** the Fenton
+Street K-1 62.5%-vs-actual-0% defect is now captured only inside the entity/
+exchange reference file above (folded in rather than given its own OI row,
+since it's a return-preparation correction, not an open investigation), and
+Task 4's remaining flag-only items (Fenton Street TY2025 MD return image-only
+scan, 7658 Fishel needing a Franklin County re-pull, no Form 4562 for 3
+entities) were not filed by either session -- still open.
+
+## 2026-08-17 -- insurance-renewal-review v2.0 committed; deductible-ladder "47% short" finding corrected; 9620 State 350 open items + CCR scheduler deviation flagged
+
+Code-surface session, following a Cowork insurance-premium-review sprint (7
+properties, 2 analytical errors caught and corrected there). Four actions:
+
+1. **`insurance-renewal-review` skill updated v1.1 -> v2.0** in `ora-skills`
+   ([PR #47](https://github.com/ZeOoba/ora-skills/pull/47), branch
+   `feat/insurance-renewal-review-v2.0-clean`, commit `5953732`). Repo was
+   verified at v1.1 first, not assumed. Changes: text-layer-vs-scan test
+   promoted to Step 1 (v1.x assumed every PDF was a scan); Step 7 rewritten
+   around the `Option 1 - GL limits $2m/4m` quote-header trap; new Step 8
+   ("quoted vs. realized"); Step 9 split into premium reconciliation (9a) and
+   named-insured-by-LOCATION reconciliation (9b); Step 11 makes the HTML
+   dashboard a standard deliverable. `tools/package_skills.py --check-staged`
+   passed; description field measured at exactly 1024 chars (the platform
+   import ceiling -- passes, but has zero headroom for the next revision).
+   `references/ocr-and-extraction-checklist.md` was byte-identical between
+   the staged copy and the repo copy, so no reconciliation was needed there.
+   `ora-skills` had unrelated unattributed WIP (`pma-qc/`, `tools/ora_doc_qc.py`)
+   in the tree at claim time -- confirmed disjoint, staged only this skill's
+   own path. Local `main` was 3 commits ahead of `origin/main` from other
+   session(s) -- branched from `origin/main` instead of local `main` so the
+   PR would not bundle unrelated unpushed work; an earlier attempt did bundle
+   them and was abandoned (its remote branch `feat/insurance-renewal-review-v2.0`
+   is stale on GitHub, unmerged, safe to delete -- left for Gabriel since
+   deleting it needs a force/delete permission this session didn't have).
+
+2. **Deductible-ladder "47% short" finding corrected** (now documented as
+   Step 8's worked example in the skill and in Cowork's
+   `insurance_deductible_ladder.md`). The Erie deductible-buydown quote tab
+   is headed "Option 1 - GL limits $2m/4m" -- every quoted tier assumes GL
+   rebased to $2M/$4M, not held at current limits. An earlier draft compared
+   a bound outcome against the raw quote without noticing this, concluding
+   the credit "came in 47% short." Wrong on both the arithmetic base and the
+   causal claim. Corrected: 3034 Westerville Rd quoted $7,237 at $25K
+   deductible (GL rebased to $2M/$4M), bound a year later at $7,522 on
+   exactly those terms -- 1.4% above the raw quote and under the
+   exposure-adjusted (~$7,600, building value +5.02%) figure. The quote held.
+   Consequence flagged for the Foundation Insurance Group draft letter: four
+   properties currently ABOVE $2M/$4M GL (Fairground Village Center $5m/5m,
+   Muirkirk $5m/5m, 3540 Fifth Ave $3m/3m, 1900 N Broadway $3m/3m) would cut
+   liability limits, not just trade retention, if they took the quoted credit
+   as-is.
+
+3. **9620 E State Route 350 (Raytown MO) mid-cycle carrier switch confirmed,
+   three items left OPEN**: Westchester property policy cancelled mid-term
+   05/28/2026 (signed by Gabriel 06/01/2026, 7.3 of 12 months used); replaced
+   by a bound Hartford Spectrum BOP (37 SBA CB6KKB), anniversary now 05/28
+   (was 10/18). New combined premium $18,885 (was $30,185); AOP deductible
+   $5,000 -> $50,000; new 2% wind/hail deductible ($86,400 exposure); rate/
+   $100 TIV dropped from 0.699 (2.97x book) to 0.437 (1.86x) -- 9620 is no
+   longer the worst-priced asset in the book (3883 Livingston at 1.97x now
+   is). Open, unresolved as of 2026-08-17: (a) broker of record unconfirmed
+   -- three agencies (XPT Partners, Foundation Insurance Group, KNABE
+   Insurance) touched this one property in 8 weeks and no letter names who
+   services it going forward; (b) GL-side transition undocumented -- the
+   signed cancellation covers only the property policy, no cancellation
+   notice supplied for the companion GL policy (GLWF18677015-001) despite
+   Hartford's BOP already bundling GL; (c) short-rate return premium unknown
+   -- the ACORD 35 calculation section was left blank. Full detail in
+   Cowork's `insurance_9620_state350.md`.
+
+4. **Scheduler deviation flagged, not silently fixed**: a weekly "Insurance
+   tracker reconciliation (ORA)" task was registered 2026-08-17 via a cloud
+   Cowork session's `create_trigger` MCP on the **CCR fleet**, not LAMS/
+   Cowork -- because the canonical `create_scheduled_task` MCP was unreachable
+   from that session, and Gabriel explicitly authorized the deviation
+   in-turn. Trigger id `trig_01LK3badqJ5wa7FyCtEE2z5W`, cron `0 13 * * 1`
+   (Mon 13:00 UTC / 9am ET), next run 2026-08-24. This will NOT show up in
+   `automation-health-monitor`'s dual-fleet enumeration unless that skill
+   learns to also check the CCR/`create_trigger` registry, or the task gets
+   re-registered on the correct fleet via `register-scheduled-task`. Not
+   re-registered this session -- flagging only, per the handoff's explicit
+   instruction not to silently fix it.
+
+## 2026-08-17 -- settlement-basis-extraction skill committed; "Metrics History" brain-repo pattern found NOT to exist
+
+Code-surface session, following a Cowork "Taxes + Settlement Statements" project
+systemization sprint (5 items; 4 of 5 delivered there, repo/skill work handed off
+to Code). Three actions taken here:
+
+1. **`settlement-basis-extraction` skill authored and committed** to `ora-skills`
+   (`9ca7a2f`), generalizing the manual 2026-08-17 Tax & Basis Register build
+   (32 settlement PDFs / 27 transactions / 6 entities) into a repeatable HUD-1/
+   ALTA extraction procedure: OCR triage, verbatim transcription + cross-footing,
+   `references/charge-capitalization-taxonomy.md` for closing-charge tagging,
+   land/improvement gap flagging, and 1031-chain-register updates at closing.
+   Passed `tools/package_skills.py --check-staged` frontmatter validation.
+   README inventory bumped 57 -> 58. `ora-skills` had unrelated unattributed WIP
+   (`pma-qc/`, `tools/ora_doc_qc.py`) in the working tree at claim time --
+   confirmed disjoint via `repo_first_check.py` full sweep and staged only this
+   skill's own paths, per single-writer discipline.
+
+2. **The handoff prompt's premise was false, verified rather than assumed:**
+   it asserted the brain repo (`oxford-command-center`) already writes a
+   "Metrics History" table for Leasing/Ops/Market via a "Category 4a/4b
+   write-through" pattern, sourced to the `monthly-close` skill's changelog.
+   Grepped both `oxford-brain-ingest` (which turns out to hold zero code --
+   just ~30 flat CSV exports, not an ingestion layer) and `oxford-command-center`
+   (source + `architecture/database-schema.md`) for "Metrics History",
+   "write-through", "Category 4a/4b": zero matches anywhere. `monthly-close`'s
+   own `## CATEGORY 4` section is QB month-end journal entries, unrelated.
+   What actually exists is four separate purpose-built tables in
+   `data/warehouse/finance.sqlite` (`property_occupancy`, `lease_events`,
+   `prospect_demand_events`, `market_series` -- migrations 004/011-013), two of
+   which (`lease_events`, `market_series`) are schema-only with no live INSERT
+   path anywhere in `server/` or `scripts/`. None carry a generic
+   category/metric/value envelope the new tax or 1031 data could append into.
+   **Did not force either register into this repo.** Correction: a dedicated
+   `property_tax_assessments` + `tax_appeals` pair already exists
+   (`server/warehouse/migrations/020_property_tax.sql`, live importer
+   `scripts/import-assessments.ts`, CSV template
+   `docs/templates/property-tax-assessments.template.csv`) -- the real home for
+   the `CARRYING_COST_TREND` register data once it's pulled out of the
+   Cowork-project-only markdown into a Code-accessible file; nobody has done
+   that ingestion yet. The 1031 exchange chain register has no existing table
+   anywhere -- stays in the Cowork project as source of record per the
+   handoff's own fallback instruction.
+
+3. **Two open data gaps filed to the tracker** rather than re-derived or left
+   implicit: [OI-187](open-items-tracker.md#OI-187) (3034 Westerville Rd ALTA
+   settlement table, 0% legible, needs a clean copy from title/counsel) and
+   [OI-188](open-items-tracker.md#OI-188) (2203-2207 Northwood, no historical
+   tax record anywhere in the `Property Taxes Historical` tree -- same property
+   behind the unresolved $75,011 recognized-boot/related-party 1031 gap, seller
+   and lender both `2900 Loch Raven LLC`).
+
+Untouched, per the handoff's own scope: OCR of the 23 scanned settlement PDFs
+(blocked all session on a OneDrive folder-consent dialog, purely a "retry with
+the desktop app in foreground" task) and the draft Form 4562 request to the
+preparer (drafted in Cowork, not sent -- outbound counterparty send needs
+Gabriel's in-turn confirmation and Code has no send path for it anyway).
+
+## 2026-08-17 -- register-scheduled-task v2.12 packaged + staged (bounded-pause resume rule)
+
+Cloud Cowork session, Desktop Commander bridge live. Gabriel handed over a
+proposed v2.11 -> v2.12 patch ("bulk pause must register its own auto-resume").
+Adopted with corrections and expansions; committed to the repo as 655c346.
+
+WHAT WAS VERIFIED FIRST (read-only, both registries):
+- CC/MCP: 35 of 40 tasks disabled; one-time resume `ora-routine-pause-resume-08-21`
+  registered and enabled, fireAt 2026-08-21 17:00 ET, naming all 35 ids.
+- LAMS/Cowork: 27 of 28 tasks disabled, NO resume of any kind. Sole enabled entry
+  is `ora-counsel-review-standard-positions-2027` (one-time, fires 2027-08-02).
+- Therefore: the CC fleet restores itself Friday; the LAMS fleet does not restore
+  at all. `ora-cowork-heartbeat` and `automation-health-monitor` are both among
+  the disabled LAMS tasks -- the pause silenced the detectors for its own failure.
+- The proposed patch's premise was correct. Its claim that "nothing surfaces that
+  asymmetry" was slightly overstated: the CC resume task's step 6 email carries a
+  reminder line about the LAMS fleet -- but it does not send until 2026-08-21
+  17:00 ET, i.e. at the END of the window rather than the start.
+
+CHANGES BEYOND THE PROPOSED PATCH:
+1. Re-hinged the rule on a BOUNDED pause (stated/implied end) rather than a BULK
+   one. Bulk is the aggravating factor; a single task paused "until Friday" fails
+   identically, and a genuinely open-ended pause has no resume to register.
+2. Added: "pause all routines" is fleet-ambiguous -- resolve against both
+   registries and register one resume per fleet in scope.
+3. Added: never blanket-pause `ora-cowork-heartbeat` / `automation-health-monitor`
+   without saying so in the same turn.
+4. Added: a resume must NOT re-stamp `[MODEL:]` dates. This resolves a live
+   contradiction -- the v2.8 PAUSE bullet says re-tag with a current date on
+   re-enable, while the CC resume task's own step 5 correctly forbids it per
+   memory/feedback_verified_null_vs_inferred_null.md. v2.12 scopes v2.8's rule to
+   a hand re-enable where the model IS observed.
+5. Kept the patch's `fireAt` field name -- verified correct: one-time resume tasks
+   carry `fireAt`, not `cronExpression`/`nextRunAt`.
+6. Incident narrative filed to references/incident-history.md, not SKILL.md
+   (one fact, one home -- the size discipline from package-and-stage-skill v1.20).
+
+PACKAGING: tools/package_skills.py exit 0; description 969/1024 (a first build hit
+1069 and then 1023 -- the step-2a gate caught both before any Save-skill ask, which
+is exactly the silent-rejection trap package-and-stage-skill v1.21 was written for;
+trimmed explanatory text, never trigger vocabulary, to leave 55 chars of headroom).
+2 entries, forward-slash paths. SHA256 fca9f4ff08e852cdc58879d193226694588c7366c19a033a9fdaff1cd840e03d.
+Transferred into the cloud session via the base64+SHA256 bridge fallback (two
+device_request_folder_access dialogs timed out unanswered), byte-identity asserted.
+
+STATUS: STAGED, NOT INSTALLED. Save-skill click pending. Do NOT clear
+_staging/PENDING_REIMPORT.md until the click is confirmed and the AppData cache
+mirror is verified to hold BOTH packaged files.
+
+OPEN ITEM (higher priority than this skill edit): the LAMS fleet still has no
+resume. `ora-lams-routine-pause-resume-08-21` must be registered from a NATIVE
+on-device Cowork session (cloud sessions carry no registry MCP tools -- Rule 1).
+Draft spec staged alongside this entry.
+
+## 2026-08-17 — LAMS-side routine-pause auto-resume could not be registered from a cloud Cowork session; register-scheduled-task doctrine gap identified
+
+Gabriel asked to pause all scheduled routines until Fri 2026-08-21 17:00 ET with
+auto-resume. CC/MCP side succeeded (35 tasks paused; one-time resume task
+`ora-routine-pause-resume-08-21` registered). The LAMS/Cowork-side counterpart
+was dispatched to a cloud-sandbox Cowork session (device-bridge only, no native
+app process) — `list_scheduled_tasks`/`create_scheduled_task`/`update_scheduled_task`
+were absent (confirmed via two ToolSearch passes). Per Rule 1 the session
+correctly stopped rather than improvising a filesystem-splice fix, and did NOT
+register `ora-lams-routine-pause-resume-08-21`. This surface gap was already
+documented same-day in `register-scheduled-task` v2.10/v2.11 (added ahead of or
+concurrent with this incident) — no doctrine action needed there.
+
+**Residual gap identified (not yet fixed):** `register-scheduled-task`'s PAUSE
+section has no rule requiring a bulk-pause operation to register its own
+auto-resume in the SAME supervised session before the pause commits. On the
+LAMS side here, the pause and the resume-registration were split across two
+separate turns/surfaces, and the resume registration silently failed to land
+at all — nothing in the skill enforces symmetry. Proposed fix: a new PAUSE
+subsection requiring bulk-disable operations to register the auto-resume
+task (or confirm it's already registered) in the same pass, on the same
+surface, before/with the disable calls — never as a follow-up. Drafted as a
+proposed v2.12 patch and delivered to Gabriel for review via
+`package-and-stage-skill` (not applied directly — session cannot edit skills
+directly per platform policy). See also `reference_ora_session_sweep_lams_registry_gap.md`
+if it covers related ground (not cross-checked in this session — flag for the
+patch reviewer to reconcile).
+
+**Confirmed already covered, no action taken (would have duplicated existing
+doctrine):** (1) surface-capability preamble for the MCP registry tools — live
+in `register-scheduled-task` v2.10/v2.11 Rule 1 + Dual-fleet registry model
+surface note; (2) `fleet-status.py` as the cross-surface read for both fleets —
+live in `fleet-advisory-remediation` v1.1 Inputs section; (3) LAMS registry
+path pin — already the single source of truth in `CLAUDE.md`'s SCHEDULER
+section and `register-scheduled-task`'s Dual-fleet registry model table;
+adding it to `rules.md` would have violated memory-policy's I3 (one source of
+truth per fact).
+
+## 2026-08-17 -- register-scheduled-task v2.11 Save-skill click confirmed
+
+Gabriel confirmed the Save-skill click for `register-scheduled-task` v2.11
+(commit 10bac87, "id-collision fleet-resolution must never be tested via a live
+delete") in this Cowork session via Entry point B of package-and-stage-skill.
+
+Evidence, not assumed:
+- Live ListSkills call post-confirmation shows register-scheduled-task at
+  description version "v2.11 (2026-08-17)", enabled:true, skill id
+  skill_012MxGsJTLKjD5g4F6jjzsyH -- a NEW id relative to the pre-click id
+  (skill_018MpNnXxwB8JYCrY3roG5oR), corroborating a real re-registration event.
+- Post-install file-completeness + hash verify: every file in the packaged
+  `register-scheduled-task.skill` (SKILL.md, references/incident-history.md --
+  2 files) is present in the runtime cache mirror at
+  `...\skills-plugin\583f08bc-0123-4111-8158-8fe3d927e350\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\skills\register-scheduled-task\`
+  with byte-identical (raw match) SHA256 hashes against the packaged copy.
+
+register-scheduled-task | v2.11 | Save-skill click confirmed | PENDING_REIMPORT line cleared this pass.
+
+## 2026-08-17 -- ora-setup-audit v1.5 Save-skill click confirmed
+
+Gabriel confirmed the Save-skill click for `ora-setup-audit` v1.5 (commit 4697d8a,
+"local-mirror drift is now structurally prevented") in this Cowork session via
+Entry point B of package-and-stage-skill.
+
+Evidence, not assumed:
+- Live ListSkills call post-confirmation shows ora-setup-audit at description version
+  "v1.5", enabled:true, skill id skill_01NJyuc7Fft8zN9QP8TSgiSp -- a NEW id relative
+  to the pre-click id (skill_01PPhkBdT8e1CCYLttaA3Z4Z), corroborating a real
+  re-registration event.
+- Post-install file-completeness + hash verify: the single packaged file (SKILL.md)
+  is present in the runtime cache mirror at
+  `...\skills-plugin\583f08bc-0123-4111-8158-8fe3d927e350\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\skills\ora-setup-audit\`
+  with a byte-identical (raw match) SHA256 hash against the packaged copy.
+
+ora-setup-audit | v1.5 | Save-skill click confirmed | PENDING_REIMPORT line cleared this pass.
+
+## 2026-08-17 -- daily-brief v2.11 Save-skill click confirmed
+
+Gabriel confirmed the Save-skill click for `daily-brief` v2.11 (commit e98c92f,
+"split incident narrative to references/, size fix per Automation Audit Rev 9/15")
+in this Cowork session via Entry point B of package-and-stage-skill.
+
+Evidence, not assumed:
+- Live ListSkills call post-confirmation shows daily-brief at description version
+  "v2.11 (2026-08-16: ...)", enabled:true, skill id skill_01UThCyVdrwCH2Gz7dA91maS --
+  a NEW id relative to the pre-click id (skill_01MEijMjZU3q3idMKYY9f1nU), corroborating
+  a real re-registration event, not a cached description string.
+- Post-install file-completeness + hash verify: every file in the packaged
+  `daily-brief.skill` (SKILL.md, references/incident-history.md, target-markets.json --
+  3 files) is present in the runtime cache mirror at
+  `...\skills-plugin\583f08bc-0123-4111-8158-8fe3d927e350\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\skills\daily-brief\`
+  with byte-identical (raw match) SHA256 hashes against the packaged copy.
+
+daily-brief | v2.11 | Save-skill click confirmed | PENDING_REIMPORT line cleared this pass.
+
+## 2026-08-17 -- package-and-stage-skill already in sync, no reimport needed
+
+Entry point B bridge-first freshness screen (this session, fresh-run) checked
+`package-and-stage-skill` against both required independent signals before any
+Save-skill ask:
+
+- ListSkills (live account call): description string shows "v1.21", enabled:true --
+  matches the staged package's version exactly.
+- Desktop Commander SHA256 compare: repo `C:\Users\Owner\ora-skills\package-and-stage-skill\SKILL.md`
+  vs runtime cache copy at
+  `...\local-agent-mode-sessions\skills-plugin\583f08bc-0123-4111-8158-8fe3d927e350\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\skills\package-and-stage-skill\SKILL.md`
+  -- RAW MATCH (hash 9AF2F56837BE4F1D1890E6D8725FC094AEDAAF6A3BBF3C72E52EFD91859D04AA on both sides).
+
+Both signals matching means the Save-skill click already happened (in this session or
+an earlier unlogged one) -- no redundant install ask presented for this package.
+package-and-stage-skill | v1.21 | already in sync | no reimport needed.
+
+## 2026-08-17 — ora-cc-schematic-refresh (REV 2026-08-17a, scheduled Mon 14:15 ET)
+
+Producer-clobber pre-check clean. Two of the five standing probes regressed off 08-16a's all-green reading: `governor-drift-probe.py` returned EXIT 1 (1 hit, `acquisition-buy-box-v1.md:31` — appears to be a probe false-positive on the ratified per-property 65% refi-sizing ceiling, the same dual-governor doctrine the probe already suppresses one line below; Hard Invariant 4 constants themselves untouched); `memory-integrity-probe.py` returned EXIT 1 after 08-16a's first-ever green (281/286, 8 issues: 5 unlisted files from a concurrent session's Automation Audit work, 2 in-git orphan index links for uncommitted files, 1 governor-drift passthrough). MEMORY.md itself improved (22,207 → 21,447 bytes).
+
+Cross-check (b) found real, fully git-attributed drift: `enabledPlugins` 5 keys/3 true/2 false → 5 keys/2 true/3 false — `commit-commands` flipped FALSE, attributed to commit `1242210` (Gabriel, 2026-08-16 17:05 ET, `/doctor` pass, disabled for near-zero usage). Fleet VERDICT stayed ATTENTION: 67 tracked / 65 enabled (cc=39, lams=26) / 2 disabled, up from 66/64/2. Same-time collisions cleared 3 → 0 (two genuine overlaps no longer share a clock time in the live cron table — read as resolved-by-retime). The LAMS copy of `ora-passed-deal-tracker` flipped to disabled while the CC copy stays enabled — a step toward resolving the cross-fleet duplicate flagged at 08-16a, though the dual registration itself persists. Throttle skips reversed direction, 50 → 186 in the last 24h, breaking a three-run decline.
+
+Durable probe-status snapshot written via `write-doctrine-status.py`. One file edit (`artifacts/claude-code-schematic.html`), title-block rev log rolled under the 4-entry cap (08-11a archived to history), per-node keep-2 cap applied to all 8 touched nodes, `node --check` passed, republished in place. No registry writes, no email.
+
+## 2026-08-17 -- ora-passed-deal-tracker LAMS duplicate: retire held; register-scheduled-task hardened instead
+
+Dispatched to retire the disabled LAMS/Cowork duplicate of `ora-passed-deal-tracker` (cron `30 6 15 * *`, cross-fleet id collision flagged by `ora-task-integrity-guard`). Retirement itself was NOT performed and remains on hold -- no archive, no delete, both fleet copies unchanged from their pre-session state.
+
+Reason: this cloud Cowork session has no `list_scheduled_tasks`/`delete_scheduled_task`/`create_scheduled_task`/`update_scheduled_task` MCP tools (confirmed absent from the toolset; device bridge only, no native app process). Per register-scheduled-task Rule 1, stopped rather than improvise a filesystem path. `delete_scheduled_task` resolves an id collision by session locality with no fleet parameter (reference_delete_scheduled_task_resolves_colliding_id_to_local_fleet.md) -- deleting from the wrong surface risks the LIVE CC copy, not the disabled LAMS twin.
+
+Found live: `ora-skills` commit `bdba52b1` (register-scheduled-task v2.10, 2026-08-17 11:36:44 -0400) had already documented this exact tool-availability gap ~41 min before this session's pre-flight began, from what reads as the same root incident. Doc-only fix; did not by itself prevent this session's own dispatch into the same gap, since whatever routes task briefs to a surface does not appear to consult the skill text at dispatch time -- flagged as a still-open dispatch-routing question, not resolved this session.
+
+Genuinely missing piece added this session: register-scheduled-task v2.10 documented that a delete can be tested by fleet, but not that it must never be tested by deleting a LIVE task. Committed v2.11 (`ora-skills` `10bac87c`, 2026-08-17 12:52:55 -0400): a RETIRE bullet stating the two safe fleet-resolution checks (`list_scheduled_tasks`'s `path` field; the host surface's own reported client identity, e.g. Desktop Commander `get_config.currentClient`) and explicitly barring `ora-cowork-heartbeat` or any dead-man/heartbeat id as a test target. Queued in `_staging/PENDING_REIMPORT.md` by the post-commit hook; not yet packaged/installed -- needs a `package-and-stage-skill` run and Gabriel's Save-skill click before the platform copy reflects it.
+
+Two further fleet-status.py changes proposed earlier this session (a `disabled_but_present` JSON field; a `--why-fleet` flag) were investigated and NOT implemented -- both already correctly handled by existing code. `registry-membership-probe.py`'s `classify_absent()` already separates "still present but disabled" (WARN, not a drop) from true absence ([ACTION]); the fleet-resolution question is already answerable via Desktop Commander's own `get_config.currentClient`, which the v2.11 change above now points to directly. Correcting the record: my own earlier read of `registry-membership.log`'s `regressions={...}` line as a possible false-removal signal was a misdiagnosis of a field name, not a real gap in the underlying probe logic.
+
+Confirmed stale (evidence, not inference) before deciding whether to touch two claimed files:
+- `hooks/active-work/fleet-status-reconcile.json` (session `6797e01b`, claimed 2026-08-16 20:58:22, "3-way merge... land registration-age annotation from PR #136"): `ora-claude-config` commit `7814838` ("feat(fleet-status): reconcile cross-fleet duplicate detector with registration-age annotation") landed 2026-08-16 21:01:41, 3 minutes after the claim; working tree for `maintenance/fleet-status.py` and `maintenance/test-fleet-status.py` is clean. Claim is stale (never released after landing), not live.
+- `hooks/active-work/open-items-tracker-oi127.json` (claimed 2026-08-12 18:32:53, "file OI-127 as a duplicate pointer to OI-135... via worktree+PR"): merged via `ora-claude-config` PR #85 (`715c346`, 2026-08-13 00:17:37); `git merge-base --is-ancestor` confirms it's on `main`. Claim is stale.
+
+Not touched: `open-items-tracker.md` itself currently carries unrelated, clearly-live uncommitted content in the working tree (8 insertions/5 deletions: OI-186/184/185 filed today, plus OI-078/079/080/081 updated to CODE FIXED/CLOSED with today's date and PR references) -- not explained by either stale claim above. Held off appending the planned fleet-advisory-remediation routing note for `ora-passed-deal-tracker` rather than write into an actively-changing shared file; this is a dirty-tree-triage-shaped situation (attribute via the two-pass mtime check), not a stale-claim one, and wasn't run this session.
+
+Net for the night: one real gap found and closed (register-scheduled-task v2.11, committed, packaging pending); one dispatch-routing question surfaced but not resolved; two proposed script changes investigated and correctly NOT made; two stale claims confirmed with evidence and reported (not yet cleaned up -- claim files still present); the original retire task itself untouched, on hold pending a session with the scheduled-task MCP tools.
+
+## 2026-08-17 — orphaned-task-forensics: delinquency-check timeout root-caused and fixed (Gabriel-directed)
+
+Spawned on the `ora-pm-daily-crons` gap flagged in the same session's `fleet-advisory-remediation` pass.
+Doesn't cleanly fit either of this skill's own workflows (not an orphaned/absorbed producer, not a
+lost SKILL.md) — the task is live and firing, one of its two HTTP calls is unreliable. Investigated
+directly since the skill's diagnostic workflows didn't apply; findings and fix presented via
+`AskUserQuestion` before any write, per this skill's Output/Boundaries discipline anyway.
+
+**Symptom:** `ora-pm-daily-crons` (CC/MCP) ran twice today (10:20 AM, 10:48 AM ET) — both times
+`critical-dates-alerts` succeeded (HTTP 200) and `delinquency-check` failed: "The operation has timed
+out." (no HTTP status captured — a genuine client-side request timeout, not a server error response).
+
+**Root cause:** `ping-crons.ps1`'s client-side `-TimeoutSec 240` (set 2026-08-04 after a 22-lease
+post-6-week-backlog run measured ~93s, already over the *original* 90s limit) was itself outgrown.
+This cron did not fire at all 2026-08-15/08-16 (native "ORA PM Crons" disabled 08-16 for the OI-162
+migration; `ora-pm-daily-crons` not yet registered/live), so today's first CC/MCP-fleet run likely hit
+2-3 days of accumulated delinquency computation in one request — the same failure class the 240s bump
+was built for, just outgrown again by a shorter gap. Did not re-probe the live endpoint to confirm the
+exact current delinquent-lease count, since `delinquency-check` commits real late-fee charges
+server-side on every call — not something to trigger just to test, without Gabriel's sign-off.
+
+**Fix (Gabriel-approved, "raise the timeout again"):** bumped `-TimeoutSec` 240 -> 480 in
+`C:\Users\Owner\ora-pm-cron\ping-crons.ps1`, with an inline comment explaining the history (240s was
+already a bump from 90s) so a third recurrence doesn't require re-deriving this from scratch. Not a
+git repo — plain-file edit is the only durability mechanism here. Re-enabled `ora-pm-daily-crons` via
+the supervised `update_scheduled_task` (`enabled: true` only — diffed the SKILL.md before/after per
+the known frontmatter-drop hazard on `description`-bearing calls; byte-identical, confirming that
+hazard is specific to `description` retags, not `enabled`-only calls). Verified live: `enabled: true`,
+`cronExpression` unchanged (`40 9 * * *`), next fire 2026-08-18T13:46:31Z (09:46 ET tomorrow).
+
+**Not yet verified:** tomorrow's normal-cadence (non-backlog) run should confirm the fix holds under
+ordinary daily volume. If it times out again even on a single day's delinquency count, the cause is
+something other than backlog size (Worker-side degradation, D1 query regression) and needs a different
+investigation — flag to Gabriel rather than raising the timeout a third time reflexively.
+
+**Also closes:** ORA PM Crons / OI-162 daily-half gap flagged in the same-session
+`fleet-advisory-remediation` entry above — no working critical-dates-alerts/delinquency-check path
+existed between this fix and the prior entry; now restored.
+
+## 2026-08-17 — fleet-advisory-remediation: 4 native Windows Scheduled Task failures triaged (Code session)
+
+Investigated the `setup-self-audit` `windows-tasks` WARN Gabriel surfaced mid-session (4 native
+Windows Task Scheduler tasks, not either dual-fleet registry — confirmed out of scope for the
+`fleet-advisory-remediation` skill proper, which covers CC/MCP + LAMS/Cowork registries only; pivoted
+to direct `schtasks`/`Get-WinEvent`/`Get-ScheduledTask` diagnostics per the skill's own scope
+boundary).
+
+1. **ORA Claude Desktop Wake-and-Launch — FIXED.** Last Result `0x80070420`
+   (ERROR_SERVICE_ALREADY_RUNNING) was NOT a script bug — `ensure-claude-renderer.ps1` is fail-open
+   on every internal path (every branch, including the catch block, `exit 0`s) and its log has
+   exactly ONE line total (2026-08-05) despite firing daily since 2026-08-04. Root cause confirmed
+   via Task Scheduler's own operational log (event 153): "did not launch task ... as it missed its
+   schedule." The task's `Settings` had no `StartWhenAvailable`, so its 04:45 ET daily trigger is
+   dropped outright (not deferred) on any morning the host is asleep at that exact minute — and this
+   host's first scheduler dispatch varies 03:31-17:09
+   (`reference_am_cluster_late_wake_root_cause_2026-08-13.md`), so most mornings qualify. This is
+   directly upstream of that AM-cluster-lateness investigation: it measured the symptom without
+   knowing this task existed or was silently failing to run at all. Fixed live via
+   `Set-ScheduledTask` (`StartWhenAvailable = $true`; `schtasks.exe` has no CLI switch for this),
+   verified via XML re-export — all other settings/triggers/actions unchanged. Documented in the
+   script header so a future delete-and-recreate via its `/Create` one-liner doesn't silently
+   regress it. Isolated commit `82e4f78`.
+
+2. **ORA Fleet Dead-Man — NOT A DEFECT, working as designed.** `Last Result 1` is the script's own
+   deliberate alarm exit code (confirmed in `fleet-deadman.ps1`: `exit 1` fires only inside the
+   ALARM branch, file-only alert per its own header doctrine — no email, no toast, by design).
+   Today's log entry (`2026-08-17T13:45:39Z`) shows a real but low-severity finding: 1 phantom
+   dispatch in the last 26h, exactly at the script's own alarm threshold. No fix needed.
+
+3. **ORA Command Center - Mirror Deploy — SELF-RESOLVED, no fix needed.** The `0xC000013A`
+   (terminated) result Gabriel saw was a single transient kill; `schtasks /query` now shows
+   `Last Result: 0` on the most recent hourly runs. This is exactly the transient-kill class
+   `ora-command-center-mirror-drift-check`'s own classifier (BENIGN_KILLED_AFTER_COMPLETION /
+   RUN_IN_PROGRESS) exists to absorb.
+
+4. **ORA PM Crons — NEEDS GABRIEL'S DECISION, not touched.** The native task's `Disabled` state is
+   CORRECT and intentional (2026-08-16 OI-162 migration to `ora-pm-daily-crons` on the CC/MCP fleet
+   — do not re-enable, per that task's own SKILL.md instruction). But the intended replacement,
+   `ora-pm-daily-crons`, is ALSO currently `enabled: false` in the live CC/MCP registry, and
+   `cron.log` shows it ran TWICE today (10:20 AM and 10:48 AM ET) with `delinquency-check` timing
+   out both times ("The operation has timed out.") while `critical-dates-alerts` succeeded both
+   times. **There is currently no working automated path for critical-dates-alerts/delinquency-check
+   pinging.** Did not re-enable the task (unknown whether the disable was deliberate pending
+   investigation of the double-run/timeout, or accidental) and did not root-cause the Worker timeout
+   (per this skill's own boundary: stale-producer symptoms route to `orphaned-task-forensics`, never
+   root-caused inline). Flagged to Gabriel for a decision; OI-162 remains OPEN.
+
+**Net:** 1 fixed + verified, 2 confirmed non-issues (1 by-design, 1 self-resolved), 1 handed off as a
+live gap needing Gabriel's call. Logged per fleet-advisory-remediation Step 8 (one consolidated entry,
+not one per line item).
+
+## 2026-08-17 — class-n description remediation: 18 of 18 fleet tasks fixed (Code session)
+
+Cleanup pass on the 2026-08-15 `ora-skill-text-audit` class-n finding (description >1536 chars or
+>=2 changelog fragments — 18 of 68 fleet tasks breaching). Used the pre-built
+`maintenance/desc-classn-remediate.py` (self-tested, gate-refuses on any regression) plus manual
+authoring per task. `automation-health-monitor` (LAMS) was already done separately as v1.25 before
+this pass started; this entry covers the remaining 18.
+
+**MOVE-TO-BODY doctrine held throughout — no changelog content was deleted.** The tool auto-migrated
+pointer-only fragments matching `vX.Y (YYYY-MM-DD` on 11 of 18 tasks. On the other 7 the task's
+changelog used a format the tool's fragment regex doesn't recognize (`vX.Y YYYY-MM-DD` with no
+parens, or `v06`/`v05` with no decimal) — for those the full changelog text was hand-migrated into a
+body "Changelog — MIGRATED FROM FRONTMATTER" section before trimming, since 0-fragments-detected did
+NOT mean nothing needed migrating.
+
+**Genuine dangling-pointer found and closed:** `ora-cowork-heartbeat`'s body already carried a v06
+note that read "corrected stale 2x/day cadence references... see frontmatter changelog" — a real
+POINTER-ONLY hazard the automated scanner could not see (same non-decimal-version blind spot). The
+v06 content was still intact in the frontmatter at the time of this trim and was recovered and
+inlined into the body verbatim, with a note explaining why the tool missed it. Unlike
+`automation-health-monitor`'s pre-existing v1.16 case, this one was NOT unrecoverable — no verified
+null needed here.
+
+**Per-task char counts (before -> after):**
+
+CC/MCP fleet (12, committed to ora-claude-config as an isolated commit, `ba95efe`, on the currently
+checked-out `feat/model-canary-probe-step25` branch — consistent with this repo's established
+dirty-tree-triage isolated-commit pattern, files disjoint from other sessions' concurrent
+memory/*.md WIP):
+- ora-task-integrity-guard: 7779 -> 1148 (0 fragments detected, no-parens format; full v1.1-v1.11 changelog hand-migrated)
+- ora-health-guard: 5885 -> 1067 (7 fragments; tool auto-migrated v1.1-v1.7)
+- ora-cc-snapshot-refresh: 5523 -> 1068 (0 fragments, no-parens format; hand-migrated)
+- ora-lease-snapshot-refresh: 5199 -> 1066 (4 fragments auto-migrated v1.4-v1.7; plus a hand-migrated un-versioned preamble the tool's fragment scan couldn't see)
+- ora-appsec-sweep: 3199 -> 1207 (6 fragments; tool auto-migrated v1.2-v1.6)
+- ora-command-center-mirror-drift-check: 3178 -> 1056 (0 fragments, no-parens format; hand-migrated)
+- ora-entry-market-scan: 2860 -> 1030 (5 fragments; tool auto-migrated v1.1-v1.5)
+- ora-cc-schematic-refresh: 2741 -> 1057 (5 fragments; tool auto-migrated v1.2-v1.6)
+- ora-site-exposure-probe: 2195 -> 840 (0 fragments, no-parens format; hand-migrated)
+- ora-doctrine-integrity-guard: 1852 -> 942 (0 fragments, no-parens format; hand-migrated)
+- ora-open-sessions-board: 1110 -> 716 (2 fragments; tool auto-migrated v1.2,v1.3)
+- ora-aaos-publish-contracts: 1017 -> 715 (2 fragments; tool auto-migrated v1.2,v1.3)
+
+LAMS/Cowork fleet (6, OneDrive-native, no git):
+- ora-skill-store-drift-check: 1546 -> 1063 (5 fragments; tool auto-migrated v1.9-v1.13)
+- ora-stale-pipeline-nudge: 1474 -> 1011 (4 fragments; tool auto-migrated v1.1,v1.2,v2.1 — v2.0 was already dual-stored)
+- ora-cowork-heartbeat: 1789 -> 902 (0 fragments detected; hand-migrated including the dangling-pointer fix above)
+- ora-owner-outreach-queue-refresh: 1134 -> 1007 (3 fragments; tool auto-migrated v1.2,v1.3,v1.4)
+- ora-om-intake-ocr: 711 -> 577 (2 fragments; tool auto-migrated v1.3,v1.4)
+- ora-friday-closeout: 460 -> 413 (2 fragments; tool auto-migrated v2.0,v2.1)
+
+**Verification:** `--scan` re-run at the end reports 0 of 68 breaching. `list_scheduled_tasks`
+(CC/MCP) and a direct read of the LAMS `scheduled-tasks.json` registry (read, not written — the
+config-write-guard hook correctly blocked a `python -c` one-liner that only read the file, confirming
+that guard fires on write-shaped commands regardless of actual behavior; used the Read tool instead)
+both confirm all 18 tasks are still `enabled:true` with unchanged `cronExpression`/`nextRunAt` post-edit
+— the real integration test, since the registry has no `description` field and `list_scheduled_tasks`
+composes it by reading the SKILL.md live. No `cronExpression`, `enabled` flag, or registry entry was
+touched by this pass; frontmatter-and-body text only, per Gabriel's scope constraint.
+
+**Backups:** every trimmed file's pre-trim version copied to
+`<task>/_state-history/_skill-versions/SKILL.<oldver>-2026-08-17-pre-<newver>-classn-trim.md` (CC-fleet
+copies are gitignored/local-only — git history is the durable backup there per the ora-claude-config
+force-track convention; LAMS copies are the primary backup, OneDrive-native, matching
+`automation-health-monitor`'s established pattern).
+
+## 2026-08-17 — class-n description remediation: automation-health-monitor trimmed 7,249→1,155; reusable tool built; dark folder confirmed already archived
+
+Gabriel-directed follow-up to the two items left open on 2026-08-14.
+
+**Item A — `ora-sleep-fix-verify-0813` dark folder: ALREADY RESOLVED, no action taken.** Found at `~/.claude/scheduled-tasks/_archive_2026-08-14_expired-onetime\ora-sleep-fix-verify-0813` — another session archived it on 08-14. Confirmed absent from both live registries (0 matches in either `scheduled-tasks.json`), and `setup-self-audit` now returns `[ OK ] fleet: 67 registered (64 enabled) across both fleets; 39 folder(s) in the live store; every enabled filePath resolves; no unregistered folders`. Verified rather than redone.
+
+**Item B — class-n description trim, `automation-health-monitor` v1.24 → v1.25.** 7,249 chars / 8 changelog fragments → **1,155 chars / 1 fragment**. Backup at `_state-history/_skill-versions/SKILL.v1.24-2026-08-17-pre-v1.25-desc-trim.md`. `list_scheduled_tasks` re-read after the write: renders correctly, `enabled` true, cron `5 11 * * 1-5` and `nextRunAt` unchanged.
+
+**STALE-PLAN CATCH — worth recording as a process win.** The trim script was authored on 08-14 and hardcoded "v1.24 (2026-08-14)". Before applying it on 08-17 a pre-flight re-read found the file had been edited on **2026-08-16 16:31 by another session**, shipping a real v1.24 (Step 0.57 BLOCKED-AWAITING-GABRIEL). Applying the stale script would have collided with and misattributed that version. Renumbered to v1.25 and re-derived the migration set from the live file. **Trust observation over memory — a plan authored three days ago against a multi-session-edited file is stale input by default.**
+
+**Migration set is computed, never hardcoded.** Some versions exist in the body ONLY as pointers reading "see description field above"; trimming the description makes those dangle and the content is lost. That set differs per file and MOVES: on `automation-health-monitor` it was {v1.20, v1.22} on 08-14 and only {v1.20} by 08-17, because the 08-16 session had backfilled v1.22. v1.20's 1,095-char entry was migrated verbatim into a "MIGRATED FROM FRONTMATTER" body block.
+
+**VERIFIED NULL found.** `v1.16`'s full note is absent from BOTH the body and the description — the body's "see description field above" pointer had been dangling for some time before today. Recorded as a verified null with the one-line summary that survives; NOT reconstructed. The addendum line was rewritten to say so explicitly (per `feedback_verified_null_vs_inferred_null.md`).
+
+**Fleet scope is much larger than one file: 18 of 68 task descriptions breach class n** (10 MEDIUM, 8 LOW), worst `ora-task-integrity-guard` at 7,779 chars, `ora-health-guard` at 5,885 with **7 pointer-only versions**. Hand-editing 18 files invites exactly the migration mistake above, so instead:
+
+**NEW TOOL — `maintenance/desc-classn-remediate.py`.** Modes: `--scan` (fleet breach table incl. per-file pointer-only sets), `--report` (single file), and a guarded remediate that migrates pointer-only fragments verbatim, swaps the description, and **refuses to write** unless all pass: ≤1536 chars · <2 fragments · single line · `[MODEL:]` tag preserved · migrated text verifiably present in the new body · body length not reduced · **trigger vocabulary preserved** (parsed from the OLD description and diffed — class n's own rule is that dropping trigger terms is a routing regression worse than the tokens saved). Self-tested via `--scan`, exit 0.
+
+**Code-surface prompt produced** for the remaining 18: `outputs/2026-08-17_ClassN-Description-Remediation_Prompt_v01.md`. Deliberately NOT a scheduled task — one-pass cleanup, with the 2026-09-15 `ora-skill-text-audit` run as the confirmation gate.
+
+**UNRELATED FINDING, flagged for follow-up — four Windows Scheduled Tasks failing.** `setup-self-audit` returned a new WARN: `ORA Fleet Dead-Man` last result 1 · `ORA Command Center - Mirror Deploy` 3221225786 (0xC000013A, terminated) · `ORA PM Crons` 2147943467 (0x8007006B, ERROR_BAD_LENGTH) · **`ORA Claude Desktop Wake-and-Launch` 2147946720 (0x80070420, ERROR_SERVICE_ALREADY_RUNNING)**. The last one is materially important: a Wake-and-Launch task whose job is getting the Desktop app up in the morning ALREADY EXISTS and is erroring. That sits directly upstream of the 08-14 AM-cluster investigation, which measured first-dispatch spread of 818 min (03:31–17:09) and concluded no cron slot could fix it — **that conclusion was drawn without knowing this task existed**. If Wake-and-Launch can be made reliable the premise changes and the AM cluster may become schedulable again. Step 0.5c (HOST-UNAVAILABLE) remains correct either way — it classifies the symptom honestly — but the root cause may be fixable after all. Recommend investigating before further morning-cadence work.
+
+## 2026-08-17 -- register-scheduled-task v2.10 installed
+
+register-scheduled-task v2.10 (2026-08-17 -- cloud-vs-on-device surface note for registry MCP tools) confirmed installed via Gabriel's Save-skill click in the cloud Cowork session that packaged and delivered it. This entry logs the CLICK itself, not merely the upstream repo commit bdba52b1f64312ba414ae3d0772305a264efce7d.
+
+Confirming evidence (this Code session, 2026-08-17): `python tools\skill_drift_report.py --publish-status register-scheduled-task` returned `INSTALLED (verdict=IN-SYNC, cache_version=v2.10, checked_at=2026-08-17T15:43:48Z)`. AppData runtime cache mirror at `skills-plugin\583f08bc-0123-4111-8158-8fe3d927e350\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\skills\register-scheduled-task\` verified to contain both packaged files (SKILL.md, references\incident-history.md), SHA256-identical to the repo copy at commit bdba52b1.
 
 ## 2026-08-17 (afternoon) — Dirty-tree triage continued: ora-ar-feed-sweep + 8 output_contract-removal commits, 8 CRLF-noise entries identified as non-actionable
 
@@ -6455,3 +7225,46 @@ Four issues triaged in priority order from the 2026-08-05 Automation Health repo
 - 5 tasks now retimed/proposed-retimed around the same "machine not running Sun evening–Mon AM" root cause (monday-sync, lease-expiration-brief, tenant-contact-gap-sweep, session-sweep-proposed) plus broker-touch-cadence's first fire landing in an adjacent risk window — worth solving once at the infra level (a wake trigger / keep-open policy) rather than continuing to retime every new task around it.
 - A step that never executes produces neither a non-zero exit nor a log line — exit-code-only alarm conditions (as ora-task-integrity-guard's STEP 3 was before today) are structurally blind to a step being skipped outright. The freshness-check pattern added today generalizes to any multi-step guard task.
 - ora-health-guard's Notion-outage-vs-dead-task confusion (fixed today) is a pattern worth checking for on any other task whose sole health signal is a single external connector write (e.g., confirm ora-broker-touch-cadence's Ops Hub-row contract has the same failure mode before its next fire).
+
+
+## 2026-08-17 — Zapier doctrine conflict reconciled; rules.md carried a superseded premise
+
+**Trigger:** while revoking Composio's teamspace grant, noticed `ORA-Zapier-API` still
+present as an owned Notion integration, and reported an apparent contradiction between
+the Cowork operating prompt ("Zapier retired, removal ratified 2026-07-16") and the
+Cowork CLAUDE.md ("KEEP CONNECTED, NEVER USE — do not remove the connector").
+
+**Investigated rather than assumed, and the initial framing was wrong.** There is no
+live contradiction between equals — there is one ratified position plus known-stale
+copies. Timeline from the record:
+
+- 2026-04-16 — account "out of space" = capacity-capped.
+- 2026-06-02 / 06-03 — KEPT deliberately, "DO NOT RE-FLAG in future cleanup passes."
+  Premise: capacity-capped not retired; removal would force a needless re-auth later.
+- 2026-06-10 — Gabriel REJECTED Cowork's removal proposal; "6/02 decision stands."
+- ~2026-06-22 — connection de-authed / absent from the live Cowork tool list. **The
+  premise of the keep-connected posture became false here**, silently.
+- 2026-07-16 — Gabriel RATIFIED removal (setup-audit ratification session). `tech.md`
+  §4 and SoR §10 aligned to `state=retired`. Recorded in event_log_2026-07-18 §431.
+
+**Action taken:** `rules.md` §2 still read "**Zapier is out of space** (since
+2026-04-16)". That is not merely outdated phrasing — it is the exact rationale the
+07-16 ratification overturned, sitting in a canonical file where a future session
+would read it as current and could reasonably re-derive the keep-connected posture.
+Rewritten to state the ratified position, with the superseded premise preserved
+inline as audit trail per the never-delete rule.
+
+**Residual, unchanged and now 1 month old:** the "Zapier: KEEP CONNECTED" line lives
+in the Cowork Settings → Preferences operating prompt, which is **Gabriel-edited only**
+— Claude cannot reach it. It was flagged for manual removal on 2026-07-16 and again on
+07-18 and is still present. This is the third flag.
+
+**Lesson (pattern, not incident):** the 07-16 ratification updated `tech.md` and SoR
+but not `rules.md`, and could not update the Cowork prompt. A ratification that changes
+a *premise* needs a sweep of every file repeating that premise, not just the files
+stating the conclusion. Same failure shape as the 2026-07-27 master-vintage hold: the
+decision was made correctly and then failed to propagate.
+
+**Still live, not actioned — needs Gabriel:** `ORA-Zapier-API` remains an owned Notion
+integration with an access token (created 2026-04-26). Deleting it is destructive and
+credential-affecting, so it was reported rather than executed.

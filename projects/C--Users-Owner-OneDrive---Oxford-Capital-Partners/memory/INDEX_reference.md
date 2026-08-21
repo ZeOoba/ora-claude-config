@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 83715320-ea98-4ae2-8ebd-e3ec6f2163dd
-  modified: 2026-08-17T01:55:52.240Z
+  modified: 2026-08-17T15:31:22.839Z
 ---
 
 # ORA Memory Index — Reference
@@ -25,7 +25,7 @@ metadata:
 - [Warehouse Basis Parsing](reference_warehouse_basis_parsing.md) — where each PM platform states accounting basis
 - [Tenant Name Mappings](reference_tenant_name_mappings.md) — PM platform → Notion Tenant DB aliases
 - [Property→LLC Signature Roster](reference_property_llc_signature_roster.md) — signing-LLC for landlord mail
-- [ORA PM App](reference_ora_pm.md) — ZeOoba/ora-pm; 07-16 audit (3 criticals) + purge status
+- **⛔ [ORA PM App](reference_ora_pm.md)** — BETA, not live (08-17 Gabriel); payments table empty, delinquency digests not real; N+1 timeout bug found; 07-16 audit (3 criticals) + purge status
 - [oxfordra.net Deploy Canon](reference_oxfordra_deploy_canon.md) — netlify-cli from website-canonical is THE path; merged PR auto-deploys PROD
 - [docx verification gap on Windows](reference_docx_verification_windows_gap.md) — no LibreOffice/Poppler, soffice.py is Unix-only; use maintenance/docx-to-pdf.ps1
 - [Model Release Checklist](reference_model_release_checklist.md) — hardcoded model IDs + sweep process
