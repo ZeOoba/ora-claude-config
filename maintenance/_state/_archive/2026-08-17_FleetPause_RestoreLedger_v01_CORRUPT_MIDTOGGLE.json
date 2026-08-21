@@ -1,0 +1,555 @@
+{
+ "captured": "2026-08-17T18:45:00-04:00",
+ "purpose": "Pause-all until 2026-08-21T17:00-04:00; before-state for EXACT restore",
+ "registries": {
+  "cc": "C:\\Users\\Owner\\AppData\\Roaming\\Claude\\claude-code-sessions\\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\\583f08bc-0123-4111-8158-8fe3d927e350\\scheduled-tasks.json",
+  "lams": "C:\\Users\\Owner\\AppData\\Roaming\\Claude\\local-agent-mode-sessions\\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\\583f08bc-0123-4111-8158-8fe3d927e350\\scheduled-tasks.json"
+ },
+ "tasks": [
+  {
+   "fleet": "cc",
+   "id": "ora-master-workbook-ingest",
+   "enabled": false,
+   "cron": "45 5 * * 1",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-financial-code-integrity-sweep",
+   "enabled": false,
+   "cron": "30 13 * * 1",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-monthly-portfolio-briefing",
+   "enabled": false,
+   "cron": "45 7 1 * *",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-health-guard",
+   "enabled": false,
+   "cron": "15 5 * * *",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-task-integrity-guard",
+   "enabled": false,
+   "cron": "5 7 * * *",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-weekly-hygiene",
+   "enabled": false,
+   "cron": "15 20 * * 0",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-deal-sourcing-scan",
+   "enabled": false,
+   "cron": "45 10 * * 2",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-pm-ledger",
+   "enabled": false,
+   "cron": "0 15 * * *",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-doctrine-integrity-guard",
+   "enabled": false,
+   "cron": "55 12 * * *",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-open-sessions-board",
+   "enabled": false,
+   "cron": "0 17 * * 1,3,5",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-command-center-mirror-drift-check",
+   "enabled": false,
+   "cron": "40 10 * * 1-5",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-site-exposure-probe",
+   "enabled": false,
+   "cron": "50 9 * * 3",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-aaos-expire-leases",
+   "enabled": false,
+   "cron": "20 7 * * *",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-aaos-publish-contracts",
+   "enabled": false,
+   "cron": "15 9 * * *",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-model-release-watch",
+   "enabled": false,
+   "cron": "20 11 * * 1",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-calibration-snapshot",
+   "enabled": false,
+   "cron": "30 15 1 1,4,7,10 *",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-entry-market-scan",
+   "enabled": false,
+   "cron": "45 11 1-7 * 2",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-cc-schematic-refresh",
+   "enabled": false,
+   "cron": "15 14 * * 1,4",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-sofr-direct-prefetch",
+   "enabled": false,
+   "cron": "10 10 * * 1-5",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-broker-touch-cadence",
+   "enabled": false,
+   "cron": "40 13 2 * *",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-am-brief",
+   "enabled": false,
+   "cron": "0 6 * * *",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-deal-command-board",
+   "enabled": false,
+   "cron": "50 9 * * 1",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-deal-aging-sla",
+   "enabled": false,
+   "cron": "25 9 * * 1-5",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-appsec-sweep",
+   "enabled": false,
+   "cron": "30 13 * * 3",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-tenant-hubspot-reconciliation",
+   "enabled": false,
+   "cron": "15 8 1 * *",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-cc-snapshot-refresh",
+   "enabled": false,
+   "cron": "15 6 * * 1",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-511-industrial-fallout-check",
+   "enabled": true,
+   "cron": null,
+   "fireAt": 1787319000000
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-lease-snapshot-refresh",
+   "enabled": false,
+   "cron": "40 7 * * 1-5",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-pm-ledger-retime-efficacy-check",
+   "enabled": true,
+   "cron": null,
+   "fireAt": 1787257800000
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-psa-drift-watch",
+   "enabled": false,
+   "cron": "45 13 * * 3",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-claude-setup-audit",
+   "enabled": false,
+   "cron": "0 10 1 * *",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-acquisition-underwriting-eval-harness",
+   "enabled": false,
+   "cron": "14 12 * * *",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-psa-drift-watch-retime-efficacy-check",
+   "enabled": true,
+   "cron": null,
+   "fireAt": 1787166000000
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-rev10-remediation-efficacy-check",
+   "enabled": true,
+   "cron": null,
+   "fireAt": 1787250600000
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-county-sales-monitor",
+   "enabled": false,
+   "cron": "25 10 15 * *",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-passed-deal-tracker",
+   "enabled": false,
+   "cron": "30 6 15 * *",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-pm-daily-crons",
+   "enabled": false,
+   "cron": "40 9 * * *",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-memory-commit-sweep",
+   "enabled": false,
+   "cron": "0 19 * * *",
+   "fireAt": null
+  },
+  {
+   "fleet": "cc",
+   "id": "ora-ar-feed-sweep",
+   "enabled": false,
+   "cron": "20 8 * * 1",
+   "fireAt": null
+  },
+  {
+   "fleet": "lams",
+   "id": "ora-consolidate-memory-monthly",
+   "enabled": false,
+   "cron": "0 5 2 * *",
+   "fireAt": null
+  },
+  {
+   "fleet": "lams",
+   "id": "ora-skill-store-drift-check",
+   "enabled": false,
+   "cron": "10 12 * * 1",
+   "fireAt": null
+  },
+  {
+   "fleet": "lams",
+   "id": "ora-skill-text-audit",
+   "enabled": true,
+   "cron": "45 9 15 * *",
+   "fireAt": null
+  },
+  {
+   "fleet": "lams",
+   "id": "ora-om-intake-ocr",
+   "enabled": false,
+   "cron": "15 6 * * 3",
+   "fireAt": null
+  },
+  {
+   "fleet": "lams",
+   "id": "ora-owner-outreach-queue-refresh",
+   "enabled": false,
+   "cron": "55 10 * * 1",
+   "fireAt": null
+  },
+  {
+   "fleet": "lams",
+   "id": "ora-passed-deal-tracker",
+   "enabled": false,
+   "cron": "30 6 15 * *",
+   "fireAt": null
+  },
+  {
+   "fleet": "lams",
+   "id": "ora-replacement-cost-refresh",
+   "enabled": false,
+   "cron": "10 6 9 3,6,9,12 *",
+   "fireAt": null
+  },
+  {
+   "fleet": "lams",
+   "id": "ora-bearmode-refresh",
+   "enabled": true,
+   "cron": "25 6 9 3,6,9,12 *",
+   "fireAt": null
+  },
+  {
+   "fleet": "lams",
+   "id": "ora-friday-closeout",
+   "enabled": false,
+   "cron": "30 16 * * 5",
+   "fireAt": null
+  },
+  {
+   "fleet": "lams",
+   "id": "ora-lease-expiration-brief",
+   "enabled": false,
+   "cron": "45 10 * * 1",
+   "fireAt": null
+  },
+  {
+   "fleet": "lams",
+   "id": "ora-monday-sync",
+   "enabled": false,
+   "cron": "35 10 * * 1",
+   "fireAt": null
+  },
+  {
+   "fleet": "lams",
+   "id": "automation-health-monitor",
+   "enabled": false,
+   "cron": "5 11 * * 1-5",
+   "fireAt": null
+  },
+  {
+   "fleet": "lams",
+   "id": "ora-stale-pipeline-nudge",
+   "enabled": false,
+   "cron": "15 10 * * 4",
+   "fireAt": null
+  },
+  {
+   "fleet": "lams",
+   "id": "ora-ar-export-freshness-nudge",
+   "enabled": false,
+   "cron": "30 11 1,15 * *",
+   "fireAt": null
+  },
+  {
+   "fleet": "lams",
+   "id": "ora-session-sweep",
+   "enabled": false,
+   "cron": "0 20 * * 0",
+   "fireAt": null
+  },
+  {
+   "fleet": "lams",
+   "id": "ora-gis-endpoint-liveping",
+   "enabled": true,
+   "cron": "35 6 9 3,6,9,12 *",
+   "fireAt": null
+  },
+  {
+   "fleet": "lams",
+   "id": "ora-cam-data-backfill",
+   "enabled": false,
+   "cron": null,
+   "fireAt": 1786791600000
+  },
+  {
+   "fleet": "lams",
+   "id": "ora-ic-memo-pipeline-reconciliation",
+   "enabled": false,
+   "cron": "30 10 * * 2",
+   "fireAt": null
+  },
+  {
+   "fleet": "lams",
+   "id": "ora-underwrite-doctrine-staleness-check",
+   "enabled": false,
+   "cron": "0 13 * * 3",
+   "fireAt": null
+  },
+  {
+   "fleet": "lams",
+   "id": "ora-cowork-heartbeat",
+   "enabled": false,
+   "cron": "50 5 * * *",
+   "fireAt": null
+  },
+  {
+   "fleet": "lams",
+   "id": "ora-exit-cap-spotcheck",
+   "enabled": true,
+   "cron": "45 6 9 3,6,9,12 *",
+   "fireAt": null
+  },
+  {
+   "fleet": "lams",
+   "id": "ora-critical-deadlines-scan",
+   "enabled": false,
+   "cron": "5 9 * * 4",
+   "fireAt": null
+  },
+  {
+   "fleet": "lams",
+   "id": "ora-capex-idea-stage-nudge",
+   "enabled": false,
+   "cron": "15 12 1 * *",
+   "fireAt": null
+  },
+  {
+   "fleet": "lams",
+   "id": "ora-tenant-contact-gap-sweep",
+   "enabled": false,
+   "cron": "50 10 * * 1",
+   "fireAt": null
+  },
+  {
+   "fleet": "lams",
+   "id": "ora-health-guard-fail-aging-nudge",
+   "enabled": false,
+   "cron": "0 9 * * 1-5",
+   "fireAt": null
+  },
+  {
+   "fleet": "lams",
+   "id": "ora-dd-critical-tracker",
+   "enabled": false,
+   "cron": "35 9 * * 4",
+   "fireAt": null
+  },
+  {
+   "fleet": "lams",
+   "id": "ora-insurance-renewal-monitor",
+   "enabled": false,
+   "cron": "40 11 * * 1",
+   "fireAt": null
+  },
+  {
+   "fleet": "lams",
+   "id": "ora-counsel-review-standard-positions-2027",
+   "enabled": true,
+   "cron": null,
+   "fireAt": 1817211600000
+  }
+ ],
+ "counts": {
+  "total": 67,
+  "enabled": 9,
+  "disabled": 58
+ },
+ "MUST_STAY_OFF_ON_RESTORE": [
+  "cc/ora-master-workbook-ingest",
+  "cc/ora-financial-code-integrity-sweep",
+  "cc/ora-monthly-portfolio-briefing",
+  "cc/ora-health-guard",
+  "cc/ora-task-integrity-guard",
+  "cc/ora-weekly-hygiene",
+  "cc/ora-deal-sourcing-scan",
+  "cc/ora-pm-ledger",
+  "cc/ora-doctrine-integrity-guard",
+  "cc/ora-open-sessions-board",
+  "cc/ora-command-center-mirror-drift-check",
+  "cc/ora-site-exposure-probe",
+  "cc/ora-aaos-expire-leases",
+  "cc/ora-aaos-publish-contracts",
+  "cc/ora-model-release-watch",
+  "cc/ora-calibration-snapshot",
+  "cc/ora-entry-market-scan",
+  "cc/ora-cc-schematic-refresh",
+  "cc/ora-sofr-direct-prefetch",
+  "cc/ora-broker-touch-cadence",
+  "cc/ora-am-brief",
+  "cc/ora-deal-command-board",
+  "cc/ora-deal-aging-sla",
+  "cc/ora-appsec-sweep",
+  "cc/ora-tenant-hubspot-reconciliation",
+  "cc/ora-cc-snapshot-refresh",
+  "cc/ora-lease-snapshot-refresh",
+  "cc/ora-psa-drift-watch",
+  "cc/ora-claude-setup-audit",
+  "cc/ora-acquisition-underwriting-eval-harness",
+  "cc/ora-county-sales-monitor",
+  "cc/ora-passed-deal-tracker",
+  "cc/ora-pm-daily-crons",
+  "cc/ora-memory-commit-sweep",
+  "cc/ora-ar-feed-sweep",
+  "lams/ora-consolidate-memory-monthly",
+  "lams/ora-skill-store-drift-check",
+  "lams/ora-om-intake-ocr",
+  "lams/ora-owner-outreach-queue-refresh",
+  "lams/ora-passed-deal-tracker",
+  "lams/ora-replacement-cost-refresh",
+  "lams/ora-friday-closeout",
+  "lams/ora-lease-expiration-brief",
+  "lams/ora-monday-sync",
+  "lams/automation-health-monitor",
+  "lams/ora-stale-pipeline-nudge",
+  "lams/ora-ar-export-freshness-nudge",
+  "lams/ora-session-sweep",
+  "lams/ora-cam-data-backfill",
+  "lams/ora-ic-memo-pipeline-reconciliation",
+  "lams/ora-underwrite-doctrine-staleness-check",
+  "lams/ora-cowork-heartbeat",
+  "lams/ora-critical-deadlines-scan",
+  "lams/ora-capex-idea-stage-nudge",
+  "lams/ora-tenant-contact-gap-sweep",
+  "lams/ora-health-guard-fail-aging-nudge",
+  "lams/ora-dd-critical-tracker",
+  "lams/ora-insurance-renewal-monitor"
+ ],
+ "RE_ENABLE_ON_RESTORE": [
+  "cc/ora-511-industrial-fallout-check",
+  "cc/ora-pm-ledger-retime-efficacy-check",
+  "cc/ora-psa-drift-watch-retime-efficacy-check",
+  "cc/ora-rev10-remediation-efficacy-check",
+  "lams/ora-skill-text-audit",
+  "lams/ora-bearmode-refresh",
+  "lams/ora-gis-endpoint-liveping",
+  "lams/ora-exit-cap-spotcheck",
+  "lams/ora-counsel-review-standard-positions-2027"
+ ]
+}

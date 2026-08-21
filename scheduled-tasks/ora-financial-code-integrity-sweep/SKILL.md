@@ -26,6 +26,16 @@ FINANCIAL-CODE PATHS (the review scope — only changes touching these matter):
   server/macro/**, src/analytics/**, server/overlay.ts,
   src/contracts/warehouse.ts, src/contracts/macro.ts, src/contracts/debt.ts, src/contracts/loan.ts,
   src/brain/anomaly-insights.ts, src/brain/principal-digest.ts
+  server/ar/**, scripts/ar-import-headless.ts, scripts/seed-ar-mappings.ts
+                        (added 2026-08-17 — AR aging/delinquency subsystem; computes real per-tenant
+                         balances (arBalances[], ~$204,788 on its first live run) that feed the
+                         daily brief's collections alerts. NOT a warehouse/workbook file, which is
+                         exactly why it was missed until this run's pre-flight scope check caught it.)
+  data/snapshots/portfolio.json, data/ar/**, docs/templates/property-tax-assessments*.csv,
+  scripts/import-assessments.ts
+                        (added 2026-08-17 — see the lesson below. These are DATA artifacts, not
+                         code, but they carry NOI/AR/tax figures directly and this task's own scope
+                         had never named a single data file before this.)
   (2026-07-24 lesson: the previous version enumerated individual warehouse FILES; the week the
   Debt & Maturity module landed, none of its files were on the list, and a literal reading of the
   scope would have reported CLEAN while two HIGH governor false-clearance defects sat in the
@@ -40,6 +50,21 @@ FINANCIAL-CODE PATHS (the review scope — only changes touching these matter):
   same day. STRUCTURAL FIX, do not skip it: step 2 below now requires running the log WITHOUT path
   filters and diffing against the scoped log — an empty scoped log plus a non-empty unscoped log
   means THIS LIST IS STALE, not that the week was clean.)
+  (2026-08-17 lesson — the SAME failure mode a THIRD time, and TWICE in one run. First: step 2a's
+  gate caught server/ar/** before the workflow launched (a real scoped commit existed that week, so
+  the gate's literal "scoped log empty" trigger didn't fire — the catch was from manually reading
+  the unscoped commits' subjects, not the mechanical gate). Second: even after adding server/ar/**,
+  the scope-integrity lens found the manifest STILL missed data/snapshots/portfolio.json and a tax
+  CSV — the commits that actually landed that week's new arBalances, a new ~767-line QuickBooks NOI
+  block, and new tax figures were invisible to the prescribed `git diff -- <financial paths>`
+  because none of those paths named a DATA file, only code. STRUCTURAL GAP THIS EXPOSES: step 2a's
+  mechanical trigger ("scoped log empty, unscoped log non-empty") only catches a week with ZERO
+  scoped commits — it does nothing when the scope is PARTIALLY stale (some real financial commits
+  in scope, others landing in an unlisted directory the same week). The manual "read the unscoped
+  commits' actual changed files" instruction is what actually caught both gaps this run, not the
+  mechanical trigger — do not treat 2a's gate as sufficient on its own; always eyeball the unscoped
+  commit subjects for financial-sounding themes (ar, tax, noi, debt, balance, assessment) even when
+  the scoped log is non-empty.)
 
 STEPS:
 1. PRE-FLIGHT: confirm the repo exists and git works. If not, write a Notion completion row noting the failure and STOP (do not fabricate a result).

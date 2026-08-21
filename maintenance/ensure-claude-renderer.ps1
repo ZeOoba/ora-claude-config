@@ -27,6 +27,21 @@
 # Install/refresh (run once):
 #   schtasks /Create /TN "ORA Claude Desktop Wake-and-Launch" /SC DAILY /ST 04:45 /F `
 #     /TR "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"C:\Users\Owner\.claude\maintenance\ensure-claude-renderer.ps1\""
+#
+# StartWhenAvailable FIX (2026-08-17, fleet-advisory-remediation): the schtasks /Create
+# form above does NOT set StartWhenAvailable -- without it, a 04:45 trigger that fires
+# while the host is asleep/off is simply ABANDONED (Task Scheduler event 153, "did not
+# launch task ... as it missed its schedule"), not deferred, recording Last Result
+# 0x80070420 (Task Scheduler's generic code for exactly this) even though the script
+# itself is fail-open on every internal path and was never reached. This host's first
+# scheduler dispatch varies 03:31-17:09 (reference_am_cluster_late_wake_root_cause),
+# so a hard 04:45-or-never trigger silently missed most mornings -- the log had exactly
+# ONE line total (2026-08-05) despite running daily since 2026-08-04. Fixed live via:
+#   $t = Get-ScheduledTask -TaskName "ORA Claude Desktop Wake-and-Launch"
+#   $t.Settings.StartWhenAvailable = $true
+#   Set-ScheduledTask -InputObject $t
+# If this task is ever deleted and recreated with the /Create one-liner above, RE-APPLY
+# this immediately after -- schtasks.exe's CLI has no direct switch for this setting.
 
 param([switch]$WhatIf)
 
@@ -34,6 +49,35 @@ $log    = Join-Path $env:USERPROFILE '.claude\maintenance\ensure-claude-renderer
 $appId  = 'shell:AppsFolder\Claude_pzs8sxrjxfjjc!Claude'
 
 function Log($m) { "$([DateTime]::UtcNow.ToString('s'))Z  $m" | Out-File -FilePath $log -Append -Encoding utf8 }
+
+function Assert-StartWhenAvailable {
+    <#
+    .SYNOPSIS
+    Self-heal the StartWhenAvailable flag on this script's own scheduled task (2026-08-21 fix).
+    schtasks.exe's /Create CLI has no switch for this setting (see header) -- if the task is ever
+    deleted and recreated with that one-liner and the header's manual re-apply step is skipped or
+    forgotten, a trigger that fires while the host is asleep/off is silently ABANDONED rather than
+    deferred (Task Scheduler event 153) -- the exact incident recorded above (2026-08-05, 4.1h dark,
+    11 tasks lost, one log line total despite running daily). Runs every invocation instead of
+    depending on a human re-reading a comment after the next recreation. Fail-open: a lookup/set
+    failure here must never block the renderer check below. Respects -WhatIf (logs, does not write).
+    #>
+    param([switch]$WhatIf)
+    try {
+        $t = Get-ScheduledTask -TaskName 'ORA Claude Desktop Wake-and-Launch' -ErrorAction Stop
+        if (-not $t.Settings.StartWhenAvailable) {
+            if ($WhatIf) {
+                Log 'WHATIF - StartWhenAvailable is false; would re-apply'
+            } else {
+                $t.Settings.StartWhenAvailable = $true
+                Set-ScheduledTask -InputObject $t | Out-Null
+                Log 'SELF-HEAL - StartWhenAvailable was false; re-applied'
+            }
+        }
+    } catch {
+        Log ('StartWhenAvailable self-heal check failed (fail-open, not blocking): ' + $_.Exception.Message)
+    }
+}
 
 function Get-RendererState {
     <#
@@ -53,6 +97,8 @@ function Get-RendererState {
 }
 
 try {
+    Assert-StartWhenAvailable -WhatIf:$WhatIf
+
     $procs = @(Get-CimInstance Win32_Process -Filter "Name='claude.exe'" -ErrorAction Stop |
                Select-Object ProcessId, CommandLine)
     $state = Get-RendererState -Procs $procs
