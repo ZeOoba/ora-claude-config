@@ -725,6 +725,87 @@ def _perprop_portfolio_paired_veto_spans(low):
             spans.append(mm.span(1))
     return spans
 
+# --- Standalone per-property refi-sizing ceiling (KNOWN GAP 2, closed) -----------------------
+# The pairing suppressor above requires the portfolio-aggregate 40% companion on the SAME LINE.
+# Doctrine also states the two governors on SEPARATE bullets (acquisition-buy-box-v1.md:31 states
+# only "per-property refi sizing ... <= 65%"; the aggregate 40% companion is a separate bullet two
+# lines below, :33). That standalone line escapes every existing suppressor: the literal "LTV
+# ceiling" token arms is_gov (correctly -- it usually IS the acquisition/aggregate governor label),
+# so _refi_qualified's unconditional veto on "ltv ceiling" (in ACQ_GOV_MARKERS) refuses to treat it
+# as a refi-market figure; the pairing suppressor above requires the missing companion; and the
+# refi-construct member suppressors (_refi_member_value_spans) require a same-line "LESSER of ...
+# DSCR" / "refi to N% LTV" / "N% LTV refi-sizing" construct, none of which is present in a bare
+# "(per-property refi sizing): <= 65%" bullet. This was KNOWN GAP 2 in an earlier version of this
+# module's comments: "Closing it requires widening LTV SUPPRESSION -- a false-negative risk on Hard
+# Invariant 4 that belongs in its own reviewed change." This is that change.
+#
+# Kept to the SAME safety pattern as every suppressor in this module (detection over silence):
+#   * VALUE-LOCKED to the ratified 65 (CANON_LTV_PERPROPERTY) -- a drifted per-property figure
+#     (any value other than 65) never matches, so it is untouched by this check and still flags
+#     through the normal passes below. This is the same guarantee test_perprop_member_value_
+#     locked_to_ratified_65_unit already relies on for the pairing suppressor, and it is why a
+#     value-locked check is safe where the rejected "blanket per-property veto span" (setup-audit
+#     note C4, see test_perproperty_non_ratified_ltv_still_flags_unit) was not: that alternative
+#     would have silenced a REAL per-property drift regardless of value.
+#   * FRAME-GATED on the ratified wording: "per-propert(y/ies)" and "refi ... siz(ing)" (either
+#     order, percent/digit-free gap so an intervening drift value breaks the match, matching the
+#     _GAP convention used by every refi-construct regex above) -- the literal phrasing this
+#     governor is declared with everywhere it appears (SKILL.md "per-property refi-sizing",
+#     buy-box-v1.md "per-property refi sizing"). A bare "per-property ... 65% ceiling" with no
+#     refi/sizing framing does NOT match and stays fully checked (test_perdeal_perproperty_drift_
+#     still_flags_unit's "Hard filter: per-property LTV ceiling 65%." has neither token).
+#   * VALUE-ADJACENT (round-1 independent review finding, 2026-08-21): the frame match must END
+#     within PERPROPERTY_REFI_FRAME_REACH chars immediately BEFORE the suppressed value -- unlike
+#     the earlier revision of this check, a line-wide "does the frame appear ANYWHERE on the line"
+#     test is NOT safe here, because every OTHER suppressor in this module is span/proximity-scoped
+#     to the value it suppresses (_refi_member_value_spans, the pairing veto, the correction spans)
+#     and this is the module's ratified doctrine wording ALWAYS precedes the value it qualifies
+#     ("(per-property refi sizing): <= 65%", "per-property refi-sizing ceiling = LESSER of 65%
+#     LTV") -- a line-wide test let a genuinely drifted AGGREGATE value slip through whenever the
+#     ratified per-property phrase happened to sit ANYWHERE ELSE on the same line, even after the
+#     value or across a clause boundary the frame's own gap regex does not stop at:
+#       "Portfolio LTV ceiling raised to 65% given our per-property refi sizing convention."
+#       "Aggregate LTV ceiling 65%; per-property refi sizing unchanged."
+#     Both are AGGREGATE-governor drift narrations (the "raised to"/"aggregate" framing is the
+#     acquisition/portfolio ceiling, not the per-property one) with the ratified phrase sitting
+#     AFTER the value -- pinned clean-must-still-flag by
+#     test_perproperty_refi_frame_elsewhere_on_line_does_not_mask_aggregate_drift_unit. Requiring
+#     the frame to END just before the value closes this: both masked examples have the frame
+#     AFTER the value, so "ends before, within reach" never matches them, while the two ratified
+#     real-tree lines (buy-box-v1.md:31 gap ~12 chars, its hyphenated SKILL.md-style spelling gap
+#     ~9 chars) stay comfortably inside the reach.
+#   * VETOED by the existing _governor_declared_nearby check: a bare "governor" token or an
+#     ACQ_DECL_NEARBY token (acquisition/buy-box/hard filter/hard screen/hard ceiling/hard cap/
+#     floor) near the value means it is being declared AS the acquisition/aggregate ceiling despite
+#     the refi-sizing wording -- a mislabeling, not numeric drift, and it must still flag.
+#     KNOWN RESIDUAL (round-1 independent review, non-blocking): this veto's window (VETO_BEFORE=28
+#     chars) is narrower than the frame-adjacency reach below, so a governor/acquisition token that
+#     sits BEFORE the frame -- outside the veto's reach but still on the line, e.g. "The acquisition
+#     governor: per-property refi sizing LTV ceiling 65%." -- is not caught by either guard. Left
+#     as a documented residual rather than widening VETO_BEFORE (which is independently tuned
+#     against real per-property/refi prose margins -- see its own comment); the value-lock still
+#     means only the literal ratified 65 can ever be affected, never an actual drifted figure.
+_PERPROPERTY_REFI_FRAME_GAP = r"(?:[^\n%0-9]|" + re.escape(CANON_LTV_PERPROPERTY) + r")"
+RE_PERPROPERTY_REFI_FRAME = re.compile(
+    r"per[\s\-]?propert(?:y|ies)\b" + _PERPROPERTY_REFI_FRAME_GAP + r"{0,40}?refi[\s\-]?siz"
+    r"|refi[\s\-]?siz" + _PERPROPERTY_REFI_FRAME_GAP + r"{0,40}?per[\s\-]?propert(?:y|ies)\b",
+    re.I)
+# Reach for the value-adjacency test above. Comfortably covers both real-tree gaps (~12 and ~9
+# chars) with margin for reasonable phrasing variance, while staying far short of the masked
+# examples' frame-after-value placement (which "ends before vs" excludes regardless of reach size).
+PERPROPERTY_REFI_FRAME_REACH = 24
+
+def _perproperty_refi_frame_immediately_before(low, vs):
+    """True when a RE_PERPROPERTY_REFI_FRAME match ends within PERPROPERTY_REFI_FRAME_REACH chars
+    before index `vs` -- i.e. the ratified per-property refi-sizing phrase is the thing actually
+    qualifying THIS value, not merely present somewhere else on the line (see the value-adjacency
+    note above)."""
+    lo = vs - PERPROPERTY_REFI_FRAME_REACH
+    for fm in RE_PERPROPERTY_REFI_FRAME.finditer(low):
+        if lo <= fm.end() <= vs:
+            return True
+    return False
+
 def _refi_member_value_spans(low):
     """Return (ltv_noveto, ltv_veto, dscr_veto): the exact digit-group spans of refi-sizing
     construct MEMBER VALUES -- never whole-construct spans. Only these specific values are
@@ -1045,7 +1126,7 @@ def scan_line(raw):
     #    new. seen_ltv dedupes so an ltv-present value already flagged forward is not double-flagged.
     if "ltv" in low or is_gov:
         seen_ltv = set()
-        def _flag_ltv(val, kind="ceiling"):
+        def _flag_ltv(val, kind="ceiling", vs=None, ve=None):
             # NUMERIC comparison (2026-07-29, with the decimal-fragment guard): captures may now be
             # decimals, so "40.0" must read as canonical and "54.3" must flag as itself -- never as
             # its fractional fragment. Unparseable input is impossible from these regexes but is
@@ -1055,6 +1136,18 @@ def scan_line(raw):
             try:
                 num = float(val)
             except ValueError:
+                return
+            # STANDALONE per-property refi-sizing ceiling (KNOWN GAP 2, closed -- see
+            # RE_PERPROPERTY_REFI_FRAME above): the ratified 65 declared on its own bullet, with no
+            # same-line aggregate companion or refi construct, is a SECOND canonical governor value
+            # at this level, not a drift on the 40% aggregate. VALUE-LOCKED (only "65" ever matches,
+            # so a real per-property drift is untouched and still flags below) and FRAME-GATED
+            # (requires the ratified "per-property ... refi ... siz(ing)" wording on the line), with
+            # position info required so the existing _governor_declared_nearby veto still applies --
+            # a value mislabeled AS the acquisition/aggregate ceiling nearby still flags.
+            if (val == CANON_LTV_PERPROPERTY and vs is not None
+                    and _perproperty_refi_frame_immediately_before(low, vs)
+                    and not _governor_declared_nearby(low, vs, ve if ve is not None else vs)):
                 return
             # 0 < num < 1 flags too (REFUTE residual #1, 2026-07-29): "LTV ceiling 0.65%" is the
             # unit-interval notation a human porting capital-config.ts (ltvCeiling: 0.65) into
@@ -1091,7 +1184,7 @@ def scan_line(raw):
                         # TDC"), and the window would then read that subject's percentage as the
                         # declared LTV ceiling. Same veto as the reverse pass, same reason.
                         if not _nonltv_subject_owns(low, base + pm.start(1)):
-                            _flag_ltv(pm.group(1))
+                            _flag_ltv(pm.group(1), vs=base + pm.start(1), ve=base + pm.end(1))
                 if not cmp_hits:  # proximity fallback only when no comparator-bound value was found
                     for m in RE_LTV_NEAR.finditer(low):
                         # skip a POST-CLOSE-REFI LTV sizing figure (e.g. "refi ... 65% LTV" against
@@ -1113,7 +1206,7 @@ def scan_line(raw):
                         if (_in_spans(pvs, pve, refi_ltv_veto)
                                 and not _governor_declared_nearby(low, pvs, pve)):
                             continue
-                        _flag_ltv(m.group(1) or m.group(2), kind="governor")
+                        _flag_ltv(m.group(1) or m.group(2), kind="governor", vs=pvs, ve=pve)
             # REVERSE-ORDER ceiling ("65% ceiling"/"65% maximum") -- number-then-keyword, needs NO
             # 'ltv' token, so it closes "This 65% ceiling is the acquisition governor". Correction-
             # span-skipped and post-close-refi-suppressed exactly like the forward passes.
@@ -1131,7 +1224,7 @@ def scan_line(raw):
                 # the requirement form silenced real declarations).
                 if _nonltv_subject_owns(low, vs):
                     continue
-                _flag_ltv(m.group(1))
+                _flag_ltv(m.group(1), vs=vs, ve=m.end(1))
     return out
 
 # DATED AUDIT/PROJECT memory files (2026-07-16): the same append-only NARRATIVE class as
