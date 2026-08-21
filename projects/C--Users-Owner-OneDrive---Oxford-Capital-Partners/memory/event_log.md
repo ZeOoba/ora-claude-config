@@ -12,6 +12,55 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-21 — Skill fleet: manuscript-amendment discipline (754 Old State)
+
+Four skills committed (`ora-skills` 29e78e8) and confirmed installed. Origin: a scanned
+lease at 754 Old State Route 74 whose typed expiry of "May 31, 2030" was struck through in
+ink and replaced by hand with "2027", circled and initialed. Tesseract transcribed the typed
+layer and dropped the manuscript change with no signal. An IC memo (v02) and a full IRR
+model were published on the wrong date before Gabriel caught it. The visual sweep that
+followed found four more hand changes OCR had missed, plus an unexecuted base lease that
+four months of file review had not surfaced.
+
+- **lease-abstraction-pipeline v2.6** — new STEP 2A: mandatory page-image review for every
+  OCR-path document before any field is reported (render, contact-sheet, zoom every economic
+  term / party block / signature page). Adds `EXECUTION_STATUS` and lease-chain-gap checks to
+  every document, +9 STEP 5 quality flags. Rule of record: on a scanned document, OCR text is
+  evidence of the FORM, not of the BARGAIN.
+- **deal-execution v1.5** — LEASE-CHAIN INTEGRITY in Workflow 3 DD (instrument chain, executed
+  counterpart per link, landlord-of-record match, manuscript-amendment catalogue); Workflow 2A
+  item 12 extended so estoppels carry the chain and reproduce hand amendments verbatim.
+- **title-exam-abstraction v1.0** (new) — exam-vs-commitment distinction; the mortgage-location-
+  vs-boundary-survey trap (OAC 4733-38 vs -37); cross-collateral/cross-default as its own
+  category with payoff ≠ parcel release; every exception routed to a deliverable or register item.
+- **estoppel-request-generation v1.0** (new) — estoppels built from the 32-field abstract,
+  pre-filled, each abstraction defect converted into an affirmative certification. Never amends.
+
+**Install verified before clearing the ledger.** main.log showed no SkillsPlugin sync (last
+entry 2026-08-20 20:40), so verification rested on the two NEW skills: the post-commit hook
+reported "no local AppData mirror installed yet — nothing to sync" for both, yet both cache
+directories existed at 17:22 local, three minutes after the 21:19Z commit. The hook could not
+have created them, so only a real Save-skill install could. All four then hashed byte-identical
+(EOL-normalized) to the repo. Ledger entries cleared for the four.
+
+**Observed, not actioned:** five other ledger entries (daily-brief, insurance-renewal-review,
+listing-agreement-qc, register-scheduled-task, settlement-basis-extraction) disappeared between
+this session's read and its clear. `cmd_clear` provably pops only named skills, so another actor
+cleared them; a subsequent always-verify `candidates` sweep shows none of the five has drift, so
+nothing was lost. That sweep did surface **three skills with repo-ahead-of-cache drift and no
+ledger entry at all — `debt-management`, `lease-addendum`, `loi-generation`** — the retroactive-
+blindness case `candidates` exists to catch. Left for Gabriel: they belong to other workstreams
+and packaging/installing them was not in scope.
+
+**Process note:** a cloud Cowork session CAN reach the repo-first path through the Desktop
+Commander bridge. Route: author in-container → SendUserFile → device_commit_files into a
+connected folder → PowerShell copy into `ora-skills` → idempotent patch scripts → pre-flight
+gate → commit → `tools\package_skills.py` → device_stage_files back → SendUserFile renders the
+Save-skill button. Use PowerShell, not `cmd /c` with `set VAR=...&` (breaks on spaced paths).
+Watch line endings: reading utf8 and writing `newline=''` flips CRLF→LF, which `.gitattributes`
+wants but makes a legacy-CRLF blob diff look like a full-file rewrite — verify with `git diff -w`
+and say so in the commit message.
+
 ## 2026-08-21 -- repo-architecture-review: cross-repo audit filed OI-197 through OI-201, remediation started
 
 Cowork session ran `repo-architecture-review` across all 10 ZeOoba repos (local
