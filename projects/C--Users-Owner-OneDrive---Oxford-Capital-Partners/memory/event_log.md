@@ -5,12 +5,130 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-18T00:43:44.957Z
+  modified: 2026-08-21T21:12:22.041Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-08-21 -- repo-architecture-review: cross-repo audit filed OI-197 through OI-201, remediation started
+
+Cowork session ran `repo-architecture-review` across all 10 ZeOoba repos (local
+clones: ora-skills, oxford-command-center, ora-pm, AAOS, website-canonical;
+READMEs via `gh api`: ora-cowork-watchdog, BrainVault, ora-claude-config,
+Claude-Guru-Ooba-; Internal-Accounting-App has no documentation at all). Filed
+5 new items via `allocate-oi-id.py`: OI-197 (circular monitoring dependency
+across 5 scheduler substrates), OI-198 (ora-cowork-watchdog README describes an
+unbuilt systemd producer path), OI-199 (Internal-Accounting-App undocumented,
+uncloned -- the highest financial-consequence repo, structurally blind to this
+audit), OI-200 (stray third writable clone `oxford-command-center-1`, plus 2
+unpushed commits on the primary including a tax recapture absent from every
+mirror deploy since 08-17), OI-201 (ora-pm README stale on the billing/deploy
+path). `check-open-items-duplicate-ids.py` confirmed zero duplicate rows/
+sections. Tracker commit: `6985b46` on `feat/model-canary-probe-step25`.
+
+Also surfaced, not yet actioned: both scheduler fleets have read `EN=OFF`
+since 2026-08-17 (needs Gabriel's decision, not a unilateral resume); ora-pm
+monthly billing still has no trigger anywhere, next billing date 2026-09-01
+(new unattended automation on a money-moving path -- needs explicit
+confirmation before registering).
+
+A Code session picked up remediation same-day per the audit's handoff brief:
+committing the tracker, then working the punch list (A-E) and five workflow
+optimizations (WO-1 through WO-5).
+
+## 2026-08-21 — acquisition-proposal-generation v3.1 INSTALLED (Save-skill click confirmed, not merely committed)
+
+**What happened.** Gabriel clicked **Save skill** in Cowork on the staged
+`acquisition-proposal-generation.skill` package and confirmed it in-session at
+**2026-08-21 16:46 ET**. This entry records the CLICK, not the upstream repo commit —
+the repo commit (`fc78d55`, 2026-08-21 16:31:50 -0400, "Add acquisition-proposal-generation
+skill v3.1") is evidence the skill was authored, never evidence anyone installed it.
+First install of this skill; it is new, not a revision of a previously-installed version.
+
+**Path.** package-and-stage-skill v1.21 Entry point B (pre-packaged install, no repackaging).
+Package built by an earlier Code session at
+`ora-skills\_staging\2026-08-21_acquisition-proposal-generation-reimport\`.
+
+**Pre-check (all green).** Existence ASSERTED, not inferred: 439,052 bytes, mtime 16:39:59.
+SHA256 `1105ff284549d99fd378a3f3c3165610c0791a666f620f3530ded6b9609bd4d6` — matched the
+handoff's expected hash, and the copy staged into session outputs re-hashed identical.
+5 zip entries, all forward-slash, no directory records, expected file set exactly.
+All 5 packaged entries byte-matched the current repo copies. Frontmatter gate:
+`name` == dir, description 966/1024. `plugin_of` = None (standalone path correct).
+Repo tree clean. Not a SHARED_ROOT_DEPS consumer.
+
+**Routed to Cowork Save-skill deliberately.** 5-file skill (`SKILL.md`, `scripts/build.js`,
+`scripts/photos/{1100_rarig,55_newplant,9050_redbranch}.jpg`). Desktop Settings →
+Capabilities was explicitly ruled out per the 2026-07-11 subfolder-drop bug — that path
+would have landed SKILL.md alone and silently discarded the generator.
+
+**Post-install verify — 5/5 files, and the directory was REBUILT, not overwritten.**
+The cache mirror at
+`…\skills-plugin\583f08bc-…\a6ad2c61-…\skills\acquisition-proposal-generation\`
+carries all five files, each hashing MATCH against the repo. Decisive signal: the
+directory's own **CreationTime moved to 16:46:25** (from 16:21:45 pre-click), with every
+file created at 16:46:25 — a genuine platform tear-down-and-re-download. A
+`sync_appdata_mirror.py` content overwrite replaces file bytes in place and leaves the
+directory's CreationTime untouched, so directory re-creation is the discriminator.
+
+**Evidence caveat, recorded deliberately (v1.13 doctrine).** The pre-click state was
+*contaminated* and would have read as "already installed" to a careless pass: `ListSkills`
+already returned the skill enabled at v3.1, and all 5 cache files already hashed identical
+to the repo. Both were untrustworthy — the pre-commit mirror-sync hook had overwritten the
+cache files at 16:31:01–16:31:09 (before the 16:31:50 commit), which is the
+hash-match-by-construction case, and the account-side v3.1 description was consistent with
+a 16:21:45 *pre-commit* build whose contents the hook had already erased locally. The
+ledger still listing the skill pending, plus the absence of any corroborating sync cycle,
+is what correctly kept this on the install path.
+
+**`main.log` was unavailable as corroboration on this machine.** `main.log` has not been
+written since 2026-08-20 20:51:03 ("going down for update"); there is no 2026-08-21
+`SkillsPlugin` activity in any log file in `%APPDATA%\Claude\logs`. Step 2's normal
+Delta→Sync-complete corroboration could not be obtained, so the directory-recreation
+timestamp above was used as the first-hand substitute. **Standing consequence: while the
+desktop build is not writing main.log, the step-2 short-circuit gate cannot be satisfied
+at all — every skill will read as un-corroborated, and cache-directory CreationTime is the
+fallback discriminator.**
+
+**Ledger.** `pending_reimport.py clear acquisition-proposal-generation` run only AFTER
+this append returned exit 0. The other 5 pending entries (daily-brief,
+insurance-renewal-review, listing-agreement-qc, register-scheduled-task,
+settlement-basis-extraction) were left untouched.
+
+**Discrepancy surfaced, not repaired.** The dispatch named 8 other pending skills; the
+ledger holds only 5. `debt-management`, `lease-addendum`, and `loi-generation` are NOT in
+`_staging/PENDING_REIMPORT.md`. Reported, not acted on — out of scope for this task.
+
+## 2026-08-21 -- MEMORY.md archival pass, 918B WARN breach cleared (Automation Audit R17, Gabriel-approved)
+
+Rev 17 of the ORA Automation Audit flagged MEMORY.md at 22,418B, 918B past the
+21,500B WARN runway marker. Gabriel chose "archive stale entries now, with
+ref-repair" over leaving it or splitting the index.
+
+Archived 4 entries, each verified genuinely closed/superseded and checked for
+inbound references before moving:
+- `reference_portfolio_json_notion_seed_fallback_regression.md` (FIXED 08-09, 0 inbound refs)
+- `reference_settings_json_enabledplugins_skilloverrides_attribution_2026-08.md` (resolved, 0 inbound refs)
+- `project_broker_pipeline_blobs_v1_outage_2026-08-04.md` (fully resolved 08-16, 0 inbound refs)
+- `reference_cc_snapshot_refresh_dq_flag_alert_is_count_not_severity.md` (FIXED 08-11, 2 inbound refs in
+  `open-items-tracker.md` -- one `[[wikilink]]`, one literal markdown path link)
+
+All 4 moved to `_archive/<name>_archived_2026-08-21.md` per the archive-not-delete
+policy (memory-policy.md section 4) -- full prose preserved, nothing deleted.
+Corresponding lines removed from MEMORY.md's index. The one literal-path link in
+`open-items-tracker.md` (line ~6960, which would have broken since it pointed at
+the file's pre-move location) was repaired to point at the new archived path; the
+adjacent `[[wikilink]]` reference (name-based, doesn't break on a file move) was
+annotated with the same archived-path note for a future reader's benefit.
+
+**Result:** MEMORY.md 22,544B -> 21,437B (1,107B freed), back under the 21,500B
+WARN marker with 2,963B of headroom to the 24,400B HARD ceiling. Zero orphaned
+links introduced -- both inbound-ref sites in open-items-tracker.md were checked
+and repaired, not just the index.
+
+Full detail: [[project_automation_audit_rev17_2026-08-21]].
 
 ## 2026-08-17 -- dirty-tree-triage: 4 settled isolated commits landed on `~/.claude`; ora-skills and oxford-command-center left untouched
 
