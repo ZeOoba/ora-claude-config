@@ -72,6 +72,34 @@ that guard BLOCKS, so a crafted command that fools it bypasses a gate. This one 
 prints, so a crafted command costs an advisory. The difference is that ORDINARY commands
 must be right -- which is what the review showed the first draft got wrong.
 
+--- GAP C: UNSCOPED STAGE (added 2026-08-21, usage-report remediation) ----------------
+A bare `-a`/`--all`, or a sweep `git add -A`/`add .`/`add --all`/`add -u`, with no
+explicit `-- <pathspec>` on the commit itself, stages whatever else happens to be dirty
+in the working tree -- including the SAME session's own forgotten or unrelated local
+edits, not just another session's (commit-provenance-guard.py already blocks that
+cross-session case; this is the narrower, same-session hygiene gap it does not cover).
+
+Deliberately WARN-only, not a new blocking gate: this repo already tried blocking-by-
+syntax for git flags once and the lesson held -- a wrong or over-broad BLOCK on an
+ordinary command is worse than a missed advisory, and BLOCKING a bare `-a`/`add -A`
+would also be pure redundant friction on top of the cross-session case
+commit-provenance-guard.py already enforces. So this reuses the exact same detection
+`analyze()` already computes for stages_all/has_add (extended to also capture whether
+an `add` segment's own args are a SWEEP form) and only ever prints.
+
+Silent whenever the commit carries an explicit `-- <pathspec>` (already scoped, however
+it got staged) or when `add` named explicit paths with no sweep flag.
+
+ACCEPTED GAPS (independent review, 2026-08-21, both noise-direction, neither fixed here):
+a separate-token `-m "-a"` (the value, not glued -- `git commit -m "-a"`) is misread by
+the PRE-EXISTING `_cluster_stages_all` scan (same root cause as round-2 finding m8, which
+only fixed the GLUED case) and now surfaces as a visible wrong UNSCOPED advisory instead
+of a silent one; `git add -- -u` (a file literally named `-u`) also misreads as a sweep
+token, since the sweep-token scan does not stop at a `--` inside add's own args. Both fail
+toward noise, never silence, and never block -- tolerated rather than fixed here to avoid
+touching `_cluster_stages_all`'s pre-existing, independently-scoped behavior in the course
+of adding an unrelated advisory.
+
 Stdlib only. ASCII-only. Windows (`python`).
 """
 
@@ -244,6 +272,7 @@ def analyze(cmd, payload_cwd):
     cwd = payload_cwd
     found = None
     has_add = False
+    sweep_add = False
     for seg in _segments(cmd):
         stripped = _strip_prefixes(seg)
         # Track `cd <path>` so a later segment's repo resolves where the shell will be
@@ -257,6 +286,18 @@ def analyze(cmd, payload_cwd):
             continue
         if sub == "add":
             has_add = True
+            # GAP C: does THIS add's own arg list contain a sweep token? Unlike has_add
+            # (deliberately unrestricted, see the REVERT note just below), this one only
+            # asks about the tokens actually passed to add -- `git add plain.txt` must
+            # stay silent while `git add -A`/`add .`/`add --all`/`add -u` must not. Same
+            # token set pending_add_paths() in hooks/lib/git_commit_parse.py already
+            # treats as "wants everything", kept in sync deliberately rather than
+            # imported: this file has its own independent tokenizer (see module
+            # docstring), so importing one function from the other would still leave
+            # two segment-parsing implementations to keep behavior-equivalent.
+            if any(t in ("-A", "--all", "--no-ignore-removal", "-u", "--update", ".")
+                   for t in rest):
+                sweep_add = True
             # DELIBERATELY NOT path-restricted (round-3 finding M5 -- this is a REVERT).
             #
             # Round 2 raised a MINOR false positive: `git add plain.txt && git commit`
@@ -318,11 +359,19 @@ def analyze(cmd, payload_cwd):
             "repo_dir": target,
             "stages_all": bool(stages_all),
             "pathspec": pathspec,
+            # Snapshotted HERE, not after the whole loop (independent review,
+            # 2026-08-21): sweep_add/has_add otherwise stay position-blind and would
+            # credit a commit with a sweep `add` that only happens AFTER it in the same
+            # compound command (`git commit -m x && git add -A` has not yet added
+            # anything at the time this commit runs) -- a wrong advisory, exactly what
+            # this module's own PRECISION POSTURE forbids. Matches "later commit wins":
+            # each commit's snapshot reflects only sweep/add activity seen SO FAR.
+            "sweep_add": sweep_add,
+            "has_add": has_add,
         }
         # keep scanning: a LATER commit segment wins, matching execution order
     if found is None:
         return None
-    found["has_add"] = has_add
     return found
 
 
@@ -501,7 +550,7 @@ def _safe(text):
     return s or "(unknown)"
 
 
-def build_message(branch, prev_branch, stale):
+def build_message(branch, prev_branch, stale, unscoped=False):
     parts = []
     if branch:
         if prev_branch and prev_branch != branch:
@@ -523,6 +572,14 @@ def build_message(branch, prev_branch, stale):
             "generated file) bypasses it. Hand-set `modified:` before committing, or the "
             "file will read as older, and therefore less trustworthy, than it is."
             % (len(stale), listed, more))
+    if unscoped:
+        parts.append(
+            "UNSCOPED STAGE: this command uses `-a`/`--all`, or a bare `add -A`/`add .`/"
+            "`add --all`/`add -u`, with no explicit `-- <pathspec>` on the commit itself -- "
+            "it will stage whatever else is dirty in the working tree, including your own "
+            "forgotten or unrelated local changes. Prefer `git commit -- <paths>` matching "
+            "what you meant to stage, or hooks/lib/isolated_commit.py for a single-file, "
+            "index-only stage.")
     return "\n\n".join(parts)
 
 
@@ -566,8 +623,11 @@ def main():
     # analyze(): every inference error failed silent, which is the one direction this hook
     # must not fail in.
     stale = stale_stamp_files(repo, use_worktree=use_wt, pathspec=plan["pathspec"])
+    # UNSCOPED only when the commit itself carries no explicit pathspec: a `-- <paths>`
+    # commit is already scoped to exactly those paths regardless of how staging happened.
+    unscoped = (plan["stages_all"] or plan["sweep_add"]) and not plan["pathspec"]
 
-    msg = build_message(branch, prev, stale)
+    msg = build_message(branch, prev, stale, unscoped=unscoped)
     if not msg:
         return
     _emit(msg)
