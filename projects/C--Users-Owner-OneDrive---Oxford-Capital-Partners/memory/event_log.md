@@ -5,12 +5,103 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-21T21:12:22.041Z
+  modified: 2026-08-21T21:55:11.507Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-08-21 -- 6-skill reimport batch (deal-execution, debt-management, document-assembly, estoppel-request-generation, lease-abstraction-pipeline, legal-intelligence) installed via Gabriel's Save-skill clicks
+
+Entry point A (fresh package) on the 6 items that entered `pending_reimport.py` after a concurrent session committed `63f0efe` (deal-execution, document-assembly, estoppel-request-generation, lease-abstraction-pipeline, legal-intelligence -- 8 code-review findings closed: landlord/vesting wiring, estoppel routing, CreationTime gap) and `27cb034` (debt-management v1.3 -- PAYOFF STATEMENTS workflow, repo-first reconciliation). All six skill dirs confirmed git-clean and `plugin_of` returned `None` for all six (standalone Save-skill path) before packaging. Packaged via `tools/package_skills.py`, exit 0, frontmatter gate passed on all six (deal-execution 980/1024, debt-management 929/1024, document-assembly 778/1024, estoppel-request-generation 902/1024, lease-abstraction-pipeline 966/1024, legal-intelligence 969/1024). Staged and handed to a Cowork session (this Code session has no Save-skill install control) for Entry point B present_files + Save-skill clicks; Cowork routed all six through the Cowork install button (two are multi-file: deal-execution has `scripts/`, lease-abstraction-pipeline has `references/` + `SCHEDULED_TASK.md`). Gabriel confirmed all six clicks.
+
+`main.log` remained stale throughout (last write 2026-08-20 20:51:03), so verification used the cache-directory CreationTime discriminator against pre-click baselines captured before the clicks:
+- `deal-execution`: CreationTime moved 17:21:59 -> 17:53:45. Confirmed genuine re-import, content byte-identical.
+- `document-assembly`: CreationTime moved 2026-08-14 18:00:44 -> 17:53:44. Confirmed genuine re-import, content byte-identical.
+- `estoppel-request-generation`: CreationTime moved 17:22:05 -> 17:53:48. Confirmed genuine re-import, content byte-identical.
+- `lease-abstraction-pipeline`: CreationTime moved 17:21:51 -> 17:53:51. Confirmed genuine re-import, content byte-identical (all 3 packaged files, incl. `SCHEDULED_TASK.md`).
+- `legal-intelligence`: CreationTime moved 2026-08-03 14:51:09 -> 17:53:56. Confirmed genuine re-import, content byte-identical.
+- `debt-management`: CreationTime did NOT move (unchanged at 2026-08-17 17:34:25) even though content is byte-identical to the packaged v1.3. Same ambiguous pattern as `package-and-stage-skill` in the prior batch: the pre-commit `sync_appdata_mirror.py` hook overwrites content in-place into any EXISTING AppData mirror on every commit, so a byte-match here is expected regardless of whether today's click actually re-imported anything -- per this skill's own v1.13 doctrine, content match with an unmoved CreationTime is not first-hand proof of install. Flagging rather than asserting a clean confirmation: **content is verified correct and live; today's click's provenance for debt-management specifically is inconclusive.**
+
+All six cleared from `_staging/PENDING_REIMPORT.md` (`pending_reimport.py clear`) -- content re-sync independently confirmed for all six, genuine re-import confirmed via CreationTime for five of the six.
+
+## 2026-08-21 -- Save-skill click confirmed: 6-skill batch (commit 63f0efe)
+
+Packaged, staged, and installed via package-and-stage-skill v1.22/v1.23 Entry point A,
+run from a cloud Cowork session over the Desktop Commander bridge. `main.log` was
+stale (last write 2026-08-20 20:51:03) for the entire session, so the CreationTime
+fallback discriminator (v1.22 step 7) was used for post-install verification instead
+of the main.log Delta/Sync-complete gate.
+
+Skills confirmed installed (cache dir CreationTime moved to 2026-08-21 17:53:44-56,
+all post-dating both the 17:45:17 commit and the pre-check baseline, file counts
+matching the packaged .skill entries exactly):
+
+- deal-execution v1.6 (3 files: SKILL.md, scripts/audit_completeness.py, scripts/extract_revisions.py)
+- document-assembly v1.4 (1 file: SKILL.md)
+- estoppel-request-generation v1.1 (1 file: SKILL.md)
+- lease-abstraction-pipeline v2.7 (3 files: SKILL.md, SCHEDULED_TASK.md, references/extraction-edge-cases.md)
+- legal-intelligence v1.3 (1 file: SKILL.md)
+- package-and-stage-skill v1.23 (1 file: SKILL.md)
+
+Note: package-and-stage-skill's own AppData cache hash-matched the repo BEFORE this
+install (pre-commit mirror-sync hook artifact, per v1.13 doctrine) -- the stale
+CreationTime baseline (16:56:54, pre-dating the 17:45:17 commit) and this session's
+own synced mirror still reading v1.22 were what correctly flagged it as needing
+reimport despite the false-negative hash match.
+
+This is Gabriel's confirmed Save-skill click on all 6, not merely the upstream repo
+commit. Source commit: 63f0efe80fc8b6377211bc79d455676afda54add.
+
+## 2026-08-21 -- orphaned oxford-command-center-1.worktrees archived (OI-200 loose end)
+
+Running dirty-tree-triage's new stray-clone-by-remote discovery (scan_dirty_trees.py, commit 1aec229) surfaced C:\Users\Owner\oxford-command-center-1.worktrees\qodo-github-repo-review -- a git-worktree checkout left behind when its parent clone (oxford-command-center-1) was archived under OI-200's closure. Not flagged by the discovery tool itself (no top-level .git of its own), and git couldn't even recognize it as a repo any more ("fatal: not a git repository") since its .git pointer referenced the now-moved parent -- confirmed genuinely orphaned, not live: absent from the primary repo's own `git worktree list` (which only shows the 5 real worktrees under oxford-command-center/.claude/worktrees/ and oxford-command-center-worktrees/, a different naming pattern entirely). Archived (never deleted, Hard Invariant 6) to C:\Users\Owner\_archive-non-onedrive\oxford-command-center-1-worktrees-orphan-20260821\, alongside the original stray-clone archive from OI-200. Verified the primary repo's 5 live worktrees are unaffected post-move.
+
+## 2026-08-21 -- loi-generation v1.7 committed and pushed: merged colliding v1.6 revisions (commit 3c477f5)
+
+Reconciled the loi-generation version collision at Gabriel's direction. Repo's v1.6 (2026-08-16, committed) added Phase 6c Lost-Deal Ledger capture (Notion Deal Sourcing Log, `ORA Max Defensible Price`); the platform's independent v1.6 (2026-08-18, never committed) wired `{{PROPERTY_ZONING_PHRASE}}` + a new inline SS13 entity-interest conditional into the master template, fixed the EXECUTION PAGE subtitle token gap, and fixed a `{{TENANT_DISCLOSURE_PHRASE}}` trailing-comma defect -- both diverged from the same v1.5 base with no knowledge of each other. Neither was a superset, so this merged both feature sets into v1.7: `SKILL.md` combines both sides' Decision Logic/Token Reference/Phase 4/Versioning changes, and `templates/LOI_Master_Template_Condensed.docx` was replaced with the platform-side v1.1 copy (Phase 6c is Notion-only and needed no template changes, so nothing from the repo side was lost). Pre-commit gate initially BLOCKED on the merged description exceeding the 1024-char platform limit (1094 chars) -- trimmed to 912 and re-committed clean; this is the pre-flight frontmatter gate working as designed, not a defect. Pushed `1aec229..3c477f5` to origin/main. Archived both spent rescue copies to `_archive\2026-08-21_repo-first-rescue-triage\loi-generation-merged-3c477f5\`. Verified the platform runtime-cache mirror now byte-matches the committed content (auto-synced by pre-commit Check 4). Companion to the same-session `debt-management` v1.3 reconciliation (commit 27cb034). **One item from the same `STORE_AHEAD_OF_REPO.md` sweep remains OPEN:** `lease-addendum` -- real committed work on unmerged branch `claude/determined-cannon-8126a7` commit `a359381` (ora_doc_qc retrofit), needs a merge-to-main decision, not touched.
+
+## 2026-08-21 -- dirty-tree-triage v1.1 installed via Save-skill click (OI-203 fix now live)
+
+Gabriel clicked **Save skill** in Cowork on the `dirty-tree-triage.skill` package (2 entries: `SKILL.md`, `scripts/scan_dirty_trees.py`; commit `4e44f72`, the OI-203 fix pairing step 7's ora-skills git check with a `claim_work.py claim`). Verified as a genuine re-import, not a mirror-sync artifact: the runtime cache directory's CreationTime moved from the 2026-08-13 baseline to 2026-08-21 17:41:42, with both files sharing that exact timestamp (directory torn down and recreated); `main.log` was unavailable for corroboration (no activity since 2026-08-20 20:51:03, "going down for update"), so the CreationTime discriminator was the sole evidence, per package-and-stage-skill v1.22. Content hash-matches commit `4e44f72` exactly. `open-items-tracker.md#OI-203` fix is now live end-to-end (repo + platform). Cleared from `ora-skills/_staging/PENDING_REIMPORT.md`.
+
+Noted in passing: the repo has since moved past this commit with uncommitted v1.2 WIP (stray-clone-by-remote discovery, OI-200) under a live, properly-filed `ora-skills-housekeeping` claim (session `d7aee8c2`) -- correctly left untouched, not a conflict with this install.
+
+## 2026-08-21 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `00eb97d5-5753-4335-93e9-891e19413564` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel authorized in-turn 2026-08-21. maintenance/test-governor-drift-probe.py fails on unmodified main (confirmed, unrelated to this push's 2-file diff) -- false positive flagging acquisition-buy-box-v1.md's ratified 65%-per-property-refi/40%-aggregate LTV split as drift. Fix spawned as a separate task (task_bb18f708).
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-08-21 17:47:16 local.
+
+## 2026-08-21 -- 3-skill reimport batch (insurance-renewal-review, dirty-tree-triage, package-and-stage-skill) installed via Gabriel's Save-skill clicks
+
+Entry point A (fresh package, no pre-built `.skill` existed for any of the three) on the 3 items left open by the earlier batch5 handoff: `insurance-renewal-review` (commit `834bfe3`, trims `description` off the 1024-char hard import limit), `dirty-tree-triage` (commit `4e44f72`, pairs step 7's `ora-skills` single-writer check with a `claim_work.py` claim per OI-203), `package-and-stage-skill` (commit `c31fa66`, v1.22 -- `main.log` liveness fallback + canonical `.ps1` invocation snippet). Repo confirmed clean for all three skill dirs before packaging; `plugin_of` returned `None` for all three (standalone Save-skill path, no plugin rebuild). Packaged via `tools/package_skills.py`, exit 0, frontmatter gate passed (`insurance-renewal-review` now 940/1024, confirming the 834bfe3 trim took effect; `package-and-stage-skill` 1010/1024; `dirty-tree-triage` 729/1024). Staged and presented; Gabriel confirmed all three Save-skill clicks.
+
+`main.log` was stale throughout (last write 2026-08-20 20:51:03, per v1.22's own documented fallback), so post-install verification used the cache-directory CreationTime discriminator instead of log corroboration:
+- `insurance-renewal-review`: cache dir CreationTime moved 17:19:31 -> 17:41:42 -- confirmed genuine re-import. Content byte-identical to the packaged v-trim.
+- `dirty-tree-triage`: cache dir CreationTime moved 2026-08-13 20:08:25 -> 17:41:42 -- confirmed genuine re-import. Content byte-identical to the packaged build.
+- `package-and-stage-skill`: cache dir CreationTime did NOT move (unchanged at 16:56:54, i.e. ~2 min after the c31fa66 commit itself) even though content is byte-identical to the packaged v1.22. Per this skill's own v1.13 doctrine, an unchanged CreationTime with matching content is NOT first-hand proof that today's click is what installed it -- most likely an earlier, unlogged install already landed v1.22 minutes after the commit, and today's click was a no-op against already-current content. Flagging this rather than asserting a clean "confirmed click" for this one item: **content is verified correct and live; install-timing provenance for this specific instance is inconclusive.**
+
+All three cleared from `_staging/PENDING_REIMPORT.md` (`pending_reimport.py clear`) since the runtime cache re-sync is independently confirmed for content on all three, and confirmed genuine re-import for two of the three. Note: an uncommitted, in-progress edit to `package-and-stage-skill/SKILL.md` (session `04d7cdf1`, toward a v1.23 doc-only fix) was observed mid-task, unrelated to this batch -- will surface as its own future pending-reimport once committed.
+
+## 2026-08-21 -- debt-management v1.3 committed: repo-first reconciliation of platform-side PAYOFF STATEMENTS work (commit 27cb034)
+
+Committed `debt-management/SKILL.md` v1.2 -> v1.3, landing the PAYOFF STATEMENTS section (Step 0 direction check, Workflow A issuing / Workflow B auditing, 13-point payoff QC gate) that had been running on the platform cache since 2026-08-17 but was never committed to `ora-skills` -- surfaced by re-running `tools/repo_first_check.py`'s full sweep while investigating a Gabriel-flagged `STORE_AHEAD_OF_REPO.md` entry (which itself turned out to be stale/already-resolved for lease-form-qc/listing-agreement-qc). Verified the cache content byte-matched (CRLF-normalized) the committed result before archiving its rescue copy. Committed in isolation (explicit pathspec, not `git add -A`) after a concurrent live session's own 6-file staged commit (`63f0efe`) landed first -- avoided co-mingling per the shared-checkout hygiene hook's warning. Pre-commit mirror sync (Check 4) pushed the new content into the AppData runtime cache automatically; `PENDING_REIMPORT.md` now carries a `debt-management` line awaiting Gabriel's Save-skill click. Archived the spent rescue copy to `_archive\2026-08-21_repo-first-rescue-triage\debt-management-committed-27cb034\`. **Two items from the same sweep remain OPEN, need Gabriel's decision, NOT touched:** `loi-generation` (a genuine two-way v1.6 version collision -- repo's Lost-Deal Ledger Phase 6c vs. cache's template-token wiring, both real, neither a superset) and `lease-addendum` (real committed work on unmerged branch `claude/determined-cannon-8126a7` commit `a359381`, retrofitting `addendum_qc.py`/`ora_doc_qc.py` -- needs a merge-to-main decision, not a rescue). Their rescue copies remain in `_staging/repo-first-rescue/`, untouched.
+
+## 2026-08-21 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `00eb97d5-5753-4335-93e9-891e19413564` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel authorized in-turn 2026-08-21. maintenance/test-governor-drift-probe.py fails on unmodified main (confirmed, unrelated to this push's 2-file diff) -- false positive flagging acquisition-buy-box-v1.md's ratified 65%-per-property-refi/40%-aggregate LTV split as drift. Fix spawned as a separate task (task_bb18f708).
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-08-21 17:42:51 local.
+
+## 2026-08-21 -- dirty-tree-triage: full `ora-skills\_staging\` sweep, 26 dated folders + 32 loose files archived, zero live/uncommitted work found
+
+Extended the earlier repo-first-rescue triage to the entire remaining `_staging\` backlog (six weeks, 2026-07-09 through 2026-08-21, ~18MB). Six parallel read-only investigation passes hash-compared every packaged `.skill`/source-mirror file against full `ora-skills` git history (CRLF-normalized) and cross-checked loose `.ps1`/`.py`/`.md` session scripts against confirmed-shipped commits and `event_log.md`. Result: **every single item resolved to an exact historical commit match or confirmed-shipped/confirmed-installed state** — no live, uncommitted, or contested content anywhere in the backlog. Notable corroborating evidence along the way: `2026-07-21_index-unregistered-batch`'s own `_verify_output.txt` independently confirmed 15/15 installs; `2026-08-17`'s `CODE-HANDOFF.md` task list (including reconciling `_staging/repo-first-rescue/`) was independently confirmed complete; `2026-08-17`'s LAMS pause/resume draft's underlying scheduled task was confirmed to have actually fired live today at 21:06:45Z. One folder (`2026-08-21_batch5-reimport`) was auto-archived by a concurrent live session mid-sweep — left untouched, already resolved. Archived (never deleted, Hard Invariant 6) the remaining 25 dated folders + 32 loose files to `_archive\2026-08-21_staging-full-sweep-triage\`, structure preserved. Left `_staging\PENDING_REIMPORT.md` and `_staging\STORE_AHEAD_OF_REPO.md` untouched — confirmed live/active (PENDING_REIMPORT.md's own mtime advanced mid-sweep). `_staging\` now holds only those two active ledger files. Separate open item surfaced, out of scope for this sweep: `STORE_AHEAD_OF_REPO.md` currently flags `lease-form-qc` and `listing-agreement-qc` runtime-cache content as DIVERGENT from repo on `scripts/ora_doc_qc.py` since 2026-08-17T20:23Z — a live, still-open drift, unrelated to any archived item here.
+
+## 2026-08-21 -- OI-203 fixed: dirty-tree-triage step 7 now pairs the ora-skills git check with a claim_work.py claim
+
+`ora-skills` commit `4e44f72` (`dirty-tree-triage` v1.1, Gabriel-directed): step 7's `git log -1`/`git status` single-writer check now also requires `claim_work.py claim ora-skills-housekeeping --paths <target>` before any hands-on ora-skills triage. Claimed the work under that exact slug before making this edit -- clean claim, no takeover needed -- and released it after commit. Root cause (filed as `open-items-tracker.md#OI-203`): two sessions independently ran this skill's full workflow against the same `ora-skills/_staging` folders earlier today with neither claiming first; git state alone can't see a concurrent session since commits share author identity across sessions, so both saw a clean tree and proceeded, and the collision was caught only by accident. The pre-commit hook auto-synced the AppData mirror and logged the skill to `ora-skills/_staging/PENDING_REIMPORT.md` -- **not yet live on the platform account** until a `package-and-stage-skill` re-upload runs; a session still reading the old synced copy won't see the new step 7 language in the meantime. OI-203 row updated to FIXED (repo) with the commit citation.
 
 ## 2026-08-21 — Skill fleet: manuscript-amendment discipline (754 Old State)
 
@@ -60,6 +151,72 @@ Save-skill button. Use PowerShell, not `cmd /c` with `set VAR=...&` (breaks on s
 Watch line endings: reading utf8 and writing `newline=''` flips CRLF→LF, which `.gitattributes`
 wants but makes a legacy-CRLF blob diff look like a full-file rewrite — verify with `git diff -w`
 and say so in the commit message.
+
+## 2026-08-21 -- Filed OI-203: claim_work.py process gap surfaced by today's ora-skills `_staging` triage collision
+
+Two sessions were independently handed the same investigation of `ora-skills/_staging/repo-first-rescue/` + `session_outputs/lease-addendum.skill` today; both reached the same conclusion (all 8 items fully superseded, safe to archive) but neither filed a `claim_work.py claim` before starting, so the collision was caught only by accident -- one session's archive `mv` found its source already moved by the other, seconds after `event_log.md` had already been updated. `hooks/active-work/*.json` held no claim for this task at the time. The module's own docstring cites a near-identical 2026-08-12 ora-skills precedent as its reason for existing; this is a fresh instance of the same gap, not a new failure mode. Distinct from [open-items-tracker.md#OI-166](open-items-tracker.md#OI-166) (fixed 2026-08-16 -- a bug inside the claim mechanism itself); this one is non-adoption -- the mechanism was never invoked. Filed per Gabriel's in-turn instruction as [open-items-tracker.md#OI-203](open-items-tracker.md#OI-203); full detail in the tracker row.
+
+## 2026-08-21 -- 5-skill reimport batch INSTALLED (Save-skill clicks confirmed, not merely committed)
+
+**What happened.** Gabriel clicked **Save skill** in Cowork for 5 skills that had sat in
+`PENDING_REIMPORT.md` since 2026-08-17 (one since 2026-08-21). The Cowork session that ran
+the clicks got through Entry point B's pre-check and staging (extracted zips to
+`_extract_check\`, ran a freshness screen) but did not complete steps 5-8 -- no event_log
+entry, no ledger clear, staging folder left unarchived. This Code session verified the
+installs independently and closed out steps 5-8 itself rather than trust the claim on sight
+(the ledger still showed all 5 pending when first checked, which is what triggered the
+independent verify instead of a same-turn "done").
+
+**Skills, versions, staged packages:**
+- `daily-brief` v2.12 (commit fd9bd17, "v2.11->v2.12: drop 'market update' trigger")
+- `insurance-renewal-review` v2.0 (commit 5953732, "text-layer triage, quoted-vs-realized
+  check, named-insured-by-location reconciliation, HTML dashboard")
+- `listing-agreement-qc` v1.2 (commit 8ae16b5, "REPO-FIRST capture of previously-uncaptured
+  cache-only skill")
+- `register-scheduled-task` v2.12 (commit 655c346, "a bounded pause must register its resume
+  per fleet, same session/surface/pass")
+- `settlement-basis-extraction` v1.0 (commit 9ca7a2f, first install -- brand new skill)
+
+**Path.** package-and-stage-skill Entry point A (this session packaged fresh via
+`tools\package_skills.py`, not a handoff) -> staged to
+`ora-skills\_staging\2026-08-21_batch5-reimport\` -> handed to Cowork via Entry point B for
+the Save-skill clicks.
+
+**Pre-check (all green).** None are plugin members (`plugin_of` = None for all 5). Repo tree
+clean on all 5 dirs before packaging. Packager exit 0 on all 5: forward-slash entries, `name`
+== dir, description within the 1024-char limit -- **`insurance-renewal-review` packaged at
+exactly 1024/1024 chars, zero margin before a future one-character addition silently fails
+import** (flagged to Gabriel, not edited). `daily-brief` (target-markets.json) and
+`listing-agreement-qc` (tools/ora_doc_qc.py) are SHARED_ROOT_DEPS consumers; `pending_reimport.py
+shared-deps` read all-in-sync before packaging, no CACHE-AHEAD/DIVERGENT direction conflict.
+
+**Post-install verify -- 5/5 skills, all files, and every cache directory was REBUILT, not
+overwritten.** Directory CreationTime moved to match LastWriteTime for all 5 (17:19:31,
+17:19:31, 17:19:34, 17:19:37, 17:19:39 ET respectively -- staggered a few seconds apart,
+consistent with one sequential batch of Save-skill clicks), versus their pre-click
+CreationTimes of 8/17 or earlier -- the same directory-recreation discriminator used for
+`acquisition-proposal-generation` earlier today. All shipped files byte-matched the repo
+(raw SHA256, no EOL normalization needed). Both shared deps confirmed: `daily-brief`'s
+`target-markets.json` and `listing-agreement-qc`'s `scripts/ora_doc_qc.py` both hash-identical
+to their repo-root/tools sources.
+
+**`main.log` unavailable as corroboration on this machine** (same standing gap recorded in
+today's earlier `acquisition-proposal-generation` entry -- no `SkillsPlugin` activity logged
+since 2026-08-20 20:51:03). Directory-recreation timestamp used as the first-hand substitute,
+consistent with that entry's documented fallback.
+
+**Ledger.** `pending_reimport.py clear <skill>` run for all 5, each only after this append
+returned exit 0. Ledger entries added later in the session for other work (`deal-execution`,
+`estoppel-request-generation`, `lease-abstraction-pipeline`, `title-exam-abstraction`,
+`package-and-stage-skill`) were left untouched -- out of scope for this task.
+
+**Staging archived.** `_staging\2026-08-21_batch5-reimport\` (including the Cowork session's
+own partial-verification scripts) moved to `_archive\2026-08-21_batch5-reimport\`, nothing
+deleted.
+
+## 2026-08-21 -- dirty-tree-triage: ora-skills `_staging\repo-first-rescue\` + `_staging\session_outputs\lease-addendum.skill` archived, all 8 items confirmed superseded
+
+Two undated staging folders flagged by a 2026-08-21 Cowork session (no manifest/event_log signature) were triaged file-by-file against `ora-skills` git history. All 17 files in `repo-first-rescue\` (7 skill trees: exception-detection, insurance-renewal-review, lease-addendum, lease-form-qc, listing-agreement-qc, masterlease-jurisdiction-rebase, package-and-stage-skill) hash-matched an exact prior commit already superseded by later work — notably masterlease-jurisdiction-rebase's v1.1.2 content matches commit `ea9dddf`'s own "Code-surface close-out" reconciliation of a Cowork-hand-edit, and package-and-stage-skill's mislabeled "v1.20" draft is the exact stale-mirror-clobber incident already documented in the current v1.21 Changelog. `session_outputs\lease-addendum.skill` is byte-identical to both current repo HEAD and the already-installed AppData synced mirror — a spent package missing only its event_log confirmation line, not its content. No live or uncommitted work found in either folder. Archived (never deleted, Hard Invariant 6) to `_archive\2026-08-21_repo-first-rescue-triage\`, structure preserved. Repo verified git-clean on package-and-stage-skill and all 6 other touched skill dirs before and after.
 
 ## 2026-08-21 -- repo-architecture-review: cross-repo audit filed OI-197 through OI-201, remediation started
 
