@@ -5,12 +5,55 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-21T21:55:11.507Z
+  modified: 2026-08-21T22:18:27.383Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-08-21 -- governor-drift-probe.py KNOWN GAP 2 closed: per-property refi-sizing 65% LTV ceiling no longer flags as drift
+
+Fixed a false positive that was blocking every push repo-wide: `governor-drift-probe.py`
+flagged `acquisition-buy-box-v1.md:31` ("LTV ceiling (per-property refi sizing): <= 65%
+LTV...") as "LTV governor 65% != canonical 40%". Doctrine states the ratified per-property
+refi-sizing ceiling (<= 65% LTV) and the portfolio-aggregate ceiling (<= 40% LTV, Hard
+Invariant 4) on SEPARATE bullets (buy-box-v1.md :31 vs :33); the probe's existing pairing
+suppressor only recognized the two governors when stated together on the same line. This
+was a previously-documented, deliberately-deferred gap in the probe's own comments (KNOWN
+GAP 2: "Closing it requires widening LTV SUPPRESSION -- a false-negative risk on Hard
+Invariant 4 that belongs in its own reviewed change").
+
+Fix: a narrow suppressor in `_flag_ltv` that is VALUE-LOCKED (only the literal ratified
+"65" ever matches -- a real per-property drift still flags) and VALUE-ADJACENT (the
+ratified "per-property ... refi ... siz(ing)" wording must end within a short window
+immediately before the flagged value, not merely appear anywhere on the line), vetoed by
+the existing `_governor_declared_nearby` check.
+
+Two-round independent review via `eos-review-gate.py` (pinned `claude-fable-5`, the
+gate's top reviewer tier). Round 1 caught a real Critical: the first cut's frame check was
+line-wide, which could mask a genuine AGGREGATE-governor drift restated as 65% elsewhere
+on the same line (e.g. "Portfolio LTV ceiling raised to 65% given our per-property refi
+sizing convention."). Fixed with the value-adjacency requirement; round 2 approved with no
+blocking findings. A known, narrower residual was accepted rather than fixed (a
+governor/acquisition-declaration token sitting >28 chars before the value, outside the
+existing veto's reach, could still be masked in this one shape) -- documented in-code
+rather than widening `VETO_BEFORE`, since that constant is independently tuned against
+other real-tree margins and the value-lock means only the literal "65" is ever at stake.
+
+Added 4 regression tests: the real false positive (plus a hyphenated "refi-sizing"
+spelling), a drifted per-property value still flagging, and the two round-1
+adversarial-masking shapes still flagging. Full `test-governor-drift-probe.py` suite
+green; live probe now exits 0 against the real tree (1242 files scanned; was exit 1).
+Full local pre-push chain run for real (doctrine gate, 94/94 hook-tests, confidentiality
+scan) -- all green, both as a standalone simulation and during the actual push.
+
+Built in an isolated worktree per the shared-checkout single-writer doctrine (claimed via
+`claim_work.py` under a distinct `hooks-override-auth-governor-drift` slug alongside a
+concurrent session's unrelated `hooks-override-auth` claim on `commit-hygiene-guard.py`).
+Merged to `main` (`c7875a5` -> merge commit) and pushed to `origin/main` on
+`ora-claude-config` (`7221e63..bfcd26b`). Scratch worktrees and the merged feature branch
+cleaned up after push.
 
 ## 2026-08-21 -- 6-skill reimport batch (deal-execution, debt-management, document-assembly, estoppel-request-generation, lease-abstraction-pipeline, legal-intelligence) installed via Gabriel's Save-skill clicks
 
