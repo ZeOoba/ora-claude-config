@@ -503,6 +503,147 @@ try:
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
+print("== H. unscoped-stage advisory (GAP C, 2026-08-21) ==")
+
+tmp = tempfile.mkdtemp()
+try:
+    repo, _ = make_repo(tmp)
+    with open(os.path.join(repo, "plain.txt"), "w", encoding="utf-8") as fh:
+        fh.write("changed\n")
+    git(repo, "add", "-A")
+    rc, ctx, dec = run_guard("git commit -m x", repo)
+    check("H1 plain commit of pre-staged files: no unscoped warning",
+          "UNSCOPED" not in ctx, "ctx=%r" % ctx[:250])
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
+for label, cmd in [
+    ("H2 add -A && commit: warns UNSCOPED", "git add -A && git commit -m x"),
+    ("H3 commit -am: warns UNSCOPED", "git commit -am x"),
+    ("H4 add . && commit: warns UNSCOPED", "git add . && git commit -m x"),
+    ("H5 commit --all: warns UNSCOPED", "git commit --all -m x"),
+]:
+    tmp = tempfile.mkdtemp()
+    try:
+        repo, _ = make_repo(tmp)
+        with open(os.path.join(repo, "plain.txt"), "w", encoding="utf-8") as fh:
+            fh.write("changed\n")
+        rc, ctx, dec = run_guard(cmd, repo)
+        check(label, "UNSCOPED" in ctx, "ctx=%r" % ctx[:300])
+        check(label + " (still warn-only)", rc == 0 and dec != "deny",
+              "rc=%s dec=%s" % (rc, dec))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+tmp = tempfile.mkdtemp()
+try:
+    repo, _ = make_repo(tmp)
+    with open(os.path.join(repo, "plain.txt"), "w", encoding="utf-8") as fh:
+        fh.write("changed\n")
+    git(repo, "add", "-A")
+    rc, ctx, dec = run_guard("git commit -m x -- plain.txt", repo)
+    check("H6 add -A but commit itself has an explicit pathspec: silent",
+          "UNSCOPED" not in ctx, "ctx=%r" % ctx[:300])
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
+tmp = tempfile.mkdtemp()
+try:
+    repo, _ = make_repo(tmp)
+    with open(os.path.join(repo, "plain.txt"), "w", encoding="utf-8") as fh:
+        fh.write("changed\n")
+    rc, ctx, dec = run_guard("git add plain.txt && git commit -m x", repo)
+    check("H7 explicit named-file add (no sweep flag): silent",
+          "UNSCOPED" not in ctx, "ctx=%r" % ctx[:300])
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
+# H8 -- independent-review finding (2026-08-21): a sweep `add` AFTER the commit it
+# follows in the same compound command must NOT taint that earlier commit. sweep_add
+# is snapshotted into `found` at the moment each commit segment is parsed, matching the
+# existing "later commit wins" ordering rule -- not accumulated blindly across the whole
+# command the way the pre-fix version did.
+tmp = tempfile.mkdtemp()
+try:
+    repo, _ = make_repo(tmp)
+    rc, ctx, dec = run_guard("git commit -m x && git add -A", repo)
+    check("H8 sweep add AFTER the commit: no false UNSCOPED warning",
+          "UNSCOPED" not in ctx, "ctx=%r" % ctx[:300])
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
+# H9 -- the three sweep tokens not covered by H2-H5 (-u, --update, --no-ignore-removal).
+for label, cmd in [
+    ("H9a add -u && commit: warns UNSCOPED", "git add -u && git commit -m x"),
+    ("H9b add --update && commit: warns UNSCOPED", "git add --update && git commit -m x"),
+    ("H9c add --no-ignore-removal && commit: warns UNSCOPED",
+     "git add --no-ignore-removal && git commit -m x"),
+]:
+    tmp = tempfile.mkdtemp()
+    try:
+        repo, _ = make_repo(tmp)
+        with open(os.path.join(repo, "plain.txt"), "w", encoding="utf-8") as fh:
+            fh.write("changed\n")
+        rc, ctx, dec = run_guard(cmd, repo)
+        check(label, "UNSCOPED" in ctx, "ctx=%r" % ctx[:300])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+# H10 -- newline-separated form (matches the existing E-M4 newline coverage pattern).
+tmp = tempfile.mkdtemp()
+try:
+    repo, _ = make_repo(tmp)
+    with open(os.path.join(repo, "plain.txt"), "w", encoding="utf-8") as fh:
+        fh.write("changed\n")
+    rc, ctx, dec = run_guard("git add -A\ngit commit -m x", repo)
+    check("H10 newline-separated add -A / commit: warns UNSCOPED",
+          "UNSCOPED" in ctx, "ctx=%r" % ctx[:300])
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
+# H11 -- independent-review finding (PR #142, Qodo): `add -A -- <pathspec>` is SCOPED by
+# its own pathspec in real git -- -A only means "the whole tree" absent a pathspec on the
+# add itself. Must NOT be read as a sweep.
+tmp = tempfile.mkdtemp()
+try:
+    repo, _ = make_repo(tmp)
+    with open(os.path.join(repo, "plain.txt"), "w", encoding="utf-8") as fh:
+        fh.write("changed\n")
+    rc, ctx, dec = run_guard("git add -A -- plain.txt && git commit -m x", repo)
+    check("H11 add -A scoped by its OWN pathspec: silent",
+          "UNSCOPED" not in ctx, "ctx=%r" % ctx[:300])
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
+# H12 -- independent-review finding (PR #142, Qodo): a sweep add in ONE repo must not
+# taint a commit in a DIFFERENT repo reached via `-C`.
+tmpA, tmpB = tempfile.mkdtemp(), tempfile.mkdtemp()
+try:
+    repoA, _ = make_repo(tmpA)
+    repoB, _ = make_repo(tmpB)
+    with open(os.path.join(repoB, "plain.txt"), "w", encoding="utf-8") as fh:
+        fh.write("changed\n")
+    cmd = 'git -C "%s" add -A && git -C "%s" commit -m x' % (repoA, repoB)
+    rc, ctx, dec = run_guard(cmd, repoA)
+    check("H12 cross-repo sweep add does not taint a different repo's commit",
+          "UNSCOPED" not in ctx, "ctx=%r" % ctx[:300])
+finally:
+    shutil.rmtree(tmpA, ignore_errors=True)
+    shutil.rmtree(tmpB, ignore_errors=True)
+
+# H13 -- guard against over-correcting H11/H12: a SAME-repo sweep add must still warn.
+tmp = tempfile.mkdtemp()
+try:
+    repo, _ = make_repo(tmp)
+    with open(os.path.join(repo, "plain.txt"), "w", encoding="utf-8") as fh:
+        fh.write("changed\n")
+    rc, ctx, dec = run_guard('git -C "%s" add -A && git -C "%s" commit -m x' % (repo, repo),
+                             repo)
+    check("H13 same-repo -C add/commit still warns UNSCOPED",
+          "UNSCOPED" in ctx, "ctx=%r" % ctx[:300])
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
 print("")
 if FAILS:
     print("FAILED: %d" % len(FAILS))
