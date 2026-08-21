@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-08-21T21:13:12.808Z
+  modified: 2026-08-21T21:22:46.961Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -32,6 +32,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
+| [OI-202](#OI-202) | 2026-08-21 | Repo-architecture-review remediation, Code session picking up the handoff | **MEDIUM - model-driven one-time scheduled task stalled silently mid-run.** `ora-routine-pause-resume-08-21` fired at its scheduled time but only executed the first 2 of 35 `update_scheduled_task(enabled:true)` calls in its instruction list before stopping - no error, no partial-progress marker, and it never reached its own step-6 summary email (confirmed absent from `send-log.txt`). Completed the remaining 33 re-enables manually this session; root cause of the stall itself not diagnosed. |
 | [OI-201](#OI-201) | 2026-08-21 | Cross-repo architecture-diagram review (`repo-architecture-review`, Gabriel-directed, this session) | **MEDIUM - stale diagram on a money-moving path.** `ora-pm/README.md`'s architecture mermaid still labels its scheduler node "Windows Task Scheduler (two separate tasks, no ORA fleet involved)" and its prose still asserts `scripts/trigger-billing.ps1` POSTs `/api/cron/monthly-billing` "on the 1st of the month". Since [OI-162](#OI-162) (2026-08-16) the daily half is `ora-pm-daily-crons` on the cc fleet and "ORA PM Crons" is Disabled; the monthly half has no trigger in Windows Task Scheduler OR either fleet registry (re-verified 2026-08-21). The deploy section is also wrong: `.github/workflows/ci.yml` deploys via `wrangler pages deploy`, not the Pages Git integration the README describes. |
 | [OI-200](#OI-200) | 2026-08-21 | Cross-repo architecture-diagram review (`repo-architecture-review`, Gabriel-directed, this session) | **LOW-MEDIUM - stray third writable clone of a financial repo.** `C:\Users\Owner\oxford-command-center-1` (created 2026-08-20 13:34, full clone of `ZeOoba/oxford-command-center` at `58da3a4`, clean) is referenced by nothing - grep of `oxford-command-center/scripts/*.ps1` and `~/.claude/maintenance/*.{ps1,py}` returns zero hits. Three writable copies of the repo now sit on one disk (primary, `-1`, and the managed `-deploy-build`); `dirty-tree-triage`'s roster covers only the primary. Primary also holds 2 unpushed commits (`0e60d02`, `07bd362` - a tax recapture fix) not on `origin/main`, so they are absent from every mirror deploy. |
 | [OI-199](#OI-199) | 2026-08-21 | Cross-repo architecture-diagram review (`repo-architecture-review`, Gabriel-directed, this session) | **LOW (dormant) - audit coverage hole.** `ZeOoba/Internal-Accounting-App` is the only ORA repo with NO README at all (`gh api repos/ZeOoba/Internal-Accounting-App/readme` -> 404), no architecture diagram, and no local clone on `C:\Users\Owner`. Its stated purpose (per the GitHub repo description) is automating internal accounting/bookkeeping/financial reporting across ~20 LLCs - the highest financial-consequence domain in the portfolio. Dormant since 2026-06-04. Every run of `repo-architecture-review` is structurally blind to it. Decide: document it or archive it. |
@@ -4084,6 +4085,18 @@ single check turns today's silent coalesce into a visible one.
 **Fix direction:** update the mermaid scheduler node and the "Cron jobs have no native Cloudflare Pages trigger" paragraph to current reality, and mark monthly-billing explicitly as UNTRIGGERED rather than describing a schedule it does not have. Normal lane triage - `/build` or a docs-scoped commit in `ora-pm`; no gate implications.
 
 **Related:** [OI-162](#OI-162) (parent, monthly half still open), [OI-076](#OI-076), [OI-047](#OI-047).
+
+---
+
+### OI-202
+
+**Opened:** 2026-08-21 · **Source:** Repo-architecture-review remediation, Code session picking up the handoff brief
+
+**Description:** **MEDIUM.** `ora-routine-pause-resume-08-21` is a model-driven one-time CC/MCP task (natural-language steps run by an agent session, not a deterministic script) whose job was to re-enable 35 recurring tasks paused since 2026-08-17. It fired on schedule (`lastRunAt: 2026-08-21T21:05:54Z`) but `list_scheduled_tasks` showed only the first 2 ids in its own instruction list (`ora-master-workbook-ingest`, `ora-financial-code-integrity-sweep`) had actually been flipped `enabled:true` — the remaining 33 stayed `OFF`. No error was recorded anywhere reachable this session, and its step-6 summary email never sent (`send-log.txt` has no matching entry) — meaning the run stopped somewhere in steps 1-5 with no trace of why, and nothing downstream (fleet-status, the dead-man chain) flagged the partial completion as distinct from a clean one.
+
+**Fix direction:** completed manually this session — the remaining 33 tasks were re-enabled directly via `update_scheduled_task(enabled:true)` (no other fields touched, matching the original task's own instruction to avoid reverting hand-edits made during the pause), verified via `list_scheduled_tasks`, and the step-6 summary email was sent late by hand. Root cause of the stall is NOT diagnosed — no session transcript/log was surfaced by a quick check. If this recurs, a one-time resume task's design should probably write an explicit per-item progress marker (or a exit code / heartbeat file) so a stall is distinguishable from "still running" and catchable by `automation-health-monitor` or the dead-man chain, rather than only visible via a manual `list_scheduled_tasks` diff.
+
+**Related:** discovered while re-verifying §3a of the 2026-08-21 repo-architecture-review handoff brief; not yet linked to any prior OI on model-driven scheduled-task reliability.
 
 ---
 
