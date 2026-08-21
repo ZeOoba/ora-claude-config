@@ -66,12 +66,21 @@ def split_desc(txt):
 
 
 def fragments(desc):
+    # Values are LISTS, not a single chunk (2026-08-21 fix): the same version string can appear
+    # twice (a version patched twice in one day, or a messy real-world duplicate — the module
+    # docstring's own automation-health-monitor v1.20/v1.22 example shows this data is not always
+    # clean). Keying a plain dict by version alone silently overwrote the earlier occurrence with
+    # the later one before pointer_only()/remediate() ever saw it — if the discarded fragment was
+    # pointer-only in the body, its content was gone with no failed check to surface it, exactly
+    # the irreversible loss this tool exists to prevent. Confirmed via repro: two v1.5 fragments in
+    # one description collapsed to only the second.
     marks = [x.start() for x in FRAG.finditer(desc)]
     out = {}
     for i, s in enumerate(marks):
         e = marks[i + 1] if i + 1 < len(marks) else len(desc)
         chunk = desc[s:e].strip().rstrip(".").rstrip()
-        out[re.match(r"v(\d+\.\d+)", chunk).group(1)] = chunk
+        ver = re.match(r"v(\d+\.\d+)", chunk).group(1)
+        out.setdefault(ver, []).append(chunk)
     return out
 
 
@@ -175,15 +184,21 @@ def remediate(path, new_desc_file, apply, version_label):
                  "entries previously existed ONLY in the `description` field; the body carried "
                  "pointers reading \"see description field above\", which stops being true the "
                  "moment the description is trimmed. Moved verbatim, not summarised.*\n\n"
-                 % version_label) + "\n\n".join("- **%s" % frags[v] for v in po) + "\n"
+                 % version_label) + "\n\n".join("- **%s" % c for v in po for c in frags[v]) + "\n"
         new_txt = new_txt.rstrip() + "\n" + block
 
     nd = re.search(r"(?m)^description:(.*)$", new_txt).group(1).strip()
     nb = new_txt.split("---", 2)[2]
     nfrag = len(FRAG.findall(nd))
 
-    # trigger vocabulary that must survive: everything quoted after "Trigger"
-    old_trig = re.findall(r"[Tt]rigger(?:s| phrases| on|:)([^.]*)", desc)
+    # trigger vocabulary that must survive: everything quoted after "Trigger". Stops only at a
+    # period followed by whitespace-or-end-of-string, NOT at any period — a bare `[^.]*` (the
+    # original version) truncated at the first embedded period from a version tag ("v1.2") or
+    # abbreviation, silently under-capturing trig_terms and letting real dropped trigger terms
+    # slip past the "trigger vocabulary preserved" gate below with a false PASS (2026-08-21 fix,
+    # confirmed via repro: "...DSCR, v1.2 rollout, debt covenant..." used to capture only up to
+    # "v1", losing "rollout, debt covenant" from the check entirely).
+    old_trig = re.findall(r"[Tt]rigger(?:s| phrases| on|:)((?:(?!\.\s|\.$).)*)", desc)
     trig_terms = []
     for t in old_trig:
         trig_terms += [s.strip() for s in re.split(r"[,;]", t) if 2 < len(s.strip()) < 60]
@@ -193,7 +208,7 @@ def remediate(path, new_desc_file, apply, version_label):
         ("<2 changelog fragments", nfrag < 2),
         ("single line", "\n" not in nd),
         ("MODEL tag preserved", ("[MODEL:" in nd) == ("[MODEL:" in desc)),
-        ("migrated text present in body", all(frags[v][:120] in nb for v in po)),
+        ("migrated text present in body", all(c[:120] in nb for v in po for c in frags[v])),
         ("body length not reduced", len(nb) >= len(body)),
     ]
     missing_trig = [t for t in trig_terms if t.lower() not in nd.lower()]
