@@ -12,6 +12,42 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-21 -- repo-architecture-review description-trim (commit 73feef1): content verified live, Save-skill click provenance inconclusive
+
+Gabriel reported clicking **Save skill** in Cowork on the staged
+`repo-architecture-review.skill` (904/1024-char description trim, commit `73feef1`,
+2026-08-21 18:08:05 -0400). Package staged at
+`ora-skills\_staging\2026-08-21_repo-architecture-review-desclen-fix\`, SHA256
+`d813a1e536493bd3b46c8736a48a04bee84607efe1112379a469004f5eb4ecb2`.
+
+**Content verified correct and live.** Cache SKILL.md at
+`...\skills-plugin\583f08bc-...\a6ad2c61-...\skills\repo-architecture-review\SKILL.md`
+is byte-identical to the current repo copy (SHA256 `f89750d5...4681` both sides) --
+confirmed via direct grep for the trimmed phrasing (new wording present, old wording
+absent) as well as a full-file hash match.
+
+**But CreationTime evidence does NOT corroborate a fresh click.** The cache directory's
+CreationTime is still 2026-08-21 18:01:19 -- unchanged from the batch8 install
+recorded earlier today (`automation-health-monitor v1.6 + repo-architecture-review v1.0
+(post-1aec229)` entry). No re-creation event happened after the 18:08:05 commit. This
+is fully explained by `sync_appdata_mirror.py`'s pre-commit hook, which overwrites
+content in place into any EXISTING AppData mirror on every commit -- per this skill's
+own v1.13 doctrine, content matching the repo is not itself evidence of a genuine
+platform re-import when CreationTime hasn't moved. No verification scripts or
+`present_files` artifacts were found in the staging folder either (unlike every prior
+round in today's session, which left a scratch-script trail), consistent with the
+click not having actually reached Entry point B in Cowork.
+
+**Conclusion, following the same-day precedent for this exact ambiguous pattern
+(debt-management, package-and-stage-skill entries above):** content is verified
+correct and live regardless of whether today's click did anything -- the pre-commit
+hook alone guarantees that. Cleared from the ledger on that basis, but this is NOT
+being recorded as a confirmed Save-skill click; provenance for this specific instance
+is inconclusive.
+
+`_staging\2026-08-21_repo-architecture-review-desclen-fix\` archived to
+`_archive\2026-08-21_repo-architecture-review-desclen-fix\` (never deleted).
+
 ## 2026-08-21 -- governor-drift-probe.py KNOWN GAP 2 closed: per-property refi-sizing 65% LTV ceiling no longer flags as drift
 
 Fixed a false positive that was blocking every push repo-wide: `governor-drift-probe.py`
