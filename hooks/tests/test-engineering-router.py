@@ -167,6 +167,107 @@ for _bad in (None, "", 123, {"a": 1}):
 
 _sh.rmtree(_base, ignore_errors=True)
 
+# --- Structured-prompt-as-plan recognition (2026-08-21) -----------------------
+# A prompt that is ITSELF a multi-phase plan (>=2 distinct "Phase N"/"Stage N"
+# headers) should write the SAME permanent plan-approved marker /plan or a real
+# plan file would -- see engineering-router.py's _approve_plan_from_prompt.
+# FALSE POSITIVES ARE THE DANGEROUS DIRECTION here too (this marker is
+# permanent for the rest of the session, stronger than the budget reset above),
+# so the bar (>=2 distinct phase/stage headers) is deliberately narrow and the
+# negative cases matter as much as the positive ones.
+_pbase = _tf.mkdtemp(prefix="router-planmarker-")
+
+
+def _plan_marker_content(prompt, sid):
+    sess = _os.path.join(_pbase, sid)
+    _os.environ["EOS_SESSIONS_DIR"] = _pbase
+    _er._approve_plan_from_prompt({"session_id": sid}, prompt)
+    marker = _os.path.join(sess, "plan-approved")
+    if not _os.path.isfile(marker):
+        return None
+    with open(marker, encoding="utf-8") as fh:
+        return fh.read()
+
+
+# MUST write the marker -- a genuine staged multi-phase plan.
+_phase_plan = (
+    "Phase 0: audit the current state.\n"
+    "Phase 1: design the fix.\n"
+    "Phase 2: implement and test.\n"
+    "Phase 3: land and verify."
+)
+_c = _plan_marker_content(_phase_plan, "phase-yes-1")
+assert _c is not None, "multi-phase prompt must write the plan-approved marker"
+assert _c.startswith("prompt:phase-plan"), \
+    "marker content should be auditable as prompt-derived, got: %r" % _c
+
+# Stage N is the same shape as Phase N.
+assert _plan_marker_content(
+    "Stage 1: gather requirements. Stage 2: build. Stage 3: ship.",
+    "phase-yes-2") is not None
+
+# MUST NOT write the marker -- these are exactly the shapes the WEAKER
+# budget-reset path already handles; promoting them to a permanent bypass
+# would be a real regression, not an improvement.
+_NOT_A_PHASE_PLAN = [
+    "Fix items 1-3 now",                                    # numeric item ref, no phase words
+    "Fix these items:\n1. the guard\n2. the probe\n3. tests",  # enumerated list, not phases
+    "Phase 1: just this one phase, nothing else",            # only ONE phase header
+    "the deployment has three phases in general",            # prose mention, not headers
+    "",
+]
+for _i, _p in enumerate(_NOT_A_PHASE_PLAN):
+    assert _plan_marker_content(_p, "phase-no-%d" % _i) is None, \
+        "must NOT write plan-approved for: %r" % _p
+
+# Malformed session ids must not raise -- this runs on every user turn.
+for _bad in (None, "", 123, {"a": 1}):
+    _er._approve_plan_from_prompt({"session_id": _bad}, _phase_plan)
+
+_sh.rmtree(_pbase, ignore_errors=True)
+
+# End-to-end: a multi-phase prompt, run through the real hook, must leave
+# eos-plan-gate.py ALLOWING a 4th+ code edit in the SAME session with no
+# override marker needed -- the actual bug this closes.
+_e2e_base = _tf.mkdtemp(prefix="router-planmarker-e2e-")
+_PLAN_GATE = _os.path.join(_os.path.dirname(HOOK), "eos-plan-gate.py")
+assert _os.path.isfile(_PLAN_GATE), "eos-plan-gate.py not found at %r" % _PLAN_GATE
+
+
+def _gate_decision(session_id, sessions_dir, file_path="C:/x/y.py"):
+    env = dict(_os.environ)
+    env["EOS_SESSIONS_DIR"] = sessions_dir
+    p = subprocess.run(
+        [sys.executable, _PLAN_GATE],
+        input=json.dumps({"session_id": session_id,
+                          "tool_input": {"file_path": file_path}}),
+        capture_output=True, text=True, env=env)
+    return p.stdout
+
+
+env_router = dict(_os.environ)
+env_router["EOS_SESSIONS_DIR"] = _e2e_base
+subprocess.run([sys.executable, HOOK],
+               input=json.dumps({"prompt": _phase_plan, "session_id": "e2e-sess"}),
+               capture_output=True, text=True, env=env_router)
+for _n in range(5):  # well past eos-plan-gate's LIMIT=3
+    _out = _gate_decision("e2e-sess", _e2e_base)
+    assert _out == "", \
+        "edit %d must be silently allowed once the prompt was plan-approved, got deny: %r" % (_n, _out)
+_sh.rmtree(_e2e_base, ignore_errors=True)
+
+# Regression control: WITHOUT the phase-plan marker, the gate still denies
+# past LIMIT -- proves the e2e pass above tests the marker, not a broken gate.
+_ctrl_base = _tf.mkdtemp(prefix="router-planmarker-ctrl-")
+_denied = False
+for _n in range(5):
+    _out = _gate_decision("ctrl-sess", _ctrl_base)
+    if _out != "":
+        _denied = True
+        break
+assert _denied, "control case (no plan-approved marker) must still deny past LIMIT"
+_sh.rmtree(_ctrl_base, ignore_errors=True)
+
 # --- Concurrent-session advisory (2026-08-05) ---------------------------------
 # 2026-08-05 investigation (reference_concurrent_session_duplicate_hardening_work.md):
 # three near-collisions in one ~20-concurrent-session day, none caught proactively.
