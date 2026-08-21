@@ -5,12 +5,24 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-21T22:18:27.383Z
+  modified: 2026-08-21T22:40:49.356Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-08-21 -- oxfordra.net deploy: broker auth-binding security fix
+
+Deployed commits `eb80fe7` + `fde9328` (website-canonical `main`) to production via `netlify deploy --build --prod`, with Gabriel's explicit in-turn confirmation ("push and deploy it"). Deploy ID `6a88d33d177dcd3eecce9b27`.
+
+**What shipped:** closes cc-audit-army finding `unauth-sharepoint-read-oracle-via-background-fn`. `broker-finalize.mjs` mints a short-lived HMAC `authToken` binding `{submissionId, itemPath}` for the internal `broker-finalize` -> `broker-score-background` handoff (previously unauthenticated, a public-URL SharePoint read-and-persist oracle). Base fix found already in progress, uncommitted, in the shared checkout -- origin unattributed after checking with two other concurrently-active sessions; reviewed thoroughly (8-angle adversarial code review) before building on it and shipping.
+
+5 adversarial-review findings fixed on top of the base fix: cross-boundary token replay closed via a `type` claim (`upload`/`bg-auth`/`status`); the read-side auth gap on `broker-score-status.mjs` closed via a new `statusToken` (client-threaded through `broker-upload.js`/`for-brokers.html`); `SUBMISSION_ID_RE`/`UPLOAD_PATH_RE` deduplicated into `_shared/validate.js` next to their generators; auth check reordered ahead of shape checks in `broker-score-background.mjs`; `verifyIntakeToken` hardened to fail closed instead of throwing on a missing secret. A 6th finding (an unrelated, uncited change to `track-record.html`'s public Fairground Village Center return figures) was NOT applied -- Gabriel confirmed the live 4.5x/63%+ figures were already correct and a peer session reverted that edit separately.
+
+**Pre-deploy gate:** `site-qc-reviewer` caught a real BLOCK on the first pass -- `for-brokers.html` referenced `/broker-upload.js` with no cache-bust query param (the only script on the site missing one), while `_headers` sets a 1-year immutable cache on `/*.js` and this diff changed `pollForScore()`'s signature. A returning visitor's stale cached JS would have called the new server code with no `statusToken`, gotten a 401, and hung/crashed silently. Fixed with `?v=2` (commit `fde9328`, matching the site's existing per-file cache-bust convention); re-review returned APPROVE.
+
+**Verification:** 60/60 tests passing (`node --test tests/functions/`, including 7 new tests pinning the fixes) both before and after the cache-bust fix. `verify-push.py` confirmed local HEAD == `origin/main` tip (`fde9328`) before deploy. Post-deploy: `https://oxfordra.net/` and `/for-brokers` both 200; served `/broker-upload.js` confirmed live with the 4-parameter `pollForScore` signature and `?v=2` reference; `/api/broker-score-status` confirmed returning `401 invalid_auth` with no `statusToken` -- the fix is live and functioning in production.
 
 ## 2026-08-21 -- repo-architecture-review description-trim (commit 73feef1): content verified live, Save-skill click provenance inconclusive
 
@@ -103,17 +115,6 @@ Reconciled the loi-generation version collision at Gabriel's direction. Repo's v
 Gabriel clicked **Save skill** in Cowork on the `dirty-tree-triage.skill` package (2 entries: `SKILL.md`, `scripts/scan_dirty_trees.py`; commit `4e44f72`, the OI-203 fix pairing step 7's ora-skills git check with a `claim_work.py claim`). Verified as a genuine re-import, not a mirror-sync artifact: the runtime cache directory's CreationTime moved from the 2026-08-13 baseline to 2026-08-21 17:41:42, with both files sharing that exact timestamp (directory torn down and recreated); `main.log` was unavailable for corroboration (no activity since 2026-08-20 20:51:03, "going down for update"), so the CreationTime discriminator was the sole evidence, per package-and-stage-skill v1.22. Content hash-matches commit `4e44f72` exactly. `open-items-tracker.md#OI-203` fix is now live end-to-end (repo + platform). Cleared from `ora-skills/_staging/PENDING_REIMPORT.md`.
 
 Noted in passing: the repo has since moved past this commit with uncommitted v1.2 WIP (stray-clone-by-remote discovery, OI-200) under a live, properly-filed `ora-skills-housekeeping` claim (session `d7aee8c2`) -- correctly left untouched, not a conflict with this install.
-
-## 2026-08-21 -- 3-skill reimport batch (isolated-commit, lease-addendum, loi-generation) installed via Gabriel's Save-skill clicks
-
-Entry point A (fresh package) on the 3 genuinely-pending items out of 5 originally flagged -- a fresh `pending_reimport.py list` re-check found `automation-health-monitor` and `repo-architecture-review` had already been cleared by another concurrent session before this batch ran, so only the remaining 3 were packaged: `isolated-commit` (commit `8a35320`, brand-new skill -- first install ever, no prior cache directory existed), `lease-addendum` (commit `92fdd41`, untracked its vendored `ora_doc_qc.py` in favor of the shared-dep pattern already used by lease-form-qc/listing-agreement-qc/pma-qc -- confirmed registered in `package_skills.py`'s `SHARED_ROOT_DEPS` sourcing from `tools/ora_doc_qc.py` before packaging), and `loi-generation` (commit `3c477f5`, v1.7 merge of colliding v1.6 revisions). All three skill dirs confirmed git-clean and `plugin_of` returned `None` for all three (standalone Save-skill path) before packaging. Packaged via `tools/package_skills.py`, exit 0, frontmatter gate passed on all three (isolated-commit 325/1024, lease-addendum 794/1024 with the injected `scripts/ora_doc_qc.py` confirmed present as the 9th zip entry, loi-generation 912/1024). Staged and handed to a Cowork session for Entry point B present_files + Save-skill clicks (routed via Cowork install, not desktop Settings, since lease-addendum and loi-generation are multi-file). Gabriel confirmed all three clicks.
-
-`main.log` remained stale throughout (last write 2026-08-20 20:51:03). Verification:
-- `isolated-commit`: no prior cache directory existed (first install) -- a cache directory now exists at CreationTime 18:09:32 with content byte-identical to the packaged build. Existence itself is the install signal for a first-ever install; confirmed installed.
-- `lease-addendum`: CreationTime moved 2026-08-14 18:30:37 -> 18:09:32. Confirmed genuine re-import, all 9 packaged files (incl. the injected shared dep) byte-identical.
-- `loi-generation`: CreationTime moved 2026-08-18 15:05:16 -> 18:09:42. Confirmed genuine re-import, all 5 packaged files byte-identical.
-
-No ambiguous cases this batch -- all three cleared from `_staging/PENDING_REIMPORT.md` (`pending_reimport.py clear`) with first-hand confirming evidence for each.
 
 ## 2026-08-21 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
 
