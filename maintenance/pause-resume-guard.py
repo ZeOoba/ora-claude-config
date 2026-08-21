@@ -32,14 +32,22 @@ Alarms when, for either fleet:
 Never alarms on a single task being legitimately disabled for an unrelated
 reason -- only an aggregate near-zero ratio across a whole fleet is a signal.
 
+Also checks the GENERAL case (2026-08-21 follow-on, OI-202): ANY one-time
+task, not just a fleet resume, that fired and left a stale/incomplete
+task-progress-marker.py marker -- see that script for the write-side
+convention. This is the general fix OI-202's fix direction asked for; the
+fleet-ratio check above is the narrower, concrete instance that motivated it
+and stays as an independent signal (a stalled resume with no marker at all
+still trips it).
+
 Sends ONE Outlook COM alert via the proven standalone path
 (send-via-outlook.ps1 -- deploy-mirror.ps1 already uses this successfully
 outside any Claude session). Writes a state file so a persisting alarm
-doesn't re-email every run; a NEW alarm (fleet flipped from OK to ALARM)
-always sends immediately.
+doesn't re-email every run; a NEW alarm (fleet flipped from OK to ALARM, or a
+newly-stalled marker) always sends immediately.
 
 Usage:
-    python pause-resume-guard.py [--json] [--min-enabled-ratio F] [--resume-grace-minutes N]
+    python pause-resume-guard.py [--json] [--min-enabled-ratio F] [--resume-grace-minutes N] [--marker-grace-minutes N]
 """
 import argparse
 import json
@@ -56,6 +64,11 @@ _spec = importlib.util.spec_from_file_location(
     "fleet_status", os.path.join(os.path.dirname(os.path.abspath(__file__)), "fleet-status.py"))
 fleet_status = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(fleet_status)
+
+_spec2 = importlib.util.spec_from_file_location(
+    "task_progress_marker", os.path.join(os.path.dirname(os.path.abspath(__file__)), "task-progress-marker.py"))
+task_progress_marker = importlib.util.module_from_spec(_spec2)
+_spec2.loader.exec_module(task_progress_marker)
 
 STATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_state", "pause-resume-guard-state.json")
 SEND_SCRIPT = r"C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1"
@@ -77,11 +90,17 @@ def save_state(state):
 
 
 def parse_fire_at(task):
-    fa = task.get("fireAt")
-    if not fa:
+    """fireAt on a live registry entry is epoch-ms (int/float), not an ISO
+    string -- confirmed against the live cc/lams registries 2026-08-21. This
+    used to call fa.replace(...) directly, which threw on an int and was
+    silently swallowed by the except below, so overdue-resume detection could
+    never fire (empty resume_tasks the same day, for the same reason -- see
+    the taskId->id fix at the call site)."""
+    fa = fleet_status.fire_at(task)
+    if fa is None:
         return None
     try:
-        return datetime.fromisoformat(fa.replace("Z", "+00:00"))
+        return datetime.fromtimestamp(fa / 1000, tz=timezone.utc)
     except Exception:
         return None
 
@@ -94,13 +113,16 @@ def analyze_fleet(label, tasks):
     enabled = sum(1 for t in recurring if t.get("enabled"))
     ratio = enabled / len(recurring)
 
-    resume_tasks = [t for t in tasks if RESUME_ID_RE.search(t.get("taskId", "")) and t.get("fireAt")]
+    # NOTE (2026-08-21): live registry entries key the id as "id", not
+    # "taskId" -- the original taskId lookup always returned "" and this list
+    # was silently empty on every run. Same incident as parse_fire_at above.
+    resume_tasks = [t for t in tasks if RESUME_ID_RE.search(t.get("id", "")) and fleet_status.fire_at(t) is not None]
     now = datetime.now(timezone.utc)
     overdue_resume = None
     for t in resume_tasks:
         fa = parse_fire_at(t)
         if fa and fa < now:
-            overdue_resume = {"taskId": t.get("taskId"), "fireAt": t.get("fireAt"),
+            overdue_resume = {"taskId": t.get("id"), "fireAt": t.get("fireAt"),
                                "minutesOverdue": (now - fa).total_seconds() / 60}
             break
 
@@ -134,6 +156,7 @@ def main():
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--min-enabled-ratio", type=float, default=0.10)
     parser.add_argument("--resume-grace-minutes", type=float, default=30)
+    parser.add_argument("--marker-grace-minutes", type=float, default=20)
     args = parser.parse_args()
 
     registries = fleet_status.discover_registries()
@@ -176,28 +199,49 @@ def main():
         else:
             state[fleet]["alarmed"] = False
 
+    # General case (OI-202 follow-on, 2026-08-21): ANY one-time task with a
+    # stale/incomplete task-progress-marker.py marker, not just a fleet
+    # resume. Tracked per taskId so a persisting stall doesn't re-email every
+    # 6h run, same pattern as the fleet-ratio alarms above.
+    marker_state = state.setdefault("_markers", {})
+    stalled = task_progress_marker.find_stalled(args.marker_grace_minutes)
+    seen_marker_ids = set()
+    for s in stalled:
+        tid = s["taskId"]
+        seen_marker_ids.add(tid)
+        already_alarmed = marker_state.get(tid, {}).get("alarmed", False)
+        marker_state[tid] = {"alarmed": True, "lastChecked": now_iso}
+        reason = (f"one-time task '{tid}' ({s['fleet']}) stalled at step {s['step']}/{s['totalSteps']} "
+                  f"-- marker last updated {s['staleMinutes']} min ago (note={s['note']!r})")
+        alarms.append({"fleet": f"marker:{tid}", "reason": reason, "alreadyAlarmed": already_alarmed})
+    # a marker that's no longer stalled (completed, or its task got re-run) clears its own alarm state
+    for tid in list(marker_state.keys()):
+        if tid not in seen_marker_ids:
+            marker_state[tid]["alarmed"] = False
+
     save_state(state)
 
     new_alarms = [a for a in alarms if not a["alreadyAlarmed"]]
 
     if args.json:
-        print(json.dumps({"results": results, "alarms": alarms}, indent=2, default=str))
+        print(json.dumps({"results": results, "alarms": alarms, "stalledMarkers": stalled}, indent=2, default=str))
     else:
         for r in results:
             print(f"{r['fleet']:6s} ratio={r.get('ratio')} enabled={r.get('enabledCount')}/{r.get('totalRecurring')} overdueResume={r.get('overdueResume')}")
+        print(f"markers: {len(stalled)} stalled" if stalled else "markers: none stalled")
         if alarms:
-            print(f"[ACTION] {len(alarms)} fleet(s) tripped: " + "; ".join(f"{a['fleet']}: {a['reason']}" for a in alarms))
+            print(f"[ACTION] {len(alarms)} tripped: " + "; ".join(f"{a['fleet']}: {a['reason']}" for a in alarms))
         else:
-            print("No fleet shows a stuck pause.")
+            print("No fleet shows a stuck pause, no stalled progress markers.")
 
     if new_alarms:
         subject = "[ORA] Fleet pause/resume guard - ALARM"
         body_lines = ["Fleet pause/resume guard tripped (native, off-fleet check -- OI-202/WO-5).", ""]
         for a in new_alarms:
-            body_lines.append(f"Fleet: {a['fleet']}")
+            body_lines.append(f"Source: {a['fleet']}")
             body_lines.append(f"Reason: {a['reason']}")
             body_lines.append("")
-        body_lines.append("This does not auto-resume anything -- verify and resume by hand, or investigate why an automated resume didn't work (see open-items-tracker.md#OI-202 for a real prior instance).")
+        body_lines.append("This does not auto-resume or auto-restart anything -- verify by hand. For a fleet-ratio alarm: resume the fleet or investigate why an automated resume didn't work. For a stalled-marker alarm: check the task's own instructions/session for where it stopped (see open-items-tracker.md#OI-202 for a real prior instance and register-scheduled-task/SKILL.md's progress-marker convention).")
         send_alert(subject, "\n".join(body_lines))
 
     return 0
