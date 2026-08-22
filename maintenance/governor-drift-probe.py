@@ -335,7 +335,14 @@ RE_DSCR_CORRECTION = re.compile(
 # window, and was judged not worth a further round. Left as accepted residuals -- a future REFUTE
 # pass should not re-derive these as new findings without a plan to actually close them.
 RE_DSCR_TILDE_HEDGE = re.compile(r"~([0-9]+\.[0-9]+)(?![0-9])(?!%)\s*[x×]?", re.I)
-RE_DSCR_CANON_PLAIN = re.compile(r"(?<![~0-9.])" + re.escape(CANON_DSCR) + r"(?![0-9])", re.I)
+# Qodo PR #145 review finding (2026-08-22, HIGH): the original lookbehind/lookahead pair
+# ((?<![~0-9.]) ... (?![0-9])) excluded a tilde/digit/dot glued immediately before or a digit
+# immediately after, but NOT a version-token 'v'/'V' before it ("v1.25", mirroring the SAME gap
+# RE_DSCR_THRESH's own (?<![vV]) already closed above) or a percent immediately after ("1.25%",
+# mirroring RE_DSCR_THRESH's (?!%)) -- either would let a version string or an unrelated rate let
+# a tilde-hedged DRIFT value ride an accidental "plain 1.25" companion into wrong suppression.
+RE_DSCR_CANON_PLAIN = re.compile(
+    r"(?<![vV~0-9.])" + re.escape(CANON_DSCR) + r"(?![0-9])(?!%)", re.I)
 RE_CORRECTED_WORD = re.compile(r"\bcorrected\b", re.I)
 TILDE_HEDGE_CORRECTED_AFTER_REACH = 150
 

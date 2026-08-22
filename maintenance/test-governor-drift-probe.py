@@ -608,6 +608,28 @@ def test_approximate_tilde_value_not_a_dscr_threshold_unit():
     print("  PASS test_approximate_tilde_value_not_a_dscr_threshold_unit")
 
 
+def test_tilde_hedge_canon_plain_rejects_version_and_percent_tokens_unit():
+    """Qodo PR #145 review finding (HIGH): RE_DSCR_CANON_PLAIN's original lookbehind/lookahead
+    ((?<![~0-9.]) ... (?![0-9])) did not exclude a version token ('v1.25') or a percent-suffixed
+    figure ('1.25%') -- mirroring gaps RE_DSCR_THRESH's own (?<![vV]) and (?!%) guards already
+    closed for the primary DSCR extractor, but missing here. Either could hand a tilde-hedged
+    DRIFT value a false 'plain canonical 1.25 restatement' companion and wrongly suppress it."""
+    m = _load_probe_module()
+    out_version = m.scan_line("dscr floor ~1.10x corrected in v1.25 of the script.")
+    assert any("1.10" in o for o in out_version), (
+        "a 'v1.25' version token must not satisfy the plain-1.25 companion signal; got %r"
+        % out_version)
+    out_percent = m.scan_line("dscr floor ~1.10x corrected; now at 1.25% of par.")
+    assert any("1.10" in o for o in out_percent), (
+        "a '1.25%' percent figure must not satisfy the plain-1.25 companion signal; got %r"
+        % out_percent)
+    # sanity: the genuine plain-1.25 shape (no version/percent decoration) is unaffected.
+    out_genuine = m.scan_line("dscr floor ~1.10x corrected; canonical is 1.25x.")
+    assert out_genuine == [], (
+        "a genuine plain-1.25 restatement must still license suppression; got %r" % out_genuine)
+    print("  PASS test_tilde_hedge_canon_plain_rejects_version_and_percent_tokens_unit")
+
+
 def test_tilde_hedge_corrected_word_boundary_and_directional_unit():
     """ROUND-1 INDEPENDENT REVIEW (2026-08-22): the first cut of the tilde-hedge suppressor
     gated on `"corrected" in low` -- a bare, whole-line, non-directional substring test. Two
@@ -659,7 +681,11 @@ def test_deal_comparison_skill_file_clean():
     false positive at line 153 (a v1.2 Changelog entry narrating the DSCR-wrong-LTV bug fix, see
     test_approximate_tilde_value_not_a_dscr_threshold_unit)."""
     m = _load_probe_module()
-    path = r"C:\Users\Owner\ora-skills\deal-comparison\SKILL.md"
+    # Qodo PR #145 review finding (portability): use the probe's own canonical ora-skills root
+    # (HOME/ora-skills) rather than a hardcoded Windows path, so this stays correct on a
+    # different user/OS. (Pre-existing test_acquisition_underwriting_skill_file_clean uses the
+    # older hardcoded form -- unrelated to this PR's diff, left as-is.)
+    path = os.path.join(m.ORA_SKILLS_REPO, "deal-comparison", "SKILL.md")
     assert os.path.isfile(path), "skill file not found: %s" % path
     findings = []
     with open(path, encoding="utf-8", errors="replace") as fh:
@@ -1199,8 +1225,17 @@ def test_active_work_claims_excluded_e2e():
     payload = ('{"session_id": "test", "title": "selftest", '
                '"description": "DSCR governor floor 1.60x per the audit note.", '
                '"claimed_at": "2026-08-22T00:00:00"}')
-    assert not os.path.exists(probe_path), (
-        "stale selftest claim file from a prior run: %s" % probe_path)
+    # Read-before-write (Qodo PR #145 review finding): this is a shared checkout where another
+    # session could concurrently be mid-run of this same selftest -- read any existing content
+    # first so a genuine collision surfaces the OTHER run's payload in the failure message
+    # instead of silently clobbering it. Uniquely-named file, so a real collision is rare, but
+    # a bare pre-write assert alone is a check-then-act race, not an actual read.
+    if os.path.exists(probe_path):
+        with open(probe_path, encoding="utf-8", errors="replace") as fh:
+            existing = fh.read()
+        raise AssertionError(
+            "stale/concurrent selftest claim file at %s -- existing content: %r"
+            % (probe_path, existing))
     with open(probe_path, "w", encoding="utf-8") as fh:
         fh.write(payload)
     try:
@@ -1898,6 +1933,7 @@ def main():
     test_reverse_order_refi_suppression_unit()
     test_version_token_not_a_dscr_threshold_unit()
     test_approximate_tilde_value_not_a_dscr_threshold_unit()
+    test_tilde_hedge_canon_plain_rejects_version_and_percent_tokens_unit()
     test_tilde_hedge_corrected_word_boundary_and_directional_unit()
     test_deal_comparison_skill_file_clean()
     test_rate_percent_not_a_dscr_threshold_unit()
