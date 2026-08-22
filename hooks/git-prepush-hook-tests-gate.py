@@ -263,9 +263,17 @@ def run_test_file(path, timeout=None):
     timeout = timeout if timeout is not None else PER_TEST_TIMEOUT_SECONDS
     env = {k: v for k, v in os.environ.items() if k not in GIT_ENV_LEAK_VARS}
     try:
+        # encoding="utf-8" (found 2026-08-22): text=True with no explicit encoding decodes
+        # the child's stdout/stderr using locale.getpreferredencoding() (cp1252 on Windows).
+        # A test file that reconfigures its OWN stdout to UTF-8 (governor-drift-probe.py's
+        # pattern, to echo scanned content safely) can emit bytes invalid under cp1252 (e.g.
+        # U+201D -> E2 80 9D; 0x9D has no cp1252 mapping at all), crashing subprocess's
+        # internal reader thread and silently dropping the captured output to None instead
+        # of raising -- see maintenance/test-governor-drift-probe.py's sibling regression.
         proc = subprocess.run(
             [sys.executable, path],
             capture_output=True, text=True, timeout=timeout, env=env,
+            encoding="utf-8", errors="replace",
         )
         return proc.returncode, (proc.stdout or "") + (proc.stderr or ""), False
     except subprocess.TimeoutExpired as e:
