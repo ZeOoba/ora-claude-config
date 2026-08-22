@@ -25,16 +25,41 @@
 #   schtasks /Create /TN "ORA Fleet Heartbeat Push" /SC DAILY /ST 07:30 /F `
 #     /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"C:\Users\Owner\.claude\maintenance\push-fleet-heartbeat.ps1\""
 
-$repo    = Join-Path $env:USERPROFILE '.claude'
-$hbRel   = 'maintenance/_state/fleet-heartbeat.json'
-$emitter = Join-Path $repo 'maintenance\emit-fleet-heartbeat.py'
-$log     = Join-Path $repo 'maintenance\push-fleet-heartbeat.log'
+$primaryRepo = Join-Path $env:USERPROFILE '.claude'
+$hbRel       = 'maintenance/_state/fleet-heartbeat.json'
+$log         = Join-Path $primaryRepo 'maintenance\push-fleet-heartbeat.log'
 
 function Log($m) { "$([DateTime]::UtcNow.ToString('s'))Z  $m" | Out-File -FilePath $log -Append -Encoding utf8 }
 
 try {
+    # 0) Resolve whichever worktree actually has 'main' checked out -- NEVER
+    #    assume the primary checkout ($primaryRepo) is on main (fixed 2026-08-22,
+    #    closes an incident where the primary checkout was on
+    #    feat/model-canary-probe-step25: this script committed the heartbeat
+    #    refresh there instead of on main, then `git push origin main` pushed the
+    #    untouched local main ref -- a silent no-op that looked like success while
+    #    the heartbeat actually went stale on origin). Resolved dynamically via
+    #    `git worktree list`, not a hardcoded worktree path, so a future
+    #    rename/recreation of the main-checkout worktree can't silently regress
+    #    this fix back to the same bug.
+    $repo = $null
+    $wtPath = $null
+    git -C $primaryRepo worktree list --porcelain 2>&1 | ForEach-Object {
+        if ($_ -match '^worktree (.+)$') { $wtPath = $Matches[1] }
+        elseif ($_ -match '^branch refs/heads/main$') { $repo = $wtPath }
+    }
+    if (-not $repo) {
+        Log 'FAIL-OPEN: no worktree has main checked out (git worktree list) - skipping push, Action alarms if stale >24h'
+        exit 0
+    }
+    Log ("using main worktree: " + $repo)
+    $emitter = Join-Path $repo 'maintenance\emit-fleet-heartbeat.py'
+
     # 1) Refresh the heartbeat (full interpreter path first -- scheduled sessions
-    #    may not have python on PATH; bare python as fallback).
+    #    may not have python on PATH; bare python as fallback). Runs the emitter
+    #    FROM the resolved main worktree so it writes that worktree's copy of the
+    #    heartbeat file (emit-fleet-heartbeat.py resolves its output path relative
+    #    to its own script location, not cwd) -- the copy step 3 below commits.
     $py = 'C:\Users\Owner\AppData\Local\Programs\Python\Python313\python.exe'
     if (-not (Test-Path $py)) { $py = 'python' }
     & $py $emitter 2>&1 | ForEach-Object { Log ("emit: " + $_) }
