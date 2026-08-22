@@ -607,16 +607,21 @@ def record_override_use(session_id, signature, now=None):
             "FAILED (%s) -- not blocking, this is visibility only.\n" % e)
 
 
-def override_frequency(signature, now=None, window_hours=None):
-    """(count, distinct_session_count) of override uses recorded for this exact failure
-    signature within the rolling window. Call AFTER record_override_use() for the same
-    `now` and the count/session-count returned include the just-recorded use -- that
-    keeps the message's arithmetic trivial ("this failure has now been overridden N
-    times") instead of requiring the caller to add 1 and re-derive session-set
-    membership by hand.
+def override_sessions(signature, now=None, window_hours=None):
+    """(count, session_id_set) of override uses recorded for this exact failure
+    signature within the rolling window -- the scan override_frequency() wraps, and
+    that multi_session_claim_hint() also needs the RAW set for (2026-08-22, OI-136
+    follow-up): telling "this session repeating itself" apart from "a DIFFERENT
+    session also hit this" requires the actual ids, not just a count, so both callers
+    now share one scan instead of the file being read twice per gate invocation.
 
-    Missing or unreadable state file reads as (0, 0), never an error or a crash: a fresh
-    machine, a wiped state file, or the file simply not existing yet must not be
+    Call AFTER record_override_use() for the same `now` and the count/session-set
+    returned include the just-recorded use -- that keeps the message's arithmetic
+    trivial ("this failure has now been overridden N times") instead of requiring the
+    caller to add 1 and re-derive session-set membership by hand.
+
+    Missing or unreadable state file reads as (0, set()), never an error or a crash: a
+    fresh machine, a wiped state file, or the file simply not existing yet must not be
     mistaken for repeat-override history, and must never be why a push fails. A
     malformed line (bad JSON, a missing field) is skipped rather than aborting the scan
     -- one corrupt line must not blind the counter to every other line in the file."""
@@ -631,7 +636,7 @@ def override_frequency(signature, now=None, window_hours=None):
         with open(path, "r", encoding="utf-8") as f:
             lines = f.readlines()
     except OSError:
-        return (0, 0)
+        return (0, set())
     for line in lines:
         line = line.strip()
         if not line:
@@ -643,7 +648,7 @@ def override_frequency(signature, now=None, window_hours=None):
         # A line can be VALID JSON and still not be a record -- e.g. a bare number or a
         # JSON array from a future writer, a truncated append, or a stray non-JSONL line.
         # rec.get(...) below would raise AttributeError on anything but a dict, which
-        # would propagate out of override_frequency() uncaught and crash main() itself
+        # would propagate out of override_sessions() uncaught and crash main() itself
         # (found in this session's own REFUTE pass, not by an external report).
         if not isinstance(rec, dict):
             continue
@@ -657,6 +662,15 @@ def override_frequency(signature, now=None, window_hours=None):
             continue
         count += 1
         sessions.add(rec.get("session_id"))
+    return (count, sessions)
+
+
+def override_frequency(signature, now=None, window_hours=None):
+    """(count, distinct_session_count) -- thin wrapper over override_sessions() kept
+    for its own test coverage's existing exact-tuple assertions; see that function for
+    the actual scan and the reason it now returns the raw set instead of just the
+    count. No other module in this tree calls override_frequency() directly."""
+    count, sessions = override_sessions(signature, now=now, window_hours=window_hours)
     return (count, len(sessions))
 
 
@@ -673,6 +687,55 @@ def override_frequency_note(count, distinct_sessions, window_hours, verb):
         "  This exact failure %s overridden %s by %d distinct %s in the last %dh -- "
         "weigh that pattern, not just this instance.\n"
         % (verb, _pluralize_count(count), distinct_sessions, session_word, window_hours)
+    )
+
+
+def multi_session_claim_hint(sessions, own_session_id):
+    """Actionable follow-on to override_frequency_note(), appended after it -- ONLY
+    when the recorded session set contains at least one session OTHER than the
+    caller. Empty string (nothing printed) otherwise.
+
+    WHY (2026-08-22, [[project_governor_drift_probe_dscr_scaling_multiplier_fix_2026-08-22]],
+    OI-136 follow-up): override_frequency_note() (OI-136 candidate fix 2, already live
+    before this change) already told the operator "this exact failure has now been
+    overridden 8 times by 3 distinct sessions" on the DSCR-changelog false positive --
+    and every one of those sessions overrode again anyway, then at least 3 independently
+    built competing fixes for the identical root cause before anyone checked whether
+    someone else already had. The note names the pattern; it never says what to DO
+    about it. This closes that gap with the cheapest available next step: check for a
+    live claim or an in-flight fix before spending the time to build a competing one.
+
+    Deliberately silent when `sessions` is empty or contains only `own_session_id`: a
+    session repeating its own override is not evidence anyone ELSE is fixing anything,
+    and firing on every solo repeat would just be a second instance of the exact
+    "normalised until ignored" failure mode OI-136 already documents for the override
+    token itself -- noise trains the reader to stop reading, same as the token did.
+
+    `own_session_id=None` (a headless push with no CLAUDE_CODE_SESSION_ID) excludes
+    nothing beyond the falsy-entry filter below: every genuinely recorded session
+    still counts as "other", since there is no real "self" to subtract.
+
+    A falsy entry in `sessions` (None, most likely -- override_sessions() adds
+    `rec.get("session_id")` unconditionally, so a log line with a valid `ts`/
+    `signature` but no `session_id` KEY produces a literal None; no writer shipped
+    today produces this, but the reader is deliberately tolerant of malformed/
+    hand-edited lines) is EXCLUDED, never counted as an "other session" -- caught by
+    Qodo's PR #146 review, 2026-08-22. Before this function existed, that same None
+    only nudged override_frequency_note()'s informational count off by one; turning
+    it into an ACTIONABLE "go check for this session's claim" instruction is a
+    materially worse failure mode for data that was never attributable to begin
+    with. `s and s != own_session_id` also independently covers `own_session_id`
+    itself being falsy (None): a None entry never matches ITS OWN falsy identity
+    into an "other", the same guard that excludes it for a real caller id."""
+    others = {s for s in sessions if s and s != own_session_id}
+    if not others:
+        return ""
+    n = len(others)
+    return (
+        "  %d other %s already overridden this exact failure -- before building a fix "
+        "yourself, check for one already in flight: `python hooks/lib/claim_work.py "
+        "list` and recent activity in `list_sessions`/`event_log.md`.\n"
+        % (n, "session has" if n == 1 else "sessions have")
     )
 
 
@@ -741,9 +804,13 @@ def main():
         signature = failure_signature(results)
         now = datetime.now()
         record_override_use(session_id, signature, now=now)
-        count, distinct_sessions = override_frequency(signature, now=now)
+        count, sessions = override_sessions(signature, now=now)
         sys.stderr.write(override_frequency_note(
-            count, distinct_sessions, OVERRIDE_FREQUENCY_WINDOW_HOURS, verb="has now been"))
+            count, len(sessions), OVERRIDE_FREQUENCY_WINDOW_HOURS, verb="has now been"))
+        # OI-136 follow-up (2026-08-22): the note above is informational only -- add the
+        # actionable next step, but only when it's backed by evidence someone else is
+        # actually in the mix (never on this session's own solo repeat).
+        sys.stderr.write(multi_session_claim_hint(sessions, session_id))
     elif exit_code != 0:
         sys.stderr.write(
             "pre-push BLOCKED: the tracked test suite has a real failure (see report above). "
@@ -759,11 +826,15 @@ def main():
         # been. Read-only -- blocking a push must never itself write to the counter, or
         # every retry of a still-broken push would inflate its own frequency count.
         signature = failure_signature(results)
-        count, distinct_sessions = override_frequency(signature, now=datetime.now())
+        count, sessions = override_sessions(signature, now=datetime.now())
         if count > 0:
             sys.stderr.write(override_frequency_note(
-                count, distinct_sessions, OVERRIDE_FREQUENCY_WINDOW_HOURS,
+                count, len(sessions), OVERRIDE_FREQUENCY_WINDOW_HOURS,
                 verb="already has been"))
+            # Same OI-136 follow-up as the OVERRIDDEN path above -- here `session_id`
+            # is the id about to mint a NEW token (or None on a bare-terminal push), so
+            # excluding it still means "someone genuinely different already hit this".
+            sys.stderr.write(multi_session_claim_hint(sessions, session_id))
     return exit_code
 
 
