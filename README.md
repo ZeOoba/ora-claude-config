@@ -52,6 +52,7 @@ flowchart TB
     LOCALDIR -.git add / commit / push\n(opt-in files only).-> REPO[("This repo:\nGitHub ZeOoba/ora-claude-config\n(PRIVATE — backup mirror, not a deploy target)")]
     REPO -.git clone / pull\n(disaster recovery).-> LOCALDIR
 ```
+<!-- diagram-verified: 2026-08-21 -->
 
 **Reading the diagram:** everything in the top box happens inside one live Claude Code
 session. `settings.json` wires up the hooks and exposes the skills/agents/commands/
