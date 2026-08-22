@@ -1318,6 +1318,211 @@ def test_perproperty_refi_frame_elsewhere_on_line_does_not_mask_aggregate_drift_
     print("  PASS test_perproperty_refi_frame_elsewhere_on_line_does_not_mask_aggregate_drift_unit")
 
 
+def test_dscr_scaling_multiplier_changelog_stays_clean_unit():
+    """REGRESSION PIN (governor-drift-probe.py false positive, overridden 5x by 3 sessions across
+    2026-08-21/22 via the allow-hook-test-failure override token -- hooks/_state/override-usage-
+    log.jsonl signature d491c6e47418): deal-comparison/SKILL.md:153's v1.2 changelog entry narrates
+    a PAST BUG ("DSCR was tested at 40% LTV ... inflating computed DSCR ~1.6x") -- a scaling factor
+    describing how wrong a buggy CALCULATION was, not a declared governor threshold. RE_DSCR_THRESH
+    matched "dscr ~1.6x" (the second "DSCR" token) as if it were a declared floor and flagged
+    "DSCR governor threshold 1.6x != canonical 1.25x".
+
+    The reproduction below is the real line verbatim (deal-comparison/SKILL.md:153, one continuous
+    changelog paragraph scanned as a single line by scan_line()) -- it deliberately ALSO carries
+    "HARD FILTER", "disqualif", and "would floor-flag" elsewhere on the same dense line, which is
+    exactly what makes this false-positive shape different from the module's existing qualifiers:
+    a generic nearby-token veto (the pattern every sibling qualifier above uses) would misread
+    "floor-flag" -- ORA's own Ruling-5 term of art for "gets flagged for breaching a floor" -- as a
+    floor DECLARATION next to the value and refuse to suppress. See
+    _dscr_scaling_multiplier_spans for why the fix avoids that veto shape entirely."""
+    m = _load_probe_module()
+    line = (
+        "- v1.2 (2026-08-21): HIGH fix (cc-audit-army findings M02-deal-comparison-dscr-wrong-"
+        "ltv-and-kills, M13-deal-comparison-basis-band-ignores-vintage-ramp), Gabriel-approved. "
+        "Two defects that made this skill disagree with acquisition-underwriting on the firm's "
+        "two hardest acquisition gates: (1) DSCR was tested at 40% LTV — the portfolio-"
+        "aggregate governor, not per-property refi sizing — inflating computed DSCR ~1.6x "
+        "and letting deals that would floor-flag in acquisition-underwriting score clean here; "
+        "corrected to the LESSER-of-65%-LTV/1.25x-DSCR basis. (2) A breach was labeled "
+        '"immediate disqualification"/"DISQUALIFIED", contradicting Ruling 5 (floors flag, never '
+        "kill); corrected to FLOOR-FLAGGED throughout (HARD FILTER line, scoring table, "
+        "recommendation thresholds, output template). (3) The Basis band hardcoded a flat "
+        ">40%-of-RCT-LOW cutoff — only the loosest (≥2005-vintage) endpoint of the "
+        "vintage ramp — so a pre-1995 building (ORA's dominant vintage) could score points "
+        "at a basis acquisition-underwriting Stage 1 would already floor-flag; corrected to the "
+        "same linear vintage-ramp floor (65% discount at ≤1995 → 60% at ≥2005) "
+        "acquisition-underwriting uses. No governor constants changed — this only restates "
+        "deal-comparison to apply the already-ratified 1.25x DSCR / RCT v03 vintage ramp correctly."
+    )
+    out = m.scan_line(line)
+    assert out == [], (
+        "changelog scaling-multiplier narrative ('inflating computed DSCR ~1.6x') must not flag "
+        "as a governor declaration; got %r" % out)
+    print("  PASS test_dscr_scaling_multiplier_changelog_stays_clean_unit")
+
+
+def test_dscr_scaling_multiplier_real_drift_still_flags_unit():
+    """ANTI-BLINDING (detection over silence): a genuine DSCR governor drift sharing the line with
+    the scaling-multiplier narrative must still flag in full -- the multiplier suppressor defers
+    whole-line to the RE_GOV_DSCR_BOUND structural veto the moment a real "dscr ... floor/minimum"
+    pairing is present, so BOTH the multiplier value and the drifted floor stay visible (safe
+    over-detection, not masking). A second line pins that a real drift phrased with a scaling verb
+    ('inflated') in a DIFFERENT word order -- 'the DSCR floor was inflated to 1.60x', keyword
+    BEFORE the value, no 'computed/calculated/measured' token -- structurally cannot match
+    RE_DSCR_COMPUTED_SCALING at all, so it is untouched and flags via the pre-existing declaration
+    extractor exactly as it did before this fix."""
+    m = _load_probe_module()
+    combined = ("v1.3: fixed the bug inflating computed DSCR ~1.6x; separately, note the DSCR "
+                "floor 1.60x needs correction to 1.25x.")
+    out = m.scan_line(combined)
+    assert any("1.6x" in o for o in out) and any("1.60x" in o for o in out), (
+        "both the multiplier value and the co-located real DSCR floor drift must flag when a "
+        "genuine declaration shares the line; got %r" % out)
+
+    other_order = ("v1.4: the DSCR floor was inflated to 1.60x due to a config error; "
+                   "corrected to 1.25x.")
+    out2 = m.scan_line(other_order)
+    assert any("1.60x" in o for o in out2), (
+        "a real DSCR floor drift phrased with a scaling verb in a different word order (keyword "
+        "before value, no computed/calculated/measured token) must still flag; got %r" % out2)
+    print("  PASS test_dscr_scaling_multiplier_real_drift_still_flags_unit")
+
+
+def test_dscr_scaling_multiplier_by_factor_phrasing_stays_clean_unit():
+    """Generalization pin: the suppressor is not hardcoded to the literal '~1.6x' tilde notation --
+    the equally natural 'by a factor of N.Nx' phrasing must be recognized too, since both are
+    describing the same scaling-multiplier narrative shape (a computed figure inflated/overstated
+    by a bug), just with different connective wording."""
+    m = _load_probe_module()
+    line = "v1.5: fixed a bug overstating computed DSCR by a factor of 1.6x in the scoring table."
+    out = m.scan_line(line)
+    assert out == [], (
+        "'overstating computed DSCR by a factor of 1.6x' must not flag; got %r" % out)
+    print("  PASS test_dscr_scaling_multiplier_by_factor_phrasing_stays_clean_unit")
+
+
+def test_dscr_scaling_multiplier_keyword_after_value_still_flags_unit():
+    """ADVERSARIAL FINDING (independent review, round 1, 2026-08-22): the first cut of the scaling-
+    multiplier suppressor claimed a floor/ceiling/minimum/maximum keyword always sits immediately
+    adjacent to ITS value in a real declaration, and relied on that to skip a proximity veto -- but
+    that is only true for keyword-BEFORE-value forms (RE_DSCR_DECL). RE_DSCR_DECL_REV's shape puts
+    the keyword AFTER the value ("1.40x floor"), which the scaling regex's left-only value bound did
+    not guard, so "bug inflating computed DSCR ~1.40x floor going forward" matched the multiplier
+    shape and silenced a genuine value-then-keyword declaration -- RE_GOV_DSCR_BOUND cannot catch it
+    either, because the value's own decimal point sits inside its clause-exclusion gap class.
+
+    Closed with a trailing negative lookahead in RE_DSCR_COMPUTED_SCALING
+    (`(?!\\s*(?:floor|ceiling|minimum|min|maximum|max)\\b)`), mirroring the bps-tier refi veto's
+    existing kw_after_spans exemption ("an explicitly-declared floor is a governor statement...
+    must flag even inside a bps tier" -- round-2 review W3).
+
+    All three lines carry a fix/bug/correction token (RE_CHANGELOG_CONTEXT), so all three exercise
+    the lookahead specifically (round-2 review Finding 3: line 2 originally carried no such token,
+    so it was pinning RE_CHANGELOG_CONTEXT rather than the lookahead it was meant to test)."""
+    m = _load_probe_module()
+    for line, val in (
+        ("hard filter: bug inflating computed DSCR ~1.40x floor going forward.", "1.40"),
+        ("fix: acquisition screen overstated computed DSCR by 1.30x minimum; correction pending.",
+         "1.30"),
+        ("hard filter: fixed bug — understated calculated DSCR ~1.40x ceiling.", "1.40"),
+    ):
+        out = m.scan_line(line)
+        assert any(val in o for o in out), (
+            "a value-then-keyword DSCR declaration inside scaling-verb prose must still flag; "
+            "line=%r got=%r" % (line, out))
+    print("  PASS test_dscr_scaling_multiplier_keyword_after_value_still_flags_unit")
+
+
+def test_dscr_scaling_multiplier_intervening_modifier_still_flags_unit():
+    """ADVERSARIAL FINDING (independent review, round 2, 2026-08-22): the round-1 lookahead fix
+    only guarded a keyword IMMEDIATELY adjacent to the value ("~1.40x floor"). A single modifier
+    word between value and keyword slipped past it -- "~1.40x hard floor" / "~1.40x strict
+    minimum" -- and was otherwise invisible to every other pass (RE_DSCR_DECL_REV requires the
+    keyword to abut the value; RE_GOV_DSCR_BOUND is blocked by the value's own decimal sitting in
+    its clause-exclusion gap class). Confirmed as a live regression vs main (main flags both lines
+    below; the pre-round-2-fix worktree silenced them). This is not contrived vocabulary -- the
+    module's own _is_gov_line docstring uses "DSCR hard floor 1.40x" as its canonical example, and
+    STAB_GOV_MARKERS separately carries "hard cap"/"hard ceiling".
+
+    Closed by widening the lookahead to allow up to 2 intervening hyphen/space-joined modifier
+    words before the keyword: `(?!\\s*(?:\\w+[-\\s]+){0,2}(?:floor|ceiling|minimum|min|maximum|max)
+    \\b)`."""
+    m = _load_probe_module()
+    for line, val in (
+        ("hard filter: fixed bug inflating computed DSCR ~1.40x hard floor going forward.",
+         "1.40"),
+        ("hard filter: fixed bug inflating computed DSCR ~1.40x strict minimum.", "1.40"),
+    ):
+        out = m.scan_line(line)
+        assert any(val in o for o in out), (
+            "a value-then-MODIFIER-then-keyword DSCR declaration inside scaling-verb prose must "
+            "still flag; line=%r got=%r" % (line, out))
+    print("  PASS test_dscr_scaling_multiplier_intervening_modifier_still_flags_unit")
+
+
+def test_dscr_scaling_multiplier_present_tense_mechanism_still_flags_unit():
+    """ADVERSARIAL FINDING (independent review, round 1, 2026-08-22): the scaling-multiplier
+    suppressor is scoped by doctrine to a PAST-DEFECT changelog narrative, but the original regex
+    encoded no notion of pastness -- a PRESENT-TENSE multiplicative fudge on computed DSCR (a real
+    drift MECHANISM, since it effectively shifts the floor by the factor, not a typo) matched and
+    was silenced identically to the past-tense bug-fix narrative it was designed for. Closed by
+    requiring an explicit fix/bug/correction context token (RE_CHANGELOG_CONTEXT) anywhere on the
+    line before suppressing -- present-tense/still-applied narratives generally carry none."""
+    m = _load_probe_module()
+    for line, val in (
+        ("v2.0: per the hard filter, the underwriting model now deliberately scales computed "
+         "DSCR by 1.4x before comparison.", "1.4"),
+        ("Per the hard acquisition governor doctrine, the model inflates computed DSCR ~1.4x "
+         "today.", "1.4"),
+    ):
+        out = m.scan_line(line)
+        assert any(val in o for o in out), (
+            "a present-tense/live scaling-multiplier narrative with no fix/bug/correction context "
+            "token must still flag; line=%r got=%r" % (line, out))
+    print("  PASS test_dscr_scaling_multiplier_present_tense_mechanism_still_flags_unit")
+
+
+def test_dscr_scaling_multiplier_governor_nearby_still_flags_unit():
+    """Test-gap finding (independent review, round 1, 2026-08-22): none of the three original
+    tests exercised the "governor" proximity veto in _dscr_scaling_multiplier_spans -- deleting
+    that veto left all three green. Pins it directly: a scaling-multiplier-shaped value with the
+    literal "governor" token inside its [vs-25, ve+40] reach must still flag."""
+    m = _load_probe_module()
+    line = "changelog: bug inflating computed DSCR ~1.6x governor threshold."
+    out = m.scan_line(line)
+    assert any("1.6" in o for o in out), (
+        "a scaling-multiplier value declared AS the governor nearby must still flag; got %r" % out)
+    print("  PASS test_dscr_scaling_multiplier_governor_nearby_still_flags_unit")
+
+
+def test_dscr_scaling_multiplier_accepted_residuals_unit():
+    """Pins the two ACCEPTED RESIDUALS documented above RE_DSCR_COMPUTED_SCALING (round-2 review,
+    2026-08-22) DELIBERATELY, so they read as a decision rather than a latent gap:
+      * NEGATION-BLIND: RE_CHANGELOG_CONTEXT is a lexical token check, not negation-aware -- a
+        line stating a defect is explicitly NOT YET corrected still satisfies the gate (it carries
+        "bug" and "corrected").
+      * TOPIC-BLIND: the token search is line-wide, not proximity-scoped to the value -- an
+        unrelated fix/bug mention elsewhere on the line satisfies the gate for a scaling-multiplier
+        clause that has nothing to do with it.
+    Both were verified in round-2 review to be NOT cheaply closeable without either reopening the
+    real target line (proximity/clause-scoping the token search) or adding new negation-detection
+    suppression surface. If either residual is ever closed, this test's assertions flip and it
+    should be rewritten as a must-flag pin instead of deleted outright."""
+    m = _load_probe_module()
+    negation_blind = ("OPEN BUG (hard filter): scoring still inflates computed DSCR ~1.6x; "
+                       "not yet corrected.")
+    assert m.scan_line(negation_blind) == [], (
+        "negation-blind residual changed behavior -- update this test's docstring/assertion "
+        "rather than deleting it; got %r" % m.scan_line(negation_blind))
+
+    topic_blind = ("per the hard filter, we fixed a typo in the README; separately, the model "
+                   "now deliberately scales computed DSCR by 1.4x before comparison.")
+    assert m.scan_line(topic_blind) == [], (
+        "topic-blind residual changed behavior -- update this test's docstring/assertion rather "
+        "than deleting it; got %r" % m.scan_line(topic_blind))
+    print("  PASS test_dscr_scaling_multiplier_accepted_residuals_unit")
+
+
 def test_value_between_metric_and_boundword_flags_unit():
     """GAP NOW CLOSED (2026-08-12). Was pinned as a known gap on 2026-08-11: the
     metric-VALUE-boundword order did not arm, because the value's own decimal is a '.' and the
@@ -1755,6 +1960,14 @@ def main():
     test_perproperty_refi_ceiling_standalone_bullet_stays_clean_unit()
     test_perproperty_refi_ceiling_standalone_drift_still_flags_unit()
     test_perproperty_refi_frame_elsewhere_on_line_does_not_mask_aggregate_drift_unit()
+    test_dscr_scaling_multiplier_changelog_stays_clean_unit()
+    test_dscr_scaling_multiplier_real_drift_still_flags_unit()
+    test_dscr_scaling_multiplier_by_factor_phrasing_stays_clean_unit()
+    test_dscr_scaling_multiplier_keyword_after_value_still_flags_unit()
+    test_dscr_scaling_multiplier_intervening_modifier_still_flags_unit()
+    test_dscr_scaling_multiplier_present_tense_mechanism_still_flags_unit()
+    test_dscr_scaling_multiplier_governor_nearby_still_flags_unit()
+    test_dscr_scaling_multiplier_accepted_residuals_unit()
     test_ltv_reverse_ceiling_vetoes_non_ltv_subjects_unit()
     test_ltv_subject_veto_does_not_silence_real_declarations_unit()
     test_ltv_subject_veto_reach_semantics_unit()
