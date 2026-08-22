@@ -105,6 +105,7 @@
 - [Sweep, then verify](feedback_sweep_then_verify.md) — a first grep/edit pass misses instances QC later catches; take the full inventory first, re-grep after to prove zero
 - [Polling-claim loop is the default](feedback_polling_claim_loop_default_2026-08-13.md) — contested claim/staged state: wait+recheck (1-4 min cleared it), don't force
 - [Check active claims before optimization-queue work](feedback_check_active_claims_before_optimization_queue_work_2026-08-13.md) — 2 of 9 batch items were already claimed by other live sessions
+- [Apply findings with outcomes — reusable macro](feedback_apply_findings_with_outcomes_macro.md) — proven twice (CC-round, ora-skills-round); triage → claim by touched path → fix → re-report outcomes
 - [REFUTE differential harness](reference_refute_differential_harness.md) — guard/probe regex edits: old-vs-new differential battery; judge deltas, not absolutes
 - [Refute gate's path scope went stale TWICE](reference_refute_gate_excludes_server_workbook.md) — never trust a path-scoped `git log` returning empty; diff it against an unscoped log first
 - [Verify before repeating session claims](feedback_verify_before_repeating_session_claims.md) — check ground truth before relaying
