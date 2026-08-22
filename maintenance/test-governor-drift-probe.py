@@ -613,7 +613,9 @@ def test_deal_comparison_skill_file_clean():
     false positive at line 153 (a v1.2 Changelog entry narrating the DSCR-wrong-LTV bug fix, see
     test_approximate_tilde_value_not_a_dscr_threshold_unit)."""
     m = _load_probe_module()
-    path = r"C:\Users\Owner\ora-skills\deal-comparison\SKILL.md"
+    # via m.ORA_SKILLS_REPO (not a hardcoded literal) so this test isn't Windows/user-path-specific
+    # (Qodo review, PR #144).
+    path = os.path.join(m.ORA_SKILLS_REPO, "deal-comparison", "SKILL.md")
     assert os.path.isfile(path), "skill file not found: %s" % path
     findings = []
     with open(path, encoding="utf-8", errors="replace") as fh:
@@ -1140,10 +1142,14 @@ def test_active_work_claims_excluded_e2e():
     payload = ('{"session_id": "test", "title": "selftest", '
                '"description": "narrating a past bug: inflating computed DSCR ~1.6x, '
                'corrected to 1.25x", "claimed_at": "2026-08-22T00:00:00"}')
-    assert not os.path.exists(probe_path), (
-        "stale selftest claim file from a prior run: %s" % probe_path)
-    with open(probe_path, "w", encoding="utf-8") as fh:
-        fh.write(payload)
+    # Atomic create-only open (O_CREAT|O_EXCL), not a separate exists-check then a plain "w" open:
+    # closes the TOCTOU race between the check and the write, and never truncates a file that's
+    # already there (Qodo review, PR #144 -- read/verify-before-write on hooks/** paths).
+    fd = os.open(probe_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    try:
+        os.write(fd, payload.encode("utf-8"))
+    finally:
+        os.close(fd)
     try:
         r = run_probe()
         assert r.returncode == 0, (

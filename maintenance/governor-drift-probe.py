@@ -302,8 +302,16 @@ RE_DSCR_CORRECTION = re.compile(
 # literal word "corrected" (completed-action, not a pending TODO), AND (c) the line separately
 # restates the PLAIN (non-hedged) canonical 1.25. A tilde-hedged value with any signal missing --
 # no "corrected", or no plain-1.25 companion -- still flags via RE_DSCR_THRESH untouched.
+# Qodo review (PR #144) caught two real gaps in this three-signal gate, both closed:
+#   * signal (b) was a bare substring test ("corrected" in low), which also matches "uncorrected"
+#     -- a report stating the drift is STILL uncorrected would have wrongly armed suppression.
+#     Fixed with a word-boundary regex, RE_CORRECTED_WORD.
+#   * signal (c), RE_DSCR_CANON_PLAIN, excluded a value glued to '~'/digits/'.' but not 'v'/'V' --
+#     inconsistent with RE_DSCR_THRESH's own version-token guard, so a bare "v1.25" mention (never
+#     a plain canonical restatement) could satisfy the gate. Lookbehind now excludes 'v'/'V' too.
 RE_DSCR_TILDE_HEDGE = re.compile(r"~([0-9]+\.[0-9]+)(?![0-9])(?!%)\s*[x×]?", re.I)
-RE_DSCR_CANON_PLAIN = re.compile(r"(?<![~0-9.])" + re.escape(CANON_DSCR) + r"(?![0-9])", re.I)
+RE_DSCR_CANON_PLAIN = re.compile(r"(?<![vV~0-9.])" + re.escape(CANON_DSCR) + r"(?![0-9])", re.I)
+RE_CORRECTED_WORD = re.compile(r"\bcorrected\b", re.I)
 # Probe SELF-DESCRIPTION suppressor (2026-07-24): documentation of THIS probe's own detection
 # semantics must quote the sentinel value to be useful -- ora-doctrine-integrity-guard/SKILL.md
 # reads "...or the 1.75 regression sentinel". That is prose ABOUT the detector, not a governor
@@ -1041,7 +1049,7 @@ def scan_line(raw):
     # report must not be mistaken for an already-fixed changelog note).
     dscr_tilde_hedge_spans = (
         [mm.span(1) for mm in RE_DSCR_TILDE_HEDGE.finditer(low)]
-        if ("corrected" in low and RE_DSCR_CANON_PLAIN.search(low)) else [])
+        if (RE_CORRECTED_WORD.search(low) and RE_DSCR_CANON_PLAIN.search(low)) else [])
     # Probe self-description ("...the 1.75 regression sentinel") -- span-scoped exactly like the
     # correction notes above, so only the quoted sentinel token is skipped, never the branch.
     sentinel_prose_spans = [mm.span() for mm in RE_SENTINEL_PROSE.finditer(low)]
