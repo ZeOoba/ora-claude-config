@@ -69,6 +69,61 @@ def _scoped_directive_evidence(prompt_raw, prompt_lower):
     return None
 
 
+# --- structured-prompt-as-plan recognition (2026-08-21) -----------------------
+# WHY: _scoped_directive_evidence/_reset_plan_gate_budget above only RESETS an
+# ALREADY-CONSUMED counter, and only on a turn AFTER the one that used up the
+# budget (it is a UserPromptSubmit hook, so it needs a follow-up prompt to fire
+# on). A prompt that is ITSELF a fully-staged multi-phase plan (e.g. "Phase 0:
+# ... Phase 1: ... Phase 2: ... Phase 3: ...") and then gets executed straight
+# through in the SAME turn never gets that follow-up turn -- the gate still
+# denies on the 4th code edit, forcing a manual override for work that was
+# already planned as thoroughly as /plan would have produced, just not THROUGH
+# /plan. Observed live 2026-08-21 (this hook's own session).
+#
+# DELIBERATELY NARROWER than _scoped_directive_evidence: this writes the SAME
+# PERMANENT plan-approved marker eos-plan-marker.py writes for a real /plan run
+# or a docs/superpowers/plans/ file -- so the bar has to be high enough that a
+# false positive is not materially different from a spurious /plan invocation.
+# A bare numbered list ("do items 1-3") does NOT qualify here (that stays on
+# the weaker, budget-reset-only path above) -- only an explicit multi-PHASE (or
+# multi-STAGE) structure, the concrete shape "Phase 0-3" names, counts: >=2
+# distinct "Phase N" / "Stage N" headers is a plan-shaped prompt almost nothing
+# else produces by accident.
+_PHASE_HEADER_RE = re.compile(r"\b(?:phase|stage)\s+\d+\b", re.I)
+
+
+def _written_plan_evidence(prompt_raw):
+    """Evidence string if `prompt_raw` itself reads as a written, staged plan
+    (>=2 distinct Phase/Stage N headers), else None."""
+    nums = set(m.group(0).lower() for m in _PHASE_HEADER_RE.finditer(prompt_raw))
+    if len(nums) >= 2:
+        return "multi-phase prompt structure (%s)" % ", ".join(sorted(nums))
+    return None
+
+
+def _approve_plan_from_prompt(data, prompt_raw):
+    """Write the same permanent plan-approved marker eos-plan-marker.py writes
+    for a real /plan run, when THIS turn's prompt already reads as one (see
+    _written_plan_evidence). Best-effort, fully silent on failure -- must never
+    affect prompt handling. Auditable via the marker's own content, same as
+    eos-plan-marker.py's 'lane:<skill>' convention."""
+    try:
+        sid = data.get("session_id")
+        if not isinstance(sid, str) or not sid:
+            return
+        evidence = _written_plan_evidence(prompt_raw)
+        if not evidence:
+            return
+        base = os.environ.get("EOS_SESSIONS_DIR") or \
+            "C:/Users/Owner/.claude/hooks/sessions"
+        sess = os.path.join(base, sid)
+        os.makedirs(sess, exist_ok=True)
+        with open(os.path.join(sess, "plan-approved"), "w", encoding="utf-8") as fh:
+            fh.write("prompt:phase-plan (%s)" % evidence)
+    except Exception:
+        pass  # never let this affect the prompt path
+
+
 def _reset_plan_gate_budget(data, prompt_raw, prompt_lower):
     """Reset eos-plan-gate's per-session code-edit counter when the user's turn
     already enumerates the work. Best-effort and fully silent on failure -- this
@@ -162,6 +217,7 @@ def main():
 
     # Genuine user turn confirmed (system/notification text already returned
     # above), so a scope signal here really is Gabriel's own instruction.
+    _approve_plan_from_prompt(data, prompt_raw)
     _reset_plan_gate_budget(data, prompt_raw, prompt)
 
     # Fix #1b: '/code-review ultra' is CLOUD review; doctrine forbids it on confidential repos.
