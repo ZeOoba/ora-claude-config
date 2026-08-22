@@ -1429,6 +1429,35 @@ def test_ledger_files_excluded_source_pin():
     print("  PASS test_ledger_files_excluded_source_pin")
 
 
+def test_concurrent_session_hardening_narrative_excluded_unit():
+    """2026-08-22 false positive: memory/reference_concurrent_session_duplicate_hardening_work.md
+    NARRATES a past incident -- one session's own investigation title was literally 'Fix
+    governor-drift-probe false positive on LTV 65%/40%', quoted in prose while explaining what
+    that OTHER session was and wasn't working on. This is the same append-only NARRATIVE class as
+    event_log.md/the ledgers (records findings, does not declare a live governor), tripped ONLY
+    because the line separately contains the literal token 'governor' (as part of the compound
+    'governor-drift-probe', the tool's own name) which alone satisfies is_gov's bare substring
+    GOV_KEYWORDS check. Exempt by EXACT FILENAME, mirroring the ledger/historical-evaluations
+    precedent (DATED_AUDIT_RE's docstring: a broad pattern token was REFUTE-rejected 2026-07-29;
+    narrow exact names only). Blocked every push in this repo until fixed (2026-08-22).
+    skip_names is main()-local, so this pins the exemption at SOURCE level."""
+    m = _load_probe_module()
+    with open(PROBE, "r", encoding="utf-8") as fh:
+        src = fh.read()
+    assert '"reference_concurrent_session_duplicate_hardening_work.md"' in src, (
+        "narrative exemption missing from skip_names: "
+        "reference_concurrent_session_duplicate_hardening_work.md")
+    # FILE-scoped, not logic-level (same discipline as test_dated_audit_memory_file_excluded_unit):
+    # the triggering span of the real line (verbatim from the file) must still trip scan_line()
+    # on its own.
+    real_line = (
+        "its own title was \"Fix governor-drift-probe false positive on LTV 65%/40%\", a "
+        "different, already-landed bug (`c7875a5`)")
+    assert m.scan_line(real_line), (
+        "detection logic must be intact -- the file is excluded by FILE, not by gutting scan_line")
+    print("  PASS test_concurrent_session_hardening_narrative_excluded_unit")
+
+
 def test_intervening_qualifier_dscr_floor_flags_unit():
     """GAP (2026-08-11): GOV_KEYWORDS held the CONTIGUOUS literal 'dscr floor', so any qualifier
     between the metric and its floor-word defeated the is_gov gate and the whole equality branch
@@ -2155,6 +2184,7 @@ def main():
     test_dated_review_memory_file_excluded_unit()
     test_unit_interval_ltv_flags_unit()
     test_ledger_files_excluded_source_pin()
+    test_concurrent_session_hardening_narrative_excluded_unit()
     test_review_hole3_paired_gap_drift_flags_unit()
     test_review_hole4_veto_window_and_refi_gate_flags_unit()
     test_review_hole5_dscr_extraction_regressions_flags_unit()
