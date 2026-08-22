@@ -5,12 +5,16 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-22T21:51:58.831Z
+  modified: 2026-08-22T22:15:00.000Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-08-22 — Pointer: the M18 eval-harness event_log entry landed via commit `b26b7f1`, mislabeled
+
+The preceding "M18 eval-harness YoC/DSCR floor-constant parser" entry above was appended via `append-event-log.py` (collision-safe at the file level) while 3 other sessions' entries were also sitting uncommitted in the same backlog. Before this session could isolate and commit its own entry (per [[reference_event_log_uncommitted_backlog]]), a concurrent session committed the full accumulated backlog first, at `b26b7f1` -- whose message is `"memory: document debt-scoring oxfordNoi basis is conservative, not proven correct"` and says nothing about the M18 fix. Verified byte-for-byte that the M18 entry landed intact and unaltered inside that commit; nothing was lost, nothing further needed committing. Logging this pointer so anyone searching commit history by message for the M18/diff_verdict.py change finds `b26b7f1`, not a nonexistent commit named after it. Same pattern as this session's earlier `febb870`/ora-skills co-mingled-commit incident (see the entry above), just on `~/.claude` instead.
 
 ## 2026-08-22 — M18 eval-harness YoC/DSCR floor-constant parser: cross-clause regex bug found by review, fixed and landed (`7d10e3f`)
 
