@@ -34,6 +34,7 @@ sibling monitor (see pause-resume-guard.py) instead of shelling out.
 import argparse
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 
@@ -46,36 +47,70 @@ _spec.loader.exec_module(fleet_status)
 
 MARKER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_state", "task-progress")
 
+# task_id becomes a filesystem path component (write/clear open/remove it directly), and
+# --task-id is a free-form CLI arg with no upstream validation -- a task_id of "../../../foo"
+# or an absolute path (os.path.join silently DISCARDS the MARKER_DIR prefix for an absolute
+# second argument, especially on Windows with a drive letter) let write/clear touch any file
+# on disk. Every real scheduled-task id in this fleet is alphanumeric plus -._, so that shape
+# is enforced up front, and containment is re-checked after path construction as defense in
+# depth (belt-and-suspenders: the regex should already make escape impossible, but a path
+# that somehow still resolves outside MARKER_DIR is rejected rather than trusted).
+_SAFE_TASK_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+# fleet is keyed the same way task_id is -- see fleet-status.py's discover_registries()
+# docstring: "cc" (claude-code-sessions/MCP) and "lams" (local-agent-mode-sessions/Cowork)
+# are the only two live labels, but --fleet is still a free-form CLI arg like --task-id, so
+# it gets the same validation rather than being trusted as code-controlled.
+_SAFE_FLEET_RE = re.compile(r"^[a-z0-9]+$")
 
-def _marker_path(task_id):
-    return os.path.join(MARKER_DIR, f"{task_id}.json")
+
+class InvalidTaskId(ValueError):
+    pass
 
 
-def write_marker(task_id, step, of, note=None):
-    os.makedirs(MARKER_DIR, exist_ok=True)
+def _marker_path(fleet, task_id):
+    """Markers are keyed on (fleet, task_id), not task_id alone -- the same one-time task id
+    can legitimately exist in both fleets (fleet-status.py's own find_cross_fleet_duplicates
+    documents this as a real, supported case), so a bare task_id key let a marker written for
+    one fleet's task be read/cleared for the other fleet's same-named task."""
+    if not isinstance(fleet, str) or not _SAFE_FLEET_RE.match(fleet):
+        raise InvalidTaskId(f"invalid fleet: {fleet!r}")
+    if not isinstance(task_id, str) or not _SAFE_TASK_ID_RE.match(task_id):
+        raise InvalidTaskId(f"invalid task id: {task_id!r}")
+    path = os.path.join(MARKER_DIR, fleet, f"{task_id}.json")
+    real_dir = os.path.realpath(MARKER_DIR)
+    real_path = os.path.realpath(path)
+    if os.path.commonpath([real_dir, real_path]) != real_dir:
+        raise InvalidTaskId(f"fleet/task id escapes marker directory: {fleet!r}/{task_id!r}")
+    return path
+
+
+def write_marker(fleet, task_id, step, of, note=None):
+    path = _marker_path(fleet, task_id)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     data = {
+        "fleet": fleet,
         "taskId": task_id,
         "step": step,
         "totalSteps": of,
         "note": note,
         "updatedAt": datetime.now(timezone.utc).isoformat(),
     }
-    with open(_marker_path(task_id), "w", encoding="utf-8") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
     return data
 
 
-def load_marker(task_id):
+def load_marker(fleet, task_id):
     try:
-        with open(_marker_path(task_id), encoding="utf-8") as f:
+        with open(_marker_path(fleet, task_id), encoding="utf-8") as f:
             return json.load(f)
     except Exception:
         return None
 
 
-def clear_marker(task_id):
+def clear_marker(fleet, task_id):
     try:
-        os.remove(_marker_path(task_id))
+        os.remove(_marker_path(fleet, task_id))
         return True
     except FileNotFoundError:
         return False
@@ -97,7 +132,7 @@ def find_stalled(grace_minutes=20):
             if not t.get("lastRunAt"):
                 continue  # hasn't fired yet -- nothing to stall
             task_id = t.get("id")
-            marker = load_marker(task_id)
+            marker = load_marker(label, task_id)
             if marker is None:
                 continue
             step, total = marker.get("step", 0), marker.get("totalSteps", 0)
@@ -124,6 +159,7 @@ def main():
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_write = sub.add_parser("write", help="Record step N of TOTAL for a one-time task")
+    p_write.add_argument("--fleet", required=True, choices=["cc", "lams"])
     p_write.add_argument("--task-id", required=True)
     p_write.add_argument("--step", type=int, required=True)
     p_write.add_argument("--of", type=int, required=True, dest="of_total")
@@ -134,18 +170,27 @@ def main():
     p_check.add_argument("--json", action="store_true")
 
     p_clear = sub.add_parser("clear", help="Delete a task's marker file")
+    p_clear.add_argument("--fleet", required=True, choices=["cc", "lams"])
     p_clear.add_argument("--task-id", required=True)
 
     args = parser.parse_args()
 
     if args.cmd == "write":
-        data = write_marker(args.task_id, args.step, args.of_total, args.note)
+        try:
+            data = write_marker(args.fleet, args.task_id, args.step, args.of_total, args.note)
+        except InvalidTaskId as e:
+            print(f"[ERROR] {e}", file=sys.stderr)
+            return 2
         print(json.dumps(data, indent=2))
         return 0
 
     if args.cmd == "clear":
-        removed = clear_marker(args.task_id)
-        print(f"{'removed' if removed else 'no marker found for'} {args.task_id}")
+        try:
+            removed = clear_marker(args.fleet, args.task_id)
+        except InvalidTaskId as e:
+            print(f"[ERROR] {e}", file=sys.stderr)
+            return 2
+        print(f"{'removed' if removed else 'no marker found for'} {args.fleet}/{args.task_id}")
         return 0
 
     if args.cmd == "check":
