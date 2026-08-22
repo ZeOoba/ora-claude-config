@@ -1252,6 +1252,63 @@ def test_active_work_claims_excluded_e2e():
     print("  PASS test_active_work_claims_excluded_e2e (exit 0, active-work not scanned)")
 
 
+def test_sessions_dir_pruned_unit():
+    """2026-08-22 FP fix, found while pushing the LTV-narrative fix above: hooks/sessions/<id>/
+    {overrides,reviews}/*.json is the SAME ephemeral cross-session narrative-artifact class as
+    hooks/active-work/*.json -- an override token's free-text `reason` and a review artifact's
+    free-text `notes` both legitimately quote whatever bug they're about. This session's OWN
+    --record review artifact for the LTV-narrative fix quoted 'LTV 65%/40%' in its notes and
+    self-triggered the probe the moment it was written, exactly like active-work did for the
+    DSCR fix. Pruned by directory name, same as active-work/_archive/_staging."""
+    m = _load_probe_module()
+    assert m._is_pruned_dir("sessions")
+    # Tight: requires the exact directory name, so an unrelated dir is never over-pruned
+    # (suppression is a false NEGATIVE on a governor guard).
+    assert not m._is_pruned_dir("sessions-archive")
+    assert not m._is_pruned_dir("session")
+    print("  PASS test_sessions_dir_pruned_unit")
+
+
+def test_sessions_reviews_excluded_e2e():
+    """End-to-end companion to test_active_work_claims_excluded_e2e: a live eos-review-gate.py
+    review artifact quoting an off-canonical LTV value in its free-text notes must not fail the
+    probe."""
+    m = _load_probe_module()
+    would_flag = m.scan_line("LTV governor ceiling raised to 65% per the review notes.")
+    assert would_flag, (
+        "test payload must itself be a flaggable governor declaration, or this e2e proves "
+        "nothing about the sessions prune -- got %r" % would_flag)
+    reviews_dir = os.path.join(m.CLAUDE, "hooks", "sessions",
+                                "_governor_probe_selftest_session", "reviews")
+    os.makedirs(reviews_dir, exist_ok=True)
+    probe_path = os.path.join(reviews_dir, "_governor_probe_selftest_review.json")
+    payload = ('{"key": "test", "verdict": "approved", '
+               '"notes": "LTV governor ceiling raised to 65% per the review notes.", '
+               '"ts": 0}')
+    if os.path.exists(probe_path):
+        with open(probe_path, encoding="utf-8", errors="replace") as fh:
+            existing = fh.read()
+        raise AssertionError(
+            "stale/concurrent selftest review file at %s -- existing content: %r"
+            % (probe_path, existing))
+    with open(probe_path, "w", encoding="utf-8") as fh:
+        fh.write(payload)
+    try:
+        r = run_probe()
+        assert r.returncode == 0, (
+            "a review artifact quoting an off-canonical value must not fail the probe (proves "
+            "the sessions prune, not merely that the payload text is independently suppressed); "
+            "got %d\n%s" % (r.returncode, r.stdout))
+        assert "sessions" not in r.stdout, (
+            "hooks/sessions review artifacts should not be scanned for governor drift:\n%s"
+            % r.stdout)
+    finally:
+        os.remove(probe_path)
+        os.rmdir(reviews_dir)
+        os.rmdir(os.path.dirname(reviews_dir))
+    print("  PASS test_sessions_reviews_excluded_e2e (exit 0, sessions not scanned)")
+
+
 def test_fleet_roots_are_scanned_unit():
     """COVERAGE GAP closed 2026-07-24: build_targets() scanned neither scheduled-task fleet
     root, yet 17 fleet SKILL.md files declare DSCR/LTV. A governor edit landing in
@@ -2202,6 +2259,8 @@ def main():
     test_event_log_excluded_e2e()
     test_active_work_claims_pruned_unit()
     test_active_work_claims_excluded_e2e()
+    test_sessions_dir_pruned_unit()
+    test_sessions_reviews_excluded_e2e()
     test_intervening_qualifier_dscr_floor_flags_unit()
     test_ratified_perproperty_refi_ceiling_prose_stays_clean_unit()
     test_perproperty_refi_ceiling_standalone_bullet_stays_clean_unit()
