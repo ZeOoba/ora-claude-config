@@ -606,6 +606,148 @@ def _stabilization_qualified(low, val_start):
     return (any(q in window for q in STABILIZATION_QUALIFIERS)
             or RE_STAB_YEAR.search(window) is not None)
 
+# --- Bug-fix/audit-changelog SCALING-MULTIPLIER qualifier (2026-08-22) -----------------------
+# A changelog/audit-fix narrative describing a PAST DEFECT can state that a BUGGY CALCULATION
+# inflated/overstated a computed metric by a MULTIPLIER -- e.g. deal-comparison/SKILL.md:153's
+# v1.2 entry: "DSCR was tested at 40% LTV ... inflating computed DSCR ~1.6x and letting deals that
+# would floor-flag ... score clean here; corrected to the LESSER-of-65%-LTV/1.25x-DSCR basis." That
+# is describing how WRONG the buggy output was (a scaling factor on a CALCULATION RESULT), never a
+# declared governor threshold -- but RE_DSCR_THRESH has no notion of "multiplier vs threshold":
+# "dscr ~1.6x" (the second "DSCR" token, immediately followed by the approximation) reads
+# identically to a declared "DSCR floor 1.6x" candidate, so it fell straight into the branch-2
+# equality check and flagged "DSCR governor threshold 1.6x != canonical 1.25x" -- live on main,
+# overridden 5x by 3 sessions across 2026-08-21/22 (hooks/_state/override-usage-log.jsonl,
+# signature d491c6e47418) before this fix.
+#
+# This is a DIFFERENT false-positive shape from every existing qualifier above: _portfolio_qualified
+# / _refi_qualified / _stabilization_qualified all suppress a value that IS a legitimate alternate
+# METRIC (a portfolio-wide target, a refi-sizing input, a lease-up covenant) -- this line's "1.6" is
+# not a metric at all, it is the MAGNITUDE OF A BUG. None of the three existing qualifiers'
+# narrative shapes match it, so it needed its own suppressor rather than a reuse of any of them.
+#
+# The dense real-tree line is also why a WIDE proximity veto (the module's usual pattern, e.g.
+# _governor_declared_nearby's +-28/40-char reach used by every sibling qualifier above) is UNSAFE
+# here: the same changelog entry narrates TWO OTHER defects on the SAME line ("...score clean here"
+# is 31 chars before "floor-flag", and the line separately carries "HARD FILTER"/"disqualif" for an
+# unrelated defect #2) -- "floor" alone sits well inside any +-40ish reach, and ACQ_DECL_NEARBY /
+# STAB_GOV_MARKERS both include bare "floor" and "hard filter". A generic nearby-token veto reused
+# from the sibling qualifiers would misread "would floor-flag" (ORA's own Ruling-5 term of art for
+# "gets flagged for breaching a floor", see FLOOR-FLAGGED just after) as a floor DECLARATION next to
+# the value and refuse to suppress the very false positive this fix targets.
+#
+# _dscr_scaling_multiplier_spans() therefore does NOT use a proximity-window veto at all. Instead it
+# relies on the extraction pattern itself being STRUCTURALLY exclusive of a real declaration, PLUS
+# two independent gates added after round-1 independent review (eos-review-gate.py, claude-fable-5)
+# found both a false negative and a tense-blindness gap in the first cut:
+#   * REQUIRE the exact narrative shape "<scaling verb> ... computed/calculated/measured ... dscr
+#     ... (~ | by [a factor of]) ... <value>x" (RE_DSCR_COMPUTED_SCALING, clause-bounded gaps so it
+#     cannot reach across a clause boundary into an unrelated sentence).
+#   * RIGHT-SIDE KEYWORD LOOKAHEAD (round-1 review Finding 1, false-negative class): the claim that
+#     "a floor/ceiling/minimum/maximum keyword sits immediately adjacent to ITS value in every real
+#     declaration" is only true for keyword-BEFORE-value forms (RE_DSCR_DECL). RE_DSCR_DECL_REV's
+#     shape puts the keyword AFTER the value ("1.40x floor"), which the scaling regex's left-only
+#     bound does not guard -- "bug inflating computed DSCR ~1.40x floor going forward" matched and
+#     silenced a genuine value-then-keyword declaration (repro confirmed pre-fix; RE_GOV_DSCR_BOUND
+#     cannot catch it either, because the value's own decimal point sits inside its clause-exclusion
+#     gap class, same reasoning as the per-property-refi fix's decimal-free-gap precedent). The
+#     trailing `(?!\s*(?:floor|ceiling|minimum|min|maximum|max)\b)` closes this: an explicitly
+#     declared floor/ceiling immediately after the value is never suppressed, mirroring the
+#     kw_after_spans exemption the bps-tier refi veto already carries (round-2 review W3: "an
+#     explicitly-declared floor is a governor statement... must flag even inside a bps tier").
+#   * CHANGELOG-CONTEXT REQUIREMENT (round-1 review Finding 2, tense-blindness class): the doctrine
+#     above scopes this suppressor to a PAST-DEFECT changelog narrative, but the regex alone encodes
+#     no notion of pastness -- "the model now deliberately scales computed DSCR by 1.4x before
+#     comparison" (a present-tense multiplicative fudge -- a real drift MECHANISM, not a typo) and
+#     "scoring still inflates computed DSCR ~1.6x; not yet corrected" (a live, uncorrected defect)
+#     both matched and were silenced pre-fix. RE_CHANGELOG_CONTEXT requires an explicit fix/bug/
+#     correction token ANYWHERE on the line -- the real false-positive line carries "fix", "Two
+#     defects", "corrected" (three times) well past this bar, while a live-behavior or currently-
+#     applied-multiplier line generally will not.
+#   * STRUCTURAL VETO on RE_GOV_DSCR_BOUND anywhere on the line (same belt-and-suspenders precedent
+#     as _stabilization_qualified): a genuine "dscr ... floor/minimum/min" pairing sharing the line
+#     means a real declaration is present and every candidate on the line -- including the
+#     multiplier value -- must stay fully visible. Verified against the real false-positive line:
+#     its nearest "dscr"-to-"floor" gap is ~37 chars, outside RE_GOV_DSCR_BOUND's 24-char reach, so
+#     this veto does not fire there (test_dscr_scaling_multiplier_changelog_stays_clean_unit pins
+#     this margin) -- but a synthetic line that adds an explicit "DSCR floor 1.60x" alongside the
+#     multiplier phrase DOES trip it, and both values flag
+#     (test_dscr_scaling_multiplier_real_drift_still_flags_unit).
+#   * "governor" proximity veto as a final belt-and-suspenders check, anchored to the VALUE'S OWN
+#     SPAN [vs-25, ve+40] (not value-START-anchored like _refi_qualified/_stabilization_qualified's
+#     [val_start-25, val_start+40] -- this window is therefore slightly wider on the after side, by
+#     the value's own length; direction-safe, since a wider veto only means MORE detection) --
+#     narrow enough that it cannot collide with "floor-flag" the way a bare-"floor" veto would.
+#
+# ACCEPTED RESIDUAL (round-1 review Finding 2, non-blocking): RE_CHANGELOG_CONTEXT is a lexical
+# token check, not a negation-aware or topic-aware one, and both gaps were verified in round-2
+# review rather than merely asserted:
+#   * NEGATION-BLIND: "OPEN BUG (hard filter): scoring still inflates computed DSCR ~1.6x; not yet
+#     corrected" carries both "bug" and "corrected" and is therefore still suppressed, even though
+#     the defect is explicitly NOT YET fixed.
+#   * TOPIC-BLIND: the token search is ANYWHERE on the line, not proximity-scoped to the value --
+#     "per the hard filter, we fixed a typo in the README; separately, the model now deliberately
+#     scales computed DSCR by 1.4x before comparison" is suppressed by the unrelated README-typo
+#     "fixed", even though the DSCR multiplier clause itself describes a live, deliberately-applied
+#     mechanism with no fix/correction language of its own.
+# Round-2 review confirmed both are NOT cheaply closeable: proximity- or clause-scoping the token
+# search un-suppresses the real target line itself (deal-comparison/SKILL.md:153's nearest fix/
+# correct token sits ~200-300 chars from the "~1.6x" value, across a ';' clause boundary), and a
+# negation gate is new suppression-logic surface with its own false-negative/false-positive risk on
+# a Hard-Invariant-4 guard. Both residuals are the SAME underlying category-boundary issue: this
+# gate can only ask "does the LINE mention a fix/bug/correction anywhere", not "is THIS VALUE the
+# subject of one" -- closing that for real needs the gate re-scoped to a clause or sentence around
+# the value, which is deferred as its own reviewed change rather than guessed at here. Out of
+# proportion to the actual risk today: an armed line with a topically-unrelated fix/bug mention
+# elsewhere is a narrow, dense-changelog-specific shape, and the failure direction (silent
+# suppression of a value that was never a governor DECLARATION in the first place, only ever a
+# computed-figure narration) is bounded by the fact that this suppressor's OWN extraction pattern
+# already requires the narrow "verb...computed/calculated/measured...dscr...connective...value"
+# shape -- a topically-unrelated fix mention widens WHEN it applies, never WHAT it applies to. Both
+# residuals pinned deliberately by test_dscr_scaling_multiplier_accepted_residuals_unit rather than
+# left latent; a future pass closing either should start from this comment.
+_SCALING_VERBS = r"(?:inflat|overstat|understat|deflat|scal)\w*"
+RE_DSCR_COMPUTED_SCALING = re.compile(
+    r"\b" + _SCALING_VERBS + r"\b[^.;!?\n]{0,20}?\b(?:computed|calculated|measured)\b"
+    r"[^.;!?\n]{0,15}?\bdscr\b\s*(?:~|by\s+(?:a\s+factor\s+of\s+)?)\s*([0-9]+\.[0-9]+)\s*[x×]"
+    # RIGHT-SIDE KEYWORD LOOKAHEAD, widened after round-2 review: the original single-word-adjacent
+    # form (?!\s*(?:floor|...)\b) missed a value-then-MODIFIER-then-keyword declaration ("~1.40x
+    # hard floor", "~1.40x strict minimum") -- vocabulary the module treats as canonical elsewhere
+    # (_is_gov_line's own docstring example is "DSCR hard floor 1.40x"; STAB_GOV_MARKERS carries
+    # "hard cap"/"hard ceiling"). Allowing up to 2 intervening hyphen/space-joined modifier words
+    # closes it; direction-safe per the module's own doctrine (a wider lookahead only BLOCKS
+    # suppression, i.e. more detection, never less). Verified this does not over-block: "floor-flag"
+    # (2 words after a suppressible value, on the real target line) is >2 words past any value in
+    # that line's scaling-multiplier match, so it is unaffected; a value sitting within 2 words of a
+    # literal "floor-flag" WOULD now flag -- loud, not silent, and never observed on the real tree.
+    r"(?!\s*(?:\w+[-\s]+){0,2}(?:floor|ceiling|minimum|min|maximum|max)\b)",
+    re.I)
+# Any explicit fix/bug/correction token on the line -- the PAST-DEFECT narrative marker this
+# suppressor is scoped to (see CHANGELOG-CONTEXT REQUIREMENT above). Word-bounded so it does not
+# match inside an unrelated word ("suffix", "prefix", "fixture").
+RE_CHANGELOG_CONTEXT = re.compile(r"\b(?:fix(?:ed|es|ing)?|correct\w*|bug\w*|defect\w*)\b", re.I)
+
+def _dscr_scaling_multiplier_spans(low):
+    """Digit-group spans of DSCR values that are approximate INFLATION/SCALING MULTIPLIERS on a
+    COMPUTED figure in a bug-fix changelog narrative ("inflating computed DSCR ~1.6x") -- the
+    magnitude of a PAST defect, not a declared governor threshold. Empty (no suppression) whenever
+    the line also carries a structural dscr+floor/min pairing (RE_GOV_DSCR_BOUND) -- a real
+    declaration sharing the line must stay fully visible, so this suppressor defers to that veto for
+    the WHOLE line rather than per-value, matching _stabilization_qualified's structural-veto
+    precedent -- or whenever the line carries no fix/bug/correction context token (RE_CHANGELOG_
+    CONTEXT), which would mean a live-behavior or presently-applied multiplier is being described,
+    not a past, corrected defect."""
+    if RE_GOV_DSCR_BOUND.search(low) is not None:
+        return []
+    if RE_CHANGELOG_CONTEXT.search(low) is None:
+        return []
+    spans = []
+    for mm in RE_DSCR_COMPUTED_SCALING.finditer(low):
+        vs, ve = mm.span(1)
+        if "governor" in low[max(0, vs - 25):ve + 40]:
+            continue
+        spans.append((vs, ve))
+    return spans
+
 # --- Refi-sizing CONSTRUCT member-value spans (2026-07-11; redesigned after adversarial review) --
 # _refi_qualified() is LINE-scoped and its ACQ_GOV_MARKERS veto misfires on the v3.8-ratified skill
 # text: post-2026-07-11 doctrine, "per-property governor: LESSER of 65% LTV and 1.25x DSCR"
@@ -1018,6 +1160,13 @@ def scan_line(raw):
     # bare-proximity LTV fallback below -- every explicit-declaration pass stays armed.
     perprop_paired_veto = _perprop_portfolio_paired_veto_spans(low) if is_gov else []
     refi_ltv_veto = refi_ltv_veto + perprop_paired_veto
+    # Bug-fix/audit-changelog SCALING-MULTIPLIER spans (2026-08-22): DSCR values that are an
+    # approximate inflation/scaling factor on a COMPUTED figure in a changelog narrative
+    # ("inflating computed DSCR ~1.6x"), not a declared governor threshold. See
+    # _dscr_scaling_multiplier_spans for why this cannot reuse the sibling qualifiers' proximity
+    # veto (a bare "floor" token collides with ORA's own "floor-flag" term of art on the real
+    # false-positive line).
+    scaling_mult_spans = _dscr_scaling_multiplier_spans(low) if is_gov else []
 
     # 1) Regression sentinel: 1.75 near DSCR/governor. Fires only for a 1.75 that is NEITHER (a) the
     #    corrected-away value of a "corrected from 1.75 → 1.25" note NOR (b) an explicit PORTFOLIO-LEVEL
@@ -1097,6 +1246,14 @@ def scan_line(raw):
             # AS the governor (see _stabilization_qualified), so a real governor drift dressed in
             # stabilization language still flags.
             if _stabilization_qualified(low, vs):
+                continue
+            # skip a DSCR value that is an approximate INFLATION/SCALING MULTIPLIER on a computed
+            # figure in a bug-fix changelog narrative ("inflating computed DSCR ~1.6x") -- the
+            # magnitude of a defect, not a declared governor threshold. Structurally excluded from
+            # ever matching a real declaration (see RE_DSCR_COMPUTED_SCALING) and deferred whole-
+            # line to the RE_GOV_DSCR_BOUND structural veto at the source, so a real "dscr floor/
+            # minimum" pairing sharing the line still flags in full (see _dscr_scaling_multiplier_spans).
+            if _in_spans(vs, ve, scaling_mult_spans):
                 continue
             # skip a DSCR value that IS the bps rate-pricing tier's band member (a refi input) --
             # member-scoped, so a floor declared elsewhere on the line still flags. Vetoed if the
