@@ -214,6 +214,17 @@ _NOT_A_PHASE_PLAN = [
     "Fix these items:\n1. the guard\n2. the probe\n3. tests",  # enumerated list, not phases
     "Phase 1: just this one phase, nothing else",            # only ONE phase header
     "the deployment has three phases in general",            # prose mention, not headers
+    # Independent-review finding 2026-08-21: unanchored prose mentions of
+    # "Phase N"/"Stage N" with no header delimiter must NOT trigger a
+    # PERMANENT gate bypass. This is realistic, common language in ORA's own
+    # domain (ESA reports use arabic-numeral "Phase 1"/"Phase 2"), not a
+    # contrived edge case.
+    "the Phase 1 ESA flagged a REC -- do we need a Phase 2 before closing?",
+    "compare phase 1 and phase 2 of the rollout",
+    "we're now in phase 2. let's discuss timing",             # period, sentence boundary
+    "Phase 1-3 will take a week",                              # hyphen reads as a range
+    # Same step named twice under different words is NOT two distinct steps.
+    "Phase 1: kickoff. Stage 1: kickoff again.",
     "",
 ]
 for _i, _p in enumerate(_NOT_A_PHASE_PLAN):
