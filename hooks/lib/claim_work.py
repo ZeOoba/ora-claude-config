@@ -18,6 +18,15 @@ visible (see paths_conflict()'s "prefer a distinct slug" guidance, printed on a
 provably-disjoint collision), where reusing one slug for unrelated work would
 make the second claim silently overwrite the first's broadcast.
 
+CODE-REVIEW REMEDIATION IS NOT EXEMPT (2026-08-22 clarification, Gabriel-ruled):
+applying findings from /code-review or a review agent is ad-hoc work on a shared
+subsystem like any other -- it claims whichever slug the TOUCHED PATH already
+maps to (hooks/** -> hooks-override-auth, everything else in ~/.claude ->
+repo-housekeeping, ora-skills -> ora-skills-housekeeping), not a separate
+unscoped category. A session skipped claiming entirely during a review-fix round
+because none of the four names read as "about" review work -- the fix is this
+clarification, not a fifth slug.
+
 WHY (2026-07-25, task_17998414): reference_concurrent_session_duplicate_hardening_work.md
 logs 6 recorded collisions where two sessions independently duplicated work on the same
 shared subsystem without knowing about each other -- most severely, two sessions each
