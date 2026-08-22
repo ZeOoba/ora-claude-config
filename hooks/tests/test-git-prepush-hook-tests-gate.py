@@ -788,6 +788,27 @@ expect("multi_session_claim_hint: own_session_id=None (headless push) -> nothing
           "`python hooks/lib/claim_work.py list` and recent activity in "
           "`list_sessions`/`event_log.md`.\n")
 
+# --- multi_session_claim_hint(): a None entry (a malformed log line missing the
+# session_id field -- override_sessions() adds rec.get("session_id") unconditionally,
+# so a line with valid ts/signature but no session_id key puts a literal None in the
+# set) must NEVER count as evidence of another session. Qodo PR #146 review finding,
+# 2026-08-22: before this PR, a None in the set only nudged the informational
+# frequency-note count off by one; this hint turns that same stale data into an
+# ACTIONABLE instruction to go check for a claim that doesn't exist, which is worse.
+expect("multi_session_claim_hint: sessions={None} (one malformed line, no real other "
+       "session) -> silent, not '1 other session'",
+       gt.multi_session_claim_hint({None}, "sess-a") == "")
+expect("multi_session_claim_hint: sessions={None}, own_session_id=None (headless push, "
+       "one malformed line) -> silent -- None must never match itself into an 'other'",
+       gt.multi_session_claim_hint({None}, None) == "")
+expect("multi_session_claim_hint: a REAL other session plus a malformed None entry -> "
+       "fires, but the None entry must not inflate the count ('1 other', not '2 other')",
+       gt.multi_session_claim_hint({None, "sess-a", "sess-b"}, "sess-a")
+       == "  1 other session has already overridden this exact failure -- before "
+          "building a fix yourself, check for one already in flight: "
+          "`python hooks/lib/claim_work.py list` and recent activity in "
+          "`list_sessions`/`event_log.md`.\n")
+
 # --- main(): end-to-end wiring ---------------------------------------------------------
 # The note appears in the right branch with the right tense, records itself on an
 # override, and stays SILENT on a clean first block -- "overridden 0 times" would be
