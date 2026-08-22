@@ -103,6 +103,14 @@
       "failed_connectors": "none",
       "notion_written": true,
       "notion_error": null
+    },
+    {
+      "last_run_et": "2026-08-22T11:11:47-04:00",
+      "status": "DEGRADED",
+      "subject_sent": "\u2705 ORA Connector Pre-Flight \u2014 2026-08-22 \u2014 Notion OK",
+      "failed_connectors": "none",
+      "notion_written": true,
+      "notion_error": null
     }
   ]
 }
