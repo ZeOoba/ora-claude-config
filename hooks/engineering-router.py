@@ -89,15 +89,35 @@ def _scoped_directive_evidence(prompt_raw, prompt_lower):
 # multi-STAGE) structure, the concrete shape "Phase 0-3" names, counts: >=2
 # distinct "Phase N" / "Stage N" headers is a plan-shaped prompt almost nothing
 # else produces by accident.
-_PHASE_HEADER_RE = re.compile(r"\b(?:phase|stage)\s+\d+\b", re.I)
+# Header-anchored: a bare "Phase 1"/"Stage 2" mention in ordinary prose (a due-
+# diligence ESA reference -- "the Phase 1 flagged a REC, need a Phase 2 before
+# closing" -- or "compare phase 1 and phase 2 of the rollout") must NOT match.
+# Only a real structural header -- the number immediately followed by a colon
+# or em-dash, the way a staged plan actually writes "Phase 1: ..." -- counts.
+# Independent-review finding 2026-08-21 (eos-review-gate): the prior unanchored
+# `\b(?:phase|stage)\s+\d+\b` matched that ESA-style prose and would have
+# permanently disabled eos-plan-gate.py's edit-limit discipline for the rest of
+# the session on ordinary commercial-RE language. Deliberately excludes "." and
+# "-" as delimiters despite reading naturally in a header, too: a period reads
+# as a sentence boundary after a bare mention ("we're now in phase 2.") and a
+# hyphen reads as a range ("Phase 1-3 will take a week") -- both plausible
+# false positives this gate cannot afford, since the marker it writes is
+# permanent for the session. Colon and em-dash are the only unambiguous
+# structural-header signals.
+_PHASE_HEADER_RE = re.compile(r"\b(?:phase|stage)\s+\d+\s*[:—]", re.I)
 
 
 def _written_plan_evidence(prompt_raw):
     """Evidence string if `prompt_raw` itself reads as a written, staged plan
-    (>=2 distinct Phase/Stage N headers), else None."""
-    nums = set(m.group(0).lower() for m in _PHASE_HEADER_RE.finditer(prompt_raw))
-    if len(nums) >= 2:
-        return "multi-phase prompt structure (%s)" % ", ".join(sorted(nums))
+    (>=2 DISTINCT-NUMBERED Phase/Stage headers), else None. Distinctness is
+    judged by the header's number, not its raw text -- "Phase 1: ... Stage 1:
+    ..." is the SAME step named twice, not two steps, and must not count as 2
+    (independent-review finding 2026-08-21, non-blocking nit folded into the
+    same fix)."""
+    headers = set(m.group(0).lower() for m in _PHASE_HEADER_RE.finditer(prompt_raw))
+    numbers = set(re.search(r"\d+", h).group(0) for h in headers)
+    if len(numbers) >= 2:
+        return "multi-phase prompt structure (%s)" % ", ".join(sorted(headers))
     return None
 
 
