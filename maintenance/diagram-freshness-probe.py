@@ -80,7 +80,16 @@ def check_one(label, local_path, remote_repo, max_age_days):
     if not m:
         return {"repo": label, "status": "MISSING_STAMP", "detail": "has a mermaid diagram but no diagram-verified stamp"}
 
-    stamp_date = date.fromisoformat(m.group(1))
+    try:
+        stamp_date = date.fromisoformat(m.group(1))
+    except ValueError as e:
+        # STAMP_RE only validates DIGIT SHAPE (\d{4}-\d{2}-\d{2}), not calendar validity --
+        # a syntactically-matching but impossible date ("2026-02-31") makes fromisoformat
+        # raise. This must become a per-target result, not an uncaught exception: check_one
+        # is invoked from a single list comprehension in main(), so letting this propagate
+        # would abort the ENTIRE cross-repo audit and silently drop every other target.
+        return {"repo": label, "status": "INVALID_STAMP",
+                "detail": f"stamp {m.group(1)!r} is not a valid calendar date: {e}"}
     age_days = (date.today() - stamp_date).days
     if age_days < 0:
         return {"repo": label, "status": "FUTURE_STAMP", "detail": f"stamp dated {stamp_date} is in the future -- check for a typo"}
@@ -103,7 +112,8 @@ def main():
         for r in results:
             print(f"{r['status']:14s} {r['repo']:30s} {r['detail']}")
 
-    problems = [r for r in results if r["status"] in ("STALE", "MISSING_STAMP", "UNREADABLE", "FUTURE_STAMP")]
+    problems = [r for r in results if r["status"] in
+                ("STALE", "MISSING_STAMP", "UNREADABLE", "FUTURE_STAMP", "INVALID_STAMP")]
     if not args.json:
         print()
         if problems:

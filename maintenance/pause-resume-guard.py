@@ -56,6 +56,8 @@ import re
 import subprocess
 import sys
 import tempfile
+import urllib.error
+import urllib.request
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -73,6 +75,10 @@ _spec2.loader.exec_module(task_progress_marker)
 STATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_state", "pause-resume-guard-state.json")
 SEND_SCRIPT = r"C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1"
 RESUME_ID_RE = re.compile(r"-resume-", re.IGNORECASE)
+NOTION_ENV_PATH = r"C:\Users\Owner\oxford-command-center\.env"
+# Same target every other native/scheduled-task alert in this fleet posts status/failure
+# notes to (ora-am-brief, ora-cc-snapshot-refresh, ora-doctrine-integrity-guard, ...).
+OPERATIONS_HUB_PAGE_ID = "32b6ecd8-9e59-81f2-b329-df3fd0e25062"
 
 
 def load_state():
@@ -130,10 +136,61 @@ def analyze_fleet(label, tasks):
         "fleet": label, "status": "OK", "ratio": ratio,
         "enabledCount": enabled, "totalRecurring": len(recurring),
         "overdueResume": overdue_resume,
+        # A resume task that EXISTS but isn't due yet (fireAt in the future) also leaves
+        # overdue_resume None -- without this, the caller's "no pending/overdue resume task
+        # exists for this fleet" branch couldn't tell that apart from a genuinely absent
+        # resume, and fired a false alarm on a legitimately scheduled future pause.
+        "hasResumeTask": bool(resume_tasks),
     }
 
 
-def send_alert(subject, body):
+def _load_notion_token():
+    # Exact key match (mirrors scheduled-tasks/ora-pm-ledger/*_snapshot_diff.py's
+    # load_token): a prefix match would happily return NOTION_TOKEN_OLD / _BACKUP and
+    # authenticate as the wrong (possibly revoked) integration.
+    with open(NOTION_ENV_PATH, encoding="utf-8") as f:
+        for line in f:
+            k, sep, v = line.partition("=")
+            if sep and k.strip() == "NOTION_TOKEN":
+                return v.strip().strip('"').strip("'")
+    raise RuntimeError(f"NOTION_TOKEN not found in {NOTION_ENV_PATH}")
+
+
+def _log_send_failure_to_notion(subject, identifier, proc):
+    """Best-effort ONLY -- a Notion logging failure must never raise past this call. The
+    guard's obligation is to have TRIED to make a silent send failure visible somewhere,
+    not to guarantee delivery of the visibility mechanism itself (that would just move the
+    single-point-of-failure, not remove it). Appends a paragraph block to the Operations
+    Hub page, the same target every other native/scheduled-task alert in this fleet posts
+    status/failure notes to."""
+    try:
+        token = _load_notion_token()
+        text = (f"[ALERT SEND FAILED] pause-resume-guard could not deliver: {subject} "
+                f"(identifier={identifier!r}, send-via-outlook.ps1 exit={proc.returncode}, "
+                f"stderr={proc.stderr.strip()[:300]!r})")
+        req = urllib.request.Request(
+            f"https://api.notion.com/v1/blocks/{OPERATIONS_HUB_PAGE_ID}/children",
+            data=json.dumps({"children": [{
+                "object": "block", "type": "paragraph",
+                "paragraph": {"rich_text": [{"type": "text", "text": {"content": text[:2000]}}]},
+            }]}).encode(),
+            headers={"Authorization": "Bearer " + token,
+                     "Notion-Version": "2022-06-28",
+                     "Content-Type": "application/json"},
+            method="PATCH")
+        with urllib.request.urlopen(req, timeout=30) as r:
+            r.read()
+        return True
+    except Exception:
+        return False
+
+
+def send_alert(subject, body, identifier=None):
+    """One retry on a COM failure (2) or timeout (4) -- matches PR Compliance's send-script
+    caller contract. Returns whether delivery actually succeeded; callers MUST check this
+    (see main()) rather than assume the send happened, and MUST NOT persist alarm-suppression
+    state as delivered until this returns True -- a discarded return value here previously let
+    a failed send permanently suppress every future retry of a still-active alarm."""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
         f.write(body)
         body_path = f.name
@@ -143,7 +200,10 @@ def send_alert(subject, body):
         proc = subprocess.run(args, capture_output=True, text=True)
         if proc.returncode in (2, 4):
             proc = subprocess.run(args, capture_output=True, text=True)
-        return proc.returncode == 0
+        ok = proc.returncode == 0
+        if not ok:
+            _log_send_failure_to_notion(subject, identifier, proc)
+        return ok
     finally:
         try:
             os.unlink(body_path)
@@ -183,7 +243,7 @@ def main():
             reason = (f"enabled ratio {r['ratio']:.0%} ({r['enabledCount']}/{r['totalRecurring']}), "
                        f"resume task '{r['overdueResume']['taskId']}' fireAt {r['overdueResume']['fireAt']} "
                        f"was {r['overdueResume']['minutesOverdue']:.0f}min ago and never resumed it")
-        elif near_zero and not r["overdueResume"] and prev_near_zero:
+        elif near_zero and not r["overdueResume"] and not r["hasResumeTask"] and prev_near_zero:
             trip = True
             reason = (f"enabled ratio {r['ratio']:.0%} ({r['enabledCount']}/{r['totalRecurring']}) for at least "
                        f"two consecutive checks, and no pending/overdue resume task exists for this fleet")
@@ -193,8 +253,11 @@ def main():
         state[fleet]["lastChecked"] = now_iso
 
         if trip:
+            # NOTE: "alarmed" is deliberately NOT set here. It must only become True once
+            # send_alert() actually confirms delivery (below) -- setting it eagerly, before
+            # the send is even attempted, is what let a failed Outlook delivery permanently
+            # suppress every later retry of a still-active alarm.
             already_alarmed = state[fleet].get("alarmed", False)
-            state[fleet]["alarmed"] = True
             alarms.append({"fleet": fleet, "reason": reason, "alreadyAlarmed": already_alarmed})
         else:
             state[fleet]["alarmed"] = False
@@ -210,7 +273,10 @@ def main():
         tid = s["taskId"]
         seen_marker_ids.add(tid)
         already_alarmed = marker_state.get(tid, {}).get("alarmed", False)
-        marker_state[tid] = {"alarmed": True, "lastChecked": now_iso}
+        # Same deferred-"alarmed" fix as the fleet-ratio alarms above: only lastChecked is
+        # recorded here; "alarmed" is set later, only for markers whose alert actually sent.
+        marker_state.setdefault(tid, {})
+        marker_state[tid]["lastChecked"] = now_iso
         reason = (f"one-time task '{tid}' ({s['fleet']}) stalled at step {s['step']}/{s['totalSteps']} "
                   f"-- marker last updated {s['staleMinutes']} min ago (note={s['note']!r})")
         alarms.append({"fleet": f"marker:{tid}", "reason": reason, "alreadyAlarmed": already_alarmed})
@@ -218,8 +284,6 @@ def main():
     for tid in list(marker_state.keys()):
         if tid not in seen_marker_ids:
             marker_state[tid]["alarmed"] = False
-
-    save_state(state)
 
     new_alarms = [a for a in alarms if not a["alreadyAlarmed"]]
 
@@ -242,8 +306,19 @@ def main():
             body_lines.append(f"Reason: {a['reason']}")
             body_lines.append("")
         body_lines.append("This does not auto-resume or auto-restart anything -- verify by hand. For a fleet-ratio alarm: resume the fleet or investigate why an automated resume didn't work. For a stalled-marker alarm: check the task's own instructions/session for where it stopped (see open-items-tracker.md#OI-202 for a real prior instance and register-scheduled-task/SKILL.md's progress-marker convention).")
-        send_alert(subject, "\n".join(body_lines))
+        identifier = "; ".join(a["fleet"] for a in new_alarms)
+        delivered = send_alert(subject, "\n".join(body_lines), identifier=identifier)
+        # Only mark these as "alarmed" (suppressing future retries) once delivery actually
+        # succeeded -- see send_alert's docstring and analyze_fleet's "alarmed" comment above.
+        if delivered:
+            for a in new_alarms:
+                key = a["fleet"]
+                if key.startswith("marker:"):
+                    marker_state.setdefault(key[len("marker:"):], {})["alarmed"] = True
+                else:
+                    state.setdefault(key, {})["alarmed"] = True
 
+    save_state(state)
     return 0
 
 
