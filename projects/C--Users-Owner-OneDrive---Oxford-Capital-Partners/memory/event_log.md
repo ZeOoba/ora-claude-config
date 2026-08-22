@@ -22,6 +22,12 @@ Investigated the DSCR-changelog-scaling-multiplier duplicate-fix collision flagg
 
 **Recommendation surfaced to Gabriel, not yet actioned:** two independent, non-exclusive options were flagged --  (a) narrow `governor-drift-probe.py`'s pre-push scan to changed files only, shrinking blast radius (bigger, separate project, needs its own review as governor code); (b) cheaper -- when the override-usage-log's already-tracked `signature` field sees a repeat hit, surface a "this false positive has been overridden N times by M sessions in 24h, check active claims before building a fix" warning at override time (reuses existing data, no gate-logic change). No implementation authorized this session -- read-only investigation only, per the request.
 
+## 2026-08-22 -- package-and-stage-skill v1.24 installed via Gabriel's Save-skill click (dogfoods its own Local main.log fix)
+
+Entry point A (fresh package) on the item that entered `pending_reimport.py` when v1.24 itself was committed (`b07f599`, checks `AppData\Local\Claude\Logs\main.log` in addition to the Roaming copy). Skill dir confirmed git-clean and `plugin_of` returned `None` (standalone Save-skill path) before packaging. Packaged via `tools/package_skills.py`, exit 0, frontmatter gate passed (description 1010/1024). Gabriel confirmed the Save-skill click.
+
+Verification used the new v1.24 doctrine on itself: cache-directory CreationTime moved 2026-08-21 17:53:56 -> 2026-08-22 12:37:42, SKILL.md byte-identical to the packaged build. `AppData\Local\Claude\Logs\main.log` (the newly-added check) shows an exact `[SkillsPlugin] Delta: 1 to download` / `Sync complete: 1 downloaded` pair at the identical second, 12:37:42 -- first-hand, skill-specific corroboration (only one skill was installed in this window, no count-attribution ambiguity). Confirmed genuine re-import, no ambiguity. Cleared from `_staging/PENDING_REIMPORT.md` (`pending_reimport.py clear`).
+
 ## 2026-08-22 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
 
 - The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `8c98eacf-04d4-4d51-9116-59f55a6b49b2` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
