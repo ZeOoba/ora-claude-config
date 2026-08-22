@@ -5,12 +5,88 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-22T22:15:00.000Z
+  modified: 2026-08-22T22:08:49.565Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-08-22 -- Save-skill clicks confirmed: package-and-stage-skill v1.25, acquisition-underwriting v4.13
+
+Two confirmed platform installs from the refi-rate-rebase session. Logged per package-and-stage-skill
+step 7 (the click, not merely the repo commit).
+
+- **package-and-stage-skill v1.25** (commit 8f00bb4). CONFIRMED, two independent signals:
+  (i) a live `ListSkills` account call returns the skill enabled with a description string ending
+  "Commit by pathspec. v1.25" -- the platform's own copy, not the cache; (ii) runtime-cache directory
+  CreationTime = 2026-08-22 17:58:05, after the 17:55 commit. A mirror-sync overwrite rewrites bytes in
+  place and leaves CreationTime untouched, so a moved CreationTime is a real teardown/recreate.
+  PENDING_REIMPORT line cleared.
+
+- **acquisition-underwriting v4.13** (commit 5b1f319, refi rate default 7.00% -> 6.50%). CONFIRMED on
+  CreationTime alone: cache directory CreationTime = 2026-08-22 17:50:08, after the 17:45:01 commit, and
+  the repo state at that moment was v4.13. ListSkills is NOT corroborating here -- this skill's
+  description carries no version token, so the account call cannot discriminate versions for it.
+  CAVEAT, recorded rather than smoothed over: no pre-click CreationTime baseline was captured during
+  this session's step 2, which the v1.23 rule requires unconditionally. The 17:50:08 reading is
+  therefore compared against an inferred prior state, not a measured one. Evidence is good but one
+  notch weaker than the doctrine calls for.
+  PENDING_REIMPORT line NOT cleared -- see below.
+
+- **acquisition-underwriting ledger line deliberately left pending.** The current pending line is for
+  commit 8728924 (Kinsman Blvd doctrine bundle, v4.14) written at 22:01Z by a concurrent session, not
+  for v4.13. v4.14 has not been installed: the cache CreationTime has not moved since 17:50:08. Clearing
+  the line would mark an uninstalled version as installed.
+
+- **DUPLICATE REGISTRATION FLAGGED (needs Gabriel).** `ListSkills` returns TWO enabled entries named
+  `acquisition-underwriting`, ids `skill_012DJmjQBkLtQtfu6We1owXx` and `skill_01Ukeyw2g9c99nVdsSpnTiyr`,
+  with byte-identical descriptions. `plugin_of('acquisition-underwriting')` returns None, so this is not
+  the known plugin-shadow-copy case (step 0). Two registrations of the same skill name means an
+  ambiguous resolution at invocation time and an install that may land on only one of them. A session
+  cannot delete a registry entry; this needs a manual removal in Settings -> Capabilities.
+
+- Local main.log (`%LOCALAPPDATA%\Claude\Logs\main.log`) was live (mtime 18:07:36) but its last 400 lines
+  carried no `[SkillsPlugin]` entries, so the v1.24 exact-second correlation was unavailable for either
+  skill. CreationTime was the operative discriminator, as v1.22/v1.23 anticipate.
+
+## 2026-08-22 — v2.10-class surface gap closed at DISPATCH time; session-context xref probe built; retire-pending register guards the in-flight LAMS retirement
+
+Implemented the four optimizations Gabriel carried forward from the second `ora-passed-deal-tracker` incident. Session surface: cloud-sandbox Cowork (device bridge, no native app process) — `list_scheduled_tasks` / `create_` / `update_` / `delete_scheduled_task` confirmed ABSENT by tool-registry search. No registry write was attempted from here, and none of the work below required one.
+
+**1. `register-scheduled-task` v2.13 -> v2.14 — RULE 3 (pre-flight surface assertion) + RULE 4 (dispatch-time surface routing).** v2.10 documented the cloud-vs-native surface gap correctly; the gap recurred anyway on the same id because nothing at dispatch time read the note and the receiving session could only discover it mid-pass. RULE 3 makes the assertion the first action of any registration/update/pause/retire pass — prove the surface by tool-registry search, never by calling a tool (a test call on `delete_scheduled_task` is a delete), and never split an ordered pass across the discovery. RULE 4 moves the decision one step earlier still, to whoever writes the brief: a LAMS registry WRITE is handed to "a native on-device Cowork session" by name, never a bare "Cowork session"; READS stay exempt (`fleet-status.py` reads both registries from any surface). QC gate updated. Also added a RETIRE bullet and a bounded-pause carve-out bullet for the retire-pending register (item 3).
+
+**2. `fleet-advisory-remediation` v1.2 -> v1.3 — the dispatch step itself.** Step 6 was the actual dispatch site and said "flag it for a Cowork-side session", which a cloud sandbox satisfies. It now names the native on-device surface literally, requires RULE 3's assertion as the brief's step 1, and requires an ordered multi-step write (archive-first-delete-second) to be flagged as ONE indivisible pass. Matching Outputs + Boundaries bullets. Also corrected the frontmatter version, which read v1.1 while the changelog was at v1.2.
+
+**3. Retire-pending register + `pause-resume-guard.py` check — the live hazard.** `enabled:false` is a pause, not a retirement: the LAMS `ora-passed-deal-tracker` entry is disabled only as a side effect of the stalled 08-21 bulk resume, so every future fleet-wide resume re-arms it until the registration is dropped. New `maintenance/_state/retire-pending.json` records ratified-but-unexecuted retirements; `pause-resume-guard.py` (native, off-fleet, every 6h) now alarms when a listed id is found `enabled:true` on its named fleet. Fail-open by construction (absent/unreadable/malformed register = no findings), fleet-scoped so the canonical CC copy is never flagged, per-key alarm bookkeeping namespaced under `_retirePending` so it cannot collide with fleet-ratio state. Six new tests; full suite green (14/14). Verified against the live registries read-only: cc=40, lams=30, LAMS copy `enabled:false` (no finding), CC copy `enabled:true` (correctly not flagged).
+
+**State correction found mid-session:** the LAMS archive step HAS since been executed — `Documents\Claude\Scheduled\ora-passed-deal-tracker\` is gone and the archived copy is at `_archive_2026-08-22_retired-to-ccmcp\ora-passed-deal-tracker\SKILL.md`. The registration therefore now carries a DANGLING filePath. The retire-pending entry records that half-executed state and the remaining step. **Step 2 of 2 is still open and still requires a native on-device Cowork session** (`delete_scheduled_task` takes no fleet parameter and resolves session-local — the same call from Claude Code would delete the LIVE CC copy).
+
+**4. `session-context-xref-probe.py` — new, wired as the 7th engine of `ora-doctrine-integrity-guard` (v1.4 -> v1.5).** Validates that session-context.md's own pointers resolve: a dated `event_log.md` citation must match a real entry heading (live log OR a rolled-over `memory/_archive/` chunk); a backticked file citation must exist on disk across the memory dir, `~/.claude` + its usual subdirs, `ora-skills`, the LAMS store, and the two OneDrive homes (extensible via `_state/xref-extra-roots.json`). Deliberately narrow — elided paths, prose, and call syntax are skipped, because a false `[XREF-MISSING]` in a daily guard costs more than a missed one. `[SKIP]` is fail-open; a missing/empty session-context.md stays `backup-session-context.py`'s alarm. 11 tests, all pass.
+
+**Its first live run found two genuine dangling references:** (a) `reference_tech.md` — no such file has ever existed; the file is `tech.md`. FIXED in session-context.md. (b) `outreach-ratification.json` — a FALSE positive, the file is real but lives under the OneDrive business folder; that root was added rather than reported. The probe now runs clean: 7 dated event_log citations and 18 file citations validated.
+
+**Not done here, deliberately:** nothing was committed in `~/.claude` or `ora-skills` — both had another session's uncommitted work in flight (Automation Audit Rev 18 remediation, and the M18 eval-harness batch), and the single-writer discipline says land these separately. The two edited skills also need a `package-and-stage-skill` reimport to reach the runtime cache; until then `repo_first_check.py` will correctly report them REPO-AHEAD, which is normal and not an alarm.
+
+## 2026-08-22 — ORA Doctrine Patch Bundle v01 applied (3700 Kinsman Blvd origin) — `8728924`
+
+Gabriel pasted a 4-patch doctrine bundle from the 3700 Kinsman Blvd (Madison WI) FULL underwrite. Verified base SHA256 for all four target files before editing (bundle's own integrity rule); 3 of 4 matched and were applied as written, 1 was stale and re-anchored.
+
+**Applied to `ora-skills` (commit `8728924`, main):**
+- `acquisition-underwriting/SKILL.md` v4.13→v4.14 — STAGE -1 item 8 (zoning-GIS + assessed-value intake via `ora-flood-zoning-dd`/`ora-millage-lookup`), QC Gate floor-test-block extension, corrupted/non-numeric doctrine-constant halt rule, December-back-test drift-sweep hook.
+- `acquisition-proposal-generation/SKILL.md` v3.1→v3.2 — walk-price QC gate (refuse to produce a proposal above the ORA walk price).
+- `market-monitor/SKILL.md` v1.4→v1.5 — new DOCTRINE-DRIFT REPORT section, run-triggered/reporting-only.
+- `loi-generation/SKILL.md` v1.7→v1.8 — walk-price required-input + hard-fail QC Gate item, **re-anchored as item 23** (bundle assumed the gate had 16 items; two same-day commits, `3c477f5` + `0eb8f5f`, had already expanded it to 22 for an unrelated reason before this session started — stated base hash `7bb9b372ed56` did not match the live file `2f179af…`, correctly caught by the bundle's own refuse-if-hash-mismatches rule).
+
+Skipped per the bundle's own instruction: item 1D (single-tenant Stage 2 row 6 scoring branch) — would change a scorecard weight, held for the December back-test.
+
+**Findings during application (both fixed pre-commit):**
+- Independent review caught a fabricated "true" Louisville rent figure ($4.90–$6.00) in the bundle's own corrupted-constant incident narrative — the file's actual on-disk Louisville constant is $3.90–$5.00. Corrected to match reality before commit; ironic given the bullet's own subject is "don't infer, read the on-disk file."
+- Pre-commit skill-frontmatter gate blocked on `acquisition-proposal-generation`'s description exceeding the 1024-char platform limit after the version-tag edit — trimmed rather than overridden (`--no-verify` not used).
+
+Landed via `isolated-commit` (claimed slug `ora-skills-doctrine-patch-v01`, pathspec-scoped stage, two independent-review passes — second after post-review fixes, per the skill's re-review-don't-reuse rule). Not pushed to remote (no explicit push instruction this session). Post-commit hook recorded all 4 skills to `_staging/PENDING_REIMPORT.md` — Cowork/LAMS runtime copies need repackage+reinstall via `package-and-stage-skill` before these changes are live there; the Code-surface repo copies are authoritative as of this commit.
+
+Not patchable from this session (per bundle): the skill-injection constant-corruption defect itself is an Anthropic-side platform issue (bug report shipped separately, outside this repo); `verified-deal-recon`'s absence from the Cowork synced skill set remains unresolved (Patch 1A re-routed around it into STAGE -1, but the routing-default-resolves-to-nothing gap is general, not closed).
 
 ## 2026-08-22 — Pointer: the M18 eval-harness event_log entry landed via commit `b26b7f1`, mislabeled
 

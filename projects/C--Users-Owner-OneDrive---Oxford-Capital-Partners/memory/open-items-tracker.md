@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-08-22T17:01:05.726Z
+  modified: 2026-08-22T21:59:15.245Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -4971,6 +4971,54 @@ comment) and record the convention in `architecture/coding-standards.md` so new 
 it. `server/warehouse/migrations/**` is architect-owned per `.claude/hooks/architect-owned.json` —
 this needs the declared review_needed + architect-ack path.
 **Auto-check:** none.
+
+### OI-187
+**Status:** OPEN
+**Opened:** 2026-08-17 · **Source:** Tax & Settlement systemization sprint — full description lives in the Open table row above; this section exists only to give `#OI-187` a resolvable anchor for inbound links (event_log.md, tax-settlement reference).
+
+---
+
+### OI-188
+**Status:** OPEN
+**Opened:** 2026-08-17 · **Source:** Tax & Settlement systemization sprint — full description lives in the Open table row above; this section exists only to give `#OI-188` a resolvable anchor for inbound links (event_log.md, tax-settlement reference).
+
+---
+
+### OI-189
+**Status:** OPEN
+**Opened:** 2026-08-17 · **Source:** Tax & Settlement systemization sprint — full description lives in the Open table row above; this section exists only to give `#OI-189` a resolvable anchor for inbound links (event_log.md, MEMORY.md).
+
+---
+
+### OI-190
+**Status:** OPEN
+**Opened:** 2026-08-17 · **Source:** Tax & Settlement systemization sprint — full description lives in the Open table row above; this section exists only to give `#OI-190` a resolvable anchor for inbound links (event_log.md, tax-settlement reference).
+
+---
+
+### OI-191
+**Status:** OPEN
+**Opened:** 2026-08-17 · **Source:** Tax & Settlement systemization sprint — full description lives in the Open table row above; this section exists only to give `#OI-191` a resolvable anchor for inbound links (event_log.md).
+
+---
+
+### OI-192
+**Status:** OPEN
+**Opened:** 2026-08-17 · **Source:** Tax & Settlement systemization sprint — full description lives in the Open table row above; this section exists only to give `#OI-192` a resolvable anchor for inbound links (event_log.md).
+
+---
+
+### OI-193
+**Status:** OPEN
+**Opened:** 2026-08-17 · **Source:** Tax & Settlement systemization sprint — full description lives in the Open table row above; this section exists only to give `#OI-193` a resolvable anchor for inbound links (event_log.md, MEMORY.md).
+
+---
+
+### OI-203
+**Status:** FIXED (repo) 2026-08-21 — not yet installed on the platform account
+**Opened:** 2026-08-21 · **Source:** `dirty-tree-triage` on ora-skills, Gabriel-directed follow-up — full description lives in the Open table row above; this section exists only to give `#OI-203` a resolvable anchor for inbound links (event_log.md).
+
+---
 
 ### OI-089
 **Status:** OPEN
