@@ -5,12 +5,95 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-22T18:11:10.431Z
+  modified: 2026-08-22T21:51:58.831Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-08-22 — M18 eval-harness YoC/DSCR floor-constant parser: cross-clause regex bug found by review, fixed and landed (`7d10e3f`)
+
+**What:** A prior session's (1c2b8337) uncommitted M18-eval-harness-cannot-detect-governor-drift fix to `acquisition-underwriting-eval-harness/lib/diff_verdict.py` was independently code-reviewed and REJECTED before landing. `_parse_floor_pair` (extracts an "<observed> vs <floor>" pair from free-form `floor_result` prose, for DSCR/YoC governor-drift detection) searched a fixed +/-100-char window around a metric label. Since the window could span past a `;` into an unrelated metric's clause, and `_POSITIONAL_PCT_RE`'s label group is optional, a YoC search on the module's own canonical test string `"CLEARS (Basis 75.0% vs 65% floor; YoC 10.96% vs 8%; DSCR 1.45x vs 1.25x)"` incorrectly returned the Basis pair `(75.0, 65.0)` instead of `(10.96, 8.0)` — a silent false negative on exactly the governor-drift class this fix exists to catch. The existing test using this string only asserted status/floor_drift, so it passed for the wrong reason and never caught the bug.
+
+**Fix:** Scoped `_parse_floor_pair`'s search to the label's own semicolon-delimited clause (`text.rfind(";", ...)` / `text.find(";", ...)`) instead of a fixed character window. Verified by direct execution — not just test-passing — against: the repro string; a reconstruction of the old buggy logic (confirmed it still returns the wrong pair on both healthy and drifted variants of the string); and all 6 real `golden_set/*.json` `floor_result` strings (zero misparses, including the 3 files that join Basis/YoC prose with "and" inside one semicolon segment). Also tightened both YoC label regexes with a leading `\b` (previously could match the "YC" inside "NYC").
+
+Added 3 regression tests (`test_yoc_parses_own_clause_not_the_adjacent_basis_clause`, `test_yoc_drift_inside_full_combined_clears_phrasing_flags`, `test_trailing_floor_label_reversal_inside_combined_phrasing_flags_drift`) plus a direct-pair assertion. All 32 tests in `test_diff_verdict.py` pass.
+
+**Known residual limitation, documented in-code (not fixed — kept the change narrow per Gabriel's original M18 approval):** the clause-scoping does not fully close the same bug class WITHIN one semicolon-delimited clause. A hypothetical compact "and"-joined phrasing like `"Basis 54% vs 65% floor and YoC 6.9% vs 8.0%"` (no intervening qualifier word, no `;`) would still misparse YoC to the Basis pair — confirmed by execution. Not present in any real golden file today (their "and"-joined clauses all have a qualifier word like "discount"/"vintage-ramp" breaking the false adjacency). Future fix if ever hit: require the optional label group in `_POSITIONAL_PCT_RE`/`_POSITIONAL_X_RE` when a clause contains more than one recognized metric label.
+
+**Review:** Two independent `claude-fable-5` review passes per [[feedback_refute_pass_proactive_default]] / Gabriel's 2026-07-24 ratified financial-code review policy. Pass 1 (on the fix before cleanup) confirmed the defect and the fix, flagged 3 minor items (stale comment referencing a since-removed constant, missing leading `\b`, undocumented edge case) — all addressed. Pass 2 (on final content) returned APPROVED. Verdict recorded through `eos-review-gate.py` (key `7ec31d7c3f12ca4b2de7efe597156563a4194fcdc4976b812f34a1e932e3b740`).
+
+**Shared-checkout incident, resolved cleanly:** mid-task, a concurrent session (04d7cdf1) briefly swept these two staged files into one of its own commits (`febb870`, message about an unrelated refi-rate default change) via what looks like a broad `add`/`commit -a`, then reset it back out (`git reset` to `HEAD~1`, followed by its own clean re-commit at `5b1f319` without these files). No content was lost or altered — verified `git diff febb870 -- <these 2 files>` was empty against the working tree before committing, i.e. the working tree still held exactly the twice-reviewed content. `commit-provenance-guard` correctly flagged `diff_verdict.py` as "edited by session 04d7cdf1" (tracking the commit-history touch, not actual content authorship); declared `allow-foreign-commit` with the verification evidence in the reason, then landed pathspec-scoped to just these 2 files so none of 04d7cdf1's unrelated `SKILL.md` WIP (still dirty/actively changing across several skills at commit time) got pulled in.
+
+**Landed:** commit `7d10e3f` on `main`, `acquisition-underwriting-eval-harness/lib/diff_verdict.py` + `acquisition-underwriting-eval-harness/lib/test_diff_verdict.py` only (382 insertions, 9 deletions).
+
+## 2026-08-22 — ora-passed-deal-tracker LAMS retirement: step 1 (ARCHIVE) EXECUTED; step 2 (DEREGISTER) still blocked on the surface gap
+
+Supersedes the earlier 2026-08-22 entry ("retirement RATIFIED, execution BLOCKED"). Gabriel granted all approvals in-turn and directed execution of the full 4-step finish. Two of the four steps were capability-blocked, not permission-blocked — approval cannot supply a tool the session does not carry.
+
+**Step 1 — ARCHIVE: DONE and verified.**
+- Moved `…\Documents\Claude\Scheduled\ora-passed-deal-tracker\` → `…\Documents\Claude\Scheduled\_archive_2026-08-22_retired-to-ccmcp\ora-passed-deal-tracker\` (move, not delete; archive folder created as a sibling INSIDE the store, per this fleet's convention and the `_archive_2026-07-16_retired-to-ccmcp\` precedent).
+- Verified: source path no longer exists; destination holds `SKILL.md`, 4,775 bytes, mtime `2026-08-05 17:32:21` preserved, SHA256 `7933FF2F46E5AD9AD3DFD4F9096C08CE6FDA4EDCAF12894BDB1BC8A38D1651E2` — byte-identical to the pre-move hash.
+- The older `_archive_2026-06-11_orphans\ora-passed-deal-tracker\` sibling (2,236 bytes, mtime 2026-06-09) was NOT touched and NOT merged. Two distinct archives, unrelated provenance.
+
+**Step 2 — DEREGISTER: NOT DONE.** `delete_scheduled_task` is absent from this session; re-confirmed by two further exhaustive tool-registry searches after approval was granted. This is a cloud-sandbox Cowork session (device-bridge only, no native app process), which per register-scheduled-task v2.13 Rule 1 + the v2.10 surface note never carries `create_scheduled_task` / `update_scheduled_task` / `delete_scheduled_task` / `list_scheduled_tasks`. Did NOT hand-edit `scheduled-tasks.json` to compensate (Rule 2, JSON-splice PROHIBITED). Second occurrence of the v2.10 incident class on this same task id.
+
+**Step 3 — VERIFY via `list_scheduled_tasks`: NOT DONE** (same missing tool). Substituted a read-only registry read, which Rule 2 explicitly says is NOT verification — treat the LAMS line below as evidence, not proof:
+- LAMS/Cowork: id `ora-passed-deal-tracker` STILL PRESENT, `30 6 15 * *`, `enabled: false`, `filePath` now DANGLING (points at the moved folder). 30 entries / 27 enabled.
+- CC/MCP: id `ora-passed-deal-tracker`, `30 6 15 * *`, `enabled: true`, filePath `C:\Users\Owner\.claude\scheduled-tasks\ora-passed-deal-tracker\SKILL.md`, SKILL.md 25,288 bytes, SHA256 `025934498C6DEA95860F7AEEAD92F5684D57153DC049E47C93DD9A7EA0ACFE8F`. 40 entries / 36 enabled. **Untouched — cron and enabled state identical before and after this session's only write.**
+
+**Step 4 — session-context.md: UPDATED** to the true intermediate state (archived / not yet deregistered), not flipped to complete.
+
+**Net risk change.** The half-state is now a REGISTERED id with a MISSING SKILL.md rather than a registered id with a live duplicate spec. On balance this reduces exposure: if a future fleet-wide resume re-enables the LAMS entry (the 2026-08-21 near-incident pattern, which recurs on every pause/resume pass), it can no longer execute a duplicate sweep against Notion — there are no instructions on disk to run. It will instead fail on a missing file, which `task-folder-registration-probe.py` should surface as a visible [ACTION] rather than a silent duplicate. That probe alarm is EXPECTED until step 2 lands; do not "fix" it by restoring the folder.
+
+**Still-open, one step:** from a NATIVE on-device Cowork session, run `delete_scheduled_task` for id `ora-passed-deal-tracker`, then confirm via `list_scheduled_tasks` that the LAMS entry is gone AND the CC/MCP entry is still `enabled: true` (the `path` field is the sole fleet disambiguator). Never the Cowork Scheduled-sidebar trash icon. The `RATIFIED` token for this drop is logged in the preceding 2026-08-22 entry, so `registry-membership-probe.py` will auto-ratify it inside the <=14d window — clock started 2026-08-22.
+
+## 2026-08-22 — ora-passed-deal-tracker LAMS retirement RATIFIED, execution BLOCKED on surface gap (cloud Cowork session lacks the MCP tools)
+
+**Status: NOT executed.** The LAMS/Cowork twin of `ora-passed-deal-tracker` is still registered and still unarchived as of this entry. Nothing was moved, deleted, disabled, or re-enabled on either fleet by this session.
+
+**RATIFIED — planned registry drop: `ora-passed-deal-tracker` (LAMS/Cowork fleet ONLY).** Logged per register-scheduled-task v2.13's archive-first-delete-second bullet so `registry-membership-probe.py` auto-ratifies the drop (<=14d window) instead of raising a false [ACTION] when the native session executes it. The CC/MCP copy of this id is NOT being dropped and MUST stay enabled.
+
+**Why it did not run here.** A retirement pass was dispatched to a cloud-sandbox Cowork session (device-bridge only, no native app process). Per register-scheduled-task v2.13 Rule 1 + the v2.10 surface note, such a session never carries `create_scheduled_task` / `update_scheduled_task` / `delete_scheduled_task` / `list_scheduled_tasks` — confirmed absent here by exhaustive tool-registry search, not inferred from a failed call. Stopped rather than improvising; specifically did NOT hand-edit `scheduled-tasks.json` (Rule 2, JSON-splice PROHIBITED) and did NOT perform the archive move alone, since archive-first-delete-second is a single ordered pass and half-executing it is the exact failure mode that produced this handoff. This is the SECOND occurrence of the v2.10 incident class, on the same task id — the 2026-08-17 original is what created the doctrine note.
+
+**Verified ground truth (live registry read, read-only, 2026-08-22):**
+
+- LAMS/Cowork — `local-agent-mode-sessions\...\scheduled-tasks.json`: id `ora-passed-deal-tracker`, cron `30 6 15 * *`, `enabled: false`, filePath `...\Documents\Claude\Scheduled\ora-passed-deal-tracker\SKILL.md`, `lastRunAt 2026-08-15T18:28:04.621Z`, `lastScheduledFor 2026-08-15T10:30:00.000Z`. Registry holds 30 entries, 27 enabled.
+- CC/MCP — `claude-code-sessions\...\scheduled-tasks.json`: id `ora-passed-deal-tracker`, cron `30 6 15 * *`, **`enabled: true`** (canonical, untouched), filePath `C:\Users\Owner\.claude\scheduled-tasks\ora-passed-deal-tracker\SKILL.md`. Registry holds 40 entries, 36 enabled.
+- Both copies confirmed present on disk with their own SKILL.md.
+
+**Two pre-conditions cleared for whoever executes this:**
+
+1. **Cross-fleet shared-file risk: CLEARED.** The CC/MCP `SKILL.md` (275 lines) is a full self-contained spec, NOT a redirect stub pointing at the LAMS OneDrive path. The LAMS `SKILL.md` (59 lines) is a strict content subset. Archiving the LAMS folder cannot destroy the CC copy's spec.
+2. **Solely-run producer scripts: NONE.** Swept `~/.claude` for scripts this task is the sole invoker of. The LAMS copy invokes only `_shared/send-via-outlook.ps1` (shared across the fleet) and reads the `annual-cycle` repo path (also read by the CC copy). All other hits (`fleet-status.py`, `task-folder-registration-probe.py`, and their tests) reference the id as monitoring/test data, not as a dependency on the LAMS registration.
+
+**Correction to the dispatched brief:** it proposed archiving to `Documents\Claude\Scheduled_archive_2026-08-22_retired\`. That is not this fleet's convention. Archives are siblings INSIDE the store: `Documents\Claude\Scheduled\_archive_YYYY-MM-DD_*\`. Nearest precedent for this exact case (retired because migrated to CC/MCP) is `_archive_2026-07-16_retired-to-ccmcp\`.
+
+**Also found: session-context.md cites "History: `event_log.md` 2026-08-22" for this id, but no such entry existed.** The 2026-08-22 ratification was recorded in `session-context.md` only. This entry closes that gap. `session-context.md`'s bullet remains accurate as written ("ratified 2026-08-22 but NOT yet executed") and must NOT be flipped to complete until the two steps below actually run.
+
+**Ready-to-run procedure — native on-device Cowork session ONLY** (Claude Code cannot do step 2: `delete_scheduled_task` carries no fleet parameter and resolves session-local, so the identical call from Code would delete the LIVE CC/MCP copy):
+
+1. Archive: move `C:\Users\Owner\OneDrive - Oxford Capital Partners\Documents\Claude\Scheduled\ora-passed-deal-tracker\` to `...\Documents\Claude\Scheduled\_archive_2026-08-22_retired-to-ccmcp\ora-passed-deal-tracker\`. Move, never delete. Verify the move landed before step 2.
+2. Deregister: `delete_scheduled_task` for id `ora-passed-deal-tracker` from that native LAMS session. Do NOT use the Cowork Scheduled-sidebar trash icon (folder-destructive, bypasses the Recycle Bin).
+3. Verify: `list_scheduled_tasks` shows the LAMS entry gone AND the CC/MCP entry still `enabled: true` at `30 6 15 * *` with path `...\.claude\scheduled-tasks\...` (the `path` field is the sole fleet disambiguator).
+4. Then update `session-context.md`'s `ora-passed-deal-tracker` bullet to record the retirement as executed, and append the completion entry here.
+
+**Constraints honored this session:** LAMS copy never re-enabled, not even transiently; CC/MCP copy and its cron never touched; no JSON edits anywhere.
+
+## 2026-08-22 — Dirty-tree-triage: cross-repo cleanup, 4 repos (Gabriel: "commit everything you can")
+
+Full dirty-tree-triage run across `~/.claude`, `ora-skills`, `oxford-command-center`, `website-canonical` (98 dirty entries + stray-clone discovery, no strays found). Two-check settle window (20 min) confirmed staticity except `event_log.md`/`MEMORY.md`, which the live "Oracle setup audit" (Rev 18) session was actively writing — correctly excluded throughout.
+
+**`~/.claude`** — 9 isolated commits: backup-mirror resync (32 files, verified byte-identical to already-committed live `scheduled-tasks/`), new `ora-pm-monthly-billing` task, 5 qodo-* skill installs, 4 already-deindexed memory deletions, 3 attributed reference-memory edits (2 from idle sessions, landed via `allow-foreign-commit`), push-fleet-heartbeat.ps1 worktree-resolution fix (idle session 80720188), 2 auto-generated guard-state files, `confidential-repos.json`'s oxford-command-center second-consumer addition (blast-radius file, landed on Gabriel's explicit in-turn approval).
+
+**`ora-skills`** — landed the "Qodo code review on merged code" remediation batch (sessions 1c2b8337 + 04d7cdf1) minus 2 holds: `loi-generation/references/qc-gate.md` (pre-commit hook caught a real content defect — title says "22-Point" but only 16 items present, not resolved here per triage scope) and `acquisition-underwriting-eval-harness/lib/diff_verdict.py` + test (eos-review-gate: financial/governor code, independent review dispatched). 20 already-archived `_archive/*` scratch dirs (305 files, ~59.5K lines) left untracked — too large to blind-commit under a general go-ahead, flagged for Gabriel's explicit call.
+
+**`oxford-command-center`** — landed the cc-audit-army remediation batch (session 1c2b8337) minus `server/warehouse/debt-scoring.ts` + test, held for independent review (DSCR now correctly uses ownership-adjusted `oxfordNoi` instead of 100%-basis `noi`, fixing a false-governor-clearance risk on jointly-owned properties — Hard Invariant 4 adjacent).
+
+**`website-canonical`** — 1 dirty file (`netlify/edge-functions/knowledge-base.json`), untouched per Hard Invariant 2 (no per-deploy confirmation obtained).
+
+Two independent reviews (model: claude-fable-5) dispatched for the held financial/governor-code diffs per Gabriel's 2026-07-24 eos-review-gate ratification; verdicts pending as of this entry.
 
 ## 2026-08-22 — Pre-push encoding-crash + two self-inflicted governor-drift-probe false positives, ROOT-CAUSED AND LANDED
 
