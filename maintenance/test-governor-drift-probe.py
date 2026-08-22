@@ -31,7 +31,16 @@ def run_probe(argv=None):
     cmd = [sys.executable, PROBE]
     if argv:
         cmd += argv
-    return subprocess.run(cmd, capture_output=True, text=True)
+    # encoding="utf-8" (found 2026-08-22): text=True with no explicit encoding decodes the
+    # probe's stdout/stderr using locale.getpreferredencoding() (cp1252 on Windows). The
+    # probe reconfigures ITS OWN stdout to UTF-8 (module docstring: "force UTF-8 so the
+    # probe never crashes on its own output") to safely echo scanned file content, but that
+    # just moves the crash up here: a smart quote like U+201D encodes as UTF-8 bytes
+    # E2 80 9D, and byte 0x9D has no cp1252 mapping at all, so subprocess's internal reader
+    # thread crashes (UnicodeDecodeError, printed straight to real stderr, never raised to
+    # the caller) and silently drops the captured stdout to None instead.
+    return subprocess.run(cmd, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace")
 
 
 def test_canonical_clean_unit():
@@ -1174,6 +1183,45 @@ def test_test_files_excluded_from_scan_unit():
     print("  PASS test_test_files_excluded_from_scan_unit")
 
 
+def test_run_probe_survives_child_utf8_smartquote_e2e():
+    """Regression (2026-08-22): run_probe()'s subprocess.run(..., text=True) call had no
+    explicit encoding, so it decoded the probe's stdout using locale.getpreferredencoding()
+    (cp1252 on Windows). governor-drift-probe.py reconfigures ITS OWN stdout to UTF-8 (see
+    its module docstring, "force UTF-8 so the probe never crashes on its own output") so it
+    can safely echo scanned file content containing non-cp1252 characters -- but that just
+    moves the crash one level up: a smart quote like U+201D encodes as UTF-8 bytes E2 80 9D,
+    and byte 0x9D has NO cp1252 mapping at all, so the PARENT's decode crashes inside
+    subprocess's internal reader thread instead (prints "Exception in thread ..." straight to
+    the real stderr, not raised to the caller) and SILENTLY drops the captured stdout to None.
+    git-prepush-hook-tests-gate.py then reads this test file's own (also None-corrupted, see
+    the sibling regression in hooks/tests/test-git-prepush-hook-tests-gate.py) output and
+    reports a confusing, contentless "fail" for a run that never actually hit real drift.
+    Reproduced here by monkeypatching PROBE to a synthetic child that mimics the real probe's
+    own stdout-reconfigure pattern, so the test is deterministic and doesn't depend on which
+    byte happens to be live in the real scanned tree on any given day."""
+    import tempfile
+    global PROBE
+    child_root = tempfile.mkdtemp(prefix="gdp-smartquote-child-")
+    child_path = os.path.join(child_root, "emit_smartquote.py")
+    with open(child_path, "w", encoding="utf-8") as fh:
+        fh.write(
+            "import sys\n"
+            "sys.stdout.reconfigure(encoding='utf-8', errors='replace')\n"
+            "sys.stdout.write('GOVERNOR DRIFT DETECTED (1): right double quote "
+            "\\u201d present\\n')\n"
+            "sys.exit(1)\n")
+    real_probe = PROBE
+    PROBE = child_path
+    try:
+        r = run_probe()
+    finally:
+        PROBE = real_probe
+    assert r.stdout is not None and "GOVERNOR DRIFT DETECTED" in r.stdout, (
+        "run_probe() must capture the child's UTF-8 smart-quote output instead of "
+        "silently dropping it to None; got stdout=%r" % r.stdout)
+    print("  PASS test_run_probe_survives_child_utf8_smartquote_e2e")
+
+
 def test_event_log_excluded_e2e():
     """End-to-end: real tree is clean AND no finding cites event_log.md."""
     r = run_probe()
@@ -2256,6 +2304,7 @@ def main():
     test_dated_audit_memory_file_excluded_unit()
     test_acquisition_underwriting_skill_file_clean()
     test_test_files_excluded_from_scan_unit()
+    test_run_probe_survives_child_utf8_smartquote_e2e()
     test_event_log_excluded_e2e()
     test_active_work_claims_pruned_unit()
     test_active_work_claims_excluded_e2e()
