@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1212fe18-a05b-453a-b759-cc70bbebd233
-  modified: 2026-08-09T14:58:13.731Z
+  modified: 2026-08-22T20:42:40.628Z
 ---
 
 **Diagnosed 2026-08-09** while root-causing ~13 consecutive mirror-deploy failures (2026-08-05 20:10 → 2026-08-09 08:51). Do not re-diagnose from scratch — and do not blame the tool that reports the timeout.
@@ -43,5 +43,18 @@ Already-cached hostnames (`registry.npmjs.org`, `dash.cloudflare.com`) resolve i
 ## The actual fix is a host network setting
 
 Adding a secondary resolver and/or disabling IPv6 on the Wi-Fi adapter is a **system settings change** — surface it to Gabriel, never apply it autonomously. Worth checking whether `10.254.1.1` is a router or a VPN resolver before changing anything.
+
+## Verification attempt — 2026-08-22 — INCONCLUSIVE, do not treat as resolved
+
+Re-ran the diagnostic per Gabriel's request. Result does NOT confirm the documented fix was applied — it's a different network than the one this fault was diagnosed on:
+
+| Probe | 2026-08-09 (original, router `10.254.1.1`) | 2026-08-22 (this check) |
+| --- | --- | --- |
+| `curl` default dns | `5.11s` | `0.073s` |
+| `curl -4` dns | `0.013s` | `0.013s` |
+| Wi-Fi IPv6 binding (`Get-NetAdapterBinding`) | not checked at diagnosis time | **still `Enabled: True`** — the documented unbind fix was never applied |
+| DNS server | `10.254.1.1`, single, no secondary | `192.168.1.1`, single IPv4, no secondary — **different router entirely** |
+
+The router address changed (`10.254.1.1` → `192.168.1.1`), meaning this machine is on a different Wi-Fi network than the one the fault was diagnosed on. The fast result here is consistent with either (a) this network's resolver just doesn't exhibit the fault, or (b) the fault is network-specific and was never actually fixed on the original network. Since IPv6 is still bound, **the unbind fix in this file was not applied on this machine** — if the original `10.254.1.1` network is still in use elsewhere, the fault likely still reproduces there. Re-test specifically on the `10.254.1.1` network before closing this out.
 
 Related: [[reference-command-center-mirror-deploy-gap]], [[reference-mirror-deploy-0xc000013a-is-usually-benign]].
