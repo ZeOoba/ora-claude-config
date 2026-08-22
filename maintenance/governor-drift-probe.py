@@ -70,7 +70,8 @@ def build_targets():
                                  "Documents", "Claude", "Scheduled"), (".md",)))
     return targets
 
-_PRUNE_EXACT = ("node_modules", "dist", ".git", "__pycache__", "_archive", "_staging")
+_PRUNE_EXACT = ("node_modules", "dist", ".git", "__pycache__", "_archive", "_staging",
+                 "active-work")
 # Archive dirs are named "_archive_<date>[_suffix]" in practice (26 such dirs live across the
 # fleet roots, memory, hooks/sessions and the brain warehouse) -- the exact-name test above
 # matched NONE of them, so every dated archive was being scanned as live content. Fixed
@@ -78,6 +79,16 @@ _PRUNE_EXACT = ("node_modules", "dist", ".git", "__pycache__", "_archive", "_sta
 # was the trigger. Requires the trailing separator so the match stays TIGHT: suppression on a
 # governor guard is a false NEGATIVE, and "_archives_live" must still be scanned.
 _PRUNE_PREFIX = ("_archive_", "_staging_")
+# hooks/active-work/*.json (2026-08-22, found while landing the tilde-hedge fix above): these are
+# claim_work.py's EPHEMERAL cross-session claim broadcasts, not governor documentation -- same
+# narrative-artifact class as event_log.md/MEMORY.md (skip_names, in main()), just JSON instead of
+# markdown and under hooks/ instead of memory/. A claim's free-text `description` legitimately
+# quotes whatever bug/task it's about (e.g. "Fix ... 'inflating computed DSCR ~1.6x' misread as a
+# declared threshold"), and a --force takeover additionally embeds the DISPLACED claim's own
+# description verbatim in `prior_claim` -- so the exact bug text this fix targets ended up
+# self-triggering via this session's own claim file the moment it was written. Pruned by directory
+# name (not skip_names, since claim filenames are slug-derived and unbounded) -- consistent with
+# _PRUNE_EXACT's directory-level exclusions above.
 
 def _is_pruned_dir(name):
     return name in _PRUNE_EXACT or name.startswith(_PRUNE_PREFIX)
@@ -269,6 +280,30 @@ RE_LTV_CORRECTION = re.compile(
 RE_DSCR_CORRECTION = re.compile(
     r"corrected[^0-9\n]{0,20}from\s+[0-9]+\.[0-9]+\s*[x×]?\s*(?:\bto\b|→|->|=>)\s*"
     + re.escape(CANON_DSCR) + r"(?![0-9])", re.I)  # (?![0-9]) not \b: a trailing x ("→ 1.25x") must still suppress
+# Tilde-hedged CHANGELOG narration suppressor (2026-08-21 FP fix; M-3 symmetry with the correction
+# notes above). A Changelog entry narrating a past bug's SYMPTOM value glues '~' directly to the
+# digits ("inflating computed DSCR ~1.6x ... corrected to the LESSER-of-65%-LTV/1.25x-DSCR basis")
+# -- but unlike RE_DSCR_CORRECTION's tight "corrected from X to 1.25" structure, real changelog
+# prose doesn't always land in that exact shape (no "from X to Y" pair here).
+# TWO REFUTE-caught gaps, both closed:
+#   1) (2026-08-21, first attempt) a blanket (?<![vV~]) lookbehind straight on RE_DSCR_THRESH
+#      unconditionally suppressed EVERY tilde-glued value -- silently hiding a REAL drift report
+#      written the same way ("dscr floor ~1.10x" with no companion canonical restatement, e.g. an
+#      audit note reading "the governor now reads ~1.10x"). Fixed by span-scoping (below).
+#   2) (2026-08-21, second attempt) span-scoping to "tilde value + a bare 1.25 ANYWHERE on the
+#      line" was still too loose: "the acquisition dscr floor reads ~1.10x in three files -- needs
+#      reverting to 1.25x" is an UNRESOLVED drift report (the fix has NOT happened) that also
+#      mentions 1.25, and would have been wrongly suppressed. This is the exact "whole-line
+#      corrected + 1.25" shape line 267's comment already says was tried and REPLACED for being
+#      too loose (just not span-scoped that time). Fixed by ALSO requiring the literal word
+#      "corrected" -- the same completed-action anchor RE_DSCR_CORRECTION already uses -- so a
+#      still-broken "needs reverting" report is never mistaken for an already-fixed changelog note.
+# Suppression now requires ALL THREE: (a) the value is tilde-glued, (b) the line contains the
+# literal word "corrected" (completed-action, not a pending TODO), AND (c) the line separately
+# restates the PLAIN (non-hedged) canonical 1.25. A tilde-hedged value with any signal missing --
+# no "corrected", or no plain-1.25 companion -- still flags via RE_DSCR_THRESH untouched.
+RE_DSCR_TILDE_HEDGE = re.compile(r"~([0-9]+\.[0-9]+)(?![0-9])(?!%)\s*[x×]?", re.I)
+RE_DSCR_CANON_PLAIN = re.compile(r"(?<![~0-9.])" + re.escape(CANON_DSCR) + r"(?![0-9])", re.I)
 # Probe SELF-DESCRIPTION suppressor (2026-07-24): documentation of THIS probe's own detection
 # semantics must quote the sentinel value to be useful -- ora-doctrine-integrity-guard/SKILL.md
 # reads "...or the 1.75 regression sentinel". That is prose ABOUT the detector, not a governor
@@ -999,6 +1034,14 @@ def scan_line(raw):
     # <X> to/→ canonical" note suppresses ONLY the corrected-away old value (the span), never the
     # whole branch -- so a live drift sharing the line still flags. DSCR and LTV are independent.
     dscr_corr_spans = [mm.span() for mm in RE_DSCR_CORRECTION.finditer(low)]
+    # Tilde-hedged changelog narration (2026-08-21) -- span-scoped exactly like the correction
+    # notes above, and ONLY armed when the line separately restates the plain canonical 1.25 AND
+    # contains the completed-action word "corrected" (see RE_DSCR_TILDE_HEDGE's own comment for
+    # why the gate requires all three signals together -- a still-broken "needs reverting to 1.25"
+    # report must not be mistaken for an already-fixed changelog note).
+    dscr_tilde_hedge_spans = (
+        [mm.span(1) for mm in RE_DSCR_TILDE_HEDGE.finditer(low)]
+        if ("corrected" in low and RE_DSCR_CANON_PLAIN.search(low)) else [])
     # Probe self-description ("...the 1.75 regression sentinel") -- span-scoped exactly like the
     # correction notes above, so only the quoted sentinel token is skipped, never the branch.
     sentinel_prose_spans = [mm.span() for mm in RE_SENTINEL_PROSE.finditer(low)]
@@ -1076,6 +1119,10 @@ def scan_line(raw):
             vs, ve = m.span(1)
             # skip the corrected-away old value of a DSCR correction note (span-scoped, M-2).
             if any(s <= vs and ve <= e for (s, e) in dscr_corr_spans):
+                continue
+            # skip a tilde-hedged changelog-narration value, ONLY when the line also separately
+            # restates the plain canonical 1.25 (span-scoped, 2026-08-21 -- see RE_DSCR_TILDE_HEDGE).
+            if any(s <= vs and ve <= e for (s, e) in dscr_tilde_hedge_spans):
                 continue
             # skip an explicit PORTFOLIO-LEVEL DSCR figure: the blended portfolio-wide target
             # (ratified 1.75x, 2026-07-08) is a SEPARATE aggregate metric, not the per-deal governor
