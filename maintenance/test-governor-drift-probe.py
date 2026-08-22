@@ -553,6 +553,124 @@ def test_version_token_not_a_dscr_threshold_unit():
     print("  PASS test_version_token_not_a_dscr_threshold_unit")
 
 
+def test_approximate_tilde_value_not_a_dscr_threshold_unit():
+    """2026-08-21 FP fix (ora-skills deal-comparison/SKILL.md:153): a CHANGELOG entry narrating a
+    past bug's symptom ("inflating computed DSCR ~1.6x") read as a live DSCR governor declaration
+    and blocked the pre-push hook-tests gate.
+
+    Two REFUTE-caught gaps shaped this into its final, span-scoped, THREE-signal design (all
+    required together: tilde-glued value + literal "corrected" + a separate plain-1.25 restatement):
+      1) A blanket lookbehind (suppress every tilde-glued value, unconditionally) was rejected --
+         it would also hide a REAL drift report written the same way ("dscr floor ~1.10x" with no
+         companion canonical restatement).
+      2) A looser two-signal gate (tilde value + a bare 1.25 ANYWHERE on the line, no "corrected"
+         requirement) was ALSO rejected -- "the acquisition dscr floor reads ~1.10x in three files
+         -- needs reverting to 1.25x" is an UNRESOLVED drift report that mentions 1.25 without ever
+         saying the fix happened, and would have been wrongly suppressed. Requiring "corrected" (the
+         same completed-action anchor RE_DSCR_CORRECTION already uses) closes that gap."""
+    m = _load_probe_module()
+    # the real deal-comparison/SKILL.md:153 shape (trimmed to the relevant clause) -- must be clean:
+    assert m.scan_line(
+        "(1) DSCR was tested at 40% LTV — the portfolio-aggregate governor, not per-property refi "
+        "sizing — inflating computed DSCR ~1.6x and letting deals that would floor-flag in "
+        "acquisition-underwriting score clean here; corrected to the LESSER-of-65%-LTV/1.25x-DSCR "
+        "basis."
+    ) == [], "the real changelog shape must not read as a DSCR threshold"
+    # a shorter changelog shape carrying all three required signals -- also clean:
+    assert m.scan_line(
+        "Symptom under the old code: DSCR read ~1.10, well above the real floor; corrected to the "
+        "canonical 1.25x DSCR floor."
+    ) == [], "a corrected changelog note with all three signals must not flag"
+
+    # REFUTE gap 1 (closed): unconditional tilde suppression must NOT hide a bare, unresolved report.
+    out_bare = m.scan_line("dscr floor ~1.10x now -- must fix.")
+    assert any("1.10" in o for o in out_bare), (
+        "a bare tilde value with no companion evidence must still flag; got %r" % out_bare)
+
+    # REFUTE gap 2 (closed): tilde + bare 1.25 with NO "corrected" is still an unresolved report,
+    # not a changelog note -- must flag, not be suppressed.
+    out_unresolved = m.scan_line(
+        "the acquisition dscr floor reads ~1.10x in three files -- needs reverting to 1.25x.")
+    assert any("1.10" in o for o in out_unresolved), (
+        "an unresolved drift report mentioning 1.25 without 'corrected' must still flag; got %r"
+        % out_unresolved)
+
+    # Sanity: a genuinely off-canonical value elsewhere on the line, sharing a line with a
+    # "corrected"+tilde note but on its OWN un-hedged "dscr" occurrence, is untouched by the
+    # tilde suppressor (which is span-scoped to the tilde-glued value only) and still flags.
+    out_guard = m.scan_line(
+        "Changelog: old code read DSCR ~1.6x; corrected to 1.25x. Unrelated: DSCR floor 1.10x.")
+    assert any("1.10" in o for o in out_guard), (
+        "a real drift on its own un-hedged dscr occurrence must still flag; got %r" % out_guard)
+    assert not any("1.6" in o for o in out_guard), (
+        "the ~1.6x changelog figure, with 'corrected'+1.25 present, must not flag; got %r"
+        % out_guard)
+    print("  PASS test_approximate_tilde_value_not_a_dscr_threshold_unit")
+
+
+def test_tilde_hedge_corrected_word_boundary_and_directional_unit():
+    """ROUND-1 INDEPENDENT REVIEW (2026-08-22): the first cut of the tilde-hedge suppressor
+    gated on `"corrected" in low` -- a bare, whole-line, non-directional substring test. Two
+    real false negatives followed, both on a Hard-Invariant-4 guard whose stated bias is
+    detection over silence:
+      1) "un**corrected**" contains the substring "corrected", so a drift report that
+         literally says it is NOT fixed was wrongly suppressed.
+      2) The gate had no directionality or per-span binding: an unrelated "corrected" earlier
+         on the line (describing a DIFFERENT fix), or "corrected" preceding the tilde value
+         itself (the NEW/bad figure being hedged, not the old one), or a second still-broken
+         tilde value sharing a line with one genuinely-fixed value, could all ride an
+         unrelated "corrected" token into silent suppression.
+    Fixed by requiring the WORD-BOUNDARY token "corrected" to appear AFTER each tilde value
+    individually, within a bounded reach (_tilde_hedge_suppressed_spans)."""
+    m = _load_probe_module()
+    # gap 1: "uncorrected" must not satisfy the completed-action anchor.
+    out1 = m.scan_line(
+        "dscr floor still reads ~1.10x across three skills, uncorrected; canonical is 1.25x.")
+    assert any("1.10" in o for o in out1), (
+        "an explicitly UNcorrected drift report must still flag; got %r" % out1)
+    # gap 2a: "corrected to ~1.40x" -- the hedged value IS the new/bad figure, not a symptom
+    # of an already-fixed one. "corrected" precedes it, so directionality must not suppress it.
+    out2a = m.scan_line("dscr floor corrected to ~1.40x, was 1.25x previously.")
+    assert any("1.40" in o for o in out2a), (
+        "a tilde-hedged value that is ITSELF the new drift (corrected TO it) must still flag; "
+        "got %r" % out2a)
+    # gap 2b: an unrelated, earlier "corrected" (fixing something else entirely) must not arm
+    # suppression for a DSCR drift later on the same line.
+    out2b = m.scan_line(
+        "audit: the ltv typo was corrected to 40%; separately the dscr floor now reads ~1.10x "
+        "vs the canonical 1.25x -- still open.")
+    assert any("1.10" in o for o in out2b), (
+        "an unrelated earlier 'corrected' must not mask a real drift later on the line; got %r"
+        % out2b)
+    # gap 2c: two tilde values on one line, only the FIRST genuinely followed by "corrected" --
+    # the second, still-unfixed value must not inherit the first's suppression.
+    out2c = m.scan_line(
+        "changelog: symptom dscr ~1.6x corrected to 1.25x; note the live floor also reads "
+        "~1.40x dscr minimum, unfixed.")
+    assert not any("1.6" in o for o in out2c), (
+        "the genuinely-corrected ~1.6x symptom must stay suppressed; got %r" % out2c)
+    assert any("1.40" in o for o in out2c), (
+        "a second, still-unfixed tilde value sharing the line must still flag; got %r" % out2c)
+    print("  PASS test_tilde_hedge_corrected_word_boundary_and_directional_unit")
+
+
+def test_deal_comparison_skill_file_clean():
+    """The live deal-comparison SKILL.md (repo copy) must scan CLEAN line-by-line -- the 2026-08-21
+    false positive at line 153 (a v1.2 Changelog entry narrating the DSCR-wrong-LTV bug fix, see
+    test_approximate_tilde_value_not_a_dscr_threshold_unit)."""
+    m = _load_probe_module()
+    path = r"C:\Users\Owner\ora-skills\deal-comparison\SKILL.md"
+    assert os.path.isfile(path), "skill file not found: %s" % path
+    findings = []
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        for i, raw in enumerate(fh, 1):
+            for reason in m.scan_line(raw):
+                findings.append((i, reason))
+    assert findings == [], (
+        "deal-comparison SKILL.md must be clean; got %r" % findings)
+    print("  PASS test_deal_comparison_skill_file_clean (0 findings)")
+
+
 def test_rate_percent_not_a_dscr_threshold_unit():
     """2026-07-11 FP fix (root cause 1b): "DSCR, 7.00% fixed" was read as "DSCR 7.0x" -- the regex
     backtracked to a PARTIAL capture ("7.0" of "7.00") to defeat the (?!\\s*%) percent guard. The
@@ -1039,6 +1157,64 @@ def test_event_log_excluded_e2e():
     assert "event_log.md" not in r.stdout, (
         "event_log.md narrative should not be scanned for governor drift:\n%s" % r.stdout)
     print("  PASS test_event_log_excluded_e2e (exit 0, event_log.md not scanned)")
+
+
+def test_active_work_claims_pruned_unit():
+    """2026-08-22 FP fix, found while landing the tilde-hedge changelog fix above:
+    hooks/active-work/*.json (claim_work.py's ephemeral cross-session claim broadcasts) is the
+    SAME narrative-artifact class as event_log.md/MEMORY.md -- a claim's free-text `description`
+    legitimately quotes whatever bug it's about, and a --force takeover additionally embeds the
+    displaced claim's own description verbatim in `prior_claim`. This session's OWN claim file,
+    describing this exact fix, ended up quoting 'inflating computed DSCR ~1.6x' and self-triggered
+    the probe the moment it was written -- pruned by directory name, same as _archive/_staging."""
+    m = _load_probe_module()
+    assert m._is_pruned_dir("active-work")
+    # Tight: requires the exact directory name, so an unrelated dir is never over-pruned
+    # (suppression is a false NEGATIVE on a governor guard).
+    assert not m._is_pruned_dir("active-work-archive")
+    assert not m._is_pruned_dir("work")
+    print("  PASS test_active_work_claims_pruned_unit")
+
+
+def test_active_work_claims_excluded_e2e():
+    """End-to-end companion to test_event_log_excluded_e2e: a live claim_work.py claim file
+    quoting an off-canonical DSCR value in its free-text description must not fail the probe.
+
+    REGRESSION GUARD (round-1 independent review, 2026-08-22): the original version of this
+    test used a payload that ALSO satisfied the tilde-hedge suppressor's own three signals
+    (tilde-glued + "corrected" + plain 1.25 companion) -- so it passed even with the
+    `active-work` prune reverted, since scan_line() on that text already returns [] on its
+    own. This payload is a BARE, unhedged, unsuppressed governor declaration
+    ("DSCR governor floor 1.60x") that WOULD flag if actually scanned (verified directly via
+    m.scan_line() before wiring it into the file below), so this test can only pass because of
+    the prune."""
+    m = _load_probe_module()
+    would_flag = m.scan_line("DSCR governor floor 1.60x per the audit note.")
+    assert would_flag, (
+        "test payload must itself be a flaggable governor declaration, or this e2e proves "
+        "nothing about the active-work prune -- got %r" % would_flag)
+    claims_dir = os.path.join(m.CLAUDE, "hooks", "active-work")
+    os.makedirs(claims_dir, exist_ok=True)
+    probe_path = os.path.join(claims_dir, "_governor_probe_selftest_claim.json")
+    payload = ('{"session_id": "test", "title": "selftest", '
+               '"description": "DSCR governor floor 1.60x per the audit note.", '
+               '"claimed_at": "2026-08-22T00:00:00"}')
+    assert not os.path.exists(probe_path), (
+        "stale selftest claim file from a prior run: %s" % probe_path)
+    with open(probe_path, "w", encoding="utf-8") as fh:
+        fh.write(payload)
+    try:
+        r = run_probe()
+        assert r.returncode == 0, (
+            "a claim file quoting an off-canonical value must not fail the probe (proves the "
+            "active-work prune, not merely that the payload text is independently suppressed); "
+            "got %d\n%s" % (r.returncode, r.stdout))
+        assert "active-work" not in r.stdout, (
+            "hooks/active-work claim files should not be scanned for governor drift:\n%s"
+            % r.stdout)
+    finally:
+        os.remove(probe_path)
+    print("  PASS test_active_work_claims_excluded_e2e (exit 0, active-work not scanned)")
 
 
 def test_fleet_roots_are_scanned_unit():
@@ -1721,6 +1897,9 @@ def main():
     test_reverse_order_suppression_still_applies_unit()
     test_reverse_order_refi_suppression_unit()
     test_version_token_not_a_dscr_threshold_unit()
+    test_approximate_tilde_value_not_a_dscr_threshold_unit()
+    test_tilde_hedge_corrected_word_boundary_and_directional_unit()
+    test_deal_comparison_skill_file_clean()
     test_rate_percent_not_a_dscr_threshold_unit()
     test_refi_lesser_of_construct_suppressed_unit()
     test_refi_sizing_phrase_suppressed_unit()
@@ -1750,6 +1929,8 @@ def main():
     test_acquisition_underwriting_skill_file_clean()
     test_test_files_excluded_from_scan_unit()
     test_event_log_excluded_e2e()
+    test_active_work_claims_pruned_unit()
+    test_active_work_claims_excluded_e2e()
     test_intervening_qualifier_dscr_floor_flags_unit()
     test_ratified_perproperty_refi_ceiling_prose_stays_clean_unit()
     test_perproperty_refi_ceiling_standalone_bullet_stays_clean_unit()
