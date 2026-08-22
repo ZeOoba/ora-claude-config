@@ -71,7 +71,7 @@ def build_targets():
     return targets
 
 _PRUNE_EXACT = ("node_modules", "dist", ".git", "__pycache__", "_archive", "_staging",
-                 "active-work")
+                 "active-work", "sessions")
 # Archive dirs are named "_archive_<date>[_suffix]" in practice (26 such dirs live across the
 # fleet roots, memory, hooks/sessions and the brain warehouse) -- the exact-name test above
 # matched NONE of them, so every dated archive was being scanned as live content. Fixed
@@ -89,6 +89,13 @@ _PRUNE_PREFIX = ("_archive_", "_staging_")
 # self-triggering via this session's own claim file the moment it was written. Pruned by directory
 # name (not skip_names, since claim filenames are slug-derived and unbounded) -- consistent with
 # _PRUNE_EXACT's directory-level exclusions above.
+# hooks/sessions/<id>/{overrides,reviews}/*.json (2026-08-22, found while landing the LTV-narrative
+# fix above): the SAME ephemeral cross-session narrative-artifact class as active-work -- an
+# eos-review-gate.py --record artifact's free-text `notes` and a git-prepush-hook-tests-gate.py
+# override token's free-text `reason` both legitimately quote whatever bug they're about. This
+# session's OWN review artifact for the LTV-narrative fix quoted "LTV 65%/40%" in its notes and
+# self-triggered the probe the moment it was written. Pruned by directory name (session ids are
+# unbounded, same as claim slugs) -- consistent with active-work's precedent above.
 
 def _is_pruned_dir(name):
     return name in _PRUNE_EXACT or name.startswith(_PRUNE_PREFIX)
@@ -1551,6 +1558,15 @@ def main():
     # see DATED_AUDIT_RE comment): it narrates the same two Gabriel-ACCEPTED LTV exceptions.
     skip_names |= {"disposition-ledger.md", "deal-decision-ledger.md",
                    "project_historical_evaluations_acquisition_review_2026-07-29.md"}
+    # reference_concurrent_session_duplicate_hardening_work.md (2026-08-22): same append-only
+    # NARRATIVE class -- it records what OTHER sessions investigated/were/weren't working on,
+    # quoting one session's own title verbatim ('Fix governor-drift-probe false positive on
+    # LTV 65%/40%') while explaining it was a DIFFERENT, already-landed bug. That quoted title
+    # trips is_gov purely because it contains the literal substring "governor" (as part of the
+    # tool's own compound name, "governor-drift-probe") -- not because it declares a live
+    # governor. Exact-name exemption, not a pattern token (REFUTE-rejected precedent above):
+    # this file is a narrative investigation log, never the doctrinal home for a governor value.
+    skip_names |= {"reference_concurrent_session_duplicate_hardening_work.md"}
     # DATED AUDIT/PROJECT memory files: exempt by pattern -- see DATED_AUDIT_RE at module level.
     # Dated event_log rollover archives (memory-policy.md's rollover rule, first exercised
     # 2026-07-09: _archive/event_log_<YYYY-MM-DD>.md) are the SAME append-only narrative class
