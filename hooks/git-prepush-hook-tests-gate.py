@@ -712,9 +712,22 @@ def multi_session_claim_hint(sessions, own_session_id):
     token itself -- noise trains the reader to stop reading, same as the token did.
 
     `own_session_id=None` (a headless push with no CLAUDE_CODE_SESSION_ID) excludes
-    nothing: every recorded session counts as "other", since there is no "self" to
-    subtract."""
-    others = sessions - {own_session_id} if own_session_id else set(sessions)
+    nothing beyond the falsy-entry filter below: every genuinely recorded session
+    still counts as "other", since there is no real "self" to subtract.
+
+    A falsy entry in `sessions` (None, most likely -- override_sessions() adds
+    `rec.get("session_id")` unconditionally, so a log line with a valid `ts`/
+    `signature` but no `session_id` KEY produces a literal None; no writer shipped
+    today produces this, but the reader is deliberately tolerant of malformed/
+    hand-edited lines) is EXCLUDED, never counted as an "other session" -- caught by
+    Qodo's PR #146 review, 2026-08-22. Before this function existed, that same None
+    only nudged override_frequency_note()'s informational count off by one; turning
+    it into an ACTIONABLE "go check for this session's claim" instruction is a
+    materially worse failure mode for data that was never attributable to begin
+    with. `s and s != own_session_id` also independently covers `own_session_id`
+    itself being falsy (None): a None entry never matches ITS OWN falsy identity
+    into an "other", the same guard that excludes it for a real caller id."""
+    others = {s for s in sessions if s and s != own_session_id}
     if not others:
         return ""
     n = len(others)
