@@ -1446,6 +1446,15 @@ def main():
     # see DATED_AUDIT_RE comment): it narrates the same two Gabriel-ACCEPTED LTV exceptions.
     skip_names |= {"disposition-ledger.md", "deal-decision-ledger.md",
                    "project_historical_evaluations_acquisition_review_2026-07-29.md"}
+    # reference_concurrent_session_duplicate_hardening_work.md (2026-08-22): same append-only
+    # NARRATIVE class -- it records what OTHER sessions investigated/were/weren't working on,
+    # quoting one session's own title verbatim ('Fix governor-drift-probe false positive on
+    # LTV 65%/40%') while explaining it was a DIFFERENT, already-landed bug. That quoted title
+    # trips is_gov purely because it contains the literal substring "governor" (as part of the
+    # tool's own compound name, "governor-drift-probe") -- not because it declares a live
+    # governor. Exact-name exemption, not a pattern token (REFUTE-rejected precedent above):
+    # this file is a narrative investigation log, never the doctrinal home for a governor value.
+    skip_names |= {"reference_concurrent_session_duplicate_hardening_work.md"}
     # DATED AUDIT/PROJECT memory files: exempt by pattern -- see DATED_AUDIT_RE at module level.
     # Dated event_log rollover archives (memory-policy.md's rollover rule, first exercised
     # 2026-07-09: _archive/event_log_<YYYY-MM-DD>.md) are the SAME append-only narrative class
