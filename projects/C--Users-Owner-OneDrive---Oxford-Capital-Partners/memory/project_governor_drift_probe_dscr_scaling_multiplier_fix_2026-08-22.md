@@ -5,15 +5,15 @@ metadata:
   node_type: memory
   type: project
   originSessionId: fa20bb38-6bd1-40cd-94dd-85a41d1573c2
-  modified: 2026-08-22T16:40:06.424Z
+  modified: 2026-08-22T16:49:37.080Z
 ---
 
 # governor-drift-probe DSCR-changelog-scaling-multiplier fix — landed, plus a duplicate-session finding
 
-`deal-comparison/SKILL.md:153`'s v1.2 changelog entry ("...inflating computed DSCR ~1.6x
-and letting deals that would floor-flag...") was misread by `governor-drift-probe.py`
-as a live DSCR governor declaration of 1.6x — a scaling-factor narration of a past bug's
-magnitude, not a threshold. Blocked every push; overridden via `allow-hook-test-failure`
+`deal-comparison/SKILL.md:153`'s v1.2 changelog entry (see [[event_log]] 2026-08-22 for
+the full quoted text) narrates a past bug's computed-value scaling factor, not a
+threshold — but `governor-drift-probe.py` misread it as a live governor declaration.
+Blocked every push; overridden via `allow-hook-test-failure`
 **8 times by at least 3 distinct sessions** across 2026-08-21/22 before this landed.
 
 **Fixed** in `maintenance/governor-drift-probe.py` (`RE_DSCR_COMPUTED_SCALING` +
