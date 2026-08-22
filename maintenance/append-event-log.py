@@ -71,6 +71,14 @@ INPLACE_FALLBACK_AFTER = 3
 # succeed") once this many uncommitted '## ' entries have piled up against HEAD.
 UNCOMMITTED_BACKLOG_WARN_AT = 4
 
+# Print a WARN once the live log's total size exceeds this many bytes, regardless
+# of commit status. 400_000 matches the largest of the 3 historical archived
+# chunks (303,844B / 401,121B / 135,280B) -- Automation Audit R18-2 found the log
+# went 35 days (7614 lines, 1.42MB) with no rollover because the only existing
+# warning tracked uncommitted entry COUNT, not total file size, so nothing fired
+# until someone remembered to run rollover-event-log.py by hand.
+LOG_SIZE_WARN_AT = 400_000
+
 
 def insert_newest(content, entry):
     """Insert `entry` (must start '## ') above the first existing '## ' entry,
@@ -384,9 +392,12 @@ def drain_spool(log, attempts=3):
     return drained
 
 
-def warn_if_uncommitted_backlog(log, threshold=UNCOMMITTED_BACKLOG_WARN_AT):
+def warn_if_uncommitted_backlog(log, threshold=UNCOMMITTED_BACKLOG_WARN_AT,
+                                 size_threshold=LOG_SIZE_WARN_AT):
     """Best-effort, NEVER-BLOCKING nudge: if `threshold`+ '## '-headed entries
-    are sitting uncommitted against HEAD, print a one-line WARN to stderr.
+    are sitting uncommitted against HEAD, OR the live log has grown past
+    `size_threshold` bytes (regardless of commit status), print a one-line
+    WARN to stderr.
 
     2026-07-17: multiple concurrent sessions each append-without-committing
     over the same day, and the file accumulates into one large, tangled diff
@@ -398,7 +409,26 @@ def warn_if_uncommitted_backlog(log, threshold=UNCOMMITTED_BACKLOG_WARN_AT):
     NOT attempt to attribute lines to a specific session, and it never
     fails the append: any error here (not a git repo, git unavailable, no
     HEAD yet) is silently swallowed, matching this file's fail-open style
-    everywhere else."""
+    everywhere else.
+
+    2026-08-22 (Automation Audit R18-2): the count check above only ever
+    fires when someone is actively appending without committing -- it says
+    nothing about total file size, so a log that IS being committed regularly
+    but never rolled over (structurally, not just left uncommitted) can still
+    grow unbounded with no warning at all. That's exactly what happened here:
+    35 days, 7614 lines, 1.42MB, no WARN ever printed. The size check below is
+    independent of git state entirely (a plain os.path.getsize), so it fires
+    even when the count check stays silent."""
+    try:
+        size = os.path.getsize(log)
+        if size >= size_threshold:
+            sys.stderr.write(
+                "WARN: %s is %d bytes, past the %d-byte rollover threshold -- "
+                "run maintenance/rollover-event-log.py to cut it back down.\n"
+                % (os.path.basename(log), size, size_threshold)
+            )
+    except OSError:
+        pass  # best-effort only -- must never affect the append's own success
     try:
         repo = os.path.dirname(os.path.abspath(log))
         # walk up to find a repo root cheaply -- git handles this natively
