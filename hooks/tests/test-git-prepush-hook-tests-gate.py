@@ -164,6 +164,32 @@ expect("classify: rc != 0 WITH 'CANNOT RUN:' sentinel -> env-skip",
 expect("classify: a timeout (no sentinel) is a real failure, not env-skip",
        gt.classify(124, "TIMEOUT after 90s\n") == "fail")
 
+# --- run_test_file(): must not corrupt/drop output on a non-cp1252 byte a test's ------
+# UTF-8-reconfigured stdout emits (2026-08-22 regression) -----------------------------
+# Root cause: run_test_file()'s subprocess.run(..., text=True) had no explicit encoding,
+# so it decoded the child's stdout using locale.getpreferredencoding() (cp1252 on
+# Windows). A test file that reconfigures its OWN stdout to UTF-8 (the same pattern
+# maintenance/governor-drift-probe.py uses for its scanned-content output) can legitimately
+# emit bytes that are invalid cp1252 -- e.g. U+201D (right double quotation mark, "”")
+# encodes as UTF-8 bytes E2 80 9D, and 0x9D has NO cp1252 mapping at all. Pre-fix this
+# crashes subprocess's internal reader thread (UnicodeDecodeError inside _readerthread,
+# printed directly to the real stderr, not raised to the caller) and SILENTLY drops the
+# captured stdout to None -- the gate then reports a confusing, contentless "fail" for a
+# test that actually ran and printed a real finding.
+smartquote_probe_root = tempfile.mkdtemp(prefix="gt-smartquote-probe-")
+smartquote_probe = write_dummy_test(
+    smartquote_probe_root, "test-smartquote-probe.py",
+    "import sys\n"
+    "sys.stdout.reconfigure(encoding='utf-8', errors='replace')\n"
+    "sys.stdout.write('finding: right double quote \\u201d present\\n')\n"
+    "sys.exit(1)\n")
+rc_sq, out_sq, to_sq = gt.run_test_file(smartquote_probe)
+expect("run_test_file: captures a UTF-8 smart-quote byte from the child's own "
+       "reconfigured stdout instead of silently dropping output to None "
+       "(0x9D has no cp1252 mapping)",
+       out_sq is not None and "finding:" in out_sq,
+       "got rc=%r out=%r" % (rc_sq, out_sq))
+
 # --- run_test_file(): must not leak git hook env vars into the test subprocess --------
 # Simulates git's own pre-push hook environment: git sets GIT_DIR/GIT_WORK_TREE (and
 # friends) in the hook process's env so IT can operate on the outer repo. Bug: this
