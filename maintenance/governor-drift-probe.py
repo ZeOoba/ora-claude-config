@@ -705,6 +705,31 @@ RE_CANON_DSCR_PAIRED_LTV = re.compile(      # "1.25x DSCR <at/,> <N>% LTV"; capt
     re.I)
 RE_BPS_DSCR_TIER = re.compile(              # "+/-N bps ... <X.XX>x DSCR" rate tier; capture (1) band
     r"[+\-−±]\s*[0-9]+\s*bps\b" + _GAP + r"{0,50}?([0-9]+\.[0-9]+)\s*[x×][\s\-*]*dscr", re.I)
+# DSCR-TIER BUCKET LABEL (2026-08-22 FP fix; session 438b62fb, human-authorized override). A
+# refi-rate adjustment tier is sometimes named with a hyphenated descriptor glued directly onto its
+# DSCR threshold -- "stabilized-multi-tenant-≥1.40x adjustments are unchanged in magnitude"
+# (acquisition-underwriting SKILL.md v4.13, mirroring the sibling "+25 bp sub-$2M/single-tenant"
+# tier right beside it). The label IS the value's subject (which bucket a property falls into), not
+# a DSCR floor/governor restatement -- but RE_DSCR_DECL's bare "[≥≤]...x" match has no
+# concept of subject, so it read the bucket's threshold as a governor declaration. The intended
+# suppressors (_refi_qualified / _stabilization_qualified) recognize this shape via "stabiliz" but
+# their veto check is a WHOLE-LINE "any(m in low ...)" scan (STAB_GOV_MARKERS / ACQ_GOV_MARKERS),
+# so an unrelated "per-property" mention elsewhere in the same dense paragraph (the correct,
+# ratified dual-governor restatement in the line's OWN closing sentence) vetoed the suppression by
+# accident.
+# Structurally distinct from every governor-DECLARATION shape in this module: a floor/ceiling/
+# governor restatement is always SPACE-separated from its keyword ("DSCR floor 1.25x", "1.25x DSCR
+# floor"); only a rate-tier bucket NAME hyphen-glues straight into the comparator with no space
+# ("label-word-≥1.40x"). That is the metric guard here, in place of a keyword/proximity test.
+# VETO-tier (added to dscr_veto alongside the bps-tier band, consumed by the SAME check at the DSCR
+# equality call site): _governor_declared_nearby is PROXIMITY-scoped (VETO_BEFORE/VETO_AFTER), not
+# whole-line, so a real drift dressed in this shape ("the acquisition governor is
+# stabilized-multi-tenant-≥1.40x") still flags -- pinned by
+# test_dscr_rate_tier_bucket_label_veto_when_declared_as_governor_unit. Gated on a refi context
+# (REFI_TOKENS, same gate as the bps tier) so the shape is only trusted where a rate-tier bucket
+# plausibly appears.
+RE_DSCR_TIER_LABEL = re.compile(
+    r"[a-z]+(?:-[a-z0-9$]+){1,5}-[≥≤<>]=?\s*([0-9]+\.[0-9]+)\s*[x×]", re.I)
 RE_GOV_TOKEN = re.compile(r"governors?\b")
 RE_CANON_DSCR_GOV_PHRASE = re.compile(
     re.escape(CANON_DSCR) + r"\s*[x×][\s\-*]*dscr\s+governor\b", re.I)
@@ -767,6 +792,41 @@ def _perprop_portfolio_paired_veto_spans(low):
         if mm.group(1) == CANON_LTV_PERPROPERTY and mm.group(2) == CANON_LTV:
             spans.append(mm.span(1))
     return spans
+
+def _line_reaffirms_ratified_ltv_pair(low):
+    """True when the line contains the tight, correctly-paired ratified restatement ('per-property
+    LTV 65% / portfolio-aggregate LTV 40%') ANYWHERE -- not necessarily adjacent to the value being
+    considered for suppression. See the LINE-WIDE reaffirmation comment at its _flag_ltv call site
+    for why this is needed on top of the local pairing spans above (2026-08-22 FP fix). Delegates to
+    _perprop_portfolio_paired_veto_spans (same COMPANION-ANCHORED regex, same canonical-40
+    requirement) rather than re-filtering RE_PERPROP_PORTFOLIO_PAIR itself, so the two can never
+    drift apart (independent-review non-blocking finding, 2026-08-22). Implicitly VALUE-LOCKED by
+    its caller (only invoked when val == 65)."""
+    return bool(_perprop_portfolio_paired_veto_spans(low))
+
+# AGGREGATE/PORTFOLIO clause veto for _line_reaffirms_ratified_ltv_pair (independent review
+# finding, 2026-08-22, session 438b62fb -- see the veto's call site in _flag_ltv for the concrete
+# masked-drift example). Deliberately CLAUSE-BOUNDED rather than a fixed-width window like
+# _governor_declared_nearby: there is no real-tree margin data to tune a window against here, and
+# widening a VETO only ever adds detection (never risks masking a drift), so the safe direction is
+# the wider, whole-clause reach -- bounded by the same clause-ender convention as
+# _nonltv_subject_owns (RE_CLAUSE_END) so it cannot leap into an unrelated clause elsewhere in a
+# long paragraph.
+RE_LTV_AGGREGATE_SUBJECT = re.compile(r"\baggregate\b|\bportfolio\b", re.I)
+
+def _aggregate_ltv_declared_in_clause(low, vs):
+    """True when the CLAUSE containing the value at index `vs` itself names 'aggregate' or
+    'portfolio' -- meaning the value is being asserted AS (or in the same breath as) the
+    portfolio-AGGREGATE ceiling, not the per-property one, even though the line elsewhere carries
+    the correct ratified pairing. Whole-clause, not proximity-windowed (see module comment above)."""
+    lo = 0
+    for cm in RE_CLAUSE_END.finditer(low[:vs]):
+        lo = cm.end()
+    hi = len(low)
+    m = RE_CLAUSE_END.search(low, vs)
+    if m:
+        hi = m.start()
+    return RE_LTV_AGGREGATE_SUBJECT.search(low, lo, hi) is not None
 
 # --- Standalone per-property refi-sizing ceiling (KNOWN GAP 2, closed) -----------------------
 # The pairing suppressor above requires the portfolio-aggregate 40% companion on the SAME LINE.
@@ -867,6 +927,8 @@ def _refi_member_value_spans(low):
         ltv_veto.append(mm.span(2))         # the N% LTV member of the pairing -> veto
     if any(t in low for t in REFI_TOKENS):  # bps tier is a refi input only in a refi context
         for mm in RE_BPS_DSCR_TIER.finditer(low):
+            dscr_veto.append(mm.span(1))
+        for mm in RE_DSCR_TIER_LABEL.finditer(low):  # rate-tier bucket label, see RE_DSCR_TIER_LABEL
             dscr_veto.append(mm.span(1))
     return ltv_noveto, ltv_veto, dscr_veto
 
@@ -1203,6 +1265,40 @@ def scan_line(raw):
             if (val == CANON_LTV_PERPROPERTY and vs is not None
                     and _perproperty_refi_frame_immediately_before(low, vs)
                     and not _governor_declared_nearby(low, vs, ve if ve is not None else vs)):
+                return
+            # LINE-WIDE ratified dual-governor reaffirmation (2026-08-22 FP fix; session 438b62fb,
+            # human-authorized override). The tight companion-anchored pairing above
+            # (_perprop_portfolio_paired_veto_spans / RE_PERPROP_PORTFOLIO_PAIR) already suppresses
+            # "per-property LTV 65% / portfolio-aggregate LTV 40%" when both members sit close
+            # together -- but that pairing is consumed ONLY via refi_ltv_veto, itself scoped to the
+            # single RE_LTV_NEAR match it was extracted from. A dense paragraph can restate that
+            # SAME ratified pairing once, in its own closing sentence ("governor constant (DSCR
+            # 1.25x / per-property LTV 65% / portfolio-aggregate LTV 40%) changed"), while ALSO
+            # discussing "the 65% LTV ceiling" earlier in an unrelated clause with no "per-property"
+            # token anywhere near THAT occurrence ("DSCR binds less often and the 65% LTV ceiling
+            # binds more often" -- acquisition-underwriting SKILL.md v4.13). Both name the SAME
+            # ratified per-property figure; only the wording differs, and the reaffirming pairing is
+            # sitting in plain sight elsewhere on the SAME line.
+            # _line_reaffirms_ratified_ltv_pair() answers "does this line contain the tight
+            # companion-anchored pairing ANYWHERE" (not local to THIS value) -- still
+            # COMPANION-ANCHORED (the aggregate 40% must be present and correctly paired, so a
+            # drifted companion earns no reaffirmation) and VALUE-LOCKED to 65 (a real per-property
+            # drift at any OTHER value is untouched and still flags below, exactly like the
+            # standalone-frame check above). Still vetoed by _governor_declared_nearby at THIS
+            # value's own position, so a mislabeled "65% ... is now the acquisition governor"
+            # sharing a line with the correct pairing still flags -- pinned by
+            # test_ltv_ceiling_reaffirmed_elsewhere_does_not_mask_governor_declared_drift_unit.
+            # ALSO vetoed by _aggregate_ltv_declared_in_clause (independent review finding,
+            # 2026-08-22, session 438b62fb): a partial-edit drift line naturally quotes the OLD
+            # correct pairing alongside a genuinely wrong NEW aggregate figure ("Aggregate LTV
+            # ceiling raised to 65% ... doctrine had read per-property LTV 65% / portfolio-aggregate
+            # LTV 40%.") -- without this veto the reaffirmation elsewhere on the line would mask a
+            # real drift of the 40%-governor TO 65%, the single most plausible wrong value for it.
+            # Pinned by test_ltv_ceiling_reaffirmed_elsewhere_does_not_mask_aggregate_drift_unit.
+            if (val == CANON_LTV_PERPROPERTY and vs is not None
+                    and _line_reaffirms_ratified_ltv_pair(low)
+                    and not _governor_declared_nearby(low, vs, ve if ve is not None else vs)
+                    and not _aggregate_ltv_declared_in_clause(low, vs)):
                 return
             # 0 < num < 1 flags too (REFUTE residual #1, 2026-07-29): "LTV ceiling 0.65%" is the
             # unit-interval notation a human porting capital-config.ts (ltvCeiling: 0.65) into
