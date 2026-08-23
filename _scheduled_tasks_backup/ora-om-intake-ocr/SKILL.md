@@ -1,6 +1,6 @@
 ---
 name: ora-om-intake-ocr
-description: Weekly OM intake pass — detect new PDFs in Investment Candidates folder, OCR image-only scans, gate-screen new candidates (Buy Box Stage 0), sweep stale seen-backlog OMs that were never gate-screened, extract structured fields via Brain server, report. Wednesdays 6:15 AM ET. v1.4 (2026-08-12): added Step 3.6 stale seen-backlog sweep (closes the gap that let "OM  Dollar General  Cincinnati OH.pdf" sit un-gated for ~2 months); OCR now Tesseract-backed (winget-installed 2026-08-12) with a Ghostscript deviation (blocked by non-admin session — see Step 2 note). v1.3 (2026-07-29): corrected Folder: path (missing \Business\ segment; pointed to a nonexistent location). [MODEL: claude-sonnet-5 | set 2026-07-13]
+description: Weekly OM intake pass (Wednesdays 06:15 AM ET) — detects new PDFs in the Investment Candidates folder, OCRs image-only scans (Tesseract-backed, winget-installed 2026-08-12; Ghostscript path blocked by non-admin session, see body Step 2), gate-screens new candidates (Buy Box Stage 0), sweeps stale seen-backlog OMs that were never gate-screened (Step 3.6), extracts structured fields via the Brain server, and reports. Full versioned changelog lives in the body of this file (migrated from frontmatter, class-n remediation 2026-08-17). [MODEL: claude-sonnet-5 | set 2026-07-13]
 ---
 
 RESTORATION NOTE: Re-registered 2026-07-07 after the 2026-07-05 machine migration orphaned this task (folder survived on disk; registry entry was lost). Content restored verbatim from the surviving SKILL.md — no logic changes.
@@ -121,3 +121,10 @@ Autonomous; no mid-run questions. Originals immutable. Temp work in session
 scratchpad only — never write temp files to the OneDrive folder. Permitted durable
 writes there: `_intake\manifest.json` (canonical state), `*_OCR.pdf` siblings, and
 the dated intake report when email is unavailable.
+
+
+*Changelog — MIGRATED FROM FRONTMATTER (v1.5 (2026-08-17), class-n remediation). These entries previously existed ONLY in the `description` field; the body carried pointers reading "see description field above", which stops being true the moment the description is trimmed. Moved verbatim, not summarised.*
+
+- **v1.3 (2026-07-29): corrected Folder: path (missing \Business\ segment; pointed to a nonexistent location). [MODEL: claude-sonnet-5 | set 2026-07-13]
+
+- **v1.4 (2026-08-12): added Step 3.6 stale seen-backlog sweep (closes the gap that let "OM  Dollar General  Cincinnati OH.pdf" sit un-gated for ~2 months); OCR now Tesseract-backed (winget-installed 2026-08-12) with a Ghostscript deviation (blocked by non-admin session — see Step 2 note)
