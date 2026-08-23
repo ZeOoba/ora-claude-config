@@ -26,6 +26,8 @@
 - **[Usage-report remediation 08-21](project_usage_report_horizon_builds_scoped_2026-08-21.md)** — 5 items shipped (commit-hygiene GAP C advisory PR #142, isolated-commit skill, rules.md §22-24); 3 "on the horizon" builds scoped-only, NOT implemented — read before starting the self-healing fleet, adversarial pre-push swarm, or environment-preflight builds
 - **[governor-drift-probe DSCR-changelog-scaling-multiplier fix + duplicate-session finding, 08-22](project_governor_drift_probe_dscr_scaling_multiplier_fix_2026-08-22.md)** — landed `ecf7b42`; also caught 3+ parallel sessions independently fixing the identical bug — flag for Gabriel
 - [Governor-LTV remediation PR #233](project_governor_ltv_remediation_2026-07-24.md) — 11 shipped; OPEN: debt-scoring ltv gap + silent-refusal reload path
+- **⛔ [3700 Kinsman Blvd FedEx — walk-price breach, decision due 08-25](project_fedex_kinsman_walk_price_breach_2026-08-23.md)** — drafted $3.8M LOI breaches 3 underwriting floors; walk $2,661,000. Withdraw or log Exception Register override
+- [HubSpot lease-renewal pipeline stalled 08-23](reference_hubspot_lease_renewal_pipeline_stalled_2026-08-23.md) — all 43 deals stuck at appointmentscheduled since 03-27, incl. tenants expiring within days
 - **⛔ [Northwood/EGFLLC $2.8M loan 07-27](project_northwood_egflc_loan_miscategorized_2026-07-27.md) — REOPENED. Reclassified 08-03, REVERSED unlogged 08-09 as a "duplicate"; Gabriel ruled C 08-10: INTERNAL DEBT REPORTING FROZEN until Eric produces the source doc. Quote external debt ($10,627,017) only — never Total Debt/internal. No governor impaired**
 
 ## Markets
