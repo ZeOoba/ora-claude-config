@@ -2083,6 +2083,186 @@ def test_ltv_ceiling_reaffirmed_elsewhere_does_not_mask_aggregate_drift_unit():
     print("  PASS test_ltv_ceiling_reaffirmed_elsewhere_does_not_mask_aggregate_drift_unit")
 
 
+def test_eval_harness_floor_result_narration_clean_unit():
+    """2026-08-23 FP fix: an auto-generated eval-harness run log narrates a deal's floor-check
+    VERDICT -- the ACHIEVED DSCR quoted against the canonical 1.25x floor, computed at the ratified
+    65%-LTV per-property refi-sizing basis. Both figures are doctrine-correct (1.42x/1.48x is the
+    underwriting RESULT, 65% is CANON_LTV_PERPROPERTY, and the canonical floor is restated
+    correctly on the same line), so neither may flag. The two lines below are VERBATIM the live
+    triggers (ora-skills/acquisition-underwriting-eval-harness/runs/
+    2026-08-23T171623Z_scheduled-poll.json:399 and :195, including the surrounding JSON quoting);
+    :195 additionally proves the construct-specific suppressor is needed even where
+    RE_REFI_SIZING_NAMED matches, because ACQ_DECL_NEARBY's 'floor' token sits inside this
+    phrasing's own canonical anchor and vetoes the shared refi-member suppression."""
+    m = _load_probe_module()
+    lines = (
+        '          "FLOOR-FLAGGED - Basis floor BREACHED (57.3% discount vs 60% floor); Yield '
+        'floor BREACHED (7.53% YoC vs 8.0% floor); DSCR floor PASSES (1.42x vs 1.25x floor at '
+        '65%-LTV sizing, LTV binds); GATE-FLAGGED on size",',
+        '          "FLOOR-FLAGGED - Basis floor FAIL (54.3% discount); Yield floor FAIL (5.99% '
+        'YoC vs 8.0% floor); DSCR floor PASS (1.48x vs 1.25x floor at 65%-LTV refi sizing, LTV '
+        'binds)",',
+    )
+    for line in lines:
+        out = m.scan_line(line)
+        assert out == [], (
+            "eval-harness floor-result narration is doctrine-correct and must be clean; "
+            "line=%r got=%r" % (line, out))
+    print("  PASS test_eval_harness_floor_result_narration_clean_unit")
+
+
+def test_floor_result_narration_does_not_mask_drift_unit():
+    """ANTI-BLINDING for the floor-result suppressor: every guard that keeps it from becoming a
+    blind spot, exercised one at a time. Each variant looks like the suppressed construct but
+    carries a REAL drift (or a declaration), and must still flag."""
+    m = _load_probe_module()
+    # (a) CANONICAL ANCHOR: a drifted floor RESTATEMENT ("vs 1.40x floor") matches neither regex,
+    #     so the achieved value, the drifted restatement, AND the sizing LTV all stay visible.
+    out = m.scan_line('"DSCR floor PASSES (1.42x vs 1.40x floor at 65%-LTV sizing, LTV binds)"')
+    assert any("DSCR" in o and "1.40" in o for o in out), (
+        "drifted canonical restatement 1.40x must still flag; got %r" % out)
+    assert any("LTV" in o and "65" in o for o in out), (
+        "without the canonical anchor the 65%% LTV lock must not engage; got %r" % out)
+    # (b) VALUE-LOCK: a drifted sizing basis (80% is not the ratified per-property 65) still flags.
+    #     Only the LTV finding is asserted: the achieved-DSCR member (1.42x) stays suppressed here
+    #     by design -- its own construct (vs-canonical-floor) is intact and independent of the LTV
+    #     lock, and the line still goes red via the 80. Expected/acceptable, not an oversight
+    #     (round-2 review non-blocking note).
+    out = m.scan_line('"DSCR floor PASSES (1.42x vs 1.25x floor at 80%-LTV sizing, LTV binds)"')
+    assert any("LTV" in o and "80" in o for o in out), (
+        "non-ratified sizing LTV 80%% must still flag (value-lock); got %r" % out)
+    # (c) DECL-SHAPE VETO: a declaration dressed in the construct's word order -- pivot-bound
+    #     ("raised to 1.42x") and keyword-bound ("floor 1.42x") -- still flags even with a result
+    #     verb adjacent, because the value's span is also bound by a declaration-shaped extractor.
+    out = m.scan_line("Governor update: DSCR floor raised to 1.42x vs 1.25x floor -- passes")
+    assert any("DSCR" in o and "1.42" in o for o in out), (
+        "pivot-declared 1.42x must still flag despite the vs-canonical tail; got %r" % out)
+    out = m.scan_line("DSCR floor 1.42x vs 1.25x floor -- clears")
+    assert any("DSCR" in o and "1.42" in o for o in out), (
+        "keyword-declared 1.42x must still flag despite the vs-canonical tail; got %r" % out)
+    # (d) RESULT-VERB GATE: the same word order with NO verdict verb is not a harness narration
+    #     ("previously" reads as a drift report) and still flags.
+    out = m.scan_line("DSCR governor: 1.42x vs 1.25x floor previously")
+    assert any("DSCR" in o and "1.42" in o for o in out), (
+        "verb-less vs-canonical construct must still flag; got %r" % out)
+    # (e) GOVERNOR-TOKEN VETO: the sizing 65 declared AS the governor nearby still flags.
+    out = m.scan_line(
+        '"DSCR floor PASSES (1.42x vs 1.25x floor at 65%-LTV sizing, the governor now)"')
+    assert any("LTV" in o and "65" in o for o in out), (
+        "65 declared AS the governor must still flag; got %r" % out)
+    # (f) AGGREGATE-CLAUSE VETO: a 65 asserted in the same clause as an aggregate/portfolio
+    #     subject is (plausibly) the 40%-aggregate governor drifted TO 65 -- still flags.
+    out = m.scan_line(
+        '"DSCR floor PASSES (1.42x vs 1.25x floor at 65%-LTV sizing for the aggregate portfolio)"')
+    assert any("LTV" in o and "65" in o for o in out), (
+        "aggregate-clause 65 must still flag; got %r" % out)
+    print("  PASS test_floor_result_narration_does_not_mask_drift_unit")
+
+
+def test_floor_result_round2_declaration_tokens_still_veto_unit():
+    """Round-2 independent review, Finding 1 (2026-08-23): the first cut of the floor-result
+    governor veto dropped the WHOLE ACQ_DECL_NEARBY list instead of only the two floor-family
+    tokens that collide with the construct's own canonical anchor -- silencing lines HEAD flagged.
+    Every remaining declaration token must veto suppression for BOTH members: a "hard ceiling"/
+    "hard cap"/"acquisition"/"buy-box"/"hard filter" phrase hung off the construct means one of
+    its values is being declared AS the governor, so the achieved DSCR AND the sizing 65 both
+    stay visible (the veto is whole-construct-scoped -- the token sits ~40+ chars from the
+    achieved value but well inside the construct window)."""
+    m = _load_probe_module()
+    tails = ("the hard ceiling", "the hard cap", "our acquisition ceiling",
+             "the buy-box ceiling", "the hard filter")
+    for tail in tails:
+        line = ('"DSCR floor PASSES (1.42x vs 1.25x floor at 65%%-LTV sizing, %s)"' % tail)
+        out = m.scan_line(line)
+        assert any("DSCR" in o and "1.42" in o for o in out), (
+            "achieved 1.42x must flag when %r is declared on the construct; got %r" % (tail, out))
+        assert any("LTV" in o and "65" in o for o in out), (
+            "sizing 65%% must flag when %r is declared on the construct; got %r" % (tail, out))
+    print("  PASS test_floor_result_round2_declaration_tokens_still_veto_unit")
+
+
+def test_floor_result_round2_binder_declarations_still_flag_unit():
+    """Round-2 independent review, Finding 2 (2026-08-23): copula/binder-bound declarations
+    ("DSCR floor is 1.42x vs 1.25x floor") are the module's own documented I-2 canonical-decoy
+    class, and none of the extractor-shaped spans (pivot/keyword-abutting/from-to) bind them --
+    so the first cut suppressed them whenever a result verb sat nearby. The KEYWORD-DIRECT-BIND
+    veto (round-3 restructuring of round-2's enumerated binder list -- see
+    _floor_kw_binds_value_directly) must keep every one of these flagging: a same-clause
+    floor-keyword within reach of the value suppresses ONLY when the verdict verb sits wholly
+    BETWEEN them, and the genuine harness construct always interposes exactly that ("floor
+    PASSES (1.42x"), which no binder shape can match. The last case also pins the bare-'clear'
+    removal from the result-verb gate: clear-height prose ("28 ft clear") must not arm
+    suppression of a copula declaration."""
+    m = _load_probe_module()
+    lines = (
+        "DSCR floor is 1.42x vs 1.25x floor; deal passes.",
+        "Deal PASS: DSCR floor is 1.42x vs 1.25x floor.",
+        "DSCR floor at 1.42x vs 1.25x floor -- passes.",
+        "DSCR floor = 1.42x vs 1.25x floor -- passes.",
+        "Spec: 28 ft clear. DSCR floor is 1.42x vs 1.25x floor.",
+    )
+    for line in lines:
+        out = m.scan_line(line)
+        assert any("DSCR" in o and "1.42" in o for o in out), (
+            "binder-bound declared 1.42x must still flag; line=%r got=%r" % (line, out))
+    print("  PASS test_floor_result_round2_binder_declarations_still_flag_unit")
+
+
+def test_floor_result_round3_verbphrase_binders_still_flag_unit():
+    """Round-3 independent review (2026-08-23): enumerating binder TOKENS was structurally
+    unclosable -- any VERB-PHRASE binder falls outside a finite list ("set" is even already in
+    the module's own _CHANGE_VERB, but _PIVOT only covers "set TO", not "set at"). The
+    keyword-direct-bind veto INVERTS the test instead of growing the list: when the nearest
+    floor-keyword before the candidate value sits in the same clause, suppression REQUIRES a
+    verdict verb wholly between keyword and value -- which only the genuine harness narration
+    shape satisfies ("floor PASSES (1.42x", "floor PASS (1.48x"). Every verb-phrase declaration
+    below therefore flags, known or novel, with no enumeration. The trailing "-- passes" on
+    each line is the adversarial part: a result verb near the construct must NOT rescue
+    suppression when it does not sit between keyword and value. (A 24-char reach cap pinned by
+    an earlier revision of this test was deleted in round 4 -- see
+    test_floor_result_round4_distant_keyword_declarations_still_flag_unit.)"""
+    m = _load_probe_module()
+    lines = (
+        "DSCR floor set at 1.42x vs 1.25x floor -- passes.",
+        "DSCR floor stands at 1.42x vs 1.25x floor -- passes.",
+        "DSCR floor sits at 1.42x vs 1.25x floor -- passes.",
+        "DSCR floor now sits at 1.42x vs 1.25x floor -- passes.",
+        "DSCR floor pegged at 1.42x vs 1.25x floor -- passes.",
+        "DSCR floor held at 1.42x vs 1.25x floor -- passes.",
+        "DSCR floor rises to 1.42x vs 1.25x floor -- passes.",
+        "DSCR floor currently stands at 1.42x vs 1.25x floor -- passes.",
+    )
+    for line in lines:
+        out = m.scan_line(line)
+        assert any("DSCR" in o and "1.42" in o for o in out), (
+            "verb-phrase-bound declared 1.42x must still flag; line=%r got=%r" % (line, out))
+    print("  PASS test_floor_result_round3_verbphrase_binders_still_flag_unit")
+
+
+def test_floor_result_round4_distant_keyword_declarations_still_flag_unit():
+    """Round-4 independent review (2026-08-23): the 24-char keyword reach cap created a
+    suppression band just past it -- a declaration whose qualifier phrase pushes the value more
+    than 24 chars from the keyword ("floor under the revised doctrine is 1.42x") slipped
+    through, silently suppressed. The cap is DELETED, not widened: distance never protects a
+    genuine narration (the verb-between requirement and the clause boundary do), so the veto now
+    reaches the whole clause and no qualifier length can outrun it. The last case pins the
+    plural/verb keyword form ("DSCR floors at 1.42x" -- 'floors' added to RE_DSCR_FLOOR_KW,
+    round-4 non-blocking note): equally a declaration, equally flagged."""
+    m = _load_probe_module()
+    lines = (
+        "DSCR floor under the revised doctrine is 1.42x vs 1.25x floor -- passes.",
+        "DSCR floor effective next quarter is 1.42x vs 1.25x floor -- passes.",
+        "DSCR floor per the updated standard is 1.42x vs 1.25x floor -- passes.",
+        "DSCR floor for all deals henceforth is 1.42x vs 1.25x floor -- passes.",
+        "DSCR floors at 1.42x vs 1.25x floor -- passes.",
+    )
+    for line in lines:
+        out = m.scan_line(line)
+        assert any("DSCR" in o and "1.42" in o for o in out), (
+            "distant-keyword declared 1.42x must still flag; line=%r got=%r" % (line, out))
+    print("  PASS test_floor_result_round4_distant_keyword_declarations_still_flag_unit")
+
+
 def main():
     assert os.path.isfile(PROBE), "probe not found: %s" % PROBE
     test_fleet_roots_are_scanned_unit()
@@ -2165,6 +2345,12 @@ def main():
     test_ltv_ceiling_reaffirmed_elsewhere_does_not_mask_real_drift_unit()
     test_ltv_ceiling_reaffirmed_elsewhere_does_not_mask_governor_declared_drift_unit()
     test_ltv_ceiling_reaffirmed_elsewhere_does_not_mask_aggregate_drift_unit()
+    test_eval_harness_floor_result_narration_clean_unit()
+    test_floor_result_narration_does_not_mask_drift_unit()
+    test_floor_result_round2_declaration_tokens_still_veto_unit()
+    test_floor_result_round2_binder_declarations_still_flag_unit()
+    test_floor_result_round3_verbphrase_binders_still_flag_unit()
+    test_floor_result_round4_distant_keyword_declarations_still_flag_unit()
     test_event_log_excluded_e2e()
     test_active_work_claims_pruned_unit()
     test_active_work_claims_excluded_e2e()
