@@ -12,6 +12,34 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-22 -- AAOS repo has no worktree isolation: concurrent-session collision on shared checkout (PR #3)
+
+**OPEN ITEM.** While cherry-picking a misplaced commit (`281026e`, landed by mistake on
+`docs/architecture-diagram-refresh`) onto a clean `fix/handoff-registration-doctrine-check`
+branch, a different concurrent session wrote directly into the same shared, non-worktree-isolated
+checkout at `C:\Users\Owner\AAOS`. It ran `git reset --hard origin/docs/architecture-diagram-refresh`
+then re-cherry-picked `281026e` onto the wrong base and pushed the result to
+`origin/fix/handoff-registration-doctrine-check` -- all mid-sequence, with none of those commands
+issued by this session. Caught via `git reflog show <branch>` showing a `reset`/`cherry-pick`
+entry this session never made, plus a remote-tracking branch that existed before this session ever
+pushed. No data was lost (the correct commit was recoverable from reflog), but the pushed branch
+briefly carried an unrelated docs commit into what should have been a minimal fix, and the recovery
+required deleting + recreating the remote branch (`git push --force-with-lease` was itself blocked
+by the permission layer, unrelated to this finding).
+
+**Why it happened:** AAOS already uses `git worktree` for at least one line of work
+(`feature/notion-post-wire` -> `C:/Users/Owner/AAOS-worktrees/notion-post`), but the primary
+checkout `C:\Users\Owner\AAOS` itself is not worktree-isolated, so any session operating "in AAOS"
+by default shares one working tree, index, and HEAD with every other session doing the same --
+the same class of hazard the `~/.claude`/`ora-skills`/`website-canonical`/`oxford-command-center`
+single-writer doctrine exists to prevent, just for a repo not on that roster.
+
+**Recommendation (not yet actioned):** either (a) add AAOS to the shared-checkout single-writer
+roster (claim-before-edit via the existing `claim_work.py` pattern or equivalent), or (b) make
+worktree-per-task the default entry point for AAOS work (mirroring `notion-post`), so concurrent
+sessions land in isolated trees instead of racing on `C:\Users\Owner\AAOS` directly. Flagged for
+the next `ora-setup-audit` pass rather than actioned ad hoc.
+
 ## 2026-08-22 — Cowork session review: 4 workflow-observation fixes (2 already landed by a concurrent session, 1 trimmed)
 
 Dispatched to close 4 fixes surfaced during a Cowork session review: a probe existence-check gap, a doctrine-only assertion with no machine check, a skill-version/changelog drift class, and a terseness WARN. Pre-flight checks against ground truth found 2 of the 4 already done by a concurrent session before this pass started -- not assumed, verified with tests.
