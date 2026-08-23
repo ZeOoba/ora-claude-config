@@ -1806,6 +1806,169 @@ def test_stabilization_qualifier_does_not_mask_year_YYYY_dates_unit():
     print("  PASS test_stabilization_qualifier_does_not_mask_year_YYYY_dates_unit")
 
 
+# Real trigger line, quoted VERBATIM (not simplified) from acquisition-underwriting SKILL.md v4.13
+# changelog (line 15, as of 2026-08-22) -- both false positives fixed below live on this ONE line.
+# This exact failure was overridden via allow-hook-test-failure tokens by 6 distinct sessions in the
+# 24h before the fix (2026-08-22, session 438b62fb-30d2-43f3-b1ad-d86ecbcfb749, human-authorized).
+REAL_V413_CHANGELOG_LINE = (
+    "**v4.13 (2026-08-22):** **Refi rate default cut 7.00% → 6.50%** (Gabriel, in-turn "
+    "instruction 2026-08-22). Single-input change to the UNDERWRITING CONVENTIONS refi paragraph. "
+    "The ±25 bp band moves with the base (6.75–7.25% → **6.25–6.75%**) because "
+    "the band is derived from the base, not set independently — the +25 bp "
+    "sub-$2M/single-tenant and −25 bp stabilized-multi-tenant-≥1.40x adjustments are "
+    "unchanged in magnitude. Consumers updated to match: `references/ic-memo-structure.md` §7 "
+    "Debt & Capital Structure, and the v4.3 rate/refi-shock-bear sentence in the same paragraph. "
+    "**One second-order consequence flagged rather than silently inherited:** the paragraph's "
+    "long-standing observation that \"DSCR ≥1.25x is typically the more frequently binding "
+    "constraint\" was calibrated at 7.00%; a 6.50% coupon on 25-yr amort cuts annual debt service "
+    "~4.5% at the same loan amount, so DSCR binds less often and the 65% LTV ceiling binds more "
+    "often. The paragraph now carries that caveat and instructs a per-deal test instead of the "
+    "inherited heuristic. **No scorecard weight, Stage 1 floor, or governor constant (DSCR 1.25x / "
+    "per-property LTV 65% / portfolio-aggregate LTV 40%) changed** — the coupon is an "
+    "assumption, not a governor, and the DSCR ≥1.25x floor itself is untouched. Not re-derived "
+    "from a lender quote or an index; re-confirm at the annual December back-test alongside the "
+    "rest of the 2026 defaults. Downstream note: any workbook built on the prior 7.00% Inputs-tab "
+    "value carries a stale refi rate — re-run rather than assume parity."
+)
+
+
+def test_v413_changelog_line_clean_unit():
+    """REGRESSION PIN (2026-08-22): the real acquisition-underwriting SKILL.md v4.13 changelog line
+    (line 15) must scan fully clean. Prior to this fix it produced TWO false positives on this one
+    line: 'DSCR governor threshold 1.40x != canonical 1.25x' (the stabilized-multi-tenant rate-tier
+    label) and 'LTV governor 65% != canonical 40%' (the mid-sentence LTV-ceiling mention). This is
+    the exact line that blocked git-prepush-doctrine-gate.py and was overridden 6 times in 24h
+    before the underlying probe bug was fixed."""
+    m = _load_probe_module()
+    out = m.scan_line(REAL_V413_CHANGELOG_LINE)
+    assert out == [], (
+        "the real v4.13 changelog line must scan clean; got %r" % out)
+    print("  PASS test_v413_changelog_line_clean_unit")
+
+
+def test_dscr_rate_tier_bucket_label_not_flagged_as_governor_unit():
+    """2026-08-22 FP fix, root cause 1: a refi rate-tier BUCKET LABEL hyphen-glued to its DSCR
+    threshold ("stabilized-multi-tenant-≥1.40x") names WHICH rate-adjustment bucket a property
+    falls into -- it is not a DSCR floor/governor restatement, mirroring the sibling "+25 bp
+    sub-$2M/single-tenant" tier beside it. RE_DSCR_DECL's bare comparator+x match has no concept of
+    subject and read it as a governor declaration; the intended suppressors
+    (_refi_qualified/_stabilization_qualified) exist for exactly this shape but their veto check is
+    WHOLE-LINE, so an unrelated 'per-property' mention elsewhere in the same dense paragraph (the
+    line's own correct closing restatement) vetoed the suppression by accident. Isolated from the
+    LTV false positive (test_ltv_ceiling_reaffirmed_elsewhere_in_paragraph_suppressed_unit covers
+    that one) by trimming the real line down to only the DSCR-tier-label clause plus enough of the
+    real closing sentence to reproduce the whole-line veto collision."""
+    m = _load_probe_module()
+    line = (
+        "Refi rate default cut. The +25 bp sub-$2M/single-tenant and −25 bp "
+        "stabilized-multi-tenant-≥1.40x adjustments are unchanged in magnitude. No scorecard "
+        "weight, Stage 1 floor, or governor constant (DSCR 1.25x / per-property LTV 65% / "
+        "portfolio-aggregate LTV 40%) changed."
+    )
+    out = m.scan_line(line)
+    assert not any("1.40" in o for o in out), (
+        "DSCR-tier bucket label 'word-word-≥N.NNx' must not be misread as a governor "
+        "restatement even when an unrelated 'per-property' token sits elsewhere on the same line; "
+        "got %r" % out)
+    print("  PASS test_dscr_rate_tier_bucket_label_not_flagged_as_governor_unit")
+
+
+def test_dscr_rate_tier_bucket_label_veto_when_declared_as_governor_unit():
+    """ANTI-BLINDING (mirrors test_perprop_pairing_vetoed_when_declared_as_acquisition_ceiling_unit):
+    a REAL DSCR drift dressed up in the tier-bucket-label shape must still flag.
+    _governor_declared_nearby is PROXIMITY-scoped (unlike the whole-line STAB/ACQ_GOV_MARKERS
+    checks this fix works around), so a 'governor' token sitting close to the value still vetoes
+    suppression."""
+    m = _load_probe_module()
+    line = ("Refi note: acquisition governor: stabilized-multi-tenant-≥1.40x for every deal.")
+    out = m.scan_line(line)
+    assert any("1.40" in o for o in out), (
+        "a DSCR drift declared AS the governor nearby must still flag despite the tier-label "
+        "shape; got %r" % out)
+    print("  PASS test_dscr_rate_tier_bucket_label_veto_when_declared_as_governor_unit")
+
+
+def test_ltv_ceiling_reaffirmed_elsewhere_in_paragraph_suppressed_unit():
+    """2026-08-22 FP fix, root cause 2: '65% LTV ceiling' mentioned mid-sentence with no
+    'per-property' token nearby (real text: 'so DSCR binds less often and the 65% LTV ceiling binds
+    more often') is the SAME ratified per-property governor as the line's own closing restatement
+    ('per-property LTV 65% / portfolio-aggregate LTV 40%'). The existing pairing suppressor
+    (_perprop_portfolio_paired_veto_spans) only recognizes the pairing when both members sit close
+    together on one RE_LTV_NEAR match -- it does not reach a DIFFERENT, earlier mention of the same
+    65% figure elsewhere on the line. _line_reaffirms_ratified_ltv_pair() closes that gap: if the
+    line contains the tight, correctly-paired restatement ANYWHERE, any other value-locked (== 65)
+    LTV-ceiling mention on the same line is recognized as the same governor, not independent drift.
+    Value-locked and companion-anchored exactly like the existing pairing check -- see
+    test_ltv_ceiling_reaffirmed_elsewhere_does_not_mask_real_drift_unit and
+    test_ltv_ceiling_reaffirmed_elsewhere_does_not_mask_governor_declared_drift_unit for the two
+    ways this stays tight."""
+    m = _load_probe_module()
+    line = ("so DSCR binds less often and the 65% LTV ceiling binds more often. No scorecard "
+            "weight, Stage 1 floor, or governor constant (DSCR 1.25x / per-property LTV 65% / "
+            "portfolio-aggregate LTV 40%) changed.")
+    out = m.scan_line(line)
+    assert not any("65" in o for o in out), (
+        "'65%% LTV ceiling' reaffirmed elsewhere on the same line as the ratified per-property/"
+        "portfolio-aggregate pairing must not flag as independent drift; got %r" % out)
+    print("  PASS test_ltv_ceiling_reaffirmed_elsewhere_in_paragraph_suppressed_unit")
+
+
+def test_ltv_ceiling_reaffirmed_elsewhere_does_not_mask_real_drift_unit():
+    """VALUE-LOCK: a genuinely drifted LTV ceiling (not 65) sharing a line with the ratified pairing
+    must still flag -- the reaffirmation check only ever recognizes the literal ratified 65, exactly
+    like the pre-existing pairing/frame suppressors it extends."""
+    m = _load_probe_module()
+    line = ("so DSCR binds less often and the 70% LTV ceiling binds more often. No scorecard "
+            "weight, Stage 1 floor, or governor constant (DSCR 1.25x / per-property LTV 65% / "
+            "portfolio-aggregate LTV 40%) changed.")
+    out = m.scan_line(line)
+    assert any("70" in o for o in out), (
+        "a drifted 70%% LTV ceiling must still flag despite a ratified pairing elsewhere on the "
+        "line; got %r" % out)
+    print("  PASS test_ltv_ceiling_reaffirmed_elsewhere_does_not_mask_real_drift_unit")
+
+
+def test_ltv_ceiling_reaffirmed_elsewhere_does_not_mask_governor_declared_drift_unit():
+    """ANTI-BLINDING (mirrors test_perprop_pairing_vetoed_when_declared_as_acquisition_ceiling_unit):
+    a 65% LTV figure explicitly MISLABELED as the acquisition governor must still flag even when the
+    ratified pairing sits elsewhere on the same line -- _governor_declared_nearby is evaluated at
+    THIS value's own position, so a nearby 'acquisition governor' declaration vetoes the new
+    suppression exactly as it already vetoes the standalone-frame and pairing suppressors."""
+    m = _load_probe_module()
+    line = ("Hard filter: 65% LTV is now the acquisition governor, while per-property LTV 65% / "
+            "portfolio-aggregate LTV 40% remains correct elsewhere.")
+    out = m.scan_line(line)
+    assert any("65" in o for o in out), (
+        "a 65%% LTV figure declared AS the acquisition governor must still flag despite a ratified "
+        "pairing elsewhere on the line; got %r" % out)
+    print("  PASS test_ltv_ceiling_reaffirmed_elsewhere_does_not_mask_governor_declared_drift_unit")
+
+
+def test_ltv_ceiling_reaffirmed_elsewhere_does_not_mask_aggregate_drift_unit():
+    """ANTI-BLINDING (independent review finding, 2026-08-22, session 438b62fb): the CATASTROPHIC
+    case for the reaffirmation suppressor is a partial-edit drift line that naturally quotes the OLD
+    correct pairing alongside a genuinely wrong NEW aggregate figure -- the 40%-governor drifted TO
+    65% (the single most plausible wrong value, since 65 is itself a legitimate ratified number one
+    level down). Each of these must still flag despite the ratified pairing sitting later on the
+    same line, because THIS occurrence is asserted in the same clause as an 'aggregate'/'portfolio'
+    subject:"""
+    m = _load_probe_module()
+    lines = (
+        "Aggregate LTV ceiling raised to 65% effective today; doctrine had read per-property LTV "
+        "65% / portfolio-aggregate LTV 40%.",
+        "Portfolio-aggregate LTV ceiling 65%; per-property LTV 65% / portfolio-aggregate LTV 40% "
+        "was the prior reading.",
+        "Governor: size the whole portfolio to 65% maximum; per-property LTV 65% / "
+        "portfolio-aggregate LTV 40% no longer applies.",
+    )
+    for line in lines:
+        out = m.scan_line(line)
+        assert any("65" in o for o in out), (
+            "an aggregate/portfolio-labelled 65%% ceiling must still flag despite a ratified "
+            "pairing elsewhere on the line; line=%r got=%r" % (line, out))
+    print("  PASS test_ltv_ceiling_reaffirmed_elsewhere_does_not_mask_aggregate_drift_unit")
+
+
 def main():
     assert os.path.isfile(PROBE), "probe not found: %s" % PROBE
     test_fleet_roots_are_scanned_unit()
@@ -1873,6 +2036,19 @@ def main():
     test_dated_audit_memory_file_excluded_unit()
     test_acquisition_underwriting_skill_file_clean()
     test_test_files_excluded_from_scan_unit()
+    # Registered here, BEFORE the known-broken e2e tests below (test_event_log_excluded_e2e /
+    # test_active_work_claims_excluded_e2e currently fail on 6 pre-existing, unrelated findings in
+    # OTHER files -- confirmed via git stash to predate this change) -- an assert failure aborts
+    # main() outright, so anything registered after those calls silently never runs on a plain
+    # `python test-governor-drift-probe.py` invocation (independent-review blocking finding,
+    # 2026-08-22, session 438b62fb).
+    test_v413_changelog_line_clean_unit()
+    test_dscr_rate_tier_bucket_label_not_flagged_as_governor_unit()
+    test_dscr_rate_tier_bucket_label_veto_when_declared_as_governor_unit()
+    test_ltv_ceiling_reaffirmed_elsewhere_in_paragraph_suppressed_unit()
+    test_ltv_ceiling_reaffirmed_elsewhere_does_not_mask_real_drift_unit()
+    test_ltv_ceiling_reaffirmed_elsewhere_does_not_mask_governor_declared_drift_unit()
+    test_ltv_ceiling_reaffirmed_elsewhere_does_not_mask_aggregate_drift_unit()
     test_event_log_excluded_e2e()
     test_active_work_claims_pruned_unit()
     test_active_work_claims_excluded_e2e()
