@@ -1462,6 +1462,14 @@ def main():
     # governor. Exact-name exemption, not a pattern token (REFUTE-rejected precedent above):
     # this file is a narrative investigation log, never the doctrinal home for a governor value.
     skip_names |= {"reference_concurrent_session_duplicate_hardening_work.md"}
+    # INDEX_projects_system.md (2026-08-23): the "Projects & system" SUB-INDEX split out of
+    # MEMORY.md (already exempted above) when MEMORY.md's own size gate got tight -- same
+    # append-only-pointer NARRATIVE class as its parent, just in a separate file. Its bullets
+    # POINT to project files and quote their titles verbatim, e.g. "- [governor-drift-probe LTV
+    # 65%/40% split false positive](...) -- LANDED 08-22 (`c7875a5`)" -- a record of a
+    # ALREADY-LANDED fix, not a live governor declaration. Same reasoning as MEMORY.md itself:
+    # exact-name exemption, not a pattern token (REFUTE-rejected precedent above).
+    skip_names |= {"INDEX_projects_system.md"}
     # DATED AUDIT/PROJECT memory files: exempt by pattern -- see DATED_AUDIT_RE at module level.
     # Dated event_log rollover archives (memory-policy.md's rollover rule, first exercised
     # 2026-07-09: _archive/event_log_<YYYY-MM-DD>.md) are the SAME append-only narrative class
