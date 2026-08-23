@@ -40,6 +40,17 @@ fleet-ratio check above is the narrower, concrete instance that motivated it
 and stays as an independent signal (a stalled resume with no marker at all
 still trips it).
 
+Also checks RETIRE-PENDING RESURRECTION (2026-08-22, register-scheduled-task
+v2.14): a retirement that has been RATIFIED but not yet EXECUTED leaves the
+task registered with enabled:false, and enabled:false is not a retirement --
+it is a pause. Any fleet-wide resume (the very thing the checks above exist to
+chase) flips it back on and silently reverses the decision; on a same-id
+cross-fleet pair it also resurrects the duplicate the retirement existed to
+remove. maintenance/_state/retire-pending.json is the register of those
+in-flight retirements; this alarms when one of its ids is found enabled:true
+on its named fleet. Fail-open by construction: an absent, unreadable or
+malformed register yields no findings, never a crash and never a false alarm.
+
 Sends ONE Outlook COM alert via the proven standalone path
 (send-via-outlook.ps1 -- deploy-mirror.ps1 already uses this successfully
 outside any Claude session). Writes a state file so a persisting alarm
@@ -73,6 +84,7 @@ task_progress_marker = importlib.util.module_from_spec(_spec2)
 _spec2.loader.exec_module(task_progress_marker)
 
 STATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_state", "pause-resume-guard-state.json")
+RETIRE_PENDING_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_state", "retire-pending.json")
 SEND_SCRIPT = r"C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1"
 RESUME_ID_RE = re.compile(r"-resume-", re.IGNORECASE)
 NOTION_ENV_PATH = r"C:\Users\Owner\oxford-command-center\.env"
@@ -109,6 +121,56 @@ def parse_fire_at(task):
         return datetime.fromtimestamp(fa / 1000, tz=timezone.utc)
     except Exception:
         return None
+
+
+def load_retire_pending(path=None):
+    """Entries from _state/retire-pending.json: retirements RATIFIED but not yet EXECUTED.
+
+    Shape: {"pending": [{"fleet": "cc"|"lams", "id": ..., "ratified": "YYYY-MM-DD",
+    "reason": ..., "executeFrom": ...}, ...]}; a bare top-level list is also accepted.
+
+    FAIL-OPEN, deliberately: an absent, unreadable or malformed register returns [] and
+    this guard reports nothing. The register is a convenience for making an in-flight
+    retirement observable -- it must never be able to crash the guard that also carries
+    the fleet-ratio and stalled-marker checks, and a parse error must never masquerade
+    as "no retirement is pending" ALARM-side either. Entries missing fleet or id are
+    skipped rather than guessed at."""
+    try:
+        with open(path or RETIRE_PENDING_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return []
+    entries = data.get("pending") if isinstance(data, dict) else data
+    if not isinstance(entries, list):
+        return []
+    return [e for e in entries
+            if isinstance(e, dict) and e.get("id") and e.get("fleet")]
+
+
+def find_resurrected(tasks_by_fleet, path=None):
+    """Retire-pending ids found ENABLED on their named fleet -- i.e. a ratified retirement
+    that a resume (or a hand re-enable) has silently reversed while it waited to execute.
+
+    Three outcomes per entry, only one of which is a finding:
+      - id present and enabled  -> FINDING (the registration is live again)
+      - id present and disabled -> normal: still awaiting execution, exactly as filed
+      - id absent from the fleet -> the retirement executed; the register entry is stale
+        and should be removed, but a stale entry is not an alarm (removing it is the
+        executing session's job, and alarming here would punish a completed retirement).
+    """
+    out = []
+    for e in load_retire_pending(path):
+        fleet = str(e["fleet"]).lower()
+        for t in tasks_by_fleet.get(fleet, []):
+            if t.get("id") != e["id"]:
+                continue
+            if t.get("enabled"):
+                out.append({"fleet": fleet, "id": e["id"],
+                            "ratified": e.get("ratified", "unknown"),
+                            "reason": e.get("reason", ""),
+                            "executeFrom": e.get("executeFrom", "the fleet's own surface")})
+            break
+    return out
 
 
 def analyze_fleet(label, tasks):
@@ -221,8 +283,10 @@ def main():
 
     registries = fleet_status.discover_registries()
     results = []
+    tasks_by_fleet = {}
     for label, path in registries:
         tasks, _ = fleet_status.load(path)
+        tasks_by_fleet[str(label).lower()] = tasks
         results.append(analyze_fleet(label, tasks))
 
     state = load_state()
@@ -285,18 +349,40 @@ def main():
         if tid not in seen_marker_ids:
             marker_state[tid]["alarmed"] = False
 
+    # Retire-pending resurrection (2026-08-22, register-scheduled-task v2.14). Same
+    # per-key alarm bookkeeping as the markers above so a persisting resurrection
+    # doesn't re-email every 6h run.
+    rp_state = state.setdefault("_retirePending", {})
+    resurrected = find_resurrected(tasks_by_fleet)
+    seen_rp = set()
+    for rp in resurrected:  # not `r` -- `results` reuses that name in the print loop below
+        key = f"{rp['fleet']}:{rp['id']}"
+        seen_rp.add(key)
+        already_alarmed = rp_state.get(key, {}).get("alarmed", False)
+        rp_state.setdefault(key, {})["lastChecked"] = now_iso
+        reason = (f"retire-pending task '{rp['id']}' ({rp['fleet']}) is ENABLED again -- its retirement "
+                  f"was ratified {rp['ratified']} but never executed, so this is a LIVE registration, "
+                  f"not a retired one. On file: {rp['reason']!r}. Execute from: {rp['executeFrom']}.")
+        alarms.append({"fleet": f"retire-pending:{key}", "reason": reason, "alreadyAlarmed": already_alarmed})
+    # an entry that is disabled again (or whose retirement finally executed) clears its own alarm state
+    for key in list(rp_state.keys()):
+        if key not in seen_rp:
+            rp_state[key]["alarmed"] = False
+
     new_alarms = [a for a in alarms if not a["alreadyAlarmed"]]
 
     if args.json:
-        print(json.dumps({"results": results, "alarms": alarms, "stalledMarkers": stalled}, indent=2, default=str))
+        print(json.dumps({"results": results, "alarms": alarms, "stalledMarkers": stalled,
+                          "resurrectedRetirePending": resurrected}, indent=2, default=str))
     else:
         for r in results:
             print(f"{r['fleet']:6s} ratio={r.get('ratio')} enabled={r.get('enabledCount')}/{r.get('totalRecurring')} overdueResume={r.get('overdueResume')}")
         print(f"markers: {len(stalled)} stalled" if stalled else "markers: none stalled")
+        print(f"retire-pending: {len(resurrected)} resurrected of {len(load_retire_pending())} filed")
         if alarms:
             print(f"[ACTION] {len(alarms)} tripped: " + "; ".join(f"{a['fleet']}: {a['reason']}" for a in alarms))
         else:
-            print("No fleet shows a stuck pause, no stalled progress markers.")
+            print("No fleet shows a stuck pause, no stalled progress markers, no retire-pending id re-enabled.")
 
     if new_alarms:
         subject = "[ORA] Fleet pause/resume guard - ALARM"
@@ -305,7 +391,7 @@ def main():
             body_lines.append(f"Source: {a['fleet']}")
             body_lines.append(f"Reason: {a['reason']}")
             body_lines.append("")
-        body_lines.append("This does not auto-resume or auto-restart anything -- verify by hand. For a fleet-ratio alarm: resume the fleet or investigate why an automated resume didn't work. For a stalled-marker alarm: check the task's own instructions/session for where it stopped (see open-items-tracker.md#OI-202 for a real prior instance and register-scheduled-task/SKILL.md's progress-marker convention).")
+        body_lines.append("This does not auto-resume, auto-restart or auto-disable anything -- verify by hand. For a fleet-ratio alarm: resume the fleet or investigate why an automated resume didn't work. For a stalled-marker alarm: check the task's own instructions/session for where it stopped (see open-items-tracker.md#OI-202 for a real prior instance and register-scheduled-task/SKILL.md's progress-marker convention). For a retire-pending alarm: the id's ratified retirement has been reversed -- re-disable it on the named fleet and finish the retirement from the surface named in the alarm (archive-first-delete-second, ONE pass; see register-scheduled-task v2.14 RULES 3-4).")
         identifier = "; ".join(a["fleet"] for a in new_alarms)
         delivered = send_alert(subject, "\n".join(body_lines), identifier=identifier)
         # Only mark these as "alarmed" (suppressing future retries) once delivery actually
@@ -315,6 +401,10 @@ def main():
                 key = a["fleet"]
                 if key.startswith("marker:"):
                     marker_state.setdefault(key[len("marker:"):], {})["alarmed"] = True
+                elif key.startswith("retire-pending:"):
+                    # keyed "<fleet>:<id>" under _retirePending -- NOT a top-level fleet key,
+                    # which is what the bare else below would have written.
+                    rp_state.setdefault(key[len("retire-pending:"):], {})["alarmed"] = True
                 else:
                     state.setdefault(key, {})["alarmed"] = True
 
