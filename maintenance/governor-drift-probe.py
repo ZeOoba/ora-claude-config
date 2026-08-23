@@ -902,6 +902,31 @@ RE_CANON_DSCR_PAIRED_LTV = re.compile(      # "1.25x DSCR <at/,> <N>% LTV"; capt
     re.I)
 RE_BPS_DSCR_TIER = re.compile(              # "+/-N bps ... <X.XX>x DSCR" rate tier; capture (1) band
     r"[+\-−±]\s*[0-9]+\s*bps\b" + _GAP + r"{0,50}?([0-9]+\.[0-9]+)\s*[x×][\s\-*]*dscr", re.I)
+# DSCR-TIER BUCKET LABEL (2026-08-22 FP fix; session 438b62fb, human-authorized override). A
+# refi-rate adjustment tier is sometimes named with a hyphenated descriptor glued directly onto its
+# DSCR threshold -- "stabilized-multi-tenant-≥1.40x adjustments are unchanged in magnitude"
+# (acquisition-underwriting SKILL.md v4.13, mirroring the sibling "+25 bp sub-$2M/single-tenant"
+# tier right beside it). The label IS the value's subject (which bucket a property falls into), not
+# a DSCR floor/governor restatement -- but RE_DSCR_DECL's bare "[≥≤]...x" match has no
+# concept of subject, so it read the bucket's threshold as a governor declaration. The intended
+# suppressors (_refi_qualified / _stabilization_qualified) recognize this shape via "stabiliz" but
+# their veto check is a WHOLE-LINE "any(m in low ...)" scan (STAB_GOV_MARKERS / ACQ_GOV_MARKERS),
+# so an unrelated "per-property" mention elsewhere in the same dense paragraph (the correct,
+# ratified dual-governor restatement in the line's OWN closing sentence) vetoed the suppression by
+# accident.
+# Structurally distinct from every governor-DECLARATION shape in this module: a floor/ceiling/
+# governor restatement is always SPACE-separated from its keyword ("DSCR floor 1.25x", "1.25x DSCR
+# floor"); only a rate-tier bucket NAME hyphen-glues straight into the comparator with no space
+# ("label-word-≥1.40x"). That is the metric guard here, in place of a keyword/proximity test.
+# VETO-tier (added to dscr_veto alongside the bps-tier band, consumed by the SAME check at the DSCR
+# equality call site): _governor_declared_nearby is PROXIMITY-scoped (VETO_BEFORE/VETO_AFTER), not
+# whole-line, so a real drift dressed in this shape ("the acquisition governor is
+# stabilized-multi-tenant-≥1.40x") still flags -- pinned by
+# test_dscr_rate_tier_bucket_label_veto_when_declared_as_governor_unit. Gated on a refi context
+# (REFI_TOKENS, same gate as the bps tier) so the shape is only trusted where a rate-tier bucket
+# plausibly appears.
+RE_DSCR_TIER_LABEL = re.compile(
+    r"[a-z]+(?:-[a-z0-9$]+){1,5}-[≥≤<>]=?\s*([0-9]+\.[0-9]+)\s*[x×]", re.I)
 RE_GOV_TOKEN = re.compile(r"governors?\b")
 RE_CANON_DSCR_GOV_PHRASE = re.compile(
     re.escape(CANON_DSCR) + r"\s*[x×][\s\-*]*dscr\s+governor\b", re.I)
@@ -964,6 +989,41 @@ def _perprop_portfolio_paired_veto_spans(low):
         if mm.group(1) == CANON_LTV_PERPROPERTY and mm.group(2) == CANON_LTV:
             spans.append(mm.span(1))
     return spans
+
+def _line_reaffirms_ratified_ltv_pair(low):
+    """True when the line contains the tight, correctly-paired ratified restatement ('per-property
+    LTV 65% / portfolio-aggregate LTV 40%') ANYWHERE -- not necessarily adjacent to the value being
+    considered for suppression. See the LINE-WIDE reaffirmation comment at its _flag_ltv call site
+    for why this is needed on top of the local pairing spans above (2026-08-22 FP fix). Delegates to
+    _perprop_portfolio_paired_veto_spans (same COMPANION-ANCHORED regex, same canonical-40
+    requirement) rather than re-filtering RE_PERPROP_PORTFOLIO_PAIR itself, so the two can never
+    drift apart (independent-review non-blocking finding, 2026-08-22). Implicitly VALUE-LOCKED by
+    its caller (only invoked when val == 65)."""
+    return bool(_perprop_portfolio_paired_veto_spans(low))
+
+# AGGREGATE/PORTFOLIO clause veto for _line_reaffirms_ratified_ltv_pair (independent review
+# finding, 2026-08-22, session 438b62fb -- see the veto's call site in _flag_ltv for the concrete
+# masked-drift example). Deliberately CLAUSE-BOUNDED rather than a fixed-width window like
+# _governor_declared_nearby: there is no real-tree margin data to tune a window against here, and
+# widening a VETO only ever adds detection (never risks masking a drift), so the safe direction is
+# the wider, whole-clause reach -- bounded by the same clause-ender convention as
+# _nonltv_subject_owns (RE_CLAUSE_END) so it cannot leap into an unrelated clause elsewhere in a
+# long paragraph.
+RE_LTV_AGGREGATE_SUBJECT = re.compile(r"\baggregate\b|\bportfolio\b", re.I)
+
+def _aggregate_ltv_declared_in_clause(low, vs):
+    """True when the CLAUSE containing the value at index `vs` itself names 'aggregate' or
+    'portfolio' -- meaning the value is being asserted AS (or in the same breath as) the
+    portfolio-AGGREGATE ceiling, not the per-property one, even though the line elsewhere carries
+    the correct ratified pairing. Whole-clause, not proximity-windowed (see module comment above)."""
+    lo = 0
+    for cm in RE_CLAUSE_END.finditer(low[:vs]):
+        lo = cm.end()
+    hi = len(low)
+    m = RE_CLAUSE_END.search(low, vs)
+    if m:
+        hi = m.start()
+    return RE_LTV_AGGREGATE_SUBJECT.search(low, lo, hi) is not None
 
 # --- Standalone per-property refi-sizing ceiling (KNOWN GAP 2, closed) -----------------------
 # The pairing suppressor above requires the portfolio-aggregate 40% companion on the SAME LINE.
@@ -1064,6 +1124,8 @@ def _refi_member_value_spans(low):
         ltv_veto.append(mm.span(2))         # the N% LTV member of the pairing -> veto
     if any(t in low for t in REFI_TOKENS):  # bps tier is a refi input only in a refi context
         for mm in RE_BPS_DSCR_TIER.finditer(low):
+            dscr_veto.append(mm.span(1))
+        for mm in RE_DSCR_TIER_LABEL.finditer(low):  # rate-tier bucket label, see RE_DSCR_TIER_LABEL
             dscr_veto.append(mm.span(1))
     return ltv_noveto, ltv_veto, dscr_veto
 
@@ -1187,7 +1249,7 @@ def _spans_overlap(a0, a1, b0, b1):
 VETO_BEFORE = 28
 VETO_AFTER = 40
 
-def _governor_declared_nearby(low, vs, ve=None):
+def _governor_declared_nearby(low, vs, ve=None, exclude=()):
     """True when a bare singular 'governor' token -- or an acquisition-declaration token
     (ACQ_DECL_NEARBY) -- OVERLAPS the DIRECTION-AWARE interval [vs-VETO_BEFORE, ve+VETO_AFTER]
     around the value: the value may be declared AS the governor, so a VETO-tier refi member must
@@ -1195,12 +1257,21 @@ def _governor_declared_nearby(low, vs, ve=None):
     end-bound / substring slice silently shrank the effective reach and biased toward silence).
     Exemptions (both err toward detection elsewhere): PLURAL 'governors' (names multiple governors),
     and a 'governor' inside the canonical phrase '1.25x DSCR governor' (binds to the canonical DSCR
-    on its left, e.g. 'the 1.25x DSCR governor at 65% LTV')."""
+    on its left, e.g. 'the 1.25x DSCR governor at 65% LTV').
+
+    `exclude` (2026-08-23, floor-result round-2 review): ACQ_DECL_NEARBY tokens to SKIP -- for a
+    caller whose own construct anchor unavoidably contains one of the tokens (the floor-result
+    narration's canonical anchor IS '1.25x floor', so 'floor'/'dscr floor' would veto every
+    genuine match unconditionally). Only the named tokens are skipped; every other declaration
+    token and the bare-'governor' scan stay fully armed. Default () = existing call sites are
+    byte-for-byte unchanged."""
     if ve is None:
         ve = vs
     lo, hi = vs - VETO_BEFORE, ve + VETO_AFTER
     # acquisition-declaration substrings: any occurrence overlapping the interval vetoes.
     for t in ACQ_DECL_NEARBY:
+        if t in exclude:
+            continue
         start = 0
         while True:
             k = low.find(t, start)
@@ -1230,6 +1301,177 @@ def _refi_construct_suppressed(low, vs, ve, uncond_spans, guarded_spans):
     if any(s <= vs and ve <= e for (s, e) in guarded_spans):
         return not _governor_declared_nearby(low, vs)
     return False
+
+# --- Eval-harness FLOOR-RESULT narration (2026-08-23 FP fix) ---------------------------------
+# An auto-generated acquisition-underwriting eval-harness run log narrates ONE deal's floor-check
+# RESULT, quoting the deal's ACHIEVED DSCR against the canonical floor at the ratified 65%-LTV
+# per-property refi-sizing basis -- live triggers: ora-skills/acquisition-underwriting-eval-harness/
+# runs/2026-08-23T171623Z_scheduled-poll.json:399 ("DSCR floor PASSES (1.42x vs 1.25x floor at
+# 65%-LTV sizing, LTV binds)") and :195 ("DSCR floor PASS (1.48x vs 1.25x floor at 65%-LTV refi
+# sizing, LTV binds)"). BOTH figures are doctrine-correct: 1.42x/1.48x is the deal's computed DSCR
+# (an underwriting RESULT), and 65% is the ratified PER-PROPERTY refi-sizing ceiling
+# (CANON_LTV_PERPROPERTY), not a drift on the 40% aggregate. Yet both flag:
+#   * DSCR side: RE_DSCR_THRESH binds the achieved value ("DSCR floor PASSES (1.42x"), and no
+#     suppressor applies -- no refi token (:399), no bps tier, no stabilization/portfolio frame.
+#   * LTV side (:399): NONE of the refi-construct regexes match -- RE_REFI_SIZING_NAMED needs a
+#     literal "refi" before "siz" ("65%-LTV sizing" has none), RE_CANON_DSCR_PAIRED_LTV needs
+#     "1.25x DSCR" (this phrasing writes "1.25x floor"), LESSER-of/refi-to are absent.
+#   * LTV side (:195): RE_REFI_SIZING_NAMED DOES match ("65%-LTV refi sizing"), but the veto-tier
+#     check _governor_declared_nearby vetoes suppression anyway: ACQ_DECL_NEARBY contains "floor",
+#     and this phrasing NECESSARILY places "1.25x floor" a few chars before the 65 -- the shared
+#     veto vocabulary structurally defeats suppression for this construct, so a construct-specific
+#     suppressor (with its own, narrower veto) is required rather than a new member regex alone.
+# Suppression is kept TIGHT with the module's usual guards, plus two construct-specific ones:
+#   * CANONICAL-ANCHORED: both regexes require the literal plain canonical 1.25 restated as the
+#     floor ("vs 1.25x floor" / "1.25x floor at"). A drifted floor restatement ("1.42x vs 1.40x
+#     floor") matches nothing, so the 1.40 AND the 1.42 both stay fully visible.
+#   * RESULT-VERB GATED: a pass/clear/breach/fail/miss token must sit adjacent to the construct
+#     (whole-line finditer + span overlap, per the Hole-4 slicing precedent) -- the harness always
+#     narrates a floor-check VERDICT ("PASSES (", "clears ("), while a drift DECLARATION written in
+#     the same word order ("DSCR governor: 1.42x vs 1.25x floor previously") carries none.
+#   * DECL-SHAPE VETO (DSCR, at the call site): a value whose span is ALSO bound by a
+#     declaration-shaped extractor (RE_DSCR_DECL / FROMTO / DECL_REV / PIVOT_DECOY / KW_AFTER) is
+#     being DECLARED, not narrated -- "DSCR floor raised to 1.42x vs 1.25x floor -- passes" still
+#     flags via RE_DSCR_DECL's "raised to 1.42x" binding.
+#   * VALUE-LOCKED (LTV): only the ratified 65 (CANON_LTV_PERPROPERTY) is ever suppressed -- a
+#     drifted sizing basis ("at 80%-LTV sizing") never matches the lock and still flags, same
+#     guarantee as the per-property pairing/standalone-frame suppressors above.
+#   * DECLARATION-TOKEN VETO: the full _governor_declared_nearby check runs on the WHOLE construct
+#     span (member spans are strictly inside it, so this is the wider window -- see the veto-scope
+#     comment in _floor_result_spans), excluding ONLY the two tokens that are part of this
+#     construct's own canonical anchor
+#     ("floor", "dscr floor" -- see the :195 analysis above for why those would veto every genuine
+#     match unconditionally). Every OTHER declaration token stays live: "...at 65%-LTV sizing, the
+#     hard ceiling" / "hard cap" / "acquisition"/"buy-box" phrasing near either value still flags
+#     (round-2 independent review, 2026-08-23: the first cut dropped the WHOLE token list and
+#     silenced exactly those shapes -- a real false-negative regression, fixed by the exclusion
+#     being a two-token surgical trim instead).
+#   * KEYWORD-DIRECT-BIND VETO (DSCR; round-2 review 2026-08-23, restructured round-3): a
+#     floor-keyword that reaches the achieved value with NO verdict verb between them is BINDING
+#     the value -- a DECLARATION ("floor is 1.42x", "floor set at 1.42x", "floor stands at
+#     1.42x", "floor = 1.42x", a table cell "floor | 1.42x") -- the I-2 canonical-decoy class,
+#     which none of the extractor-shaped spans catch (RE_DSCR_DECL's comparator/pivot set has no
+#     copula or verb-phrase binders). Round 2 enumerated single-token binders (is|was|of|at|=|:|
+#     '|') and round-3 review found the structural hole in enumerating at all: any VERB-PHRASE
+#     binder ("set at", "stands at", "pegged at", "rises to") falls outside any finite list.
+#     INVERTED instead: when the NEAREST floor-keyword before the value sits in the SAME clause
+#     (a clause ender between them means the keyword belongs to a previous clause and binds
+#     nothing here), suppression REQUIRES a RE_FLOOR_RESULT_VERB match wholly between keyword-end
+#     and value-start. NO distance cap (round-4: a cap creates a suppression band just past it --
+#     "floor under the revised doctrine is 1.42x" -- and distance never protects a genuine
+#     narration; the verb-between test and clause boundary do). The genuine harness
+#     construct ALWAYS has the verdict verb exactly there ("floor PASSES (1.42x", "floor PASS
+#     (1.48x"), so no real narration is touched; every binder -- known or novel -- fails the
+#     requirement and flags. Also from round 2: bare "clear" dropped from RE_FLOOR_RESULT_VERB
+#     (harness verdicts write "clears"/"cleared"; bare "clear" is clear-height prose -- "28 ft
+#     clear" -- and was an arming vector for the copula shapes; bare "pass"/"fail" stay, the
+#     harness writes "PASS ("/"FAIL" verbatim).
+#   * AGGREGATE-CLAUSE VETO (LTV): reuses _aggregate_ltv_declared_in_clause, so a 65 asserted in
+#     the same clause as an "aggregate"/"portfolio" subject (a drift of the 40% governor TO 65,
+#     the most plausible wrong value) still flags.
+#   * SPAN-SCOPED + WEAKEST-PASS-ONLY: only the construct's own member digits are suppressed, and
+#     only in the passes that actually bind them (the dscr-anchored primary pass and the LTV
+#     bare-proximity fallback); comparator/anchor/FROMTO/reverse-order passes stay fully armed, and
+#     the 1.75 sentinel (branch 1) is untouched -- an achieved DSCR of exactly 1.75 in a future
+#     harness log would flag as a visible FP rather than widening suppression of the most-guarded
+#     value (deliberate: detection over silence).
+RE_FLOOR_RESULT_VERB = re.compile(
+    r"\b(?:pass(?:es|ed)?|clear(?:s|ed)|breach(?:es|ed)?|fail(?:s|ed)?|miss(?:es|ed)?)\b", re.I)
+# Achieved-vs-canonical-floor: "<achieved>x vs 1.25x [dscr ]floor"; capture (1) the achieved value.
+# Same lookbehind class as RE_DSCR_CANON_PLAIN (no version/tilde/decimal-fragment binding).
+RE_DSCR_VS_CANON_FLOOR = re.compile(
+    r"(?<![vV~0-9.])([0-9]+\.[0-9]+)\s*[x×]\s*vs\.?\s*" + re.escape(CANON_DSCR)
+    + r"\s*[x×][\s\-]*(?:dscr\s+)?floor\b", re.I)
+# Sizing-basis LTV: "1.25x [dscr ]floor at <N>%[- ]LTV [refi ]siz(ing)"; capture (1) N. The literal
+# "at" + the "siz" tail are the sizing-context anchors -- "1.25x floor and 65% LTV ceiling" (a
+# conjunction, plausibly declaring a ceiling) matches neither and stays fully checked.
+RE_CANON_FLOOR_AT_LTV_SIZING = re.compile(
+    re.escape(CANON_DSCR) + r"\s*[x×][\s\-]*(?:dscr\s+)?floor\s+at\s+"
+    r"([0-9]{1,3})\s*%[\s\-]*ltv\b[\s\-]*(?:refi[\s\-]?)?siz", re.I)
+# Verb-adjacency reaches. BEFORE spans the harness's "PASSES (1.42x vs " lead-in (~10 chars between
+# verb end and construct start, with margin); AFTER catches a trailing verdict ("...floor clears").
+# Deliberately short so a verb elsewhere on a long line cannot arm suppression.
+FLOOR_RESULT_VERB_BEFORE = 24
+FLOOR_RESULT_VERB_AFTER = 12
+# The two ACQ_DECL_NEARBY tokens that are part of this construct's OWN canonical anchor ("1.25x
+# floor" / "1.25x dscr floor") and therefore cannot serve as veto evidence here -- and ONLY those
+# two. "minimum dscr"/"min dscr" and every non-floor token ("hard ceiling", "hard cap",
+# "acquisition", "buy box"/"buy-box", "hard filter", "hard screen") stay live as vetoes.
+FLOOR_RESULT_VETO_EXCLUDE = ("floor", "dscr floor")
+# KEYWORD-DIRECT-BIND veto (see the block comment above). The keyword set mirrors RE_DSCR_DECL's
+# bound-words, plus the plural/verb form "floors" ("DSCR floors at 1.42x" is equally a
+# declaration; round-4 review) -- the regex's only consumer is this veto, so widening it is
+# detection-positive by construction. NO distance cap (round-4 review): an earlier revision
+# bounded the keyword's reach at 24 chars, and any cap creates a suppression band just past it
+# ("DSCR floor under the revised doctrine is 1.42x vs 1.25x floor -- passes" put 26 chars of
+# qualifier between keyword and value and slipped through). Distance never protects a genuine
+# narration -- the verb-between test and the clause boundary do -- so the veto reaches the whole
+# clause. The check itself lives in _floor_kw_binds_value_directly(), which is what the DSCR
+# suppression condition consults.
+RE_DSCR_FLOOR_KW = re.compile(r"\b(?:floors?|minimum|min|maximum|max|ceiling)\b", re.I)
+
+def _floor_kw_binds_value_directly(low, vs):
+    """True when the NEAREST floor-keyword ending at or before index `vs` (the candidate value's
+    start) sits in the SAME clause and has NO verdict verb (RE_FLOOR_RESULT_VERB) wholly between
+    its end and `vs` -- i.e. the keyword is binding the value directly ("floor is 1.42x", "floor
+    set at 1.42x", "floor under the revised doctrine is 1.42x"): a DECLARATION, so floor-result
+    suppression must not apply. Returns False when there is no keyword before the value, the
+    keyword is in a previous clause ("...8.0% floor; DSCR 1.42x..." -- the clause ender breaks
+    the binding, matching the module's clause-bounded house convention), or the verdict verb sits
+    between keyword and value ("floor PASSES (1.42x" -- the genuine harness narration). No
+    distance cap, deliberately -- see the round-4 note above."""
+    kw_end = None
+    for km in RE_DSCR_FLOOR_KW.finditer(low):
+        e = km.end()
+        if e <= vs and (kw_end is None or e > kw_end):
+            kw_end = e
+    if kw_end is None:
+        return False
+    if RE_CLAUSE_END.search(low, kw_end, vs):
+        return False
+    for vm in RE_FLOOR_RESULT_VERB.finditer(low):
+        if kw_end <= vm.start() and vm.end() <= vs:
+            return False
+    return True
+
+def _floor_result_spans(low):
+    """Return (dscr_spans, ltv_spans): the exact digit-group spans of a floor-RESULT narration's
+    member values -- the achieved DSCR compared against the canonical floor, and the ratified
+    65%-LTV sizing basis it was computed at. Every guard described in the block comment above is
+    applied here except the DSCR decl-shape and binder-decl vetoes, which live at the call site
+    (the former needs the extractor spans, the latter the candidate value's exact start)."""
+    dscr_spans, ltv_spans = [], []
+    verb_spans = [vm.span() for vm in RE_FLOOR_RESULT_VERB.finditer(low)]
+    def _verb_near(s, e):
+        return any(_spans_overlap(a, b, s - FLOOR_RESULT_VERB_BEFORE,
+                                  e + FLOOR_RESULT_VERB_AFTER) for (a, b) in verb_spans)
+    # The declaration-token veto runs on the WHOLE construct span, not just the member's digits:
+    # the construct is ONE narration, so a declaration token hung off either end ("...at 65%-LTV
+    # sizing, the hard ceiling") taints all of it. The member span is strictly inside the match
+    # span, so the whole-match window strictly CONTAINS the member window -- widening the veto is
+    # detection-positive only. It also matters concretely: on the "hard ceiling"-tail shapes the
+    # token sits ~40 chars past the ACHIEVED value (just outside a member-scoped VETO_AFTER reach)
+    # but well within reach of the construct's end, and HEAD flagged the DSCR value on those lines
+    # -- member-scoping would have silently kept that half of the regression (round-2 review).
+    for mm in RE_DSCR_VS_CANON_FLOOR.finditer(low):
+        ms, me = mm.span()
+        if not _verb_near(ms, me):
+            continue
+        if _governor_declared_nearby(low, ms, me, exclude=FLOOR_RESULT_VETO_EXCLUDE):
+            continue
+        dscr_spans.append(mm.span(1))
+    for mm in RE_CANON_FLOOR_AT_LTV_SIZING.finditer(low):
+        if mm.group(1) != CANON_LTV_PERPROPERTY:    # VALUE-LOCK: only the ratified 65, ever
+            continue
+        ms, me = mm.span()
+        if not _verb_near(ms, me):
+            continue
+        if _governor_declared_nearby(low, ms, me, exclude=FLOOR_RESULT_VETO_EXCLUDE):
+            continue
+        if _aggregate_ltv_declared_in_clause(low, mm.start(1)):
+            continue
+        ltv_spans.append(mm.span(1))
+    return dscr_spans, ltv_spans
 
 def scan_line(raw):
     """Return list of (reason) drift findings for one line."""
@@ -1269,6 +1511,12 @@ def scan_line(raw):
     # veto (a bare "floor" token collides with ORA's own "floor-flag" term of art on the real
     # false-positive line).
     scaling_mult_spans = _dscr_scaling_multiplier_spans(low) if is_gov else []
+    # Eval-harness floor-RESULT narration spans (2026-08-23): the achieved-DSCR member and the
+    # ratified 65%-LTV sizing-basis member of a "PASSES (1.42x vs 1.25x floor at 65%-LTV sizing)"
+    # verdict. All guards except the DSCR decl-shape veto are applied inside the helper; consumed
+    # ONLY by the dscr-anchored candidate loop and the LTV bare-proximity fallback below.
+    floor_result_dscr, floor_result_ltv = (
+        _floor_result_spans(low) if is_gov else ([], []))
 
     # 1) Regression sentinel: 1.75 near DSCR/governor. Fires only for a 1.75 that is NEITHER (a) the
     #    corrected-away value of a "corrected from 1.75 → 1.25" note NOR (b) an explicit PORTFOLIO-LEVEL
@@ -1312,6 +1560,16 @@ def scan_line(raw):
         is_rubric = len(pair_spans) >= 2
         seen = set()
         kw_after_spans = [mm.span(1) for mm in RE_DSCR_KW_AFTER_DSCR.finditer(low)]
+        # Declaration-shaped extractor spans, for the floor-result DECL-SHAPE veto below: a value
+        # bound by any of these is being DECLARED (keyword/pivot/from-to construct), so a
+        # floor-result narration match on the same span must NOT suppress it. Computed only when a
+        # floor-result construct is actually present (the only consumer).
+        decl_shaped_spans = (
+            [mm.span(1) for mm in RE_DSCR_DECL.finditer(low)]
+            + [mm.span(1) for mm in RE_DSCR_FROMTO.finditer(low)]
+            + [mm.span(1) for mm in RE_DSCR_DECL_REV.finditer(low)]
+            + [mm.span(1) for mm in RE_DSCR_PIVOT_DECOY.finditer(low)]
+        ) if floor_result_dscr else []
         cands = (list(RE_DSCR_THRESH.finditer(low)) + list(RE_DSCR_FROMTO.finditer(low))
                  + list(RE_DSCR_DECL.finditer(low)) + list(RE_DSCR_DECL_REV.finditer(low))
                  + list(RE_DSCR_KW_AFTER_DSCR.finditer(low)))
@@ -1371,6 +1629,22 @@ def scan_line(raw):
             if (_in_spans(vs, ve, refi_dscr_veto) and not _in_spans(vs, ve, kw_after_spans)
                     and not _governor_declared_nearby(low, vs, ve)):
                 continue
+            # skip an ACHIEVED DSCR narrated against the canonical floor -- an eval-harness
+            # floor-check VERDICT ("DSCR floor PASSES (1.42x vs 1.25x floor at 65%-LTV sizing)"),
+            # not a governor declaration (see the floor-result block comment). Canonical-anchored,
+            # result-verb-gated and declaration-token-vetoed in _floor_result_spans; the DECL-SHAPE
+            # veto here keeps a declaration dressed in the same word order visible ("DSCR floor
+            # raised to 1.42x vs 1.25x floor -- passes" still flags via RE_DSCR_DECL's pivot
+            # binding), and the KEYWORD-DIRECT-BIND veto covers every binder form those extractors
+            # miss -- copula AND verb-phrase alike ("DSCR floor is 1.42x...", "DSCR floor set at
+            # 1.42x...", "DSCR floor stands at 1.42x..." all still flag): suppression requires the
+            # verdict verb to sit BETWEEN a same-clause nearby floor-keyword and the value, which
+            # only the genuine narration shape satisfies ("floor PASSES (1.42x").
+            if (_in_spans(vs, ve, floor_result_dscr)
+                    and not _in_spans(vs, ve, kw_after_spans)
+                    and not _in_spans(vs, ve, decl_shaped_spans)
+                    and not _floor_kw_binds_value_directly(low, vs)):
+                continue
             in_pair = any(s <= vs and ve <= e for (s, e) in pair_spans)
             if is_rubric and in_pair:
                 continue  # a scored multiple inside a genuine rubric -- not a declared floor
@@ -1411,6 +1685,40 @@ def scan_line(raw):
             if (val == CANON_LTV_PERPROPERTY and vs is not None
                     and _perproperty_refi_frame_immediately_before(low, vs)
                     and not _governor_declared_nearby(low, vs, ve if ve is not None else vs)):
+                return
+            # LINE-WIDE ratified dual-governor reaffirmation (2026-08-22 FP fix; session 438b62fb,
+            # human-authorized override). The tight companion-anchored pairing above
+            # (_perprop_portfolio_paired_veto_spans / RE_PERPROP_PORTFOLIO_PAIR) already suppresses
+            # "per-property LTV 65% / portfolio-aggregate LTV 40%" when both members sit close
+            # together -- but that pairing is consumed ONLY via refi_ltv_veto, itself scoped to the
+            # single RE_LTV_NEAR match it was extracted from. A dense paragraph can restate that
+            # SAME ratified pairing once, in its own closing sentence ("governor constant (DSCR
+            # 1.25x / per-property LTV 65% / portfolio-aggregate LTV 40%) changed"), while ALSO
+            # discussing "the 65% LTV ceiling" earlier in an unrelated clause with no "per-property"
+            # token anywhere near THAT occurrence ("DSCR binds less often and the 65% LTV ceiling
+            # binds more often" -- acquisition-underwriting SKILL.md v4.13). Both name the SAME
+            # ratified per-property figure; only the wording differs, and the reaffirming pairing is
+            # sitting in plain sight elsewhere on the SAME line.
+            # _line_reaffirms_ratified_ltv_pair() answers "does this line contain the tight
+            # companion-anchored pairing ANYWHERE" (not local to THIS value) -- still
+            # COMPANION-ANCHORED (the aggregate 40% must be present and correctly paired, so a
+            # drifted companion earns no reaffirmation) and VALUE-LOCKED to 65 (a real per-property
+            # drift at any OTHER value is untouched and still flags below, exactly like the
+            # standalone-frame check above). Still vetoed by _governor_declared_nearby at THIS
+            # value's own position, so a mislabeled "65% ... is now the acquisition governor"
+            # sharing a line with the correct pairing still flags -- pinned by
+            # test_ltv_ceiling_reaffirmed_elsewhere_does_not_mask_governor_declared_drift_unit.
+            # ALSO vetoed by _aggregate_ltv_declared_in_clause (independent review finding,
+            # 2026-08-22, session 438b62fb): a partial-edit drift line naturally quotes the OLD
+            # correct pairing alongside a genuinely wrong NEW aggregate figure ("Aggregate LTV
+            # ceiling raised to 65% ... doctrine had read per-property LTV 65% / portfolio-aggregate
+            # LTV 40%.") -- without this veto the reaffirmation elsewhere on the line would mask a
+            # real drift of the 40%-governor TO 65%, the single most plausible wrong value for it.
+            # Pinned by test_ltv_ceiling_reaffirmed_elsewhere_does_not_mask_aggregate_drift_unit.
+            if (val == CANON_LTV_PERPROPERTY and vs is not None
+                    and _line_reaffirms_ratified_ltv_pair(low)
+                    and not _governor_declared_nearby(low, vs, ve if ve is not None else vs)
+                    and not _aggregate_ltv_declared_in_clause(low, vs)):
                 return
             # 0 < num < 1 flags too (REFUTE residual #1, 2026-07-29): "LTV ceiling 0.65%" is the
             # unit-interval notation a human porting capital-config.ts (ltvCeiling: 0.65) into
@@ -1464,6 +1772,12 @@ def scan_line(raw):
                         # Applies ONLY to this weakest (bare-proximity) pass; comparator/anchor/
                         # FROMTO/reverse passes stay un-suppressed.
                         pvs, pve = m.span(1) if m.group(1) else m.span(2)
+                        # skip the ratified 65%-LTV sizing basis of a floor-RESULT narration
+                        # ("...1.25x floor at 65%-LTV sizing, LTV binds") -- value-locked to 65,
+                        # canonical-anchored, result-verb-gated, and governor-/aggregate-clause-
+                        # vetoed inside _floor_result_spans (see the floor-result block comment).
+                        if _in_spans(pvs, pve, floor_result_ltv):
+                            continue
                         if _in_spans(pvs, pve, refi_ltv_noveto):
                             continue
                         if (_in_spans(pvs, pve, refi_ltv_veto)
@@ -1567,6 +1881,14 @@ def main():
     # governor. Exact-name exemption, not a pattern token (REFUTE-rejected precedent above):
     # this file is a narrative investigation log, never the doctrinal home for a governor value.
     skip_names |= {"reference_concurrent_session_duplicate_hardening_work.md"}
+    # INDEX_projects_system.md (2026-08-23): the "Projects & system" SUB-INDEX split out of
+    # MEMORY.md (already exempted above) when MEMORY.md's own size gate got tight -- same
+    # append-only-pointer NARRATIVE class as its parent, just in a separate file. Its bullets
+    # POINT to project files and quote their titles verbatim, e.g. "- [governor-drift-probe LTV
+    # 65%/40% split false positive](...) -- LANDED 08-22 (`c7875a5`)" -- a record of a
+    # ALREADY-LANDED fix, not a live governor declaration. Same reasoning as MEMORY.md itself:
+    # exact-name exemption, not a pattern token (REFUTE-rejected precedent above).
+    skip_names |= {"INDEX_projects_system.md"}
     # DATED AUDIT/PROJECT memory files: exempt by pattern -- see DATED_AUDIT_RE at module level.
     # Dated event_log rollover archives (memory-policy.md's rollover rule, first exercised
     # 2026-07-09: _archive/event_log_<YYYY-MM-DD>.md) are the SAME append-only narrative class

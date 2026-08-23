@@ -87,6 +87,103 @@ def test_pending_resume_does_not_trip_the_no_resume_alarm_branch_e2e_state_unit(
     print("  PASS test_pending_resume_does_not_trip_the_no_resume_alarm_branch_e2e_state_unit")
 
 
+# --- retire-pending resurrection (2026-08-22, register-scheduled-task v2.14) -----------
+
+def _write_rp(tmpdir, payload):
+    p = os.path.join(tmpdir, "retire-pending.json")
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(payload if isinstance(payload, str) else json.dumps(payload))
+    return p
+
+
+def test_retire_pending_enabled_is_a_finding_unit():
+    """THE case this check exists for: a bulk resume flips a ratified-but-unexecuted
+    retirement back on, which is indistinguishable from a healthy task to every other
+    detector here."""
+    tmp = tempfile.mkdtemp(prefix="prg-rp-")
+    p = _write_rp(tmp, {"pending": [{"fleet": "lams", "id": "ora-passed-deal-tracker",
+                                     "ratified": "2026-08-22", "reason": "duplicate of the CC copy",
+                                     "executeFrom": "native on-device Cowork session"}]})
+    tasks = {"lams": [{"id": "ora-passed-deal-tracker", "cronExpression": "30 6 15 * *", "enabled": True}]}
+    found = prg.find_resurrected(tasks, path=p)
+    assert len(found) == 1, f"an enabled retire-pending id must be a finding: {found}"
+    assert found[0]["id"] == "ora-passed-deal-tracker"
+    assert found[0]["executeFrom"] == "native on-device Cowork session"
+    print("  PASS test_retire_pending_enabled_is_a_finding_unit")
+
+
+def test_retire_pending_disabled_is_not_a_finding_unit():
+    """Still awaiting execution, exactly as filed -- the normal state, never an alarm."""
+    tmp = tempfile.mkdtemp(prefix="prg-rp-")
+    p = _write_rp(tmp, {"pending": [{"fleet": "lams", "id": "ora-passed-deal-tracker"}]})
+    tasks = {"lams": [{"id": "ora-passed-deal-tracker", "cronExpression": "30 6 15 * *", "enabled": False}]}
+    assert prg.find_resurrected(tasks, path=p) == []
+    print("  PASS test_retire_pending_disabled_is_not_a_finding_unit")
+
+
+def test_retire_pending_executed_retirement_is_not_a_finding_unit():
+    """Id absent from the registry = the retirement executed. The register entry is now
+    stale and should be removed by the executing session, but a stale entry must not
+    alarm -- alarming here would punish a completed retirement."""
+    tmp = tempfile.mkdtemp(prefix="prg-rp-")
+    p = _write_rp(tmp, {"pending": [{"fleet": "lams", "id": "ora-passed-deal-tracker"}]})
+    assert prg.find_resurrected({"lams": [{"id": "something-else", "enabled": True}]}, path=p) == []
+    print("  PASS test_retire_pending_executed_retirement_is_not_a_finding_unit")
+
+
+def test_retire_pending_only_matches_its_named_fleet_unit():
+    """A same-id cross-fleet pair is the whole reason these retirements exist. The CC copy
+    of ora-passed-deal-tracker is CANONICAL and enabled on purpose -- matching on id alone
+    would alarm on it forever."""
+    tmp = tempfile.mkdtemp(prefix="prg-rp-")
+    p = _write_rp(tmp, {"pending": [{"fleet": "lams", "id": "ora-passed-deal-tracker"}]})
+    tasks = {"cc": [{"id": "ora-passed-deal-tracker", "cronExpression": "30 6 15 * *", "enabled": True}],
+             "lams": [{"id": "ora-passed-deal-tracker", "cronExpression": "30 6 15 * *", "enabled": False}]}
+    assert prg.find_resurrected(tasks, path=p) == [], "the canonical CC copy must never be flagged"
+    print("  PASS test_retire_pending_only_matches_its_named_fleet_unit")
+
+
+def test_retire_pending_missing_or_malformed_register_fails_open_unit():
+    """Fail-open by construction: this check shares a process with the fleet-ratio and
+    stalled-marker checks and must never be able to crash or false-alarm them."""
+    tmp = tempfile.mkdtemp(prefix="prg-rp-")
+    tasks = {"lams": [{"id": "ora-passed-deal-tracker", "enabled": True}]}
+    assert prg.load_retire_pending(os.path.join(tmp, "does-not-exist.json")) == []
+    assert prg.find_resurrected(tasks, path=os.path.join(tmp, "does-not-exist.json")) == []
+    assert prg.find_resurrected(tasks, path=_write_rp(tmp, "{not json at all")) == []
+    assert prg.find_resurrected(tasks, path=_write_rp(tmp, {"pending": "a string, not a list"})) == []
+    # entries missing fleet or id are skipped, not guessed at
+    assert prg.load_retire_pending(_write_rp(tmp, {"pending": [{"id": "no-fleet"}, {"fleet": "lams"}]})) == []
+    print("  PASS test_retire_pending_missing_or_malformed_register_fails_open_unit")
+
+
+def test_retire_pending_alarm_state_is_namespaced_not_a_top_level_fleet_key_unit():
+    """Regression guard for the alarm-key routing: a 'retire-pending:<fleet>:<id>' alarm
+    must persist under _retirePending, NOT as a top-level fleet key (which is what the
+    marker check's bare else-branch would have done, and would have collided with the
+    real fleet ratio state)."""
+    tmp = tempfile.mkdtemp(prefix="prg-rp-e2e-")
+    p = _write_rp(tmp, {"pending": [{"fleet": "cc", "id": "ora-doomed-task", "ratified": "2026-08-22"}]})
+    tasks = {"cc": _recurring_tasks(10, enabled=True) + [
+        {"id": "ora-doomed-task", "cronExpression": "0 6 * * *", "enabled": True}]}
+
+    state1, calls1 = _run_main_with_fixtures(tasks, tmp, send_alert_result=True, retire_pending_path=p)
+    assert calls1 == 1, "a newly-resurrected retire-pending id must alarm"
+    assert state1["_retirePending"]["cc:ora-doomed-task"]["alarmed"] is True
+    assert "retire-pending:cc:ora-doomed-task" not in state1, "must not leak a top-level key"
+
+    # Run 2: unchanged and already delivered -- must not re-email.
+    _, calls2 = _run_main_with_fixtures(tasks, tmp, send_alert_result=True, retire_pending_path=p)
+    assert calls2 == 0, "an already-delivered retire-pending alarm must not re-send"
+
+    # Run 3: the id is disabled again -- the alarm state clears so a future flip re-alarms.
+    tasks["cc"][-1]["enabled"] = False
+    state3, calls3 = _run_main_with_fixtures(tasks, tmp, send_alert_result=True, retire_pending_path=p)
+    assert calls3 == 0
+    assert state3["_retirePending"]["cc:ora-doomed-task"]["alarmed"] is False
+    print("  PASS test_retire_pending_alarm_state_is_namespaced_not_a_top_level_fleet_key_unit")
+
+
 # --- send_alert: retry, return value, Notion logging on failure ------------------------
 
 def test_send_alert_retries_once_on_com_failure_then_succeeds_unit():
@@ -130,13 +227,19 @@ def test_notion_logging_failure_itself_never_raises_unit():
 
 # --- main(): the actual end-to-end regression for the "never retry" bug ----------------
 
-def _run_main_with_fixtures(tasks_by_fleet, state_dir, send_alert_result, stalled=None):
+def _run_main_with_fixtures(tasks_by_fleet, state_dir, send_alert_result, stalled=None,
+                            retire_pending_path=None):
     """Monkeypatch fleet_status/task_progress_marker/send_alert/save path, then call
-    main() once via a real argv, and return the resulting persisted state dict."""
+    main() once via a real argv, and return the resulting persisted state dict.
+
+    retire_pending_path defaults to a path that does not exist, so a test that isn't
+    about the retire-pending check never reads the LIVE register (which would make these
+    tests depend on real fleet state)."""
     prg.fleet_status.discover_registries = lambda: [(f, f"{f}.json") for f in tasks_by_fleet]
     prg.fleet_status.load = lambda path: (tasks_by_fleet[path[:-5]], None)
     prg.task_progress_marker.find_stalled = lambda grace_minutes: (stalled or [])
     prg.STATE_PATH = os.path.join(state_dir, "state.json")
+    prg.RETIRE_PENDING_PATH = retire_pending_path or os.path.join(state_dir, "no-retire-pending.json")
 
     sent = {"calls": 0}
 
@@ -193,6 +296,12 @@ def main():
     test_send_alert_returns_false_on_persistent_failure_and_does_not_raise_unit()
     test_notion_logging_failure_itself_never_raises_unit()
     test_failed_delivery_does_not_persist_alarmed_and_retries_next_run_unit()
+    test_retire_pending_enabled_is_a_finding_unit()
+    test_retire_pending_disabled_is_not_a_finding_unit()
+    test_retire_pending_executed_retirement_is_not_a_finding_unit()
+    test_retire_pending_only_matches_its_named_fleet_unit()
+    test_retire_pending_missing_or_malformed_register_fails_open_unit()
+    test_retire_pending_alarm_state_is_namespaced_not_a_top_level_fleet_key_unit()
     print("ALL PAUSE-RESUME-GUARD TESTS PASS")
 
 

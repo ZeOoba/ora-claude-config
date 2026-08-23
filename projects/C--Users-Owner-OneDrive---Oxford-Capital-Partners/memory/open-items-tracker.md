@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-08-22T16:04:32.062Z
+  modified: 2026-08-22T21:59:15.245Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -32,6 +32,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
+| [OI-204](#OI-204) | 2026-08-22 | Session close-out knowledge candidate, code-review remediation round on `acquisition-underwriting-eval-harness` | **LOW-MEDIUM — governor-constant duplication is now a 3-way cross-repo pattern, not 2-way.** DSCR floor (1.25x) and YoC/LTV governor constants are hardcoded independently in at least three places: `maintenance/governor-drift-probe.py` (the dedicated drift guard), `acquisition-underwriting/SKILL.md` prose (the buy-box narrative), and now `acquisition-underwriting-eval-harness/lib/diff_verdict.py` (confirmed live in this session's remediation diff, third recurrence of the same defect class). Each copy can drift independently and `governor-drift-probe.py` only watches the first two. Needs a follow-up: either a single source-of-record constant the eval-harness imports/reads rather than restates, or an explicit third watch-target added to the drift probe so a future change to the eval-harness copy doesn't silently diverge from the other two. Not fixed here — filed per CLAUDE.md's close-out convention rather than left as a skipped review finding |
 | [OI-203](#OI-203) | 2026-08-21 | `dirty-tree-triage` on ora-skills `_staging/repo-first-rescue/` + `session_outputs/lease-addendum.skill`, Gabriel-directed follow-up | **FIXED (repo) 2026-08-21 — `claim_work.py` process gap: the claim step is never invoked, not broken.** `dirty-tree-triage` step 7 now requires `claim_work.py claim ora-skills-housekeeping` alongside its existing `git log -1`/`git status` check — commit [`4e44f72`](https://github.com/ZeOoba/ora-skills/commit/4e44f72), `ora-skills` v1.1, Gabriel-directed. **Not yet installed on the platform account** — the pre-commit hook auto-synced the AppData mirror and logged the skill to `ora-skills/_staging/PENDING_REIMPORT.md`; a session still reading the old `~/.claude/skills/synced/dirty-tree-triage/` copy (rather than the repo) won't see the new step 7 language until a `package-and-stage-skill` re-upload lands. Evidence for the gap itself:  Two sessions were independently handed the same ora-skills `_staging` triage today and both did the full investigation; one archived the result and logged it to `event_log.md` moments before this session's own archive `mv` ran — caught only because the `mv`'s source had already vanished, and confirmed by `event_log.md`'s `modified:` stamp predating this session's attempt by ~4 min. `hooks/active-work/*.json` held zero claims for this task at investigation time (only stale, unrelated ones) — neither session ran `claim_work.py claim ora-skills-housekeeping`/`repo-housekeeping` before starting, despite the module's own docstring citing a near-identical 2026-08-12 ora-skills precedent ("two sessions were handed the same remediation prompt and both started work; the second caught it only by reading the first's session transcript, ~15 minutes in") as the reason the module exists. Distinct from [OI-166](#OI-166) (fixed 2026-08-16, a bug WITHIN the claim mechanism — didn't check other slugs' claims): this is zero adoption of the mechanism, since neither session invoked it at all. `session-context.md` doesn't surface this either — it's a hand-curated standing-doctrine digest (last touched 2026-08-17), not an event_log mirror, so a one-off collision like this has no standing surface pushing sessions toward the claim step. |
 | [OI-202](#OI-202) | 2026-08-21 | Repo-architecture-review remediation, Code session picking up the handoff | **MEDIUM - model-driven one-time scheduled task stalled silently mid-run.** `ora-routine-pause-resume-08-21` fired at its scheduled time but only executed the first 2 of 35 `update_scheduled_task(enabled:true)` calls in its instruction list before stopping - no error, no partial-progress marker, and it never reached its own step-6 summary email (confirmed absent from `send-log.txt`). Completed the remaining 33 re-enables manually this session. **General-case detection fix landed 2026-08-21 (same day, follow-on session)** — see the item body's second Progress note: `task-progress-marker.py` + a `register-scheduled-task/SKILL.md` v2.13 authoring convention, wired into the existing `ORA Fleet Pause-Resume Guard` native task. Remains OPEN because the ORIGINAL stall's root cause is still not diagnosed and the fix is opt-in (doesn't retrofit existing one-time tasks). |
 | [OI-196](#OI-196) | 2026-08-17 | Tax & Settlement systemization sprint (Cowork session, project "Taxes + Settlement Statements"); gap-check pass on the Code handoff | **LOW — flag only, needs OneDrive/preparer access, not repo work.** No Form 4562 / asset-level depreciation schedule on file for 1100 Rarig Ave LLC (TY2025), Muirkirk Properties LLC (both years), or Fairground Village Center LLC. A preparer request is drafted in the Cowork project but not sent — outbound send needs Gabriel's in-turn confirmation and Code has no send path for it regardless |
@@ -4970,6 +4971,54 @@ comment) and record the convention in `architecture/coding-standards.md` so new 
 it. `server/warehouse/migrations/**` is architect-owned per `.claude/hooks/architect-owned.json` —
 this needs the declared review_needed + architect-ack path.
 **Auto-check:** none.
+
+### OI-187
+**Status:** OPEN
+**Opened:** 2026-08-17 · **Source:** Tax & Settlement systemization sprint — full description lives in the Open table row above; this section exists only to give `#OI-187` a resolvable anchor for inbound links (event_log.md, tax-settlement reference).
+
+---
+
+### OI-188
+**Status:** OPEN
+**Opened:** 2026-08-17 · **Source:** Tax & Settlement systemization sprint — full description lives in the Open table row above; this section exists only to give `#OI-188` a resolvable anchor for inbound links (event_log.md, tax-settlement reference).
+
+---
+
+### OI-189
+**Status:** OPEN
+**Opened:** 2026-08-17 · **Source:** Tax & Settlement systemization sprint — full description lives in the Open table row above; this section exists only to give `#OI-189` a resolvable anchor for inbound links (event_log.md, MEMORY.md).
+
+---
+
+### OI-190
+**Status:** OPEN
+**Opened:** 2026-08-17 · **Source:** Tax & Settlement systemization sprint — full description lives in the Open table row above; this section exists only to give `#OI-190` a resolvable anchor for inbound links (event_log.md, tax-settlement reference).
+
+---
+
+### OI-191
+**Status:** OPEN
+**Opened:** 2026-08-17 · **Source:** Tax & Settlement systemization sprint — full description lives in the Open table row above; this section exists only to give `#OI-191` a resolvable anchor for inbound links (event_log.md).
+
+---
+
+### OI-192
+**Status:** OPEN
+**Opened:** 2026-08-17 · **Source:** Tax & Settlement systemization sprint — full description lives in the Open table row above; this section exists only to give `#OI-192` a resolvable anchor for inbound links (event_log.md).
+
+---
+
+### OI-193
+**Status:** OPEN
+**Opened:** 2026-08-17 · **Source:** Tax & Settlement systemization sprint — full description lives in the Open table row above; this section exists only to give `#OI-193` a resolvable anchor for inbound links (event_log.md, MEMORY.md).
+
+---
+
+### OI-203
+**Status:** FIXED (repo) 2026-08-21 — not yet installed on the platform account
+**Opened:** 2026-08-21 · **Source:** `dirty-tree-triage` on ora-skills, Gabriel-directed follow-up — full description lives in the Open table row above; this section exists only to give `#OI-203` a resolvable anchor for inbound links (event_log.md).
+
+---
 
 ### OI-089
 **Status:** OPEN

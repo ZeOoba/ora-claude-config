@@ -1,0 +1,16 @@
+{
+  "_comment": "Retirements RATIFIED but not yet EXECUTED (or half-executed). A task listed here is registered with enabled:false ONLY because its retirement is still in flight -- it is NOT paused, and any fleet-wide resume that re-enables it silently reverses a ratified decision. pause-resume-guard.py (native, off-fleet, every 6h) alarms if a listed id is found enabled:true on its named fleet; register-scheduled-task v2.14 requires every bulk resume to carve these ids out. Remove an entry in the same pass that actually completes its retirement. This file is a plain state register consulted by a guard -- it is NOT a scheduler registry, and writing to it retires nothing by itself (Rule 2 is unaffected).",
+  "pending": [
+    {
+      "fleet": "lams",
+      "id": "ora-passed-deal-tracker",
+      "ratified": "2026-08-22",
+      "state": "HALF-EXECUTED -- archive step DONE, registry drop PENDING",
+      "reason": "LAMS/Cowork twin of a CC/MCP-canonical id. CC copy (cron 30 6 15 * *) is live and MUST stay enabled; the LAMS copy is a duplicate. Its enabled:false is a side effect of the stalled 2026-08-21 bulk resume (ora-routine-pause-resume-08-21 stopped after 2 of 35 tasks), NOT a deliberate pause -- so the next fleet-wide resume would re-arm a duplicate monthly run, now against a DANGLING filePath (the spec folder has been archived out from under the registration). Pre-conditions cleared before the archive: cross-fleet shared-file risk NONE (CC SKILL.md is a full self-contained spec, not a redirect stub into the LAMS OneDrive path); solely-run producer scripts NONE.",
+      "executeFrom": "native on-device Cowork session",
+      "verifiedOnDisk": "2026-08-22: source 'Documents\\Claude\\Scheduled\\ora-passed-deal-tracker\\' GONE; archived copy present at 'Documents\\Claude\\Scheduled\\_archive_2026-08-22_retired-to-ccmcp\\ora-passed-deal-tracker\\SKILL.md'. LAMS registry still carries the id at 30 6 15 * *, enabled:false. CC registry carries it enabled:true.",
+      "remainingProcedure": "STEP 1 (archive) IS DONE -- do not repeat it. STEP 2: delete_scheduled_task 'ora-passed-deal-tracker' from a NATIVE on-device Cowork session -- never the Cowork Scheduled-sidebar trash icon (folder-destructive, bypasses the Recycle Bin), and never from Claude Code (delete_scheduled_task takes no fleet parameter and resolves session-local, which would delete the LIVE CC copy). STEP 3: verify via list_scheduled_tasks that the LAMS entry is gone AND the CC entry is still enabled:true at 30 6 15 * * with path '...\\.claude\\scheduled-tasks\\...' (the path field is the sole fleet disambiguator). STEP 4: remove this entry, update session-context.md's ora-passed-deal-tracker bullet to record the retirement as complete, and append the completion entry to memory/event_log.md.",
+      "history": "memory/event_log.md 2026-08-22; register-scheduled-task SKILL.md v2.14 + versions/CHANGELOG-v2.9-v2.12.md v2.10-v2.11"
+    }
+  ]
+}

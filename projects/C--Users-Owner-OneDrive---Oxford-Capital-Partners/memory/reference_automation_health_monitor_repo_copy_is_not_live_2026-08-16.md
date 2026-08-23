@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 04649f52-2fab-4ed0-82ed-62ce390a746b
-  modified: 2026-08-16T20:31:57.043Z
+  modified: 2026-08-22T21:57:53.004Z
 ---
 
 **Editing `ora-skills\automation-health-monitor\SKILL.md` has ZERO effect on the running health monitor.** Verified 2026-08-16 by direct comparison:
@@ -21,6 +21,6 @@ metadata:
 
 **Rule:** for any scheduled task, the file at the registry's `filePath` is authoritative. Read it FIRST; never assume the `ora-skills` copy of a same-named skill is what runs. Confirm with `fleet-status.py` (reads both fleets from any surface) plus a `wc -l`/`sha256sum` comparison before editing.
 
-**Do NOT naively sync the repo copy up to the live one** — the live copy contains task-execution prose (fleet-specific steps, hardcoded Notion page IDs, registry paths) that does not belong in a portable skill. Reconciling them is its own scoped project, not a side effect of a task edit. Related: the Rev 13 audit's recurring "skill-mirror drift" finding ([[project_automation_audit_rev13_2026-08-16]]).
+**Do NOT naively sync the repo copy up to the live one** — the live copy contains task-execution prose (fleet-specific steps, hardcoded Notion page IDs, registry paths) that does not belong in a portable skill. Reconciling them is its own scoped project, not a side effect of a task edit. Related: the Rev 13 audit's recurring "skill-mirror drift" finding (archived 2026-08-22, superseded by Rev 18 — see `_archive/project_automation_audit_rev13_2026-08-16_archived_2026-08-22.md`).
 
 Found while adding Step 0.57 (BLOCKED-AWAITING-GABRIEL detection) — a worktree had already been cut against `ora-skills` before the comparison revealed the edit would have had no effect. See [[project_ora_strategic_constraints_2026-08-16]].
