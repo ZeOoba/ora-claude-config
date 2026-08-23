@@ -1,6 +1,6 @@
 ---
 name: ora-friday-closeout
-description: Friday 4:30 PM ET — week closeout ledger (Part A) + week-ahead synthesis (Part B). v2.1 (2026-07-18): Part A gained a report-only LOI Throughput line (Gabriel-carried-forward item from the 2026-07 setup-review plan). v2.0 (2026-07-16, Fleet Ledger v2 ruling C1): absorbed the retired CC task ora-week-ahead-briefing verbatim as Part B — one Friday session, one email, one Notion page; the CC twin was retired same day. [MODEL: claude-sonnet-5 | set 2026-07-08]
+description: Friday 4:30 PM ET — week closeout ledger (Part A, includes a report-only LOI Throughput line) + week-ahead synthesis (Part B, absorbed 2026-07-16 from the retired CC task ora-week-ahead-briefing verbatim — one Friday session, one email, one Notion page). Full versioned changelog lives in the body of this file (migrated from frontmatter, class-n remediation 2026-08-17). [MODEL: claude-sonnet-5 | set 2026-07-08]
 output_contract:
   version: 1
   blocks:
@@ -56,3 +56,10 @@ Format: ORA Institutional Style Guide v1.0+ — clean HTML, Oxford Navy headers,
 HARD GUARDRAILS: never move money, execute trades, or send external communications without explicit in-turn confirmation; never modify financial models or the governor constants (DSCR 1.25 / LTV 40); never touch oxfordra.net; active confidential deals (roster: C:\Users\Owner\.claude\hooks\confidential-terms.json) never appear on any external surface; never fabricate.
 
 RUN SUMMARY (always, last line): "ora-friday-closeout: [P] completions / [Q] open items / [N] calendar items / [M] task fires / [K] deadlines / [J] milestones / [L] LOIs (Δ vs prior week) / email [sent|FAILED] / Publish: [...]".
+
+
+*Changelog — MIGRATED FROM FRONTMATTER (v2.2 (2026-08-17), class-n remediation). These entries previously existed ONLY in the `description` field; the body carried pointers reading "see description field above", which stops being true the moment the description is trimmed. Moved verbatim, not summarised.*
+
+- **v2.0 (2026-07-16, Fleet Ledger v2 ruling C1): absorbed the retired CC task ora-week-ahead-briefing verbatim as Part B — one Friday session, one email, one Notion page; the CC twin was retired same day. [MODEL: claude-sonnet-5 | set 2026-07-08]
+
+- **v2.1 (2026-07-18): Part A gained a report-only LOI Throughput line (Gabriel-carried-forward item from the 2026-07 setup-review plan)
