@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 16c5371f-037c-41a7-907c-504cc9671b5b
-  modified: 2026-08-16T18:44:19.956Z
+  modified: 2026-08-22T21:58:56.573Z
 ---
 
 # ORA Memory Index — Projects & System
@@ -54,6 +54,11 @@ metadata:
 - [PFI Warehouse Backlog](pfi-warehouse-systematization-backlog.md) — 3 queued basis-recovery follow-ups
 
 ## Recently landed
+- ✅ [ora-skills PR #48 — shared ora_doc_qc module, MERGED 08-18](project_ora_doc_qc_shared_module_pr48_2026-08-17.md) — unifies pma-qc/listing-agreement-qc/lease-form-qc extraction, closes false-clean + T1-spurious-BLOCK bugs
+- ✅ [lease-addendum cache/repo orphaned-branch divergence, RESOLVED 08-21](project_lease_addendum_cache_orphaned_branch_2026-08-21.md) — PR #48's shared-module pattern also applied to lease-addendum on a branch that never merged; ran 4 days CACHE-AHEAD/DIVERGENT until a same-day fleet pass merged it (`ab6ce5d`, `92fdd41`)
+- ✅ [governor-drift-probe LTV 65%/40% split false positive](project_usage_report_horizon_builds_scoped_2026-08-21.md) — LANDED 08-22 (`c7875a5`)
+- [Live checkout 132 behind 08-15](project_live_checkout_132_behind_settings_json_overlap_2026-08-15.md) — SUPERSEDED 08-16: the 132-commit gap closed; kept for the settings.json conflict-class lesson
+- [Workflow-optimizations punch list 08-21 resolution](project_workflow_optimizations_2026-08-21_resolution.md) — 1 already fixed elsewhere (discarded dup), 1 shipped on branch awaiting merge, 1 filed not fixed, 2 investigation/memory-only
 - [county-sales-monitor skill draft 08-15](project_county_sales_monitor_skill_draft_2026-08-15.md) — v0.2 DRAFT; cadence/delivery/scope ratified (monthly, Notion DB, Tier A only, Louisville deferred); pilot build not started
 - [Dangling worktree landing 08-15](project_dangling_worktree_landing_2026-08-15.md) — CLOSED: PRs #110/#112/#113/#114 merged, 2 others already-landed-elsewhere; settings.json dupe-registration collision found+fixed, PR #105 now CLEAN
 - [Multi-repo triage landed 08-15](project_multirepo_triage_landed_2026-08-15.md) — 4-repo dirty/PR/worktree sweep; 3 oxford-command-center PRs landed, 17 stale worktrees/branches removed, 0 open PRs left anywhere
