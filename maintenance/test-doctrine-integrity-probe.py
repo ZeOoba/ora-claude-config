@@ -996,6 +996,159 @@ def _load_probe_module():
     return mod
 
 
+# --- Check 15: skill frontmatter-version vs changelog-version drift (2026-08-22) ---
+# Regression origin: reference_skill_description_version_extraction_gotcha.md --
+# deal-retirement's frontmatter said v1.1 while its true current version was v1.2
+# (visible only via inline [v1.2] tags, no body changelog section to disambiguate at
+# the time), caught only by a hand sweep. This closes the "caught by hand, not by
+# tooling" gap the 2026-08-22 review flagged.
+
+def test_extract_skill_own_version_prefers_h1_over_description():
+    """The documented acquisition-underwriting case: H1 says v4.3, but the
+    frontmatter description's FIRST vX.Y( match is the Buy Box sub-schema's v1.1.
+    The H1 marker must win."""
+    m = _load_probe_module()
+    text = (
+        "---\n"
+        "description: \"...Buy Box & Scorecard v1.1 (Rulings 1-5 ratified 2026-06-09)...\"\n"
+        "---\n\n"
+        "# Acquisition Underwriting — Oxford Realty Advisors (v4.3 — Buy Box & Scorecard v1.1)\n"
+    )
+    m2 = _load_probe_module()
+    assert m2.extract_skill_own_version(text) == "4.3", m2.extract_skill_own_version(text)
+    print("  PASS test_extract_skill_own_version_prefers_h1_over_description")
+
+
+def test_extract_skill_own_version_falls_back_to_description_without_h1():
+    m = _load_probe_module()
+    text = (
+        "---\n"
+        "description: \"Some skill... v2.0 (2026-05-01: initial release)\"\n"
+        "---\n\n"
+        "# Some Skill (no version marker in this heading)\n"
+    )
+    assert m.extract_skill_own_version(text) == "2.0"
+    print("  PASS test_extract_skill_own_version_falls_back_to_description_without_h1")
+
+
+def test_extract_skill_own_version_none_when_neither_present():
+    m = _load_probe_module()
+    text = "---\ndescription: \"No version token anywhere in here\"\n---\n\n# Plain Heading\n"
+    assert m.extract_skill_own_version(text) is None
+    print("  PASS test_extract_skill_own_version_none_when_neither_present")
+
+
+def test_extract_changelog_top_version_reads_newest_first_ordering():
+    m = _load_probe_module()
+    text = (
+        "# Some Skill\n\nbody prose\n\n"
+        "## Changelog\n"
+        "- **v1.2 (2026-07-18):** fixed the thing\n"
+        "- v1.1 (2026-07-16): earlier note\n"
+    )
+    assert m.extract_changelog_top_version(text) == "1.2"
+    print("  PASS test_extract_changelog_top_version_reads_newest_first_ordering")
+
+
+def test_extract_changelog_top_version_reads_oldest_first_ordering():
+    """The real communication-intelligence shape: bullets listed ascending
+    (v1.1, v1.2, v1.3) -- a first-line read would wrongly return v1.1.
+    Version comparison must be numeric, not positional."""
+    m = _load_probe_module()
+    text = (
+        "# Some Skill\n\nbody prose\n\n"
+        "## Changelog\n"
+        "- v1.1 (2026-07-08): initial\n"
+        "- v1.2 (2026-07-11): added a thing\n"
+        "- v1.3 (2026-07-24): fixed a thing; also mentions "
+        "`other-skill` v9.9 mid-sentence, which must NOT be picked up\n"
+    )
+    assert m.extract_changelog_top_version(text) == "1.3"
+    print("  PASS test_extract_changelog_top_version_reads_oldest_first_ordering")
+
+
+def test_extract_changelog_top_version_ignores_midsentence_cross_reference():
+    """A changelog entry that mentions ANOTHER skill's version number inline
+    must not let that number win, even if numerically higher than this
+    skill's own top version."""
+    m = _load_probe_module()
+    text = (
+        "# Some Skill\n\nbody prose\n\n"
+        "## Changelog\n"
+        "- v1.1 (2026-07-24): same fix applied to `other-skill` v9.9, "
+        "the higher-volume producer\n"
+    )
+    assert m.extract_changelog_top_version(text) == "1.1"
+    print("  PASS test_extract_changelog_top_version_ignores_midsentence_cross_reference")
+
+
+def test_extract_changelog_top_version_numeric_not_lexicographic():
+    """v1.10 must outrank v1.9 -- a lexicographic string compare would get
+    this backwards ('1.10' < '1.9')."""
+    m = _load_probe_module()
+    text = (
+        "# Some Skill\n\n## Changelog\n"
+        "- v1.9 (2026-06-01): old\n"
+        "- v1.10 (2026-08-01): new\n"
+    )
+    assert m.extract_changelog_top_version(text) == "1.10"
+    print("  PASS test_extract_changelog_top_version_numeric_not_lexicographic")
+
+
+def test_extract_changelog_top_version_none_without_section():
+    m = _load_probe_module()
+    assert m.extract_changelog_top_version("# Some Skill\n\nno changelog here\n") is None
+    print("  PASS test_extract_changelog_top_version_none_without_section")
+
+
+def test_skill_version_changelog_drift_flags_real_mismatch():
+    """The deal-retirement-shaped regression: frontmatter/H1 says v1.1, changelog
+    top entry says v1.2."""
+    m = _load_probe_module()
+    text = (
+        "---\n"
+        "description: \"Deal retirement helper v1.1 (2026-07-16: initial)\"\n"
+        "---\n\n"
+        "# Deal Retirement (v1.1)\n\n"
+        "## Changelog\n"
+        "- **v1.2 (2026-07-18):** added novation handling\n"
+        "- v1.1 (2026-07-16): initial\n"
+    )
+    finding = m.check_skill_version_changelog_drift("deal-retirement", text)
+    assert finding is not None and "v1.1" in finding and "v1.2" in finding, finding
+    print("  PASS test_skill_version_changelog_drift_flags_real_mismatch")
+
+
+def test_skill_version_changelog_drift_quiet_when_aligned():
+    m = _load_probe_module()
+    text = (
+        "---\ndescription: \"A skill v1.2 (2026-07-18: fix)\"\n---\n\n"
+        "# A Skill (v1.2)\n\n## Changelog\n- **v1.2 (2026-07-18):** fix\n"
+    )
+    assert m.check_skill_version_changelog_drift("a-skill", text) is None
+    print("  PASS test_skill_version_changelog_drift_quiet_when_aligned")
+
+
+def test_skill_version_changelog_drift_quiet_when_no_changelog_section():
+    """Fail-open: most skills carry no changelog section at all -- that must
+    never itself be a finding."""
+    m = _load_probe_module()
+    text = "---\ndescription: \"A skill v1.0\"\n---\n\n# A Skill (v1.0)\n\nno changelog here\n"
+    assert m.check_skill_version_changelog_drift("a-skill", text) is None
+    print("  PASS test_skill_version_changelog_drift_quiet_when_no_changelog_section")
+
+
+def test_live_probe_wires_skill_version_changelog_drift_check():
+    """Integration: the live probe run must report the new check ran (a count
+    line), and must stay exit 0 -- this check is WARN-only by design, never
+    a gate failure."""
+    r = run_probe()  # live mode: no argv
+    assert r.returncode == 0, "live probe must stay exit 0\n%s" % r.stdout
+    assert "Skill version/changelog drift: checked" in r.stdout, (
+        "expected the new check's summary line in live output:\n%s" % r.stdout)
+    print("  PASS test_live_probe_wires_skill_version_changelog_drift_check")
+
+
 # --- Check 13: doctrine-vs-deliverable identity drift (2026-08-03) ---------
 # Regression origin: CLAUDE.md said "Principal" while 38 .docx deliverables, three
 # ora-skills sources and build_t1_letterpack.py's outbound signature block all said
@@ -1450,6 +1603,18 @@ def main():
     test_stage_sync_catches_hyphen_substituted_for_em_dash()
     test_stage_sync_reports_every_bad_site_not_just_the_first()
     test_stage_sync_accepts_backticked_inclusion_form()
+    test_extract_skill_own_version_prefers_h1_over_description()
+    test_extract_skill_own_version_falls_back_to_description_without_h1()
+    test_extract_skill_own_version_none_when_neither_present()
+    test_extract_changelog_top_version_reads_newest_first_ordering()
+    test_extract_changelog_top_version_reads_oldest_first_ordering()
+    test_extract_changelog_top_version_ignores_midsentence_cross_reference()
+    test_extract_changelog_top_version_numeric_not_lexicographic()
+    test_extract_changelog_top_version_none_without_section()
+    test_skill_version_changelog_drift_flags_real_mismatch()
+    test_skill_version_changelog_drift_quiet_when_aligned()
+    test_skill_version_changelog_drift_quiet_when_no_changelog_section()
+    test_live_probe_wires_skill_version_changelog_drift_check()
     print("ALL DOCTRINE-PROBE TESTS PASS")
 
 
