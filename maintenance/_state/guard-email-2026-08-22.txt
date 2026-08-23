@@ -1,0 +1,20 @@
+ORA Task Integrity Guard -- 2026-08-22 07:05 ET run
+
+ALARM CONDITIONS:
+
+1) ID COLLISION (guard.ps1) -- the same task id resolves to two different filePaths across the CC/MCP and LAMS registries, meaning one definition is going unguarded:
+   ora-passed-deal-tracker ->
+     C:\Users\Owner\.claude\scheduled-tasks\ora-passed-deal-tracker\SKILL.md
+     C:\Users\Owner\OneDrive - Oxford Capital Partners\Documents\Claude\Scheduled\ora-passed-deal-tracker\SKILL.md
+   Note: per its own SKILL.md description, this task was "Moved from LAMS/Cowork to CC/MCP 2026-08-15" (Gabriel-directed, COM-access reason). The LAMS-side folder looks like a leftover from that migration, not yet archived. Recommend confirming the LAMS registry entry is disabled/removed, then archiving the LAMS folder (LAMS retire order is archive-first per session-context doctrine).
+
+2) STEP 2.75 task-folder-registration-probe.py exited 1 -- [ACTION] UNCOMMITTED_VS_GIT:
+   cc: ora-pm-monthly-billing -- the SKILL.md on disk differs from HEAD, so the bytes the scheduler actually reads exist in NO commit anywhere. Nothing reviews, backs up, or reproduces this content. Commit it, or revert it.
+
+Both deterministic engines otherwise clean: guard.ps1 checked=69, restored=[], missing_everywhere=[], regressed=[], unreadable=[], errors=[], ledger_status=ok; membership-guard.ps1 disappeared=[], disabled=[], parse_miss=[], added={cc: none, lams: ora-loan-terms-reconciliation}. Step 2.8 (backup-completeness) and Step 2.9 (dangling-mutation) both clean (exit 0). Phantom-dispatch probe (Step 1.5 script 4) clean (exit 0, 0 dispatches in the 26h window).
+
+STEP-4 NOTE (non-alarm, logged separately to guard-note-2026-08-22.md): STEP 1.5 script 3 (push-fleet-heartbeat.ps1) committed the fleet heartbeat locally (07459fc, "chore(deadman): fleet-heartbeat refresh 2026-08-22") but the push was rejected -- local HEAD diverged from origin/main (22 ahead / 7 behind), most likely another concurrently-active session's commits. Not reconciled here (single-writer risk on a shared checkout). The external dead-man (.github/workflows/fleet-deadman.yml, 13:00 UTC daily) will catch this if unresolved by then -- that is the intended defence-in-depth behavior, not double-alarmed here.
+
+MODEL-CURRENCY (informational only, Step 2.5, never an independent alarm trigger): 36 in-scope CC/MCP tasks -- 11 CONTRADICTED (tag vs. observed model mismatch; non-actionable on this server-pinned fleet per doctrine -- see memory/model-currency-cc.md 2026-08-22 entry for the full list), 7 NO_OBSERVATION/unverifiable, 18 OBSERVED clean, 4 exempt (one-time/paused). CONTRADICTED count jumped 3->11 since 2026-08-17, reflecting a shift in the server's per-session model mix, not a defect.
+
+-- ora-task-integrity-guard, automated run
