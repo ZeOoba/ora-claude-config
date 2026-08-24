@@ -180,9 +180,13 @@ def fresh(path, ttl):
     return -CLOCK_SKEW_TOLERANCE_SECONDS <= age < ttl
 
 
-def consume(path):
+def consume_token(path):
     """Burn a single-use token. If it cannot be removed we cannot promise single-use, so
-    the caller must treat failure as 'no override'."""
+    the caller must treat failure as 'no override'.
+
+    Named consume_token, not consume: token_grants() takes a `consume` BOOL parameter
+    (2026-08-24, dual-layer-consumption fix -- see its own docstring) and a same-named
+    local would shadow this function inside that scope."""
     try:
         os.remove(path)
         return True
@@ -190,10 +194,10 @@ def consume(path):
         return False
 
 
-def token_grants(session_id, tier, extra_check=None):
+def token_grants(session_id, tier, extra_check=None, consume=True):
     """The validated token's fields when a valid, fresh, correctly-scoped, session-matched
     token authorizes `tier` for `session_id` -- otherwise None. Consumes the token first
-    when the tier is single-use.
+    when the tier is single-use AND `consume` is True (see the `consume` param below).
 
     Returns the FIELDS rather than a bool so callers can put `reason:` into the audit trail.
     A granting token always carries scope+session, so the dict is always truthy; callers
@@ -206,9 +210,34 @@ def token_grants(session_id, tier, extra_check=None):
     A tier declaring requires_extra_check REFUSES to grant when no extra_check is supplied,
     so forgetting one fails closed instead of silently dropping the binding.
 
-    CONSUMES on validation, so call it ONLY when a grant would actually be used. Evaluating
-    it speculatively (e.g. before checking whether there is anything to override) would burn
-    a single-use token on an action that never needed one.
+    consume (2026-08-24, dual-layer-consumption bug fix): pass False for a PEEK -- validate
+    the token exactly as normal but do NOT burn it, even if the tier is single_use. Exists
+    because WEBSITE_DEPLOY and EXTERNAL_SEND each have TWO independent enforcement layers
+    sharing the ONE token: a fast PreToolUse text-scan (ora-autonomy-gate.py's Gate 1/Gate 2a,
+    explicitly documented as bypassable-by-indirection, so it is not the authoritative check)
+    and a slower, indirection-proof internal check the wrapped binary itself runs right
+    before the real action (check_external_send.py inside send-via-outlook.ps1,
+    check_website_deploy.py inside netlify-guard.js -- both of THEIR docstrings already say
+    "consumed as a side effect of this check", i.e. they were always meant to be the sole
+    consumer). Before this fix, both layers called token_grants() with default consume=True,
+    so the PreToolUse layer burned the token to let the command through, and the internal
+    check -- the one enforcement point immune to the indirection tricks the PreToolUse layer
+    cannot catch -- then found no token at all and denied a correctly-authorized action.
+    Proven live 2026-08-24: a single `netlify deploy --build --prod` run, with a freshly
+    minted, correctly-scoped, session-matched token, reached exit 5 (DENY) at netlify-guard.js
+    even though ora-autonomy-gate.py had just granted passage using that same token seconds
+    earlier. The PreToolUse callers now pass consume=False (peek only, defense-in-depth
+    speed bump); the internal checks keep the default consume=True and remain the one place
+    a single-use grant is actually spent. A caller with NO downstream internal check (e.g.
+    Gate 2c's Netlify MCP mutating-tool check, which has no wrapped-binary layer to defer to)
+    must keep consume=True -- it is the only enforcement point for that path, exactly like
+    doctrine-drift's git-prepush-doctrine-gate.py, which never had this bug because it too is
+    the sole checker for its action (also why that tier is multi-use, sidestepping consumption
+    order entirely; see its own module for that latent-vs-live distinction).
+
+    CONSUMES on validation (when consume=True), so call it ONLY when a grant would actually
+    be used. Evaluating it speculatively (e.g. before checking whether there is anything to
+    override) would burn a single-use token on an action that never needed one.
     """
     if tier.requires_extra_check and extra_check is None:
         return None
@@ -229,8 +258,9 @@ def token_grants(session_id, tier, extra_check=None):
     if extra_check is not None and not extra_check(fields):
         return None
     # Consume BEFORE granting: if we granted first and the delete then failed, the token
-    # would silently become multi-use.
-    if tier.single_use and not consume(path):
+    # would silently become multi-use. Skipped entirely for a peek (consume=False) -- see
+    # the `consume` param doc above for why a caller would ask for that.
+    if consume and tier.single_use and not consume_token(path):
         return None
     return fields
 
