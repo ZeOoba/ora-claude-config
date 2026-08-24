@@ -108,6 +108,59 @@ try:
 finally:
     os.unlink(_p)
 
+# --- orphaned_filepaths (2026-08-22, ORPHANED_FILEPATH) --------------------------------
+# The real regression this closes: ora-passed-deal-tracker's LAMS entry sat
+# enabled:false with its SKILL.md already archived away (retirement step 1 of 2
+# done), and every existing enabled-only check treated the dangling filePath as
+# harmless. This must catch a DISABLED entry too, not just an enabled one.
+_EXISTS = {"/exists/a/SKILL.md", "/exists/b/SKILL.md"}
+
+
+def _fake_exists(p):
+    return p in _EXISTS
+
+
+_ENTRIES = [
+    {"id": "ora-live", "filePath": "/exists/a/SKILL.md", "enabled": True},
+    {"id": "ora-live-disabled", "filePath": "/exists/b/SKILL.md", "enabled": False},
+    {"id": "ora-enabled-gone", "filePath": "/gone/c/SKILL.md", "enabled": True},
+    {"id": "ora-passed-deal-tracker", "filePath": "/gone/d/SKILL.md", "enabled": False},
+    {"id": "ora-no-filepath", "filePath": None, "enabled": True},
+]
+expect("orphaned: catches a DISABLED entry with a dangling filePath (real case)",
+       "ora-passed-deal-tracker" in rmp.orphaned_filepaths(_ENTRIES, exists_fn=_fake_exists))
+expect("orphaned: also catches an enabled entry with a dangling filePath",
+       "ora-enabled-gone" in rmp.orphaned_filepaths(_ENTRIES, exists_fn=_fake_exists))
+expect("orphaned: entries whose filePath resolves are not flagged",
+       "ora-live" not in rmp.orphaned_filepaths(_ENTRIES, exists_fn=_fake_exists)
+       and "ora-live-disabled" not in rmp.orphaned_filepaths(_ENTRIES, exists_fn=_fake_exists))
+expect("orphaned: no filePath at all is not flagged (nothing to check)",
+       "ora-no-filepath" not in rmp.orphaned_filepaths(_ENTRIES, exists_fn=_fake_exists))
+expect("orphaned: exact expected set",
+       rmp.orphaned_filepaths(_ENTRIES, exists_fn=_fake_exists)
+       == ["ora-enabled-gone", "ora-passed-deal-tracker"])
+expect("orphaned: empty entries -> empty set", rmp.orphaned_filepaths([]) == [])
+
+# all_recurring_entries: one-time (no 5-field cron) and malformed rows excluded
+_REG2 = {"scheduledTasks": [
+    {"id": "e", "cronExpression": "0 1 * * *", "enabled": True, "filePath": "/x/e"},
+    {"id": "f", "cronExpression": None, "enabled": True, "filePath": "/x/f"},  # one-time -> excluded
+    {"id": "g", "cronExpression": "0 2 * * *", "enabled": False, "filePath": "/x/g"},
+]}
+with _tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as _tf2:
+    _json.dump(_REG2, _tf2)
+    _p2 = _tf2.name
+try:
+    entries2 = rmp.all_recurring_entries(_p2)
+    expect("all_recurring_entries: one-time row excluded, disabled row kept",
+           {e["id"] for e in entries2} == {"e", "g"})
+    expect("all_recurring_entries: filePath preserved", any(
+        e["id"] == "g" and e["filePath"] == "/x/g" for e in entries2))
+finally:
+    os.unlink(_p2)
+expect("all_recurring_entries: unreadable path -> None",
+       rmp.all_recurring_entries("/does/not/exist.json") is None)
+
 # --- ratified_drops (2026-06-11 auto-ratification) -------------------------------------
 import datetime as _dt
 _TODAY = _dt.date(2026, 6, 11)

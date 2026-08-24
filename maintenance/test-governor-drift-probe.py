@@ -31,7 +31,16 @@ def run_probe(argv=None):
     cmd = [sys.executable, PROBE]
     if argv:
         cmd += argv
-    return subprocess.run(cmd, capture_output=True, text=True)
+    # encoding="utf-8" (found 2026-08-22): text=True with no explicit encoding decodes the
+    # probe's stdout/stderr using locale.getpreferredencoding() (cp1252 on Windows). The
+    # probe reconfigures ITS OWN stdout to UTF-8 (module docstring: "force UTF-8 so the
+    # probe never crashes on its own output") to safely echo scanned file content, but that
+    # just moves the crash up here: a smart quote like U+201D encodes as UTF-8 bytes
+    # E2 80 9D, and byte 0x9D has no cp1252 mapping at all, so subprocess's internal reader
+    # thread crashes (UnicodeDecodeError, printed straight to real stderr, never raised to
+    # the caller) and silently drops the captured stdout to None instead.
+    return subprocess.run(cmd, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace")
 
 
 def test_canonical_clean_unit():
@@ -608,13 +617,83 @@ def test_approximate_tilde_value_not_a_dscr_threshold_unit():
     print("  PASS test_approximate_tilde_value_not_a_dscr_threshold_unit")
 
 
+def test_tilde_hedge_canon_plain_rejects_version_and_percent_tokens_unit():
+    """Qodo PR #145 review finding (HIGH): RE_DSCR_CANON_PLAIN's original lookbehind/lookahead
+    ((?<![~0-9.]) ... (?![0-9])) did not exclude a version token ('v1.25') or a percent-suffixed
+    figure ('1.25%') -- mirroring gaps RE_DSCR_THRESH's own (?<![vV]) and (?!%) guards already
+    closed for the primary DSCR extractor, but missing here. Either could hand a tilde-hedged
+    DRIFT value a false 'plain canonical 1.25 restatement' companion and wrongly suppress it."""
+    m = _load_probe_module()
+    out_version = m.scan_line("dscr floor ~1.10x corrected in v1.25 of the script.")
+    assert any("1.10" in o for o in out_version), (
+        "a 'v1.25' version token must not satisfy the plain-1.25 companion signal; got %r"
+        % out_version)
+    out_percent = m.scan_line("dscr floor ~1.10x corrected; now at 1.25% of par.")
+    assert any("1.10" in o for o in out_percent), (
+        "a '1.25%' percent figure must not satisfy the plain-1.25 companion signal; got %r"
+        % out_percent)
+    # sanity: the genuine plain-1.25 shape (no version/percent decoration) is unaffected.
+    out_genuine = m.scan_line("dscr floor ~1.10x corrected; canonical is 1.25x.")
+    assert out_genuine == [], (
+        "a genuine plain-1.25 restatement must still license suppression; got %r" % out_genuine)
+    print("  PASS test_tilde_hedge_canon_plain_rejects_version_and_percent_tokens_unit")
+
+
+def test_tilde_hedge_corrected_word_boundary_and_directional_unit():
+    """ROUND-1 INDEPENDENT REVIEW (2026-08-22): the first cut of the tilde-hedge suppressor
+    gated on `"corrected" in low` -- a bare, whole-line, non-directional substring test. Two
+    real false negatives followed, both on a Hard-Invariant-4 guard whose stated bias is
+    detection over silence:
+      1) "un**corrected**" contains the substring "corrected", so a drift report that
+         literally says it is NOT fixed was wrongly suppressed.
+      2) The gate had no directionality or per-span binding: an unrelated "corrected" earlier
+         on the line (describing a DIFFERENT fix), or "corrected" preceding the tilde value
+         itself (the NEW/bad figure being hedged, not the old one), or a second still-broken
+         tilde value sharing a line with one genuinely-fixed value, could all ride an
+         unrelated "corrected" token into silent suppression.
+    Fixed by requiring the WORD-BOUNDARY token "corrected" to appear AFTER each tilde value
+    individually, within a bounded reach (_tilde_hedge_suppressed_spans)."""
+    m = _load_probe_module()
+    # gap 1: "uncorrected" must not satisfy the completed-action anchor.
+    out1 = m.scan_line(
+        "dscr floor still reads ~1.10x across three skills, uncorrected; canonical is 1.25x.")
+    assert any("1.10" in o for o in out1), (
+        "an explicitly UNcorrected drift report must still flag; got %r" % out1)
+    # gap 2a: "corrected to ~1.40x" -- the hedged value IS the new/bad figure, not a symptom
+    # of an already-fixed one. "corrected" precedes it, so directionality must not suppress it.
+    out2a = m.scan_line("dscr floor corrected to ~1.40x, was 1.25x previously.")
+    assert any("1.40" in o for o in out2a), (
+        "a tilde-hedged value that is ITSELF the new drift (corrected TO it) must still flag; "
+        "got %r" % out2a)
+    # gap 2b: an unrelated, earlier "corrected" (fixing something else entirely) must not arm
+    # suppression for a DSCR drift later on the same line.
+    out2b = m.scan_line(
+        "audit: the ltv typo was corrected to 40%; separately the dscr floor now reads ~1.10x "
+        "vs the canonical 1.25x -- still open.")
+    assert any("1.10" in o for o in out2b), (
+        "an unrelated earlier 'corrected' must not mask a real drift later on the line; got %r"
+        % out2b)
+    # gap 2c: two tilde values on one line, only the FIRST genuinely followed by "corrected" --
+    # the second, still-unfixed value must not inherit the first's suppression.
+    out2c = m.scan_line(
+        "changelog: symptom dscr ~1.6x corrected to 1.25x; note the live floor also reads "
+        "~1.40x dscr minimum, unfixed.")
+    assert not any("1.6" in o for o in out2c), (
+        "the genuinely-corrected ~1.6x symptom must stay suppressed; got %r" % out2c)
+    assert any("1.40" in o for o in out2c), (
+        "a second, still-unfixed tilde value sharing the line must still flag; got %r" % out2c)
+    print("  PASS test_tilde_hedge_corrected_word_boundary_and_directional_unit")
+
+
 def test_deal_comparison_skill_file_clean():
     """The live deal-comparison SKILL.md (repo copy) must scan CLEAN line-by-line -- the 2026-08-21
     false positive at line 153 (a v1.2 Changelog entry narrating the DSCR-wrong-LTV bug fix, see
     test_approximate_tilde_value_not_a_dscr_threshold_unit)."""
     m = _load_probe_module()
-    # via m.ORA_SKILLS_REPO (not a hardcoded literal) so this test isn't Windows/user-path-specific
-    # (Qodo review, PR #144).
+    # Qodo PR #145 review finding (portability): use the probe's own canonical ora-skills root
+    # (HOME/ora-skills) rather than a hardcoded Windows path, so this stays correct on a
+    # different user/OS. (Pre-existing test_acquisition_underwriting_skill_file_clean uses the
+    # older hardcoded form -- unrelated to this PR's diff, left as-is.)
     path = os.path.join(m.ORA_SKILLS_REPO, "deal-comparison", "SKILL.md")
     assert os.path.isfile(path), "skill file not found: %s" % path
     findings = []
@@ -1104,6 +1183,45 @@ def test_test_files_excluded_from_scan_unit():
     print("  PASS test_test_files_excluded_from_scan_unit")
 
 
+def test_run_probe_survives_child_utf8_smartquote_e2e():
+    """Regression (2026-08-22): run_probe()'s subprocess.run(..., text=True) call had no
+    explicit encoding, so it decoded the probe's stdout using locale.getpreferredencoding()
+    (cp1252 on Windows). governor-drift-probe.py reconfigures ITS OWN stdout to UTF-8 (see
+    its module docstring, "force UTF-8 so the probe never crashes on its own output") so it
+    can safely echo scanned file content containing non-cp1252 characters -- but that just
+    moves the crash one level up: a smart quote like U+201D encodes as UTF-8 bytes E2 80 9D,
+    and byte 0x9D has NO cp1252 mapping at all, so the PARENT's decode crashes inside
+    subprocess's internal reader thread instead (prints "Exception in thread ..." straight to
+    the real stderr, not raised to the caller) and SILENTLY drops the captured stdout to None.
+    git-prepush-hook-tests-gate.py then reads this test file's own (also None-corrupted, see
+    the sibling regression in hooks/tests/test-git-prepush-hook-tests-gate.py) output and
+    reports a confusing, contentless "fail" for a run that never actually hit real drift.
+    Reproduced here by monkeypatching PROBE to a synthetic child that mimics the real probe's
+    own stdout-reconfigure pattern, so the test is deterministic and doesn't depend on which
+    byte happens to be live in the real scanned tree on any given day."""
+    import tempfile
+    global PROBE
+    child_root = tempfile.mkdtemp(prefix="gdp-smartquote-child-")
+    child_path = os.path.join(child_root, "emit_smartquote.py")
+    with open(child_path, "w", encoding="utf-8") as fh:
+        fh.write(
+            "import sys\n"
+            "sys.stdout.reconfigure(encoding='utf-8', errors='replace')\n"
+            "sys.stdout.write('GOVERNOR DRIFT DETECTED (1): right double quote "
+            "\\u201d present\\n')\n"
+            "sys.exit(1)\n")
+    real_probe = PROBE
+    PROBE = child_path
+    try:
+        r = run_probe()
+    finally:
+        PROBE = real_probe
+    assert r.stdout is not None and "GOVERNOR DRIFT DETECTED" in r.stdout, (
+        "run_probe() must capture the child's UTF-8 smart-quote output instead of "
+        "silently dropping it to None; got stdout=%r" % r.stdout)
+    print("  PASS test_run_probe_survives_child_utf8_smartquote_e2e")
+
+
 def test_event_log_excluded_e2e():
     """End-to-end: real tree is clean AND no finding cites event_log.md."""
     r = run_probe()
@@ -1134,18 +1252,43 @@ def test_active_work_claims_pruned_unit():
 
 def test_active_work_claims_excluded_e2e():
     """End-to-end companion to test_event_log_excluded_e2e: a live claim_work.py claim file
-    quoting an off-canonical DSCR value in its free-text description must not fail the probe."""
+    quoting an off-canonical DSCR value in its free-text description must not fail the probe.
+
+    REGRESSION GUARD (round-1 independent review, 2026-08-22): the original version of this
+    test used a payload that ALSO satisfied the tilde-hedge suppressor's own three signals
+    (tilde-glued + "corrected" + plain 1.25 companion) -- so it passed even with the
+    `active-work` prune reverted, since scan_line() on that text already returns [] on its
+    own. This payload is a BARE, unhedged, unsuppressed governor declaration
+    ("DSCR governor floor 1.60x") that WOULD flag if actually scanned (verified directly via
+    m.scan_line() before wiring it into the file below), so this test can only pass because of
+    the prune."""
     m = _load_probe_module()
+    would_flag = m.scan_line("DSCR governor floor 1.60x per the audit note.")
+    assert would_flag, (
+        "test payload must itself be a flaggable governor declaration, or this e2e proves "
+        "nothing about the active-work prune -- got %r" % would_flag)
     claims_dir = os.path.join(m.CLAUDE, "hooks", "active-work")
     os.makedirs(claims_dir, exist_ok=True)
     probe_path = os.path.join(claims_dir, "_governor_probe_selftest_claim.json")
     payload = ('{"session_id": "test", "title": "selftest", '
-               '"description": "narrating a past bug: inflating computed DSCR ~1.6x, '
-               'corrected to 1.25x", "claimed_at": "2026-08-22T00:00:00"}')
-    # Atomic create-only open (O_CREAT|O_EXCL), not a separate exists-check then a plain "w" open:
-    # closes the TOCTOU race between the check and the write, and never truncates a file that's
-    # already there (Qodo review, PR #144 -- read/verify-before-write on hooks/** paths).
-    fd = os.open(probe_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+               '"description": "DSCR governor floor 1.60x per the audit note.", '
+               '"claimed_at": "2026-08-22T00:00:00"}')
+    # Read-before-write (Qodo PR #145 review finding): this is a shared checkout where another
+    # session could concurrently be mid-run of this same selftest -- read any existing content
+    # first so a genuine collision surfaces the OTHER run's payload in the failure message
+    # instead of silently clobbering it. Combined at the 2026-08-23 merge with the sibling
+    # branch's atomic create-only open (O_CREAT|O_EXCL, Qodo review PR #144): the exclusive
+    # create is what actually closes the check-then-act TOCTOU window (a plain "w" open after
+    # an exists-check could still truncate a file created in between), while the
+    # FileExistsError path preserves the read-and-surface behavior for a genuine collision.
+    try:
+        fd = os.open(probe_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        with open(probe_path, encoding="utf-8", errors="replace") as fh:
+            existing = fh.read()
+        raise AssertionError(
+            "stale/concurrent selftest claim file at %s -- existing content: %r"
+            % (probe_path, existing))
     try:
         os.write(fd, payload.encode("utf-8"))
     finally:
@@ -1153,8 +1296,9 @@ def test_active_work_claims_excluded_e2e():
     try:
         r = run_probe()
         assert r.returncode == 0, (
-            "a claim file quoting an off-canonical value must not fail the probe; got %d\n%s"
-            % (r.returncode, r.stdout))
+            "a claim file quoting an off-canonical value must not fail the probe (proves the "
+            "active-work prune, not merely that the payload text is independently suppressed); "
+            "got %d\n%s" % (r.returncode, r.stdout))
         assert "active-work" not in r.stdout, (
             "hooks/active-work claim files should not be scanned for governor drift:\n%s"
             % r.stdout)
@@ -1552,6 +1696,211 @@ def test_perproperty_refi_frame_elsewhere_on_line_does_not_mask_aggregate_drift_
             "aggregate-governor drift to 65%% must still flag even when the ratified per-property "
             "refi-sizing phrase sits elsewhere on the line; line=%r got=%r" % (line, out))
     print("  PASS test_perproperty_refi_frame_elsewhere_on_line_does_not_mask_aggregate_drift_unit")
+
+
+def test_dscr_scaling_multiplier_changelog_stays_clean_unit():
+    """REGRESSION PIN (governor-drift-probe.py false positive, overridden 5x by 3 sessions across
+    2026-08-21/22 via the allow-hook-test-failure override token -- hooks/_state/override-usage-
+    log.jsonl signature d491c6e47418): deal-comparison/SKILL.md:153's v1.2 changelog entry narrates
+    a PAST BUG ("DSCR was tested at 40% LTV ... inflating computed DSCR ~1.6x") -- a scaling factor
+    describing how wrong a buggy CALCULATION was, not a declared governor threshold. RE_DSCR_THRESH
+    matched "dscr ~1.6x" (the second "DSCR" token) as if it were a declared floor and flagged
+    "DSCR governor threshold 1.6x != canonical 1.25x".
+
+    The reproduction below is the real line verbatim (deal-comparison/SKILL.md:153, one continuous
+    changelog paragraph scanned as a single line by scan_line()) -- it deliberately ALSO carries
+    "HARD FILTER", "disqualif", and "would floor-flag" elsewhere on the same dense line, which is
+    exactly what makes this false-positive shape different from the module's existing qualifiers:
+    a generic nearby-token veto (the pattern every sibling qualifier above uses) would misread
+    "floor-flag" -- ORA's own Ruling-5 term of art for "gets flagged for breaching a floor" -- as a
+    floor DECLARATION next to the value and refuse to suppress. See
+    _dscr_scaling_multiplier_spans for why the fix avoids that veto shape entirely."""
+    m = _load_probe_module()
+    line = (
+        "- v1.2 (2026-08-21): HIGH fix (cc-audit-army findings M02-deal-comparison-dscr-wrong-"
+        "ltv-and-kills, M13-deal-comparison-basis-band-ignores-vintage-ramp), Gabriel-approved. "
+        "Two defects that made this skill disagree with acquisition-underwriting on the firm's "
+        "two hardest acquisition gates: (1) DSCR was tested at 40% LTV — the portfolio-"
+        "aggregate governor, not per-property refi sizing — inflating computed DSCR ~1.6x "
+        "and letting deals that would floor-flag in acquisition-underwriting score clean here; "
+        "corrected to the LESSER-of-65%-LTV/1.25x-DSCR basis. (2) A breach was labeled "
+        '"immediate disqualification"/"DISQUALIFIED", contradicting Ruling 5 (floors flag, never '
+        "kill); corrected to FLOOR-FLAGGED throughout (HARD FILTER line, scoring table, "
+        "recommendation thresholds, output template). (3) The Basis band hardcoded a flat "
+        ">40%-of-RCT-LOW cutoff — only the loosest (≥2005-vintage) endpoint of the "
+        "vintage ramp — so a pre-1995 building (ORA's dominant vintage) could score points "
+        "at a basis acquisition-underwriting Stage 1 would already floor-flag; corrected to the "
+        "same linear vintage-ramp floor (65% discount at ≤1995 → 60% at ≥2005) "
+        "acquisition-underwriting uses. No governor constants changed — this only restates "
+        "deal-comparison to apply the already-ratified 1.25x DSCR / RCT v03 vintage ramp correctly."
+    )
+    out = m.scan_line(line)
+    assert out == [], (
+        "changelog scaling-multiplier narrative ('inflating computed DSCR ~1.6x') must not flag "
+        "as a governor declaration; got %r" % out)
+    print("  PASS test_dscr_scaling_multiplier_changelog_stays_clean_unit")
+
+
+def test_dscr_scaling_multiplier_real_drift_still_flags_unit():
+    """ANTI-BLINDING (detection over silence): a genuine DSCR governor drift sharing the line with
+    the scaling-multiplier narrative must still flag in full -- the multiplier suppressor defers
+    whole-line to the RE_GOV_DSCR_BOUND structural veto the moment a real "dscr ... floor/minimum"
+    pairing is present, so BOTH the multiplier value and the drifted floor stay visible (safe
+    over-detection, not masking). A second line pins that a real drift phrased with a scaling verb
+    ('inflated') in a DIFFERENT word order -- 'the DSCR floor was inflated to 1.60x', keyword
+    BEFORE the value, no 'computed/calculated/measured' token -- structurally cannot match
+    RE_DSCR_COMPUTED_SCALING at all, so it is untouched and flags via the pre-existing declaration
+    extractor exactly as it did before this fix."""
+    m = _load_probe_module()
+    combined = ("v1.3: fixed the bug inflating computed DSCR ~1.6x; separately, note the DSCR "
+                "floor 1.60x needs correction to 1.25x.")
+    out = m.scan_line(combined)
+    assert any("1.6x" in o for o in out) and any("1.60x" in o for o in out), (
+        "both the multiplier value and the co-located real DSCR floor drift must flag when a "
+        "genuine declaration shares the line; got %r" % out)
+
+    other_order = ("v1.4: the DSCR floor was inflated to 1.60x due to a config error; "
+                   "corrected to 1.25x.")
+    out2 = m.scan_line(other_order)
+    assert any("1.60x" in o for o in out2), (
+        "a real DSCR floor drift phrased with a scaling verb in a different word order (keyword "
+        "before value, no computed/calculated/measured token) must still flag; got %r" % out2)
+    print("  PASS test_dscr_scaling_multiplier_real_drift_still_flags_unit")
+
+
+def test_dscr_scaling_multiplier_by_factor_phrasing_stays_clean_unit():
+    """Generalization pin: the suppressor is not hardcoded to the literal '~1.6x' tilde notation --
+    the equally natural 'by a factor of N.Nx' phrasing must be recognized too, since both are
+    describing the same scaling-multiplier narrative shape (a computed figure inflated/overstated
+    by a bug), just with different connective wording."""
+    m = _load_probe_module()
+    line = "v1.5: fixed a bug overstating computed DSCR by a factor of 1.6x in the scoring table."
+    out = m.scan_line(line)
+    assert out == [], (
+        "'overstating computed DSCR by a factor of 1.6x' must not flag; got %r" % out)
+    print("  PASS test_dscr_scaling_multiplier_by_factor_phrasing_stays_clean_unit")
+
+
+def test_dscr_scaling_multiplier_keyword_after_value_still_flags_unit():
+    """ADVERSARIAL FINDING (independent review, round 1, 2026-08-22): the first cut of the scaling-
+    multiplier suppressor claimed a floor/ceiling/minimum/maximum keyword always sits immediately
+    adjacent to ITS value in a real declaration, and relied on that to skip a proximity veto -- but
+    that is only true for keyword-BEFORE-value forms (RE_DSCR_DECL). RE_DSCR_DECL_REV's shape puts
+    the keyword AFTER the value ("1.40x floor"), which the scaling regex's left-only value bound did
+    not guard, so "bug inflating computed DSCR ~1.40x floor going forward" matched the multiplier
+    shape and silenced a genuine value-then-keyword declaration -- RE_GOV_DSCR_BOUND cannot catch it
+    either, because the value's own decimal point sits inside its clause-exclusion gap class.
+
+    Closed with a trailing negative lookahead in RE_DSCR_COMPUTED_SCALING
+    (`(?!\\s*(?:floor|ceiling|minimum|min|maximum|max)\\b)`), mirroring the bps-tier refi veto's
+    existing kw_after_spans exemption ("an explicitly-declared floor is a governor statement...
+    must flag even inside a bps tier" -- round-2 review W3).
+
+    All three lines carry a fix/bug/correction token (RE_CHANGELOG_CONTEXT), so all three exercise
+    the lookahead specifically (round-2 review Finding 3: line 2 originally carried no such token,
+    so it was pinning RE_CHANGELOG_CONTEXT rather than the lookahead it was meant to test)."""
+    m = _load_probe_module()
+    for line, val in (
+        ("hard filter: bug inflating computed DSCR ~1.40x floor going forward.", "1.40"),
+        ("fix: acquisition screen overstated computed DSCR by 1.30x minimum; correction pending.",
+         "1.30"),
+        ("hard filter: fixed bug — understated calculated DSCR ~1.40x ceiling.", "1.40"),
+    ):
+        out = m.scan_line(line)
+        assert any(val in o for o in out), (
+            "a value-then-keyword DSCR declaration inside scaling-verb prose must still flag; "
+            "line=%r got=%r" % (line, out))
+    print("  PASS test_dscr_scaling_multiplier_keyword_after_value_still_flags_unit")
+
+
+def test_dscr_scaling_multiplier_intervening_modifier_still_flags_unit():
+    """ADVERSARIAL FINDING (independent review, round 2, 2026-08-22): the round-1 lookahead fix
+    only guarded a keyword IMMEDIATELY adjacent to the value ("~1.40x floor"). A single modifier
+    word between value and keyword slipped past it -- "~1.40x hard floor" / "~1.40x strict
+    minimum" -- and was otherwise invisible to every other pass (RE_DSCR_DECL_REV requires the
+    keyword to abut the value; RE_GOV_DSCR_BOUND is blocked by the value's own decimal sitting in
+    its clause-exclusion gap class). Confirmed as a live regression vs main (main flags both lines
+    below; the pre-round-2-fix worktree silenced them). This is not contrived vocabulary -- the
+    module's own _is_gov_line docstring uses "DSCR hard floor 1.40x" as its canonical example, and
+    STAB_GOV_MARKERS separately carries "hard cap"/"hard ceiling".
+
+    Closed by widening the lookahead to allow up to 2 intervening hyphen/space-joined modifier
+    words before the keyword: `(?!\\s*(?:\\w+[-\\s]+){0,2}(?:floor|ceiling|minimum|min|maximum|max)
+    \\b)`."""
+    m = _load_probe_module()
+    for line, val in (
+        ("hard filter: fixed bug inflating computed DSCR ~1.40x hard floor going forward.",
+         "1.40"),
+        ("hard filter: fixed bug inflating computed DSCR ~1.40x strict minimum.", "1.40"),
+    ):
+        out = m.scan_line(line)
+        assert any(val in o for o in out), (
+            "a value-then-MODIFIER-then-keyword DSCR declaration inside scaling-verb prose must "
+            "still flag; line=%r got=%r" % (line, out))
+    print("  PASS test_dscr_scaling_multiplier_intervening_modifier_still_flags_unit")
+
+
+def test_dscr_scaling_multiplier_present_tense_mechanism_still_flags_unit():
+    """ADVERSARIAL FINDING (independent review, round 1, 2026-08-22): the scaling-multiplier
+    suppressor is scoped by doctrine to a PAST-DEFECT changelog narrative, but the original regex
+    encoded no notion of pastness -- a PRESENT-TENSE multiplicative fudge on computed DSCR (a real
+    drift MECHANISM, since it effectively shifts the floor by the factor, not a typo) matched and
+    was silenced identically to the past-tense bug-fix narrative it was designed for. Closed by
+    requiring an explicit fix/bug/correction context token (RE_CHANGELOG_CONTEXT) anywhere on the
+    line before suppressing -- present-tense/still-applied narratives generally carry none."""
+    m = _load_probe_module()
+    for line, val in (
+        ("v2.0: per the hard filter, the underwriting model now deliberately scales computed "
+         "DSCR by 1.4x before comparison.", "1.4"),
+        ("Per the hard acquisition governor doctrine, the model inflates computed DSCR ~1.4x "
+         "today.", "1.4"),
+    ):
+        out = m.scan_line(line)
+        assert any(val in o for o in out), (
+            "a present-tense/live scaling-multiplier narrative with no fix/bug/correction context "
+            "token must still flag; line=%r got=%r" % (line, out))
+    print("  PASS test_dscr_scaling_multiplier_present_tense_mechanism_still_flags_unit")
+
+
+def test_dscr_scaling_multiplier_governor_nearby_still_flags_unit():
+    """Test-gap finding (independent review, round 1, 2026-08-22): none of the three original
+    tests exercised the "governor" proximity veto in _dscr_scaling_multiplier_spans -- deleting
+    that veto left all three green. Pins it directly: a scaling-multiplier-shaped value with the
+    literal "governor" token inside its [vs-25, ve+40] reach must still flag."""
+    m = _load_probe_module()
+    line = "changelog: bug inflating computed DSCR ~1.6x governor threshold."
+    out = m.scan_line(line)
+    assert any("1.6" in o for o in out), (
+        "a scaling-multiplier value declared AS the governor nearby must still flag; got %r" % out)
+    print("  PASS test_dscr_scaling_multiplier_governor_nearby_still_flags_unit")
+
+
+def test_dscr_scaling_multiplier_accepted_residuals_unit():
+    """Pins the two ACCEPTED RESIDUALS documented above RE_DSCR_COMPUTED_SCALING (round-2 review,
+    2026-08-22) DELIBERATELY, so they read as a decision rather than a latent gap:
+      * NEGATION-BLIND: RE_CHANGELOG_CONTEXT is a lexical token check, not negation-aware -- a
+        line stating a defect is explicitly NOT YET corrected still satisfies the gate (it carries
+        "bug" and "corrected").
+      * TOPIC-BLIND: the token search is line-wide, not proximity-scoped to the value -- an
+        unrelated fix/bug mention elsewhere on the line satisfies the gate for a scaling-multiplier
+        clause that has nothing to do with it.
+    Both were verified in round-2 review to be NOT cheaply closeable without either reopening the
+    real target line (proximity/clause-scoping the token search) or adding new negation-detection
+    suppression surface. If either residual is ever closed, this test's assertions flip and it
+    should be rewritten as a must-flag pin instead of deleted outright."""
+    m = _load_probe_module()
+    negation_blind = ("OPEN BUG (hard filter): scoring still inflates computed DSCR ~1.6x; "
+                       "not yet corrected.")
+    assert m.scan_line(negation_blind) == [], (
+        "negation-blind residual changed behavior -- update this test's docstring/assertion "
+        "rather than deleting it; got %r" % m.scan_line(negation_blind))
+
+    topic_blind = ("per the hard filter, we fixed a typo in the README; separately, the model "
+                   "now deliberately scales computed DSCR by 1.4x before comparison.")
+    assert m.scan_line(topic_blind) == [], (
+        "topic-blind residual changed behavior -- update this test's docstring/assertion rather "
+        "than deleting it; got %r" % m.scan_line(topic_blind))
+    print("  PASS test_dscr_scaling_multiplier_accepted_residuals_unit")
 
 
 def test_value_between_metric_and_boundword_flags_unit():
@@ -2301,6 +2650,8 @@ def main():
     test_reverse_order_refi_suppression_unit()
     test_version_token_not_a_dscr_threshold_unit()
     test_approximate_tilde_value_not_a_dscr_threshold_unit()
+    test_tilde_hedge_canon_plain_rejects_version_and_percent_tokens_unit()
+    test_tilde_hedge_corrected_word_boundary_and_directional_unit()
     test_deal_comparison_skill_file_clean()
     test_rate_percent_not_a_dscr_threshold_unit()
     test_refi_lesser_of_construct_suppressed_unit()
@@ -2332,12 +2683,13 @@ def main():
     test_dated_audit_memory_file_excluded_unit()
     test_acquisition_underwriting_skill_file_clean()
     test_test_files_excluded_from_scan_unit()
-    # Registered here, BEFORE the known-broken e2e tests below (test_event_log_excluded_e2e /
-    # test_active_work_claims_excluded_e2e currently fail on 6 pre-existing, unrelated findings in
-    # OTHER files -- confirmed via git stash to predate this change) -- an assert failure aborts
+    test_run_probe_survives_child_utf8_smartquote_e2e()
+    # Registered here, BEFORE the e2e tests below -- an assert failure in an e2e test aborts
     # main() outright, so anything registered after those calls silently never runs on a plain
     # `python test-governor-drift-probe.py` invocation (independent-review blocking finding,
-    # 2026-08-22, session 438b62fb).
+    # 2026-08-22, session 438b62fb; at the time, test_event_log_excluded_e2e /
+    # test_active_work_claims_excluded_e2e were failing on 6 pre-existing findings in OTHER
+    # files, since closed -- see test_index_projects_system_narrative_excluded_unit).
     test_v413_changelog_line_clean_unit()
     test_dscr_rate_tier_bucket_label_not_flagged_as_governor_unit()
     test_dscr_rate_tier_bucket_label_veto_when_declared_as_governor_unit()
@@ -2361,6 +2713,14 @@ def main():
     test_perproperty_refi_ceiling_standalone_bullet_stays_clean_unit()
     test_perproperty_refi_ceiling_standalone_drift_still_flags_unit()
     test_perproperty_refi_frame_elsewhere_on_line_does_not_mask_aggregate_drift_unit()
+    test_dscr_scaling_multiplier_changelog_stays_clean_unit()
+    test_dscr_scaling_multiplier_real_drift_still_flags_unit()
+    test_dscr_scaling_multiplier_by_factor_phrasing_stays_clean_unit()
+    test_dscr_scaling_multiplier_keyword_after_value_still_flags_unit()
+    test_dscr_scaling_multiplier_intervening_modifier_still_flags_unit()
+    test_dscr_scaling_multiplier_present_tense_mechanism_still_flags_unit()
+    test_dscr_scaling_multiplier_governor_nearby_still_flags_unit()
+    test_dscr_scaling_multiplier_accepted_residuals_unit()
     test_ltv_reverse_ceiling_vetoes_non_ltv_subjects_unit()
     test_ltv_subject_veto_does_not_silence_real_declarations_unit()
     test_ltv_subject_veto_reach_semantics_unit()
