@@ -51,4 +51,16 @@ Never fabricate a number. If any step in the console output is unclear or the re
 
 ## What this task does NOT do
 
-Does not resolve the review queue (that's the interactive `scripts/ar-import.ts`, a human-run tool). Does not touch git. Does not modify anything under `Business/`. Does not retry automatically on a guard trip — it reports and waits for next Monday.
+Does not resolve the review queue. Does not touch git. Does not modify anything under `Business/`. Does not retry automatically on a guard trip — it reports and waits for next Monday.
+
+### How the review queue actually gets resolved (for the human reading the summary email)
+
+`data/ar/review-queue.json` is a **report surface, not a work queue** — nothing in the repo reads it back, and there is no resolver tool. A queued row means the matcher could not attribute it to a lease, and the fix belongs in the matcher, not in a hand-edit:
+
+1. Correct the matcher so the row attributes **by rule** — `server/ar/resolve-by-unit.ts` for a unit-level miss, or the `resolvePropertyId` header map in `scripts/ar-import-headless.ts` for an unrecognized property header.
+2. Copy the row's source file from `data/ar/processed/` back into `data/ar/inbox/` (the importer archives each file after a successful run, so it is no longer in the inbox).
+3. Re-run `npx tsx scripts/ar-import-headless.ts`, with both guards above still satisfied.
+
+A re-import at the **same** as-of date overwrites the prior entry rather than being rejected as stale (`server/ar/resolve-latest.ts`, `incomingMs >= existingMs`), so step 3 is safe to repeat. This is the path actually used on 2026-08-24.
+
+`scripts/ar-import.ts` is **not** the resolver, despite its name. It takes a **PDF path** as `argv[2]`, parses Yardi/AppFolio aging PDFs via pdfplumber, and writes through a **running** server (`POST /api/actions/tenant-arrears`) — which Guard 2 above requires to be down. It never reads `review-queue.json`, and it cannot parse the xlsx delinquency exports these queued rows come from.
