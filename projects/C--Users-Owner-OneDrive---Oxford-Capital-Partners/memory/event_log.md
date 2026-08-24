@@ -5,12 +5,38 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-24T17:57:19.832Z
+  modified: 2026-08-24T18:19:49.995Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-08-24 — Code-surface close-out of the 2026-08-24 PD/PUD Cowork session's remaining gaps (items 1–7, 9, 10 of 10)
+
+Closed the punch-list left after the Cowork session's 7-commit `ora-skills` landing (`a292937`..`1b60a49`). Item 8 (754 IRR Model refi rebase) is explicitly gated on Gabriel per Hard Invariant 4 and was NOT touched — analysis-only, asked separately.
+
+**Item 1 — event_log.md backlog.** 10 uncommitted entries spanning multiple sessions' work (hook-override record, the Cowork PD/PUD entry, oxfordra.net deploys x2, 14-skill Save-skill batch, deploy-gate token fix, tenant-contact-gap root cause, push-fleet-heartbeat v2.0, main-checkout sync, an owner-outreach weekly-release entry that landed mid-task) split into 10 isolated commits via the temp-index technique, oldest first, each named for its own session's work — plus one follow-up commit fixing a blank-line-separator regression the split introduced. `git status --porcelain` on the file is clean.
+
+**Item 2 — phantom-dispatch-probe frozen-log gate.** Committed (`7cc499a`) — companion to automation-health-monitor v1.7; 25/25 tests pass.
+
+**Item 3 — maintenance/_state gitignore classification.** 6 files audited individually against readers (grepped, not assumed): `dispatch-skip.json`/`pause-resume-guard-state.json`/`task-progress/` are local-probe run state (now gitignored + `git rm --cached`, first attempt via `git commit -- <pathspec>` silently re-added them — caught, redone with a bare commit per the temp-index reference doc's own warning); `fleet-heartbeat.json`/`health-guard-beacon.json`/`retire-pending.json` are durable registers with an external or cross-session reader and stay tracked. 3 commits (`065510a`, `4af2615`, `e2be847`).
+
+**Item 4 — description headroom.** 7 skills trimmed (parenthetical glosses/named-example lists/implementation-detail clauses only, zero trigger vocabulary), each version-bumped with its own Changelog entry: settlement-basis-extraction v1.1, masterlease-jurisdiction-rebase v1.7, pma-qc v1.1, disposition-analysis v1.2, package-and-stage-skill v1.29, listing-agreement-qc v1.3, acquisition-underwriting v4.19 (folded into item 7's commit). All now ≥66 chars headroom (was 5–36). `description_budget.py`/`frontmatter_sweep.py` clean.
+
+**Item 5 — owner-outreach v1.3 review.** Verified (not assumed): the live generator at `Business\Investment Candidates -- 2026\build_t1_letterpack.py` genuinely imports `t1_letter_format.py`, calls `verify_pack()` with a hard `sys.exit` on failure, and its PAGE/LETTERHEAD_MODE/MAX_LINE_CHARS constants match `ORA_OwnerOutreach-T1Letter_FormatSpec_v1.1.md`. No discrepancy found between doc and code. Review-only, no changes.
+
+**Item 6 — acquisition-underwriting-eval-harness PENDING_REIMPORT entry.** Confirmed it's a scheduled-task-only engine (live at `scheduled-tasks/ora-acquisition-underwriting-eval-harness/`, own frontmatter says so) — `repo_first_check.py`'s NOT-INSTALLED read was the wrong signal, not a gap. Cleared via `pending_reimport.py clear`, not a confirmed-install clear.
+
+**Item 7 — consumer-sweep scope gap.** `acquisition-underwriting` v4.19's UNDERWRITING CONVENTIONS clause (ii) widened from `Business\Investment Candidates -- 2026` only to every active deal folder under `Business\`. Re-swept the widened scope for the 7.00%→6.50% change (`model.py`/`*IRRModel*` search across all 22 non-admin/non-candidates Business\ folders): only `754 Old State` has a refi model, and it is still stale — but on a **v04** workbook (`2026-08-24_754OldStateRoute74_IRRModel_v04.xlsx`, `model-src-v04/model.py`), not the v03 the item-8 analysis was built against; v04 was created today by an untracked session and still carries `r, n = 0.07/12, 25*12`. Reported, not edited. No other active deal folder has a refi model of any kind.
+
+**Item 9 — 754 DEAL-TERMS-REGISTER Items 16–22.** Reconstructed from `archive/2026-08-21_754OldStateRoute74_ICMemo_v03.docx` §3–4 (the numbering note's own cited source): open mortgage (16), assignment of rents (17), cross-collateralization/cross-default package (18), unexecuted Green Organics base lease (19), Three Waters manuscript amendments (20), 754B landlord-of-record defect (21), Green Organics rent verification (22). Write-back verified: items 1–24 all present on disk, none renumbered. Flagged in the register itself: a same-day IC Memo v04 and IRR Model v04 exist that this reconciliation did not use and has not checked for consistency against.
+
+**Item 10 — Flaute escalation reminder.** Registered `ora-754-flaute-escalation-check` via `register-scheduled-task`'s supervised procedure (CC/MCP fleet, surface asserted per Rule 3, no id collision) — one-time, fires 2026-08-28 08:00 ET, ggoldberg-only, Outlook COM. `list_scheduled_tasks` confirms enabled:true, correct fireAt.
+
+**Close-out sweep:** `repo_first_check.py` → no cache-ahead skills; `frontmatter_sweep.py` → 0 findings across 64 dirs; `pytest tools/` → 256/256 passed; `git status --porcelain` clean in both `ora-skills` and the touched `~/.claude` paths. 8 skills packaged and handed to Gabriel to Save (settlement-basis-extraction, acquisition-underwriting, masterlease-jurisdiction-rebase, pma-qc, disposition-analysis, package-and-stage-skill, listing-agreement-qc, owner-outreach) — none of their Save-skill clicks confirmed yet as of this entry; their PENDING_REIMPORT/ledger entries stay open until confirmed.
+
+**Not pushed:** all `~/.claude` commits landed locally on `feat/model-canary-probe-step25` only — pushing is a shared-state action requiring separate confirmation, not assumed here.
 
 ## 2026-08-24 — acquisition-underwriting-eval-harness: confirmed scheduled-task-only, PENDING_REIMPORT entry cleared (not an install)
 
