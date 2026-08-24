@@ -5,12 +5,32 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-24T17:32:11.772Z
+  modified: 2026-08-24T17:57:19.832Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-08-24 — acquisition-underwriting-eval-harness: confirmed scheduled-task-only, PENDING_REIMPORT entry cleared (not an install)
+
+Close-out work-order item 6. The `_staging/PENDING_REIMPORT.md` ledger has carried `acquisition-underwriting-eval-harness | pending since 2026-08-22T21:49Z | commit 7d10e3f` for two days -- `repo_first_check.py` reports it NOT-INSTALLED as a Save-skill-cached interactive skill, which is true and expected, not a gap.
+
+**Verified (not assumed):** the skill's own frontmatter says "PILOT -- piloted on one skill only; registered 2026-08-14 as a daily-polling scheduled task," and `~/.claude/scheduled-tasks/ora-acquisition-underwriting-eval-harness/` exists and is live on the CC/MCP fleet. Scheduled tasks execute from their own copy under `scheduled-tasks/<id>/`, never from the interactive Skills-plugin runtime cache that `repo_first_check.py`/`PENDING_REIMPORT.md` track -- so this skill was never a candidate for a Save-skill click and the ledger's NOT-INSTALLED read was the wrong signal to alarm on.
+
+Cleared via `python tools/pending_reimport.py clear acquisition-underwriting-eval-harness` -- not a confirmed-install clear (no Save-skill click happened, none is needed), an explicit N/A. Recorded here so the next drift check doesn't re-flag it as an unresolved pending entry.
+
+## 2026-08-24 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `b1becf3d-65d1-4e26-93b3-5c9a2c79edac` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel explicitly authorized pushing despite the governor-drift-probe test failure after a 12-minute wait for the in-flight fix (session 47a599db, hooks-override-auth claim) did not land. Failure is a known false-positive class (eval-harness scheduled-poll narrative text misread as a governor redeclaration), not a real Hard Invariant 4 breach -- confirmed by the other session's own claim description. This is the 3rd override of this identical failure in 24h.
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-08-24 13:54:09 local.
+
+## 2026-08-24 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `ae46330f-3dfe-40d7-9a01-097f42f36cde` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel explicitly authorized (in-turn, via AskUserQuestion) overriding test-governor-drift-probe.py's failure to push commit f4b04d5. Confirmed unrelated to this commit: the failing file (acquisition-underwriting-eval-harness/runs/2026-08-24T163634Z_scheduled-poll.json) lives in the separate ora-skills repo, not ora-claude-config, and this commit touches only ora-health-guard/SKILL.md and MEMORY.md. Already overridden by 2 other sessions for the identical failure in the last 24h.
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-08-24 13:47:05 local.
 
 ## 2026-08-24 — T1 owner-outreach letter-format patch landed + this week's set released (46 letters, wave-capped to 50)
 
