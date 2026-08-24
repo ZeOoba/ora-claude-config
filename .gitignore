@@ -227,3 +227,17 @@ maintenance/_state/registry-membership.json
 maintenance/_state/task-content-ledger.json
 maintenance/_state/task-content-ledger.json.lock
 maintenance/_state/wake-cause.json
+# (2026-08-24, close-out work-order item 3) Six more maintenance/_state/ files audited
+# individually against readers (grepped, not assumed) rather than swept as a class --
+# fleet-heartbeat.json/health-guard-beacon.json/retire-pending.json are durable registers
+# with an external or cross-session reader and stay TRACKED (see their own notes above /
+# in pause-resume-guard.py); these three are pure local-probe run state, same class as
+# phantom-dispatch.json above: dispatch-skip.json is dispatch-skip-probe.py's per-run
+# snapshot (regenerated every automation-health-monitor invocation, read only within that
+# same run); pause-resume-guard-state.json is load_state()/save_state()'s own private
+# checkpoint, read/written only by pause-resume-guard.py itself; task-progress/ is
+# task-progress-marker.py's per-task progress-marker directory, read only by that script
+# and pause-resume-guard.py's stall check, no external consumer found.
+maintenance/_state/dispatch-skip.json
+maintenance/_state/pause-resume-guard-state.json
+maintenance/_state/task-progress/

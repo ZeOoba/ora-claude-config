@@ -138,7 +138,6 @@
     "run": "user-invocable-only",
     "verify": "user-invocable-only",
     "security-review": "user-invocable-only",
-    "review": "user-invocable-only",
     "keybindings-help": "user-invocable-only",
     "loop": "user-invocable-only",
     "fewer-permission-prompts": "user-invocable-only"
