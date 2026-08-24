@@ -1,8 +1,0 @@
-{
-  "fleet": "cc",
-  "taskId": "ora-brainvault-session-backlog-catchup",
-  "step": 3,
-  "totalSteps": 6,
-  "note": "context: 4 sessions isRunning=true, 196 idle (informational only). Safe set still 0 - STOPPING before steps 4-6, nothing to stage/commit/push.",
-  "updatedAt": "2026-08-22T22:15:42.798219+00:00"
-}

@@ -28,11 +28,26 @@ failing to start (ora-task-integrity-guard was itself phantom-dispatched on
 2026-08-04 AND 2026-08-05, so an in-fleet check would have been silent on
 exactly the days it was needed).
 
-Exit 0 = no phantom dispatch in the window.
+Exit 0 = no phantom dispatch in the window, AND at least one dispatch was
+         actually examined.
 Exit 1 = [ACTION] phantom dispatch(es) found.
-Exit 2 = probe could not look (logs missing/unreadable). NEVER conflated with
-         exit 0 -- a zero that might mean "could not look" is a failure, not a
-         clean run (memory: feedback_verified_null_vs_inferred_null).
+Exit 2 = probe could not look. NEVER conflated with exit 0 -- a zero that might
+         mean "could not look" is a failure, not a clean run (memory:
+         feedback_verified_null_vs_inferred_null). Three ways to get here:
+           (a) logs missing/unreadable;
+           (b) FROZEN LOG -- logs read fine but the newest write predates the
+               look-back window, so they cannot answer the question;
+           (c) ZERO DISPATCHES -- log is fresh but carries no dispatch events
+               in the window, so the probe verified nothing.
+
+(b) was added 2026-08-24 after this probe reported exit 0 "OK -- every dispatch
+in the window confirmed" over a window holding >=12 real dispatches. Nothing
+was wrong with the parser: the desktop app had stopped writing to
+%APPDATA%\\Claude\\logs entirely at 2026-08-20 20:51, so all five logs were
+4 days stale and correctly contained nothing recent. The probe was reading
+real bytes and drawing a conclusion the bytes could not support. A log's
+READABILITY and its LIVENESS are different properties and this probe now
+checks both.
 
 Deliberately NO silent excepts: registry-membership-probe.py shipped an
 `except Exception: pass` around its log append and went quiet for two days
@@ -111,8 +126,14 @@ def default_log_paths():
 
 
 def load_lines(paths):
-    """Read every readable log. Raise ProbeError if NONE could be read."""
+    """Read every readable log. Raise ProbeError if NONE could be read.
+
+    Also returns the newest mtime across the logs actually read. A readable
+    but FROZEN log is the failure mode this probe was blind to until
+    2026-08-24 -- see the freshness gate in main().
+    """
     lines, read, problems = [], [], []
+    newest_mtime = None
     for p in paths:
         p = pathlib.Path(p)
         if not p.exists():
@@ -122,11 +143,14 @@ def load_lines(paths):
             with open(p, encoding="utf-8", errors="replace") as fh:
                 lines.extend(fh.read().splitlines())
             read.append(p.name)
+            mt = datetime.datetime.fromtimestamp(p.stat().st_mtime)
+            if newest_mtime is None or mt > newest_mtime:
+                newest_mtime = mt
         except OSError as exc:
             problems.append(f"{p.name}: {exc.__class__.__name__}: {exc}")
     if not read:
         raise ProbeError("no desktop log was readable -- " + "; ".join(problems))
-    return lines, read, problems
+    return lines, read, problems, newest_mtime
 
 
 def parse_events(lines):
@@ -253,9 +277,39 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     try:
-        lines, read, problems = load_lines(args.logs or default_log_paths())
+        lines, read, problems, newest_mtime = load_lines(args.logs or default_log_paths())
     except ProbeError as exc:
         print(f"[PROBE ERROR] phantom-dispatch-probe could not look: {exc}", file=sys.stderr)
+        print("This is NOT a clean run. Do not report the fleet healthy.", file=sys.stderr)
+        return 2
+
+    # ---- FROZEN-LOG GATE (added 2026-08-24) -------------------------------
+    # A readable log is not a LIVE log. On 2026-08-24 this probe returned
+    # exit 0 / "OK -- every dispatch in the window confirmed" over a window
+    # that contained at least 12 real dispatches, because the desktop app had
+    # silently stopped writing to %APPDATA%\Claude\logs entirely at
+    # 2026-08-20 20:51 -- every file in that directory was 4 days stale. The
+    # probe read five logs successfully, parsed them correctly, and found
+    # nothing, because there was nothing newer than the freeze to find.
+    # Reading stale bytes is "could not look", not "looked and it was clean"
+    # (memory: feedback_verified_null_vs_inferred_null).
+    now = datetime.datetime.now()
+    cutoff = now - datetime.timedelta(hours=args.hours)
+    if newest_mtime is not None and newest_mtime < cutoff:
+        age_h = (now - newest_mtime).total_seconds() / 3600.0
+        print("[PROBE ERROR] phantom-dispatch-probe could not look: desktop log is FROZEN.",
+              file=sys.stderr)
+        print(f"  newest write across {', '.join(read)}: "
+              f"{newest_mtime:%Y-%m-%d %H:%M:%S} ({age_h:.1f}h ago)", file=sys.stderr)
+        print(f"  look-back window is {args.hours:g}h, so the log cannot answer this question.",
+              file=sys.stderr)
+        print("  The app is dispatching (check the registry) but not logging -- restarting",
+              file=sys.stderr)
+        print("  Claude Desktop is the usual fix. Until then EVERY log-derived signal on this",
+              file=sys.stderr)
+        print("  machine is stale: dispatch-skip-probe's confirmation leg, host-availability-",
+              file=sys.stderr)
+        print("  report.py, and automation-health-monitor Step 0.08's log scan.", file=sys.stderr)
         print("This is NOT a clean run. Do not report the fleet healthy.", file=sys.stderr)
         return 2
 
@@ -277,6 +331,29 @@ def main(argv=None):
         print(f"  window    : last {args.hours:g}h")
         print(f"  confirmed : {confirmed}")
         print(f"  phantom   : {len(phantoms)} ({pct:.0f}% of {total} dispatches)")
+
+    # ---- ZERO-DISPATCH GATE (added 2026-08-24) ----------------------------
+    # Defence in depth behind the frozen-log gate above, for the case where
+    # the log is fresh but still carries no dispatch events at all: 0 of 0 is
+    # not a clean run, it is an unverified one. This probe's entire contract
+    # is "I checked N dispatches and none were phantom" -- with N=0 it checked
+    # nothing and must say so. During a ratified bounded fleet pause this
+    # exit 2 is the CORRECT answer, and the pause ledger is what explains it.
+    if total == 0:
+        print(f"\n[PROBE ERROR] no dispatch events at all in the last {args.hours:g}h "
+              f"across {', '.join(read)}.", file=sys.stderr)
+        print("  0 of 0 dispatches is UNVERIFIED, not clean -- the probe checked nothing.",
+              file=sys.stderr)
+        print("  Cross-check the registry: if lastRunAt HAS advanced for any task in this",
+              file=sys.stderr)
+        print("  window, the app is dispatching without logging and the log is unreliable",
+              file=sys.stderr)
+        print("  even though its mtime looks current. If the fleet was deliberately paused,",
+              file=sys.stderr)
+        print("  this is expected -- record it against the pause, do not record it as clean.",
+              file=sys.stderr)
+        return 2
+
     if phantoms:
         print("\n[ACTION] These dispatches never started -- lastRunAt says otherwise:")
         for p in phantoms:

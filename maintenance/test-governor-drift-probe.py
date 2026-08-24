@@ -1183,6 +1183,41 @@ def test_test_files_excluded_from_scan_unit():
     print("  PASS test_test_files_excluded_from_scan_unit")
 
 
+def test_eval_harness_run_logs_excluded_from_scan_unit():
+    """2026-08-24 path-class exemption: acquisition-underwriting-eval-harness/runs/*.json is
+    machine-generated RESULT narration (a deal's achieved DSCR/LTV at scoring time), never a
+    governor DECLARATION -- the same class as is_data_json's /data/ exemption, but these live
+    under .../runs/, not /data/. The 2026-08-23 floor-result suppressor (ba831dc) already needed
+    three rounds to cover two known LLM phrasings, and a THIRD phrasing
+    ("DSCR floor PASSES (~1.42x at 65%-LTV-bound refi sizing)" -- no explicit "vs 1.25x floor"
+    restatement for a canonical-anchored regex to lock onto) re-tripped it within 24h on
+    2026-08-24T163634Z_scheduled-poll.json:204 (liberty-office-park-west-chester-oh). Regex
+    whack-a-mole against unpredictable LLM narration is a losing, ever-recurring game for this
+    one file class; _is_eval_harness_run_log() ends it with a path exemption instead, same
+    precedent as _is_test_file(). The living governor stays declared in standards.md/rules.md/
+    CLAUDE.md/skills/capital-config.ts, all still fully in scope."""
+    m = _load_probe_module()
+    assert m._is_eval_harness_run_log(
+        r"C:\Users\Owner\ora-skills\acquisition-underwriting-eval-harness\runs\2026-08-24T163634Z_scheduled-poll.json")
+    assert m._is_eval_harness_run_log(
+        "/home/x/ora-skills/acquisition-underwriting-eval-harness/runs/2026-08-23T171623Z_scheduled-poll.json")
+    # case-insensitive, forward-slash-normalized:
+    assert m._is_eval_harness_run_log(
+        "/HOME/X/ORA-SKILLS/ACQUISITION-UNDERWRITING-EVAL-HARNESS/RUNS/foo.json")
+    # narrowly scoped to .../runs/ -- sibling eval-harness content stays IN scope (hand-authored,
+    # could legitimately declare/discuss the governor):
+    assert not m._is_eval_harness_run_log(
+        "/x/ora-skills/acquisition-underwriting-eval-harness/README.md")
+    assert not m._is_eval_harness_run_log(
+        "/x/ora-skills/acquisition-underwriting-eval-harness/golden-deals/some-deal.json")
+    # the real governor home (a DIFFERENT, similarly-named directory) must never match:
+    assert not m._is_eval_harness_run_log(
+        r"C:\Users\Owner\ora-skills\acquisition-underwriting\SKILL.md")
+    # a bare "runs" substring elsewhere must not false-match:
+    assert not m._is_eval_harness_run_log("/home/x/some-other-project/test-runs/file.json")
+    print("  PASS test_eval_harness_run_logs_excluded_from_scan_unit")
+
+
 def test_run_probe_survives_child_utf8_smartquote_e2e():
     """Regression (2026-08-22): run_probe()'s subprocess.run(..., text=True) call had no
     explicit encoding, so it decoded the probe's stdout using locale.getpreferredencoding()
@@ -2814,6 +2849,7 @@ def main():
     test_dated_audit_memory_file_excluded_unit()
     test_acquisition_underwriting_skill_file_clean()
     test_test_files_excluded_from_scan_unit()
+    test_eval_harness_run_logs_excluded_from_scan_unit()
     test_run_probe_survives_child_utf8_smartquote_e2e()
     # Registered here, BEFORE the e2e tests below -- an assert failure in an e2e test aborts
     # main() outright, so anything registered after those calls silently never runs on a plain
