@@ -22,6 +22,8 @@ test, so the suite never depends on (nor can be flipped by) a real live token
 from a concurrent session.
 """
 
+import importlib.util
+import inspect
 import json
 import os
 import shutil
@@ -212,6 +214,88 @@ def test_broken_token_module_fails_closed():
 
     shutil.rmtree(sandbox, ignore_errors=True)
     print("PASS test_broken_token_module_fails_closed")
+
+
+def test_stale_token_module_without_consume_param_fails_closed():
+    """SAME failure mode as test_broken_token_module_fails_closed, different trigger:
+    a version-SKEWED (not missing/broken) override_tokens.py whose token_grants() predates
+    the `consume` keyword this gate now always passes.
+
+    Adversarial review, 2026-08-24: a plain `from override_tokens import token_grants`
+    succeeds against such a module -- only the CALL fails, with TypeError, not the import.
+    Unguarded, that TypeError would propagate past the except-Exception import fallback
+    (which had already committed to TOKEN_CONTRACT_LOADED = True) and crash the process
+    with exit 1 -- non-blocking for PreToolUse, so the gated action would proceed with NO
+    authorization check at all. This environment routinely runs several concurrent sessions
+    and worktrees against a shared ~/.claude checkout, and override_tokens.py is edited for
+    the doctrine gate too, so this is a real reachable state, not a hypothetical.
+
+    The fix: ora-autonomy-gate.py's import block now inspects token_grants' signature and
+    raises (routing through the SAME fallback stub as a missing module) if `consume` is
+    absent. This test proves that guard actually fires, using a real stale module -- copied
+    from a fixture with the `consume` parameter stripped, not just deleted -- so this
+    exercises the ONE failure mode the signature check exists for that
+    test_broken_token_module_fails_closed does not.
+    """
+    sandbox = tempfile.mkdtemp(prefix="oag-stale-")
+    shutil.copytree(os.path.dirname(HOOK), os.path.join(sandbox, "hooks"))
+    gate = os.path.join(sandbox, "hooks", "ora-autonomy-gate.py")
+    stale_lib_path = os.path.join(sandbox, "hooks", "lib", "override_tokens.py")
+    real_lib_path = os.path.join(os.path.dirname(HOOK), "lib", "override_tokens.py")
+    with open(real_lib_path, "r", encoding="utf-8") as fh:
+        real_source = fh.read()
+    # Strip ONLY the `consume` parameter/behavior, leaving everything else (path resolution,
+    # freshness, parsing, scope/session checks) exactly as the real module -- this must be a
+    # believable "older version", not a stub, or the test would not be exercising the actual
+    # signature-mismatch path.
+    stale_source = real_source.replace(
+        "def token_grants(session_id, tier, extra_check=None, consume=True):",
+        "def token_grants(session_id, tier, extra_check=None):",
+    ).replace(
+        "if consume and tier.single_use and not consume_token(path):",
+        "if tier.single_use and not consume_token(path):",
+    )
+    with open(stale_lib_path, "w", encoding="utf-8") as fh:
+        fh.write(stale_source)
+    # Verify the fixture STRUCTURALLY (via the actual function signature, not a string/prose
+    # search -- the docstring legitimately still says "consume" throughout its explanation of
+    # WHY the parameter is being removed) before trusting the test that follows.
+    _spec = importlib.util.spec_from_file_location("stale_override_tokens", stale_lib_path)
+    _stale_mod = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_stale_mod)
+    assert "consume" not in inspect.signature(_stale_mod.token_grants).parameters, (
+        "fixture setup failed -- the stale token_grants() still has a 'consume' parameter; "
+        "this test would not be exercising the version-skew path it claims to")
+
+    def run_stale(payload):
+        env = dict(os.environ)
+        env["ORA_OVERRIDE_SESSIONS_DIR"] = tempfile.mkdtemp(prefix="oag-stale-sess-")
+        payload = dict(payload)
+        payload["session_id"] = SESSION_A
+        proc = subprocess.run([sys.executable, gate], input=json.dumps(payload),
+                              capture_output=True, text=True, env=env)
+        return proc.returncode, proc.stderr
+
+    for label, payload in (
+        ("prod deploy", bash_payload(PROD_DEPLOY)),
+        ("external send", bash_payload(
+            "powershell -File send-via-outlook.ps1 -To broker@example.com -Subject x -Body y")),
+    ):
+        rc, err = run_stale(payload)
+        assert rc == 2, (
+            "%s must BLOCK (exit 2) against a stale override_tokens.py missing the "
+            "'consume' parameter, got exit %s -- exit 1 (an uncaught TypeError) is "
+            "NON-BLOCKING for PreToolUse and would let the action through with NO "
+            "authorization check at all.\n%s" % (label, rc, err))
+
+    # An UNGATED call must still pass -- the signature guard degrades exactly like any other
+    # broken-module case, not more aggressively.
+    rc, err = run_stale(write_payload("C:/proj/src/index.html"))
+    assert rc == 0, (
+        "an ungated call must still pass with a stale module (got exit %s)\n%s" % (rc, err))
+
+    shutil.rmtree(sandbox, ignore_errors=True)
+    print("PASS test_stale_token_module_without_consume_param_fails_closed")
 
 
 def test_broken_email_send_tier_fails_closed():
@@ -587,27 +671,130 @@ def test_website_token_does_not_authorize_external_send():
 # FIX 4 -- deploy/send tier: single-use + short TTL
 # --------------------------------------------------------------------------
 
-def test_deploy_token_is_single_use():
-    """Ratified 2026-07-16: the deploy grant is consumed at gate-pass."""
+def test_gate_2a_deploy_check_peeks_and_does_not_consume():
+    """SUPERSEDES the pre-2026-08-24 'deploy grant is consumed at gate-pass' rule.
+
+    Gate 2a is the fast, explicitly-documented-as-indirection-blind PreToolUse pre-check
+    (see the module docstring's ALSO DEFERRED section) -- it is NOT the authoritative
+    enforcement point for a CLI deploy; netlify-guard.js's check_website_deploy.py is (it
+    runs after argv is fully resolved, immune to indirection, and its own docstring already
+    says the grant is "consumed as a side effect of THIS check"). Before 2026-08-24, Gate 2a
+    ALSO consumed the same single-use token via override_active()'s default consume=True,
+    so a real `netlify deploy --build --prod` run reached exit 0 here (token burned) and
+    then exit 5 (DENY) inside netlify-guard.js's own check moments later -- a correctly
+    authorized deploy could never complete. Proven live 2026-08-24, root-caused, and fixed
+    by passing consume=False at this call site (see override_tokens.token_grants' own
+    docstring for the full two-layer rationale). This test locks in the fix: Gate 2a must
+    grant WITHOUT touching the token file, and must do so again identically on a second
+    check with the SAME still-valid token -- proving it is a genuine peek, not merely
+    delayed consumption. test_check_website_deploy_consumes_after_gate_2a_peek below proves
+    the OTHER half: the downstream layer still enforces single-use correctly."""
     d = fresh_sessions_dir()
     path = mint(d, "allow-website-deploy", "website-deploy")
     rc, out, err = run_hook(bash_payload(PROD_DEPLOY), sessions_dir=d)
-    assert rc == 0, "first deploy must pass, got %s (%s)" % (rc, err)
-    assert not os.path.exists(path), "token must be consumed (deleted) at gate-pass"
+    assert rc == 0, "first deploy check must pass, got %s (%s)" % (rc, err)
+    assert os.path.exists(path), (
+        "Gate 2a must NOT consume the token -- it is a peek; the downstream "
+        "check_website_deploy.py is the sole intended consumer")
     rc, out, err = run_hook(bash_payload(PROD_DEPLOY), sessions_dir=d)
-    assert rc == 2, "second deploy on a consumed token must block, got %s (%s)" % (rc, err)
-    print("PASS test_deploy_token_is_single_use")
+    assert rc == 0, (
+        "a second Gate 2a check against the SAME still-valid token must also pass "
+        "(not merely delayed single-use) -- got %s (%s)" % (rc, err))
+    print("PASS test_gate_2a_deploy_check_peeks_and_does_not_consume")
 
 
-def test_external_send_token_is_single_use():
+def test_check_website_deploy_consumes_after_gate_2a_peek():
+    """The direct regression test for the 2026-08-24 incident: run the REAL two-layer
+    flow end to end -- Gate 2a's PreToolUse peek, then the actual downstream
+    check_website_deploy.py subprocess netlify-guard.js invokes -- and prove a single,
+    freshly-minted token satisfies BOTH. Before the fix this sequence failed at the
+    second step with exit 1 (DENY), reproducing exit 5 from netlify-guard.js in production."""
+    d = fresh_sessions_dir()
+    mint(d, "allow-website-deploy", "website-deploy")
+    rc, out, err = run_hook(bash_payload(PROD_DEPLOY), sessions_dir=d)
+    assert rc == 0, "Gate 2a must pass first, got %s (%s)" % (rc, err)
+    check_script = os.path.join(HERE, "lib", "check_website_deploy.py")
+    env = dict(os.environ)
+    env["ORA_OVERRIDE_SESSIONS_DIR"] = d
+    proc = subprocess.run(
+        [sys.executable, check_script, "--session", SESSION_A],
+        capture_output=True, text=True, env=env,
+    )
+    assert proc.returncode == 0, (
+        "check_website_deploy.py must ALLOW using the same token Gate 2a already peeked "
+        "at, got exit %s (%s) -- this is the exact incident this fix closes"
+        % (proc.returncode, proc.stderr))
+    proc2 = subprocess.run(
+        [sys.executable, check_script, "--session", SESSION_A],
+        capture_output=True, text=True, env=env,
+    )
+    assert proc2.returncode == 1, (
+        "a second check_website_deploy.py call must DENY -- single-use is still enforced, "
+        "just at the correct (downstream) layer now, got exit %s" % proc2.returncode)
+    print("PASS test_check_website_deploy_consumes_after_gate_2a_peek")
+
+
+def test_gate_1_send_check_peeks_and_does_not_consume():
+    """Same fix, same rationale, applied to the EXTERNAL_SEND sibling of the deploy bug
+    (Gate 1 / check_external_send.py inside send-via-outlook.ps1). See
+    test_gate_2a_deploy_check_peeks_and_does_not_consume's docstring for the full story."""
     d = fresh_sessions_dir()
     path = mint(d, "allow-external-send", "external-send", recipients=["broker@example.com"])
     rc, out, err = run_hook(send_payload("broker@example.com"), sessions_dir=d)
-    assert rc == 0, "first send must pass, got %s (%s)" % (rc, err)
-    assert not os.path.exists(path), "send token must be consumed at gate-pass"
+    assert rc == 0, "first Gate 1 check must pass, got %s (%s)" % (rc, err)
+    assert os.path.exists(path), (
+        "Gate 1 must NOT consume the token -- check_external_send.py is the sole "
+        "intended consumer")
     rc, out, err = run_hook(send_payload("broker@example.com"), sessions_dir=d)
-    assert rc == 2, "second send on a consumed token must block, got %s (%s)" % (rc, err)
-    print("PASS test_external_send_token_is_single_use")
+    assert rc == 0, (
+        "a second Gate 1 check against the SAME still-valid token must also pass, "
+        "got %s (%s)" % (rc, err))
+    print("PASS test_gate_1_send_check_peeks_and_does_not_consume")
+
+
+def test_check_external_send_consumes_after_gate_1_peek():
+    """End-to-end regression test mirroring
+    test_check_website_deploy_consumes_after_gate_2a_peek, for the email-send path."""
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=["broker@example.com"])
+    rc, out, err = run_hook(send_payload("broker@example.com"), sessions_dir=d)
+    assert rc == 0, "Gate 1 must pass first, got %s (%s)" % (rc, err)
+    check_script = os.path.join(HERE, "lib", "check_external_send.py")
+    env = dict(os.environ)
+    env["ORA_OVERRIDE_SESSIONS_DIR"] = d
+    proc = subprocess.run(
+        [sys.executable, check_script, "--session", SESSION_A],
+        input="broker@example.com\n", capture_output=True, text=True, env=env,
+    )
+    assert proc.returncode == 0, (
+        "check_external_send.py must ALLOW using the same token Gate 1 already peeked "
+        "at, got exit %s (%s)" % (proc.returncode, proc.stderr))
+    proc2 = subprocess.run(
+        [sys.executable, check_script, "--session", SESSION_A],
+        input="broker@example.com\n", capture_output=True, text=True, env=env,
+    )
+    assert proc2.returncode == 1, (
+        "a second check_external_send.py call must DENY -- single-use is still enforced "
+        "at the correct layer, got exit %s" % proc2.returncode)
+    print("PASS test_check_external_send_consumes_after_gate_1_peek")
+
+
+def test_netlify_mcp_deploy_token_is_still_single_use():
+    """ASYMMETRY LOCK, not a regression of the 2026-08-24 fix: the Netlify MCP
+    mutating-tool path (Gate 2c/check_mcp) has NO downstream wrapped-binary layer to
+    defer to -- it is the ONLY enforcement point for that action, so it must keep
+    consuming the token itself (override_active's default consume=True). If a future
+    edit accidentally set consume=False here too, a single grant could authorize
+    unlimited MCP prod-deploy-equivalent calls within the token's 5-minute window."""
+    d = fresh_sessions_dir()
+    path = mint(d, "allow-website-deploy", "website-deploy")
+    rc, out, err = run_hook(mcp_payload("mcp__netlify__project-updater"), sessions_dir=d)
+    assert rc == 0, "first MCP updater call must pass, got %s (%s)" % (rc, err)
+    assert not os.path.exists(path), (
+        "the MCP path has no downstream check -- it MUST consume the token itself")
+    rc, out, err = run_hook(mcp_payload("mcp__netlify__project-updater"), sessions_dir=d)
+    assert rc == 2, "a second MCP updater call on a consumed token must block, got %s (%s)" % (rc, err)
+    print("PASS test_netlify_mcp_deploy_token_is_still_single_use")
 
 
 def test_write_token_is_multi_use():
