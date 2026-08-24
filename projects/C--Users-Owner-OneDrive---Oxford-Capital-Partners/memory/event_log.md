@@ -5,13 +5,22 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-23T21:34:35.889Z
+  modified: 2026-08-24T17:32:11.772Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-24 — T1 owner-outreach letter-format patch landed + this week's set released (46 letters, wave-capped to 50)
+
+- Landed Format Spec v1.1 into `build_t1_letterpack.py` (Investment Candidates -- 2026 folder): margins 1.50"/1.00" top/bottom, letterhead-mode gating (typeset firm block suppressed on pre-printed stock), signature gap 46pt, street address struck from the footer, `fit_re_line`/`split_address_block`/`prose_property_list` wired in for the two documented overflow modes, and a mandatory post-generation `verify_pack` integrity gate (Word COM -> PDF, one-salutation-per-page check) -- new `_docx_to_pdf.ps1` (parameterized, replaces the one-off `_convert_pack_to_pdf.ps1`).
+- `t1_letter_format.py` + its FormatSpec + SKILL.md v1.3 were already landed in `ora-skills` by another session earlier the same day (commit `4c9206d`, rescued from a cache-ahead state). This session placed the module+spec into the target folder and did the actual generator integration, which had not been done -- the Cowork session that specified the patch had no connected folder and could not reach either path.
+- TDD: wrote `test_t1_letter_format.py` (36 checks) first, watched it fail (11/36) against the unpatched generator, then patched. Caught a real bug in the process -- `space_after` was being double-wrapped in `Pt()` (the existing `add()` helper already applies `Pt()` to its argument), which would have written a ~7-billion-point signature gap into every letter.
+- Verified twice against real production data before release: a 10-letter wave-capped regen, then the full 154-letter eligible queue uncapped -- both `verify_pack` green, independently re-confirmed via direct PDF text extraction (no stray street address, no typeset firm block, longest real Re: line came in at 75/76 chars).
+- Released this week's set: Gabriel chose to wave-cap at the ratified 50/week rather than the full 154 eligible, since `--wave-cap` is NOT auto-derived from `wave_cap_per_week` in outreach-ratification.json -- it must be passed explicitly on every release, a real gap worth knowing for future weeks. Ran `owner_outreach_weekly.py --wave-cap 50` (self-check OK, live Notion suppression pull, vintage ratification standing-cleared, master 28d stale WARN-only per the 2026-07-12 relax) -> 46 letters / 50 properties in `20260824_Owner-Outreach_T1-Letter-Pack_Phase1_v01.docx`, `verify_pack` green, 0 net-new (all 187 promoted parcels already in the ledger -- `promote_netnew.py` and `--commit` ran as no-ops), 51 held on the cadence/ladder gate, 86 deferred beyond the wave cap.
+- Did NOT run `--released` -- that flag logs the pack as physically mailed and drives the 21-day cadence gate for every future run; it is Gabriel's step, after he signs and mails the 46 letters.
+- Post-release: confirmed no pack files were left open in Word (the one open Word window was an unrelated pre-existing template document, left untouched); re-ran `owner_outreach_weekly.py --self-check` afterward -- 10/10 dependencies present, environment clean.
 ## 2026-08-24 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
 
 - The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `47a599db-2cb9-4dfa-a427-b27ce1367f4c` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
