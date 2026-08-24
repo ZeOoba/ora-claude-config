@@ -1,46 +1,222 @@
 {
- "ts": "2026-08-14T15:16:21.204763+00:00",
+ "ts": "2026-08-24T15:17:43.780164+00:00",
  "log_scan_ok": true,
  "rows": [
   {
    "fleet": "cc",
-   "taskId": "ora-am-brief",
+   "taskId": "ora-aaos-publish-contracts",
    "verdict": "THROTTLED-THEN-RECOVERED",
-   "last_skip": "2026-08-14 07:57:23",
-   "skips_in_window": 1,
+   "last_skip": "2026-08-24 10:18:27",
+   "skips_in_window": 2,
    "reasons": [
     "global_limit"
    ],
    "recovered_by": [
-    "confirmed_task_run",
-    "spawn_line",
     "lastRunAt"
    ],
-   "skip_age_secs": 11937.0,
-   "lastRunAt": "2026-08-14 07:59:20",
-   "spawn": "2026-08-14 07:59:19",
-   "confirmed": "2026-08-14 07:59:20",
-   "dispatch_confirmed_only": false
+   "skip_age_secs": 3555.7,
+   "lastRunAt": "2026-08-24 10:19:28",
+   "spawn": "-",
+   "confirmed": "-",
+   "dispatch_confirmed_only": true
   },
   {
    "fleet": "cc",
-   "taskId": "ora-lease-snapshot-refresh",
+   "taskId": "ora-acquisition-underwriting-eval-harness",
    "verdict": "THROTTLED-THEN-RECOVERED",
-   "last_skip": "2026-08-14 08:06:19",
+   "last_skip": "2026-08-23 12:59:48",
+   "skips_in_window": 15,
+   "reasons": [
+    "global_limit"
+   ],
+   "recovered_by": [
+    "lastRunAt"
+   ],
+   "skip_age_secs": 80273.9,
+   "lastRunAt": "2026-08-23 13:00:49",
+   "spawn": "-",
+   "confirmed": "-",
+   "dispatch_confirmed_only": true
+  },
+  {
+   "fleet": "cc",
+   "taskId": "ora-am-brief",
+   "verdict": "THROTTLED-THEN-RECOVERED",
+   "last_skip": "2026-08-24 10:22:27",
+   "skips_in_window": 7,
+   "reasons": [
+    "global_limit"
+   ],
+   "recovered_by": [
+    "lastRunAt"
+   ],
+   "skip_age_secs": 3315.8,
+   "lastRunAt": "2026-08-24 10:23:28",
+   "spawn": "-",
+   "confirmed": "-",
+   "dispatch_confirmed_only": true
+  },
+  {
+   "fleet": "cc",
+   "taskId": "ora-ar-feed-sweep",
+   "verdict": "THROTTLED-THEN-RECOVERED",
+   "last_skip": "2026-08-24 10:53:27",
+   "skips_in_window": 36,
+   "reasons": [
+    "global_limit"
+   ],
+   "recovered_by": [
+    "lastRunAt"
+   ],
+   "skip_age_secs": 1455.4,
+   "lastRunAt": "2026-08-24 10:54:28",
+   "spawn": "-",
+   "confirmed": "-",
+   "dispatch_confirmed_only": true
+  },
+  {
+   "fleet": "cc",
+   "taskId": "ora-brainvault-session-backlog-catchup",
+   "verdict": "THROTTLED-THEN-RECOVERED",
+   "last_skip": "2026-08-23 13:05:49",
+   "skips_in_window": 21,
+   "reasons": [
+    "global_limit"
+   ],
+   "recovered_by": [
+    "lastRunAt"
+   ],
+   "skip_age_secs": 79913.8,
+   "lastRunAt": "2026-08-23 13:06:49",
+   "spawn": "-",
+   "confirmed": "-",
+   "dispatch_confirmed_only": true
+  },
+  {
+   "fleet": "cc",
+   "taskId": "ora-cc-snapshot-refresh",
+   "verdict": "THROTTLED-THEN-RECOVERED",
+   "last_skip": "2026-08-24 10:47:27",
+   "skips_in_window": 30,
+   "reasons": [
+    "global_limit"
+   ],
+   "recovered_by": [
+    "lastRunAt"
+   ],
+   "skip_age_secs": 1815.5,
+   "lastRunAt": "2026-08-24 10:48:28",
+   "spawn": "-",
+   "confirmed": "-",
+   "dispatch_confirmed_only": true
+  },
+  {
+   "fleet": "cc",
+   "taskId": "ora-command-center-mirror-drift-check",
+   "verdict": "THROTTLED-THEN-RECOVERED",
+   "last_skip": "2026-08-24 10:45:27",
+   "skips_in_window": 6,
+   "reasons": [
+    "global_limit"
+   ],
+   "recovered_by": [
+    "lastRunAt"
+   ],
+   "skip_age_secs": 1935.5,
+   "lastRunAt": "2026-08-24 10:46:28",
+   "spawn": "-",
+   "confirmed": "-",
+   "dispatch_confirmed_only": true
+  },
+  {
+   "fleet": "cc",
+   "taskId": "ora-deal-aging-sla",
+   "verdict": "THROTTLED-THEN-RECOVERED",
+   "last_skip": "2026-08-24 10:38:27",
+   "skips_in_window": 21,
+   "reasons": [
+    "global_limit"
+   ],
+   "recovered_by": [
+    "lastRunAt"
+   ],
+   "skip_age_secs": 2355.7,
+   "lastRunAt": "2026-08-24 10:39:29",
+   "spawn": "-",
+   "confirmed": "-",
+   "dispatch_confirmed_only": true
+  },
+  {
+   "fleet": "cc",
+   "taskId": "ora-deal-command-board",
+   "verdict": "THROTTLED-THEN-RECOVERED",
+   "last_skip": "2026-08-24 10:26:27",
    "skips_in_window": 9,
    "reasons": [
     "global_limit"
    ],
    "recovered_by": [
-    "confirmed_task_run",
-    "spawn_line",
     "lastRunAt"
    ],
-   "skip_age_secs": 11401.8,
-   "lastRunAt": "2026-08-14 08:07:20",
-   "spawn": "2026-08-14 08:07:19",
-   "confirmed": "2026-08-14 08:07:20",
-   "dispatch_confirmed_only": false
+   "skip_age_secs": 3075.8,
+   "lastRunAt": "2026-08-24 10:27:28",
+   "spawn": "-",
+   "confirmed": "-",
+   "dispatch_confirmed_only": true
+  },
+  {
+   "fleet": "cc",
+   "taskId": "ora-lease-snapshot-refresh",
+   "verdict": "THROTTLED-THEN-RECOVERED",
+   "last_skip": "2026-08-24 10:49:27",
+   "skips_in_window": 32,
+   "reasons": [
+    "global_limit"
+   ],
+   "recovered_by": [
+    "lastRunAt"
+   ],
+   "skip_age_secs": 1695.4,
+   "lastRunAt": "2026-08-24 10:50:29",
+   "spawn": "-",
+   "confirmed": "-",
+   "dispatch_confirmed_only": true
+  },
+  {
+   "fleet": "cc",
+   "taskId": "ora-pm-daily-crons",
+   "verdict": "THROTTLED-THEN-RECOVERED",
+   "last_skip": "2026-08-24 10:52:27",
+   "skips_in_window": 55,
+   "reasons": [
+    "global_limit"
+   ],
+   "recovered_by": [
+    "lastRunAt"
+   ],
+   "skip_age_secs": 1515.4,
+   "lastRunAt": "2026-08-24 10:53:28",
+   "spawn": "-",
+   "confirmed": "-",
+   "dispatch_confirmed_only": true
+  },
+  {
+   "fleet": "cc",
+   "taskId": "ora-sofr-direct-prefetch",
+   "verdict": "THROTTLED-THEN-RECOVERED",
+   "last_skip": "2026-08-24 10:19:27",
+   "skips_in_window": 2,
+   "reasons": [
+    "global_limit"
+   ],
+   "recovered_by": [
+    "lastRunAt"
+   ],
+   "skip_age_secs": 3495.6,
+   "lastRunAt": "2026-08-24 10:20:27",
+   "spawn": "-",
+   "confirmed": "-",
+   "dispatch_confirmed_only": true
   }
  ],
  "unverifiable": []
