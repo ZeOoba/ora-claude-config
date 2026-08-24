@@ -1839,6 +1839,34 @@ def _is_test_file(path):
     return bn.endswith(".py") and (bn.startswith("test-") or bn.startswith("test_")
                                    or bn.endswith("_test.py"))
 
+def _is_eval_harness_run_log(path):
+    """2026-08-24 path-class exemption. acquisition-underwriting-eval-harness/runs/*.json is
+    machine-generated RESULT narration -- a deal's achieved DSCR/LTV at scoring time, quoted in
+    LLM-authored floor_result_variants prose -- never a governor DECLARATION. Same class as
+    is_data_json's /data/ exemption (per-DEAL values, not governor text), but these live under
+    .../runs/, not /data/, so that check doesn't reach them.
+
+    The 2026-08-23 floor-result suppressor (ba831dc, ~220 lines, 4 rounds of adversarial review)
+    already narrowly covers two known phrasings ("DSCR floor PASSES (1.42x vs 1.25x floor at
+    65%-LTV sizing)") by requiring the sentence to explicitly restate "vs 1.25x floor" as its
+    canonical anchor. A third phrasing re-tripped it within 24h:
+    2026-08-24T163634Z_scheduled-poll.json:204 (liberty-office-park-west-chester-oh) --
+    "DSCR floor PASSES (~1.42x at 65%-LTV-bound refi sizing)" -- never restates 1.25x at all, so
+    no canonical-anchored regex can lock onto it without abandoning the anchor guarantee that
+    makes the existing suppressor safe. Regex whack-a-mole against unpredictable per-run LLM
+    phrasing is a losing, ever-recurring game for this one file class (flagged as the cheaper
+    alternative in ba831dc's own commit message but deferred to Gabriel; now empirically
+    recurred, so taken here instead of a fourth narrow regex branch).
+
+    A real governor drift in what the acquisition-underwriting skill COMPUTES would first drift
+    at its declaration in standards.md / rules.md / CLAUDE.md / skills / capital-config.ts, all
+    still fully in scope -- this file class only ever narrates a downstream result. Path-based
+    (not skip_names by exact name), since a new dated run file is created on every scheduled
+    poll. Narrowly scoped to .../runs/ specifically -- sibling eval-harness content (README,
+    golden-deal fixtures) is hand-authored and stays fully in scope, matching this module's
+    precision-over-recall design throughout."""
+    return "/acquisition-underwriting-eval-harness/runs/" in path.replace("\\", "/").lower()
+
 def main():
     quiet = "--quiet" in sys.argv
     findings = []
@@ -1903,7 +1931,7 @@ def main():
             basename = os.path.basename(path)
             if (os.path.abspath(path) == self_path or basename in skip_names
                     or EVENT_LOG_ARCHIVE_RE.match(basename) or DATED_AUDIT_RE.match(basename)
-                    or _is_test_file(path)):
+                    or _is_test_file(path) or _is_eval_harness_run_log(path)):
                 continue
             low_path = path.lower().replace("\\", "/")
             is_code = low_path.endswith((".ts", ".tsx", ".js"))
