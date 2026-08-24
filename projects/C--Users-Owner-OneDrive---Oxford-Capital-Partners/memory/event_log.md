@@ -12,6 +12,14 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-24 — owner_outreach_weekly.py: --wave-cap now defaults to the ratified wave_cap_per_week
+
+- `--wave-cap` previously defaulted to `None` (uncapped) when the flag was omitted, even though `outreach-ratification.json`'s `targeting.wave_cap_per_week: 50` documents the hand-addressing budget it's meant to enforce. Nothing actually applied it. This was found live during T1 letter-format-patch verification: an unqualified regen ran the full 154-letter eligible queue with no warning.
+- Added `resolve_wave_cap(explicit, ratification_path=OUTREACH_RATIFICATION)` to `owner_outreach_weekly.py`: omitted `--wave-cap` now resolves to the ratified figure; explicit `--wave-cap 0` is a deliberate "run this release uncapped" override (0 is never a real cap); any other explicit `--wave-cap N` still passes through unchanged. Falls back to `None` (uncapped, unchanged prior behavior) if the ratification file is missing, unreadable, or carries no positive `wave_cap_per_week`.
+- Tests: extended `test_owner_outreach_ladder.py` with 10 checks (default pickup, explicit override, explicit 0, missing/malformed ratification file, missing key, a ratified 0, a different ratified figure to prove it isn't hardcoded) -- all 70 pass.
+- Verified live: a real scan run with `--wave-cap` omitted entirely printed `[WAVE-CAP] --wave-cap not passed -- defaulting to the ratified wave_cap_per_week (50)` and produced a byte-identical pack to the explicit `--wave-cap 50` run from the same day's release.
+- No git repo exists in `Investment Candidates -- 2026`, so there is no commit for this change -- current state of `owner_outreach_weekly.py` + `test_owner_outreach_ladder.py` snapshotted to `_archive/2026-08-24_wave-cap-default-patch_checkpoint/` as the closest equivalent. Note: unlike the same day's `build_t1_letterpack.py` patch, the pre-edit copy of `owner_outreach_weekly.py` was not archived before editing -- recoverable only from this session's transcript, not a file-level backup.
+
 ## 2026-08-24 — Code-surface close-out of the 2026-08-24 PD/PUD Cowork session's remaining gaps (items 1–7, 9, 10 of 10)
 
 Closed the punch-list left after the Cowork session's 7-commit `ora-skills` landing (`a292937`..`1b60a49`). Item 8 (754 IRR Model refi rebase) is explicitly gated on Gabriel per Hard Invariant 4 and was NOT touched — analysis-only, asked separately.
