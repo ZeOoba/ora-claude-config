@@ -40,6 +40,17 @@ runs (reinstall / session-dir rotation) before escalating to [ACTION] -- the
 2026-07-05 reinstall's mid-recovery probe cried CRITICAL on a store that reappeared
 hours later (2026-07-08).
 
+ORPHANED_FILEPATH (2026-08-22): flags ANY recurring registry entry -- enabled or
+DISABLED -- whose filePath no longer exists on disk. task-folder-registration-
+probe.py's ORPHANED_REGISTRATION check covers similar ground but is deliberately
+enabled-only ("won't fire, not actively dangerous"), so a DISABLED/pending-
+retirement entry with a dangling filePath is invisible to it by design. Confirmed
+case: the ora-passed-deal-tracker LAMS entry sat enabled:false with its SKILL.md
+already archived away (retirement step 1 of 2 done, registry row never dropped)
+and nothing alarmed. This check has no reconciliation window (unlike drops) --
+once the registry row is actually deleted, the check has nothing left to flag,
+so it self-clears on completion rather than needing a RATIFIED/retired-prose gate.
+
 Run daily from the ora-setup-audit STEP 1 block. First run writes a baseline.
 """
 import datetime
@@ -258,6 +269,40 @@ def all_recurring_states(path):
     return out
 
 
+def all_recurring_entries(path):
+    """[{'id','filePath','enabled'}] for every recurring (5-field cron) task in
+    the store, regardless of enabled state. None if unreadable. Companion to
+    all_recurring_states() -- that one drops filePath, which orphaned_filepaths()
+    needs."""
+    try:
+        d = json.load(open(path, encoding="utf-8"))
+    except Exception:
+        return None
+    out = []
+    for t in d.get("scheduledTasks", []) or []:
+        expr = t.get("cronExpression")
+        if isinstance(expr, str) and len(expr.split()) == 5:
+            out.append({"id": t.get("id") or "?", "filePath": t.get("filePath"),
+                        "enabled": bool(t.get("enabled"))})
+    return out
+
+
+def orphaned_filepaths(entries, exists_fn=os.path.isfile):
+    """entries: [{'id','filePath','enabled'}] (any enabled state). Sorted ids
+    whose filePath is set but does not resolve on disk.
+
+    Deliberately NOT enabled-only, unlike task-folder-registration-probe.py's
+    ORPHANED_REGISTRATION -- the failure mode this closes is a DISABLED /
+    pending-retirement row whose SKILL.md is already gone, which an
+    enabled-only check treats as harmless ("won't fire"). A dangling filePath
+    on a row that is otherwise done being retired is exactly the half-executed
+    state that should keep alarming until the row itself is deleted. Pure."""
+    return sorted(
+        e["id"] for e in entries
+        if e.get("filePath") and not exists_fn(e["filePath"])
+    )
+
+
 def classify_absent(prior_enabled_ids, current_states):
     """Split ids that left the ENABLED set into (disabled_regressions, true_drops).
 
@@ -355,6 +400,7 @@ def splice_generated_block(content, block):
 def main():
     current, current_detail, current_states, missing_stores = {}, {}, {}, []
     current_onetime = {}
+    current_entries = {}
     all_labels = ["cc", "lams"]
     for label, store in (("cc", "claude-code-sessions"),
                          ("lams", "local-agent-mode-sessions")):
@@ -367,6 +413,7 @@ def main():
         current_detail[label] = detail
         current_states[label] = all_recurring_states(p) or {}
         current_onetime[label] = enabled_onetime_detail(p) or []
+        current_entries[label] = all_recurring_entries(p) or []
 
     prior, prior_streaks = {}, {}
     if os.path.isfile(STATE):
@@ -399,6 +446,12 @@ def main():
 
     streaks = next_missing_streaks(prior_streaks, set(missing_stores), all_labels)
 
+    orphaned = {}
+    for label, entries in current_entries.items():
+        found = orphaned_filepaths(entries)
+        if found:
+            orphaned[label] = found
+
     ts = datetime.datetime.now().isoformat(timespec="seconds")
     os.makedirs(STATE_DIR, exist_ok=True)
     with open(STATE, "w", encoding="utf-8") as f:
@@ -421,7 +474,7 @@ def main():
 
     line = (f"{ts} {_roster('cc')} {_roster('lams')}"
             f" drops={drops or '-'} regressions={regressions or '-'} adds={adds or '-'}"
-            f" missing_stores={missing_stores or '-'}")
+            f" missing_stores={missing_stores or '-'} orphaned_filepaths={orphaned or '-'}")
     try:
         with open(LOG, "a", encoding="utf-8") as f:
             f.write(line + "\n")
@@ -475,9 +528,23 @@ def main():
     except Exception as e:
         print(f"  WARN session-context update skipped: {e}")
 
+    # ORPHANED_FILEPATH is a direct point-in-time check on the current registry --
+    # unlike drops/regressions/adds it needs no prior snapshot to diff against, so
+    # it must fire even on the baseline (first-ever) run, before the `not prior`
+    # early return below.
+    bad = False
+    if orphaned:
+        for label, ids in orphaned.items():
+            print(f"  [ACTION] ORPHANED_FILEPATH in {label}: {', '.join(ids)} -- "
+                  "registry row's filePath no longer exists on disk (file deleted/"
+                  "moved without dropping the registry entry -- e.g. a half-executed "
+                  "retirement). Complete the retirement (delete_scheduled_task) or "
+                  "restore the file. Checked regardless of enabled state.")
+            bad = True
+
     if not prior:
         print("  BASELINE written -- no prior snapshot to diff against.")
-        return 0
+        return 1 if bad else 0
     if adds:
         for label, ids in adds.items():
             print(f"  INFO new in {label}: {', '.join(ids)}")
@@ -486,7 +553,6 @@ def main():
         print("  INFO fleet membership CHANGED this run -- if a recovery/rebuild is in "
               "progress, re-run the probe until two consecutive clean runs before "
               "trusting the generated roster as settled.")
-    bad = False
     if missing_stores:
         for label in missing_stores:
             streak = streaks.get(label, 1)

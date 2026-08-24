@@ -83,6 +83,15 @@ Checks:
      report PARTIAL rather than clean.
      (Checks 12 and 13 are registered in main() but were never added to this
      list -- pre-existing gap, noted 2026-08-12, not fixed here.)
+ 15. Skill frontmatter-version vs changelog-version drift (2026-08-22): for
+     EVERY real skill dir under SKILL_SCAN_ROOTS (not just those named in
+     doctrine), extract the skill's own version (body H1 heading marker
+     first, else the frontmatter description's trailing 'vX.Y (' token --
+     see reference_skill_description_version_extraction_gotcha.md) and the
+     top entry under its '## Changelog' heading. Flag a mismatch     [WARN only]
+     Fail-open per skill: no H1, no description version, or no Changelog
+     section at all just means nothing to compare -- most skills carry no
+     changelog section, and that is not itself a finding.
 
 Exit 1 = any hard [MISSING] (command/file/skill absent, size budget, dated
          annotation, confidential leak), or CLAUDE.md / the EOS section is
@@ -530,6 +539,115 @@ def collect_skill_dirs(roots, prune):
             if "SKILL.md" in filenames:
                 names.add(os.path.basename(dirpath).lower())
     return names, errs, absent_roots
+
+
+# --- Check 15 (2026-08-22): skill frontmatter-version vs changelog-version
+# drift. See reference_skill_description_version_extraction_gotcha.md -- a
+# bare 'vX.Y' in a skill's frontmatter description is not reliably the FILE
+# version (a sub-component/schema version, or a superseded entry stacked
+# ahead of the true current one, can also match 'vX.Y('). That memory's rule:
+# prefer the body H1 heading's version marker; only fall back to the
+# frontmatter description's trailing 'vX.Y (' token when no H1 marker exists.
+# A skill whose own version and its changelog's TOP entry disagree is exactly
+# the drift a recent case (deal-retirement, 2026-07-21) caught only by hand --
+# this makes it a daily probe finding instead.
+H1_VERSION_RE = re.compile(r"^#\s.*\(v(\d+\.\d+(?:\.\d+)?)\b", re.M)
+DESC_VERSION_RE = re.compile(r"\bv(\d+\.\d+(?:\.\d+)?)\s*\(")
+CHANGELOG_HEADER_RE = re.compile(r"^##\s+Changelog\s*$", re.M | re.I)
+# Matches only a changelog BULLET's leading version tag ("- v1.1 (date): ..." or
+# "- **v1.2 (date):** ...") -- not any vX.Y mentioned mid-sentence. Confirmed
+# necessary against live content: communication-intelligence's own v1.3 entry
+# reads "...same fix applied to `tenant-email` v1.1, the higher-volume..." --
+# a naive whole-line/whole-section search would pick up that cross-reference's
+# v1.1 as if it were one of THIS skill's own changelog entries.
+CHANGELOG_ENTRY_LEAD_VERSION_RE = re.compile(r"^\s*-\s*\**v(\d+\.\d+(?:\.\d+)?)\b", re.M)
+
+
+def collect_skill_md_paths(roots, prune):
+    """{name: SKILL.md path} for every real skill dir under `roots`, mirroring
+    collect_skill_dirs's walk/prune logic (same SKILL.md-presence match, same
+    prune set + SKILL_PRUNE_PREFIXES) but keeping the path instead of
+    discarding it -- needed here to read content for the version/changelog
+    drift check. First match wins if the same name resolves under more than
+    one root (mirrors collect_skill_dirs's name-only dedup)."""
+    out = {}
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for dirpath, dirnames, filenames in os.walk(root, onerror=lambda e: None):
+            dirnames[:] = [d for d in dirnames
+                           if d.lower() not in prune
+                           and not d.lower().startswith(SKILL_PRUNE_PREFIXES)]
+            if "SKILL.md" in filenames:
+                name = os.path.basename(dirpath).lower()
+                out.setdefault(name, os.path.join(dirpath, "SKILL.md"))
+    return out
+
+
+def extract_frontmatter_description(text):
+    """The frontmatter 'description:' field's value (the `---`-fenced block at
+    file top), or None if absent/unparseable. Deliberately simple -- reads
+    only the opening line of the value, which is enough to find a trailing
+    'vX.Y (' token; this is not a YAML parser."""
+    m = re.match(r"^---\s*\n(.*?)\n---\s*\n", text, re.S)
+    if not m:
+        return None
+    dm = re.search(r"^description:\s*(.+)$", m.group(1), re.M)
+    return dm.group(1).strip() if dm else None
+
+
+def extract_skill_own_version(text):
+    """The skill's own version per reference_skill_description_version_
+    extraction_gotcha.md: the body H1 heading's '(vX.Y...)' marker FIRST;
+    only when no H1 marker exists, fall back to the frontmatter description's
+    trailing 'vX.Y (' token. None if neither is present. Pure."""
+    h1 = H1_VERSION_RE.search(text)
+    if h1:
+        return h1.group(1)
+    desc = extract_frontmatter_description(text)
+    if desc:
+        dm = DESC_VERSION_RE.search(desc)
+        if dm:
+            return dm.group(1)
+    return None
+
+
+def extract_changelog_top_version(text):
+    """The HIGHEST version tagged on a changelog bullet under a '## Changelog'
+    heading, or None if there is no Changelog section or no bullet in it
+    carries a leading vX.Y tag.
+
+    Deliberately NOT "the first bullet's version": ORA skills are not
+    consistently ordered newest-first -- confirmed live against
+    communication-intelligence, whose Changelog lists v1.1/v1.2/v1.3 in
+    ascending (oldest-first) order, which would make a first-line read
+    report the true-current v1.3 skill as a false v1.1-vs-v1.3 mismatch.
+    Comparing all bullet versions numerically (each dotted segment as an
+    int, so v1.10 correctly outranks v1.9) and taking the max is ordering-
+    agnostic. Pure."""
+    hm = CHANGELOG_HEADER_RE.search(text)
+    if not hm:
+        return None
+    rest = text[hm.end():]
+    nh = NEXT_HEADER_RE.search(rest)
+    section = rest[:nh.start()] if nh else rest
+    versions = [m.group(1) for m in CHANGELOG_ENTRY_LEAD_VERSION_RE.finditer(section)]
+    if not versions:
+        return None
+    return max(versions, key=lambda v: tuple(int(p) for p in v.split(".")))
+
+
+def check_skill_version_changelog_drift(name, text):
+    """Return a finding string if `name`'s own version (H1-first, else
+    frontmatter description) diverges from its changelog's top-entry version.
+    None when either side is unresolvable -- fail-open, since most skills
+    carry no changelog section at all -- or the two already agree. Pure."""
+    own = extract_skill_own_version(text)
+    top = extract_changelog_top_version(text)
+    if own is None or top is None or own == top:
+        return None
+    return ("%s: frontmatter/H1 version v%s does not match changelog top "
+            "entry v%s -- one was bumped without the other" % (name, own, top))
 
 
 def collect_flat_names(directory, suffix):
@@ -1381,6 +1499,25 @@ def main():
                 print("  [MISSING] %s -> no skill dir (Code/Cowork) and not a known plugin skill"
                       % tok)
                 missing.append("%s (skill; Code/Cowork/plugin)" % tok)
+
+    # --- 15. skill frontmatter-version vs changelog-version drift (all skills,
+    # not just those named in doctrine) ---
+    skill_paths = collect_skill_md_paths(SKILL_SCAN_ROOTS, SKILL_PRUNE_DIRS)
+    drift_checked = 0
+    drift_read_errors = 0
+    for name, path in sorted(skill_paths.items()):
+        try:
+            skill_text = Path(path).read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            drift_read_errors += 1
+            continue
+        drift_checked += 1
+        finding = check_skill_version_changelog_drift(name, skill_text)
+        if finding:
+            warn(finding)
+    print("Skill version/changelog drift: checked %d skill(s)%s"
+          % (drift_checked,
+             (" (%d unreadable, skipped)" % drift_read_errors) if drift_read_errors else ""))
 
     # --- 5. CLAUDE.md size budget ---
     words = len(text.split())

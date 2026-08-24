@@ -164,6 +164,32 @@ expect("classify: rc != 0 WITH 'CANNOT RUN:' sentinel -> env-skip",
 expect("classify: a timeout (no sentinel) is a real failure, not env-skip",
        gt.classify(124, "TIMEOUT after 90s\n") == "fail")
 
+# --- run_test_file(): must not corrupt/drop output on a non-cp1252 byte a test's ------
+# UTF-8-reconfigured stdout emits (2026-08-22 regression) -----------------------------
+# Root cause: run_test_file()'s subprocess.run(..., text=True) had no explicit encoding,
+# so it decoded the child's stdout using locale.getpreferredencoding() (cp1252 on
+# Windows). A test file that reconfigures its OWN stdout to UTF-8 (the same pattern
+# maintenance/governor-drift-probe.py uses for its scanned-content output) can legitimately
+# emit bytes that are invalid cp1252 -- e.g. U+201D (right double quotation mark, "”")
+# encodes as UTF-8 bytes E2 80 9D, and 0x9D has NO cp1252 mapping at all. Pre-fix this
+# crashes subprocess's internal reader thread (UnicodeDecodeError inside _readerthread,
+# printed directly to the real stderr, not raised to the caller) and SILENTLY drops the
+# captured stdout to None -- the gate then reports a confusing, contentless "fail" for a
+# test that actually ran and printed a real finding.
+smartquote_probe_root = tempfile.mkdtemp(prefix="gt-smartquote-probe-")
+smartquote_probe = write_dummy_test(
+    smartquote_probe_root, "test-smartquote-probe.py",
+    "import sys\n"
+    "sys.stdout.reconfigure(encoding='utf-8', errors='replace')\n"
+    "sys.stdout.write('finding: right double quote \\u201d present\\n')\n"
+    "sys.exit(1)\n")
+rc_sq, out_sq, to_sq = gt.run_test_file(smartquote_probe)
+expect("run_test_file: captures a UTF-8 smart-quote byte from the child's own "
+       "reconfigured stdout instead of silently dropping output to None "
+       "(0x9D has no cp1252 mapping)",
+       out_sq is not None and "finding:" in out_sq,
+       "got rc=%r out=%r" % (rc_sq, out_sq))
+
 # --- run_test_file(): must not leak git hook env vars into the test subprocess --------
 # Simulates git's own pre-push hook environment: git sets GIT_DIR/GIT_WORK_TREE (and
 # friends) in the hook process's env so IT can operate on the outer repo. Bug: this
@@ -705,6 +731,29 @@ with tempfile.TemporaryDirectory() as _td:
     finally:
         gt.OVERRIDE_USAGE_LOG_OVERRIDE = _prev_usage
 
+# --- override_sessions(): raw session-id set, the shared scan override_frequency() wraps
+with tempfile.TemporaryDirectory() as _td:
+    _usage_log = os.path.join(_td, "override-usage-log.jsonl")
+    _prev_usage = gt.OVERRIDE_USAGE_LOG_OVERRIDE
+    gt.OVERRIDE_USAGE_LOG_OVERRIDE = _usage_log
+    try:
+        expect("override_sessions: missing file -> (0, empty set)",
+               gt.override_sessions("sig-fresh") == (0, set()))
+
+        base_now = datetime(2026, 8, 12, 12, 0, 0)
+        gt.record_override_use("sess-a", "sig-x", now=base_now)
+        gt.record_override_use("sess-b", "sig-x", now=base_now)
+        gt.record_override_use("sess-a", "sig-x", now=base_now)
+        expect("override_sessions: returns the actual session-id SET, not just its size "
+               "-- (3 records, 2 distinct sessions)",
+               gt.override_sessions("sig-x", now=base_now) == (3, {"sess-a", "sess-b"}),
+               "got %r" % (gt.override_sessions("sig-x", now=base_now),))
+        expect("override_frequency: still just (count, len(sessions)) -- unchanged, "
+               "backward-compatible contract now built ON TOP of override_sessions()",
+               gt.override_frequency("sig-x", now=base_now) == (3, 2))
+    finally:
+        gt.OVERRIDE_USAGE_LOG_OVERRIDE = _prev_usage
+
 # --- record_override_use(): write-failure resilience -----------------------------------
 # Mirrors log_override_use()'s own defensive posture: this is called AFTER the push has
 # already been allowed, so a state-file write failure must be visibility-only and must
@@ -729,6 +778,62 @@ expect("override_frequency_note: plural count/session both read naturally",
        gt.override_frequency_note(3, 2, 24, verb="already has been")
        == "  This exact failure already has been overridden 3 times by 2 distinct "
           "sessions in the last 24h -- weigh that pattern, not just this instance.\n")
+
+# --- multi_session_claim_hint(): actionable nudge, ONLY when evidence of ANOTHER session
+# (2026-08-22, OI-136 follow-up): override_frequency_note() alone already told 3+
+# sessions "this has been overridden 8 times by 3 distinct sessions" on the identical
+# DSCR-changelog false positive, and every one of them overrode again anyway instead of
+# checking whether someone was already fixing it -- the note names the pattern but never
+# says what to DO about it. This closes that gap. Deliberately silent when the only
+# session in the set is THIS session: a session repeating its own override is not
+# evidence anyone else is fixing anything, and a hint that fires on every solo repeat
+# would be exactly the same "normalised until ignored" failure mode OI-136 already
+# documents for the override token itself.
+expect("multi_session_claim_hint: only this session in the set -> silent",
+       gt.multi_session_claim_hint({"sess-a"}, "sess-a") == "")
+expect("multi_session_claim_hint: empty set -> silent",
+       gt.multi_session_claim_hint(set(), "sess-a") == "")
+expect("multi_session_claim_hint: one OTHER session -> fires, singular grammar",
+       gt.multi_session_claim_hint({"sess-a", "sess-b"}, "sess-a")
+       == "  1 other session has already overridden this exact failure -- before "
+          "building a fix yourself, check for one already in flight: "
+          "`python hooks/lib/claim_work.py list` and recent activity in "
+          "`list_sessions`/`event_log.md`.\n")
+expect("multi_session_claim_hint: multiple other sessions -> fires, plural grammar, "
+       "count excludes the caller's own id",
+       gt.multi_session_claim_hint({"sess-a", "sess-b", "sess-c"}, "sess-a")
+       == "  2 other sessions have already overridden this exact failure -- before "
+          "building a fix yourself, check for one already in flight: "
+          "`python hooks/lib/claim_work.py list` and recent activity in "
+          "`list_sessions`/`event_log.md`.\n")
+expect("multi_session_claim_hint: own_session_id=None (headless push) -> nothing to "
+       "exclude, every recorded session counts as 'other'",
+       gt.multi_session_claim_hint({"sess-a", "sess-b"}, None)
+       == "  2 other sessions have already overridden this exact failure -- before "
+          "building a fix yourself, check for one already in flight: "
+          "`python hooks/lib/claim_work.py list` and recent activity in "
+          "`list_sessions`/`event_log.md`.\n")
+
+# --- multi_session_claim_hint(): a None entry (a malformed log line missing the
+# session_id field -- override_sessions() adds rec.get("session_id") unconditionally,
+# so a line with valid ts/signature but no session_id key puts a literal None in the
+# set) must NEVER count as evidence of another session. Qodo PR #146 review finding,
+# 2026-08-22: before this PR, a None in the set only nudged the informational
+# frequency-note count off by one; this hint turns that same stale data into an
+# ACTIONABLE instruction to go check for a claim that doesn't exist, which is worse.
+expect("multi_session_claim_hint: sessions={None} (one malformed line, no real other "
+       "session) -> silent, not '1 other session'",
+       gt.multi_session_claim_hint({None}, "sess-a") == "")
+expect("multi_session_claim_hint: sessions={None}, own_session_id=None (headless push, "
+       "one malformed line) -> silent -- None must never match itself into an 'other'",
+       gt.multi_session_claim_hint({None}, None) == "")
+expect("multi_session_claim_hint: a REAL other session plus a malformed None entry -> "
+       "fires, but the None entry must not inflate the count ('1 other', not '2 other')",
+       gt.multi_session_claim_hint({None, "sess-a", "sess-b"}, "sess-a")
+       == "  1 other session has already overridden this exact failure -- before "
+          "building a fix yourself, check for one already in flight: "
+          "`python hooks/lib/claim_work.py list` and recent activity in "
+          "`list_sessions`/`event_log.md`.\n")
 
 # --- main(): end-to-end wiring ---------------------------------------------------------
 # The note appears in the right branch with the right tense, records itself on an
@@ -773,6 +878,10 @@ with tempfile.TemporaryDirectory() as _td:
             expect("main: overridden -> frequency note present, correct tense/count",
                    "has now been overridden 1 time by 1 distinct session"
                    in _err.getvalue(), repr(_err.getvalue()[-400:]))
+            expect("main: overridden, only THIS session has ever hit it -> claim hint "
+                   "stays silent (no evidence anyone else is fixing it)",
+                   "already overridden this exact failure" not in _err.getvalue(),
+                   repr(_err.getvalue()[-400:]))
             with io.open(_usage_log, encoding="utf-8") as _f:
                 _usage_written = _f.read()
             expect("main: overridden -> the use was actually appended to the state file",
@@ -792,6 +901,71 @@ with tempfile.TemporaryDirectory() as _td:
                    "minted, in the 'already has been' tense",
                    "already has been overridden 1 time by 1 distinct session"
                    in _err.getvalue(), repr(_err.getvalue()[-400:]))
+            expect("main: second block, still only THIS session in the history -> claim "
+                   "hint stays silent",
+                   "already overridden this exact failure" not in _err.getvalue(),
+                   repr(_err.getvalue()[-400:]))
+        finally:
+            gt.OVERRIDE_USAGE_LOG_OVERRIDE = _prev_usage
+            gt.EVENT_LOG_OVERRIDE = _prev_event
+            gt.TESTS_DIR_OVERRIDE = _prev_tests_dir
+            os.environ.pop("ORA_OVERRIDE_SESSIONS_DIR", None)
+            os.environ.pop("CLAUDE_CODE_SESSION_ID", None)
+
+# --- main(): claim-check hint fires end-to-end when a DIFFERENT session already hit the
+# identical failure signature -- the actual gap this change closes (2026-08-22, OI-136
+# follow-up: the informational-only note above did not stop 3 sessions independently
+# re-fixing the same governor-drift-probe.py false positive).
+with tempfile.TemporaryDirectory() as _td:
+    _usage_log = os.path.join(_td, "override-usage-log.jsonl")
+    _log = os.path.join(_td, "event_log.md")
+    with io.open(_log, "w", encoding="utf-8") as _f:
+        _f.write("---\nname: event_log\n---\n\n# ORA Event Log\n\nintro\n\n"
+                 "## 2026-01-01 - seed\n\nbody\n")
+    freq_root = tempfile.mkdtemp(prefix="gt-hintcounter-")
+    write_dummy_test(freq_root, "test-always-fails.py", "import sys; sys.exit(1)\n")
+
+    _prev_usage = gt.OVERRIDE_USAGE_LOG_OVERRIDE
+    _prev_event = gt.EVENT_LOG_OVERRIDE
+    _prev_tests_dir = gt.TESTS_DIR_OVERRIDE
+    gt.OVERRIDE_USAGE_LOG_OVERRIDE = _usage_log
+    gt.EVENT_LOG_OVERRIDE = _log
+    gt.TESTS_DIR_OVERRIDE = freq_root
+    os.environ["CLAUDE_CODE_SESSION_ID"] = SESSION
+
+    with tempfile.TemporaryDirectory() as sessions_root:
+        os.environ["ORA_OVERRIDE_SESSIONS_DIR"] = sessions_root
+        try:
+            # Pre-seed a DIFFERENT session's override of the SAME failure signature.
+            # Derived via failure_signature() the same way main() will, rather than
+            # hardcoding a hash that would silently rot if the algorithm ever changes.
+            sig = gt.failure_signature(
+                [{"file": "test-always-fails.py", "status": "fail"}])
+            gt.record_override_use("some-other-session", sig, now=datetime.now())
+
+            # BLOCKED path (no token yet): a different session already overrode this
+            # exact signature, so both the frequency note AND the claim hint must fire.
+            _err = io.StringIO()
+            with contextlib.redirect_stderr(_err):
+                gt.main()
+            expect("main: blocked with a PRIOR OTHER-session override -> claim hint fires",
+                   "1 other session has already overridden this exact failure"
+                   in _err.getvalue(), repr(_err.getvalue()[-500:]))
+
+            # OVERRIDDEN path: SESSION's own use is now ALSO recorded, but it must never
+            # count as "other" -- the hint should still read "1 other", not "2 other".
+            mint(sessions_root, SESSION, good_token())
+            _err = io.StringIO()
+            with contextlib.redirect_stderr(_err):
+                gt.main()
+            expect("main: overridden with a PRIOR OTHER-session override -> hint fires, "
+                   "still '1 other' -- this session's own just-recorded use is excluded",
+                   "1 other session has already overridden this exact failure"
+                   in _err.getvalue(), repr(_err.getvalue()[-500:]))
+            expect("main: overridden with a PRIOR OTHER-session override -> hint does "
+                   "NOT inflate to '2 other' by miscounting the caller's own use",
+                   "2 other session" not in _err.getvalue(),
+                   repr(_err.getvalue()[-500:]))
         finally:
             gt.OVERRIDE_USAGE_LOG_OVERRIDE = _prev_usage
             gt.EVENT_LOG_OVERRIDE = _prev_event
