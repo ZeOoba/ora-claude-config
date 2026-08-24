@@ -5,12 +5,19 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-24T19:19:29.000Z
+  modified: 2026-08-24T20:02:54.323Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-08-24 — t1_letter_format.py: plain-mode top margin folded into the module (page_for_mode())
+
+- `PAGE` only ever encoded letterhead mode's 1.50" top margin; plain mode's 1.00" override (FormatSpec v1.1, "no pre-printed letterhead band to clear") existed only as spec prose, so `build_t1_letterpack.py` carried a local `PLAIN_MODE_TOP_MARGIN_TWIPS` workaround instead of the module owning its own documented behavior. Self-flagged as a knowledge-gap candidate during the same day's session close-out, then fixed on request.
+- Added `PLAIN_TOP = 1440` + `page_for_mode(mode=LETTERHEAD_MODE)` to `ora-skills/owner-outreach/t1_letter_format.py` (canonical) -- returns `PAGE` with `top` swapped for plain mode, every other margin unchanged. Mirrored to the working copy in `Investment Candidates -- 2026/` (pre-fix copy archived to `_archive/2026-08-24_plain-mode-margin-gap-fix/`). `build_t1_letterpack.py` now calls `page_for_mode(LETTERHEAD_MODE)` instead of re-deriving the swap inline.
+- Tests: 5 new module-level checks (`page_for_mode()` in both modes, other margins unchanged, default-argument behavior) -- 41/41 `test_t1_letter_format.py`, plus the full existing suite (70 ladder + promote-netnew) unaffected. Live-verified: a real 2-letter regen against the current queue still produces 2160-twip (1.50") top margin in production letterhead mode, `verify_pack` green.
+- Committed to `ora-skills` (`1670510`, `main`) and pushed (`189931d..1670510`). Single-writer check clean at claim time (HEAD `189931d`, no uncommitted owner-outreach changes); `claim_work.py`'s `ora-skills-housekeeping` slug held for the duration, released after push confirmed synced.
 
 ## 2026-08-24 -- Workflow optimizations from Entry Point B install session filed to memory
 
