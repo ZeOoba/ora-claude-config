@@ -12,6 +12,28 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-24 — Correction: masterlease-jurisdiction-rebase install IS complete, not missing a file
+
+A concurrent session's entry immediately above this one ("Entry Point B pre-packaged install: 8-skill description-headroom batch") reported `masterlease-jurisdiction-rebase` as NOT cleared -- cache copy allegedly missing `scripts/fixtures/ORA_MasterLease_ShallowBayIndustrial_v2.6_TEMPLATE.docx` relative to the packaged `.skill`, the signature of the desktop-Settings subfolder-drop bug.
+
+Re-checked directly, fresh, this session: only one skills-plugin cache instance exists on this machine (`…\skills-plugin\583f08bc-...\a6ad2c61-...\skills\`) -- no alternate cache the other session could have been reading. All 7 files present in `masterlease-jurisdiction-rebase`'s cache directory, and SHA256 hash-compared file-for-file against the repo copy: `config/properties.json`, `config/state_overlays.json`, `scripts/fixtures/ORA_MasterLease_ShallowBayIndustrial_v2.6_TEMPLATE.docx`, `scripts/ora_docx_redline.py`, `scripts/rebase.py`, `scripts/test_rebase.py`, `SKILL.md` -- all 7 MATCH exactly, including the fixture file the other session flagged as missing.
+
+Likely explanation: the other session's check landed mid-sync, before the file finished writing -- `main.log` showed several rapid successive `[SkillsPlugin]` sync cycles in the same ~15:21:36-15:22:09 window this install batch covers, and a check between cycles could catch a transient partial state. Not re-derivable with certainty at this remove; noted as the working hypothesis, not asserted as fact.
+
+The earlier `pending_reimport.py clear masterlease-jurisdiction-rebase` in this session's own entry stands -- it was correct, not premature. No re-install needed.
+
+## 2026-08-24 — 8-skill Save-skill batch confirmed installed (2026-08-24 close-out items 4/5/7/9)
+
+Gabriel confirmed the Save-skill install click for all 8 packages staged this session: settlement-basis-extraction (v1.1), acquisition-underwriting (v4.19), masterlease-jurisdiction-rebase (v1.7), pma-qc (v1.1), disposition-analysis (v1.2), package-and-stage-skill (v1.29), listing-agreement-qc (v1.3), owner-outreach (v1.3, review-only, no version change).
+
+Verification (not hash-alone): all 8 cache directories under the skills-plugin runtime cache show a fresh CreationTime clustered 15:21:36-15:22:09 local, matching `%LOCALAPPDATA%\Claude\Logs\main.log`'s `[SkillsPlugin] Delta: N to download` / `Sync complete: N downloaded, 0 failed` cycles in the same window (Roaming main.log stale since 2026-08-20 20:51, per standing note -- Local log used instead). `verify_installed_cache.py` confirms all 8 installed descriptions are balanced, 0 stray body quotes.
+
+`repo_first_check.py`: all 8 IN-SYNC.
+
+Anomaly noted, not blocking: the recurring `[warn] Remote skill "acquisition-underwriting" maps to the same directory as an earlier remote skill, skipping` duplicate-registration entry (pre-existing, documented previously) fired again in this window -- the kept entry's content still verified correct via CreationTime/log correlation above.
+
+LEDGER: `pending_reimport.py clear` run for all 8 skills below.
+
 ## 2026-08-24 — owner_outreach_weekly.py: --wave-cap now defaults to the ratified wave_cap_per_week
 
 - `--wave-cap` previously defaulted to `None` (uncapped) when the flag was omitted, even though `outreach-ratification.json`'s `targeting.wave_cap_per_week: 50` documents the hand-addressing budget it's meant to enforce. Nothing actually applied it. This was found live during T1 letter-format-patch verification: an unqualified regen ran the full 154-letter eligible queue with no warning.
