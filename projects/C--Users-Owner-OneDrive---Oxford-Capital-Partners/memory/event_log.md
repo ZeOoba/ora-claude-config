@@ -12,6 +12,17 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-24 — oxfordra.net: closed the last 404.html nav-orphaning gap, deployed
+
+Follow-up to the 6-item build (9beddf8) that added `/sell-your-building` and `/resources/` to the footer's Navigate column on 20 of 22 published pages, skipping `404.html` because it uses a different flat `site-footer__links` list rather than the standard footer structure. Gabriel asked to close that gap specifically.
+
+**Landed:** `59631cc` — two links inserted into `404.html`'s footer link list, matching the exact hrefs/text/placement (after the Brokers link) already reviewed and shipped on the other 20 pages. `application-received.html` deliberately left untouched — its footer has no nav links at all (copyright + Privacy/Terms only), so adding these two there would be a new pattern, not closing an existing gap.
+
+**Gate:** scoped site-qc-reviewer pass (not a full re-audit, since only one small file changed on top of an already-approved baseline) — APPROVE. Confirmed both new link targets are real published pages, no confidential-term leakage, no structural damage to the footer, earlier session's skip-link/CSP-safe-pattern work on 404.html undisturbed.
+
+**Deploy note:** the deploy-gate dual-consumption bug fixed earlier today (merged to `main` in `~/.claude` at `a6fef82`) has NOT yet propagated to the primary `~/.claude` checkout, which is still on `feat/model-canary-probe-step25` and does not contain that fix — confirmed via `git merge-base --is-ancestor` before assuming otherwise. Used the known double-mint token workaround again for this deploy rather than assuming the fix was live. Syncing the primary checkout to pick up the fix is separate follow-up work, not done here.
+
+Verified live: `curl https://oxfordra.net/404` shows both new links; homepage 200; `verify-push.py` confirms `origin/main` tip matches local HEAD (`59631cc`).
 ## 2026-08-24 -- Save-skill clicks confirmed: 14-skill batch from ora-skill-store-drift-check remediation
 
 Gabriel confirmed the Save-skill install click for the following 14 packages, staged via package-and-stage-skill following the 2026-08-24 drift check (Notion Ops Hub comment 3c66ecd8): automation-health-monitor, register-scheduled-task, acquisition-underwriting, deal-comparison, deal-execution, document-assembly, fleet-advisory-remediation, lease-addendum, ora-flood-zoning-dd, ora-setup-audit, package-and-stage-skill, ratify-hurdle-rate, rent-roll-reconciliation, tax-appeal.
