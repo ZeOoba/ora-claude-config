@@ -12,6 +12,92 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-24 -- PD/PUD doctrine, mechanism-over-answer rule, frontmatter repair: 14 confirmed Save-skill installs
+
+Cowork session (cloud sandbox + Desktop Commander bridge). Four delivery batches,
+each confirmed by Gabriel's **Save-skill click**, not merely by the repo commit.
+Post-install verification per package-and-stage-skill step 7: repo_first_check.py
+reports IN-SYNC for every skill below, and verify_installed_cache.py (new this
+session) read the installed SKILL.md in the runtime cache directly.
+
+Commits: a292937, c1c3cde, 696e838, c6f3dea, 4c9206d, f64875d, 1b60a49.
+
+BATCH 1 -- PD/PUD amendment-tier doctrine (a292937)
+  ora-flood-zoning-dd v1.4      new Step 6A: PD districts carry no by-right use
+                                table; an empty permitted-use lookup is a FALSE
+                                NEGATIVE, not an UNK. Minor-vs-major amendment
+                                tier test; recorded-easement clearance separated
+                                from zoning clearance.
+  acquisition-underwriting v4.17  PD/PUD carve-out, STAGE 2.5 + 2.6 item 2.
+  deal-execution v1.7           DD checklist Title & Survey 20 -> 21 items.
+  Origin: 754 Old State Route 74. A written Township confirmation on 2026-07-21
+  that no special approval was needed to remove parking spaces was logged as
+  substantially resolved; the 2026-08 follow-up call named the actual mechanism
+  (a minor amendment application to the PD plan) and disclosed that outside
+  storage would be a major amendment.
+
+BATCH 2 -- mechanism-over-answer propagation + register write-back (696e838)
+  acquisition-underwriting v4.18  inline changelog restored to its four-most-recent
+                                rule; v4.13 and v4.14 archived to
+                                versions/CHANGELOG-v3.2-v4.14.md.
+  title-exam-abstraction v1.1   REGISTER WRITE-BACK VERIFICATION in STEP 4, after
+                                a 2026-08-21 review recorded adding register Items
+                                16-22 that never reached the file.
+  ora-millage-lookup v1.1       get-the-mechanism rule for ladder tiers 2-3.
+  tax-appeal v1.3               confirm-the-mechanism rule at the head of Sec 5.
+  automation-health-monitor v1.7  and register-scheduled-task v2.15 -- another
+                                session's settled 2026-08-24 WIP, triaged per
+                                dirty-tree-triage (two-pass mtime settle, no claim
+                                marker) and committed at c1c3cde. NOT authored in
+                                this session. One defect fixed in the process: the
+                                v2.15 description was 1070 chars against the
+                                1024 cap and would have been rejected at import
+                                silently.
+
+BATCH 3 -- frontmatter repair (c6f3dea)
+  ora-flood-zoning-dd, document-assembly, exception-detection, monthly-close,
+  portfolio-reporting. All five had shipped their BODY changelog heading as their
+  description since the 2026-07-29 Phase-4 description lint, which left an
+  unterminated quoted scalar whose closing quote sat 4-8 lines into the body.
+  None of their trigger vocabulary was routing. The repo's own gates could not see
+  it: package_skills.py reads frontmatter with a non-greedy regex that stops at the
+  '---' fence and recovers the intended string, so description_budget.py and the
+  packager both reported OK on all five. An existing test asserted this shape was
+  benign because "the platform installs it fine" -- true, and never the question.
+  Installing is not routing. Gate added, deliberately narrow; two new tests; the
+  benign no-closing-quote-anywhere case still passes unflagged.
+
+BATCH 4 -- closing-sweep discipline (1b60a49)
+  package-and-stage-skill v1.28  step 7 now requires a CLOSING SWEEP before
+                                sign-off: repo_first_check.py ending "no
+                                cache-ahead skills", frontmatter_sweep.py ending
+                                "0 finding(s)", verify_installed_cache.py on
+                                anything installed. New tools/frontmatter_sweep.py
+                                and tools/verify_installed_cache.py back it.
+  register-scheduled-task v2.16  description 1015 -> 931 (headroom 9 -> 93).
+
+CACHE-AHEAD CATCH -- the reason the closing sweep is now doctrine (4c9206d)
+  A closing repo_first_check run flagged owner-outreach CACHE-AHEAD: the runtime
+  cache held another session's v1.3 SKILL.md (17110 b vs the repo's 12462 b, last
+  committed f35a77c on 2026-08-15) plus ORA_OwnerOutreach-T1Letter_FormatSpec_v1.1.md
+  and t1_letter_format.py, neither of which existed on any branch. This session had
+  already made three commits; a fourth touching that skill would have had
+  sync_appdata_mirror.py (pre-commit Check 4) overwrite ~16 KB of content that
+  existed nowhere else. Reconciled after confirming the cache copy was a clean
+  superset (145 of 146 repo lines preserved, 51 net-new, frontmatter clean).
+  NOT a Save-skill install -- committed from the rescue copy, so its ledger entry
+  stays PENDING.
+
+ALSO RECORDED: the platform's skill listing is NOT a per-skill diagnostic. It
+truncates -- a long alphabetical tail renders name-only, and membership in that
+tail shifts between renders (loi-generation and listing-agreement-qc showed full
+descriptions early in this session and name-only later, unchanged). Never confirm
+an install from it.
+
+LEDGER: clearing the seven entries above that correspond to confirmed Save-skill
+clicks. Deliberately left PENDING: owner-outreach (mirror-synced by commit, never
+clicked -- hash-match-by-construction is not install evidence per v1.13) and
+acquisition-underwriting-eval-harness (2026-08-22, another session, NOT-INSTALLED).
 ## 2026-08-24 — oxfordra.net: closed the last 404.html nav-orphaning gap, deployed
 
 Follow-up to the 6-item build (9beddf8) that added `/sell-your-building` and `/resources/` to the footer's Navigate column on 20 of 22 published pages, skipping `404.html` because it uses a different flat `site-footer__links` list rather than the standard footer structure. Gabriel asked to close that gap specifically.
