@@ -1388,6 +1388,82 @@ RE_DSCR_VS_CANON_FLOOR = re.compile(
 RE_CANON_FLOOR_AT_LTV_SIZING = re.compile(
     re.escape(CANON_DSCR) + r"\s*[x×][\s\-]*(?:dscr\s+)?floor\s+at\s+"
     r"([0-9]{1,3})\s*%[\s\-]*ltv\b[\s\-]*(?:refi[\s\-]?)?siz", re.I)
+# NO-CANONICAL-RESTATEMENT floor-result variant (2026-08-24, live incident): both regexes above
+# require the narration to explicitly repeat "vs 1.25x floor" / "1.25x floor at ..." -- but the
+# acquisition-underwriting-eval-harness's ACTUAL generated prose sometimes narrates the verdict
+# without ever restating the canonical value at all: "DSCR floor PASSES (~1.42x at 65%-LTV-bound
+# refi sizing); IRR ... not derivable" (live, acquisition-underwriting-eval-harness/runs/
+# 2026-08-24T163634Z_scheduled-poll.json:204 -- overridden 2x by 2 distinct sessions in 24h before
+# this fix). Two sibling phrasing variants on the SAME harness output (:205 "DSCR 1.42x at
+# 65%-LTV refi - PASS (LTV binds)", :206 "DSCR ~1.42x passes (LTV binds)") are ALREADY suppressed
+# by other existing passes (refi-qualification / proximity vetoes) -- verified empirically against
+# scan_line() before writing this fix; only the :204 shape needed a new suppressor.
+# ANCHOR CHOICE: a RESULT-VERB (PASS/FAIL/CLEAR/BREACH/MISS, the same RE_FLOOR_RESULT_VERB
+# alternation used by the sibling KEYWORD-DIRECT-BIND veto) sitting DIRECTLY between "dscr
+# floor(s)" and an opening parenthesis holding the achieved value.
+# REQUIRED SIZING TAIL (round-1 adversarial review, Fable-tier, 2026-08-24 -- two real
+# false-negative regressions found and closed here): the first draft made the trailing LTV-sizing
+# clause OPTIONAL, reasoning that "dscr floor <verb> (" alone was narrow enough -- disproven. That
+# shape also matches RATIFICATION prose using "passes"/"clears" in their ordinary approval sense
+# ("the amendment to the DSCR floor passes (1.40x, effective Q4)", "Motion: DSCR floor passes
+# (1.40x, ratified 2026-08-24)"), which a real drift could plausibly be dressed in and which
+# carries NONE of _governor_declared_nearby's veto vocabulary. The live harness construct ALWAYS
+# carries the LTV-sizing tail inside the SAME parenthetical ("at N%-LTV ... siz..."); no
+# ratification-prose shape does. Making the tail REQUIRED (dropping the old trailing `?`) closes
+# the ratification-verb class entirely while leaving the incident fix untouched -- :204 still
+# suppresses, :205/:206 never matched this regex either way (see above). This also makes the
+# LTV member effectively mandatory for suppression to fire at all, so the "optional" framing in
+# the value-lock note below is now about whether the (always-present) capture equals 65, not about
+# whether it exists.
+# SAME-VALUE-RECURRENCE VETO (round-1 review, second finding): a same-line explicit declaration
+# using the achieved value is not reliably independently extractable -- "DSCR floor breaches
+# (1.10x at 65%-LTV sizing) so we raised the floor to 1.10x" evades RE_DSCR_DECL's pivot (which
+# requires the change-verb immediately before "to"; "raised THE FLOOR to" breaks it) and would
+# otherwise go fully silent once the verdict-parenthetical occurrence is suppressed. Detection over
+# silence: if the achieved value's literal digit string occurs AGAIN anywhere else on the line
+# outside this match's own span, do not suppress -- a repeated value is inherently ambiguous
+# (equally consistent with an emphatic restatement of a real drift), and the module's whole design
+# philosophy treats an ambiguous-but-plausible case as a visible false positive over a silent false
+# negative. See _value_recurs_outside_span(). ACCEPTED RESIDUAL (round-2 review): the comparison is
+# literal-STRING, not numeric -- a same-line restatement at different decimal precision ("1.1x" vs
+# "1.10x") does not trip it, and a sentence-final period right after the value ("...to 1.10.")
+# blocks the lookahead. Narrower instance of a pre-existing extraction gap (bare "floor to X" prose
+# unconnected to "dscr" is equally invisible on origin/main), not a regression this fix introduces.
+# The achieved DSCR member is GATED ON THE SAME VALUE-LOCK as the LTV member at the call site
+# (round-2 review: an earlier draft suppressed the achieved value unconditionally once the
+# construct matched at all, which silenced the WHOLE line on a >100%-and-uncaught sizing basis --
+# "DSCR floor PASSES (1.42x at 165%-LTV-bound refi sizing)" returned zero findings, because 165
+# fails the value-lock so the LTV member stayed visible but nothing else on the line was checking
+# it, while the achieved 1.42x was suppressed regardless. Gating both members on the identical
+# `mm.group(2) == CANON_LTV_PERPROPERTY` condition means a non-ratified sizing basis leaves BOTH
+# members visible, never just one) -- see test_floor_result_narration_nocanon_does_not_mask_drift_
+# unit cases (a) and (i). `(?<![0-9.])` immediately before the LTV capture (round-1 review, third
+# finding) stops the lazy `{0,40}?` window from absorbing a leading digit of a 4+-digit run
+# ("1265%-LTV" reading as "265", dropping the leading "1") -- verified a 3-digit run never needed
+# this (greedy `{1,3}` from the first reachable digit already captures it whole); the sibling
+# RE_CANON_FLOOR_AT_LTV_SIZING doesn't need this guard at all because its `at\s+` anchor already
+# pins the capture to the first digit after "at".
+RE_DSCR_FLOOR_VERDICT_NOCANON = re.compile(
+    r"dscr\s+floors?\s+(?:pass(?:es|ed)?|clear(?:s|ed)|breach(?:es|ed)?|fail(?:s|ed)?|miss(?:es|ed)?)"
+    r"\s*\(~?([0-9]+\.[0-9]+)\s*[x×]"
+    r"(?!\s*(?:vs|versus)\b)"  # DRIFTED/CORRECT-RESTATEMENT GUARD: if "vs"/"versus" immediately
+                    # follows the achieved value, the line IS using the canonical-restatement shape
+                    # ("1.42x vs 1.25x floor" or a drifted "1.42x vs 1.40x floor") -- that shape
+                    # belongs entirely to RE_DSCR_VS_CANON_FLOOR / RE_CANON_FLOOR_AT_LTV_SIZING
+                    # above (which only suppress an EXACT match on the correct canonical value),
+                    # never to this no-restatement variant. Without this guard, a drifted
+                    # restatement sharing the line with an LTV-sizing mention within reach would
+                    # still get its LTV member wrongly value-locked away by THIS regex even though
+                    # the drifted DSCR restatement should have kept the whole construct visible --
+                    # caught by test_floor_result_narration_does_not_mask_drift_unit case (a).
+                    # ACCEPTED RESIDUAL (round-1 review): this guard checks only the ordering
+                    # "<achieved>x [vs|versus] ..." -- a drifted restatement placed AFTER the
+                    # LTV-sizing clause instead of directly after the achieved value ("...(1.42x at
+                    # 65%-LTV sizing vs 1.40x floor)") still gets its LTV/DSCR members suppressed
+                    # by this regex. Non-silent: the drifted 1.40 restatement itself still flags via
+                    # the ordinary candidate loop regardless (verified), so the push still blocks --
+                    # this is a member-level under-flag on an otherwise-caught line, not a miss.
+    r"[^()\n]{0,40}?(?<![0-9.])([0-9]{1,3})\s*%[\s\-]*ltv", re.I)
 # Verb-adjacency reaches. BEFORE spans the harness's "PASSES (1.42x vs " lead-in (~10 chars between
 # verb end and construct start, with margin); AFTER catches a trailing verdict ("...floor clears").
 # Deliberately short so a verb elsewhere on a long line cannot arm suppression.
@@ -1434,6 +1510,17 @@ def _floor_kw_binds_value_directly(low, vs):
             return False
     return True
 
+def _value_recurs_outside_span(low, val, span_start, span_end):
+    """True when the digit string `val` (e.g. "1.42") appears anywhere on `low` OUTSIDE
+    [span_start, span_end), whole-number-bounded (never matching as a fragment of a larger
+    number, same guard shape as the module's decimal-fragment convention elsewhere). Used by
+    RE_DSCR_FLOOR_VERDICT_NOCANON's SAME-VALUE-RECURRENCE veto -- see its block comment."""
+    pattern = re.compile(r"(?<![0-9.])" + re.escape(val) + r"(?![0-9.])")
+    for m in pattern.finditer(low):
+        if m.start() < span_start or m.end() > span_end:
+            return True
+    return False
+
 def _floor_result_spans(low):
     """Return (dscr_spans, ltv_spans): the exact digit-group spans of a floor-RESULT narration's
     member values -- the achieved DSCR compared against the canonical floor, and the ratified
@@ -1471,6 +1558,31 @@ def _floor_result_spans(low):
         if _aggregate_ltv_declared_in_clause(low, mm.start(1)):
             continue
         ltv_spans.append(mm.span(1))
+    # NO-CANONICAL-RESTATEMENT variant (see RE_DSCR_FLOOR_VERDICT_NOCANON's block comment above):
+    # the verdict verb is baked into the regex itself (it IS the construct's anchor), so no
+    # separate _verb_near check is needed here -- unlike the two passes above, which anchor on the
+    # literal "vs 1.25x"/"1.25x floor at" text and verify a verb sits nearby afterward.
+    for mm in RE_DSCR_FLOOR_VERDICT_NOCANON.finditer(low):
+        ms, me = mm.span()
+        if _governor_declared_nearby(low, ms, me, exclude=FLOOR_RESULT_VETO_EXCLUDE):
+            continue
+        # SAME-VALUE-RECURRENCE veto (round-1 review): if the achieved value repeats elsewhere on
+        # the line outside this construct, do not suppress EITHER member -- see the block comment
+        # above RE_DSCR_FLOOR_VERDICT_NOCANON for why ("...raised the floor to 1.10x" is not
+        # reliably independently extractable, so the verdict-parenthetical occurrence must stay
+        # the one thing that catches it).
+        if _value_recurs_outside_span(low, mm.group(1), ms, me):
+            continue
+        # VALUE-LOCK, applied to BOTH members together (round-2 review: an earlier draft gated
+        # only the LTV member here, so a non-ratified sizing basis left the LTV value correctly
+        # unsuppressed but ALSO silenced the achieved DSCR value unconditionally -- on a sizing
+        # basis no other pass catches either (e.g. an out-of-range "165%-LTV"), the whole line
+        # went silent instead of merely losing one member's suppression). Gating both on the
+        # identical condition means a non-ratified sizing basis leaves BOTH members visible.
+        if mm.group(2) == CANON_LTV_PERPROPERTY:
+            dscr_spans.append(mm.span(1))
+            if not _aggregate_ltv_declared_in_clause(low, mm.start(2)):
+                ltv_spans.append(mm.span(2))
     return dscr_spans, ltv_spans
 
 def scan_line(raw):
@@ -1511,10 +1623,13 @@ def scan_line(raw):
     # veto (a bare "floor" token collides with ORA's own "floor-flag" term of art on the real
     # false-positive line).
     scaling_mult_spans = _dscr_scaling_multiplier_spans(low) if is_gov else []
-    # Eval-harness floor-RESULT narration spans (2026-08-23): the achieved-DSCR member and the
-    # ratified 65%-LTV sizing-basis member of a "PASSES (1.42x vs 1.25x floor at 65%-LTV sizing)"
-    # verdict. All guards except the DSCR decl-shape veto are applied inside the helper; consumed
-    # ONLY by the dscr-anchored candidate loop and the LTV bare-proximity fallback below.
+    # Eval-harness floor-RESULT narration spans (2026-08-23, widened 2026-08-24): the achieved-DSCR
+    # member and the ratified 65%-LTV sizing-basis member of a floor verdict -- both the
+    # canonical-restating shape ("PASSES (1.42x vs 1.25x floor at 65%-LTV sizing)") and the
+    # no-restatement shape actually seen in a live harness run ("floor PASSES (~1.42x at
+    # 65%-LTV-bound refi sizing)", RE_DSCR_FLOOR_VERDICT_NOCANON). All guards except the DSCR
+    # decl-shape veto are applied inside the helper; consumed ONLY by the dscr-anchored candidate
+    # loop and the LTV bare-proximity fallback below.
     floor_result_dscr, floor_result_ltv = (
         _floor_result_spans(low) if is_gov else ([], []))
 
