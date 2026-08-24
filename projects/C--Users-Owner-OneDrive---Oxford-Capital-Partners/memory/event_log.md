@@ -12,6 +12,26 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-24 -- Workflow optimizations from Entry Point B install session filed to memory
+
+Two new tooling gotchas found during the 8-skill Entry Point B install session filed
+as reference notes and indexed in INDEX_reference.md (Skill gotchas cluster + a new
+standalone line):
+
+- `reference_cowork_no_live_skill_listing_tool.md` -- no tool reachable from a Cowork
+  session is equivalent to a live account `ListSkills` call, so package-and-stage-skill's
+  bridge-first freshness screen part (a) cannot run there; `mcp__skills__list_skills` is
+  a user-facing render widget, not a data source, and using it as one would be a misuse.
+  Falls through to the full post-install CreationTime/hash verify every time on this surface.
+- `reference_present_files_requires_absolute_path.md` -- `mcp__cowork__present_files`
+  rejects relative filenames even when the file exists at the documented outputs path;
+  always pass the full absolute Windows path.
+
+A third candidate (inline PowerShell via Desktop Commander stripping `$variables`) was
+checked against existing memory first and found already fully covered by
+`reference_desktop_commander_powershell_variable_stripping.md` -- not re-filed, per
+`feedback_recheck_before_reflagging_tooling_gaps.md`.
+
 ## 2026-08-24 -- Entry Point B pre-packaged install: 8-skill description-headroom batch
 
 Gabriel confirmed the Save-skill click for 8 pre-packaged .skill files staged at
