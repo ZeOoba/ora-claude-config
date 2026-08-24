@@ -21,11 +21,13 @@ Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (fir
 - Released this week's set: Gabriel chose to wave-cap at the ratified 50/week rather than the full 154 eligible, since `--wave-cap` is NOT auto-derived from `wave_cap_per_week` in outreach-ratification.json -- it must be passed explicitly on every release, a real gap worth knowing for future weeks. Ran `owner_outreach_weekly.py --wave-cap 50` (self-check OK, live Notion suppression pull, vintage ratification standing-cleared, master 28d stale WARN-only per the 2026-07-12 relax) -> 46 letters / 50 properties in `20260824_Owner-Outreach_T1-Letter-Pack_Phase1_v01.docx`, `verify_pack` green, 0 net-new (all 187 promoted parcels already in the ledger -- `promote_netnew.py` and `--commit` ran as no-ops), 51 held on the cadence/ladder gate, 86 deferred beyond the wave cap.
 - Did NOT run `--released` -- that flag logs the pack as physically mailed and drives the 21-day cadence gate for every future run; it is Gabriel's step, after he signs and mails the 46 letters.
 - Post-release: confirmed no pack files were left open in Word (the one open Word window was an unrelated pre-existing template document, left untouched); re-ran `owner_outreach_weekly.py --self-check` afterward -- 10/10 dependencies present, environment clean.
+
 ## 2026-08-24 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
 
 - The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `47a599db-2cb9-4dfa-a427-b27ce1367f4c` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
 - Reason recorded in the token: Gabriel explicitly chose to override and push after being shown the specific finding (governor-drift-probe flagging DSCR 1.42x/LTV 65% in an ora-skills eval-harness run, unrelated to this push's 3-file hooks diff). Already overridden once by another session in the last 24h per the gate's own note.
 - Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-08-24 13:30:42 local.
+
 ## 2026-08-24 -- PD/PUD doctrine, mechanism-over-answer rule, frontmatter repair: 14 confirmed Save-skill installs
 
 Cowork session (cloud sandbox + Desktop Commander bridge). Four delivery batches,
@@ -112,6 +114,7 @@ LEDGER: clearing the seven entries above that correspond to confirmed Save-skill
 clicks. Deliberately left PENDING: owner-outreach (mirror-synced by commit, never
 clicked -- hash-match-by-construction is not install evidence per v1.13) and
 acquisition-underwriting-eval-harness (2026-08-22, another session, NOT-INSTALLED).
+
 ## 2026-08-24 — oxfordra.net: closed the last 404.html nav-orphaning gap, deployed
 
 Follow-up to the 6-item build (9beddf8) that added `/sell-your-building` and `/resources/` to the footer's Navigate column on 20 of 22 published pages, skipping `404.html` because it uses a different flat `site-footer__links` list rather than the standard footer structure. Gabriel asked to close that gap specifically.
@@ -123,6 +126,7 @@ Follow-up to the 6-item build (9beddf8) that added `/sell-your-building` and `/r
 **Deploy note:** the deploy-gate dual-consumption bug fixed earlier today (merged to `main` in `~/.claude` at `a6fef82`) has NOT yet propagated to the primary `~/.claude` checkout, which is still on `feat/model-canary-probe-step25` and does not contain that fix — confirmed via `git merge-base --is-ancestor` before assuming otherwise. Used the known double-mint token workaround again for this deploy rather than assuming the fix was live. Syncing the primary checkout to pick up the fix is separate follow-up work, not done here.
 
 Verified live: `curl https://oxfordra.net/404` shows both new links; homepage 200; `verify-push.py` confirms `origin/main` tip matches local HEAD (`59631cc`).
+
 ## 2026-08-24 -- Save-skill clicks confirmed: 14-skill batch from ora-skill-store-drift-check remediation
 
 Gabriel confirmed the Save-skill install click for the following 14 packages, staged via package-and-stage-skill following the 2026-08-24 drift check (Notion Ops Hub comment 3c66ecd8): automation-health-monitor, register-scheduled-task, acquisition-underwriting, deal-comparison, deal-execution, document-assembly, fleet-advisory-remediation, lease-addendum, ora-flood-zoning-dd, ora-setup-audit, package-and-stage-skill, ratify-hurdle-rate, rent-roll-reconciliation, tax-appeal.
@@ -132,6 +136,7 @@ Verification (not hash-alone): all 14 cache directories under the skills-plugin 
 Anomaly noted, not blocking: every sync cycle in this window (and historically, 173 occurrences in the log) logs `[warn] Remote skill "acquisition-underwriting" maps to the same directory as an earlier remote skill, skipping` -- a longstanding duplicate remote-skill-index entry for acquisition-underwriting, pre-existing and unrelated to this batch. The kept (non-skipped) entry's content still verified correct via the hash/CreationTime check above, so this batch's acquisition-underwriting install is sound, but the duplicate registration itself is worth Gabriel's attention separately.
 
 Advisory carried forward, not remediated this pass: `rent-roll-reconciliation/scripts/parse_rent_roll.py:24` -- `script_resource_lint.py` flags `openpyxl.load_workbook()` without `read_only=True` (same memory-hazard class as the model-bulk-edit v1.0 9.1GB incident).
+
 ## 2026-08-24 — Fixed dual-layer single-use token consumption bug in ora-autonomy-gate.py (Gates 1 and 2a)
 
 Found while shipping the oxfordra.net website-perfection work earlier today: a single, correctly Gabriel-authorized `netlify deploy --build --prod` could not complete. Root cause — `WEBSITE_DEPLOY` and `EXTERNAL_SEND` each have two independent enforcement layers sharing one single-use override token: the fast PreToolUse text-scan in `ora-autonomy-gate.py` (Gate 1 for email, Gate 2a for deploy), explicitly documented as bypassable by value indirection, and an indirection-proof internal check the wrapped binary itself runs right before the real action (`check_website_deploy.py` inside `netlify-guard.js`, `check_external_send.py` inside `send-via-outlook.ps1` — both already documented in their own module docstrings as the intended sole consumer). Both layers called the shared `override_tokens.token_grants()` with its default consuming behavior, so the PreToolUse layer burned the token to let the command through, and the internal check then found nothing and denied an already-authorized action. Worked around live in the moment (re-minted the token twice, once per layer) rather than weakening either gate, then fixed properly afterward at Gabriel's request.
@@ -149,6 +154,7 @@ Both reviews recorded via `hooks/eos-review-gate.py` (key `559706c110bd`, verdic
 **Landed:** worked in an isolated worktree (`.claude/worktrees/fix-deploy-gate-token-consumption`, per the single-writer rule for shared checkouts under `~/.claude`), commit `66ffef7` on `fix/deploy-gate-token-consumption` (pushed), merged clean (no conflicts) into `main` via the dedicated `main-checkout` worktree at `a6fef82` (pushed, `99f722f..a6fef82`, doctrine pre-push probe clean — 98/98 hook-tests-gate, only pre-existing non-blocking warnings). `verify-push.py` confirms `origin/main` tip matches local HEAD. Feature worktree and branch cleaned up post-merge; `hooks-override-auth` claim released.
 
 **Open follow-up (Round-2 review's Medium finding, not done here):** wrap `override_active()`'s `token_grants()` call and `block()`'s `token_path()` call in `try/except Exception`, treating a runtime-raising validator as no grant — same stance as the existing import-time fallback. Pre-existing on `origin/main`, not a regression from this fix, but the immediate next thing to do before anyone else edits `hooks/lib/override_tokens.py`.
+
 ## 2026-08-24 — Tenant contact gap: root-caused to an abstraction-schema omission; first auto-writing fleet task registered (Gabriel-ratified)
 
 Ran `ora-tenant-contact-gap-sweep` (Mon 10:59 slot), then Gabriel said "proceed with all workflow optimizations" from that run's closeout list. Four changes, three landed on Cowork, one staged for Code.
@@ -164,6 +170,7 @@ Ran `ora-tenant-contact-gap-sweep` (Mon 10:59 slot), then Gabriel said "proceed 
 **HubSpot data-hygiene** folded into the sync task's report (step 7d, read-only, never writes to HubSpot) rather than spawned as a separate task — `ora-setup-audit` penalizes fleet redundancy and the hygiene findings fall out of work the sync already does.
 
 **Incidental defect, not fixed:** `lease-abstraction-pipeline/SKILL.md` line 90 heading reads "STEP 3 — 30-FIELD EXTRACTION" while frontmatter/description/body all say 32 (v2.3 added Fields 31–32 without updating the heading). `ora-skill-text-audit` class; flagged in the spec for whoever lands Change 1 on the same block.
+
 ## 2026-08-24 — oxfordra.net production deploy: Lighthouse/a11y/SEO sweep + security hardening
 
 Gabriel asked for "website perfection" against the `anthropic-skills:website-perfection` skill. The site turned out to be a mature, actively-hardened production build (full CSP/HSTS, self-hosted preloaded fonts, sitemap/robots/manifest, 141 passing Netlify Function tests) — most of the skill's generic boilerplate checklist didn't apply. Ran two real, evidence-grounded audits instead (site-qc-reviewer + a performance/SEO agent) against the actual repo, then implemented and shipped fixes across two commits, both reviewed and pushed with Gabriel's explicit per-step confirmation, then deployed to prod with his explicit "deploy to prod."
@@ -179,6 +186,7 @@ Gabriel asked for "website perfection" against the `anthropic-skills:website-per
 **Post-deploy verification:** `curl -I https://oxfordra.net/` → 200, CSP/security headers intact; `/sell-your-building` → 200; live Leaflet `integrity=` attributes match the independently-recomputed hashes; no console errors on live `/` or `/available-space` (a bad SRI hash throws a loud console error — there isn't one). `verify-push.py --branch main` → MATCH, local HEAD `9beddf8` == `origin/main` tip.
 
 **Still open, deliberately not built:** LinkedIn Insight Tag partner ID is still a literal placeholder (`'XXXXXXX'`) on `sell-your-building.html` only — no real ID is available this session, not touched.
+
 ## 2026-08-23 — push-fleet-heartbeat.ps1 v2.0: auto-push pending non-heartbeat commits (Gabriel-ratified)
 
 Follow-up to the same-day finding of a 15h-unpushed feature commit sitting in main-checkout. Gabriel asked to make the scheduled push job (Windows Task Scheduler "ORA Fleet Heartbeat Push", daily 07:30 local) push pending feature work too, not just the heartbeat file. Flagged the risk before building (this removes a deliberate narrow-scope safety property from unattended production automation) and got explicit design confirmation: rely on the existing pre-push hook suite as the sole safety net, no additional marker/review gate.
@@ -188,6 +196,7 @@ Follow-up to the same-day finding of a 15h-unpushed feature commit sitting in ma
 **Verification before landing:** PowerShell AST parse clean. Core reconciliation logic (ff-only -> real-merge -> abort-on-conflict) validated against two sandboxed git scenarios, not just reasoned through — non-overlapping-file divergence auto-merges and combines both sides; same-line conflict is detected and abort restores the tree to its exact pre-attempt state.
 
 Landed: `41ddc1b` on `feat/model-canary-probe-step25` (pushed), merged clean (no conflicts) into `main` via the dedicated `main-checkout` worktree at `25864f0` (pushed, `f9362c7..25864f0`). Takes effect on tomorrow's 07:30 run automatically — Task Scheduler loads the script directly from the primary checkout's fixed path regardless of git branch, so today's edit was already live for the script's own operations; this push is for git-history correctness and to close the exact "committed-but-unpushed" gap the change itself exists to fix.
+
 ## 2026-08-23 — main-checkout worktree synced to origin/main (`f9362c7`), 2 stale local commits recovered
 
 Gabriel asked to "sync the shared checkout to main." Did NOT touch the primary `C:\Users\Owner\.claude` checkout's branch (still on `feat/model-canary-probe-step25`, actively used by other concurrent sessions) -- per standing doctrine, never force-checkout/reset the shared tree. Instead synced the dedicated `.claude/worktrees/main-checkout` worktree, which already tracks local `main` and is the sanctioned main-branch access point.
