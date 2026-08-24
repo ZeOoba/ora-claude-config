@@ -12,6 +12,16 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-23 — main-checkout worktree synced to origin/main (`f9362c7`), 2 stale local commits recovered
+
+Gabriel asked to "sync the shared checkout to main." Did NOT touch the primary `C:\Users\Owner\.claude` checkout's branch (still on `feat/model-canary-probe-step25`, actively used by other concurrent sessions) -- per standing doctrine, never force-checkout/reset the shared tree. Instead synced the dedicated `.claude/worktrees/main-checkout` worktree, which already tracks local `main` and is the sanctioned main-branch access point.
+
+**Not a clean fast-forward.** The worktree carried 2 local commits never pushed to origin/main: `52d0605` "feat(maintenance): add ORPHANED_FILEPATH check + skill version/changelog drift probe" (2026-08-22 20:41:28, real finished feature work -- registry-membership-probe.py + doctrine-integrity-probe.py additions) and `42804f5` "chore(deadman): fleet-heartbeat refresh 2026-08-23" (2026-08-23 12:47:48, routine automated heartbeat ping). Both authored under Gabriel's git identity, neither touching files affected by the recent governor-drift-probe merge -- merged origin/main in (clean auto-merge via 'ort' strategy, zero conflicts), preserving both.
+
+Verified before push: 116/116 governor-drift-probe tests pass, live probe exit 0 (1162 files). Pushed `efcd876..f9362c7` directly to origin/main.
+
+**Worth Gabriel's attention:** the ORPHANED_FILEPATH check (52d0605) had been sitting unpushed in this worktree since 2026-08-22 20:41 -- over 15 hours -- before this sync surfaced it. If `main-checkout` is meant to be routinely pushed after local work lands there, it isn't happening on its own; worth a look at whatever process is supposed to push it (or confirm work is only ever meant to land there via merge from elsewhere, in which case this is a one-off).
+
 ## 2026-08-23 — feat/model-canary-probe-step25 merged into main (45 commits, `efcd876`)
 
 Gabriel requested the full branch merged, not just the governor-drift-probe eval-harness fix (`ba831dc`) landed earlier this session. Confirmed scope explicitly before acting (45 commits from many concurrent sessions, not scoped to my own work).
