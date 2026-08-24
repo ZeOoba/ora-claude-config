@@ -222,8 +222,10 @@ class TestLiveness(unittest.TestCase):
 
     def _run(self, path):
         import tempfile
+        state_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(state_dir.cleanup)
         return pdp.main(["--log", path, "--hours", "26", "--quiet",
-                         "--state-dir", tempfile.mkdtemp()])
+                         "--state-dir", state_dir.name])
 
     def _now_line_pair(self, task="ora-live"):
         ts = (datetime.datetime.now()
