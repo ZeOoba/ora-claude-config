@@ -1,0 +1,11 @@
+[
+  {
+    "task_id": "ora-passed-deal-tracker",
+    "paths": [
+      "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-passed-deal-tracker\\SKILL.md",
+      "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-passed-deal-tracker\\SKILL.md"
+    ],
+    "acknowledged": "2026-08-24",
+    "reason": "Gabriel-directed 2026-08-24, after ora-task-integrity-guard's 07:05 ET alarm. Known 2026-08-15 move to CC/MCP (memory/event_log.md): the LAMS twin was archived to _archive_2026-08-22_retired-to-ccmcp\\ora-passed-deal-tracker\\ on 2026-08-22, but the ORIGINAL LAMS folder and its LAMS registry row were never removed -- step 2/2 (delete_scheduled_task against the LAMS entry, from a native on-device Cowork session, never Claude Code) is still outstanding. CC/MCP copy is canonical and stays enabled. Pinned to the EXACT path pair below: if either path ever changes (e.g. the LAMS row is finally dropped and a DIFFERENT collision appears, or the CC/MCP canonical path moves) this suppression stops matching and the collision re-alarms on its own -- do not edit the paths to chase a new finding, add a new entry instead. Remove this entry once the LAMS registry row is actually dropped; a stale suppression for a since-cleared collision is worse than a noisy one."
+  }
+]
