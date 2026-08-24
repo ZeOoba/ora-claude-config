@@ -12,6 +12,17 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-24 — Debug: ora-psa-drift-watch / ora-open-sessions-board "misses" — NOT bugs, root-caused
+
+Gabriel asked to fix the two scheduled-task misses flagged in today's ora-cc-schematic-refresh run. Systematic-debugging investigation (registry read, task-folder/SKILL.md sanity check, cross-reference against `reference_bounded_pause_voided_overlapping_efficacy_checks_2026-08-21.md` and `reference_rev10_efficacy_2026-08-20.md`) found **no defect** — both are the same already-diagnosed root cause:
+
+- Gabriel ordered "pause all routines until Friday 5pm" on 2026-08-17 (~14:50 ET), disabling 35 of 40 CC/MCP recurring tasks; resume fired 2026-08-21 ~17:05 ET (`ora-routine-pause-resume-08-21`).
+- `ora-psa-drift-watch` (Wed 13:45 ET, registered 08-12): its only expected fire before today, Wed 08-19, fell inside the pause window. Never had a real opportunity to fire. Next real opportunity: Wed **2026-08-26** 13:45 ET (not 08-27 as an earlier memory note mis-stated — 08-27 is a Thursday; corrected in `reference_rev10_efficacy_2026-08-20.md` and the MEMORY.md pointer).
+- `ora-open-sessions-board` (Mon/Wed/Fri 17:00 ET, last ran 08-14): its three subsequent expected fires (08-17, 08-19, 08-21) all fell inside/at the edge of the same pause window; today's (Mon 08-24 17:00 ET) simply had not yet occurred at read time (~14:30 ET).
+- Both tasks confirmed healthy otherwise: `enabled: true`, cron matches each SKILL.md's frontmatter exactly, task folders well-formed. Live registry read this session also confirms the 08-21 resume fully completed (all CC/MCP recurring tasks now `enabled: true`), closing the "incomplete resume?" doubt the 08-21 efficacy check had left open.
+
+No registry writes made — nothing was broken to fix. Recommend re-checking `ora-psa-drift-watch` after Wed 2026-08-26 13:45 ET, and `ora-open-sessions-board` after today's 17:00 ET slot, to confirm normal firing resumed. If either still fails to fire past its corrected next-opportunity date, that would be a genuine new finding warranting fresh investigation.
+
 ## 2026-08-24 — ora-cc-schematic-refresh (scheduled, Mon 14:15 ET slot)
 
 Routine 2×/week schematic refresh. Producer-clobber check clean. Notable deltas this run (vs. 2026-08-17a):
