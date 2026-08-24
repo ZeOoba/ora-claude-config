@@ -12,6 +12,15 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-23 — push-fleet-heartbeat.ps1 v2.0: auto-push pending non-heartbeat commits (Gabriel-ratified)
+
+Follow-up to the same-day finding of a 15h-unpushed feature commit sitting in main-checkout. Gabriel asked to make the scheduled push job (Windows Task Scheduler "ORA Fleet Heartbeat Push", daily 07:30 local) push pending feature work too, not just the heartbeat file. Flagged the risk before building (this removes a deliberate narrow-scope safety property from unattended production automation) and got explicit design confirmation: rely on the existing pre-push hook suite as the sole safety net, no additional marker/review gate.
+
+**What changed:** the old step 2 attempted `--ff-only` reconciliation only and gave up (fail-open, no push) on ANY real divergence — even when the two sides touched entirely different files and would merge cleanly. v2.0 adds one real `git merge` attempt behind the ff-only fast path, with unconditional `git merge --abort` on any actual conflict — conflict resolution still never automated (the governor-drift-probe merge earlier today needed two Fable-tier agents and 3 review rounds; a scheduled script can't replicate that). Also reordered reconciliation to run before the heartbeat emit (avoids the emit's own uncommitted change contending with the merge), and removed the early-exit that skipped pushing entirely on a day the heartbeat counts didn't change.
+
+**Verification before landing:** PowerShell AST parse clean. Core reconciliation logic (ff-only -> real-merge -> abort-on-conflict) validated against two sandboxed git scenarios, not just reasoned through — non-overlapping-file divergence auto-merges and combines both sides; same-line conflict is detected and abort restores the tree to its exact pre-attempt state.
+
+Landed: `41ddc1b` on `feat/model-canary-probe-step25` (pushed), merged clean (no conflicts) into `main` via the dedicated `main-checkout` worktree at `25864f0` (pushed, `f9362c7..25864f0`). Takes effect on tomorrow's 07:30 run automatically — Task Scheduler loads the script directly from the primary checkout's fixed path regardless of git branch, so today's edit was already live for the script's own operations; this push is for git-history correctness and to close the exact "committed-but-unpushed" gap the change itself exists to fix.
 ## 2026-08-23 — main-checkout worktree synced to origin/main (`f9362c7`), 2 stale local commits recovered
 
 Gabriel asked to "sync the shared checkout to main." Did NOT touch the primary `C:\Users\Owner\.claude` checkout's branch (still on `feat/model-canary-probe-step25`, actively used by other concurrent sessions) -- per standing doctrine, never force-checkout/reset the shared tree. Instead synced the dedicated `.claude/worktrees/main-checkout` worktree, which already tracks local `main` and is the sanctioned main-branch access point.
