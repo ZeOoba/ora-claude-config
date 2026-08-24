@@ -83,6 +83,32 @@ work = json.load(open('data/snapshots/portfolio.json', encoding='utf-8'))
 for k in ('leases','deals','counterparties','properties','loans'):
     h, w = len(head.get(k,[])), len(work.get(k,[]))
     print(('SHRINK ' if w < h else 'ok     ') + f'{k}: {h} -> {w}')
+# Generic non-list section-shrink check (added 2026-08-24, OI-137/quickbooks incident):
+# the list-key loop above only ever covered 5 hardcoded keys, so the 2026-08-17 incident
+# (a CLI writer nulling the whole server-attached 'quickbooks' dict -- 828 deleted lines --
+# see reference_cc_snapshot_shrink_guard_covers_lists_only.md) went undetected. This check is
+# schema-agnostic -- any top-level key that was a non-empty/non-null value in HEAD and is
+# null or empty (dict/list/str) in the working copy is flagged, so a FUTURE server-attached
+# section shaped like quickbooks is automatically covered without a bespoke fix. SKIP excludes
+# keys with their own, different-from-'bigger-is-better' semantics: the 5 list keys (already
+# handled above), 'meta' (generatedAt always differs -- noise, not signal), and 'dataQuality'
+# (fewer flags is an IMPROVEMENT per the ratified severity gate below, not a defect -- see
+# 'A count that moves 2 -> 1 is an improvement, not an exception').
+# KNOWN RESIDUAL, disclosed not silently accepted: this only catches a section's TOP LEVEL going
+# populated -> empty/null. A nested list shrinking while the parent dict stays non-empty (e.g.
+# quickbooks.properties dropping some but not all rows) is NOT caught -- would need per-section
+# shape knowledge, which is exactly what 'generic' is trying to avoid. Strictly better than
+# before (zero coverage of non-list sections), not a claim of full coverage.
+SKIP = {'leases','deals','counterparties','properties','loans','meta','dataQuality'}
+def is_empty(v):
+    if v is None: return True
+    if isinstance(v, (list, dict, str)): return len(v) == 0
+    return False
+for k in sorted(set(head) | set(work)):
+    if k in SKIP: continue
+    h, w = head.get(k), work.get(k)
+    if not is_empty(h) and is_empty(w):
+        print(f'SHRINK  {k}: populated -> empty/null')
 "
   ```
 
