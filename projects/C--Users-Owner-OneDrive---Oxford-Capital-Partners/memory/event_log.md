@@ -12,6 +12,36 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-24 -- Entry Point B pre-packaged install: 8-skill description-headroom batch
+
+Gabriel confirmed the Save-skill click for 8 pre-packaged .skill files staged at
+`C:\Users\Owner\ora-skills\_staging\2026-08-24\` (Entry Point B, this session's
+own integrity pre-check run first -- exists/entries/frontmatter/freshness all
+PASS on all 8; pma-qc and listing-agreement-qc's `scripts/ora_doc_qc.py` verified
+against the shared `tools/ora_doc_qc.py` source, not a skill-dir copy).
+
+Post-install verification (cache-directory CreationTime moved off this
+session's pre-check baseline for all 8, confirming a real re-import rather
+than a `sync_appdata_mirror.py` content-only overwrite; packaged-file hash
+compared against the resulting cache copy):
+
+- settlement-basis-extraction -- confirmed installed clean. Save-skill click, ~2026-08-24 15:21:36.
+- acquisition-underwriting -- confirmed installed clean. Save-skill click, ~2026-08-24 15:21:36.
+- pma-qc -- confirmed installed clean. Save-skill click, ~2026-08-24 15:21:43.
+- disposition-analysis -- confirmed installed clean. Save-skill click, ~2026-08-24 15:21:47.
+- package-and-stage-skill -- confirmed installed clean. Save-skill click, ~2026-08-24 15:21:51.
+- listing-agreement-qc -- confirmed installed clean. Save-skill click, ~2026-08-24 15:21:58.
+- owner-outreach -- confirmed installed clean. Save-skill click, ~2026-08-24 15:22:09.
+
+**masterlease-jurisdiction-rebase -- NOT cleared.** CreationTime moved
+(~2026-08-24 15:21:39, consistent with a Save-skill click), but the resulting
+cache copy is missing `scripts/fixtures/ORA_MasterLease_ShallowBayIndustrial_v2.6_TEMPLATE.docx`
+relative to the packaged .skill -- content does not fully match. This is the
+signature of the known desktop-Settings subfolder-drop bug even though this
+skill was routed to the Cowork Save-skill button per doctrine; needs Gabriel
+re-verification and, if the file is still missing, a re-install via Cowork
+before its PENDING_REIMPORT entry is cleared.
+
 ## 2026-08-24 — Debug: ora-psa-drift-watch / ora-open-sessions-board "misses" — NOT bugs, root-caused
 
 Gabriel asked to fix the two scheduled-task misses flagged in today's ora-cc-schematic-refresh run. Systematic-debugging investigation (registry read, task-folder/SKILL.md sanity check, cross-reference against `reference_bounded_pause_voided_overlapping_efficacy_checks_2026-08-21.md` and `reference_rev10_efficacy_2026-08-20.md`) found **no defect** — both are the same already-diagnosed root cause:
