@@ -5,12 +5,44 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-23T16:59:40.535Z
+  modified: 2026-08-23T21:34:35.889Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-08-23 — feat/model-canary-probe-step25 merged into main (45 commits, `efcd876`)
+
+Gabriel requested the full branch merged, not just the governor-drift-probe eval-harness fix (`ba831dc`) landed earlier this session. Confirmed scope explicitly before acting (45 commits from many concurrent sessions, not scoped to my own work).
+
+Done in an isolated worktree (`.claude/worktrees/merge-canary-to-main`, branch `main-merge-temp` off `origin/main`) — never touched the shared checkout's working directory, which stayed on `feat/model-canary-probe-step25` throughout for other sessions' concurrent work.
+
+**Real conflicts, not a clean fast-forward.** `origin/main` carried 10 commits not on the feature branch, including 3 independently-landed governor-drift-probe.py false-positive fixes (PRs #145, #149, plus #150's unrelated encoding fix) — the same file my own fix had just touched. 4 conflict hunks in `governor-drift-probe.py`, 8 in `test-governor-drift-probe.py`.
+
+Resolved via the same implementer + independent adversarial reviewer discipline used for the original fix (both Fable-tier, per Hard Invariant 4 / financial-governor-code floor):
+- Combined both lineages' suppression logic (main's DSCR-changelog-scaling-multiplier + self-inflicted-FP fixes; feat's eval-harness FLOOR-RESULT narration fix) — AST-verified zero dropped/duplicated top-level names across both files (111 + 122 names).
+- One real judgment call: both sides had independently evolved a "tilde-hedge" suppressor at different review generations. Took main's later, more-restrictive redesign wholesale (PR #145's remediation closed gaps feat's earlier version had) — verified by adversarial reviewer that main's version still suppresses everything feat's existed for (deal-comparison/SKILL.md:153 pinned in a passing test), so no false-negative reopened.
+- `test_active_work_claims_excluded_e2e`: combined main's stronger flaggable-payload assertion with feat's atomic `O_CREAT|O_EXCL` file-create (closing a TOCTOU main's version had) — reviewer verified both properties hold in the merged code, not just that both sides' text survived.
+
+**Verification:** 116/116 tests pass post-merge (up from 105 feat-alone / main-alone failing on the live SKILL.md v4.13 line, which the merge itself resolves). Live probe exit 0, 1162 files. Adversarial reviewer ran a 23-case battery against the fully-merged file (not just feat-alone as in the original 4 rounds) — found 2 mismatches, decomposed both to confirm neither is merge-created (one is main's own pre-existing documented residual, one is an inherited main behavior that's safe-direction/over-flag, not under-flag, and doesn't occur anywhere in the live tree).
+
+Pushed directly as `main-merge-temp:main` after confirming `origin/main` hadn't moved since the merge base was taken. Worktree removed after push.
+
+Not yet done: this merge doesn't retroactively update the shared `~/.claude` checkout's branch (still on `feat/model-canary-probe-step25` — untouched by design, other sessions may be mid-work there) or any other local branch/worktree tracking main.
+
+## 2026-08-23 — Dirty-tree triage across 4 shared checkouts; one isolated commit (website-canonical)
+
+- Ran dirty-tree-triage across `~/.claude`, `ora-skills`, `website-canonical`, `oxford-command-center`. `~/.claude` (7 dirty entries, branch `feat/model-canary-probe-step25`) and `ora-skills` (2 untracked `_archive/` dirs dated 2026-08-22) were both CONTESTED — attributed to the live "ORA Doctrine Patch Bundle v01" session (`local_a1ce8288…`, isRunning:true at scan time) — left untouched per the skill's contested-WIP boundary; no claim filed since nothing was touched.
+- `website-canonical`: one modified file (`netlify/edge-functions/knowledge-base.json`, `generatedAt` timestamp-only regen, zero content diff, no live-session attribution) isolated-committed on Gabriel's explicit confirmation. The site-write gate fired on the commit; override token `allow-website-write` was written with Gabriel's in-turn confirmation quoted as the reason, used, and deleted immediately after the commit landed (`19a516c`).
+- Pushed `19a516c` to `origin/main` on Gabriel's explicit instruction. Verified via Netlify: deploy `6a8b4f30…`, state `ready`, context `production`, published 2026-08-23T19:51:33Z, `commit_ref` matches `19a516c` exactly, secret scan clean (226 files, 0 matches), Lighthouse 97/100/100/100. Diff vs the prior prod deploy (`fde9328`) confirmed as exactly the one-field timestamp change — nothing else shipped.
+- Flagged, not resolved (out of this skill's scope): `~/.claude`'s `feat/model-canary-probe-step25` branch has diverged from `origin/main` (5 local commits since merge-base `801f9831c`, 3 remote-only commits #148-150); `oxford-command-center` `main` is ahead 4 / behind 1 vs `origin/main`. Both need a real merge decision from Gabriel, not triage.
+
+## 2026-08-23 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `8b55e671-b71b-440b-9702-2d4841b9bd71` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel explicitly authorized ("Override and push now") after confirming via AskUserQuestion that the maintenance/test-governor-drift-probe.py failure is pre-existing and unrelated to this push -- the push's diff is scoped to exactly one file (memory/event_log.md, an append-only log), and the failure reads DSCR/LTV values from ora-skills/acquisition-underwriting-eval-harness/runs/2026-08-23T171623Z_scheduled-poll.json, a file in a different repo untouched by this commit. Hook itself noted the identical failure was already overridden 3 times by 2 distinct sessions in the prior 24h.
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-08-23 13:56:37 local.
 
 ## 2026-08-23 — Duplicate acquisition-underwriting skill registration — Cowork-surface investigation (blocked at Settings)
 
