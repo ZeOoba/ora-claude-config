@@ -176,6 +176,7 @@ and stays untouched. Today's fixes are the opposite direction (WIDENING detectio
 false negatives elsewhere), which is a different risk profile, not a re-litigation of that
 finding.
 """
+import inspect
 import json
 import os
 import re
@@ -218,6 +219,23 @@ except Exception:
 # made for its benefit can break this gate -- which is precisely why it must degrade safely.
 try:
     from override_tokens import Tier, token_grants, token_path  # noqa: E402
+    # SIGNATURE GUARD (2026-08-24, adversarial review of the consume-param fix below): a
+    # plain `from ... import token_grants` succeeds even against an OLDER override_tokens.py
+    # that predates the `consume` keyword this file now always passes -- the import itself
+    # cannot fail on a missing parameter, only a call can. Left unchecked, that call raises
+    # TypeError at every gated action, which the PreToolUse dispatcher (pretooluse-
+    # dispatcher.py) does NOT treat as a block (only an explicit sys.exit(2) blocks) -- so a
+    # version-skewed shared module (this environment routinely runs several concurrent
+    # sessions and worktrees against a shared ~/.claude checkout; override_tokens.py is
+    # edited for the doctrine gate too) would silently fail OPEN instead of closed, defeating
+    # the entire point of the except-Exception fallback below. Forcing the check here, before
+    # TOKEN_CONTRACT_LOADED is set True, routes an incompatible module through that same
+    # fallback -- every gated action blocks, exactly like any other broken-module case.
+    if "consume" not in inspect.signature(token_grants).parameters:
+        raise ImportError(
+            "override_tokens.token_grants() is missing the 'consume' parameter -- "
+            "stale/skewed shared module; degrading to the fail-closed stub"
+        )
     # EXTERNAL_SEND is SHARED with check_external_send.py (send-via-outlook.ps1's own
     # outbound-action check, 2026-07-17 -- see email_send_tier.py's module docstring for
     # why: the two enforcement points must never diverge on what "authorized" means).
@@ -247,7 +265,7 @@ except Exception:
             self.single_use = single_use
             self.requires_extra_check = requires_extra_check
 
-    def token_grants(session_id, tier, extra_check=None):
+    def token_grants(session_id, tier, extra_check=None, consume=True):
         return None  # no validator -> no grant, ever
 
     def token_path(session_id, name):
@@ -332,14 +350,23 @@ def _normalize_for_matching(text):
     return "".join(ch for ch in folded if unicodedata.category(ch) not in _STRIP_CATEGORIES)
 
 
-def override_active(session_id, tier, external=None):
+def override_active(session_id, tier, external=None, consume=True):
     """True iff a valid token authorizes `tier` for `session_id`. The generic contract
     (path, freshness, parse, scope, session, single-use consumption) is the shared module's;
-    the recipient binding is this gate's and rides along as extra_check."""
+    the recipient binding is this gate's and rides along as extra_check.
+
+    consume=False for a PEEK (2026-08-24 dual-layer-consumption fix -- full rationale in
+    override_tokens.token_grants' own docstring): pass it at any PreToolUse call site whose
+    gated action has its OWN downstream internal check (send-via-outlook.ps1's
+    check_external_send.py, netlify-guard.js's check_website_deploy.py) -- that internal
+    check is the sole intended consumer for single-use tiers on those paths. A call site
+    with no such downstream check (e.g. the Netlify MCP mutating-tool gate below, which has
+    no wrapped-binary layer to defer to) must keep the default consume=True: it is the only
+    enforcement point for that action, so it must be the one that spends the grant."""
     extra_check = None
     if tier.requires_extra_check:
         extra_check = lambda fields: _recipients_authorized(fields, external or [])  # noqa: E731
-    return token_grants(session_id, tier, extra_check=extra_check) is not None
+    return token_grants(session_id, tier, extra_check=extra_check, consume=consume) is not None
 
 
 def block(reason, tier, session_id, extra=""):
@@ -410,14 +437,29 @@ def check_bash(command, session_id):
     if "send-via-outlook.ps1" in lowered or SEND_SHORTNAME_RE.search(lowered):
         recipients = EMAIL_RE.findall(normalized)
         external = sorted({r for r in recipients if is_external(r)})
-        if external and not override_active(session_id, EXTERNAL_SEND, external):
+        # consume=False (2026-08-24): this is the fast, indirection-blind pre-check (see the
+        # module docstring's ALSO DEFERRED section); check_external_send.py inside
+        # send-via-outlook.ps1 itself is the indirection-proof backstop and the documented
+        # sole consumer of a single-use allow-external-send token. Consuming here as well
+        # left that backstop denying an already-authorized send with no token left to find --
+        # proven live on the WEBSITE_DEPLOY sibling of this exact pattern, same root cause.
+        if external and not override_active(session_id, EXTERNAL_SEND, external, consume=False):
             block("external email recipient(s): %s" % ", ".join(external), EXTERNAL_SEND,
                   session_id,
                   extra="The token must NAME each external recipient: a token approving a\n"
                         "send to one counterparty does not authorize a send to another.\n")
     # GATE 2a — production deploy via the netlify CLI.
+    # consume=False (2026-08-24): this text-scan is explicitly documented above as
+    # structurally blind to value indirection -- netlify-guard.js's check_website_deploy.py
+    # is the indirection-proof backstop and the documented sole consumer of a single-use
+    # allow-website-deploy token here. Consuming at this layer too meant a single, correctly
+    # authorized `netlify deploy --build --prod` could never pass both layers: this gate
+    # burned the token to let the Bash command run, then netlify-guard.js's own check found
+    # nothing left and denied it. Proven live 2026-08-24 (the incident that prompted this
+    # fix). Gate 2c below (Netlify MCP mutating tools) has no such downstream layer to defer
+    # to, so it deliberately keeps the default consume=True -- it is the only checker there.
     if NETLIFY_INVOKE_RE.search(normalized) and "deploy" in lowered and "--prod" in lowered:
-        if not override_active(session_id, WEBSITE_DEPLOY):
+        if not override_active(session_id, WEBSITE_DEPLOY, consume=False):
             block("production deploy to oxfordra.net (netlify --prod)", WEBSITE_DEPLOY,
                   session_id)
     # GATE 2b — writing into the site tree via a raw shell op (cp/mv/redirect/etc).
