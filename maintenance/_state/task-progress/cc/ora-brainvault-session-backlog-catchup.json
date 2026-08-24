@@ -1,8 +1,0 @@
-{
-  "fleet": "cc",
-  "taskId": "ora-brainvault-session-backlog-catchup",
-  "step": 6,
-  "totalSteps": 6,
-  "note": "committed d796b67 (240 files) and pushed to origin/main; 18 files mtime 2026-08-23 remain excluded by design; task complete",
-  "updatedAt": "2026-08-23T17:13:50.782123+00:00"
-}
