@@ -27,49 +27,22 @@
 - **[governor-drift-probe DSCR-changelog-scaling-multiplier fix + duplicate-session finding, 08-22](project_governor_drift_probe_dscr_scaling_multiplier_fix_2026-08-22.md)** — landed `ecf7b42`; also caught 3+ parallel sessions independently fixing the identical bug — flag for Gabriel
 - [Governor-LTV remediation PR #233](project_governor_ltv_remediation_2026-07-24.md) — 11 shipped; OPEN: debt-scoring ltv gap + silent-refusal reload path
 - **⛔ [3700 Kinsman Blvd FedEx — walk-price breach, decision due 08-25](project_fedex_kinsman_walk_price_breach_2026-08-23.md)** — drafted $3.8M LOI breaches 3 underwriting floors; walk $2,661,000. Withdraw or log Exception Register override
+- [CC branch-protect/mjs-dmts gaps](project_ccm_mjs_dmts_parity_and_branch_protection_gap_2026-08-24.md) — OI-205/OI-206
 - [HubSpot lease-renewal pipeline stalled 08-23](reference_hubspot_lease_renewal_pipeline_stalled_2026-08-23.md) — all 43 deals stuck at appointmentscheduled since 03-27, incl. tenants expiring within days
 - **⛔ [Northwood/EGFLLC $2.8M loan 07-27](project_northwood_egflc_loan_miscategorized_2026-07-27.md) — REOPENED. Reclassified 08-03, REVERSED unlogged 08-09 as a "duplicate"; Gabriel ruled C 08-10: INTERNAL DEBT REPORTING FROZEN until Eric produces the source doc. Quote external debt ($10,627,017) only — never Total Debt/internal. No governor impaired**
 
 ## Markets
-- [Market Intelligence](markets.md) — cross-market snapshots, macro (FRED), replacement cost, comps
-- [Basis Denominator — RCT v03 (RATIFIED)](project_replacement_cost_benchmark_unratified.md) — the ONE denominator; ORA buys at ~35-40% of replacement
-- **[Acquisition Buy Box & Scorecard v1.1 (RATIFIED)](acquisition-buy-box-v1.md)** — Rulings 1-5 + Amendments A-G, ratified 2026-06-09; created 08-17 closing a gap where drift-check step 2c cited this key since 06-20 and it never existed
-- [Notion Pipeline Tracker stale governor fields](reference_notion_pipeline_tracker_stale_governor_fields.md) — RCR formula stale at $95/SF; DSCR text asserted a non-canonical floor; fixed 08-11
-- [Deal Decision Ledger](deal-decision-ledger.md) — one row per decided PASS/SKIP/DROP/PARK/CLOSE + buy-box rule validated
-- [Disposition & Exit Ledger](disposition-ledger.md) — POST-acquisition lifecycle: ACQUIRED/HOLD/REFI/1031/SALE; 13 deals + 1100 Rarig HOLD backfilled 07-29
-- [DG Portfolio OH — PASS](deal_dg_portfolio_oh_2026-06.md) — Matthews 3-store DG net-lease + cap stratification
-- [1100 Rarig Ave — Disposition (HOLD)](deal_1100_rarig_disposition_2026-07.md) — basis/NOI/cost-seg; open gaps in file
-- [Historical Evaluations acquisition review 07-29](project_historical_evaluations_acquisition_review_2026-07-29.md) — 13-deal table; 2 LTV exceptions, 2 open date discrepancies
-- [entry-market-scan defects 08-04](reference_entry_market_scan_defects_2026-08-04.md) — `Gate Review` field: blank = awaiting Gabriel, never placeholder it
-- [5515 Catfish Court broker-correspondence claim is FALSE](reference_catfish_court_broker_correspondence_claim_false.md) — 08-14 re-check is a warm follow-up, not a cold call
-- [808 Rhoads real broker is Elford, not Koon/Menninger](reference_808_rhoads_real_broker_is_elford_not_koon.md) — Deal went OUT of contract 06-26; seller wants ~$3.5M vs the $2.86M LOI plan
+- **→ [Markets & Deals sub-index](INDEX_markets.md)** — buy box + basis denominator, decision/disposition ledgers, decided deals, rent-roll & lease-data gotchas, insurance, master-lease and workbook findings. **Not auto-loaded — open it before any deal, buy-box, rent-roll, lease-data or workbook question rather than assuming no prior finding exists.** (Count deliberately not stated — a hardcoded anchor belongs in a computed field or nowhere.)
 - **⛔ [511 Industrial Mile — duplicate rows + walk/offer conflict 08-16](reference_511_industrial_mile_duplicate_rows_and_walk_offer_conflict_2026-08-16.md)** — ORA's ONLY priced LOI loss ($1.575M won vs ORA's $1.45M). TWO Sourcing Log rows; Walk $930K sits BELOW the actual $1.45M offer, so Loss Class is held UNCLASSIFIED — don't pick a number. Re-engagement tickler fires 08-21. Pipeline `LOI Status` is unreliable — never branch on it
-- [Delinquency collection-status blind spot](reference_delinquency_report_collection_status_blindspot.md) — "no action taken" is inferred; wrong 4 of 6 tenants
-- [Columbus Suburban default/vacate 07-28](tenant_columbus_suburban_default_2026-07-28.md) — ORA-T-105 gone; $20,457 owed, PM misspells name "Suburan"; vacate ≠ contract expiry
-- [Rent-roll vacancy convention changed 08-01](reference_rent_roll_vacancy_convention_change_2026-08-01.md) — occupancy 98.6%→94.9% is definitional, not deterioration
-- [parseLeases vacancy-block phantom leases](reference_parseleases_vacancy_block_phantom_leases_2026-08-03.md) — CLOSED 08-03
-- [Both snapshot tasks write ONE file](reference_snapshot_tasks_share_one_file_diff_absorption.md) — the sibling's "no commit" is correct, not broken
 - **⛔ [openpyxl re-save breaks exceljs workbook parse 08-14](reference_openpyxl_resave_breaks_exceljs_workbook_parse_2026-08-14.md)** — Exit 3 `Cannot read properties of undefined (reading 'comments')` = absolute comment rel targets, NOT a lock or corruption (zip clean, all parts present). Breaks both snapshot tasks AND the mirror deploy (there it reads only as `build:mirror failed (1)`) until Excel rewrites the file
-- [CC snapshot is TRACKED, not ignored](reference_command_center_snapshot_is_tracked_not_ignored.md) — auto-committed unattended; the task file's "git-ignored" claim is wrong
-- [Notion Tenant DB Completeness Gap](reference_tenant_db_completeness_gap.md) — split on `Row Retired`, not the ⛔ARCHIVED prefix
-- [ora-pm critical-dates feed unreliable 08-04](reference_ora_pm_critical_dates_feed_unreliable_2026-08-04.md) — wrong on 5 of 10 rows; match on property+unit, never tenant name
-- [Lease-date detector defects 07-24](reference_lease_date_detector_defects_2026-07-24.md) — PR #232 merged; diff by business key not id
-- [HubSpot missed the 07-16 lease-date correction](reference_hubspot_missed_lease_date_correction.md) — HubSpot never fixed; J&R live conflict
-- **[HubSpot Lease Renewal `closedate` unreliable 08-16](reference_hubspot_lease_renewal_closedate_unreliable_2026-08-16.md)** — wrong on 2 of 3 Aug expirations (1yr/3yr early); never alert off it
-- [Insurance lapse confirmed REAL 07-25](project_insurance_lapse_confirmed_real_2026-07-25.md) — 5 properties expired/cancelled, 3 with no plan
-- **[9620 State 350 Hartford switch + deductible-ladder fix 08-17](reference_insurance_9620_state350_and_deductible_ladder_2026-08-17.md)** — 3 items OPEN (broker of record/GL transition/short-rate); "47% short" finding was wrong, corrected in skill v2.0
-- [Master Lease landlord entity states 08-03](project_masterlease_landlord_entity_states_2026-08-03.md) — MD/MO entities sourced; Baqir/Baquir + 13B/B13 open
-- [Master Lease next-rev upstream notes](reference_masterlease_next_rev_upstream_notes.md) — typo RESOLVED in v2.4.1; heading fragmentation still open
-- [Master workbook no single-writer 07-24](project_master_workbook_no_single_writer_2026-07-24.md) — OPEN: uncoordinated concurrent edits
-- [Master workbook single-writer proposal 07-25](project_master_workbook_single_writer_proposal_2026-07-25.md) — RATIFIED; text now [tech.md](tech.md) §3d
-- [Cash Data excludes PM-held accounts](reference_cash_data_excludes_pm_held_accounts.md) — negative balance is usually tax-timing, not distress
-- [Annual debt service 366-day over-capture](reference_workbook_annual_debt_service_366day_overcapture.md) — RESOLVED 08-05
-- [ELS EOMONTH pair-fix landed HALF](reference_els_eomonth_pair_fix_half_applied_2026-08-05.md) — OI-094: `H6:I9` moved to EOMONTH but `Assumptions!B30` was never constrained to month-end; strictly WORSE than pre-fix under manual override
 
 ## Reference
 - **[debt-scoring.ts JV-debt basis CONFIRMED 08-22](reference_debt_scoring_oxfordnoi_basis_conservative_not_correct_2026-08-22.md)** — 9cb6169 verified vs live workbook, not just conservative
+- **[claim_work.py --paths is space-separated, not comma 08-24](reference_claim_work_paths_comma_vs_space.md)** — a comma-joined value silently becomes ONE bogus path, no error; `covering N path(s)` in the output is the tell
+- **[CC snapshot shrink guard covers 5 list keys only, not dicts like quickbooks 08-24](reference_cc_snapshot_shrink_guard_covers_lists_only.md)** — root cause of the 08-17 quickbooks-nulling incident fixed (`6b9b507`); the guard itself was never widened, so a future server-attached section could suffer the same silent loss
+- ⚠️ **[Rate Snapshot fetched_at 7-day stale 08-24](reference_rate_snapshot_fetched_at_7day_stale_2026-08-24.md)** — ora-sofr-direct-prefetch found ora-am-brief's header stamp still 08-17 on 08-24; a persistent multi-day gap, not the documented same-burst ordering race. §2 patched; §1/3/4 untouched (not this task's scope)
 - ⛔ **[Bounded pause VOIDS overlapping efficacy checks 08-21](reference_bounded_pause_voided_overlapping_efficacy_checks_2026-08-21.md)** — a paused task and a missed task are indistinguishable in `send-log.txt`; the 08-17 pause manufactured 3 fake misses in `ora-pm-ledger`'s 08-13→08-19 window (4 of 4 eligible days actually delivered ON-SLOT). Check `lastRunAt` + the FleetPause restore ledger BEFORE any efficacy verdict. Also: `recordedSkips` is ROLLING (~6d) — 107→4 is retention decay, not improvement
-- ⚠️ **[Rev 10 remediation efficacy — 3 PASS / 1 FAIL 08-21](reference_rev10_efficacy_2026-08-20.md)** — FAIL is assert 1: `ora-psa-drift-watch` has NO `lastRunAt`, so the Rev 7 retime (`45 13 * * 3`) has still never been exercised; its 08-19 first fire fell inside the 08-17 bounded pause, so the null is explained but NOT cleared — re-check 08-27. Marketplaces, eval-harness runs/, and ora-setup-audit mirror parity all PASS
+- ⚠️ **[Rev 10 remediation efficacy — 3 PASS / 1 FAIL 08-21](reference_rev10_efficacy_2026-08-20.md)** — FAIL is assert 1: `ora-psa-drift-watch` has NO `lastRunAt`, so the Rev 7 retime (`45 13 * * 3`) has still never been exercised; its 08-19 first fire fell inside the 08-17 bounded pause, so the null is explained but NOT cleared — re-check 08-26 (Wed; corrected 08-24, was mislabeled 08-27/Thu). Marketplaces, eval-harness runs/, and ora-setup-audit mirror parity all PASS
 - **[Tax & Basis Register entity EINs + 1031 exchange index 08-17](reference_tax_settlement_entity_and_exchange_index_2026-08-17.md)** — 6 entity EINs, EX-12-*/IPX exchange numbers 2015-2026; 5 priority-1 findings filed as [OI-189](open-items-tracker.md#OI-189)-[OI-193](open-items-tracker.md#OI-193)
 - **["Metrics History"/Category 4a/4b doesn't exist 08-17](reference_metrics_history_pattern_does_not_exist_2026-08-17.md)** — tax data's home is `property_tax_assessments`
 - **⛔ [Transcript mtime ≠ event date — hookify already stopped 08-13](reference_hookify_noop_hooks_every_tool_call.md)** — hookify's no-op hooks are HISTORICAL, nothing to disable. The reusable lesson: bucket transcript metrics by each event's own `timestamp`, never by file mtime — a resumed session's .jsonl is touched today but holds week-old lines, which made a dead finding read as live
@@ -88,6 +61,7 @@
 - **[delete_scheduled_task resolves a colliding id to the LOCAL fleet 08-17](reference_delete_scheduled_task_resolves_colliding_id_to_local_fleet.md)** — no fleet param; "deregister the LAMS twin" run from Code deletes the LIVE CC task. Verify with a LAMS-only control id (`ora-cowork-heartbeat`) before firing
 - **⛔ [Task description lives in ONE store — SKILL.md](reference_skill_description_registry_file_desync.md)** — neither registry holds `description`; a file edit IS durable. NEVER `update_scheduled_task` to "sync" one — that call drops frontmatter keys
 - [SKILL.md frontmatter is deliberately NOT strict YAML](reference_skill_frontmatter_lenient_parse.md) — the harness parses line-wise, so ~97/147 fleet SKILL.md fail `yaml.safe_load` **by design**; do NOT mass-quote to satisfy it
+- **⛔ [AR review-queue has NO resolver 08-24](reference_ar_review_queue_has_no_resolver.md)** — `review-queue.json` is write-only; the runbook's "run `scripts/ar-import.ts`" is a dead pointer (PDF-only, needs a server Guard 2 forbids). A queued row is not durable — one was erased by a sibling session's regen. Only `overlay.json` (gitignored) held the money
 - **⚠️ [AR subsystem ran for the first time 08-17](reference_ar_subsystem_exists_but_dark_2026-08-16.md)** — `data/ar/` + `arBalances[]` now populated (~$204,788), but it was a one-off manual run, still unregistered (no inbox, no schedule) and unreviewed by Gabriel. Do NOT rebuild the pipeline — 3 sessions nearly did before this
 
 ## Rules & governance

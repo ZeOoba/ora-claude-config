@@ -5,12 +5,52 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-24T20:02:54.323Z
+  modified: 2026-08-24T22:24:23.803Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-08-24 — governor-drift-probe eval-harness false positive: duplicate-fix collision resolved, regex approach reverted in favor of path exemption
+
+Follow-up to the deploy-gate token fix earlier today: while landing that fix, a production push separately got blocked by a governor-drift-probe.py false positive — an ora-acquisition-underwriting-eval-harness scheduled-poll run's floor-verdict prose ("DSCR floor PASSES (~1.42x at 65%-LTV-bound refi sizing)") was misread as a governor redeclaration, already overridden twice by two distinct sessions in 24h.
+
+**First pass:** built a narrow, structurally-anchored regex suppressor (`RE_DSCR_FLOOR_VERDICT_NOCANON`, ~250 lines across `maintenance/governor-drift-probe.py` + `maintenance/test-governor-drift-probe.py`), root-caused precisely against the actual source and the file's existing suppression conventions. Three rounds of independent Fable-tier adversarial review (two rounds found and closed real false-negative regressions — a ratification-verb gap and a same-line-recurrence gap, plus two lower-severity fixes) before landing at `6b888d3` (merged to `main` via `b820d10`, pushed, verified — the pre-push doctrine gate's own hook-tests-gate ran clean with no override needed, confirming the fix worked in its real invocation context).
+
+**Duplicate-work collision discovered:** immediately after landing, found another concurrent session had independently fixed the *identical* incident (same trigger line cited verbatim in their own commit message) via a fundamentally different approach — a blanket path-based exemption (`_is_eval_harness_run_log`, ~30 lines) excluding the whole `.../acquisition-underwriting-eval-harness/runs/*.json` path from scanning entirely, on the reasoning that this file class is machine-generated downstream result narration, never a governor source of truth, and that regex suppression is empirically a losing game against unpredictable per-run LLM phrasing. Same collision class as the 2026-08-22 DSCR-changelog-scaling-multiplier incident (3+ sessions independently fixing the same false positive) — see `project_governor_drift_probe_dscr_scaling_multiplier_fix_2026-08-22.md`.
+
+**Gabriel's call, given the recommendation:** adopt the path-exemption approach as the durable fix. The empirical case is strong — this was the *second* narrow regex suppressor built for this exact recurring false-positive class (the first, `ba831dc`, ~220 lines/4 review rounds, was bypassed by new LLM phrasing within 24h; the regex fix built today would have faced the identical risk from the next scheduled run). Did not touch the other session's work while it was still staged/uncommitted (single-writer discipline — exactly the scenario the 08-22 incident's own memory note warns about); waited for it to land as a real commit (`1b5ab70`) and merge into `origin/main` before acting.
+
+**Resolution:** reverted the regex-based fix (`git revert 6b888d3`, clean auto-merge — the two fixes touch disjoint regions of the file) once `1b5ab70` was confirmed merged and independently verified to cover the original incident on its own. Reviewed (Fable-tier, recorded via `eos-review-gate.py`, key `33c21fd48782`): revert is a clean, exact inverse of the original commit, the path-exemption fix and its own tests are fully untouched, full suite green. Landed as `144f7bf` on `main` (pushed, verified — pre-push doctrine gate clean, 98/98 hook tests, no override needed).
+
+**Net state:** `governor-drift-probe.py` now has exactly one fix for this incident (the path exemption), not two coexisting mechanisms where one is dead code. Per-line drift detection is strictly unweakened everywhere outside the exempted path — the revert narrows scope to exactly the ratified exemption, nothing more.
+
+## 2026-08-24 — Open-sessions board: "Cricket DC LLC lease addendum" closed
+
+Session `local_171c2681-60c1-4191-ad9a-fb9d72121b03` (Cowork, ~10d stale) had specced a lease-addendum skill build (MINIMAL AMENDMENT doctrine, 4 modules, 7-state recordation overlay, 16-check QC gate, guaranty exhibit for substitutions) plus tombstoning document-assembly's Template 6 and adding a CLAUDE.md tie-break, both in the same commit. Re-verified live: already fully shipped. `ora-skills/lease-addendum` exists (SKILL.md v1.0 + references/scripts/templates/tests), built via commit c29471e "feat: add lease-addendum skill; tombstone document-assembly Template 6". document-assembly's own v1.4 changelog confirms the Template 6 tombstone with matching gap analysis (novation consent / security-deposit disposition / insurance reissuance / notice addresses). CLAUDE.md's Skill tie-breaks section already carries the routing rule. Gabriel: close it out. No further action.
+
+## 2026-08-24 — Open-sessions board: "Fix governor-drift-probe DSCR/LTV false positive" closed
+
+Session `local_9b2a3fb7-bd95-4946-b313-7a1c2dcae20e` couldn't reach an unreachable peer session it believed was concurrently editing the same dscr_veto/refi-sizing suppression machinery in governor-drift-probe.py, and stalled on whether to merge. Re-verified live: no conflict ever materialized. Both change sets (this session's 3 fixes -- v4.13 DSCR/LTV false positive e15a2c0, memory-narrative exemptions de509c8/85e64c3, hooks/sessions prune ff1158a -- and the peer's eval-harness floor-result fix ba831dc) landed via efcd876, a 45-commit merge of feat/model-canary-probe-step25 into main on 2026-08-23 17:32, in the window this session was active. A further hardening commit (1b5ab70, path-exemption for a third recurrence) landed cleanly afterward on 2026-08-24 14:34 with no conflict. No conflict markers in the file, no dangling active-work claim referencing it. Gabriel: close it out. No further action.
+
+## 2026-08-24 — Open-sessions board: "Dirty triage" (oxford-command-center) closed
+
+Session `local_e2bc42b3-f1b0-4321-853e-e893fe77dc8f` flagged a merge conflict between local commits (9cb6169 DSCR fix, ead629d cc-audit-army batch, plus a local doc revision) and PR #287's insurance-premium-history-import feature, same design-spec doc path diverged. Re-verified live: already resolved by another session — main (43d685c) matches origin/main exactly, git status clean, merge commit a77cd19 "Merge origin/main into local main" landed both local commits and PR #287's doc version (472c5f1, 95 lines) cleanly. The local-only doc draft no longer exists anywhere reachable (checked jolly-vaughan-931fba worktree: byte-identical to main; integrity-sweep-fixes worktree: pruned). Gabriel: "Close it out." No further action.
+
+## 2026-08-24 — 3700 Kinsman Blvd (FedEx): Notion Stage corrected to Candidate; 8/25 walk-price deadline confirmed controlling
+
+Gabriel's final ruling on the open-sessions board follow-up: Notion Stage corrected from "Passed" to **Candidate** (matches every other actively-negotiated deal in the tracker). On the two conflicting deadlines surfaced by reconciliation (8/25 walk-price-breach decision vs. 8/27 underwrite-pass deadline cited by the counteroffer-analysis session): **8/25 controls**. Notion page `3c06ecd8-9e59-813f-9679-e2905c34a488` updated live via notion-update-page. projects.md Active deal pipeline row and deal-decision-ledger.md's corrective row (2026-08-24) both stand as written; this entry closes the loop opened earlier today by the deal-stage reconciler's tripwire.
+
+## 2026-08-24 — 3700 Kinsman Blvd (FedEx): Gabriel ruled Notion's "Passed" stage WRONG
+
+Open-sessions board flagged the deal-stage reconciler's tripwire (Notion Stage → Passed, no matching decision found, conflicting with a live same-day counteroffer-analysis session and the open walk-price-breach item). Gabriel's ruling on the board: "Passed not correct" — the deal remains active. Notion's Stage field itself was NOT corrected by this session (no confirmed replacement value — see open question). deal-decision-ledger.md's 2026-08-24 Kinsman row is superseded by a new corrective row rather than edited, per the ledger's append-only convention. projects.md's Active deal pipeline table did not carry this deal at all (last verified 2026-08-11, predates the re-engagement) — added as an ACTIVE row reflecting the live Matthews REIS counteroffer ($4,075,000, 8/27 deadline) and the still-open walk-price-breach decision.
+
+## 2026-08-24 — Deal-stage sync: 3700 Kinsman Blvd — Madison WI (FedEx) — (none) → Passed (Notion)
+
+Detected by ora-open-sessions-board's reconciliation step; no corresponding entry existed. Tripwire only — see Notion for the actual decision context.
+
+**Flagged as a live conflict, not a routine sync:** Notion Stage already reads "Passed," but a Cowork session active 0.9h before this run ("3700 Kinsman counteroffer analysis") is treating the deal as live — Matthews REIS sent a Multiple Counteroffer 8/24/2026 ($4,075,000 purchase price), and that session's own text cites an 8/27 deadline for a formal SCREEN/UNDERWRITE pass, not a closed decision. This also conflicts with MEMORY.md's `project_fedex_kinsman_walk_price_breach_2026-08-23.md` entry, which frames the walk-price decision as due 2026-08-25 with the drafted $3.8M LOI breaching 3 underwriting floors (walk $2,661,000) — still open, not resolved. Someone or something set Notion's Stage to Passed without a matching narrative anywhere reachable from this run. Surfaced on today's open-sessions board as a QUESTIONS FOR GABRIEL item rather than accepted as a clean transition.
 
 ## 2026-08-24 — t1_letter_format.py: plain-mode top margin folded into the module (page_for_mode())
 

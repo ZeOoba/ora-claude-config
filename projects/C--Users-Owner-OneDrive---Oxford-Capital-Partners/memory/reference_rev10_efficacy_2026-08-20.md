@@ -1,8 +1,11 @@
 ---
 name: reference-rev10-efficacy-2026-08-20
-description: One-time efficacy check of the Automation Audit Rev 10 remediation (2026-08-14) — 3 PASS, 1 FAIL (psa-drift-watch never fired, confounded by the 08-17 bounded fleet pause)
-metadata:
+description: "One-time efficacy check of the Automation Audit Rev 10 remediation (2026-08-14) — 3 PASS, 1 FAIL (psa-drift-watch never fired, confounded by the 08-17 bounded fleet pause)"
+metadata: 
+  node_type: memory
   type: reference
+  originSessionId: 2beba31c-2df2-4beb-8d85-3bc760e04f6d
+  modified: 2026-08-24T19:01:50.113Z
 ---
 
 # Rev 10 Remediation — Efficacy Check (run 2026-08-21 ~17:15 ET)
@@ -18,7 +21,9 @@ Evidence — `list_scheduled_tasks` (CC/MCP registry, MCP tool, not the JSON), e
 
 Per the assert's stated rule, absent `lastRunAt` = FAIL. The retime itself landed correctly — the cron reads `45 13 * * 3`, the Rev 7 collision fix. What did not happen is the fire.
 
-**Attribution (do not read this FAIL as "the retime silently never took"):** the task's first-ever scheduled fire would have been Wednesday **2026-08-19 13:45 ET**, which falls inside the bounded pause. Evidence — registry entry `ora-routine-pause-resume-08-21`, verbatim description: *"One-time resume — re-enables the 35 CC/MCP recurring tasks paused 2026-08-17 at Gabriel's request (\"pause all routines until Friday 5pm\")"*. A disabled task cannot fire. So the null here is **explained**, not mysterious — but it is also **unverified as fixed**: the retime has still never been exercised, and the next natural fire is Wednesday 2026-08-27 13:45 ET. Re-check then before calling R10-4 closed.
+**Attribution (do not read this FAIL as "the retime silently never took"):** the task's first-ever scheduled fire would have been Wednesday **2026-08-19 13:45 ET**, which falls inside the bounded pause. Evidence — registry entry `ora-routine-pause-resume-08-21`, verbatim description: *"One-time resume — re-enables the 35 CC/MCP recurring tasks paused 2026-08-17 at Gabriel's request (\"pause all routines until Friday 5pm\")"*. A disabled task cannot fire. So the null here is **explained**, not mysterious — but it is also **unverified as fixed**: the retime has still never been exercised, and the next natural fire is Wednesday **2026-08-26** 13:45 ET (corrected 2026-08-24 — the original note said "Wednesday 2026-08-27," but 2026-08-27 is a Thursday; verified independently via `calendar.weekday(2026,8,26)` = Wednesday). Re-check then before calling R10-4 closed.
+
+**Re-checked 2026-08-24 (still pre-window, not yet actionable):** `ora-cc-schematic-refresh`'s live run confirmed `ora-psa-drift-watch` is still `enabled: true`, cron unchanged (`45 13 * * 3`), still no `lastRunAt` — expected, since 2026-08-26 has not yet arrived. Also confirmed from the live registry that the 08-21 resume did fully complete: every CC/MCP recurring task (not just the 2 seen in this note's "incidental observation") now shows `enabled: true`, closing that open doubt. `ora-open-sessions-board` (Mon/Wed/Fri 17:00 ET) shows the identical pattern for the same reason — its last run was 2026-08-14, and 08-17/08-19/08-21 all fell inside the same pause window; its Monday 2026-08-24 17:00 ET fire had simply not yet occurred at read time (~14:30 ET). Neither is a new defect — both are the same already-diagnosed pause-window null. See `event_log.md` 2026-08-24 for the fuller writeup.
 
 Sibling one-time `ora-psa-drift-watch-retime-efficacy-check` did fire today (`lastRunAt: 2026-08-21T21:10:51.698Z`), i.e. ~4 min before this run; its own finding is not restated here.
 

@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 22a20c12-8ae6-4d2e-ae7a-89acb1956634
-  modified: 2026-08-21T21:27:23.846Z
+  modified: 2026-08-24T22:20:23.807Z
 ---
 
 **The trap.** An efficacy check counts "days the task delivered nothing" from
@@ -46,11 +46,15 @@ timestamp in the file. Fleet-wide `per_task_limit` read **zero** in the retained
 window, but 5 of those 6 days sat inside the pause with 35 of 40 tasks disabled,
 so contention was artificially suppressed — it does not close [[open-items-tracker]] OI-133 item (a).
 
-**Doctrine gap, unfixed.** `register-scheduled-task` v2.12 requires a bounded
-pause to register its own auto-resume. It does NOT require enumerating one-time
-checks whose window intersects the pause and either deferring their `fireAt`
-past the resume or recording them as knowingly voided. Recommended to Gabriel
-2026-08-21 as question 2 of the pm-ledger efficacy report; his call.
+**Doctrine gap — FIXED 2026-08-24.** `register-scheduled-task` v2.12 required a
+bounded pause to register its own auto-resume but did NOT require enumerating
+one-time checks whose window intersects the pause and either deferring their
+`fireAt` past the resume or recording them as knowingly voided. Recommended to
+Gabriel 2026-08-21 as question 2 of the pm-ledger efficacy report; ratified
+2026-08-24 (yes, add the check). Shipped as v2.17's ONE-TIME EFFICACY-CHECK
+CHECK, `ora-skills` commit `d9e3708`. Auto-synced to the LAMS skills-plugin
+copy at commit time but landed in `PENDING_REIMPORT.md` — Gabriel still needs
+to click Save skill in Cowork before the updated version is live there.
 
 Related: [[reference_fleet_throttle_skip_catchup_burst]] ·
 [[reference_rev10_efficacy_2026-08-20]] ·
