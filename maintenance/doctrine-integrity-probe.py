@@ -197,6 +197,18 @@ BACKUP_SWEEP_TRANSIENT_DIRS = {
     # NEVER track (invariant 3): confidential staging must not reach the remote.
     # daemon/ (above) additionally holds key files -- also never track.
     "_confidential-staging",
+    # NEVER track (2026-08-24, recurring WARN since 08-18 per push-fleet-heartbeat.log):
+    # .secrets/ holds live credential files (e.g. notion-outreach.token) -- exactly the
+    # class this .gitignore's own header rationale names ("this dir mixes secrets... with
+    # the config worth tracking") as the reason for its /* default-deny in the first place.
+    # A .gitignore opt-in (the sweep's other suggested remediation) is categorically wrong
+    # here, not just unratified -- unlike _confidential-staging (deal terms, catastrophic
+    # if lost) or session-context.md's roster (see backup-session-context.py), a lost API
+    # token is regenerable from its issuing service's own admin UI, so no off-machine
+    # mirror is set up for it here; if that stops being true for some future file placed
+    # in .secrets/, add the same local-rotation + OneDrive-mirror pattern
+    # backup-session-context.py already uses, don't opt the dir into git.
+    ".secrets",
 }
 
 # Tokens that look like slash commands but resolve via a plugin skill rather than
