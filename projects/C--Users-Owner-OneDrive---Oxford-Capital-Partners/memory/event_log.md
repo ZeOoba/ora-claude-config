@@ -12,6 +12,11 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-24 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `47a599db-2cb9-4dfa-a427-b27ce1367f4c` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel explicitly chose to override and push after being shown the specific finding (governor-drift-probe flagging DSCR 1.42x/LTV 65% in an ora-skills eval-harness run, unrelated to this push's 3-file hooks diff). Already overridden once by another session in the last 24h per the gate's own note.
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-08-24 13:30:42 local.
 ## 2026-08-24 -- PD/PUD doctrine, mechanism-over-answer rule, frontmatter repair: 14 confirmed Save-skill installs
 
 Cowork session (cloud sandbox + Desktop Commander bridge). Four delivery batches,
