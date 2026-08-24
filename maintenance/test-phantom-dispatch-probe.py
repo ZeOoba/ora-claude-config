@@ -196,5 +196,80 @@ class TestVerifiedNull(unittest.TestCase):
         self.assertIsNone(pdp.find_phantoms([], now=NOW, hours=26) or None)
 
 
+class TestLiveness(unittest.TestCase):
+    """A log can be perfectly READABLE and still be dead.
+
+    Live regression, 2026-08-24: the probe returned exit 0 and printed
+    "OK -- every dispatch in the window confirmed" over a window that held at
+    least 12 real dispatches. The parser was fine; the desktop app had simply
+    stopped writing to %APPDATA%\\Claude\\logs at 2026-08-20 20:51, so all five
+    logs were 4 days stale and genuinely contained nothing recent. Readability
+    and liveness are different properties -- these tests pin both gates.
+    """
+
+    def _log(self, lines, age_hours):
+        """Write a temp log and backdate its mtime by age_hours."""
+        import os
+        import tempfile
+        fd, path = tempfile.mkstemp(suffix="-main.log", text=True)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+        self.addCleanup(lambda: os.path.exists(path) and os.unlink(path))
+        when = (datetime.datetime.now()
+                - datetime.timedelta(hours=age_hours)).timestamp()
+        os.utime(path, (when, when))
+        return path
+
+    def _run(self, path):
+        import tempfile
+        return pdp.main(["--log", path, "--hours", "26", "--quiet",
+                         "--state-dir", tempfile.mkdtemp()])
+
+    def _now_line_pair(self, task="ora-live"):
+        ts = (datetime.datetime.now()
+              - datetime.timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
+        return [spawn(ts, task), confirm(ts, task)]
+
+    def test_frozen_log_is_exit_2_not_exit_0(self):
+        # The exact 2026-08-24 shape: real dispatch lines, but all of them
+        # predate the window because the file stopped being written.
+        path = self._log([
+            spawn("2026-08-20 20:50:00", "ora-frozen"),
+            confirm("2026-08-20 20:50:01", "ora-frozen"),
+        ], age_hours=86.8)
+        self.assertEqual(self._run(path), 2)
+
+    def test_fresh_log_with_zero_dispatch_events_is_exit_2_not_exit_0(self):
+        # mtime is current, so the frozen-log gate passes -- the zero-dispatch
+        # gate is what has to catch this one. 0 of 0 is unverified, not clean.
+        path = self._log([
+            "2026-08-24 10:00:00 [info] [process-memory] trigger=interval tree_rss_sum=985MB",
+        ], age_hours=0)
+        self.assertEqual(self._run(path), 2)
+
+    def test_fresh_log_with_a_healthy_dispatch_is_still_exit_0(self):
+        # The happy path must survive both new gates, or they are worse than
+        # the bug: a probe that always exits 2 is a probe nobody reads.
+        path = self._log(self._now_line_pair(), age_hours=0)
+        self.assertEqual(self._run(path), 0)
+
+    def test_fresh_log_with_a_phantom_is_still_exit_1(self):
+        ts = (datetime.datetime.now() - datetime.timedelta(minutes=30))
+        path = self._log([
+            spawn(ts.strftime("%Y-%m-%d %H:%M:%S"), "ora-ghost"),
+            stale((ts + datetime.timedelta(minutes=6)).strftime("%Y-%m-%d %H:%M:%S"),
+                  "ora-ghost"),
+        ], age_hours=0)
+        self.assertEqual(self._run(path), 1)
+
+    def test_load_lines_reports_the_newest_mtime(self):
+        path = self._log(["irrelevant"], age_hours=5)
+        _lines, read, _problems, newest = pdp.load_lines([path])
+        self.assertEqual(len(read), 1)
+        self.assertIsNotNone(newest)
+        age_h = (datetime.datetime.now() - newest).total_seconds() / 3600.0
+        self.assertAlmostEqual(age_h, 5.0, delta=0.1)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
