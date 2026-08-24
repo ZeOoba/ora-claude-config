@@ -12,6 +12,12 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-24 -- Save-skill clicks confirmed: 5-skill frontmatter-fix batch (concurrent-session commits c6f3dea, 696e838)
+
+Gabriel confirmed the Save-skill install click for exception-detection, monthly-close, ora-millage-lookup, portfolio-reporting, title-exam-abstraction -- packaged and staged via package-and-stage-skill after these appeared as new pending-reimport entries mid-task (landed by a concurrent session, commits c6f3dea "fix(frontmatter): five skills were shipping their changelog as their description" and 696e838 "feat(dd): mechanism-over-answer rule propagated; register write-back verification").
+
+Verification: all 5 cache directories show fresh CreationTime clustered 18:25:52.326Z-18:26:01.172Z, immediately following staging, SKILL.md content SHA256-matching repo (EOL-normalized). Corroborated to the second against `%LOCALAPPDATA%\Claude\Logs\main.log`: `Sync complete: 2 downloaded` at 14:25:52 local (exception-detection + monthly-close together), `1 downloaded, 1 removed` at 14:25:55 (ora-millage-lookup), `1 downloaded` at 14:25:58 (portfolio-reporting) and 14:26:01 (title-exam-abstraction). Zero sync failures.
+
 ## 2026-08-24 — Correction: masterlease-jurisdiction-rebase install IS complete, not missing a file
 
 A concurrent session's entry immediately above this one ("Entry Point B pre-packaged install: 8-skill description-headroom batch") reported `masterlease-jurisdiction-rebase` as NOT cleared -- cache copy allegedly missing `scripts/fixtures/ORA_MasterLease_ShallowBayIndustrial_v2.6_TEMPLATE.docx` relative to the packaged `.skill`, the signature of the desktop-Settings subfolder-drop bug.
