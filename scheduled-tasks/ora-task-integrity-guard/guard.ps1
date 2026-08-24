@@ -173,6 +173,44 @@ try {
         exit 1
     }
 
+    # ---- id-collision acknowledgment (2026-08-24, Gabriel-directed) ------
+    # A collision is re-derived from a live registry scan every run -- there is no persistence
+    # of its own, so by construction it never silently disappears. This lets Gabriel dated-ack a
+    # SPECIFIC (id, path-pair) he already knows about and has a plan for, without inventing a new
+    # blind spot: the ack is pinned to the exact path pair, so if either path ever changes (the
+    # known leg gets resolved, or a DIFFERENT collision appears on the same id) the old ack stops
+    # matching and the finding re-alarms on its own. Same bar as dangling-mutation-acknowledged.json
+    # / ora-appsec-sweep/suppressions.md: added deliberately with a dated reason, never to quiet a
+    # noisy run. Fail-open: an absent or unparseable ack file suppresses nothing.
+    $idCollisionAckPath = 'C:\Users\Owner\.claude\maintenance\_shared\id-collision-acknowledged.json'
+    $idCollisionAcks = @()
+    try {
+        if (Test-Path -LiteralPath $idCollisionAckPath) {
+            $idCollisionAcks = @(Get-Content -LiteralPath $idCollisionAckPath -Raw | ConvertFrom-Json)
+        }
+    } catch { $idCollisionAcks = @() }
+
+    $collisionsSuppressed = @()
+    $collisionsLive = @()
+    foreach ($c in $collisions) {
+        # Format is '{id} -> {path1} | {path2}' (built above). Split defensively -- an ack that
+        # fails to parse against a given entry just falls through to "live", never to "suppressed".
+        $isSuppressed = $false
+        try {
+            $idPart, $pathsPart = $c -split ' -> ', 2
+            $p1, $p2 = @($pathsPart -split ' \| ', 2)
+            $pairKey = (@($p1, $p2) | Sort-Object) -join '|'
+            foreach ($ack in $idCollisionAcks) {
+                if ($ack.task_id -ceq $idPart -and $ack.paths -and
+                    ((@($ack.paths) | Sort-Object) -join '|') -eq $pairKey) {
+                    $isSuppressed = $true
+                    break
+                }
+            }
+        } catch { $isSuppressed = $false }
+        if ($isSuppressed) { $collisionsSuppressed += $c } else { $collisionsLive += $c }
+    }
+
     # ---- ledger lock -----------------------------------------------------
     # The ledger is read-modify-write and this engine has TWO scheduled callers, which an
     # overnight-outage catch-up burst can fire together. Unlocked, concurrent runs silently lost
@@ -290,7 +328,8 @@ try {
         unreadable         = @($unreadable)   # exists but unreadable/0-byte -- left strictly untouched
         errors             = @($errors)       # per-task failures; the run continued
         parse_miss         = @($parseMiss)    # registry files that would not parse
-        id_collisions      = @($collisions)
+        id_collisions      = @($collisionsLive)       # live -- unacknowledged, STEP-3 alarm
+        id_collisions_suppressed = @($collisionsSuppressed)  # dated-acked in id-collision-acknowledged.json; reported, never escalated
         ledger_status      = $ledgerStatus    # ok | absent | unreadable -- 'unreadable' means
                                               # regression detection was OFF this run
         churn_suppressed   = @()              # vestigial: kept so older parsing does not break.
