@@ -12,6 +12,20 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-24 — ora-cc-schematic-refresh (scheduled, Mon 14:15 ET slot)
+
+Routine 2×/week schematic refresh. Producer-clobber check clean. Notable deltas this run (vs. 2026-08-17a):
+- governor-drift-probe.py returned to green (exit 0, 1,170 files) — 08-17a's single hit (acquisition-buy-box-v1.md:31 heading-line false positive) is gone; not fixed by this task, observed as resolved.
+- Both oxford-command-center and ora-pm are simultaneously clean and level with origin for the first time in several runs (occ HEAD 3d4de2a / #299; ora-pm HEAD ca62ecb).
+- memory-integrity-probe.py stays EXIT 1 but improved sharply: 304/305 files (was 281/286), 1 issue (was 8) — sole remainder is one unlisted file, feedback_git_status_short_hides_branch_use_sb.md.
+- MEMORY.md dropped to 20,056 bytes (from 21,447).
+- The cross-fleet duplicate ora-passed-deal-tracker's LAMS registration appears to have been removed entirely (no longer present in the LAMS registry at all, not merely disabled) — read from live fleet-status.py data only, not verified against a change log.
+- Fleet VERDICT stays ATTENTION with two new findings: ora-psa-drift-watch is now OVERDUE (registered 08-13 for Wednesdays, never fired past 08-19), and ora-open-sessions-board shows a missed cycle open at 167.9h (no fire since ~08-14, spanning 08-17/08-19/08-21/08-24). Neither is this task's to fix.
+- CLAUDE.md word count moved 1,841 → 1,848 against the 1,850 FAIL gate — two words of headroom, tightest yet recorded. Do not trim (ratified stance).
+- Process note: the schematic artifact's title-block prose contains a pre-existing literal-backslash-before-apostrophe defect (e.g. "task\'s") across all older kept revision entries — not introduced this run, not fixed (out of this task's one-file-edit scope), flagged inline in the new rev entry for whoever next does a fuller pass.
+
+Title-block rev-entry cap: archived Rev 2026-08-13a to claude-code-schematic-history.md (now 12 earlier entries archived). Applied the mandatory keep-2 per-node cap to all 8 nodes with fresh data this run (CC/MCP fleet, LAMS/Cowork fleet, Dual-fleet status, Governor drift, Doctrine integrity, Confidentiality guard, Memory integrity, oxford-command-center/ora-pm repos) — file settled at 123,233 bytes. Durable probe-status snapshot written to maintenance/_state/doctrine-status.json. No registry writes, no email, one file edit, one republish.
+
 ## 2026-08-24 -- Save-skill clicks confirmed: 5-skill frontmatter-fix batch (concurrent-session commits c6f3dea, 696e838)
 
 Gabriel confirmed the Save-skill install click for exception-detection, monthly-close, ora-millage-lookup, portfolio-reporting, title-exam-abstraction -- packaged and staged via package-and-stage-skill after these appeared as new pending-reimport entries mid-task (landed by a concurrent session, commits c6f3dea "fix(frontmatter): five skills were shipping their changelog as their description" and 696e838 "feat(dd): mechanism-over-answer rule propagated; register write-back verification").
