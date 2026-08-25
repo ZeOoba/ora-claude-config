@@ -5,12 +5,62 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-24T22:24:23.803Z
+  modified: 2026-08-25T20:57:25.990Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-08-25 — `debt_scores` empty-table root cause found: TWO layered causes, one already-frozen by Gabriel's 08-10 ruling
+
+Debugged why `oxford-command-center`'s `debt_scores` warehouse table has 0 rows (flagged in today's `ORA Notion Daily Digest`). Two independent causes, not one:
+
+1. **Never scheduled.** `scripts/debt-scores-snapshot.ts` is the sole production caller of `server/warehouse/debt-scores-persistence.ts`'s `persistDebtScores()`. The code is complete and has already survived multiple adversarial-review rounds (R19a–19g, real bugs fixed) — but it was built as a "manually/scheduled-invokable snapshot action" (its own header comment) and nothing ever registered a scheduled task to run it. Confirmed via grep: zero references to `debt-scores-snapshot` or `persistDebtScores` anywhere under `~/.claude/scheduled-tasks/` or the LAMS fleet, and no `package.json` script entry.
+2. **Even if scheduled, it would refuse every run since 2026-08-16.** Ran the script live (`npx tsx scripts/debt-scores-snapshot.ts`, no `--db`/`--snapshot-date` override, against the real warehouse): exit 1, `REFUSED — the debt book is 'degraded'`. Traced to `warehouse_meta` key `debt_snapshot.last_write_refused`, latched 2026-08-16T18:29:41Z by the shrinkage guard in `server/warehouse/debt-snapshot.ts`: loan `borrower-2203-2207-northwood-dr` "disappeared with no terminal status and no same-property replacement."
+
+**That loan is the exact Northwood/EGFLLC $2.8M loan Gabriel froze in Ruling C, 2026-08-10** ([[project_northwood_egflc_loan_miscategorized_2026-07-27]]) — the warehouse-side echo of the 2026-08-09 unlogged workbook reversal (PSI row 10 zeroed, Loan Index row 24 relabeled "DUPLICATE") reaching the next warehouse debt-snapshot ingest. `debt_scores` staying empty is therefore a **correct downstream consequence of a ruling Gabriel already made**, not a separate defect — clearing the warehouse `degraded` marker (via the book's `confirmAbsent` mechanism) would be adjudicating the exact contested loan status Ruling C deferred to Eric's source document, just through a warehouse side door instead of the workbook.
+
+**Decision, not yet made:** do NOT register `debt-scores-snapshot.ts` as a scheduled task and do NOT clear the warehouse marker until Eric produces the source document and [[project_northwood_egflc_loan_miscategorized_2026-07-27]] is updated. Cross-linked into that memory file's "How to apply" section so the next session investigating either the warehouse gap or the loan freeze finds both halves.
+
+No code changed. `oxford-command-center-data` claim released — investigation only, no write to the repo.
+
+## 2026-08-25 — ORA Notion Daily Digest "Coverage Gaps" (Section D + insurance + DSCR/LTV + CC Daily Brief) resolved by direct verification
+
+Gabriel pasted the Coverage Gaps block from `ORA Notion Daily Digest - 2026-08-25` (Notion `3c76ecd8-9e59-81c4-ab8e-c3ca8289554e`) and asked to fix it. Each item independently re-verified rather than patched as code:
+
+- **Section D title-search miss (Task Guard, IC Memo/Pipeline reconciliation, Deal-Sourcing Scan, Cash Position):** not a search bug — architectural. `ora-task-integrity-guard` ("ORA Task Guard" subject) and `ora-deal-sourcing-scan` are email/database-only and never post to the Notion Ops Hub at all. `ora-ic-memo-pipeline-reconciliation` DOES post today's result, but as an inline `## IC Memo ↔ Pipeline Tracker Reconciliation — 2026-08-25` heading appended directly to the Operations Hub page body (`32b6ecd8...`, confirmed present, 1 GAP found), not as a separate titled child page — a page-title search structurally cannot find it. "Cash Position" in the list is simply wrong: it's `ora-am-brief` Block D, Mondays only; today is Tuesday, so no Cash Position send occurred today at all (last was 2026-08-24, confirmed in send-log.txt).
+- **"\[ORA Command Center\] Daily Brief" not located:** confirmed architectural, not a miss — `oxford-command-center/server/brief/run.ts` has no Notion-page-creation call; this brief is email-only. (The distinct `Daily Brief — 2026-08-25` Notion page that does exist under Ops Hub belongs to `ora-am-brief`'s own "ORA Daily Brief," a different send.)
+- **DSCR/LTV governor figures:** confirmed independently via direct SQLite query of `oxford-command-center/data/warehouse/finance.sqlite` — `debt_scores` is genuinely 0 rows (vs. `debt_positions` 59 rows populated). The scoring/persistence step that should derive `debt_scores` from `debt_positions` has never written to it. Not fixed here (governor-adjacent financial code, Hard Invariant 4) — flagged as a real gap, not a stale caveat.
+- **Insurance — re-verified against the live warehouse:** still the same 5 properties as 08-24's `🛡️ Insurance Renewal Monitor — 2026-08-24` (Notion `3c66ecd8-9e59-81e7-9f5a-f731feceb525`), confirmed via direct query of `property_insurance_policies` today — EXPIRED (unverifiable, no declarations on file, 3rd consecutive run): 1100 Rarig Ave (159d lapsed) and Easton Technology Center POA (142d lapsed); RENEW NOW: 3034 Westerville Rd (24d), 1900 N Broadway UFX+BCL (2d, 2026-27 term already bound — no real gap), 9050 Red Branch/Muirkirk PCKG+BCL (6d — highest priority, collateral for the NorthMarq/Symetra $1,322,139.74 loan, Oxford 50% share). Nothing changed since 08-24 beyond ordinary day-count decrement.
+
+No code changes made — this was a verification pass, not a bug fix. Worth a future systematization candidate: the digest's Section D title-search should account for inline-Hub-page producers vs. dedicated-child-page producers as two distinct classes rather than treating every producer as a searchable page.
+
+## 2026-08-24 -- register-scheduled-task v2.17 installed (Save-skill click confirmed)
+
+Gabriel clicked Save skill in Cowork for `register-scheduled-task` v2.17 (ora-skills commit `d9e3708` -- ONE-TIME EFFICACY-CHECK CHECK added to the Bounded pause section, closing the 2026-08-21 pm-ledger-efficacy doctrine gap, ratified same day). Confirmed installed, not just committed: Local `main.log` shows `[SkillsPlugin] Triggered sync (5s delay)` -> `Delta: 1 to download, 0 to remove` -> `Sync complete: 1 downloaded, 0 failed` at 2026-08-24 19:24:19-20 ET, matching to the second the runtime cache directory's CreationTime (19:24:20.366) for the skills-plugin `register-scheduled-task` folder. Cache SKILL.md content verified byte-matching the repo's v2.17. PENDING_REIMPORT.md entry cleared.
+
+## 2026-08-24 -- register-scheduled-task v2.17 reimported (Save-skill click)
+
+**Skill:** register-scheduled-task
+**Version:** v2.17 (one-time efficacy-check check for bounded pauses; ratified by Gabriel 2026-08-24)
+**Repo commit:** d9e3708b253f93ce8a485c2c3e5bba592583d20b
+**Action:** package-and-stage-skill Entry point A -- packaged via `tools\package_skills.py`
+(2 entries: SKILL.md, references/incident-history.md; description 972/1024 chars OK),
+staged to session outputs, surfaced via `present_files`, installed by Gabriel's
+**Save-skill click** in Cowork (confirmed by user message "saved").
+
+**Install confirmation (not just the repo commit):**
+- Cache dir CreationTime moved 2026-08-24 13:17:27 (pre-click baseline) -> 19:24:20
+  (post-click), all files sharing the new CreationTime -- directory was torn down and
+  recreated, ruling out a mere `sync_appdata_mirror.py` mirror overwrite.
+- `%LOCALAPPDATA%\Claude\Logs\main.log` corroborates to the second: `19:24:14 Triggered
+  sync (5s delay)` -> `19:24:20 Delta: 1 to download` -> `19:24:20 Sync complete: 1
+  downloaded, 0 failed`, exact-second match to the CreationTime move.
+- Post-install cache file set (SKILL.md, references/incident-history.md) matches the
+  packaged `.skill` entry list exactly.
+
+PENDING_REIMPORT.md entry cleared same session.
 
 ## 2026-08-24 — governor-drift-probe eval-harness false positive: duplicate-fix collision resolved, regex approach reverted in favor of path exemption
 
