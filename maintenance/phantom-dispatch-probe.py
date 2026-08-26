@@ -42,12 +42,24 @@ Exit 2 = probe could not look. NEVER conflated with exit 0 -- a zero that might
 
 (b) was added 2026-08-24 after this probe reported exit 0 "OK -- every dispatch
 in the window confirmed" over a window holding >=12 real dispatches. Nothing
-was wrong with the parser: the desktop app had stopped writing to
-%APPDATA%\\Claude\\logs entirely at 2026-08-20 20:51, so all five logs were
-4 days stale and correctly contained nothing recent. The probe was reading
-real bytes and drawing a conclusion the bytes could not support. A log's
-READABILITY and its LIVENESS are different properties and this probe now
-checks both.
+was wrong with the parser: everything under %APPDATA%\\Claude\\logs was 4 days
+stale and correctly contained nothing recent. The probe was reading real bytes
+and drawing a conclusion the bytes could not support. A log's READABILITY and
+its LIVENESS are different properties and this probe now checks both.
+
+*** CORRECTED 2026-08-26: the app had not stopped writing -- it had MOVED. ***
+The gate's judgement ("these bytes cannot answer the question") was right; its
+DIAGNOSIS ("the app is dispatching but not logging -- restart it") was wrong,
+and sent six days of remediation at a healthy writer. Claude Desktop relocated
+its logs to %LOCALAPPDATA%\\Claude\\Logs during an update on 2026-08-20
+20:40-20:51; the old tree's last scheduler event is 2026-08-17 14:23:47 and the
+new tree's first is 2026-08-21 17:05:49, five minutes after the fleet pause
+ended. `default_log_paths()` no longer hardcodes a directory -- it asks
+_shared/log_liveness.py, which selects newest-wins across known locations and
+has a dedicated STALE-LOCATION verdict so a future move names itself instead of
+impersonating a dead app. A hardcoded absolute path is an unverified assumption
+("GUIDs rotate, never hardcode" -- store_discovery), and "the file I expected is
+stale" has two causes, not one.
 
 Deliberately NO silent excepts: registry-membership-probe.py shipped an
 `except Exception: pass` around its log append and went quiet for two days
@@ -118,8 +130,25 @@ class Phantom:
 
 
 def default_log_paths():
-    appdata = os.environ.get("APPDATA") or str(pathlib.Path.home() / "AppData/Roaming")
-    logs = pathlib.Path(appdata) / "Claude" / "logs"
+    """DISCOVER the live log directory; never hardcode one (fixed 2026-08-26).
+
+    This function used to return %APPDATA%\\Claude\\logs unconditionally. On
+    2026-08-20 the app moved its logs to %LOCALAPPDATA%\\Claude\\Logs during an
+    update, and for six days this probe read the abandoned Roaming tree and
+    reported FROZEN -- correct that the bytes could not answer the question,
+    wrong about why, and pointing remediation (restart the app, check ACLs,
+    check disk) at a writer that was working perfectly. Selection is
+    newest-wins across the known candidates; see _shared/log_liveness.py.
+    """
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "_shared"))
+    try:
+        import log_liveness
+        logs = pathlib.Path(log_liveness.discover_log_dir()[0])
+    except Exception:
+        # Fail to the CURRENT location, not the historical one: if discovery is
+        # unavailable, guessing the abandoned tree is the worse of two guesses.
+        local = os.environ.get("LOCALAPPDATA") or str(pathlib.Path.home() / "AppData/Local")
+        logs = pathlib.Path(local) / "Claude" / "Logs"
     # main.log is current; main1..main4 are older rotations. Include all so the
     # window still resolves across a rotation boundary.
     return [logs / "main.log"] + [logs / f"main{i}.log" for i in range(1, 5)]
@@ -303,9 +332,15 @@ def main(argv=None):
               f"{newest_mtime:%Y-%m-%d %H:%M:%S} ({age_h:.1f}h ago)", file=sys.stderr)
         print(f"  look-back window is {args.hours:g}h, so the log cannot answer this question.",
               file=sys.stderr)
-        print("  The app is dispatching (check the registry) but not logging -- restarting",
+        print("  FIRST CHECK WHETHER THE LOG DIRECTORY MOVED, not whether the app died:",
               file=sys.stderr)
-        print("  Claude Desktop is the usual fix. Until then EVERY log-derived signal on this",
+        print("    python _shared/log_liveness.py   (surveys every known location, newest-wins)",
+              file=sys.stderr)
+        print("  That is what 2026-08-20 actually was, and 'restart the app / check ACLs /",
+              file=sys.stderr)
+        print("  check disk' were chased for six days against a writer that was fine.",
+              file=sys.stderr)
+        print("  Until this resolves EVERY log-derived signal on this",
               file=sys.stderr)
         print("  machine is stale: dispatch-skip-probe's confirmation leg, host-availability-",
               file=sys.stderr)
