@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-08-24T17:45:31.377Z
+  modified: 2026-08-26T18:02:07.430Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -7224,5 +7224,53 @@ Shipped instead:
 
 **Auto-check:** none automated. To see whether any row is currently queued:
 `python -c "import json;q=json.load(open(r'C:/Users/Owner/oxford-command-center/data/ar/review-queue.json',encoding='utf-8'));print(len(q),'row(s)',sum(r.get('d30',0)+r.get('d60',0)+r.get('d90',0)+r.get('d90plus',0) for r in q))"`
+
+---
+
+### OI-208
+
+**Status:** OPEN
+**Opened:** 2026-08-26 · **Source:** ora-appsec-sweep 2026-08-26 (ora-pm @ `ca62ecb`, security-auditor dispatch)
+**Severity:** MEDIUM (authorization / session assurance)
+
+**Description:** `src/pages/auth/AdminLogin.tsx:18` (Supabase email magic link) and `server/middleware/admin-auth.ts` — no server-side AAL2/step-up requirement exists anywhere on the admin route tree (full-portfolio CRUD, tenant portal invite/revoke, lease-document egress to Anthropic, QB journal exports), while tenants must clear TOTP AAL2 to move money via `requireAal2` (`server/middleware/aal-guard.ts`, 3 routes). This is distinct from [OI-036](#OI-036) (CLOSED) — that item fixed WHO is admitted as admin (exact-match `ADMIN_EMAILS` allowlist, `shouldCreateUser: false`, live tenant-exclusion check); this item is about session STRENGTH once admitted. The privilege hierarchy is inverted: the most privileged principal has the weakest session requirement.
+
+**Impact:** compromise of any allowlisted mailbox (e.g. `ggoldberg@oxfordra.net`) yields a full admin session via magic link with no second factor — including inviting an attacker-controlled `contact_email` as a portal tenant, rewriting `charges`/`payments` history, and pulling the entire tenant roster.
+
+**Candidate fix (NOT applied):** enroll a TOTP factor on admin accounts and apply the existing `requireAal2` middleware (auth-source-agnostic — validates the presented JWT) to the admin gate, or at minimum to the destructive CRUD verbs and `portal-auth.ts`/`intake.ts`.
+
+**Auto-check:** none.
+
+---
+
+### OI-209
+
+**Status:** OPEN
+**Opened:** 2026-08-26 · **Source:** ora-appsec-sweep 2026-08-26 (oxford-command-center @ `eb236c4`, security-auditor dispatch)
+**Severity:** MEDIUM (dependency CVE, refresh of a closed bucket)
+
+**Description:** [OI-017](#OI-017) closed 2026-07-26 with oxford-command-center at "9 vulns / 0 critical," explicitly not including a queued non-breaking `npm audit fix` pass. One month later this sweep's `npm audit --json` on the pinned worktree finds advisories not present in OI-017's closure snapshot: **`@hono/node-server ^1.13.7`** — GHSA-frvp-7c67-39w9, path traversal via encoded backslash (`%5C`) on Windows in `serve-static`, fixed at `>=1.19.15` (no `serveStatic` route currently mounted in `server/`, bounding reachability today); and **`react-router-dom ^6.30.4`** — GHSA-jjmj-jmhj-qwj2 (moderate, open-redirect→XSS via `<Link>`/`useNavigate` backslash handling, not present in OI-017's tracked pair GHSA-wrjc-x8rr-h8h6/GHSA-337j-9hxr-rhxg), fixed at `react-router` `>=7.18.0` or a patched 6.30.x. `npm audit` overall: 7 high, 3 moderate, 0 critical — remainder (js-yaml, postcss, nanoid, brace-expansion, fast-uri, sharp/libvips) are dev/build-tooling-reachable only, same class OI-017 already characterized as not urgent.
+
+**Impact:** `@hono/node-server` is a runtime dependency on the served Brain Server (Hono-on-node, Windows host) — the exact affected configuration, live if any static route is added. `react-router-dom` ships in the client bundle served behind Cloudflare Access to the mirror, which shows confidential portfolio data; a crafted deep link against the SPA's `/* -> /index.html` fallback could redirect off-site or, in the XSS variant, execute script in the mirror origin.
+
+**Candidate fix (NOT applied):** upgrade `@hono/node-server` to `>=1.19.15`; upgrade `react-router-dom` to a fixed release (`>=7.18.0`, or patched 6.30.x if staying on v6 — verify no reliance on the removed `deserializeErrors` SSR path). Batch with the deferred OI-017 `npm audit fix` pass (brace-expansion/fast-uri/js-yaml/postcss) as one lockfile-refresh PR, runtime deps first, gated on `npm run gate`.
+
+**Auto-check:** none.
+
+---
+
+### OI-210
+
+**Status:** OPEN
+**Opened:** 2026-08-26 · **Source:** ora-appsec-sweep 2026-08-26 (oxford-command-center @ `eb236c4`, security-auditor dispatch)
+**Severity:** MEDIUM (resource exhaustion / DoS)
+
+**Description:** `server/ar/pdf-extract.ts:17-34` shells out to Python/pdfplumber over an operator-supplied PDF path with a 10 MB stdout `maxBuffer` but no bound on input file size, page count, or wall-clock — no `timeout` on the `spawnSync`, unlike `brief/send.ts` which sets `timeout: 60_000`. `server/warehouse/om-extract.ts` similarly runs `pdf-parse` on uploaded PDFs with no equivalent cap. A malformed or adversarial PDF (decompression bomb, pathological page tree) can hang or OOM the process.
+
+**Impact:** denial of service / resource exhaustion of the Brain Server via a crafted PDF dropped into the AR inbox or uploaded through the OM extract endpoint. Bounded today to whoever can supply a file — on the current loopback-only deployment that's the operator, but the Phase-2 tunnelled deployment ([[project_ccm_mjs_dmts_parity_and_branch_protection_gap_2026-08-24]] context) widens the reachable surface. Related but distinct from [OI-050](#OI-050) (Host-header/DNS-rebinding on the same server) — that's an auth-bypass finding, this is availability.
+
+**Candidate fix (NOT applied):** add a `timeout` (mirror `send.ts`'s 60s) to the `spawnSync` in `pdf-extract.ts`, plus a pre-flight file-size stat cap and, where pdfplumber allows, a page-count cap. Keep `maxBuffer` as the last-resort ceiling. Apply the same discipline to `om-extract.ts`.
+
+**Auto-check:** none.
 
 **Related:** `projects/C--Users-Owner-oxford-command-center/memory/collections-ar-feed-pending.md` (the upstream feed item — a different project's memory dir, so deliberately NOT a `[[wikilink]]`, which would dangle from here), `ora-ar-feed-sweep` SKILL.md §"How the review queue actually gets resolved".

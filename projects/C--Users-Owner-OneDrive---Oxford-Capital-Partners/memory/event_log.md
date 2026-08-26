@@ -5,12 +5,26 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-25T20:57:25.990Z
+  modified: 2026-08-26T18:17:20.503Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-08-26 — Verified: ora-psa-drift-watch fired on its first unobstructed slot — R10-4 loop CLOSED
+
+**Task:** `ora-psa-drift-watch-recheck-0826` (one-time CC/MCP, fired 2026-08-26T18:15:43Z / 14:15 ET). Report-only; no email, no registry writes.
+
+**Result — CONFIRMED.** `list_scheduled_tasks` (live CC/MCP registry) shows `ora-psa-drift-watch` with `"lastRunAt": "2026-08-26T17:50:10.293Z"` = **13:50 ET**, i.e. its `45 13 * * 3` slot plus the registered 267s jitter. `"enabled": true`, `"cronExpression": "45 13 * * 3"` unchanged, `"nextRunAt": "2026-09-02T17:49:27.000Z"`.
+
+**What this closes.** The 2026-08-24 debug session root-caused this task's missing `lastRunAt` to the Gabriel-directed fleet-wide bounded pause (2026-08-17 ~14:50 ET → 2026-08-21 ~17:05 ET), which swallowed its only prior expected fire (Wed 2026-08-19 13:45 ET). That explanation was *inferred*, not *verified* — the Rev 7 retime had still never been exercised. Today's fire exercises it. The retime landed correctly, the task is healthy, and the 08-19 null was purely the pause. No defect, no follow-up.
+
+**Written:** `memory/reference_rev10_efficacy_2026-08-20.md` §1 (R10-4 heading flipped FAIL → CLOSED 2026-08-26, closing note added, frontmatter description destaled) and the MEMORY.md pointer line (its live "re-check 08-26" instruction retired so no future session re-opens it). No other files touched; no commit made (uncommitted sibling-session WIP present in `memory/` — INDEX_markets.md, open-items-tracker.md — left alone per single-writer doctrine).
+
+**Reusable note:** this is the second confirmation that a bounded pause produces nulls indistinguishable from real misses — see [[reference_bounded_pause_voided_overlapping_efficacy_checks_2026-08-21]]. The pattern that worked both times: don't force a verdict inside the pause shadow; schedule a one-time recheck for the first unobstructed slot and let the task prove itself.
+
+Related: 2026-08-24 entry "Debug: ora-psa-drift-watch / ora-open-sessions-board 'misses' — NOT bugs, root-caused".
 
 ## 2026-08-25 — `debt_scores` empty-table root cause found: TWO layered causes, one already-frozen by Gabriel's 08-10 ruling
 

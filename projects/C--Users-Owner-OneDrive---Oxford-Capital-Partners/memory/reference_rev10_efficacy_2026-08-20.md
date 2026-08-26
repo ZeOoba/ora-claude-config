@@ -1,6 +1,6 @@
 ---
 name: reference-rev10-efficacy-2026-08-20
-description: "One-time efficacy check of the Automation Audit Rev 10 remediation (2026-08-14) — 3 PASS, 1 FAIL (psa-drift-watch never fired, confounded by the 08-17 bounded fleet pause)"
+description: "One-time efficacy check of the Automation Audit Rev 10 remediation (2026-08-14) — 3 PASS, 1 FAIL; the R10-4 FAIL (psa-drift-watch never fired) CLOSED 2026-08-26 when the task fired normally on its first unobstructed slot"
 metadata: 
   node_type: memory
   type: reference
@@ -12,9 +12,9 @@ metadata:
 
 Scheduled task `ora-rev10-remediation-efficacy-check`, report-only. Plan: `~/.claude/docs/superpowers/plans/2026-08-14-rev10-remediation.md`. Artifact: https://claude.ai/code/artifact/8b29049b-d7a0-4394-a602-d51e52fd21e7. No fixes, no emails, no writes beyond this file + the MEMORY.md pointer. Findings route to the next `ora-setup-audit` revision.
 
-**Result: 3 PASS / 1 FAIL.**
+**Result at run time: 3 PASS / 1 FAIL.** The FAIL (R10-4) was CLOSED 2026-08-26 — see §1.
 
-## 1. PSA-drift-watch retime efficacy (R10-4) — ⚠️ FAIL (but see attribution)
+## 1. PSA-drift-watch retime efficacy (R10-4) — ✅ CLOSED 2026-08-26 (FAIL at run time; see attribution)
 
 Evidence — `list_scheduled_tasks` (CC/MCP registry, MCP tool, not the JSON), entry `ora-psa-drift-watch`, verbatim:
 `"cronExpression": "45 13 * * 3"`, `"enabled": false`, **no `lastRunAt` key present at all** (and no `nextRunAt`).
@@ -25,7 +25,9 @@ Per the assert's stated rule, absent `lastRunAt` = FAIL. The retime itself lande
 
 **Re-checked 2026-08-24 (still pre-window, not yet actionable):** `ora-cc-schematic-refresh`'s live run confirmed `ora-psa-drift-watch` is still `enabled: true`, cron unchanged (`45 13 * * 3`), still no `lastRunAt` — expected, since 2026-08-26 has not yet arrived. Also confirmed from the live registry that the 08-21 resume did fully complete: every CC/MCP recurring task (not just the 2 seen in this note's "incidental observation") now shows `enabled: true`, closing that open doubt. `ora-open-sessions-board` (Mon/Wed/Fri 17:00 ET) shows the identical pattern for the same reason — its last run was 2026-08-14, and 08-17/08-19/08-21 all fell inside the same pause window; its Monday 2026-08-24 17:00 ET fire had simply not yet occurred at read time (~14:30 ET). Neither is a new defect — both are the same already-diagnosed pause-window null. See `event_log.md` 2026-08-24 for the fuller writeup.
 
-Sibling one-time `ora-psa-drift-watch-retime-efficacy-check` did fire today (`lastRunAt: 2026-08-21T21:10:51.698Z`), i.e. ~4 min before this run; its own finding is not restated here.
+**CLOSED 2026-08-26 — the retime is now verified, not merely explained:** the scheduled recheck `ora-psa-drift-watch-recheck-0826` (fired 2026-08-26T18:15:43Z / 14:15 ET) read the live CC/MCP registry and found `ora-psa-drift-watch` with `"lastRunAt": "2026-08-26T17:50:10.293Z"` — 13:50 ET, i.e. the `45 13 * * 3` slot plus its registered 267s jitter — `"enabled": true`, cron unchanged, `"nextRunAt": "2026-09-02T17:49:27.000Z"`. The task fired normally on its first unobstructed opportunity after the 08-17→08-21 bounded pause, confirming the Rev 7 retime landed and the 08-19 null was purely the pause. No further recheck needed.
+
+Sibling one-time `ora-psa-drift-watch-retime-efficacy-check` did fire on 2026-08-21 (`lastRunAt: 2026-08-21T21:10:51.698Z`), i.e. ~4 min before this run; its own finding is not restated here.
 
 ## 2. Marketplace re-clone watch (R10-3) — ✅ PASS
 
