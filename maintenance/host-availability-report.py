@@ -8,11 +8,25 @@ Evidence = the first scheduler dispatch of each calendar day, taken from the
 rotated main*.log set. That is the operative fact: a cron slot earlier than
 first-availability cannot fire on time no matter where it is placed.
 """
-import glob, os, re, collections, datetime
+import glob, os, re, sys, collections, datetime
 
-LOGDIR = os.path.join(os.environ["APPDATA"], "Claude", "logs")
+# LOGDIR is DISCOVERED, not hardcoded (fixed 2026-08-26). This line read
+# %APPDATA%\Claude\logs until the app moved its logs to %LOCALAPPDATA%\Claude\Logs
+# on 2026-08-20; for six days afterwards this script silently produced a table
+# that simply ended on 2026-08-17 and said nothing about why -- one of three
+# detectors that reported success off an abandoned directory.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "_shared"))
+try:
+    import log_liveness
+    LOGDIR = str(log_liveness.discover_log_dir()[0])
+except Exception:
+    LOGDIR = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Claude", "Logs")
 paths = sorted(glob.glob(os.path.join(LOGDIR, "main*.log")))
+print("log dir      : %s" % LOGDIR)
 print("logs scanned: %d" % len(paths))
+if not paths:
+    print("[ACTION] no main*.log under that directory — this table would be EMPTY, "
+          "not clean. Run _shared/log_liveness.py before trusting anything below.")
 
 # e.g. 2026-08-14 07:57:23.123 ... Spawning new session for scheduled task <id>
 TS = re.compile(r"(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2}):(\d{2})")
