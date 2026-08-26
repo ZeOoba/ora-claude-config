@@ -83,3 +83,39 @@ Related: [OI-205](open-items-tracker.md#OI-205), [OI-206](open-items-tracker.md#
 [[reference_concurrent_session_duplicate_hardening_work]],
 `ora-command-center-mirror-drift-check` SKILL.md (never-push-them-yourself rule — this
 finding is why that rule exists).
+
+## ⛔ OI-205 side effect, found 2026-08-25: ALL direct pushes to `main` now fail
+
+The "revisit if a future direct push still lands ungated" caveat above resolved the
+opposite way. Nothing lands ungated — **nothing lands at all**. `ora-lease-snapshot-refresh`
+(2026-08-25 run) hit:
+
+```
+remote: error: GH006: Protected branch update failed for refs/heads/main.
+remote: - 2 of 2 required status checks are expected.
+ ! [remote rejected] main -> main (protected branch hook declined)
+```
+
+`gate` and `refute-required` are produced by **`pull_request`-triggered** workflows, so a
+direct push creates zero check runs; GitHub reports both as "expected" and declines.
+`enforce_admins: true` means no account bypasses it. Status-checks-only enforcement
+(`required_pull_request_reviews: null`) therefore behaves as **PR-only landing in
+practice** — the distinction Gabriel's choice preserved does not exist for direct pushes.
+
+**Affects both snapshot tasks** — `ora-lease-snapshot-refresh` and
+`ora-cc-snapshot-refresh` share `data/snapshots/portfolio.json` and the same Auto-push
+guard. Their spec'd publication path (fast-forward direct push to `main`) is now
+structurally impossible, not transient. Do **not** retry, and never with a force variant.
+Last automation push that landed: `75c039d`, 2026-08-14. Commits strand locally; they all
+match `^Auto-refresh: (CC|lease) snapshot` so the two tasks do not deadlock each other, but
+`origin/main`'s snapshot — what the Command Center mirror deploy reads — goes stale.
+
+**Awaiting Gabriel's decision** (Notion Operations Hub note + email, both 2026-08-25):
+(A) PR-based auto-landing via a bot branch, recommended — only option that unblocks
+publication and leaves OI-205 strictly stronger; (B) add `push:` triggers to the two
+workflows, smaller but re-weakens exactly what OI-205 closed; (C) revert both tasks to
+commit-locally-never-push; (D) a bypass allowlist, not recommended and not a Claude action
+(security-setting change). Until he rules, expect every material-change run of either task
+to commit locally and report a push guard-condition failure. See
+[[reference_memory_dir_not_in_single_writer_list_2026-08-14]] for this file's own
+write-contention caveat.

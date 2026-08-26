@@ -1,14 +1,16 @@
 ---
 name: project-fedex-kinsman-walk-price-breach
-description: 3700 Kinsman Blvd Madison WI (FedEx) drafted $3.8M LOI breaches 3 underwriting floors; Gabriel decision due 2026-08-25
+description: 3700 Kinsman Blvd Madison WI (FedEx) drafted $3.8M LOI breached 3 underwriting floors — RESOLVED 2026-08-24, Gabriel let it lapse, never transmitted
 metadata: 
   node_type: memory
   type: project
   originSessionId: 8117da08-b2f4-41f7-9a45-6d7de1cb0708
-  modified: 2026-08-23T19:16:20.282Z
+  modified: 2026-08-26T15:30:27.343Z
 ---
 
-3700 Kinsman Blvd — Madison WI (FedEx single-tenant, 44,200 SF): the drafted $3.8M LOI (STANDARD format, sent for transmission approval 08-18) was overtaken by a FULL-mode underwrite completed 2026-08-22, which returned PASS-band but breached 3 of 5 Stage-1 floors at that price — Basis 58.08% vs 65% floor, Yield 5.88% YoC vs 8% floor, levered 10-yr IRR 5.77% vs 12% floor. Combined score 31.5/100, P(exec) 15%. ORA walk price is $2,661,000 ($60.20/SF) — $1,139,000 below the drafted $3.8M LOI. Acquisition Pipeline Tracker's Next Action was updated 08-22 to HOLD the LOI, with a decision deadline of **2026-08-25** (LOI expiration): withdraw/let it lapse, or log an Exception Register compensating factor to override. Do NOT transmit at $3.8M without an explicit override.
+**RESOLVED 2026-08-24 (confirmed by ora-deal-aging-sla's 2026-08-26 pull of the Acquisition Pipeline Tracker):** Gabriel decided to let the LOI lapse rather than override. Tracker Next Action now reads "None — closed out. LOI allowed to lapse per Gabriel's decision 2026-08-24; never transmitted to broker." `LOI Status` = Not Submitted; `LOI Expiration Date` = 2026-08-25 (passed, moot). No further tracking needed on this deal unless it resurfaces.
+
+3700 Kinsman Blvd — Madison WI (FedEx single-tenant, 44,200 SF): the drafted $3.8M LOI (STANDARD format, sent for transmission approval 08-18) was overtaken by a FULL-mode underwrite completed 2026-08-22, which returned PASS-band but breached 3 of 5 Stage-1 floors at that price — Basis 58.08% vs 65% floor, Yield 5.88% YoC vs 8% floor, levered 10-yr IRR 5.77% vs 12% floor. Combined score 31.5/100, P(exec) 15%. ORA walk price is $2,661,000 ($60.20/SF) — $1,139,000 below the drafted $3.8M LOI. Acquisition Pipeline Tracker's Next Action was updated 08-22 to HOLD the LOI, with a decision deadline of 2026-08-25 (LOI expiration): withdraw/let it lapse, or log an Exception Register compensating factor to override.
 
 Additional flags on the deal: zoning is CC (Commercial Center) in an IL corridor — the FedEx use is probably legal nonconforming and Wis. Stat. 62.23(7)(h) extinguishes that right after 12 months' discontinuance; the parcel is coded EXEMPT/$0 assessed for 2025-2026, so ORA's purchase triggers a ~$70,894/yr reassessment (~21% FedEx occupancy-cost increase before the 2030 renewal decision) plus possible ~$140K Wis. Stat. 70.44 omitted-property back-tax exposure; FedEx Network 2.0 is closing 475+ stations (~30% of footprint) by end CY2027 with a competing automated hub 3 miles away, though the lease runs to 3/31/2030.
 
