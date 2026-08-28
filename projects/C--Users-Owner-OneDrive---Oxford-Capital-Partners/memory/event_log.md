@@ -5,12 +5,41 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-27T18:40:32.847Z
+  modified: 2026-08-28T14:40:22.078Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## ora-passed-deal-tracker retirement CLOSED — LAMS registry row was already gone, step 2/2 obsolete (2026-08-28)
+
+Closing the "OPEN: (1)(2)" list from the 2026-08-23 entry above ("ora-task-integrity-guard resurrected the archived ora-passed-deal-tracker LAMS folder"). Verified both limbs directly rather than re-running the pending `delete_scheduled_task` procedure:
+
+- LAMS/Cowork registry: no `ora-passed-deal-tracker` id present. 28 entries total, none matching.
+- Filesystem: `...\Documents\Claude\Scheduled\ora-passed-deal-tracker\` does not exist (the resurrected folder from the 08-23 guard alarm is gone — either archived again or never re-created since).
+
+**Both open items are CLOSED, not just stale:**
+1. The pending LAMS `delete_scheduled_task` call — moot. There is no LAMS registry row left to delete.
+2. The resurrected stale folder cleanup — moot. The folder is not present.
+
+**Do NOT run `delete_scheduled_task` for this id.** With the LAMS entry already gone, the call has nothing to disambiguate against and resolves unambiguously to the live CC/MCP task — it would delete the canonical, enabled copy outright. Detail and the general cross-fleet-delete doctrine (kept intact, not superseded): [[reference_delete_scheduled_task_resolves_colliding_id_to_local_fleet]].
+
+CC/MCP copy remains canonical and untouched, `enabled: true`, `30 6 15 * *`.
+
+## Fleet advisory remediation: 2 expired one-time CC/MCP entries deregistered (2026-08-28)
+
+Gabriel forwarded a fleet-status/setup-self-audit advisory flagging `ora-754-flaute-escalation-check` as "expired one-time, missed its fire, remains enabled" and the sole driver of the ATTENTION verdict, plus `ora-psa-drift-watch-recheck-0826` as a second expired one-time entry, and asked to fix it. Ran fleet-advisory-remediation (Explicit permission: Gabriel's in-chat "Fix this").
+
+Live check (`fleet-status.py --json` + `list_scheduled_tasks`) found the advisory's premise stale: both tasks had already fired and auto-disabled per their own one-time design before this session looked —
+- `ora-754-flaute-escalation-check`: fireAt 08:00 ET, actually fired 13:41 UTC (~09:41 ET), throttle-delayed ~1h41m by the AM catch-up burst, NOT missed. The 15/25 refusals in the advisory were pre-fire throttle skips.
+- `ora-psa-drift-watch-recheck-0826`: fireAt 14:15 ET 2026-08-26, fired 43 sec later — on time, no issue.
+
+Both were `enabled: false` in the live registry at check time, contradicting the advisory's "remains enabled" claim (report was already stale by the time it reached this session).
+
+Action taken (CC/MCP fleet only, no LAMS cross-fleet write needed): deleted both registry entries via supervised `delete_scheduled_task`, then archived both SKILL.md folders to `scheduled-tasks/_archive_2026-08-28_onetime-complete/` per the CC/MCP RETIRE doctrine (delete-registry-first, archive-folder-second, to prevent `guard.ps1:157` resurrecting them). Post-write `list_scheduled_tasks` re-run confirmed both gone from the live registry.
+
+Note for Gabriel: this does NOT clear the fleet-status ATTENTION verdict — the 124 throttle skips in the last 24h are overwhelmingly driven by other enabled recurring tasks (lease-snapshot-refresh 27, memory-commit-sweep 27, aaos-publish-contracts 23, deal-aging-sla 14) during the AM catch-up burst, not by these two one-time entries. Other advisory items (windows-tasks WARN, skill-override-efficacy WARN, 4c/4d coverage gaps, 3700 Kinsman Stage/Next-Action inconsistency, host-wake remediations, mirror vintage caveat) are out of this pass's scope and untouched.
 
 ## 2026-08-27 — ora-cc-schematic-refresh: memory-integrity back to EXIT 0, two fleet findings resolved
 

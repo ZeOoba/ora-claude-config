@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 75dbb430-5eb1-48e5-bfdd-ee0bfebb696c
-  modified: 2026-08-22T16:02:47.232Z
+  modified: 2026-08-28T14:39:47.233Z
 ---
 
 `mcp__scheduled-tasks__delete_scheduled_task` takes **`taskId` only** — no fleet/surface
@@ -65,3 +65,13 @@ coverage at all. So an id collision is an active protection gap on the surviving
 cosmetic tidy-up — and archiving the LAMS canonical while its registry entry lives does NOT
 help: the guard just restores it from the `gov` mirror
 (`Claude_Workspace\00_Governance\Scheduled\<id>\`) at the next 07:05 run.
+
+**CLOSURE (2026-08-28) — the `ora-passed-deal-tracker` instance of this trap is now
+CONFIRMED RESOLVED, not just archived.** Verified against the live LAMS registry (28 tasks,
+no `ora-passed-deal-tracker` id present) and the filesystem (`OneDrive…\Documents\Claude\
+Scheduled\ora-passed-deal-tracker\` does not exist). Both limbs of the 2026-08-22 "step 2/2"
+open item are closed — see `event_log.md`. The general cross-fleet-delete doctrine documented
+above still stands for any FUTURE id collision, but running `delete_scheduled_task` against
+this specific id is now actively hazardous rather than merely redundant: with no LAMS entry
+left to collide on, the call resolves unambiguously to the live CC/MCP task and would delete
+it outright. Do not run it for this id.
