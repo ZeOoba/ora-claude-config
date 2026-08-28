@@ -12,6 +12,7 @@ Run: python test-governor-drift-probe.py
 Pure stdlib. ASCII-only output (Windows cp1252 console).
 """
 import os
+import re
 import sys
 import shutil
 import subprocess
@@ -47,6 +48,36 @@ def run_probe(argv=None):
 
 
 _SELFTEST_SCRATCH_STALE_AGE_SECONDS = 3600
+_SELFTEST_SCRATCH_PID_RE = re.compile(r"^(\d+)_")
+
+
+def _pid_is_alive(pid):
+    """Best-effort Windows liveness check via ctypes (stdlib -- this file stays dependency-
+    free, no psutil). Used only to keep the sweep below from ever touching an entry still
+    owned by a running process regardless of its mtime age: a test suspended by this
+    laptop's Modern Standby (a real, previously-observed failure mode here -- see
+    reference_lastruntime_restamped_on_modern_standby_resume.md) can otherwise sit idle past
+    the staleness threshold while genuinely still in flight. Any failure to determine
+    liveness (bad pid, no permission, platform quirk) returns False -- i.e. falls back to
+    the age-based sweep rather than treating an unverifiable pid as permanently alive."""
+    try:
+        import ctypes
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return False
+        ctypes.windll.kernel32.CloseHandle(handle)
+        return True
+    except Exception:
+        return False
+
+
+def _selftest_scratch_owner_pid(name, prefix):
+    """Extract the creator pid encoded in a "<prefix><pid>_<uuid8>[.ext]" scratch name, or
+    None if the name doesn't match that shape (an unrecognized name falls back to the
+    age-only sweep below instead of being treated as permanently alive)."""
+    m = _SELFTEST_SCRATCH_PID_RE.match(name[len(prefix):])
+    return int(m.group(1)) if m else None
 
 
 def _sweep_stale_selftest_scratch(parent_dir, prefix):
@@ -55,8 +86,9 @@ def _sweep_stale_selftest_scratch(parent_dir, prefix):
     A process killed between creating its own uniquely-named entry and its `finally` cleanup
     leaks that one entry forever -- each run's own setup only ever clears its OWN (never
     pre-existing) name, not a prior run's. Sweep anything matching this prefix that is older
-    than the staleness threshold; a live sibling from a genuinely concurrent run is always
-    younger than that, so this never touches another session's in-flight selftest."""
+    than the staleness threshold AND whose owning pid (encoded in the name) is no longer
+    alive; a live sibling from a genuinely concurrent -- or merely slow/suspended -- run is
+    therefore never touched even past the age threshold."""
     try:
         entries = os.listdir(parent_dir)
     except OSError:
@@ -66,6 +98,9 @@ def _sweep_stale_selftest_scratch(parent_dir, prefix):
         if not name.startswith(prefix):
             continue
         path = os.path.join(parent_dir, name)
+        owner_pid = _selftest_scratch_owner_pid(name, prefix)
+        if owner_pid is not None and _pid_is_alive(owner_pid):
+            continue
         try:
             age = now - os.path.getmtime(path)
         except OSError:
@@ -1439,8 +1474,23 @@ def test_sessions_reviews_excluded_e2e():
     payload = ('{"key": "test", "verdict": "approved", '
                '"notes": "LTV governor ceiling raised to 65% per the review notes.", '
                '"ts": 0}')
-    with open(probe_path, "w", encoding="utf-8") as fh:
-        fh.write(payload)
+    # Read-before-write + atomic create (same house convention as the FileExistsError branch
+    # in test_active_work_claims_excluded_e2e above, Qodo PR #144/#145): reviews_dir was just
+    # created fresh by the os.makedirs() call above (no exist_ok), so probe_path cannot
+    # actually pre-exist here today -- kept for consistency with the sibling test and as
+    # defense in depth if that invariant is ever weakened.
+    try:
+        fd = os.open(probe_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        with open(probe_path, encoding="utf-8", errors="replace") as fh:
+            existing = fh.read()
+        raise AssertionError(
+            "stale/concurrent selftest review file at %s -- existing content: %r"
+            % (probe_path, existing))
+    try:
+        os.write(fd, payload.encode("utf-8"))
+    finally:
+        os.close(fd)
     try:
         r = run_probe()
         assert r.returncode == 0, (
