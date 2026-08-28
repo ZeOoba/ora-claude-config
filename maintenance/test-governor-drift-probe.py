@@ -13,8 +13,11 @@ Pure stdlib. ASCII-only output (Windows cp1252 console).
 """
 import os
 import sys
+import shutil
 import subprocess
 import importlib.util
+import time
+import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROBE = os.path.join(HERE, "governor-drift-probe.py")
@@ -41,6 +44,41 @@ def run_probe(argv=None):
     # the caller) and silently drops the captured stdout to None instead.
     return subprocess.run(cmd, capture_output=True, text=True,
                            encoding="utf-8", errors="replace")
+
+
+_SELFTEST_SCRATCH_STALE_AGE_SECONDS = 3600
+
+
+def _sweep_stale_selftest_scratch(parent_dir, prefix):
+    """Best-effort GC for the pid+uuid-suffixed scratch entries the e2e selftests below
+    create in live, gitignored ~/.claude directories (hooks/sessions, hooks/active-work).
+    A process killed between creating its own uniquely-named entry and its `finally` cleanup
+    leaks that one entry forever -- each run's own setup only ever clears its OWN (never
+    pre-existing) name, not a prior run's. Sweep anything matching this prefix that is older
+    than the staleness threshold; a live sibling from a genuinely concurrent run is always
+    younger than that, so this never touches another session's in-flight selftest."""
+    try:
+        entries = os.listdir(parent_dir)
+    except OSError:
+        return
+    now = time.time()
+    for name in entries:
+        if not name.startswith(prefix):
+            continue
+        path = os.path.join(parent_dir, name)
+        try:
+            age = now - os.path.getmtime(path)
+        except OSError:
+            continue
+        if age < _SELFTEST_SCRATCH_STALE_AGE_SECONDS:
+            continue
+        if os.path.isdir(path):
+            shutil.rmtree(path, ignore_errors=True)
+        else:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
 
 
 def test_canonical_clean_unit():
@@ -1304,7 +1342,15 @@ def test_active_work_claims_excluded_e2e():
         "nothing about the active-work prune -- got %r" % would_flag)
     claims_dir = os.path.join(m.CLAUDE, "hooks", "active-work")
     os.makedirs(claims_dir, exist_ok=True)
-    probe_path = os.path.join(claims_dir, "_governor_probe_selftest_claim.json")
+    # pid+uuid suffix (found 2026-08-28, session aa0eb89c, alongside the identical bug in
+    # test_sessions_reviews_excluded_e2e below): with 10+ Claude Code sessions routinely live
+    # in this shared checkout, two of them running this same test concurrently is the common
+    # case, not an anomaly -- a fixed filename made that a real, frequently reproducible
+    # "stale/concurrent" failure rather than the genuine-collision signal it was meant to be.
+    _sweep_stale_selftest_scratch(claims_dir, "_governor_probe_selftest_claim_")
+    probe_path = os.path.join(
+        claims_dir,
+        "_governor_probe_selftest_claim_%d_%s.json" % (os.getpid(), uuid.uuid4().hex[:8]))
     payload = ('{"session_id": "test", "title": "selftest", '
                '"description": "DSCR governor floor 1.60x per the audit note.", '
                '"claimed_at": "2026-08-22T00:00:00"}')
@@ -1316,6 +1362,8 @@ def test_active_work_claims_excluded_e2e():
     # create is what actually closes the check-then-act TOCTOU window (a plain "w" open after
     # an exists-check could still truncate a file created in between), while the
     # FileExistsError path preserves the read-and-surface behavior for a genuine collision.
+    # With the pid+uuid suffix above this branch should now be unreachable in practice; kept
+    # as defense in depth rather than removed.
     try:
         fd = os.open(probe_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     except FileExistsError:
@@ -1362,25 +1410,35 @@ def test_sessions_dir_pruned_unit():
 def test_sessions_reviews_excluded_e2e():
     """End-to-end companion to test_active_work_claims_excluded_e2e: a live eos-review-gate.py
     review artifact quoting an off-canonical LTV value in its free-text notes must not fail the
-    probe."""
+    probe.
+
+    The scratch session dir is suffixed with this process's pid + a uuid4 (found 2026-08-28,
+    session aa0eb89c): a fixed name here collided across the many Claude Code sessions that
+    routinely run in this shared checkout concurrently -- two runs of this same test raced on
+    the identical hooks/sessions/_governor_probe_selftest_session/reviews/ path, and a process
+    killed between writing the file and reaching `finally` left it behind for the next run to
+    trip over. Teardown uses shutil.rmtree (not a bare os.rmdir, which assumes the directory is
+    exactly empty) so a leftover or a late concurrent write can't turn a passing probe run into
+    a spurious WinError 145."""
     m = _load_probe_module()
     would_flag = m.scan_line("LTV governor ceiling raised to 65% per the review notes.")
     assert would_flag, (
         "test payload must itself be a flaggable governor declaration, or this e2e proves "
         "nothing about the sessions prune -- got %r" % would_flag)
-    reviews_dir = os.path.join(m.CLAUDE, "hooks", "sessions",
-                                "_governor_probe_selftest_session", "reviews")
-    os.makedirs(reviews_dir, exist_ok=True)
+    sessions_dir = os.path.join(m.CLAUDE, "hooks", "sessions")
+    _sweep_stale_selftest_scratch(sessions_dir, "_governor_probe_selftest_session_")
+    session_name = "_governor_probe_selftest_session_%d_%s" % (os.getpid(), uuid.uuid4().hex[:8])
+    session_dir = os.path.join(sessions_dir, session_name)
+    reviews_dir = os.path.join(session_dir, "reviews")
+    # Defense in depth only -- the pid+uuid suffix makes a real collision astronomically
+    # unlikely, but a bare os.makedirs(exist_ok=True) would silently merge into a leftover
+    # from some prior run under the same name rather than starting from a clean directory.
+    shutil.rmtree(session_dir, ignore_errors=True)
+    os.makedirs(reviews_dir)
     probe_path = os.path.join(reviews_dir, "_governor_probe_selftest_review.json")
     payload = ('{"key": "test", "verdict": "approved", '
                '"notes": "LTV governor ceiling raised to 65% per the review notes.", '
                '"ts": 0}')
-    if os.path.exists(probe_path):
-        with open(probe_path, encoding="utf-8", errors="replace") as fh:
-            existing = fh.read()
-        raise AssertionError(
-            "stale/concurrent selftest review file at %s -- existing content: %r"
-            % (probe_path, existing))
     with open(probe_path, "w", encoding="utf-8") as fh:
         fh.write(payload)
     try:
@@ -1393,9 +1451,7 @@ def test_sessions_reviews_excluded_e2e():
             "hooks/sessions review artifacts should not be scanned for governor drift:\n%s"
             % r.stdout)
     finally:
-        os.remove(probe_path)
-        os.rmdir(reviews_dir)
-        os.rmdir(os.path.dirname(reviews_dir))
+        shutil.rmtree(session_dir, ignore_errors=True)
     print("  PASS test_sessions_reviews_excluded_e2e (exit 0, sessions not scanned)")
 
 
