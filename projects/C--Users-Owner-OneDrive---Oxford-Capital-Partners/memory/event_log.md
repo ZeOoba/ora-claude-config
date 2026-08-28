@@ -12,6 +12,20 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-08-28 — Two fleet-advisory friction fixes: fleet-status.py staleness note + automation-health-monitor tickler check
+
+Gabriel flagged two workflow-optimization items from the same-day `ora-754-flaute-escalation-check` incident (see "Fleet advisory remediation: 2 expired one-time CC/MCP entries deregistered" entry above) and asked to fix them.
+
+**1. `fleet-status.py` (`~/.claude/maintenance/fleet-status.py`).** The advisory that drove that incident read correctly at generation time but was stale by the time it was forwarded and acted on. Added a `generated_at` timestamp and a `STALENESS_NOTE` re-verify warning to BOTH the text (`--summary`/default) and `--json` report output — baked into the report template itself rather than relying on `fleet-advisory-remediation`'s own live-reverify discipline. Purely additive; no detection logic (`expired_needs_attention`, `find_missed_cycles`, `never_ran_overdue`) changed. Verified: `py_compile` clean, all 17 tests in `test-fleet-status.py` pass (same count before/after), independently re-verified by a review agent with no knowledge of the reasoning, working from the diff alone.
+
+**2. `automation-health-monitor` SKILL.md (`ora-skills`), v1.7 -> v1.8.** Added Step 1.25 ("One-time tickler lifecycle check"): before flagging a one-time task's disabled state, check `lastRunAt` against `fireAt` -- `disabled + lastRunAt set` = normal completion (throttle-delay included), never flag; `disabled + no lastRunAt` = genuinely anomalous, flag; `enabled + past fireAt, not yet fired` = re-verify live before flagging. Mirrors `fleet-status.py`'s own `expired_needs_attention` filter, which already got this right -- the gap was a downstream reader treating an old snapshot as current, not a logic bug. Frontmatter description still 853 chars (under the 1,024 platform limit). Independently re-verified by a separate review agent, diff-only.
+
+**Landed via `isolated-commit`** (claim -> pathspec-scoped stage -> independent review -> commit -> push), one commit per repo, neither touching the other ~36 (`~/.claude`) / 1 (`ora-skills`) unrelated dirty/untracked files already present from other concurrently-active sessions:
+- `~/.claude` `80ee575` "fix(fleet-status): stamp reports with generated_at + staleness warning" -- pushed to `feat/model-canary-probe-step25`. First push attempt lost a ref-lock race to a concurrent session on the same shared checkout; their merge (`6337529`) already carried this commit through, confirmed local/remote HEAD identical.
+- `ora-skills` `9ac75a5` "docs(automation-health-monitor): add one-time tickler lifecycle check (v1.8)" -- required a conflict-free merge with an unrelated concurrent PR (#49, register-scheduled-task changelog retention) before push; landed at `1c35a7e` on `main`.
+
+**Follow-up, not yet done:** the `ora-skills` commit's post-commit sync copied the updated SKILL.md into the LAMS skills-plugin staging tree and logged it to `PENDING_REIMPORT.md` per `package-and-stage-skill` doctrine -- the live scheduled-task copy of `automation-health-monitor` won't run v1.8's Step 1.25 until Gabriel clicks Save skill on the reimport.
+
 ## ora-passed-deal-tracker retirement CLOSED — LAMS registry row was already gone, step 2/2 obsolete (2026-08-28)
 
 Closing the "OPEN: (1)(2)" list from the 2026-08-23 entry above ("ora-task-integrity-guard resurrected the archived ora-passed-deal-tracker LAMS folder"). Verified both limbs directly rather than re-running the pending `delete_scheduled_task` procedure:
