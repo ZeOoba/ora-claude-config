@@ -50,39 +50,68 @@ SNAPSHOT_RE = re.compile(r"^(?P<category>.+)-(?P<date>\d{4}-\d{2}-\d{2})\.json$"
 
 
 def plan(state_dir, keep_days, today=None):
-    """Return {category: [(filename, date_str), ...]} of files to archive --
-    every dated snapshot for that category older than the most recent
-    --keep-days worth, computed against `today` (injected for tests)."""
+    """Return (to_archive, invalid): to_archive is {category: [(filename,
+    date_str), ...]} of files to archive; invalid is a list of filenames
+    that matched the dated-snapshot pattern but carry a calendar-invalid
+    date. Computed against `today` (injected for tests).
+
+    Two invariants, both found by independent review (2026-08-28) against
+    the actual producer scripts before being accepted -- neither is
+    hypothetical:
+
+    1. A regex-matching but calendar-invalid date (e.g. `capex-2026-02-30
+       .json`) must not crash the whole run. `date.fromisoformat` raises
+       ValueError on those; caught per-file and reported, not left to
+       blow up per-directory.
+    2. Each producer's own `newest_archive()` fallback (e.g.
+       capex_snapshot_diff.py) recovers from a missing/corrupt `-latest.json`
+       by scanning `state/` -- not `state/_archive/<category>/` -- for the
+       newest dated snapshot, so a collapsed pull doesn't silently overwrite
+       the baseline with an empty one. Archiving every stale snapshot for a
+       category would strand that fallback with nothing to find. The newest
+       VALID dated snapshot per category is therefore never archived,
+       independent of --keep-days -- guaranteeing the producers' own
+       recovery path always has a live candidate in state/ root."""
     if today is None:
         today = datetime.date.today()
 
     by_category = {}
+    invalid = []
     for fname in os.listdir(state_dir):
         if not os.path.isfile(os.path.join(state_dir, fname)):
             continue
         m = SNAPSHOT_RE.match(fname)
         if not m:
             continue
-        by_category.setdefault(m.group("category"), []).append(
-            (fname, m.group("date")))
+        category, date_str = m.group("category"), m.group("date")
+        try:
+            parsed = datetime.date.fromisoformat(date_str)
+        except ValueError:
+            invalid.append(fname)
+            continue
+        by_category.setdefault(category, []).append((fname, date_str, parsed))
 
     to_archive = {}
+    cutoff = today - datetime.timedelta(days=keep_days)
     for category, entries in by_category.items():
-        cutoff = today - datetime.timedelta(days=keep_days)
+        entries.sort(key=lambda e: e[2])
+        newest_fname = entries[-1][0]  # never archived -- producer fallback candidate
         stale = [
-            (fname, date_str) for fname, date_str in entries
-            if datetime.date.fromisoformat(date_str) < cutoff
+            (fname, date_str) for fname, date_str, parsed in entries
+            if parsed < cutoff and fname != newest_fname
         ]
         if stale:
-            to_archive[category] = sorted(stale, key=lambda e: e[1])
-    return to_archive
+            to_archive[category] = stale
+    return to_archive, invalid
 
 
 def apply_plan(state_dir, to_archive):
     """Move planned files into state/_archive/<category>/. Returns the number
     of files moved. Refuses (raises FileExistsError) rather than overwrite an
-    existing archived copy -- a second run against an already-archived date
-    is a no-op for that file, not a silent clobber."""
+    existing archived copy -- aborts the remainder of the run rather than
+    silently clobbering; already-moved files stay moved, and the next run
+    re-plans cleanly against whatever is left. Only reachable if a producer
+    regenerates an already-archived date."""
     archive_root = os.path.join(state_dir, "_archive")
     moved = 0
     for category, entries in to_archive.items():
@@ -112,8 +141,9 @@ def _selftest():
                 f.write("{}")
 
         today = datetime.date(2026, 8, 28)
-        p = plan(tmp, keep_days=14, today=today)
+        p, invalid = plan(tmp, keep_days=14, today=today)
 
+        assert invalid == [], invalid
         assert set(p.keys()) == {"capex", "deal-sourcing"}, p
         assert [f for f, _ in p["capex"]] == [
             "capex-2026-07-27.json", "capex-2026-08-10.json"], p["capex"]
@@ -136,13 +166,47 @@ def _selftest():
         os.makedirs(os.path.join(tmp, "_archive", "capex"), exist_ok=True)
         with open(os.path.join(tmp, "_archive", "capex", "capex-2026-07-20.json"), "w", encoding="utf-8") as f:
             f.write("{}")  # pre-existing archive copy for the same date
-        p2 = plan(tmp, keep_days=14, today=today)
+        p2, _ = plan(tmp, keep_days=14, today=today)
         try:
             apply_plan(tmp, p2)
         except FileExistsError:
             pass
         else:
             raise AssertionError("expected FileExistsError on a pre-archived duplicate")
+
+    # independent-review fixes (2026-08-28): invalid date + newest-always-kept
+    with tempfile.TemporaryDirectory() as tmp2:
+        # a whole category with EVERY dated snapshot older than keep-days --
+        # the newest one must survive regardless, so a producer's own
+        # newest_archive() fallback always has a live candidate in state/ root
+        names2 = [
+            "property-register-2026-01-05.json",   # oldest
+            "property-register-2026-01-12.json",   # newest -- must be kept live
+            "capex-2026-02-30.json",                # calendar-invalid (regex matches, date doesn't)
+            "capex-2026-08-27.json",                # valid, within window
+        ]
+        for n in names2:
+            with open(os.path.join(tmp2, n), "w", encoding="utf-8") as f:
+                f.write("{}")
+
+        today2 = datetime.date(2026, 8, 28)
+        p3, invalid3 = plan(tmp2, keep_days=14, today=today2)
+
+        assert invalid3 == ["capex-2026-02-30.json"], invalid3
+        assert set(p3.keys()) == {"property-register"}, p3
+        assert [f for f, _ in p3["property-register"]] == [
+            "property-register-2026-01-05.json"], p3["property-register"]
+        # the newest property-register snapshot is >14 days stale too, but must
+        # NOT appear in the archive plan -- it's the producer fallback candidate
+        stale_names = [f for f, _ in p3["property-register"]]
+        assert "property-register-2026-01-12.json" not in stale_names, stale_names
+
+        moved3 = apply_plan(tmp2, p3)
+        assert moved3 == 1, moved3
+        assert os.path.exists(os.path.join(tmp2, "property-register-2026-01-12.json")), \
+            "newest snapshot must stay live even though it is stale by date"
+        # the invalid-date file is left alone, not silently deleted or moved
+        assert os.path.exists(os.path.join(tmp2, "capex-2026-02-30.json"))
 
     print("selftest: PASS")
     return 0
@@ -172,8 +236,11 @@ def main(argv=None):
         sys.stderr.write("no such directory: %s\n" % a.state_dir)
         return 1
 
-    to_archive = plan(a.state_dir, a.keep_days)
+    to_archive, invalid = plan(a.state_dir, a.keep_days)
     total = sum(len(v) for v in to_archive.values())
+
+    for fname in invalid:
+        print("INVALID DATE (left in place, not archived): %s" % fname)
 
     if total == 0:
         print("nothing older than %d days in %s -- nothing to archive" % (a.keep_days, a.state_dir))
