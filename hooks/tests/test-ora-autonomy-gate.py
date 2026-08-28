@@ -179,7 +179,15 @@ def test_broken_token_module_fails_closed():
     self-deadlock). Fail closed on gated actions, stay available otherwise.
     """
     sandbox = tempfile.mkdtemp(prefix="oag-broken-")
-    shutil.copytree(os.path.dirname(HOOK), os.path.join(sandbox, "hooks"))
+    # ignore="sessions": the gate resolves its session-override dir via the ORA_OVERRIDE_
+    # SESSIONS_DIR test seam (set below, per invocation) or else DEFAULT_SESSIONS_DIR, which
+    # is an ABSOLUTE path to the real hooks/sessions -- never anything relative to this copied
+    # tree. Copying the real hooks/sessions/ here was therefore always dead weight, and with
+    # many Claude Code sessions routinely live in this shared checkout, it collided with their
+    # concurrent writes there: found 2026-08-28 (session aa0eb89c) as a shutil.copytree crash
+    # racing test_sessions_reviews_excluded_e2e's own scratch session dir.
+    shutil.copytree(os.path.dirname(HOOK), os.path.join(sandbox, "hooks"),
+                    ignore=shutil.ignore_patterns("sessions"))
     gate = os.path.join(sandbox, "hooks", "ora-autonomy-gate.py")
     os.remove(os.path.join(sandbox, "hooks", "lib", "override_tokens.py"))
 
@@ -238,7 +246,15 @@ def test_stale_token_module_without_consume_param_fails_closed():
     test_broken_token_module_fails_closed does not.
     """
     sandbox = tempfile.mkdtemp(prefix="oag-stale-")
-    shutil.copytree(os.path.dirname(HOOK), os.path.join(sandbox, "hooks"))
+    # ignore="sessions": the gate resolves its session-override dir via the ORA_OVERRIDE_
+    # SESSIONS_DIR test seam (set below, per invocation) or else DEFAULT_SESSIONS_DIR, which
+    # is an ABSOLUTE path to the real hooks/sessions -- never anything relative to this copied
+    # tree. Copying the real hooks/sessions/ here was therefore always dead weight, and with
+    # many Claude Code sessions routinely live in this shared checkout, it collided with their
+    # concurrent writes there: found 2026-08-28 (session aa0eb89c) as a shutil.copytree crash
+    # racing test_sessions_reviews_excluded_e2e's own scratch session dir.
+    shutil.copytree(os.path.dirname(HOOK), os.path.join(sandbox, "hooks"),
+                    ignore=shutil.ignore_patterns("sessions"))
     gate = os.path.join(sandbox, "hooks", "ora-autonomy-gate.py")
     stale_lib_path = os.path.join(sandbox, "hooks", "lib", "override_tokens.py")
     real_lib_path = os.path.join(os.path.dirname(HOOK), "lib", "override_tokens.py")
@@ -305,7 +321,15 @@ def test_broken_email_send_tier_fails_closed():
     imported in ONE try/except so a broken email_send_tier.py (while override_tokens.py
     stays intact) degrades exactly as fail-closed, not silently disabling Gate 1."""
     sandbox = tempfile.mkdtemp(prefix="oag-broken-est-")
-    shutil.copytree(os.path.dirname(HOOK), os.path.join(sandbox, "hooks"))
+    # ignore="sessions": the gate resolves its session-override dir via the ORA_OVERRIDE_
+    # SESSIONS_DIR test seam (set below, per invocation) or else DEFAULT_SESSIONS_DIR, which
+    # is an ABSOLUTE path to the real hooks/sessions -- never anything relative to this copied
+    # tree. Copying the real hooks/sessions/ here was therefore always dead weight, and with
+    # many Claude Code sessions routinely live in this shared checkout, it collided with their
+    # concurrent writes there: found 2026-08-28 (session aa0eb89c) as a shutil.copytree crash
+    # racing test_sessions_reviews_excluded_e2e's own scratch session dir.
+    shutil.copytree(os.path.dirname(HOOK), os.path.join(sandbox, "hooks"),
+                    ignore=shutil.ignore_patterns("sessions"))
     gate = os.path.join(sandbox, "hooks", "ora-autonomy-gate.py")
     os.remove(os.path.join(sandbox, "hooks", "lib", "email_send_tier.py"))
 
@@ -342,7 +366,15 @@ def test_broken_website_deploy_tier_fails_closed():
     CLI wrapper's outbound-action check, OI-007) must ALSO still block every gated action.
     Same failure shape as the email_send_tier / override_tokens variants above."""
     sandbox = tempfile.mkdtemp(prefix="oag-broken-wdt-")
-    shutil.copytree(os.path.dirname(HOOK), os.path.join(sandbox, "hooks"))
+    # ignore="sessions": the gate resolves its session-override dir via the ORA_OVERRIDE_
+    # SESSIONS_DIR test seam (set below, per invocation) or else DEFAULT_SESSIONS_DIR, which
+    # is an ABSOLUTE path to the real hooks/sessions -- never anything relative to this copied
+    # tree. Copying the real hooks/sessions/ here was therefore always dead weight, and with
+    # many Claude Code sessions routinely live in this shared checkout, it collided with their
+    # concurrent writes there: found 2026-08-28 (session aa0eb89c) as a shutil.copytree crash
+    # racing test_sessions_reviews_excluded_e2e's own scratch session dir.
+    shutil.copytree(os.path.dirname(HOOK), os.path.join(sandbox, "hooks"),
+                    ignore=shutil.ignore_patterns("sessions"))
     gate = os.path.join(sandbox, "hooks", "ora-autonomy-gate.py")
     os.remove(os.path.join(sandbox, "hooks", "lib", "website_deploy_tier.py"))
 
