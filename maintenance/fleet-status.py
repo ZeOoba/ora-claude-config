@@ -594,6 +594,26 @@ def find_collisions(tasks):
     return collisions
 
 
+# STALENESS WARNING (added 2026-08-28, closes a false-alarm class): this report is a
+# point-in-time snapshot. Root incident: a fleet-status/setup-self-audit advisory
+# forwarded to Gabriel correctly showed `ora-754-flaute-escalation-check` as expired,
+# not-yet-fired, still enabled -- true AT GENERATION TIME -- but the task was mid a
+# ~1h41m AM-catch-up-burst throttle delay and had already fired and auto-disabled by
+# the time the advisory was read and acted on. The snapshot wasn't wrong; it was stale
+# by minutes, and nothing in the report itself said so. This note is baked into BOTH
+# output modes (not left to a downstream skill's discipline, e.g. fleet-advisory-
+# remediation's live-reverify step) because Gabriel routinely pastes/forwards this
+# output as-is, and a reader several minutes removed from generation has no way to
+# know the snapshot may already be dead -- especially during a catch-up burst, when
+# enabled/lastRunAt can flip within minutes.
+STALENESS_NOTE = (
+    "SNAPSHOT, NOT LIVE STATE: task enabled/lastRunAt can change within minutes, "
+    "especially during an AM catch-up burst (throttle-delayed fires + auto-disable "
+    "on completion). Re-run this script (or list_scheduled_tasks) immediately before "
+    "acting on any flagged item -- do not act on a forwarded/pasted copy of this output."
+)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--registry")
@@ -711,8 +731,12 @@ def main():
         verdict_flags.append("%d task(s) registered on BOTH fleets" % len(cross_fleet_dups))
     verdict = "OK" if not verdict_flags else "ATTENTION -- " + "; ".join(verdict_flags)
 
+    generated_at_iso = datetime.datetime.now().isoformat(timespec="seconds")
+
     if args.json:
         print(json.dumps({
+            "generated_at": generated_at_iso,
+            "staleness_note": STALENESS_NOTE,
             "registries": {lbl: p for lbl, p in regs},
             "per_fleet_enabled": {lbl: sum(1 for t in enabled if t.get("_fleet") == lbl)
                                   for lbl, _ in regs},
@@ -745,8 +769,11 @@ def main():
         sys.exit(0)
 
     print("ORA FLEET STATUS  (DUAL-FLEET: cc = claude-code-sessions/MCP · lams = local-agent-mode-sessions/Cowork)")
+    print("generated_at: %s" % generated_at_iso)
     for lbl, p in regs:
         print("registry[%s]: %s" % (lbl, p))
+    print("=" * 84)
+    print("!! %s" % STALENESS_NOTE)
     print("=" * 84)
     reg_dates = registration_dates()
     now_local = datetime.datetime.now()
@@ -815,6 +842,8 @@ def main():
     # design). Now only flags the subsets above that represent an actual anomaly --
     # see cadence_buffer_days() and test-fleet-status.py.
     print("\n  VERDICT: %s" % verdict)
+    if verdict != "OK":
+        print("  !! %s snapshot at %s -- %s" % ("ATTENTION", generated_at_iso, STALENESS_NOTE))
     sys.exit(0)
 
 
