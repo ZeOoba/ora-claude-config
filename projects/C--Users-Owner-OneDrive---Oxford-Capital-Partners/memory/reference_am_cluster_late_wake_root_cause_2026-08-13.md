@@ -1,6 +1,55 @@
 # AM-cluster late wake — root cause, 2026-08-13
 
-**Status:** RESOLVED as a diagnosis. Two remediations are host-level and await Gabriel's decision.
+> ## ⛔ CORRECTION 2026-08-27 — REMEDIATION 2's PREMISE WAS WRONG, AND IT IS NOW FIXED
+>
+> This file said, in two places, that **"Claude Desktop has no launch-at-logon / launch-at-startup
+> entry."** That is **false, and was false when written.** An entry existed the whole time:
+>
+> ```
+> HKCU\Software\Microsoft\Windows\CurrentVersion\Run
+>   Claude = "C:\Program Files\WindowsApps\Claude_1.28929.0.0_x64__pzs8sxrjxfjjc\app\Claude.exe"
+> ```
+>
+> **It was broken, not absent.** That path hardcodes a *version-stamped* MSIX directory. The app has
+> since updated to **1.37937.0.0**, so the `1.28929.0.0` folder no longer exists (verified by direct
+> `ls`: "No such file or directory"; `Get-AppxPackage -Name Claude` reports InstallLocation
+> `…\Claude_1.37937.0.0_x64__pzs8sxrjxfjjc`). Every logon since that update silently tried to launch
+> a deleted executable and failed. Symptom and prognosis were right — the app does not come back
+> after a reboot — but the *mechanism* was wrong, and the recommended fix ("create a Run-key/
+> Startup-folder entry") would have added a second entry beside a broken one.
+>
+> **FIXED 2026-08-27** (Gabriel-directed, in-turn "proceed"): the existing HKCU value was repaired
+> in place — not duplicated — to the version-independent AppsFolder alias, which cannot rot on the
+> next update:
+>
+> ```
+> Claude = explorer.exe shell:AppsFolder\Claude_pzs8sxrjxfjjc!Claude
+> ```
+>
+> `Claude_pzs8sxrjxfjjc!Claude` is exactly what `Get-StartApps` returns for this package, and
+> `Claude_pzs8sxrjxfjjc` is the PackageFamilyName (no version component). HKCU, user scope, **no
+> elevation needed**, readback-verified. Revert by restoring the OLD VALUE quoted above.
+>
+> **Still open after this fix — do not read it as "reboots are solved":** a Run key fires at
+> *interactive logon*. If a reboot leaves the machine at the lock screen, nothing launches. Full
+> unattended coverage additionally needs auto-logon, or Windows' "Use my sign-in info to
+> automatically finish setting up after an update." Neither was changed.
+>
+> **The reusable lesson — this is the third time it has bitten this system.** A hardcoded absolute
+> path is itself an unverified assumption, and *"the thing I expected isn't working"* has at least
+> two causes: it stopped, or **it moved**. Same failure class as the 2026-08-20 log-directory move
+> (`%APPDATA%\Claude\logs` → `%LOCALAPPDATA%\Claude\Logs`, six days of detectors reading an
+> abandoned tree, see [[reference_run_once_guard_is_block_sentinel_not_run_once_guard_ps1]] for the
+> re-spec-from-scratch cousin) and the same reason `store_discovery.store_name()` forbids
+> hardcoding registry GUIDs. Under MSIX, **any** path containing a version number will rot on
+> update — always prefer the AppsFolder alias or PackageFamilyName. And per
+> [[feedback_absence_claims_need_verification_before_building]]: "nothing does X" almost always
+> means "it exists but is disconnected" — this finding was surfaced only by grepping the Run keys
+> *before* building the replacement this file recommended.
+
+**Status:** RESOLVED as a diagnosis. Remediation 2 was mis-premised and is now FIXED (see CORRECTION
+above, 2026-08-27). Remediation 1 (WU active hours) remains host-level, needs elevation, and awaits
+Gabriel.
 **Supersedes as the default hypothesis:** "the host is sleeping / the sleep config regressed."
 **Escalation trigger:** three consecutive 5h+ late mornings (08-11, 08-12, 08-13) with
 `STANDBYIDLE` AC = 0 confirmed intact on each. The question was reframed as *why the Desktop app
@@ -11,8 +60,12 @@ running.** Not throttled, not hung, not misconfigured — absent.
 
 Three system-initiated reboots out of Modern Standby at **04:32 / 04:40 / 04:41 ET on 2026-08-13**,
 driven by Windows Update, killed the Claude Desktop process ~33 minutes before the 05:15 slot.
-Claude Desktop has no launch-at-logon or launch-at-startup entry, so the scheduler did not exist
-again until the app was opened manually at **10:50:41**.
+Claude Desktop did not relaunch, so the scheduler did not exist again until the app was opened
+manually at **10:50:41**.
+
+> *Amended 2026-08-27:* the original wording here read "has no launch-at-logon or launch-at-startup
+> entry." It **had one** — pointing at a deleted version-stamped MSIX path, so it never fired. See
+> the CORRECTION block at the top. The observable effect described above is unchanged and correct.
 
 ## Why A.0b could never have caught it
 
@@ -108,14 +161,43 @@ the fleet's authority.
 
 1. **Windows Update active hours currently permit an unattended reboot in the AM-cluster window.**
    The 04:32 reboot was `Operating System: Service pack (Planned)` — a scheduled maintenance
-   action, not a crash. Setting active hours to cover roughly 00:00–08:00 would move it out of the
-   05:15–06:30 band. Trade-off: updates then install during the working day.
-2. **Claude Desktop has no launch-at-logon / launch-at-startup entry.** After any reboot — WU or
-   otherwise — fleet dispatch stops silently until a human opens the app. This is the larger of the
-   two: it converts every reboot into a total outage of unknown duration. Note the app needs an
-   interactive user session, so a "run whether logged on or not" Task Scheduler entry will not
-   work; the realistic options are a Run-key/Startup-folder entry plus auto-logon, or accepting
-   that reboots require a manual restart.
+   action, not a crash. **STILL OPEN — needs elevation, not applied.**
+
+   > *Measured and corrected 2026-08-27* (the original entry proposed a window without recording the
+   > live values, and the proposal was wrong). Actual current setting:
+   > `HKLM\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings` → **`ActiveHoursStart = 8`,
+   > `ActiveHoursEnd = 2`** (`SmartActiveHoursState` unset, so these manual values govern).
+   >
+   > Active hours are the window in which Windows will **not** auto-restart. So restarts are
+   > currently **permitted 02:00–08:00** — and the AM cluster runs **05:15–09:30**. The overlap is
+   > 05:15–08:00, which is exactly where the 04:32 / 04:40 / 04:41 reboots landed. This is not a
+   > hypothetical exposure; it is the measured cause of the 08-13 outage.
+   >
+   > The original suggestion here — "cover roughly 00:00–08:00" — would have made it **worse**: it
+   > blocks restarts overnight but permits them 08:00–24:00, still exposing 08:00–09:30 of the
+   > cluster *and* moving reboots into the working day.
+   >
+   > **Correct fix: `ActiveHoursStart = 4`, `ActiveHoursEnd = 22`** (an 18-hour span, the maximum
+   > Windows allows). Restarts then confine to **22:00–04:00**, clear of the whole AM cluster and
+   > comfortably after the latest scheduled task of the week (`ora-weekly-hygiene`, Sun 20:15 ET).
+   > Requires an **elevated** shell — HKLM; an unelevated session cannot write it.
+   >
+   > Caveat: active hours constrain *routine* restarts. Windows can still force one past a
+   > compliance deadline, so this reduces the risk rather than eliminating it. Combined with the
+   > now-working logon entry (remediation 2), a forced reboot should self-recover at next sign-in.
+2. ~~**Claude Desktop has no launch-at-logon / launch-at-startup entry.**~~ **✅ CORRECTED AND FIXED
+   2026-08-27 — the premise was wrong.** The entry EXISTED (HKCU Run) but hardcoded a version-
+   stamped MSIX path that the app outgrew on update, so it launched nothing. Repaired in place to
+   the version-independent AppsFolder alias; full detail in the CORRECTION block at the top of this
+   file. **Do not "add" a startup entry — one is there and now works.**
+
+   The effect described originally still held until 08-27: after any reboot, fleet dispatch stopped
+   silently until a human opened the app, converting every reboot into a total outage of unknown
+   duration. The note about interactive sessions also still holds and is the **residual gap**: a Run
+   key fires at logon, so a "run whether logged on or not" Task Scheduler entry is still not a
+   substitute, and a reboot that parks the machine at the lock screen still launches nothing until
+   someone signs in. Auto-logon (or "finish setting up after an update") remains unconfigured and is
+   the only thing that would close it — Gabriel's call, not changed.
 
 Detection is now in place regardless of which is chosen: `ora-health-guard` v1.7 A.0c runs
 `maintenance/wake-cause-probe.ps1` on every late fire and names the cause in the alert body
