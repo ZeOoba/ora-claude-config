@@ -16,6 +16,7 @@ import os
 import pathlib
 import tempfile
 import unittest
+import unittest.mock as mock
 
 _HERE = pathlib.Path(__file__).resolve().parent
 _spec = importlib.util.spec_from_file_location("log_liveness", _HERE / "_shared" / "log_liveness.py")
@@ -71,6 +72,66 @@ class TestMissing(Isolated):
         # "could not look" and "found a problem" are different outcomes.
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual(ll.main(["--log-dir", tmp, "--no-registry-check"]), 2)
+
+
+class TestReadabilityVsStatability(Isolated):
+    """Qodo #1/#2 (log_liveness.py PR review): stat() succeeding is not proof
+    a candidate can actually be read. Both are real bugs in `_read_mtimes()`
+    -- it used to add a `main*.log` name to files_read (and let its mtime
+    drive OK/FROZEN/BEHIND) on os.stat() alone, never attempting an open().
+    Every real caller (dispatch-skip-probe.py, phantom-dispatch-probe.py,
+    host-availability-report.py) actually open()s the candidate paths, so a
+    file that stats but can't be opened -- or isn't a regular file at all --
+    was being counted as usable evidence when nothing downstream could
+    actually read it.
+    """
+
+    def test_directory_named_like_a_log_is_excluded(self):
+        # Qodo #2: a directory named main.log stats fine and carries a real,
+        # fresh mtime. Any real consumer's open(main.log) raises
+        # IsADirectoryError on it.
+        with tempfile.TemporaryDirectory() as tmp:
+            d = pathlib.Path(tmp)
+            (d / "main.log").mkdir()
+            fresh = (NOW - dt.timedelta(hours=1)).timestamp()
+            os.utime(d / "main.log", (fresh, fresh))
+            r = ll.assess(tmp, window_hours=24, now=NOW)
+        self.assertEqual(r.verdict, "MISSING")
+        self.assertFalse(r.usable)
+        self.assertNotIn("main.log", r.files_read)
+        self.assertTrue(any("not a regular file" in p for p in r.problems))
+
+    def test_unreadable_but_statable_file_is_excluded(self):
+        # Qodo #1: os.stat() succeeds on a permission-denied (or ACL-locked)
+        # regular file -- only an actual open() attempt reveals it can't be
+        # read. Simulated with a mock rather than real chmod/ACLs so the
+        # assertion holds on any platform, Windows included, where a chmod
+        # bit doesn't reliably block the owner's own read.
+        with tempfile.TemporaryDirectory() as tmp:
+            d = make_logs(tmp, {"main.log": 1.0})
+            target = str(d / "main.log")
+            real_open = open
+
+            def fake_open(path, *a, **kw):
+                if str(path) == target:
+                    raise PermissionError(13, "Permission denied", target)
+                return real_open(path, *a, **kw)
+
+            with mock.patch("builtins.open", side_effect=fake_open):
+                r = ll.assess(tmp, window_hours=24, now=NOW)
+        self.assertEqual(r.verdict, "MISSING")
+        self.assertFalse(r.usable)
+        self.assertNotIn("main.log", r.files_read)
+        self.assertTrue(any("PermissionError" in p for p in r.problems))
+
+    def test_a_readable_regular_file_still_counts(self):
+        # Guard against an over-broad fix: a normal, readable file must still
+        # pass -- this is the module's entire OK path.
+        with tempfile.TemporaryDirectory() as tmp:
+            make_logs(tmp, {"main.log": 1.0})
+            r = ll.assess(tmp, window_hours=24, now=NOW)
+        self.assertEqual(r.verdict, "OK")
+        self.assertIn("main.log", r.files_read)
 
 
 class TestFrozen(Isolated):
