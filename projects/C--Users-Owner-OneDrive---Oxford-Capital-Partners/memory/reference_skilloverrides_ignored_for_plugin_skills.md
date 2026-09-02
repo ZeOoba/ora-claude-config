@@ -40,3 +40,16 @@ Also inert: `name-only` / `user-invocable-only` on a builtin `local`/`local-jsx`
 **Do not re-attempt this via `skillOverrides`.** Re-adding `anthropic-skills:<name>` keys is the inert-key defect above, not a fix — `skill-override-efficacy-probe.py` will flag any such key CRIT. If a future session finds these three listed and reaches for an override, this ruling is the answer.
 
 Related: [[feedback_verified_null_vs_inferred_null]], [[feedback_absence_claims_need_verification_before_building]]
+
+## Merged 2026-09-02 from the concurrent-session twin `reference_skilloverrides_inert_for_plugin_skills.md` (archived)
+
+Both files were written 2026-08-05 by different sessions on the same finding (see [[reference_concurrent_session_duplicate_hardening_work]]). Unique points the twin carried:
+- The listing builder also skips plugin skills outright: `if(gi.type!=="prompt" || gi.loadedFrom!=="skills" && gi.loadedFrom!=="commands_DEPRECATED") continue;`
+- Key format is NOT the problem — the lookup accepts both `plugin:skill` and the unqualified name; the `source==="plugin"` early return is.
+- Cloud skill-store plugins register as `@inline` in `.claude.json` and are `source==="plugin"` too — `anthropic-skills:` and `ora-operations-extensions:` keys are equally unreachable.
+- Confirmed live-in-listing despite `"off"` (2026-08-05): 6 `fa0fa64bdc96:` (docx/pdf/pptx/xlsx/mcp-builder/claude-api), 6 `ora-operations-extensions:`, 3 `anthropic-skills:`, `andrej-karpathy-skills:karpathy-guidelines`, 2 `cowork-plugin-management:`, 4 moot `chrome-devtools-mcp:`.
+- Levers that actually work: `enabledPlugins: false` / uninstall (local plugins) · unpublishing from the skill store (`@inline`) · `disableBundledSkills` or `CLAUDE_CODE_DISABLE_BUNDLED_SKILLS=1` (bundled set only).
+- Downstream hazard: settings.json asserts a suppression state that does not exist; Automation Fleet Audit rev 1 (2026-08-05) reasoned from it and treated the stock document-skills duplication as already solved. Retiring the local `ora-operations-extensions` plugin manifest failed for the same reason — the repo manifest never served those skills.
+- One-step verification: compare the session's own skill listing against the `"off"` keys; a listed "off" skill proves the key inert.
+
+Related (from the twin): [[reference_skill_surfaces]] · [[reference_skill_store_drift_check_false_positives]] · [[reference_skill_reimport_sync_lag]] · [[feedback_verify_before_repeating_session_claims]]

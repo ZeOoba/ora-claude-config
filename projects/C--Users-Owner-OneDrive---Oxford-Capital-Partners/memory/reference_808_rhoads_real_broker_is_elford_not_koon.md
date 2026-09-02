@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 3250b056-2da6-4a7e-8f84-deac7b3f343a
-  modified: 2026-08-13T15:12:10.283Z
+  modified: 2026-08-28T13:50:08.833Z
 ---
 
 **808 Rhoads Avenue (Columbus, OH 43205): the tracker's `Broker / Source` field names only the LISTING side and will silently defeat a recipient-domain search.**
@@ -23,3 +23,5 @@ The Notion Acquisition Pipeline Tracker row lists James Koon (Koon Property Grou
 - ORA's last outbound: 2026-06-26. The ball has been on ORA's side since.
 
 Detail and evidence: Notion Ops Hub page "Deal Aging SLA — 2026-08-13". Backfilling `Broker / Source` with the Elford contact is permitted (identity, not posture) but needs Gabriel's in-turn instruction, stamped with source and date.
+
+**RECURRED 2026-08-28, 15 days later — the tracker field is still uncorrected.** A same-day `ora-deal-aging-sla` run found a never-sent 2026-08-13 draft addressed to jkoon@koonpropertygroup.com and initially misread it as a real outbound (isDraft was not checked first — a new lesson: always verify `isDraft` on a search-result message before treating it as a sent anchor, since Outlook search returns drafts alongside sent/received mail with no visual distinction in the summary). Once corrected, the true last SENT outbound to Elford Realty (lalexander@elfordrealty.com) was 2026-06-26 — roughly 45 business days stale as of 2026-08-28, the worst aging figure across that entire run. A second, correctly-addressed, well-written follow-up draft to Lauren Alexander (cc Jackie Delay, dated 2026-08-13) already exists in Drafts and has also never been sent — recommended to Gabriel for review/send rather than duplicating it. Evidence: Notion Ops Hub page "Deal Aging SLA — 2026-08-28" (corrected mid-run; the page's edit history shows the original wrong finding). If this recurs a third time, the `Broker / Source` backfill should stop waiting for a fresh in-turn instruction each time and be raised as a standing ask.

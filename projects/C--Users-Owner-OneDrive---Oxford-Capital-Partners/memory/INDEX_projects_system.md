@@ -17,6 +17,8 @@ metadata:
 > Same rules as the root index: one line per entry, pointers only, never content. Detail lives in the target file. Rationale for the split: [size gate is a runway marker](reference_memory_index_size_gate_is_a_runway_marker.md).
 
 ## Automation / setup audit revisions
+- [Automation Audit Rev 18 08-22](project_automation_audit_rev18_2026-08-22.md) — MEMORY.md 266B from hard ceiling; event_log 35d unrolled; superseded by Rev 20
+- [Automation Audit Rev 17 08-21](project_automation_audit_rev17_2026-08-21.md) — LAMS resume would have resurrected the retired passed-deal-tracker twin; fixed pre-fire
 - **[Automation Audit Rev 12 08-16](project_automation_audit_rev12_2026-08-16.md)** — both Rev 9 data-quality items REFUTED: capex-budgeting never republished (repo commit ≠ store publish); `@inline` store plugins never appear in `enabledPlugins`, so that test proves nothing
 - **[Automation Audit Rev 11 08-16](project_automation_audit_rev11_2026-08-16.md)** — narrow follow-up, not full-fleet; README HOOKS→MAINT diagram edge + 7-file `.gitignore` churn fix, both executed; not yet PR'd to main
 - **[Automation Audit Rev 10 08-14](project_automation_audit_rev10_2026-08-14.md)** — first UNATTENDED run; it loaded a STALE v1.2 copy of its own skill (repo is v1.3); eval-harness dirties `ora-skills` daily; 3 zero-plugin marketplaces

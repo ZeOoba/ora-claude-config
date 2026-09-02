@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: rules
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-28T17:35:10.462Z
+  modified: 2026-08-28T20:31:39.714Z
 ---
 
 # ORA Standing Rules & Preferences
@@ -251,3 +251,9 @@ ACTIVE-deal terms anywhere).
 - **Rule:** never run a sed/awk find-and-replace across multiple files in one command, and never build multi-line shell logic via a heredoc. Use the Edit tool for a scoped change, or write a real script file and run it. If a repo-wide replace is genuinely needed, show the full match list first and wait for confirmation before executing.
 - **Why it matters:** usage-report friction log (2026-08-21) — a blanket sed clobbered changelog/version-string history across files, and a heredoc escaping failure forced a rewrite. `feedback_sed_windows_path_escapes.md` (GNU sed's `\U`/`\L` corrupting Windows paths) is a narrower gotcha inside this same broader rule, not a substitute for it.
 - **How to apply:** default to Edit/Write for any change with a determinate target file+location; reach for a checked-in script over an inline heredoc once shell logic exceeds one line; treat "I need sed across N files" as a signal to pause and confirm scope first, not a reason to write a cleverer one-liner.
+
+## 25. File-naming schema overlap — a dated model that's also a session artifact
+
+- **Rule:** ORA's three standing naming schemas (CLAUDE.md's Conventions section — deal files, models, session outputs — do not unify) leave one case ambiguous: a file that's both a dated model and a session artifact. In that case the session-output schema wins; the model schema is reserved for canonical/template workbooks only, never for a one-off dated output.
+- **Why it matters:** relocated out of CLAUDE.md's Conventions section (word-budget pass, Automation Audit Revision 19) — the three schemas themselves stay inline there since every naming decision reads them directly, but this overlap case is a secondary disambiguation that doesn't need to sit on the page consulted for every save.
+- **How to apply:** before naming any file that's arguably both a model and a session output, check which schema actually governs — default to the session-output schema unless the file is a genuine reusable template/canonical workbook.

@@ -30,7 +30,7 @@ metadata:
 - [docx verification gap on Windows](reference_docx_verification_windows_gap.md) — no LibreOffice/Poppler, soffice.py is Unix-only; use maintenance/docx-to-pdf.ps1
 - [Model Release Checklist](reference_model_release_checklist.md) — hardcoded model IDs + sweep process
 - [Claude Code Setups](reference_claude_code_setups.md) — best public setups: obra/superpowers, disler hooks
-- [skillOverrides is INERT for plugin skills](reference_skilloverrides_inert_for_plugin_skills.md) — `source==="plugin"` exits before the lookup; 39 of 56 ORA keys are dead. Uninstall/unpublish instead; never infer suppression from a settings entry
+- [skillOverrides is INERT for plugin skills (merged 09-02)](reference_skilloverrides_ignored_for_plugin_skills.md) — `source==="plugin"` exits before the lookup; 39 of 56 ORA keys are dead. Uninstall/unpublish instead; never infer suppression from a settings entry
 - [Plugin cleanup scope: cache vs marketplaces](reference_plugin_cleanup_scope_cache_vs_marketplaces.md) — 08-05 cleaned `plugins/cache/` only; `plugins/marketplaces/` is separate, ~23MB missed
 - [CLAUDE.md wc -w locale undercount](reference_claude_md_wc_w_locale_undercounts.md) — bare `wc -w` reads ~140 words low; use the probe or `LC_ALL=en_US.UTF-8`
 - [ECC Repo Flagged](reference_ecc_repo_flagged.md) — affaan-m/ECC rejected: malware-clone risk
