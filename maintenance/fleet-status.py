@@ -711,8 +711,21 @@ def main():
         verdict_flags.append("%d task(s) registered on BOTH fleets" % len(cross_fleet_dups))
     verdict = "OK" if not verdict_flags else "ATTENTION -- " + "; ".join(verdict_flags)
 
+    # Host clock (added 2026-09-03): cron is evaluated in LOCAL time, so a machine whose
+    # clock is not on Eastern fires every slot shifted in ET terms. The 2026-09-02 shift
+    # to UTC+2 went unnoticed by every scheduled pass because nothing printed it.
+    # Flag only -- never retime (memory: reference_machine_clock_utc_plus_2_fleet_shift_2026-09-02).
+    _now_local = datetime.datetime.now().astimezone()
+    _off = _now_local.utcoffset() or datetime.timedelta(0)
+    _mins = int(abs(_off).total_seconds() // 60)
+    host_clock_offset = "%s%02d:%02d" % ("+" if _off >= datetime.timedelta(0) else "-", _mins // 60, _mins % 60)
+    host_clock = "%s (UTC%s)" % (_now_local.tzname() or "?", host_clock_offset)
+    host_clock_shifted = host_clock_offset not in ("-04:00", "-05:00")
+
     if args.json:
         print(json.dumps({
+            "host_clock": host_clock,
+            "host_clock_shifted_from_eastern": host_clock_shifted,
             "registries": {lbl: p for lbl, p in regs},
             "per_fleet_enabled": {lbl: sum(1 for t in enabled if t.get("_fleet") == lbl)
                                   for lbl, _ in regs},
@@ -745,6 +758,9 @@ def main():
         sys.exit(0)
 
     print("ORA FLEET STATUS  (DUAL-FLEET: cc = claude-code-sessions/MCP · lams = local-agent-mode-sessions/Cowork)")
+    print("host_clock: %s%s" % (host_clock,
+          "  !! NOT Eastern -- every cron slot below fires shifted in ET terms; flag, never retime"
+          if host_clock_shifted else ""))
     for lbl, p in regs:
         print("registry[%s]: %s" % (lbl, p))
     print("=" * 84)
