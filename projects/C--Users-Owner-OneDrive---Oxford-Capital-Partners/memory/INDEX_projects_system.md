@@ -72,3 +72,7 @@ metadata:
 
 ---
 *Sub-index holds pointers, not narration — history in [event_log.md](event_log.md). Back to [MEMORY.md](MEMORY.md).*
+
+## Relocated from the root index 2026-09-02 (root crossed its 21,500-byte runway marker; entries moved verbatim, newest-first as they sat in MEMORY.md)
+- [Automation Audit Rev 17–19](project_automation_audit_rev19_2026-08-28.md) · [Rev 20](project_automation_audit_rev20_2026-08-28.md) — both superseded by Rev 21; Rev20's 93/24h throttle figure is a PRE-OUTAGE baseline, do not cite it
+- ✅ [3700 Kinsman Blvd FedEx — walk-price breach, RESOLVED 08-24](project_fedex_kinsman_walk_price_breach_2026-08-23.md) — Gabriel let the $3.8M LOI lapse, never transmitted; confirmed via ora-deal-aging-sla 08-26 pull

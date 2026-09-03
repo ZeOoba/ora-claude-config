@@ -5,12 +5,27 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-09-02T10:18:17.665Z
+  modified: 2026-09-02T12:14:41.446Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-09-02 — Schematic-driven fix pass (Gabriel: "fix all of the above"): billing caught up + off-host backup PR, never-ran first-slot detector fix, memory index split, FRED/setup-audit stale readings corrected, UTC+2 clock flagged
+
+Follow-up to the 09-02a schematic refresh. Findings ranked, then all five actioned; nothing money-moving was run by this session.
+
+1. **ora-pm-monthly-billing — RESOLVED by the catch-up burst, not by hand.** Fired 12:44 local: 139 charges posted, remaining=0, summary emailed (send-log). R21-2 closes. **Structural fix opened: ora-pm PR #24** — GitHub Actions off-host backup (`40 16 1 * *` UTC, 30-90 min after the laptop slot, same drain/stall semantics as trigger-billing.ps1, idempotent so a double fire posts 0). **Needs Gabriel to add repo secret `ORA_PM_CRON_SECRET` before merge** — deliberately not set by Claude. Cloudflare cron ruled out (wrangler.toml: no workers.dev subdomain on this account).
+2. **fleet-status.py detector gap (R21-2b) — FIXED, ora-claude-config PR #157.** First-slot rule: a never-ran recurring task whose first post-registration slot elapsed >24h is overdue regardless of the 40-day day-of-month cadence buffer; slot-before-createdAt never counts. +`never_ran_overdue_reason` in JSON/text. Tests: date-dependent test 4 pinned, 4b/4c added; all pass; live registries show no new false positives across the 6 never-ran tasks; the billing shape flags. Worktree-isolated — the live checkout (on `feat/model-canary-probe-step25`, unrelated WIP) does NOT carry it until main lands there.
+3. **R21-3 was a wrong-target read — corrected in the Rev 21 memory file.** `ORA PM Crons` (Windows) was retired deliberately 08-16 in favour of `ora-pm-daily-crons` (SKILL.md: do not re-enable). That fleet task recovered today 12:41 (3 critical dates, 35 late fees, both SEND OK). No Windows task touched.
+4. **oxford-command-center — PR #309** gitignores `data/alert-state/`; the 08-28 23:2x orphaned `portfolio.json.tmp-18412-*` and `probe.tmp` (outage kill mid-write) moved to `data/_backup/orphaned-tmp-2026-09-02/` (archive, not delete). portfolio.json itself regenerated cleanly 12:43.
+5. **MEMORY.md 21,733 → 16,934 B** (had crossed the 21,500 WARN since the morning refresh): 17 closed/dated Reference entries + 2 Projects entries relocated verbatim to sub-indexes; that overflowed INDEX_reference.md (25,039 B > 24,400 limit), so a second sub-index `INDEX_reference_resolved.md` now holds the resolved/closed set, linked from the root. memory-integrity probe green, 315/315.
+6. **Schematic rev 2026-09-02b republished** (same URL): FRED connector marked LIVE (verified by a real fred_series_info(SOFR) call — dead since 08-16, fix unattributed), setup-self-audit node re-checked (mirror drift v1.6==v1.6 CLOSED; windows-tasks WARN closed as 0xC000013A shutdown kills per Rev 21; skillOverrides 17 still open), Dual-fleet node updated (missed cycles 7→0, skips 780→1,026 as the burst drains), MCP stat strip 1 dead → 0 dead. 08-17a rolled to history under the 4-entry cap.
+
+**NEW, flagged not fixed:** machine clock is Romance Standard Time (UTC+2). Cron is evaluated in local time, so every fleet slot fires 6h early in ET terms until the laptop is back on Eastern — cron.log offsets flipped -04:00 → +02:00 between 08-28 and 09-02. Memory: reference_machine_clock_utc_plus_2_fleet_shift_2026-09-02.md.
+
+Not done / residual: skillOverrides 17-unresolved (needs a live /skills listing); no probe watches MCP connector liveness (FRED was dead ~17 days silently); PR #157 must reach the live checkout to change fleet-status output.
 
 ## 2026-09-02 — ora-cc-schematic-refresh: fleet catch-up-burst signature (7 missed cycles, throttle skips 35→780/24h), CLAUDE.md headroom recovered to 63 words
 

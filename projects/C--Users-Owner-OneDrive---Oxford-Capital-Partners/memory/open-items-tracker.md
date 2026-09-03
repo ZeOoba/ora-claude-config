@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-08-28T21:07:15.887Z
+  modified: 2026-09-02T12:05:15.063Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -32,6 +32,13 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
+| [OI-222](#OI-222) | 2026-09-02 | `ora-appsec-sweep` 2026-09-02 (ora-pm @ `ca62ecb`, security-auditor dispatch) | **MEDIUM — a Stripe webhook event that throws on first processing is permanently dropped, not retried.** The event id is inserted into `stripe_webhook_events` *before* processing; a transient failure marks the row `failed` and returns 500, Stripe retries, the retry's insert hits `23505` and short-circuits to `{skipped:true}` 200 — the retry is discarded and the row never re-processes. Can leave a real ACH payment stuck `processing` (balance overstated) or a `charge.dispute.created` uncounted (balance understated). Not applied |
+| [OI-223](#OI-223) | 2026-09-02 | `ora-appsec-sweep` 2026-09-02 (ora-pm @ `ca62ecb`, security-auditor dispatch) | **MEDIUM — the outstanding-balance cap on `/api/payment-intent` ignores pending/processing ACH, so a tenant can pay the same charges twice.** `ar_ledger.balance` only credits `stripe_status='succeeded'`; during the 3-5 business day ACH `processing` window the portal still lists the charges as payable and the cap still passes since the balance hasn't moved yet. Not applied |
+| [OI-224](#OI-224) | 2026-09-02 | `ora-appsec-sweep` 2026-09-02 (ora-pm @ `ca62ecb`, security-auditor dispatch) | **MEDIUM — the admin manual-payment route's schema allows `method:'ach_stripe'` with no `stripe_status`, producing rows the ledger never counts but the admin UI shows as paid.** `PaymentInsertSchema` doesn't restrict `method` to `check`/`wire`/`other` despite the route comment saying it should; such a row has NULL `stripe_status` so `ar_ledger` (which only sums `succeeded`) excludes it while `GET /api/payments`/admin PaymentsList display it as a recorded payment. Related but distinct from [OI-082](#OI-082) (missing uniqueness on non-Stripe methods, a double-counting bug in the opposite direction). Not applied |
+| [OI-225](#OI-225) | 2026-09-02 | `ora-appsec-sweep` 2026-09-02 (oxford-command-center @ `d30d71e`, security-auditor dispatch) | **MEDIUM — the AI agent's tool results can carry confidential-deal identifiers to the Anthropic API with no redaction, unlike every other egress path in the repo.** `get_deals`/`search_entities` correctly drop `confidential:true` rows, but `get_alerts`/`evaluateConditions` and `get_relationships` do not, and `agent.ts` appends tool results verbatim into the outbound `messages` with no pre-send scan — while `comps.ts`, `om-extract.ts`, and `narrative.ts` all fail closed on the same egress. Asking "any deadlines?" with a confidential deal in an alert-eligible stage sends its name/detail to api.anthropic.com. Not applied |
+| [OI-226](#OI-226) | 2026-09-02 | `ora-appsec-sweep` 2026-09-02 (oxford-command-center @ `d30d71e`, security-auditor dispatch) | **MEDIUM — the agent can self-mint the human-only "architect ack" override sentinel, unlocking edits to governed files without a human in the loop.** `file-guard.mjs` releases protection on `server/index.ts`, `src/contracts/**`, migrations, etc. when `.claude/overrides/architect-edit-ok` is fresh (60-min TTL), but `bash-guard.mjs`'s `GUARD_PATH` doesn't cover `.claude/overrides/` or `mkdir`/`touch`-shaped writes, so the agent can create the sentinel itself. Compounded by `Bash(npx tsx:*)` being pre-approved, which reaches governed files via `fs` outside the Edit/Write tools the file-guard intercepts. Not applied |
+| [OI-227](#OI-227) | 2026-09-02 | `ora-appsec-sweep` 2026-09-02 (oxford-command-center @ `d30d71e`, security-auditor dispatch) | **LOW — the git pre-push hook installer silently no-ops when `tsx` is absent, leaving a checkout with no confidentiality scan on push.** Flagged under the sweep's mandatory item-3c hook-change check: `scripts/install-git-hooks.ts`/`prepare-hooks.mjs` (commit `3d4de2a`) moved the installer to `.ts`-via-`tsx`; when a checkout is built with `npm ci --omit=dev`, `tsx` is missing and `prepare-hooks.mjs` exits 0 without writing the pre-push hook at all — no warning. The scan logic itself (`prepush-confidential-scan.mjs`, commit `ead629d`) is unchanged and was independently assessed non-weakening (structurally strengthened, in fact). Not applied |
+| [OI-228](#OI-228) | 2026-09-02 | `ora-appsec-sweep` 2026-09-02, DISPATCH INTEGRITY GATE assertion 4 (post-hoc model-floor probe) | **LOW — tooling defect, not a real floor breach: `check-dispatch-model-floor.py`'s `MODEL_RANK` table doesn't recognize `claude-fable-5-1` (the current Fable 5.1 model id) and ranks it UNKNOWN (fail-closed, -1), firing exit 1 on both this sweep's subagents even though each ran 100% on Fable with zero fallback events — the best possible outcome, not a violation.** `MODEL_RANK` only has bare `claude-fable-5`/`claude-mythos-5`; the table appears to predate the Fable 5.1 rollout. Verified directly: `agent-ae4ff02601b0e1cdb.jsonl` (ora-pm, 62 msgs) and `agent-ae7f6e4c49d408b89.jsonl` (occ, 110 msgs) both show `model:"claude-fable-5-1"` on every line, 0 fallback blocks. Distinct from [OI-052](#OI-052) (the documented fable→opus mid-run fallback pattern, ruled compliant) — this is a false-positive FAIL from a stale id mapping, not a fallback of any kind. Per the sweep's own doctrine this still had to be recorded and escalated (never silently loosen the assertion), but the fix here is adding `claude-fable-5-1`/`claude-mythos-5-1` (rank 100) to `MODEL_RANK`, not touching the floor logic. Not applied |
 | [OI-213](#OI-213) | 2026-09-02 | `ora-tenant-hubspot-reconciliation` monthly run (this task) | **ELEVATED — Heritage Pool Supply's exercised renewal option (2026-04-26) is documented in Notion and the workbook but the HubSpot deal still carries the superseded 2026-09-30 expiration in `appointmentscheduled`.** Notion's own row is RETIRED as a duplicate and names the canonical record and the correct date; `portfolio.json` independently says `leaseEnd 2031-09-30, Active`. Recommend `dealstage` → `closedwon`, `closedate` → `2031-09-30`. Detection-only — not written |
 | [OI-214](#OI-214) | 2026-09-02 | `ora-tenant-hubspot-reconciliation` monthly run (this task) | **ELEVATED (Step 3d escalation — a correction that propagated to two systems and not the third) — Maryland Hospital Association's HubSpot deal still carries `2027-06-30`, the exact value Notion's own note records as disproven and replaced by `2027-05-31` on 2026-07-21.** `portfolio.json` agrees with the corrected date. Deal is already `closedwon`, so the wrong date is now baked into a closed record. Recommend `closedate` → `2027-05-31`. Detection-only — not written |
 | [OI-215](#OI-215) | 2026-09-02 | `ora-tenant-hubspot-reconciliation` monthly run (this task) | **ELEVATED (Step 3d escalation, reverse direction) — the Notion Tenant DB row for J&R ENTERPRISES still carries Lease Expiration `2026-07-31`, a date now 33 days in the past, while HubSpot and the workbook both agree on `2026-12-31`.** This is the same tenant named in this task's own 2026-07-25 Step-3d precedent; the drift has since inverted — HubSpot is now correct and Notion is the stale system. Recommend correcting **Notion**, not HubSpot. Detection-only — not written |
@@ -367,6 +374,122 @@ Step 8 was added 2026-07-21 specifically to catch property/market attribution ch
 - Six Tenant DB property labels have no 1:1 Register row and roll into the Sepich umbrella: `2018 Zettler Rd`, `2806 Banwick Rd`, `2822 Banwick Rd`, `392 Morrison Rd`, `3034 Westerville`, `4601`/`4595 E. 5th Ave`. Known convention, not a defect.
 
 **Method caveat:** the live Notion Property Register read was **quota-blocked** this run (`Query Data Source` usage limit). The check was executed against `ora-pm-ledger`'s Property Register cache (`property-register-latest.json`, `as_of 2026-09-02`, 14 rows, same `db_id 19a61fc9-21ed-42d7-a0db-aa730d9a9683`) — same-day and same source, but a cache rather than the live read Step 8 specifies. The row count matches the 14 the skill expects.
+
+### OI-222
+
+**Status:** OPEN
+**Opened:** 2026-09-02 · **Source:** `ora-appsec-sweep` 2026-09-02 (ora-pm @ `ca62ecbed3aff0a1d21585dcf40f62d823810296`, security-auditor dispatch)
+**Severity:** MEDIUM (money-state correctness — webhook resilience)
+
+**Description:** `server/routes/webhook.ts:30-46` inserts the Stripe event id into `stripe_webhook_events` *before* calling `handleStripeEvent`. If the handler throws (e.g. a transient Supabase error), the row is marked `failed` and the endpoint returns 500. Stripe retries the same event; the retry's insert hits Postgres `23505` (unique violation) and the handler short-circuits to `{received:true, skipped:true}` with 200 — the retry is discarded, and nothing ever re-drives a `failed` row.
+
+**Impact:** A lost `payment_intent.succeeded` leaves a real ACH payment stuck at `processing` (balance overstated, risk of a duplicate manual payment). A lost `charge.failed`/`charge.dispute.created` arriving after a `succeeded` event leaves `ar_ledger` counting a returned/disputed ACH as paid (balance understated). Same failure class as the two AR-ledger bugs already shipped in this repo (cartesian fan-out, divide-by-100): correctness of money state depends on an implicit guarantee — here, "every webhook eventually processes" — that isn't actually enforced.
+
+**Candidate fix (NOT applied):** on `23505`, read the existing row's `status`; if `failed`, re-run `handleStripeEvent` and update the row (idempotent updates make this safe to retry). Add a periodic re-drive of `status='failed'` rows (existing cron infrastructure), and a test asserting a Stripe retry after a failed handler actually re-processes rather than silently skipping.
+
+**Auto-check:** none.
+
+---
+
+### OI-223
+
+**Status:** OPEN
+**Opened:** 2026-09-02 · **Source:** `ora-appsec-sweep` 2026-09-02 (ora-pm @ `ca62ecbed3aff0a1d21585dcf40f62d823810296`, security-auditor dispatch)
+**Severity:** MEDIUM (money-state correctness — accidental double-pay)
+
+**Description:** `ar_ledger.balance` (view, `supabase/migrations/0011_appsec_idempotency_and_scale.sql:118-151`) only credits ACH rows with `stripe_status='succeeded'`. A Stripe ACH PaymentIntent sits in `processing` for 3-5 business days after the tenant authorizes it. During that window, per the documented 2026-07-18 UI ruling, the portal still lists every underlying charge as payable, and `/api/stripe/payment-intent`'s balance cap (`server/routes/stripe.ts:159-168`) still passes because `ar_ledger.balance` hasn't moved yet — `client_request_id` is regenerated on any selection change, so Stripe-side idempotency doesn't cover a second, differently-selected payment either.
+
+**Impact:** A tenant who pays, then (before the ACH clears) pays again — believing the first attempt didn't go through, or paying a different subset of charges — can be legitimately charged twice for the same balance. Refundable, but an operational and trust problem on a live tenant portal.
+
+**Candidate fix (NOT applied):** subtract `SUM(amount) WHERE method='ach_stripe' AND stripe_status IN ('processing','requires_action')` from the cap check in `/api/payment-intent`, and surface pending payments in the Pay Now UI so the tenant can see they've already paid.
+
+**Auto-check:** none.
+
+---
+
+### OI-224
+
+**Status:** OPEN
+**Opened:** 2026-09-02 · **Source:** `ora-appsec-sweep` 2026-09-02 (ora-pm @ `ca62ecbed3aff0a1d21585dcf40f62d823810296`, security-auditor dispatch)
+**Severity:** MEDIUM (money-state correctness — ledger/display divergence)
+
+**Description:** `server/lib/schemas.ts:74-81`'s `PaymentInsertSchema` allows `method:'ach_stripe'` with no `stripe_status` field, even though `server/routes/payments.ts:28-36`'s own code comment says this admin manual-entry route is for `check`/`wire`/`other` only. A row inserted this way has `stripe_status` NULL, so `ar_ledger` (which sums only `stripe_status='succeeded'` ACH rows) excludes it from the tenant's balance — while `GET /api/payments` and the admin PaymentsList display it as a recorded payment. There is also no unique constraint on manual payments (`check_number` isn't even in the schema), so the same check can be entered twice.
+
+**Impact:** Admin-visible "paid" rows that don't reduce the tenant's actual balance (the exact display/ledger divergence class in this repo's defect history), or duplicate manual entries that double-credit a tenant. Related but distinct from [OI-082](#OI-082), which is about missing uniqueness on non-Stripe payments causing double-COUNTING (understated balance) — this is a schema gap allowing an uncounted-but-displayed row (the opposite-direction bug), on the same route.
+
+**Candidate fix (NOT applied):** restrict `PaymentInsertSchema.method` to `['check','wire','other']`; add `check_number` to the schema; add a partial unique index, e.g. `(lease_id, payment_date, amount, check_number) WHERE method IN ('check','wire','other')`.
+
+**Auto-check:** none.
+
+---
+
+### OI-225
+
+**Status:** OPEN
+**Opened:** 2026-09-02 · **Source:** `ora-appsec-sweep` 2026-09-02 (oxford-command-center @ `d30d71ea78f98ebfc1deee4ee6847672baca78d2`, security-auditor dispatch)
+**Severity:** MEDIUM (OWASP LLM02 sensitive-information disclosure / Invariant 3 egress)
+
+**Description:** `server/ai/tools.ts:251-269` (`get_alerts` → `evaluateConditions`) and `:238-249` (`get_relationships`) do not filter out confidential deals the way `get_deals`/`search_entities` do — `src/analytics/conditions.ts:786-814` generates deal-insight alerts (LOI/PSA deadlines, next-actions) named for every deal with no `confidential` check, and `get_relationships` returns counterparties/emails tied to confidential deals too. `server/ai/agent.ts:249` then appends tool results verbatim into the outbound `messages` array with no pre-send scan — unlike `server/ai/comps.ts:26-29`, `server/warehouse/om-extract.ts:90-106`, and `server/ai/narrative.ts:118-123,252-254`, which all fail closed on the same Anthropic-API egress. The Pages-mirror path (`functions/api/ai.ts`) runs the identical agent against a snapshot deliberately baked WITH confidential data (`MIRROR_INCLUDE_CONFIDENTIAL=1`), so it inherits the same gap.
+
+**Impact:** A question like "what's at risk right now?" against a confidential deal in an alert-eligible stage (e.g. LOI/PSA within `loiDeadlineWarnDays`) sends that deal's name and free-text `nextAction`/detail to api.anthropic.com. 16 of 22 deals in the committed snapshot are `confidential:true` at this SHA.
+
+**Candidate fix (NOT applied):** share one `redactConfidential()` function (the bake pipeline's `scripts/bake-mirror.ts:78` already has the right shape) between the bake, the agent, and the mirror Function, and/or run `server/briefing/confidential.ts`'s `scanForConfidential` over each tool_result before it's pushed into `messages`, dropping/nulling hits — matching the belt-and-suspenders pattern the other three egress points already use.
+
+**Auto-check:** none.
+
+---
+
+### OI-226
+
+**Status:** OPEN
+**Opened:** 2026-09-02 · **Source:** `ora-appsec-sweep` 2026-09-02 (oxford-command-center @ `d30d71ea78f98ebfc1deee4ee6847672baca78d2`, security-auditor dispatch)
+**Severity:** MEDIUM (OWASP LLM06 excessive agency — agent-surface hardening)
+
+**Description:** `.claude/hooks/file-guard.mjs:119-126,189-195` releases architect-owned protection on governed files (`server/index.ts`, `src/contracts/**`, migrations, `package.json`, etc. — CLAUDE.md §4) when the sentinel file `.claude/overrides/architect-edit-ok` is fresh (60-min TTL); the sentinel is meant to be touched by a human. `.claude/hooks/bash-guard.mjs:510`'s `GUARD_PATH` covers only `settings*.json` and `hooks/`, not `.claude/overrides/`, and its write-detector doesn't match `mkdir`/`touch`/`New-Item` forms — so `mkdir -p .claude/overrides && touch .claude/overrides/architect-edit-ok` isn't blocked, letting the agent unlock its own edits to governed files. Separately, `.claude/settings.json:31` pre-approves `Bash(npx tsx:*)`, which reaches `data/overlay.json`/`data/warehouse/**` through `fs` — outside the Edit/Write tools the file-guard actually intercepts.
+
+**Impact:** Governor-adjacent files (`server/warehouse/migrations/**`, `src/contracts/**`) and irreplaceable local state can be modified in-session with no human in the loop, defeating the point of the sentinel mechanism.
+
+**Candidate fix (NOT applied):** extend `bash-guard.mjs`'s `GUARD_PATH` to match `\.claude[\\/](?:settings\.json|settings\.local\.json|hooks|overrides)` and add write-shaped forms (`touch`, `New-Item`, `mkdir`, `echo >`) to its detector; better, make the sentinel's content an HMAC over the current date keyed from a secret outside the repo (unreadable via `permissions.deny`) so the agent cannot forge it by writing the file. Narrow `Bash(npx tsx:*)` to `Bash(npx tsx scripts/*)`.
+
+**Auto-check:** none.
+
+---
+
+### OI-227
+
+**Status:** OPEN
+**Opened:** 2026-09-02 · **Source:** `ora-appsec-sweep` 2026-09-02 (oxford-command-center @ `d30d71ea78f98ebfc1deee4ee6847672baca78d2`, security-auditor dispatch — item-3c mandatory hook-change check)
+**Severity:** LOW (the scan logic itself was assessed non-weakening; this is a narrower installer gap)
+
+**Description:** Two commits touched hook logic inside this sweep's lookback window: `ead629d` (2026-08-22, `scripts/prepush-confidential-scan.mjs`) and `3d4de2a` (2026-08-24, `scripts/install-git-hooks.ts` + `scripts/prepare-hooks.mjs`). `ead629d` is a strengthening change (adds a fail-closed structural `confidential:true` payload check). `3d4de2a` converted the hook installer to `.ts`-via-`tsx`; `prepare-hooks.mjs:21-27` now exits 0 **without installing the pre-push hook at all** when `tsx` is absent from `node_modules` (e.g. a checkout built with `npm ci --omit=dev`) — no warning is printed.
+
+**Impact:** A checkout installed without devDependencies silently has no pre-push confidentiality scan; a push from that checkout is unscanned. This repo is the one with the ratified private-repo confidentiality exception (S-001), so the residual exposure is bounded, but the hook is still the documented enforcement mechanism and its installer should not fail silently.
+
+**Candidate fix (NOT applied):** have `prepare-hooks.mjs` write its builtin `WRAPPER` string directly (already a constant in the file) when `tsx` is unavailable, rather than skipping installation.
+
+**Auto-check:** none.
+
+---
+
+### OI-228
+
+**Status:** OPEN
+**Opened:** 2026-09-02 · **Source:** `ora-appsec-sweep` 2026-09-02, DISPATCH INTEGRITY GATE assertion 4 (post-hoc model-floor probe, mandatory per SKILL.md v1.5+)
+**Severity:** LOW (tooling false-positive, not a real floor breach)
+
+**Description:** `~/.claude/maintenance/check-dispatch-model-floor.py --floor claude-opus-4-8` exited 1 ("FAIL — below-floor model") against both of this sweep's subagent transcripts. Root cause: its `MODEL_RANK` table recognizes only `claude-mythos-5` and `claude-fable-5` (rank 100) — it has no entry for `claude-fable-5-1`, the model id this session's own environment reports as the current Fable 5.1 release, so `model_rank()` falls through to `UNKNOWN_RANK = -1` (fail-closed by design for genuinely unplaceable ids) and reads a valid top-tier model as a violation.
+
+**Verified directly** (not just inferred from the probe's summary line): `agent-ae4ff02601b0e1cdb.jsonl` (ora-pm dispatch, 62 assistant messages) and `agent-ae7f6e4c49d408b89.jsonl` (oxford-command-center dispatch, 110 assistant messages) both show `message.model:"claude-fable-5-1"` on every single line, with **zero** `"type":"fallback"` events in either transcript. Both dispatches ran entirely on Fable for their full duration — the best possible outcome under Gabriel's ratified Option C (2026-07-24), not a degradation.
+
+**Distinct from [OI-052](#OI-052).** OI-052 documents a real, repeatedly-observed mid-run fallback pattern (`claude-fable-5` → `claude-opus-5`/`claude-opus-4-8`), ruled compliant 2026-08-14 because Opus is still top-tier. This item is a different mechanism entirely: no fallback occurred; the probe's own lookup table is stale.
+
+**Per the sweep's own doctrine, this had to be recorded and escalated regardless of diagnosis** ("Do NOT 'fix' a firing by loosening the floor below Opus or deleting the assertion") — see the completion report / escalation email for the mandatory MODEL-FLOOR BREACH notice. The actual fix belongs in the probe script, not the floor logic: add `claude-fable-5-1` (and, proactively, `claude-mythos-5-1`) to `MODEL_RANK` at rank 100.
+
+**Candidate fix (NOT applied):** `~/.claude/maintenance/check-dispatch-model-floor.py` — add `"claude-fable-5-1": 100` and `"claude-mythos-5-1": 100` to `MODEL_RANK`. Out of scope for this report-only task to apply (the file lives outside both audited repos and this task's writes are limited to Notion/tracker/scratch/worktrees).
+
+**Auto-check:** none.
+
+---
 
 ### OI-181
 **Status:** OPEN

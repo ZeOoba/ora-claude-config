@@ -93,6 +93,34 @@ The old VERDICT logic flagged ATTENTION on ANY never-ran task, ANY expired one-t
 - `coderabbit` collides with the same review surface but needs an uninstalled CLI, so it is not a live alternative.
 - The `code-review:code-review` plugin retired 2026-08-14 — it collided with the native `/code-review` command and was strictly narrower (no diff-dispatch routing of its own).
 
+## 3h. Off-fleet Windows Task Scheduler roster (added 2026-09-03 — the one home for "deliberately retired")
+
+<!--BEGIN-WINDOWS-TASK-ROSTER-->
+<!-- Machine-readable roster of the native Windows Task Scheduler tasks that run ORA automation
+     OUTSIDE both Claude fleets. Read by maintenance/setup-self-audit.py (windows-tasks check) and by
+     the automation-health-monitor skill's Step 1.75 -- do NOT delete the markers. One task per line:
+       - <TaskName> | state=<active|retired> | crit=<yes|no> | exit1-ok=<yes|no> [| since=YYYY-MM-DD | superseded-by=<id> | note=...]
+     state=active  -> expected Ready/Running. MISSING or Disabled = finding (CRIT when crit=yes, else WARN).
+     state=retired -> deliberately disabled or removed. Disabled or MISSING = EXPECTED, never a finding;
+                      Ready/Running = documented-retired-but-alive finding.
+     exit1-ok=yes  -> the task's own script exits 1 BY DESIGN to mean "alert posted", not a crash.
+     A live ORA* task with no roster line = untracked off-fleet automation (WARN; add a line, never filter).
+     Why this exists: Automation Audit Rev 21 (2026-09-02) read `ORA PM Crons` Disabled/0x8007042B as a
+     17-day-dead scheduling path. It was retired by design on 2026-08-16 -- a fact that lived only in the
+     automation-health-monitor skill's prose, which the audit never runs, while setup-self-audit.py's
+     hardcoded dict still listed it as a CRIT backbone task. -->
+- ORA Fleet Dead-Man | state=active | crit=yes | exit1-ok=yes | note=fleet-deadman.ps1 exits 1 when it writes an alert
+- ORA Fleet Heartbeat Push | state=active | crit=yes | exit1-ok=no
+- ORA Claude Desktop Wake-and-Launch | state=active | crit=yes | exit1-ok=no | note=upstream of BOTH fleets (they fire only while the app is open)
+- ORA Stuck-Session Watchdog | state=active | crit=no | exit1-ok=no
+- ORA Command Center - Mirror Deploy | state=active | crit=no | exit1-ok=no
+- ORA Mirror Deploy Classifier | state=active | crit=no | exit1-ok=yes | note=mirror-classify-offfleet.ps1 exits 1 when it sends an ALARM
+- ORA Fleet Pause-Resume Guard | state=active | crit=no | exit1-ok=no
+- ORA Nightly Disk Clean | state=active | crit=no | exit1-ok=no
+- ClaudeFleetMirror | state=active | crit=no | exit1-ok=no | note=legacy name, not ORA*-prefixed -- enumerated by name
+- ORA PM Crons | state=retired | crit=no | exit1-ok=no | since=2026-08-16 | superseded-by=ora-pm-daily-crons | note=OI-162; its SKILL.md says do not re-enable; last result 0x8007042B is the 08-16 kill, not a live failure
+<!--END-WINDOWS-TASK-ROSTER-->
+
 ## 4. MCP connectors
 
 <!--BEGIN-CONNECTOR-ROSTER-->
