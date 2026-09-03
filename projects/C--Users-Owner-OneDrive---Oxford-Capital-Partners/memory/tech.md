@@ -99,7 +99,7 @@ The old VERDICT logic flagged ATTENTION on ANY never-ran task, ANY expired one-t
 <!-- Machine-readable roster of the native Windows Task Scheduler tasks that run ORA automation
      OUTSIDE both Claude fleets. Read by maintenance/setup-self-audit.py (windows-tasks check) and by
      the automation-health-monitor skill's Step 1.75 -- do NOT delete the markers. One task per line:
-       - <TaskName> | state=<active|retired> | crit=<yes|no> | exit1-ok=<yes|no> [| since=YYYY-MM-DD | superseded-by=<id> | note=...]
+       grammar:  <TaskName> | state=<active|retired> | crit=<yes|no> | exit1-ok=<yes|no> [| since=YYYY-MM-DD | superseded-by=<id> | note=...]  (each task line starts with "- ")
      state=active  -> expected Ready/Running. MISSING or Disabled = finding (CRIT when crit=yes, else WARN).
      state=retired -> deliberately disabled or removed. Disabled or MISSING = EXPECTED, never a finding;
                       Ready/Running = documented-retired-but-alive finding.

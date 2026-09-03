@@ -1,6 +1,7 @@
 ---
 name: ora-pm-daily-crons
 description: Daily 9:40 AM ET ora-pm cron pinger (critical-dates-alerts + delinquency-check + Outlook-COM digest send) — supersedes the off-fleet Windows Task Scheduler task "ORA PM Crons" (OI-162). Retimed 09:00→09:40 on 2026-08-16 to clear a same-minute collision with LAMS ora-health-guard-fail-aging-nudge (0 9 * * 1-5) and to sit outside the 05:00–09:30 AM-pileup window (Automation Audit R13-6). [MODEL: claude-sonnet-5 | set 2026-08-16]
+offhost-backup: none — GAP declared 2026-09-03 under register-scheduled-task v2.19 rule 3b: delinquency-check posts late fees to tenant ledgers, so this task is money-moving, and no off-host trigger exists (ora-pm PR #24 covers monthly billing only). Flagged to Gabriel; do not narrow the money-moving definition to clear this line. Re-check after any update_scheduled_task call (drops non-owned frontmatter keys).
 ---
 
 Run the ora-pm daily cron pinger by executing the EXISTING, already-tested PowerShell script — do not re-implement its logic, do not modify it:

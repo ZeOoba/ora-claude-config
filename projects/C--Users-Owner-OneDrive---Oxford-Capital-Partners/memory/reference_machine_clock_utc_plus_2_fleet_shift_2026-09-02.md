@@ -15,6 +15,6 @@ metadata:
 **How to apply:**
 - Before calling a fire time "early", "late", or "odd", run `Get-TimeZone` and compare against the `-04:00`/`-05:00` the task specs assume.
 - Do NOT retime any task to compensate — the shift reverses itself when the clock returns to Eastern, and the registries would then be 6h off the other way. Flag, don't fix.
-- The off-host GitHub Actions billing backup (ora-pm PR #24, `40 16 1 * *` UTC) is deliberately clock-independent; it is the one trigger unaffected by this.
+- The off-host GitHub Actions billing backup (ora-pm PR #24, `40 17 1 * *` UTC — retimed from 16:40 at PR review, head d686e4d 2026-09-03) is deliberately clock-independent; it is the one trigger unaffected by this.
 
 Related: [[reference_lastruntime_restamped_on_modern_standby_resume]] (the other reason wall-clock task timing misleads on this laptop), [[project_automation_audit_rev21_2026-09-02]].
