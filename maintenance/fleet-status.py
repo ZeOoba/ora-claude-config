@@ -637,18 +637,46 @@ def main():
     # RECALIBRATED VERDICT INPUTS (2026-07-14) -- see cadence_buffer_days() docstring.
     # never-ran is only overdue for a RECURRING task (no fireAt -- one-time tasks are
     # handled by expired_needs_attention instead) whose age exceeds its cadence buffer.
+    #
+    # FIRST-SLOT RULE (2026-09-02, closes Automation Audit R21-2b). The cadence
+    # buffer alone measures age-since-createdAt, so a day-of-month cron gets a
+    # flat 40-day grace regardless of whether a real slot has already come and
+    # gone. That hid a money-moving miss: ora-pm-monthly-billing (10 11 1 * *,
+    # registered 2026-08-21) missed its first-ever fire on 2026-09-01 inside a
+    # host outage and read "0 overdue" -- and would have kept reading that
+    # until ~09-30 -- while find_missed_cycles() explicitly excludes never-ran
+    # tasks. A never-ran task whose FIRST post-registration slot has elapsed by
+    # more than MISSED_CYCLE_GRACE_HOURS is overdue now, whatever its cadence;
+    # the buffer remains the fallback for crons most_recent_expected_fire_utc()
+    # can't evaluate. A slot that predates createdAt never counts (a task
+    # registered on the 16th for the 15th is simply waiting for next month).
     never_ran_overdue = []
+    never_ran_overdue_reason = {}
+    now_local_for_slots = datetime.datetime.now()
+    now_utc_naive = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
     for t in never_ran:
         if fire_at(t):
             continue  # one-time -- not this check's business
         created = t.get("createdAt")
         if not isinstance(created, (int, float)):
             continue  # can't determine age -- don't flag on missing data
+        created_utc = datetime.datetime.fromtimestamp(
+            created / 1000.0, datetime.timezone.utc).replace(tzinfo=None)
+        expected_utc = most_recent_expected_fire_utc(t.get("cronExpression"), now_local_for_slots)
+        if (expected_utc is not None and expected_utc > created_utc
+                and (now_utc_naive - expected_utc)
+                > datetime.timedelta(hours=MISSED_CYCLE_GRACE_HOURS)):
+            never_ran_overdue.append(t)
+            never_ran_overdue_reason[t.get("id")] = (
+                "first slot %sZ elapsed >%dh unfired"
+                % (expected_utc.strftime("%Y-%m-%dT%H:%M"), MISSED_CYCLE_GRACE_HOURS))
+            continue
         buf = cadence_buffer_days(t.get("cronExpression"))
         if buf is None:
             continue  # can't classify cadence -- don't guess
         if (now_ms - created) / 86400000.0 > buf:
             never_ran_overdue.append(t)
+            never_ran_overdue_reason[t.get("id")] = "age exceeds %dd cadence buffer" % buf
 
     # expired one-time is only VERDICT-worthy if it never fired (missed) or is still
     # enabled past its fireAt (didn't auto-disable) -- a normal successful one-time
@@ -725,6 +753,7 @@ def main():
             "total": len(tasks), "enabled": len(enabled), "disabled": len(disabled),
             "never_ran": [t.get("id") for t in never_ran],
             "never_ran_overdue": [t.get("id") for t in never_ran_overdue],
+            "never_ran_overdue_reason": never_ran_overdue_reason,
             "onetime": [t.get("id") for t in onetime],
             "expired_onetime": [t.get("id") for t in expired],
             "expired_needs_attention": [t.get("id") for t in expired_needs_attention],
@@ -780,7 +809,10 @@ def main():
              ", ".join("%s=%d" % kv for kv in per_fleet.items())))
     print("  never-ran .......... %d   %s" % (len(never_ran), ", ".join(sorted(t.get("id") for t in never_ran)) or "-"))
     print("      of which overdue  %d   %s" % (len(never_ran_overdue),
-          ", ".join(sorted(t.get("id") for t in never_ran_overdue)) or "- (not yet due, by cadence)"))
+          ", ".join("%s (%s)" % (tid, never_ran_overdue_reason.get(tid, "?"))
+                    for tid in sorted(t.get("id") for t in never_ran_overdue))
+          or "- (not yet due: no post-registration slot elapsed >%dh, none past cadence buffer)"
+          % MISSED_CYCLE_GRACE_HOURS))
     print("  one-time fireAt .... %d   %s" % (len(onetime), ", ".join(sorted(t.get("id") for t in onetime)) or "-"))
     print("  EXPIRED one-time ... %d   %s" % (len(expired), ", ".join(sorted(t.get("id") for t in expired)) or "-"))
     print("      of which missed/stuck %d   %s" % (len(expired_needs_attention),
