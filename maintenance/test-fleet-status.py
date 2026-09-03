@@ -11,9 +11,12 @@ Contract under test (the recalibration, not the pre-existing table/collision cod
   * never-ran is only VERDICT-worthy if the task is a RECURRING task (no fireAt) whose
     createdAt is older than a cadence-aware buffer inferred from its cron fields --
     a quarterly/annual task that simply hasn't reached its next fire yet must not flag.
-  * FIRST-SLOT RULE (2026-09-02, R21-2b): a never-ran recurring task whose first
-    post-registration slot elapsed more than MISSED_CYCLE_GRACE_HOURS ago IS overdue
-    regardless of that buffer; a slot that predates createdAt never counts.
+  * FIRST-SLOT RULE (2026-09-02, R21-2b): a never-ran recurring task whose FIRST
+    post-registration slot (forward walk from createdAt, not the most recent slot)
+    elapsed more than MISSED_CYCLE_GRACE_HOURS ago IS overdue regardless of that
+    buffer; a slot that predates createdAt never counts; a cron the walker can't
+    evaluate falls back to the buffer instead of crashing; reasons are reported
+    per registration so duplicate ids don't collapse.
   * A one-time task (has fireAt) is never counted under never-ran-overdue; it's
     handled by the expired-needs-attention check below instead.
   * expired one-time is only VERDICT-worthy if it never fired (missed) or is still
@@ -210,7 +213,8 @@ def test_monthly_never_ran_first_slot_elapsed_is_overdue():
           data is not None and data.get("never_ran_overdue") == ["monthly-missed"],
           "expected monthly-missed flagged, got %r" % (data,))
     check("test_monthly_never_ran_first_slot_elapsed_reason",
-          data is not None and "first slot" in data.get("never_ran_overdue_reason", {}).get("monthly-missed", ""),
+          data is not None and any(r.get("id") == "monthly-missed" and "first slot" in r.get("reason", "")
+                                   for r in data.get("never_ran_overdue_reason", [])),
           "expected first-slot reason, got %r" % (data,))
     check("test_monthly_never_ran_first_slot_elapsed_verdict",
           data is not None and data.get("verdict", "").startswith("ATTENTION"),
@@ -227,6 +231,59 @@ def test_monthly_never_ran_slot_before_registration_not_overdue():
     check("test_monthly_never_ran_slot_before_registration_not_overdue",
           data is not None and data.get("never_ran_overdue") == [],
           "expected not overdue (slot predates createdAt), got %r" % (data,))
+
+
+# 4d. PR #157 review, finding 1: the FIRST post-registration slot is the
+#     witness, not the most recent one. A multi-fire daily cron always has a
+#     slot inside the last 24h, so a most-recent check never flags it; the
+#     forward walker must. Registered 2 days ago -> first slot ~2 days old.
+def test_multifire_never_ran_first_slot_elapsed_is_overdue():
+    tasks = [task("multifire-missed", cron="0 7,13,19 * * *", created_days_ago=2)]
+    data, _ = run(tasks)
+    check("test_multifire_never_ran_first_slot_elapsed_is_overdue",
+          data is not None and data.get("never_ran_overdue") == ["multifire-missed"],
+          "expected multifire-missed flagged via first slot, got %r" % (data,))
+    check("test_multifire_never_ran_first_slot_reason_is_first_slot_not_buffer",
+          data is not None and any(r.get("id") == "multifire-missed" and "first slot" in r.get("reason", "")
+                                   for r in data.get("never_ran_overdue_reason", [])),
+          "expected a first-slot reason (not the 3d cadence buffer), got %r" % (data,))
+
+
+# 4e. PR #157 review, finding 3: dom/month/dow syntax the walker can't parse
+#     (a stepped month) must NOT crash the whole report -- it returns None and
+#     the cadence buffer runs as the documented fallback (120d for a
+#     month-restricted cron; created 10d ago -> not overdue).
+def test_unsupported_cron_field_falls_back_to_cadence_buffer():
+    tasks = [task("stepped-month", cron="0 5 * */2 *", created_days_ago=10),
+             task("daily-ok", cron="0 6 * * *", created_days_ago=1, last_run=recent_iso())]
+    data, err = run(tasks)
+    check("test_unsupported_cron_field_does_not_crash",
+          data is not None, "fleet-status crashed on a stepped month field: %s" % (err,))
+    check("test_unsupported_cron_field_not_overdue_within_buffer",
+          data is not None and data.get("never_ran_overdue") == [],
+          "expected cadence-buffer fallback (not overdue at 10d/120d), got %r" % (data,))
+    tasks = [task("stepped-month-old", cron="0 5 * */2 *", created_days_ago=200)]
+    data, _ = run(tasks)
+    check("test_unsupported_cron_field_overdue_past_buffer_with_buffer_reason",
+          data is not None and data.get("never_ran_overdue") == ["stepped-month-old"]
+          and any(r.get("id") == "stepped-month-old" and "cadence buffer" in r.get("reason", "")
+                  for r in data.get("never_ran_overdue_reason", [])),
+          "expected buffer-reason flag at 200d/120d, got %r" % (data,))
+
+
+# 4f. PR #157 review, finding 4: reasons are per registration, not per id.
+#     Two never-ran registrations sharing an id (a supported duplicate-id
+#     failure mode) must each keep their own reason.
+def test_duplicate_id_overdue_reasons_are_not_collapsed():
+    tasks = [task("dup", cron="0 6 * * *", created_days_ago=3),          # first-slot reason
+             task("dup", cron="0 5 * */2 *", created_days_ago=200)]      # buffer reason
+    data, _ = run(tasks)
+    reasons = [r for r in (data or {}).get("never_ran_overdue_reason", []) if r.get("id") == "dup"]
+    check("test_duplicate_id_overdue_reasons_are_not_collapsed",
+          data is not None and data.get("never_ran_overdue") == ["dup", "dup"] and len(reasons) == 2
+          and any("first slot" in r["reason"] for r in reasons)
+          and any("cadence buffer" in r["reason"] for r in reasons),
+          "expected two distinct reasons for two 'dup' registrations, got %r" % (data,))
 
 
 # 5. A one-time task with a FUTURE fireAt is never-ran but not due -- no flag anywhere.
@@ -400,6 +457,9 @@ if __name__ == "__main__":
     test_monthly_recent_creation_not_overdue()
     test_monthly_never_ran_first_slot_elapsed_is_overdue()
     test_monthly_never_ran_slot_before_registration_not_overdue()
+    test_multifire_never_ran_first_slot_elapsed_is_overdue()
+    test_unsupported_cron_field_falls_back_to_cadence_buffer()
+    test_duplicate_id_overdue_reasons_are_not_collapsed()
     test_onetime_future_fire_not_flagged()
     test_onetime_normal_completion_not_flagged()
     test_onetime_missed_fire_flagged()
