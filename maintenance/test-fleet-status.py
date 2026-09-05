@@ -286,6 +286,19 @@ def test_duplicate_id_overdue_reasons_are_not_collapsed():
           "expected two distinct reasons for two 'dup' registrations, got %r" % (data,))
 
 
+# 4g. A PAUSED (enabled=False) never-ran task must never flag under the
+#     first-slot rule -- matches find_missed_cycles()'s own "a paused task
+#     isn't expected to fire" guard. The first-slot walker doesn't check
+#     `enabled` at all, so a paused daily task with an old createdAt would
+#     otherwise flag ATTENTION even though nobody expects it to have fired.
+def test_paused_never_ran_task_not_flagged():
+    tasks = [task("paused-task", cron="0 6 * * *", created_days_ago=3, enabled=False)]
+    data, _ = run(tasks)
+    check("test_paused_never_ran_task_not_flagged",
+          data is not None and data.get("never_ran_overdue") == [] and data.get("verdict") == "OK",
+          "expected a paused task to never flag as overdue, got %r" % (data,))
+
+
 # 5. A one-time task with a FUTURE fireAt is never-ran but not due -- no flag anywhere.
 def test_onetime_future_fire_not_flagged():
     tasks = [task("future-onetime", fire_at=now_ms() + 5 * DAY)]
@@ -460,6 +473,7 @@ if __name__ == "__main__":
     test_multifire_never_ran_first_slot_elapsed_is_overdue()
     test_unsupported_cron_field_falls_back_to_cadence_buffer()
     test_duplicate_id_overdue_reasons_are_not_collapsed()
+    test_paused_never_ran_task_not_flagged()
     test_onetime_future_fire_not_flagged()
     test_onetime_normal_completion_not_flagged()
     test_onetime_missed_fire_flagged()

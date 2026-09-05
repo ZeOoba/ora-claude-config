@@ -723,6 +723,8 @@ def main():
     for t in never_ran:
         if fire_at(t):
             continue  # one-time -- not this check's business
+        if not t.get("enabled", True):
+            continue  # a paused task isn't expected to fire (matches find_missed_cycles())
         created = t.get("createdAt")
         if not isinstance(created, (int, float)):
             continue  # can't determine age -- don't flag on missing data
