@@ -1,6 +1,6 @@
 ---
 name: ora-cc-snapshot-refresh
-description: Weekly Monday 06:15 ET — re-runs Command Center's `npm run extract` against the live Master Workbook so data/snapshots/portfolio.json (lease/insurance alert source) doesn't sit stale between weekly ora-master-workbook-ingest cycles. Read-only against the workbook; writes the tracked snapshot artifact, then auto-commits (repo-sanity + material-change + section-shrink + deals-degradation guards, matching ora-lease-snapshot-refresh) and auto-pushes fast-forward-only when every commit ahead matches ^Auto-refresh: (CC|lease) snapshot. STEP 5 gates the alert email on data-quality flag SEVERITY (warn+) read from dataQuality[], not raw count — every warn-or-higher flag emails; info-only flags post to Notion, no email. (The 2026-08-16 ratified-tombstone allowlist was retired 2026-08-28: the flag it suppressed stopped firing entirely once the underlying workbook condition was resolved, so no allowlist is currently active.) 2026-08-03 phantom-lease incident (parse.ts:476) CLOSED. Full versioned changelog lives in the body of this file (migrated from frontmatter, class-n remediation 2026-08-17). [MODEL: claude-opus-5 observed | checked 2026-08-12 via live-run transcript canary]
+description: Weekly Monday 06:15 ET — re-runs Command Center's `npm run extract` against the live Master Workbook so data/snapshots/portfolio.json (lease/insurance alert source) doesn't sit stale between weekly ora-master-workbook-ingest cycles. Read-only against the workbook; writes the tracked snapshot artifact, then auto-commits (repo-sanity + material-change + section-shrink + deals-degradation guards, matching ora-lease-snapshot-refresh) and lands it via an auto-merged PR (changed 2026-09-02 from a direct push, which branch protection makes structurally impossible) when every commit ahead matches ^Auto-refresh: (CC|lease) snapshot. STEP 5 gates the alert email on data-quality flag SEVERITY (warn+) read from dataQuality[], not raw count — every warn-or-higher flag emails; info-only flags post to Notion, no email. (The 2026-08-16 ratified-tombstone allowlist was retired 2026-08-28: the flag it suppressed stopped firing entirely once the underlying workbook condition was resolved, so no allowlist is currently active.) 2026-08-03 phantom-lease incident (parse.ts:476) CLOSED. Full versioned changelog lives in the body of this file (migrated from frontmatter, class-n remediation 2026-08-17). [MODEL: claude-opus-5 observed | checked 2026-08-12 via live-run transcript canary]
 ---
 
 ORA Command Center Snapshot Refresh. You are a senior financial-systems operator for Oxford Realty Advisors, no memory of prior runs. Follow the ORA Institutional Style Guide v1.0+ in any output.
@@ -39,6 +39,15 @@ Both halves of the lifting condition are done, independently verified:
 
 STEPS
 1. Single-writer check: `cd C:\Users\Owner\oxford-command-center` and run `git status --short`. If there are uncommitted changes in files this task doesn't touch, that's fine (this task only writes the tracked `data/snapshots/portfolio.json`) — proceed. If `data/snapshots/portfolio.json` itself shows as modified in a way that looks like someone else's in-progress edit, stop and flag rather than overwrite.
+
+   1a. **Resync `main` BEFORE the extract runs — the previous run's PR has usually landed since (added 2026-09-02, option A′).** Snapshot commits now land via an auto-merged PR rather than a direct push (see **Auto-push**), so when the last run's PR merged, `origin/main` gained a merge commit whose second parent is this checkout's own last snapshot commit. Local `main` therefore reads as *behind*, not diverged. Fast-forward it while the tree is still clean:
+
+   ```bash
+   git fetch origin
+   git rev-list --left-right --count origin/main...HEAD
+   ```
+
+   If behind > 0 and ahead == 0 → `git merge --ff-only origin/main`. **This must happen before the extract**, not inside Auto-push: once the extract has rewritten `data/snapshots/portfolio.json`, a fast-forward that also touches that file is refused for local modifications and the run deadlocks with a dirty tree it cannot clean. A pure fast-forward is the ONLY history-moving operation this task may ever perform — never a reset, a rebase, or `pull --rebase`. If `--ff-only` fails, the checkout has genuinely diverged: stop before the extract, surface it as a guard-condition failure with a QUESTION FOR GABRIEL, and let a human reconcile it.
 2. Confirm `.env` has `WORKBOOK_PATH` pointing at `C:\Users\Owner\OneDrive - Oxford Capital Partners\eric spreadsheets\Master Excel Template Company Wide -- Oxford.xlsx` (verified present 2026-07-21; if missing/wrong, flag and stop rather than guess a path).
 3. Run `npm run extract` (executes `scripts/extract-workbook.ts`) via Desktop Commander (`start_process`/`interact_with_process`) in that directory. Capture full stdout AND the exit code — read both, per the EXIT-CODE CONTRACT above, before deciding what to post. The stdout includes the "RECONCILIATION SUMMARY" block (property/lease/loan/insurance/deal counts, data-quality flag count) and, when applicable, a "Lease drift detected" / "Lease end date changes" section — quote drift lines verbatim, do not summarize them away.
 4. On exit 0 or 2: read the resulting `data/snapshots/portfolio.json` `meta` block (`asOf`, `generatedAt`) to confirm the write succeeded. On exit 1: `portfolio.json` was deliberately NOT written — do not expect `meta.generatedAt` to have advanced, and do not treat that as a separate defect on top of the refusal itself. On exit 3: the write may or may not have happened; do not assume either way — read stdout for what actually ran.
@@ -160,9 +169,9 @@ for k in sorted(set(head) | set(work)):
 - Commit message: `Auto-refresh: CC snapshot (asOf <meta.asOf>, <N> leases, <drift summary>)`, e.g. `Auto-refresh: CC snapshot (asOf 2026-08-10, 138 leases, no drift)`. Pull the actual numbers from stdout and the `meta` block — never fabricate them. **Keep the literal `Auto-refresh: CC snapshot ` prefix**: Auto-push below and the sibling task's guard both match on it, and changing the wording silently breaks both.
 - A commit failure (hook rejection, lock file, anything non-clean) is a guard-condition failure, not a silent skip — surface it like the exit-code alarms above.
 
-## Auto-push (Gabriel directive 2026-08-11 — supersedes the prior unwritten "commit and stop")
+## Auto-push (Gabriel directive 2026-08-11; landing mechanism changed to auto-merged PR 2026-09-02)
 
-`git push` publishes *every* local commit on `main`, not just this task's, so the guards below exist to keep that to automation commits only. No commit → nothing to push; skip this section entirely.
+Landing a commit publishes *every* local commit on `main` that is ahead, not just this task's, so the guards below exist to keep that to automation commits only. No commit → nothing to land; skip this section entirely. **The landing mechanism changed on 2026-09-02 from a direct `git push origin main` to an auto-merged PR** — the direct push was structurally impossible and had been failing every run since 2026-08-25; see **Landing the commit** at the end of this section. The guards themselves are unchanged.
 
 - **Fetch before deciding — never push blind.**
 
@@ -183,9 +192,38 @@ for k in sorted(set(head) | set(work)):
   **Why both prefixes and not just this task's own.** `ora-lease-snapshot-refresh` writes the same tracked file under the same anomaly floor, material-change gate, and shrink guard, and both tasks have carried an Auto-push section since 2026-08-11. From that point on either can find the other's commit ahead of `origin/main`: whichever commits second would read it as a human's unpushed work and refuse, deadlocking the pair. That forward-looking collision is the whole reason for the widened pattern. Neither task can publish work a human meant to hold back, because a human commit does not match it. Keep it in sync with the identical guard in `ora-lease-snapshot-refresh`.
 
   **Rationale corrected 2026-08-12 (transcript-verified) — do not restore the old wording.** This paragraph previously cited `0b5b36e`'s stranding as that deadlock actually occurring. It was not. Session `1de11c79-1c29-4ad7-8e6b-20c60c5f8279` (this task's 2026-08-11 run, `createdAt` 22:39:34Z) evaluated **no push guard at all** — this task had neither an Auto-push nor an Auto-commit section that day, and its own run report reads: *"Committed locally as `0b5b36e` … Not pushed — no push step is in the spec."* The commit was an unattended run improvising against an unwritten rule. A deadlock was impossible regardless: pre-flight recorded `origin/main` at `b9a58c2` with a clean tree, so after committing exactly one commit — its own — was ahead, and an own-prefix guard would have matched and pushed it. The widened pattern **stands** on its forward-looking merit above; only the false historical evidence is withdrawn. Do not re-narrow to a single prefix on the strength of that retracted claim.
-- Both guards satisfied → `git push origin main`. Report the pushed range (`<old>..<new>`) in the run report.
-- A push failure (rejected, auth, network, pre-push hook) is a guard-condition failure, not a silent skip — surface it. Never retry with any force variant, and do not retry more than once for a plainly transient network error.
-- **Exit-code routing is unchanged by this section** — an exit-0 push still gets no Notion post and no email.
+- Both guards satisfied → land the commit per **Landing the commit** below. Report the PR number and, once merged, the resulting `origin/main` range in the run report.
+- A failure at any point in that sequence (branch push rejected, `gh` auth, network, pre-push hook, PR creation, auto-merge refused) is a guard-condition failure, not a silent skip — surface it. Never retry with any force variant, and do not retry more than once for a plainly transient network error.
+- **Exit-code routing is unchanged by this section** — an exit-0 landing still gets no Notion post and no email.
+
+### Landing the commit — auto-merged PR, NOT a direct push (Gabriel ruling 2026-09-02, option A′)
+
+**A direct `git push origin main` can never succeed and must not be attempted.** `main` carries classic branch protection (no rulesets) with `enforce_admins: true` and two required contexts, `gate` and `refute-required`. `refute-required` is declared `if: github.event_name == 'pull_request'` (`.github/workflows/ci.yml:33`), so it never reports a status on a push at all; `gate` runs only *after* a push is accepted. A pushed commit therefore carries 0 of 2 required statuses and GitHub rejects it:
+
+```
+remote: error: GH006: Protected branch update failed for refs/heads/main.
+remote: - 2 of 2 required status checks are expected.
+```
+
+This is **structural, not transient** — it failed identically on 2026-08-25 ([[open-items-tracker.md#OI-205]]) and again on 2026-09-02, and it would fail every run. Do not retry it, do not reach for any force variant, and do not propose disabling `enforce_admins`: that was evaluated and **rejected** on 2026-09-02 because branch-protection bypass is actor-scoped, never commit-scoped — it would exempt *every* admin direct push from the refute doctrine gate, not just these snapshots. (A push-restriction allowlist, which could scope it to one account, is an organization-only feature; `ZeOoba` is a User account, so it is unavailable here regardless.)
+
+Land it through a PR that merges itself:
+
+```bash
+BR="snapshot/cc-refresh-$(date +%Y-%m-%d-%H%M)"
+git push origin HEAD:refs/heads/$BR    # creates the branch AT the commit; HEAD never leaves main
+gh pr create --base main --head "$BR" --title "<the commit subject, verbatim>" --body "<run summary>"
+gh pr merge <n> --auto --merge         # lands itself the moment gate + refute-required pass
+```
+
+- **`--merge` is mandatory. NEVER `--squash` or `--rebase`.** A merge commit keeps this checkout's local commit as an *ancestor* of the new `origin/main`, which is exactly what makes the next run's resync a clean fast-forward. A squash or rebase rewrites the SHA, permanently diverging the shared checkout from the remote and stranding every later run behind a divergence the fast-forward guard will correctly refuse to resolve.
+- `git push origin HEAD:refs/heads/$BR` deliberately does **not** check the branch out. This is a shared checkout other sessions work in; moving `HEAD` off `main` is the hazard `memory/rules.md` §14 warns about.
+- **`refute-required` passes trivially on these commits** — they touch only `data/snapshots/portfolio.json`, never financial-decision source (verified live on PR #307, 2026-09-02: passed in 46s). If it ever FAILS, that is real signal that something outside the snapshot got staged. Surface it; do not retry.
+- **If the PR does not merge** — a check went red, auto-merge was disarmed, or the repo's `allow_auto_merge` was turned back off — the commit is safe on the branch and in the open PR. Report it as a guard-condition failure naming the PR number and the failing check. **Never merge it by hand to force it through**, and never fall back to a direct push.
+- **If a snapshot PR from an earlier run is still open**, do NOT open a second one: push the new commit onto that same existing branch so the open PR picks it up, and say so in the run report. Two open PRs against the same file will conflict with each other.
+- After confirming the merge, delete the remote branch (`git push origin --delete "$BR"`). The repo's `delete_branch_on_merge` is false, so these otherwise accumulate.
+- Repo prerequisite, set 2026-09-02: `allow_auto_merge: true`. If `gh pr merge --auto` reports auto-merge is unavailable, that setting was reverted — surface it rather than merging manually.
+- Keep this section in sync with the identical one in `ora-lease-snapshot-refresh`.
 
 ## Changelog — MIGRATED FROM FRONTMATTER (v1.4, 2026-08-17, class-n remediation)
 

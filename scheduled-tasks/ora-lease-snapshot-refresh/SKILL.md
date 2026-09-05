@@ -1,16 +1,25 @@
 ---
 name: ora-lease-snapshot-refresh
-description: Weekday 1x/day (07:40 ET, collapsed from 3x/day 2026-08-05 per ORA-wide once/day cadence policy) regeneration of oxford-command-center's data/snapshots/portfolio.json via scripts/lease-snapshot-drift-check.ts, independent of interactive server uptime — reports lease drift (new/removed/date-changed) with an anomaly floor that refuses to write on a suspicious parse (closes the 2026-07-24 lease-date integrity incident, PR #232). On a successful write (exit 0/2) with lease data that actually moved (material-change gate structurally ignores write-clock-only churn) auto-commits locally, then auto-pushes to origin/main fast-forward-only under a section-shrink + deals-degradation guard and an own-commits-only pattern ^Auto-refresh: (CC|lease) snapshot shared with ora-cc-snapshot-refresh (never any force variant). 2026-08-03 phantom-lease incident (parse.ts:476) CLOSED. Full versioned changelog lives in the body of this file (migrated from frontmatter, class-n remediation 2026-08-17). [MODEL: claude-opus-5 observed | checked 2026-08-09 via live-run transcript canary]
+description: Weekday 1x/day (07:40 ET, collapsed from 3x/day 2026-08-05 per ORA-wide once/day cadence policy) regeneration of oxford-command-center's data/snapshots/portfolio.json via scripts/lease-snapshot-drift-check.ts, independent of interactive server uptime — reports lease drift (new/removed/date-changed) with an anomaly floor that refuses to write on a suspicious parse (closes the 2026-07-24 lease-date integrity incident, PR #232). On a successful write (exit 0/2) with lease data that actually moved (material-change gate structurally ignores write-clock-only churn) auto-commits locally, then lands it via an auto-merged PR (changed 2026-09-02 from a direct push to origin/main, which branch protection makes structurally impossible) under a section-shrink + deals-degradation guard and an own-commits-only pattern ^Auto-refresh: (CC|lease) snapshot shared with ora-cc-snapshot-refresh (never any force variant). 2026-08-03 phantom-lease incident (parse.ts:476) CLOSED. Full versioned changelog lives in the body of this file (migrated from frontmatter, class-n remediation 2026-08-17). [MODEL: claude-opus-5 observed | checked 2026-08-09 via live-run transcript canary]
 ---
 
 You are running the scheduled task `ora-lease-snapshot-refresh` for Oxford Realty Advisors. This regenerates `data/snapshots/portfolio.json` in the `oxford-command-center` repo (`C:\Users\Owner\oxford-command-center`) via `scripts/lease-snapshot-drift-check.ts`, on a cadence independent of whether the interactive Command Center dev/prod server happens to be running (that dependency was the root cause of a 2026-07-24 lease-date integrity incident — the Command Center's alerts engine and its own portfolio snapshot disagreed about the portfolio's largest near-term lease expiration because the snapshot had gone stale). Full context: `CHANGELOG.md`'s "Stable lease ids + overlay-write hardening (2026-07-24)" entry and `docs/superpowers/plans/2026-07-24-lease-id-integrity-fix-plan.md` Task 3, both in that repo.
 
 ## Steps
 
+0. **Resync `main` BEFORE the extract runs — the previous run's PR has usually landed since (added 2026-09-02, option A′).** Snapshot commits now land via an auto-merged PR rather than a direct push (see **Auto-push**), so when the last run's PR merged, `origin/main` gained a merge commit whose second parent is this checkout's own last snapshot commit. Local `main` therefore reads as *behind*, not diverged. Fast-forward it while the tree is still clean:
+
+   ```bash
+   git fetch origin
+   git rev-list --left-right --count origin/main...HEAD
+   ```
+
+   If behind > 0 and ahead == 0 → `git merge --ff-only origin/main`. **This must happen before the extract**, not inside Auto-push: once the extract has rewritten `data/snapshots/portfolio.json`, a fast-forward that also touches that file is refused for local modifications and the run deadlocks with a dirty tree it cannot clean. A pure fast-forward is the ONLY history-moving operation this task may ever perform — never a reset, a rebase, or `pull --rebase`. If `--ff-only` fails, the checkout has genuinely diverged: stop before the extract, surface it as a guard-condition failure with a QUESTION FOR GABRIEL, and let a human reconcile it.
+
 1. Run, from the `oxford-command-center` repo root: `npx tsx scripts/lease-snapshot-drift-check.ts`
 2. Read the exit code AND the full stdout/stderr output — the exit code alone doesn't carry the detail a human needs.
 3. On Exit 0 or Exit 2 only, commit the regenerated snapshot per "Auto-commit" below.
-4. If step 3 produced a commit, push it per "Auto-push" below (fast-forward only, automation snapshot commits only — see that section for which prefixes qualify).
+4. If step 3 produced a commit, land it per "Auto-push" below — an auto-merged PR since 2026-09-02, NOT a direct push (automation snapshot commits only; see that section for which prefixes qualify and why the direct push was retired).
 
 ## ✅ 2026-08-03 phantom-lease incident — CLOSED, suspension LIFTED 2026-08-03 20:2x UTC (Gabriel ruling)
 
@@ -125,11 +134,11 @@ for k in sorted(set(head) | set(work)):
 - Commit with a message summarizing the script's own printed counts, e.g. `Auto-refresh: lease snapshot (138 leases, no drift)` for Exit 0, or `Auto-refresh: lease snapshot (139 leases; drift: +2 new / -1 removed / 3 date-changed)` for Exit 2 — pull the actual numbers from stdout, never fabricate them.
 - A commit failure (hook rejection, lock file, anything non-clean) is a guard-condition failure, not a silent skip — surface it the same way as the exit-code alarms below rather than swallowing it.
 
-## Auto-push (Gabriel directive 2026-08-09 — supersedes the prior "commit locally, never push" default)
+## Auto-push (Gabriel directive 2026-08-09; landing mechanism changed to auto-merged PR 2026-09-02)
 
 Through 2026-08-08 this task committed on `main` and stopped, because an unattended push to the shared remote was a standing decision Gabriel had not made. He made it on 2026-08-09 (after a manual push of `8e4f51e`): **once a commit has been made per Auto-commit above, push it.** No commit → nothing to push; this whole section is skipped.
 
-`git push` publishes *every* local commit on `main`, not just this task's — so the guards below exist to make sure that's only ever this task's own commit.
+Landing a commit publishes *every* local commit on `main` that is ahead, not just this task's — so the guards below exist to make sure that's only ever an automation snapshot commit. **The landing mechanism changed on 2026-09-02 from a direct `git push origin main` to an auto-merged PR**; the direct push was structurally impossible against `main`'s required status checks. See **Landing the commit** at the end of this section. The guards themselves are unchanged.
 
 - **Fetch before deciding — never push blind.** `git fetch origin`, then read the divergence:
 
@@ -149,9 +158,38 @@ Through 2026-08-08 this task committed on `main` and stopped, because an unatten
   **Why `CC` as well as this task's own `lease`.** `ora-cc-snapshot-refresh` writes the same tracked `data/snapshots/portfolio.json` under the same anomaly floor, material-change gate, and shrink guard, and gained its own Auto-push section on 2026-08-11. From that point on either task can find the other's commit ahead of `origin/main`: whichever commits second would read it as a human's unpushed work and refuse, deadlocking the pair. That forward-looking collision is the whole reason for the widened pattern. Neither task can publish work a human meant to hold back, because a human commit does not match it. Keep it in sync with the identical guard in `ora-cc-snapshot-refresh`.
 
   **Rationale corrected 2026-08-12 (transcript-verified) — do not restore the old wording.** This paragraph previously cited `0b5b36e`'s stranding as that deadlock actually occurring. It was not. Session `1de11c79-1c29-4ad7-8e6b-20c60c5f8279` (the `ora-cc-snapshot-refresh` run of 2026-08-11, `createdAt` 22:39:34Z) evaluated **no push guard at all** — that task had neither an Auto-push nor an Auto-commit section that day, and its own run report reads: *"Committed locally as `0b5b36e` … Not pushed — no push step is in the spec."* Its commit was an unattended run improvising against an unwritten rule. A deadlock was impossible regardless: that run's pre-flight recorded `origin/main` at `b9a58c2` with a clean tree, so after committing exactly one commit — its own — was ahead, and an own-prefix guard would have matched and pushed it. The widened pattern **stands** on its forward-looking merit above; only the false historical evidence is withdrawn. Do not re-narrow to a single prefix on the strength of that retracted claim.
-- Both guards satisfied → `git push origin main`. Report the pushed range (`<old>..<new>`) in the run report.
-- A push failure (rejected, auth, network, pre-push hook) is a guard-condition failure, not a silent skip — surface it. Do not retry with any force variant, and do not retry more than once for a plainly transient network error.
-- Still **no** Notion post and **no** email for an Exit 0 push — the exit-code routing below is unchanged by this section.
+- Both guards satisfied → land the commit per **Landing the commit** below. Report the PR number and, once merged, the resulting `origin/main` range in the run report.
+- A failure at any point in that sequence (branch push rejected, `gh` auth, network, pre-push hook, PR creation, auto-merge refused) is a guard-condition failure, not a silent skip — surface it. Never retry with any force variant, and do not retry more than once for a plainly transient network error.
+- **Exit-code routing is unchanged by this section** — an exit-0 landing still gets no Notion post and no email.
+
+### Landing the commit — auto-merged PR, NOT a direct push (Gabriel ruling 2026-09-02, option A′)
+
+**A direct `git push origin main` can never succeed and must not be attempted.** `main` carries classic branch protection (no rulesets) with `enforce_admins: true` and two required contexts, `gate` and `refute-required`. `refute-required` is declared `if: github.event_name == 'pull_request'` (`.github/workflows/ci.yml:33`), so it never reports a status on a push at all; `gate` runs only *after* a push is accepted. A pushed commit therefore carries 0 of 2 required statuses and GitHub rejects it:
+
+```
+remote: error: GH006: Protected branch update failed for refs/heads/main.
+remote: - 2 of 2 required status checks are expected.
+```
+
+This is **structural, not transient** — it failed identically on 2026-08-25 ([[open-items-tracker.md#OI-205]]) and again on 2026-09-02, and it would fail every run. Do not retry it, do not reach for any force variant, and do not propose disabling `enforce_admins`: that was evaluated and **rejected** on 2026-09-02 because branch-protection bypass is actor-scoped, never commit-scoped — it would exempt *every* admin direct push from the refute doctrine gate, not just these snapshots. (A push-restriction allowlist, which could scope it to one account, is an organization-only feature; `ZeOoba` is a User account, so it is unavailable here regardless.)
+
+Land it through a PR that merges itself:
+
+```bash
+BR="snapshot/lease-refresh-$(date +%Y-%m-%d-%H%M)"
+git push origin HEAD:refs/heads/$BR    # creates the branch AT the commit; HEAD never leaves main
+gh pr create --base main --head "$BR" --title "<the commit subject, verbatim>" --body "<run summary>"
+gh pr merge <n> --auto --merge         # lands itself the moment gate + refute-required pass
+```
+
+- **`--merge` is mandatory. NEVER `--squash` or `--rebase`.** A merge commit keeps this checkout's local commit as an *ancestor* of the new `origin/main`, which is exactly what makes the next run's resync a clean fast-forward. A squash or rebase rewrites the SHA, permanently diverging the shared checkout from the remote and stranding every later run behind a divergence the fast-forward guard will correctly refuse to resolve.
+- `git push origin HEAD:refs/heads/$BR` deliberately does **not** check the branch out. This is a shared checkout other sessions work in; moving `HEAD` off `main` is the hazard `memory/rules.md` §14 warns about.
+- **`refute-required` passes trivially on these commits** — they touch only `data/snapshots/portfolio.json`, never financial-decision source (verified live on PR #307, 2026-09-02: passed in 46s). If it ever FAILS, that is real signal that something outside the snapshot got staged. Surface it; do not retry.
+- **If the PR does not merge** — a check went red, auto-merge was disarmed, or the repo's `allow_auto_merge` was turned back off — the commit is safe on the branch and in the open PR. Report it as a guard-condition failure naming the PR number and the failing check. **Never merge it by hand to force it through**, and never fall back to a direct push.
+- **If a snapshot PR from an earlier run is still open**, do NOT open a second one: push the new commit onto that same existing branch so the open PR picks it up, and say so in the run report. Two open PRs against the same file will conflict with each other.
+- After confirming the merge, delete the remote branch (`git push origin --delete "$BR"`). The repo's `delete_branch_on_merge` is false, so these otherwise accumulate.
+- Repo prerequisite, set 2026-09-02: `allow_auto_merge: true`. If `gh pr merge --auto` reports auto-merge is unavailable, that setting was reverted — surface it rather than merging manually.
+- Keep this section in sync with the identical one in `ora-cc-snapshot-refresh`.
 
 ## Exit code handling (differentiated 0/1/2/3 — do not treat them the same)
 
