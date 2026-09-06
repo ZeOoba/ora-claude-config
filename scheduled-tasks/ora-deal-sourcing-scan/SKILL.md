@@ -3,7 +3,24 @@ name: ora-deal-sourcing-scan
 description: Weekly on-market deal-sourcing scan (Tuesdays) — searches new industrial/flex listings across ORA's ten target markets, applies the basis/physical hard floors as a GATE, scores survivors, dedupes against the Notion Deal Sourcing Log, mechanically detects price cuts off the stored first-sighting ask, and emails a ranked digest. Restored 2026-07-07 — no replacement task applies the scoring rubric or writes to the Deal Sourcing Log. [MODEL: claude-opus-5 observed | checked 2026-08-12 via live-run transcript canary]
 ---
 
-ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.5, 2026-08-11).
+ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.6, 2026-09-05).
+
+v2.6 — FOUR COVERAGE-GAP FINDINGS CLOSED FROM THE 2026-09-05 RUN (three coverage-gap
+fixes + one restored procedure, no scoring weight changed). Full remediation analysis for
+that run: `docs/superpowers/plans/2026-09-05-deal-sourcing-scan-remediation.md`.
+(1) BROWSER-TOOL REQUIREMENT added to the Step 1 dispatch guardrail — a per-market agent
+given only WebSearch/WebFetch cannot read JS-rendered broker-direct inventory pages and
+was reporting 7 real brokerage sites across the target markets (Michigan, Iowa, Kentucky,
+plus a Richmond VA proxy comp) as having "no crawlable inventory" when the gap was the
+dispatch's own tooling, not the market. (2) Baltimore's Curtis Bay/Dundalk/Rosedale/Glen
+Burnie MD now get the same explicit per-submarket query treatment Howard County already
+had — a generic "Baltimore" metro-level sweep does not reliably surface addressable
+listings for any of these four. (3) Indianapolis's Whiteland/Beech Grove IN get the same
+treatment — they were getting folded into a combined Noblesville-area query. (4) The
+Step 1 construction-photo-analysis procedure (v2.4) is now MANDATORY, not a discretionary
+scope trade-off a run can skip — Gabriel ratified this 2026-09-05 after that run skipped
+it entirely with no compensating check; skipping it going forward is a reportable
+coverage gap, same standing as an unsearched submarket.
 
 v2.5 — LOUISVILLE KY LEG ADDED; THE SCAN IS NOW TEN MARKETS, NOT NINE (2026-08-11,
 coverage fix + mirror sync, no scoring weight changed). Louisville was ratified as the
@@ -215,11 +232,33 @@ For each of the ten clusters, web-search for newly listed industrial/flex produc
   verified data). Sanity check: a per-market agent that returns in under ~5 tool
   calls almost certainly delegated rather than worked — re-dispatch with the
   guardrail before trusting a thin or empty result.
+- BROWSER-TOOL REQUIREMENT (added 2026-09-05): a per-market dispatch given ONLY
+  WebSearch/WebFetch cannot read JS-rendered broker-direct inventory pages — WebFetch
+  returns an empty page or a nav shell for these, which reads as "no crawlable
+  inventory" when the page may in fact carry live listings. Confirmed unreachable this
+  way on 2026-09-05: NAI Wisinski, Colliers West MI, Cushman & Wakefield | Thalhimer,
+  NAI Iowa, Hubbell Realty, R&R Realty, and Commercial Kentucky's own listing pages.
+  Before reporting a brokerage as having "no crawlable for-sale inventory," either grant
+  the dispatch browser-pane / Claude-in-Chrome tool access and have it actually load the
+  page, or say explicitly in the run notes that only a text-only pass was attempted —
+  do not let a text-only null read as a confirmed empty inventory.
 - SUBMARKET COVERAGE (do NOT skip): the KS side of Kansas City (Lenexa, Olathe, Shawnee, Overland
   Park) and Maryland's Howard County (Columbia, Jessup, Elkridge) + Anne Arundel/Hanover.
   Run these explicitly through the step-1 aggregators / Claude-in-Chrome, not just
   Crexi/LoopNet. If a submarket genuinely yields no verifiable for-sale listing, state
   that in the email's coverage-gaps note rather than omitting it silently.
+- ADDED 2026-09-05 (coverage-gap fix, no scoring weight changed): Baltimore's Curtis Bay,
+  Dundalk, and Rosedale, plus Glen Burnie MD, need the SAME explicit per-submarket query
+  treatment as Howard County above. On the 2026-09-05 run a generic "Baltimore" sweep
+  returned only aggregate counts for these four, no addressable street listings — a bare
+  metro-level query does not reliably surface individual addresses for them. Query each
+  by name; if a filtered Crexi/LoopNet browser-pane pull (not just WebSearch/WebFetch) is
+  still needed to get addressable results, do it rather than reporting an aggregate-only
+  null as a coverage gap.
+- ADDED 2026-09-05: Indianapolis's Whiteland and Beech Grove submarkets need their OWN
+  query, not folded into a combined Noblesville search. On the 2026-09-05 run they were
+  bundled into one Noblesville-area query and came back under-covered — neither returned
+  a distinct result. Search each by name.
 - MONTGOMERY COUNTY MD — MONTHLY, NOT WEEKLY (downgraded 2026-07-14). A full
   fetch-verified pass found ZERO in-box industrial for-sale inventory county-wide:
   both Yardi platforms return no industrial-for-sale listings for Rockville,
@@ -251,7 +290,19 @@ For each of the ten clusters, web-search for newly listed industrial/flex produc
   2026-08-04 run ALL NINE market agents reported it as impossible and returned UNKNOWN
   for every candidate. UNKNOWN scores the same as PEMB (2/5), so that silently
   suppressed ~3 points on essentially the whole scan. The instruction was wrong, not
-  the agents — WebFetch returns text only and cannot see images. Use this instead: ***
+  the agents — WebFetch returns text only and cannot see images. ***
+
+  *** MANDATORY, NOT DISCRETIONARY (ratified by Gabriel 2026-09-05, after the 2026-09-05
+  run skipped this whole procedure "for scope reasons" with no compensating check). The
+  score impact is genuinely small — ~1 in 5 candidates resolvable, up to 3 points each
+  (masonry/tilt-up/precast resolving from UNKNOWN; less for hybrid, none for confirmed
+  PEMB — the one measured sample, 2026-08-04, averaged 2 points across 3/3/0) — but
+  the real yield is the by-products below, which listing text never discloses. Skipping
+  this step is a COVERAGE GAP to name explicitly in that run's digest, exactly like a
+  submarket that returned nothing — never a silent scope trade-off a run makes on its
+  own. Run it every run, not at a run's discretion. ***
+
+  Use this instead:
   1. Read the listing text first. A minority state it outright ("masonry", "precast
      concrete", "pre-engineered steel", "block"). Cheapest win; take it and stop.
   2. Otherwise open the listing in the BROWSER PANE (preview_start / navigate), then:
