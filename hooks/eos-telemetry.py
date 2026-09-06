@@ -293,14 +293,22 @@ def main():
         "override_reason": override_reason,
         "override_at": override_at,
     }
-    # Nothing observable changed since this session's last record -> writing
-    # it again adds a line and no information. Append-only is preserved: this
-    # only ever declines to write, it never rewrites or removes an existing
-    # record, so it keeps the concurrency property that has held 963 lines of
-    # interleaved multi-session appends at zero corruption.
-    # Bound the file before scanning it end-to-end (R22-5).
+    # Bound the file BEFORE the end-to-end dedupe scan below (R22-5). This is
+    # the one and only place this module moves an existing file, and it is
+    # deliberately kept above the append-only note that follows so that note
+    # continues to describe the code it actually governs. Rotation is safe
+    # against the concurrency property for two reasons: it is a single
+    # os.replace (atomic on the same volume, so no reader ever sees a partial
+    # file), and a session whose prior record was rotated away appends one
+    # duplicate -- which the dedupe docstring already calls harmless.
     rotate_if_large(out_file)
 
+    # Nothing observable changed since this session's last record -> writing
+    # it again adds a line and no information. Append-only is preserved on
+    # this path: the dedupe below only ever declines to write, it never
+    # rewrites or removes an existing record, so it keeps the concurrency
+    # property that has held 963 lines of interleaved multi-session appends
+    # at zero corruption.
     if is_duplicate_of_last(out_file, session_id, record):
         return
 

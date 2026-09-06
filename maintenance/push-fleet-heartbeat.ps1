@@ -1,4 +1,4 @@
-﻿# ORA Fleet Heartbeat + Pending-Work Push -- local pulse leg of the EXTERNAL cross-fleet dead-man (v2.0 2026-08-23)
+# ORA Fleet Heartbeat + Pending-Work Push -- local pulse leg of the EXTERNAL cross-fleet dead-man (v2.0 2026-08-23)
 # ----------------------------------------------------------------------------------
 # WHY v1.0 (2026-07-09): Task 6 (DEADMAN_APPROACH=GITHUB-ACTION, Gabriel-ratified). The
 # GitHub Action .github/workflows/fleet-deadman.yml checks the COMMITTED copy of
