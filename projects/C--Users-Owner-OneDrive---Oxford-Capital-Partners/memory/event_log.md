@@ -12,6 +12,32 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-09-06 — Qodo NOT renewed; PR review is Claude-native only + blast-radius review gate added to CLAUDE.md
+
+Gabriel, in-turn, via interactive decision question ("sort out the qodo billing"). Two rulings.
+
+**Ruling 1 — Claude-native review only.** Qodo's trial ended 2026-09-06; it is NOT being renewed, and CodeRabbit stays on Free. No third-party PR-review spend.
+
+Evidence put to him before the call, both directions:
+- **For renewing:** Qodo had a genuine track record — 10 inline findings on ora-claude-config PR #158 earlier the same day, *all ten accepted* after live verification; and a real concurrency catch on PR #153 (a pure age-based scratch sweep that could delete a still-running sibling's files, a defect specific to this laptop's Modern Standby behaviour that sequential testing cannot surface).
+- **Against:** ORA runs **~200 PRs / 30 days** across ora-claude-config (128), oxford-command-center (53), Website (9), ora-skills (10) — so Qodo's free Developer tier (30 PR reviews/month) covers only ~15% of volume and is not a fallback. Paid is ~$30/user/mo annual (~$38 monthly; 2026 restructure offers a ~$30/mo base for up to 30 users plus pooled credits). Declined under [[procurement-stance-deepen-not-migrate]].
+- **Cost of the gap, already realised:** with both bots silent, **PR #160 merged a function-deleting regression** the same day while GitHub reported MERGEABLE/CLEAN — see this log's own #160 entry. Across five PRs today (#159, #161, #313, #314 and #158's follow-ups) **not one received a bot review**: Qodo billing-blocked throughout, CodeRabbit rate-limited to one review/hour on Free and returning summaries only.
+
+**Ruling 2 — blast-radius merge gate, added to CLAUDE.md.** New Engineering OS bullet: *"Merge gate: a bot status check is never a review verdict — a blast-radius PR needs a real one before merge (adversarial subagent pass; tiers per Dispatch). History: `event_log.md`."* Dateless, per the doctrine probe's checks 5/6 — the first draft carried a bare date and was correctly blocked at edit time rather than at push. The live edit required an `allow-config-write` token; minted citing Gabriel's selected option text verbatim, scoped to this one bullet.
+
+**Three defects in the FIRST draft of that bullet, all caught by the mandatory independent review (Fable) and none by me.** Worth recording because each was confidently wrong:
+1. **A factually false premise.** The draft asserted "Third-party PR bots are NOT in use." CodeRabbit is installed, posting, and WIRED INTO CI — `.github/workflows/claude-ci-fix.yml` lines 33/34/49/55 trigger on `github.event.comment.user.login == 'coderabbit[bot]'` and dispatch Claude to address its findings. An agent reading "NOT in use" could strip that trigger as dead code. Gabriel's ruling was *no third-party SPEND*, not *no third-party bot*. It was also volatile billing state written into the invariant layer, which the file's own header forbids.
+2. **Wrong section.** It landed under `## Skill tie-breaks` (line 60), not `## Engineering OS`. "Blast-radius" is defined only inside the EOS section, which the header says ported copies OMIT — verified: all three ported CLAUDE.md copies carry the tie-breaks bullet with zero occurrences of the blast-radius definition, so the term would have been undefined on Cowork/Chat/Obsidian. Also duplicated "reviewer >= implementer", already at line 73.
+3. **Overreach.** "A green CI ... certifies nothing" is false against the repo's real suites (`ci.yml`, `full-gate-selfhosted.yml`); the target was the bot STATUS CHECK. And "therefore" made the gate contingent on bot state — if the bots return, a literal reader concludes the gate lapses. The shipped wording is unconditional.
+
+**Word budget — I measured it with the wrong tool.** Recorded here first as "1653 -> 1692 words"; both numbers were `wc -w`, which this shell's locale undercounts by ~136 (it drops the standalone `·`/`→`/`—` tokens). The probe's `len(text.split())` is authoritative and [[reference_claude_md_word_budget_is_a_floor]] line 28 already says so — a documented rule I violated. TRUE figures: **1793 -> 1817** (WARN 1700, FAIL 1850), i.e. 33 words of headroom, not the ~158 the wrong count implied.
+
+**The standing minimum-headroom relocation was NOT executed, because the pre-picked candidate is INVALID.** [[reference_claude_md_next_relocation_candidate_2026-08-28]] nominates moving the 8-guard roster out of the `Calibrate:` bullet into `tech.md` §3f — but `tech.md` §3f line 89 itself states that `doctrine-integrity-probe.py` **Check 11 requires those 8 backtick-quoted guard names to stay inline in CLAUDE.md**, and says to relocate only their explanatory detail. Executing the candidate would have broken the probe. The two memory files contradict each other; the candidate file has been corrected and a fresh candidate must be picked before the next headroom pass.
+
+**Follow-through.** All five Qodo skills (`qodo-review`, `qodo-review-resolver`, `qodo-get-rules`, `qodo-manage-standards`, `qodo-codebase-wisdom`) moved to `skills/_archive_2026-09-06_qodo_retired/` with a README carrying this rationale — left installed they trigger on their descriptions and silently under-deliver against a dead workspace. Verified first that nothing else references them. The `qodo` CLI stays at `~/.qodo/` (harmless; re-enabling is cheaper than reinstalling). **No billing action was taken or needed** — the trial lapsed on its own; Claude cannot transact, and Gabriel should confirm no payment method is set to auto-convert, which is not visible from this machine.
+
+**Carried along in the same commit, disclosed:** CLAUDE.md also held an orphaned uncommitted hunk from 2026-08-28 (mtime 9 days stale, no active claim) — the word-budget relocation replacing the naming-overlap rule with a pointer to `rules.md` §25. Verified §25 exists and is complete before landing it, so the pointer is not dangling.
+
 ## 2026-09-02 — ora-cc-schematic-refresh: fleet catch-up-burst signature (7 missed cycles, throttle skips 35→780/24h), CLAUDE.md headroom recovered to 63 words
 
 Scheduled 2x/week refresh (rev 2026-09-02a). All five standing probes re-run live and stayed green (governor-drift, doctrine-integrity, memory-integrity 313/313 0 issues, confidentiality-guard 131/131). Two material changes worth a durable record:
