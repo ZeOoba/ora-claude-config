@@ -1,4 +1,4 @@
-﻿# ORA Stuck-Session Watchdog -- kills scheduled-task-fired claude.exe sessions that have run
+# ORA Stuck-Session Watchdog -- kills scheduled-task-fired claude.exe sessions that have run
 # past a reasonable ceiling. The mirror-image failure mode to fleet-deadman.ps1 (which detects
 # the fleet going SILENT); this detects a session that fired and never finished.
 #
