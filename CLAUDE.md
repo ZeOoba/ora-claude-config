@@ -27,7 +27,7 @@
 7. Never fabricate firm, tenant, deal, or counterparty data — read the source of record first (see Tools & data).
 
 ## Conventions & deliverables
-- Naming — three standing schemas, do NOT unify: deal files `[DocType]_[Property]_[MMDDYYYY]` · models `ORA_[DocType]_[Property]_v[X.Y].xlsx` · session outputs `YYYY-MM-DD_[Topic]_[DocType]_v##.ext` in `/outputs/`. A dated model that's also a session artifact uses the session-output schema; `ORA_...` is canonical/template workbooks only.
+- Naming — three standing schemas, do NOT unify: deal files `[DocType]_[Property]_[MMDDYYYY]` · models `ORA_[DocType]_[Property]_v[X.Y].xlsx` · session outputs `YYYY-MM-DD_[Topic]_[DocType]_v##.ext` in `/outputs/`. Overlap rule (dated model that's also a session artifact): `rules.md` §25.
 - Modeling conventions (required metrics, replacement-cost, rents): `standards.md` Part A.
 - Institutional deliverables: ORA Style Guide v1.0+ (fonts/colors: `rules.md` §7) + 16-pt QC Gate before presenting. PDFs need extractable text layers — no Print-to-PDF.
 
@@ -70,6 +70,7 @@
 - Blast radius (disqualifies L1): `hooks/**` · `*.env*` · `*credentials*` · `confidential-terms.json` · `settings.json` · `CLAUDE.md`/`~/.claude` config · scheduled-task registries · CSP/headers · financial-constant/governor files. Even L1 runs the cheapest verify.
 - Done bar (L2–L7 completion criteria: TDD, quality gates, mandatory adversarial REFUTE pass for financial/security-gate code w/ optional cross-model escalation, evidence-before-claim, server-stop): full text `reference_engineering_os_done_bar.md`. Spec §7 points here too — do not duplicate.
 - Cloud `/code-review ultra`: ONLY repos not in `~/.claude/confidential-repos.json` AND explicit opt-in (no local tool call — can't be hook-blocked).
+- Merge gate: a bot status check is never a review verdict — a blast-radius PR needs a real one before merge (adversarial subagent pass; tiers per Dispatch). History: `event_log.md`.
 - Dispatch (announce `Dispatch: <mode> · <model> — <top factors>`): inline for trivial/small/coupled · `subagent-driven-development` for code-heavy/independent/high-precision/>~4 tasks · `Workflow` only with explicit opt-in. Model-tier assignment: spec §7.1. Invariants unchanged: reviewer ≥ implementer; confidential/financial/governor code never below Fable; ALWAYS pin an explicit `model` per dispatch. RAM/parallelism (`/ram`, `/heavy`): spec §9, `reference_lean_ram_toolkit.md`.
 - Non-trivial technical recommendations: current state → evidence → root cause → alternatives → ROI/confidence → risk → rollback — evidence over preference.
 - Release: `/ship` (skill) owns the per-target gate/deploy/rollback chains (brain mirror, ora-pm, oxfordra.net); oxfordra.net still requires invariant 2's per-deploy confirmation. A merged PR is not a live deploy — verify the actual served asset/behavior before calling oxfordra.net work done.
