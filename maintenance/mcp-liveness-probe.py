@@ -15,13 +15,22 @@ WHAT IT PROBES
 Every entry under `mcpServers` in ~/.claude.json -- the set of locally-registered
 stdio / Streamable-HTTP servers (as of 2026-09-03: excel, fred, context7). Each is
 driven through the real MCP handshake: `initialize` -> `notifications/initialized`
--> `tools/list`, and the returned tool count is the liveness signal.
+-> `tools/list`, and the returned tool count is the liveness signal. Every reply is
+checked as a JSON-RPC 2.0 envelope (jsonrpc == "2.0", exactly one of result/error,
+matching id) and the InitializeResult must carry protocolVersion / capabilities /
+serverInfo before the probe proceeds -- a server that answers with the right id but
+the wrong shape is PROTOCOL, not OK.
 
 Cloud-managed connectors (Notion, HubSpot, M365, Netlify, plugins) are NOT reachable
 from a subprocess -- they exist only inside a live Claude session -- so they are out
 of scope BY CONSTRUCTION, not by omission. Health Guard B.1 covers them with real
 in-session tool calls. This probe says so in its output rather than silently
 narrowing the scan set (memory: reference_probe_scan_sets).
+
+The whole handshake shares ONE deadline (--timeout, default 45s) per server on both
+transports; the HTTP transport never follows redirects (a 3xx is DOWN) and only
+speaks http/https, so configured headers cannot be replayed to a redirect target.
+The set of URLs it will contact is exactly the operator's own ~/.claude.json.
 
 FINDING CLASSES (exit 1)
 ------------------------
@@ -30,13 +39,15 @@ FINDING CLASSES (exit 1)
                carry a narrower PATH than an interactive shell (`uv` lives on the
                user-scope PATH only), so the probe also searches the user-scope registry PATH (HKCU / Environment / Path).
   DOWN         started/connected but cannot complete the handshake within --timeout
-  PROTOCOL     connected but the reply is not valid JSON-RPC / MCP
+               (includes a refused redirect on HTTP)
+  PROTOCOL     connected but the reply is not valid JSON-RPC / MCP (bad envelope,
+               missing InitializeResult, 202/empty body to a request, non-JSON line)
   ZERO_TOOLS   handshake OK, `tools/list` returned an empty list
-  UNSUPPORTED  transport type this probe cannot drive (reported, never skipped)
+  UNSUPPORTED  transport type or URL scheme this probe cannot drive (reported, never skipped)
   NO_SERVERS   ~/.claude.json has no mcpServers at all (roster expects some)
 
 Exit 0 = every server live with >= 1 tool; exit 1 = one or more findings;
-exit 2 = probe error (unreadable/unparseable ~/.claude.json) -- fail loud.
+exit 2 = probe error (unreadable/unparseable ~/.claude.json, bad CLI value) -- fail loud.
 
 Usage: python mcp-liveness-probe.py [--quiet] [--json] [--timeout=SECONDS]
        [--claude-json=PATH] [--only=NAME]
@@ -44,11 +55,13 @@ Usage: python mcp-liveness-probe.py [--quiet] [--json] [--timeout=SECONDS]
 import os
 import sys
 import json
+import math
 import time
 import queue
 import shutil
 import threading
 import subprocess
+import urllib.parse
 import urllib.request
 import urllib.error
 
@@ -61,8 +74,10 @@ for _s in (sys.stdout, sys.stderr):
 HOME = os.path.expanduser("~")
 DEFAULT_CLAUDE_JSON = os.path.join(HOME, ".claude.json")
 DEFAULT_TIMEOUT = 45.0          # `uv run` cold-starts can take 10-20s on this laptop
+MAX_TIMEOUT = 600.0             # a probe that can hang the daily health guard is worse than a false DOWN
 PROTOCOL_VERSION = "2025-03-26"
-CLIENT_INFO = {"name": "ora-mcp-liveness-probe", "version": "1.0"}
+CLIENT_INFO = {"name": "ora-mcp-liveness-probe", "version": "1.1"}
+ALLOWED_SCHEMES = ("http", "https")
 CLOUD_NOTE = ("cloud-managed connectors (Notion, HubSpot, M365, Netlify, plugins) are not "
               "reachable from a subprocess -- covered by Health Guard B.1 in-session calls, "
               "not by this probe")
@@ -84,10 +99,14 @@ def parse_args(argv):
         elif a.startswith("--claude-json="):
             opts["claude_json"] = a.split("=", 1)[1]
         elif a.startswith("--timeout="):
+            raw = a.split("=", 1)[1]
             try:
-                opts["timeout"] = float(a.split("=", 1)[1])
+                val = float(raw)
             except ValueError:
-                die("bad --timeout value: %s" % a)
+                die("bad --timeout value: %r (need a number of seconds)" % raw)
+            if not math.isfinite(val) or val <= 0 or val > MAX_TIMEOUT:
+                die("--timeout must be a finite number in (0, %g] seconds, got %r" % (MAX_TIMEOUT, raw))
+            opts["timeout"] = val
         elif a.startswith("--only="):
             opts["only"] = a.split("=", 1)[1]
         else:
@@ -109,6 +128,9 @@ def read_servers(path):
     return servers
 
 
+# --------------------------------------------------------------------------
+# JSON-RPC / MCP validation shared by both transports
+# --------------------------------------------------------------------------
 def _rpc(id_, method, params=None):
     msg = {"jsonrpc": "2.0", "id": id_, "method": method}
     if params is not None:
@@ -120,11 +142,50 @@ def _init_params():
     return {"protocolVersion": PROTOCOL_VERSION, "capabilities": {}, "clientInfo": CLIENT_INFO}
 
 
+def _validate_envelope(msg, want_id):
+    """Return the `result` of a JSON-RPC 2.0 response for want_id, or raise ValueError.
+    Accepts only: a dict, jsonrpc == "2.0", id == want_id, exactly one of result/error."""
+    if not isinstance(msg, dict):
+        raise ValueError("response for id %s is not a JSON object" % want_id)
+    if msg.get("jsonrpc") != "2.0":
+        raise ValueError("response for id %s lacks jsonrpc=\"2.0\" (got %r)" % (want_id, msg.get("jsonrpc")))
+    if msg.get("id") != want_id:
+        raise ValueError("response id %r != requested %r" % (msg.get("id"), want_id))
+    has_result, has_error = "result" in msg, "error" in msg
+    if has_result == has_error:
+        raise ValueError("response for id %s must carry exactly one of result/error (result=%s error=%s)"
+                         % (want_id, has_result, has_error))
+    if has_error:
+        raise ValueError("JSON-RPC error for id %s: %s" % (want_id, msg["error"]))
+    return msg["result"]
+
+
+def _validate_init(result):
+    """InitializeResult must carry protocolVersion (str), capabilities (object), serverInfo.name."""
+    if not isinstance(result, dict):
+        raise ValueError("InitializeResult is not an object: %r" % (result,))
+    if not isinstance(result.get("protocolVersion"), str) or not result["protocolVersion"]:
+        raise ValueError("InitializeResult lacks protocolVersion")
+    if not isinstance(result.get("capabilities"), dict):
+        raise ValueError("InitializeResult lacks capabilities object")
+    info = result.get("serverInfo")
+    if not isinstance(info, dict) or not isinstance(info.get("name"), str):
+        raise ValueError("InitializeResult lacks serverInfo.name")
+    return info["name"]
+
+
 def _tool_names(result):
-    tools = (result or {}).get("tools")
+    tools = (result or {}).get("tools") if isinstance(result, dict) else None
     if not isinstance(tools, list):
         raise ValueError("tools/list result has no 'tools' list")
     return [str(t.get("name", "?")) for t in tools if isinstance(t, dict)]
+
+
+def _remaining(t0, timeout, what):
+    left = timeout - (time.time() - t0)
+    if left <= 0:
+        raise TimeoutError("timeout after %.0fs before %s" % (timeout, what))
+    return left
 
 
 # --------------------------------------------------------------------------
@@ -209,13 +270,11 @@ def probe_stdio(cfg, timeout):
         proc.stdin.flush()
 
     def _recv(want_id):
-        """Return the parsed response for want_id, or raise."""
+        """Return the validated `result` for want_id, or raise."""
         while True:
-            remaining = timeout - (time.time() - t0)
-            if remaining <= 0:
-                raise TimeoutError("timeout after %.0fs waiting for id %s" % (timeout, want_id))
+            left = _remaining(t0, timeout, "reply to id %s" % want_id)
             try:
-                raw = lines.get(timeout=remaining)
+                raw = lines.get(timeout=left)
             except queue.Empty:
                 raise TimeoutError("timeout after %.0fs waiting for id %s" % (timeout, want_id))
             if raw is None:
@@ -232,28 +291,23 @@ def probe_stdio(cfg, timeout):
                 msg = json.loads(text)
             except ValueError:
                 raise ValueError("non-JSON line on stdout: %r" % text[:120])
-            if isinstance(msg, dict) and msg.get("id") == want_id:
-                if "error" in msg:
-                    raise ValueError("JSON-RPC error for id %s: %s" % (want_id, msg["error"]))
-                return msg.get("result")
-            # notifications / unrelated ids: keep reading
+            if isinstance(msg, dict) and "id" in msg and "method" not in msg:
+                if msg.get("id") != want_id:
+                    continue  # a response to something we did not ask -- keep reading
+                return _validate_envelope(msg, want_id)
+            # notifications / server->client requests: keep reading
 
     try:
         try:
             _send(_rpc(1, "initialize", _init_params()))
-            init = _recv(1)
+            server_name = _validate_init(_recv(1))
             _send({"jsonrpc": "2.0", "method": "notifications/initialized"})
             _send(_rpc(2, "tools/list", {}))
-            res = _recv(2)
+            names = _tool_names(_recv(2))
         except (TimeoutError, ConnectionError, BrokenPipeError, OSError) as e:
             return {"class": "DOWN", "error": str(e), "elapsed": round(time.time() - t0, 1)}
         except ValueError as e:
             return {"class": "PROTOCOL", "error": str(e), "elapsed": round(time.time() - t0, 1)}
-        try:
-            names = _tool_names(res)
-        except ValueError as e:
-            return {"class": "PROTOCOL", "error": str(e), "elapsed": round(time.time() - t0, 1)}
-        server_name = ((init or {}).get("serverInfo") or {}).get("name")
         rec = {"class": "ZERO_TOOLS" if not names else "OK", "tools": len(names),
                "tool_names": names[:8], "server": server_name,
                "elapsed": round(time.time() - t0, 1)}
@@ -287,6 +341,16 @@ def probe_stdio(cfg, timeout):
 # --------------------------------------------------------------------------
 # Streamable-HTTP transport
 # --------------------------------------------------------------------------
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse every redirect: configured headers (possibly credentials) must never be
+    replayed to a location the operator did not configure. urllib then raises HTTPError."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect())
+
+
 def _http_post(url, body, headers, timeout):
     data = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(url, data=data, method="POST")
@@ -295,15 +359,23 @@ def _http_post(url, body, headers, timeout):
     req.add_header("MCP-Protocol-Version", PROTOCOL_VERSION)
     for k, v in headers.items():
         req.add_header(k, v)
-    resp = urllib.request.urlopen(req, timeout=timeout)
+    resp = _OPENER.open(req, timeout=timeout)
     ctype = (resp.headers.get("Content-Type") or "").lower()
     sid = resp.headers.get("Mcp-Session-Id")
     raw = resp.read().decode("utf-8", "replace")
+    resp.close()
     return resp.status, ctype, sid, raw
 
 
 def _parse_http_body(status, ctype, raw, want_id):
+    """Validated `result` for want_id. A 202/empty body is acceptable ONLY for a
+    notification (want_id None); for a request it is a PROTOCOL failure."""
     if status == 202 or not raw.strip():
+        if want_id is None:
+            return None
+        raise ValueError("no JSON-RPC response for id %s: HTTP %s with empty body "
+                         "(202/empty is valid for notifications, not for a request)" % (want_id, status))
+    if want_id is None:
         return None
     candidates = []
     if "text/event-stream" in ctype:
@@ -317,10 +389,8 @@ def _parse_http_body(status, ctype, raw, want_id):
             msg = json.loads(c)
         except ValueError:
             continue
-        if isinstance(msg, dict) and msg.get("id") == want_id:
-            if "error" in msg:
-                raise ValueError("JSON-RPC error for id %s: %s" % (want_id, msg["error"]))
-            return msg.get("result")
+        if isinstance(msg, dict) and msg.get("id") == want_id and "method" not in msg:
+            return _validate_envelope(msg, want_id)
     raise ValueError("no JSON-RPC response for id %s in HTTP body (%s): %r"
                      % (want_id, ctype or "no content-type", raw[:120]))
 
@@ -329,28 +399,32 @@ def probe_http(cfg, timeout):
     url = cfg.get("url")
     if not url:
         return {"class": "DOWN", "error": "no url configured"}
+    scheme = (urllib.parse.urlsplit(str(url)).scheme or "").lower()
+    if scheme not in ALLOWED_SCHEMES:
+        return {"class": "UNSUPPORTED", "error": "url scheme %r not in %s" % (scheme, "/".join(ALLOWED_SCHEMES))}
     headers = {str(k): str(v) for k, v in (cfg.get("headers") or {}).items()}
     t0 = time.time()
     try:
-        status, ctype, sid, raw = _http_post(url, _rpc(1, "initialize", _init_params()), headers, timeout)
-        init = _parse_http_body(status, ctype, raw, 1)
+        status, ctype, sid, raw = _http_post(url, _rpc(1, "initialize", _init_params()), headers,
+                                             _remaining(t0, timeout, "initialize"))
+        server_name = _validate_init(_parse_http_body(status, ctype, raw, 1))
         if sid:
             headers["Mcp-Session-Id"] = sid
         try:
-            _http_post(url, {"jsonrpc": "2.0", "method": "notifications/initialized"}, headers, timeout)
+            _http_post(url, {"jsonrpc": "2.0", "method": "notifications/initialized"}, headers,
+                       _remaining(t0, timeout, "notifications/initialized"))
         except urllib.error.HTTPError:
             pass  # some servers 4xx a bare notification; tools/list is the real test
-        status, ctype, _, raw = _http_post(url, _rpc(2, "tools/list", {}), headers, timeout)
-        res = _parse_http_body(status, ctype, raw, 2)
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as e:
+        status, ctype, _, raw = _http_post(url, _rpc(2, "tools/list", {}), headers,
+                                           _remaining(t0, timeout, "tools/list"))
+        names = _tool_names(_parse_http_body(status, ctype, raw, 2))
+    except urllib.error.HTTPError as e:
+        kind = "redirect refused (%s)" % e.code if 300 <= e.code < 400 else "HTTP %s" % e.code
+        return {"class": "DOWN", "error": "%s: %s" % (kind, e), "elapsed": round(time.time() - t0, 1)}
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
         return {"class": "DOWN", "error": str(e), "elapsed": round(time.time() - t0, 1)}
     except ValueError as e:
         return {"class": "PROTOCOL", "error": str(e), "elapsed": round(time.time() - t0, 1)}
-    try:
-        names = _tool_names(res)
-    except ValueError as e:
-        return {"class": "PROTOCOL", "error": str(e), "elapsed": round(time.time() - t0, 1)}
-    server_name = ((init or {}).get("serverInfo") or {}).get("name")
     return {"class": "ZERO_TOOLS" if not names else "OK", "tools": len(names),
             "tool_names": names[:8], "server": server_name,
             "elapsed": round(time.time() - t0, 1)}
@@ -375,6 +449,7 @@ def probe_one(name, cfg, timeout):
 def main():
     opts = parse_args(sys.argv[1:])
     servers = read_servers(opts["claude_json"])
+
     results = []
     if opts["only"]:
         if opts["only"] not in servers:
