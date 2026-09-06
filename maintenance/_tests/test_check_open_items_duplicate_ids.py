@@ -301,6 +301,113 @@ if real["orphaned_sections"] or real["missing_sections"]:
           "duplicate-ids.py` reports these." % (real["orphaned_sections"],
                                                 real["missing_sections"]))
 
+# --- companion history file (split 2026-09-06, Automation Audit R22-4) -------------
+# CLOSED items' rows and detail sections moved to open-items-tracker-history.md.
+# check() itself is untouched (still a pure function of ONE string) -- these tests
+# cover history_path()'s derivation and main()'s combining of the two files, which
+# is where the actual dual-file awareness lives.
+
+# history_path() must derive relative to tracker_path()'s OWN directory, never fall
+# through to the real production history file, when only TRACKER_PATH_OVERRIDE is
+# set. Getting this wrong bleeds unrelated live content (67 real closed rows) into
+# every fixture-based test above that only ever meant to exercise the tracker in
+# isolation -- exactly the failure this test guards against having reappear.
+with tempfile.TemporaryDirectory() as td:
+    fixture_tracker = os.path.join(td, "clean-tracker.md")
+    with open(fixture_tracker, "w", encoding="utf-8") as f:
+        f.write(clean)
+    codc.TRACKER_PATH_OVERRIDE = fixture_tracker
+    try:
+        expect("history_path() derives inside the override's OWN directory, not the real one",
+               os.path.dirname(codc.history_path()) == td,
+               "got %r" % codc.history_path())
+        expect("a companion history file absent from that directory reads as optional/empty",
+               codc.read_optional(codc.history_path()) == "")
+    finally:
+        codc.TRACKER_PATH_OVERRIDE = None
+
+# HISTORY_PATH_OVERRIDE, when explicitly set, wins outright (test seam parity with
+# TRACKER_PATH_OVERRIDE).
+with tempfile.TemporaryDirectory() as td:
+    explicit = os.path.join(td, "wherever.md")
+    with open(explicit, "w", encoding="utf-8") as f:
+        f.write("### OI-999\n**Status:** CLOSED\n")
+    codc.HISTORY_PATH_OVERRIDE = explicit
+    try:
+        expect("HISTORY_PATH_OVERRIDE wins over the derived path",
+               codc.history_path() == explicit, "got %r" % codc.history_path())
+    finally:
+        codc.HISTORY_PATH_OVERRIDE = None
+
+# main() must COMBINE tracker + history before checking -- a duplicate id split
+# across the two files (the exact shape a bad manual edit could produce: the same
+# id present as a row in BOTH the live Open table and the history Closed table) is
+# every bit as much a real collision as two rows in one file, and must be caught.
+with tempfile.TemporaryDirectory() as td:
+    t_path = os.path.join(td, "open-items-tracker.md")
+    h_path = os.path.join(td, "open-items-tracker-history.md")
+    with open(t_path, "w", encoding="utf-8") as f:
+        f.write("## Open\n\n" + row("500", "still open per this table") + "\n")
+    with open(h_path, "w", encoding="utf-8") as f:
+        f.write("## Closed\n\n" + row("500", "also closed per this table") + "\n")
+    codc.TRACKER_PATH_OVERRIDE = t_path
+    try:
+        rc = codc.main()
+    finally:
+        codc.TRACKER_PATH_OVERRIDE = None
+    expect("main() catches a duplicate id split ACROSS tracker + history -> exit 1",
+           rc == 1, "got %r" % rc)
+
+    # Sibling case: clean on each file alone, clean combined too (no false positive
+    # from the mere fact of being split across two files).
+    with open(t_path, "w", encoding="utf-8") as f:
+        f.write("## Open\n\n" + row("501") + "\n" + section("501") + "\n")
+    with open(h_path, "w", encoding="utf-8") as f:
+        f.write("## Closed\n\n" + row("502") + "\n" + section("502", status="CLOSED") + "\n")
+    codc.TRACKER_PATH_OVERRIDE = t_path
+    try:
+        rc = codc.main()
+    finally:
+        codc.TRACKER_PATH_OVERRIDE = None
+    expect("main() reads clean when tracker and history are each clean on their own",
+           rc == 0, "got %r" % rc)
+
+# external_anchor_refs() must recognize a cross-file link into EITHER filename, and
+# must exclude BOTH filenames as sources (a reference from the tracker INTO the
+# history file, or vice versa, is internal to this one logical document).
+_d2 = tempfile.mkdtemp(prefix="oi-refs-history-")
+try:
+    def _w2(name, body):
+        with open(os.path.join(_d2, name), "wb") as fh:
+            fh.write(body)
+    _w2("event_log.md", b"closed via [OI-016](open-items-tracker-history.md#OI-016)\n")
+    _w2("open-items-tracker.md",
+        b"pointer: [OI-500](open-items-tracker-history.md#OI-500)\n")
+    _w2("open-items-tracker-history.md",
+        b"pointer back: [OI-501](open-items-tracker.md#OI-501)\n")
+    refs2 = codc.external_anchor_refs(_d2, "open-items-tracker.md",
+                                      "open-items-tracker-history.md")
+    expect("external_anchor_refs matches a cross-file link into the HISTORY filename",
+           "OI-016" in refs2, "got %r" % refs2)
+    expect("external_anchor_refs excludes a tracker-internal link INTO history (not external)",
+           "OI-500" not in refs2, "got %r" % refs2)
+    expect("external_anchor_refs excludes a history-internal link INTO tracker (not external)",
+           "OI-501" not in refs2, "got %r" % refs2)
+finally:
+    _sh.rmtree(_d2, ignore_errors=True)
+
+# --- the live combined pair, right now: still zero id collisions -------------------
+# Stronger than the tracker-alone regression guard above -- this is what main()
+# actually checks in production (tracker text concatenated with history text).
+_live_history_text = codc.read_optional(codc.DEFAULT_HISTORY_PATH)
+_live_combined = codc.check(
+    open(codc.DEFAULT_TRACKER_PATH, encoding="utf-8").read() + "\n" + _live_history_text)
+expect("canonical tracker+history combined has zero id collisions right now",
+       codc.collision_finding(_live_combined) is False, "got %r" % _live_combined)
+expect("the 5 pre-existing orphaned sections are unchanged by the split (not new damage)",
+       set(_live_combined["orphaned_sections"]) == {"OI-205", "OI-206", "OI-208", "OI-209", "OI-210"},
+       "got %r" % _live_combined["orphaned_sections"])
+
 passed = sum(1 for ok, _ in results if ok)
 print("check-open-items-duplicate-ids tests: %d/%d passed" % (passed, len(results)))
 sys.exit(0 if passed == len(results) else 1)
