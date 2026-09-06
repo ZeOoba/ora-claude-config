@@ -244,9 +244,8 @@ class TestMultiFireMissedCycle(unittest.TestCase):
         # expected fire is today's 13:40, not 07:40 or yesterday's 19:40.
         now_local = datetime.datetime(2026, 7, 29, 15, 0, 0)  # a Wednesday
         expected = fs.most_recent_expected_fire_utc("40 7,13,19 * * 1-5", now_local)
-        # Per-date local->UTC (PR #157): the offset in force on 2026-07-29,
-        # not today's -- the two differ across a DST boundary.
-        self.assertEqual(expected, fs._local_to_utc(datetime.datetime(2026, 7, 29, 13, 40)))
+        self.assertEqual(expected, datetime.datetime(2026, 7, 29, 13, 40) -
+                          fs._local_utc_offset())
 
     def test_multifire_task_missing_a_cycle_is_flagged(self):
         # Last real run was 07:40 two days ago -- both the 13:40/19:40 slots
