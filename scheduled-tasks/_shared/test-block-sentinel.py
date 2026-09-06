@@ -466,6 +466,62 @@ def test_main_block_id_supported():
     os.remove(st)
 
 
+def test_period_month_reclaims_across_days_within_same_month():
+    """A monthly task claimed and completed on the 1st must SKIP on a re-fire
+    later the same month (2026-09-06 does NOT restage a monthly task) -- the
+    gap --period exists to close (added 2026-09-06)."""
+    print("\ntest_period_month_reclaims_across_days_within_same_month")
+    st = tmp_state()
+    rc, out = run(["claim", "--task", "t", "--block", "main", "--run-id", "r1",
+                   "--period", "month"], st)
+    check("exit 0", rc == 0, "got %s (%s)" % (rc, out))
+    check("periodKey is YYYY-MM", out.get("periodKey") == et_today()[:7], str(out))
+    run(["complete", "--task", "t", "--block", "main", "--run-id", "r1", "--period", "month"], st)
+    rc, out = run(["claim", "--task", "t", "--block", "main", "--run-id", "r2",
+                   "--period", "month"], st)
+    check("same-month re-fire skips", rc == 10, "got %s (%s)" % (rc, out))
+    os.remove(st)
+
+
+def test_period_week_keys_to_iso_week():
+    print("\ntest_period_week_keys_to_iso_week")
+    st = tmp_state()
+    rc, out = run(["claim", "--task", "t", "--block", "main", "--run-id", "r1",
+                   "--period", "week"], st)
+    check("exit 0", rc == 0, "got %s (%s)" % (rc, out))
+    check("periodKey looks like an ISO week", bool(out.get("periodKey", "").count("-W") == 1),
+          str(out))
+    data = read_state(st)
+    check("state keyed to the ISO week, not the day", et_today() not in data, str(list(data.keys())))
+    os.remove(st)
+
+
+def test_period_day_is_unaffected_default():
+    """--period defaults to "day" -- omitting the flag entirely must reproduce
+    the exact pre-existing behavior (etDate, day-keyed state)."""
+    print("\ntest_period_day_is_unaffected_default")
+    st = tmp_state()
+    rc, out = run(["claim", "--task", "t", "--block", "main", "--run-id", "r1"], st)
+    check("exit 0", rc == 0, "got %s (%s)" % (rc, out))
+    check("period defaults to day", out.get("period") == "day", str(out))
+    check("periodKey equals etDate for day period", out.get("periodKey") == out.get("etDate"), str(out))
+    check("etDate is today's ET date", out.get("etDate") == et_today(), str(out))
+    os.remove(st)
+
+
+def test_period_month_and_day_buckets_are_independent():
+    """The same task/block claimed under two different --period values must not
+    collide -- they address different dict keys in the same state file."""
+    print("\ntest_period_month_and_day_buckets_are_independent")
+    st = tmp_state()
+    run(["claim", "--task", "t", "--block", "main", "--run-id", "d1"], st)
+    run(["complete", "--task", "t", "--block", "main", "--run-id", "d1"], st)
+    rc, out = run(["claim", "--task", "t", "--block", "main", "--run-id", "m1",
+                   "--period", "month"], st)
+    check("month claim unaffected by day-period COMPLETE", rc == 0, "got %s (%s)" % (rc, out))
+    os.remove(st)
+
+
 def test_ttl_exact_boundary():
     """The sibling test samples 29 and 31 minutes; pin the boundary itself."""
     print("\ntest_ttl_exact_boundary")
@@ -503,6 +559,10 @@ if __name__ == "__main__":
     test_owner_may_fail_and_that_releases_the_claim()
     test_block_id_aliases_address_one_record()
     test_main_block_id_supported()
+    test_period_month_reclaims_across_days_within_same_month()
+    test_period_week_keys_to_iso_week()
+    test_period_day_is_unaffected_default()
+    test_period_month_and_day_buckets_are_independent()
     test_ttl_exact_boundary()
     if _failures:
         print("\n%d FAILURE(S): %s" % (len(_failures), ", ".join(_failures)))
