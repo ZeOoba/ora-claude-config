@@ -105,11 +105,22 @@ REVIEW_BY_RE = re.compile(r"^review_by:\s*(20\d{2}-\d{2}-\d{2})\s*$", re.M)
 
 # --- open-items tracker (check 4) ---
 TRACKER = os.path.join(MEM, "open-items-tracker.md")
+# Companion file (split 2026-09-06, Automation Audit R22-4): CLOSED items' rows
+# and detail sections live here now. Optional, like TRACKER's own presence check
+# below -- a memory dir that hasn't split yet, or a test fixture that only
+# writes one side, must not fail to read.
+TRACKER_HISTORY = os.path.join(MEM, "open-items-tracker-history.md")
 FLEET_STATUS_PROBE = os.path.join(HOME, ".claude", "maintenance", "fleet-status.py")
 OI_ID_RE = re.compile(r"^###\s+(OI-\d{3,})\s*$", re.M)
 OI_STATUS_RE = re.compile(r"\*\*Status:\*\*\s*(\S+)")
 OI_AUTOCHECK_RE = re.compile(r"\*\*Auto-check:\*\*\s*(.+)")
-OI_REF_RE = re.compile(r"open-items-tracker\.md#(OI-\d{3,})")
+# Matches a reference into EITHER file, capturing which filename was actually
+# named -- check 4a below validates the id resolves IN THAT FILE, not merely
+# somewhere across the pair, because a markdown reader following the link
+# literally opens the named file and jumps to `#OI-NNN` there: a reference
+# using the pre-split filename for an item that has since closed (and moved to
+# the history file) is a genuinely dead link, not a stylistic nit.
+OI_REF_RE = re.compile(r"(open-items-tracker(?:-history)?)\.md#(OI-\d{3,})")
 KV_RE = re.compile(r'(\w+)=("[^"]*"|\S+)')
 
 
@@ -563,34 +574,63 @@ def main():
                 "archive it; do not let it rot" % (name, due, (today - due).days))
 
     # --- 4. open-items tracker: dead pointers [fail] + auto-check drift [warn] ---
-    # Optional companion file -- absent tracker just means no items exist to check yet.
+    # Optional companion files -- absent means no items exist to check yet on that
+    # side. Parsed SEPARATELY (not concatenated) so `where[oid]` can record which
+    # actual file each id's `### OI-NNN` header lives in -- check 4a needs that to
+    # validate a reference against the FILE IT NAMES, not merely against the
+    # combined pair (see OI_REF_RE's docstring above for why that distinction is
+    # the whole point of tracking it).
     tracker_items = {}
     if os.path.isfile(TRACKER):
         try:
             tracker_items = parse_open_items(open(TRACKER, encoding="utf-8").read())
         except Exception as e:
             warnings.append("open-items-tracker.md unreadable: %s" % e)
+    history_items = {}
+    if os.path.isfile(TRACKER_HISTORY):
+        try:
+            history_items = parse_open_items(open(TRACKER_HISTORY, encoding="utf-8").read())
+        except Exception as e:
+            warnings.append("open-items-tracker-history.md unreadable: %s" % e)
+    where = {oid: "open-items-tracker.md" for oid in tracker_items}
+    for oid in history_items:
+        # An id in BOTH files' header sets is a duplicate-id anomaly this probe
+        # does not itself adjudicate (check-open-items-duplicate-ids.py's combined
+        # DUPLICATE_SECTION check does) -- first-seen (tracker) wins here so 4a
+        # still has a single answer to validate against, rather than raising.
+        where.setdefault(oid, "open-items-tracker-history.md")
+    combined_items = dict(history_items)
+    combined_items.update(tracker_items)  # tracker wins on any status conflict too
 
-    # 4a. dead pointers -- any #OI-NNN reference elsewhere that doesn't resolve here.
+    # 4a. dead pointers -- any #OI-NNN reference elsewhere that doesn't resolve, OR
+    # that names the WRONG file for where the id's anchor actually lives (a link a
+    # markdown reader would literally fail to jump to).
     for path in glob.glob(os.path.join(MEM, "*.md")):
         name = os.path.basename(path)
-        if name == "open-items-tracker.md":
+        if name in ("open-items-tracker.md", "open-items-tracker-history.md"):
             continue
         try:
             txt = open(path, encoding="utf-8").read()
         except Exception:
             continue
-        for ref in sorted(set(OI_REF_RE.findall(txt))):
-            if ref not in tracker_items:
-                issues.append("%s references open-items-tracker.md#%s, which has no matching "
-                              "row in the tracker (dead pointer)" % (name, ref))
+        for stem, oid in sorted(set(OI_REF_RE.findall(txt))):
+            referenced_file = stem + ".md"
+            actual_file = where.get(oid)
+            if actual_file is None:
+                issues.append("%s references %s#%s, which has no matching row in "
+                              "either open-items-tracker.md or open-items-tracker-history.md "
+                              "(dead pointer)" % (name, referenced_file, oid))
+            elif actual_file != referenced_file:
+                issues.append("%s references %s#%s, but that id's anchor is actually in "
+                              "%s (dead pointer -- wrong file named, likely stale from "
+                              "before the item closed/split)" % (name, referenced_file, oid, actual_file))
 
     # 4b. auto-check drift -- OPEN items whose stated condition now mechanically matches.
     # Only text that looks like a real kind=... attempt is evaluated -- the convention's
     # documented "no auto-check configured" placeholder is the literal word "none" (with
     # or without trailing prose), which is not itself a malformed kind= attempt and must
     # not be reported as one (found live on OI-009/016/021/022/024/025, 2026-07-27).
-    open_autochecks = [(oid, it) for oid, it in tracker_items.items()
+    open_autochecks = [(oid, it) for oid, it in combined_items.items()
                        if it["status"] == "OPEN" and it["autocheck"] and "kind=" in it["autocheck"]]
     if open_autochecks:
         fleet_json, ferr = load_fleet_json()
