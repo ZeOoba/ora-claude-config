@@ -241,3 +241,11 @@ maintenance/_state/wake-cause.json
 maintenance/_state/dispatch-skip.json
 maintenance/_state/pause-resume-guard-state.json
 maintenance/_state/task-progress/
+# (2026-08-26) log-liveness.json — _shared/log_liveness.py's per-run snapshot,
+# written by ora-health-guard A.0d and re-read only within the same run. Same
+# class as dispatch-skip.json / phantom-dispatch.json above: pure local-probe run
+# state, regenerated every fire, no external or cross-session reader (grepped
+# against fleet-deadman.yml, oxford-command-center and ora-pm, not assumed). The
+# cross-fleet consumer reads the Connector Pre-Flight beacon's log_liveness line,
+# not this file.
+maintenance/_state/log-liveness.json
