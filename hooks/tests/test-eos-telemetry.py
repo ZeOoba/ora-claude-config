@@ -499,6 +499,98 @@ def test_no_override_file():
     print("PASS test_no_override_file")
 
 
+# ---------------------------------------------------------------------------
+# rotate_if_large() -- Automation Audit R22-5.
+#
+# lane-telemetry.jsonl had reached 2,164,334B with no rotation logic anywhere in
+# this hook, and is_duplicate_of_last() reads it END TO END on every SessionEnd.
+# These call the function directly (importlib rather than run_hook) because the
+# contract under test is the rotation boundary itself, not hook wiring.
+# ---------------------------------------------------------------------------
+
+def _load_hook_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('eos_telemetry_mod', HOOK)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_rotation_under_cap_leaves_file_alone():
+    mod = _load_hook_module()
+    tmp = tempfile.mkdtemp(prefix='eos-rot-')
+    f = os.path.join(tmp, 'lane-telemetry.jsonl')
+    with open(f, 'w', encoding='ascii') as fh:
+        fh.write('{"session_id":"a"}\n')
+    mod.rotate_if_large(f, max_bytes=1024)
+    assert os.path.isfile(f), 'under-cap file must not be rotated'
+    assert not os.path.isdir(os.path.join(tmp, '_archive')), 'under-cap must not archive'
+    print('PASS test_rotation_under_cap_leaves_file_alone')
+
+
+def test_rotation_over_cap_archives_without_data_loss():
+    mod = _load_hook_module()
+    tmp = tempfile.mkdtemp(prefix='eos-rot-')
+    f = os.path.join(tmp, 'lane-telemetry.jsonl')
+    payload = 'x' * 5000
+    with open(f, 'w', encoding='ascii') as fh:
+        fh.write(payload)
+    mod.rotate_if_large(f, max_bytes=1024)
+    assert not os.path.isfile(f), 'over-cap file must leave the live path'
+    names = sorted(os.listdir(os.path.join(tmp, '_archive')))
+    assert len(names) == 1, 'expected exactly 1 archived file, got %r' % names
+    assert names[0].endswith('lane-telemetry.jsonl'), names[0]
+    with open(os.path.join(tmp, '_archive', names[0]), 'r', encoding='ascii') as fh:
+        body = fh.read()
+    # ARCHIVES, never deletes or truncates (standing invariant 6)
+    assert body == payload, 'archived copy lost bytes: %d of %d' % (len(body), len(payload))
+    print('PASS test_rotation_over_cap_archives_without_data_loss')
+
+
+def test_rotation_leaves_live_path_writable():
+    """A rotation that left the caller unable to append would DROP telemetry --
+    the exact failure this hook exists to prevent."""
+    mod = _load_hook_module()
+    tmp = tempfile.mkdtemp(prefix='eos-rot-')
+    f = os.path.join(tmp, 'lane-telemetry.jsonl')
+    with open(f, 'w', encoding='ascii') as fh:
+        fh.write('y' * 5000)
+    mod.rotate_if_large(f, max_bytes=1024)
+    with open(f, 'a', encoding='ascii') as fh:
+        fh.write('{"session_id":"new"}\n')
+    with open(f, 'r', encoding='ascii') as fh:
+        assert fh.read() == '{"session_id":"new"}\n', 'post-rotation file should hold only the new record'
+    print('PASS test_rotation_leaves_live_path_writable')
+
+
+def test_rotation_fails_open():
+    """Any rotation error must leave the file alone and never raise: telemetry
+    must not block a session."""
+    mod = _load_hook_module()
+    tmp = tempfile.mkdtemp(prefix='eos-rot-')
+    mod.rotate_if_large(os.path.join(tmp, 'absent.jsonl'), max_bytes=1)
+    a_dir = os.path.join(tmp, 'iam-a-dir')
+    os.makedirs(a_dir)
+    mod.rotate_if_large(a_dir, max_bytes=1)
+    print('PASS test_rotation_fails_open')
+
+
+def test_rotation_actually_fires_end_to_end():
+    """Regression guard for a real bug caught in review: the first draft called
+    datetime.datetime.utcnow(), but this module imports 'from datetime import
+    datetime', so it raised AttributeError into the fail-open except and rotation
+    silently never fired. Prove rotation MOVES the file, not merely that it did
+    not raise -- a swallowed exception looks identical to success."""
+    mod = _load_hook_module()
+    tmp = tempfile.mkdtemp(prefix='eos-rot-')
+    f = os.path.join(tmp, 'lane-telemetry.jsonl')
+    with open(f, 'w', encoding='ascii') as fh:
+        fh.write('z' * 3000)
+    mod.rotate_if_large(f, max_bytes=1024)
+    arch = os.path.join(tmp, '_archive')
+    assert os.path.isdir(arch) and os.listdir(arch), 'rotation did not fire'
+    print('PASS test_rotation_actually_fires_end_to_end')
+
 if __name__ == "__main__":
     test_happy_path()
     test_record_carries_schema_and_detectors()
@@ -516,4 +608,9 @@ if __name__ == "__main__":
     test_override_used_surfaces_reason()
     test_override_used_no_reason_backward_compat()
     test_no_override_file()
+    test_rotation_under_cap_leaves_file_alone()
+    test_rotation_over_cap_archives_without_data_loss()
+    test_rotation_leaves_live_path_writable()
+    test_rotation_fails_open()
+    test_rotation_actually_fires_end_to_end()
     print("ALL TELEMETRY TESTS PASS")
