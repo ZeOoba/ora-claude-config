@@ -42,8 +42,11 @@ REAL_CLAUDE_MD = os.path.join(CLAUDE_DIR, "CLAUDE.md")
 # ran the hook-tests gate. Keep this set in sync with write-doctrine-status.py's
 # build_snapshot(); an == comparison is deliberate (it catches silent schema drift in
 # both directions) and is exactly why it must be updated when the schema grows.
+# "history" added 2026-09-06: bounded newest-first list of compact per-check records
+# (write-doctrine-status.py HISTORY_MAX) so ora-consolidate-memory-monthly can count
+# pass/fail over a window; the writer's own tests cover its shape and cap.
 EXPECTED_KEYS = {"last_check", "source", "doctrine_probe", "governor_probe",
-                 "memory_probe", "guard_orphans"}
+                 "memory_probe", "guard_orphans", "history"}
 
 
 def _load(path, modname):
@@ -90,7 +93,9 @@ def test_write_status_valid_json_and_keys():
 
 
 def test_write_status_overwrites_not_appends():
-    """A second write_status to the same path REPLACES the file (snapshot, not append)."""
+    """A second write_status to the same path REPLACES the file (snapshot, not append).
+    Since 2026-09-06 the prior check ALSO survives -- but only as a compact record inside
+    the bounded `history` array, never at the top level (which must still be overwritten)."""
     fd, path = tempfile.mkstemp(suffix="_doctrine-status.json")
     os.close(fd)
     try:
@@ -103,8 +108,14 @@ def test_write_status_overwrites_not_appends():
         data = json.loads(raw)  # must be a single dict, not concatenated JSON
         assert data["source"] == "scheduled", "second write did not overwrite source"
         assert data["doctrine_probe"]["exit_code"] == 0, "stale doctrine_rc survived overwrite"
-        assert "old-thing" not in raw, "old summary text survived the overwrite (appended?)"
+        top_level = {k: v for k, v in data.items() if k != "history"}
+        assert "old-thing" not in json.dumps(top_level), \
+            "old summary text survived at the TOP LEVEL (overwrite broken)"
         assert data["governor_probe"] == {"exit_code": 0, "summary": "clean"}
+        # ...and the prior check is retained exactly once, in history, newest first.
+        assert [h["source"] for h in data["history"]] == ["scheduled", "pre-push"], data["history"]
+        assert data["history"][1]["doctrine_summary"] == "[MISSING] /old-thing"
+        assert raw.count("old-thing") == 1, "prior summary should appear once (in history only)"
         print("  PASS test_write_status_overwrites_not_appends")
     finally:
         if os.path.exists(path):

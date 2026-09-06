@@ -70,6 +70,114 @@ def test_write_status_still_works_with_no_memory_args():
         assert data["doctrine_probe"] == {"exit_code": 1, "summary": "[MISSING] bare date"}
 
 
+# ---- history array (added 2026-09-06) ----------------------------------------------
+
+def _write_n(mod, path, n, rc_fn=lambda i: 0, source="pre-push"):
+    for i in range(n):
+        assert mod.write_status(source, rc_fn(i), "run %d" % i, path=path) is True
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def test_history_present_and_newest_first():
+    mod = _load()
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "doctrine-status.json")
+        data = _write_n(mod, path, 3, rc_fn=lambda i: i)  # rcs 0,1,2
+        assert "history" in data
+        assert [h["doctrine_rc"] for h in data["history"]] == [2, 1, 0], data["history"]
+        assert data["history"][0]["last_check"] == data["last_check"]
+        # governor/memory not run by this caller -> None in the record too
+        assert data["history"][0]["governor_rc"] is None
+        assert data["history"][0]["memory_rc"] is None
+        assert data["history"][0]["guard_orphan_count"] == 0
+
+
+def test_history_is_capped_at_history_max():
+    mod = _load()
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "doctrine-status.json")
+        data = _write_n(mod, path, mod.HISTORY_MAX + 7)
+        assert len(data["history"]) == mod.HISTORY_MAX
+        # oldest records fall off the tail, newest stays on top
+        assert data["history"][0]["doctrine_summary"] == "run %d" % (mod.HISTORY_MAX + 6)
+
+
+def test_legacy_file_without_history_is_seeded_from_its_snapshot():
+    """Upgrade path: the pre-2026-09-06 file (top-level only) must not lose its last result."""
+    mod = _load()
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "doctrine-status.json")
+        legacy = mod.build_snapshot("pre-push", 1, "[MISSING] bare date")  # no history key
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(legacy, f)
+        assert mod.write_status("scheduled", 0, "clean", governor_rc=0, governor_summary="ok", path=path)
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        assert len(data["history"]) == 2
+        assert data["history"][1] == {
+            "last_check": legacy["last_check"], "source": "pre-push",
+            "doctrine_rc": 1, "governor_rc": None, "memory_rc": None,
+            "doctrine_summary": "[MISSING] bare date", "governor_summary": None,
+            "memory_summary": None, "guard_orphan_count": 0,
+        }
+
+
+def test_corrupt_prior_file_does_not_break_the_write():
+    mod = _load()
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "doctrine-status.json")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("{not json")
+        assert mod.write_status("pre-push", 0, "clean", path=path) is True
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        assert len(data["history"]) == 1
+
+
+def test_history_record_truncates_long_summary():
+    mod = _load()
+    snap = mod.build_snapshot("pre-push", 1, "x" * 500)
+    rec = mod._history_record(snap)
+    assert len(rec["doctrine_summary"]) == mod._SUMMARY_MAX_CHARS
+    assert rec["doctrine_summary"].endswith("...")
+    # the top-level snapshot keeps the full line
+    assert len(snap["doctrine_probe"]["summary"]) == 500
+
+
+def test_summarize_history_counts_window_pass_fail():
+    from datetime import datetime, timedelta
+    mod = _load()
+    now = datetime(2026, 9, 6, 12, 0, 0)
+    def rec(days_ago, d=None, g=None, m=None, src="pre-push"):
+        snap = mod.build_snapshot(src, d, "d", governor_rc=g, governor_summary="g",
+                                  memory_rc=m, memory_summary="m",
+                                  now=now - timedelta(days=days_ago))
+        return mod._history_record(snap)
+    data = {"history": [
+        rec(1, d=0),                 # in window, doctrine pass
+        rec(3, d=1),                 # in window, doctrine fail
+        rec(5, d=0, g=0, m=2, src="scheduled"),  # in window, gov pass, mem fail
+        rec(45, d=1, g=1),           # OUT of 30-day window, must not count
+        {"last_check": "garbage", "doctrine_rc": 1},  # unparseable -> skipped
+    ]}
+    s = mod.summarize_history(data, since_days=30, now=now)
+    assert s["checks_in_window"] == 3, s
+    assert s["unparsed"] == 1
+    assert s["probes"]["doctrine"] == {"ran": 3, "pass": 2, "fail": 1}, s["probes"]
+    assert s["probes"]["governor"] == {"ran": 1, "pass": 1, "fail": 0}, s["probes"]
+    assert s["probes"]["memory"] == {"ran": 1, "pass": 0, "fail": 1}, s["probes"]
+    assert sorted(f["probe"] for f in s["fails"]) == ["doctrine", "memory"]
+
+
+def test_summarize_history_falls_back_to_legacy_top_level():
+    mod = _load()
+    legacy = mod.build_snapshot("pre-push", 1, "[MISSING] bare date")  # no history key
+    s = mod.summarize_history(legacy, since_days=30)
+    assert s["records_total"] == 1
+    assert s["probes"]["doctrine"] == {"ran": 1, "pass": 0, "fail": 1}
+
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
     failed = 0
