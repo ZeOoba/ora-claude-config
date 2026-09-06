@@ -5,6 +5,34 @@ description: Monthly cross-reference of HubSpot Lease Renewal deals vs. the Noti
 
 Monthly reconciliation between HubSpot "Lease Renewals" pipeline deals and the Notion Tenant Database, plus a source-of-record date check against the workbook-derived snapshot. This is a detection/reporting task only — it never writes to HubSpot or Notion.
 
+## STEP 0 — DOUBLE-FIRE ENTRY GUARD (added 2026-09-06)
+
+This task was unwired against the fleet's double-fire guard even though it shares the same catch-up-burst exposure `ora-am-brief`/`ora-deal-aging-sla` were fixed for on 2026-08-09: the whole fleet fires only while the Desktop app is open, so an offline stretch spanning the 1st of the month re-arms this task at next open exactly like a daily task re-arms overnight. A DAY-keyed guard would not help here — the same run re-firing hours later on the same calendar day is not the failure mode for a monthly task; a re-fire on the 3rd because the 1st was missed, or an overlapping fire from a manual catch-up run, is. `--period month` (added to `block-sentinel.py` 2026-09-06) keys the claim to the calendar month instead of the ET date for exactly this reason.
+
+Run this as the first action of the run:
+
+```
+python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-tenant-hubspot-reconciliation --block main --run-id <run_id> --period month --ttl-min 45
+```
+
+- **Exit 10** → this month's run already completed. Log `BLOCK_MAIN_ALREADY_COMPLETE_TODAY`, **exit without pulling HubSpot/Notion or emailing**, and report it as a NORMAL skip (not a miss) citing the earlier run's tracker entries.
+- **Exit 11** → another fire is live this month. Stand down identically.
+- **Exit 0** → proceed to Step 1.
+
+Once Step 6's email send lands, run:
+
+```
+python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-tenant-hubspot-reconciliation --block main --run-id <run_id> --period month --email-sent-at <ISO8601>
+```
+
+If the run aborts instead (Step 7's data-gap case still completes the report — only a genuine crash/abort skips straight to `fail`):
+
+```
+python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py fail --task ora-tenant-hubspot-reconciliation --block main --run-id <run_id> --period month --error "<what broke>"
+```
+
+**Only the run that holds the claim may call `complete` or `fail`.** A run that stood down (exit 10 or 11) calls NEITHER. **Always pass `--period month`** on every call for this task — omitting it addresses the day-keyed bucket instead and defeats the guard silently (no error; the claim just never persists across days). Full contract: `_shared/README-DOUBLE-FIRE-GUARD.md`.
+
 ## Steps
 
 1. Read the Tenant DB cache `ora-pm-ledger` already maintains: `~\.claude\scheduled-tasks\ora-pm-ledger\state\tenant-db-latest.json` (JSON, ~296 rows, refreshed nightly by `ora-pm-ledger` — do NOT re-pull Notion yourself). Read it with Python; force UTF-8 stdout (`PYTHONIOENCODING=utf-8`) to avoid a cp1252 crash on tenant titles containing "⛔". If the file's `as_of` date is more than 3 days stale, note that as a WATCH item (ora-pm-ledger may be down) but proceed with whatever is there.
@@ -20,7 +48,13 @@ Monthly reconciliation between HubSpot "Lease Renewals" pipeline deals and the N
 5. **Never fabricate a renewal/vacate/termination outcome.** If Notion has no signal for a given stale deal, say so explicitly in the report as a question for Gabriel — do not infer one from silence or pattern-match to other tenants.
 6. Output: write directly into `open-items-tracker.md` (the canonical punch-list) rather than a standalone Notion child page (2026-07-25 change — a prior run's Notion-only output was nearly re-done by hand because nothing pointed to it from the tracker). For each ELEVATED, DATE-MISMATCH, IDLE, and WATCH finding: read the tracker's current highest `OI-NNN`, assign the next sequential ID, append a row to its Open table (`Opened` = today's date, `Source` = this task's run, one-line `Description`), and add a full `### OI-NNN` entry below with `Status: OPEN` and the full evidence — recommended correction + quoted Notion evidence (ELEVATED), tenant/HubSpot closedate/portfolio.json leaseEnd/property-unit (DATE-MISMATCH), the idle-deal disposition question (IDLE), or the open question (WATCH) — following the tracker's existing per-item convention exactly. List ELEVATED items first, then DATE-MISMATCH, then IDLE, then WATCH. Still email a short summary via Outlook COM (`C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1` — the sole send path) to `ggoldberg@oxfordra.net` ONLY, no cc (this is not the Daily Brief's sanctioned exception) — link each item to its `open-items-tracker.md#OI-NNN` anchor rather than restating the finding text in the email body. On send failure: retry once, then flag loudly in the tracker entry itself rather than halting the task.
 7. If either the cache file, the `portfolio.json` snapshot, or the HubSpot pull is unreachable, state that plainly as a data gap in the report rather than presenting partial results as complete — never fabricate a clean reconciliation.
-8. **Post-reconciliation Property Register cross-check (added 2026-07-21).** Before finalizing the report — and before recommending or accepting any Property/Market change for a tenant row (whether via this task's own ELEVATED recommendations or an ad hoc correction pass using this task's evidence bar) — cross-check each touched tenant's Property Name/Market against the live Notion "🏢 Property Register" (`collection://24d6a531-f4b7-4c38-87fb-3b1be4a4f1f3`, database page `19a61fc9-21ed-42d7-a0db-aa730d9a9683`; 14 rows, `Property Name`/`Market` columns — Market is a fixed select: Maryland / Columbus OH / Indianapolis IN / Kansas City MO / Other). Flag as a new **CHURN** category any tenant whose Property/Market assignment doesn't exactly match a Property Register row, or that shifted between two properties mid-session without a documented reason (e.g., a tenant intermittently attributed to a Columbus OH property vs. a Salisbury MD property). Do not silently let a self-corrected mismatch pass unflagged — log it even if the final state looks right, since a churn that self-corrects once can recur and go the wrong way next time. This check is mechanical (exact-match against the Register), not a judgment call — don't skip it because the final numbers look plausible.
+8. **Post-reconciliation Property Register cross-check (added 2026-07-21; population + match rules rewritten 2026-09-06 per [OI-221](open-items-tracker.md#OI-221)'s follow-on).** Before finalizing the report — and before recommending or accepting any Property/Market change for a tenant row (whether via this task's own ELEVATED recommendations or an ad hoc correction pass using this task's evidence bar) — cross-check each touched tenant's Property Name/Market against the live Notion "🏢 Property Register" (`collection://24d6a531-f4b7-4c38-87fb-3b1be4a4f1f3`, database page `19a61fc9-21ed-42d7-a0db-aa730d9a9683`; 14 rows, `Property Name`/`Market` columns — Market is a fixed select: Maryland / Columbus OH / Indianapolis IN / Kansas City MO / Other).
+
+   **Scope the whole check to `Row Retired == false` rows only.** OI-221's 2026-09-05 run found this check's population was never the problem it looked like: 13 of 14 apparent "churns" were a live row and its own `⛔ ARCHIVED 2026-07-12` retired twin, on a closed ruling (Gabriel, 2026-07-12: leave the ~18-25 unconfirmed singletons, do not re-triage). **Do NOT try to filter those out with a signature exclusion** (e.g. "retired + `⛔ ARCHIVED 2026-07-12` title + expiration equal to the live row's") — that was this step's original follow-on plan and it leaks: 3 of the 13 (Airmaster Heating & Cooling, Eastern Shore Karate & Fitness, Maryland Hospital Association) carry no expiration or a *different* expiration on the retired twin, so a same-expiration signature misses them and still reports them as churn. Excluding retired rows structurally at the population level catches all of them without depending on a fragile per-row signature, and does not require re-deriving which rows are the closed OI-009 phantom batch on every run.
+
+   **Match Property Address with a normalised comparison, not exact string equality.** The Tenant DB separates address from city with an em-dash (`29000 Information Ln — Easton MD`); the Register uses a comma and the unabbreviated street type (`29000 Information Lane, Easton MD`). A literal exact-match flags all 138 live rows (0 of 138 match), which is unsatisfiable and not a real finding. Normalise both sides before comparing: unify the address/city separator (em-dash and comma both to one form), expand common street-type abbreviations (Ln→Lane, Rd→Road, Ave→Avenue, Dr→Drive, etc.), and treat the known Sepich-portfolio umbrella labels (`2018 Zettler Rd`, `2806 Banwick Rd`, `2822 Banwick Rd`, `392 Morrison Rd`, `3034 Westerville`, `4601`/`4595 E. 5th Ave`) as matching the `Sepich Portfolio, Columbus OH (8 props)` Register row rather than flagging them as unmatched.
+
+   Flag as a new **CHURN** category any live (non-retired), normalised-address tenant whose Property/Market assignment still doesn't resolve to a Property Register row, or that shifted between two properties mid-session without a documented reason. Do not silently let a self-corrected mismatch pass unflagged — log it even if the final state looks right. This check is mechanical, not a judgment call — don't skip it because the final numbers look plausible, and don't re-litigate OI-009's closed ruling by re-filing the retired-twin population this scoping now excludes by construction.
 
 ## Precedent (2026-07-21)
 

@@ -7,6 +7,34 @@ Run the ORA Monthly Portfolio Briefing — a self-contained, AI-narrated portfol
 
 (Restored 2026-07-07 after the CC/MCP registry was destroyed by a 2026-07-05 app reinstall — recovered from the 2026-06-22 fleet snapshot.)
 
+## STEP 0 — DOUBLE-FIRE ENTRY GUARD (added 2026-09-06)
+
+This task shares the same catch-up-burst exposure `ora-am-brief`/`ora-deal-aging-sla` were fixed for on 2026-08-09 (the whole fleet fires only while the Desktop app is open, so an offline stretch spanning the 1st re-arms this task at next open) — nothing previously stood a second fire down. `--period month` keys the claim to the calendar month rather than the ET date, since a day-keyed guard would not catch a re-fire days later in the same month.
+
+Run this as the first action of the run:
+
+```
+python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-monthly-portfolio-briefing --block main --run-id <run_id> --period month --ttl-min 45
+```
+
+- **Exit 10** → this month's briefing already completed. Exit without pulling the workbook/Notion or emailing; report a NORMAL skip citing the earlier run's Notion page.
+- **Exit 11** → another fire is live this month. Stand down identically.
+- **Exit 0** → proceed with the briefing.
+
+Once the email + Notion archive land, run:
+
+```
+python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-monthly-portfolio-briefing --block main --run-id <run_id> --period month --notion-page-id <archived page id> --email-sent-at <ISO8601>
+```
+
+If the run aborts instead:
+
+```
+python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py fail --task ora-monthly-portfolio-briefing --block main --run-id <run_id> --period month --error "<what broke>"
+```
+
+**Only the run that holds the claim may call `complete` or `fail`.** **Always pass `--period month`** on every call — omitting it addresses the day-keyed bucket instead and silently defeats the guard. Full contract: `_shared/README-DOUBLE-FIRE-GUARD.md`.
+
 TOOLING / CONVENTIONS
 - Python (if needed): use the FULL path C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe (bare `python` is NOT on PATH in scheduled sessions).
 - Email send: C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1 — this is the SOLE automated send path (Outlook COM / M365 only; no Gmail; the Composio and Rube connectors are removed — never reference them). On a non-zero exit: retry ONCE, then flag loudly in the Notion completion row — do NOT halt.
