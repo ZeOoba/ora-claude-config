@@ -370,6 +370,34 @@ def _local_utc_offset():
     return datetime.datetime.now().astimezone().utcoffset() or datetime.timedelta(0)
 
 
+def _fmt_offset(td):
+    mins = int(abs(td).total_seconds() // 60)
+    return "%s%02d:%02d" % ("+" if td >= datetime.timedelta(0) else "-", mins // 60, mins % 60)
+
+
+def host_clock_status(now_local=None):
+    """Host clock vs Eastern AT THIS INSTANT (added 2026-09-03; DST-aware 2026-09-06).
+
+    Cron is evaluated in LOCAL time, so a host whose clock is not on Eastern fires every
+    slot shifted in ET terms. The comparison is against America/New_York's offset at the
+    same instant (zoneinfo), so -05:00 in July or -04:00 in January is correctly SHIFTED --
+    a flat {-04:00, -05:00} allow-set would read both as Eastern. Without tzdata the check
+    degrades to that allow-set and says so. Flag only -- never retime
+    (memory: reference_machine_clock_utc_plus_2_fleet_shift_2026-09-02)."""
+    now_local = now_local or datetime.datetime.now().astimezone()
+    host_off = _fmt_offset(now_local.utcoffset() or datetime.timedelta(0))
+    try:
+        from zoneinfo import ZoneInfo
+        eastern = _fmt_offset(now_local.astimezone(ZoneInfo("America/New_York")).utcoffset())
+        shifted = host_off != eastern
+    except Exception:
+        eastern = "-05:00/-04:00 (tzdata unavailable -- season not resolved)"
+        shifted = host_off not in ("-04:00", "-05:00")
+    return {"host_clock": "%s (UTC%s)" % (now_local.tzname() or "?", host_off),
+            "host_clock_offset": host_off, "eastern_offset_now": eastern,
+            "host_clock_shifted": shifted}
+
+
 def parse_last_run_utc(s):
     """Parse a lastRunAt ISO8601 string (with or without trailing 'Z') into a
     naive UTC datetime, or None if missing/unparseable."""
@@ -739,8 +767,16 @@ def main():
         verdict_flags.append("%d task(s) registered on BOTH fleets" % len(cross_fleet_dups))
     verdict = "OK" if not verdict_flags else "ATTENTION -- " + "; ".join(verdict_flags)
 
+    # Host clock (added 2026-09-03): the 2026-09-02 shift to UTC+2 went unnoticed by every
+    # scheduled pass because nothing printed it. See host_clock_status().
+    _hc = host_clock_status()
+    host_clock, host_clock_shifted, eastern_offset_now = _hc["host_clock"], _hc["host_clock_shifted"], _hc["eastern_offset_now"]
+
     if args.json:
         print(json.dumps({
+            "host_clock": host_clock,
+            "eastern_offset_now": eastern_offset_now,
+            "host_clock_shifted_from_eastern": host_clock_shifted,
             "registries": {lbl: p for lbl, p in regs},
             "per_fleet_enabled": {lbl: sum(1 for t in enabled if t.get("_fleet") == lbl)
                                   for lbl, _ in regs},
@@ -774,6 +810,9 @@ def main():
         sys.exit(0)
 
     print("ORA FLEET STATUS  (DUAL-FLEET: cc = claude-code-sessions/MCP · lams = local-agent-mode-sessions/Cowork)")
+    print("host_clock: %s; Eastern now %s%s" % (host_clock, eastern_offset_now,
+          "  !! NOT Eastern -- every cron slot below fires shifted in ET terms; flag, never retime"
+          if host_clock_shifted else ""))
     for lbl, p in regs:
         print("registry[%s]: %s" % (lbl, p))
     print("=" * 84)
