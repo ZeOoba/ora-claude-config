@@ -67,10 +67,20 @@ DEFAULT_TRACKER_PATH = os.path.join(
     "C--Users-Owner-OneDrive---Oxford-Capital-Partners", "memory",
     "open-items-tracker.md",
 )
+# Companion file (split 2026-09-06, Automation Audit R22-4): CLOSED items' table
+# rows and `### OI-NNN` detail sections live here now, not in the live tracker.
+# Same directory, sibling name -- derived, never hand-typed twice.
+DEFAULT_HISTORY_PATH = os.path.join(
+    os.path.dirname(DEFAULT_TRACKER_PATH), "open-items-tracker-history.md")
 
 # Test seam only (mirrors the other probes' *_OVERRIDE pattern): when set, read
-# THIS path instead of the canonical tracker. None -> canonical.
+# THIS path instead of the canonical tracker/history file. None -> canonical.
+# HISTORY_PATH_OVERRIDE pointing at a path that does not exist is NOT an error --
+# the companion file is optional, exactly like the tracker itself is optional to
+# memory-integrity-probe.py's check 4 (a tracker/history pair that hasn't split
+# yet, or a test fixture that only cares about one side, must not fail to read).
 TRACKER_PATH_OVERRIDE = None
+HISTORY_PATH_OVERRIDE = None
 
 ROW_ID_RE = re.compile(r"^\|\s*\[OI-(\d+)\]\(#OI-\d+\)\s*\|", re.MULTILINE)
 SECTION_ID_RE = re.compile(r"^### OI-(\d+)\s*$", re.MULTILINE)
@@ -78,6 +88,31 @@ SECTION_ID_RE = re.compile(r"^### OI-(\d+)\s*$", re.MULTILINE)
 
 def tracker_path():
     return TRACKER_PATH_OVERRIDE or DEFAULT_TRACKER_PATH
+
+
+def history_path():
+    # Derived relative to tracker_path()'s OWN directory, not a fixed default --
+    # when TRACKER_PATH_OVERRIDE points a test at a fixture in a temp dir, the
+    # companion history path must resolve inside that SAME temp dir (correctly
+    # finding nothing there) rather than falling through to the real production
+    # history file, which would bleed unrelated live content into every fixture
+    # that only ever meant to exercise the tracker in isolation.
+    if HISTORY_PATH_OVERRIDE:
+        return HISTORY_PATH_OVERRIDE
+    return os.path.join(os.path.dirname(tracker_path()),
+                         os.path.basename(DEFAULT_HISTORY_PATH))
+
+
+def read_optional(path):
+    """File text, or "" if it does not exist. Any OTHER OSError (locked, permission)
+    still raises -- an optional file silently missing is fine; one that exists but
+    cannot be read is the same "treat as a check failure" case main() already has
+    for the tracker itself, and swallowing it here would hide that."""
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return fh.read()
+    except FileNotFoundError:
+        return ""
 
 
 def _duplicates(ids):
@@ -160,7 +195,8 @@ def collision_finding(result):
     return bool(result["duplicate_rows"] or result["duplicate_sections"])
 
 
-# A CROSS-FILE link into the tracker: `](open-items-tracker.md#OI-NNN)`.
+# A CROSS-FILE link into the tracker OR its history companion:
+# `](open-items-tracker.md#OI-NNN)` / `](open-items-tracker-history.md#OI-NNN)`.
 #
 # NOT the bare fragment form `](#OI-NNN)`. That distinction is the whole feature.
 # The first cut matched only the bare form, which in the live memory dir appears
@@ -174,19 +210,28 @@ def collision_finding(result):
 # other file, `](#OI-42)` is a fragment link into THAT file's own anchors and has
 # nothing to do with the tracker. Counting it would escalate the tracker's OI-42
 # row over an unrelated link.
-ANCHOR_REF_RE = re.compile(r"\]\(\s*open-items-tracker\.md#OI-(\d+)\s*\)",
-                           re.IGNORECASE)
+#
+# BOTH filenames matched since the 2026-09-06 split (R22-4): a CLOSED item's
+# anchor now resolves in the history file, and a reference written before the
+# split may still say `open-items-tracker.md#OI-NNN` for an id that moved -- that
+# is exactly a dead/stale pointer this same escalation should catch, not a
+# reason to stop matching the old filename.
+ANCHOR_REF_RE = re.compile(
+    r"\]\(\s*open-items-tracker(?:-history)?\.md#OI-(\d+)\s*\)", re.IGNORECASE)
 
 
-def external_anchor_refs(memory_dir=None, tracker_file=None):
-    """{"OI-NNN"} referenced as `](#OI-NNN)` from memory files OTHER than the
-    tracker itself.
+def external_anchor_refs(memory_dir=None, tracker_file=None, history_file=None):
+    """{"OI-NNN"} referenced as a cross-file link from memory files OTHER than
+    the tracker or its history companion.
 
     WHY THE EXCLUSION IS THE WHOLE POINT: every tracker row links to its own
-    anchor (`| [OI-166](#OI-166) |`), so counting the tracker would mark every
-    sectionless row as "linked" and escalate all of them -- which is just the
-    old INFO line with a louder label. Only a reference from ANOTHER file is
-    evidence that someone, somewhere, expects that anchor to resolve.
+    anchor (`| [OI-166](#OI-166) |`), so counting the tracker (or history file)
+    would mark every sectionless row as "linked" and escalate all of them --
+    which is just the old INFO line with a louder label. Only a reference from
+    ANOTHER file is evidence that someone, somewhere, expects that anchor to
+    resolve. A reference FROM the tracker INTO the history file (or vice versa)
+    is likewise internal to this one logical, two-file document -- not evidence
+    of a third-party dependency -- so both filenames are excluded as sources.
 
     Returns an empty set on any I/O trouble: this only ever ESCALATES severity,
     so failing to read a sibling file must not invent findings."""
@@ -194,13 +239,16 @@ def external_anchor_refs(memory_dir=None, tracker_file=None):
         memory_dir = os.path.dirname(tracker_path())
     if tracker_file is None:
         tracker_file = os.path.basename(tracker_path())
+    if history_file is None:
+        history_file = os.path.basename(history_path())
+    excluded = {tracker_file, history_file}
     refs = set()
     try:
         names = os.listdir(memory_dir)
     except OSError:
         return refs
     for name in names:
-        if not name.endswith(".md") or name == tracker_file:
+        if not name.endswith(".md") or name in excluded:
             continue
         try:
             with open(os.path.join(memory_dir, name), encoding="utf-8",
@@ -306,7 +354,19 @@ def main():
             "a check failure, not a clean result.\n" % (path, e))
         return 1
 
-    result = check(text)
+    # Companion history file (split 2026-09-06, R22-4): CLOSED items' rows and
+    # sections live there now. It is OPTIONAL -- a tracker that hasn't split yet
+    # (or a fixture that only ever writes the one file) reads as "" here, same
+    # posture as memory-integrity-probe.py's own optional-tracker handling.
+    # Concatenated with the tracker's text BEFORE check(): the two files are one
+    # logical document split for size, so a duplicate/orphan spanning both
+    # (e.g. an id wrongly present in both the live Open table and the history
+    # Closed table) must be caught exactly as if they were still one file.
+    hpath = history_path()
+    history_text = read_optional(hpath)
+    combined = text + "\n" + history_text if history_text else text
+
+    result = check(combined)
     # Split BEFORE reporting, and fold the result back into `result`, so the
     # human report, RESULT_JSON and the exit code all describe the same thing.
     # Computing it only inside format_report() left machine consumers blind to
@@ -315,7 +375,8 @@ def main():
     broken, benign = split_missing(result, refs)
     result["broken_anchors"] = broken
     result["missing_sections_benign"] = benign
-    print(format_report(result, path, refs))
+    label = path if not history_text else "%s + %s" % (path, hpath)
+    print(format_report(result, label, refs))
     print("RESULT_JSON=%s" % json.dumps(result))
     return 1 if any_finding(result) else 0
 
