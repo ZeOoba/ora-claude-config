@@ -110,6 +110,44 @@ def payload(record):
     return {k: v for k, v in record.items() if k not in VOLATILE_FIELDS}
 
 
+MAX_BYTES = 8 * 1024 * 1024  # 8MB -- see rotate_if_large()
+
+
+def rotate_if_large(out_file, max_bytes=MAX_BYTES):
+    """Archive the telemetry file once it crosses `max_bytes`, so neither disk
+    nor the dedupe scan grows without bound.
+
+    Why this is safe despite is_duplicate_of_last() scanning the WHOLE file:
+    rotation's only side effect is that a session whose previous record landed
+    before the rotation boundary will not find it, and will append one duplicate
+    record. That is exactly the outcome the dedupe docstring already declares
+    harmless -- "a duplicate is harmless (the rollup merges by session_id)" --
+    while the outcome it calls unacceptable, a silently dropped record, cannot
+    arise here. Rotation therefore trades an occasional harmless duplicate for a
+    bounded O(filesize) scan.
+
+    ARCHIVES, never deletes (standing invariant 6). Fails open in every branch:
+    telemetry must never block a session, so any error leaves the file untouched
+    and the caller proceeds exactly as before.
+
+    Added 2026-09-06 (Automation Audit R22-5): the file had reached 2,164,334B
+    with no rotation logic anywhere in this hook, and is read end-to-end on
+    every SessionEnd.
+    """
+    try:
+        if not os.path.isfile(out_file):
+            return
+        if os.path.getsize(out_file) < max_bytes:
+            return
+        arch_dir = os.path.join(os.path.dirname(out_file), "_archive")
+        os.makedirs(arch_dir, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        dest = os.path.join(arch_dir, "%s-%s" % (stamp, os.path.basename(out_file)))
+        os.replace(out_file, dest)
+    except Exception:
+        return
+
+
 def is_duplicate_of_last(out_file, session_id, record):
     """True when `record` repeats this session's most recent record verbatim.
 
@@ -255,11 +293,22 @@ def main():
         "override_reason": override_reason,
         "override_at": override_at,
     }
+    # Bound the file BEFORE the end-to-end dedupe scan below (R22-5). This is
+    # the one and only place this module moves an existing file, and it is
+    # deliberately kept above the append-only note that follows so that note
+    # continues to describe the code it actually governs. Rotation is safe
+    # against the concurrency property for two reasons: it is a single
+    # os.replace (atomic on the same volume, so no reader ever sees a partial
+    # file), and a session whose prior record was rotated away appends one
+    # duplicate -- which the dedupe docstring already calls harmless.
+    rotate_if_large(out_file)
+
     # Nothing observable changed since this session's last record -> writing
-    # it again adds a line and no information. Append-only is preserved: this
-    # only ever declines to write, it never rewrites or removes an existing
-    # record, so it keeps the concurrency property that has held 963 lines of
-    # interleaved multi-session appends at zero corruption.
+    # it again adds a line and no information. Append-only is preserved on
+    # this path: the dedupe below only ever declines to write, it never
+    # rewrites or removes an existing record, so it keeps the concurrency
+    # property that has held 963 lines of interleaved multi-session appends
+    # at zero corruption.
     if is_duplicate_of_last(out_file, session_id, record):
         return
 

@@ -43,6 +43,30 @@ param(
 . (Join-Path $PSScriptRoot 'stuck-session-watchdog-lib.ps1')
 
 $log   = Join-Path $env:USERPROFILE '.claude\maintenance\stuck-session-watchdog.log'
+
+# --- Log rotation (added 2026-09-06, Automation Audit R21-10 / R22-8) ------------
+# This log had no cap of ANY kind: `grep -icE "rotat|MaxLog|trim|Clear-Content|prune|archive"`
+# returned 0 against this file, and it was growing unbounded (~8.0KB/day for the
+# watchdog, ~5.5KB/day for the heartbeat push). Rotation ARCHIVES, never deletes,
+# per standing invariant 6, and is wrapped in try/catch so a rotation failure can
+# never take down the caller -- these scripts fail open, like every other guard here.
+function Invoke-LogRotation($path, $maxBytes = 1048576) {
+    try {
+        if (Test-Path -LiteralPath $path) {
+            if ((Get-Item -LiteralPath $path).Length -ge $maxBytes) {
+                $archDir = Join-Path (Split-Path $path -Parent) '_log_archive'
+                if (-not (Test-Path -LiteralPath $archDir)) {
+                    New-Item -ItemType Directory -Path $archDir -Force | Out-Null
+                }
+                $base = [IO.Path]::GetFileNameWithoutExtension($path)
+                $dest = Join-Path $archDir ("{0}-{1}.log" -f $base, [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss'))
+                Move-Item -LiteralPath $path -Destination $dest -Force
+            }
+        }
+    } catch { }
+}
+Invoke-LogRotation $log
+
 $alert = Join-Path ([Environment]::GetFolderPath('Desktop')) 'STUCK-SESSION-ALERT.txt'
 
 function Log($m) { "$([DateTime]::UtcNow.ToString('s'))Z  $m" | Out-File -FilePath $log -Append -Encoding utf8 }
