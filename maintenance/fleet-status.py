@@ -370,6 +370,34 @@ def _local_utc_offset():
     return datetime.datetime.now().astimezone().utcoffset() or datetime.timedelta(0)
 
 
+def _fmt_offset(td):
+    mins = int(abs(td).total_seconds() // 60)
+    return "%s%02d:%02d" % ("+" if td >= datetime.timedelta(0) else "-", mins // 60, mins % 60)
+
+
+def host_clock_status(now_local=None):
+    """Host clock vs Eastern AT THIS INSTANT (added 2026-09-03; DST-aware 2026-09-06).
+
+    Cron is evaluated in LOCAL time, so a host whose clock is not on Eastern fires every
+    slot shifted in ET terms. The comparison is against America/New_York's offset at the
+    same instant (zoneinfo), so -05:00 in July or -04:00 in January is correctly SHIFTED --
+    a flat {-04:00, -05:00} allow-set would read both as Eastern. Without tzdata the check
+    degrades to that allow-set and says so. Flag only -- never retime
+    (memory: reference_machine_clock_utc_plus_2_fleet_shift_2026-09-02)."""
+    now_local = now_local or datetime.datetime.now().astimezone()
+    host_off = _fmt_offset(now_local.utcoffset() or datetime.timedelta(0))
+    try:
+        from zoneinfo import ZoneInfo
+        eastern = _fmt_offset(now_local.astimezone(ZoneInfo("America/New_York")).utcoffset())
+        shifted = host_off != eastern
+    except Exception:
+        eastern = "-05:00/-04:00 (tzdata unavailable -- season not resolved)"
+        shifted = host_off not in ("-04:00", "-05:00")
+    return {"host_clock": "%s (UTC%s)" % (now_local.tzname() or "?", host_off),
+            "host_clock_offset": host_off, "eastern_offset_now": eastern,
+            "host_clock_shifted": shifted}
+
+
 def parse_last_run_utc(s):
     """Parse a lastRunAt ISO8601 string (with or without trailing 'Z') into a
     naive UTC datetime, or None if missing/unparseable."""
@@ -657,18 +685,46 @@ def main():
     # RECALIBRATED VERDICT INPUTS (2026-07-14) -- see cadence_buffer_days() docstring.
     # never-ran is only overdue for a RECURRING task (no fireAt -- one-time tasks are
     # handled by expired_needs_attention instead) whose age exceeds its cadence buffer.
+    #
+    # FIRST-SLOT RULE (2026-09-02, closes Automation Audit R21-2b). The cadence
+    # buffer alone measures age-since-createdAt, so a day-of-month cron gets a
+    # flat 40-day grace regardless of whether a real slot has already come and
+    # gone. That hid a money-moving miss: ora-pm-monthly-billing (10 11 1 * *,
+    # registered 2026-08-21) missed its first-ever fire on 2026-09-01 inside a
+    # host outage and read "0 overdue" -- and would have kept reading that
+    # until ~09-30 -- while find_missed_cycles() explicitly excludes never-ran
+    # tasks. A never-ran task whose FIRST post-registration slot has elapsed by
+    # more than MISSED_CYCLE_GRACE_HOURS is overdue now, whatever its cadence;
+    # the buffer remains the fallback for crons most_recent_expected_fire_utc()
+    # can't evaluate. A slot that predates createdAt never counts (a task
+    # registered on the 16th for the 15th is simply waiting for next month).
     never_ran_overdue = []
+    never_ran_overdue_reason = {}
+    now_local_for_slots = datetime.datetime.now()
+    now_utc_naive = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
     for t in never_ran:
         if fire_at(t):
             continue  # one-time -- not this check's business
         created = t.get("createdAt")
         if not isinstance(created, (int, float)):
             continue  # can't determine age -- don't flag on missing data
+        created_utc = datetime.datetime.fromtimestamp(
+            created / 1000.0, datetime.timezone.utc).replace(tzinfo=None)
+        expected_utc = most_recent_expected_fire_utc(t.get("cronExpression"), now_local_for_slots)
+        if (expected_utc is not None and expected_utc > created_utc
+                and (now_utc_naive - expected_utc)
+                > datetime.timedelta(hours=MISSED_CYCLE_GRACE_HOURS)):
+            never_ran_overdue.append(t)
+            never_ran_overdue_reason[t.get("id")] = (
+                "first slot %sZ elapsed >%dh unfired"
+                % (expected_utc.strftime("%Y-%m-%dT%H:%M"), MISSED_CYCLE_GRACE_HOURS))
+            continue
         buf = cadence_buffer_days(t.get("cronExpression"))
         if buf is None:
             continue  # can't classify cadence -- don't guess
         if (now_ms - created) / 86400000.0 > buf:
             never_ran_overdue.append(t)
+            never_ran_overdue_reason[t.get("id")] = "age exceeds %dd cadence buffer" % buf
 
     # expired one-time is only VERDICT-worthy if it never fired (missed) or is still
     # enabled past its fireAt (didn't auto-disable) -- a normal successful one-time
@@ -733,10 +789,18 @@ def main():
 
     generated_at_iso = datetime.datetime.now().isoformat(timespec="seconds")
 
+    # Host clock (added 2026-09-03): the 2026-09-02 shift to UTC+2 went unnoticed by every
+    # scheduled pass because nothing printed it. See host_clock_status().
+    _hc = host_clock_status()
+    host_clock, host_clock_shifted, eastern_offset_now = _hc["host_clock"], _hc["host_clock_shifted"], _hc["eastern_offset_now"]
+
     if args.json:
         print(json.dumps({
             "generated_at": generated_at_iso,
             "staleness_note": STALENESS_NOTE,
+            "host_clock": host_clock,
+            "eastern_offset_now": eastern_offset_now,
+            "host_clock_shifted_from_eastern": host_clock_shifted,
             "registries": {lbl: p for lbl, p in regs},
             "per_fleet_enabled": {lbl: sum(1 for t in enabled if t.get("_fleet") == lbl)
                                   for lbl, _ in regs},
@@ -749,6 +813,7 @@ def main():
             "total": len(tasks), "enabled": len(enabled), "disabled": len(disabled),
             "never_ran": [t.get("id") for t in never_ran],
             "never_ran_overdue": [t.get("id") for t in never_ran_overdue],
+            "never_ran_overdue_reason": never_ran_overdue_reason,
             "onetime": [t.get("id") for t in onetime],
             "expired_onetime": [t.get("id") for t in expired],
             "expired_needs_attention": [t.get("id") for t in expired_needs_attention],
@@ -770,6 +835,9 @@ def main():
 
     print("ORA FLEET STATUS  (DUAL-FLEET: cc = claude-code-sessions/MCP · lams = local-agent-mode-sessions/Cowork)")
     print("generated_at: %s" % generated_at_iso)
+    print("host_clock: %s; Eastern now %s%s" % (host_clock, eastern_offset_now,
+          "  !! NOT Eastern -- every cron slot below fires shifted in ET terms; flag, never retime"
+          if host_clock_shifted else ""))
     for lbl, p in regs:
         print("registry[%s]: %s" % (lbl, p))
     print("=" * 84)
@@ -807,7 +875,10 @@ def main():
              ", ".join("%s=%d" % kv for kv in per_fleet.items())))
     print("  never-ran .......... %d   %s" % (len(never_ran), ", ".join(sorted(t.get("id") for t in never_ran)) or "-"))
     print("      of which overdue  %d   %s" % (len(never_ran_overdue),
-          ", ".join(sorted(t.get("id") for t in never_ran_overdue)) or "- (not yet due, by cadence)"))
+          ", ".join("%s (%s)" % (tid, never_ran_overdue_reason.get(tid, "?"))
+                    for tid in sorted(t.get("id") for t in never_ran_overdue))
+          or "- (not yet due: no post-registration slot elapsed >%dh, none past cadence buffer)"
+          % MISSED_CYCLE_GRACE_HOURS))
     print("  one-time fireAt .... %d   %s" % (len(onetime), ", ".join(sorted(t.get("id") for t in onetime)) or "-"))
     print("  EXPIRED one-time ... %d   %s" % (len(expired), ", ".join(sorted(t.get("id") for t in expired)) or "-"))
     print("      of which missed/stuck %d   %s" % (len(expired_needs_attention),

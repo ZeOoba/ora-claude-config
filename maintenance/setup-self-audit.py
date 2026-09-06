@@ -505,63 +505,166 @@ def check_prepush_shim():
     else:
         add("prepush-shim", "OK", "shim chains all 3 gates")
 
-# ---- Check 7: WINDOWS-TASK BACKBONE (2026-07-29, Phase-5 blueprint) ----
-# The app-independent automation layer. Presence: all 6 expected. Last-result: nonzero
-# on the two dead-man legs is WARN (retry policy added 2026-07-29 absorbs transients;
-# two consecutive failures surface via the daily cadence of this audit).
-WINDOWS_TASKS = {  # name -> CRIT-if-missing?
-    "ORA Fleet Dead-Man": True,
-    "ORA Fleet Heartbeat Push": True,
-    "ORA Stuck-Session Watchdog": False,
-    "ORA Command Center - Mirror Deploy": False,
-    "ClaudeFleetMirror": False,
-    "ORA Nightly Disk Clean": False,
-    # Added 2026-08-04 (OI-076): found unregistered on this machine since
-    # ~2026-06-24, ~6 weeks dead (same migration-loss class as
-    # ClaudeFleetMirror above) -- this scan set never covered it, so this
-    # daily check couldn't have caught it. CRIT: drives ora-pm's
-    # critical-dates-alerts/delinquency-check (real financial impact --
-    # late-fee posting missed for the outage's duration).
-    "ORA PM Crons": True,
-    # Added 2026-08-04 (OI-076 follow-up review): keeps Claude Desktop
-    # running -- BOTH Claude fleets (CC/MCP, LAMS/Cowork) only fire while
-    # it's open, so this is upstream of the entire fleet. CRIT.
-    "ORA Claude Desktop Wake-and-Launch": True,
+# ---- Check 7: WINDOWS-TASK BACKBONE (2026-07-29; ROSTER-DRIVEN since 2026-09-03) ----
+# The app-independent automation layer. The expected set is no longer a hardcoded dict:
+# it is the <!--BEGIN/END-WINDOWS-TASK-ROSTER--> block in memory/tech.md section 3h,
+# shared with the automation-health-monitor skill so the two readers cannot disagree.
+# Grammar: - <TaskName> | state=active|retired | crit=yes|no | exit1-ok=yes|no [| since= | superseded-by= | note=]
+#   state, crit and exit1-ok are REQUIRED and closed-vocabulary; a typo (crit=yees), a missing
+#   field, a duplicate field or a duplicate task name is a parse error (SKIP, never a silent WARN
+#   downgrade of a CRIT task).
+#   active  -> MISSING or Disabled is a finding (CRIT when crit=yes, else WARN); bad last result WARN.
+#   retired -> Disabled/MISSING is EXPECTED (never a finding); Ready/Running is a WARN
+#              (documented-retired-but-alive). Automation Audit Rev 21 (2026-09-02) mis-read
+#              `ORA PM Crons` Disabled/0x8007042B as a 17-day-dead scheduling path because the
+#              old dict here said CRIT and knew nothing about deliberate retirement.
+#   exit1-ok=yes -> the task's own script exits 1 BY DESIGN ("alert posted"); not a WARN.
+# Any live ORA* task with no roster line is WARN (untracked). The roster is a baseline, never a
+# filter: the live query enumerates EVERY Task Scheduler folder (Get-ScheduledTask with no
+# -TaskName/-TaskPath narrows to the root folder) and keeps ORA* plus rostered names, carrying
+# TaskPath so a moved or duplicated task stays diagnosable. A query that did not complete
+# (no sentinel / non-zero exit) is SKIP = could not look; a query that completed with ZERO rows
+# is a real answer and classifies every active task as MISSING.
+WINDOWS_ROSTER = os.path.join(CLAUDE, "projects", "C--Users-Owner-OneDrive---Oxford-Capital-Partners",
+                              "memory", "tech.md")
+WINDOWS_ROSTER_BEGIN = "<!--BEGIN-WINDOWS-TASK-ROSTER-->"
+WINDOWS_ROSTER_END = "<!--END-WINDOWS-TASK-ROSTER-->"
+WINDOWS_RESULT_OK = ("0", "267009", "267011", "")   # success / SCHED_S_TASK_RUNNING / never ran
+WINDOWS_RESULT_DECODE = {
+    "2147943467": "0x8007042B stopped by a Task Scheduler stop-condition",
+    "2147946720": "0x800710E0 operator/administrator refused the request (a task condition -- AC/idle/StartWhenAvailable -- was unmet)",
+    "3221225786": "0xC000013A STATUS_CONTROL_C_EXIT (killed mid-run, e.g. shutdown)",
+    "267014": "0x41306 terminated by the user",
 }
 
+def parse_windows_roster(text):
+    """[(name, fields)] from the marker block. Raises ValueError on a malformed block/line."""
+    b = text.find(WINDOWS_ROSTER_BEGIN)
+    e = text.find(WINDOWS_ROSTER_END, b + 1) if b != -1 else -1
+    if b == -1 or e == -1:
+        raise ValueError("WINDOWS-TASK-ROSTER markers not found")
+    block = re.sub(r"<!--.*?-->", "", text[b + len(WINDOWS_ROSTER_BEGIN):e], flags=re.S)  # comments are prose, never tasks
+    entries = []
+    seen = set()
+    for raw in block.splitlines():
+        line = raw.strip()
+        if not line.startswith("- "):
+            continue
+        parts = [x.strip() for x in line[2:].split("|")]
+        name, fields = parts[0], {}
+        for part in parts[1:]:
+            if "=" not in part:
+                raise ValueError("roster line malformed (field without '='): %r" % line)
+            k, v = part.split("=", 1)
+            k = k.strip().lower()
+            if k in fields:
+                raise ValueError("roster line malformed (duplicate field %r): %r" % (k, line))
+            fields[k] = v.strip()
+        if not name:
+            raise ValueError("roster line malformed (empty task name): %r" % line)
+        if name in seen:
+            raise ValueError("roster has duplicate task name %r" % name)
+        for req, vocab in (("state", ("active", "retired")), ("crit", ("yes", "no")), ("exit1-ok", ("yes", "no"))):
+            if fields.get(req) not in vocab:
+                raise ValueError("roster line malformed (%s must be one of %s, got %r): %r"
+                                 % (req, "|".join(vocab), fields.get(req), line))
+        seen.add(name)
+        entries.append((name, fields))
+    if not entries:
+        raise ValueError("roster block has no task lines")
+    return entries
+
+def _decode_windows_result(code):
+    if code in WINDOWS_RESULT_DECODE:
+        return WINDOWS_RESULT_DECODE[code]
+    return ("0x%X" % int(code)) if code.isdigit() else code
+
+def classify_windows_tasks(entries, live):
+    """Pure. entries = parse_windows_roster() output; live = {name: (state, last_result[, task_path])}
+    for every task the live query returned (a name absent from `live` == task not present; an
+    EMPTY dict is a real 'nothing is registered' answer, so every active task reads MISSING).
+    Returns (status, detail, items)."""
+    crit, warn, ok = [], [], []
+    rostered = set()
+    for name, f in entries:
+        rostered.add(name)
+        is_crit = f.get("crit", "no") == "yes"
+        exit1_ok = f.get("exit1-ok", "no") == "yes"
+        row = live.get(name)
+        state = row[0] if row else None
+        result = (row[1] if row else "").strip()
+        if f["state"] == "retired":
+            tag = "retired since %s, superseded by %s" % (f.get("since", "?"), f.get("superseded-by", "?"))
+            if row is None or state == "Disabled":
+                ok.append("%s (%s -- %s as expected)" % (name, tag, "absent" if row is None else "Disabled"))
+            else:
+                warn.append("%s is %s but rostered RETIRED (%s) -- documented-retired-but-alive; "
+                            "disable it or update the roster" % (name, state, tag))
+            continue
+        if row is None:
+            (crit if is_crit else warn).append("%s MISSING (re-register per its script header)" % name)
+        elif state == "Disabled":
+            (crit if is_crit else warn).append("%s is Disabled but rostered active (mark it retired in the roster if deliberate)" % name)
+        elif result not in WINDOWS_RESULT_OK and not (exit1_ok and result == "1"):
+            warn.append("%s last result %s" % (name, _decode_windows_result(result)))
+        else:
+            ok.append(name)
+    for name in sorted(live):
+        if name not in rostered:
+            row = live[name]
+            where = (" (folder %s)" % row[2]) if len(row) > 2 and row[2] else ""
+            warn.append("%s%s is live but has no line in the tech.md 3h WINDOWS-TASK-ROSTER -- "
+                        "untracked off-fleet automation; add a roster line" % (name, where))
+    n_active = sum(1 for _, f in entries if f["state"] == "active")
+    n_retired = len(entries) - n_active
+    if crit:
+        return "CRIT", "; ".join(crit + warn), []
+    if warn:
+        return "WARN", "; ".join(warn), []
+    return ("OK", "all %d active backbone tasks present/enabled with clean results; "
+                  "%d retired task(s) in expected state" % (n_active, n_retired), [])
+
 def check_windows_tasks():
-    import subprocess
-    ps = ("$ErrorActionPreference='SilentlyContinue'; "
-          + "; ".join(
-              "$t=Get-ScheduledTask -TaskName '%s'; if ($t) { $i=$t | Get-ScheduledTaskInfo; "
-              "Write-Output ('%s|PRESENT|' + $t.State + '|' + $i.LastTaskResult) } "
-              "else { Write-Output '%s|MISSING||' }" % (n, n, n)
-              for n in WINDOWS_TASKS))
+    try:
+        entries = parse_windows_roster(open(WINDOWS_ROSTER, encoding="utf-8", errors="replace").read())
+    except Exception as e:
+        add("windows-tasks", "SKIP", "roster unreadable (%s) -- could NOT look, not 'clean': %s" % (WINDOWS_ROSTER, e))
+        return
+    names = ",".join("'%s'" % n.replace("'", "''") for n, _ in entries)
+    # Enumerate EVERY folder (no -TaskName/-TaskPath, which would narrow to the root), keep ORA* plus
+    # rostered names, carry TaskPath, and end with a sentinel so "completed with zero rows" (a real
+    # answer) is distinguishable from "the query never ran" (SKIP -- could not look).
+    ps = ("$ErrorActionPreference='SilentlyContinue'; $names=@(%s); "
+          "foreach($t in @(Get-ScheduledTask)){ if($t -and ($t.TaskName -like 'ORA*' -or ($names -contains $t.TaskName))){ "
+          "$i=$t|Get-ScheduledTaskInfo; Write-Output ($t.TaskName+'|'+$t.State+'|'+$i.LastTaskResult+'|'+$t.TaskPath) } }; "
+          "Write-Output '__QUERY_OK__'" % names)
     try:
         r = subprocess.run(["powershell.exe", "-NoProfile", "-Command", ps],
-                           capture_output=True, text=True, timeout=60,
+                           capture_output=True, text=True, timeout=120,
                            encoding="utf-8", errors="replace")
-        rows = dict()
-        for ln in (r.stdout or "").splitlines():
-            parts = ln.strip().split("|")
-            if len(parts) == 4:
-                rows[parts[0]] = parts
     except Exception as e:
-        add("windows-tasks", "SKIP", "query failed: %s" % e)
+        add("windows-tasks", "SKIP", "query failed to run (%s) -- could NOT look, not 'clean'" % e)
         return
-    bad = []
-    for name, crit in WINDOWS_TASKS.items():
-        row = rows.get(name)
-        if not row or row[1] != "PRESENT":
-            bad.append(("CRIT" if crit else "WARN", "%s MISSING (re-register per its script header)" % name))
-        elif row[3] not in ("0", "267009", "267011", ""):  # 267009=running, 267011=never-ran
-            bad.append(("WARN", "%s last result %s" % (name, row[3])))
-    if any(s == "CRIT" for s, _ in bad):
-        add("windows-tasks", "CRIT", "; ".join(m for _, m in bad))
-    elif bad:
-        add("windows-tasks", "WARN", "; ".join(m for _, m in bad))
-    else:
-        add("windows-tasks", "OK", "all %d backbone tasks present, last results clean" % len(WINDOWS_TASKS))
+    out_lines = [ln.strip() for ln in (r.stdout or "").splitlines() if ln.strip()]
+    if r.returncode != 0 or "__QUERY_OK__" not in out_lines:
+        add("windows-tasks", "SKIP", "query did not complete (exit %s, sentinel %s) -- could NOT look, not 'clean'"
+            % (r.returncode, "present" if "__QUERY_OK__" in out_lines else "absent"))
+        return
+    live, dups = {}, []
+    for ln in out_lines:
+        parts = ln.split("|")
+        if len(parts) != 4 or not parts[0]:
+            continue
+        name, state, result, path = (x.strip() for x in parts)
+        if name in live:
+            dups.append("%s in %s and %s" % (name, live[name][2] or "?", path or "?"))
+            continue
+        live[name] = (state, result, path)
+    status, detail, items = classify_windows_tasks(entries, live)
+    if dups:
+        status = "CRIT" if status == "CRIT" else "WARN"
+        detail += "; duplicate task name(s) across folders (first occurrence classified): " + "; ".join(dups)
+    add("windows-tasks", status, detail, items)
 
 # ---- Check 8: SKILL-OVERRIDE EFFICACY (2026-08-05) ----
 # Root cause: the harness short-circuits `if (e.type!=="prompt" || e.source==="plugin")

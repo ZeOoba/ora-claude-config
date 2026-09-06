@@ -11,6 +11,9 @@ Contract under test (the recalibration, not the pre-existing table/collision cod
   * never-ran is only VERDICT-worthy if the task is a RECURRING task (no fireAt) whose
     createdAt is older than a cadence-aware buffer inferred from its cron fields --
     a quarterly/annual task that simply hasn't reached its next fire yet must not flag.
+  * FIRST-SLOT RULE (2026-09-02, R21-2b): a never-ran recurring task whose first
+    post-registration slot elapsed more than MISSED_CYCLE_GRACE_HOURS ago IS overdue
+    regardless of that buffer; a slot that predates createdAt never counts.
   * A one-time task (has fireAt) is never counted under never-ran-overdue; it's
     handled by the expired-needs-attention check below instead.
   * expired one-time is only VERDICT-worthy if it never fired (missed) or is still
@@ -175,13 +178,55 @@ def test_daily_never_run_for_weeks_is_overdue():
           "expected ATTENTION verdict, got %r" % (data,))
 
 
-# 4. A monthly task created 10 days ago has NOT exceeded its cadence buffer.
+# 4. A monthly task created 10 days ago whose next slot is still AHEAD has NOT
+#    exceeded its cadence buffer and has no elapsed post-registration slot.
+#    (Pinned to a day-of-month 3 days in the future: a fixed `1 * *` here was
+#    date-dependent -- run on the 2nd or 3rd of a month, the 1st has just
+#    elapsed and the first-slot rule correctly flags it, which is test 4b.)
+def _dom_days_from_today(delta_days):
+    import datetime
+    return (datetime.date.today() + datetime.timedelta(days=delta_days)).day
+
+
 def test_monthly_recent_creation_not_overdue():
-    tasks = [task("monthly-new", cron="0 5 1 * *", created_days_ago=10)]
+    cron = "0 5 %d * *" % _dom_days_from_today(+3)
+    tasks = [task("monthly-new", cron=cron, created_days_ago=10)]
     data, _ = run(tasks)
     check("test_monthly_recent_creation_not_overdue",
           data is not None and data.get("never_ran_overdue") == [],
           "expected not overdue, got %r" % (data,))
+
+
+# 4b. FIRST-SLOT RULE (2026-09-02, Automation Audit R21-2b): a never-ran
+#     recurring task whose first post-registration slot elapsed more than the
+#     grace window ago IS overdue, regardless of the cadence buffer. This is the
+#     ora-pm-monthly-billing shape: registered 08-21, slot 09-01 11:10 missed
+#     in an outage, previously read "0 overdue" until ~09-30.
+def test_monthly_never_ran_first_slot_elapsed_is_overdue():
+    cron = "0 0 %d * *" % _dom_days_from_today(-2)   # slot ~2 days ago, 00:00 local
+    tasks = [task("monthly-missed", cron=cron, created_days_ago=5)]
+    data, _ = run(tasks)
+    check("test_monthly_never_ran_first_slot_elapsed_is_overdue",
+          data is not None and data.get("never_ran_overdue") == ["monthly-missed"],
+          "expected monthly-missed flagged, got %r" % (data,))
+    check("test_monthly_never_ran_first_slot_elapsed_reason",
+          data is not None and "first slot" in data.get("never_ran_overdue_reason", {}).get("monthly-missed", ""),
+          "expected first-slot reason, got %r" % (data,))
+    check("test_monthly_never_ran_first_slot_elapsed_verdict",
+          data is not None and data.get("verdict", "").startswith("ATTENTION"),
+          "expected ATTENTION verdict, got %r" % (data,))
+
+
+# 4c. A slot that predates registration never counts: the same cron registered
+#     AFTER the slot passed is simply waiting for next month (the
+#     ora-passed-deal-tracker shape -- registered 08-16 on a `15 * *` cron).
+def test_monthly_never_ran_slot_before_registration_not_overdue():
+    cron = "0 0 %d * *" % _dom_days_from_today(-2)
+    tasks = [task("monthly-fresh", cron=cron, created_days_ago=1)]
+    data, _ = run(tasks)
+    check("test_monthly_never_ran_slot_before_registration_not_overdue",
+          data is not None and data.get("never_ran_overdue") == [],
+          "expected not overdue (slot predates createdAt), got %r" % (data,))
 
 
 # 5. A one-time task with a FUTURE fireAt is never-ran but not due -- no flag anywhere.
@@ -353,6 +398,8 @@ if __name__ == "__main__":
     test_quarterly_not_yet_due_is_not_overdue()
     test_daily_never_run_for_weeks_is_overdue()
     test_monthly_recent_creation_not_overdue()
+    test_monthly_never_ran_first_slot_elapsed_is_overdue()
+    test_monthly_never_ran_slot_before_registration_not_overdue()
     test_onetime_future_fire_not_flagged()
     test_onetime_normal_completion_not_flagged()
     test_onetime_missed_fire_flagged()
