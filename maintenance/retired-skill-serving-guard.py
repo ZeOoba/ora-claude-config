@@ -64,10 +64,20 @@ reinstall); this probe only makes the gap visible.
 Exit 0 = clean (or nothing retired yet to check). Exit 1 = [ACTION], at least
 one retired skill is still being served from an installed bundle. Exit 2 =
 PROBE ERROR -- the filesystem scan itself failed (permission error, or a
-directory removed mid-scan by a concurrent reimport); the caller's
-scheduled-run alarm wiring treats any non-zero exit as an alarm, so this is
-not silently missed, but is worth distinguishing from a genuine leak in the
-alarm body if the caller inspects stderr.
+directory removed mid-scan by a concurrent reimport), OR at least one
+installed-bundle location exists but the scan found literally zero installed
+skill folders across BOTH `skills-plugin/<newest version>` and
+`rpm/plugin_*/`. On any machine that has ever used the LAMS bundle mechanism
+that second case never happens in steady state -- Cowork always has its own
+always-on plugins installed (`cowork-plugin-management`, `desktop-commander`,
+...) -- so a true zero there almost certainly means a Cowork "Save skill"
+rebuild is mid-flight (the tree was cleared and not yet repopulated), not a
+genuinely clean scan. This is distinct from the case where NEITHER
+installed-bundle location exists at all, which means this session's surface
+never uses the LAMS mechanism and IS a legitimate "nothing to check" (exit
+0). The caller's scheduled-run alarm wiring treats any non-zero exit as an
+alarm, so a PROBE ERROR is not silently missed, but is worth distinguishing
+from a genuine leak in the alarm body if the caller inspects stderr.
 
 USAGE
   python retired-skill-serving-guard.py
@@ -285,6 +295,37 @@ def _selftest():
         installed_default = installed_bundle_skill_dirs(bundle_root)
         assert set(installed_default.keys()) == {"deal-screen", "old-skill"}, installed_default
 
+    # ---- main(): "Empty bundle reports clean" regression -- an installed-bundle
+    # tree that EXISTS (skills-plugin/ and the sessions root both present, e.g.
+    # mid a Cowork "Save skill" rebuild that cleared the tree before
+    # repopulating it) but currently holds zero installed skill folders must
+    # NOT be reported as clean/exit-0 -- that would be indistinguishable from
+    # "confirmed nothing retired is being served." Exercised through the real
+    # CLI (subprocess) since this is main()'s own exit-code decision, not
+    # something a helper function's return value alone proves.
+    import subprocess
+
+    with tempfile.TemporaryDirectory() as tmp:
+        skills_root = os.path.join(tmp, "ora-skills")
+        archive = os.path.join(skills_root, "_archive")
+        os.makedirs(archive)
+        _touch_skill_md(os.path.join(archive, "old-skill_retired-2026-08-05"))
+
+        bundle_root = os.path.join(tmp, "skills-plugin")
+        os.makedirs(bundle_root)  # exists, but zero plugin_id dirs -- mid-rebuild shape
+        session_root = os.path.join(tmp, "sessions")
+        os.makedirs(session_root)  # exists, but zero session dirs
+
+        result = subprocess.run(
+            [sys.executable, os.path.abspath(__file__),
+             "--ora-skills-root", skills_root,
+             "--bundle-root", bundle_root,
+             "--session-root", session_root],
+            capture_output=True, text=True)
+        assert result.returncode == 2, (result.returncode, result.stdout, result.stderr)
+        assert "PROBE ERROR" in result.stderr, result.stderr
+        assert "clean" not in result.stdout, result.stdout
+
     print("selftest: PASS")
     return 0
 
@@ -326,7 +367,30 @@ def main(argv=None):
                   "(this session's surface may not use the LAMS bundle mechanism)")
             return 0
 
-        leaks = find_leaks(a.ora_skills_root, a.bundle_root, a.session_root)
+        installed = installed_bundle_skill_dirs(a.bundle_root, a.session_root)
+
+        if not installed:
+            # At least one installed-bundle location exists (the branch above
+            # would already have returned if neither did), yet the scan found
+            # zero installed skill folders anywhere across both locations. On
+            # a machine that has ever used the LAMS bundle mechanism this
+            # never happens in steady state -- Cowork always has its own
+            # always-on plugins installed (cowork-plugin-management,
+            # desktop-commander, ...). A true zero here almost certainly means
+            # a Cowork "Save skill" rebuild is mid-flight -- the tree was
+            # cleared and not yet repopulated -- and the guard cannot tell
+            # that apart from a genuinely clean scan. Report it the same as a
+            # PROBE ERROR (exit 2) rather than folding it into "clean": a
+            # scheduled run must never read a regeneration window as
+            # confirmation that no retired skill is being served.
+            sys.stderr.write(
+                "PROBE ERROR -- an installed-bundle location exists but zero installed "
+                "skill folders were found across skills-plugin/<newest version> and "
+                "rpm/plugin_*/; treating as unverifiable rather than clean (likely a "
+                "Cowork bundle regeneration in progress)\n")
+            return 2
+
+        leaks = {name: installed[name] for name in retired if name in installed}
     except OSError as e:
         sys.stderr.write("PROBE ERROR -- could not complete the filesystem scan: %s\n" % e)
         return 2
