@@ -638,6 +638,34 @@ Use all of the following signals and merge, deduping by page ID:
    broad `notion-search` semantic query, KEEPing any result whose `timestamp`
    date == `{TODAY}`.
 
+   **Section D producer classification (added 2026-08-25 — read before writing COVERAGE GAPS
+   for Section D).** A title-search over child pages structurally cannot find every producer
+   that fired today, because not every send-log entry corresponds to a searchable Notion page.
+   Before flagging a send-log subject as "not independently matched by title," check which
+   class its producer falls into — most misses are NOT search failures:
+   - **INLINE-ONLY (posts to the Ops Hub page BODY, not a child page):**
+     `ora-ic-memo-pipeline-reconciliation` — appends a `## IC Memo ↔ Pipeline Tracker
+     Reconciliation — {TODAY}` heading directly onto page `32b6ecd8…`'s own content, never a
+     separate titled page. A page-title search will never surface it. Check for this heading via
+     `notion-fetch` on the Hub page itself (or a `notion-search` scoped with `page_url` set to the
+     Hub page), not a workspace-wide title search.
+   - **NO-NOTION-POST (email/database only, nothing to find in Notion, ever):**
+     `ora-task-integrity-guard` (subject line "ORA Task Guard — …") and `ora-deal-sourcing-scan`
+     (updates Deal Sourcing Log rows directly, not the Hub) — neither has ever posted a Hub page.
+     The `[ORA Command Center] Daily Brief` (`oxford-command-center/server/brief/run.ts`) is the
+     same class — email-only, no Notion page exists to find. Report these as "no Notion
+     counterpart by design," not as an unresolved search gap.
+   - **MONDAY-ONLY (do not expect a same-day send on other weekdays):** Cash Position Snapshot is
+     `ora-am-brief` Block D, Mondays only. A send-log check on any other weekday finding no Cash
+     Position entry is correct, not a gap — do not list it among "today's sends" to reconcile
+     unless `{TODAY}` is a Monday.
+   - **DEDICATED CHILD PAGE (the default; title-search works):** everything else that posts to the
+     Hub creates its own titled page (e.g. `Automation Health — {TODAY}`, `Deal Aging SLA —
+     {TODAY}`, `Doctrine/Governor Integrity — {TODAY}`) — title-search these normally.
+   This list is not exhaustive — a producer not listed here should still be title-searched and,
+   if unmatched, reported as a genuine best-effort miss. Update this list when a new producer's
+   posting mode is confirmed, rather than re-deriving it from scratch next run.
+
 **Known limitation — corrected 2026-07-16 ~19:35 ET after live testing.** This
 paragraph previously read: *"edit detection is **precise** for all six database
 sources (step 2) and best-effort only for the two page-tree sources."* **Both

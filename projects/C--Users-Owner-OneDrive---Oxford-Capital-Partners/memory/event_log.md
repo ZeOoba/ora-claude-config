@@ -5,12 +5,258 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-08-24T20:02:54.323Z
+  modified: 2026-09-02T10:18:17.665Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-09-02 — ora-cc-schematic-refresh: fleet catch-up-burst signature (7 missed cycles, throttle skips 35→780/24h), CLAUDE.md headroom recovered to 63 words
+
+Scheduled 2x/week refresh (rev 2026-09-02a). All five standing probes re-run live and stayed green (governor-drift, doctrine-integrity, memory-integrity 313/313 0 issues, confidentiality-guard 131/131). Two material changes worth a durable record:
+
+1. **Fleet VERDICT stayed ATTENTION but the driver flipped.** 7 recurring CC/MCP tasks (ora-acquisition-underwriting-eval-harness, ora-am-brief, ora-deal-aging-sla, ora-lease-snapshot-refresh, ora-memory-commit-sweep, ora-pm-daily-crons, ora-sofr-direct-prefetch) show a missed single cycle open, all clustered in an 89.8-114.0h band, up from 0 missed cycles at the prior rev (08-27a). Throttle skips in the last 24h jumped 35 -> 780 (all-time 1,022 across 39 tasks). Both read as one event: a roughly 90-114h app-closed gap consistent with the documented catch-up-burst signature (reference_fleet_throttle_skip_catchup_burst.md, reference_am_cluster_late_wake_root_cause_2026-08-13.md), not independently confirmed via a power-event log this pass. oxford-command-center also went from clean to carrying 3 untracked temp files (data/alert-state/, a portfolio.json snapshot temp, probe.tmp) — read as live producer WIP from the same window, not investigated further.
+2. **CLAUDE.md headroom recovered sharply:** 1,848 -> 1,787 words against the 1,850 FAIL gate (2-word margin -> 63-word margin), per the 2026-08-28 single-writer-bullet relocation (reference_claude_md_next_relocation_candidate_2026-08-28.md) plus a few further words moved since.
+
+Fleet composition otherwise contracted normally: 66/65/1 -> 64/64/0 tracked/enabled/disabled, both drops (ora-754-flaute-escalation-check, ora-psa-drift-watch-recheck-0826) being expired one-time tasks aging fully out of the registry.
+
+No registry writes, no email. One file edit (claude-code-schematic.html), one republish to the existing artifact URL, plus the routine per-node keep-2 archival and title-block rev rollover (08-16a rolled to claude-code-schematic-history.md, keeping 4 inline entries).
+
+## 2026-09-02 — Monthly Memory Consolidation (ora-consolidate-memory-monthly, LAMS/Cowork surface)
+
+Scheduled monthly pass over `memory/` (316 root files + 59 archived at start). Changes:
+- **event_log.md rolled over** via `rollover-event-log.py`: 1781 → 617 live lines; entries older than 2026-08-23 ("feat/model-canary-probe-step25 merged into main") moved to `_archive/event_log_2026-09-02.md` (1168 lines). Rev 18 (08-22) had flagged the log 35 days unrolled.
+- **Duplicate merged:** `reference_skilloverrides_inert_for_plugin_skills.md` was a concurrent-session twin of `reference_skilloverrides_ignored_for_plugin_skills.md` (both 2026-08-05, different originSessionIds). Unique content folded into the `_ignored_` file (listing-builder skip, `@inline` scope, live-in-listing breakdown, working levers, audit-rev-1 hazard); twin archived as `_archive/reference_skilloverrides_inert_for_plugin_skills_merged-into-ignored_2026-09-02.md`; inbound links repointed in `INDEX_reference.md` and `reference_plugin_cleanup_scope_cache_vs_marketplaces.md`.
+- **Stale fact corrected in 2 living docs:** `tech.md` §3 and `00_system_of_record.md` §7 still described `ora-cowork-heartbeat` as 05:50+17:50; it has been 1x/day (05:50 ET, cron `50 5 * * *`) since 2026-08-05.
+- **LAMS task-count drift-check (tech.md §3, 07-12 line overwritten):** live LAMS registry via `list_scheduled_tasks` = 28 entries, all enabled (27 recurring + 1 one-time, `ora-counsel-review-standard-positions-2027`), vs 20 on 07-12 — net +8 from the 07-15→08-24 registrations less LAMS retirements; organic churn, not drift. CC-side not reachable from this surface.
+- **Index hygiene:** 2 unlisted files (`project_automation_audit_rev17_2026-08-21.md`, `project_automation_audit_rev18_2026-08-22.md`) added to `INDEX_projects_system.md`; 0 orphan links across MEMORY.md + 3 sub-indexes (313 links resolved). MEMORY.md deliberately untouched — 21,296 B, ~200 B under the 21.5 KB WARN, no headroom for additions.
+- **Stray backup archived:** `open-items-tracker.md.bak-appsec-20260731` (149 KB, zero inbound refs) → `_archive/open-items-tracker_bak-appsec_2026-07-31.md`.
+- **Retired-connector check:** no memory file presents Rube/Gmail/Zapier/Composio as active (grep clean; `00_system_of_record.md` connector line marks all four retired/removed).
+- **Repo references resolve:** `C:/Users/Owner/website-canonical` (+`.git`), `oxford-site`, `ora-skills`, `oxford-command-center`, `_shared/send-via-outlook.ps1`.
+- **review_by scan:** 1 dated note, not yet due (`project_historical_evaluations_acquisition_review_2026-07-29.md` → 2026-09-30); 0 overdue.
+- **Doctrine/governor audit line (Phase 3 item 5):** `maintenance/_state/doctrine-status.json` last check 2026-08-28 17:21 (pre-push) — doctrine probe FAIL ×1 (exit 1: "[MISSING] bare date 2020-01-01 at line 6 — dated history belongs in event_log.md"; the status record does not name the file), governor probe not run (null), memory probe not run (null), guard_orphans 0. Pre-push override sentinel ("Pre-push proceeded DESPITE doctrine drift"): 0 entries in the live log for the past month — **no overrides**. No check-8 confidential-term finding on record (index reference only).
+
+## 2026-08-28 — ORA Master Workbook write: 1900 Broadway insurance term flip + workspace-wide BCL relabel (Gabriel confirmed)
+
+Executed the drafted workbook edit from earlier today (see the prior 2026-08-28 entry, "1900 N Broadway insurance warehouse fix + workspace-wide BCL relabel") after Gabriel's explicit in-turn confirmation ("Go ahead"). Written via Excel COM only (`ora-master-workbook-ingest` doctrine — never openpyxl), against the live ORA Master Workbook's "Insurance Renewals" tab (`eric spreadsheets` folder).
+
+**Row numbers had drifted since the last structural reference (2026-08-10 backup)** — 3 new rows were inserted earlier in the sheet for a Hartford GL/Umbrella/EPLI bundle at 9620 State 350. Re-verified every target row by scanning column A for exact slug matches live via COM before writing (drafted row numbers 26/27 → actual live rows 30/31 for 1900 Broadway; other BCL rows shifted similarly). This confirms the caveat flagged in the draft was warranted — do not reuse cached row numbers for this tab without re-verifying.
+
+**Writes applied (17 cells, all individually asserted against their pre-write value before writing, per `model-bulk-edit` doctrine):**
+- Row 30 (`INS-1900BROADWAY-UFX`): E 08/27/25→08/27/26, F 08/27/26→08/27/27, I $11,166→$11,554, M notes flipped from "not yet incepted" to "incepted, confirmed against cert"
+- Row 31 (`INS-1900BROADWAY-BCL`): D relabeled + same date/premium/notes pattern, I $2,271→$1,992
+- D-column relabel "Business Crime Liability (BCL)" → "Business Catastrophe Liability (BCL)" on all 10 BCL rows (12, 14, 16, 18, 27, 29, 31, 34, 36, 38)
+
+Two of the 19 originally-planned writes (M30/M31 notes) were skipped on the first pass by the exact-string assertion — a smart-quote/apostrophe character mismatch (false negative, not a wrong-row signal), resolved with a second pass using a substring marker check plus a fresh row-identity re-check (A30/A31 slug match) before writing. Post-write read-back (fresh COM read, all 11 touched rows) confirms every cell landed correctly and the `K` status formula recalculated 1900 Broadway from `EXPIRED` to `Current` — the false-lapse condition is now fixed at the actual source.
+
+**Backup:** `Documents\Claude\_backups\` folder, filename stamped `_pre-1900BroadwayInsFix_2026-08-28`, SHA256 `1C4CE894F5728D54C82BAE5C9DE2AA134C1B428625ED4BBC8A08482EDA61D27F`, taken before the first write attempt.
+
+**Not done — flagged for Gabriel:** `server/brief/run.ts` (the Daily Brief) reads `oxford-command-center/data/snapshots/portfolio.json`, a periodic cached extraction of this workbook (`scripts/extract-workbook.ts`, normally regenerated by the `ora-cc-snapshot-refresh` schedule / a drift-check task), not the live file directly. The workbook fix will not clear tomorrow's Daily Brief alert until that snapshot next regenerates. Did not run `npm run extract` manually — portfolio.json is git-tracked in a shared repo and the scheduled task normally auto-commits/pushes it, which is outside what was confirmed for this task. Gabriel can ask for a manual re-extract if he wants it reflected before the next scheduled run.
+
+Also unresolved, flagged not asserted: the old note's "CAT-202 electronic data" endorsement reference doesn't match any form number in the actual 2026-2027 umbrella schedule of forms (which lists CAT203 "Cyber Liability and Data Breach Liability" instead) — left as Data Gaps #11, not resolved, since confirming the delta would need the *prior* term's schedule of forms too.
+
+## 2026-08-28 — Two fleet-advisory friction fixes: fleet-status.py staleness note + automation-health-monitor tickler check
+
+Gabriel flagged two workflow-optimization items from the same-day `ora-754-flaute-escalation-check` incident (see "Fleet advisory remediation: 2 expired one-time CC/MCP entries deregistered" entry above) and asked to fix them.
+
+**1. `fleet-status.py` (`~/.claude/maintenance/fleet-status.py`).** The advisory that drove that incident read correctly at generation time but was stale by the time it was forwarded and acted on. Added a `generated_at` timestamp and a `STALENESS_NOTE` re-verify warning to BOTH the text (`--summary`/default) and `--json` report output — baked into the report template itself rather than relying on `fleet-advisory-remediation`'s own live-reverify discipline. Purely additive; no detection logic (`expired_needs_attention`, `find_missed_cycles`, `never_ran_overdue`) changed. Verified: `py_compile` clean, all 17 tests in `test-fleet-status.py` pass (same count before/after), independently re-verified by a review agent with no knowledge of the reasoning, working from the diff alone.
+
+**2. `automation-health-monitor` SKILL.md (`ora-skills`), v1.7 -> v1.8.** Added Step 1.25 ("One-time tickler lifecycle check"): before flagging a one-time task's disabled state, check `lastRunAt` against `fireAt` -- `disabled + lastRunAt set` = normal completion (throttle-delay included), never flag; `disabled + no lastRunAt` = genuinely anomalous, flag; `enabled + past fireAt, not yet fired` = re-verify live before flagging. Mirrors `fleet-status.py`'s own `expired_needs_attention` filter, which already got this right -- the gap was a downstream reader treating an old snapshot as current, not a logic bug. Frontmatter description still 853 chars (under the 1,024 platform limit). Independently re-verified by a separate review agent, diff-only.
+
+**Landed via `isolated-commit`** (claim -> pathspec-scoped stage -> independent review -> commit -> push), one commit per repo, neither touching the other ~36 (`~/.claude`) / 1 (`ora-skills`) unrelated dirty/untracked files already present from other concurrently-active sessions:
+- `~/.claude` `80ee575` "fix(fleet-status): stamp reports with generated_at + staleness warning" -- pushed to `feat/model-canary-probe-step25`. First push attempt lost a ref-lock race to a concurrent session on the same shared checkout; their merge (`6337529`) already carried this commit through, confirmed local/remote HEAD identical.
+- `ora-skills` `9ac75a5` "docs(automation-health-monitor): add one-time tickler lifecycle check (v1.8)" -- required a conflict-free merge with an unrelated concurrent PR (#49, register-scheduled-task changelog retention) before push; landed at `1c35a7e` on `main`.
+
+**Follow-up, not yet done:** the `ora-skills` commit's post-commit sync copied the updated SKILL.md into the LAMS skills-plugin staging tree and logged it to `PENDING_REIMPORT.md` per `package-and-stage-skill` doctrine -- the live scheduled-task copy of `automation-health-monitor` won't run v1.8's Step 1.25 until Gabriel clicks Save skill on the reimport.
+
+## 2026-08-28 — 1900 N Broadway insurance warehouse fix + workspace-wide BCL relabel
+
+Fixed two data-quality issues in oxford-command-center's warehouse (`data/warehouse/finance.sqlite`, `property_insurance_policies`), triggered by Gabriel providing the actual 2026-2027 Erie renewal certificates for 1900 North Broadway LLC and today's Daily Brief firing a CRITICAL "policy expired" alert that was actually stale.
+
+1. **Workspace-wide relabel:** "Business Crime Liability (BCL)" → "Business Catastrophe Liability (BCL)" across all 19 rows / 10 properties in the warehouse. Confirmed against the Erie umbrella policy's own Schedule of Forms (form BCL, edition 04/03 = "BUSINESS CATASTROPHE LIABILITY POLICY") and the declarations page title ("ERIE INSURANCE EXCHANGE BUSINESS CATASTROPHE POLICY"). The label is workbook-authored text (`server/workbook/parse.ts:1133` passes column 4 through verbatim, no code-side dictionary) — so this warehouse fix is cosmetic-only and will be silently overwritten by the next brain-server/re-ingest unless the live ORA Master Workbook's Insurance Renewals tab is corrected at the source. That workbook edit needs Gabriel's explicit confirmation (DSOR, Hard Invariant 2/read-only rule) — not done here.
+
+2. **1900 Broadway UFX + BCL current-term fix, and a latent bug found in `collapseToCurrentTerm`:** rows 1341 (UFX)/1342 (BCL) already held the correct 2026-08-27→2027-08-27 term (ingested 2026-08-17, premiums $11,554/$1,992 — exact match to the renewal certs) but were losing `insurance-analysis.ts`'s `isMoreCurrent` tie-break (primary key: `source_date`) to a STALE 2025-08-27→2026-08-27 row re-ingested later (2026-08-24, ids 1444/1445) — because that re-ingest captured the workbook's own 2026-08-17 self-correction (workbook flipped back to the then-still-in-force prior term after prematurely showing the new one, with a "RENEWAL ISSUED, NOT YET INCEPTED" note — see `data/snapshots/portfolio.json`). Once the incept date (08-27) passed, nobody flipped the workbook row forward again, so the stale term kept winning every recapture. **Bumped `source_date`/`source`/`ingested_by` on rows 1341/1342 to today** so they now correctly win the tie-break. Left the older historical rows (1352/1353, 1444/1445) untouched as an audit trail.
+   - **General vulnerability, not fixed here:** `isMoreCurrent`'s source_date-primary tie-break can be exploited by exactly this timing pattern (an old-term re-ingest landing AFTER a new-term ingest) on any property/policy, not just this one. Flagged as a follow-up, not fixed — a broader algorithm change wasn't in scope for a data correction.
+
+3. **True root cause of today's CRITICAL alert is NOT the warehouse.** `src/analytics/conditions.ts`'s `ins-lapsed-live-*` condition (which fired the alert) reads Spine A / `snapshot.insurance[]` directly — the live ORA Master Workbook's Insurance Renewals tab — not the warehouse table. The workbook itself still carries the pre-incept 2026-08-27 expiration and "Renew Now" status (the 08-17 self-correction never got flipped forward after the renewal incepted). Fixing the warehouse does not silence this alert; the workbook row needs updating at the source, which requires Gabriel's confirmation before any write (DSOR).
+
+4. **Compounding issue, already tracked, not touched:** `property_insurance_policies.property_id` holds policy-level slugs, not property ids (0 of 14 match) — confirmed still true, still OPEN as [OI-125](open-items-tracker.md#OI-125), LOW severity/warning-only. Not re-engineered here — out of scope for this fix and already has an auditable path forward documented in-file.
+
+Backup of finance.sqlite taken before edits: `data/warehouse/finance.sqlite.bak-2026-08-28-pre-insurance-fix`. finance.sqlite is gitignored — no commit needed/possible for this change.
+
+## Governor-probe/autonomy-gate selftest scratch-collision fix MERGED (2026-08-28)
+
+[PR #153](https://github.com/ZeOoba/ora-claude-config/pull/153) merged (`222091e`). Root cause of session aa0eb89c's blocked push (WinError 145 "directory not empty") and a same-push autonomy-gate flake: `maintenance/test-governor-drift-probe.py`'s e2e selftests wrote scratch files under **fixed, non-unique names** in the live, gitignored `hooks/sessions/` and `hooks/active-work/` trees -- shared by every Claude Code session in this checkout. With 10+ sessions routinely live, two concurrent runs of the same test is the common case here, not an anomaly. Direct concurrency stress-testing (6-8 parallel copies of the test file) surfaced a **second, previously-unreported instance** of the identical pattern (`test_active_work_claims_excluded_e2e`, 5/6 failures under load before the fix) -- worth remembering as a method: sequential re-runs never would have caught either bug, only genuine concurrent stress did.
+
+Fix: both scratch names are now pid+uuid4-suffixed, teardown is `shutil.rmtree` (not a bare `os.rmdir`), and a new `_sweep_stale_selftest_scratch()` helper GCs anything past a 1-hour mtime threshold **whose owning pid (encoded in the name) is confirmed dead** via a stdlib-only Windows `ctypes.OpenProcess` liveness check -- added after Qodo's automated PR review flagged the first version's pure age-based sweep as capable of deleting a still-running sibling's scratch (plausible on this laptop specifically, given Modern Standby sleep can make a live process's entry look hours-idle; see [[reference_lastruntime_restamped_on_modern_standby_resume]]). Separately, `hooks/tests/test-ora-autonomy-gate.py`'s 4 sandbox-isolation tests were `shutil.copytree`-ing the entire live `hooks/` tree (including `hooks/sessions/`) into a temp sandbox on every run -- proven dead weight (every gate invocation sets `ORA_OVERRIDE_SESSIONS_DIR`; the non-test fallback `DEFAULT_SESSIONS_DIR` is an absolute path independent of any sandbox copy) and the actual collision surface for that flake. Now excludes `sessions` via `shutil.ignore_patterns`.
+
+Landed via 2 commits, both independently reviewed (Fable, `eos-review-gate.py --record`, scoped by content hash) in an isolated worktree (`hooks/**` edits are blocked in the live checkout). Verified via direct repro of the original WinError, multi-round concurrent stress runs (0 failures after vs. reproducible failures before), and the actual pre-push `hook-tests-gate` (100/100 pass, both pushes).
+
+## Item 7b (Run-key/lock-screen launch gap) ruled CLOSED as accepted residual risk (2026-08-28)
+
+Gabriel confirmed "done" on the recommendation not to build either remaining host-wake fix. Ruling: neither Task Scheduler run-whether-logged-on-or-not (real risk of silently degrading Outlook COM sends -- the sole send path for the fleet -- from a non-interactive session) nor auto-login (stores the account password recoverably in the registry, removes password-at-boot on a machine holding deal data) clears the bar against the now-narrow tail risk left after 7a. 7a (Windows Update active hours 4/22) already eliminated the dominant, routine trigger. Residual risk accepted -- the existing catch-up-burst doctrine + dead-man chain (fleet-deadman.ps1 + ora-cowork-heartbeat -> Notion -> GitHub watchdog) already makes a full-night miss self-healing and visible, not silent. No further build planned; re-open only if the tail risk materializes in practice.
+
+## Windows Update active hours remediation (7a) CLOSED (2026-08-28)
+
+Gabriel ran the handed-off `set-active-hours.ps1` in his own elevated shell (this session never touched system settings directly, per the prohibited-action policy). Verified read-only afterward: `HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings` now shows `ActiveHoursStart=4`, `ActiveHoursEnd=22`, matching the 4/22 target ratified in the fleet-advisory follow-up. Auto-restart can no longer land inside the 05:15-09:30 ET AM scheduled-task cluster.
+
+Item 7b (Run-key launch not surviving a lock-screen-parked reboot) remains open -- real fix requires Gabriel to pick between a credentialed Task Scheduler entry or auto-login, both real tradeoffs, not yet decided.
+
+## ora-passed-deal-tracker retirement CLOSED — LAMS registry row was already gone, step 2/2 obsolete (2026-08-28)
+
+Closing the "OPEN: (1)(2)" list from the 2026-08-23 entry above ("ora-task-integrity-guard resurrected the archived ora-passed-deal-tracker LAMS folder"). Verified both limbs directly rather than re-running the pending `delete_scheduled_task` procedure:
+
+- LAMS/Cowork registry: no `ora-passed-deal-tracker` id present. 28 entries total, none matching.
+- Filesystem: `...\Documents\Claude\Scheduled\ora-passed-deal-tracker\` does not exist (the resurrected folder from the 08-23 guard alarm is gone — either archived again or never re-created since).
+
+**Both open items are CLOSED, not just stale:**
+1. The pending LAMS `delete_scheduled_task` call — moot. There is no LAMS registry row left to delete.
+2. The resurrected stale folder cleanup — moot. The folder is not present.
+
+**Do NOT run `delete_scheduled_task` for this id.** With the LAMS entry already gone, the call has nothing to disambiguate against and resolves unambiguously to the live CC/MCP task — it would delete the canonical, enabled copy outright. Detail and the general cross-fleet-delete doctrine (kept intact, not superseded): [[reference_delete_scheduled_task_resolves_colliding_id_to_local_fleet]].
+
+CC/MCP copy remains canonical and untouched, `enabled: true`, `30 6 15 * *`.
+
+## Fleet advisory remediation: 2 expired one-time CC/MCP entries deregistered (2026-08-28)
+
+Gabriel forwarded a fleet-status/setup-self-audit advisory flagging `ora-754-flaute-escalation-check` as "expired one-time, missed its fire, remains enabled" and the sole driver of the ATTENTION verdict, plus `ora-psa-drift-watch-recheck-0826` as a second expired one-time entry, and asked to fix it. Ran fleet-advisory-remediation (Explicit permission: Gabriel's in-chat "Fix this").
+
+Live check (`fleet-status.py --json` + `list_scheduled_tasks`) found the advisory's premise stale: both tasks had already fired and auto-disabled per their own one-time design before this session looked —
+- `ora-754-flaute-escalation-check`: fireAt 08:00 ET, actually fired 13:41 UTC (~09:41 ET), throttle-delayed ~1h41m by the AM catch-up burst, NOT missed. The 15/25 refusals in the advisory were pre-fire throttle skips.
+- `ora-psa-drift-watch-recheck-0826`: fireAt 14:15 ET 2026-08-26, fired 43 sec later — on time, no issue.
+
+Both were `enabled: false` in the live registry at check time, contradicting the advisory's "remains enabled" claim (report was already stale by the time it reached this session).
+
+Action taken (CC/MCP fleet only, no LAMS cross-fleet write needed): deleted both registry entries via supervised `delete_scheduled_task`, then archived both SKILL.md folders to `scheduled-tasks/_archive_2026-08-28_onetime-complete/` per the CC/MCP RETIRE doctrine (delete-registry-first, archive-folder-second, to prevent `guard.ps1:157` resurrecting them). Post-write `list_scheduled_tasks` re-run confirmed both gone from the live registry.
+
+Note for Gabriel: this does NOT clear the fleet-status ATTENTION verdict — the 124 throttle skips in the last 24h are overwhelmingly driven by other enabled recurring tasks (lease-snapshot-refresh 27, memory-commit-sweep 27, aaos-publish-contracts 23, deal-aging-sla 14) during the AM catch-up burst, not by these two one-time entries. Other advisory items (windows-tasks WARN, skill-override-efficacy WARN, 4c/4d coverage gaps, 3700 Kinsman Stage/Next-Action inconsistency, host-wake remediations, mirror vintage caveat) are out of this pass's scope and untouched.
+
+## 2026-08-27 — ora-cc-schematic-refresh: memory-integrity back to EXIT 0, two fleet findings resolved
+
+Schematic artifact refreshed to REV 2026-08-27a (Thu 14:15 ET slot). Notable this run: memory-integrity-probe.py flipped EXIT 1 → EXIT 0 (309/309 indexed, 0 issues — the sole 08-24a remainder, `feedback_git_status_short_hides_branch_use_sb.md`, has been indexed). Two fleet findings open since 08-24a resolved: `ora-psa-drift-watch` fired 2026-08-26T17:50:10 (cleared OVERDUE), `ora-open-sessions-board` fired 2026-08-26T21:09:15 (cleared a 167.9h missed-cycle gap open since ~08-14). Fleet tracked count dropped 72→66 (enabled unchanged at 65, cc=37/lams=28) as 6 EXPIRED one-time tasks fully aged out of both registries; throttle skips fell 199→35/24h. doctrine-integrity warnings 3→2 (`.secrets/` backup-sweep candidate no longer flagged). governor-drift and confidentiality-guard unchanged (green, 9th consecutive for the latter). oxford-command-center advanced to HEAD 4fe838f (PR #306, routine lease-snapshot auto-refresh); ora-pm unchanged. enabledPlugins unchanged (5 keys/2 true/3 false) — no drift to attribute. Title-block rev log rolled over per the 4-entry cap (08-14a archived to claude-code-schematic-history.md); per-node keep-2 cap applied to all 8 live-health/fleet nodes (7 prior segments archived). Durable probe-status snapshot written to maintenance/_state/doctrine-status.json. No registry writes, no email, one file edit, one republish.
+
+## 2026-08-27 — CC mirror: stranded lease-snapshot landed via PR #306, main divergence cleared
+
+Gabriel-directed remediation of the 2026-08-27 10:45 ET `ora-command-center-mirror-drift-check` findings (that check is read-only by doctrine; the in-turn instruction overrode it).
+
+**Fixed.** Local `main` was ahead 1 / behind 3. The ahead commit `eb236c4` (lease-snapshot auto-refresh, 138 leases, drift: 1 date-changed) had been stranded unpushed since 08-26 11:30 ET — at 23h it sat one hour under the classifier's 24h `MirrorAheadStaleHours` threshold, so it flagged without escalating. Landed via [PR #306](https://github.com/ZeOoba/oxford-command-center/pull/306) (merge commit `4fe838f`), then local `main` fast-forwarded. Post-state: behind 0 / ahead 0, `aheadFlag.severity = OK`, classifier `verdict: HEALTHY`.
+
+Payload was one file, `data/snapshots/portfolio.json`: one lease renewed (rent $9.27 -> $10.57/SF, expiry 2028-06-30 -> 2031-06-30), cascading +$3,120 NOI and +$39,000 value on that property.
+
+**Pre-landing verification** (all three checked, not assumed): no shrink — all 22 top-level keys present, every collection length identical (leases 138, properties 14, arBalances 44, tasks 115); no stale-parser regression — `eb236c4`'s parent *is* the merge-base `4f2c82a`, so `1c7d17b` (Sepich rent-roll key mapping) and the AR regenerations are all ancestors; conflict-free by construction — zero file overlap, the 3 behind-commits touch only the beacon/classifier scripts. Merged with a **merge commit** deliberately, keeping `eb236c4` a true ancestor so the local checkout resolved by fast-forward — no `reset --hard`, no history rewrite.
+
+**Root cause NOT fixed — will recur.** OI-205: branch protection on CC `main` has `enforce_admins: true` with required checks `gate` + `refute-required` and `strict: true`, so the snapshot writers' auto-push (`ora-lease-snapshot-refresh` v1.5, `ora-cc-snapshot-refresh` v1.2, both auto-push since 08-09/08-11) is rejected and their commits strand locally every run. PR #306 is a one-off manual clear, not a fix. Expect the same FLAG tomorrow.
+
+**Two residual findings.**
+1. The 12:03 ET mirror run failed (`ALARM_SCRIPT_FAILED`, `git fetch origin` 128 / `Recv failure: Connection was reset`) and **no `Send-DeployFailureAlert` email went out** — no send-log entry, no new `data/outbox/` file (newest there is 08-13). The COM send path is not structurally broken: `[ORA Command Center] Mirror deploy FAILED` mails delivered fine on 08-16 and 08-20. So this is a gap in the failure-alert path on this specific throw, worth root-causing.
+2. **Process error, mine.** I created and merged the remediation branch in the *shared checkout* rather than an isolated worktree, contrary to the CLAUDE.md single-writer rule ("claim a worktree, never the shared checkout"). Evidence of the interaction: the failed 12:03 run's beacon recorded `headSha: f63477d` — my feature-branch tip, not `main`. Whether that caused the fetch reset is unproven (a connection reset is network-layer), but the deploy demonstrably read a HEAD it should never have seen. Use `git worktree add` for CC repo work while the hourly mirror task is live.
+
+Recovery verified end-to-end rather than asserted: triggered the native task manually at 12:39:22, ran 7m10s to `rc=0` with `outcome=success` and `headSha 4fe838f` (= main). Claim `oxford-command-center-data` taken for the duration and released.
+
+## 2026-08-26 — Verified: ora-psa-drift-watch fired on its first unobstructed slot — R10-4 loop CLOSED
+
+**Task:** `ora-psa-drift-watch-recheck-0826` (one-time CC/MCP, fired 2026-08-26T18:15:43Z / 14:15 ET). Report-only; no email, no registry writes.
+
+**Result — CONFIRMED.** `list_scheduled_tasks` (live CC/MCP registry) shows `ora-psa-drift-watch` with `"lastRunAt": "2026-08-26T17:50:10.293Z"` = **13:50 ET**, i.e. its `45 13 * * 3` slot plus the registered 267s jitter. `"enabled": true`, `"cronExpression": "45 13 * * 3"` unchanged, `"nextRunAt": "2026-09-02T17:49:27.000Z"`.
+
+**What this closes.** The 2026-08-24 debug session root-caused this task's missing `lastRunAt` to the Gabriel-directed fleet-wide bounded pause (2026-08-17 ~14:50 ET → 2026-08-21 ~17:05 ET), which swallowed its only prior expected fire (Wed 2026-08-19 13:45 ET). That explanation was *inferred*, not *verified* — the Rev 7 retime had still never been exercised. Today's fire exercises it. The retime landed correctly, the task is healthy, and the 08-19 null was purely the pause. No defect, no follow-up.
+
+**Written:** `memory/reference_rev10_efficacy_2026-08-20.md` §1 (R10-4 heading flipped FAIL → CLOSED 2026-08-26, closing note added, frontmatter description destaled) and the MEMORY.md pointer line (its live "re-check 08-26" instruction retired so no future session re-opens it). No other files touched; no commit made (uncommitted sibling-session WIP present in `memory/` — INDEX_markets.md, open-items-tracker.md — left alone per single-writer doctrine).
+
+**Reusable note:** this is the second confirmation that a bounded pause produces nulls indistinguishable from real misses — see [[reference_bounded_pause_voided_overlapping_efficacy_checks_2026-08-21]]. The pattern that worked both times: don't force a verdict inside the pause shadow; schedule a one-time recheck for the first unobstructed slot and let the task prove itself.
+
+Related: 2026-08-24 entry "Debug: ora-psa-drift-watch / ora-open-sessions-board 'misses' — NOT bugs, root-caused".
+
+## 2026-08-25 — `debt_scores` empty-table root cause found: TWO layered causes, one already-frozen by Gabriel's 08-10 ruling
+
+Debugged why `oxford-command-center`'s `debt_scores` warehouse table has 0 rows (flagged in today's `ORA Notion Daily Digest`). Two independent causes, not one:
+
+1. **Never scheduled.** `scripts/debt-scores-snapshot.ts` is the sole production caller of `server/warehouse/debt-scores-persistence.ts`'s `persistDebtScores()`. The code is complete and has already survived multiple adversarial-review rounds (R19a–19g, real bugs fixed) — but it was built as a "manually/scheduled-invokable snapshot action" (its own header comment) and nothing ever registered a scheduled task to run it. Confirmed via grep: zero references to `debt-scores-snapshot` or `persistDebtScores` anywhere under `~/.claude/scheduled-tasks/` or the LAMS fleet, and no `package.json` script entry.
+2. **Even if scheduled, it would refuse every run since 2026-08-16.** Ran the script live (`npx tsx scripts/debt-scores-snapshot.ts`, no `--db`/`--snapshot-date` override, against the real warehouse): exit 1, `REFUSED — the debt book is 'degraded'`. Traced to `warehouse_meta` key `debt_snapshot.last_write_refused`, latched 2026-08-16T18:29:41Z by the shrinkage guard in `server/warehouse/debt-snapshot.ts`: loan `borrower-2203-2207-northwood-dr` "disappeared with no terminal status and no same-property replacement."
+
+**That loan is the exact Northwood/EGFLLC $2.8M loan Gabriel froze in Ruling C, 2026-08-10** ([[project_northwood_egflc_loan_miscategorized_2026-07-27]]) — the warehouse-side echo of the 2026-08-09 unlogged workbook reversal (PSI row 10 zeroed, Loan Index row 24 relabeled "DUPLICATE") reaching the next warehouse debt-snapshot ingest. `debt_scores` staying empty is therefore a **correct downstream consequence of a ruling Gabriel already made**, not a separate defect — clearing the warehouse `degraded` marker (via the book's `confirmAbsent` mechanism) would be adjudicating the exact contested loan status Ruling C deferred to Eric's source document, just through a warehouse side door instead of the workbook.
+
+**Decision, not yet made:** do NOT register `debt-scores-snapshot.ts` as a scheduled task and do NOT clear the warehouse marker until Eric produces the source document and [[project_northwood_egflc_loan_miscategorized_2026-07-27]] is updated. Cross-linked into that memory file's "How to apply" section so the next session investigating either the warehouse gap or the loan freeze finds both halves.
+
+No code changed. `oxford-command-center-data` claim released — investigation only, no write to the repo.
+
+## 2026-08-25 — ORA Notion Daily Digest "Coverage Gaps" (Section D + insurance + DSCR/LTV + CC Daily Brief) resolved by direct verification
+
+Gabriel pasted the Coverage Gaps block from `ORA Notion Daily Digest - 2026-08-25` (Notion `3c76ecd8-9e59-81c4-ab8e-c3ca8289554e`) and asked to fix it. Each item independently re-verified rather than patched as code:
+
+- **Section D title-search miss (Task Guard, IC Memo/Pipeline reconciliation, Deal-Sourcing Scan, Cash Position):** not a search bug — architectural. `ora-task-integrity-guard` ("ORA Task Guard" subject) and `ora-deal-sourcing-scan` are email/database-only and never post to the Notion Ops Hub at all. `ora-ic-memo-pipeline-reconciliation` DOES post today's result, but as an inline `## IC Memo ↔ Pipeline Tracker Reconciliation — 2026-08-25` heading appended directly to the Operations Hub page body (`32b6ecd8...`, confirmed present, 1 GAP found), not as a separate titled child page — a page-title search structurally cannot find it. "Cash Position" in the list is simply wrong: it's `ora-am-brief` Block D, Mondays only; today is Tuesday, so no Cash Position send occurred today at all (last was 2026-08-24, confirmed in send-log.txt).
+- **"\[ORA Command Center\] Daily Brief" not located:** confirmed architectural, not a miss — `oxford-command-center/server/brief/run.ts` has no Notion-page-creation call; this brief is email-only. (The distinct `Daily Brief — 2026-08-25` Notion page that does exist under Ops Hub belongs to `ora-am-brief`'s own "ORA Daily Brief," a different send.)
+- **DSCR/LTV governor figures:** confirmed independently via direct SQLite query of `oxford-command-center/data/warehouse/finance.sqlite` — `debt_scores` is genuinely 0 rows (vs. `debt_positions` 59 rows populated). The scoring/persistence step that should derive `debt_scores` from `debt_positions` has never written to it. Not fixed here (governor-adjacent financial code, Hard Invariant 4) — flagged as a real gap, not a stale caveat.
+- **Insurance — re-verified against the live warehouse:** still the same 5 properties as 08-24's `🛡️ Insurance Renewal Monitor — 2026-08-24` (Notion `3c66ecd8-9e59-81e7-9f5a-f731feceb525`), confirmed via direct query of `property_insurance_policies` today — EXPIRED (unverifiable, no declarations on file, 3rd consecutive run): 1100 Rarig Ave (159d lapsed) and Easton Technology Center POA (142d lapsed); RENEW NOW: 3034 Westerville Rd (24d), 1900 N Broadway UFX+BCL (2d, 2026-27 term already bound — no real gap), 9050 Red Branch/Muirkirk PCKG+BCL (6d — highest priority, collateral for the NorthMarq/Symetra $1,322,139.74 loan, Oxford 50% share). Nothing changed since 08-24 beyond ordinary day-count decrement.
+
+No code changes made — this was a verification pass, not a bug fix. Worth a future systematization candidate: the digest's Section D title-search should account for inline-Hub-page producers vs. dedicated-child-page producers as two distinct classes rather than treating every producer as a searchable page.
+
+## 2026-08-24 -- register-scheduled-task v2.17 installed (Save-skill click confirmed)
+
+Gabriel clicked Save skill in Cowork for `register-scheduled-task` v2.17 (ora-skills commit `d9e3708` -- ONE-TIME EFFICACY-CHECK CHECK added to the Bounded pause section, closing the 2026-08-21 pm-ledger-efficacy doctrine gap, ratified same day). Confirmed installed, not just committed: Local `main.log` shows `[SkillsPlugin] Triggered sync (5s delay)` -> `Delta: 1 to download, 0 to remove` -> `Sync complete: 1 downloaded, 0 failed` at 2026-08-24 19:24:19-20 ET, matching to the second the runtime cache directory's CreationTime (19:24:20.366) for the skills-plugin `register-scheduled-task` folder. Cache SKILL.md content verified byte-matching the repo's v2.17. PENDING_REIMPORT.md entry cleared.
+
+## 2026-08-24 -- register-scheduled-task v2.17 reimported (Save-skill click)
+
+**Skill:** register-scheduled-task
+**Version:** v2.17 (one-time efficacy-check check for bounded pauses; ratified by Gabriel 2026-08-24)
+**Repo commit:** d9e3708b253f93ce8a485c2c3e5bba592583d20b
+**Action:** package-and-stage-skill Entry point A -- packaged via `tools\package_skills.py`
+(2 entries: SKILL.md, references/incident-history.md; description 972/1024 chars OK),
+staged to session outputs, surfaced via `present_files`, installed by Gabriel's
+**Save-skill click** in Cowork (confirmed by user message "saved").
+
+**Install confirmation (not just the repo commit):**
+- Cache dir CreationTime moved 2026-08-24 13:17:27 (pre-click baseline) -> 19:24:20
+  (post-click), all files sharing the new CreationTime -- directory was torn down and
+  recreated, ruling out a mere `sync_appdata_mirror.py` mirror overwrite.
+- `%LOCALAPPDATA%\Claude\Logs\main.log` corroborates to the second: `19:24:14 Triggered
+  sync (5s delay)` -> `19:24:20 Delta: 1 to download` -> `19:24:20 Sync complete: 1
+  downloaded, 0 failed`, exact-second match to the CreationTime move.
+- Post-install cache file set (SKILL.md, references/incident-history.md) matches the
+  packaged `.skill` entry list exactly.
+
+PENDING_REIMPORT.md entry cleared same session.
+
+## 2026-08-24 — governor-drift-probe eval-harness false positive: duplicate-fix collision resolved, regex approach reverted in favor of path exemption
+
+Follow-up to the deploy-gate token fix earlier today: while landing that fix, a production push separately got blocked by a governor-drift-probe.py false positive — an ora-acquisition-underwriting-eval-harness scheduled-poll run's floor-verdict prose ("DSCR floor PASSES (~1.42x at 65%-LTV-bound refi sizing)") was misread as a governor redeclaration, already overridden twice by two distinct sessions in 24h.
+
+**First pass:** built a narrow, structurally-anchored regex suppressor (`RE_DSCR_FLOOR_VERDICT_NOCANON`, ~250 lines across `maintenance/governor-drift-probe.py` + `maintenance/test-governor-drift-probe.py`), root-caused precisely against the actual source and the file's existing suppression conventions. Three rounds of independent Fable-tier adversarial review (two rounds found and closed real false-negative regressions — a ratification-verb gap and a same-line-recurrence gap, plus two lower-severity fixes) before landing at `6b888d3` (merged to `main` via `b820d10`, pushed, verified — the pre-push doctrine gate's own hook-tests-gate ran clean with no override needed, confirming the fix worked in its real invocation context).
+
+**Duplicate-work collision discovered:** immediately after landing, found another concurrent session had independently fixed the *identical* incident (same trigger line cited verbatim in their own commit message) via a fundamentally different approach — a blanket path-based exemption (`_is_eval_harness_run_log`, ~30 lines) excluding the whole `.../acquisition-underwriting-eval-harness/runs/*.json` path from scanning entirely, on the reasoning that this file class is machine-generated downstream result narration, never a governor source of truth, and that regex suppression is empirically a losing game against unpredictable per-run LLM phrasing. Same collision class as the 2026-08-22 DSCR-changelog-scaling-multiplier incident (3+ sessions independently fixing the same false positive) — see `project_governor_drift_probe_dscr_scaling_multiplier_fix_2026-08-22.md`.
+
+**Gabriel's call, given the recommendation:** adopt the path-exemption approach as the durable fix. The empirical case is strong — this was the *second* narrow regex suppressor built for this exact recurring false-positive class (the first, `ba831dc`, ~220 lines/4 review rounds, was bypassed by new LLM phrasing within 24h; the regex fix built today would have faced the identical risk from the next scheduled run). Did not touch the other session's work while it was still staged/uncommitted (single-writer discipline — exactly the scenario the 08-22 incident's own memory note warns about); waited for it to land as a real commit (`1b5ab70`) and merge into `origin/main` before acting.
+
+**Resolution:** reverted the regex-based fix (`git revert 6b888d3`, clean auto-merge — the two fixes touch disjoint regions of the file) once `1b5ab70` was confirmed merged and independently verified to cover the original incident on its own. Reviewed (Fable-tier, recorded via `eos-review-gate.py`, key `33c21fd48782`): revert is a clean, exact inverse of the original commit, the path-exemption fix and its own tests are fully untouched, full suite green. Landed as `144f7bf` on `main` (pushed, verified — pre-push doctrine gate clean, 98/98 hook tests, no override needed).
+
+**Net state:** `governor-drift-probe.py` now has exactly one fix for this incident (the path exemption), not two coexisting mechanisms where one is dead code. Per-line drift detection is strictly unweakened everywhere outside the exempted path — the revert narrows scope to exactly the ratified exemption, nothing more.
+
+## 2026-08-24 — Open-sessions board: "Cricket DC LLC lease addendum" closed
+
+Session `local_171c2681-60c1-4191-ad9a-fb9d72121b03` (Cowork, ~10d stale) had specced a lease-addendum skill build (MINIMAL AMENDMENT doctrine, 4 modules, 7-state recordation overlay, 16-check QC gate, guaranty exhibit for substitutions) plus tombstoning document-assembly's Template 6 and adding a CLAUDE.md tie-break, both in the same commit. Re-verified live: already fully shipped. `ora-skills/lease-addendum` exists (SKILL.md v1.0 + references/scripts/templates/tests), built via commit c29471e "feat: add lease-addendum skill; tombstone document-assembly Template 6". document-assembly's own v1.4 changelog confirms the Template 6 tombstone with matching gap analysis (novation consent / security-deposit disposition / insurance reissuance / notice addresses). CLAUDE.md's Skill tie-breaks section already carries the routing rule. Gabriel: close it out. No further action.
+
+## 2026-08-24 — Open-sessions board: "Fix governor-drift-probe DSCR/LTV false positive" closed
+
+Session `local_9b2a3fb7-bd95-4946-b313-7a1c2dcae20e` couldn't reach an unreachable peer session it believed was concurrently editing the same dscr_veto/refi-sizing suppression machinery in governor-drift-probe.py, and stalled on whether to merge. Re-verified live: no conflict ever materialized. Both change sets (this session's 3 fixes -- v4.13 DSCR/LTV false positive e15a2c0, memory-narrative exemptions de509c8/85e64c3, hooks/sessions prune ff1158a -- and the peer's eval-harness floor-result fix ba831dc) landed via efcd876, a 45-commit merge of feat/model-canary-probe-step25 into main on 2026-08-23 17:32, in the window this session was active. A further hardening commit (1b5ab70, path-exemption for a third recurrence) landed cleanly afterward on 2026-08-24 14:34 with no conflict. No conflict markers in the file, no dangling active-work claim referencing it. Gabriel: close it out. No further action.
+
+## 2026-08-24 — Open-sessions board: "Dirty triage" (oxford-command-center) closed
+
+Session `local_e2bc42b3-f1b0-4321-853e-e893fe77dc8f` flagged a merge conflict between local commits (9cb6169 DSCR fix, ead629d cc-audit-army batch, plus a local doc revision) and PR #287's insurance-premium-history-import feature, same design-spec doc path diverged. Re-verified live: already resolved by another session — main (43d685c) matches origin/main exactly, git status clean, merge commit a77cd19 "Merge origin/main into local main" landed both local commits and PR #287's doc version (472c5f1, 95 lines) cleanly. The local-only doc draft no longer exists anywhere reachable (checked jolly-vaughan-931fba worktree: byte-identical to main; integrity-sweep-fixes worktree: pruned). Gabriel: "Close it out." No further action.
+
+## 2026-08-24 — 3700 Kinsman Blvd (FedEx): Notion Stage corrected to Candidate; 8/25 walk-price deadline confirmed controlling
+
+Gabriel's final ruling on the open-sessions board follow-up: Notion Stage corrected from "Passed" to **Candidate** (matches every other actively-negotiated deal in the tracker). On the two conflicting deadlines surfaced by reconciliation (8/25 walk-price-breach decision vs. 8/27 underwrite-pass deadline cited by the counteroffer-analysis session): **8/25 controls**. Notion page `3c06ecd8-9e59-813f-9679-e2905c34a488` updated live via notion-update-page. projects.md Active deal pipeline row and deal-decision-ledger.md's corrective row (2026-08-24) both stand as written; this entry closes the loop opened earlier today by the deal-stage reconciler's tripwire.
+
+## 2026-08-24 — 3700 Kinsman Blvd (FedEx): Gabriel ruled Notion's "Passed" stage WRONG
+
+Open-sessions board flagged the deal-stage reconciler's tripwire (Notion Stage → Passed, no matching decision found, conflicting with a live same-day counteroffer-analysis session and the open walk-price-breach item). Gabriel's ruling on the board: "Passed not correct" — the deal remains active. Notion's Stage field itself was NOT corrected by this session (no confirmed replacement value — see open question). deal-decision-ledger.md's 2026-08-24 Kinsman row is superseded by a new corrective row rather than edited, per the ledger's append-only convention. projects.md's Active deal pipeline table did not carry this deal at all (last verified 2026-08-11, predates the re-engagement) — added as an ACTIVE row reflecting the live Matthews REIS counteroffer ($4,075,000, 8/27 deadline) and the still-open walk-price-breach decision.
+
+## 2026-08-24 — Deal-stage sync: 3700 Kinsman Blvd — Madison WI (FedEx) — (none) → Passed (Notion)
+
+Detected by ora-open-sessions-board's reconciliation step; no corresponding entry existed. Tripwire only — see Notion for the actual decision context.
+
+**Flagged as a live conflict, not a routine sync:** Notion Stage already reads "Passed," but a Cowork session active 0.9h before this run ("3700 Kinsman counteroffer analysis") is treating the deal as live — Matthews REIS sent a Multiple Counteroffer 8/24/2026 ($4,075,000 purchase price), and that session's own text cites an 8/27 deadline for a formal SCREEN/UNDERWRITE pass, not a closed decision. This also conflicts with MEMORY.md's `project_fedex_kinsman_walk_price_breach_2026-08-23.md` entry, which frames the walk-price decision as due 2026-08-25 with the drafted $3.8M LOI breaching 3 underwriting floors (walk $2,661,000) — still open, not resolved. Someone or something set Notion's Stage to Passed without a matching narrative anywhere reachable from this run. Surfaced on today's open-sessions board as a QUESTIONS FOR GABRIEL item rather than accepted as a clean transition.
 
 ## 2026-08-24 — t1_letter_format.py: plain-mode top margin folded into the module (page_for_mode())
 
@@ -390,1155 +636,7 @@ Pushed directly as `main-merge-temp:main` after confirming `origin/main` hadn't 
 
 Not yet done: this merge doesn't retroactively update the shared `~/.claude` checkout's branch (still on `feat/model-canary-probe-step25` — untouched by design, other sessions may be mid-work there) or any other local branch/worktree tracking main.
 
-## 2026-08-23 — Dirty-tree triage across 4 shared checkouts; one isolated commit (website-canonical)
-
-- Ran dirty-tree-triage across `~/.claude`, `ora-skills`, `website-canonical`, `oxford-command-center`. `~/.claude` (7 dirty entries, branch `feat/model-canary-probe-step25`) and `ora-skills` (2 untracked `_archive/` dirs dated 2026-08-22) were both CONTESTED — attributed to the live "ORA Doctrine Patch Bundle v01" session (`local_a1ce8288…`, isRunning:true at scan time) — left untouched per the skill's contested-WIP boundary; no claim filed since nothing was touched.
-- `website-canonical`: one modified file (`netlify/edge-functions/knowledge-base.json`, `generatedAt` timestamp-only regen, zero content diff, no live-session attribution) isolated-committed on Gabriel's explicit confirmation. The site-write gate fired on the commit; override token `allow-website-write` was written with Gabriel's in-turn confirmation quoted as the reason, used, and deleted immediately after the commit landed (`19a516c`).
-- Pushed `19a516c` to `origin/main` on Gabriel's explicit instruction. Verified via Netlify: deploy `6a8b4f30…`, state `ready`, context `production`, published 2026-08-23T19:51:33Z, `commit_ref` matches `19a516c` exactly, secret scan clean (226 files, 0 matches), Lighthouse 97/100/100/100. Diff vs the prior prod deploy (`fde9328`) confirmed as exactly the one-field timestamp change — nothing else shipped.
-- Flagged, not resolved (out of this skill's scope): `~/.claude`'s `feat/model-canary-probe-step25` branch has diverged from `origin/main` (5 local commits since merge-base `801f9831c`, 3 remote-only commits #148-150); `oxford-command-center` `main` is ahead 4 / behind 1 vs `origin/main`. Both need a real merge decision from Gabriel, not triage.
-
-## 2026-08-23 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
-
-- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `8b55e671-b71b-440b-9702-2d4841b9bd71` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
-- Reason recorded in the token: Gabriel explicitly authorized ("Override and push now") after confirming via AskUserQuestion that the maintenance/test-governor-drift-probe.py failure is pre-existing and unrelated to this push -- the push's diff is scoped to exactly one file (memory/event_log.md, an append-only log), and the failure reads DSCR/LTV values from ora-skills/acquisition-underwriting-eval-harness/runs/2026-08-23T171623Z_scheduled-poll.json, a file in a different repo untouched by this commit. Hook itself noted the identical failure was already overridden 3 times by 2 distinct sessions in the prior 24h.
-- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-08-23 13:56:37 local.
-
-## 2026-08-23 — Duplicate acquisition-underwriting skill registration — Cowork-surface investigation (blocked at Settings)
-
-Follow-up to the same-day duplicate-registration thread (event_log.md, "duplicate" + "acquisition-underwriting"). Tested from Cowork, per instruction, whether this surface has a legitimate first-party path to Settings > Capabilities > Skills, distinct from the generic computer-use MCP that a prior Code-surface session had refused outright.
-
-Result: no such path exists. computer_resolve_access(apps=["Claude"]) — the first-party pre-check before any computer-use request — returned apps:[] with "No requested app could be resolved on this device," no policyDenied/userDenied entries populated. Claude's own window is not resolvable as a controllable target at all. Functionally equivalent to the Code-surface's explicit self-window refusal, now confirmed cross-surface. Stopped per instruction: no retry, no registry-JSON edit, no scripted API call.
-
-ListSkills (read-only, not Settings UI) independently reconfirmed both ids still present and enabled as of this check: skill_01Bfw31cAN8cY73Fojo67rgq and skill_012DJmjQBkLtQtfu6We1owXx, both named "acquisition-underwriting," byte-identical descriptions. No install/created-date or other distinguishing field is exposed by this tool — that data, if it exists, is Settings-UI-only and remains unobserved.
-
-skill_01Bfw31cAN8cY73Fojo67rgq (inferred-newer) was NOT disabled — Step 3 unreachable given the above. No files, no skill state, no registration touched.
-
-Logging note: this Cowork session could not reach event_log.md or append-event-log.py directly — both are outside the OneDrive Claude_Workspace connected root (confirmed via device_list_dir: "not inside a folder connected to Cowork on this device"). Entry prepared and handed back to Gabriel for append via append-event-log.py --entry-file from a session with that path connected.
-
-Status: CLOSED for this investigation angle. Confirmed cross-surface (Code + Cowork): resolving this specific duplicate requires Gabriel's manual disable click in Settings > Capabilities > Skills on skill_01Bfw31cAN8cY73Fojo67rgq. No further Claude-session attempts should be made against this without a new instruction.
-
-## 2026-08-22 -- governor-drift-probe.py: last 6 pre-existing false positives closed, probe fully clean (commits de509c8, ff1158a, 85e64c3)
-
-Follow-up to the v4.13-changelog fix (e15a2c0, earlier tonight). That fix left 6 pre-existing,
-unrelated findings failing `test_event_log_excluded_e2e` / `test_active_work_claims_excluded_e2e`
--- confirmed via git-stash differential to predate the v4.13 fix. Gabriel asked for these fixed too.
-
-**Not lost work -- an unmerged branch.** Investigation found `fix/governor-drift-probe-ltv-
-narrative-fp` (pushed to origin, not merged into this branch) already carried two independently-
-reviewed, approved commits covering 5 of the 6 findings:
-- `860e508` -- exact-filename exemption for `memory/reference_concurrent_session_duplicate_
-  hardening_work.md` (quotes another session's own bug title in narrative prose)
-- `3e048c1` -- adds `"sessions"` to `_PRUNE_EXACT`, excluding `hooks/sessions/**` (ephemeral
-  per-session review-artifact `notes` fields legitimately quote drift-sounding text, same class as
-  the already-pruned `hooks/active-work/*.json`)
-
-**Claim collision surfaced correctly.** `claim_work.py claim` flagged a LIVE claim (session
-`8fc887ef`, slug `repo-housekeeping`) covering the exact same root-cause fix, claimed ~1 minute
-earlier. Gabriel chose "take over now" (already had the exact commits identified and reviewed) --
-force-claimed, cherry-picked `860e508` + `3e048c1` cleanly (both auto-merged with this session's
-own v4.13 fix, no conflicts).
-
-**6th finding, not covered by that branch:** `memory/INDEX_projects_system.md:59` -- the
-"Projects & system" sub-index split out of MEMORY.md (already exempted), same narrative-pointer
-class. Added exact-filename exemption (`85e64c3`), independently reviewed (claude-fable-5,
-approved) and recorded via `eos-review-gate.py --record`.
-
-**Result:** `python governor-drift-probe.py --quiet` against the live tree now exits 0, zero
-findings. `python test-governor-drift-probe.py` prints "ALL GOVERNOR-PROBE TESTS PASS" -- 99/99,
-no skips, both previously-failing e2e tests genuinely pass rather than being worked around.
-
-Work claim `governor-drift-probe-cherry-pick` released on completion. Session 8fc887ef's
-`repo-housekeeping` claim on these same files may now be stale/redundant -- worth a quick check
-with that session before it does duplicate work on an already-clean probe.
-
-## 2026-08-23 — ora-task-integrity-guard resurrected the archived ora-passed-deal-tracker LAMS folder (pending step 2/2 bit us)
-
-- Daily 07:05 ET run of ora-task-integrity-guard found `restored[]` and `id_collisions[]` non-empty for `ora-passed-deal-tracker` — the first real alarm from this guard since it was restored 2026-07-07. Alarm email sent to ggoldberg@oxfordra.net (subject "ORA Task Guard - 2026-08-23: 1 restored, 1 id-collision").
-- Root cause: the LAMS/Cowork half of ora-passed-deal-tracker's 2026-08-15 move to CC/MCP was archived on disk 2026-08-22 (step 1/2), but its LAMS registry row was never dropped (step 2/2, which requires `delete_scheduled_task` from a native on-device Cowork session — not reachable from Claude Code). Because the registry still points to `OneDrive...\Documents\Claude\Scheduled\ora-passed-deal-tracker\SKILL.md`, guard.ps1 treated the file as a registered-but-missing task folder and restored a surviving copy there — recreating the archived folder with STALE content (4,775 bytes, 2026-08-05 vintage) instead of the current CC/MCP canonical (25,288 bytes, 2026-08-16).
-- CC/MCP canonical copy is untouched and still authoritative; this only affected the LAMS-side artifact that was supposed to be gone.
-- OPEN: (1) complete the pending LAMS `delete_scheduled_task` for ora-passed-deal-tracker from a native on-device Cowork session; (2) once that registry row is dropped, delete or re-archive the resurrected stale folder at the LAMS OneDrive path — until then, guard.ps1 will keep re-restoring it daily.
-- General lesson: a "step 1/2 done, step 2/2 pending" cross-fleet retirement is not inert while pending — guard.ps1's restore engine will actively resurrect an archived-but-still-registered folder on the very next run. Worth checking whether any OTHER task currently sits in that same half-retired state before it produces the same surprise.
-
-## 2026-08-22 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
-
-- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `8fc887ef-c665-4e49-9778-69aa26c165e6` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
-- Reason recorded in the token: Gabriel explicitly instructed pushing commit 0ea5016 (same branch, immediately after authorizing the identical override for 6fb2848/5113054 moments earlier). Same pre-existing test_event_log_excluded_e2e governor-drift-probe false positive, unrelated to 0ea5016's content (a modified: stamp fix).
-- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-08-22 22:57:11 local.
-
-## 2026-08-22 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
-
-- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `8fc887ef-c665-4e49-9778-69aa26c165e6` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
-- Reason recorded in the token: Gabriel explicitly authorized pushing despite the known, pre-existing test_event_log_excluded_e2e governor-drift-probe false positive (7 findings, none in files I touched -- INDEX_projects_system.md, reference_concurrent_session_duplicate_hardening_work.md, hooks/sessions/*/reviews/*.json). Already overridden 6x by other sessions in 24h; unrelated to my event_log.md commits (6fb2848, 5113054).
-- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-08-22 22:44:56 local.
-
-## 2026-08-22 -- AAOS repo has no worktree isolation: concurrent-session collision on shared checkout (PR #3)
-
-**OPEN ITEM.** While cherry-picking a misplaced commit (`281026e`, landed by mistake on
-`docs/architecture-diagram-refresh`) onto a clean `fix/handoff-registration-doctrine-check`
-branch, a different concurrent session wrote directly into the same shared, non-worktree-isolated
-checkout at `C:\Users\Owner\AAOS`. It ran `git reset --hard origin/docs/architecture-diagram-refresh`
-then re-cherry-picked `281026e` onto the wrong base and pushed the result to
-`origin/fix/handoff-registration-doctrine-check` -- all mid-sequence, with none of those commands
-issued by this session. Caught via `git reflog show <branch>` showing a `reset`/`cherry-pick`
-entry this session never made, plus a remote-tracking branch that existed before this session ever
-pushed. No data was lost (the correct commit was recoverable from reflog), but the pushed branch
-briefly carried an unrelated docs commit into what should have been a minimal fix, and the recovery
-required deleting + recreating the remote branch (`git push --force-with-lease` was itself blocked
-by the permission layer, unrelated to this finding).
-
-**Why it happened:** AAOS already uses `git worktree` for at least one line of work
-(`feature/notion-post-wire` -> `C:/Users/Owner/AAOS-worktrees/notion-post`), but the primary
-checkout `C:\Users\Owner\AAOS` itself is not worktree-isolated, so any session operating "in AAOS"
-by default shares one working tree, index, and HEAD with every other session doing the same --
-the same class of hazard the `~/.claude`/`ora-skills`/`website-canonical`/`oxford-command-center`
-single-writer doctrine exists to prevent, just for a repo not on that roster.
-
-**Recommendation (not yet actioned):** either (a) add AAOS to the shared-checkout single-writer
-roster (claim-before-edit via the existing `claim_work.py` pattern or equivalent), or (b) make
-worktree-per-task the default entry point for AAOS work (mirroring `notion-post`), so concurrent
-sessions land in isolated trees instead of racing on `C:\Users\Owner\AAOS` directly. Flagged for
-the next `ora-setup-audit` pass rather than actioned ad hoc.
-
-## 2026-08-22 -- governor-drift-probe.py false-positive fix: DSCR rate-tier label + unpaired 65% LTV reaffirmation (commit e15a2c0)
-
-Fixed the recurring `test_acquisition_underwriting_skill_file_clean` failure that had blocked
-`git-prepush-doctrine-gate.py` and been overridden via allow-hook-test-failure tokens by 6
-distinct sessions in the prior 24h, per the gate's own warning text. Human-authorized override
-this session (2026-08-22) confirmed both findings against acquisition-underwriting SKILL.md v4.13
-(line 15) were false positives, not real governor drift.
-
-**Root cause 1 (DSCR):** the hyphenated rate-tier bucket label
-"stabilized-multi-tenant-≥1.40x" was read as a DSCR governor restatement by `RE_DSCR_DECL`
-(bare comparator+x match, no subject awareness). The intended suppressors
-(`_refi_qualified`/`_stabilization_qualified`) exist for exactly this shape, but their veto check
-scans the WHOLE LINE for "per-property" (`STAB_GOV_MARKERS`/`ACQ_GOV_MARKERS`), so an unrelated,
-correct "per-property" restatement elsewhere in the same dense paragraph vetoed the suppression by
-accident.
-
-**Root cause 2 (LTV):** "65% LTV ceiling" mentioned mid-sentence with no "per-property" token in
-the same clause was flagged as aggregate-governor drift (65 != canonical 40), even though the
-line's own closing sentence reaffirms the ratified "per-property LTV 65% / portfolio-aggregate LTV
-40%" pairing. The existing pairing suppressor (`_perprop_portfolio_paired_veto_spans`) only
-recognizes the pairing when both members sit close together on one match -- it doesn't reach a
-different, earlier mention of the same 65% figure elsewhere on the line.
-
-**Fix 1:** new `RE_DSCR_TIER_LABEL` (hyphen-glued label + comparator + x, refi-gated) feeds the
-existing `dscr_veto` / `_governor_declared_nearby` machinery -- reuses the PROXIMITY-scoped veto
-instead of the whole-line one, so a real drift dressed in the same shape still flags.
-
-**Fix 2:** new `_line_reaffirms_ratified_ltv_pair` (line-wide, companion-anchored, value-locked to
-65) plus `_aggregate_ltv_declared_in_clause` (clause-bounded aggregate/portfolio veto, added after
-independent review caught that the first version could mask a REAL aggregate-governor drift to 65%
-on a partial-edit line quoting the old pairing alongside a wrong new figure).
-
-Independently reviewed (claude-fable-5, two passes, both APPROVED) per Gabriel's 2026-07-24
-financial/governor-code review policy -- verdict recorded via `eos-review-gate.py --record`
-(key `f1b163fc...`). 7 new regression tests pin both real phrasings verbatim (quoting SKILL.md
-line 15 directly) plus 5 anti-blinding cases. Full suite: 93/93 passing.
-
-**Separately flagged, NOT fixed here (out of scope):** the full-tree e2e tests
-(`test_event_log_excluded_e2e`, `test_active_work_claims_excluded_e2e`) still fail on 6
-pre-existing, unrelated findings -- `memory/INDEX_projects_system.md:59`,
-`memory/reference_concurrent_session_duplicate_hardening_work.md:85`, and 4 review-artifact JSONs
-under `hooks/sessions/*/reviews/`. Confirmed via git-stash differential to predate this change.
-Review artifacts under `hooks/sessions/d33391a0-.../reviews/` (timestamps 13:16-13:49) reference
-"two related governor-drift-probe.py false-positive fixes, both independently reviewed" for the
-`reference_concurrent_session_duplicate_hardening_work.md:85` finding specifically -- that work was
-apparently reviewed and approved but never landed in this checkout (no matching commit exists, and
-`governor-drift-probe.py`/`test-governor-drift-probe.py` had zero uncommitted changes when this
-session started). Possible lost work from another session -- worth surfacing to Gabriel rather than
-silently re-doing or ignoring.
-
-## 2026-08-22 -- Save-skill click confirmed: model-bulk-edit v1.1 (memory-defect fix)
-
-Fourth and final install of the refi-rate-rebase session. Confirmed on the full evidence
-chain, the cleanest of the four:
-
-- Cache directory CreationTime moved 20:41:28 (v1.0) -> **2026-08-22 20:55:26**.
-- Local `main.log` shows `Sync complete: 1 downloaded, 0 failed` at **exactly 20:55:26** --
-  an exact-second match to the CreationTime move. First-hand, skill-specific proof per the
-  v1.24 correlation rule; rules out the mirror-sync-hook explanation entirely.
-- 2 files in cache, matching the packaged .skill's 2 entries, INCLUDING
-  `scripts/cached_value_lint.py` -- the subfolder survived, reconfirming the Cowork install
-  path handles multi-file packages correctly.
-- Cached script carries 3 occurrences of `read_only=True`; cached SKILL.md carries the v1.1
-  changelog entry at line 144.
-- SHA256 of the cached script vs the repo copy, CRLF->LF normalized: **MATCH**
-  (13870e9333cd84f8...).
-
-PENDING_REIMPORT line cleared.
-
-**What v1.1 fixed, recorded because it was a defect this session shipped and then had to
-repair on the same machine it broke.** v1.0's `cached_value_lint.py` opened each workbook
-twice in openpyxl's default full-object-tree mode and held both trees. Run across the
-Business tree it reached 9.1 GB RSS, exhausted the paging file, and caused an unrelated
-PowerShell invocation to fail with `0x800705AF`; the process was killed by PID (40816).
-v1.1 passes `read_only=True` on both loads and streams the sheets in lockstep via `zip()`
-with a per-file `gc.collect()`: measured peak 48 MB, ~190x reduction. The lesson worth
-carrying: a read-only audit script is not automatically a safe script, and "it only reads"
-is not a resource argument.
-
-**STILL OPEN after this session, both recorded so nothing reads as finished that isn't:**
-
-1. **The portfolio-wide cached-value sweep has never completed.** v1.1 is verified working
-   at small scale but has not been run to completion over `Business`. The only DEAD finding
-   on record remains `ORA_UnderwritingModel_125DouglasPike_v2.0.xlsx` (nulls at Returns!B37
-   and Sensitivity!B17, since repaired by the Excel COM rebase). Nothing else is audited.
-   Run from a plain terminal, not a detached launcher:
-   `python "C:\Users\Owner\ora-skills\model-bulk-edit\scripts\cached_value_lint.py" "C:\Users\Owner\OneDrive - Oxford Capital Partners\Business" --quiet`
-   Sanity-check the reported workbook count before trusting the verdict -- an argument-
-   quoting error silently walks the wrong root and prints a confident tiny number.
-
-2. **Duplicate `acquisition-underwriting` registration is UNRESOLVED and still firing.**
-   As of 20:55:52 the desktop app is still logging, on every sync:
-   `[warn] [SkillsPlugin] Remote skill "acquisition-underwriting" maps to the same directory
-   as an earlier remote skill, skipping`
-   Two enabled registrations exist (skill_012DJmjQBkLtQtfu6We1owXx and
-   skill_01Ukeyw2g9c99nVdsSpnTiyr); one is skipped every time. Needs manual removal in
-   Settings -> Capabilities -- a session cannot delete a registry entry.
-
-## 2026-08-22 — Cowork session review: 4 workflow-observation fixes (2 already landed by a concurrent session, 1 trimmed)
-
-Dispatched to close 4 fixes surfaced during a Cowork session review: a probe existence-check gap, a doctrine-only assertion with no machine check, a skill-version/changelog drift class, and a terseness WARN. Pre-flight checks against ground truth found 2 of the 4 already done by a concurrent session before this pass started -- not assumed, verified with tests.
-
-**1. `registry-membership-probe.py` ORPHANED_FILEPATH -- already landed, verified.** Found already committed on `main` at `52d0605` (Gabriel's own session, same evening, before this pass began). Flags any registry entry -- enabled or disabled -- whose `filePath` no longer resolves on disk, as a distinct `[ACTION] ORPHANED_FILEPATH` category appended to the existing log-line/print format (not folded into `task-folder-registration-probe.py`'s enabled-only `ORPHANED_REGISTRATION`). Closes exactly the gap that let the `ora-passed-deal-tracker` half-executed retirement (item 4 below) go uncaught. 54/54 `test-registry-membership-probe.py` tests pass.
-
-**2. Handoff brief `list_scheduled_tasks` machine check -- found in-flight, escalated, landed by a concurrent session.** The brief asked for a 2-line preamble on `AAOS/templates/handoff.template.json` + `handoff.schema.json`. Found instead a much larger implementation already staged uncommitted in `C:\Users\Owner\AAOS` (separate repo from `~/.claude`) -- a full `check_registration_doctrine()` in `tools/validate.py`, a schema `$comment`, and new tests -- sitting on the wrong branch (`docs/architecture-diagram-refresh`, unrelated/already-pushed docs work). Surfaced the scope conflict to Gabriel via AskUserQuestion rather than unilaterally committing someone else's unreviewed WIP or discarding it; Gabriel chose to commit the fuller version. Before that commit could be made, a concurrent session landed it independently as `281026e` ("feat(validate): reject a handoff that JSON-splices via list_scheduled_tasks") -- adversarially hardened past the version seen minutes earlier (fixed-window scan replacing sentence-splitting, word-boundary matching; an independent claude-fable-5 review pass had found 2 real defects in the first draft). 225/225 AAOS tests pass, re-verified directly (`python -m unittest discover -s tests`). `handoff.template.json` itself deliberately NOT touched -- it's a schema-validated data instance with `additionalProperties: false`, so a comment field there would fail its own schema. No other handoff-brief template exists in `register-scheduled-task` SKILL.md or the superpowers specs (grepped both; the specs' "handoff" hits are all the unrelated `/handoff` RAM-reclaim command).
-
-**Resolved:** commit `281026e` was relocated off `docs/architecture-diagram-refresh` per the spawned follow-up (`task_75c7eb8d`, run by Gabriel in a separate local session) -- now `e862b52` on branch `fix/handoff-registration-doctrine-check` (differs from `281026e` by one unrelated README.md line), pushed and up to date with `origin`, PR #3 open ("Reject a handoff that JSON-splices via list_scheduled_tasks").
-
-**3. Skill frontmatter-version vs. changelog-version drift -- already landed, verified.** Also part of `52d0605`: new Check 15 in `doctrine-integrity-probe.py`, following `reference_skill_description_version_extraction_gotcha.md`'s extraction rule (body H1 heading version marker first, frontmatter-description fallback only when no H1 marker exists) against the changelog's numerically-highest bullet version (ordering-agnostic by design -- catches `communication-intelligence`'s oldest-first changelog without a false positive). 77/77 `test-doctrine-integrity-probe.py` tests pass, directly re-run against `52d0605` -- corrects the commit message's own "227" figure, which an independent review pass caught as unverifiable (the script prints no such total; 227 matches neither the PASS-line count nor the assert count).
-
-**4. `session-context.md` `ora-passed-deal-tracker` bullet trimmed 123 -> 44 words.** Confirmed via `event_log.md`'s existing 2026-08-22 entries ("LAMS retirement: step 1 (ARCHIVE) EXECUTED; step 2 (DEREGISTER) still blocked" and its RATIFIED predecessor) that all the narrative detail -- SHA256 hashes, archive paths, blocked-step reasoning -- was already captured here, so nothing needed moving; only the session-context.md bullet needed cutting down to task/status/next-action + a pointer. Confirmed the "step 2" gating language in the brief meant step 2 of THIS 4-item punch list (the handoff check, item 2 above), not the tracker's own "step 2 of 2" registry-drop -- the brief's instruction to verify rather than guess was correct to include, since at read time item 2 had not yet landed and did so mid-investigation. New bullet verified under `doctrine-integrity-probe.py`'s 80-word terseness cap (Check 10); a live probe run against the file shows no bullet-length WARN. `session-context.md` is git-untracked by design (`.gitignore:12`), so this edit carried no commit/merge risk despite briefly landing directly in the shared checkout instead of the isolated worktree opened for this pass (harmless here; noted for next time).
-
-**Process:** claimed `repo-housekeeping` via `claim_work.py` before touching anything, opened an isolated worktree for the git-tracked `~/.claude` files (`fix/cowork-review-observations-08-22`, off `main`), found it unneeded once items 1/3 turned out already on `main` and item 4's file is untracked, released the claim and removed the worktree clean.
-
-## 2026-08-22 — Investigated: duplicate "acquisition-underwriting" skill registration (flagged 3x this session by prior entries)
-
-Live `ListSkills` call (not another historical log entry) confirms the account currently carries exactly **two enabled entries both named `acquisition-underwriting`**, byte-identical 997-char descriptions: `skill_01Bfw31cAN8cY73Fojo67rgq` and `skill_012DJmjQBkLtQtfu6We1owXx`.
-
-**Isolated to this one skill, not systemic.** The other 3 skills reinstalled in today's same Kinsman-batch cycle (`loi-generation`, `market-monitor`, `acquisition-proposal-generation`) each show exactly one enabled entry. A fresh Save-skill install does not generically create a duplicate — whatever caused this is specific to acquisition-underwriting's registration lineage.
-
-**The duplicate ID pair has changed composition across sightings today**, which rules out a single static leftover:
-- Refi-rate session (~17:50, pre-Kinsman, v4.13 install): `skill_012DJmjQBkLtQtfu6We1owXx` + `skill_01Ukeyw2g9c99nVdsSpnTiyr`
-- Post-Kinsman Cowork install (~20:41, v4.15): `skill_01Bfw31cAN8cY73Fojo67rgq` + `skill_012DJmjQBkLtQtfu6We1owXx`
-- Now (live check, same session as the above): same pair as the Cowork sighting
-
-`skill_012DJmjQBkLtQtfu6We1owXx` is the one constant across every sighting today; the other slot changed identity between the two installs (`...Tiyr` → `...67rgq`). Read together with the Local `main.log` warning recurring on 2026-08-20 (two days before any of today's activity) — `[SkillsPlugin] Remote skill "acquisition-underwriting" maps to the same directory as an earlier remote skill, skipping` — this looks like an ongoing pattern (a stray second registration recurring/rotating around installs of this specific skill), not a single historical accident sitting untouched.
-
-**Root cause not confirmed — two structural candidates investigated, one ruled out:**
-- `git log`: this skill was built by `3d845f8` (2026-06-07, "Consolidate deal-evaluation skills into acquisition-underwriting v2.0" — merged 3 standalone skills, itself syncing git to an "already-live runtime skill") and later restructured by `83547a7` (2026-08-13, "progressive-disclosure split" — single-file SKILL.md → 8-entry package with a `references/` dir). Either structural change (a multi-skill merge, or a single-file→multi-file packaging shape change) is a plausible point where the platform's importer could have registered a new skill_id instead of updating one in place, but no platform-side creation-timestamp is exposed to this session to confirm which.
-- **Ruled out:** a stray git worktree (`.claude/worktrees/determined-cannon-8126a7`) carries its own copy of `acquisition-underwriting/SKILL.md` with the same frontmatter `name:` — initially looked like a plausible second packaging source, but the worktree's actual HEAD (`a359381`, branch `claude/determined-cannon-8126a7`) is unrelated `lease-addendum`/`ora_doc_qc.py` work from 2026-08-17; the SKILL.md copy there is incidental (worktrees mirror the full tree), not evidence of a deliberate second package/install from that location.
-- No other file in the repo declares `name: acquisition-underwriting` in its frontmatter, and the three archived source skills (`deal-screen`, `cap-rate-snapshot`, `market-comp-analyzer`) each still carry their own original name — none collides.
-
-**Cannot remediate from this session — confirmed structural limit, not a missing permission.** No available tool can delete or merge an account-level skill registration; that requires a manual action in Settings → Capabilities. Recommended procedure for Gabriel, since which of the two IDs is currently "winning" the silent skip cannot be determined from here: open Settings → Capabilities, find the two `acquisition-underwriting` rows, and disable (not delete) one — then ask a session to re-run the content-grep check used earlier this session (confirm the live `v4.15`/current H1 title string is still present in the runtime cache) before deleting it for good. If content breaks, re-enable that one and disable/delete the other instead. Flagging again for `ora-setup-audit`'s next pass, since this is now the fourth session-entry to note it without remediation.
-
-## 2026-08-22 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
-
-- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `438b62fb-30d2-43f3-b1ad-d86ecbcfb749` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
-- Reason recorded in the token: Gabriel explicitly authorized in-turn (2026-08-22) after review. test_acquisition_underwriting_skill_file_clean failure is pre-existing/unrelated to this push (which touches only ~/.claude event_log.md) -- it flags ora-skills/acquisition-underwriting/SKILL.md line 15, a committed file this session never edited. Verified false positive: "1.40x" is a DSCR-tier LABEL for a refi-rate adjustment bucket ("stabilized-multi-tenant->=1.40x"), not a restated governor floor; "65% LTV ceiling" is the ratified per-property figure (CLAUDE.md: 40% aggregate / 65% per-property) just without "per-property" directly adjacent in this clause. Same sentence explicitly reaffirms "No scorecard weight, Stage 1 floor, or governor constant (DSCR 1.25x / per-property LTV 65% / portfolio-aggregate LTV 40%) changed".
-- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-08-22 20:54:29 local.
-
-## 2026-08-22 — Correction: my own "4 skills installed" entry misstated acquisition-underwriting's version
-
-My entry above ("ORA Doctrine Patch Bundle v01 ... all 4 skills installed via Save-skill click") claimed **acquisition-underwriting → v4.14**. That is wrong. The actually-installed version is **v4.15** — independently reconfirmed just now via direct grep of the live cache's H1 title line, and consistent with the more detailed entry a concurrent Cowork session logged in between ("Doctrine patch v01: 4 skills installed via Cowork Save-skill click"): a further commit (`329bb2b`, 2026-08-22 18:13:46, "v4.15 — archive v4.8-v4.11, add conventions-change consumer sweep") landed 12 minutes after mine (`8728924`) and before Gabriel's Save-skill click. My staged v4.14 `.skill` package went stale in that window; the Cowork session's Entry-point-B freshness pre-check caught it, rejected the stale package, and rebuilt+installed fresh against the then-current repo HEAD. My own verification checked only that specific patch-content strings were present in the cache (true in both v4.14 and v4.15, since v4.15 preserved my v4.14 paragraph verbatim) — it did not check the file's own top-of-file version stamp, which is the actual gap: content-presence is necessary but not sufficient to confirm which version installed.
-
-Diff-checked `8728924..329bb2b` directly: all 4 of my patch items (STAGE -1 item 8, QC Gate floor-test extension, corrupted-constant halt rule, back-test drift-sweep hook) are intact, unmodified, in the v4.15 content — this was a version-label accuracy error in my own log entry, not a content-loss or install problem. The Cowork session's entry is the accurate record for the install; treat mine as superseded on the acquisition-underwriting line only. The other 3 skills (acquisition-proposal-generation v3.2, market-monitor v1.5, loi-generation v1.8) were correctly reported in both entries.
-
-Lesson for future installs: verify the H1/frontmatter version stamp against the intended target, not just presence of the new content — a later commit on the same file between packaging and install can validly supersede a staged package without any content being lost.
-
-## 2026-08-22 -- Save-skill clicks confirmed: acquisition-underwriting v4.15, model-bulk-edit v1.0, package-and-stage-skill v1.26
-
-Three confirmed platform installs, verified post-click per package-and-stage-skill step 7
-(cache file count vs the packaged .skill, CreationTime vs a measured pre-click baseline, and
-Local main.log correlation where available).
-
-- **acquisition-underwriting v4.15** (commit 329bb2b). Cache CreationTime moved 17:50:08 ->
-  2026-08-22 20:40:58; 9 files present, matching the 9 entries in the packaged .skill
-  (SKILL.md + target-markets.json + 7 references). Cache SKILL.md line 7 reads
-  "(v4.15 -- Buy Box & Scorecard v1.1)". Carries the concurrent session's v4.14 Kinsman batch,
-  this session's v4.13 refi-rate change, the v4.8-v4.11 changelog archive, and the new
-  conventions-change consumer sweep rule.
-
-- **model-bulk-edit v1.0** (commit b02a3e2). FIRST install -- no prior cache directory existed.
-  CreationTime 20:41:28, 2 files (SKILL.md + scripts/cached_value_lint.py), matching the
-  packaged .skill exactly. The subfolder file landed, confirming the Cowork install path
-  handled the multi-file package correctly (the desktop Settings path drops subfolders).
-
-- **package-and-stage-skill v1.26** (commit 2ced173). Strongest evidence of the three:
-  CreationTime moved 17:58:05 -> 20:41:33, cache description ends "Commit by pathspec; claim
-  first. v1.26", AND the Local main.log shows `Delta: 1 to download` at 20:41:32 ->
-  `Sync complete: 1 downloaded, 0 failed` at 20:41:33 -- an exact-second match to the
-  CreationTime move. This is the v1.24 correlation working as designed: first-hand,
-  skill-specific proof that rules out the mirror-sync-hook explanation.
-
-  All three PENDING_REIMPORT lines cleared.
-
-- **DUPLICATE REGISTRATION -- now CONFIRMED by the app itself, not inferred.** The earlier
-  flag this session raised from `ListSkills` (two enabled entries named
-  `acquisition-underwriting`: skill_012DJmjQBkLtQtfu6We1owXx and
-  skill_01Ukeyw2g9c99nVdsSpnTiyr) is corroborated by the desktop app's own log, twice during
-  this sync cycle:
-
-      [warn] [SkillsPlugin] Remote skill "acquisition-underwriting" maps to the same
-      directory as an earlier remote skill, skipping
-
-  One of the two registrations is being SKIPPED on every sync. Benign right now -- the cache
-  landed v4.15 correctly -- but it means the account carries a registration the runtime
-  silently ignores, and which of the pair "wins" is not something this session can determine
-  or control. `plugin_of` returns None, so this is not the known plugin-shadow case.
-  A session cannot delete a registry entry: needs manual removal in Settings -> Capabilities.
-  Recommend removing whichever entry is NOT the one currently resolving, then re-running a
-  sync and confirming the warn line is gone.
-
-- **Cached-value sweep across the Business tree did NOT complete -- killed, not finished.**
-  `scripts/cached_value_lint.py` was launched detached against
-  `OneDrive\...\Business` and reached **9.1 GB RSS** (PID 40816) before it was terminated.
-  It exhausted the paging file: an unrelated PowerShell invocation failed with
-  "Could not load file or assembly 'System.Management.Automation' ... The paging file is too
-  small for this operation to complete (0x800705AF)". Cause is a real defect in the script as
-  shipped in v1.0: it calls `openpyxl.load_workbook()` TWICE per workbook (data_only False and
-  True) without `read_only=True`, so both full object trees are held in memory per file.
-  No portfolio-wide cached-value result exists yet; the `125DouglasPike` finding stands, but
-  nothing else has been audited. Fix tracked for model-bulk-edit v1.1.
-
-## 2026-08-22 — Doctrine Patch Bundle v01 (Kinsman Blvd): all 4 skills installed via Save-skill click
-
-Gabriel confirmed the Save-skill click for all 4 packages staged from commit `8728924` (`_staging/2026-08-22_doctrine-patch-v01/`). Verified, not assumed — hash-match-by-construction is not proof of install (v1.13 doctrine), so verification used the CreationTime-move discriminator plus a direct content grep, since `%APPDATA%\Claude\logs\main.log` (Roaming) was stale (last write 2026-08-20) and `%LOCALAPPDATA%\Claude\Logs\main.log` (Local) carries no skill-name attribution on its Delta/Sync-complete lines.
-
-- **acquisition-underwriting** → v4.14. Cache CreationTime moved 2026-08-22 17:50:08 → 20:40:58 (9/9 files, matching the packaged `.skill`). Content-verified: STAGE -1 item 8 string present in the cache copy.
-- **acquisition-proposal-generation** → v3.2. CreationTime moved 2026-08-21 16:46:25 → 2026-08-22 20:41:04 (5/5 files). Content-verified: walk-price QC item present.
-- **market-monitor** → v1.5. CreationTime moved 2026-08-16 15:57:44 → 2026-08-22 20:41:04 (2/2 files). Content-verified: DOCTRINE-DRIFT REPORT section present.
-- **loi-generation** → v1.8. CreationTime moved 2026-08-21 18:09:42 → 2026-08-22 20:41:20 (5/5 files). Content-verified: QC Gate item 23 present.
-
-All four CreationTimes landed within a 22-second window (20:40:58–20:41:20), consistent with one Save-skill session. Local `main.log` shows 2 non-zero `Delta: 1 to download`/`Sync complete: 1 downloaded` cycles at 20:41:27 and 20:41:32 (5-7s after the CreationTime moves, matching the log's own "5s delay" trigger note) — partial corroboration only, since the log carries no per-skill attribution and 4 directories moved against 2 logged downloads; the CreationTime-move + content-grep evidence is what actually confirms all 4, not the log.
-
-**Anomaly noted, not blocking:** Local `main.log` logged `[SkillsPlugin] Remote skill "acquisition-underwriting" maps to the same directory as an earlier remote skill, skipping` at 20:41:28/20:41:32 — an identical warning also appears in the stale Roaming log at 2026-08-20 20:40:22. Recurring two days apart suggests a persistent duplicate remote-skill registration for acquisition-underwriting on the platform side. Content-verified as correct (v4.14 string present) despite the warning, so not blocking — but flagging for `ora-setup-audit` or a future drift check, since a duplicate registration is exactly the kind of thing that could someday resolve the skip to the WRONG copy.
-
-`PENDING_REIMPORT` cleared for all 4 skills. `_staging/2026-08-22_doctrine-patch-v01/` archived to `_archive/2026-08-22_doctrine-patch-v01/`.
-
-## 2026-08-22 -- Doctrine patch v01: 4 skills installed via Cowork Save-skill click
-
-Cowork session ran package-and-stage-skill Entry point B for the 4 packages staged at
-`_staging\2026-08-22_doctrine-patch-v01\` (repo commit 8728924, "doctrine: apply Kinsman
-Blvd patch bundle v01"). All 4 confirmed installed via Gabriel's Save-skill click, not
-merely the upstream repo commit.
-
-**acquisition-underwriting -> v4.15** (not v4.14 as originally staged). Freshness
-pre-check found the staged v4.14 package STALE: repo HEAD had moved to 329bb2b
-("v4.15 - archive v4.8-v4.11, add conventions-change consumer sweep", 2026-08-22
-18:13:46 -0400), 12 minutes after the cited 8728924. Staged package rejected per
-Entry point B item 3; rebuilt fresh via `tools\package_skills.py` against current
-repo (validated: description 997/1024, 9 entries, forward-slash paths, byte-verified
-SHA256 both sides). Installed package is v4.15, not v4.14.
-Confirming timestamp: cache CreationTime moved 2026-08-22 17:50:08 -> 20:40:58.899538
-(America/New_York); Local main.log `[SkillsPlugin] Delta: 1 to download` / `Sync
-complete: 1 downloaded` at 2026-08-22 20:40:58 -- exact-second match.
-
-**acquisition-proposal-generation -> v3.2** (walk-price QC gate added). Freshness
-pre-check clean (byte-identical to repo). Confirming timestamp: cache CreationTime
-moved 2026-08-21 16:46:25 -> 20:41:04.971143; Local main.log `Delta: 2 to download`
-/ `Sync complete: 2 downloaded` at 2026-08-22 20:41:04 -- exact-second match (paired
-with market-monitor, downloaded in the same sync cycle).
-
-**market-monitor -> v1.5** (run-triggered DOCTRINE-DRIFT REPORT section added).
-Freshness pre-check clean (byte-identical to repo, incl. shared target-markets.json).
-Confirming timestamp: cache CreationTime moved 2026-08-16 15:57:44 -> 20:41:04.959873;
-same 20:41:04 `Delta: 2` / `Sync complete: 2 downloaded` cycle as acquisition-proposal-
-generation above.
-
-**loi-generation -> v1.8** (23-point QC gate, item 23 = walk-price clearance).
-Freshness pre-check clean (byte-identical to repo). Confirming timestamp: cache
-CreationTime moved 2026-08-21 18:09:42 -> 20:41:20.578527; Local main.log `Delta: 1
-to download` / `Sync complete: 1 downloaded` at 2026-08-22 20:41:20 -- exact-second
-match.
-
-All 4: `plugin_of()` returned None (not plugin-bundled -- standalone Save-skill
-correct). Post-install cache mirror file-count verified against each `.skill`'s
-packaged entries -- no missing files for any of the 4. `%APPDATA%\Claude\logs\
-main.log` (Roaming) has been stale since 2026-08-21 00:51:03 (app went down for
-update) and was not usable for corroboration; `%LOCALAPPDATA%\Claude\Logs\main.log`
-(Local) was live and gave exact-second corroboration for all 4, per the v1.24
-doctrine addendum.
-
-**Flagged, not remediated this session:** every sync cycle in the Local main.log
-around this install logs `[warn] [SkillsPlugin] Remote skill "acquisition-underwriting"
-maps to the same directory as an earlier remote skill, skipping`, and `ListSkills`
-shows two enabled entries named "acquisition-underwriting" (skill_01Bfw31cAN8cY73Fojo67rgq
-and skill_012DJmjQBkLtQtfu6We1owXx). This predates this session's install (the warning
-fires on every cycle, not just the ones that touched acquisition-underwriting) and
-looks like a duplicate platform-side registration, not an install defect -- the sync
-itself completed correctly (Delta 1 / downloaded 1, file-count and content verified).
-Surfacing for Gabriel; not investigated or collapsed here.
-
-## 2026-08-22 -- Save-skill clicks confirmed: package-and-stage-skill v1.25, acquisition-underwriting v4.13
-
-Two confirmed platform installs from the refi-rate-rebase session. Logged per package-and-stage-skill
-step 7 (the click, not merely the repo commit).
-
-- **package-and-stage-skill v1.25** (commit 8f00bb4). CONFIRMED, two independent signals:
-  (i) a live `ListSkills` account call returns the skill enabled with a description string ending
-  "Commit by pathspec. v1.25" -- the platform's own copy, not the cache; (ii) runtime-cache directory
-  CreationTime = 2026-08-22 17:58:05, after the 17:55 commit. A mirror-sync overwrite rewrites bytes in
-  place and leaves CreationTime untouched, so a moved CreationTime is a real teardown/recreate.
-  PENDING_REIMPORT line cleared.
-
-- **acquisition-underwriting v4.13** (commit 5b1f319, refi rate default 7.00% -> 6.50%). CONFIRMED on
-  CreationTime alone: cache directory CreationTime = 2026-08-22 17:50:08, after the 17:45:01 commit, and
-  the repo state at that moment was v4.13. ListSkills is NOT corroborating here -- this skill's
-  description carries no version token, so the account call cannot discriminate versions for it.
-  CAVEAT, recorded rather than smoothed over: no pre-click CreationTime baseline was captured during
-  this session's step 2, which the v1.23 rule requires unconditionally. The 17:50:08 reading is
-  therefore compared against an inferred prior state, not a measured one. Evidence is good but one
-  notch weaker than the doctrine calls for.
-  PENDING_REIMPORT line NOT cleared -- see below.
-
-- **acquisition-underwriting ledger line deliberately left pending.** The current pending line is for
-  commit 8728924 (Kinsman Blvd doctrine bundle, v4.14) written at 22:01Z by a concurrent session, not
-  for v4.13. v4.14 has not been installed: the cache CreationTime has not moved since 17:50:08. Clearing
-  the line would mark an uninstalled version as installed.
-
-- **DUPLICATE REGISTRATION FLAGGED (needs Gabriel).** `ListSkills` returns TWO enabled entries named
-  `acquisition-underwriting`, ids `skill_012DJmjQBkLtQtfu6We1owXx` and `skill_01Ukeyw2g9c99nVdsSpnTiyr`,
-  with byte-identical descriptions. `plugin_of('acquisition-underwriting')` returns None, so this is not
-  the known plugin-shadow-copy case (step 0). Two registrations of the same skill name means an
-  ambiguous resolution at invocation time and an install that may land on only one of them. A session
-  cannot delete a registry entry; this needs a manual removal in Settings -> Capabilities.
-
-- Local main.log (`%LOCALAPPDATA%\Claude\Logs\main.log`) was live (mtime 18:07:36) but its last 400 lines
-  carried no `[SkillsPlugin]` entries, so the v1.24 exact-second correlation was unavailable for either
-  skill. CreationTime was the operative discriminator, as v1.22/v1.23 anticipate.
-
-## 2026-08-22 — v2.10-class surface gap closed at DISPATCH time; session-context xref probe built; retire-pending register guards the in-flight LAMS retirement
-
-Implemented the four optimizations Gabriel carried forward from the second `ora-passed-deal-tracker` incident. Session surface: cloud-sandbox Cowork (device bridge, no native app process) — `list_scheduled_tasks` / `create_` / `update_` / `delete_scheduled_task` confirmed ABSENT by tool-registry search. No registry write was attempted from here, and none of the work below required one.
-
-**1. `register-scheduled-task` v2.13 -> v2.14 — RULE 3 (pre-flight surface assertion) + RULE 4 (dispatch-time surface routing).** v2.10 documented the cloud-vs-native surface gap correctly; the gap recurred anyway on the same id because nothing at dispatch time read the note and the receiving session could only discover it mid-pass. RULE 3 makes the assertion the first action of any registration/update/pause/retire pass — prove the surface by tool-registry search, never by calling a tool (a test call on `delete_scheduled_task` is a delete), and never split an ordered pass across the discovery. RULE 4 moves the decision one step earlier still, to whoever writes the brief: a LAMS registry WRITE is handed to "a native on-device Cowork session" by name, never a bare "Cowork session"; READS stay exempt (`fleet-status.py` reads both registries from any surface). QC gate updated. Also added a RETIRE bullet and a bounded-pause carve-out bullet for the retire-pending register (item 3).
-
-**2. `fleet-advisory-remediation` v1.2 -> v1.3 — the dispatch step itself.** Step 6 was the actual dispatch site and said "flag it for a Cowork-side session", which a cloud sandbox satisfies. It now names the native on-device surface literally, requires RULE 3's assertion as the brief's step 1, and requires an ordered multi-step write (archive-first-delete-second) to be flagged as ONE indivisible pass. Matching Outputs + Boundaries bullets. Also corrected the frontmatter version, which read v1.1 while the changelog was at v1.2.
-
-**3. Retire-pending register + `pause-resume-guard.py` check — the live hazard.** `enabled:false` is a pause, not a retirement: the LAMS `ora-passed-deal-tracker` entry is disabled only as a side effect of the stalled 08-21 bulk resume, so every future fleet-wide resume re-arms it until the registration is dropped. New `maintenance/_state/retire-pending.json` records ratified-but-unexecuted retirements; `pause-resume-guard.py` (native, off-fleet, every 6h) now alarms when a listed id is found `enabled:true` on its named fleet. Fail-open by construction (absent/unreadable/malformed register = no findings), fleet-scoped so the canonical CC copy is never flagged, per-key alarm bookkeeping namespaced under `_retirePending` so it cannot collide with fleet-ratio state. Six new tests; full suite green (14/14). Verified against the live registries read-only: cc=40, lams=30, LAMS copy `enabled:false` (no finding), CC copy `enabled:true` (correctly not flagged).
-
-**State correction found mid-session:** the LAMS archive step HAS since been executed — `Documents\Claude\Scheduled\ora-passed-deal-tracker\` is gone and the archived copy is at `_archive_2026-08-22_retired-to-ccmcp\ora-passed-deal-tracker\SKILL.md`. The registration therefore now carries a DANGLING filePath. The retire-pending entry records that half-executed state and the remaining step. **Step 2 of 2 is still open and still requires a native on-device Cowork session** (`delete_scheduled_task` takes no fleet parameter and resolves session-local — the same call from Claude Code would delete the LIVE CC copy).
-
-**4. `session-context-xref-probe.py` — new, wired as the 7th engine of `ora-doctrine-integrity-guard` (v1.4 -> v1.5).** Validates that session-context.md's own pointers resolve: a dated `event_log.md` citation must match a real entry heading (live log OR a rolled-over `memory/_archive/` chunk); a backticked file citation must exist on disk across the memory dir, `~/.claude` + its usual subdirs, `ora-skills`, the LAMS store, and the two OneDrive homes (extensible via `_state/xref-extra-roots.json`). Deliberately narrow — elided paths, prose, and call syntax are skipped, because a false `[XREF-MISSING]` in a daily guard costs more than a missed one. `[SKIP]` is fail-open; a missing/empty session-context.md stays `backup-session-context.py`'s alarm. 11 tests, all pass.
-
-**Its first live run found two genuine dangling references:** (a) `reference_tech.md` — no such file has ever existed; the file is `tech.md`. FIXED in session-context.md. (b) `outreach-ratification.json` — a FALSE positive, the file is real but lives under the OneDrive business folder; that root was added rather than reported. The probe now runs clean: 7 dated event_log citations and 18 file citations validated.
-
-**Not done here, deliberately:** nothing was committed in `~/.claude` or `ora-skills` — both had another session's uncommitted work in flight (Automation Audit Rev 18 remediation, and the M18 eval-harness batch), and the single-writer discipline says land these separately. The two edited skills also need a `package-and-stage-skill` reimport to reach the runtime cache; until then `repo_first_check.py` will correctly report them REPO-AHEAD, which is normal and not an alarm.
-
-## 2026-08-22 — ORA Doctrine Patch Bundle v01 applied (3700 Kinsman Blvd origin) — `8728924`
-
-Gabriel pasted a 4-patch doctrine bundle from the 3700 Kinsman Blvd (Madison WI) FULL underwrite. Verified base SHA256 for all four target files before editing (bundle's own integrity rule); 3 of 4 matched and were applied as written, 1 was stale and re-anchored.
-
-**Applied to `ora-skills` (commit `8728924`, main):**
-- `acquisition-underwriting/SKILL.md` v4.13→v4.14 — STAGE -1 item 8 (zoning-GIS + assessed-value intake via `ora-flood-zoning-dd`/`ora-millage-lookup`), QC Gate floor-test-block extension, corrupted/non-numeric doctrine-constant halt rule, December-back-test drift-sweep hook.
-- `acquisition-proposal-generation/SKILL.md` v3.1→v3.2 — walk-price QC gate (refuse to produce a proposal above the ORA walk price).
-- `market-monitor/SKILL.md` v1.4→v1.5 — new DOCTRINE-DRIFT REPORT section, run-triggered/reporting-only.
-- `loi-generation/SKILL.md` v1.7→v1.8 — walk-price required-input + hard-fail QC Gate item, **re-anchored as item 23** (bundle assumed the gate had 16 items; two same-day commits, `3c477f5` + `0eb8f5f`, had already expanded it to 22 for an unrelated reason before this session started — stated base hash `7bb9b372ed56` did not match the live file `2f179af…`, correctly caught by the bundle's own refuse-if-hash-mismatches rule).
-
-Skipped per the bundle's own instruction: item 1D (single-tenant Stage 2 row 6 scoring branch) — would change a scorecard weight, held for the December back-test.
-
-**Findings during application (both fixed pre-commit):**
-- Independent review caught a fabricated "true" Louisville rent figure ($4.90–$6.00) in the bundle's own corrupted-constant incident narrative — the file's actual on-disk Louisville constant is $3.90–$5.00. Corrected to match reality before commit; ironic given the bullet's own subject is "don't infer, read the on-disk file."
-- Pre-commit skill-frontmatter gate blocked on `acquisition-proposal-generation`'s description exceeding the 1024-char platform limit after the version-tag edit — trimmed rather than overridden (`--no-verify` not used).
-
-Landed via `isolated-commit` (claimed slug `ora-skills-doctrine-patch-v01`, pathspec-scoped stage, two independent-review passes — second after post-review fixes, per the skill's re-review-don't-reuse rule). Not pushed to remote (no explicit push instruction this session). Post-commit hook recorded all 4 skills to `_staging/PENDING_REIMPORT.md` — Cowork/LAMS runtime copies need repackage+reinstall via `package-and-stage-skill` before these changes are live there; the Code-surface repo copies are authoritative as of this commit.
-
-Not patchable from this session (per bundle): the skill-injection constant-corruption defect itself is an Anthropic-side platform issue (bug report shipped separately, outside this repo); `verified-deal-recon`'s absence from the Cowork synced skill set remains unresolved (Patch 1A re-routed around it into STAGE -1, but the routing-default-resolves-to-nothing gap is general, not closed).
-
-## 2026-08-22 — Pointer: the M18 eval-harness event_log entry landed via commit `b26b7f1`, mislabeled
-
-The preceding "M18 eval-harness YoC/DSCR floor-constant parser" entry above was appended via `append-event-log.py` (collision-safe at the file level) while 3 other sessions' entries were also sitting uncommitted in the same backlog. Before this session could isolate and commit its own entry (per [[reference_event_log_uncommitted_backlog]]), a concurrent session committed the full accumulated backlog first, at `b26b7f1` -- whose message is `"memory: document debt-scoring oxfordNoi basis is conservative, not proven correct"` and says nothing about the M18 fix. Verified byte-for-byte that the M18 entry landed intact and unaltered inside that commit; nothing was lost, nothing further needed committing. Logging this pointer so anyone searching commit history by message for the M18/diff_verdict.py change finds `b26b7f1`, not a nonexistent commit named after it. Same pattern as this session's earlier `febb870`/ora-skills co-mingled-commit incident (see the entry above), just on `~/.claude` instead.
-
-## 2026-08-22 — M18 eval-harness YoC/DSCR floor-constant parser: cross-clause regex bug found by review, fixed and landed (`7d10e3f`)
-
-**What:** A prior session's (1c2b8337) uncommitted M18-eval-harness-cannot-detect-governor-drift fix to `acquisition-underwriting-eval-harness/lib/diff_verdict.py` was independently code-reviewed and REJECTED before landing. `_parse_floor_pair` (extracts an "<observed> vs <floor>" pair from free-form `floor_result` prose, for DSCR/YoC governor-drift detection) searched a fixed +/-100-char window around a metric label. Since the window could span past a `;` into an unrelated metric's clause, and `_POSITIONAL_PCT_RE`'s label group is optional, a YoC search on the module's own canonical test string `"CLEARS (Basis 75.0% vs 65% floor; YoC 10.96% vs 8%; DSCR 1.45x vs 1.25x)"` incorrectly returned the Basis pair `(75.0, 65.0)` instead of `(10.96, 8.0)` — a silent false negative on exactly the governor-drift class this fix exists to catch. The existing test using this string only asserted status/floor_drift, so it passed for the wrong reason and never caught the bug.
-
-**Fix:** Scoped `_parse_floor_pair`'s search to the label's own semicolon-delimited clause (`text.rfind(";", ...)` / `text.find(";", ...)`) instead of a fixed character window. Verified by direct execution — not just test-passing — against: the repro string; a reconstruction of the old buggy logic (confirmed it still returns the wrong pair on both healthy and drifted variants of the string); and all 6 real `golden_set/*.json` `floor_result` strings (zero misparses, including the 3 files that join Basis/YoC prose with "and" inside one semicolon segment). Also tightened both YoC label regexes with a leading `\b` (previously could match the "YC" inside "NYC").
-
-Added 3 regression tests (`test_yoc_parses_own_clause_not_the_adjacent_basis_clause`, `test_yoc_drift_inside_full_combined_clears_phrasing_flags`, `test_trailing_floor_label_reversal_inside_combined_phrasing_flags_drift`) plus a direct-pair assertion. All 32 tests in `test_diff_verdict.py` pass.
-
-**Known residual limitation, documented in-code (not fixed — kept the change narrow per Gabriel's original M18 approval):** the clause-scoping does not fully close the same bug class WITHIN one semicolon-delimited clause. A hypothetical compact "and"-joined phrasing like `"Basis 54% vs 65% floor and YoC 6.9% vs 8.0%"` (no intervening qualifier word, no `;`) would still misparse YoC to the Basis pair — confirmed by execution. Not present in any real golden file today (their "and"-joined clauses all have a qualifier word like "discount"/"vintage-ramp" breaking the false adjacency). Future fix if ever hit: require the optional label group in `_POSITIONAL_PCT_RE`/`_POSITIONAL_X_RE` when a clause contains more than one recognized metric label.
-
-**Review:** Two independent `claude-fable-5` review passes per [[feedback_refute_pass_proactive_default]] / Gabriel's 2026-07-24 ratified financial-code review policy. Pass 1 (on the fix before cleanup) confirmed the defect and the fix, flagged 3 minor items (stale comment referencing a since-removed constant, missing leading `\b`, undocumented edge case) — all addressed. Pass 2 (on final content) returned APPROVED. Verdict recorded through `eos-review-gate.py` (key `7ec31d7c3f12ca4b2de7efe597156563a4194fcdc4976b812f34a1e932e3b740`).
-
-**Shared-checkout incident, resolved cleanly:** mid-task, a concurrent session (04d7cdf1) briefly swept these two staged files into one of its own commits (`febb870`, message about an unrelated refi-rate default change) via what looks like a broad `add`/`commit -a`, then reset it back out (`git reset` to `HEAD~1`, followed by its own clean re-commit at `5b1f319` without these files). No content was lost or altered — verified `git diff febb870 -- <these 2 files>` was empty against the working tree before committing, i.e. the working tree still held exactly the twice-reviewed content. `commit-provenance-guard` correctly flagged `diff_verdict.py` as "edited by session 04d7cdf1" (tracking the commit-history touch, not actual content authorship); declared `allow-foreign-commit` with the verification evidence in the reason, then landed pathspec-scoped to just these 2 files so none of 04d7cdf1's unrelated `SKILL.md` WIP (still dirty/actively changing across several skills at commit time) got pulled in.
-
-**Landed:** commit `7d10e3f` on `main`, `acquisition-underwriting-eval-harness/lib/diff_verdict.py` + `acquisition-underwriting-eval-harness/lib/test_diff_verdict.py` only (382 insertions, 9 deletions).
-
-## 2026-08-22 — ora-passed-deal-tracker LAMS retirement: step 1 (ARCHIVE) EXECUTED; step 2 (DEREGISTER) still blocked on the surface gap
-
-Supersedes the earlier 2026-08-22 entry ("retirement RATIFIED, execution BLOCKED"). Gabriel granted all approvals in-turn and directed execution of the full 4-step finish. Two of the four steps were capability-blocked, not permission-blocked — approval cannot supply a tool the session does not carry.
-
-**Step 1 — ARCHIVE: DONE and verified.**
-- Moved `…\Documents\Claude\Scheduled\ora-passed-deal-tracker\` → `…\Documents\Claude\Scheduled\_archive_2026-08-22_retired-to-ccmcp\ora-passed-deal-tracker\` (move, not delete; archive folder created as a sibling INSIDE the store, per this fleet's convention and the `_archive_2026-07-16_retired-to-ccmcp\` precedent).
-- Verified: source path no longer exists; destination holds `SKILL.md`, 4,775 bytes, mtime `2026-08-05 17:32:21` preserved, SHA256 `7933FF2F46E5AD9AD3DFD4F9096C08CE6FDA4EDCAF12894BDB1BC8A38D1651E2` — byte-identical to the pre-move hash.
-- The older `_archive_2026-06-11_orphans\ora-passed-deal-tracker\` sibling (2,236 bytes, mtime 2026-06-09) was NOT touched and NOT merged. Two distinct archives, unrelated provenance.
-
-**Step 2 — DEREGISTER: NOT DONE.** `delete_scheduled_task` is absent from this session; re-confirmed by two further exhaustive tool-registry searches after approval was granted. This is a cloud-sandbox Cowork session (device-bridge only, no native app process), which per register-scheduled-task v2.13 Rule 1 + the v2.10 surface note never carries `create_scheduled_task` / `update_scheduled_task` / `delete_scheduled_task` / `list_scheduled_tasks`. Did NOT hand-edit `scheduled-tasks.json` to compensate (Rule 2, JSON-splice PROHIBITED). Second occurrence of the v2.10 incident class on this same task id.
-
-**Step 3 — VERIFY via `list_scheduled_tasks`: NOT DONE** (same missing tool). Substituted a read-only registry read, which Rule 2 explicitly says is NOT verification — treat the LAMS line below as evidence, not proof:
-- LAMS/Cowork: id `ora-passed-deal-tracker` STILL PRESENT, `30 6 15 * *`, `enabled: false`, `filePath` now DANGLING (points at the moved folder). 30 entries / 27 enabled.
-- CC/MCP: id `ora-passed-deal-tracker`, `30 6 15 * *`, `enabled: true`, filePath `C:\Users\Owner\.claude\scheduled-tasks\ora-passed-deal-tracker\SKILL.md`, SKILL.md 25,288 bytes, SHA256 `025934498C6DEA95860F7AEEAD92F5684D57153DC049E47C93DD9A7EA0ACFE8F`. 40 entries / 36 enabled. **Untouched — cron and enabled state identical before and after this session's only write.**
-
-**Step 4 — session-context.md: UPDATED** to the true intermediate state (archived / not yet deregistered), not flipped to complete.
-
-**Net risk change.** The half-state is now a REGISTERED id with a MISSING SKILL.md rather than a registered id with a live duplicate spec. On balance this reduces exposure: if a future fleet-wide resume re-enables the LAMS entry (the 2026-08-21 near-incident pattern, which recurs on every pause/resume pass), it can no longer execute a duplicate sweep against Notion — there are no instructions on disk to run. It will instead fail on a missing file, which `task-folder-registration-probe.py` should surface as a visible [ACTION] rather than a silent duplicate. That probe alarm is EXPECTED until step 2 lands; do not "fix" it by restoring the folder.
-
-**Still-open, one step:** from a NATIVE on-device Cowork session, run `delete_scheduled_task` for id `ora-passed-deal-tracker`, then confirm via `list_scheduled_tasks` that the LAMS entry is gone AND the CC/MCP entry is still `enabled: true` (the `path` field is the sole fleet disambiguator). Never the Cowork Scheduled-sidebar trash icon. The `RATIFIED` token for this drop is logged in the preceding 2026-08-22 entry, so `registry-membership-probe.py` will auto-ratify it inside the <=14d window — clock started 2026-08-22.
-
-## 2026-08-22 — ora-passed-deal-tracker LAMS retirement RATIFIED, execution BLOCKED on surface gap (cloud Cowork session lacks the MCP tools)
-
-**Status: NOT executed.** The LAMS/Cowork twin of `ora-passed-deal-tracker` is still registered and still unarchived as of this entry. Nothing was moved, deleted, disabled, or re-enabled on either fleet by this session.
-
-**RATIFIED — planned registry drop: `ora-passed-deal-tracker` (LAMS/Cowork fleet ONLY).** Logged per register-scheduled-task v2.13's archive-first-delete-second bullet so `registry-membership-probe.py` auto-ratifies the drop (<=14d window) instead of raising a false [ACTION] when the native session executes it. The CC/MCP copy of this id is NOT being dropped and MUST stay enabled.
-
-**Why it did not run here.** A retirement pass was dispatched to a cloud-sandbox Cowork session (device-bridge only, no native app process). Per register-scheduled-task v2.13 Rule 1 + the v2.10 surface note, such a session never carries `create_scheduled_task` / `update_scheduled_task` / `delete_scheduled_task` / `list_scheduled_tasks` — confirmed absent here by exhaustive tool-registry search, not inferred from a failed call. Stopped rather than improvising; specifically did NOT hand-edit `scheduled-tasks.json` (Rule 2, JSON-splice PROHIBITED) and did NOT perform the archive move alone, since archive-first-delete-second is a single ordered pass and half-executing it is the exact failure mode that produced this handoff. This is the SECOND occurrence of the v2.10 incident class, on the same task id — the 2026-08-17 original is what created the doctrine note.
-
-**Verified ground truth (live registry read, read-only, 2026-08-22):**
-
-- LAMS/Cowork — `local-agent-mode-sessions\...\scheduled-tasks.json`: id `ora-passed-deal-tracker`, cron `30 6 15 * *`, `enabled: false`, filePath `...\Documents\Claude\Scheduled\ora-passed-deal-tracker\SKILL.md`, `lastRunAt 2026-08-15T18:28:04.621Z`, `lastScheduledFor 2026-08-15T10:30:00.000Z`. Registry holds 30 entries, 27 enabled.
-- CC/MCP — `claude-code-sessions\...\scheduled-tasks.json`: id `ora-passed-deal-tracker`, cron `30 6 15 * *`, **`enabled: true`** (canonical, untouched), filePath `C:\Users\Owner\.claude\scheduled-tasks\ora-passed-deal-tracker\SKILL.md`. Registry holds 40 entries, 36 enabled.
-- Both copies confirmed present on disk with their own SKILL.md.
-
-**Two pre-conditions cleared for whoever executes this:**
-
-1. **Cross-fleet shared-file risk: CLEARED.** The CC/MCP `SKILL.md` (275 lines) is a full self-contained spec, NOT a redirect stub pointing at the LAMS OneDrive path. The LAMS `SKILL.md` (59 lines) is a strict content subset. Archiving the LAMS folder cannot destroy the CC copy's spec.
-2. **Solely-run producer scripts: NONE.** Swept `~/.claude` for scripts this task is the sole invoker of. The LAMS copy invokes only `_shared/send-via-outlook.ps1` (shared across the fleet) and reads the `annual-cycle` repo path (also read by the CC copy). All other hits (`fleet-status.py`, `task-folder-registration-probe.py`, and their tests) reference the id as monitoring/test data, not as a dependency on the LAMS registration.
-
-**Correction to the dispatched brief:** it proposed archiving to `Documents\Claude\Scheduled_archive_2026-08-22_retired\`. That is not this fleet's convention. Archives are siblings INSIDE the store: `Documents\Claude\Scheduled\_archive_YYYY-MM-DD_*\`. Nearest precedent for this exact case (retired because migrated to CC/MCP) is `_archive_2026-07-16_retired-to-ccmcp\`.
-
-**Also found: session-context.md cites "History: `event_log.md` 2026-08-22" for this id, but no such entry existed.** The 2026-08-22 ratification was recorded in `session-context.md` only. This entry closes that gap. `session-context.md`'s bullet remains accurate as written ("ratified 2026-08-22 but NOT yet executed") and must NOT be flipped to complete until the two steps below actually run.
-
-**Ready-to-run procedure — native on-device Cowork session ONLY** (Claude Code cannot do step 2: `delete_scheduled_task` carries no fleet parameter and resolves session-local, so the identical call from Code would delete the LIVE CC/MCP copy):
-
-1. Archive: move `C:\Users\Owner\OneDrive - Oxford Capital Partners\Documents\Claude\Scheduled\ora-passed-deal-tracker\` to `...\Documents\Claude\Scheduled\_archive_2026-08-22_retired-to-ccmcp\ora-passed-deal-tracker\`. Move, never delete. Verify the move landed before step 2.
-2. Deregister: `delete_scheduled_task` for id `ora-passed-deal-tracker` from that native LAMS session. Do NOT use the Cowork Scheduled-sidebar trash icon (folder-destructive, bypasses the Recycle Bin).
-3. Verify: `list_scheduled_tasks` shows the LAMS entry gone AND the CC/MCP entry still `enabled: true` at `30 6 15 * *` with path `...\.claude\scheduled-tasks\...` (the `path` field is the sole fleet disambiguator).
-4. Then update `session-context.md`'s `ora-passed-deal-tracker` bullet to record the retirement as executed, and append the completion entry here.
-
-**Constraints honored this session:** LAMS copy never re-enabled, not even transiently; CC/MCP copy and its cron never touched; no JSON edits anywhere.
-
-## 2026-08-22 — Dirty-tree-triage: cross-repo cleanup, 4 repos (Gabriel: "commit everything you can")
-
-Full dirty-tree-triage run across `~/.claude`, `ora-skills`, `oxford-command-center`, `website-canonical` (98 dirty entries + stray-clone discovery, no strays found). Two-check settle window (20 min) confirmed staticity except `event_log.md`/`MEMORY.md`, which the live "Oracle setup audit" (Rev 18) session was actively writing — correctly excluded throughout.
-
-**`~/.claude`** — 9 isolated commits: backup-mirror resync (32 files, verified byte-identical to already-committed live `scheduled-tasks/`), new `ora-pm-monthly-billing` task, 5 qodo-* skill installs, 4 already-deindexed memory deletions, 3 attributed reference-memory edits (2 from idle sessions, landed via `allow-foreign-commit`), push-fleet-heartbeat.ps1 worktree-resolution fix (idle session 80720188), 2 auto-generated guard-state files, `confidential-repos.json`'s oxford-command-center second-consumer addition (blast-radius file, landed on Gabriel's explicit in-turn approval).
-
-**`ora-skills`** — landed the "Qodo code review on merged code" remediation batch (sessions 1c2b8337 + 04d7cdf1) minus 2 holds: `loi-generation/references/qc-gate.md` (pre-commit hook caught a real content defect — title says "22-Point" but only 16 items present, not resolved here per triage scope) and `acquisition-underwriting-eval-harness/lib/diff_verdict.py` + test (eos-review-gate: financial/governor code, independent review dispatched). 20 already-archived `_archive/*` scratch dirs (305 files, ~59.5K lines) left untracked — too large to blind-commit under a general go-ahead, flagged for Gabriel's explicit call.
-
-**`oxford-command-center`** — landed the cc-audit-army remediation batch (session 1c2b8337) minus `server/warehouse/debt-scoring.ts` + test, held for independent review (DSCR now correctly uses ownership-adjusted `oxfordNoi` instead of 100%-basis `noi`, fixing a false-governor-clearance risk on jointly-owned properties — Hard Invariant 4 adjacent).
-
-**`website-canonical`** — 1 dirty file (`netlify/edge-functions/knowledge-base.json`), untouched per Hard Invariant 2 (no per-deploy confirmation obtained).
-
-Two independent reviews (model: claude-fable-5) dispatched for the held financial/governor-code diffs per Gabriel's 2026-07-24 eos-review-gate ratification; verdicts pending as of this entry.
-
-## 2026-08-22 — Pre-push encoding-crash + two self-inflicted governor-drift-probe false positives, ROOT-CAUSED AND LANDED
-
-- Root-caused and fixed the recurring `UnicodeDecodeError` crash Gabriel reproduced twice (same byte 0x9D, same position 1061) in `git-prepush-hook-tests-gate.py`'s subprocess capture. `subprocess.run(..., text=True)` with no explicit `encoding=` decodes a child's stdout using `locale.getpreferredencoding()` (cp1252 on Windows); `governor-drift-probe.py` reconfigures its own stdout to UTF-8 to echo scanned content, so it can legitimately emit bytes invalid under cp1252 (U+201D → `E2 80 9D`; `0x9D` has no cp1252 mapping at all), crashing `subprocess`'s internal reader thread and silently dropping captured output to `None` instead of raising — the gate then misread the decode artifact as a real test failure. Fixed both call sites (`git-prepush-hook-tests-gate.py::run_test_file`, `maintenance/test-governor-drift-probe.py::run_probe`, the latter being where the crash actually originates) with `encoding="utf-8", errors="replace"`. This is the same bug class multiple other sessions hit and overrode today (see the three `allow-hook-test-failure` override entries directly above this one, all citing claim `hooks-override-auth-prepush-encoding-crash`). Landed: [PR #150](https://github.com/ZeOoba/ora-claude-config/pull/150), independently reviewed (claude-fable-5, approved).
-- While landing that fix, hit — and fixed — two more instances of the SAME underlying false-positive class in `governor-drift-probe.py`'s `is_gov` gate (a bare `"governor" in low` substring check): (1) `memory/reference_concurrent_session_duplicate_hardening_work.md:85` quotes another session's own investigation title, `"Fix governor-drift-probe false positive on LTV 65%/40%"`, in prose — the quoted title's `"governor-drift-probe"` alone satisfied `is_gov`, and the probe read `65%`/`40%` out of it as a live LTV drift. Fixed with an exact-filename `skip_names` exemption, mirroring the existing `disposition-ledger.md`/`deal-decision-ledger.md`/historical-evaluations-review precedent. (2) Recording that fix's own review artifact via `eos-review-gate.py --record` immediately self-triggered the identical class one layer up: the artifact's free-text `notes` field (describing the bug) lives under `hooks/sessions/<id>/reviews/*.json`, an ephemeral, session-id-unbounded path the probe was still scanning. Fixed by adding `"sessions"` to `_PRUNE_EXACT`, mirroring the `active-work` claim-file precedent landed earlier today. Landed together: [PR #149](https://github.com/ZeOoba/ora-claude-config/pull/149), independently reviewed (claude-fable-5, approved).
-- Both were full-suite green (97/97 hook-tests-gate files pass) and independently reviewed by `claude-fable-5` per `eos-review-gate.py`'s mandatory review requirement before landing hooks/**-and-governor-code changes. Gabriel confirmed both merges in-turn. Closes the recurring need for `allow-hook-test-failure` overrides for this class of push — related prior history: OI-136 in `open-items-tracker.md`.
-
-## 2026-08-22 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
-
-- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `efe758ee-6a0d-48c9-9be0-55ad97d0d6e8` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
-- Reason recorded in the token: Gabriel authorized 2026-08-22 -- pushing a verified docstring-only commit to claim_work.py (branch oi-slug-clarify) blocked by two unrelated pre-existing failures: (1) encoding-crash in git-prepush-hook-tests-gate.py, already fixed by session d33391a0 (unmerged, applied locally read-only to unblock), and (2) governor-drift-probe LTV 65%/40% false-positive match inside reference_concurrent_session_duplicate_hardening_work.md (historical narrative text another session edited today, in session 8c98eacf's active governor-dscr-changelog scope, not mine to fix). My diff touches only hooks/lib/claim_work.py's docstring; 204/204 existing tests pass; independently reviewed PASS. One-time, this push only.
-- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-08-22 13:43:02 local.
-
-## 2026-08-22 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
-
-- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `fe5e4953-9754-4ecf-83cc-ead704bdd3f6` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
-- Reason recorded in the token: Gabriel explicit in-turn confirmation 2026-08-22 to push claude/override-frequency-claim-hint despite the pre-existing, unrelated UnicodeDecodeError in git-prepush-hook-tests-gate.py's subprocess.run capture (missing encoding=utf-8) crashing maintenance/test-governor-drift-probe.py -- same bug and same authorization class Gabriel already gave earlier today for fix/governor-drift-probe-changelog-fp-v2 (PR #145); root-cause fix already claimed by a separate session (hooks-override-auth-prepush-encoding-crash)
-- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-08-22 13:41:24 local.
-
-## 2026-08-22 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
-
-- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `efe758ee-6a0d-48c9-9be0-55ad97d0d6e8` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
-- Reason recorded in the token: Gabriel authorized 2026-08-22 -- pushing a verified docstring-only commit to claim_work.py (branch oi-slug-clarify) blocked by two unrelated pre-existing failures: (1) encoding-crash in git-prepush-hook-tests-gate.py, already fixed by session d33391a0 (unmerged, applied locally read-only to unblock), and (2) governor-drift-probe LTV 65%/40% false-positive match inside reference_concurrent_session_duplicate_hardening_work.md (historical narrative text another session edited today, in session 8c98eacf's active governor-dscr-changelog scope, not mine to fix). My diff touches only hooks/lib/claim_work.py's docstring; 204/204 existing tests pass; independently reviewed PASS. One-time, this push only.
-- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-08-22 13:37:39 local.
-
-## 2026-08-22 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
-
-- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `fe5e4953-9754-4ecf-83cc-ead704bdd3f6` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
-- Reason recorded in the token: Gabriel explicit in-turn confirmation 2026-08-22 to push claude/override-frequency-claim-hint despite the pre-existing, unrelated UnicodeDecodeError in git-prepush-hook-tests-gate.py's subprocess.run capture (missing encoding=utf-8) crashing maintenance/test-governor-drift-probe.py -- same bug and same authorization class Gabriel already gave earlier today for fix/governor-drift-probe-changelog-fp-v2 (PR #145); root-cause fix already claimed by a separate session (hooks-override-auth-prepush-encoding-crash)
-- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-08-22 13:35:07 local.
-
-## 2026-08-22 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
-
-- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `fe5e4953-9754-4ecf-83cc-ead704bdd3f6` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
-- Reason recorded in the token: Gabriel explicit in-turn confirmation 2026-08-22 to push claude/override-frequency-claim-hint despite the pre-existing, unrelated UnicodeDecodeError in git-prepush-hook-tests-gate.py's subprocess.run capture (missing encoding=utf-8) crashing maintenance/test-governor-drift-probe.py -- same bug and same authorization class Gabriel already gave earlier today for fix/governor-drift-probe-changelog-fp-v2 (PR #145); root-cause fix already claimed by a separate session (hooks-override-auth-prepush-encoding-crash)
-- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-08-22 13:30:45 local.
-
-## 2026-08-22 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
-
-- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `efe758ee-6a0d-48c9-9be0-55ad97d0d6e8` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
-- Reason recorded in the token: Gabriel authorized 2026-08-22 -- pushing a verified docstring-only commit to claim_work.py (branch oi-slug-clarify) blocked by two unrelated pre-existing failures: (1) encoding-crash in git-prepush-hook-tests-gate.py, already fixed by session d33391a0 (unmerged, applied locally read-only to unblock), and (2) governor-drift-probe LTV 65%/40% false-positive match inside reference_concurrent_session_duplicate_hardening_work.md (historical narrative text another session edited today, in session 8c98eacf's active governor-dscr-changelog scope, not mine to fix). My diff touches only hooks/lib/claim_work.py's docstring; 204/204 existing tests pass; independently reviewed PASS. One-time, this push only.
-- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-08-22 13:28:58 local.
-
-## 2026-08-22 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
-
-- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `fe5e4953-9754-4ecf-83cc-ead704bdd3f6` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
-- Reason recorded in the token: Gabriel explicit in-turn confirmation 2026-08-22 to push claude/override-frequency-claim-hint despite the pre-existing, unrelated UnicodeDecodeError in git-prepush-hook-tests-gate.py's subprocess.run capture (missing encoding=utf-8) crashing maintenance/test-governor-drift-probe.py -- same bug and same authorization class Gabriel already gave earlier today for fix/governor-drift-probe-changelog-fp-v2 (PR #145); root-cause fix already claimed by a separate session (hooks-override-auth-prepush-encoding-crash)
-- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-08-22 13:21:18 local.
-
-## 2026-08-22 -- package-and-stage-skill v1.24 installed (Gabriel's Save-skill click)
-
-`package-and-stage-skill` v1.24 confirmed installed via Gabriel's **Save-skill click** in Cowork (Entry point B, `_staging\2026-08-22_reimport-batch6\package-and-stage-skill.skill`), not merely the upstream repo commit `b07f599` ("fix(package-and-stage-skill): v1.24 - check Local main.log too, not just Roaming", 2026-08-22 12:15:08 -0400).
-
-Corroboration (main.log-based, both paths checked per v1.24's own fix):
-- Roaming `main.log` (`%APPDATA%\Claude\logs\main.log`) was stale (last write 2026-08-20 20:51:03) — unusable for this check, consistent with the doctrine v1.24 itself documents.
-- Local `main.log` (`%LOCALAPPDATA%\Claude\Logs\main.log`) was live and showed `[SkillsPlugin] Delta: 1 to download, 0 to remove` -> `Sync complete: 1 downloaded, 0 failed, 0 removed, 0 orphans cleaned` at **2026-08-22 12:37:42**.
-- Cache directory CreationTime (`...\skills-plugin\...\skills\package-and-stage-skill`) moved from the pre-click baseline 2026-08-21 17:53:56 to **2026-08-22 12:37:42** -- an exact-second match with the Local-log Sync-complete event, confirming a genuine re-import rather than the pre-commit mirror-sync overwrite.
-- Runtime cache file set verified against the packaged `.skill`: single entry `SKILL.md`, 62,377 bytes, SHA256 `d3d6a422187783b51b85f41e9e3c0cf19659e129943429f92f93ee771c3b283d` -- matches the package's zipped-entry hash exactly.
-
-Ledger cleared: `pending_reimport.py clear package-and-stage-skill`. Spent `_staging\2026-08-22_reimport-batch6\` scratch archived to `_archive\` per Hard Invariant 6.
-
-## 2026-08-22 -- package-and-stage-skill v1.24 installed via Gabriel's Save-skill click (dogfoods its own Local main.log fix)
-
-Entry point A (fresh package) on the item that entered `pending_reimport.py` when v1.24 itself was committed (`b07f599`, checks `AppData\Local\Claude\Logs\main.log` in addition to the Roaming copy). Skill dir confirmed git-clean and `plugin_of` returned `None` (standalone Save-skill path) before packaging. Packaged via `tools/package_skills.py`, exit 0, frontmatter gate passed (description 1010/1024). Gabriel confirmed the Save-skill click.
-
-Verification used the new v1.24 doctrine on itself: cache-directory CreationTime moved 2026-08-21 17:53:56 -> 2026-08-22 12:37:42, SKILL.md byte-identical to the packaged build. `AppData\Local\Claude\Logs\main.log` (the newly-added check) shows an exact `[SkillsPlugin] Delta: 1 to download` / `Sync complete: 1 downloaded` pair at the identical second, 12:37:42 -- first-hand, skill-specific corroboration (only one skill was installed in this window, no count-attribution ambiguity). Confirmed genuine re-import, no ambiguity. Cleared from `_staging/PENDING_REIMPORT.md` (`pending_reimport.py clear`).
-
-## 2026-08-22 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
-
-- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `8c98eacf-04d4-4d51-9116-59f55a6b49b2` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
-- Reason recorded in the token: Gabriel explicit in-turn authorization (2026-08-22) to push the Qodo-review-fix commit onto PR #145 despite a THIRD distinct instance this session of the LTV 65%/40% narration false positive -- this time in memory/reference_concurrent_session_duplicate_hardening_work.md, introduced by a concurrent session minutes ago, already tracked separately as task_bb18f708 (not yet landed). PR #145's own fix (two-round-plus-Qodo-round reviewed) is unrelated and correct.
-- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-08-22 13:00:25 local.
-
-## 2026-08-22 — duplicate-work collision investigated: NOT a dispatch bug, refuse-without-force reproduces correctly
-
-Investigated the DSCR-changelog-scaling-multiplier duplicate-fix collision flagged earlier today (3+ sessions independently fixing the identical `governor-drift-probe.py` false positive; see [[project_governor_drift_probe_dscr_scaling_multiplier_fix_2026-08-22]]). Two questions, both answered:
-
-**(1) No dispatcher/broadcast sent this task to multiple sessions.** Grepped `fleet-roster.md` and both scheduled-task registries for anything referencing `governor-drift-probe`/`deal-comparison` around 08-22 11:00-12:30 -- zero matches. Pulled the actual session transcripts (`list_events`/`search_session_transcripts`) for both colliding sessions: `local_564ffdae` (agent id `8c98eacf`) was titled "Fix governor-drift-probe false positive on LTV 65%/40%" -- a DIFFERENT, already-resolved false positive (found 08-21, landed 08-22 at `c7875a5`, see MEMORY.md). Its own override-usage-log hit on the DSCR-changelog signature came at 11:53:08, 35 minutes before it claimed the DSCR slug at 12:28:11 -- it was blocked by the DSCR bug as a SIDE EFFECT of pushing its own unrelated LTV fix, and only later chose to fix the DSCR bug too, in the same session. A THIRD, still-unidentified session independently built a competing fix on `fix/governor-drift-probe-changelog-fp` (commit `2155fb4`, 12:14:14 -0400), also unmerged. Two MORE sessions (`cde87cef` 11:52:37, `d1847790` 12:00:16) hit the same override without building any fix at all. **Root cause of the convergence: `governor-drift-probe.py` scans the ENTIRE tree on every push regardless of what changed, so one false-positive line in a shared file (`deal-comparison/SKILL.md:153`) blocks every concurrently-active session's push, not just sessions touching that file.** With 16+ sessions routinely active, a widely-blocking gate bug gets hit by many unrelated sessions in a short window, and several independently choose "fix root cause" over "override again" once it gets old. This is a consequence of (a) a real bug, (b) whole-tree scanning, and (c) high concurrency -- not a task-dispatch defect. No broadcast/dispatch mechanism needs fixing.
-
-**(2) `claim_work.py`'s refuse-without-force is correctly implemented and reproduces as documented.** Read `main()`'s full `claim` branch: `write_claim()` is unreachable on the colliding-without-`--force` path -- the function returns `EXIT_CLAIM_REFUSED` (3) first. Verified with a clean-room reproduction (logic copied to an isolated sandbox, `ORA_ACTIVE_WORK_DIR` pointed at a scratch dir): session A claims, session B without `--force` is REFUSED at exit 3 and writes nothing, A's claim is untouched on disk; `--force` correctly takes over and preserves `prior_claim`. The live incident's actual behavior (8c98eacf's claim landing with no `prior_claim` and no REFUSED trail) could NOT be fully reconciled against this: the session-transcript tool compacts ordinary tool calls without showing raw arguments/stdout, so 8c98eacf's exact `claim` invocation and its printed output were not recoverable. Corroborating evidence (8c98eacf's own claim file recorded `cwd` as the OneDrive project folder and `paths` resolved as absolute paths under that same folder, not the real `~/.claude` repo paths -- the signature of the tool being invoked from the wrong working directory) suggests environment/context confusion in how that session invoked the CLI, but `CLAIMS_DIR` is a fixed absolute path independent of `cwd`, so a wrong-cwd invocation alone does not explain a bypassed collision check. Also untested: my reproduction was sequential, not a genuine concurrent-process race -- a true TOCTOU race between two real simultaneous `claim` invocations remains unverified either way. **Conclusion: the refusal code is provably correct in isolation; what happened live could not be fully explained with the evidence available and is left open, not closed as "not a bug."**
-
-**Recommendation surfaced to Gabriel, not yet actioned:** two independent, non-exclusive options were flagged --  (a) narrow `governor-drift-probe.py`'s pre-push scan to changed files only, shrinking blast radius (bigger, separate project, needs its own review as governor code); (b) cheaper -- when the override-usage-log's already-tracked `signature` field sees a repeat hit, surface a "this false positive has been overridden N times by M sessions in 24h, check active claims before building a fix" warning at override time (reuses existing data, no gate-logic change). No implementation authorized this session -- read-only investigation only, per the request.
-
-## 2026-08-22 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
-
-- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `8c98eacf-04d4-4d51-9116-59f55a6b49b2` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
-- Reason recorded in the token: Gabriel explicit in-turn authorization (2026-08-22) to push fix/governor-drift-probe-changelog-fp-v2 (the two-round-reviewed changelog/active-work false-positive fix) despite a DIFFERENT, pre-existing bug in git-prepush-hook-tests-gate.py itself: subprocess.run(..., text=True) with no explicit encoding crashes with UnicodeDecodeError (byte 0x9d under cp1252) while capturing test-governor-drift-probe.py's subprocess output. Reproduces consistently (same byte, same position, 2 attempts) and is unrelated to the reviewed fix -- confirmed root cause: missing encoding="utf-8", errors="replace" on the subprocess.run call at hooks/git-prepush-hook-tests-gate.py:266-268. Gabriel chose to override and push now rather than fix the harness bug first; flagged separately as a follow-up.
-- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-08-22 12:48:30 local.
-
-## 2026-08-22 — governor-drift-probe DSCR-changelog-scaling-multiplier false positive FIXED, closing the recurring-override pattern (commit ecf7b42 -> main)
-
-- `deal-comparison/SKILL.md:153`'s v1.2 changelog entry ("...inflating computed DSCR ~1.6x and letting deals that would floor-flag...") was misread by `governor-drift-probe.py` as a live DSCR governor declaration of 1.6x, blocking every push. Overridden via the `allow-hook-test-failure` token **8 times by at least 3 distinct sessions** across 2026-08-21/22 before landing (5 tallied at task start, signature `d491c6e47418`; 3 more by session `ebb79ea0` at 12:23/12:25/12:30 local on 2026-08-22 while this fix was in flight — see the three preceding event_log entries).
-- Root cause: `RE_DSCR_THRESH` has no notion of "multiplier vs threshold" — "DSCR ~1.6x" (a scaling-factor narration of how wrong a buggy calculation's output was) reads identically to a declared floor. None of the module's existing qualifiers (`_portfolio_qualified`/`_refi_qualified`/`_stabilization_qualified`) matched this narrative shape — it needed its own suppressor.
-- Fix: `RE_DSCR_COMPUTED_SCALING` + `_dscr_scaling_multiplier_spans()` — a narrow, span-scoped suppressor requiring the exact "&lt;scaling verb&gt; ... computed/calculated/measured ... dscr ... (~ | by [a factor of]) ... N.Nx" shape, deferred whole-line to the existing `RE_GOV_DSCR_BOUND` structural veto and gated on an explicit fix/bug/correction context token. Deliberately does NOT reuse the module's usual wide proximity veto (`_governor_declared_nearby`) — the real line's own "floor-flag" (ORA's Ruling-5 term of art) sits inside that veto's normal reach and would have wrongly blocked the fix.
-- Built in an isolated worktree (`hooks-override-auth-governor-dscr-changelog` claim), 3 rounds of independent adversarial review (`eos-review-gate.py`, claude-fable-5): round 1 found a HIGH false negative + MEDIUM tense-blindness gap (both fixed); round 2 found a live regression in round 1's own fix (a modifier-word gap in the keyword lookahead — fixed by widening to 2-word tolerance) and identified 2 residual gaps (topic-blind and negation-blind changelog-context gating) accepted as documented, deliberately-pinned residuals rather than chased with new negation-detection logic; round 3 APPROVE WITH NITS (one tautological test line fixed). 8 new regression tests. Full suite green (94 local / 97 via the real pre-push hook-tests gate); live probe exit 0 against the real tree (was exit 1). Doctrine gate, hook-tests gate, and confidential-scan gate all run for real via `git push` (not just simulated).
-- **Duplicate-work collision discovered mid-task**: at least 2 other parallel sessions were independently working this identical false positive — a fully-formed but unmerged competing fix on branch `fix/governor-drift-probe-changelog-fp` (commit `2155fb4`, worktree `fix-governor-drift-probe-changelog-fp`, different design: 3-signal line-wide gate requiring a tilde-glued value + literal "corrected" + a separate plain-1.25 restatement, no proximity/adjacency requirement between the three) — inspected and found to have a plausible false-negative gap of its own (a real drift sharing a line with an unrelated "corrected"/"1.25" mention elsewhere would be masked, since none of its three signals are scoped to each other) — and a claim on the identical `hooks-override-auth-governor-dscr-changelog` slug by session `8c98eacf` (claimed 2026-08-22T12:28:11, description referenced "currently uncommitted in shared checkout working tree" but the shared checkout had zero uncommitted changes to these files at check time; its recorded `paths` pointed under the OneDrive project folder rather than the actual `~/.claude` repo, suggesting `claim_work.py` was run from the wrong cwd). Neither session was reachable via `ListAgents`/`SendMessage` (not listed by a resolvable name). Proceeded to push after confirming `origin/main` had no conflicting commits for these 2 files and the shared checkout had no uncommitted collision — git's normal non-fast-forward protection covers any later conflicting push from those sessions. Flagging for Gabriel: this task appears to have been dispatched to 3+ parallel sessions simultaneously: worth checking whether that was intentional or a dispatch/scheduling duplication worth tightening.
-
-## 2026-08-21 -- oxfordra.net deploy: broker auth-binding security fix
-
-Deployed commits `eb80fe7` + `fde9328` (website-canonical `main`) to production via `netlify deploy --build --prod`, with Gabriel's explicit in-turn confirmation ("push and deploy it"). Deploy ID `6a88d33d177dcd3eecce9b27`.
-
-**What shipped:** closes cc-audit-army finding `unauth-sharepoint-read-oracle-via-background-fn`. `broker-finalize.mjs` mints a short-lived HMAC `authToken` binding `{submissionId, itemPath}` for the internal `broker-finalize` -> `broker-score-background` handoff (previously unauthenticated, a public-URL SharePoint read-and-persist oracle). Base fix found already in progress, uncommitted, in the shared checkout -- origin unattributed after checking with two other concurrently-active sessions; reviewed thoroughly (8-angle adversarial code review) before building on it and shipping.
-
-5 adversarial-review findings fixed on top of the base fix: cross-boundary token replay closed via a `type` claim (`upload`/`bg-auth`/`status`); the read-side auth gap on `broker-score-status.mjs` closed via a new `statusToken` (client-threaded through `broker-upload.js`/`for-brokers.html`); `SUBMISSION_ID_RE`/`UPLOAD_PATH_RE` deduplicated into `_shared/validate.js` next to their generators; auth check reordered ahead of shape checks in `broker-score-background.mjs`; `verifyIntakeToken` hardened to fail closed instead of throwing on a missing secret. A 6th finding (an unrelated, uncited change to `track-record.html`'s public Fairground Village Center return figures) was NOT applied -- Gabriel confirmed the live 4.5x/63%+ figures were already correct and a peer session reverted that edit separately.
-
-**Pre-deploy gate:** `site-qc-reviewer` caught a real BLOCK on the first pass -- `for-brokers.html` referenced `/broker-upload.js` with no cache-bust query param (the only script on the site missing one), while `_headers` sets a 1-year immutable cache on `/*.js` and this diff changed `pollForScore()`'s signature. A returning visitor's stale cached JS would have called the new server code with no `statusToken`, gotten a 401, and hung/crashed silently. Fixed with `?v=2` (commit `fde9328`, matching the site's existing per-file cache-bust convention); re-review returned APPROVE.
-
-**Verification:** 60/60 tests passing (`node --test tests/functions/`, including 7 new tests pinning the fixes) both before and after the cache-bust fix. `verify-push.py` confirmed local HEAD == `origin/main` tip (`fde9328`) before deploy. Post-deploy: `https://oxfordra.net/` and `/for-brokers` both 200; served `/broker-upload.js` confirmed live with the 4-parameter `pollForScore` signature and `?v=2` reference; `/api/broker-score-status` confirmed returning `401 invalid_auth` with no `statusToken` -- the fix is live and functioning in production.
-
-## 2026-08-21 -- repo-architecture-review description-trim (commit 73feef1): content verified live, Save-skill click provenance inconclusive
-
-Gabriel reported clicking **Save skill** in Cowork on the staged
-`repo-architecture-review.skill` (904/1024-char description trim, commit `73feef1`,
-2026-08-21 18:08:05 -0400). Package staged at
-`ora-skills\_staging\2026-08-21_repo-architecture-review-desclen-fix\`, SHA256
-`d813a1e536493bd3b46c8736a48a04bee84607efe1112379a469004f5eb4ecb2`.
-
-**Content verified correct and live.** Cache SKILL.md at
-`...\skills-plugin\583f08bc-...\a6ad2c61-...\skills\repo-architecture-review\SKILL.md`
-is byte-identical to the current repo copy (SHA256 `f89750d5...4681` both sides) --
-confirmed via direct grep for the trimmed phrasing (new wording present, old wording
-absent) as well as a full-file hash match.
-
-**But CreationTime evidence does NOT corroborate a fresh click.** The cache directory's
-CreationTime is still 2026-08-21 18:01:19 -- unchanged from the batch8 install
-recorded earlier today (`automation-health-monitor v1.6 + repo-architecture-review v1.0
-(post-1aec229)` entry). No re-creation event happened after the 18:08:05 commit. This
-is fully explained by `sync_appdata_mirror.py`'s pre-commit hook, which overwrites
-content in place into any EXISTING AppData mirror on every commit -- per this skill's
-own v1.13 doctrine, content matching the repo is not itself evidence of a genuine
-platform re-import when CreationTime hasn't moved. No verification scripts or
-`present_files` artifacts were found in the staging folder either (unlike every prior
-round in today's session, which left a scratch-script trail), consistent with the
-click not having actually reached Entry point B in Cowork.
-
-**Conclusion, following the same-day precedent for this exact ambiguous pattern
-(debt-management, package-and-stage-skill entries above):** content is verified
-correct and live regardless of whether today's click did anything -- the pre-commit
-hook alone guarantees that. Cleared from the ledger on that basis, but this is NOT
-being recorded as a confirmed Save-skill click; provenance for this specific instance
-is inconclusive.
-
-`_staging\2026-08-21_repo-architecture-review-desclen-fix\` archived to
-`_archive\2026-08-21_repo-architecture-review-desclen-fix\` (never deleted).
-
-## 2026-08-21 -- 6-skill reimport batch (deal-execution, debt-management, document-assembly, estoppel-request-generation, lease-abstraction-pipeline, legal-intelligence) installed via Gabriel's Save-skill clicks
-
-Entry point A (fresh package) on the 6 items that entered `pending_reimport.py` after a concurrent session committed `63f0efe` (deal-execution, document-assembly, estoppel-request-generation, lease-abstraction-pipeline, legal-intelligence -- 8 code-review findings closed: landlord/vesting wiring, estoppel routing, CreationTime gap) and `27cb034` (debt-management v1.3 -- PAYOFF STATEMENTS workflow, repo-first reconciliation). All six skill dirs confirmed git-clean and `plugin_of` returned `None` for all six (standalone Save-skill path) before packaging. Packaged via `tools/package_skills.py`, exit 0, frontmatter gate passed on all six (deal-execution 980/1024, debt-management 929/1024, document-assembly 778/1024, estoppel-request-generation 902/1024, lease-abstraction-pipeline 966/1024, legal-intelligence 969/1024). Staged and handed to a Cowork session (this Code session has no Save-skill install control) for Entry point B present_files + Save-skill clicks; Cowork routed all six through the Cowork install button (two are multi-file: deal-execution has `scripts/`, lease-abstraction-pipeline has `references/` + `SCHEDULED_TASK.md`). Gabriel confirmed all six clicks.
-
-`main.log` remained stale throughout (last write 2026-08-20 20:51:03), so verification used the cache-directory CreationTime discriminator against pre-click baselines captured before the clicks:
-- `deal-execution`: CreationTime moved 17:21:59 -> 17:53:45. Confirmed genuine re-import, content byte-identical.
-- `document-assembly`: CreationTime moved 2026-08-14 18:00:44 -> 17:53:44. Confirmed genuine re-import, content byte-identical.
-- `estoppel-request-generation`: CreationTime moved 17:22:05 -> 17:53:48. Confirmed genuine re-import, content byte-identical.
-- `lease-abstraction-pipeline`: CreationTime moved 17:21:51 -> 17:53:51. Confirmed genuine re-import, content byte-identical (all 3 packaged files, incl. `SCHEDULED_TASK.md`).
-- `legal-intelligence`: CreationTime moved 2026-08-03 14:51:09 -> 17:53:56. Confirmed genuine re-import, content byte-identical.
-- `debt-management`: CreationTime did NOT move (unchanged at 2026-08-17 17:34:25) even though content is byte-identical to the packaged v1.3. Same ambiguous pattern as `package-and-stage-skill` in the prior batch: the pre-commit `sync_appdata_mirror.py` hook overwrites content in-place into any EXISTING AppData mirror on every commit, so a byte-match here is expected regardless of whether today's click actually re-imported anything -- per this skill's own v1.13 doctrine, content match with an unmoved CreationTime is not first-hand proof of install. Flagging rather than asserting a clean confirmation: **content is verified correct and live; today's click's provenance for debt-management specifically is inconclusive.**
-
-All six cleared from `_staging/PENDING_REIMPORT.md` (`pending_reimport.py clear`) -- content re-sync independently confirmed for all six, genuine re-import confirmed via CreationTime for five of the six.
-
-## 2026-08-21 -- Save-skill click confirmed: 6-skill batch (commit 63f0efe)
-
-Packaged, staged, and installed via package-and-stage-skill v1.22/v1.23 Entry point A,
-run from a cloud Cowork session over the Desktop Commander bridge. `main.log` was
-stale (last write 2026-08-20 20:51:03) for the entire session, so the CreationTime
-fallback discriminator (v1.22 step 7) was used for post-install verification instead
-of the main.log Delta/Sync-complete gate.
-
-Skills confirmed installed (cache dir CreationTime moved to 2026-08-21 17:53:44-56,
-all post-dating both the 17:45:17 commit and the pre-check baseline, file counts
-matching the packaged .skill entries exactly):
-
-- deal-execution v1.6 (3 files: SKILL.md, scripts/audit_completeness.py, scripts/extract_revisions.py)
-- document-assembly v1.4 (1 file: SKILL.md)
-- estoppel-request-generation v1.1 (1 file: SKILL.md)
-- lease-abstraction-pipeline v2.7 (3 files: SKILL.md, SCHEDULED_TASK.md, references/extraction-edge-cases.md)
-- legal-intelligence v1.3 (1 file: SKILL.md)
-- package-and-stage-skill v1.23 (1 file: SKILL.md)
-
-Note: package-and-stage-skill's own AppData cache hash-matched the repo BEFORE this
-install (pre-commit mirror-sync hook artifact, per v1.13 doctrine) -- the stale
-CreationTime baseline (16:56:54, pre-dating the 17:45:17 commit) and this session's
-own synced mirror still reading v1.22 were what correctly flagged it as needing
-reimport despite the false-negative hash match.
-
-This is Gabriel's confirmed Save-skill click on all 6, not merely the upstream repo
-commit. Source commit: 63f0efe80fc8b6377211bc79d455676afda54add.
-
-## 2026-08-21 -- orphaned oxford-command-center-1.worktrees archived (OI-200 loose end)
-
-Running dirty-tree-triage's new stray-clone-by-remote discovery (scan_dirty_trees.py, commit 1aec229) surfaced C:\Users\Owner\oxford-command-center-1.worktrees\qodo-github-repo-review -- a git-worktree checkout left behind when its parent clone (oxford-command-center-1) was archived under OI-200's closure. Not flagged by the discovery tool itself (no top-level .git of its own), and git couldn't even recognize it as a repo any more ("fatal: not a git repository") since its .git pointer referenced the now-moved parent -- confirmed genuinely orphaned, not live: absent from the primary repo's own `git worktree list` (which only shows the 5 real worktrees under oxford-command-center/.claude/worktrees/ and oxford-command-center-worktrees/, a different naming pattern entirely). Archived (never deleted, Hard Invariant 6) to C:\Users\Owner\_archive-non-onedrive\oxford-command-center-1-worktrees-orphan-20260821\, alongside the original stray-clone archive from OI-200. Verified the primary repo's 5 live worktrees are unaffected post-move.
-
-## 2026-08-21 -- loi-generation v1.7 committed and pushed: merged colliding v1.6 revisions (commit 3c477f5)
-
-Reconciled the loi-generation version collision at Gabriel's direction. Repo's v1.6 (2026-08-16, committed) added Phase 6c Lost-Deal Ledger capture (Notion Deal Sourcing Log, `ORA Max Defensible Price`); the platform's independent v1.6 (2026-08-18, never committed) wired `{{PROPERTY_ZONING_PHRASE}}` + a new inline SS13 entity-interest conditional into the master template, fixed the EXECUTION PAGE subtitle token gap, and fixed a `{{TENANT_DISCLOSURE_PHRASE}}` trailing-comma defect -- both diverged from the same v1.5 base with no knowledge of each other. Neither was a superset, so this merged both feature sets into v1.7: `SKILL.md` combines both sides' Decision Logic/Token Reference/Phase 4/Versioning changes, and `templates/LOI_Master_Template_Condensed.docx` was replaced with the platform-side v1.1 copy (Phase 6c is Notion-only and needed no template changes, so nothing from the repo side was lost). Pre-commit gate initially BLOCKED on the merged description exceeding the 1024-char platform limit (1094 chars) -- trimmed to 912 and re-committed clean; this is the pre-flight frontmatter gate working as designed, not a defect. Pushed `1aec229..3c477f5` to origin/main. Archived both spent rescue copies to `_archive\2026-08-21_repo-first-rescue-triage\loi-generation-merged-3c477f5\`. Verified the platform runtime-cache mirror now byte-matches the committed content (auto-synced by pre-commit Check 4). Companion to the same-session `debt-management` v1.3 reconciliation (commit 27cb034). **One item from the same `STORE_AHEAD_OF_REPO.md` sweep remains OPEN:** `lease-addendum` -- real committed work on unmerged branch `claude/determined-cannon-8126a7` commit `a359381` (ora_doc_qc retrofit), needs a merge-to-main decision, not touched.
-
-## 2026-08-21 -- dirty-tree-triage v1.1 installed via Save-skill click (OI-203 fix now live)
-
-Gabriel clicked **Save skill** in Cowork on the `dirty-tree-triage.skill` package (2 entries: `SKILL.md`, `scripts/scan_dirty_trees.py`; commit `4e44f72`, the OI-203 fix pairing step 7's ora-skills git check with a `claim_work.py claim`). Verified as a genuine re-import, not a mirror-sync artifact: the runtime cache directory's CreationTime moved from the 2026-08-13 baseline to 2026-08-21 17:41:42, with both files sharing that exact timestamp (directory torn down and recreated); `main.log` was unavailable for corroboration (no activity since 2026-08-20 20:51:03, "going down for update"), so the CreationTime discriminator was the sole evidence, per package-and-stage-skill v1.22. Content hash-matches commit `4e44f72` exactly. `open-items-tracker.md#OI-203` fix is now live end-to-end (repo + platform). Cleared from `ora-skills/_staging/PENDING_REIMPORT.md`.
-
-Noted in passing: the repo has since moved past this commit with uncommitted v1.2 WIP (stray-clone-by-remote discovery, OI-200) under a live, properly-filed `ora-skills-housekeeping` claim (session `d7aee8c2`) -- correctly left untouched, not a conflict with this install.
-
-## 2026-08-21 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
-
-- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `00eb97d5-5753-4335-93e9-891e19413564` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
-- Reason recorded in the token: Gabriel authorized in-turn 2026-08-21. maintenance/test-governor-drift-probe.py fails on unmodified main (confirmed, unrelated to this push's 2-file diff) -- false positive flagging acquisition-buy-box-v1.md's ratified 65%-per-property-refi/40%-aggregate LTV split as drift. Fix spawned as a separate task (task_bb18f708).
-- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-08-21 17:47:16 local.
-
-## 2026-08-21 -- 3-skill reimport batch (insurance-renewal-review, dirty-tree-triage, package-and-stage-skill) installed via Gabriel's Save-skill clicks
-
-Entry point A (fresh package, no pre-built `.skill` existed for any of the three) on the 3 items left open by the earlier batch5 handoff: `insurance-renewal-review` (commit `834bfe3`, trims `description` off the 1024-char hard import limit), `dirty-tree-triage` (commit `4e44f72`, pairs step 7's `ora-skills` single-writer check with a `claim_work.py` claim per OI-203), `package-and-stage-skill` (commit `c31fa66`, v1.22 -- `main.log` liveness fallback + canonical `.ps1` invocation snippet). Repo confirmed clean for all three skill dirs before packaging; `plugin_of` returned `None` for all three (standalone Save-skill path, no plugin rebuild). Packaged via `tools/package_skills.py`, exit 0, frontmatter gate passed (`insurance-renewal-review` now 940/1024, confirming the 834bfe3 trim took effect; `package-and-stage-skill` 1010/1024; `dirty-tree-triage` 729/1024). Staged and presented; Gabriel confirmed all three Save-skill clicks.
-
-`main.log` was stale throughout (last write 2026-08-20 20:51:03, per v1.22's own documented fallback), so post-install verification used the cache-directory CreationTime discriminator instead of log corroboration:
-- `insurance-renewal-review`: cache dir CreationTime moved 17:19:31 -> 17:41:42 -- confirmed genuine re-import. Content byte-identical to the packaged v-trim.
-- `dirty-tree-triage`: cache dir CreationTime moved 2026-08-13 20:08:25 -> 17:41:42 -- confirmed genuine re-import. Content byte-identical to the packaged build.
-- `package-and-stage-skill`: cache dir CreationTime did NOT move (unchanged at 16:56:54, i.e. ~2 min after the c31fa66 commit itself) even though content is byte-identical to the packaged v1.22. Per this skill's own v1.13 doctrine, an unchanged CreationTime with matching content is NOT first-hand proof that today's click is what installed it -- most likely an earlier, unlogged install already landed v1.22 minutes after the commit, and today's click was a no-op against already-current content. Flagging this rather than asserting a clean "confirmed click" for this one item: **content is verified correct and live; install-timing provenance for this specific instance is inconclusive.**
-
-All three cleared from `_staging/PENDING_REIMPORT.md` (`pending_reimport.py clear`) since the runtime cache re-sync is independently confirmed for content on all three, and confirmed genuine re-import for two of the three. Note: an uncommitted, in-progress edit to `package-and-stage-skill/SKILL.md` (session `04d7cdf1`, toward a v1.23 doc-only fix) was observed mid-task, unrelated to this batch -- will surface as its own future pending-reimport once committed.
-
-## 2026-08-21 -- debt-management v1.3 committed: repo-first reconciliation of platform-side PAYOFF STATEMENTS work (commit 27cb034)
-
-Committed `debt-management/SKILL.md` v1.2 -> v1.3, landing the PAYOFF STATEMENTS section (Step 0 direction check, Workflow A issuing / Workflow B auditing, 13-point payoff QC gate) that had been running on the platform cache since 2026-08-17 but was never committed to `ora-skills` -- surfaced by re-running `tools/repo_first_check.py`'s full sweep while investigating a Gabriel-flagged `STORE_AHEAD_OF_REPO.md` entry (which itself turned out to be stale/already-resolved for lease-form-qc/listing-agreement-qc). Verified the cache content byte-matched (CRLF-normalized) the committed result before archiving its rescue copy. Committed in isolation (explicit pathspec, not `git add -A`) after a concurrent live session's own 6-file staged commit (`63f0efe`) landed first -- avoided co-mingling per the shared-checkout hygiene hook's warning. Pre-commit mirror sync (Check 4) pushed the new content into the AppData runtime cache automatically; `PENDING_REIMPORT.md` now carries a `debt-management` line awaiting Gabriel's Save-skill click. Archived the spent rescue copy to `_archive\2026-08-21_repo-first-rescue-triage\debt-management-committed-27cb034\`. **Two items from the same sweep remain OPEN, need Gabriel's decision, NOT touched:** `loi-generation` (a genuine two-way v1.6 version collision -- repo's Lost-Deal Ledger Phase 6c vs. cache's template-token wiring, both real, neither a superset) and `lease-addendum` (real committed work on unmerged branch `claude/determined-cannon-8126a7` commit `a359381`, retrofitting `addendum_qc.py`/`ora_doc_qc.py` -- needs a merge-to-main decision, not a rescue). Their rescue copies remain in `_staging/repo-first-rescue/`, untouched.
-
-## 2026-08-21 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
-
-- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `00eb97d5-5753-4335-93e9-891e19413564` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
-- Reason recorded in the token: Gabriel authorized in-turn 2026-08-21. maintenance/test-governor-drift-probe.py fails on unmodified main (confirmed, unrelated to this push's 2-file diff) -- false positive flagging acquisition-buy-box-v1.md's ratified 65%-per-property-refi/40%-aggregate LTV split as drift. Fix spawned as a separate task (task_bb18f708).
-- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-08-21 17:42:51 local.
-
-## 2026-08-21 -- dirty-tree-triage: full `ora-skills\_staging\` sweep, 26 dated folders + 32 loose files archived, zero live/uncommitted work found
-
-Extended the earlier repo-first-rescue triage to the entire remaining `_staging\` backlog (six weeks, 2026-07-09 through 2026-08-21, ~18MB). Six parallel read-only investigation passes hash-compared every packaged `.skill`/source-mirror file against full `ora-skills` git history (CRLF-normalized) and cross-checked loose `.ps1`/`.py`/`.md` session scripts against confirmed-shipped commits and `event_log.md`. Result: **every single item resolved to an exact historical commit match or confirmed-shipped/confirmed-installed state** — no live, uncommitted, or contested content anywhere in the backlog. Notable corroborating evidence along the way: `2026-07-21_index-unregistered-batch`'s own `_verify_output.txt` independently confirmed 15/15 installs; `2026-08-17`'s `CODE-HANDOFF.md` task list (including reconciling `_staging/repo-first-rescue/`) was independently confirmed complete; `2026-08-17`'s LAMS pause/resume draft's underlying scheduled task was confirmed to have actually fired live today at 21:06:45Z. One folder (`2026-08-21_batch5-reimport`) was auto-archived by a concurrent live session mid-sweep — left untouched, already resolved. Archived (never deleted, Hard Invariant 6) the remaining 25 dated folders + 32 loose files to `_archive\2026-08-21_staging-full-sweep-triage\`, structure preserved. Left `_staging\PENDING_REIMPORT.md` and `_staging\STORE_AHEAD_OF_REPO.md` untouched — confirmed live/active (PENDING_REIMPORT.md's own mtime advanced mid-sweep). `_staging\` now holds only those two active ledger files. Separate open item surfaced, out of scope for this sweep: `STORE_AHEAD_OF_REPO.md` currently flags `lease-form-qc` and `listing-agreement-qc` runtime-cache content as DIVERGENT from repo on `scripts/ora_doc_qc.py` since 2026-08-17T20:23Z — a live, still-open drift, unrelated to any archived item here.
-
-## 2026-08-21 -- OI-203 fixed: dirty-tree-triage step 7 now pairs the ora-skills git check with a claim_work.py claim
-
-`ora-skills` commit `4e44f72` (`dirty-tree-triage` v1.1, Gabriel-directed): step 7's `git log -1`/`git status` single-writer check now also requires `claim_work.py claim ora-skills-housekeeping --paths <target>` before any hands-on ora-skills triage. Claimed the work under that exact slug before making this edit -- clean claim, no takeover needed -- and released it after commit. Root cause (filed as `open-items-tracker.md#OI-203`): two sessions independently ran this skill's full workflow against the same `ora-skills/_staging` folders earlier today with neither claiming first; git state alone can't see a concurrent session since commits share author identity across sessions, so both saw a clean tree and proceeded, and the collision was caught only by accident. The pre-commit hook auto-synced the AppData mirror and logged the skill to `ora-skills/_staging/PENDING_REIMPORT.md` -- **not yet live on the platform account** until a `package-and-stage-skill` re-upload runs; a session still reading the old synced copy won't see the new step 7 language in the meantime. OI-203 row updated to FIXED (repo) with the commit citation.
-
-## 2026-08-21 -- governor-drift-probe.py KNOWN GAP 2 closed: per-property refi-sizing 65% LTV ceiling no longer flags as drift
-
-Fixed a false positive that was blocking every push repo-wide: `governor-drift-probe.py`
-flagged `acquisition-buy-box-v1.md:31` ("LTV ceiling (per-property refi sizing): <= 65%
-LTV...") as "LTV governor 65% != canonical 40%". Doctrine states the ratified per-property
-refi-sizing ceiling (<= 65% LTV) and the portfolio-aggregate ceiling (<= 40% LTV, Hard
-Invariant 4) on SEPARATE bullets (buy-box-v1.md :31 vs :33); the probe's existing pairing
-suppressor only recognized the two governors when stated together on the same line. This
-was a previously-documented, deliberately-deferred gap in the probe's own comments (KNOWN
-GAP 2: "Closing it requires widening LTV SUPPRESSION -- a false-negative risk on Hard
-Invariant 4 that belongs in its own reviewed change").
-
-Fix: a narrow suppressor in `_flag_ltv` that is VALUE-LOCKED (only the literal ratified
-"65" ever matches -- a real per-property drift still flags) and VALUE-ADJACENT (the
-ratified "per-property ... refi ... siz(ing)" wording must end within a short window
-immediately before the flagged value, not merely appear anywhere on the line), vetoed by
-the existing `_governor_declared_nearby` check.
-
-Two-round independent review via `eos-review-gate.py` (pinned `claude-fable-5`, the
-gate's top reviewer tier). Round 1 caught a real Critical: the first cut's frame check was
-line-wide, which could mask a genuine AGGREGATE-governor drift restated as 65% elsewhere
-on the same line (e.g. "Portfolio LTV ceiling raised to 65% given our per-property refi
-sizing convention."). Fixed with the value-adjacency requirement; round 2 approved with no
-blocking findings. A known, narrower residual was accepted rather than fixed (a
-governor/acquisition-declaration token sitting >28 chars before the value, outside the
-existing veto's reach, could still be masked in this one shape) -- documented in-code
-rather than widening `VETO_BEFORE`, since that constant is independently tuned against
-other real-tree margins and the value-lock means only the literal "65" is ever at stake.
-
-Added 4 regression tests: the real false positive (plus a hyphenated "refi-sizing"
-spelling), a drifted per-property value still flagging, and the two round-1
-adversarial-masking shapes still flagging. Full `test-governor-drift-probe.py` suite
-green; live probe now exits 0 against the real tree (1242 files scanned; was exit 1).
-Full local pre-push chain run for real (doctrine gate, 94/94 hook-tests, confidentiality
-scan) -- all green, both as a standalone simulation and during the actual push.
-
-Built in an isolated worktree per the shared-checkout single-writer doctrine (claimed via
-`claim_work.py` under a distinct `hooks-override-auth-governor-drift` slug alongside a
-concurrent session's unrelated `hooks-override-auth` claim on `commit-hygiene-guard.py`).
-Merged to `main` (`c7875a5` -> merge commit) and pushed to `origin/main` on
-`ora-claude-config` (`7221e63..bfcd26b`). Scratch worktrees and the merged feature branch
-cleaned up after push.
-
-## 2026-08-21 — Skill fleet: manuscript-amendment discipline (754 Old State)
-
-Four skills committed (`ora-skills` 29e78e8) and confirmed installed. Origin: a scanned
-lease at 754 Old State Route 74 whose typed expiry of "May 31, 2030" was struck through in
-ink and replaced by hand with "2027", circled and initialed. Tesseract transcribed the typed
-layer and dropped the manuscript change with no signal. An IC memo (v02) and a full IRR
-model were published on the wrong date before Gabriel caught it. The visual sweep that
-followed found four more hand changes OCR had missed, plus an unexecuted base lease that
-four months of file review had not surfaced.
-
-- **lease-abstraction-pipeline v2.6** — new STEP 2A: mandatory page-image review for every
-  OCR-path document before any field is reported (render, contact-sheet, zoom every economic
-  term / party block / signature page). Adds `EXECUTION_STATUS` and lease-chain-gap checks to
-  every document, +9 STEP 5 quality flags. Rule of record: on a scanned document, OCR text is
-  evidence of the FORM, not of the BARGAIN.
-- **deal-execution v1.5** — LEASE-CHAIN INTEGRITY in Workflow 3 DD (instrument chain, executed
-  counterpart per link, landlord-of-record match, manuscript-amendment catalogue); Workflow 2A
-  item 12 extended so estoppels carry the chain and reproduce hand amendments verbatim.
-- **title-exam-abstraction v1.0** (new) — exam-vs-commitment distinction; the mortgage-location-
-  vs-boundary-survey trap (OAC 4733-38 vs -37); cross-collateral/cross-default as its own
-  category with payoff ≠ parcel release; every exception routed to a deliverable or register item.
-- **estoppel-request-generation v1.0** (new) — estoppels built from the 32-field abstract,
-  pre-filled, each abstraction defect converted into an affirmative certification. Never amends.
-
-**Install verified before clearing the ledger.** main.log showed no SkillsPlugin sync (last
-entry 2026-08-20 20:40), so verification rested on the two NEW skills: the post-commit hook
-reported "no local AppData mirror installed yet — nothing to sync" for both, yet both cache
-directories existed at 17:22 local, three minutes after the 21:19Z commit. The hook could not
-have created them, so only a real Save-skill install could. All four then hashed byte-identical
-(EOL-normalized) to the repo. Ledger entries cleared for the four.
-
-**Observed, not actioned:** five other ledger entries (daily-brief, insurance-renewal-review,
-listing-agreement-qc, register-scheduled-task, settlement-basis-extraction) disappeared between
-this session's read and its clear. `cmd_clear` provably pops only named skills, so another actor
-cleared them; a subsequent always-verify `candidates` sweep shows none of the five has drift, so
-nothing was lost. That sweep did surface **three skills with repo-ahead-of-cache drift and no
-ledger entry at all — `debt-management`, `lease-addendum`, `loi-generation`** — the retroactive-
-blindness case `candidates` exists to catch. Left for Gabriel: they belong to other workstreams
-and packaging/installing them was not in scope.
-
-**Process note:** a cloud Cowork session CAN reach the repo-first path through the Desktop
-Commander bridge. Route: author in-container → SendUserFile → device_commit_files into a
-connected folder → PowerShell copy into `ora-skills` → idempotent patch scripts → pre-flight
-gate → commit → `tools\package_skills.py` → device_stage_files back → SendUserFile renders the
-Save-skill button. Use PowerShell, not `cmd /c` with `set VAR=...&` (breaks on spaced paths).
-Watch line endings: reading utf8 and writing `newline=''` flips CRLF→LF, which `.gitattributes`
-wants but makes a legacy-CRLF blob diff look like a full-file rewrite — verify with `git diff -w`
-and say so in the commit message.
-
-## 2026-08-21 -- Filed OI-203: claim_work.py process gap surfaced by today's ora-skills `_staging` triage collision
-
-Two sessions were independently handed the same investigation of `ora-skills/_staging/repo-first-rescue/` + `session_outputs/lease-addendum.skill` today; both reached the same conclusion (all 8 items fully superseded, safe to archive) but neither filed a `claim_work.py claim` before starting, so the collision was caught only by accident -- one session's archive `mv` found its source already moved by the other, seconds after `event_log.md` had already been updated. `hooks/active-work/*.json` held no claim for this task at the time. The module's own docstring cites a near-identical 2026-08-12 ora-skills precedent as its reason for existing; this is a fresh instance of the same gap, not a new failure mode. Distinct from [open-items-tracker.md#OI-166](open-items-tracker.md#OI-166) (fixed 2026-08-16 -- a bug inside the claim mechanism itself); this one is non-adoption -- the mechanism was never invoked. Filed per Gabriel's in-turn instruction as [open-items-tracker.md#OI-203](open-items-tracker.md#OI-203); full detail in the tracker row.
-
-## 2026-08-21 -- 5-skill reimport batch INSTALLED (Save-skill clicks confirmed, not merely committed)
-
-**What happened.** Gabriel clicked **Save skill** in Cowork for 5 skills that had sat in
-`PENDING_REIMPORT.md` since 2026-08-17 (one since 2026-08-21). The Cowork session that ran
-the clicks got through Entry point B's pre-check and staging (extracted zips to
-`_extract_check\`, ran a freshness screen) but did not complete steps 5-8 -- no event_log
-entry, no ledger clear, staging folder left unarchived. This Code session verified the
-installs independently and closed out steps 5-8 itself rather than trust the claim on sight
-(the ledger still showed all 5 pending when first checked, which is what triggered the
-independent verify instead of a same-turn "done").
-
-**Skills, versions, staged packages:**
-- `daily-brief` v2.12 (commit fd9bd17, "v2.11->v2.12: drop 'market update' trigger")
-- `insurance-renewal-review` v2.0 (commit 5953732, "text-layer triage, quoted-vs-realized
-  check, named-insured-by-location reconciliation, HTML dashboard")
-- `listing-agreement-qc` v1.2 (commit 8ae16b5, "REPO-FIRST capture of previously-uncaptured
-  cache-only skill")
-- `register-scheduled-task` v2.12 (commit 655c346, "a bounded pause must register its resume
-  per fleet, same session/surface/pass")
-- `settlement-basis-extraction` v1.0 (commit 9ca7a2f, first install -- brand new skill)
-
-**Path.** package-and-stage-skill Entry point A (this session packaged fresh via
-`tools\package_skills.py`, not a handoff) -> staged to
-`ora-skills\_staging\2026-08-21_batch5-reimport\` -> handed to Cowork via Entry point B for
-the Save-skill clicks.
-
-**Pre-check (all green).** None are plugin members (`plugin_of` = None for all 5). Repo tree
-clean on all 5 dirs before packaging. Packager exit 0 on all 5: forward-slash entries, `name`
-== dir, description within the 1024-char limit -- **`insurance-renewal-review` packaged at
-exactly 1024/1024 chars, zero margin before a future one-character addition silently fails
-import** (flagged to Gabriel, not edited). `daily-brief` (target-markets.json) and
-`listing-agreement-qc` (tools/ora_doc_qc.py) are SHARED_ROOT_DEPS consumers; `pending_reimport.py
-shared-deps` read all-in-sync before packaging, no CACHE-AHEAD/DIVERGENT direction conflict.
-
-**Post-install verify -- 5/5 skills, all files, and every cache directory was REBUILT, not
-overwritten.** Directory CreationTime moved to match LastWriteTime for all 5 (17:19:31,
-17:19:31, 17:19:34, 17:19:37, 17:19:39 ET respectively -- staggered a few seconds apart,
-consistent with one sequential batch of Save-skill clicks), versus their pre-click
-CreationTimes of 8/17 or earlier -- the same directory-recreation discriminator used for
-`acquisition-proposal-generation` earlier today. All shipped files byte-matched the repo
-(raw SHA256, no EOL normalization needed). Both shared deps confirmed: `daily-brief`'s
-`target-markets.json` and `listing-agreement-qc`'s `scripts/ora_doc_qc.py` both hash-identical
-to their repo-root/tools sources.
-
-**`main.log` unavailable as corroboration on this machine** (same standing gap recorded in
-today's earlier `acquisition-proposal-generation` entry -- no `SkillsPlugin` activity logged
-since 2026-08-20 20:51:03). Directory-recreation timestamp used as the first-hand substitute,
-consistent with that entry's documented fallback.
-
-**Ledger.** `pending_reimport.py clear <skill>` run for all 5, each only after this append
-returned exit 0. Ledger entries added later in the session for other work (`deal-execution`,
-`estoppel-request-generation`, `lease-abstraction-pipeline`, `title-exam-abstraction`,
-`package-and-stage-skill`) were left untouched -- out of scope for this task.
-
-**Staging archived.** `_staging\2026-08-21_batch5-reimport\` (including the Cowork session's
-own partial-verification scripts) moved to `_archive\2026-08-21_batch5-reimport\`, nothing
-deleted.
-
-## 2026-08-21 -- dirty-tree-triage: ora-skills `_staging\repo-first-rescue\` + `_staging\session_outputs\lease-addendum.skill` archived, all 8 items confirmed superseded
-
-Two undated staging folders flagged by a 2026-08-21 Cowork session (no manifest/event_log signature) were triaged file-by-file against `ora-skills` git history. All 17 files in `repo-first-rescue\` (7 skill trees: exception-detection, insurance-renewal-review, lease-addendum, lease-form-qc, listing-agreement-qc, masterlease-jurisdiction-rebase, package-and-stage-skill) hash-matched an exact prior commit already superseded by later work — notably masterlease-jurisdiction-rebase's v1.1.2 content matches commit `ea9dddf`'s own "Code-surface close-out" reconciliation of a Cowork-hand-edit, and package-and-stage-skill's mislabeled "v1.20" draft is the exact stale-mirror-clobber incident already documented in the current v1.21 Changelog. `session_outputs\lease-addendum.skill` is byte-identical to both current repo HEAD and the already-installed AppData synced mirror — a spent package missing only its event_log confirmation line, not its content. No live or uncommitted work found in either folder. Archived (never deleted, Hard Invariant 6) to `_archive\2026-08-21_repo-first-rescue-triage\`, structure preserved. Repo verified git-clean on package-and-stage-skill and all 6 other touched skill dirs before and after.
-
-## 2026-08-21 -- repo-architecture-review: cross-repo audit filed OI-197 through OI-201, remediation started
-
-Cowork session ran `repo-architecture-review` across all 10 ZeOoba repos (local
-clones: ora-skills, oxford-command-center, ora-pm, AAOS, website-canonical;
-READMEs via `gh api`: ora-cowork-watchdog, BrainVault, ora-claude-config,
-Claude-Guru-Ooba-; Internal-Accounting-App has no documentation at all). Filed
-5 new items via `allocate-oi-id.py`: OI-197 (circular monitoring dependency
-across 5 scheduler substrates), OI-198 (ora-cowork-watchdog README describes an
-unbuilt systemd producer path), OI-199 (Internal-Accounting-App undocumented,
-uncloned -- the highest financial-consequence repo, structurally blind to this
-audit), OI-200 (stray third writable clone `oxford-command-center-1`, plus 2
-unpushed commits on the primary including a tax recapture absent from every
-mirror deploy since 08-17), OI-201 (ora-pm README stale on the billing/deploy
-path). `check-open-items-duplicate-ids.py` confirmed zero duplicate rows/
-sections. Tracker commit: `6985b46` on `feat/model-canary-probe-step25`.
-
-Also surfaced, not yet actioned: both scheduler fleets have read `EN=OFF`
-since 2026-08-17 (needs Gabriel's decision, not a unilateral resume); ora-pm
-monthly billing still has no trigger anywhere, next billing date 2026-09-01
-(new unattended automation on a money-moving path -- needs explicit
-confirmation before registering).
-
-A Code session picked up remediation same-day per the audit's handoff brief:
-committing the tracker, then working the punch list (A-E) and five workflow
-optimizations (WO-1 through WO-5).
-
-## 2026-08-21 — acquisition-proposal-generation v3.1 INSTALLED (Save-skill click confirmed, not merely committed)
-
-**What happened.** Gabriel clicked **Save skill** in Cowork on the staged
-`acquisition-proposal-generation.skill` package and confirmed it in-session at
-**2026-08-21 16:46 ET**. This entry records the CLICK, not the upstream repo commit —
-the repo commit (`fc78d55`, 2026-08-21 16:31:50 -0400, "Add acquisition-proposal-generation
-skill v3.1") is evidence the skill was authored, never evidence anyone installed it.
-First install of this skill; it is new, not a revision of a previously-installed version.
-
-**Path.** package-and-stage-skill v1.21 Entry point B (pre-packaged install, no repackaging).
-Package built by an earlier Code session at
-`ora-skills\_staging\2026-08-21_acquisition-proposal-generation-reimport\`.
-
-**Pre-check (all green).** Existence ASSERTED, not inferred: 439,052 bytes, mtime 16:39:59.
-SHA256 `1105ff284549d99fd378a3f3c3165610c0791a666f620f3530ded6b9609bd4d6` — matched the
-handoff's expected hash, and the copy staged into session outputs re-hashed identical.
-5 zip entries, all forward-slash, no directory records, expected file set exactly.
-All 5 packaged entries byte-matched the current repo copies. Frontmatter gate:
-`name` == dir, description 966/1024. `plugin_of` = None (standalone path correct).
-Repo tree clean. Not a SHARED_ROOT_DEPS consumer.
-
-**Routed to Cowork Save-skill deliberately.** 5-file skill (`SKILL.md`, `scripts/build.js`,
-`scripts/photos/{1100_rarig,55_newplant,9050_redbranch}.jpg`). Desktop Settings →
-Capabilities was explicitly ruled out per the 2026-07-11 subfolder-drop bug — that path
-would have landed SKILL.md alone and silently discarded the generator.
-
-**Post-install verify — 5/5 files, and the directory was REBUILT, not overwritten.**
-The cache mirror at
-`…\skills-plugin\583f08bc-…\a6ad2c61-…\skills\acquisition-proposal-generation\`
-carries all five files, each hashing MATCH against the repo. Decisive signal: the
-directory's own **CreationTime moved to 16:46:25** (from 16:21:45 pre-click), with every
-file created at 16:46:25 — a genuine platform tear-down-and-re-download. A
-`sync_appdata_mirror.py` content overwrite replaces file bytes in place and leaves the
-directory's CreationTime untouched, so directory re-creation is the discriminator.
-
-**Evidence caveat, recorded deliberately (v1.13 doctrine).** The pre-click state was
-*contaminated* and would have read as "already installed" to a careless pass: `ListSkills`
-already returned the skill enabled at v3.1, and all 5 cache files already hashed identical
-to the repo. Both were untrustworthy — the pre-commit mirror-sync hook had overwritten the
-cache files at 16:31:01–16:31:09 (before the 16:31:50 commit), which is the
-hash-match-by-construction case, and the account-side v3.1 description was consistent with
-a 16:21:45 *pre-commit* build whose contents the hook had already erased locally. The
-ledger still listing the skill pending, plus the absence of any corroborating sync cycle,
-is what correctly kept this on the install path.
-
-**`main.log` was unavailable as corroboration on this machine.** `main.log` has not been
-written since 2026-08-20 20:51:03 ("going down for update"); there is no 2026-08-21
-`SkillsPlugin` activity in any log file in `%APPDATA%\Claude\logs`. Step 2's normal
-Delta→Sync-complete corroboration could not be obtained, so the directory-recreation
-timestamp above was used as the first-hand substitute. **Standing consequence: while the
-desktop build is not writing main.log, the step-2 short-circuit gate cannot be satisfied
-at all — every skill will read as un-corroborated, and cache-directory CreationTime is the
-fallback discriminator.**
-
-**Ledger.** `pending_reimport.py clear acquisition-proposal-generation` run only AFTER
-this append returned exit 0. The other 5 pending entries (daily-brief,
-insurance-renewal-review, listing-agreement-qc, register-scheduled-task,
-settlement-basis-extraction) were left untouched.
-
-**Discrepancy surfaced, not repaired.** The dispatch named 8 other pending skills; the
-ledger holds only 5. `debt-management`, `lease-addendum`, and `loi-generation` are NOT in
-`_staging/PENDING_REIMPORT.md`. Reported, not acted on — out of scope for this task.
-
-## 2026-08-21 -- MEMORY.md archival pass, 918B WARN breach cleared (Automation Audit R17, Gabriel-approved)
-
-Rev 17 of the ORA Automation Audit flagged MEMORY.md at 22,418B, 918B past the
-21,500B WARN runway marker. Gabriel chose "archive stale entries now, with
-ref-repair" over leaving it or splitting the index.
-
-Archived 4 entries, each verified genuinely closed/superseded and checked for
-inbound references before moving:
-- `reference_portfolio_json_notion_seed_fallback_regression.md` (FIXED 08-09, 0 inbound refs)
-- `reference_settings_json_enabledplugins_skilloverrides_attribution_2026-08.md` (resolved, 0 inbound refs)
-- `project_broker_pipeline_blobs_v1_outage_2026-08-04.md` (fully resolved 08-16, 0 inbound refs)
-- `reference_cc_snapshot_refresh_dq_flag_alert_is_count_not_severity.md` (FIXED 08-11, 2 inbound refs in
-  `open-items-tracker.md` -- one `[[wikilink]]`, one literal markdown path link)
-
-All 4 moved to `_archive/<name>_archived_2026-08-21.md` per the archive-not-delete
-policy (memory-policy.md section 4) -- full prose preserved, nothing deleted.
-Corresponding lines removed from MEMORY.md's index. The one literal-path link in
-`open-items-tracker.md` (line ~6960, which would have broken since it pointed at
-the file's pre-move location) was repaired to point at the new archived path; the
-adjacent `[[wikilink]]` reference (name-based, doesn't break on a file move) was
-annotated with the same archived-path note for a future reader's benefit.
-
-**Result:** MEMORY.md 22,544B -> 21,437B (1,107B freed), back under the 21,500B
-WARN marker with 2,963B of headroom to the 24,400B HARD ceiling. Zero orphaned
-links introduced -- both inbound-ref sites in open-items-tracker.md were checked
-and repaired, not just the index.
-
-Full detail: [[project_automation_audit_rev17_2026-08-21]].
-
-## 2026-08-17 -- dirty-tree-triage: 4 settled isolated commits landed on `~/.claude`; ora-skills and oxford-command-center left untouched
-
-Ran the `dirty-tree-triage` skill against the default four checkouts. `website-canonical`
-was clean. `~/.claude` had 17 dirty entries; 14 were settled and evidence-attributed,
-landed via `commit_isolated_replacement()` in 4 isolated commits:
-
-- `d27c51e` -- event_log.md + 3 new reference notes (Tax & Basis Register gap-check,
-  insurance-renewal-review v2.0 / 9620 State 350, Metrics-History non-existence-check),
-  attributed to sessions `8f27ce3a` (Tax & Basis import repo systemization) and
-  `8d2515c6` (Insurance renewal review skill v2.0), both settled and not running.
-- `2903132` -- rules.md Zapier status correction, corroborated by an already-committed
-  event_log entry describing the same fix.
-- `39c7f35` -- INDEX_reference.md + reference_ora_pm.md (ora-pm BETA status + N+1
-  delinquency-check timeout finding). No corroborating session found in `list_sessions`
-  -- reported UNATTRIBUTED per triage doctrine, but settled (mtime unchanged across two
-  checks, ~9h stale).
-- `324cb73` -- maintenance/_state FleetPause restore ledger + its debug-script archive +
-  the `ora-routine-pause-resume-08-21` one-time task folder, attributed to session
-  `cd9e6e4e` (Pause routines until Friday 5 PM).
-
-**Left untouched, contested/live:** `MEMORY.md`, `open-items-tracker.md`, and the new
-`project_ora_doc_qc_shared_module_pr48_2026-08-17.md` -- mtime moved BETWEEN two checks
-made ~4 minutes apart (20:31:19->20:35:18 on MEMORY.md), and session `local_ceb1bb01`
-("Retrofit listing/lease QC onto shared module", PR #48) showed `isRunning: true` mid-triage
-before its PR merged. Both `MEMORY.md` and `open-items-tracker.md` are also jointly edited
-by session `local_bd6f4916` (PR #137 merged, closing OI-184) -- multi-session collision,
-not something this skill force-resolves. Leave for the next session to reconcile.
-
-**ora-skills:** single-writer check (step 7) caught the repo mid-merge -- HEAD moved to
-`5f8b65b` (PR #48 merge) and a brand-new `_archive/2026-08-18_superseded_pre_merge_untracked/`
-appeared between the initial scan and the attribution pass, with `tools/ora_doc_qc.py`'s mtime
-seconds old. Stopped per doctrine; nothing touched. Pre-existing dirty entries there
-(`_archive/2026-08-17_item1-reimport-prep/`, `_archive/2026-08-17_register-scheduled-task-v2.10/`,
-`pma-qc/`) still need a fresh triage pass once the merge settles.
-
-**oxford-command-center:** `data/snapshots/portfolio.json` modified-tracked, mtime settled
-(~9h stale), but branch is `ahead 1, behind 1` of origin -- real divergence, out of this
-skill's scope per its own Boundaries section. Also this file is documented
-([[reference_command_center_snapshot_is_tracked_not_ignored]]) as normally auto-committed by
-its own tooling; reported rather than force-committed, since a 9h-stuck auto-commit plus a
-divergent branch together read as an anomaly worth a human look, not a mechanical isolate.
-
-Net: 4 clean isolated commits, 0 files force-resolved, 2 repos correctly left alone on
-evidence (one live merge, one branch divergence + tooling anomaly), 1 file cluster correctly
-reported as still-contested rather than guessed at.
-
-## 2026-08-17 -- Tax & Basis Register gap-check: 5 remaining priority-1 findings + entity/exchange index filed
-
-Code-surface session, gap-check pass after a concurrent session (`3f365fd1`
-and others) scoped its own Code-side work on the same 2026-08-17 "Tax &
-Settlement systemization" handoff narrowly to skill authoring +
-Metrics-History fact-check + the 2 data-gap items (OI-187/OI-188) it hit
-along the way. Verified `settlement-basis-extraction` (Task 1) was already
-committed and validated -- no action needed there. Confirmed 5 of the
-handoff's 6 priority-1 findings, plus the cost-seg memo correction, were not
-yet anywhere in `.claude`; filed them:
-
-- [OI-189](open-items-tracker.md#OI-189) -- 1100 Rarig: $1,803,121.50 settlement
-  capitalized with zero land allocation
-- [OI-190](open-items-tracker.md#OI-190) -- McGregor Lane parcel on the
-  07/02/2024 settlement but missing from the 2024 Form 8824
-- [OI-191](open-items-tracker.md#OI-191) -- 1100 Rarig $217,346 Section 481(a)
-  adjustment, no Form 3115 on file
-- [OI-192](open-items-tracker.md#OI-192) -- 5600 Sunnyside title-chain gap
-  (1992 individual owners vs. 02/2025 LLC seller, no intervening conveyance
-  documented)
-- [OI-193](open-items-tracker.md#OI-193) -- `2026-07-28_CostSegDispositionPortfolio_Memo_v02.docx`
-  Table 1/2 arithmetic errors ($200K understatement); flagged only, not
-  edited -- the memo lives in a non-Claude OneDrive business folder
-
-Also added [[reference_tax_settlement_entity_and_exchange_index_2026-08-17]]
-(6 entity EINs, the EX-12-*/IPX 1031 exchange-number index 2015-2026, and the
-Fenton Street LLC 2024 status-change note -- it exited rental-flow-through
-holding via five 12.5% zero-gain transfers but federal K-1s still print its
-old 62.5%, EXCEPTIONS tab defect #9, uncorrected).
-
-**Editing discipline:** `open-items-tracker.md` and `MEMORY.md` both carried
-a live same-file-collision warning (session `3f365fd1` working, 4 others with
-recorded edits in the same dirty checkout) at edit time. Both edits were
-kept strictly additive (new rows/lines only, no existing content touched) and
-were NOT committed -- the working tree is jointly authored right now and
-committing risks co-mingling another session's uncommitted hunks. Whoever
-next reconciles this checkout should fold these rows in along with the rest
-of the outstanding WIP.
-
-**Still not located anywhere in `.claude` as of this pass:** the Fenton
-Street K-1 62.5%-vs-actual-0% defect is now captured only inside the entity/
-exchange reference file above (folded in rather than given its own OI row,
-since it's a return-preparation correction, not an open investigation), and
-Task 4's remaining flag-only items (Fenton Street TY2025 MD return image-only
-scan, 7658 Fishel needing a Franklin County re-pull, no Form 4562 for 3
-entities) were not filed by either session -- still open.
-
 
 ---
 
-*Entries at and before “2026-08-17 -- Tax & Basis Register gap-check: 5 remaining priority-1 findings + entity/exchange index filed” rolled over 2026-08-22 to [_archive/event_log_2026-08-22.md](_archive/event_log_2026-08-22.md) per memory-policy.md's rollover rule.*
+*Entries at and before “2026-08-23 — feat/model-canary-probe-step25 merged into main (45 commits, `efcd876`)” rolled over 2026-09-02 to [_archive/event_log_2026-09-02.md](_archive/event_log_2026-09-02.md) per memory-policy.md's rollover rule.*

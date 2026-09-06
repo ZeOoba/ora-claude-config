@@ -174,10 +174,10 @@ PORTED_CLAUDE_MD_COPIES = (
 # for _confidential-staging, must NEVER reach the off-machine remote).
 BACKUP_SWEEP_TRANSIENT_DIRS = {
     # harness/runtime state, caches, per-session scratch -- regenerable
-    ".claude", ".firecrawl", ".superpowers", "artifacts", "backups", "cache",
-    "daemon", "debug", "downloads", "handoffs", "ide", "jobs", "paste-cache",
-    "plans", "plugins", "session-env", "sessions", "shell-snapshots", "statsig",
-    "tasks", "telemetry", "todos", "worktrees",
+    ".claude", ".firecrawl", ".pytest_cache", ".superpowers", "artifacts",
+    "backups", "cache", "daemon", "debug", "downloads", "handoffs", "ide",
+    "jobs", "paste-cache", "plans", "plugins", "session-env", "sessions",
+    "shell-snapshots", "statsig", "tasks", "telemetry", "todos", "worktrees",
     # append-event-log.py staging (drains into event_log.md; transient by design)
     "_tmp_entries",
     # 2026-08-15 (Gabriel-directed): harness usage telemetry -- per-session facets/

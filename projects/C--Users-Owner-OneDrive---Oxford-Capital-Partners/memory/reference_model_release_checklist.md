@@ -5,10 +5,12 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 8e3f40ea-05cc-48c4-9e6b-49cd7ec8ee9e
-  modified: 2026-07-26T15:55:34.165Z
+  modified: 2026-09-02T10:06:09.120Z
 ---
 
-Current lineup as of 2026-07-26: Fable 5 (`claude-fable-5`, hardest tier) · Opus 5 (`claude-opus-5`, standard high-capability — succeeded Opus 4.8) · Sonnet 5 (`claude-sonnet-5`, standard implementation — succeeded Sonnet 4.6) · Haiku 4.5 (`claude-haiku-4-5-20251001`, mechanical). CLAUDE.md's tier doctrine (Fable/opus/sonnet/haiku by role) is alias-based and needs NO edit on a release — confirmed zero hardcoded model IDs in CLAUDE.md or the 6 `~/.claude/agents/*.md` files.
+Current lineup as of 2026-09-02: Fable 5.1 (`claude-fable-5-1`, hardest tier — succeeded Fable 5) · Opus 5 (`claude-opus-5`, standard high-capability) · Sonnet 5 (`claude-sonnet-5`, standard implementation) · Haiku 4.5 (`claude-haiku-4-5-20251001`, mechanical). CLAUDE.md's tier doctrine (Fable/opus/sonnet/haiku by role) is alias-based and needs NO edit on a release — confirmed zero hardcoded model IDs in CLAUDE.md or the 6 `~/.claude/agents/*.md` files (as of the 2026-07-26 check; re-verify if this file hasn't been touched since).
+
+**PRIOR (superseded 2026-09-02):** lineup as of 2026-07-26 had Fable 5 (`claude-fable-5`) in the hardest tier. Detected via ora-model-release-watch's 2026-09-02 scheduled run reading this session's own system-prompt model-lineup statement (`claude-fable-5-1` present, not in the recorded set). Opus 5, Sonnet 5, and Haiku 4.5 IDs are unchanged.
 
 **PRIOR (superseded 2026-07-26):** lineup as of 2026-07-10 had Opus 4.8 (`claude-opus-4-8`) in the high-capability slot. Detected via ora-task-integrity-guard's 2026-07-26 07:14 ET run reading this session's own system-prompt model-lineup statement (`claude-opus-5` present, not in the recorded set) — flagged in-turn by Gabriel same day rather than waiting for this task's next 2026-07-27 11:27 ET scheduled fire. Every `[MODEL: claude-opus-4-8 ...]` CC/MCP observation tag logged before 2026-07-26 (`ora-site-exposure-probe`, `ora-appsec-sweep`) reflects the OLD pin and needs re-observation, not automatic correction — canary method per `reference_scheduled_task_model_standard.md`.
 

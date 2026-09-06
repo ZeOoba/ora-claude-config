@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: ba3393eb-867c-4773-be60-0095ba1567b2
-  modified: 2026-08-11T21:05:02.182Z
+  modified: 2026-08-25T20:56:57.635Z
 ---
 
 # ⚠️ CURRENT STATE (2026-08-10): internal debt reporting is FROZEN — Gabriel ruled Option C.
@@ -36,6 +36,11 @@ The status of the $2,800,000 loan against **2203-2207 Northwood Dr** (6.99%, IO,
 **Against it (reading B):** the 08-03 refutation above still holds in the live file — different rate, different principal, and `2203 FROM EGFLLC`'s journal shows no drawdown that could have produced $2.8M.
 
 The unexplained item is the same one that has blocked this since 08-03: **a $2.8M advance with no corresponding cash movement.** That is what the source document must resolve.
+
+## Downstream consequence found 2026-08-25: this is also why oxford-command-center's `debt_scores` warehouse table is empty
+
+Independently investigating why `debt_scores` (DSCR/LTV governor trend history) had 0 rows, traced it to `warehouse_meta` key `debt_snapshot.last_write_refused`: the debt book has been marked **`degraded`** since **2026-08-16T18:29:41Z**, latched by the shrinkage guard in `server/warehouse/debt-snapshot.ts` because loan `borrower-2203-2207-northwood-dr` — **this exact loan** — "disappeared with no terminal status and no same-property replacement." That's the warehouse-side echo of the 08-09 unlogged reversal above (PSI row 10 zeroed, Loan Index row 24 relabeled "DUPLICATE") propagating through to the next warehouse debt-snapshot ingest. The marker requires either the loan to reappear or an explicit `confirmAbsent: [...]` call to clear — neither has happened, so every `debt-scores-snapshot.ts` run (there's also a **separate, independent gap**: nothing has ever scheduled that script to run at all) would refuse to write regardless.
+**Do not clear this marker or call `confirmAbsent` to unblock `debt_scores`** — doing so would be adjudicating the exact contested loan status Ruling C deferred to Eric's source document, through a warehouse side door instead of the workbook. `debt_scores` stays empty as a correct consequence of the standing freeze, not a separate bug to fix. Once Eric produces the source doc and this memory is updated, clearing the warehouse marker (and then deciding whether to schedule `debt-scores-snapshot.ts`) becomes a normal follow-up, not before.
 
 ## How to apply
 
