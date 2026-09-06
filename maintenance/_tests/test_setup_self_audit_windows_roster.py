@@ -70,7 +70,42 @@ class TestParse(unittest.TestCase):
             ssa.parse_windows_roster("<!--BEGIN-WINDOWS-TASK-ROSTER-->\n<!--END-WINDOWS-TASK-ROSTER-->")
 
 
+    def test_crit_typo_raises_instead_of_downgrading(self):
+        """crit=yees must not silently classify a CRIT task as WARN."""
+        with self.assertRaises(ValueError):
+            ssa.parse_windows_roster(ROSTER.replace("crit=yes", "crit=yees"))
+
+    def test_missing_required_field_raises(self):
+        with self.assertRaises(ValueError):
+            ssa.parse_windows_roster(ROSTER.replace(" | exit1-ok=no\n- ClaudeFleetMirror", "\n- ClaudeFleetMirror"))
+
+    def test_duplicate_field_raises(self):
+        with self.assertRaises(ValueError):
+            ssa.parse_windows_roster(ROSTER.replace("crit=no | exit1-ok=no\n- ClaudeFleetMirror",
+                                                    "crit=no | crit=yes | exit1-ok=no\n- ClaudeFleetMirror"))
+
+    def test_duplicate_task_name_raises(self):
+        with self.assertRaises(ValueError):
+            ssa.parse_windows_roster(ROSTER.replace("<!--END-WINDOWS-TASK-ROSTER-->",
+                                                    "- ORA Nightly Disk Clean | state=active | crit=no | exit1-ok=no\n<!--END-WINDOWS-TASK-ROSTER-->"))
+
+
 class TestClassify(unittest.TestCase):
+    def test_empty_live_set_is_crit_every_active_missing(self):
+        """A completed query with ZERO rows is a real answer: the whole backbone is gone."""
+        status, detail, _ = ssa.classify_windows_tasks(entries(), {})
+        self.assertEqual(status, "CRIT")
+        for name in ("ORA Fleet Dead-Man MISSING", "ORA Nightly Disk Clean MISSING", "ClaudeFleetMirror MISSING"):
+            self.assertIn(name, detail)
+        self.assertNotIn("ORA PM Crons MISSING", detail)   # retired + absent = expected
+
+    def test_three_tuple_rows_with_task_path_are_accepted(self):
+        live = {k: v + ("\\",) for k, v in healthy_live().items()}
+        live["ORA Brand New Thing"] = ("Ready", "0", "\\Sub\\")
+        status, detail, _ = ssa.classify_windows_tasks(entries(), live)
+        self.assertEqual(status, "WARN")
+        self.assertIn("ORA Brand New Thing (folder \\Sub\\) is live but has no line", detail)
+
     def test_all_healthy_including_retired_disabled_is_ok(self):
         status, detail, _ = ssa.classify_windows_tasks(entries(), healthy_live())
         self.assertEqual(status, "OK", detail)
