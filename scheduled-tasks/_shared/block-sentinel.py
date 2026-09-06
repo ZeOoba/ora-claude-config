@@ -56,12 +56,24 @@ before the COM send). Neither layer is sufficient alone.
 USAGE
 -----
   python block-sentinel.py claim    --task ora-am-brief --block blockB --run-id <id>
-                                    [--ttl-min 30] [--state PATH] [--force]
+                                    [--ttl-min 30] [--state PATH] [--force] [--period day|week|month]
   python block-sentinel.py complete --task ora-am-brief --block blockB --run-id <id>
-                                    [--notion-page-id ID] [--email-sent-at ISO]
+                                    [--notion-page-id ID] [--email-sent-at ISO] [--period day|week|month]
   python block-sentinel.py fail     --task ora-am-brief --block blockB --run-id <id>
-                                    [--error "..."]
-  python block-sentinel.py status   --task ora-am-brief --block blockB   (read-only)
+                                    [--error "..."] [--period day|week|month]
+  python block-sentinel.py status   --task ora-am-brief --block blockB   (read-only) [--period day|week|month]
+
+--period (added 2026-09-06, default "day"): which calendar bucket a block's
+claim-then-complete record is keyed to. A DAILY task keyed to the ET date is
+right for a task meant to fire once a day, but a WEEKLY or MONTHLY task keyed
+the same way re-arms every day between fires -- a clock skew, a missed cron
+window, or a manual catch-up re-run days later reads as "virgin date, PROCEED"
+even though the task already ran this period. --period week keys to the ISO
+week (`YYYY-Www`, US/Eastern); --period month keys to the calendar month
+(`YYYY-MM`, US/Eastern). Same claim-then-complete semantics apply within
+whichever bucket is selected; only the key format and retention window change
+(see `prune()`). The caller must pass the SAME --period on claim/complete/fail
+that it used to claim, or it addresses a different bucket than intended.
 
 Exit codes:  0 PROCEED/ok  |  10 SKIP_ALREADY_COMPLETE  |  11 STAND_DOWN_IN_PROGRESS
              12 REFUSED (finalize without ownership; nothing written)
@@ -80,6 +92,11 @@ from datetime import datetime, timedelta, timezone
 
 DEFAULT_TTL_MIN = 30
 RETAIN_DAYS = 14
+RETAIN_SPAN = {
+    "day": timedelta(days=RETAIN_DAYS),
+    "week": timedelta(weeks=8),
+    "month": timedelta(days=93),   # ~3 months; exact day count doesn't matter, only the order of magnitude
+}
 LOCK_TIMEOUT_S = 10.0
 
 EXIT_OK = 0
@@ -138,6 +155,45 @@ def _eastern_now(force_fallback=False):
 
 def et_date():
     return _eastern_now().strftime("%Y-%m-%d")
+
+
+PERIODS = ("day", "week", "month")
+
+
+def period_key(period):
+    """The state-file bucket key for `period`, US/Eastern.
+
+    day   -> et_date() unchanged ("YYYY-MM-DD")
+    week  -> ISO year-week ("YYYY-Www")
+    month -> calendar month ("YYYY-MM")
+
+    All three formats sort lexically in chronological order, which `prune()`
+    and `_period_key_to_date()` both rely on.
+    """
+    if period == "week":
+        return _eastern_now().strftime("%G-W%V")
+    if period == "month":
+        return _eastern_now().strftime("%Y-%m")
+    return et_date()
+
+
+def _period_key_to_date(key, period):
+    """Best-effort anchor UTC datetime for a period key, for retention only.
+
+    week -> Monday of that ISO week. month -> the 1st of that month.
+    Returns None on anything unparseable (dropped as stale by prune())."""
+    try:
+        if period == "week":
+            iso_year, iso_week = str(key).split("-W")
+            return datetime.combine(
+                datetime.fromisocalendar(int(iso_year), int(iso_week), 1).date(),
+                datetime.min.time(), tzinfo=timezone.utc)
+        if period == "month":
+            y, m = str(key).split("-")
+            return datetime(int(y), int(m), 1, tzinfo=timezone.utc)
+        return _parse_iso(str(key) + "T00:00:00Z")
+    except Exception:
+        return None
 
 
 def utc_iso():
@@ -337,15 +393,20 @@ def save_state(path, data):
     return "cannot commit state file: %s" % last
 
 
-def prune(data, today):
-    """Drop dates older than RETAIN_DAYS so the file cannot grow without bound.
-    Unparseable keys are dropped too -- they cannot be today's."""
-    cutoff = (_parse_iso(today + "T00:00:00Z") - timedelta(days=RETAIN_DAYS))
+def prune(data, today, period="day"):
+    """Drop keys older than this period's retention span so the file cannot
+    grow without bound. Unparseable keys are dropped too -- they cannot be
+    today's. `period` generalizes the original day-only cutoff (identical
+    behavior when period=="day") to week/month buckets, which need a wider
+    span since they accumulate far fewer keys per unit of wall-clock time."""
+    anchor = _period_key_to_date(today, period)
+    span = RETAIN_SPAN.get(period, RETAIN_SPAN["day"])
+    cutoff = (anchor - span) if anchor is not None else None
     for key in list(data.keys()):
         if key == today:
             continue
-        parsed = _parse_iso(str(key) + "T00:00:00Z")
-        if parsed is None or parsed < cutoff:
+        parsed = _period_key_to_date(str(key), period)
+        if parsed is None or (cutoff is not None and parsed < cutoff):
             del data[key]
     return data
 
@@ -359,7 +420,8 @@ def emit(payload, code):
 
 def cmd_claim(args):
     path = args.state or default_state_path(args.task)
-    today = et_date()
+    period = getattr(args, "period", None) or "day"
+    today = period_key(period)
     run_id = args.run_id or "run-%s" % utc_iso()
     ttl = args.ttl_min if args.ttl_min is not None else DEFAULT_TTL_MIN
 
@@ -369,6 +431,7 @@ def cmd_claim(args):
         rec = (data.get(today) or {}).get(canon_block(args.block))
 
         base = {"task": args.task, "block": args.block, "etDate": today,
+                "period": period, "periodKey": today,
                 "runId": run_id, "ttlMin": ttl, "statePath": path,
                 "stateFileError": note}
 
@@ -414,7 +477,7 @@ def cmd_claim(args):
         if rec:
             new_rec["supersededRunId"] = rec.get("runId")
         data.setdefault(today, {})[canon_block(args.block)] = new_rec
-        write_err = save_state(path, prune(data, today))
+        write_err = save_state(path, prune(data, today, period))
 
         notes = [n for n in (note, write_err) if n]
         base.update({
@@ -448,7 +511,8 @@ def _finalize(args, status, extra):
     reality. It must be asked for explicitly, never inferred.
     """
     path = args.state or default_state_path(args.task)
-    today = et_date()
+    period = getattr(args, "period", None) or "day"
+    today = period_key(period)
     key = canon_block(args.block)
     with _Lock(path) as lock:
         data, err = load_state(path)
@@ -457,6 +521,7 @@ def _finalize(args, status, extra):
         if rec is None and not getattr(args, "adopt", False):
             return emit({
                 "task": args.task, "block": args.block, "etDate": today,
+                "period": period, "periodKey": today,
                 "decision": "REFUSED_NO_CLAIM",
                 "logToken": block_token(args.block, "FINALIZE_WITHOUT_CLAIM"),
                 "persisted": False, "record": None, "statePath": path,
@@ -471,6 +536,7 @@ def _finalize(args, status, extra):
                 and not getattr(args, "adopt", False):
             return emit({
                 "task": args.task, "block": args.block, "etDate": today,
+                "period": period, "periodKey": today,
                 "decision": "REFUSED_NOT_OWNER",
                 "logToken": block_token(args.block, "FINALIZE_NOT_OWNER"),
                 "persisted": False, "record": rec, "statePath": path,
@@ -489,12 +555,13 @@ def _finalize(args, status, extra):
             rec["runId"] = args.run_id
         rec["%sAt" % status.lower().split("_")[0]] = utc_iso()
         data.setdefault(today, {})[key] = rec
-        write_err = save_state(path, prune(data, today))
+        write_err = save_state(path, prune(data, today, period))
 
     # Do NOT let an earlier note mask a failed write -- that is the one error this
     # channel most needs to carry, and it was previously short-circuited away.
     notes = [n for n in (err, lock.note, write_err) if n]
     return emit({"task": args.task, "block": args.block, "etDate": today,
+                 "period": period, "periodKey": today,
                  "decision": status, "record": rec, "statePath": path,
                  "persisted": write_err is None,
                  "stateFileError": "; ".join(notes) if notes else None}, EXIT_OK)
@@ -519,11 +586,13 @@ def cmd_fail(args):
 def cmd_status(args):
     """Read-only. Must not create the state file -- callers use it to inspect."""
     path = args.state or default_state_path(args.task)
-    today = et_date()
+    period = getattr(args, "period", None) or "day"
+    today = period_key(period)
     data, err = load_state(path)
     rec = (data.get(today) or {}).get(canon_block(args.block))
     age = age_minutes(rec.get("claimedAt")) if rec else None
     return emit({"task": args.task, "block": args.block, "etDate": today,
+                 "period": period, "periodKey": today,
                  "record": rec, "ageMin": round(age, 1) if age is not None else None,
                  "statePath": path, "stateFileError": err}, EXIT_OK)
 
@@ -538,6 +607,9 @@ def main(argv=None):
         sp.add_argument("--state", default=None,
                         help="state file path; defaults to Claude_Workspace/_state/<task>-block-completion.json")
         sp.add_argument("--run-id", default=None)
+        sp.add_argument("--period", choices=PERIODS, default="day",
+                        help="calendar bucket the claim/complete record is keyed to "
+                             "(default day); must match across claim/complete/fail for one run")
         if name == "claim":
             sp.add_argument("--ttl-min", type=int, default=None)
             sp.add_argument("--force", action="store_true",

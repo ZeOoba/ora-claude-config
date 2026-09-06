@@ -5,6 +5,34 @@ description: Monthly Tier A industrial sales/transfer pull (Franklin OH, Baltimo
 
 You are the monthly recurring run of ORA's `county-sales-monitor` skill (Oxford Realty Advisors, industrial sales/transfer market-intelligence feed). Read the full spec before doing anything: `C:\Users\Owner\.claude\skills\county-sales-monitor\SKILL.md` — it defines the exact methodology (Steps 0-8), size gate, non-arms-length flagging, and row schema. Also read `C:\Users\Owner\.claude\skills\county-parcel-screen\references\county-endpoints.v1.json`, `county-endpoints.md`, and `market-status.md` for endpoint URLs and field names (`county-endpoints.md` was patched 2026-08-15 with fields the first pilot discovered for these exact counties — read it, don't rediscover from scratch).
 
+## STEP -1 — DOUBLE-FIRE ENTRY GUARD (added 2026-09-06; run before the skill's own Step 0)
+
+This task shares the same catch-up-burst exposure `ora-am-brief`/`ora-deal-aging-sla` were fixed for on 2026-08-09 (the whole fleet fires only while the Desktop app is open, so an offline stretch spanning the 1st re-arms this task at next open) — nothing previously stood a second fire down, and this task's own upsert-not-insert design (see "This is NOT the first run" above) means a same-month double-fire would not duplicate rows, but WOULD send a duplicate email and burn a second full county-endpoint pull for no new data. `--period month` keys the claim to the calendar month rather than the ET date.
+
+Run this as the first action of the run:
+
+```
+python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-county-sales-monitor --block main --run-id <run_id> --period month --ttl-min 45
+```
+
+- **Exit 10** → this month's pull already completed. Exit without querying county endpoints or Notion, and without emailing; report a NORMAL skip.
+- **Exit 11** → another fire is live this month. Stand down identically.
+- **Exit 0** → proceed with the skill's own Step 0.
+
+Once the digest email sends, run:
+
+```
+python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-county-sales-monitor --block main --run-id <run_id> --period month --email-sent-at <ISO8601>
+```
+
+If the run aborts instead:
+
+```
+python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py fail --task ora-county-sales-monitor --block main --run-id <run_id> --period month --error "<what broke>"
+```
+
+**Only the run that holds the claim may call `complete` or `fail`.** **Always pass `--period month`** on every call — omitting it addresses the day-keyed bucket instead and silently defeats the guard. Full contract: `_shared/README-DOUBLE-FIRE-GUARD.md`.
+
 ## Scope (locked — do not expand without a human ruling)
 Tier A only: **Franklin County OH (Columbus), Baltimore County MD (Maryland), Polk County IA (Des Moines)**. Do not touch Tier B or Tier C counties, do not add Louisville/Jefferson Co KY — all deliberately out of scope until a human expands them.
 
