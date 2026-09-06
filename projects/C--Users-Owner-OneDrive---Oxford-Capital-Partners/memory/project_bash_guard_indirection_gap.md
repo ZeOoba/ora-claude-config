@@ -1,6 +1,6 @@
 ---
 name: project-bash-guard-indirection-gap
-description: "CLOSED 2026-07-17: oxford-command-center's bash-guard.mjs (all 7 blocked command classes) had been defeated by git-alias/wrapper-script indirection -- fixed by resolving both into one expanded text every check scans, landed on main commit 60c45ed after 3 rounds of adversarial review found and fixed real bugs (a detection-breaking git-flag gap, a DoS-class exponential subprocess blowup, a backtracking regex, a quote-handling bug). A concurrent session closed the 2 pre-existing false positives flagged during that review (hooksPath read; cp source-vs-dest) same night, commit 8006a15. Tracked: open-items-tracker.md#OI-010 and #OI-011 (both closed)."
+description: "CLOSED 2026-07-17: oxford-command-center's bash-guard.mjs (all 7 blocked command classes) had been defeated by git-alias/wrapper-script indirection -- fixed by resolving both into one expanded text every check scans, landed on main commit 60c45ed after 3 rounds of adversarial review found and fixed real bugs (a detection-breaking git-flag gap, a DoS-class exponential subprocess blowup, a backtracking regex, a quote-handling bug). A concurrent session closed the 2 pre-existing false positives flagged during that review (hooksPath read; cp source-vs-dest) same night, commit 8006a15. Tracked: open-items-tracker-history.md#OI-010 and #OI-011 (both closed)."
 metadata:
   type: project
   originSessionId: 3fc20af9-9fcb-4681-a66a-c6eb07fdd7db
@@ -57,7 +57,7 @@ OI-007's fix pattern" below, still accurate).
 
 **2 unrelated, pre-existing false positives found during review, deliberately NOT fixed here** to
 keep this change scoped to the indirection fix — tracked separately at
-[open-items-tracker.md#OI-011](open-items-tracker.md#OI-011): `git config --get core.hooksPath` (a
+[open-items-tracker-history.md#OI-011](open-items-tracker-history.md#OI-011): `git config --get core.hooksPath` (a
 pure read) denied identically to a write; `cp` FROM a guard file (e.g. a benign backup) denied
 identically to overwriting it. **Closed same night by a concurrent session**, commit `8006a15` —
 full evidence at OI-011 (3 more real bugs found via its own 3-round adversarial pass before landing:

@@ -1,6 +1,6 @@
 ---
 name: project-autonomy-gate-indirection-ceiling-followup
-description: "CLOSED 2026-07-17 (including the machine-wide netlify follow-up): value/reference indirection (a variable/file-sourced recipient, a renamed netlify binary, splitting a deploy across two Bash calls, or invoking netlify from outside the repo) used to defeat ora-autonomy-gate.py's Gate 1/2a detection entirely -- fixed via outbound-action checks at the point where a shell has already resolved indirection, not another regex. Email side + global netlify guard landed on ~/.claude main; repo-local netlify side merged via website-canonical PR #30. Tracked: open-items-tracker.md#OI-007."
+description: "CLOSED 2026-07-17 (including the machine-wide netlify follow-up): value/reference indirection (a variable/file-sourced recipient, a renamed netlify binary, splitting a deploy across two Bash calls, or invoking netlify from outside the repo) used to defeat ora-autonomy-gate.py's Gate 1/2a detection entirely -- fixed via outbound-action checks at the point where a shell has already resolved indirection, not another regex. Email side + global netlify guard landed on ~/.claude main; repo-local netlify side merged via website-canonical PR #30. Tracked: open-items-tracker-history.md#OI-007."
 metadata:
   type: project
   originSessionId: 3fc20af9-9fcb-4681-a66a-c6eb07fdd7db

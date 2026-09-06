@@ -107,17 +107,32 @@ expect("valid kind=registry_disabled_count evaluates True when it matches", resu
 
 # --- the CANONICAL tracker itself, right now: none of the 6 known-affected items -----
 # should enter open_autochecks anymore (regression guard for the real-world fix).
+#
+# Read BOTH files (split 2026-09-06, Automation Audit R22-4): OI-016 is CLOSED, so
+# its `### OI-016` section now lives in the history companion, not the live
+# tracker -- parsing the tracker alone would show it as absent (None), not as the
+# CLOSED status this test exists to confirm. combined_items mirrors exactly what
+# main()'s own check 4 does (parse each file separately, tracker wins on conflict).
 real_text = open(mip.TRACKER, encoding="utf-8").read()
 real_items = mip.parse_open_items(real_text)
-real_open_autochecks = {oid for oid, it in real_items.items()
+real_history_items = {}
+if os.path.isfile(mip.TRACKER_HISTORY):
+    real_history_items = mip.parse_open_items(
+        open(mip.TRACKER_HISTORY, encoding="utf-8").read())
+combined_real_items = dict(real_history_items)
+combined_real_items.update(real_items)
+real_open_autochecks = {oid for oid, it in combined_real_items.items()
                         if it["status"] == "OPEN" and it["autocheck"] and "kind=" in it["autocheck"]}
 previously_affected = {"OI-009", "OI-016", "OI-021", "OI-022", "OI-024", "OI-025"}
 expect("none of the previously-affected OI rows are in the live tracker's open_autochecks now",
        real_open_autochecks.isdisjoint(previously_affected),
        "got overlap %r" % (real_open_autochecks & previously_affected))
-expect("OI-016 now parses as CLOSED in the live tracker (post-restructure)",
-       real_items.get("OI-016", {}).get("status") == "CLOSED",
-       "got %r" % real_items.get("OI-016"))
+expect("OI-016 now parses as CLOSED (tracker+history combined, post-split)",
+       combined_real_items.get("OI-016", {}).get("status") == "CLOSED",
+       "got %r" % combined_real_items.get("OI-016"))
+expect("OI-016's section actually lives in the history file now, not the live tracker",
+       "OI-016" in real_history_items and "OI-016" not in real_items,
+       "history has it: %r, tracker has it: %r" % ("OI-016" in real_history_items, "OI-016" in real_items))
 
 # --- head_orphans: a back-link to MEMORY.md is not an orphan pointer ----------------
 # Regression guard for a false FAIL observed live on the 2026-08-05 ora-health-guard run,
@@ -377,6 +392,144 @@ expect("every adopted sub-index was gated or reported unstattable (regression gu
 expect("nothing reported unstattable also appears in the sized set (channels are disjoint)",
        not ({n for n, _ in live_unstattable} & live_gated),
        "unstattable=%r gated=%r" % (live_unstattable, sorted(live_gated)))
+
+# --- check 4a: dead pointers across the tracker/history split (2026-09-06, R22-4) ---
+# OI_REF_RE now captures WHICH filename a reference names; a reference naming the
+# wrong file for where an id's anchor actually lives is a genuinely dead link (a
+# markdown reader following it literally lands on a file with no such heading),
+# not merely a style nit -- so it must be caught the same as an id that doesn't
+# exist anywhere. Full main()-shaped fixtures under ORA_MEMORY_DIR, since this
+# logic lives inline in main() rather than in a separately-testable function.
+
+def _run_main_in(mem_dir):
+    """main() against a throwaway memory dir, capturing stdout. Exit code + output.
+
+    MEM/INDEX/TRACKER/TRACKER_HISTORY are module-level constants computed ONCE at
+    import time from ORA_MEMORY_DIR -- setting that env var here is too late to
+    affect them (mip was already imported at the top of this file). Monkey-patch
+    the attributes directly instead, matching _orphans_in()'s established pattern
+    above for the same reason. governor-drift delegation (check 2a) is skipped by
+    main() itself whenever ORA_MEMORY_DIR is set (sandbox isolation, 2026-07-29)
+    -- setting it too is harmless belt-and-suspenders, not load-bearing here.
+    """
+    import io, contextlib
+    saved = (mip.MEM, mip.INDEX, mip.TRACKER, mip.TRACKER_HISTORY)
+    saved_env = os.environ.get("ORA_MEMORY_DIR")
+    mip.MEM = mem_dir
+    mip.INDEX = os.path.join(mem_dir, "MEMORY.md")
+    mip.TRACKER = os.path.join(mem_dir, "open-items-tracker.md")
+    mip.TRACKER_HISTORY = os.path.join(mem_dir, "open-items-tracker-history.md")
+    os.environ["ORA_MEMORY_DIR"] = mem_dir
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            try:
+                mip.main()
+                rc = 0
+            except SystemExit as e:
+                rc = e.code
+    finally:
+        mip.MEM, mip.INDEX, mip.TRACKER, mip.TRACKER_HISTORY = saved
+        if saved_env is None:
+            os.environ.pop("ORA_MEMORY_DIR", None)
+        else:
+            os.environ["ORA_MEMORY_DIR"] = saved_env
+    return rc, buf.getvalue()
+
+
+def _write(mem_dir, name, body):
+    with open(os.path.join(mem_dir, name), "w", encoding="utf-8") as fh:
+        fh.write(body)
+
+
+def _base_memory_fixture(mem_dir, tracker_body="", history_body="", extra_links=()):
+    """MEMORY.md linking both tracker files (so check 1 doesn't flag them unlisted),
+    plus whatever tracker/history bodies the case needs. extra_links names any
+    OTHER file the test will create (e.g. a third-party referrer) so check 1's
+    index reconciliation stays clean and doesn't drown the OI-specific assertion
+    in an unrelated "unlisted file" finding."""
+    extra = "".join("- [%s](%s)\n" % (n, n) for n in extra_links)
+    _write(mem_dir, "MEMORY.md",
+           "# Index\n- [Open Items Tracker](open-items-tracker.md)\n"
+           "- [History](open-items-tracker-history.md)\n" + extra)
+    _write(mem_dir, "open-items-tracker.md",
+           "## Open\n\n" + tracker_body)
+    _write(mem_dir, "open-items-tracker-history.md",
+           "## Closed\n\n" + history_body)
+
+
+_tmp = tempfile.mkdtemp(prefix="mip_oi_split_")
+try:
+    # OI-700 closed, section lives in history. A reference from a THIRD file naming
+    # the OLD (tracker) filename is stale -- the anchor is not there anymore.
+    _base_memory_fixture(_tmp, history_body="### OI-700\n**Status:** CLOSED\n",
+                         extra_links=["some_note.md"])
+    _write(_tmp, "some_note.md",
+           "see [OI-700](open-items-tracker.md#OI-700) for detail\n")
+    rc, out = _run_main_in(_tmp)
+    expect("wrong-file reference (tracker named, id actually in history) -> FAIL",
+           rc == 1, "rc=%r out=%r" % (rc, out))
+    expect("the wrong-file finding names which file the id is ACTUALLY in",
+           "actually in open-items-tracker-history.md" in out, out)
+finally:
+    _sh_ = __import__("shutil")
+    _sh_.rmtree(_tmp, ignore_errors=True)
+
+_tmp = tempfile.mkdtemp(prefix="mip_oi_split_")
+try:
+    # Same id, but the reference correctly names the history file -- clean.
+    _base_memory_fixture(_tmp, history_body="### OI-701\n**Status:** CLOSED\n",
+                         extra_links=["some_note.md"])
+    _write(_tmp, "some_note.md",
+           "see [OI-701](open-items-tracker-history.md#OI-701) for detail\n")
+    rc, out = _run_main_in(_tmp)
+    expect("correct-file reference (history named, id in history) -> OK",
+           rc == 0, "rc=%r out=%r" % (rc, out))
+finally:
+    __import__("shutil").rmtree(_tmp, ignore_errors=True)
+
+_tmp = tempfile.mkdtemp(prefix="mip_oi_split_")
+try:
+    # An id that exists in NEITHER file is still the plain old dead pointer, filename aside.
+    _base_memory_fixture(_tmp, extra_links=["some_note.md"])
+    _write(_tmp, "some_note.md",
+           "see [OI-999](open-items-tracker.md#OI-999) for detail\n")
+    rc, out = _run_main_in(_tmp)
+    expect("reference to an id that exists in neither file -> FAIL (plain dead pointer)",
+           rc == 1, "rc=%r out=%r" % (rc, out))
+    expect("plain dead-pointer wording used when the id resolves nowhere",
+           "has no matching row in either" in out, out)
+finally:
+    __import__("shutil").rmtree(_tmp, ignore_errors=True)
+
+_tmp = tempfile.mkdtemp(prefix="mip_oi_split_")
+try:
+    # A tracker-internal self-link and a history-internal self-link are never
+    # flagged, matching the pre-existing self-link exclusion (now for BOTH files).
+    _base_memory_fixture(
+        _tmp,
+        tracker_body="### OI-702\n**Status:** OPEN\n\nsee [self](#OI-702)\n",
+        history_body="### OI-703\n**Status:** CLOSED\n\nsee [self](#OI-703)\n",
+    )
+    rc, out = _run_main_in(_tmp)
+    expect("bare self-links within either file are never treated as dead pointers -> OK",
+           rc == 0, "rc=%r out=%r" % (rc, out))
+finally:
+    __import__("shutil").rmtree(_tmp, ignore_errors=True)
+
+_tmp = tempfile.mkdtemp(prefix="mip_oi_split_")
+try:
+    # History file absent entirely (pre-split memory dir, or a dir that just hasn't
+    # split yet) must not crash -- optional companion, same posture as the tracker's
+    # own optional-file handling.
+    _write(_tmp, "MEMORY.md", "# Index\n- [Open Items Tracker](open-items-tracker.md)\n")
+    _write(_tmp, "open-items-tracker.md",
+           "## Open\n\n### OI-704\n**Status:** OPEN\n")
+    rc, out = _run_main_in(_tmp)
+    expect("no history file at all -> probe still runs cleanly (optional companion)",
+           rc == 0, "rc=%r out=%r" % (rc, out))
+finally:
+    __import__("shutil").rmtree(_tmp, ignore_errors=True)
 
 passed = sum(1 for ok, _ in results if ok)
 print("memory-integrity-probe tests: %d/%d passed" % (passed, len(results)))

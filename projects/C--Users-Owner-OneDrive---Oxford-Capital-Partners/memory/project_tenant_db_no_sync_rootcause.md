@@ -12,10 +12,10 @@ metadata:
 **Spec:** `Claude_Workspace/01_Workspace/outputs/2026-07-16_TenantDB-Workbook-Mirror_Spec_v01.md`
 
 **Items — all CLOSED 2026-07-17 (full evidence lives only in the tracker, not restated here):**
-[OI-003](open-items-tracker.md#OI-003) built the mirror/reconciliation ·
-[OI-004](open-items-tracker.md#OI-004) added `Row Retired` property ·
-[OI-005](open-items-tracker.md#OI-005) deduped Heritage Pool rows ·
-[OI-006](open-items-tracker.md#OI-006) confirmed 4 turnovers + Soldier Trucking against executed
+[OI-003](open-items-tracker-history.md#OI-003) built the mirror/reconciliation ·
+[OI-004](open-items-tracker-history.md#OI-004) added `Row Retired` property ·
+[OI-005](open-items-tracker-history.md#OI-005) deduped Heritage Pool rows ·
+[OI-006](open-items-tracker-history.md#OI-006) confirmed 4 turnovers + Soldier Trucking against executed
 leases and wrote the corrections. **Notion Tenant DB is no longer stale on any of these rows** —
 this was a one-time manual remediation, not a standing sync (OI-003's mirror is still a
 report-only tool; nothing runs it automatically). The next `ora-master-workbook-ingest` or manual
@@ -54,7 +54,7 @@ at the original March 2026 one-time import**, not staleness and not a workbook e
 pattern was NOT exhaustively swept** at the time this was written — only the 7 rows OI-003 happened
 to flag as WORKBOOK-NEWER were checked.
 
-**✅ SWEPT 2026-07-17, same day, as [OI-008](open-items-tracker.md#OI-008) (CLOSED).** Ran every
+**✅ SWEPT 2026-07-17, same day, as [OI-008](open-items-tracker-history.md#OI-008) (CLOSED).** Ran every
 non-archived, non-retired Notion row against `EXPORT_RentRoll` on the same street-family+unit join
 — the full 79-pair reconciliable overlap. Result: no new instances. The 4 rows the sweep script
 flagged were all already-fixed (script ran against a pre-fix data cache). **Residual, explicitly
@@ -106,14 +106,14 @@ Expiring Soon → Active · `L143` portfolio counters 127A|7S|3E → **128A|6S|3
 **portfolio WALT 2.36 → 2.45 yrs** · `EXPORT_RentRoll` I77/L77 propagated. Cell-level diff vs
 backup across all 49 tabs: **exactly 1 formula/literal change** (I81); all other deltas are
 `TODAY()`-volatile recalcs. Backup: `Documents\Claude\_backups\…_pre-HeritagePool-leaseend-fix_20260716.xlsx`.
-**Still open:** [open-items-tracker.md#OI-005](open-items-tracker.md#OI-005).
+**Still open:** [open-items-tracker-history.md#OI-005](open-items-tracker-history.md#OI-005).
 
 ## Corrections to the 2026-07-16 audit brief (do not re-derive)
 
 - **The 07-12 "archival never archived" is NOT a bug.** Prepending `⛔ ARCHIVED 2026-07-12 — ` to
   the title was a deliberate, Gabriel-approved, reversible mechanism chosen because no native
   archive/status field exists. See [[reference_tenant_db_completeness_gap]]:117. The *consequence*
-  (filters read all 296) is real → [open-items-tracker.md#OI-004](open-items-tracker.md#OI-004).
+  (filters read all 296) is real → [open-items-tracker-history.md#OI-004](open-items-tracker-history.md#OI-004).
 - **The ~20 "seed/demo" rows are already decided.** They are the documented fabricated phantom
   batch (HubSpot contact-ID collisions, IDs 11751–13051). Gabriel 2026-07-12: *"leave the ~18-25
   unconfirmed singletons for individual review."* Deliberately preserved — do not re-triage.

@@ -171,7 +171,7 @@ leaked. **Do not re-open this without new information** (e.g. the lender matter 
 
 ### 2026-07-17 — Heritage Pool Supply `Monthly Rent`: workbook/Notion $8,540 vs. lease amendment Year-1 rate $8,710.80 — which is correct?
 **Answer (Gabriel, in-turn): the current $8,540 figure is correct.** Flagged during
-[OI-005](open-items-tracker.md#OI-005) (Heritage Pool row dedup) as a discrepancy against the
+[OI-005](open-items-tracker-history.md#OI-005) (Heritage Pool row dedup) as a discrepancy against the
 Year-1 escalation rate implied by the lease amendment, deliberately left uncorrected pending
 Gabriel's call rather than silently overwritten. Gabriel confirmed the live figure stands — no
 Notion or workbook write needed. **Do not re-flag this specific $8,540 vs. $8,710.80 delta**;
