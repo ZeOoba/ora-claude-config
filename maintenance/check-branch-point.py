@@ -42,7 +42,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIB_DIR = os.path.join(os.path.dirname(HERE), "hooks", "lib")
 sys.path.insert(0, LIB_DIR)
-from git_probe_common import git as _git, base_resolves  # noqa: E402
+from git_probe_common import git as _git, verify_ref_args  # noqa: E402
 
 
 def git(args, repo=None):
@@ -53,9 +53,18 @@ def git(args, repo=None):
     signature) so every call site below stays unchanged. timeout=None
     preserves this script's original unbounded subprocess.run() call --
     the shared helper's own 20s default is not adopted here, to keep this
-    extraction a pure move rather than a new behavior."""
-    rc, out, _ = _git(repo, args, timeout=None)
-    return rc, out
+    extraction a pure move rather than a new behavior.
+
+    `out or err` (not bare `out`): the original inline git() ran with
+    `cwd=repo`, so a --repo that does not exist at all made subprocess.run
+    itself raise OSError, caught and returned as the message text. The
+    shared helper instead runs `git -C repo`, which does not raise for that
+    case -- git itself exits non-zero with the real reason on STDERR. Using
+    bare stdout here would silently turn that into an empty diagnostic
+    (caught before this shipped by testing a nonexistent --repo directly);
+    falling back to stderr keeps every caller's error message non-empty."""
+    rc, out, err = _git(repo, args, timeout=None)
+    return rc, out or err
 
 
 def analyze(base="origin/main", repo=None, expect=None):
@@ -69,8 +78,8 @@ def analyze(base="origin/main", repo=None, expect=None):
         return out
     out["head"] = head
 
-    ok, _ = base_resolves(repo, base, timeout=None)
-    if not ok:
+    rc, _ = git(verify_ref_args(base), repo)
+    if rc != 0:
         # A base that does not resolve is UNDETERMINED, not clean. Returning ok
         # here would make a typo'd --base read as a pass, which is the exact
         # false-green this tool exists to prevent.

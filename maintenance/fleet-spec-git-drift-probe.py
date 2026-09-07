@@ -64,7 +64,7 @@ SPEC_BASENAME = "SKILL.md"
 
 LIB_DIR = os.path.join(CLAUDE, "hooks", "lib")
 sys.path.insert(0, LIB_DIR)
-from git_probe_common import git, base_resolves  # noqa: E402
+from git_probe_common import git, verify_ref_args  # noqa: E402
 
 
 def _is_archived(entry):
@@ -187,8 +187,8 @@ def analyze(repo, base="origin/main", do_fetch=True):
             # refusing to check anything -- matches repo-freshness.py.
             out["fetch_error"] = err or "fetch failed"
 
-    ok, err = base_resolves(repo, base)
-    if not ok:
+    rc, _, err = git(repo, verify_ref_args(base))
+    if rc != 0:
         out["error"] = "base %r does not resolve -- fetch it first: %s" % (
             base, err)
         return out
