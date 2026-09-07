@@ -1070,11 +1070,18 @@ def main():
             args.slug, _one_line(attributable_session(prior))[:8],
             _one_line(str(prior.get("claimed_at", "?")))))
         age = (datetime.datetime.now() - when).total_seconds() / 60.0
-        if age > DEFAULT_TTL_MINUTES:
+        # Must use the EFFECTIVE TTL, not the default: a reserved 'sched-' slug
+        # expires at 30 minutes, so comparing against 120 here would stay silent
+        # for the one namespace whose claims expire soonest -- restoring a 45m
+        # sched- claim would print success while read_active_claims() already
+        # treats it as gone, which is exactly the miscommunication this NOTE exists
+        # to prevent (found by adversarial review, 2026-09-07).
+        eff_ttl = _effective_ttl(args.slug, DEFAULT_TTL_MINUTES)
+        if age > eff_ttl:
             print("  NOTE: that timestamp is %.0fm old, past the %dm TTL -- the "
                   "restored claim is already expired and will not broadcast. Ask "
                   "that session to re-claim if it is still working." % (
-                      age, DEFAULT_TTL_MINUTES))
+                      age, eff_ttl))
         return 0
 
     if args.cmd == "list":
