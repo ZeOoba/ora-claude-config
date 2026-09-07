@@ -14,6 +14,17 @@ import os
 import json
 import subprocess
 
+LIB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib")
+sys.path.insert(0, LIB_DIR)
+# Guarded import (same reliability posture as active-work-broadcast.py's own
+# guarded claim_work.py import): a broken/missing git_probe_common.py must
+# degrade to this file's ORIGINAL inline subprocess call, never crash a
+# SessionStart hook.
+try:
+    from git_probe_common import git as _shared_git
+except Exception:
+    _shared_git = None
+
 
 def emit(ctx: str) -> None:
     print(json.dumps({
@@ -45,10 +56,17 @@ def main() -> None:
         return  # silent no-op for every other repo — no network, no output
 
     def git(args, timeout=15):
+        """stdout string. Uses the shared never-raise helper when it loaded;
+        falls back to this file's original raising subprocess.run call
+        otherwise -- both call sites below already wrap this in try/except,
+        matching the original contract (raise on failure, caller swallows)."""
+        if _shared_git is not None:
+            _, out, _err = _shared_git(cwd, args, timeout=timeout)
+            return out
         return subprocess.run(
             ["git", "-C", cwd] + args,
             capture_output=True, text=True, timeout=timeout,
-        )
+        ).stdout
 
     # Refresh remote-tracking refs only (safe; never touches HEAD/branches/worktree).
     try:
@@ -57,8 +75,8 @@ def main() -> None:
         pass  # offline/slow: fall back to last-known origin ref rather than failing
 
     try:
-        log = git(["log", "--oneline", "-8", "origin/main"]).stdout.strip()
-        counts = git(["rev-list", "--left-right", "--count", "HEAD...origin/main"]).stdout.strip()
+        log = git(["log", "--oneline", "-8", "origin/main"]).strip()
+        counts = git(["rev-list", "--left-right", "--count", "HEAD...origin/main"]).strip()
     except Exception:
         return
 

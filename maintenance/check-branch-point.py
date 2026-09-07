@@ -37,18 +37,25 @@ unanswerable check is not a clean one).
 import argparse
 import json
 import os
-import subprocess
 import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+LIB_DIR = os.path.join(os.path.dirname(HERE), "hooks", "lib")
+sys.path.insert(0, LIB_DIR)
+from git_probe_common import git as _git, base_resolves  # noqa: E402
 
 
 def git(args, repo=None):
-    """(rc, stdout) -- stdout stripped. Never raises on a non-zero git."""
-    try:
-        p = subprocess.run(["git"] + args, cwd=repo, capture_output=True,
-                           text=True, encoding="utf-8", errors="replace")
-    except OSError as e:
-        return 127, str(e)
-    return p.returncode, (p.stdout or "").strip()
+    """(rc, stdout) -- stdout stripped. Never raises on a non-zero git.
+
+    Thin 2-tuple shim over the shared 3-tuple git_probe_common.git() (repo
+    positional first there; this module's own call sites all predate that
+    signature) so every call site below stays unchanged. timeout=None
+    preserves this script's original unbounded subprocess.run() call --
+    the shared helper's own 20s default is not adopted here, to keep this
+    extraction a pure move rather than a new behavior."""
+    rc, out, _ = _git(repo, args, timeout=None)
+    return rc, out
 
 
 def analyze(base="origin/main", repo=None, expect=None):
@@ -62,8 +69,8 @@ def analyze(base="origin/main", repo=None, expect=None):
         return out
     out["head"] = head
 
-    rc, _ = git(["rev-parse", "--verify", "--quiet", base + "^{commit}"], repo)
-    if rc != 0:
+    ok, _ = base_resolves(repo, base, timeout=None)
+    if not ok:
         # A base that does not resolve is UNDETERMINED, not clean. Returning ok
         # here would make a typo'd --base read as a pass, which is the exact
         # false-green this tool exists to prevent.
