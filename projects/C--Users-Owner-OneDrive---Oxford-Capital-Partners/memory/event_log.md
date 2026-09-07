@@ -12,6 +12,18 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-09-07 — register-scheduled-task v2.21: sched- namespace carrier landed, closing OI-116
+
+Follow-up to the same-day closing-sweep remediation entry above (item 5, the `sched-` namespace ruling). That ruling shipped the namespace inside `hooks/lib/claim_work.py` alone (PR #171, merged), but nothing told scheduled-task authors to invoke it — no task claimed a `sched-` slug, so the shorter 30-minute TTL and the "force-takeover is ROUTINE" refusal language could never reach a live unattended holder. `register-scheduled-task` is the one skill that authors new scheduled tasks, so the gap lived there.
+
+**Fix:** `register-scheduled-task` v2.21 (`ora-skills` `bc42852`, pushed to main) adds step 3c and a matching QC-gate item: any `claim_work.py claim` call inside a scheduled task's own instructions must use `sched-<slug>`, never the bare slug, whenever the task can perform structural writes to a claim-relevant path (`hooks/**`, `open-items-tracker.md`, `oxford-command-center` data, a `~/.claude` or `ora-skills` maintenance sweep). Verified: `tools/test_package_skills.py` 54/54, `validate_skill_frontmatter()` zero findings, description budget unchanged (972/1024).
+
+**OI-116 closed** (`memory/open-items-tracker.md`) — resolved via the `sched-` namespace + this carrier rather than its originally-drafted closing condition (a non-`--force` next step); Gabriel's ruling made `--force` the routine, documented response instead of avoiding it. Full resolution note recorded on the OI-116 entry itself.
+
+**Confirmed, not duplicated:** the event-log-append-lock cross-process-lock fix another session (`aa5e3e5d`) was holding landed clean (`8779d13`, [PR #172](https://github.com/ZeOoba/ora-claude-config/pull/172), merged) — working tree matched origin, no leftover WIP. The per-entry Changelog-cap port to `package-and-stage-skill`/`register-scheduled-task` (`d61c173`) was already landed and pushed by the same session before this pass started.
+
+Files changed: `register-scheduled-task/SKILL.md` (ora-skills, +5/-3, `bc42852`, pushed). `memory/open-items-tracker.md` (OI-116 status + resolution note — uncommitted in the shared `~/.claude` checkout, same PENDING-staging pattern as OI-140).
+
 ## 2026-09-07 -- Second Save-skill batch: all 4 reimports CONFIRMED (supersedes the 13:04 entry's county-parcel-screen "stopped")
 
 Gabriel ran a corrected dispatch (repo pinned at `511ab1b`, four skills, none a first publish) after the 13:04 Cowork run above. All four clicks landed in two 2-downloaded syncs. Verified from a Code session via `tools/reimport_correlate.py verify --baseline <pre-click CreationTime>`, each an exact-second match against `%LOCALAPPDATA%\Claude\Logs\main.log`:

@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-09-06T19:01:14.239Z
+  modified: 2026-09-07T17:14:23.857Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -2953,7 +2953,7 @@ at its default.
 **Auto-check:** none.
 
 ### OI-116
-**Status:** OPEN
+**Status:** CLOSED 2026-09-07
 **Opened:** 2026-08-11
 **Source:** landing [PR #52](https://github.com/ZeOoba/ora-claude-config/pull/52) (`claim_work.py` refusal
 gate), 2026-08-11 — hit twice in a single session, then a third time filing this very item
@@ -2988,8 +2988,20 @@ honest "this holder cannot be contacted — `--force` or use a distinct slug"; (
 `_self_renew_claims` to unattended sessions differently, or cap total renewals, so an unattended claim
 can age out even while its session lives; (c) have scheduled-task wrappers `release` on exit.
 Note (b) fights `_self_renew_claims`'s own documented rationale — read its docstring before touching it.
-**Closing condition:** a session that collides with an unattended holder gets a refusal that names the
-holder as uncontactable and offers a next step that is not `--force`.
+**Closing condition (as originally drafted):** a session that collides with an unattended holder gets a
+refusal that names the holder as uncontactable and offers a next step that is not `--force`.
+**Resolved differently, closed 2026-09-07.** Gabriel ratified a reserved `sched-` slug namespace instead
+of options (a)/(b)/(c) above: an unattended claim now gets a 30-minute TTL (vs. 120 default,
+`min(caller_ttl, 30)`, never widened) so it ages out before it can block a live person, and the refusal
+message states outright that force-takeover is ROUTINE for such a holder — rather than avoiding `--force`,
+it makes `--force` the documented, safe, expected response. Implemented in `hooks/lib/claim_work.py`
+(`is_sched_slug()`, `_effective_ttl()`; doctrine: `memory/tech.md` §3e; landed via
+[PR #171](https://github.com/ZeOoba/ora-claude-config/pull/171), merged). That alone left the fix inert,
+though — no scheduled task's own instructions ever claimed under a `sched-` slug, so the shorter TTL and
+routine-force-takeover language never reached a live unattended holder. Closed today by adding the
+carrier: `register-scheduled-task` v2.21 (ora-skills `bc42852`) adds step 3c + a QC-gate item requiring
+any `claim_work.py claim` call in a scheduled task's own instructions to use `sched-<slug>`, not the bare
+slug, going forward.
 **Auto-check:** none.
 
 ### OI-117
