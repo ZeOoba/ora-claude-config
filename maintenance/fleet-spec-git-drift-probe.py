@@ -56,34 +56,15 @@ Usage:
 import argparse
 import json
 import os
-import subprocess
 import sys
 
 CLAUDE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TASKS_SUBDIR = "scheduled-tasks"
 SPEC_BASENAME = "SKILL.md"
 
-
-def git(repo, args, timeout=20, strip=True):
-    """(rc, stdout, stderr) -- never raises. Every call site here is a read
-    (rev-parse/fetch/log/show/ls-tree); this helper does not enforce that,
-    but nothing in this module calls it with a mutating verb.
-
-    strip=False for `show` (file content): stripping would silently eat a
-    trailing newline from the FILE'S OWN CONTENT and make it compare unequal
-    to an on-disk read that kept it -- found by this module's own test suite
-    (test_identical_content_despite_extra_commits_is_clean failed on exactly
-    this before strip=False was added here)."""
-    try:
-        p = subprocess.run(["git", "-C", repo] + args, capture_output=True,
-                           text=True, encoding="utf-8", errors="replace",
-                           timeout=timeout)
-    except Exception as e:
-        return 127, "", str(e)
-    out, errout = (p.stdout or ""), (p.stderr or "")
-    if strip:
-        out, errout = out.strip(), errout.strip()
-    return p.returncode, out, errout
+LIB_DIR = os.path.join(CLAUDE, "hooks", "lib")
+sys.path.insert(0, LIB_DIR)
+from git_probe_common import git, base_resolves  # noqa: E402
 
 
 def _is_archived(entry):
@@ -206,9 +187,8 @@ def analyze(repo, base="origin/main", do_fetch=True):
             # refusing to check anything -- matches repo-freshness.py.
             out["fetch_error"] = err or "fetch failed"
 
-    rc, _, err = git(repo, ["rev-parse", "--verify", "--quiet",
-                            base + "^{commit}"])
-    if rc != 0:
+    ok, err = base_resolves(repo, base)
+    if not ok:
         out["error"] = "base %r does not resolve -- fetch it first: %s" % (
             base, err)
         return out
