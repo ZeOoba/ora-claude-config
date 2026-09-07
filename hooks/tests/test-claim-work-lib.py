@@ -1021,6 +1021,55 @@ check("...and excluding one session leaves the rest still newest-first",
       ["brandnew-one", "aged-thirty"])
 shutil.rmtree(root, ignore_errors=True)
 
+# ---------------------------------------------------------------------------
+# Reserved 'sched-' namespace for UNATTENDED claims (ratified 2026-09-07).
+# An unattended holder cannot be messaged, so its claim must age out fast and
+# takeover must read as routine rather than as a transgression.
+# ---------------------------------------------------------------------------
+check("is_sched_slug true for the reserved prefix",
+      cw.is_sched_slug("sched-repo-housekeeping"), True)
+check("is_sched_slug false for an ordinary slug",
+      cw.is_sched_slug("repo-housekeeping"), False)
+check("is_sched_slug false for empty/None (no crash)",
+      [cw.is_sched_slug(""), cw.is_sched_slug(None)], [False, False])
+# The prefix uses a HYPHEN because the slug is the filename and ':' is illegal on
+# Windows -- guard the constant so nobody "tidies" it back to 'sched:'.
+check("prefix is filename-safe (no colon)", ":" in cw.SCHED_SLUG_PREFIX, False)
+check("sched slug gets the short TTL",
+      cw._effective_ttl("sched-x", cw.DEFAULT_TTL_MINUTES), cw.SCHED_TTL_MINUTES)
+check("ordinary slug keeps the caller's TTL",
+      cw._effective_ttl("ordinary", cw.DEFAULT_TTL_MINUTES), cw.DEFAULT_TTL_MINUTES)
+check("a caller TTL SHORTER than the sched TTL is not widened by the rule",
+      cw._effective_ttl("sched-x", 10), 10)
+
+# End-to-end through read_active_claims: same age, different survival.
+root = tempfile.mkdtemp(prefix="claim-sched-")
+now = datetime.datetime(2026, 9, 7, 12, 0, 0)
+for slug, age in (("sched-nightly", 45), ("human-work", 45),
+                  ("sched-fresh", 20), ("human-fresh", 20)):
+    at = now - datetime.timedelta(minutes=age)
+    with open(os.path.join(root, slug + ".json"), "w", encoding="utf-8") as f:
+        json.dump({"session_id": "s-" + slug, "description": "d", "paths": [],
+                   "title": "t", "cwd": "",
+                   "claimed_at": at.strftime("%Y-%m-%dT%H:%M:%S")}, f)
+live = sorted(c["slug"] for c in cw.read_active_claims(base_dir=root, now=now))
+check("a 45m-old sched- claim has EXPIRED while the human one at the same age lives",
+      live, ["human-fresh", "human-work", "sched-fresh"])
+
+# And the refusal text tells the challenger that force is routine here.
+with open(os.path.join(root, "sched-live.json"), "w", encoding="utf-8") as f:
+    json.dump({"session_id": "unattended-holder", "description": "nightly sweep",
+               "paths": [], "title": "t", "cwd": "",
+               "claimed_at": datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")}, f)
+code, out, err = run_cli(["claim", "sched-live", "my work"], root,
+                         session_id="challenger")
+blob = (out or "") + (err or "")
+check("claiming over a live sched- claim is still REFUSED", code, cw.EXIT_CLAIM_REFUSED)
+check("...and the refusal says takeover is ROUTINE for an unattended holder",
+      "ROUTINE" in blob, True)
+check("...and names the self-expiry window", str(cw.SCHED_TTL_MINUTES) in blob, True)
+shutil.rmtree(root, ignore_errors=True)
+
 print()
 print("RESULT: %d/%d passed" % (sum(results), len(results)))
 sys.exit(0 if all(results) else 1)
