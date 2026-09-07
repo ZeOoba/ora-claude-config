@@ -56,16 +56,30 @@ def main() -> None:
         return  # silent no-op for every other repo — no network, no output
 
     def git(args, timeout=15):
-        """stdout string. Uses the shared never-raise helper when it loaded;
-        falls back to this file's original raising subprocess.run call
-        otherwise -- both call sites below already wrap this in try/except,
-        matching the original contract (raise on failure, caller swallows)."""
+        """stdout string; raises on a subprocess-level failure (timeout,
+        missing git binary, bad cwd) so both call sites below see the same
+        contract regardless of which branch is live: the original inline
+        subprocess.run() raised for exactly those cases (an ordinary
+        non-zero git exit was never raised OR checked by either branch --
+        that part is intentionally left alone). The shared helper never
+        raises itself; it returns rc=127 as its own internal sentinel for
+        that class of failure (established convention -- check-branch-
+        point.py's pre-extraction git() used the same 127/OSError pairing),
+        so re-raise on exactly that rc to restore the original contract on
+        the primary path. Without this, a `git log` that times out here
+        would silently return "" instead of propagating, and the caller's
+        `if not counts: return` guard would not catch a partial failure
+        where `rev-list` still succeeded -- verified against a forced
+        timeout before this shipped."""
         if _shared_git is not None:
-            _, out, _err = _shared_git(cwd, args, timeout=timeout)
+            rc, out, err = _shared_git(cwd, args, timeout=timeout)
+            if rc == 127:
+                raise RuntimeError(err or "git subprocess failed")
             return out
         return subprocess.run(
             ["git", "-C", cwd] + args,
-            capture_output=True, text=True, timeout=timeout,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=timeout,
         ).stdout
 
     # Refresh remote-tracking refs only (safe; never touches HEAD/branches/worktree).
