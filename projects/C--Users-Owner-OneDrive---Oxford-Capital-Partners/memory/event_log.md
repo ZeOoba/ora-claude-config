@@ -12,6 +12,23 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-09-07 -- Second Save-skill batch: all 4 reimports CONFIRMED (supersedes the 13:04 entry's county-parcel-screen "stopped")
+
+Gabriel ran a corrected dispatch (repo pinned at `511ab1b`, four skills, none a first publish) after the 13:04 Cowork run above. All four clicks landed in two 2-downloaded syncs. Verified from a Code session via `tools/reimport_correlate.py verify --baseline <pre-click CreationTime>`, each an exact-second match against `%LOCALAPPDATA%\Claude\Logs\main.log`:
+
+- **county-parcel-screen** (v1.1, 16 files): CreationTime `2026-09-07T11:58:24` -> `2026-09-07T13:14:09.213696`; `Sync complete: 2 downloaded` @ `13:14:09`. Post-install file count 16/16.
+- **ora-setup-audit** (v1.12): CreationTime `13:04:26` -> `13:14:09.100674`; same `13:14:09` sync (both landed in one 2-downloaded pair). Installed description token reads `v1.12`, i.e. the retention-rule commit `460fb0b`, superseding the v1.11 the 13:04 run installed.
+- **package-and-stage-skill** (v1.32): CreationTime `13:04:27` -> `13:14:43.755499`; `Sync complete: 2 downloaded` @ `13:14:43`. Installed token `v1.32`.
+- **register-scheduled-task** (v2.21, 2 files): CreationTime `2026-09-06T18:04:38` -> `13:14:43.745713`; same `13:14:43` sync. **Installed token reads `v2.21`, not the `v2.20` the dispatch named** -- commit `bc42852` (v2.21, OI-116 sched- namespace carrier) landed at 13:13 ET, roughly one minute before the click, and the Cowork session re-packaged from the newer HEAD per the brief's "if HEAD has moved, package the newer content" instruction rather than shipping the stale package. Working as designed; recorded because it is the first observed case of that instruction actually firing.
+
+Enabled-skill count `68 -> 68` across the batch (`main.log` 13:14:08 and 13:14:46) -- four reimports of already-enabled skills, no new registrations, no unpublished skill revived. Post-state: `skill_drifted()` False for all four against HEAD `bc42852`.
+
+**Corrections to the 13:04 entry.** (a) Its `county-parcel-screen` "publish stopped (duplicate risk)" verdict was the correct call on the brief it was given but is now moot -- the skill was never a first publish (it was installed at 11:58:24 by a separate session, alongside `county-sales-monitor`), and `511ab1b` had since changed its endpoint references without bumping v1.1, so it needed a reimport regardless. That reimport is the 13:14:09 install above. (b) The `ora-setup-audit` v1.11 it installed was superseded 10 minutes later by v1.12.
+
+**Ledger + a guard gap worth fixing.** `pending_reimport.py clear` REFUSED `register-scheduled-task` with "not named in the newest event_log.md entry" -- correct doctrine (log the confirmed install, then clear, never the reverse) and it caught a real ordering violation: this session cleared the other three BEFORE logging. It let those three through only because each was *named* in the 13:04 entry -- including `county-parcel-screen`, which that entry named as **stopped, not installed**. The guard tests for the skill's NAME appearing in the newest entry, not for a confirmed-install claim about it, so an entry recording a deliberate non-install satisfies it just as well as one recording a success. Candidate hardening: require the name to co-occur with a confirmation token (`CONFIRMED`), not merely appear.
+
+**Same-token content drift, second live instance in one day.** `511ab1b` changed `county-parcel-screen/references/county-endpoints.md` and `.v1.json` while leaving v1.1 in place, so the store showed a current token over stale content -- the exact pattern documented this morning in `package-and-stage-skill` v1.30 (step 2) after `577397f` did it to that skill at v1.29. Also note both `county-parcel-screen` and `register-scheduled-task` read byte-identical to the repo in the AppData cache while still stale on the platform, because `sync_appdata_mirror.py` mirrors staged files on every commit; only the CreationTime-predates-the-commit test caught them.
+
 ## 2026-09-07 -- First install of county-parcel-screen v1.1 + county-sales-monitor v0.5 on Cowork (Save-skill click; closes Automation Audit R23)
 
 - Event: Gabriel's Cowork **Save-skill click** (not a repo commit) installed two skills that had never been in the account skill library. FIRST install, not a re-import: ListSkills on all trigger phrases returned nothing and neither skill had a runtime cache directory at the 11:57:55 pre-click baseline (baseline = "no directory").
