@@ -351,7 +351,23 @@ def _index_realcase_path(repo, rel):
     degrades to the documented worktree-digest fallback rather than a crash,
     but every real risk pattern in this gate (claude.md, settings.json,
     hooks/**, finance tokens) is ASCII, so this closes a gap with no
-    observed real-world trigger."""
+    observed real-world trigger.
+
+    UPDATE (2026-09-07, git-probe-dedup follow-up): this `-c
+    core.quotepath=false` flag is exactly what turned a THEORETICAL non-ASCII
+    gap into a real, always-live one -- it makes THIS call site the one
+    git_lines() caller in the whole module that is exposed to raw non-UTF-8
+    stdout bytes regardless of repo/global quotepath config, and until
+    git_commit_parse.git_lines() gained encoding="utf-8", errors="replace"
+    (via delegating to git_probe_common.git()), a non-ASCII path here did NOT
+    degrade to the fallback described above -- it crashed the whole hook with
+    an unhandled AttributeError (`None.splitlines()`), caught only by
+    __main__'s blanket `except Exception: pass`, i.e. a silent ALLOW of the
+    entire commit. See git_lines()'s own docstring for the verified mechanism
+    and hooks/tests/test-eos-review-gate.py's
+    test_index_realcase_path_survives_non_ascii_under_quotepath_false for the
+    regression proof. The fallback-not-crash claim above is accurate again as
+    of that fix."""
     out = git_lines(repo, ["-c", "core.quotepath=false", "ls-files", "--cached",
                            "--", ":(literal,icase)" + rel])
     return out[0] if out else None

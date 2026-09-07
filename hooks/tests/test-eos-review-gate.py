@@ -1300,6 +1300,58 @@ def test_hint_silent_on_multiline_message_with_attached_pathspec():
     print("PASS test_hint_silent_on_multiline_message_with_attached_pathspec")
 
 
+def test_index_realcase_path_survives_non_ascii_under_quotepath_false():
+    """git-probe-dedup follow-up (2026-09-07, independent-review finding).
+    git_commit_parse.git_lines() used to call subprocess.run() with no
+    encoding="utf-8", errors="replace" (unlike git_probe_common.git(), which
+    every other shared-wrapper caller in this fleet already gets). On Windows,
+    a non-UTF-8 byte in git's stdout is decoded inside subprocess's own
+    background reader THREAD: the UnicodeDecodeError there does NOT propagate
+    out of subprocess.run(), which instead returns NORMALLY with
+    returncode=0 and stdout=None -- so the old `try/except Exception` around
+    that call caught nothing, and the real crash was an AttributeError from
+    `None.splitlines()` on the very next line, OUTSIDE that try. That
+    AttributeError unwound past git_lines, past _index_digest /
+    _index_realcase_path, all the way to this gate's own top-level `except
+    Exception: pass` in __main__ -- the WHOLE hook aborting mid-run and
+    exiting 0, not one query degrading. Bash-verified against a real repo
+    before landing the fix (see the git-probe-dedup task notes); this test is
+    the regression proof requested by that review.
+
+    _index_realcase_path is the one git_lines call site exposed regardless of
+    repo/global config: it passes `-c core.quotepath=false` explicitly
+    (needed to recover a path's real on-disk casing), where every other
+    call site only sees git's DEFAULT core.quotepath=true C-quoting non-ASCII
+    bytes to plain ASCII escapes and is not exposed by this particular bug."""
+    mod = _load_gate_module()
+    repo = gitfixture.blank_repo(prefix="eos-rg-nonascii-")
+    # Cyrillic "slovo" (0x0441 0x043b 0x043e 0x0432 0x043e) -- UTF-8-encodes to
+    # bytes undefined under cp1252, this fleet's default locale codec
+    # (confirmed via locale.getpreferredencoding before this test was
+    # written). Built from codepoints, not a literal non-ASCII character in
+    # the source, per this file's own "ASCII-only" header contract.
+    name = "".join(chr(c) for c in (0x0441, 0x043b, 0x043e, 0x0432, 0x043e)) + ".py"
+    rel = "hooks/" + name
+    path = os.path.join(repo, "hooks", name)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("x = 1\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "init")
+
+    realcase = mod._index_realcase_path(repo, rel)
+    assert realcase == rel, (
+        "expected the real-cased non-ASCII path back unharmed, got %r -- a "
+        "regression here means the encoding gap this test guards is back"
+        % (realcase,))
+
+    digest = mod._index_digest(repo, rel)
+    assert digest, (
+        "digest must resolve for a real, committed non-ASCII path, not "
+        "silently degrade to None (the fail-open symptom this bug produced)")
+    print("PASS test_index_realcase_path_survives_non_ascii_under_quotepath_false")
+
+
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
 
 
