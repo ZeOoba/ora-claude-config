@@ -67,9 +67,9 @@ Stdlib only. ASCII-only. Windows (`python`).
 import os
 import re
 import shlex
-import subprocess
 
 from commit_provenance import norm
+from git_probe_common import git
 
 GIT_C_RE = re.compile(r"""\bgit\b\s+-C\s+(?:"([^"]+)"|'([^']+)'|([^\s&|;]+))""")
 CD_RE = re.compile(r"""\bcd\s+(?:"([^"]+)"|'([^']+)'|([^\s&|;]+))\s*&&""")
@@ -141,15 +141,79 @@ def is_git_commit(cmd):
 
 def git_lines(repo, args, timeout=5):
     """Stripped non-empty stdout lines of `git -C repo <args>`, or None if the
-    command could not be run or exited non-zero."""
-    try:
-        proc = subprocess.run(["git", "-C", repo] + args,
-                              capture_output=True, text=True, timeout=timeout)
-    except Exception:
+    command could not be run or exited non-zero.
+
+    THIN ADAPTER over git_probe_common.git() (2026-09-07, git-probe-dedup
+    follow-up -- independent review of that extraction flagged this module as
+    a third, unconsolidated copy of the same never-raise subprocess wrapper).
+    The inline subprocess.run() this replaced omitted `encoding="utf-8",
+    errors="replace"` -- present on git_probe_common.git() since it was
+    written for the exact same class of bug in the branch-freshness family.
+
+    THE ACTUAL FAILURE MECHANISM (bash-verified before this fix landed --
+    matters for anyone editing this again, because the obvious guess is
+    wrong): on Windows, subprocess.run(capture_output=True, text=True) decodes
+    stdout in a background reader THREAD. A non-UTF-8 byte there (reproduced
+    with a Cyrillic filename under `-c core.quotepath=false`, the flag
+    _index_realcase_path below actually passes) raises UnicodeDecodeError
+    INSIDE THAT THREAD -- an uncaught thread exception, printed to stderr, but
+    invisible to the caller -- and subprocess.run() itself returns NORMALLY
+    with returncode=0 and stdout=None. The old `try/except Exception` wrapped
+    only the subprocess.run() call, so it caught NOTHING; the real crash was
+    an AttributeError from `None.splitlines()` on the return line, OUTSIDE
+    that try. That AttributeError unwound out of git_lines, out of
+    candidate_paths/_index_realcase_path/etc., all the way to each gate's own
+    top-level `except Exception: pass` in __main__ -- so the failure mode was
+    never "this one query returns no candidates", it was the ENTIRE hook
+    aborting mid-run and exiting 0: commit-provenance-guard.py and
+    eos-review-gate.py both silently ALLOW, exactly the class of silent
+    failure this module's own docstring already warns about for a different
+    shared contract (see EXTRACTION PROVENANCE above). Delegating to
+    git_probe_common.git() closes the gap without a second wrapper to keep in
+    sync by hand.
+
+    REACHABILITY: git's DEFAULT `core.quotepath` (unset -> true) C-quotes
+    non-ASCII path bytes to plain ASCII escapes on output, which does NOT
+    trigger this -- candidate_paths/pending_add_paths/pathspec_arg_paths/
+    _worktree_risk_rels are therefore not exposed under default config.
+    eos-review-gate.py's _index_realcase_path explicitly passes `-c
+    core.quotepath=false` (needed there to recover a path's real on-disk
+    casing) and so IS exposed regardless of repo/global config -- that is the
+    one always-live trigger this fix closes; regression test:
+    hooks/tests/test-eos-review-gate.py's
+    test_index_realcase_path_survives_non_ascii_under_quotepath_false.
+
+    `repo` is checked truthy HERE, before ever calling git(), rather than
+    left to git()'s own repo=None/"" handling: git_probe_common.git(repo=None)
+    deliberately means "run in the current process's cwd" (correct for its
+    own cwd-relative callers), which would silently retarget this function's
+    query at the wrong repo instead of failing, and git(repo="") is rejected
+    by git() but that path is one extra hop worth avoiding here too. No
+    behaviour change for any real call site: every caller in this fleet
+    already resolves `repo` via repo_root() and checks it truthy before
+    passing it on (see commit-provenance-guard.py's and eos-review-gate.py's
+    own `if not repo: return` right after each repo_root() call) -- this is
+    defense in depth for git_lines as a general-purpose function, not a
+    behavior change for any path currently reachable.
+
+    Deliberately re-derives the non-empty-line list from git()'s returned
+    stdout rather than passing strip=False through: git() only strips the
+    whole string's leading/trailing whitespace, while this function has
+    always stripped and filtered PER LINE -- unchanged here.
+
+    LANDING NOTE (not a behaviour claim -- a deployment hazard for whoever
+    ships this): this module now hard-imports git_probe_common. Both gates'
+    own guarded imports (PROVENANCE_CONTRACT_LOADED / REVIEW_CONTRACT_LOADED)
+    turn a MISSING git_probe_common.py into a full gate skip for this module's
+    entire contract, not just a degraded git_lines -- so hooks/lib/
+    git_probe_common.py must land in the same commit as this file, never
+    split across a partial sync or cherry-pick."""
+    if not repo:
         return None
-    if proc.returncode != 0:
+    rc, out, _ = git(repo, args, timeout=timeout)
+    if rc != 0:
         return None
-    return [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
+    return [ln.strip() for ln in out.splitlines() if ln.strip()]
 
 
 def repo_root(cmd, cwd):
