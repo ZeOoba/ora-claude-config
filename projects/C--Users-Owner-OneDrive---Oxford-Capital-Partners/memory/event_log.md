@@ -5,24 +5,95 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-09-07T17:23:02.884Z
+  modified: 2026-09-07T17:35:32.447Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
-## 2026-09-07 — register-scheduled-task v2.21: sched- namespace carrier landed, closing OI-116
+## 2026-09-07 -- oxfordra.net broker-form reCAPTCHA "Invalid site key" root-caused: I/l transcription typo, not a client-library problem (PR #75, awaiting prod go-ahead)
 
-Follow-up to the same-day closing-sweep remediation entry above (item 5, the `sched-` namespace ruling). That ruling shipped the namespace inside `hooks/lib/claim_work.py` alone (PR #171, merged), but nothing told scheduled-task authors to invoke it — no task claimed a `sched-` slug, so the shorter 30-minute TTL and the "force-takeover is ROUTINE" refusal language could never reach a live unattended holder. `register-scheduled-task` is the one skill that authors new scheduled tasks, so the gap lived there.
+The broker submit-deal form on `for-brokers.html` has shown "ERROR for site owner: Invalid site key" since the key was wired in on 2026-07-18 (`e88aece`). Root cause: the site key was hand-transcribed with a capital **I** at position 5 where Google's registered key has a lowercase **l** -- shipped `6LfxrIot…`, registered `6Lfxrlot…`. The two July hotfixes (`c9dad21` swapped api.js for enterprise.js; `4f8b2ec` moved to an explicit `onload=` render) chased the wrong layer: a wrong key fails identically under every client library, so neither could have worked, and `4f8b2ec`'s "verified clean three times against the real site key" claim cannot have been made with the key the repo shipped. The admin console reports **0 verifications in 90 days**, consistent with no valid token ever minted.
 
-**Fix:** `register-scheduled-task` v2.21 (`ora-skills` `bc42852`, pushed to main) adds step 3c and a matching QC-gate item: any `claim_work.py claim` call inside a scheduled task's own instructions must use `sched-<slug>`, never the bare slug, whenever the task can perform structural writes to a claim-relevant path (`hooks/**`, `open-items-tracker.md`, `oxford-command-center` data, a `~/.claude` or `ora-skills` maintenance sweep). Verified: `tools/test_package_skills.py` 54/54, `validate_skill_frontmatter()` zero findings, description budget unchanged (972/1024).
+**How it was verified, so the next reader doesn't re-guess:** the registered key was read from the DOM of `google.com/recaptcha/admin/site/760917745/settings` character-by-character (`charCodeAt(5) === 108`), and `grecaptcha.enterprise.render()` with the corrected key on the live `oxfordra.net` origin rendered a working "I'm not a robot" checkbox directly beneath the broken one. The Browser pane could not reproduce (Google's script never loaded there); real Chrome via claude-in-chrome did.
 
-**OI-116 closed** (`memory/open-items-tracker.md`) — resolved via the `sched-` namespace + this carrier rather than its originally-drafted closing condition (a non-`--force` next step); Gabriel's ruling made `--force` the routine, documented response instead of avoiding it. Full resolution note recorded on the OI-116 entry itself.
+**Fix:** one-character correction + `tests/site/recaptcha-sitekey.test.mjs` pinning the served `data-sitekey` to the registered value (wired into `npm run test:site`), so an I/l or O/0 slip fails CI. Branch `fix/recaptcha-site-key`, commit `b09e0be`, PR #75, CI green. **Production deploy NOT done -- invariant 2, waiting for Gabriel.**
 
-**Confirmed, not duplicated:** the event-log-append-lock cross-process-lock fix another session (`aa5e3e5d`) was holding landed clean (`8779d13`, [PR #172](https://github.com/ZeOoba/ora-claude-config/pull/172), merged) — working tree matched origin, no leftover WIP. The per-entry Changelog-cap port to `package-and-stage-skill`/`register-scheduled-task` (`d61c173`) was already landed and pushed by the same session before this pass started.
+**Residuals, unchanged:** (1) `broker-upload-session.js` reCAPTCHA enforcement stays logged-but-not-enforced per the 2026-07-19 decision; its re-enable condition (widget verified in prod) becomes meetable once #75 is live -- check function logs for `success:true` verdicts first. (2) `netlify env:get` masks secrets, so `RECAPTCHA_SECRET_KEY`'s own I/l correctness is unverified; a `success:false` / `invalid-input-secret` in the logs after deploy would point there. (3) The key's domain list carries a stale `deploy-preview-32--snazzy-frangipane-de3841.netlify.app` entry; deploy previews on other numbers show "Invalid domain for site key", which is expected, not a regression.
 
-Files changed: `register-scheduled-task/SKILL.md` (ora-skills, +5/-3, `bc42852`, pushed). `memory/open-items-tracker.md` (OI-116 status + resolution note — uncommitted in the shared `~/.claude` checkout, same PENDING-staging pattern as OI-140).
+**Lesson (pattern, not one-off):** when a third-party widget reports a config error, compare the config value against the provider's source of record by character code before touching integration code. Two hotfixes and seven weeks went to the wrong layer because the key was assumed correct.
+
+## 2026-09-07 -- sched- namespace: both carriers now in place (OI-116 closed)
+
+The 2026-09-07 ruling (unattended claims use a reserved `sched-` slug, 30-minute TTL, force-takeover routine) needed TWO carriers, not one. Adversarial review of PR #171 found the namespace had none at all -- it existed in `claim_work.py` and in `tech.md` §3e, but nothing instructed any unattended runner to claim under it, so the ruling could not take effect.
+
+**Carrier 1 -- fleet task registration. Built by another session, not this one.** `register-scheduled-task` v2.21 (`bc42852`, on origin/main): new step 3c requires any claim-bearing task's own instructions to claim `sched-<slug>` rather than the bare slug, enumerates the five slugs, carries the hyphen-not-colon warning, adds a matching QC-gate item, and instructs retrofit on next touch. Verified rather than assumed: I checked the content, not the commit subject. Also verified its central assertion -- **no task SKILL.md in EITHER fleet invokes `claim_work` at all** today (`ora-pm-ledger/state_retention.py`'s hit is a docstring mention, not a call), so there is nothing to retrofit and the carrier binds future registrations only.
+
+**Carrier 2 -- ad-hoc unattended sessions. Gap found and closed this session.** Reading the actual claim record for the incident holder showed `session_id ebc44356`, `host_session_id local_5cc8626d`, `cwd C:\Users\Owner\.claude`, `paths [claude.md]` -- a SESSION doing ad-hoc housekeeping, not a fleet task following registered instructions (consistent with no task SKILL.md claiming). Such a session never reads `register-scheduled-task`; it reads `session-context.md`, auto-loaded at startup, whose ad-hoc claim bullet listed only the four bare slugs and stated a flat "2h TTL". So the exact incident would have recurred unchanged even after carrier 1. Line 8 now reads `(2h TTL; unattended runs claim `sched-<slug>`, 30m)`.
+
+**Constraint worth recording for the next editor of this file:** `doctrine-integrity-probe.py` check 10 caps each session-context bullet at **80 words** (`SESSION_CONTEXT_MAX_BULLET_WORDS`), and that bullet was already at 77 -- three words of headroom. The addition cost five, so `take over only with` was trimmed to `override with` and `warns other sessions` to `warns others` to pay for it. Measure against the probe's own tokenization (`len(line.split())`), not `wc -w`, which read 74 for the same line. Post-edit: 27 lines, no per-bullet warning, probe exit 0; `session-context-xref-probe.py` [OK] (6 dated citations, 19 file citations resolve).
+
+**Backup discipline:** `session-context.md` is git-IGNORED, so this entry and the snapshot ledger are its only history. Snapshot taken immediately after the edit -- `session-context_2026-09-07T132406.md`, scrub CLEAN, OneDrive mirror written -- rather than waiting for the next daily `backup-session-context.py` run, which would have left the change with no undo in the interim.
+
+Residual: carrier 1 applies at registration time only, so a task registered before today still claims however its own instructions say (today: none do). Nothing further outstanding on OI-116.
+
+## 2026-09-07 — package-and-stage-skill Entry Point A (Cowork): 4 re-imports confirmed; register-scheduled-task shipped mid-race, now stale vs bc42852/v2.21 [CORRECTED: it is not stale -- it shipped clean v2.21]
+
+Dispatch: county-parcel-screen, ora-setup-audit, package-and-stage-skill, register-scheduled-task, all four re-imports (none a first publish). Source: `ora-skills` 511ab1b at dispatch time. All four packaged via `tools/package_skills.py` (exit 0, all descriptions ≤1024), presented as `.skill` files, Gabriel clicked Save skill on all four, `tools/reimport_correlate.py verify` returned CONFIRMED for all four:
+
+- **county-parcel-screen** (v1.1, 16 files): CreationTime 2026-09-07T11:58:24.505668 → 13:14:09.213696; main.log Sync complete: 2 downloaded @ 13:14:09 (exact-second match). Post-install file count 16/16. Enabled-count 68→68. The 11:58:24 timestamp is this skill's original first-publish moment (another session's finding, unrelated); today's action was a content refresh only, not a duplicate publish.
+- **ora-setup-audit** (v1.12): CreationTime 13:04:26.753879 → 13:14:09.100674, paired with the same 13:14:09 Sync-complete line. Enabled-count 68→68. Note: the 13:04:26 "baseline" this session captured was itself another concurrent session's post-install timestamp (their Entry Point A dispatch installed v1.11 from an isolated worktree at `dd0f26f`, logged separately above/below). This session's install supersedes it with the correct target v1.12 from 511ab1b.
+- **package-and-stage-skill** (v1.32): CreationTime 13:04:27.472241 → 13:14:43.755499, paired with 13:14:43 Sync-complete. Enabled-count 68→68. Same caveat as ora-setup-audit: 13:04:27 was the other session's v1.30 install landing at that second, not a true pre-session baseline; this install supersedes it with target v1.32.
+- **register-scheduled-task**: CreationTime 2026-09-06T18:04:38.863759 → 13:14:43.745713, paired with 13:14:43 Sync-complete. Enabled-count 68→68. **Packaged from the dirty working tree at Gabriel's explicit direction** (511ab1b + an uncommitted step-3c addition, no matching QC-gate bullet or changelog entry, version tag left at v2.20 / header at v2.19 — internally inconsistent). Minutes later, a different session committed and pushed the same 3c text as `bc42852` (v2.21, OI-116), adding the QC-gate bullet and changelog entry this install lacks, then `9e0fca7` landed on top (unrelated, tools-only). **Net effect: the currently-installed register-scheduled-task content is stale/inconsistent versus origin/main.** Recommend a follow-up re-package + re-install from current HEAD to ship clean v2.21. **CORRECTION 2026-09-07 (Code surface, measured -- this "stale" verdict is WRONG and the recommended re-install is NOT needed).** Both shipped files -- `SKILL.md` and `references/incident-history.md` -- are byte-identical (EOL-normalized) to `bc42852`, which is also current-HEAD content for this skill. The installed `SKILL.md` header reads `# Register Scheduled Task (ORA) - v2.21` and its top changelog entry is `v2.21`, so it DOES carry the step-3c QC-gate bullet and changelog entry this note says it lacks. What actually happened: the dirty-tree text was committed AS `bc42852` at 13:13:04, ~90 seconds BEFORE the 13:14:43 click, so the package built from that tree already contained the clean v2.21 content. A post-install re-mirror cannot be the explanation -- `bc42852` is the last commit touching this skill and it predates the install, `9e0fca7` was tools-only, and the cache dir's CreationTime and LastWriteTime are both exactly 13:14:43 with nothing since. Do NOT re-package on the strength of the recommendation above. Method note for the next reader: `sync_appdata_mirror.py` mirrors staged files on every commit, so a hash match alone would NOT have settled this -- the deciding evidence is that no commit touched the skill after the install.
+
+Per dispatch instruction: `_staging/PENDING_REIMPORT.md` NOT cleared, no other repo writes made from this Cowork session. `_archive/2026-09-07_first-install-county-skills/` left untouched (another session's evidence). A Code session should clear the ledger and resolve the register-scheduled-task staleness noted above.
+
+## 2026-09-07 -- New tooling: entry_b_precheck.py, verify_install.ps1, pending_reimport.py clear log-before-clear guard (commit 9e0fca7)
+
+- Systematization candidates flagged at the end of the county-parcel-screen /
+  county-sales-monitor first-install session, actioned same day per Gabriel's
+  instruction ("Do this: ...").
+- tools/entry_b_precheck.py (new): mechanizes package-and-stage-skill Entry
+  Point B's four-item integrity pre-check (plugin_of routing gate, exists,
+  entries, validate_skill_frontmatter, freshness-vs-repo via the same
+  EOL-normalized comparator pending_reimport.py already uses) for any skill
+  name, writes <skill>.precheck.json manifests (packaged sha256 per file,
+  expected_count, plugin_of, frontmatter_errors, cache-dir CreationTime
+  baseline) into --stage-to. Reuses skill_source_files/plugin_of/
+  validate_skill_frontmatter from package_skills.py and _normalized_hash/
+  CACHE_ROOT from pending_reimport.py so it can never disagree with the
+  packager or the drift ledger about what "fresh" means.
+- tools/verify_install.ps1 (new): consumes those manifests post-Save-skill-
+  click -- cache file count, per-file SHA256 vs the packaged bytes, the
+  CreationTime discriminator (mirror-sync overwrite vs a genuine re-import),
+  and Local main.log Sync-complete correlation within a configurable
+  tolerance. Per-skill PASS/FAIL/AMBIGUOUS, never averaged.
+- tools/pending_reimport.py `clear` (modified): now fail-closed refuses to
+  clear a skill unless it is named in the NEWEST dated entry of
+  memory/event_log.md, mechanizing package-and-stage-skill step 7's
+  log-then-clear ordering (motivated by the 2026-08-14 incident where a
+  batched close-out cleared the ledger while its own append had failed the
+  header rule). `--force` overrides, loudly.
+- Testing: entry_b_precheck.py re-verified both real installs (16/16 + 1/1,
+  FRESH, plugin_of=None) via --search against the archived packages.
+  verify_install.ps1 caught and fixed a real bug during testing (Write-Output
+  diagnostic lines inside Test-OneManifest were leaking into its return value
+  via the PowerShell pipeline, corrupting $results into arrays) -- confirmed
+  fixed via a synthetic absent-baseline manifest (PASS, exit 0) and the two
+  real installed skills (correct AMBIGUOUS, since their baseline was captured
+  after the fact, not before the click). clear guard unit-tested against temp
+  fixtures (missing log, unrelated entry, matching entry, hyphen-boundary
+  non-match) plus two live smoke tests against real production files
+  (unforced refusal on an unnamed skill, --force override) -- neither
+  mutated real ledger state. Closing sweep clean: repo_first_check
+  (no cache-ahead skills), frontmatter_sweep (69 dirs, 0 findings),
+  py_compile on both Python files.
+- Test scratch archived to _archive/2026-09-07_precheck-verify-tool-tests/
+  (never deleted, per Hard Invariant 6).
+- Commit: 9e0fca7, by pathspec (tools/entry_b_precheck.py,
+  tools/pending_reimport.py, tools/verify_install.ps1 only; verified via
+  `git show --stat --oneline HEAD` immediately after).
 
 ## 2026-09-07 -- Second Save-skill batch: all 4 reimports CONFIRMED (supersedes the 13:04 entry's county-parcel-screen "stopped")
 
@@ -40,6 +111,115 @@ Enabled-skill count `68 -> 68` across the batch (`main.log` 13:14:08 and 13:14:4
 **Ledger + a guard gap worth fixing.** `pending_reimport.py clear` REFUSED `register-scheduled-task` with "not named in the newest event_log.md entry" -- correct doctrine (log the confirmed install, then clear, never the reverse) and it caught a real ordering violation: this session cleared the other three BEFORE logging. It let those three through only because each was *named* in the 13:04 entry -- including `county-parcel-screen`, which that entry named as **stopped, not installed**. The guard tests for the skill's NAME appearing in the newest entry, not for a confirmed-install claim about it, so an entry recording a deliberate non-install satisfies it just as well as one recording a success. Candidate hardening: require the name to co-occur with a confirmation token (`CONFIRMED`), not merely appear.
 
 **Same-token content drift, second live instance in one day.** `511ab1b` changed `county-parcel-screen/references/county-endpoints.md` and `.v1.json` while leaving v1.1 in place, so the store showed a current token over stale content -- the exact pattern documented this morning in `package-and-stage-skill` v1.30 (step 2) after `577397f` did it to that skill at v1.29. Also note both `county-parcel-screen` and `register-scheduled-task` read byte-identical to the repo in the AppData cache while still stale on the platform, because `sync_appdata_mirror.py` mirrors staged files on every commit; only the CreationTime-predates-the-commit test caught them.
+
+## 2026-09-07 — append-event-log.py: closed the WinError-5 concurrent-writer race with a real lock (PR #172)
+
+Friction flagged this session: `append-event-log.py` needed two retries against `[WinError 5]` from a concurrent writer before an append landed. The retry loop already self-healed it (nothing lost), but the single-structural-writer doctrine had no lock behind the append path itself — every collision was pure luck-of-the-retry.
+
+Root cause was two-part, both closed: (1) `_atomic_insert` staged its write through a FIXED path (`log + ".tmp-append"`), shared by every process — concurrent writers could both touch that same staging name within the same instant; (2) `main()`'s own post-write verification read — a plain `open(log)`, which on Windows does NOT grant `FILE_SHARE_DELETE` — could hold `log` open just long enough to make a concurrent writer's `os.replace` fail with the identical WinError 5. The second cause was found only after a first-pass fix (lock + unique tmp names) still showed retries under a 6-process concurrent test with distinct content.
+
+Fix: `_log_lock()`, a byte-range lock via `msvcrt.locking` on a permanent `log + ".lock"` sidecar handle (not a bare `O_CREAT|O_EXCL` lockfile — released by the OS the instant the holding handle closes, including on a crash, so a dead writer can never strand it), wraps the critical section in `_atomic_insert`, `_inplace_insert`, and `main()`'s verification read. Bounded by a 5s timeout: past that it proceeds unlocked rather than hanging, falling back to the pre-existing mtime-guard/retry/in-place-fallback/spool net — unchanged, and still the thing that catches an external holder (e.g. the Desktop app, per the 2026-07-16 incident) that this lock can't reach.
+
+New `maintenance/_tests/test_append_event_log_lock.py` proves mutual exclusion and the timeout fallback with real subprocesses, and that 6 processes appending DISTINCT content all land exactly once with zero retries (the actual friction scenario — the pre-existing duplicate-guard race test only races IDENTICAL content, which short-circuits through the dedup path without contending for the write itself). All three pre-existing suites unchanged in behavior: 40/40, 24/24 (incl. its own 8-process race), 8/8. Isolated worktree off `origin/main`, merged clean (063fa61).
+
+## 2026-09-07 — register-scheduled-task v2.21: sched- namespace carrier landed, closing OI-116
+
+Follow-up to the same-day closing-sweep remediation entry above (item 5, the `sched-` namespace ruling). That ruling shipped the namespace inside `hooks/lib/claim_work.py` alone (PR #171, merged), but nothing told scheduled-task authors to invoke it — no task claimed a `sched-` slug, so the shorter 30-minute TTL and the "force-takeover is ROUTINE" refusal language could never reach a live unattended holder. `register-scheduled-task` is the one skill that authors new scheduled tasks, so the gap lived there.
+
+**Fix:** `register-scheduled-task` v2.21 (`ora-skills` `bc42852`, pushed to main) adds step 3c and a matching QC-gate item: any `claim_work.py claim` call inside a scheduled task's own instructions must use `sched-<slug>`, never the bare slug, whenever the task can perform structural writes to a claim-relevant path (`hooks/**`, `open-items-tracker.md`, `oxford-command-center` data, a `~/.claude` or `ora-skills` maintenance sweep). Verified: `tools/test_package_skills.py` 54/54, `validate_skill_frontmatter()` zero findings, description budget unchanged (972/1024).
+
+**OI-116 closed** (`memory/open-items-tracker.md`) — resolved via the `sched-` namespace + this carrier rather than its originally-drafted closing condition (a non-`--force` next step); Gabriel's ruling made `--force` the routine, documented response instead of avoiding it. Full resolution note recorded on the OI-116 entry itself.
+
+**Confirmed, not duplicated:** the event-log-append-lock cross-process-lock fix another session (`aa5e3e5d`) was holding landed clean (`8779d13`, [PR #172](https://github.com/ZeOoba/ora-claude-config/pull/172), merged) — working tree matched origin, no leftover WIP. The per-entry Changelog-cap port to `package-and-stage-skill`/`register-scheduled-task` (`d61c173`) was already landed and pushed by the same session before this pass started.
+
+Files changed: `register-scheduled-task/SKILL.md` (ora-skills, +5/-3, `bc42852`, pushed). `memory/open-items-tracker.md` (OI-116 status + resolution note — uncommitted in the shared `~/.claude` checkout, same PENDING-staging pattern as OI-140).
+
+## 2026-09-07 -- package-and-stage-skill Entry Point A: 2 reimports confirmed, county-parcel-screen publish stopped (duplicate risk)
+
+**package-and-stage-skill** (v1.30, source dd0f26f): Save-skill click CONFIRMED. Cache-dir CreationTime moved 2026-09-06T18:04:49.182843 -> 2026-09-07T13:04:27.472241, exact-second match to main.log `[SkillsPlugin] Sync complete: 2 downloaded` @ 2026-09-07 13:04:27. Post-install file count 1/1 (SKILL.md only); SHA256 verified identical to the dd0f26f worktree copy. Enabled-skill count 68 -> 68 (reimport of an already-enabled skill, no count change expected or observed).
+
+**ora-setup-audit** (v1.11, source dd0f26f -- NOT the dirty working-tree v1.12 WIP in progress from another session): Save-skill click CONFIRMED. Cache-dir CreationTime moved 2026-09-06T18:04:34.057906 -> 2026-09-07T13:04:26.753879, paired with the same 13:04:27 main.log Sync-complete line as package-and-stage-skill (both landed in one 2-downloaded sync). Post-install file count 1/1; SHA256 verified identical to the dd0f26f worktree copy. Enabled-skill count 68 -> 68.
+
+**county-parcel-screen** (v1.1, 16 files): NOT packaged, staged, or presented this session. Investigation found it was already installed minutes before this session's work began -- cache dir created 2026-09-07 11:58:24 AM with all 16 expected files, `repo_first_check.py` reporting IN-SYNC (not NOT-INSTALLED), and main.log enabled-count moving 66->67 at that exact second (a second, unrelated skill, county-sales-monitor, installed 16s later at 67->68, ruling out a same-name duplicate). Contradicts the dispatch brief's "zero rows / no cache dir / first publish" premise. Per brief instruction, stopped rather than risk a duplicate store entry; no action taken on this skill.
+
+**Also found and left untouched:** `ora-skills` working tree carried live uncommitted WIP on `ora-setup-audit/SKILL.md` (v1.11->v1.12 changelog-retention extraction, ~3-4 min old at detection) plus an untracked `versions/` file -- attributed to a concurrent session (per dispatch context, ~16 sessions live today), not force-resolved. Packaged/installed the clean dd0f26f commit instead via an isolated `git worktree add` (no stash/reset/commit touched the shared working tree).
+
+**Per dispatch instruction:** `_staging/PENDING_REIMPORT.md` NOT cleared and no other repo writes made from this Cowork session; both confirmed skills still read REPO-AHEAD in `repo_first_check.py`'s per-skill listing as a result (expected -- that check also reflects the ledger, not just content; direct SHA256 comparison confirms cache content is current). A Code session should clear the ledger for `package-and-stage-skill` and `ora-setup-audit` after review. Closing sweep: `repo_first_check.py` ended "no cache-ahead skills"; `frontmatter_sweep.py` ended "swept 69 skill dir(s); 0 finding(s)"; `verify_installed_cache.py` on both confirmed skills: balanced=True, stray_body_quotes=0, "0 need attention".
+
+## 2026-08-04 — OI-NNN id allocation rule established (`allocate-oi-id.py`) after hand-computed id collisions
+
+Hand-computed `max+1` OI-NNN ids collided at least three times (OI-027, OI-061, OI-066). Fixed by requiring `python ~/.claude/maintenance/allocate-oi-id.py --session $CLAUDE_CODE_SESSION_ID --note "<why>"` for every new item, and `--backfill OI-NNN --note "<why>"` for one filed by hand or merged in without going through the allocator. Pre-push gate ships as **WARN**, not BLOCK — `_state/oi-id-enforcement-mode.txt` is the switch that will flip it to BLOCK once ready.
+
+Consolidated out of session-context.md 2026-09-07 (34-day-old dated tombstone flagged by `doctrine-integrity-probe.py`) — the rule itself is still live and stays in session-context.md, now dateless with a pointer here for the origin history.
+
+## 2026-09-07 — ora-entry-market-scan cron fix APPLIED (Gabriel-authorized), closing the OR-semantics duplicate-fire bug
+
+Gabriel explicitly authorized the fix recommended in the 2026-09-03/09-06/09-07 entries above. Applied via `register-scheduled-task` (Rule 3 surface assertion: `list_scheduled_tasks` present, native CC/MCP session):
+
+1. **Cron changed** `45 11 1-7 * 2` → `45 11 * * 2` (every Tuesday) via `update_scheduled_task` (cronExpression only — verified via `list_scheduled_tasks` that `nextRunAt` moved to 2026-09-08T15:50:02.000Z, a genuine Tuesday, and that the SKILL.md file's md5 was unchanged by the call, i.e. no frontmatter-drop risk realized).
+2. **Step 0 FIRST-TUESDAY GUARD added** to `scheduled-tasks/ora-entry-market-scan/SKILL.md` (v1.7) — moves "first Tuesday only" logic in-task: exits silently if day-of-month is outside 1–7, and checks `outputs/` for an already-completed monthly cycle before proceeding even on a genuine first Tuesday, formalizing the check 2026-09-03/09-06 each had to re-derive from scratch.
+
+**Not committed to git.** The `~/.claude` main checkout (branch `feat/model-canary-probe-step25`) carries 87 uncommitted files, including recorded edits from a concurrently active session (`abdb83bd`) — per the single-writer rule, this SKILL.md edit was left as an isolated, clean 10-line diff (`git diff --stat` confirms zero overlap with any other file) in the working tree rather than committed, to avoid co-mingling with that session's WIP. The live scheduler reads the working-tree file directly, so the fix is effective immediately regardless of commit state — but it needs a follow-up isolated-commit pass (via the `isolated-commit` skill) once the shared checkout is clean, or it risks being lost to an uncoordinated reset/checkout by another session.
+
+**Verification:** next fire 2026-09-08 (Tuesday, day 8 — a non-first Tuesday) will exercise the new Step 0 guard's day-of-month<=7 branch and should exit silently with no Notion writes/email. The next TRUE first Tuesday is 2026-10-06; that run should exercise the outputs-directory branch cleanly (no prior-month summary present) and proceed normally.
+
+Files changed: `scheduled-tasks/ora-entry-market-scan/SKILL.md` (+10 lines, UNCOMMITTED). Registry: `ora-entry-market-scan` cronExpression updated via MCP tool (not a file edit).
+
+## 2026-09-07 — oxford-command-center worktree cleanup + dirty-tree triage (2 trees preserved, 3 removed)
+
+Gabriel-directed housekeeping pass. 14 worktrees enumerated, classified by merge state, dirt, recency, and `node_modules` linkage.
+
+**Removed (3, clean + stale, branch tips verified identical before/after so no commits lost):** `occ-wt-gitignore` (merged #309, idle 4.3d), `eric-live-phase2` (idle 21.6d), `mirror-buildroot` (idle 21.8d). `git worktree prune` also cleared one dangling lease-snapshot registration. Main checkout's `node_modules` verified intact afterwards (643 packages) — the junction footgun did not fire.
+
+**Not removed, and why it mattered:** `oxford-command-center-deploy-build` looks like stale detached residue but is referenced by `scripts/deploy-mirror.ps1` and `scripts/lib/deploy-buildroot.ps1` — deleting it would have broken the mirror deploy. Found only by grepping for path references before acting; worth repeating in any future sweep.
+
+**dirty-tree-triage run on the two dirty trees.** Both held genuinely unlanded work and were one command away from destruction:
+
+- `financial-sweep-fixes` → committed `c0629df` on `fix/financial-sweep-2026-08-17-defects`. 12 files, +326/-24, all mtimes inside one 24-minute window on 2026-08-17, untouched 21 days. 13 of 14 sampled added lines absent from origin/main, including a regression test for a **$16,026.27 Columbus→Baltimore AR misattribution**, three "DIRECTION FIX" tenancy-evidence tests, and a cent-level fully-offset-tenant refute regression.
+- `ar-stale-reconcile` → committed `979a4d8` on `fix/ar-stale-row-reconcile`. 3 files, +611/-3. **Two were UNTRACKED** — `server/ar/reconcile-covered.ts` and its test existed on no branch and in no reflog; removal would have destroyed them unrecoverably. New pure fn `reconcileCoveredProperties` (re-stamp-only path for balances a run never observed, instead of zeroing them as paid).
+
+Both recorded **UNATTRIBUTED**: no live session's cwd was either worktree, and a running session named "Ora financial code integrity sweep" resembles the financial-sweep branch by name only — name similarity without an intersecting touched-set is not attribution (the guess-class that misfired 4x previously). Settlement done properly: two mtime checks 20 minutes apart, 0 of 15 moved. Both indexes empty beforehand; all paths staged explicitly.
+
+Neither is proposed for merge — `financial-sweep` overlaps files rewritten by #311/#312 and will conflict; `ar-stale-reconcile` overlaps live AR work in `.worktrees/fix-ar-matching-refute` (13 uncommitted files, active). Branches are LOCAL ONLY — not pushed. Still dirty and untouched: `fix-ar-matching-refute` (live).
+
+**Hook-integrity observation, unverified and not probed:** the two preservation commits touched financial-decision paths (`server/warehouse/reconcile-noi.ts`, `server/ar/*`) and did **not** trip `eos-review-gate`, which had blocked a single test-file commit earlier the same session. Difference: these used `git -C <other-worktree> commit` rather than committing from the session cwd. If the gate keys only off the session's own working directory, `git -C` is a bypass path. Flagged for Gabriel; deliberately not tested adversarially.
+
+Related same-session work: PRs #315 (round19 mock-leak order fragility), #317 (stale order-fragility canary header — the canary's red runs were #315's bug, not the documents.test.ts the header blamed), #318 (3 stale status.json rows).
+
+## 2026-09-07 -- Closing-sweep remediation: changelog retention, reimport routing, sched- claim namespace, backfill engine
+
+Five closing-sweep items from the prior session, executed and verified. Two rulings taken from Gabriel (multiple-choice, both recommendations ratified).
+
+**Claim handling (precedent).** Session ebc44356 held `repo-housekeeping` and was UNREACHABLE -- absent from all 445 peer sessions. Its two claimed deliverables had both already landed (`858cb88` v1.10 per-band cap; the CLAUDE.md exception-scan tie-break), and `ora-skills` main == origin/main clean. A `--force` takeover was started, but `claim_work.py` reported the paths do NOT overlap (theirs: `CLAUDE.md` only; mine: three ora-skills paths). The displaced claim was RESTORED and the work re-claimed under a distinct slug `repo-housekeeping-oraskills-sweep`, so both claims stayed visible. Distinct-slug beat takeover -- the tool's own advice was right.
+
+**1. ora-setup-audit v1.12 (`460fb0b`, pushed).** Adopted the 6-entry changelog retention rule from `register-scheduled-task` v2.18 / `package-and-stage-skill` v1.30, and performed the extraction v1.10 had deferred pending Gabriel's go. v1.10 measured the changelog at 9,696B/29%; the single v1.11 entry added in between took it to 12,180B/**32.3%** across 13 entries -- the share ROSE as the file grew, which is the curve the rule exists to flatten. Extracted v1.6->v1.0 to `versions/CHANGELOG-v1.0-v1.6.md`. Result 32.4% -> 27.2%. **Also added a calibrated ~2,000-char PER-ENTRY cap**: a count cap alone does not bound size, which is the exact defect v1.10 fixed in the artifact and `ora-cc-schematic-refresh` fixed at its v1.4. Calibrated from measurement (surviving entries 1,043-1,754B; `register-scheduled-task`'s three full entries 763-1,296B), not copied.
+
+**2. package-and-stage-skill v1.31 (`656d82d`, pushed).** Step 7 now routes to `tools/reimport_correlate.py` instead of describing the manual correlation it automates. The tool landed at `7301f15` and NOTHING referenced it -- a committed-but-unrouted tool, so every reimport since kept doing the baseline / re-list / ~40-log-line eyeball by hand. Verified the tool actually runs before documenting it. Its own retention rule tripped in the same pass (v1.31 would have been a 7th full inline entry): v1.25 compressed out, `versions/CHANGELOG-v1.24.md` renamed to `CHANGELOG-v1.24-v1.25.md`, both in-repo pointers updated so neither goes dead.
+
+**3. `_staging/` archive.** 26 loose 2026-08-2x scratch files moved to `_staging/_archive_2026-09-07_loose-scratch/`. Archived INSIDE gitignored `_staging/` rather than the tracked repo-root `_archive/` (462 tracked files), so 26 one-off scratch files do not enter git history. **Incident, caught and corrected:** the move re-globbed at write time and swept up two files another live session had created MINUTES earlier (`claude_repo_first_check.txt` 12:01, `claude_check_plugin_of.py` 12:00); both restored immediately. This is the findings-decay hazard on shared paths, and the second time it has bitten -- build the move list and execute it in the same breath, or re-verify mtimes before writing.
+
+**4. RULING (Gabriel): pending_reimport backfill -> fold into `ora-doctrine-integrity-guard`.** `cmd_backfill()` ALREADY EXISTED (line 623) -- nothing needed building, only scheduling; the "absence claims need verification" pattern again. Now the guard's NINTH engine (spec v1.8), deliberately NON-alarming (a seeded row means a reimport is pending = `package-and-stage-skill`'s job, same rule the repo-first sweep applies to REPO-AHEAD; alarming would email daily for routine work). STEP 3's predicate unchanged; STEP 4's run-log LINE gained a `reimport-ledger` field so the result is actually visible rather than nominally "surfaced". Hosted on CC/MCP because backfill reads `CACHE_ROOT`, which a Cowork-bash context cannot see and would report a false clean. A carve-out was added to the READ-ONLY guardrail so the spec does not appear to contradict itself.
+
+**5. RULING (Gabriel): unattended claims get a reserved `sched-` namespace.** 30-minute TTL vs the 120-minute default; the refusal message now says force-takeover is ROUTINE for a holder that cannot be messaged. HYPHEN not colon -- the slug IS the filename and `:` is illegal on Windows, so `sched:` would be silently mangled by `_safe_filename()` into a different slug than the caller asked for (test pins it). TTL is `min(caller_ttl, 30)`. Ordinary path unchanged. Doctrine recorded in `tech.md` Sec 3e.
+
+**6. Dead pointer removed (`3e33a22`, pushed).** `pending_reimport.py`'s module docstring and `cmd_candidates()` both named `ora-skills-reimport-watch` as the downstream consumer that should call `candidates`. That task exists on NEITHER fleet (checked against both live registries). Replaced with the consumers that actually exist.
+
+**Delivery.** ora-skills: 3 commits pushed to main (`460fb0b`, `656d82d`, `3e33a22`), 123 repo tests green. ~/.claude: PR https://github.com/ZeOoba/ora-claude-config/pull/171 from an isolated worktree off origin/main (the shared checkout was on another session's branch `feat/model-canary-probe-step25` with many unrelated dirty files) -- 266/266 claim tests green, 11 new. Blast radius (`hooks/**` + a fleet spec), so the PR still needs a real adversarial review before merge; a bot check is not a verdict. Pre-push gate flagged `test_append_event_log_duplicate_guard.py`, which passes 24/24 standalone on that branch -- a temp-dir flake under concurrent execution, not a real break.
+
+## 2026-09-07 — ora-entry-market-scan duplicate fire EXECUTED UNCAUGHT (4th+ recurrence); real duplicate Notion writes + duplicate Gabriel email sent — the failure mode 2026-09-06 explicitly predicted
+
+Scheduled fire on 2026-09-07 (day 7 of month, the last day of the predicted re-fire window from [[2026-09-03]]/[[2026-09-06]]) found the monthly cycle already fully completed 2026-09-02 ([2026-09-02_entry-scan-summary.json](../../../scheduled-tasks/ora-entry-market-scan/outputs/2026-09-02_entry-scan-summary.json): 33 listings, 18 new + 15 updated Notion rows, email sent), with 2026-09-03 and 2026-09-06 both correctly self-checking the outputs directory BEFORE writing and skipping as `SKIPPED_DUPLICATE_FIRE`. **This run did not perform that check first** — 4 parallel per-market research agents were dispatched, full SOURCE+SCREEN passes completed (Louisville 1 new + updates, Delmarva 1 new, Grand Rapids 7 new + 2 price-cut updates, Des Moines 2 new + 1 update), and the results were **actually written**: 11 new Notion Deal Sourcing Log records created, 6 existing rows updated, and a full summary email sent to ggoldberg@oxfordra.net (subject "ORA Entry Market Scan — September 2026: 1 New Candidates, 4 Watched, 5 Passed"). This is the exact worse-case outcome the 2026-09-06 entry warned about: "an actual duplicate Notion write + Gabriel email if the skip-detection judgment call is missed on some future fire."
+
+**Root cause of this session's miss:** did not read `scheduled-tasks/ora-entry-market-scan/outputs/` before executing Step 1 SOURCE, despite the task's own prior-run archives being the authoritative signal that the monthly cycle was already closed. Generalizes [[feedback_absence_claims_need_verification_before_building]] and [[feedback_check_active_claims_before_optimization_queue_work_2026-08-13]] — should have checked for existing/recent completed work before dispatching a multi-agent research cycle.
+
+**Damage assessment:**
+- Email: this is Gabriel's 4th "Entry Market Scan" email for the same September monthly cycle in 5 days (2026-09-02 original, plus today) — 2026-09-03 and 2026-09-06 correctly held. A corrective follow-up email was sent immediately after this was discovered, flagging the duplicate and the cron bug.
+- Notion: 11 new rows and 6 updates are factually accurate (prices/SF/broker verified live against current listings 2026-09-07) and correctly dated/sourced — NOT reverted, since deleting verified data risks more harm than leaving it, and several of today's "new" finds (e.g. 9289 Swanson Blvd, Clive IA) were the same SNIPPET-only leads 2026-09-06 explicitly deferred to "next legitimate cycle" rather than log — this run inadvertently completed that deferred logging, which is a defensible outcome even though the process that got there was wrong. Price-cut updates (550 Richmond St NW, 5120 E Paris Ave SE, 3900 Cane Run Rd) reflect real market moves regardless of cycle-duplication and are correct to have on file.
+- Pre-existing duplicate-row problem (550 Richmond St NW x3, 2134 East Grand Ave variants x3, 11 College Ave x2, 440 32nd St SW x2, 2150 Milton Ave x2) is CONFIRMED to be a downstream symptom of this same recurring cron bug, not unrelated data rot — the 2026-09-06 entry's "unexplained 09-05 off-protocol Notion write" anomaly (same Louisville/Des Moines addresses) is now explained: it's another uncaught duplicate fire, same as today.
+
+**Escalation — the cron bug is now 6 days old and unfixed, and has graduated from wasted-token near-misses to an actual duplicate external-facing send.** Same fix recommendation as [[2026-09-03]]/[[2026-09-06]]: authorize a `register-scheduled-task` edit to either (a) a cron the scheduler evaluates as AND for day-of-month + day-of-week if supported, or (b) fire every Tuesday (`45 11 * * 2`) with an in-task day-of-month<=7 guard before SOURCE runs. **QUESTIONS FOR GABRIEL**, escalated in the corrective email sent this run: (1) authorize the cron fix now — 3 prior entries recommended it and it is still live; (2) the Notion Deal Sourcing Log's pre-existing duplicate-address rows (roster above) need a consolidation pass — likely a `dirty-tree`-style reconciliation but for Notion rows, out of scope for this read-only task; (3) consider whether `ora-entry-market-scan` needs its own outputs-directory pre-check hard-coded into the SKILL.md's Step 0 (ahead of the existing Step 2 doctrine-version check), given three sessions now (09-03, 09-06 caught it; this one didn't) have had to re-derive this same judgment call from first principles each time.
+
+Files changed: `scheduled-tasks/ora-entry-market-scan/outputs/2026-09-07_entry-scan-summary.json` (new, status `DUPLICATE_FIRE_EXECUTED_UNCAUGHT`). 11 Notion pages created, 6 updated (collection 9a6ae219-85a3-4621-899c-c757fd062f8b). 2 emails sent to ggoldberg@oxfordra.net (the duplicate scan digest, then a corrective follow-up). No cron edit made (out of scope for this read-only task; requires `register-scheduled-task` + Gabriel review, same constraint noted 2026-09-03/09-06).
 
 ## 2026-09-07 -- First install of county-parcel-screen v1.1 + county-sales-monitor v0.5 on Cowork (Save-skill click; closes Automation Audit R23)
 
