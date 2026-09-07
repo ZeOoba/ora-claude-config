@@ -123,10 +123,42 @@ EXIT_CLAIM_REFUSED = 3   # `claim`/`restore` declined to clobber another session
                           # claim. Distinct from 1 so a caller can tell "you asked for
                           # something impossible" from "someone else is already here"
                           # without parsing stdout.
+SCHED_SLUG_PREFIX = "sched-"  # Reserved namespace for UNATTENDED (scheduled-task) claims.
+                               # Ratified 2026-09-07 after an unattended task held
+                               # 'repo-housekeeping', committed into ora-skills main
+                               # mid-session, and was unreachable by send_message --
+                               # absent from all 445 peer sessions. The single-writer
+                               # rule assumes a holder you can talk to; a scheduled task
+                               # is structurally not that. NOTE the hyphen: the slug IS
+                               # the filename (<slug>.json) and ':' is illegal on
+                               # Windows, so 'sched:' would be silently mangled by
+                               # _safe_filename() into a DIFFERENT slug than the caller
+                               # asked for.
+SCHED_TTL_MINUTES = 30         # Unattended claims expire fast. An interactive session
+                               # can be asked to release; a scheduled one cannot, so its
+                               # claim must age out on its own well before the 120-min
+                               # default would let a dead run block a live person.
 DEFAULT_TTL_MINUTES = 120  # headroom above the 90-min stuck-session-watchdog kill
                             # threshold, so a legitimately long task's claim survives
                             # while a genuinely stuck session's claim goes stale before
                             # it can mislead anyone for long
+
+
+def is_sched_slug(slug):
+    """True for a claim in the reserved unattended namespace (see SCHED_SLUG_PREFIX)."""
+    return str(slug or "").startswith(SCHED_SLUG_PREFIX)
+
+
+def _effective_ttl(slug, ttl_minutes):
+    """Unattended claims get the shorter TTL; everything else keeps the caller's.
+
+    Deliberately min() rather than a flat override: a caller that already passed a
+    TTL SHORTER than SCHED_TTL_MINUTES (a probe sweeping for very fresh claims, say)
+    must not have its window silently widened by this rule.
+    """
+    if is_sched_slug(slug):
+        return min(ttl_minutes, SCHED_TTL_MINUTES)
+    return ttl_minutes
 
 
 def _safe_filename(slug):
@@ -470,7 +502,9 @@ def read_active_claims(base_dir=None, ttl_minutes=DEFAULT_TTL_MINUTES, now=None)
         if claimed_at is None:
             continue
         age_minutes = (now - claimed_at).total_seconds() / 60.0
-        if age_minutes > ttl_minutes or age_minutes < 0:
+        # Per-claim TTL: an unattended 'sched-' claim ages out at SCHED_TTL_MINUTES
+        # even when the caller asked for the 120-min default (see _effective_ttl).
+        if age_minutes > _effective_ttl(name[:-5], ttl_minutes) or age_minutes < 0:
             continue
         out.append({
             "slug": name[:-5],
@@ -677,6 +711,15 @@ def _collision_report(slug, existing, my_paths, overlap, refused=True):
         # The reason host_session_id was recorded at all (2026-08-09): a claim you
         # can read but whose owner you cannot contact leaves no move except clobbering.
         lines.append("  Contact:     send_message to %s" % host)
+    if is_sched_slug(slug):
+        # Ratified 2026-09-07: for an unattended holder the "contact them" step above
+        # is not merely inconvenient, it is impossible -- so say so here rather than
+        # leaving each session to rediscover it and treat --force as a transgression.
+        lines.append("  NOTE:        '%s' is an UNATTENDED (scheduled-task) claim. Its holder "
+                     "cannot be messaged and will not answer. Taking it over with --force is "
+                     "ROUTINE here, not a transgression -- verify its work landed first, then "
+                     "force. It also self-expires after %d minutes."
+                     % (slug, SCHED_TTL_MINUTES))
     lines.append("  Their paths: %s" % _fmt_paths(existing.get("paths")))
     lines.append("  Your paths:  %s" % _fmt_paths(my_paths))
     if overlap is True:
@@ -1027,11 +1070,18 @@ def main():
             args.slug, _one_line(attributable_session(prior))[:8],
             _one_line(str(prior.get("claimed_at", "?")))))
         age = (datetime.datetime.now() - when).total_seconds() / 60.0
-        if age > DEFAULT_TTL_MINUTES:
+        # Must use the EFFECTIVE TTL, not the default: a reserved 'sched-' slug
+        # expires at 30 minutes, so comparing against 120 here would stay silent
+        # for the one namespace whose claims expire soonest -- restoring a 45m
+        # sched- claim would print success while read_active_claims() already
+        # treats it as gone, which is exactly the miscommunication this NOTE exists
+        # to prevent (found by adversarial review, 2026-09-07).
+        eff_ttl = _effective_ttl(args.slug, DEFAULT_TTL_MINUTES)
+        if age > eff_ttl:
             print("  NOTE: that timestamp is %.0fm old, past the %dm TTL -- the "
                   "restored claim is already expired and will not broadcast. Ask "
                   "that session to re-claim if it is still working." % (
-                      age, DEFAULT_TTL_MINUTES))
+                      age, eff_ttl))
         return 0
 
     if args.cmd == "list":
