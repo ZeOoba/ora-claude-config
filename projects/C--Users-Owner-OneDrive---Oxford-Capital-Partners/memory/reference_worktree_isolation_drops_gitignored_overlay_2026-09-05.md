@@ -31,6 +31,21 @@ metadata:
 
 ---
 
+
+## CLOSED 2026-09-06 — both PRs merged to main
+
+**[PR #312](https://github.com/ZeOoba/oxford-command-center/pull/312) merged `ac590d6`, [PR #311](https://github.com/ZeOoba/oxford-command-center/pull/311) merged `a7ff5ee`** — in that order deliberately, because #311 removes the missing-overlay refusal that had been accidentally masking #312's silent `tasks` loss. Verified present on `origin/main` after merge (a merged PR is not proof the code landed — [[project_automation_audit_rev22_2026-09-05]]).
+
+**The mandatory refute pass (5 lenses each) found BOTH PRs incomplete.** Neither was ready when its CI went green:
+- **#311** — `hasNoEnrichment` judged the RAW parse while `loadOverlay` applies per-entry Zod coercion, so `{"dealComps":{"d1":{"bogus":true}}}`, `{"tenantArrears":{"x":"oops"}}`, `{"tasks":{"a":1}}` and `{"tenantArrears":0}` passed the guard and still merged as `EMPTY_OVERLAY` — **the same silent zeroing, through the loader instead of a missing file.** Fixed by extracting `parseOverlayRaw()` so the guard judges the loader's OUTPUT; guard and loader now agree by construction. Also: the missing-file message prescribed `ALLOW_EMPTY_OVERLAY=1`, which that branch never consults — a dead remedy that a test *pinned* by asserting only on the string.
+- **#312** — both auto-pushing CLI writers gated only on the FLAG, which is deliberately `null` for `not-configured`. A `GRAPH_CLIENT_SECRET` rotation would still have written `tasks` 115→59 at exit 0. Fixed with `requireLiveM365Source()` on both writers + the missing `console.warn`.
+- **Fifth writer:** `server/brain.ts` `persist()` also merges a fail-open `EMPTY_OVERLAY` on every UI write-back; it now carries the same gate (decline the mirror, keep serving).
+
+**Reusable lessons.**
+1. **A guard must judge what the consumer actually produces, not its input.** Two checks over the same data kept in sync by hand is the defect, not the symptom — same class as the by-name write-clock filter and the hardcoded-list shrink guard.
+2. **A partial mock factory silently returns `undefined` for omitted exports.** `brain.test.ts` mocked `server/overlay`; adding two imports to `brain.ts` broke 21 tests at once. Suspect the mock before the environment — my first fix (bootstrapping the sandbox overlay in `tests/setup.ts`) addressed the wrong cause and would have set `ALLOW_EMPTY_OVERLAY=1` suite-wide, masking this branch's own refusal tests.
+3. **Duplicate-session work again:** session `24f0b4f7` independently redid the #312 refute fixes while I was merging them, and still holds worktree `ora-cc-worktrees/m365-fixes` on `fix/m365-refute-fixes` — leave it alone. Its claim lists two things NOT in main and worth a follow-up: `bake-mirror.ts` still only WARNS (so the daily brief can email "None due" and not resend, since `shouldSendBrief` keys on `lastBriefDate`), and the **partial-shrink residual is still open** — `tasks` is not one of the shrink guard's five keys, so a 200-response under the >10-list / >50-per-list / >100-total caps stays invisible.
+
 ## SECOND, INDEPENDENT degradation vector found on the next run — `tasks` 115 → 59, caught by NO guard
 
 `ora-lease-snapshot-refresh` (run `20260905T201214Z-c489`, 2026-09-05 ~20:12 UTC) reproduced the overlay drop above exactly (same 4 sections → 0) **and** surfaced a separate one on the same fire. Its stdout carried `[m365-tasks] live fetch failed, skipping` — and the `tasks` section went **115 → 59**, losing 56 M365 To-Do rows.
