@@ -173,11 +173,26 @@ REVIEWER_MODEL_LADDER = ("claude-fable-5-1", "claude-opus-5")
 # existed.
 _MODEL_SUFFIX_RE = re.compile(r"\[[^\]]*\]$")
 
+# Splits an EOS_REVIEW_MODELS list on commas that are NOT inside an unclosed
+# "[...]" tag, so a comma-bearing context-window tag (theoretical -- no real
+# tag in this fleet's data has ever carried one, per 2026-09-08 review) can't
+# get shredded into two garbage tokens by a naive raw.split(","). See
+# accepted_models()'s comment for the fuller reasoning (findings 2+4).
+_MODEL_LIST_SPLIT_RE = re.compile(r",(?![^\[]*\])")
+
 
 def _bare_model(mid):
+    """Strip surrounding whitespace, then a trailing [...] suffix. Strips
+    INSIDE this function (not left to callers) so every call site gets the
+    same normalization for free -- an independent review (2026-09-08) found
+    this file's original callers stripped inconsistently (accepted_models()
+    did, cli_record()/valid_review() didn't), which meant a reviewer id with
+    trailing whitespace instead of a suffix could still be wrongly refused.
+    Matches maintenance/model-canary-probe.py's bare_model(), which already
+    strips before its own regex sub."""
     if not isinstance(mid, str):
         return mid
-    return _MODEL_SUFFIX_RE.sub("", mid)
+    return _MODEL_SUFFIX_RE.sub("", mid.strip())
 
 APPROVED_VERDICTS = ("approved", "pass", "no-blocking-findings")
 
@@ -547,7 +562,23 @@ def accepted_models():
         # from a self-reported id (the exact scenario the docstring points them
         # at), and a suffixed value on this side must not wedge the gate the
         # same way an unnormalized --model would (see _bare_model's callers).
-        vals = tuple(_bare_model(v.strip()) for v in raw.split(",") if v.strip())
+        #
+        # Split BEFORE normalizing, but bracket-aware (2026-09-08 independent
+        # review, findings 2+4): a plain `raw.split(",")` has two bugs. (a) A
+        # bracket-only entry (e.g. "claude-opus-5,[1m]") passes the `v.strip()`
+        # truthiness check on the RAW token, then _bare_model() reduces it to
+        # "" -- an empty string that still ends up IN the accepted tuple, so a
+        # reviewer_model of "" would validate: a genuine fail-OPEN hole in a
+        # fail-closed gate. (b) a comma inside a real tag ("claude-opus-5[1m,
+        # 200k]") splits mid-tag into two garbage tokens that match nothing --
+        # fail-closed, not a bypass, but it can wedge a genuinely valid id.
+        # _MODEL_LIST_SPLIT_RE splits only on a comma NOT inside an unclosed
+        # "[...]"; filtering on the truthiness of the NORMALIZED value (not
+        # the raw token) closes (a).
+        vals = tuple(
+            m for m in (_bare_model(v) for v in _MODEL_LIST_SPLIT_RE.split(raw))
+            if m
+        )
         if vals:
             return vals
     return REVIEWER_MODEL_LADDER
