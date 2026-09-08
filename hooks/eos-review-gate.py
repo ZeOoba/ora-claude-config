@@ -60,6 +60,24 @@ a sweep target for reference_model_release_checklist.md, and EOS_REVIEW_MODELS
 overrides it without a code change. Every dispatch must still PIN an explicit
 `model` -- inheritance can yield an unusable id.
 
+EOS_REVIEW_MODELS MUST be set in settings.json's top-level "env" block to reach
+this hook -- confirmed 2026-09-07 (incident: commit 4c5d441 on
+build/git-probe-dedup) that setting it inline on the gated Bash command's own
+shell (e.g. `EOS_REVIEW_MODELS=... python -c ... && git commit ...`) does NOT
+work: this hook is spawned by the harness as its own PreToolUse process, not as
+a child of the command it gates, so a shell-local assignment on that command
+line is invisible to it. settings.json's env block, by contrast, is written
+into every subprocess Claude Code spawns, hook processes included. TREAT THIS
+AS A TEMPORARY BRIDGE, not the fix: unlike OVERRIDE_TIER_ARGS below (single-use,
+30-min TTL), a settings.json env override is unbounded -- it silently widens
+this fail-closed gate for every commit in every session until someone removes
+it. Prefer sweeping REVIEWER_MODEL_LADDER itself (reference_model_release_
+checklist.md item 9) and pull the env override once that lands.
+
+A self-reported model id can carry a trailing context-window tag (e.g.
+"claude-opus-5[1m]"); `_bare_model()` strips it before every ladder/env
+comparison so that formatting alone never refuses a genuine top-tier reviewer.
+
 SAFETY INVARIANT, two-sided and deliberately asymmetric:
   - The gate's OWN machinery fails OPEN. Bad stdin, no git, unreadable repo,
     import failure, any unexpected exception -> exit 0, allow. A bug in a gate
@@ -143,7 +161,23 @@ REVIEWS_SUBDIR = "reviews"
 # hardcoded constant, by Gabriel's 2026-07-24 amendment -- a retired id must
 # degrade to the next entry rather than make the gate unsatisfiable. Sweep target
 # for reference_model_release_checklist.md.
-REVIEWER_MODEL_LADDER = ("claude-fable-5", "claude-opus-4-8")
+REVIEWER_MODEL_LADDER = ("claude-fable-5-1", "claude-opus-5")
+
+# A self-reported model id can carry a trailing context-window tag, e.g.
+# "claude-opus-5[1m]" -- same hazard maintenance/model-canary-probe.py's
+# bare_model() exists to strip. An exact-match comparison against the ladder
+# would otherwise refuse a genuine top-tier reviewer over formatting alone,
+# recreating the exact 2026-09-07 incident this ladder update fixes. Applied
+# once at --record intake (the artifact always stores the bare id) and again
+# on read, in case an older artifact was written before this normalization
+# existed.
+_MODEL_SUFFIX_RE = re.compile(r"\[[^\]]*\]$")
+
+
+def _bare_model(mid):
+    if not isinstance(mid, str):
+        return mid
+    return _MODEL_SUFFIX_RE.sub("", mid)
 
 APPROVED_VERDICTS = ("approved", "pass", "no-blocking-findings")
 
@@ -509,7 +543,11 @@ def sessions_dir():
 def accepted_models():
     raw = os.environ.get("EOS_REVIEW_MODELS")
     if raw:
-        vals = tuple(v.strip() for v in raw.split(",") if v.strip())
+        # _bare_model here too -- an operator pastes EOS_REVIEW_MODELS straight
+        # from a self-reported id (the exact scenario the docstring points them
+        # at), and a suffixed value on this side must not wedge the gate the
+        # same way an unnormalized --model would (see _bare_model's callers).
+        vals = tuple(_bare_model(v.strip()) for v in raw.split(",") if v.strip())
         if vals:
             return vals
     return REVIEWER_MODEL_LADDER
@@ -547,7 +585,7 @@ def valid_review(session_id, key):
         return None
     if str(data.get("verdict", "")).strip().lower() not in APPROVED_VERDICTS:
         return None
-    if data.get("reviewer_model") not in accepted_models():
+    if _bare_model(data.get("reviewer_model")) not in accepted_models():
         return None
     return data
 
@@ -950,7 +988,7 @@ def cli_record(argv):
             "eos-review-gate: nothing at risk in the working tree -- there is no "
             "blast-radius diff to review, so no artifact is needed or written.\n")
         return 1
-    model = _arg(argv, "--model")
+    model = _bare_model(_arg(argv, "--model"))
     if model not in accepted_models():
         sys.stderr.write(
             "eos-review-gate: reviewer model %r is not in the accepted tier "

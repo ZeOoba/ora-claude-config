@@ -66,6 +66,13 @@ CLAUDE = os.environ.get("CLAUDE_HOME", r"C:\Users\Owner\.claude")
 # by construction (fail-closed): a model we can't place must not read as "held".
 MODEL_RANK = {
     "claude-mythos-5": 100,
+    "claude-fable-5-1": 100,
+    # claude-fable-5 is superseded (2026-09-02) but stays LOAD-BEARING, not just
+    # a courtesy for old transcripts: floor_rank() below builds "claude-%s-5" %
+    # floor, so the default `--floor fable` shorthand resolves through THIS key.
+    # There is no short-name form for fable-5-1 yet -- only the full id
+    # (--floor claude-fable-5-1) resolves it. Deleting this entry breaks the
+    # default floor invocation (exit 2, TOOLING ERROR -- fails closed, but loud).
     "claude-fable-5": 100,
     "claude-opus-5": 90,
     "claude-opus-4-8": 80,
