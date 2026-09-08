@@ -41,7 +41,7 @@ HOOK = os.path.join(HERE, "eos-review-gate.py")
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
 import gitfixture  # noqa: E402
 
-LADDER_TOP = "claude-fable-5"  # must match eos-review-gate.REVIEWER_MODEL_LADDER[0]
+LADDER_TOP = "claude-fable-5-1"  # must match eos-review-gate.REVIEWER_MODEL_LADDER[0]
 
 
 # --------------------------------------------------------------------------
@@ -82,6 +82,11 @@ def write(repo, rel, text):
 
 def run_hook(command, repo, sessions_dir, session_id="sess1", extra_env=None):
     env = dict(os.environ)
+    # EOS_REVIEW_MODELS may be set ambiently (settings.json's top-level "env"
+    # block, per the module docstring) -- scrub it so an operator's real
+    # override doesn't silently change which model tier THIS suite tests
+    # against. A test that wants it set opts in via extra_env below.
+    env.pop("EOS_REVIEW_MODELS", None)
     env["EOS_SESSIONS_DIR"] = sessions_dir
     env["ORA_OVERRIDE_SESSIONS_DIR"] = sessions_dir
     if extra_env:
@@ -97,11 +102,14 @@ def run_hook(command, repo, sessions_dir, session_id="sess1", extra_env=None):
     return proc.returncode, proc.stdout, proc.stderr
 
 
-def run_cli(args, repo, sessions_dir, session_id="sess1"):
+def run_cli(args, repo, sessions_dir, session_id="sess1", extra_env=None):
     env = dict(os.environ)
+    env.pop("EOS_REVIEW_MODELS", None)  # see run_hook's comment above
     env["EOS_SESSIONS_DIR"] = sessions_dir
     env["ORA_OVERRIDE_SESSIONS_DIR"] = sessions_dir
     env["CLAUDE_CODE_SESSION_ID"] = session_id
+    if extra_env:
+        env.update(extra_env)
     proc = subprocess.run([sys.executable, HOOK, "--repo", repo] + args,
                           capture_output=True, text=True, env=env)
     return proc.returncode, proc.stdout, proc.stderr
@@ -661,6 +669,100 @@ def test_record_cli_rejects_under_tier_model():
         repo, tmp)
     assert rc != 0, "--record must refuse an under-tier reviewer model"
     print("PASS test_record_cli_rejects_under_tier_model")
+
+
+def test_env_review_models_widens_and_narrows_accepted_tier():
+    """EOS_REVIEW_MODELS is the documented escape hatch for a retired/unlisted
+    ladder id (settings.json's top-level "env" block is what actually delivers
+    it to this subprocess in a live session -- confirmed 2026-09-07, see the
+    module docstring). Two things must hold: a model NOT in the hardcoded
+    REVIEWER_MODEL_LADDER is accepted once listed in EOS_REVIEW_MODELS, and the
+    override REPLACES the ladder rather than adding to it (so a stale
+    EOS_REVIEW_MODELS can't accidentally keep an actually-retired id alive
+    forever alongside the code-level ladder)."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "hooks/new-guard.py", "x = 1\n")
+    git(repo, "add", "-A")
+
+    rc, out, err = run_cli(
+        ["--record", "--verdict", "approved", "--model", "claude-preview-9"],
+        repo, tmp)
+    assert rc != 0, "an id absent from both the ladder and EOS_REVIEW_MODELS must be refused"
+    assert "not in the accepted tier" in err, (
+        "must fail for the accepted-tier reason specifically, not some other "
+        "cli_record exit path: %s" % err)
+
+    rc, out, err = run_cli(
+        ["--record", "--verdict", "approved", "--model", "claude-preview-9",
+         "--notes", "n"],
+        repo, tmp, extra_env={"EOS_REVIEW_MODELS": "claude-preview-9"})
+    assert rc == 0, "EOS_REVIEW_MODELS must admit an id outside the hardcoded ladder: %s" % err
+
+    rc, out, err = run_cli(
+        ["--record", "--verdict", "approved", "--model", LADDER_TOP, "--notes", "n"],
+        repo, tmp, extra_env={"EOS_REVIEW_MODELS": "claude-preview-9"})
+    assert rc != 0, "EOS_REVIEW_MODELS must REPLACE the ladder, not extend it"
+
+    # A suffixed EOS_REVIEW_MODELS value must not wedge the gate either -- an
+    # operator pastes this straight from a self-reported id (the exact
+    # scenario the module docstring's settings.json guidance points them at),
+    # so both sides of the comparison need the same _bare_model() normalization.
+    rc, out, err = run_cli(
+        ["--record", "--verdict", "approved", "--model", "claude-preview-9",
+         "--notes", "n"],
+        repo, tmp, extra_env={"EOS_REVIEW_MODELS": "claude-preview-9[1m]"})
+    assert rc == 0, (
+        "a bracket-suffixed EOS_REVIEW_MODELS value must still admit its bare "
+        "id: %s" % err)
+    print("PASS test_env_review_models_widens_and_narrows_accepted_tier")
+
+
+def test_bracketed_context_window_suffix_is_stripped_before_comparison():
+    """A self-reported model id can carry a trailing context-window tag (e.g.
+    "claude-opus-5[1m]", this session's own actual id per model-canary-probe.py's
+    bare_model()). An exact-match comparison against the ladder would otherwise
+    refuse a genuine top-tier reviewer over formatting alone -- the same failure
+    class as the 2026-09-07 incident this branch fixes, recurring even with a
+    fresh ladder. --record must accept the suffixed form, and the artifact it
+    writes must store the BARE id so a later read-back (valid_review) still
+    matches a ladder that never itself carries suffixes."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "hooks/new-guard.py", "x = 1\n")
+    git(repo, "add", "-A")
+    suffixed = LADDER_TOP + "[1m]"
+    rc, out, err = run_cli(
+        ["--record", "--verdict", "approved", "--model", suffixed, "--notes", "n"],
+        repo, tmp)
+    assert rc == 0, "a bracket-suffixed top-tier id must be accepted: %s" % err
+    key = json.loads(out)["key"]
+    path = os.path.join(tmp, "sess1", "reviews", key + ".json")
+    with open(path, "r", encoding="utf-8") as fh:
+        stored = json.load(fh)
+    assert stored["reviewer_model"] == LADDER_TOP, (
+        "the artifact must store the BARE id, not the suffixed input: %r" % stored["reviewer_model"])
+    print("PASS test_bracketed_context_window_suffix_is_stripped_before_comparison")
+
+
+def test_legacy_suffixed_artifact_still_validates_on_read():
+    """valid_review()'s _bare_model() call on the READ path exists specifically
+    for an artifact written before this normalization landed (or by any future
+    writer that forgets to normalize). Simulate that directly -- write a
+    review, then hand-edit its stored reviewer_model back to a suffixed form
+    -- rather than only exercising the CLI's own (already-normalizing) write
+    path, which test_bracketed_context_window_suffix_is_stripped_before_
+    comparison covers."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "hooks/new-guard.py", "x = 1\n")
+    git(repo, "add", "-A")
+    art = record_review(repo, tmp)
+    with open(art["artifact_path"], "r", encoding="utf-8") as fh:
+        stored = json.load(fh)
+    stored["reviewer_model"] = LADDER_TOP + "[1m]"
+    with open(art["artifact_path"], "w", encoding="utf-8") as fh:
+        json.dump(stored, fh)
+    rc, out, err = run_hook('git commit -m "add guard"', repo, tmp)
+    assert_allowed(rc, err, "legacy suffixed reviewer_model on the read path")
+    print("PASS test_legacy_suffixed_artifact_still_validates_on_read")
 
 
 def test_record_cli_cmd_scopes_pathspec_commit_and_validates_against_main():
