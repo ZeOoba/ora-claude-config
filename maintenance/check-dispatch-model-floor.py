@@ -66,6 +66,7 @@ CLAUDE = os.environ.get("CLAUDE_HOME", r"C:\Users\Owner\.claude")
 # by construction (fail-closed): a model we can't place must not read as "held".
 MODEL_RANK = {
     "claude-mythos-5": 100,
+    "claude-mythos-5-1": 100,
     "claude-fable-5-1": 100,
     # claude-fable-5 is superseded (2026-09-02) but stays LOAD-BEARING, not just
     # a courtesy for old transcripts: floor_rank() below builds "claude-%s-5" %
