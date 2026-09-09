@@ -2,11 +2,17 @@
 """Tests for cross-repo-wip-scan.py -- the read-only, periodic check-in that
 reports how long uncommitted work has been sitting in each known local repo
 (2026-07-26, follow-on to a repo-housekeeping session that found ~21
-uncommitted items nobody had been watching age).
+uncommitted items nobody had been watching age), plus the branch-drift check
+added 2026-09-09 (open-items-tracker.md#OI-249) for repos with a declared
+canonical branch.
 
 Run: python _tests/test_cross_repo_wip_scan.py   (exit 0 = pass)
 Uses real throwaway `git init` fixture repos in tempdirs -- exercises the
-real `git status --short` subprocess path, not a mock.
+real `git status --short` subprocess path, not a mock. The branch-drift
+tests additionally wire a real local "origin" remote (a second throwaway
+repo, added via `git remote add` + `git fetch`) so `origin/<branch>`
+genuinely resolves -- no mocked git, same reasoning as check-branch-point.py's
+own test suite.
 """
 import importlib.util
 import os
@@ -182,6 +188,145 @@ with tempfile.TemporaryDirectory() as td:
     finally:
         wipscan.KNOWN_REPOS_OVERRIDE = None
     expect("main: exit 0 when every scanned repo is clean", rc_clean == 0, "got %r" % rc_clean)
+
+# --- branch-drift: repo with no canonical branch declared is never flagged ---------
+with tempfile.TemporaryDirectory() as td:
+    plain = init_repo(os.path.join(td, "plain"))
+    run(["git", "checkout", "-q", "-b", "feature-x"], plain)
+    with open(os.path.join(plain, "f.txt"), "w") as f:
+        f.write("f\n")
+    run(["git", "add", "f.txt"], plain)
+    run(["git", "commit", "-q", "-m", "seed"], plain)
+    r = wipscan.scan_repo(plain)
+    expect("no canonical declared: branch_drift absent/falsy",
+           not r.get("branch_drift"), "got %r" % r)
+    expect("no canonical declared: not in format_report's BRANCH_DRIFT lines",
+           "BRANCH_DRIFT" not in wipscan.format_report([r]), wipscan.format_report([r]))
+
+
+def make_origin_pair(td, canonical="main"):
+    """(local, origin) -- `local` has `origin` wired as a real remote, with
+    `origin/<canonical>` fetched and resolvable. Both start on `canonical`
+    with one shared commit."""
+    origin = init_repo(os.path.join(td, "origin"))
+    run(["git", "checkout", "-q", "-b", canonical], origin)
+    with open(os.path.join(origin, "base.txt"), "w") as f:
+        f.write("base\n")
+    run(["git", "add", "base.txt"], origin)
+    run(["git", "commit", "-q", "-m", "base"], origin)
+
+    local = os.path.join(td, "local")
+    subprocess.run(["git", "clone", "-q", origin, local], check=True,
+                   capture_output=True, text=True)
+    return local, origin
+
+
+# --- branch-drift: on canonical, in sync -> not drift -------------------------------
+with tempfile.TemporaryDirectory() as td:
+    local, origin = make_origin_pair(td)
+    wipscan.CANONICAL_BRANCH_OVERRIDE = {local: "main"}
+    try:
+        r = wipscan.scan_repo(local)
+    finally:
+        wipscan.CANONICAL_BRANCH_OVERRIDE = None
+    expect("in-sync main: current_branch main", r.get("current_branch") == "main", repr(r))
+    expect("in-sync main: 0 commits behind", r.get("commits_behind_canonical") == 0, repr(r))
+    expect("in-sync main: NOT branch_drift", r.get("branch_drift") is False, repr(r))
+    expect("in-sync main: no [ACTION] BRANCH_DRIFT line",
+           "BRANCH_DRIFT" not in wipscan.format_report([r]), wipscan.format_report([r]))
+
+# --- branch-drift: on canonical, but far behind -> drift (behind-count alone) -------
+with tempfile.TemporaryDirectory() as td:
+    local, origin = make_origin_pair(td)
+    for i in range(wipscan.BRANCH_BEHIND_THRESHOLD):
+        with open(os.path.join(origin, "o%d.txt" % i), "w") as f:
+            f.write(str(i))
+        run(["git", "add", "o%d.txt" % i], origin)
+        run(["git", "commit", "-q", "-m", "origin commit %d" % i], origin)
+    run(["git", "fetch", "-q", "origin"], local)
+    wipscan.CANONICAL_BRANCH_OVERRIDE = {local: "main"}
+    try:
+        r = wipscan.scan_repo(local)
+    finally:
+        wipscan.CANONICAL_BRANCH_OVERRIDE = None
+    expect("behind-threshold: on main (identity matches)", r.get("current_branch") == "main", repr(r))
+    expect("behind-threshold: commits_behind_canonical == threshold",
+           r.get("commits_behind_canonical") == wipscan.BRANCH_BEHIND_THRESHOLD, repr(r))
+    expect("behind-threshold: IS branch_drift", r.get("branch_drift") is True, repr(r))
+    rep = wipscan.format_report([r])
+    expect("behind-threshold: report says 'as expected, but N behind'",
+           "as expected, but %d commit(s) behind" % wipscan.BRANCH_BEHIND_THRESHOLD in rep, rep)
+
+# --- branch-drift: off canonical entirely, 0 behind -> drift (identity alone) -------
+with tempfile.TemporaryDirectory() as td:
+    local, origin = make_origin_pair(td)
+    run(["git", "checkout", "-q", "-b", "feat/some-long-lived-branch"], local)
+    wipscan.CANONICAL_BRANCH_OVERRIDE = {local: "main"}
+    try:
+        r = wipscan.scan_repo(local)
+    finally:
+        wipscan.CANONICAL_BRANCH_OVERRIDE = None
+    expect("off-branch: current_branch is the feature branch",
+           r.get("current_branch") == "feat/some-long-lived-branch", repr(r))
+    expect("off-branch: commits_behind_canonical 0 (nothing new upstream)",
+           r.get("commits_behind_canonical") == 0, repr(r))
+    expect("off-branch: IS branch_drift even with 0 behind (identity mismatch alone)",
+           r.get("branch_drift") is True, repr(r))
+    rep = wipscan.format_report([r])
+    expect("off-branch: report says on 'X', expected 'main'",
+           "on 'feat/some-long-lived-branch', expected 'main'" in rep, rep)
+
+# --- branch-drift: origin/<canonical> does not resolve -> uncertain, not clean ------
+with tempfile.TemporaryDirectory() as td:
+    lone = init_repo(os.path.join(td, "lone"))
+    with open(os.path.join(lone, "x.txt"), "w") as f:
+        f.write("x\n")
+    run(["git", "add", "x.txt"], lone)
+    run(["git", "commit", "-q", "-m", "seed"], lone)
+    # No remote named "origin" at all -- origin/main cannot resolve.
+    wipscan.CANONICAL_BRANCH_OVERRIDE = {lone: "main"}
+    try:
+        r = wipscan.scan_repo(lone)
+    finally:
+        wipscan.CANONICAL_BRANCH_OVERRIDE = None
+    expect("no-origin: branch_drift_error set", bool(r.get("branch_drift_error")), repr(r))
+    expect("no-origin: branch_drift True (unmeasurable is uncertain, not clean)",
+           r.get("branch_drift") is True, repr(r))
+    expect("no-origin: commits_behind_canonical is None (never measured)",
+           r.get("commits_behind_canonical") is None, repr(r))
+    rep = wipscan.format_report([r])
+    expect("no-origin: report says cannot determine drift",
+           "cannot determine drift" in rep, rep)
+
+# --- any_branch_drift() aggregation + main() exit code wiring -----------------------
+with tempfile.TemporaryDirectory() as td:
+    clean_local, _ = make_origin_pair(td)
+    drifted_td = tempfile.mkdtemp(dir=td)
+    drifted_local, drifted_origin = make_origin_pair(drifted_td)
+    run(["git", "checkout", "-q", "-b", "feature-y"], drifted_local)
+
+    clean_r = wipscan.scan_repo(clean_local)
+    clean_r["path"] = clean_local  # already true, kept explicit for clarity
+    override_map = {clean_local: "main", drifted_local: "main"}
+    wipscan.CANONICAL_BRANCH_OVERRIDE = override_map
+    try:
+        all_r = wipscan.scan_all([clean_local, drifted_local])
+    finally:
+        wipscan.CANONICAL_BRANCH_OVERRIDE = None
+    expect("any_branch_drift: False over an all-clean set",
+           wipscan.any_branch_drift([all_r[0]]) is False, repr(all_r[0]))
+    expect("any_branch_drift: True once one repo drifts",
+           wipscan.any_branch_drift(all_r) is True, repr(all_r))
+
+    wipscan.KNOWN_REPOS_OVERRIDE = [drifted_local]
+    wipscan.CANONICAL_BRANCH_OVERRIDE = {drifted_local: "main"}
+    try:
+        rc = wipscan.main()
+    finally:
+        wipscan.KNOWN_REPOS_OVERRIDE = None
+        wipscan.CANONICAL_BRANCH_OVERRIDE = None
+    expect("main: exit 1 when a repo has branch_drift even if not WIP-stale",
+           rc == 1, "got %r" % rc)
 
 passed = sum(1 for ok, _ in results if ok)
 print("cross-repo-wip-scan tests: %d/%d passed" % (passed, len(results)))
