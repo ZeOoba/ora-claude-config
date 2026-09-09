@@ -765,6 +765,81 @@ def test_legacy_suffixed_artifact_still_validates_on_read():
     print("PASS test_legacy_suffixed_artifact_still_validates_on_read")
 
 
+def test_bracket_only_env_entry_cannot_produce_an_empty_accepted_model():
+    """2026-09-08 independent review, finding 2 (CONFIRMED, fail-OPEN). Before
+    the fix, accepted_models() filtered the RAW token's truthiness
+    (`v.strip()`) before _bare_model() normalized it, so a bracket-only entry
+    like "claude-opus-5,[1m]" passed the filter as non-empty, then normalized
+    to "" -- an empty string that stayed IN the accepted tuple. That means a
+    --record call (or a legacy artifact) with reviewer_model="" would VALIDATE
+    and a real commit would be ALLOWED with no recorded reviewer identity at
+    all. This must never validate, regardless of what garbage EOS_REVIEW_MODELS
+    carries."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "hooks/new-guard.py", "x = 1\n")
+    git(repo, "add", "-A")
+    rc, out, err = run_cli(
+        ["--record", "--verdict", "approved", "--model", "", "--notes", "n"],
+        repo, tmp, extra_env={"EOS_REVIEW_MODELS": "claude-opus-5,[1m]"})
+    assert rc != 0, (
+        "an empty reviewer_model must never be accepted, even with a "
+        "bracket-only EOS_REVIEW_MODELS entry present: rc=%s out=%s" % (rc, out))
+    print("PASS test_bracket_only_env_entry_cannot_produce_an_empty_accepted_model")
+
+
+def test_bare_model_strips_trailing_whitespace_before_the_suffix_regex():
+    """2026-09-08 independent review, finding 3 (CONFIRMED, fail-closed). The
+    suffix regex anchors to end-of-string ($), so a trailing space after the
+    closing bracket ("claude-opus-5[1m] ") used to defeat it entirely --
+    _bare_model() returned the string unchanged instead of "claude-opus-5",
+    which would wrongly refuse a genuine top-tier reviewer over whitespace
+    instead of formatting. maintenance/model-canary-probe.py's bare_model()
+    (the precedent this file's own comment cites) already strips first;
+    this closes the gap between the two."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "hooks/new-guard.py", "x = 1\n")
+    git(repo, "add", "-A")
+    rc, out, err = run_cli(
+        ["--record", "--verdict", "approved", "--model", LADDER_TOP + "[1m] ",
+         "--notes", "n"],
+        repo, tmp)
+    assert rc == 0, (
+        "a trailing-whitespace-after-suffix id must still normalize to the "
+        "bare top-tier id: %s" % err)
+    key = json.loads(out)["key"]
+    path = os.path.join(tmp, "sess1", "reviews", key + ".json")
+    with open(path, "r", encoding="utf-8") as fh:
+        stored = json.load(fh)
+    assert stored["reviewer_model"] == LADDER_TOP, (
+        "must store the bare id even when the input had trailing whitespace "
+        "after the suffix: %r" % stored["reviewer_model"])
+    print("PASS test_bare_model_strips_trailing_whitespace_before_the_suffix_regex")
+
+
+def test_comma_inside_bracket_tag_does_not_shred_env_review_models():
+    """2026-09-08 independent review, finding 4 (CONFIRMED, fail-closed,
+    near-theoretical -- no real context-window tag in this fleet's tracked
+    data has ever carried a comma). A naive raw.split(",") on
+    EOS_REVIEW_MODELS would split "claude-opus-5[1m,200k]" into
+    "claude-opus-5[1m" and "200k]" -- neither matches the anchored suffix
+    regex, both survive unstripped, and accepted_models() returns two
+    garbage strings that reject every real model id. Same root cause as
+    finding 2 (accepted_models() never validated the SHAPE of its entries),
+    cheap to close in the same pass."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "hooks/new-guard.py", "x = 1\n")
+    git(repo, "add", "-A")
+    rc, out, err = run_cli(
+        ["--record", "--verdict", "approved", "--model", LADDER_TOP,
+         "--notes", "n"],
+        repo, tmp,
+        extra_env={"EOS_REVIEW_MODELS": LADDER_TOP + "[1m,200k]"})
+    assert rc == 0, (
+        "a comma-bearing context-window tag must not shred the bare id out "
+        "of EOS_REVIEW_MODELS: %s" % err)
+    print("PASS test_comma_inside_bracket_tag_does_not_shred_env_review_models")
+
+
 def test_record_cli_cmd_scopes_pathspec_commit_and_validates_against_main():
     """2026-07-26 fix: without --cmd, --record scores every at-risk path in the
     WHOLE working tree -- so in a busy shared checkout with an unrelated risk
