@@ -188,7 +188,8 @@ source text does not actually support the claim made (read the F-id's evidence y
 -- do not take the verifier's word that its own citation is valid).
 
 For every surviving **CONTRADICTED** verdict, dispatch a second agent (same or higher
-model tier as the verifier that produced it) with this brief:
+model tier as the verifier that produced it -- resolve via `gmr.to_agent_tool_model_name(...)`
+exactly as in STEP 3; never dispatch this Agent-tool call with a full model id) with this brief:
 
 > Re-read the exact primary source at `[locator]` yourself. A prior verifier concluded
 > the claim "`[claim text]`" is CONTRADICTED, citing `[F-id and its evidence]`. Argue
@@ -243,7 +244,7 @@ exception does not extend here). Sections, in this exact order:
    run skipped entirely with the reason. **Every run with `joined: false` in the run
    index must be listed BY NAME (`run_id`, `task_id`) in this section with the tag
    `UNVERIFIABLE (unjoined)`, regardless of what its verifier concluded** -- this is
-   the "digest says so explicitly for that run" requirement (spec Sec 9 R1); an
+   the "digest says so explicitly for that run" requirement (spec Sec 9 R1a); an
    unjoined run can never be silently folded into a clean-looking aggregate count.
 2. **CONTRADICTED claims** -- highest priority. For each: the claim, the F-id evidence
    that contradicts it, and the drafted correction's location from STEP 6 (never its
