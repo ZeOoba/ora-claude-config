@@ -106,10 +106,115 @@ def test_never_ran_does_not_widen_without_a_resume_event():
           "no prior auditor run" in reason, reason)
 
 
-def test_find_executing_session_matches_by_createdat_and_title():
-    # Real values from the live registries (2026-09-10): AHM's lastRunAt is
-    # 2026-09-10T17:13:10.632Z; its session record's createdAt is the same
-    # instant in epoch ms (1789060390632).
+# ---------------------------------------------------------------------------
+# find_executing_session -- PRIMARY path (scheduledTaskId)
+#
+# Fixtures below are shaped on records actually dumped from the live stores on
+# 2026-09-11, not hand-typed guesses. Two properties of the real data drive
+# their shape and must not be "tidied" away:
+#   * `scheduledTaskId` holds the executing task's id VERBATIM. Present on
+#     753/1,288 CC records and 301/501 LAMS records (1,054/1,789 overall);
+#     the balance are ordinary interactive sessions with no task to name.
+#   * a record carrying `scheduledTaskId` has `titleSource` ABSENT/None --
+#     always. On the CC store the two are perfectly mutually exclusive
+#     (397 titleSource=="auto", none of them with scheduledTaskId), and
+#     `titleSource` does not appear on any of the 501 LAMS records at all.
+#     Fabricating `titleSource: "auto"` onto a scheduled-run fixture is the
+#     exact defect that let a dead heuristic pass two review rounds.
+# ---------------------------------------------------------------------------
+
+def _real_shaped_session(scheduled_task_id, created_at_ms, title,
+                          session_id="local_e59d1b67-bf90-4e6b-9883-3e8a52dec80c",
+                          cli_session_id="696009a7-1727-470b-917d-51df0ec81803",
+                          model="claude-sonnet-5"):
+    """A session record shaped like a REAL scheduled-run record. Note
+    titleSource is None, matching every real record that carries a
+    scheduledTaskId -- never "auto"."""
+    return {"sessionId": session_id, "cliSessionId": cli_session_id,
+            "scheduledTaskId": scheduled_task_id, "createdAt": created_at_ms,
+            "lastActivityAt": created_at_ms + 2556930, "title": title,
+            "titleSource": None, "model": model, "isArchived": False}
+
+
+def test_find_executing_session_primary_key_is_scheduled_task_id():
+    # Real values (live LAMS store, 2026-09-10): automation-health-monitor's
+    # lastRunAt is 2026-09-10T17:13:10.632Z and its session record carries
+    # scheduledTaskId "automation-health-monitor" with createdAt 1789060390632.
+    task = {"id": "automation-health-monitor", "lastRunAt": "2026-09-10T17:13:10.632Z"}
+    records = [
+        # decoy: same firing instant, but it names a DIFFERENT task
+        _real_shaped_session("ora-cowork-heartbeat", 1789060390632,
+                             "Ora cowork heartbeat", cli_session_id="wrong-task"),
+        _real_shaped_session("automation-health-monitor", 1789060390632,
+                             "Automation health monitor"),
+    ]
+    found = gti.find_executing_session(task, records)
+    check("exact scheduledTaskId match selects the executing session",
+          found is not None and found["cliSessionId"] == "696009a7-1727-470b-917d-51df0ec81803",
+          found)
+
+
+def test_find_executing_session_single_claimant_needs_no_time_check():
+    # The id match IS the disambiguation: a lone claimant is returned even
+    # though its createdAt is nowhere near the 2s createdAt tolerance the old
+    # primary path required.
+    task = {"id": "ora-capex-idea-stage-nudge", "lastRunAt": "2026-09-10T17:13:10.632Z"}
+    records = [_real_shaped_session("ora-capex-idea-stage-nudge",
+                                     1789060390632 - 90_000_000,  # ~25h off
+                                     "Ora capex idea stage nudge", cli_session_id="lone")]
+    found = gti.find_executing_session(task, records)
+    check("a single scheduledTaskId claimant is returned without any "
+          "createdAt/title check", found is not None and found["cliSessionId"] == "lone",
+          found)
+
+
+def test_find_executing_session_tiebreaks_claimants_by_nearest_created_at():
+    # The NORMAL case on real data: a daily task accumulates one record per
+    # firing (measured up to n=105). Tiebreak is among records already proven
+    # to belong to THIS task -- not a guess across the whole population.
+    # Measured 2026-09-11: winner sits 0-2ms out, runner-up never closer than
+    # ~82,000,000ms (~23h).
+    t_ms = 1789060390632
+    task = {"id": "ora-doctrine-integrity-guard", "lastRunAt": "2026-09-10T17:13:10.632Z"}
+    records = [
+        _real_shaped_session("ora-doctrine-integrity-guard", t_ms - 85_897_807,
+                             "Ora doctrine integrity guard", cli_session_id="yesterday"),
+        _real_shaped_session("ora-doctrine-integrity-guard", t_ms + 1,
+                             "Ora doctrine integrity guard", cli_session_id="this-firing"),
+        _real_shaped_session("ora-doctrine-integrity-guard", t_ms - 171_795_614,
+                             "Ora doctrine integrity guard", cli_session_id="two-days-ago"),
+    ]
+    found = gti.find_executing_session(task, records)
+    check("among multiple confirmed claimants, the nearest createdAt to "
+          "lastRunAt wins", found is not None and found["cliSessionId"] == "this-firing",
+          found)
+
+
+def test_find_executing_session_never_claims_another_tasks_session():
+    # A record claiming a DIFFERENT task must not be joined, even when its
+    # createdAt lands exactly on this task's lastRunAt -- the old heuristic
+    # would have taken it.
+    task = {"id": "ora-am-brief", "lastRunAt": "2026-09-10T17:13:10.632Z"}
+    records = [_real_shaped_session("ora-pm-ledger", 1789060390632,
+                                     "Ora pm ledger", cli_session_id="other-task")]
+    found = gti.find_executing_session(task, records)
+    check("a session claiming a different scheduledTaskId is never selected, "
+          "even at an exact createdAt hit", found is None, found)
+
+
+# ---------------------------------------------------------------------------
+# find_executing_session -- FALLBACK path (pre-scheduledTaskId-era records)
+#
+# The four tests below deliberately use records with NO `scheduledTaskId` key.
+# That omission is INTENTIONAL and load-bearing, not another accidental gap:
+# it is what makes these records represent the pre-field era the createdAt/
+# title heuristic still exists to serve. Any record here that grew a
+# scheduledTaskId would silently stop testing the fallback.
+# ---------------------------------------------------------------------------
+
+def test_fallback_find_executing_session_matches_by_createdat_and_title():
+    # FALLBACK path: no record carries scheduledTaskId, so the createdAt/title
+    # heuristic is the only key available -- correct for pre-field records.
     task = {"id": "automation-health-monitor", "lastRunAt": "2026-09-10T17:13:10.632Z"}
     records = [
         # decoy: a notifySessionId-style stale record, months earlier
@@ -118,14 +223,17 @@ def test_find_executing_session_matches_by_createdat_and_title():
          "sessionId": "local_e59d1b67-bf90-4e6b-9883-3e8a52dec80c",
          "cliSessionId": "696009a7-1727-470b-917d-51df0ec81803"},
     ]
+    check("no fixture here carries scheduledTaskId -- these are pre-field-era "
+          "records by design, so the fallback is what gets exercised",
+          all("scheduledTaskId" not in r for r in records))
     found = gti.find_executing_session(task, records)
-    check("finds the session created at the same ms as lastRunAt",
+    check("fallback finds the session created at the same ms as lastRunAt",
           found is not None and found["cliSessionId"] == "696009a7-1727-470b-917d-51df0ec81803")
 
 
-def test_find_executing_session_ambiguous_window_is_unjoined():
-    # Catch-up burst: two sessions created inside the same 2s tolerance
-    # window, neither titled for this task.
+def test_fallback_find_executing_session_ambiguous_window_is_unjoined():
+    # Catch-up burst: two pre-field-era sessions created inside the same 2s
+    # tolerance window, neither titled for this task.
     task = {"id": "ora-weekly-hygiene", "lastRunAt": "2026-09-11T16:01:02.000Z"}
     t_ms = 1789142462000
     records = [
@@ -133,11 +241,15 @@ def test_find_executing_session_ambiguous_window_is_unjoined():
         {"createdAt": t_ms - 100, "title": "Ora pm ledger", "titleSource": "auto"},
     ]
     found = gti.find_executing_session(task, records)
-    check("two candidates, neither titled for this task -> unjoined (never guessed)",
-          found is None)
+    check("fallback: two candidates, neither titled for this task -> unjoined "
+          "(never guessed)", found is None)
 
 
-def test_find_executing_session_disambiguates_by_title_in_a_burst():
+def test_fallback_find_executing_session_disambiguates_by_title_in_a_burst():
+    # Pre-field-era only. On CURRENT data this branch is unreachable, because
+    # titleSource=="auto" and scheduledTaskId are mutually exclusive on the
+    # real stores -- any record a modern scheduled run produces takes the
+    # primary path long before this code is reached.
     task = {"id": "ora-weekly-hygiene", "lastRunAt": "2026-09-11T16:01:02.000Z"}
     t_ms = 1789142462000
     records = [
@@ -146,11 +258,11 @@ def test_find_executing_session_disambiguates_by_title_in_a_burst():
          "cliSessionId": "aaaa"},
     ]
     found = gti.find_executing_session(task, records)
-    check("title match resolves an otherwise-ambiguous burst window",
+    check("fallback: title match resolves an otherwise-ambiguous burst window",
           found is not None and found["cliSessionId"] == "aaaa")
 
 
-def test_find_executing_session_ignores_notify_session_id():
+def test_fallback_find_executing_session_ignores_notify_session_id():
     # A task's notifySessionId points at a record with a matching cliSessionId
     # but a createdAt from months earlier -- must NOT be selected.
     task = {"id": "ora-am-brief", "lastRunAt": "2026-09-10T06:00:00.000Z",
@@ -160,8 +272,69 @@ def test_find_executing_session_ignores_notify_session_id():
          "titleSource": "auto", "sessionId": "local_STALE", "cliSessionId": "stale-cli-id"},
     ]
     found = gti.find_executing_session(task, records)
-    check("a notifySessionId record with the wrong createdAt is never selected",
-          found is None)
+    check("fallback: a notifySessionId record with the wrong createdAt is "
+          "never selected", found is None)
+
+
+def test_find_all_sessions_for_task_returns_the_single_normal_case():
+    t_ms = 1789060390632
+    task = {"id": "ora-cowork-heartbeat", "lastRunAt": "2026-09-10T17:13:10.632Z"}
+    records = [
+        _real_shaped_session("ora-cowork-heartbeat", t_ms, "Ora cowork heartbeat"),
+        # same task, YESTERDAY's firing -- outside the 300s window
+        _real_shaped_session("ora-cowork-heartbeat", t_ms - 88_330_262,
+                             "Ora cowork heartbeat", cli_session_id="yesterday"),
+    ]
+    found = gti.find_all_sessions_for_task(task, records)
+    check("a clean single firing yields a list of exactly 1", len(found) == 1, found)
+
+
+def test_find_all_sessions_for_task_surfaces_a_genuine_duplicate_fire():
+    # THE duplicate-detection evidence case: two session records both stamped
+    # with the same scheduledTaskId, created seconds apart, both attempting
+    # the same firing. The registry cannot express this -- it keeps one row
+    # per task and overwrites lastRunAt -- so this is the only real signal.
+    t_ms = 1789060390632
+    task = {"id": "ora-cowork-heartbeat", "lastRunAt": "2026-09-10T17:13:10.632Z"}
+    records = [
+        _real_shaped_session("ora-cowork-heartbeat", t_ms, "Ora cowork heartbeat",
+                             cli_session_id="fire-a"),
+        _real_shaped_session("ora-cowork-heartbeat", t_ms + 4_000, "Ora cowork heartbeat",
+                             cli_session_id="fire-b"),
+    ]
+    found = gti.find_all_sessions_for_task(task, records)
+    check("two sessions claiming the same task near the same firing BOTH "
+          "return -- direct duplicate-execution evidence", len(found) == 2, found)
+
+
+def test_find_all_sessions_for_task_excludes_other_tasks():
+    t_ms = 1789060390632
+    task = {"id": "ora-cowork-heartbeat", "lastRunAt": "2026-09-10T17:13:10.632Z"}
+    records = [
+        _real_shaped_session("ora-cowork-heartbeat", t_ms, "Ora cowork heartbeat"),
+        # a DIFFERENT task firing at the very same instant
+        _real_shaped_session("automation-health-monitor", t_ms,
+                             "Automation health monitor", cli_session_id="other"),
+    ]
+    found = gti.find_all_sessions_for_task(task, records)
+    check("a session with a different scheduledTaskId is excluded even at the "
+          "same instant", len(found) == 1 and found[0]["scheduledTaskId"] == "ora-cowork-heartbeat",
+          found)
+
+
+def test_find_all_sessions_for_task_excludes_matches_outside_the_window():
+    # scheduledTaskId matches, but createdAt is 301s out -- that is a
+    # DIFFERENT firing of the same task, not a duplicate of this one.
+    t_ms = 1789060390632
+    task = {"id": "ora-cowork-heartbeat", "lastRunAt": "2026-09-10T17:13:10.632Z"}
+    records = [
+        _real_shaped_session("ora-cowork-heartbeat", t_ms, "Ora cowork heartbeat"),
+        _real_shaped_session("ora-cowork-heartbeat", t_ms + 301_000,
+                             "Ora cowork heartbeat", cli_session_id="next-cycle"),
+    ]
+    found = gti.find_all_sessions_for_task(task, records, window_seconds=300)
+    check("a scheduledTaskId match outside window_seconds is excluded",
+          len(found) == 1 and found[0]["cliSessionId"] != "next-cycle", found)
 
 
 def test_join_cc_transcript_across_multiple_project_dirs():
@@ -208,15 +381,46 @@ def test_join_lams_transcript_absent_degrades_to_none():
 
 
 def test_detect_duplicates_same_cycle_refire():
+    # Post-C2: the flag fires on REAL evidence -- more than one session record
+    # claiming this task's firing (candidate_session_count from
+    # find_all_sessions_for_task) -- not on multiple registry rows in one
+    # build call, which the registry structurally cannot produce.
     runs = [
         {"fleet": "cc", "task_id": "ora-weekly-hygiene", "run_id": "cc:ora-weekly-hygiene:X",
-         "last_scheduled_for": "X"},
-        {"fleet": "cc", "task_id": "ora-weekly-hygiene", "run_id": "cc:ora-weekly-hygiene:X-dup",
-         "last_scheduled_for": "X"},
+         "last_scheduled_for": "X", "last_run_at": "2026-09-11T16:01:02.000Z",
+         "candidate_session_count": 2},
     ]
     flags = gti.detect_duplicates(runs, [], [])
     hits = [f for f in flags if f["type"] == "same_cycle_refire"]
-    check("same lastScheduledFor fired twice is flagged", len(hits) == 1, flags)
+    check("two session records claiming one firing is flagged", len(hits) == 1, flags)
+    check("the detail reports the real count found, not a row count",
+          hits and "2 session records" in hits[0]["detail"]
+          and "1 of these are likely duplicate" in hits[0]["detail"], flags)
+    check("the flag keeps its shape (single run_id, from this run)",
+          hits and hits[0]["run_ids"] == ["cc:ora-weekly-hygiene:X"], flags)
+
+
+def test_detect_duplicates_no_same_cycle_refire_on_a_clean_single_firing():
+    runs = [
+        {"fleet": "cc", "task_id": "ora-weekly-hygiene", "run_id": "cc:ora-weekly-hygiene:X",
+         "last_scheduled_for": "X", "last_run_at": "2026-09-11T16:01:02.000Z",
+         "candidate_session_count": 1},
+    ]
+    flags = gti.detect_duplicates(runs, [], [])
+    check("exactly one claiming session is NOT flagged",
+          [f for f in flags if f["type"] == "same_cycle_refire"] == [], flags)
+
+
+def test_detect_duplicates_same_cycle_refire_absent_count_is_safe():
+    # An unjoined run (or a run-index document predating this field) carries
+    # no candidate_session_count -- must not raise and must not flag.
+    runs = [
+        {"fleet": "cc", "task_id": "ora-weekly-hygiene", "run_id": "cc:ora-weekly-hygiene:X",
+         "last_scheduled_for": "X", "last_run_at": "2026-09-11T16:01:02.000Z"},
+    ]
+    flags = gti.detect_duplicates(runs, [], [])
+    check("a missing candidate_session_count is absent-safe and never flags",
+          [f for f in flags if f["type"] == "same_cycle_refire"] == [], flags)
 
 
 def test_detect_duplicates_cross_fleet_twin():
@@ -242,6 +446,13 @@ def test_detect_duplicates_cron_period_collision():
     ]
     flags = gti.detect_duplicates(runs, [], [])
     hits = [f for f in flags if f["type"] == "cron_period_collision"]
+    # NOTE (final-review C2 fix, 2026-09-11): this is a SYNTHETIC multi-row
+    # scenario the real single-invocation pipeline cannot produce today -- the
+    # registry supplies exactly one last_scheduled_for per task per
+    # build_run_index() call, so this flag is DORMANT in production and fires
+    # only if Stage 0 is later extended to ingest multiple nights' run-index
+    # documents. Kept deliberately, with the limitation documented in
+    # detect_duplicates rather than left as a silent no-op.
     check("two schedules 1 minute apart on a daily cron are flagged", len(hits) == 1, flags)
 
 
@@ -258,23 +469,24 @@ def test_detect_duplicates_no_false_positive_on_normal_daily_runs():
     check("two normal consecutive daily fires are NOT flagged", flags == [], flags)
 
 
-def test_detect_duplicates_identical_timestamp_is_not_also_a_cron_collision():
-    # A same_cycle_refire (identical lastScheduledFor) must not ALSO be
-    # double-reported as a cron_period_collision -- that flag requires
-    # DISTINCT lastScheduledFor values per its own docstring.
+def test_detect_duplicates_refire_is_not_also_a_cron_collision():
+    # A duplicate firing (now evidenced by candidate_session_count > 1 on the
+    # single registry row the fleet actually produces) must not ALSO be
+    # double-reported as a cron_period_collision -- that flag requires two
+    # DISTINCT lastScheduledFor values per its own docstring, which one
+    # build_run_index() call can never supply.
     runs = [
         {"fleet": "lams", "task_id": "automation-health-monitor",
-         "run_id": "lams:automation-health-monitor:same", "last_scheduled_for": "2026-09-10T15:05:00.000Z",
-         "cron_expression": "5 11 * * 1-5"},
-        {"fleet": "lams", "task_id": "automation-health-monitor",
-         "run_id": "lams:automation-health-monitor:same-dup", "last_scheduled_for": "2026-09-10T15:05:00.000Z",
-         "cron_expression": "5 11 * * 1-5"},
+         "run_id": "lams:automation-health-monitor:same",
+         "last_scheduled_for": "2026-09-10T15:05:00.000Z",
+         "last_run_at": "2026-09-10T17:13:10.632Z",
+         "cron_expression": "5 11 * * 1-5", "candidate_session_count": 2},
     ]
     flags = gti.detect_duplicates(runs, [], [])
     types = [f["type"] for f in flags]
-    check("identical timestamps ARE flagged as same_cycle_refire",
+    check("a duplicate firing IS flagged as same_cycle_refire",
           types.count("same_cycle_refire") == 1, flags)
-    check("identical timestamps are NOT also flagged as cron_period_collision",
+    check("a duplicate firing is NOT also flagged as cron_period_collision",
           types.count("cron_period_collision") == 0, flags)
 
 
@@ -309,9 +521,15 @@ def _write_registry(path, tasks, recorded_skips=None):
 
 
 def _write_session_record(registry_dir, session_id, created_at_ms, title,
-                           cli_session_id=None):
+                           cli_session_id=None, scheduled_task_id=None):
+    """Writes a session record shaped like the REAL thing: a scheduled run
+    carries `scheduledTaskId` (the task id verbatim) and `titleSource` None.
+    Passing scheduled_task_id=None deliberately produces a pre-field-era
+    record for exercising the fallback join."""
     rec = {"sessionId": session_id, "createdAt": created_at_ms,
-           "title": title, "titleSource": "auto"}
+           "title": title, "titleSource": None}
+    if scheduled_task_id:
+        rec["scheduledTaskId"] = scheduled_task_id
     if cli_session_id:
         rec["cliSessionId"] = cli_session_id
     json.dump(rec, open(os.path.join(registry_dir, session_id + ".json"), "w", encoding="utf-8"))
@@ -351,7 +569,8 @@ def test_build_run_index_end_to_end_joins_a_real_shaped_run():
         ])
         t_ms = int(datetime.fromisoformat(last_run.replace("Z", "+00:00")).timestamp() * 1000)
         _write_session_record(cc_dir, "local_aa8cdc0f", t_ms,
-                               "Ora doctrine integrity guard", cli_session_id="abc123")
+                               "Ora doctrine integrity guard", cli_session_id="abc123",
+                               scheduled_task_id="ora-doctrine-integrity-guard")
         # inject a model onto the session record after the fact (helper doesn't take one)
         session_path = os.path.join(cc_dir, "local_aa8cdc0f.json")
         rec = json.load(open(session_path, encoding="utf-8"))
@@ -371,6 +590,54 @@ def test_build_run_index_end_to_end_joins_a_real_shaped_run():
         check("run_id keys on lastScheduledFor", run["run_id"].endswith(last_run), run)
         check("CC join-rate floor passes at 1/1", index["join_stats"]["cc"]["rate_ok"] is True,
               index["join_stats"])
+        check("a clean single firing carries candidate_session_count == 1",
+              run.get("candidate_session_count") == 1, run)
+        check("a clean single firing raises no duplicate flag",
+              index["duplicate_flags"] == [], index["duplicate_flags"])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_build_run_index_end_to_end_flags_a_genuine_duplicate_fire():
+    # The whole C2 fix, end to end: ONE registry row (all the fleet can ever
+    # produce for a task) plus TWO session records both stamped with that
+    # task's scheduledTaskId near the same firing -> same_cycle_refire.
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_dir = os.path.join(tmp, "cc")
+        cc_reg = os.path.join(cc_dir, "scheduled-tasks.json")
+        now = datetime(2026, 9, 10, 20, 0, tzinfo=timezone.utc)
+        last_run = "2026-09-10T16:56:58.667Z"
+        _write_registry(cc_reg, [
+            {"id": "ora-doctrine-integrity-guard", "cronExpression": "5 7 * * *",
+             "enabled": True, "lastRunAt": last_run, "lastScheduledFor": last_run,
+             "model": "claude-opus-5", "filePath": "/some/path/SKILL.md"},
+        ])
+        t_ms = int(datetime.fromisoformat(last_run.replace("Z", "+00:00")).timestamp() * 1000)
+        _write_session_record(cc_dir, "local_fire_a", t_ms,
+                               "Ora doctrine integrity guard", cli_session_id="cli-a",
+                               scheduled_task_id="ora-doctrine-integrity-guard")
+        _write_session_record(cc_dir, "local_fire_b", t_ms + 4000,
+                               "Ora doctrine integrity guard", cli_session_id="cli-b",
+                               scheduled_task_id="ora-doctrine-integrity-guard")
+        proj_dir = os.path.join(tmp, "proj")
+        os.makedirs(proj_dir)
+        open(os.path.join(proj_dir, "cli-a.jsonl"), "w").close()
+        open(os.path.join(proj_dir, "cli-b.jsonl"), "w").close()
+
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        _write_registry(lams_reg, [])
+
+        index = gti.build_run_index(cc_reg, lams_reg, [proj_dir], now=now)
+        check("the registry still yields exactly ONE row/run for the task -- "
+              "which is why row counting could never have detected this",
+              len(index["runs"]) == 1, index["runs"])
+        run = index["runs"][0]
+        check("candidate_session_count carries the real evidence count (2)",
+              run.get("candidate_session_count") == 2, run)
+        hits = [f for f in index["duplicate_flags"] if f["type"] == "same_cycle_refire"]
+        check("a genuine duplicate fire IS flagged end to end", len(hits) == 1,
+              index["duplicate_flags"])
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -399,7 +666,8 @@ def test_build_run_index_persists_file_path_and_session_model_for_verifier_dispa
         ])
         t_ms = int(datetime.fromisoformat(last_run.replace("Z", "+00:00")).timestamp() * 1000)
         _write_session_record(cc_dir, "local_aa8cdc0f", t_ms,
-                               "Ora doctrine integrity guard", cli_session_id="abc123")
+                               "Ora doctrine integrity guard", cli_session_id="abc123",
+                               scheduled_task_id="ora-doctrine-integrity-guard")
         session_path = os.path.join(cc_dir, "local_aa8cdc0f.json")
         rec = json.load(open(session_path, encoding="utf-8"))
         rec["model"] = "claude-sonnet-5"
@@ -483,25 +751,36 @@ if __name__ == "__main__":
     test_window_widens_on_fleet_resume_event()
     test_recurring_task_named_resume_does_not_widen()
     test_never_ran_does_not_widen_without_a_resume_event()
-    test_find_executing_session_matches_by_createdat_and_title()
-    test_find_executing_session_ambiguous_window_is_unjoined()
-    test_find_executing_session_disambiguates_by_title_in_a_burst()
-    test_find_executing_session_ignores_notify_session_id()
+    test_find_executing_session_primary_key_is_scheduled_task_id()
+    test_find_executing_session_single_claimant_needs_no_time_check()
+    test_find_executing_session_tiebreaks_claimants_by_nearest_created_at()
+    test_find_executing_session_never_claims_another_tasks_session()
+    test_fallback_find_executing_session_matches_by_createdat_and_title()
+    test_fallback_find_executing_session_ambiguous_window_is_unjoined()
+    test_fallback_find_executing_session_disambiguates_by_title_in_a_burst()
+    test_fallback_find_executing_session_ignores_notify_session_id()
+    test_find_all_sessions_for_task_returns_the_single_normal_case()
+    test_find_all_sessions_for_task_surfaces_a_genuine_duplicate_fire()
+    test_find_all_sessions_for_task_excludes_other_tasks()
+    test_find_all_sessions_for_task_excludes_matches_outside_the_window()
     test_join_cc_transcript_across_multiple_project_dirs()
     test_join_cc_transcript_absent_degrades_to_none()
     test_join_lams_transcript_uses_session_id_with_prefix_intact()
     test_join_lams_transcript_absent_degrades_to_none()
     test_detect_duplicates_same_cycle_refire()
+    test_detect_duplicates_no_same_cycle_refire_on_a_clean_single_firing()
+    test_detect_duplicates_same_cycle_refire_absent_count_is_safe()
     test_detect_duplicates_cross_fleet_twin()
     test_detect_duplicates_cron_period_collision()
     test_detect_duplicates_no_false_positive_on_normal_daily_runs()
-    test_detect_duplicates_identical_timestamp_is_not_also_a_cron_collision()
+    test_detect_duplicates_refire_is_not_also_a_cron_collision()
     test_join_rate_floor_normal_window_high_rate_passes()
     test_join_rate_floor_normal_window_low_rate_fails()
     test_join_rate_floor_widened_window_same_low_rate_passes()
     test_join_rate_floor_empty_window_is_trivially_ok()
     test_build_run_index_excludes_its_own_run()
     test_build_run_index_end_to_end_joins_a_real_shaped_run()
+    test_build_run_index_end_to_end_flags_a_genuine_duplicate_fire()
     test_build_run_index_persists_file_path_and_session_model_for_verifier_dispatch()
     test_build_run_index_last_auditor_run_at_is_injectable()
     test_build_run_index_default_last_auditor_run_at_falls_back_to_real_file_reader()
