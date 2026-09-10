@@ -6,7 +6,9 @@ Run: python test-ground-truth-run-index.py   (exit 0 = all pass)
 """
 import importlib.util
 import os
+import shutil
 import sys
+import tempfile
 from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -103,6 +105,107 @@ def test_never_ran_does_not_widen_without_a_resume_event():
           "no prior auditor run" in reason, reason)
 
 
+def test_find_executing_session_matches_by_createdat_and_title():
+    # Real values from the live registries (2026-09-10): AHM's lastRunAt is
+    # 2026-09-10T17:13:10.632Z; its session record's createdAt is the same
+    # instant in epoch ms (1789060390632).
+    task = {"id": "automation-health-monitor", "lastRunAt": "2026-09-10T17:13:10.632Z"}
+    records = [
+        # decoy: a notifySessionId-style stale record, months earlier
+        {"createdAt": 1783537999843, "title": "Some old chat", "titleSource": "auto"},
+        {"createdAt": 1789060390632, "title": "Automation health monitor", "titleSource": "auto",
+         "sessionId": "local_e59d1b67-bf90-4e6b-9883-3e8a52dec80c",
+         "cliSessionId": "696009a7-1727-470b-917d-51df0ec81803"},
+    ]
+    found = gti.find_executing_session(task, records)
+    check("finds the session created at the same ms as lastRunAt",
+          found is not None and found["cliSessionId"] == "696009a7-1727-470b-917d-51df0ec81803")
+
+
+def test_find_executing_session_ambiguous_window_is_unjoined():
+    # Catch-up burst: two sessions created inside the same 2s tolerance
+    # window, neither titled for this task.
+    task = {"id": "ora-weekly-hygiene", "lastRunAt": "2026-09-11T16:01:02.000Z"}
+    t_ms = 1789142462000
+    records = [
+        {"createdAt": t_ms + 100, "title": "Ora deal sourcing scan", "titleSource": "auto"},
+        {"createdAt": t_ms - 100, "title": "Ora pm ledger", "titleSource": "auto"},
+    ]
+    found = gti.find_executing_session(task, records)
+    check("two candidates, neither titled for this task -> unjoined (never guessed)",
+          found is None)
+
+
+def test_find_executing_session_disambiguates_by_title_in_a_burst():
+    task = {"id": "ora-weekly-hygiene", "lastRunAt": "2026-09-11T16:01:02.000Z"}
+    t_ms = 1789142462000
+    records = [
+        {"createdAt": t_ms + 50, "title": "Ora deal sourcing scan", "titleSource": "auto"},
+        {"createdAt": t_ms - 50, "title": "Ora weekly hygiene", "titleSource": "auto",
+         "cliSessionId": "aaaa"},
+    ]
+    found = gti.find_executing_session(task, records)
+    check("title match resolves an otherwise-ambiguous burst window",
+          found is not None and found["cliSessionId"] == "aaaa")
+
+
+def test_find_executing_session_ignores_notify_session_id():
+    # A task's notifySessionId points at a record with a matching cliSessionId
+    # but a createdAt from months earlier -- must NOT be selected.
+    task = {"id": "ora-am-brief", "lastRunAt": "2026-09-10T06:00:00.000Z",
+            "notifySessionId": "local_STALE"}
+    records = [
+        {"createdAt": 1783537999843, "title": "ORA EOD action ledger coverage gaps",
+         "titleSource": "auto", "sessionId": "local_STALE", "cliSessionId": "stale-cli-id"},
+    ]
+    found = gti.find_executing_session(task, records)
+    check("a notifySessionId record with the wrong createdAt is never selected",
+          found is None)
+
+
+def test_join_cc_transcript_across_multiple_project_dirs():
+    tmp = tempfile.mkdtemp()
+    try:
+        dir_a = os.path.join(tmp, "projA")
+        dir_b = os.path.join(tmp, "projB")
+        os.makedirs(dir_a)
+        os.makedirs(dir_b)
+        cli_id = "c2673895-9f28-47c4-9bb1-61b07a1cc87f"
+        open(os.path.join(dir_b, cli_id + ".jsonl"), "w").close()
+        result = gti.join_cc_transcript({"cliSessionId": cli_id}, [dir_a, dir_b])
+        check("finds the transcript even when it's in the SECOND dir searched, "
+              "not the first (spec Sec 3.4: scoping to one dir loses the join)",
+              result == os.path.join(dir_b, cli_id + ".jsonl"))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_join_cc_transcript_absent_degrades_to_none():
+    result = gti.join_cc_transcript({"cliSessionId": "does-not-exist"}, ["/nonexistent"])
+    check("missing CC transcript degrades to None, not an exception", result is None)
+
+
+def test_join_lams_transcript_uses_session_id_with_prefix_intact():
+    tmp = tempfile.mkdtemp()
+    try:
+        session_id = "local_00a0caa8-2a71-4ec2-94f4-b00e2c542b1b"  # already prefixed
+        os.makedirs(os.path.join(tmp, session_id))
+        open(os.path.join(tmp, session_id, "audit.jsonl"), "w").close()
+        result = gti.join_lams_transcript({"sessionId": session_id}, tmp)
+        check("LAMS join uses sessionId as-is (no re-added local_ prefix)",
+              result == os.path.join(tmp, session_id, "audit.jsonl"))
+        doubled = os.path.join(tmp, "local_" + session_id)
+        check("doubling the prefix would NOT be the real path (regression guard)",
+              not os.path.isdir(doubled))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_join_lams_transcript_absent_degrades_to_none():
+    result = gti.join_lams_transcript({"sessionId": "local_missing"}, tempfile.gettempdir())
+    check("missing LAMS transcript degrades to None, not an exception", result is None)
+
+
 if __name__ == "__main__":
     test_build_run_id_keys_on_last_scheduled_for()
     test_window_default_when_nothing_widens()
@@ -110,6 +213,14 @@ if __name__ == "__main__":
     test_window_widens_on_fleet_resume_event()
     test_recurring_task_named_resume_does_not_widen()
     test_never_ran_does_not_widen_without_a_resume_event()
+    test_find_executing_session_matches_by_createdat_and_title()
+    test_find_executing_session_ambiguous_window_is_unjoined()
+    test_find_executing_session_disambiguates_by_title_in_a_burst()
+    test_find_executing_session_ignores_notify_session_id()
+    test_join_cc_transcript_across_multiple_project_dirs()
+    test_join_cc_transcript_absent_degrades_to_none()
+    test_join_lams_transcript_uses_session_id_with_prefix_intact()
+    test_join_lams_transcript_absent_degrades_to_none()
     print("-" * 72)
     if FAILURES:
         print("FAIL: %d failure(s): %s" % (len(FAILURES), ", ".join(FAILURES)))
