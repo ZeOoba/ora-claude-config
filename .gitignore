@@ -249,3 +249,11 @@ maintenance/_state/task-progress/
 # cross-fleet consumer reads the Connector Pre-Flight beacon's log_liveness line,
 # not this file.
 maintenance/_state/log-liveness.json
+# (2026-09-10) ground-truth/last-auditor-run.json -- ground-truth-run-index.py's
+# own "when did I last finish" marker (Sec 5 Stage 0's window-sizing input), read
+# and written only by that script itself. Same class as pause-resume-guard-state.json
+# above: no external or cross-session reader (the run-index document it feeds into
+# is a separate, per-date file already handled by the script's own --out default,
+# not this marker). Confirmed empty/absent before ora-ground-truth-auditor's first
+# real run; a stray copy appears in any worktree that ran the CLI for testing.
+maintenance/_state/ground-truth/last-auditor-run.json
