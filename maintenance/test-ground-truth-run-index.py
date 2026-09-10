@@ -206,6 +206,57 @@ def test_join_lams_transcript_absent_degrades_to_none():
     check("missing LAMS transcript degrades to None, not an exception", result is None)
 
 
+def test_detect_duplicates_same_cycle_refire():
+    runs = [
+        {"fleet": "cc", "task_id": "ora-weekly-hygiene", "run_id": "cc:ora-weekly-hygiene:X",
+         "last_scheduled_for": "X"},
+        {"fleet": "cc", "task_id": "ora-weekly-hygiene", "run_id": "cc:ora-weekly-hygiene:X-dup",
+         "last_scheduled_for": "X"},
+    ]
+    flags = gti.detect_duplicates(runs, [], [])
+    hits = [f for f in flags if f["type"] == "same_cycle_refire"]
+    check("same lastScheduledFor fired twice is flagged", len(hits) == 1, flags)
+
+
+def test_detect_duplicates_cross_fleet_twin():
+    runs = [
+        {"fleet": "cc", "task_id": "ora-passed-deal-tracker",
+         "run_id": "cc:ora-passed-deal-tracker:X", "last_scheduled_for": "X"},
+        {"fleet": "lams", "task_id": "ora-passed-deal-tracker",
+         "run_id": "lams:ora-passed-deal-tracker:Y", "last_scheduled_for": "Y"},
+    ]
+    flags = gti.detect_duplicates(runs, ["ora-passed-deal-tracker"], ["ora-passed-deal-tracker"])
+    hits = [f for f in flags if f["type"] == "cross_fleet_twin"]
+    check("same task id enabled on both fleets is flagged", len(hits) == 1, flags)
+
+
+def test_detect_duplicates_cron_period_collision():
+    runs = [
+        {"fleet": "lams", "task_id": "automation-health-monitor",
+         "run_id": "lams:automation-health-monitor:A", "last_scheduled_for": "2026-09-10T15:05:00.000Z",
+         "cron_expression": "5 11 * * 1-5"},
+        {"fleet": "lams", "task_id": "automation-health-monitor",
+         "run_id": "lams:automation-health-monitor:B", "last_scheduled_for": "2026-09-10T15:06:00.000Z",
+         "cron_expression": "5 11 * * 1-5"},
+    ]
+    flags = gti.detect_duplicates(runs, [], [])
+    hits = [f for f in flags if f["type"] == "cron_period_collision"]
+    check("two schedules 1 minute apart on a daily cron are flagged", len(hits) == 1, flags)
+
+
+def test_detect_duplicates_no_false_positive_on_normal_daily_runs():
+    runs = [
+        {"fleet": "lams", "task_id": "automation-health-monitor",
+         "run_id": "lams:automation-health-monitor:day1", "last_scheduled_for": "2026-09-09T15:05:00.000Z",
+         "cron_expression": "5 11 * * 1-5"},
+        {"fleet": "lams", "task_id": "automation-health-monitor",
+         "run_id": "lams:automation-health-monitor:day2", "last_scheduled_for": "2026-09-10T15:05:00.000Z",
+         "cron_expression": "5 11 * * 1-5"},
+    ]
+    flags = gti.detect_duplicates(runs, [], [])
+    check("two normal consecutive daily fires are NOT flagged", flags == [], flags)
+
+
 if __name__ == "__main__":
     test_build_run_id_keys_on_last_scheduled_for()
     test_window_default_when_nothing_widens()
@@ -221,6 +272,10 @@ if __name__ == "__main__":
     test_join_cc_transcript_absent_degrades_to_none()
     test_join_lams_transcript_uses_session_id_with_prefix_intact()
     test_join_lams_transcript_absent_degrades_to_none()
+    test_detect_duplicates_same_cycle_refire()
+    test_detect_duplicates_cross_fleet_twin()
+    test_detect_duplicates_cron_period_collision()
+    test_detect_duplicates_no_false_positive_on_normal_daily_runs()
     print("-" * 72)
     if FAILURES:
         print("FAIL: %d failure(s): %s" % (len(FAILURES), ", ".join(FAILURES)))
