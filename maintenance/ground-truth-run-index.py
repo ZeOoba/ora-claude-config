@@ -31,6 +31,10 @@ except Exception:
 
 DEFAULT_WINDOW_HOURS = 24
 JOIN_TOLERANCE_MS = 2000  # createdAt vs lastRunAt match window (spec Sec 3.5a)
+PRIMARY_JOIN_BOUND_SECONDS = 300  # scheduledTaskId-path distance bound (spec Sec 3.5a
+                                   # correction) -- shared by find_executing_session's
+                                   # primary-path rejection and find_all_sessions_for_task's
+                                   # default window, so the two bounds can't drift apart.
 
 
 def build_run_id(fleet, task_id, last_scheduled_for):
@@ -168,34 +172,67 @@ def find_executing_session(task, session_records, tolerance_ms=JOIN_TOLERANCE_MS
     301/501 LAMS records (60.1%) -- 1,054/1,789 overall; the balance are
     ordinary interactive sessions, which have no task to name.
 
-      - Exactly one record claims this task id -> that IS the executing
-        session. Returned immediately; no createdAt or title check is needed,
-        because the id match already IS the disambiguation.
+      - Exactly one record claims this task id -> candidate for the executing
+        session, BUT still gated by the same `PRIMARY_JOIN_BOUND_SECONDS`
+        (300s) distance check as the tiebreak below: if its `createdAt` is
+        more than that far from the task's `lastRunAt`, it is rejected and
+        this function returns None overall (NOT a fall-through to the
+        fallback pool below -- the fallback is for records with NO
+        scheduledTaskId at all, not for a scheduledTaskId record that failed
+        this check). Measured on live data, the true firing's session record
+        is always within 2ms of lastRunAt; the closest ever-observed
+        unrelated record is ~23h away, so 300s costs zero real joins while
+        closing a real risk: if a task's true firing record is ever deleted
+        or archived and an older, unrelated record with the same id happens
+        to survive, an unbounded return would silently join to it rather
+        than correctly reporting unjoined.
       - More than one claims it (the normal case -- a daily task accumulates
         one record per firing; measured up to n=105 for ora-aaos-expire-
         leases) -> tiebreak among these CONFIRMED candidates by whichever
-        `createdAt` is closest to the task's `lastRunAt`. This is a choice
-        among records already proven to belong to this task, not a heuristic
-        guess across the whole session population. Measured across all 55
-        in-window tasks on both fleets 2026-09-11, the winning candidate sat
-        0-2 ms from lastRunAt while the runner-up was never closer than
-        ~82,000,000 ms (~23 h) -- the tiebreak is unambiguous by seven orders
-        of magnitude. (Residual risk, documented rather than hidden: if the
-        true firing's record has been deleted or archived away, the tiebreak
-        will silently return the PREVIOUS firing's record. The 0-vs-23h gap
-        above is what makes that detectable downstream, not something this
-        function can rule out on its own.)
+        `createdAt` is closest to the task's `lastRunAt`, THEN the same
+        300s bound is applied to the winner -- a nearest-of-N pick is still
+        just a guess if even the nearest candidate is a day away. This is a
+        choice among records already proven to belong to this task, not a
+        heuristic guess across the whole session population. Measured across
+        all 55 in-window tasks on both fleets 2026-09-11, the winning
+        candidate sat 0-2 ms from lastRunAt while the runner-up was never
+        closer than ~82,000,000 ms (~23 h) -- the tiebreak is unambiguous by
+        seven orders of magnitude, and 300s (150,000x the observed true-match
+        distance) sits comfortably below that runner-up floor. (Residual risk,
+        documented rather than hidden: if the true firing's record has been
+        deleted or archived away AND a different stale record for the same
+        task id happens to sit within 300s of lastRunAt, the tiebreak could
+        still silently return that stale record. The 0-vs-23h gap above is
+        what makes this scenario implausible on measured data, not something
+        this function can rule out in principle.)
       - Zero claim it -> fall back to the createdAt/title heuristic below.
+        (A sole or winning claimant that FAILS the 300s bound does NOT fall
+        through here -- it returns None directly, above. The fallback pool
+        below is scoped to records with no scheduledTaskId at all; a record
+        that named this task id and simply sat too far from lastRunAt is not
+        that, and re-admitting it to the fallback pool would just reintroduce
+        the silent-stale-join risk the bound exists to close.)
 
     FALLBACK -- createdAt within `tolerance_ms` of lastRunAt, disambiguated by
-    an auto-generated title. Retained ONLY for session records predating the
-    `scheduledTaskId` field; it is the correct and only available key for
-    those. Note its title branch cannot fire for any record that HAS a
-    scheduledTaskId: measured 2026-09-11, `titleSource == "auto"` and
-    `scheduledTaskId` are perfectly mutually exclusive on the CC store
-    (397 auto / 0 of them with scheduledTaskId; 753 with scheduledTaskId /
-    0 of them auto) and `titleSource` is absent from all 501 LAMS records.
-    That is exactly why this can no longer be the primary path.
+    an auto-generated title. Exists for session records that never carry
+    `scheduledTaskId` at all -- ordinary interactive/non-scheduled sessions,
+    for which it is the correct and only available key. This is NOT a
+    "pre-scheduledTaskId-era" path: a reviewer measured the actual createdAt
+    date ranges in both stores and found no temporal boundary between
+    scheduledTaskId-carrying and non-carrying records -- they are interleaved
+    across the same date range in both fleets, because field presence tracks
+    session TYPE (scheduled vs. interactive), not time. Measured 2026-09-11,
+    every current task with a lastRunAt has at least one scheduledTaskId-
+    carrying claimant, so this fallback is never actually reached on live
+    data today -- it is dead-but-correct defensive code for a data shape
+    (a task whose only session records lack scheduledTaskId) that doesn't
+    currently occur, not a live legacy path. Note its title branch cannot
+    fire for any record that HAS a scheduledTaskId: measured 2026-09-11,
+    `titleSource == "auto"` and `scheduledTaskId` are perfectly mutually
+    exclusive on the CC store (397 auto / 0 of them with scheduledTaskId;
+    753 with scheduledTaskId / 0 of them auto) and `titleSource` is absent
+    from all 501 LAMS records. That is exactly why this can no longer be the
+    primary path.
 
     NOT notifySessionId -- that field is a static "notify here" target fixed
     at registration/last-edit time (verified against 4 real tasks across both
@@ -219,26 +256,35 @@ def find_executing_session(task, session_records, tolerance_ms=JOIN_TOLERANCE_MS
     target_ms = int(last_run.timestamp() * 1000)
 
     # --- primary: exact scheduledTaskId match -------------------------------
-    claimants = _sessions_claiming_task(task, session_records)
-    if len(claimants) == 1:
-        return claimants[0]
-    if len(claimants) > 1:
-        def _distance(rec):
-            ca_ms = _created_at_ms(rec)
-            return abs(ca_ms - target_ms) if ca_ms is not None else float("inf")
-        return min(claimants, key=_distance)
+    def _distance(rec):
+        ca_ms = _created_at_ms(rec)
+        return abs(ca_ms - target_ms) if ca_ms is not None else float("inf")
 
-    # --- fallback: pre-scheduledTaskId-era records --------------------------
+    claimants = _sessions_claiming_task(task, session_records)
+    primary_bound_ms = PRIMARY_JOIN_BOUND_SECONDS * 1000
+    if len(claimants) == 1:
+        if _distance(claimants[0]) <= primary_bound_ms:
+            return claimants[0]
+        return None  # stale/unrelated claimant -- do NOT fall through to the fallback pool
+    if len(claimants) > 1:
+        winner = min(claimants, key=_distance)
+        if _distance(winner) <= primary_bound_ms:
+            return winner
+        return None  # nearest candidate is still too far -- do NOT fall through
+
+    # --- fallback: records that never carry scheduledTaskId -----------------
     # A record that CARRIES a scheduledTaskId has already declared which task
     # it belongs to, and (given we reached here) it is not this one -- so it
     # is excluded from the fallback pool outright. Without this the timing
     # heuristic will happily join another task's session whose createdAt
     # happens to land inside the tolerance window, which is a silent
-    # cross-task mis-join, not a near miss.
+    # cross-task mis-join, not a near miss. Presence, not truthiness: a
+    # record with scheduledTaskId "" or None has still declared an owner
+    # (even if that value is falsy) and must still be excluded.
     expected_title = (task.get("id") or "").replace("-", " ").capitalize()
     candidates = []
     for rec in session_records:
-        if rec.get("scheduledTaskId"):
+        if "scheduledTaskId" in rec:
             continue
         ca_ms = _created_at_ms(rec)
         if ca_ms is None:
@@ -261,7 +307,7 @@ def find_executing_session(task, session_records, tolerance_ms=JOIN_TOLERANCE_MS
     return None  # still ambiguous -- unjoined, never guessed
 
 
-def find_all_sessions_for_task(task, session_records, window_seconds=300):
+def find_all_sessions_for_task(task, session_records, window_seconds=PRIMARY_JOIN_BOUND_SECONDS):
     """Every session record plausibly serving ONE firing of `task` -- the
     per-task-firing signal that duplicate detection needs.
 

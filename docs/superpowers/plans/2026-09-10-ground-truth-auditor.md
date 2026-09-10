@@ -694,6 +694,13 @@ def detect_duplicates(runs, cc_task_ids_enabled, lams_task_ids_enabled):
     return flags
 ```
 
+**CORRECTED POST-MERGE (2026-09-11):** the code above compares multiple rows from
+one `build_run_index()` call, which the registry can never produce (one row per
+task id). The actual shipped implementation instead uses `candidate_session_count`
+from `find_all_sessions_for_task` -- see the design spec's §5 Stage 0 correction
+and §3.5b, and `maintenance/ground-truth-run-index.py`'s current `detect_duplicates`.
+Do not rebuild from this section's original code sample.
+
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `python maintenance/test-ground-truth-run-index.py`

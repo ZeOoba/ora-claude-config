@@ -154,18 +154,68 @@ def test_find_executing_session_primary_key_is_scheduled_task_id():
           found)
 
 
-def test_find_executing_session_single_claimant_needs_no_time_check():
-    # The id match IS the disambiguation: a lone claimant is returned even
-    # though its createdAt is nowhere near the 2s createdAt tolerance the old
-    # primary path required.
+def test_find_executing_session_single_claimant_needs_no_title_check():
+    # The id match IS the disambiguation (no title check needed) as long as
+    # the lone claimant clears the 300s PRIMARY_JOIN_BOUND_SECONDS distance
+    # check -- here it's ~90s off, comfortably inside the bound but far
+    # outside the old 2s createdAt tolerance the pre-scheduledTaskId primary
+    # path required.
     task = {"id": "ora-capex-idea-stage-nudge", "lastRunAt": "2026-09-10T17:13:10.632Z"}
     records = [_real_shaped_session("ora-capex-idea-stage-nudge",
-                                     1789060390632 - 90_000_000,  # ~25h off
+                                     1789060390632 - 90_000,  # ~90s off
                                      "Ora capex idea stage nudge", cli_session_id="lone")]
     found = gti.find_executing_session(task, records)
-    check("a single scheduledTaskId claimant is returned without any "
-          "createdAt/title check", found is not None and found["cliSessionId"] == "lone",
-          found)
+    check("a single scheduledTaskId claimant within the 300s bound is "
+          "returned without any title check",
+          found is not None and found["cliSessionId"] == "lone", found)
+
+
+def test_find_executing_session_single_claimant_beyond_bound_is_unjoined():
+    # Fix 1 (2026-09-11 hardening): the primary path is no longer unbounded.
+    # A lone claimant whose createdAt sits ~1 year from lastRunAt (far beyond
+    # the measured ~23h worst-case unrelated distance) must be REJECTED, not
+    # silently returned as if it were the true firing's record -- exactly the
+    # silent-stale-join risk PRIMARY_JOIN_BOUND_SECONDS exists to close.
+    task = {"id": "ora-capex-idea-stage-nudge", "lastRunAt": "2026-09-10T17:13:10.632Z"}
+    t_ms = 1789060390632
+    year_ms = 365 * 24 * 60 * 60 * 1000
+    records = [
+        _real_shaped_session("ora-capex-idea-stage-nudge", t_ms - year_ms,
+                             "Ora capex idea stage nudge", cli_session_id="stale-lone"),
+        # fallback-eligible decoy: no scheduledTaskId, createdAt exactly on
+        # lastRunAt -- if the rejected primary claimant fell through to the
+        # fallback pool, this decoy would be wrongly picked up instead.
+        {"createdAt": t_ms, "title": "Ora capex idea stage nudge", "titleSource": "auto",
+         "cliSessionId": "fallback-decoy"},
+    ]
+    found = gti.find_executing_session(task, records)
+    check("a single claimant ~1 year from lastRunAt is rejected, not returned",
+          found is None, found)
+    check("rejection does NOT fall through to the fallback pool (the decoy "
+          "is never picked)", found is None and (found is None or
+          found.get("cliSessionId") != "fallback-decoy"), found)
+
+
+def test_find_executing_session_tiebreak_winner_beyond_bound_is_unjoined():
+    # Same hardening, multi-claimant path: even the NEAREST of several
+    # confirmed claimants must clear the 300s bound. If the true firing's
+    # record were deleted/archived and only a stale claimant survived, an
+    # unbounded tiebreak would silently return it.
+    task = {"id": "ora-doctrine-integrity-guard", "lastRunAt": "2026-09-10T17:13:10.632Z"}
+    t_ms = 1789060390632
+    year_ms = 365 * 24 * 60 * 60 * 1000
+    records = [
+        _real_shaped_session("ora-doctrine-integrity-guard", t_ms - year_ms,
+                             "Ora doctrine integrity guard", cli_session_id="stale-a"),
+        _real_shaped_session("ora-doctrine-integrity-guard", t_ms - year_ms - 5_000,
+                             "Ora doctrine integrity guard", cli_session_id="stale-b"),
+        # fallback-eligible decoy, present to confirm no fall-through happens
+        {"createdAt": t_ms, "title": "Ora doctrine integrity guard", "titleSource": "auto",
+         "cliSessionId": "fallback-decoy"},
+    ]
+    found = gti.find_executing_session(task, records)
+    check("the nearest of several stale claimants is still rejected past the "
+          "300s bound", found is None, found)
 
 
 def test_find_executing_session_tiebreaks_claimants_by_nearest_created_at():
@@ -274,6 +324,26 @@ def test_fallback_find_executing_session_ignores_notify_session_id():
     found = gti.find_executing_session(task, records)
     check("fallback: a notifySessionId record with the wrong createdAt is "
           "never selected", found is None)
+
+
+def test_fallback_excludes_falsy_but_present_scheduled_task_id():
+    # Fix 2 (2026-09-11): exclusion from the fallback pool is by KEY PRESENCE,
+    # not truthiness. A record with scheduledTaskId "" or None has still
+    # declared an owner and must be excluded even though the value is falsy --
+    # the old `if rec.get("scheduledTaskId")` check would have wrongly
+    # admitted these into the fallback pool.
+    task = {"id": "ora-weekly-hygiene", "lastRunAt": "2026-09-11T16:01:02.000Z"}
+    t_ms = 1789142462000
+    records = [
+        {"createdAt": t_ms, "title": "Ora weekly hygiene", "titleSource": "auto",
+         "scheduledTaskId": "", "cliSessionId": "empty-string-owner"},
+        {"createdAt": t_ms, "title": "Ora weekly hygiene", "titleSource": "auto",
+         "scheduledTaskId": None, "cliSessionId": "none-owner"},
+    ]
+    found = gti.find_executing_session(task, records)
+    check("records carrying scheduledTaskId (even falsy '' or None) are "
+          "excluded from the fallback pool, leaving nothing to join",
+          found is None, found)
 
 
 def test_find_all_sessions_for_task_returns_the_single_normal_case():
@@ -752,13 +822,16 @@ if __name__ == "__main__":
     test_recurring_task_named_resume_does_not_widen()
     test_never_ran_does_not_widen_without_a_resume_event()
     test_find_executing_session_primary_key_is_scheduled_task_id()
-    test_find_executing_session_single_claimant_needs_no_time_check()
+    test_find_executing_session_single_claimant_needs_no_title_check()
+    test_find_executing_session_single_claimant_beyond_bound_is_unjoined()
+    test_find_executing_session_tiebreak_winner_beyond_bound_is_unjoined()
     test_find_executing_session_tiebreaks_claimants_by_nearest_created_at()
     test_find_executing_session_never_claims_another_tasks_session()
     test_fallback_find_executing_session_matches_by_createdat_and_title()
     test_fallback_find_executing_session_ambiguous_window_is_unjoined()
     test_fallback_find_executing_session_disambiguates_by_title_in_a_burst()
     test_fallback_find_executing_session_ignores_notify_session_id()
+    test_fallback_excludes_falsy_but_present_scheduled_task_id()
     test_find_all_sessions_for_task_returns_the_single_normal_case()
     test_find_all_sessions_for_task_surfaces_a_genuine_duplicate_fire()
     test_find_all_sessions_for_task_excludes_other_tasks()
