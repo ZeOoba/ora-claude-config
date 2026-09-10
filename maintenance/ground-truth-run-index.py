@@ -20,6 +20,7 @@ import glob
 import json
 import os
 import sys
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "_shared"))
@@ -227,3 +228,83 @@ def load_session_records(registry_dir):
         except Exception:
             continue
     return records
+
+
+def _min_cron_period(cron_expression):
+    """Coarse minimum-period estimate for a 5-field cron expression, used
+    only to flag an implausibly tight re-schedule -- not a full cron parser.
+    Returns a timedelta, or None if the expression can't be classified."""
+    if not cron_expression:
+        return None
+    fields = cron_expression.split()
+    if len(fields) != 5:
+        return None
+    minute, hour = fields[0], fields[1]
+    if minute.startswith("*/"):
+        try:
+            return timedelta(minutes=int(minute[2:]))
+        except ValueError:
+            return None
+    if minute == "*":
+        return timedelta(minutes=1)
+    if hour == "*":
+        return timedelta(hours=1)
+    return timedelta(days=1)  # daily/weekly/monthly all lower-bound at 1 day
+
+
+def detect_duplicates(runs, cc_task_ids_enabled, lams_task_ids_enabled):
+    """Deterministic duplicate/collision flags across a set of run records
+    (spec Sec 5 Stage 0). `runs` is a list of dicts each carrying at least
+    fleet, task_id, run_id, last_scheduled_for (and cron_expression where
+    recurring). Returns a list of flag dicts: {"type", "detail", "run_ids"}.
+
+    Three flag types -- duplicate detection is a key comparison, never an
+    agent's judgment call:
+      - same_cycle_refire: two fires share one lastScheduledFor
+      - cron_period_collision: two distinct lastScheduledFor values fall
+        inside the same cron period for the same task
+      - cross_fleet_twin: the same task id is enabled on BOTH registries
+    """
+    flags = []
+
+    by_cycle = defaultdict(list)
+    for r in runs:
+        key = (r["fleet"], r["task_id"], r.get("last_scheduled_for"))
+        by_cycle[key].append(r["run_id"])
+    for (fleet, task_id, cycle), run_ids in by_cycle.items():
+        if cycle and len(run_ids) > 1:
+            flags.append({
+                "type": "same_cycle_refire",
+                "detail": "{} fired {} times for the same logical cycle {}".format(
+                    task_id, len(run_ids), cycle),
+                "run_ids": run_ids,
+            })
+
+    twins = set(cc_task_ids_enabled) & set(lams_task_ids_enabled)
+    for task_id in sorted(twins):
+        flags.append({
+            "type": "cross_fleet_twin",
+            "detail": "'{}' is enabled on BOTH the CC and LAMS registries -- "
+                      "known dual-fleet double-fire hazard".format(task_id),
+            "run_ids": [r["run_id"] for r in runs if r["task_id"] == task_id],
+        })
+
+    by_task = defaultdict(list)
+    for r in runs:
+        if r.get("cron_expression") and r.get("last_scheduled_for"):
+            by_task[(r["fleet"], r["task_id"])].append(r)
+    for (fleet, task_id), task_runs in by_task.items():
+        times = sorted((_parse_iso(r["last_scheduled_for"]) for r in task_runs
+                        if _parse_iso(r["last_scheduled_for"]) is not None))
+        min_period = _min_cron_period(task_runs[0].get("cron_expression"))
+        for a, b in zip(times, times[1:]):
+            if min_period is not None and (b - a) < min_period:
+                flags.append({
+                    "type": "cron_period_collision",
+                    "detail": "{} scheduled twice ({} and {}) inside one cron "
+                              "period ({})".format(task_id, a.isoformat(), b.isoformat(),
+                                                    task_runs[0].get("cron_expression")),
+                    "run_ids": [r["run_id"] for r in task_runs],
+                })
+
+    return flags
