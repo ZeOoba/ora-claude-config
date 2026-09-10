@@ -311,9 +311,16 @@ task, and both checks were **structurally dead code**. Restated honestly:
 
 Per run, derive *candidate* side effects.
 
-- **Transcript present:** parse `tool_use` records for `send-via-outlook.ps1`
+- **Transcript present:** match a line-by-line regex against the transcript's
+  RAW TEXT -- NOT a parsed/typed `tool_use` record -- for `send-via-outlook.ps1`
   invocations, `notion-create-pages` / `notion-update-page`, `git push`,
-  `allocate-oi-id.py`, and file writes.
+  `allocate-oi-id.py`, and file writes. This is a deliberate
+  simplicity/robustness tradeoff: it matches whatever text a line contains, so
+  it can never miss a real side effect, and its only failure direction is
+  OVER-triggering (e.g. a transcript line that merely prints or reads text
+  mentioning "git push" with no actual push). An over-trigger costs one extra
+  verifier dispatch in Stage 2; it never lets a real side effect go
+  unverified.
 - **Transcript absent:** external enumeration only (§9 R1 fallback).
 
 Runs with **zero** side effects receive a cheap deterministic stamp and **no agent**.

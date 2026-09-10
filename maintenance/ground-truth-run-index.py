@@ -82,12 +82,25 @@ def decide_window_hours(now, last_auditor_run_at, cc_tasks, lams_tasks,
     A fixed 24h window keyed on lastScheduledFor would silently drop the
     catch-up runs most likely to have duplicated side effects (spec Sec 5).
 
-    Returns (window_hours: float, reason: str). `now` and `last_auditor_run_at`
-    are aware UTC datetimes (or None for the latter).
+    Returns (window_hours: float, reason: str, widen_kind: str). `now` and
+    `last_auditor_run_at` are aware UTC datetimes (or None for the latter).
+
+    `widen_kind` is a machine-readable record of WHY the window was widened --
+    one of "none", "auditor_gap", "resume_event", "both" -- consumed by
+    assert_join_rate_floor to decide which floor tier applies (final-review
+    I6, 2026-09-11). This matters because task selection in build_run_index
+    keys on lastRunAt, not lastScheduledFor: a resume catch-up burst's own
+    session records already carry a recent lastRunAt and are therefore fully
+    captured by the plain default-hours window on their own -- the 3x widen
+    below adds no coverage benefit for that burst. A resume-only widen must
+    NOT relax the join-rate floor the way a genuine auditor-gap widen
+    legitimately does; see assert_join_rate_floor's docstring for the floor
+    logic this feeds.
     """
     reasons = []
     window_hours = float(default_hours)
     gap_hours = None
+    auditor_gap_widened = False
 
     if last_auditor_run_at is None:
         reasons.append("no prior auditor run recorded")
@@ -97,6 +110,7 @@ def decide_window_hours(now, last_auditor_run_at, cc_tasks, lams_tasks,
             reasons.append(
                 "prior auditor run was {:.1f}h ago (> {}h)".format(gap_hours, default_hours))
             window_hours = max(window_hours, gap_hours)
+            auditor_gap_widened = True
 
     resume_cutoff = now - timedelta(hours=default_hours)
     resume_hit = False
@@ -114,12 +128,25 @@ def decide_window_hours(now, last_auditor_run_at, cc_tasks, lams_tasks,
     if resume_hit:
         # A resume alone (auditor otherwise on schedule) still needs the
         # window widened enough to reach the paused period it just
-        # re-enabled -- a bounded pause can span days.
+        # re-enabled -- a bounded pause can span days. (Widening the window
+        # is still correct here -- it's the FLOOR relaxation this widen used
+        # to carry as a side effect that I6 decouples, not the widen itself.)
         window_hours = max(window_hours, default_hours * 3)
 
+    if auditor_gap_widened and resume_hit:
+        widen_kind = "both"
+    elif auditor_gap_widened:
+        widen_kind = "auditor_gap"
+    elif resume_hit:
+        widen_kind = "resume_event"
+    else:
+        widen_kind = "none"
+
     if not reasons:
-        return float(default_hours), "default {}h window (no widen condition met)".format(default_hours)
-    return window_hours, "; ".join(reasons)
+        return (float(default_hours),
+                "default {}h window (no widen condition met)".format(default_hours),
+                widen_kind)
+    return window_hours, "; ".join(reasons), widen_kind
 
 
 def find_project_dirs(claude_home=None):
@@ -507,17 +534,41 @@ def detect_duplicates(runs, cc_task_ids_enabled, lams_task_ids_enabled):
 
 
 def assert_join_rate_floor(joined_count, total_count, window_hours,
-                            default_hours=DEFAULT_WINDOW_HOURS):
+                            default_hours=DEFAULT_WINDOW_HOURS,
+                            widen_kind="auditor_gap"):
     """Width-dependent join-rate floor (spec Sec 9 R1a) -- NOT a non-zero
     check. Measured on the live CC store (spec Sec 3.5, all 17 project dirs):
     100% at n=100-200 recent sessions, ~43% fleet-wide. A widened window is
     expected to read lower; the SAME low rate on a normal 24h window means the
     join is broken.
 
+    `widen_kind` -- one of "none", "auditor_gap", "resume_event", "both", the
+    third element decide_window_hours returns -- decides WHICH floor tier
+    applies, not just how wide the window got (final-review I6, 2026-09-11).
+    Defaults to "auditor_gap" so existing direct callers of this function
+    alone (tests keyed purely on window_hours) keep today's width-only
+    behavior unchanged.
+
+    Why WHY matters, not just HOW WIDE: task selection in build_run_index is
+    keyed on lastRunAt, not lastScheduledFor -- a resume catch-up burst's own
+    session records are created minutes after the resume event, so they
+    already carry a recent lastRunAt and are FULLY captured by the plain
+    default-hours window on their own. The 3x resume widen therefore adds no
+    real coverage benefit for that burst. If a pure resume_event widen were
+    still allowed to relax the floor to 60%/30%, it would make the floor MORE
+    PERMISSIVE on exactly the run the design calls "the single richest
+    idempotency target available" (spec) -- backwards from the intent. A
+    genuine "auditor_gap" widen (or "both", where the gap justification still
+    applies) is a real multi-day catch-up where lower join rates are
+    structurally expected (spec Sec 3.5/R1a), so it keeps the looser tiers.
+
     Floor schedule:
-      - window_hours <= default_hours (normal night): >= 90%
-      - window_hours <= default_hours * 3 (a moderate widen): >= 60%
-      - wider than that (a multi-day catch-up burst): >= 30%
+      - widen_kind == "resume_event" (no auditor gap): >= 90% ALWAYS,
+        regardless of window_hours -- see above.
+      - otherwise, width-dependent as before:
+          - window_hours <= default_hours (normal night): >= 90%
+          - window_hours <= default_hours * 3 (a moderate widen): >= 60%
+          - wider than that (a multi-day catch-up burst): >= 30%
 
     Returns (ok: bool, message: str). total_count == 0 is trivially ok (an
     empty window has nothing to fail to join).
@@ -525,15 +576,17 @@ def assert_join_rate_floor(joined_count, total_count, window_hours,
     if total_count == 0:
         return True, "no runs in window -- floor not applicable"
     rate = joined_count / total_count
-    if window_hours <= default_hours:
+    if widen_kind == "resume_event":
+        floor = 0.90
+    elif window_hours <= default_hours:
         floor = 0.90
     elif window_hours <= default_hours * 3:
         floor = 0.60
     else:
         floor = 0.30
     ok = rate >= floor
-    msg = "{}/{} joined ({:.0%}) against a {:.0%} floor for a {:.1f}h window".format(
-        joined_count, total_count, rate, floor, window_hours)
+    msg = "{}/{} joined ({:.0%}) against a {:.0%} floor for a {:.1f}h window (widen_kind={})".format(
+        joined_count, total_count, rate, floor, window_hours, widen_kind)
     return ok, msg
 
 
@@ -592,6 +645,7 @@ def build_run_index(cc_registry_path, lams_registry_path, project_dirs,
         "generated_at": iso str,
         "window_hours": float,
         "window_reason": str,
+        "window_widen_kind": str,
         "runs": [ { run_id, fleet, task_id, last_scheduled_for, last_run_at,
                     cron_expression, model, transcript, joined: bool,
                     recorded_skips: [...], file_path, session_model,
@@ -600,6 +654,14 @@ def build_run_index(cc_registry_path, lams_registry_path, project_dirs,
         "join_stats": { "cc": {joined, total, rate_ok, message},
                          "lams": {...} },
       }
+
+    `window_widen_kind` -- one of "none", "auditor_gap", "resume_event",
+    "both" (see decide_window_hours/assert_join_rate_floor docstrings, I6
+    final review 2026-09-11) -- an explicit --window-hours override counts as
+    "none" here: it is a manual choice, not a measured auditor-gap or
+    resume-event widen, so it gets the same width-only floor tiers "none"
+    gets from decide_window_hours (no special relaxation or extra strictness
+    beyond window_hours itself).
     """
     now = now or datetime.now(timezone.utc)
     cc_tasks_all = _registry_tasks(cc_registry_path)
@@ -607,9 +669,10 @@ def build_run_index(cc_registry_path, lams_registry_path, project_dirs,
 
     if window_hours_override is not None:
         window_hours, window_reason = float(window_hours_override), "explicit --window-hours override"
+        widen_kind = "none"
     else:
         effective_last_run = last_auditor_run_at if last_auditor_run_at is not None else _read_last_auditor_run()
-        window_hours, window_reason = decide_window_hours(
+        window_hours, window_reason, widen_kind = decide_window_hours(
             now, effective_last_run, cc_tasks_all, lams_tasks_all)
 
     window_start = now - timedelta(hours=window_hours)
@@ -669,13 +732,14 @@ def build_run_index(cc_registry_path, lams_registry_path, project_dirs,
     lams_enabled = {t.get("id") for t in lams_tasks_all if t.get("enabled")}
     duplicate_flags = detect_duplicates(runs, cc_enabled, lams_enabled)
 
-    cc_ok, cc_msg = assert_join_rate_floor(cc_joined, cc_total, window_hours)
-    lams_ok, lams_msg = assert_join_rate_floor(lams_joined, lams_total, window_hours)
+    cc_ok, cc_msg = assert_join_rate_floor(cc_joined, cc_total, window_hours, widen_kind=widen_kind)
+    lams_ok, lams_msg = assert_join_rate_floor(lams_joined, lams_total, window_hours, widen_kind=widen_kind)
 
     return {
         "generated_at": now.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
         "window_hours": window_hours,
         "window_reason": window_reason,
+        "window_widen_kind": widen_kind,
         "runs": runs,
         "duplicate_flags": duplicate_flags,
         "join_stats": {
@@ -683,6 +747,34 @@ def build_run_index(cc_registry_path, lams_registry_path, project_dirs,
             "lams": {"joined": lams_joined, "total": lams_total, "rate_ok": lams_ok, "message": lams_msg},
         },
     }
+
+
+def resolve_registry_paths():
+    """Resolves the CC and LAMS registry paths via store_discovery, returning
+    (cc_path, lams_path, error) -- `error` is None on success, or a clear
+    human-readable string naming which fleet failed and why (`_sd` unavailable
+    -- the store_discovery import failed -- vs. `discover_store` ran but
+    returned None for that fleet) when EITHER path could not be resolved.
+
+    Extracted from main() so the exit-2 "could not even start" path (I3) is
+    unit-testable via dependency injection / monkeypatching `_sd` without
+    needing real registry files on disk."""
+    if _sd is None:
+        return None, None, (
+            "registry discovery unavailable: store_discovery failed to import "
+            "(_sd is None) -- cannot resolve either fleet's registry path")
+
+    cc_path = _sd.discover_store("claude-code-sessions")
+    lams_path = _sd.discover_store("local-agent-mode-sessions")
+
+    failures = []
+    if cc_path is None:
+        failures.append("cc: discover_store('claude-code-sessions') returned None")
+    if lams_path is None:
+        failures.append("lams: discover_store('local-agent-mode-sessions') returned None")
+    if failures:
+        return cc_path, lams_path, "registry discovery failed -- " + "; ".join(failures)
+    return cc_path, lams_path, None
 
 
 def main(argv=None):
@@ -695,8 +787,20 @@ def main(argv=None):
                          help="Print the run index to stdout instead of writing a file.")
     args = parser.parse_args(argv)
 
-    cc_path = _sd.discover_store("claude-code-sessions") if _sd else None
-    lams_path = _sd.discover_store("local-agent-mode-sessions") if _sd else None
+    cc_path, lams_path, discovery_error = resolve_registry_paths()
+    if discovery_error is not None:
+        # Fail LOUD, not empty: without this check, a total registry-read
+        # failure (_sd is None, or discover_store returns None for either
+        # fleet) fell through to _registry_tasks(None), whose try/except
+        # swallows the resulting TypeError and returns [] -- producing 0
+        # runs, both floors trivially "ok" (assert_join_rate_floor treats an
+        # empty window as vacuously passing), and exit 0. That makes a
+        # completely broken auditor indistinguishable from a genuinely quiet
+        # night. Exit 2 is a NEW code, distinct from 0 (clean) and 1 (join-
+        # rate floor breached), so a caller can tell "could not even start"
+        # apart from both.
+        print("GROUND-TRUTH AUDITOR COULD NOT START: " + discovery_error, file=sys.stderr)
+        return 2
     project_dirs = find_project_dirs()
 
     now = datetime.now(timezone.utc)
@@ -714,7 +818,16 @@ def main(argv=None):
         print("wrote {} ({} runs, {} duplicate flags)".format(
             out, len(index["runs"]), len(index["duplicate_flags"])))
 
-    _write_last_auditor_run(now)
+    # Only a normal automatic run resets the "when did the auditor last run"
+    # clock. --json is a read-only investigative dump (no run-index file is
+    # even written), and --window-hours is an ad-hoc manual override (not the
+    # real nightly cadence) -- either one writing the marker would silently
+    # reset the gap-tracking clock that a REAL scheduled run depends on for
+    # decide_window_hours' auditor-gap widen, potentially suppressing a
+    # legitimate future widen because this ad-hoc invocation looked like the
+    # last real run.
+    if not args.json and args.window_hours is None:
+        _write_last_auditor_run(now)
 
     floor_failures = [f for f in (index["join_stats"]["cc"], index["join_stats"]["lams"])
                       if not f["rate_ok"]]

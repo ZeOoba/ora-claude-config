@@ -7,6 +7,15 @@ side effects get a cheap deterministic stamp and never reach a verifier
 agent -- this is the approved cost gate (design spec Sec 5 Stage 1): ~8-15
 verifiers/night instead of 64.
 
+Detection is a line-by-line regex match against the transcript's RAW TEXT --
+it does NOT parse tool_use records as structured/typed JSON. This is a
+deliberate simplicity/robustness tradeoff: matching raw text can never miss a
+real side effect (the serialized tool call always contains the matched
+substring), and its only failure direction is OVER-triggering -- e.g. a
+transcript line that merely prints or reads text mentioning "git push" with no
+actual push. An over-trigger costs one extra verifier dispatch; it never
+causes a real side effect to go unverified. See SIDE_EFFECT_PATTERNS below.
+
 Usage:
     python ground-truth-side-effects.py --run-index PATH [--out PATH]
 """
@@ -16,11 +25,17 @@ import os
 import re
 import sys
 
-# Patterns matched against a transcript's tool_use records (Bash commands and
-# MCP tool names) to detect a candidate side effect. Matching the TOOL CALL,
-# not its outcome -- Stage 3's CLAIM ACCURACY axis re-verifies the actual
-# published artifact; Stage 1 only decides whether a verifier is worth
-# dispatching at all.
+# Patterns matched against a transcript's RAW TEXT, line by line -- a plain
+# regex over the serialized JSONL, NOT a parsed/typed tool_use record. This is
+# a deliberate simplicity/robustness tradeoff, not an oversight: it can never
+# miss a real side effect (the serialized tool call always contains the
+# matched text), and it can only ever OVER-trigger -- e.g. a transcript line
+# that merely prints or reads text mentioning "git push" -- never
+# UNDER-trigger. An over-trigger costs one extra verifier dispatch (Stage 2);
+# it never causes a real side effect to go unverified. Matching the TOOL
+# CALL's serialized text, not its outcome -- Stage 3's CLAIM ACCURACY axis
+# re-verifies the actual published artifact; Stage 1 only decides whether a
+# verifier is worth dispatching at all.
 SIDE_EFFECT_PATTERNS = {
     "email_sent": re.compile(r"send-via-outlook\.ps1", re.IGNORECASE),
     "notion_write": re.compile(r"notion-(create-pages|update-page)"),
