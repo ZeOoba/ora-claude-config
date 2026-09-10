@@ -90,12 +90,26 @@ def test_recurring_task_named_resume_does_not_widen():
           hours == 24.0, "hours=%s reason=%s" % (hours, reason))
 
 
+def test_never_ran_does_not_widen_without_a_resume_event():
+    # Confirmed with Gabriel 2026-09-11: a literal never-ran (no prior
+    # auditor run at all) does NOT by itself widen the window -- there is
+    # no measurable gap, and the realistic backfill case (mid-pause
+    # registration) is covered separately by the resume-event widen path.
+    now = datetime(2026, 9, 10, 4, 0, tzinfo=timezone.utc)
+    hours, reason = gti.decide_window_hours(now, None, [], [])
+    check("never-ran with no resume event stays at the default window",
+          hours == 24.0, "hours=%s reason=%s" % (hours, reason))
+    check("the reason still names the never-ran condition for visibility",
+          "no prior auditor run" in reason, reason)
+
+
 if __name__ == "__main__":
     test_build_run_id_keys_on_last_scheduled_for()
     test_window_default_when_nothing_widens()
     test_window_widens_when_auditor_gap_exceeds_default()
     test_window_widens_on_fleet_resume_event()
     test_recurring_task_named_resume_does_not_widen()
+    test_never_ran_does_not_widen_without_a_resume_event()
     print("-" * 72)
     if FAILURES:
         print("FAIL: %d failure(s): %s" % (len(FAILURES), ", ".join(FAILURES)))
