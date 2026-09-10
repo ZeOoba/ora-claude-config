@@ -135,6 +135,11 @@ run's own summary, the body of what it emailed, or any prior finding about it:
 `to_agent_tool_model_name`, never the full `verifier_model` id), in parallel across all
 side-effecting runs in one message so they run concurrently):
 
+> You are READ-ONLY for this task. You may search, read, and query any source (Notion,
+> Outlook, git, the filesystem) but you must NEVER write, send, edit, delete, or commit
+> anything, anywhere, for any reason. If you believe a correction is needed, describe it
+> in your report -- do not attempt to make it.
+>
 > You are an independent verifier auditing one prior scheduled-task run. You have NO
 > access to and must NOT trust any summary, email body, log line, or finding this run
 > produced. Every claim you report must be re-derived by YOU, right now, from the actual
@@ -191,6 +196,11 @@ For every surviving **CONTRADICTED** verdict, dispatch a second agent (same or h
 model tier as the verifier that produced it -- resolve via `gmr.to_agent_tool_model_name(...)`
 exactly as in STEP 3; never dispatch this Agent-tool call with a full model id) with this brief:
 
+> You are READ-ONLY for this task. You may search, read, and query any source (Notion,
+> Outlook, git, the filesystem) but you must NEVER write, send, edit, delete, or commit
+> anything, anywhere, for any reason. If you believe a correction is needed, describe it
+> in your report -- do not attempt to make it.
+>
 > Re-read the exact primary source at `[locator]` yourself. A prior verifier concluded
 > the claim "`[claim text]`" is CONTRADICTED, citing `[F-id and its evidence]`. Argue
 > the ORIGINAL claim was actually right. If you cannot construct a good-faith argument
