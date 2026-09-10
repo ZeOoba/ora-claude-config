@@ -180,6 +180,21 @@ BACKUP_SWEEP_TRANSIENT_DIRS = {
     "shell-snapshots", "statsig", "tasks", "telemetry", "todos", "worktrees",
     # append-event-log.py staging (drains into event_log.md; transient by design)
     "_tmp_entries",
+    # 2026-09-10 (Gabriel-directed): the harness's own Edit/Write undo store --
+    # <session uuid>/<content hash>@v<N>, one dir per session, each entry a verbatim
+    # pre-edit snapshot of a file that session touched. Ruled transient on BOTH of
+    # this allowlist's grounds, either of which alone is sufficient:
+    #   * regenerable/machine-local per-session runtime state carrying no doctrine of
+    #     its own -- same class as sessions/, todos/ and shell-snapshots/ above, and
+    #     already excluded by setup-self-audit.py's EXCLUDE_DIR_PARTS on that basis;
+    #   * NEVER TRACK (invariant 3): its contents are copies of whatever files were
+    #     edited, so a session that touched a deal model or a confidential-staging
+    #     file leaves that content here verbatim. Opting this in would carry it
+    #     off-machine to the private remote with no scrub surface -- the
+    #     _confidential-staging argument below, arrived at from the other direction.
+    # Flagged by the probe itself (untracked, no allowlist entry); this entry is the
+    # deliberate git-recorded ruling the WARN asks for, not a suppression.
+    "file-history",
     # 2026-08-15 (Gabriel-directed): harness usage telemetry -- per-session facets/
     # + session-meta/ JSON and generated report-*.html. Derived, per-session,
     # regenerable, and machine-local; same class as telemetry/ and sessions/ above.
