@@ -85,6 +85,7 @@
 - [REFUTE differential harness](reference_refute_differential_harness.md) — guard/probe regex edits: old-vs-new differential battery; judge deltas, not absolutes
 - [Refute gate's path scope went stale TWICE](reference_refute_gate_excludes_server_workbook.md) — never trust a path-scoped `git log` returning empty; diff it against an unscoped log first
 - [git status --short hides branch, use -sb](feedback_git_status_short_hides_branch_use_sb.md) — before any commit in a shared checkout; generalizes [[rules.md §14]]
+- [Piped gate output masks the exit code](feedback_piped_gate_exit_masking.md) — `| grep`/`tail` reports ITS 0, not the gate's; read the file, or the tool's `RESULT_JSON=` line; now [[rules.md §26]]
 - [Verify before repeating session claims](feedback_verify_before_repeating_session_claims.md) — check ground truth before relaying
 - [skillOverrides is ignored for plugin skills](reference_skilloverrides_ignored_for_plugin_skills.md) — any key with `:` is inert by construction; disable the plugin, not the skill
 - [Browser pane is 0x0 until resized](reference_browser_pane_zero_viewport_blocks_images.md) — "screenshots impossible" is usually an unresized pane; 9/9 agents got this wrong
