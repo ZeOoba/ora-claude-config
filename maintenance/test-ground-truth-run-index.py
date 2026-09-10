@@ -253,18 +253,20 @@ def test_find_executing_session_never_claims_another_tasks_session():
 
 
 # ---------------------------------------------------------------------------
-# find_executing_session -- FALLBACK path (pre-scheduledTaskId-era records)
+# find_executing_session -- FALLBACK path (records with no scheduledTaskId)
 #
 # The four tests below deliberately use records with NO `scheduledTaskId` key.
 # That omission is INTENTIONAL and load-bearing, not another accidental gap:
-# it is what makes these records represent the pre-field era the createdAt/
-# title heuristic still exists to serve. Any record here that grew a
-# scheduledTaskId would silently stop testing the fallback.
+# it is what makes these records represent records that never carry
+# scheduledTaskId at all (interactive sessions) -- the createdAt/title
+# fallback exists to serve these, not a temporal era. Any record here that
+# grew a scheduledTaskId would silently stop testing the fallback.
 # ---------------------------------------------------------------------------
 
 def test_fallback_find_executing_session_matches_by_createdat_and_title():
     # FALLBACK path: no record carries scheduledTaskId, so the createdAt/title
-    # heuristic is the only key available -- correct for pre-field records.
+    # heuristic is the only key available -- correct for records that never
+    # carry scheduledTaskId (interactive sessions).
     task = {"id": "automation-health-monitor", "lastRunAt": "2026-09-10T17:13:10.632Z"}
     records = [
         # decoy: a notifySessionId-style stale record, months earlier
@@ -273,8 +275,8 @@ def test_fallback_find_executing_session_matches_by_createdat_and_title():
          "sessionId": "local_e59d1b67-bf90-4e6b-9883-3e8a52dec80c",
          "cliSessionId": "696009a7-1727-470b-917d-51df0ec81803"},
     ]
-    check("no fixture here carries scheduledTaskId -- these are pre-field-era "
-          "records by design, so the fallback is what gets exercised",
+    check("these never carry scheduledTaskId by design (interactive-session "
+          "shape), so the fallback is what gets exercised",
           all("scheduledTaskId" not in r for r in records))
     found = gti.find_executing_session(task, records)
     check("fallback finds the session created at the same ms as lastRunAt",
@@ -282,8 +284,8 @@ def test_fallback_find_executing_session_matches_by_createdat_and_title():
 
 
 def test_fallback_find_executing_session_ambiguous_window_is_unjoined():
-    # Catch-up burst: two pre-field-era sessions created inside the same 2s
-    # tolerance window, neither titled for this task.
+    # Catch-up burst: two sessions with no scheduledTaskId, created inside
+    # the same 2s tolerance window, neither titled for this task.
     task = {"id": "ora-weekly-hygiene", "lastRunAt": "2026-09-11T16:01:02.000Z"}
     t_ms = 1789142462000
     records = [
@@ -296,10 +298,10 @@ def test_fallback_find_executing_session_ambiguous_window_is_unjoined():
 
 
 def test_fallback_find_executing_session_disambiguates_by_title_in_a_burst():
-    # Pre-field-era only. On CURRENT data this branch is unreachable, because
-    # titleSource=="auto" and scheduledTaskId are mutually exclusive on the
-    # real stores -- any record a modern scheduled run produces takes the
-    # primary path long before this code is reached.
+    # Records with no scheduledTaskId only. On CURRENT data this branch is
+    # unreachable, because titleSource=="auto" and scheduledTaskId are
+    # mutually exclusive on the real stores -- any record a modern scheduled
+    # run produces takes the primary path long before this code is reached.
     task = {"id": "ora-weekly-hygiene", "lastRunAt": "2026-09-11T16:01:02.000Z"}
     t_ms = 1789142462000
     records = [
@@ -327,23 +329,32 @@ def test_fallback_find_executing_session_ignores_notify_session_id():
 
 
 def test_fallback_excludes_falsy_but_present_scheduled_task_id():
-    # Fix 2 (2026-09-11): exclusion from the fallback pool is by KEY PRESENCE,
-    # not truthiness. A record with scheduledTaskId "" or None has still
-    # declared an owner and must be excluded even though the value is falsy --
-    # the old `if rec.get("scheduledTaskId")` check would have wrongly
-    # admitted these into the fallback pool.
+    # A record carrying scheduledTaskId as an EMPTY STRING or None still declared
+    # an owner (even if that value happens to be falsy) -- it must be excluded
+    # from the fallback pool by PRESENCE, not by truthiness. A single record is
+    # used deliberately: with the old truthiness check this record would be the
+    # SOLE fallback candidate and would be wrongly returned; with the correct
+    # presence check it is excluded and the result is None.
     task = {"id": "ora-weekly-hygiene", "lastRunAt": "2026-09-11T16:01:02.000Z"}
     t_ms = 1789142462000
-    records = [
+
+    empty_string_case = [
         {"createdAt": t_ms, "title": "Ora weekly hygiene", "titleSource": "auto",
-         "scheduledTaskId": "", "cliSessionId": "empty-string-owner"},
-        {"createdAt": t_ms, "title": "Ora weekly hygiene", "titleSource": "auto",
-         "scheduledTaskId": None, "cliSessionId": "none-owner"},
+         "scheduledTaskId": "", "cliSessionId": "should-not-be-returned"},
     ]
-    found = gti.find_executing_session(task, records)
-    check("records carrying scheduledTaskId (even falsy '' or None) are "
-          "excluded from the fallback pool, leaving nothing to join",
+    found = gti.find_executing_session(task, empty_string_case)
+    check("a record with scheduledTaskId='' (falsy but present) is excluded from "
+          "the fallback pool -- returns None, not the sole 'candidate'",
           found is None, found)
+
+    none_value_case = [
+        {"createdAt": t_ms, "title": "Ora weekly hygiene", "titleSource": "auto",
+         "scheduledTaskId": None, "cliSessionId": "should-not-be-returned"},
+    ]
+    found2 = gti.find_executing_session(task, none_value_case)
+    check("a record with scheduledTaskId=None (falsy but present) is excluded from "
+          "the fallback pool -- returns None, not the sole 'candidate'",
+          found2 is None, found2)
 
 
 def test_find_all_sessions_for_task_returns_the_single_normal_case():
@@ -594,8 +605,9 @@ def _write_session_record(registry_dir, session_id, created_at_ms, title,
                            cli_session_id=None, scheduled_task_id=None):
     """Writes a session record shaped like the REAL thing: a scheduled run
     carries `scheduledTaskId` (the task id verbatim) and `titleSource` None.
-    Passing scheduled_task_id=None deliberately produces a pre-field-era
-    record for exercising the fallback join."""
+    Passing scheduled_task_id=None deliberately produces a record with no
+    scheduledTaskId (interactive-session shape), for exercising the fallback
+    path."""
     rec = {"sessionId": session_id, "createdAt": created_at_ms,
            "title": title, "titleSource": None}
     if scheduled_task_id:
