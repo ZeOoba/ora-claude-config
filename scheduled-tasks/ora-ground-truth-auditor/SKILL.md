@@ -24,7 +24,8 @@ your own run trivially "passes" every axis, which is worse than not auditing at 
 ```
 
 This script decides its own window (default 24h, auto-widened for a catch-up burst or a
-gap in the auditor's own last run -- read its stdout `window_reason`), joins every run to
+gap in the auditor's own last run). Read the `window_reason` field in the JSON document
+it wrote to `--out` (not printed to stdout in this invocation). It joins every run to
 its transcript, flags duplicates, and asserts the join-rate floor. **If it exits non-zero
 (JOIN-RATE FLOOR BREACHED on stderr), do not silently continue** -- this means the join
 mechanism itself may be broken, not just noisy. Include the exact stderr line in the
@@ -43,7 +44,7 @@ gated/ungated trend that Sec 9 R3 exists to make visible.
 
 ## STEP 3 -- dispatch one verifier per side-effecting run
 
-For every run in the annotated index where `has_side_effects` was true (i.e. every run
+For every run in the annotated index where `needs_verifier` is `true` (i.e. every run
 in the index MINUS the `stamped_clean` count from STEP 2), dispatch one subagent.
 
 **Model floor for each dispatch** -- resolve with:
@@ -57,9 +58,20 @@ gmr = importlib.util.module_from_spec(spec); spec.loader.exec_module(gmr)
 verifier_model, reasoning = gmr.resolve_verifier_model(task_record, skill_md_text, session_record)
 ```
 
-where `task_record` is the run's registry entry, `skill_md_text` is the contents of the
-audited task's own SKILL.md (read its `filePath` from the registry), and `session_record`
-is the joined session dict if one exists. **Runs touching financial data, governor
+For each run needing a verifier, build the ladder's inputs directly from the run-index
+record -- no separate registry or session-record fetch is needed:
+
+- `task_record` = `{"model": run.get("model")}` (the run's own `model` field, if the
+  registry carried one -- rung 1 of the ladder)
+- `skill_md_text` = the contents of the file at `run["file_path"]`, read directly
+  (rung 2 -- the `[MODEL: ...]` tag in that file's frontmatter)
+- `session_record` = `{"model": run.get("session_model")}` (rung 3, from the joined
+  session record Stage 0 already resolved)
+
+If `run["file_path"]` is absent or unreadable, pass `skill_md_text=None` and let the
+ladder fall through to rung 3 (never fail the dispatch over a missing SKILL.md read).
+
+**Runs touching financial data, governor
 constants (DSCR/LTV), or a confidential deal never verify below Fable regardless of what
 the ladder returns** -- round up explicitly for those, per CLAUDE.md's Dispatch
 invariants. Pin the resolved model explicitly on every dispatch; never omit it.

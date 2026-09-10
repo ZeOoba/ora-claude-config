@@ -400,7 +400,7 @@ def build_run_index(cc_registry_path, lams_registry_path, project_dirs,
         "window_reason": str,
         "runs": [ { run_id, fleet, task_id, last_scheduled_for, last_run_at,
                     cron_expression, model, transcript, joined: bool,
-                    recorded_skips: [...] }, ... ],
+                    recorded_skips: [...], file_path, session_model }, ... ],
         "duplicate_flags": [ ... ],
         "join_stats": { "cc": {joined, total, rate_ok, message},
                          "lams": {...} },
@@ -461,6 +461,8 @@ def build_run_index(cc_registry_path, lams_registry_path, project_dirs,
                 "transcript": transcript,
                 "joined": transcript is not None,
                 "recorded_skips": skips.get(task_id, []),
+                "file_path": t.get("filePath"),
+                "session_model": (session.get("model") if session else None),
             })
 
     cc_enabled = {t.get("id") for t in cc_tasks_all if t.get("enabled")}
