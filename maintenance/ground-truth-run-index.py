@@ -341,3 +341,181 @@ def assert_join_rate_floor(joined_count, total_count, window_hours,
     msg = "{}/{} joined ({:.0%}) against a {:.0%} floor for a {:.1f}h window".format(
         joined_count, total_count, rate, floor, window_hours)
     return ok, msg
+
+
+SELF_TASK_ID = "ora-ground-truth-auditor"
+LAST_RUN_MARKER = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "_state", "ground-truth",
+    "last-auditor-run.json")
+
+
+def _read_last_auditor_run():
+    try:
+        d = json.load(open(LAST_RUN_MARKER, encoding="utf-8"))
+        return _parse_iso(d.get("completed_at"))
+    except Exception:
+        return None
+
+
+def _write_last_auditor_run(now):
+    os.makedirs(os.path.dirname(LAST_RUN_MARKER), exist_ok=True)
+    json.dump({"completed_at": now.strftime("%Y-%m-%dT%H:%M:%S.000Z")},
+              open(LAST_RUN_MARKER, "w", encoding="utf-8"))
+
+
+def _registry_tasks(registry_path):
+    try:
+        d = json.load(open(registry_path, encoding="utf-8-sig"))
+    except Exception:
+        return []
+    return d.get("scheduledTasks", []) or []
+
+
+def _registry_recorded_skips(registry_path):
+    try:
+        d = json.load(open(registry_path, encoding="utf-8-sig"))
+    except Exception:
+        return {}
+    return d.get("recordedSkips", {}) or {}
+
+
+def _in_window(task, window_start):
+    ts = _parse_iso(task.get("lastRunAt"))
+    return ts is not None and ts >= window_start
+
+
+def build_run_index(cc_registry_path, lams_registry_path, project_dirs,
+                     now=None, window_hours_override=None):
+    """Stage 0 orchestrator -- produces the complete run-index document.
+
+    Returns a dict:
+      {
+        "generated_at": iso str,
+        "window_hours": float,
+        "window_reason": str,
+        "runs": [ { run_id, fleet, task_id, last_scheduled_for, last_run_at,
+                    cron_expression, model, transcript, joined: bool,
+                    recorded_skips: [...] }, ... ],
+        "duplicate_flags": [ ... ],
+        "join_stats": { "cc": {joined, total, rate_ok, message},
+                         "lams": {...} },
+      }
+    """
+    now = now or datetime.now(timezone.utc)
+    cc_tasks_all = _registry_tasks(cc_registry_path)
+    lams_tasks_all = _registry_tasks(lams_registry_path)
+
+    if window_hours_override is not None:
+        window_hours, window_reason = float(window_hours_override), "explicit --window-hours override"
+    else:
+        window_hours, window_reason = decide_window_hours(
+            now, _read_last_auditor_run(), cc_tasks_all, lams_tasks_all)
+
+    window_start = now - timedelta(hours=window_hours)
+
+    cc_session_records = load_session_records(
+        os.path.dirname(cc_registry_path) if cc_registry_path else None)
+    lams_registry_dir = os.path.dirname(lams_registry_path) if lams_registry_path else None
+    lams_session_records = load_session_records(lams_registry_dir)
+    cc_recorded_skips = _registry_recorded_skips(cc_registry_path)
+    lams_recorded_skips = _registry_recorded_skips(lams_registry_path)
+
+    runs = []
+    cc_joined = cc_total = 0
+    lams_joined = lams_total = 0
+
+    for fleet, tasks, session_records, skips in (
+            ("cc", cc_tasks_all, cc_session_records, cc_recorded_skips),
+            ("lams", lams_tasks_all, lams_session_records, lams_recorded_skips)):
+        for t in tasks:
+            task_id = t.get("id")
+            if task_id == SELF_TASK_ID:
+                continue  # self-exclusion (spec Sec 5 Stage 4)
+            if not _in_window(t, window_start):
+                continue
+            session = find_executing_session(t, session_records)
+            if fleet == "cc":
+                transcript = join_cc_transcript(session, project_dirs) if session else None
+                cc_total += 1
+                if transcript:
+                    cc_joined += 1
+            else:
+                transcript = join_lams_transcript(session, lams_registry_dir) if session else None
+                lams_total += 1
+                if transcript:
+                    lams_joined += 1
+            runs.append({
+                "run_id": build_run_id(fleet, task_id, t.get("lastScheduledFor")),
+                "fleet": fleet,
+                "task_id": task_id,
+                "last_scheduled_for": t.get("lastScheduledFor"),
+                "last_run_at": t.get("lastRunAt"),
+                "cron_expression": t.get("cronExpression"),
+                "model": t.get("model"),
+                "transcript": transcript,
+                "joined": transcript is not None,
+                "recorded_skips": skips.get(task_id, []),
+            })
+
+    cc_enabled = {t.get("id") for t in cc_tasks_all if t.get("enabled")}
+    lams_enabled = {t.get("id") for t in lams_tasks_all if t.get("enabled")}
+    duplicate_flags = detect_duplicates(runs, cc_enabled, lams_enabled)
+
+    cc_ok, cc_msg = assert_join_rate_floor(cc_joined, cc_total, window_hours)
+    lams_ok, lams_msg = assert_join_rate_floor(lams_joined, lams_total, window_hours)
+
+    return {
+        "generated_at": now.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+        "window_hours": window_hours,
+        "window_reason": window_reason,
+        "runs": runs,
+        "duplicate_flags": duplicate_flags,
+        "join_stats": {
+            "cc": {"joined": cc_joined, "total": cc_total, "rate_ok": cc_ok, "message": cc_msg},
+            "lams": {"joined": lams_joined, "total": lams_total, "rate_ok": lams_ok, "message": lams_msg},
+        },
+    }
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--window-hours", type=float, default=None,
+                         help="Override automatic window sizing (ad-hoc investigation only).")
+    parser.add_argument("--out", default=None,
+                         help="Output path. Default: _state/ground-truth/run-index-<date>.json")
+    parser.add_argument("--json", action="store_true",
+                         help="Print the run index to stdout instead of writing a file.")
+    args = parser.parse_args(argv)
+
+    cc_path = _sd.discover_store("claude-code-sessions") if _sd else None
+    lams_path = _sd.discover_store("local-agent-mode-sessions") if _sd else None
+    project_dirs = find_project_dirs()
+
+    now = datetime.now(timezone.utc)
+    index = build_run_index(cc_path, lams_path, project_dirs, now=now,
+                             window_hours_override=args.window_hours)
+
+    if args.json:
+        print(json.dumps(index, indent=2))
+    else:
+        out = args.out or os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "_state", "ground-truth",
+            "run-index-{}.json".format(now.strftime("%Y-%m-%d")))
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        json.dump(index, open(out, "w", encoding="utf-8"), indent=2)
+        print("wrote {} ({} runs, {} duplicate flags)".format(
+            out, len(index["runs"]), len(index["duplicate_flags"])))
+
+    _write_last_auditor_run(now)
+
+    floor_failures = [f for f in (index["join_stats"]["cc"], index["join_stats"]["lams"])
+                      if not f["rate_ok"]]
+    if floor_failures:
+        print("JOIN-RATE FLOOR BREACHED: " + "; ".join(f["message"] for f in floor_failures),
+              file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
