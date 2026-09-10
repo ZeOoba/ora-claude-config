@@ -1,0 +1,212 @@
+---
+name: ora-ground-truth-auditor
+description: Nightly re-derivation audit of the previous 24h of scheduled-task runs across both fleets. Dispatches one verifier agent per side-effecting run (side-effect-free runs get a cheap deterministic stamp, no agent) to re-derive every factual claim from PRIMARY SOURCES ONLY -- never a prior summary, log line, or finding. Reports on four axes: IDEMPOTENCY, CLAIM ACCURACY, STALENESS, FRESHNESS OF INPUTS. Emails one morning digest to ggoldberg@oxfordra.net; any retraction or published-page edit is drafted and named in the digest, never sent or applied. Full design: docs/superpowers/specs/2026-09-10-ground-truth-auditor-design.md. [MODEL: claude-opus-5 | set 2026-09-10]
+---
+
+# ORA Ground-Truth Auditor
+
+Full design rationale, verified ground-truth facts about the substrate, and every risk
+this run must respect: `docs/superpowers/specs/2026-09-10-ground-truth-auditor-design.md`.
+Read it if anything below is ambiguous -- do not improvise around a gap, the spec's own
+Sec 9 exists to close exactly that kind of gap.
+
+## STEP 0 -- self-exclusion sanity check
+
+Before anything else, confirm your OWN task id is `ora-ground-truth-auditor`. Stage 0
+excludes this id from its own index automatically -- if you ever see this task's own
+run listed as something to audit, STOP. That means self-exclusion broke, and auditing
+your own run trivially "passes" every axis, which is worse than not auditing at all.
+
+## STEP 1 -- build the run index (Stage 0, deterministic, no judgment)
+
+```
+"C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe" "C:/Users/Owner/.claude/maintenance/ground-truth-run-index.py" --out "C:/Users/Owner/.claude/maintenance/_state/ground-truth/run-index-<today's date, YYYY-MM-DD>.json"
+```
+
+This script decides its own window (default 24h, auto-widened for a catch-up burst or a
+gap in the auditor's own last run -- read its stdout `window_reason`), joins every run to
+its transcript, flags duplicates, and asserts the join-rate floor. **If it exits non-zero
+(JOIN-RATE FLOOR BREACHED on stderr), do not silently continue** -- this means the join
+mechanism itself may be broken, not just noisy. Include the exact stderr line in the
+digest's own status section regardless of what else the run finds, and still complete
+every other step below (a broken floor is a finding, not a reason to abort the audit).
+
+## STEP 2 -- extract side effects (Stage 1, deterministic, no judgment)
+
+```
+"C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe" "C:/Users/Owner/.claude/maintenance/ground-truth-side-effects.py" --run-index "<the file STEP 1 wrote>"
+```
+
+Read its stdout line (`N runs: M to verifier, K stamped clean`) -- this is the
+`side_effect_stats` figure the digest's Runs Audited section reports verbatim, and the
+gated/ungated trend that Sec 9 R3 exists to make visible.
+
+## STEP 3 -- dispatch one verifier per side-effecting run
+
+For every run in the annotated index where `has_side_effects` was true (i.e. every run
+in the index MINUS the `stamped_clean` count from STEP 2), dispatch one subagent.
+
+**Model floor for each dispatch** -- resolve with:
+
+```python
+import sys
+sys.path.insert(0, r"C:\Users\Owner\.claude\maintenance")
+import importlib.util
+spec = importlib.util.spec_from_file_location("gmr", r"C:\Users\Owner\.claude\maintenance\ground-truth-model-resolve.py")
+gmr = importlib.util.module_from_spec(spec); spec.loader.exec_module(gmr)
+verifier_model, reasoning = gmr.resolve_verifier_model(task_record, skill_md_text, session_record)
+```
+
+where `task_record` is the run's registry entry, `skill_md_text` is the contents of the
+audited task's own SKILL.md (read its `filePath` from the registry), and `session_record`
+is the joined session dict if one exists. **Runs touching financial data, governor
+constants (DSCR/LTV), or a confidential deal never verify below Fable regardless of what
+the ladder returns** -- round up explicitly for those, per CLAUDE.md's Dispatch
+invariants. Pin the resolved model explicitly on every dispatch; never omit it.
+
+**The verifier's prompt is assembled from ONLY the following** -- this is the input-starvation
+mechanism (spec Sec 6.1), the primary defence for the absolute rule. Do NOT include the
+run's own summary, the body of what it emailed, or any prior finding about it:
+
+- the run's `run_id`, `task_id`, `fleet`, `last_scheduled_for`
+- primary-source LOCATORS ONLY, derived from the run's side_effects and transcript --
+  a Notion page id, an Outlook message subject+date to search Sent Items for, a commit
+  sha, a file path, a parcel/lease identifier. Extract these by grep'ing the transcript
+  for the same patterns STEP 2's script matched (Notion page ids appear near
+  `notion-create-pages`/`notion-update-page` calls; commit shas follow `git push`
+  output; file paths follow `Write`/`Edit` tool_use blocks).
+- the four axes below, verbatim
+- the absolute rule, verbatim: "Never treat a prior summary, log line, or finding as
+  evidence. Re-derive every claim from the primary source you just read yourself."
+
+**Verifier task prompt template** (fill the bracketed fields, dispatch via the Agent tool,
+`subagent_type: general-purpose`, the resolved `verifier_model`, in parallel across all
+side-effecting runs in one message so they run concurrently):
+
+> You are an independent verifier auditing one prior scheduled-task run. You have NO
+> access to and must NOT trust any summary, email body, log line, or finding this run
+> produced. Every claim you report must be re-derived by YOU, right now, from the actual
+> primary source: read the raw file, the actual current Notion page contents, the git
+> history, the lease document -- not a description of it.
+>
+> Run under audit: `[run_id]`, task `[task_id]`, fleet `[fleet]`, scheduled for
+> `[last_scheduled_for]`.
+>
+> Primary-source locators for this run (go read these yourself; do not ask for more
+> context about the run itself):
+> `[locator list]`
+>
+> Report on all four axes:
+>
+> **IDEMPOTENCY** -- read the actual target(s) named above. Are there two Notion pages
+> for one logical cycle? Two emails with the same subject on the relevant date in Sent
+> Items? Two commits with identical content? (Cron/trigger double-fire detection was
+> already done deterministically upstream -- you are checking the ACTUAL TARGET STATE
+> for doubles, not re-deriving the cron analysis.)
+>
+> **CLAIM ACCURACY** -- enumerate every factual assertion in the published artifact,
+> read AT ITS SOURCE (the live Notion page, the actual Sent Items message) -- never from
+> a transcript's account of what was published. For each claim, cite the primary source
+> you personally read that supports or contradicts it, and mark it SUPPORTED,
+> CONTRADICTED, or UNVERIFIABLE. UNVERIFIABLE means the primary source was unreachable --
+> report that plainly, never upgrade it to SUPPORTED because you couldn't check.
+>
+> **STALENESS** -- for each plan item, pin, or config value this run acted on, compare
+> the state AT RUN TIME (use `git log` / `git show` to reconstruct it precisely) against
+> the CURRENT state. Flag anything that was a no-op, or that reverted a newer state.
+>
+> **FRESHNESS OF INPUTS** -- for every upstream data source this run depended on, report
+> its actual last-updated timestamp (read it yourself) and state whether a staleness
+> alarm should have fired but did not. The ORA Master Workbook mirror is STALE past 7
+> days -- if this run used it, check its age explicitly.
+>
+> Compile your findings as a numbered facts dossier (F-1, F-2, ...) per the
+> evidence-dossier-drafting skill's VERIFY step -- every fact carries the exact command
+> or read you ran to establish it. Every axis verdict above must cite at least one F-id.
+> A verdict with no F-id, or citing an F-id whose source does not actually support it,
+> will be dropped before publication -- so do not write one.
+
+## STEP 4 -- F-id discipline and the refuter pass (Sec 6.2, 6.3)
+
+After every verifier returns, drop any verdict that cites no F-id or whose cited F-id's
+source text does not actually support the claim made (read the F-id's evidence yourself
+-- do not take the verifier's word that its own citation is valid).
+
+For every surviving **CONTRADICTED** verdict, dispatch a second agent (same or higher
+model tier as the verifier that produced it) with this brief:
+
+> Re-read the exact primary source at `[locator]` yourself. A prior verifier concluded
+> the claim "`[claim text]`" is CONTRADICTED, citing `[F-id and its evidence]`. Argue
+> the ORIGINAL claim was actually right. If you cannot construct a good-faith argument
+> that the original claim holds, say so and explain why the contradiction survives.
+
+A contradiction that survives this refuter pass goes to the digest. One that does not
+survive is downgraded to UNVERIFIABLE (not silently dropped) and logged in the run's own
+notes for STEP 6's systemic-cause review.
+
+## STEP 5 -- STALENESS and FRESHNESS roll-up
+
+Independent of the per-run verifiers, using the `recorded_skips` field already present
+on every run in the index (no re-derivation needed -- Stage 0 read this from the
+registry directly): for every run with a non-empty `recorded_skips` list, note the skip
+reasons and dates in the digest's Runs Audited section as context, not as a separate
+axis finding.
+
+## STEP 6 -- approval gate for corrections (Hard Invariant 1, spec Sec 7)
+
+For any CONTRADICTED claim (post-refuter) or duplicate side effect whose fix would mean
+sending a retraction email or editing a published page:
+
+1. Draft the full correction (email body or page edit) to
+   `C:\Users\Owner\.claude\maintenance\_state\ground-truth-pending-approval\<today's date>\<run_id>\`.
+2. Name it in the digest with a one-line summary of what it would change.
+3. **Do NOT send it. Do NOT apply it.** No exception -- this is an outbound
+   counterparty send or a live-page edit, both of which require Gabriel's explicit
+   in-turn confirmation regardless of how confident the verifier+refuter pair was.
+
+## STEP 7 -- systemic-cause open items
+
+For any finding that points at a systemic cause (not a one-off) -- a cron collision that
+will recur nightly, a join mechanism that is silently degrading, a skill that
+structurally cannot avoid duplicating a side effect -- file an open item:
+
+```
+ID=$("C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe" "C:/Users/Owner/.claude/maintenance/allocate-oi-id.py" --session $CLAUDE_CODE_SESSION_ID --note "<why>")
+```
+
+Never hand-compute the next OI-NNN. Reference the allocated id in the digest's Open
+Items section.
+
+## STEP 8 -- compose and send the morning digest
+
+One HTML email, `ggoldberg@oxfordra.net` **only** -- no cc (the ora-am-brief Eric-cc
+exception does not extend here). Sections, in this exact order:
+
+1. **Runs audited** -- total count, fleet split, `side_effect_stats` from STEP 2
+   verbatim (verifiers dispatched vs stamped clean), the join-rate floor result from
+   STEP 1 (state the window actually used and why, per its `window_reason`), and any
+   run skipped entirely with the reason.
+2. **CONTRADICTED claims** -- highest priority. For each: the claim, the F-id evidence
+   that contradicts it, and the drafted correction's location from STEP 6 (never its
+   content inline if it's a page edit -- link the path).
+3. **Duplicate side effects** -- from STEP 1's `duplicate_flags` plus anything a
+   verifier found at the target itself (STEP 3's IDEMPOTENCY axis). Remediation steps
+   for each.
+4. **Open items filed** -- the OI-NNN ids from STEP 7, one line each.
+
+Send via:
+
+```
+powershell -File "C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1" -To "ggoldberg@oxfordra.net" -Subject "[ORA] Ground-Truth Audit -- <today's date>" -BodyFile "<path to the composed HTML>" -BodyFormat html
+```
+
+Exit-code handling (canon): exit 2 (COM failure) or 4 (timeout) -- retry once, then flag
+loudly if it fails again (do not halt the task over a send failure once the digest is
+drafted and saved). Exit 1 (usage error) or 3 (stuck wizard) -- do not retry, flag
+immediately with the exact exit code and stderr.
+
+## STEP 9 -- completion note
+
+Do not email a second time. Report in the task's own completion notification: runs
+audited, verifiers dispatched, CONTRADICTED count (pre- and post-refuter), duplicate
+flags, OI ids filed, and the join-rate floor's pass/fail state per fleet.
