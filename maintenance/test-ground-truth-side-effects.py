@@ -122,6 +122,32 @@ def test_annotate_run_index_produces_correct_counts():
     os.remove(path_email)
 
 
+def test_annotate_run_index_persists_needs_verifier_per_run():
+    # Task 8's SKILL.md STEP 3 dispatches a verifier for every run where
+    # `needs_verifier` is true -- that field must actually be written onto
+    # each run record, not just used internally to compute the aggregate
+    # counters. Cover all three run shapes: joined-clean (False), unjoined
+    # (True, unconditionally), and joined-with-side-effects (True).
+    path_email = _write_transcript([
+        {"type": "tool_use", "name": "Bash", "input": {"command": "send-via-outlook.ps1"}}])
+    run_index = {
+        "runs": [
+            {"run_id": "clean", "joined": True, "transcript": None},
+            {"run_id": "unjoined", "joined": False, "transcript": None},
+            {"run_id": "dirty", "joined": True, "transcript": path_email},
+        ]
+    }
+    gse.annotate_run_index(run_index)
+    by_id = {r["run_id"]: r for r in run_index["runs"]}
+    check("joined-clean run has needs_verifier False",
+          by_id["clean"]["needs_verifier"] is False, by_id["clean"])
+    check("unjoined run has needs_verifier True",
+          by_id["unjoined"]["needs_verifier"] is True, by_id["unjoined"])
+    check("joined-with-side-effects run has needs_verifier True",
+          by_id["dirty"]["needs_verifier"] is True, by_id["dirty"])
+    os.remove(path_email)
+
+
 if __name__ == "__main__":
     test_extract_side_effects_detects_email_send()
     test_extract_side_effects_detects_notion_write()
@@ -133,6 +159,7 @@ if __name__ == "__main__":
     test_extract_side_effects_detects_oi_filed()
     test_extract_side_effects_detects_file_write_positive()
     test_annotate_run_index_produces_correct_counts()
+    test_annotate_run_index_persists_needs_verifier_per_run()
     print("-" * 72)
     if FAILURES:
         print("FAIL: %d failure(s): %s" % (len(FAILURES), ", ".join(FAILURES)))

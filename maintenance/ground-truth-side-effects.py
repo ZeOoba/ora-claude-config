@@ -70,7 +70,9 @@ def annotate_run_index(run_index):
     gated = ungated = 0
     for run in run_index.get("runs", []):
         run["side_effects"] = extract_side_effects(run.get("transcript"))
-        if has_side_effects(run):
+        needs_verifier = has_side_effects(run)
+        run["needs_verifier"] = needs_verifier
+        if needs_verifier:
             ungated += 1  # dispatched to a verifier
         else:
             gated += 1  # stamped clean, no agent

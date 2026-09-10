@@ -347,11 +347,16 @@ def test_build_run_index_end_to_end_joins_a_real_shaped_run():
         _write_registry(cc_reg, [
             {"id": "ora-doctrine-integrity-guard", "cronExpression": "5 7 * * *",
              "enabled": True, "lastRunAt": last_run, "lastScheduledFor": last_run,
-             "model": "claude-opus-5"},
+             "model": "claude-opus-5", "filePath": "/some/path/SKILL.md"},
         ])
         t_ms = int(datetime.fromisoformat(last_run.replace("Z", "+00:00")).timestamp() * 1000)
         _write_session_record(cc_dir, "local_aa8cdc0f", t_ms,
                                "Ora doctrine integrity guard", cli_session_id="abc123")
+        # inject a model onto the session record after the fact (helper doesn't take one)
+        session_path = os.path.join(cc_dir, "local_aa8cdc0f.json")
+        rec = json.load(open(session_path, encoding="utf-8"))
+        rec["model"] = "claude-sonnet-5"
+        json.dump(rec, open(session_path, "w", encoding="utf-8"))
         proj_dir = os.path.join(tmp, "proj")
         os.makedirs(proj_dir)
         open(os.path.join(proj_dir, "abc123.jsonl"), "w").close()
@@ -366,6 +371,60 @@ def test_build_run_index_end_to_end_joins_a_real_shaped_run():
         check("run_id keys on lastScheduledFor", run["run_id"].endswith(last_run), run)
         check("CC join-rate floor passes at 1/1", index["join_stats"]["cc"]["rate_ok"] is True,
               index["join_stats"])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_build_run_index_persists_file_path_and_session_model_for_verifier_dispatch():
+    # Task 8's SKILL.md STEP 3 dispatches gmr.resolve_verifier_model(task_record,
+    # skill_md_text, session_record) for every side-effecting run -- the live
+    # agent needs the task's own SKILL.md path (rung 2) and the joined
+    # session's own model field (rung 3) to build those inputs itself. Prove
+    # both survive onto the run record for a joined run, and are None/absent
+    # -safe (never raise) for an unjoined one.
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_dir = os.path.join(tmp, "cc")
+        cc_reg = os.path.join(cc_dir, "scheduled-tasks.json")
+        now = datetime(2026, 9, 10, 20, 0, tzinfo=timezone.utc)
+        last_run = "2026-09-10T16:56:58.667Z"
+        _write_registry(cc_reg, [
+            {"id": "ora-doctrine-integrity-guard", "cronExpression": "5 7 * * *",
+             "enabled": True, "lastRunAt": last_run, "lastScheduledFor": last_run,
+             "model": "claude-opus-5", "filePath": "/some/path/SKILL.md"},
+            {"id": "ora-unjoined-task", "cronExpression": "0 5 * * *",
+             "enabled": True, "lastRunAt": "2026-09-10T05:00:00.000Z",
+             "lastScheduledFor": "2026-09-10T05:00:00.000Z",
+             "model": "claude-opus-5", "filePath": "/some/other/SKILL.md"},
+        ])
+        t_ms = int(datetime.fromisoformat(last_run.replace("Z", "+00:00")).timestamp() * 1000)
+        _write_session_record(cc_dir, "local_aa8cdc0f", t_ms,
+                               "Ora doctrine integrity guard", cli_session_id="abc123")
+        session_path = os.path.join(cc_dir, "local_aa8cdc0f.json")
+        rec = json.load(open(session_path, encoding="utf-8"))
+        rec["model"] = "claude-sonnet-5"
+        json.dump(rec, open(session_path, "w", encoding="utf-8"))
+        proj_dir = os.path.join(tmp, "proj")
+        os.makedirs(proj_dir)
+        open(os.path.join(proj_dir, "abc123.jsonl"), "w").close()
+
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        _write_registry(lams_reg, [])
+
+        index = gti.build_run_index(cc_reg, lams_reg, [proj_dir], now=now)
+        by_task = {r["task_id"]: r for r in index["runs"]}
+
+        joined_run = by_task["ora-doctrine-integrity-guard"]
+        check("joined run persists its own registry file_path",
+              joined_run["file_path"] == "/some/path/SKILL.md", joined_run)
+        check("joined run persists the joined session's own model as session_model",
+              joined_run["session_model"] == "claude-sonnet-5", joined_run)
+
+        unjoined_run = by_task["ora-unjoined-task"]
+        check("unjoined run still carries its own registry file_path",
+              unjoined_run["file_path"] == "/some/other/SKILL.md", unjoined_run)
+        check("unjoined run's session_model is None (absent-safe, never raises)",
+              unjoined_run["session_model"] is None, unjoined_run)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -443,6 +502,7 @@ if __name__ == "__main__":
     test_join_rate_floor_empty_window_is_trivially_ok()
     test_build_run_index_excludes_its_own_run()
     test_build_run_index_end_to_end_joins_a_real_shaped_run()
+    test_build_run_index_persists_file_path_and_session_model_for_verifier_dispatch()
     test_build_run_index_last_auditor_run_at_is_injectable()
     test_build_run_index_default_last_auditor_run_at_falls_back_to_real_file_reader()
     print("-" * 72)
