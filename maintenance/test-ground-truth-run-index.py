@@ -45,9 +45,10 @@ def test_build_run_id_keys_on_last_scheduled_for():
 def test_window_default_when_nothing_widens():
     now = datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc)
     last_run = now - timedelta(hours=6)  # auditor ran 6h ago, well inside 24h
-    hours, reason = gti.decide_window_hours(now, last_run, [], [])
+    hours, reason, widen_kind = gti.decide_window_hours(now, last_run, [], [])
     check("default window when auditor is current and no resume in range",
           hours == 24.0, "hours=%s reason=%s" % (hours, reason))
+    check("widen_kind is 'none' when nothing widens", widen_kind == "none", widen_kind)
 
 
 def test_window_widens_when_auditor_gap_exceeds_default():
@@ -55,10 +56,12 @@ def test_window_widens_when_auditor_gap_exceeds_default():
     # 3 days, so its own last run is 72h old.
     now = datetime(2026, 9, 11, 4, 0, tzinfo=timezone.utc)
     last_run = now - timedelta(hours=72)
-    hours, reason = gti.decide_window_hours(now, last_run, [], [])
+    hours, reason, widen_kind = gti.decide_window_hours(now, last_run, [], [])
     check("window widens to cover the auditor's own gap",
           hours >= 72.0, "hours=%s reason=%s" % (hours, reason))
     check("reason names the gap", "prior auditor run" in reason, reason)
+    check("widen_kind is 'auditor_gap' for a pure auditor-gap widen",
+          widen_kind == "auditor_gap", widen_kind)
 
 
 def test_window_widens_on_fleet_resume_event():
@@ -71,11 +74,29 @@ def test_window_widens_on_fleet_resume_event():
         "lastRunAt": "2026-09-11T16:01:00.000Z",
         # no cronExpression -- one-time
     }
-    hours, reason = gti.decide_window_hours(now, now - timedelta(hours=1),
-                                             [resume_task], [])
+    hours, reason, widen_kind = gti.decide_window_hours(now, now - timedelta(hours=1),
+                                                         [resume_task], [])
     check("window widens on a fleet-resume event even when the auditor itself "
           "is current", hours > 24.0, "hours=%s reason=%s" % (hours, reason))
     check("reason names the resume task", "fleet-resume event" in reason, reason)
+    check("widen_kind is 'resume_event' for a pure resume widen (no auditor gap)",
+          widen_kind == "resume_event", widen_kind)
+
+
+def test_window_widens_on_both_auditor_gap_and_resume_event():
+    # I6: when BOTH conditions hold, widen_kind must be "both" -- the
+    # auditor-gap justification still applies, so the loose floor tier
+    # should still be used (see assert_join_rate_floor).
+    now = datetime(2026, 9, 11, 16, 5, tzinfo=timezone.utc)
+    last_run = now - timedelta(hours=72)
+    resume_task = {
+        "id": "ora-routine-pause-resume-2026-09-11",
+        "enabled": True,
+        "lastRunAt": "2026-09-11T16:01:00.000Z",
+    }
+    hours, reason, widen_kind = gti.decide_window_hours(now, last_run, [resume_task], [])
+    check("widen_kind is 'both' when both an auditor gap and a resume event hold",
+          widen_kind == "both", widen_kind)
 
 
 def test_recurring_task_named_resume_does_not_widen():
@@ -88,9 +109,11 @@ def test_recurring_task_named_resume_does_not_widen():
         "cronExpression": "0 * * * *",
         "lastRunAt": "2026-09-10T11:59:00.000Z",
     }
-    hours, reason = gti.decide_window_hours(now, now - timedelta(hours=1), [recurring], [])
+    hours, reason, widen_kind = gti.decide_window_hours(now, now - timedelta(hours=1), [recurring], [])
     check("a RECURRING task named *resume* does not trigger the resume widen",
           hours == 24.0, "hours=%s reason=%s" % (hours, reason))
+    check("widen_kind is 'none' (recurring resume-named task doesn't count)",
+          widen_kind == "none", widen_kind)
 
 
 def test_never_ran_does_not_widen_without_a_resume_event():
@@ -99,11 +122,13 @@ def test_never_ran_does_not_widen_without_a_resume_event():
     # no measurable gap, and the realistic backfill case (mid-pause
     # registration) is covered separately by the resume-event widen path.
     now = datetime(2026, 9, 10, 4, 0, tzinfo=timezone.utc)
-    hours, reason = gti.decide_window_hours(now, None, [], [])
+    hours, reason, widen_kind = gti.decide_window_hours(now, None, [], [])
     check("never-ran with no resume event stays at the default window",
           hours == 24.0, "hours=%s reason=%s" % (hours, reason))
     check("the reason still names the never-ran condition for visibility",
           "no prior auditor run" in reason, reason)
+    check("widen_kind is 'none' -- a never-ran with no resume didn't actually widen",
+          widen_kind == "none", widen_kind)
 
 
 # ---------------------------------------------------------------------------
@@ -595,6 +620,38 @@ def test_join_rate_floor_empty_window_is_trivially_ok():
     check("an empty window never fails the floor", ok, msg)
 
 
+def test_join_rate_floor_resume_only_widen_uses_strict_floor():
+    # I6, the whole point of the fix: task selection in build_run_index keys
+    # on lastRunAt, so a resume catch-up burst's own runs are ALREADY fully
+    # captured by the plain default-hours window -- the 3x widen adds no
+    # coverage benefit for that burst. The floor must therefore stay STRICT
+    # (90%) when the widen reason is purely resume_event (no auditor gap),
+    # even though window_hours itself is wide.
+    ok, msg = gti.assert_join_rate_floor(50, 100, window_hours=100.0, widen_kind="resume_event")
+    check("a resume-only widen with a mediocre (50/100) join rate FAILS the "
+          "strict 90% floor, despite a wide window", not ok, msg)
+
+
+def test_join_rate_floor_auditor_gap_widen_still_uses_loose_floor():
+    # Same mediocre rate as above, but this time the widen reason IS a
+    # genuine auditor-gap catch-up -- the loose floor still applies,
+    # unchanged from pre-I6 behavior (this is assert_join_rate_floor's
+    # default widen_kind too).
+    ok, msg = gti.assert_join_rate_floor(50, 100, window_hours=100.0, widen_kind="auditor_gap")
+    check("the SAME 50/100 rate under an auditor-gap widen still passes the "
+          "loose 30% floor (unchanged behavior)", ok, msg)
+
+
+def test_join_rate_floor_default_widen_kind_matches_auditor_gap_behavior():
+    # Backward compatibility: callers that don't pass widen_kind at all (the
+    # pre-I6 call shape) must see identical behavior to explicit
+    # widen_kind="auditor_gap".
+    ok_default, _ = gti.assert_join_rate_floor(50, 100, window_hours=100.0)
+    ok_explicit, _ = gti.assert_join_rate_floor(50, 100, window_hours=100.0, widen_kind="auditor_gap")
+    check("omitting widen_kind behaves identically to widen_kind='auditor_gap'",
+          ok_default == ok_explicit == True)
+
+
 def _write_registry(path, tasks, recorded_skips=None):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     json.dump({"scheduledTasks": tasks, "recordedSkips": recorded_skips or {}},
@@ -826,11 +883,181 @@ def test_build_run_index_default_last_auditor_run_at_falls_back_to_real_file_rea
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+# ---------------------------------------------------------------------------
+# I3 -- resolve_registry_paths() / main() exit-2 on total registry-discovery
+# failure. Before this fix, `_sd is None` or `discover_store` returning None
+# for either fleet fell through to `_registry_tasks(None)`, whose try/except
+# swallows the resulting TypeError and returns [] -- 0 runs, both floors
+# trivially "ok", exit 0. A broken auditor looked identical to a quiet night.
+# ---------------------------------------------------------------------------
+
+def test_resolve_registry_paths_errors_when_sd_unavailable():
+    orig_sd = gti._sd
+    gti._sd = None
+    try:
+        cc, lams, err = gti.resolve_registry_paths()
+        check("cc path is None when store_discovery failed to import",
+              cc is None, cc)
+        check("lams path is None when store_discovery failed to import",
+              lams is None, lams)
+        check("error names _sd unavailability, not a generic failure",
+              err is not None and "_sd" in err, err)
+    finally:
+        gti._sd = orig_sd
+
+
+def test_resolve_registry_paths_errors_when_discover_store_returns_none():
+    class FakeSD:
+        @staticmethod
+        def discover_store(name):
+            return None  # simulate discovery running but finding nothing
+
+    orig_sd = gti._sd
+    gti._sd = FakeSD()
+    try:
+        cc, lams, err = gti.resolve_registry_paths()
+        check("cc path is None", cc is None, cc)
+        check("lams path is None", lams is None, lams)
+        check("error names BOTH failed fleets, distinguishing this from the "
+              "_sd-unavailable case", err is not None and "cc:" in err and "lams:" in err, err)
+    finally:
+        gti._sd = orig_sd
+
+
+def test_resolve_registry_paths_errors_when_only_one_fleet_fails():
+    class FakeSD:
+        @staticmethod
+        def discover_store(name):
+            return None if name == "local-agent-mode-sessions" else "/fake/cc-path"
+
+    orig_sd = gti._sd
+    gti._sd = FakeSD()
+    try:
+        cc, lams, err = gti.resolve_registry_paths()
+        check("the healthy fleet's path still resolves", cc == "/fake/cc-path", cc)
+        check("the broken fleet's path is None", lams is None, lams)
+        check("EITHER fleet failing is still a hard error -- not a silent partial index",
+              err is not None and "lams:" in err, err)
+    finally:
+        gti._sd = orig_sd
+
+
+def test_resolve_registry_paths_ok_when_both_fleets_resolve():
+    class FakeSD:
+        @staticmethod
+        def discover_store(name):
+            return "/fake/" + name
+
+    orig_sd = gti._sd
+    gti._sd = FakeSD()
+    try:
+        cc, lams, err = gti.resolve_registry_paths()
+        check("cc path resolves", cc == "/fake/claude-code-sessions", cc)
+        check("lams path resolves", lams == "/fake/local-agent-mode-sessions", lams)
+        check("no error when both fleets resolve cleanly", err is None, err)
+    finally:
+        gti._sd = orig_sd
+
+
+def test_main_exits_2_on_total_registry_discovery_failure():
+    orig_sd = gti._sd
+    gti._sd = None
+    try:
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            rc = gti.main(["--json"])
+        check("main() returns the NEW exit code 2 (distinct from 0=clean and "
+              "1=join-rate floor breach) when registry discovery totally fails",
+              rc == 2, rc)
+    finally:
+        gti._sd = orig_sd
+
+
+# ---------------------------------------------------------------------------
+# I4 -- the "last auditor run" marker must NOT be written for a --json
+# (read-only) invocation, or for an explicit --window-hours (ad-hoc manual)
+# override -- only the normal automatic path should reset the gap-tracking
+# clock a real scheduled run depends on.
+# ---------------------------------------------------------------------------
+
+def _run_main_with_fake_registries(argv, tmp):
+    """Runs gti.main(argv) against empty, valid fake registries with _sd and
+    LAST_RUN_MARKER monkeypatched, capturing stdout/stderr so test output
+    stays clean. Returns (rc, marker_path)."""
+    import io
+    import contextlib
+
+    cc_reg = os.path.join(tmp, "cc", "scheduled-tasks.json")
+    lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+    _write_registry(cc_reg, [])
+    _write_registry(lams_reg, [])
+
+    class FakeSD:
+        @staticmethod
+        def discover_store(name):
+            return cc_reg if name == "claude-code-sessions" else lams_reg
+
+    marker_path = os.path.join(tmp, "last-auditor-run.json")
+    orig_sd = gti._sd
+    orig_marker = gti.LAST_RUN_MARKER
+    gti._sd = FakeSD()
+    gti.LAST_RUN_MARKER = marker_path
+    try:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            rc = gti.main(argv)
+        return rc, marker_path
+    finally:
+        gti._sd = orig_sd
+        gti.LAST_RUN_MARKER = orig_marker
+
+
+def test_main_json_flag_does_not_write_last_auditor_run_marker():
+    tmp = tempfile.mkdtemp()
+    try:
+        rc, marker_path = _run_main_with_fake_registries(["--json"], tmp)
+        check("main() with --json still exits 0 on a clean (empty) index", rc == 0, rc)
+        check("the last-auditor-run marker is NOT written for a --json "
+              "(read-only investigative) invocation", not os.path.exists(marker_path))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_main_window_hours_override_does_not_write_last_auditor_run_marker():
+    tmp = tempfile.mkdtemp()
+    try:
+        rc, marker_path = _run_main_with_fake_registries(
+            ["--window-hours", "48", "--out", os.path.join(tmp, "out.json")], tmp)
+        check("main() with --window-hours still exits 0 on a clean (empty) index",
+              rc == 0, rc)
+        check("the last-auditor-run marker is NOT written for an explicit "
+              "--window-hours (ad-hoc manual) override", not os.path.exists(marker_path))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_main_normal_invocation_still_writes_last_auditor_run_marker():
+    # Regression guard: the real automatic nightly path (neither --json nor
+    # --window-hours) must still reset the clock exactly as before.
+    tmp = tempfile.mkdtemp()
+    try:
+        rc, marker_path = _run_main_with_fake_registries(
+            ["--out", os.path.join(tmp, "out.json")], tmp)
+        check("main() on the normal automatic path still exits 0", rc == 0, rc)
+        check("the last-auditor-run marker IS written on a normal automatic run "
+              "(unchanged behavior)", os.path.exists(marker_path))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     test_build_run_id_keys_on_last_scheduled_for()
     test_window_default_when_nothing_widens()
     test_window_widens_when_auditor_gap_exceeds_default()
     test_window_widens_on_fleet_resume_event()
+    test_window_widens_on_both_auditor_gap_and_resume_event()
     test_recurring_task_named_resume_does_not_widen()
     test_never_ran_does_not_widen_without_a_resume_event()
     test_find_executing_session_primary_key_is_scheduled_task_id()
@@ -863,12 +1090,23 @@ if __name__ == "__main__":
     test_join_rate_floor_normal_window_low_rate_fails()
     test_join_rate_floor_widened_window_same_low_rate_passes()
     test_join_rate_floor_empty_window_is_trivially_ok()
+    test_join_rate_floor_resume_only_widen_uses_strict_floor()
+    test_join_rate_floor_auditor_gap_widen_still_uses_loose_floor()
+    test_join_rate_floor_default_widen_kind_matches_auditor_gap_behavior()
     test_build_run_index_excludes_its_own_run()
     test_build_run_index_end_to_end_joins_a_real_shaped_run()
     test_build_run_index_end_to_end_flags_a_genuine_duplicate_fire()
     test_build_run_index_persists_file_path_and_session_model_for_verifier_dispatch()
     test_build_run_index_last_auditor_run_at_is_injectable()
     test_build_run_index_default_last_auditor_run_at_falls_back_to_real_file_reader()
+    test_resolve_registry_paths_errors_when_sd_unavailable()
+    test_resolve_registry_paths_errors_when_discover_store_returns_none()
+    test_resolve_registry_paths_errors_when_only_one_fleet_fails()
+    test_resolve_registry_paths_ok_when_both_fleets_resolve()
+    test_main_exits_2_on_total_registry_discovery_failure()
+    test_main_json_flag_does_not_write_last_auditor_run_marker()
+    test_main_window_hours_override_does_not_write_last_auditor_run_marker()
+    test_main_normal_invocation_still_writes_last_auditor_run_marker()
     print("-" * 72)
     if FAILURES:
         print("FAIL: %d failure(s): %s" % (len(FAILURES), ", ".join(FAILURES)))
