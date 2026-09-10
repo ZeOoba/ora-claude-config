@@ -257,6 +257,26 @@ def test_detect_duplicates_no_false_positive_on_normal_daily_runs():
     check("two normal consecutive daily fires are NOT flagged", flags == [], flags)
 
 
+def test_detect_duplicates_identical_timestamp_is_not_also_a_cron_collision():
+    # A same_cycle_refire (identical lastScheduledFor) must not ALSO be
+    # double-reported as a cron_period_collision -- that flag requires
+    # DISTINCT lastScheduledFor values per its own docstring.
+    runs = [
+        {"fleet": "lams", "task_id": "automation-health-monitor",
+         "run_id": "lams:automation-health-monitor:same", "last_scheduled_for": "2026-09-10T15:05:00.000Z",
+         "cron_expression": "5 11 * * 1-5"},
+        {"fleet": "lams", "task_id": "automation-health-monitor",
+         "run_id": "lams:automation-health-monitor:same-dup", "last_scheduled_for": "2026-09-10T15:05:00.000Z",
+         "cron_expression": "5 11 * * 1-5"},
+    ]
+    flags = gti.detect_duplicates(runs, [], [])
+    types = [f["type"] for f in flags]
+    check("identical timestamps ARE flagged as same_cycle_refire",
+          types.count("same_cycle_refire") == 1, flags)
+    check("identical timestamps are NOT also flagged as cron_period_collision",
+          types.count("cron_period_collision") == 0, flags)
+
+
 if __name__ == "__main__":
     test_build_run_id_keys_on_last_scheduled_for()
     test_window_default_when_nothing_widens()
@@ -276,6 +296,7 @@ if __name__ == "__main__":
     test_detect_duplicates_cross_fleet_twin()
     test_detect_duplicates_cron_period_collision()
     test_detect_duplicates_no_false_positive_on_normal_daily_runs()
+    test_detect_duplicates_identical_timestamp_is_not_also_a_cron_collision()
     print("-" * 72)
     if FAILURES:
         print("FAIL: %d failure(s): %s" % (len(FAILURES), ", ".join(FAILURES)))
