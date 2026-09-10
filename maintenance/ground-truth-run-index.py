@@ -92,7 +92,10 @@ def decide_window_hours(now, last_auditor_run_at, cc_tasks, lams_tasks,
     keys on lastRunAt, not lastScheduledFor: a resume catch-up burst's own
     session records already carry a recent lastRunAt and are therefore fully
     captured by the plain default-hours window on their own -- the 3x widen
-    below adds no coverage benefit for that burst. A resume-only widen must
+    below adds negligible coverage benefit for that burst itself (it does admit
+    older, unrelated tasks whose lastRunAt falls in the wider window, where join
+    quality is known to degrade with age -- spec Sec 3.5 -- but that population
+    is small relative to a just-resumed fleet). A resume-only widen must
     NOT relax the join-rate floor the way a genuine auditor-gap widen
     legitimately does; see assert_join_rate_floor's docstring for the floor
     logic this feeds.
