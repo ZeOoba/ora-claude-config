@@ -142,6 +142,7 @@ BASH_GUARD_CHAIN = [
     "eos-evidence-gate",
     "eos-review-gate",
     "commit-provenance-guard",
+    "worktree-isolation-guard",
     "memory-orphan-link-guard",
     "commit-hygiene-guard",
 ]
