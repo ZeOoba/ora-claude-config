@@ -77,6 +77,34 @@ def test_has_side_effects_joined_clean_run_is_gated():
           gse.has_side_effects(run) is False)
 
 
+def test_extract_side_effects_detects_git_push():
+    path = _write_transcript([
+        {"type": "tool_use", "name": "Bash", "input": {"command": "git push origin feat/ground-truth-auditor"}},
+    ])
+    effects = gse.extract_side_effects(path)
+    check("git push detected", effects.get("git_push") == 1, effects)
+    os.remove(path)
+
+
+def test_extract_side_effects_detects_oi_filed():
+    path = _write_transcript([
+        {"type": "tool_use", "name": "Bash",
+         "input": {"command": "python maintenance/allocate-oi-id.py --session x --note y"}},
+    ])
+    effects = gse.extract_side_effects(path)
+    check("OI allocation detected", effects.get("oi_filed") == 1, effects)
+    os.remove(path)
+
+
+def test_extract_side_effects_detects_file_write_positive():
+    path = _write_transcript([
+        {"type": "tool_use", "name": "Write", "input": {"file_path": "x.md", "content": "y"}},
+    ])
+    effects = gse.extract_side_effects(path)
+    check("Write tool use detected as a file_write side effect", effects.get("file_write") == 1, effects)
+    os.remove(path)
+
+
 def test_annotate_run_index_produces_correct_counts():
     path_email = _write_transcript([
         {"type": "tool_use", "name": "Bash", "input": {"command": "send-via-outlook.ps1"}}])
@@ -101,6 +129,9 @@ if __name__ == "__main__":
     test_extract_side_effects_missing_transcript_is_empty_not_an_exception()
     test_has_side_effects_unjoined_run_is_never_gated_out()
     test_has_side_effects_joined_clean_run_is_gated()
+    test_extract_side_effects_detects_git_push()
+    test_extract_side_effects_detects_oi_filed()
+    test_extract_side_effects_detects_file_write_positive()
     test_annotate_run_index_produces_correct_counts()
     print("-" * 72)
     if FAILURES:
