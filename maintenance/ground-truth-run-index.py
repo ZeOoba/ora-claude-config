@@ -298,6 +298,8 @@ def detect_duplicates(runs, cc_task_ids_enabled, lams_task_ids_enabled):
                         if _parse_iso(r["last_scheduled_for"]) is not None))
         min_period = _min_cron_period(task_runs[0].get("cron_expression"))
         for a, b in zip(times, times[1:]):
+            if a == b:
+                continue  # identical lastScheduledFor is same_cycle_refire's flag, not this one
             if min_period is not None and (b - a) < min_period:
                 flags.append({
                     "type": "cron_period_collision",
