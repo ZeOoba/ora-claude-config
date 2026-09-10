@@ -115,3 +115,115 @@ def decide_window_hours(now, last_auditor_run_at, cc_tasks, lams_tasks,
     if not reasons:
         return float(default_hours), "default {}h window (no widen condition met)".format(default_hours)
     return window_hours, "; ".join(reasons)
+
+
+def find_project_dirs(claude_home=None):
+    """All ~/.claude/projects/* directories (CC transcripts are spread across
+    all of them, one per cwd -- spec Sec 3.4; NOT confined to the OneDrive
+    one). Returns a list of absolute directory paths; [] if the projects dir
+    doesn't exist."""
+    home = claude_home or os.path.expanduser("~/.claude")
+    proj_root = os.path.join(home, "projects")
+    if not os.path.isdir(proj_root):
+        return []
+    return [os.path.join(proj_root, d) for d in os.listdir(proj_root)
+            if os.path.isdir(os.path.join(proj_root, d))]
+
+
+def find_executing_session(task, session_records, tolerance_ms=JOIN_TOLERANCE_MS):
+    """Identify which session record executed a task's most recent firing.
+
+    NOT notifySessionId -- that field is a static "notify here" target fixed
+    at registration/last-edit time (verified against 4 real tasks across both
+    fleets: every notifySessionId record's createdAt predates the audited
+    lastRunAt by weeks to months). Spec Sec 3.5a.
+
+    The real key: the executing session's createdAt matches the task's
+    lastRunAt to within `tolerance_ms`, disambiguated by title when more than
+    one candidate falls in that window (a catch-up burst can create several
+    sessions inside one tolerance window).
+
+    `session_records` is an iterable of dicts as loaded from local_*.json
+    (must include at least createdAt; title/titleSource optional).
+
+    Returns the single matching session dict, or None if zero or more than
+    one candidate survives -- ambiguity is never resolved by guessing.
+    """
+    last_run = _parse_iso(task.get("lastRunAt"))
+    if last_run is None:
+        return None
+    target_ms = int(last_run.timestamp() * 1000)
+    expected_title = (task.get("id") or "").replace("-", " ").capitalize()
+
+    candidates = []
+    for rec in session_records:
+        ca = rec.get("createdAt")
+        if ca is None:
+            continue
+        try:
+            ca_ms = int(ca)
+        except (TypeError, ValueError):
+            continue
+        if abs(ca_ms - target_ms) <= tolerance_ms:
+            candidates.append(rec)
+
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+
+    # Ambiguous window -- disambiguate by title. Only trust auto-generated
+    # titles (a user-renamed title, titleSource != "auto", cannot be expected
+    # to match the task-id-derived form).
+    titled = [r for r in candidates
+              if r.get("titleSource") == "auto" and r.get("title") == expected_title]
+    if len(titled) == 1:
+        return titled[0]
+    return None  # still ambiguous -- unjoined, never guessed
+
+
+def join_cc_transcript(session_record, project_dirs):
+    """CC transcript path for a session record, or None.
+
+    session record -> cliSessionId -> <cliSessionId>.jsonl, searched across
+    EVERY project dir (spec Sec 3.4: scoping to one dir drops the join rate
+    100/100 -> 80/100 on the most recent 100 sessions). Top-level transcripts
+    only -- a subagent transcript is evidence WITHIN a run, not a run in its
+    own right.
+    """
+    cli_session_id = (session_record or {}).get("cliSessionId")
+    if not cli_session_id:
+        return None
+    for d in project_dirs:
+        candidate = os.path.join(d, cli_session_id + ".jsonl")
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def join_lams_transcript(session_record, lams_registry_dir):
+    """LAMS transcript path for a session record, or None.
+
+    session record -> <sessionId>/audit.jsonl, in the SAME directory as the
+    LAMS scheduled-tasks.json registry (confirmed: all 501/501 real
+    audit.jsonl files sit at exactly this depth). Keyed on sessionId, NOT
+    cliSessionId -- sessionId already carries the 'local_' prefix (spec
+    Sec 3.4/3.5); do not re-add it.
+    """
+    session_id = (session_record or {}).get("sessionId")
+    if not session_id or not lams_registry_dir:
+        return None
+    candidate = os.path.join(lams_registry_dir, session_id, "audit.jsonl")
+    return candidate if os.path.isfile(candidate) else None
+
+
+def load_session_records(registry_dir):
+    """All local_*.json session records in a registry's directory, as a list
+    of dicts. Unreadable files are skipped, never raise."""
+    records = []
+    for p in glob.glob(os.path.join(registry_dir or "", "local_*.json")):
+        try:
+            records.append(json.load(open(p, encoding="utf-8-sig")))
+        except Exception:
+            continue
+    return records
