@@ -56,7 +56,17 @@ import importlib.util
 spec = importlib.util.spec_from_file_location("gmr", r"C:\Users\Owner\.claude\maintenance\ground-truth-model-resolve.py")
 gmr = importlib.util.module_from_spec(spec); spec.loader.exec_module(gmr)
 verifier_model, reasoning = gmr.resolve_verifier_model(task_record, skill_md_text, session_record)
+agent_tool_model = gmr.to_agent_tool_model_name(verifier_model)
 ```
+
+`resolve_verifier_model` returns a full model id (e.g. `"claude-opus-5"`) -- the Agent
+tool's `model` parameter does NOT accept full ids, only the short names
+`sonnet | opus | haiku | fable`. Always call `to_agent_tool_model_name` on the resolved
+id and dispatch the Agent tool with `agent_tool_model` (the short name), never with
+`verifier_model` (the full id) directly. `to_agent_tool_model_name` raises `ValueError`
+loudly if `verifier_model` is somehow outside the known four -- do not catch and
+default it silently; a raised error here means the model ladder itself is broken and
+the dispatch must stop, not proceed with a guessed model name.
 
 For each run needing a verifier, build the ladder's inputs directly from the run-index
 record -- no separate registry or session-record fetch is needed:
@@ -74,25 +84,55 @@ ladder fall through to rung 3 (never fail the dispatch over a missing SKILL.md r
 **Runs touching financial data, governor
 constants (DSCR/LTV), or a confidential deal never verify below Fable regardless of what
 the ladder returns** -- round up explicitly for those, per CLAUDE.md's Dispatch
-invariants. Pin the resolved model explicitly on every dispatch; never omit it.
+invariants (round up before converting with `to_agent_tool_model_name`, so the
+short name passed to the Agent tool reflects the rounded-up floor). Pin the resolved
+model explicitly on every dispatch; never omit it.
+
+### Unjoined runs need a different locator strategy
+
+An unjoined run (`joined: false` in its run-index record) has no transcript to extract
+locators from -- `side_effects` is necessarily empty. This is NOT the same as "nothing
+to investigate": the task itself may still have sent an email, written a Notion page, or
+pushed a commit; Stage 0/1 simply couldn't confirm which. For an unjoined run, build the
+verifier's locators from EXTERNAL enumeration instead of the (empty) transcript:
+
+- Search Outlook Sent Items for messages sent around the run's `last_run_at` timestamp
+  (a window of the task's own cron period is a reasonable start) whose subject plausibly
+  matches the task -- most ORA scheduled tasks have a predictable subject prefix
+  (`[ORA] <topic>`).
+- If the run's `file_path` names a SKILL.md whose description mentions Notion, search the
+  relevant Notion database (per CLAUDE.md's Notion canon) for a page edited/created near
+  `last_run_at`.
+- If the task is known (from its own SKILL.md) to push commits, check `git log` on the
+  relevant repo for a commit near `last_run_at`.
+
+Give the verifier these SEARCH INSTRUCTIONS as its locator input (not a pre-resolved
+locator list, since none exists) -- its first job is to find what, if anything, this run
+actually did, before it can verify any claim. If the search finds nothing after a genuine
+attempt, the correct verdict is UNVERIFIABLE for every axis, not SUPPORTED and not silence.
+Report explicitly what was searched and found nothing, so this is distinguishable from a
+verifier that didn't try.
 
 **The verifier's prompt is assembled from ONLY the following** -- this is the input-starvation
 mechanism (spec Sec 6.1), the primary defence for the absolute rule. Do NOT include the
 run's own summary, the body of what it emailed, or any prior finding about it:
 
 - the run's `run_id`, `task_id`, `fleet`, `last_scheduled_for`
-- primary-source LOCATORS ONLY, derived from the run's side_effects and transcript --
-  a Notion page id, an Outlook message subject+date to search Sent Items for, a commit
-  sha, a file path, a parcel/lease identifier. Extract these by grep'ing the transcript
-  for the same patterns STEP 2's script matched (Notion page ids appear near
-  `notion-create-pages`/`notion-update-page` calls; commit shas follow `git push`
-  output; file paths follow `Write`/`Edit` tool_use blocks).
+- primary-source LOCATORS ONLY. For a joined run, derive these from the run's
+  side_effects and transcript -- a Notion page id, an Outlook message subject+date to
+  search Sent Items for, a commit sha, a file path, a parcel/lease identifier. Extract
+  these by grep'ing the transcript for the same patterns STEP 2's script matched (Notion
+  page ids appear near `notion-create-pages`/`notion-update-page` calls; commit shas
+  follow `git push` output; file paths follow `Write`/`Edit` tool_use blocks). For an
+  UNJOINED run (`joined: false`), use the external-enumeration SEARCH INSTRUCTIONS above
+  instead -- there is no transcript to grep.
 - the four axes below, verbatim
 - the absolute rule, verbatim: "Never treat a prior summary, log line, or finding as
   evidence. Re-derive every claim from the primary source you just read yourself."
 
 **Verifier task prompt template** (fill the bracketed fields, dispatch via the Agent tool,
-`subagent_type: general-purpose`, the resolved `verifier_model`, in parallel across all
+`subagent_type: general-purpose`, the resolved `agent_tool_model` (the SHORT name from
+`to_agent_tool_model_name`, never the full `verifier_model` id), in parallel across all
 side-effecting runs in one message so they run concurrently):
 
 > You are an independent verifier auditing one prior scheduled-task run. You have NO
@@ -106,7 +146,10 @@ side-effecting runs in one message so they run concurrently):
 >
 > Primary-source locators for this run (go read these yourself; do not ask for more
 > context about the run itself):
-> `[locator list]`
+> `[locator list -- for an unjoined run (joined: false), this is the external-enumeration
+> SEARCH INSTRUCTIONS block above, not a pre-resolved list; your first job is to find
+> what, if anything, this run did, and UNVERIFIABLE-on-every-axis after a genuine search
+> is a valid, expected outcome -- not evidence the run was clean]`
 >
 > Report on all four axes:
 >
@@ -197,7 +240,11 @@ exception does not extend here). Sections, in this exact order:
 1. **Runs audited** -- total count, fleet split, `side_effect_stats` from STEP 2
    verbatim (verifiers dispatched vs stamped clean), the join-rate floor result from
    STEP 1 (state the window actually used and why, per its `window_reason`), and any
-   run skipped entirely with the reason.
+   run skipped entirely with the reason. **Every run with `joined: false` in the run
+   index must be listed BY NAME (`run_id`, `task_id`) in this section with the tag
+   `UNVERIFIABLE (unjoined)`, regardless of what its verifier concluded** -- this is
+   the "digest says so explicitly for that run" requirement (spec Sec 9 R1); an
+   unjoined run can never be silently folded into a clean-looking aggregate count.
 2. **CONTRADICTED claims** -- highest priority. For each: the claim, the F-id evidence
    that contradicts it, and the drafted correction's location from STEP 6 (never its
    content inline if it's a page edit -- link the path).

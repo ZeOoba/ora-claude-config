@@ -257,3 +257,12 @@ maintenance/_state/log-liveness.json
 # not this marker). Confirmed empty/absent before ora-ground-truth-auditor's first
 # real run; a stray copy appears in any worktree that ran the CLI for testing.
 maintenance/_state/ground-truth/last-auditor-run.json
+# (2026-09-11, final-branch-review finding I7) ground-truth/run-index-*.json --
+# per-night Stage 0 output, read only by the same night's SKILL.md run and by a
+# human investigating that night. No external/cross-session reader.
+maintenance/_state/ground-truth/run-index-*.json
+# ground-truth-pending-approval/ -- drafted-but-never-sent corrections (Hard
+# Invariant 1). Can reference confidential-deal-adjacent content if a run's
+# claim touched one; must never be one `git add -A` away from landing in a
+# git-tracked, off-machine-pushed repo. Never tracked.
+maintenance/_state/ground-truth-pending-approval/
