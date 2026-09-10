@@ -732,6 +732,16 @@ def check_agent_definitions(agents_dir):
         try:
             with open(path, encoding="utf-8-sig") as fh:
                 text = fh.read()
+        except UnicodeDecodeError as exc:
+            # NOT a hard failure, deliberately. This probe runs inside the pre-push
+            # gate, so anything raised here blocks every push from every concurrent
+            # session; and a file we cannot decode is a file we cannot judge. The
+            # harness may well read it under a legacy codepage and register the agent
+            # fine -- blocking the whole repo on that unproven assumption is the worse
+            # error. Surface it and move on. (Windows editors emit cp1252 routinely.)
+            warnings.append("%s is not valid UTF-8 (%s) -- frontmatter NOT validated; "
+                            "re-save as UTF-8" % (ascii_safe(fn), ascii_safe(exc)))
+            continue
         except OSError as exc:
             warnings.append("%s unreadable (%s)" % (ascii_safe(fn), ascii_safe(exc)))
             continue
