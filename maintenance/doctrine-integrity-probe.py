@@ -679,6 +679,116 @@ def collect_flat_names(directory, suffix):
     return out
 
 
+# Builtin tool names an agent may legitimately grant. Used ONLY to raise a WARN on a
+# name nothing recognises -- never to hard-fail. A hardcoded roster like this goes stale
+# the moment the harness adds a tool, and a stale allowlist inside a BLOCKING pre-push
+# gate is itself the false-positive class this check exists to prevent. Anything
+# 'mcp__*'-prefixed, or the '*' wildcard, is accepted without membership.
+AGENT_BUILTIN_TOOLS = {
+    "read", "write", "edit", "notebookedit", "grep", "glob", "bash", "bashoutput",
+    "killshell", "websearch", "webfetch", "task", "agent", "todowrite", "skill",
+    "slashcommand", "exitplanmode", "artifact", "sendusermessage", "senduserfile",
+}
+
+
+def check_agent_definitions(agents_dir):
+    """Strict-validate every agents/*.md definition. Returns (hard_failures, warnings).
+
+    Exists because check 14 resolves agent tokens through collect_flat_names(), which
+    reads FILENAMES only and never opens the file -- so a definition whose frontmatter
+    cannot parse (which silently unregisters the agent) resolved as [OK]. Proven
+    2026-09-10: five deliberately-broken definitions passed the gate at exit 0, while
+    DELETING a referenced agent correctly exited 1.
+
+    Hard failures (blocking) are limited to unambiguous, self-evident defects: absent
+    frontmatter, unparseable YAML, name/filename-stem mismatch, duplicate name. Anything
+    requiring a maintained roster to judge is a WARN. Fails open on an absent directory
+    or an unreadable file, matching the rest of this probe.
+    """
+    failures, warnings = [], []
+    if not Path(agents_dir).is_dir():
+        return failures, warnings
+
+    try:
+        import yaml  # optional; this probe is otherwise stdlib-only
+    except ImportError:
+        yaml = None
+
+    try:
+        names = sorted(fn for fn in os.listdir(agents_dir) if fn.lower().endswith(".md"))
+    except OSError as exc:
+        warnings.append("agents dir unreadable (%s) -- validation skipped"
+                        % ascii_safe(exc))
+        return failures, warnings
+
+    if names and yaml is None:
+        warnings.append("PyYAML unavailable -- agent frontmatter checked structurally "
+                        "only (fence + name), not parsed strictly")
+
+    seen = {}
+    for fn in names:
+        path = os.path.join(agents_dir, fn)
+        stem = fn[:-3]
+        try:
+            with open(path, encoding="utf-8-sig") as fh:
+                text = fh.read()
+        except OSError as exc:
+            warnings.append("%s unreadable (%s)" % (ascii_safe(fn), ascii_safe(exc)))
+            continue
+
+        if not text.startswith("---"):
+            failures.append("%s: no frontmatter block (must open with '---')" % fn)
+            continue
+        end = text.find("\n---", 3)
+        if end == -1:
+            failures.append("%s: frontmatter block is never closed" % fn)
+            continue
+        block = text[3:end]
+
+        if yaml is not None:
+            try:
+                meta = yaml.safe_load(block)
+            except yaml.YAMLError as exc:
+                first = str(exc).splitlines()[0] if str(exc) else exc.__class__.__name__
+                failures.append("%s: frontmatter fails strict YAML parse (%s)"
+                                % (fn, ascii_safe(first)))
+                continue
+            if not isinstance(meta, dict):
+                failures.append("%s: frontmatter is not a mapping" % fn)
+                continue
+            name = meta.get("name")
+            tools_raw = meta.get("tools")
+        else:
+            m = re.search(r"^name:\s*(.+?)\s*$", block, re.M)
+            name = m.group(1).strip("'\"") if m else None
+            tm = re.search(r"^tools:\s*(.+?)\s*$", block, re.M)
+            tools_raw = tm.group(1) if tm else None
+
+        if not isinstance(name, str) or not name.strip():
+            failures.append("%s: frontmatter has no usable 'name'" % fn)
+            continue
+        name = name.strip()
+        if name.lower() != stem.lower():
+            failures.append("%s: name '%s' does not match filename stem '%s'"
+                            % (fn, ascii_safe(name), stem))
+        if name.lower() in seen:
+            failures.append("duplicate agent name '%s' in %s and %s"
+                            % (ascii_safe(name), seen[name.lower()], fn))
+        else:
+            seen[name.lower()] = fn
+
+        if isinstance(tools_raw, str):
+            for tool in (t.strip() for t in tools_raw.split(",")):
+                if not tool or tool == "*" or tool.lower().startswith("mcp__"):
+                    continue
+                if tool.lower() not in AGENT_BUILTIN_TOOLS:
+                    warnings.append("%s: grants unrecognised tool '%s' (allowlist may "
+                                    "simply be stale -- verify before acting)"
+                                    % (fn, ascii_safe(tool)))
+
+    return failures, warnings
+
+
 def collect_hook_commands(settings_obj):
     """Every hook 'command' string anywhere under settings['hooks'], walked
     generically across ALL lifecycle stages (PreToolUse/PostToolUse/SessionStart/
@@ -1511,6 +1621,19 @@ def main():
                 print("  [MISSING] %s -> no skill dir (Code/Cowork) and not a known plugin skill"
                       % tok)
                 missing.append("%s (skill; Code/Cowork/plugin)" % tok)
+
+    # --- 14b. agent definitions parse and self-identify correctly ---
+    # Deliberately OUTSIDE the skill-precedence block above: check 14 only inspects
+    # agents named as CLAUDE.md tokens, and resolves those by filename. This validates
+    # every definition on disk, whether doctrine names it or not.
+    agent_failures, agent_warnings = check_agent_definitions(AGENTS_DIR)
+    print("Agent definitions validated: %d"
+          % len(collect_flat_names(AGENTS_DIR, ".md")))
+    for w in agent_warnings:
+        warn(w)
+    for f in agent_failures:
+        print("  [MISSING] %s" % f)
+        missing.append("%s (agent definition)" % f)
 
     # --- 15. skill frontmatter-version vs changelog-version drift (all skills,
     # not just those named in doctrine) ---
