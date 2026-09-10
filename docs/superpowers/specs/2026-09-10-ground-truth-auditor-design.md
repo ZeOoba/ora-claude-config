@@ -164,10 +164,16 @@ Five stages. Stages 0 and 1 are deterministic Python; only stage 2 spends agents
 **Window sizing is automatic, not manual.** Default 24h, but Stage 0 widens the window
 to cover the full gap when either condition holds:
 
-  1. the previous auditor run completed more than 24h ago (the auditor itself was
-     paused, or the host was closed), or
+  1. a MEASURED gap since the previous auditor run exceeds 24h (last_auditor_run_at
+     is not None and the gap is too large — e.g., the auditor itself was paused,
+     or the host was closed), or
   2. the window contains a fleet-resume event — detected by a one-time
      `*-resume-*` / `*-pause-resume-*` task with `lastRunAt` in range.
+
+A literal "never ran" (no prior auditor run at all, e.g., the auditor's very first
+invocation) is recorded for visibility but does NOT by itself widen the window — there
+is no measurable gap to widen by, and the realistic backfill scenario (registering the
+auditor mid-pause) is already covered by condition 2's resume-event detection.
 
 Rationale: a catch-up burst delivers many fires whose `lastScheduledFor` values are
 *older* than 24h even though the fires themselves are minutes old. A fixed 24h window

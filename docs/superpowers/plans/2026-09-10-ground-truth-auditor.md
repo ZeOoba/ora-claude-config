@@ -216,8 +216,8 @@ def decide_window_hours(now, last_auditor_run_at, cc_tasks, lams_tasks,
     """Automatic window sizing (design spec Sec 5 Stage 0). Widens past
     default_hours when either holds:
 
-      1. the previous auditor run completed more than default_hours ago (or
-         never ran: last_auditor_run_at is None), or
+      1. a MEASURED gap since the previous auditor run exceeds default_hours
+         (last_auditor_run_at is not None and the gap is too large), or
       2. the window contains a fleet-resume event -- a one-time task (no
          cronExpression) whose id contains 'resume', fired within
          default_hours of `now`.
