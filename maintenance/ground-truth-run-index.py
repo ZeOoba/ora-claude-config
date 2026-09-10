@@ -385,8 +385,13 @@ def _in_window(task, window_start):
 
 
 def build_run_index(cc_registry_path, lams_registry_path, project_dirs,
-                     now=None, window_hours_override=None):
+                     now=None, window_hours_override=None, last_auditor_run_at=None):
     """Stage 0 orchestrator -- produces the complete run-index document.
+
+    `last_auditor_run_at` -- override for `_read_last_auditor_run()` (tests
+    inject a controlled value here instead of depending on the real marker
+    file; `None` means "use whatever the real file says", i.e. current
+    default behavior is unchanged).
 
     Returns a dict:
       {
@@ -408,8 +413,9 @@ def build_run_index(cc_registry_path, lams_registry_path, project_dirs,
     if window_hours_override is not None:
         window_hours, window_reason = float(window_hours_override), "explicit --window-hours override"
     else:
+        effective_last_run = last_auditor_run_at if last_auditor_run_at is not None else _read_last_auditor_run()
         window_hours, window_reason = decide_window_hours(
-            now, _read_last_auditor_run(), cc_tasks_all, lams_tasks_all)
+            now, effective_last_run, cc_tasks_all, lams_tasks_all)
 
     window_start = now - timedelta(hours=window_hours)
 
