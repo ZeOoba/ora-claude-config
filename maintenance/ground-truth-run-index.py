@@ -310,3 +310,34 @@ def detect_duplicates(runs, cc_task_ids_enabled, lams_task_ids_enabled):
                 })
 
     return flags
+
+
+def assert_join_rate_floor(joined_count, total_count, window_hours,
+                            default_hours=DEFAULT_WINDOW_HOURS):
+    """Width-dependent join-rate floor (spec Sec 9 R1a) -- NOT a non-zero
+    check. Measured on the live CC store (spec Sec 3.5, all 17 project dirs):
+    100% at n=100-200 recent sessions, ~43% fleet-wide. A widened window is
+    expected to read lower; the SAME low rate on a normal 24h window means the
+    join is broken.
+
+    Floor schedule:
+      - window_hours <= default_hours (normal night): >= 90%
+      - window_hours <= default_hours * 3 (a moderate widen): >= 60%
+      - wider than that (a multi-day catch-up burst): >= 30%
+
+    Returns (ok: bool, message: str). total_count == 0 is trivially ok (an
+    empty window has nothing to fail to join).
+    """
+    if total_count == 0:
+        return True, "no runs in window -- floor not applicable"
+    rate = joined_count / total_count
+    if window_hours <= default_hours:
+        floor = 0.90
+    elif window_hours <= default_hours * 3:
+        floor = 0.60
+    else:
+        floor = 0.30
+    ok = rate >= floor
+    msg = "{}/{} joined ({:.0%}) against a {:.0%} floor for a {:.1f}h window".format(
+        joined_count, total_count, rate, floor, window_hours)
+    return ok, msg

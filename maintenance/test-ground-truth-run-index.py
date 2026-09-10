@@ -277,6 +277,30 @@ def test_detect_duplicates_identical_timestamp_is_not_also_a_cron_collision():
           types.count("cron_period_collision") == 0, flags)
 
 
+def test_join_rate_floor_normal_window_high_rate_passes():
+    ok, msg = gti.assert_join_rate_floor(95, 100, window_hours=24.0)
+    check("95/100 on a normal 24h window passes the 90% floor", ok, msg)
+
+
+def test_join_rate_floor_normal_window_low_rate_fails():
+    ok, msg = gti.assert_join_rate_floor(50, 100, window_hours=24.0)
+    check("50/100 on a normal 24h window FAILS the 90% floor "
+          "(this is what R1a exists to catch)", not ok, msg)
+
+
+def test_join_rate_floor_widened_window_same_low_rate_passes():
+    # The exact scenario R1a exists to distinguish: the SAME ~50% rate is
+    # expected, not alarming, on a widened window.
+    ok, msg = gti.assert_join_rate_floor(50, 100, window_hours=100.0)
+    check("50/100 on a widened (>72h) window passes the 30% floor -- "
+          "the widener must not false-alarm nightly", ok, msg)
+
+
+def test_join_rate_floor_empty_window_is_trivially_ok():
+    ok, msg = gti.assert_join_rate_floor(0, 0, window_hours=24.0)
+    check("an empty window never fails the floor", ok, msg)
+
+
 if __name__ == "__main__":
     test_build_run_id_keys_on_last_scheduled_for()
     test_window_default_when_nothing_widens()
@@ -297,6 +321,10 @@ if __name__ == "__main__":
     test_detect_duplicates_cron_period_collision()
     test_detect_duplicates_no_false_positive_on_normal_daily_runs()
     test_detect_duplicates_identical_timestamp_is_not_also_a_cron_collision()
+    test_join_rate_floor_normal_window_high_rate_passes()
+    test_join_rate_floor_normal_window_low_rate_fails()
+    test_join_rate_floor_widened_window_same_low_rate_passes()
+    test_join_rate_floor_empty_window_is_trivially_ok()
     print("-" * 72)
     if FAILURES:
         print("FAIL: %d failure(s): %s" % (len(FAILURES), ", ".join(FAILURES)))
