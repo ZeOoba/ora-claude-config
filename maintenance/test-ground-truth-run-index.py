@@ -370,6 +370,53 @@ def test_build_run_index_end_to_end_joins_a_real_shaped_run():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_build_run_index_last_auditor_run_at_is_injectable():
+    # Testability fix: a test must be able to control the "previous auditor
+    # run" timestamp without depending on (or polluting) the real
+    # maintenance/_state/ground-truth/last-auditor-run.json file. Injecting a
+    # very old timestamp should widen the window past the 24h default,
+    # exactly as decide_window_hours would if that value came from the real
+    # file -- proving the parameter actually reaches decide_window_hours.
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_reg = os.path.join(tmp, "cc", "scheduled-tasks.json")
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        _write_registry(cc_reg, [])
+        _write_registry(lams_reg, [])
+        now = datetime(2026, 9, 11, 4, 0, tzinfo=timezone.utc)
+        injected_last_run = now - timedelta(hours=72)  # far older than 24h
+        index = gti.build_run_index(cc_reg, lams_reg, [], now=now,
+                                     last_auditor_run_at=injected_last_run)
+        check("an injected old last_auditor_run_at widens the window past the default "
+              "-- proves the parameter is actually used, not ignored",
+              index["window_hours"] >= 72.0, index["window_hours"])
+        check("the window_reason names the gap, sourced from the injected value",
+              "prior auditor run" in index["window_reason"], index["window_reason"])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_build_run_index_default_last_auditor_run_at_falls_back_to_real_file_reader():
+    # When NOT injected (the real main() call pattern), behavior must be
+    # unchanged: None triggers the existing _read_last_auditor_run() path.
+    # This test does not assert on the real file's actual content (that
+    # would reintroduce the hazard) -- it only asserts that omitting the
+    # parameter does not raise and produces a valid window_hours >= 24.0
+    # (the floor for any outcome of decide_window_hours).
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_reg = os.path.join(tmp, "cc", "scheduled-tasks.json")
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        _write_registry(cc_reg, [])
+        _write_registry(lams_reg, [])
+        now = datetime(2026, 9, 11, 4, 0, tzinfo=timezone.utc)
+        index = gti.build_run_index(cc_reg, lams_reg, [], now=now)  # no injection
+        check("omitting last_auditor_run_at does not raise and yields a sane window",
+              index["window_hours"] >= 24.0, index["window_hours"])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     test_build_run_id_keys_on_last_scheduled_for()
     test_window_default_when_nothing_widens()
@@ -396,6 +443,8 @@ if __name__ == "__main__":
     test_join_rate_floor_empty_window_is_trivially_ok()
     test_build_run_index_excludes_its_own_run()
     test_build_run_index_end_to_end_joins_a_real_shaped_run()
+    test_build_run_index_last_auditor_run_at_is_injectable()
+    test_build_run_index_default_last_auditor_run_at_falls_back_to_real_file_reader()
     print("-" * 72)
     if FAILURES:
         print("FAIL: %d failure(s): %s" % (len(FAILURES), ", ".join(FAILURES)))
