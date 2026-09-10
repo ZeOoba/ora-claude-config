@@ -57,11 +57,22 @@ def decide_window_hours(now, last_auditor_run_at, cc_tasks, lams_tasks,
     """Automatic window sizing (design spec Sec 5 Stage 0). Widens past
     default_hours when either holds:
 
-      1. the previous auditor run completed more than default_hours ago (or
-         never ran: last_auditor_run_at is None), or
+      1. a MEASURED gap since the previous auditor run exceeds default_hours
+         (last_auditor_run_at is not None and the gap is too large), or
       2. the window contains a fleet-resume event -- a one-time task (no
          cronExpression) whose id contains 'resume', fired within
          default_hours of `now`.
+
+    A literal "never ran" (last_auditor_run_at is None, e.g. the auditor's
+    very first invocation) is recorded in the returned reason for visibility
+    but does NOT by itself widen the window -- there is no measurable gap to
+    widen by, and the realistic backfill scenario (registering the auditor
+    mid-pause) is already covered by condition 2's resume-event detection.
+    A bare never-ran with no resume event in range has nothing further back
+    to meaningfully look at; a nightly auditor audits nightly deltas going
+    forward, not fleet history since inception. Confirmed with Gabriel
+    2026-09-11 -- do not "fix" this into an unbounded or arbitrary widen
+    without checking with him again.
 
     A fixed 24h window keyed on lastScheduledFor would silently drop the
     catch-up runs most likely to have duplicated side effects (spec Sec 5).
