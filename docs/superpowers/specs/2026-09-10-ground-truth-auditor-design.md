@@ -90,7 +90,13 @@ These are verified facts about the substrate, not assumptions.
      (which already includes the `local_` prefix — do not re-add it), **not** on
      `cliSessionId`. A `<cliSessionId>.jsonl` lookup matches 0/501 on LAMS.
      **Confirmed, but by a different key** — Stage 0 implements both.
-5a. **The unstated middle step — how a task's firing finds ITS session record —
+5a. **[SUPERSEDED IN PART, 2026-09-11 — read §3.5b before implementing against
+   this. Its `notifySessionId` finding stands; its claim that no documented
+   field exists, and the createdAt/title algorithm it proposed as the primary
+   key, are FACTUALLY WRONG. Left in place, not rewritten, so the error is
+   visible rather than laundered.]**
+
+   **The unstated middle step — how a task's firing finds ITS session record —
    was never a documented field, and the obvious candidate is wrong.**
    `notifySessionId` on a task record looks like a per-run pointer and is not
    one: verified against 4 real tasks across both fleets (`automation-health-
@@ -118,6 +124,75 @@ These are verified facts about the substrate, not assumptions.
    during plan-writing, after spec approval — corrected here rather than left
    for the implementer to rediscover or, worse, to silently join on
    `notifySessionId` and get a run-old, wrong transcript for every audited run.
+
+5b. **CORRECTION (2026-09-11, found during final whole-branch adversarial
+   review — NOT during original authoring): §3.5a's central claim was wrong.
+   `scheduledTaskId` is a real, present field, it holds the executing task's
+   id verbatim, and it is the correct PRIMARY join key.**
+
+   Measured directly against the live stores on 2026-09-11 by dumping the full
+   key list of every session record (not a cherry-picked field subset — that
+   sampling error is exactly how §3.5a missed this):
+
+   | store | session records | carrying `scheduledTaskId` | rate |
+   |---|---|---|---|
+   | CC (`claude-code-sessions`) | 1,288 | 753 | **58.5%** |
+   | LAMS (`local-agent-mode-sessions`) | 501 | 301 | **60.1%** |
+   | both | 1,789 | 1,054 | **58.9%** |
+
+   The ~41% without it are ordinary interactive sessions, which have no task to
+   name — the field is not "missing" from them, it is inapplicable. (Counts are
+   today's, not constants — §3.3 applies here too; recompute at run time.)
+
+   Two further measured facts, both load-bearing:
+
+   - **The value is the task id verbatim**, so this is an exact-match key, not a
+     similarity test. Records whose `scheduledTaskId` names a task absent from
+     that fleet's registry — retired tasks, 72/753 CC and 38/301 LAMS — simply
+     never match a live task, which is the correct outcome.
+   - **`titleSource == "auto"` and `scheduledTaskId` are perfectly mutually
+     exclusive.** On CC: 397 records are `titleSource: "auto"` and *none* of
+     them carries a `scheduledTaskId`; all 753 that do carry one have
+     `titleSource` null. On LAMS `titleSource` is absent from all 501 records.
+     **§3.5a step 2's title-disambiguation branch is therefore unreachable for
+     any session a scheduled task produced** — it could never have fired in
+     production. The test fixtures written against §3.5a fabricated
+     `titleSource: "auto"` onto scheduled-run records, which is why two review
+     rounds passed the dead branch: they verified the fixtures, not reality.
+
+   **Revised algorithm — `scheduledTaskId` primary, §3.5a's heuristic as
+   fallback only:**
+
+   1. **Primary.** Filter session records to `rec["scheduledTaskId"] ==
+      task["id"]`. Exactly one → that IS the executing session; return it with
+      no time or title check, because the id match already IS the
+      disambiguation. More than one (the normal case — a daily task accumulates
+      one record per firing, measured up to n=105) → tiebreak by whichever
+      `createdAt` is nearest the task's `lastRunAt`. This is a choice among
+      records *already proven* to belong to this task, not a guess across the
+      whole population: measured across all 55 in-window tasks on both fleets,
+      the winner sat **0–2 ms** from `lastRunAt` while the runner-up was never
+      closer than **~82,000,000 ms (~23 h)** — unambiguous by seven orders of
+      magnitude.
+   2. **Fallback.** Zero records claim the task → fall back to §3.5a's
+      createdAt-within-2s + auto-title heuristic, which remains correct and is
+      the only key available for session records that predate the field.
+      Records that *do* carry some other task's `scheduledTaskId` are excluded
+      from the fallback pool — they have already declared their owner, and
+      admitting them lets the timing heuristic silently join another task's
+      session that happens to land in the tolerance window.
+   3. Ambiguity in the fallback is still UNJOINED, never guessed.
+
+   **Measured effect on the real join rate** (old primary vs. new primary,
+   same corpus, 2026-09-11): over a 168 h window, CC **23/30 → 30/30** and
+   LAMS **11/18 → 18/18**; over 720 h, CC **23/32 → 32/32** and LAMS
+   **12/23 → 23/23**. The 24 h window held at 2/2 both ways (only two runs
+   were in range under the standing fleet pause), so the nightly floor in §9
+   R1a is unaffected — but the widened-window floors now have far more headroom
+   than they were written against.
+
+   This same field is what makes duplicate detection possible at all; see §5
+   Stage 0's `same_cycle_refire`, rebuilt on it in the same correction.
 6. **Scheduled-vs-actual drift is real and large.** `automation-health-monitor`
    (a **LAMS** task — its row carries no `cwd`, but it *does* carry
    `model: claude-sonnet-5`; it is precisely the 1/29 counted in §3.1) on
@@ -194,6 +269,33 @@ reasoned out of a duplicate; a key comparison cannot. Stage 0 flags:
 - two distinct `lastScheduledFor` values falling inside one cron period
 - **the same task id enabled on both fleets** — the known dual-fleet double-fire hazard
 - any `fireAt`/cron collision among one-time and recurring slots
+
+**CORRECTION (2026-09-11, same final-review pass as §3.5b).** The first two
+bullets above, as originally implemented, compared **registry rows within a
+single `build_run_index()` call** — and the registry keeps exactly **one row
+per task id**, overwriting `lastRunAt`/`lastScheduledFor` on every fire.
+Verified 2026-09-11: 38/38 CC and 29/29 LAMS task ids unique, zero
+registry-level duplicates. One call therefore can never hold two rows for one
+task, and both checks were **structurally dead code**. Restated honestly:
+
+- `same_cycle_refire` is now keyed on §3.5b's `scheduledTaskId`, via
+  `find_all_sessions_for_task(task, session_records, window_seconds=300)`:
+  **two or more session records both stamped with the same `scheduledTaskId`
+  and created near the same firing time is direct evidence of two executions**,
+  which is the only place a duplicate fire is observable at all. The count is
+  persisted per run as `candidate_session_count`, and the flag fires when it
+  exceeds 1. (On the corpus as of 2026-09-11 no in-window task has more than
+  one such record — the check is live and correct, and currently finds nothing,
+  which is the intended reading of a clean fleet.)
+- `cron_period_collision` is **DORMANT within a single invocation** and is
+  documented as such rather than left as a silent no-op. It requires two
+  distinct `lastScheduledFor` values for one task, which only a *sequence* of
+  run-index documents across multiple invocations can supply. The comparison
+  itself is correct and is kept ready for that input; it must **not** be
+  "fixed" by re-deriving collisions from registry row counts.
+- `cross_fleet_twin` is unaffected and was always correct per-invocation: each
+  fleet's registry is a separate one-row-per-task source, so comparing the two
+  enabled-id **sets** is a real comparison.
 
 ### Stage 1 — Side-effect extraction (no LLM)
 
