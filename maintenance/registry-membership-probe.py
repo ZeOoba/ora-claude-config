@@ -1,6 +1,32 @@
 #!/usr/bin/env python3
 """ORA registry-membership probe -- detects silent scheduled-task registry drops.
 
+!! THIS PROBE WRITES SHARED STATE ON EVERY RUN, AND TAKES NO FLAGS. !!
+    There is no argparse here, so no --help, --dry-run or --read-only. ANY
+    invocation -- including one you meant as `--help` -- runs the probe for real
+    and REWRITES two files every session depends on:
+        ~/.claude/session-context.md      (the BEGIN/END-GENERATED-FLEET block)
+        ~/.claude/maintenance/_state/fleet-roster.md
+    Confirmed live 2026-09-10: a `registry-membership-probe.py --help` typed to
+    inspect the interface silently ran the probe and rewrote the shared block
+    from "36 live recurring | 27" to "0 live recurring | 2" -- accurate (a
+    bounded fleet pause was in force) but indistinguishable, to the next session
+    that loads session-context.md at startup, from a destroyed fleet.
+
+    CONSEQUENCES, both of which have bitten:
+      1. Do NOT call this from an unattended/scheduled wrapper. An automated job
+         continuously rewriting a file every session reads at startup is a
+         monitoring hazard, not monitoring. `maintenance/headless/run-check.py`
+         deliberately EXCLUDES this probe for exactly that reason and uses
+         fleet-status.py (read-only) + phantom-dispatch-probe.py instead.
+      2. Do NOT run it casually to "see what it does" while a pause, rebuild or
+         recovery is in progress -- the snapshot it writes becomes the new
+         baseline for the NEXT run's temporal diff. Read fleet-roster.md or the
+         live registry instead if you only want to look.
+
+    If you need a read-only view of fleet membership, use `fleet-status.py`
+    (--summary / --json), which reads both fleets and writes no shared state.
+
 WHY: the 2026-06-09 fleet rebuild silently dropped registry ENTRIES
 (ora-cowork-heartbeat, scheduled-task-integrity-guard) while their SKILL.md
 files survived -- the heartbeat stayed dark 2026-05-31..06-10 with no alarm.
