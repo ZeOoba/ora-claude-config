@@ -26,11 +26,22 @@ your own run trivially "passes" every axis, which is worse than not auditing at 
 This script decides its own window (default 24h, auto-widened for a catch-up burst or a
 gap in the auditor's own last run). Read the `window_reason` field in the JSON document
 it wrote to `--out` (not printed to stdout in this invocation). It joins every run to
-its transcript, flags duplicates, and asserts the join-rate floor. **If it exits non-zero
-(JOIN-RATE FLOOR BREACHED on stderr), do not silently continue** -- this means the join
-mechanism itself may be broken, not just noisy. Include the exact stderr line in the
-digest's own status section regardless of what else the run finds, and still complete
-every other step below (a broken floor is a finding, not a reason to abort the audit).
+its transcript, flags duplicates, and asserts the join-rate floor.
+
+**Exit code decides what happens next -- the two non-zero codes mean different things,
+never treat them the same:**
+
+- **Exit 1 (JOIN-RATE FLOOR BREACHED on stderr):** the run-index file WAS written. Do
+  not silently continue past this without noting it, but proceed through every step
+  below -- this means the join mechanism itself may be degraded, not that the run is
+  unusable. Include the exact stderr line in the digest's own status section regardless
+  of what else the run finds (a broken floor is a finding, not a reason to abort).
+- **Exit 2 (`GROUND-TRUTH AUDITOR COULD NOT START:` on stderr):** neither registry could
+  be read at all -- no run-index file exists. **STOP here.** STEP 2 onward has nothing to
+  read. Skip directly to STEP 8 and send a digest whose ONLY content is this failure: the
+  exact stderr line, and nothing else (no runs audited, no axes, no duplicate section --
+  there is no data to report on). Do not attempt to synthesize a normal-shaped digest
+  around a missing run-index.
 
 ## STEP 2 -- extract side effects (Stage 1, deterministic, no judgment)
 
