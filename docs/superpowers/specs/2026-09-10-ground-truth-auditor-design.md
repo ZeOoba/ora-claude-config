@@ -90,6 +90,34 @@ These are verified facts about the substrate, not assumptions.
      (which already includes the `local_` prefix — do not re-add it), **not** on
      `cliSessionId`. A `<cliSessionId>.jsonl` lookup matches 0/501 on LAMS.
      **Confirmed, but by a different key** — Stage 0 implements both.
+5a. **The unstated middle step — how a task's firing finds ITS session record —
+   was never a documented field, and the obvious candidate is wrong.**
+   `notifySessionId` on a task record looks like a per-run pointer and is not
+   one: verified against 4 real tasks across both fleets (`automation-health-
+   monitor`, `ora-doctrine-integrity-guard`, `ora-command-center-mirror-drift-
+   check`, `ora-am-brief`), every `notifySessionId` record's `createdAt` sits
+   months before the task's `lastRunAt` — it is a static "notify here" target
+   fixed at registration/last-edit time, unrelated to any specific firing.
+
+   **The real key, confirmed on the same 4 tasks: the session record's
+   `createdAt` equals the task's `lastRunAt` to within ~1ms, and its `title` is
+   `task_id.replace('-', ' ').capitalize()`** (`ora-doctrine-integrity-guard`
+   → `"Ora doctrine integrity guard"`). Stage 0 finds the executing session by:
+
+   1. scan `local_*.json` in the same registry directory for
+      `abs(createdAt_ms - lastRunAt_ms) <= 2000`;
+   2. among candidates, prefer `titleSource == "auto"` and
+      `title == task_id.replace('-', ' ').capitalize()`;
+   3. **more than one surviving candidate, or none at all, is UNJOINED** — never
+      guess under ambiguity (a catch-up burst is exactly where two sessions can
+      land inside one 2s window).
+
+   Only once the session record is identified do §3.5's two per-fleet transcript
+   lookups apply (CC: its `cliSessionId` → search all project dirs; LAMS: its own
+   `sessionId` → `<sessionId>/audit.jsonl` next to the registry). This was found
+   during plan-writing, after spec approval — corrected here rather than left
+   for the implementer to rediscover or, worse, to silently join on
+   `notifySessionId` and get a run-old, wrong transcript for every audited run.
 6. **Scheduled-vs-actual drift is real and large.** `automation-health-monitor`
    (a **LAMS** task — its row carries no `cwd`, but it *does* carry
    `model: claude-sonnet-5`; it is precisely the 1/29 counted in §3.1) on
