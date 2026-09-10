@@ -358,6 +358,103 @@ check("this session's task history survived through to the end",
 shutil.rmtree(root, ignore_errors=True)
 
 # ===================================================================================
+# DISPATCH PREDICATE -- REAL TOOL NAME. The subagent-dispatch tool the harness actually
+# emits is "Agent". A "Task"-only predicate is dead code: this is the same class of bug
+# as the 2026-07-24 eos-telemetry incident (memory:
+# feedback_fixture_shaped_tests_certify_dead_branches.md), where hooks/eos-telemetry.py
+# was widened to DISPATCH_TOOLS = ("Agent", "Task") and this hook was missed.
+#
+# The Agent tool_input below is NOT invented. It is copied verbatim (prompt truncated)
+# from a REAL captured transcript tool_use block:
+#   ~/.claude/projects/C--Users-Owner/2a9c2ff7-6267-412f-b4af-8c57ccd5c206.jsonl line 280
+#   uuid ebc64645-6f5f-4afc-bf93-4de622945968  ts 2026-09-10T17:57:03.629Z
+#   {"type":"tool_use","name":"Agent","input":{"description":...,"subagent_type":...}}
+# Verified 2026-09-10 across all 1,642 local transcripts: "Agent" occurs 890 times as a
+# tool_use name, "Task" 0 times, "TaskCreate" 195 times.
+#
+# The match must stay EXACT, never a prefix or substring: TaskCreate / TaskUpdate /
+# TaskList / TaskGet / TaskOutput / TaskStop are todo-management tools, not dispatch.
+# ===================================================================================
+print()
+print("== DISPATCH PREDICATE: real tool name 'Agent' is recorded as a subagent dispatch ==")
+
+
+def feed_of(sdir, sid):
+    with open(os.path.join(sdir, sid + ".json"), "r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def dispatch_payload(sid, tool_name, tool_input):
+    return {"hook_event_name": "PostToolUse", "session_id": sid, "cwd": "C:/x",
+            "tool_name": tool_name, "tool_input": tool_input, "tool_response": {}}
+
+
+REAL_AGENT_TOOL_INPUT = {
+    "description": "ASCII-only pre-write guard",
+    "subagent_type": "general-purpose",
+    "model": "opus",
+    "prompt": "Build ONE durable guard in the ORA Claude config repo. TDD, ...",
+}
+
+root, sdir, out_path, notes_dir = fresh_env("dispatch-agent-")
+sid = "dispatch-agent"
+run_hook({"hook_event_name": "SessionStart", "session_id": sid, "cwd": "C:/x"},
+         sdir, out_path, notes_dir)
+code, _, _ = run_hook(dispatch_payload(sid, "Agent", REAL_AGENT_TOOL_INPUT),
+                      sdir, out_path, notes_dir)
+check("Agent dispatch exits 0", code, 0)
+s = feed_of(sdir, sid)
+check("Agent dispatch recorded as a 'subagent' feed event",
+      [e for e in s.get("feed_events", []) if e.get("kind") == "subagent"
+       and e.get("detail") == "ASCII-only pre-write guard"] != [], True)
+check("Agent dispatch recorded in the activity log as '[agent] ...'",
+      any(a.get("detail", "").startswith("[agent] ASCII-only pre-write guard")
+          for a in s.get("activity", [])), True)
+
+# description absent -> fall back to subagent_type (both are real fields of the tool).
+root2, sdir2, out2, notes2 = fresh_env("dispatch-agent-fallback-")
+sid2 = "dispatch-agent-fallback"
+run_hook({"hook_event_name": "SessionStart", "session_id": sid2, "cwd": "C:/x"},
+         sdir2, out2, notes2)
+run_hook(dispatch_payload(sid2, "Agent", {"subagent_type": "general-purpose",
+                                          "prompt": "..."}), sdir2, out2, notes2)
+s2 = feed_of(sdir2, sid2)
+check("Agent dispatch with no description falls back to subagent_type",
+      [e.get("detail") for e in s2.get("feed_events", [])
+       if e.get("kind") == "subagent"], ["general-purpose"])
+shutil.rmtree(root2, ignore_errors=True)
+
+# Back-compat: "Task" stays matched (older transcripts/harnesses may still emit it).
+root3, sdir3, out3, notes3 = fresh_env("dispatch-task-compat-")
+sid3 = "dispatch-task-compat"
+run_hook({"hook_event_name": "SessionStart", "session_id": sid3, "cwd": "C:/x"},
+         sdir3, out3, notes3)
+run_hook(dispatch_payload(sid3, "Task", {"description": "legacy dispatch"}),
+         sdir3, out3, notes3)
+s3 = feed_of(sdir3, sid3)
+check("legacy 'Task' name still recorded as a subagent dispatch (back-compat)",
+      [e.get("detail") for e in s3.get("feed_events", [])
+       if e.get("kind") == "subagent"], ["legacy dispatch"])
+shutil.rmtree(root3, ignore_errors=True)
+
+# NEAR-MISS SIBLINGS: exact match only. None of the todo tools may read as dispatch.
+for sibling in ("TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TaskOutput",
+                "TaskStop"):
+    root4, sdir4, out4, notes4 = fresh_env("sibling-%s-" % sibling)
+    sid4 = "sibling-%s" % sibling
+    run_hook({"hook_event_name": "SessionStart", "session_id": sid4, "cwd": "C:/x"},
+             sdir4, out4, notes4)
+    run_hook(dispatch_payload(sid4, sibling,
+                              {"id": "t-1", "title": "todo item", "status": "pending"}),
+             sdir4, out4, notes4)
+    s4 = feed_of(sdir4, sid4)
+    check("%s is NOT counted as a subagent dispatch" % sibling,
+          [e for e in s4.get("feed_events", []) if e.get("kind") == "subagent"], [])
+    shutil.rmtree(root4, ignore_errors=True)
+
+shutil.rmtree(root, ignore_errors=True)
+
+# ===================================================================================
 # ROBUSTNESS: a malformed session file, or no sessions directory at all, must never
 # crash the hook -- same fail-open posture as everywhere else in this file.
 # ===================================================================================
