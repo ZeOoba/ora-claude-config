@@ -146,6 +146,28 @@ def main():
         f = hard(d)
         check("all five mutation classes reported together", len(f) >= 4, repr(f))
 
+        # --- undecodable file must NOT crash: this probe is wired into the
+        # pre-push gate, so an unhandled exception here blocks every push from
+        # every concurrent session, with a traceback and no guidance. Windows
+        # editors emit cp1252 routinely, so this is a live case, not a theory. ---
+        d = os.path.join(tmp, "enc", "agents")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "bad-encoding.md"), "wb") as fh:
+            fh.write(b"---\nname: bad-encoding\n"
+                     b"description: 'Use when \x97 a dash appears'\n---\n\nBody.\n")
+        try:
+            f, w = dip.check_agent_definitions(d)
+            crashed = False
+        except Exception as exc:  # noqa: BLE001 - proving it does NOT raise
+            f, w, crashed = None, None, "%s: %s" % (type(exc).__name__, exc)
+        check("undecodable agent file does not crash the probe",
+              crashed is False, str(crashed))
+        check("undecodable agent file does not hard-fail (cannot prove the "
+              "harness rejects it; blocking 6 sessions on that is the worse error)",
+              crashed is False and f == [], repr(f))
+        check("undecodable agent file warns",
+              crashed is False and len(w) == 1 and "bad-encoding.md" in w[0], repr(w))
+
         # --- fail-open: absent directory is not a failure ---
         check("absent agents dir yields no failures",
               hard(os.path.join(tmp, "does-not-exist")) == [], "should fail open")
