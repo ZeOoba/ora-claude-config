@@ -131,39 +131,117 @@ def find_project_dirs(claude_home=None):
             if os.path.isdir(os.path.join(proj_root, d))]
 
 
+def _created_at_ms(rec):
+    """A session record's createdAt as int epoch-ms, or None if absent or
+    unparseable. Never raises."""
+    ca = (rec or {}).get("createdAt")
+    if ca is None:
+        return None
+    try:
+        return int(ca)
+    except (TypeError, ValueError):
+        return None
+
+
+def _sessions_claiming_task(task, session_records):
+    """Every session record whose `scheduledTaskId` is EXACTLY this task's id.
+
+    This is the real, present-in-the-data join key (see
+    find_executing_session's docstring). A record whose scheduledTaskId names
+    a task id absent from this fleet's registry -- a retired task, measured
+    2026-09-11 at 72/753 CC and 38/301 LAMS records -- simply never matches
+    any live task here, which is the correct outcome, not a gap.
+    """
+    task_id = (task or {}).get("id")
+    if not task_id:
+        return []
+    return [r for r in session_records if r.get("scheduledTaskId") == task_id]
+
+
 def find_executing_session(task, session_records, tolerance_ms=JOIN_TOLERANCE_MS):
     """Identify which session record executed a task's most recent firing.
+
+    PRIMARY KEY -- `scheduledTaskId`. Every session record created by a
+    scheduled firing carries `scheduledTaskId` set to the executing task's id
+    VERBATIM. This is an exact-match key, not an inference. Measured on the
+    live stores 2026-09-11: present on 753/1,288 CC records (58.5%) and
+    301/501 LAMS records (60.1%) -- 1,054/1,789 overall; the balance are
+    ordinary interactive sessions, which have no task to name.
+
+      - Exactly one record claims this task id -> that IS the executing
+        session. Returned immediately; no createdAt or title check is needed,
+        because the id match already IS the disambiguation.
+      - More than one claims it (the normal case -- a daily task accumulates
+        one record per firing; measured up to n=105 for ora-aaos-expire-
+        leases) -> tiebreak among these CONFIRMED candidates by whichever
+        `createdAt` is closest to the task's `lastRunAt`. This is a choice
+        among records already proven to belong to this task, not a heuristic
+        guess across the whole session population. Measured across all 55
+        in-window tasks on both fleets 2026-09-11, the winning candidate sat
+        0-2 ms from lastRunAt while the runner-up was never closer than
+        ~82,000,000 ms (~23 h) -- the tiebreak is unambiguous by seven orders
+        of magnitude. (Residual risk, documented rather than hidden: if the
+        true firing's record has been deleted or archived away, the tiebreak
+        will silently return the PREVIOUS firing's record. The 0-vs-23h gap
+        above is what makes that detectable downstream, not something this
+        function can rule out on its own.)
+      - Zero claim it -> fall back to the createdAt/title heuristic below.
+
+    FALLBACK -- createdAt within `tolerance_ms` of lastRunAt, disambiguated by
+    an auto-generated title. Retained ONLY for session records predating the
+    `scheduledTaskId` field; it is the correct and only available key for
+    those. Note its title branch cannot fire for any record that HAS a
+    scheduledTaskId: measured 2026-09-11, `titleSource == "auto"` and
+    `scheduledTaskId` are perfectly mutually exclusive on the CC store
+    (397 auto / 0 of them with scheduledTaskId; 753 with scheduledTaskId /
+    0 of them auto) and `titleSource` is absent from all 501 LAMS records.
+    That is exactly why this can no longer be the primary path.
 
     NOT notifySessionId -- that field is a static "notify here" target fixed
     at registration/last-edit time (verified against 4 real tasks across both
     fleets: every notifySessionId record's createdAt predates the audited
-    lastRunAt by weeks to months). Spec Sec 3.5a.
-
-    The real key: the executing session's createdAt matches the task's
-    lastRunAt to within `tolerance_ms`, disambiguated by title when more than
-    one candidate falls in that window (a catch-up burst can create several
-    sessions inside one tolerance window).
+    lastRunAt by weeks to months). Spec Sec 3.5a. notifySessionId was the
+    trap the spec's first correction caught; `scheduledTaskId` -- the real
+    primary key sitting in every record the whole time -- was the one that
+    same correction MISSED, because the recon scripts printed a cherry-picked
+    field subset and never the full key list. Corrected 2026-09-11 during
+    final whole-branch review.
 
     `session_records` is an iterable of dicts as loaded from local_*.json
-    (must include at least createdAt; title/titleSource optional).
+    (scheduledTaskId/createdAt/title/titleSource all optional per record).
 
-    Returns the single matching session dict, or None if zero or more than
-    one candidate survives -- ambiguity is never resolved by guessing.
+    Returns the single matching session dict, or None if nothing resolves --
+    ambiguity in the FALLBACK path is still never resolved by guessing.
     """
     last_run = _parse_iso(task.get("lastRunAt"))
     if last_run is None:
         return None
     target_ms = int(last_run.timestamp() * 1000)
-    expected_title = (task.get("id") or "").replace("-", " ").capitalize()
 
+    # --- primary: exact scheduledTaskId match -------------------------------
+    claimants = _sessions_claiming_task(task, session_records)
+    if len(claimants) == 1:
+        return claimants[0]
+    if len(claimants) > 1:
+        def _distance(rec):
+            ca_ms = _created_at_ms(rec)
+            return abs(ca_ms - target_ms) if ca_ms is not None else float("inf")
+        return min(claimants, key=_distance)
+
+    # --- fallback: pre-scheduledTaskId-era records --------------------------
+    # A record that CARRIES a scheduledTaskId has already declared which task
+    # it belongs to, and (given we reached here) it is not this one -- so it
+    # is excluded from the fallback pool outright. Without this the timing
+    # heuristic will happily join another task's session whose createdAt
+    # happens to land inside the tolerance window, which is a silent
+    # cross-task mis-join, not a near miss.
+    expected_title = (task.get("id") or "").replace("-", " ").capitalize()
     candidates = []
     for rec in session_records:
-        ca = rec.get("createdAt")
-        if ca is None:
+        if rec.get("scheduledTaskId"):
             continue
-        try:
-            ca_ms = int(ca)
-        except (TypeError, ValueError):
+        ca_ms = _created_at_ms(rec)
+        if ca_ms is None:
             continue
         if abs(ca_ms - target_ms) <= tolerance_ms:
             candidates.append(rec)
@@ -181,6 +259,50 @@ def find_executing_session(task, session_records, tolerance_ms=JOIN_TOLERANCE_MS
     if len(titled) == 1:
         return titled[0]
     return None  # still ambiguous -- unjoined, never guessed
+
+
+def find_all_sessions_for_task(task, session_records, window_seconds=300):
+    """Every session record plausibly serving ONE firing of `task` -- the
+    per-task-firing signal that duplicate detection needs.
+
+    Filters `session_records` to those whose `scheduledTaskId` exactly equals
+    the task's id, then keeps only those whose `createdAt` falls within
+    `window_seconds` of the task's `lastRunAt` in EITHER direction. The time
+    bound is what scopes this to "sessions attempting THIS firing" rather than
+    the task's entire session history (a daily task accumulates one record per
+    firing -- measured up to n=105 -- so the unbounded set is useless as a
+    duplicate signal).
+
+    WHY THIS IS THE ONLY REAL DUPLICATE EVIDENCE AVAILABLE: a genuine
+    same-cycle re-fire means the host executed one logical cron slot twice.
+    That produces TWO session records both stamped with the same
+    `scheduledTaskId` and both created near the same firing time -- direct,
+    observable evidence of two executions. The registry cannot express this at
+    all: it holds exactly ONE row per task id and OVERWRITES `lastRunAt` and
+    `lastScheduledFor` on every fire, so a re-fire leaves no second row behind.
+    Counting registry rows within a single build_run_index() call therefore can
+    never detect a duplicate -- verified 2026-09-11, 38/38 CC and 29/29 LAMS
+    task ids unique, zero registry-level duplicates -- which is precisely why
+    the old row-comparison form of `same_cycle_refire` was structurally dead
+    code. This function replaces that inference with the session-record
+    population the old code loaded and then discarded after picking one winner.
+
+    Returns a list of 0, 1, or more session dicts. Never raises.
+    """
+    last_run = _parse_iso((task or {}).get("lastRunAt"))
+    if last_run is None:
+        return []
+    target_ms = int(last_run.timestamp() * 1000)
+    bound_ms = int(window_seconds * 1000)
+
+    matches = []
+    for rec in _sessions_claiming_task(task, session_records):
+        ca_ms = _created_at_ms(rec)
+        if ca_ms is None:
+            continue
+        if abs(ca_ms - target_ms) <= bound_ms:
+            matches.append(rec)
+    return matches
 
 
 def join_cc_transcript(session_record, project_dirs):
@@ -255,29 +377,40 @@ def _min_cron_period(cron_expression):
 def detect_duplicates(runs, cc_task_ids_enabled, lams_task_ids_enabled):
     """Deterministic duplicate/collision flags across a set of run records
     (spec Sec 5 Stage 0). `runs` is a list of dicts each carrying at least
-    fleet, task_id, run_id, last_scheduled_for (and cron_expression where
-    recurring). Returns a list of flag dicts: {"type", "detail", "run_ids"}.
+    fleet, task_id, run_id, last_scheduled_for, candidate_session_count (and
+    cron_expression where recurring). Returns a list of flag dicts:
+    {"type", "detail", "run_ids"}.
 
     Three flag types -- duplicate detection is a key comparison, never an
     agent's judgment call:
-      - same_cycle_refire: two fires share one lastScheduledFor
+      - same_cycle_refire: MORE THAN ONE session record claims this task's
+        firing (run["candidate_session_count"] > 1) -- see
+        find_all_sessions_for_task. This is direct evidence of two executions.
+        It replaces the original form of this check, which compared multiple
+        REGISTRY ROWS within one build_run_index() call and was structurally
+        dead: the registry holds one row per task id and overwrites it on each
+        fire, so one call can never contain two rows for one task (verified
+        2026-09-11: 38/38 CC and 29/29 LAMS ids unique).
       - cron_period_collision: two distinct lastScheduledFor values fall
-        inside the same cron period for the same task
-      - cross_fleet_twin: the same task id is enabled on BOTH registries
+        inside the same cron period for the same task -- DORMANT within a
+        single invocation, see its own note below.
+      - cross_fleet_twin: the same task id is enabled on BOTH registries.
+        Unaffected by the above -- each fleet's registry is a separate
+        one-row-per-task source, so comparing enabled-id SETS across the two
+        is a real, working per-invocation check.
     """
     flags = []
 
-    by_cycle = defaultdict(list)
     for r in runs:
-        key = (r["fleet"], r["task_id"], r.get("last_scheduled_for"))
-        by_cycle[key].append(r["run_id"])
-    for (fleet, task_id, cycle), run_ids in by_cycle.items():
-        if cycle and len(run_ids) > 1:
+        count = r.get("candidate_session_count") or 0
+        if count > 1:
             flags.append({
                 "type": "same_cycle_refire",
-                "detail": "{} fired {} times for the same logical cycle {}".format(
-                    task_id, len(run_ids), cycle),
-                "run_ids": run_ids,
+                "detail": "{} session records both claim to have executed {}'s "
+                          "firing at {} -- {} of these are likely duplicate "
+                          "executions".format(count, r["task_id"],
+                                              r.get("last_run_at"), count - 1),
+                "run_ids": [r["run_id"]],
             })
 
     twins = set(cc_task_ids_enabled) & set(lams_task_ids_enabled)
@@ -289,6 +422,21 @@ def detect_duplicates(runs, cc_task_ids_enabled, lams_task_ids_enabled):
             "run_ids": [r["run_id"] for r in runs if r["task_id"] == task_id],
         })
 
+    # --- cron_period_collision ------------------------------------------
+    # SCOPE, stated honestly rather than left as a silent no-op: this check
+    # operates on a SEQUENCE of runs spanning MULTIPLE build_run_index()
+    # invocations -- e.g. if Stage 0 is ever extended to accept a list of
+    # prior nights' run-index documents as additional input, so that several
+    # distinct last_scheduled_for values for one task can coexist in `runs`.
+    # Within a SINGLE invocation it is DORMANT and never fires, because the
+    # registry supplies exactly one last_scheduled_for per task per call
+    # (one row per task id, overwritten on each fire) and this check requires
+    # two DISTINCT values for the same task. That is a documented limitation
+    # of the input, not a bug in the comparison -- the comparison itself is
+    # correct and is kept ready for the multi-document input it was written
+    # for. Do not "fix" it by re-deriving collisions from registry row counts;
+    # that is exactly the dead-code pattern same_cycle_refire was rebuilt to
+    # escape (final-review C2, 2026-09-11).
     by_task = defaultdict(list)
     for r in runs:
         if r.get("cron_expression") and r.get("last_scheduled_for"):
@@ -400,7 +548,8 @@ def build_run_index(cc_registry_path, lams_registry_path, project_dirs,
         "window_reason": str,
         "runs": [ { run_id, fleet, task_id, last_scheduled_for, last_run_at,
                     cron_expression, model, transcript, joined: bool,
-                    recorded_skips: [...], file_path, session_model }, ... ],
+                    recorded_skips: [...], file_path, session_model,
+                    candidate_session_count: int }, ... ],
         "duplicate_flags": [ ... ],
         "join_stats": { "cc": {joined, total, rate_ok, message},
                          "lams": {...} },
@@ -440,6 +589,10 @@ def build_run_index(cc_registry_path, lams_registry_path, project_dirs,
             if not _in_window(t, window_start):
                 continue
             session = find_executing_session(t, session_records)
+            # Cheap -- reuses session_records already loaded above. Gives
+            # detect_duplicates a REAL per-firing signal instead of counting
+            # registry rows, which can never exceed 1 per task per call.
+            matching_sessions = find_all_sessions_for_task(t, session_records)
             if fleet == "cc":
                 transcript = join_cc_transcript(session, project_dirs) if session else None
                 cc_total += 1
@@ -463,6 +616,7 @@ def build_run_index(cc_registry_path, lams_registry_path, project_dirs,
                 "recorded_skips": skips.get(task_id, []),
                 "file_path": t.get("filePath"),
                 "session_model": (session.get("model") if session else None),
+                "candidate_session_count": len(matching_sessions),
             })
 
     cc_enabled = {t.get("id") for t in cc_tasks_all if t.get("enabled")}
