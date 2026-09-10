@@ -82,3 +82,30 @@ def resolve_verifier_model(task_record, skill_md_text=None, session_record=None)
     return MODEL_TIERS[audited_tier], (
         "audited model '{}' resolved via {} -- verifying at >= that tier".format(
             audited_model, source))
+
+
+# Full model id -> short Agent-tool `model` parameter name. The Agent tool only
+# accepts these four short names; passing a full id (e.g. "claude-opus-5")
+# would fail the dispatch. Every id in MODEL_TIERS must have an entry here.
+AGENT_TOOL_MODEL_NAMES = {
+    "claude-haiku-4-5-20251001": "haiku",
+    "claude-sonnet-5": "sonnet",
+    "claude-opus-5": "opus",
+    FABLE_MODEL: "fable",
+}
+
+
+def to_agent_tool_model_name(full_model_id):
+    """Map a full model id (as returned by resolve_verifier_model) to the
+    short name the Agent tool's `model` parameter accepts (sonnet | opus |
+    haiku | fable). Raises ValueError -- loudly, never silently -- if given
+    a full id outside the known map, since silently returning something
+    wrong would produce an invalid Agent-tool dispatch."""
+    try:
+        return AGENT_TOOL_MODEL_NAMES[full_model_id]
+    except KeyError:
+        raise ValueError(
+            "to_agent_tool_model_name: no Agent-tool short name mapped for "
+            "model id '{}' -- known ids are {}. Refusing to guess (an invalid "
+            "Agent-tool model name must never be produced silently).".format(
+                full_model_id, sorted(AGENT_TOOL_MODEL_NAMES)))

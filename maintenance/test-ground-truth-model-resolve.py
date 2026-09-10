@@ -83,6 +83,27 @@ def test_extract_model_tag_parses_the_simple_format():
     check("parses the simple [MODEL: <id> | ...] tag format", tag == "claude-sonnet-5", tag)
 
 
+def test_to_agent_tool_model_name_maps_all_four_known_ids():
+    check("claude-haiku-4-5-20251001 maps to 'haiku'",
+          gmr.to_agent_tool_model_name("claude-haiku-4-5-20251001") == "haiku")
+    check("claude-sonnet-5 maps to 'sonnet'",
+          gmr.to_agent_tool_model_name("claude-sonnet-5") == "sonnet")
+    check("claude-opus-5 maps to 'opus'",
+          gmr.to_agent_tool_model_name("claude-opus-5") == "opus")
+    check("claude-fable-5-1 maps to 'fable'",
+          gmr.to_agent_tool_model_name("claude-fable-5-1") == "fable")
+
+
+def test_to_agent_tool_model_name_raises_on_unknown_id():
+    try:
+        gmr.to_agent_tool_model_name("some-future-model-not-in-the-table")
+        check("unknown full model id raises ValueError instead of "
+              "silently returning an invalid Agent-tool name", False)
+    except ValueError:
+        check("unknown full model id raises ValueError instead of "
+              "silently returning an invalid Agent-tool name", True)
+
+
 if __name__ == "__main__":
     test_rung1_registry_model_wins()
     test_rung2_skill_md_tag_used_when_registry_absent()
@@ -93,6 +114,8 @@ if __name__ == "__main__":
     test_verifier_model_unknown_audited_model_also_forces_fable()
     test_extract_model_tag_parses_the_real_frontmatter_format()
     test_extract_model_tag_parses_the_simple_format()
+    test_to_agent_tool_model_name_maps_all_four_known_ids()
+    test_to_agent_tool_model_name_raises_on_unknown_id()
     print("-" * 72)
     if FAILURES:
         print("FAIL: %d failure(s): %s" % (len(FAILURES), ", ".join(FAILURES)))
