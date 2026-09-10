@@ -5,6 +5,7 @@ House style matches the other maintenance test rigs: plain python, no pytest.
 Run: python test-ground-truth-run-index.py   (exit 0 = all pass)
 """
 import importlib.util
+import json
 import os
 import shutil
 import sys
@@ -301,6 +302,74 @@ def test_join_rate_floor_empty_window_is_trivially_ok():
     check("an empty window never fails the floor", ok, msg)
 
 
+def _write_registry(path, tasks, recorded_skips=None):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    json.dump({"scheduledTasks": tasks, "recordedSkips": recorded_skips or {}},
+              open(path, "w", encoding="utf-8"))
+
+
+def _write_session_record(registry_dir, session_id, created_at_ms, title,
+                           cli_session_id=None):
+    rec = {"sessionId": session_id, "createdAt": created_at_ms,
+           "title": title, "titleSource": "auto"}
+    if cli_session_id:
+        rec["cliSessionId"] = cli_session_id
+    json.dump(rec, open(os.path.join(registry_dir, session_id + ".json"), "w", encoding="utf-8"))
+
+
+def test_build_run_index_excludes_its_own_run():
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_reg = os.path.join(tmp, "cc", "scheduled-tasks.json")
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        now = datetime(2026, 9, 11, 20, 5, tzinfo=timezone.utc)
+        _write_registry(cc_reg, [
+            {"id": "ora-ground-truth-auditor", "cronExpression": "0 4 * * *",
+             "enabled": True, "lastRunAt": now.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+             "lastScheduledFor": now.strftime("%Y-%m-%dT%H:%M:%S.000Z")},
+        ])
+        _write_registry(lams_reg, [])
+        index = gti.build_run_index(cc_reg, lams_reg, [], now=now)
+        check("the auditor's own run never appears in its own index",
+              all(r["task_id"] != "ora-ground-truth-auditor" for r in index["runs"]),
+              index["runs"])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_build_run_index_end_to_end_joins_a_real_shaped_run():
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_dir = os.path.join(tmp, "cc")
+        cc_reg = os.path.join(cc_dir, "scheduled-tasks.json")
+        now = datetime(2026, 9, 10, 20, 0, tzinfo=timezone.utc)
+        last_run = "2026-09-10T16:56:58.667Z"
+        _write_registry(cc_reg, [
+            {"id": "ora-doctrine-integrity-guard", "cronExpression": "5 7 * * *",
+             "enabled": True, "lastRunAt": last_run, "lastScheduledFor": last_run,
+             "model": "claude-opus-5"},
+        ])
+        t_ms = int(datetime.fromisoformat(last_run.replace("Z", "+00:00")).timestamp() * 1000)
+        _write_session_record(cc_dir, "local_aa8cdc0f", t_ms,
+                               "Ora doctrine integrity guard", cli_session_id="abc123")
+        proj_dir = os.path.join(tmp, "proj")
+        os.makedirs(proj_dir)
+        open(os.path.join(proj_dir, "abc123.jsonl"), "w").close()
+
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        _write_registry(lams_reg, [])
+
+        index = gti.build_run_index(cc_reg, lams_reg, [proj_dir], now=now)
+        check("exactly one run indexed", len(index["runs"]) == 1, index["runs"])
+        run = index["runs"][0]
+        check("run is joined to its transcript", run["joined"] is True, run)
+        check("run_id keys on lastScheduledFor", run["run_id"].endswith(last_run), run)
+        check("CC join-rate floor passes at 1/1", index["join_stats"]["cc"]["rate_ok"] is True,
+              index["join_stats"])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     test_build_run_id_keys_on_last_scheduled_for()
     test_window_default_when_nothing_widens()
@@ -325,6 +394,8 @@ if __name__ == "__main__":
     test_join_rate_floor_normal_window_low_rate_fails()
     test_join_rate_floor_widened_window_same_low_rate_passes()
     test_join_rate_floor_empty_window_is_trivially_ok()
+    test_build_run_index_excludes_its_own_run()
+    test_build_run_index_end_to_end_joins_a_real_shaped_run()
     print("-" * 72)
     if FAILURES:
         print("FAIL: %d failure(s): %s" % (len(FAILURES), ", ".join(FAILURES)))
