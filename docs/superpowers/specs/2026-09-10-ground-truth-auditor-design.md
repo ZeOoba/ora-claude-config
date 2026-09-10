@@ -176,11 +176,21 @@ These are verified facts about the substrate, not assumptions.
       magnitude.
    2. **Fallback.** Zero records claim the task → fall back to §3.5a's
       createdAt-within-2s + auto-title heuristic, which remains correct and is
-      the only key available for session records that predate the field.
-      Records that *do* carry some other task's `scheduledTaskId` are excluded
+      the only key available for session records that never carry
+      `scheduledTaskId` at all — ordinary interactive/non-scheduled sessions.
+      This is NOT a "records that predate the field" claim: measured directly
+      against both stores' createdAt ranges (2026-09-11 final review), records
+      with and without `scheduledTaskId` are interleaved across the same date
+      range in both fleets — field presence tracks session TYPE, not time.
+      Every current task with a `lastRunAt` has at least one
+      `scheduledTaskId`-carrying claimant, so this fallback is dead-but-correct
+      defensive code on today's live data, not an active legacy path. Records
+      that *do* carry some other task's `scheduledTaskId` are excluded
       from the fallback pool — they have already declared their owner, and
       admitting them lets the timing heuristic silently join another task's
-      session that happens to land in the tolerance window.
+      session that happens to land in the tolerance window. This exclusion is
+      by field PRESENCE, not truthiness — a record with `scheduledTaskId: ""`
+      or `null` has still declared an owner.
    3. Ambiguity in the fallback is still UNJOINED, never guessed.
 
    **Measured effect on the real join rate** (old primary vs. new primary,
