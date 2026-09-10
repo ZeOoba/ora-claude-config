@@ -9,12 +9,17 @@ verifiers/night instead of 64.
 
 Detection is a line-by-line regex match against the transcript's RAW TEXT --
 it does NOT parse tool_use records as structured/typed JSON. This is a
-deliberate simplicity/robustness tradeoff: matching raw text can never miss a
-real side effect (the serialized tool call always contains the matched
-substring), and its only failure direction is OVER-triggering -- e.g. a
-transcript line that merely prints or reads text mentioning "git push" with no
-actual push. An over-trigger costs one extra verifier dispatch; it never
-causes a real side effect to go unverified. See SIDE_EFFECT_PATTERNS below.
+deliberate simplicity/robustness tradeoff: for any side effect WITHIN the
+pattern set below, matching raw text can never miss it (the serialized tool
+call always contains the matched substring), and its only failure direction
+for those patterns is OVER-triggering -- e.g. a transcript line that merely
+prints or reads text mentioning "git push" with no actual push. An
+over-trigger costs one extra verifier dispatch; it never causes a real side
+effect IN THE PATTERN SET to go unverified. This is not a completeness claim
+about side effects generally -- a side effect whose serialized text matches
+none of SIDE_EFFECT_PATTERNS (e.g. a Notion comment, a `gh pr create`, a raw
+HTTP POST) is invisible to this gate regardless of matching strategy. See
+SIDE_EFFECT_PATTERNS below.
 
 Usage:
     python ground-truth-side-effects.py --run-index PATH [--out PATH]
