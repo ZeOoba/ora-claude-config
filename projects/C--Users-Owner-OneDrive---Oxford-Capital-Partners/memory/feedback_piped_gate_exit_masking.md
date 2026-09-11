@@ -15,4 +15,6 @@ metadata:
 ```
 cmd > "<scratchpad>/out.txt" 2>&1; echo "EXIT: $?"
 ```
-then grep the file for detail. Piping to `tail`/`grep`/`head` is fine only for quick LOOKS where you will not cite the exit code as evidence. Also verify the summary line content (e.g. vitest "Test Files N passed") — never claim green from the exit code of a pipeline. Related: [[command-center-gate-vs-gate-ci-divergence]].
+then grep the file for detail. Piping to `tail`/`grep`/`head` is fine only for quick LOOKS where you will not cite the exit code as evidence. Also verify the summary line content (e.g. vitest "Test Files N passed") — never claim green from the exit code of a pipeline.
+
+**Recurred 2026-09-10** (Gabriel, on his own smoke test): `preflight-shared-checkout.py` piped through `grep` printed `exit=0` over a **CONTESTED** verdict. Not a new mechanism — the same one, surviving because the countermeasure was only ever written down here. ORA's checks now print a machine-readable `RESULT_JSON={...}` as their LAST line specifically so a piped caller can still recover the verdict (`preflight-shared-checkout.py`, `verify-push.py`, `cross-repo-wip-scan.py`, `check-open-items-duplicate-ids.py`, the pm-ledger diffs) — when a tool offers one, read the verdict from that line. Promoted to a standing rule the same day: [[rules.md §26]]. Related: [[command-center-gate-vs-gate-ci-divergence]].
