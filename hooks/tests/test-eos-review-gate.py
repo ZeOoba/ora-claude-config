@@ -41,7 +41,7 @@ HOOK = os.path.join(HERE, "eos-review-gate.py")
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
 import gitfixture  # noqa: E402
 
-LADDER_TOP = "claude-fable-5"  # must match eos-review-gate.REVIEWER_MODEL_LADDER[0]
+LADDER_TOP = "claude-fable-5-1"  # must match eos-review-gate.REVIEWER_MODEL_LADDER[0]
 
 
 # --------------------------------------------------------------------------
@@ -82,6 +82,11 @@ def write(repo, rel, text):
 
 def run_hook(command, repo, sessions_dir, session_id="sess1", extra_env=None):
     env = dict(os.environ)
+    # EOS_REVIEW_MODELS may be set ambiently (settings.json's top-level "env"
+    # block, per the module docstring) -- scrub it so an operator's real
+    # override doesn't silently change which model tier THIS suite tests
+    # against. A test that wants it set opts in via extra_env below.
+    env.pop("EOS_REVIEW_MODELS", None)
     env["EOS_SESSIONS_DIR"] = sessions_dir
     env["ORA_OVERRIDE_SESSIONS_DIR"] = sessions_dir
     if extra_env:
@@ -97,11 +102,14 @@ def run_hook(command, repo, sessions_dir, session_id="sess1", extra_env=None):
     return proc.returncode, proc.stdout, proc.stderr
 
 
-def run_cli(args, repo, sessions_dir, session_id="sess1"):
+def run_cli(args, repo, sessions_dir, session_id="sess1", extra_env=None):
     env = dict(os.environ)
+    env.pop("EOS_REVIEW_MODELS", None)  # see run_hook's comment above
     env["EOS_SESSIONS_DIR"] = sessions_dir
     env["ORA_OVERRIDE_SESSIONS_DIR"] = sessions_dir
     env["CLAUDE_CODE_SESSION_ID"] = session_id
+    if extra_env:
+        env.update(extra_env)
     proc = subprocess.run([sys.executable, HOOK, "--repo", repo] + args,
                           capture_output=True, text=True, env=env)
     return proc.returncode, proc.stdout, proc.stderr
@@ -661,6 +669,175 @@ def test_record_cli_rejects_under_tier_model():
         repo, tmp)
     assert rc != 0, "--record must refuse an under-tier reviewer model"
     print("PASS test_record_cli_rejects_under_tier_model")
+
+
+def test_env_review_models_widens_and_narrows_accepted_tier():
+    """EOS_REVIEW_MODELS is the documented escape hatch for a retired/unlisted
+    ladder id (settings.json's top-level "env" block is what actually delivers
+    it to this subprocess in a live session -- confirmed 2026-09-07, see the
+    module docstring). Two things must hold: a model NOT in the hardcoded
+    REVIEWER_MODEL_LADDER is accepted once listed in EOS_REVIEW_MODELS, and the
+    override REPLACES the ladder rather than adding to it (so a stale
+    EOS_REVIEW_MODELS can't accidentally keep an actually-retired id alive
+    forever alongside the code-level ladder)."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "hooks/new-guard.py", "x = 1\n")
+    git(repo, "add", "-A")
+
+    rc, out, err = run_cli(
+        ["--record", "--verdict", "approved", "--model", "claude-preview-9"],
+        repo, tmp)
+    assert rc != 0, "an id absent from both the ladder and EOS_REVIEW_MODELS must be refused"
+    assert "not in the accepted tier" in err, (
+        "must fail for the accepted-tier reason specifically, not some other "
+        "cli_record exit path: %s" % err)
+
+    rc, out, err = run_cli(
+        ["--record", "--verdict", "approved", "--model", "claude-preview-9",
+         "--notes", "n"],
+        repo, tmp, extra_env={"EOS_REVIEW_MODELS": "claude-preview-9"})
+    assert rc == 0, "EOS_REVIEW_MODELS must admit an id outside the hardcoded ladder: %s" % err
+
+    rc, out, err = run_cli(
+        ["--record", "--verdict", "approved", "--model", LADDER_TOP, "--notes", "n"],
+        repo, tmp, extra_env={"EOS_REVIEW_MODELS": "claude-preview-9"})
+    assert rc != 0, "EOS_REVIEW_MODELS must REPLACE the ladder, not extend it"
+
+    # A suffixed EOS_REVIEW_MODELS value must not wedge the gate either -- an
+    # operator pastes this straight from a self-reported id (the exact
+    # scenario the module docstring's settings.json guidance points them at),
+    # so both sides of the comparison need the same _bare_model() normalization.
+    rc, out, err = run_cli(
+        ["--record", "--verdict", "approved", "--model", "claude-preview-9",
+         "--notes", "n"],
+        repo, tmp, extra_env={"EOS_REVIEW_MODELS": "claude-preview-9[1m]"})
+    assert rc == 0, (
+        "a bracket-suffixed EOS_REVIEW_MODELS value must still admit its bare "
+        "id: %s" % err)
+    print("PASS test_env_review_models_widens_and_narrows_accepted_tier")
+
+
+def test_bracketed_context_window_suffix_is_stripped_before_comparison():
+    """A self-reported model id can carry a trailing context-window tag (e.g.
+    "claude-opus-5[1m]", this session's own actual id per model-canary-probe.py's
+    bare_model()). An exact-match comparison against the ladder would otherwise
+    refuse a genuine top-tier reviewer over formatting alone -- the same failure
+    class as the 2026-09-07 incident this branch fixes, recurring even with a
+    fresh ladder. --record must accept the suffixed form, and the artifact it
+    writes must store the BARE id so a later read-back (valid_review) still
+    matches a ladder that never itself carries suffixes."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "hooks/new-guard.py", "x = 1\n")
+    git(repo, "add", "-A")
+    suffixed = LADDER_TOP + "[1m]"
+    rc, out, err = run_cli(
+        ["--record", "--verdict", "approved", "--model", suffixed, "--notes", "n"],
+        repo, tmp)
+    assert rc == 0, "a bracket-suffixed top-tier id must be accepted: %s" % err
+    key = json.loads(out)["key"]
+    path = os.path.join(tmp, "sess1", "reviews", key + ".json")
+    with open(path, "r", encoding="utf-8") as fh:
+        stored = json.load(fh)
+    assert stored["reviewer_model"] == LADDER_TOP, (
+        "the artifact must store the BARE id, not the suffixed input: %r" % stored["reviewer_model"])
+    print("PASS test_bracketed_context_window_suffix_is_stripped_before_comparison")
+
+
+def test_legacy_suffixed_artifact_still_validates_on_read():
+    """valid_review()'s _bare_model() call on the READ path exists specifically
+    for an artifact written before this normalization landed (or by any future
+    writer that forgets to normalize). Simulate that directly -- write a
+    review, then hand-edit its stored reviewer_model back to a suffixed form
+    -- rather than only exercising the CLI's own (already-normalizing) write
+    path, which test_bracketed_context_window_suffix_is_stripped_before_
+    comparison covers."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "hooks/new-guard.py", "x = 1\n")
+    git(repo, "add", "-A")
+    art = record_review(repo, tmp)
+    with open(art["artifact_path"], "r", encoding="utf-8") as fh:
+        stored = json.load(fh)
+    stored["reviewer_model"] = LADDER_TOP + "[1m]"
+    with open(art["artifact_path"], "w", encoding="utf-8") as fh:
+        json.dump(stored, fh)
+    rc, out, err = run_hook('git commit -m "add guard"', repo, tmp)
+    assert_allowed(rc, err, "legacy suffixed reviewer_model on the read path")
+    print("PASS test_legacy_suffixed_artifact_still_validates_on_read")
+
+
+def test_bracket_only_env_entry_cannot_produce_an_empty_accepted_model():
+    """2026-09-08 independent review, finding 2 (CONFIRMED, fail-OPEN). Before
+    the fix, accepted_models() filtered the RAW token's truthiness
+    (`v.strip()`) before _bare_model() normalized it, so a bracket-only entry
+    like "claude-opus-5,[1m]" passed the filter as non-empty, then normalized
+    to "" -- an empty string that stayed IN the accepted tuple. That means a
+    --record call (or a legacy artifact) with reviewer_model="" would VALIDATE
+    and a real commit would be ALLOWED with no recorded reviewer identity at
+    all. This must never validate, regardless of what garbage EOS_REVIEW_MODELS
+    carries."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "hooks/new-guard.py", "x = 1\n")
+    git(repo, "add", "-A")
+    rc, out, err = run_cli(
+        ["--record", "--verdict", "approved", "--model", "", "--notes", "n"],
+        repo, tmp, extra_env={"EOS_REVIEW_MODELS": "claude-opus-5,[1m]"})
+    assert rc != 0, (
+        "an empty reviewer_model must never be accepted, even with a "
+        "bracket-only EOS_REVIEW_MODELS entry present: rc=%s out=%s" % (rc, out))
+    print("PASS test_bracket_only_env_entry_cannot_produce_an_empty_accepted_model")
+
+
+def test_bare_model_strips_trailing_whitespace_before_the_suffix_regex():
+    """2026-09-08 independent review, finding 3 (CONFIRMED, fail-closed). The
+    suffix regex anchors to end-of-string ($), so a trailing space after the
+    closing bracket ("claude-opus-5[1m] ") used to defeat it entirely --
+    _bare_model() returned the string unchanged instead of "claude-opus-5",
+    which would wrongly refuse a genuine top-tier reviewer over whitespace
+    instead of formatting. maintenance/model-canary-probe.py's bare_model()
+    (the precedent this file's own comment cites) already strips first;
+    this closes the gap between the two."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "hooks/new-guard.py", "x = 1\n")
+    git(repo, "add", "-A")
+    rc, out, err = run_cli(
+        ["--record", "--verdict", "approved", "--model", LADDER_TOP + "[1m] ",
+         "--notes", "n"],
+        repo, tmp)
+    assert rc == 0, (
+        "a trailing-whitespace-after-suffix id must still normalize to the "
+        "bare top-tier id: %s" % err)
+    key = json.loads(out)["key"]
+    path = os.path.join(tmp, "sess1", "reviews", key + ".json")
+    with open(path, "r", encoding="utf-8") as fh:
+        stored = json.load(fh)
+    assert stored["reviewer_model"] == LADDER_TOP, (
+        "must store the bare id even when the input had trailing whitespace "
+        "after the suffix: %r" % stored["reviewer_model"])
+    print("PASS test_bare_model_strips_trailing_whitespace_before_the_suffix_regex")
+
+
+def test_comma_inside_bracket_tag_does_not_shred_env_review_models():
+    """2026-09-08 independent review, finding 4 (CONFIRMED, fail-closed,
+    near-theoretical -- no real context-window tag in this fleet's tracked
+    data has ever carried a comma). A naive raw.split(",") on
+    EOS_REVIEW_MODELS would split "claude-opus-5[1m,200k]" into
+    "claude-opus-5[1m" and "200k]" -- neither matches the anchored suffix
+    regex, both survive unstripped, and accepted_models() returns two
+    garbage strings that reject every real model id. Same root cause as
+    finding 2 (accepted_models() never validated the SHAPE of its entries),
+    cheap to close in the same pass."""
+    repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+    write(repo, "hooks/new-guard.py", "x = 1\n")
+    git(repo, "add", "-A")
+    rc, out, err = run_cli(
+        ["--record", "--verdict", "approved", "--model", LADDER_TOP,
+         "--notes", "n"],
+        repo, tmp,
+        extra_env={"EOS_REVIEW_MODELS": LADDER_TOP + "[1m,200k]"})
+    assert rc == 0, (
+        "a comma-bearing context-window tag must not shred the bare id out "
+        "of EOS_REVIEW_MODELS: %s" % err)
+    print("PASS test_comma_inside_bracket_tag_does_not_shred_env_review_models")
 
 
 def test_record_cli_cmd_scopes_pathspec_commit_and_validates_against_main():
@@ -1298,6 +1475,58 @@ def test_hint_silent_on_multiline_message_with_attached_pathspec():
     assert mod.message_shape_hint(cmd) == "", (
         "hint fired despite the pathspec being attached")
     print("PASS test_hint_silent_on_multiline_message_with_attached_pathspec")
+
+
+def test_index_realcase_path_survives_non_ascii_under_quotepath_false():
+    """git-probe-dedup follow-up (2026-09-07, independent-review finding).
+    git_commit_parse.git_lines() used to call subprocess.run() with no
+    encoding="utf-8", errors="replace" (unlike git_probe_common.git(), which
+    every other shared-wrapper caller in this fleet already gets). On Windows,
+    a non-UTF-8 byte in git's stdout is decoded inside subprocess's own
+    background reader THREAD: the UnicodeDecodeError there does NOT propagate
+    out of subprocess.run(), which instead returns NORMALLY with
+    returncode=0 and stdout=None -- so the old `try/except Exception` around
+    that call caught nothing, and the real crash was an AttributeError from
+    `None.splitlines()` on the very next line, OUTSIDE that try. That
+    AttributeError unwound past git_lines, past _index_digest /
+    _index_realcase_path, all the way to this gate's own top-level `except
+    Exception: pass` in __main__ -- the WHOLE hook aborting mid-run and
+    exiting 0, not one query degrading. Bash-verified against a real repo
+    before landing the fix (see the git-probe-dedup task notes); this test is
+    the regression proof requested by that review.
+
+    _index_realcase_path is the one git_lines call site exposed regardless of
+    repo/global config: it passes `-c core.quotepath=false` explicitly
+    (needed to recover a path's real on-disk casing), where every other
+    call site only sees git's DEFAULT core.quotepath=true C-quoting non-ASCII
+    bytes to plain ASCII escapes and is not exposed by this particular bug."""
+    mod = _load_gate_module()
+    repo = gitfixture.blank_repo(prefix="eos-rg-nonascii-")
+    # Cyrillic "slovo" (0x0441 0x043b 0x043e 0x0432 0x043e) -- UTF-8-encodes to
+    # bytes undefined under cp1252, this fleet's default locale codec
+    # (confirmed via locale.getpreferredencoding before this test was
+    # written). Built from codepoints, not a literal non-ASCII character in
+    # the source, per this file's own "ASCII-only" header contract.
+    name = "".join(chr(c) for c in (0x0441, 0x043b, 0x043e, 0x0432, 0x043e)) + ".py"
+    rel = "hooks/" + name
+    path = os.path.join(repo, "hooks", name)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("x = 1\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "init")
+
+    realcase = mod._index_realcase_path(repo, rel)
+    assert realcase == rel, (
+        "expected the real-cased non-ASCII path back unharmed, got %r -- a "
+        "regression here means the encoding gap this test guards is back"
+        % (realcase,))
+
+    digest = mod._index_digest(repo, rel)
+    assert digest, (
+        "digest must resolve for a real, committed non-ASCII path, not "
+        "silently degrade to None (the fail-open symptom this bug produced)")
+    print("PASS test_index_realcase_path_survives_non_ascii_under_quotepath_false")
 
 
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
