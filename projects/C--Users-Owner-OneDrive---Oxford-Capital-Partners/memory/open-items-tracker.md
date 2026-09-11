@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 1624855d-d36d-4c3e-9761-0250482b1d31
-  modified: 2026-09-08T13:48:18.000Z
+  modified: 2026-09-08T17:30:26.630Z
 ---
 
 **Purpose:** every open/residual/TODO item anywhere in the ORA system (memory files, `oxford-cc-repo-health.md`-style incident writeups, `event_log.md` follow-ups, fleet punch lists) gets exactly ONE row here. Other files reference an item by pointer — `[open-items-tracker.md#OI-003](open-items-tracker.md#OI-003)` — and never restate its description, evidence, or status inline. A restated copy is the thing that rotted in the 2026-07-16/17 incident (see [[event_log]] and [[oxford-cc-repo-health]]): a forward-pointer to `session-context.md` "carrying the live list" went dead the instant that file's content moved on, because the item text lived in two places and only one of them got updated when the item closed.
@@ -32,6 +32,25 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 
 | ID | Opened | Source | One-line |
 |----|--------|--------|----------|
+| [OI-272](#OI-272) | 2026-09-11 | `dirty-tree-triage` push-blocker fix, this session — surfaced fixing [OI-271](#OI-271)'s neighbor, `LADDER_TOP` staleness in `hooks/tests/test-eos-review-gate.py` | **MEDIUM (branch-drift symptom cascading into an untested regression).** `hooks/lib/git_commit_parse.py` on `feat/model-canary-probe-step25` is 72 lines behind `main`'s already-reviewed fix (thin adapter over `git_probe_common.git()`, closing a Windows non-UTF-8-stdout `AttributeError` on `None.splitlines()`). Confirmed live: `test_index_realcase_path_survives_non_ascii_under_quotepath_false` fails on this branch with exactly that `AttributeError`/`UnicodeDecodeError` shape. **Do not hand-sync this file** — attempted once this session, `git checkout main -- hooks/lib/git_commit_parse.py` alone cascaded 1 failure into 54, meaning it now depends on other infrastructure (`git_probe_common.py` and possibly more) that is ALSO stale here and was not further chased. The override token `allow-hook-test-failure` has covered this same failure twice in 24h per the gate's own recurrence nudge — a third instance should not be a third override. Fix direction: this belongs to [OI-249](#OI-249)'s merge-forward corrector (bulk, atomic, dependency-consistent) rather than more one-off `git checkout main -- <path>` syncs, which are only safe for genuinely self-contained files (proven true for `CLAUDE.md` and this OI's own `test-eos-review-gate.py` fix, proven FALSE for `git_commit_parse.py`) |
+| [OI-271](#OI-271) | 2026-09-11 | `dirty-tree-triage` follow-up — independent review (claude-opus-5) of `CLAUDE.md` commit `b777625` | **LOW (doc contradiction, no automated behavior affected).** `rules.md` §2 line 32 ("On non-zero COM exit: retry once … do NOT halt") now directly contradicts its own exit-code table two lines below (exit 1/3 = do NOT retry) — harmless while `CLAUDE.md` inlined the same split for a reader to reconcile against, live now that `CLAUDE.md` points straight at §2 instead. Documentation-only; `send-via-outlook.ps1`'s actual exit-code handling is unaffected. See detail section below |
+| [OI-270](#OI-270) | 2026-09-10 | CI on [ZeOoba/AAOS PR #5](https://github.com/ZeOoba/AAOS/pull/5) (run 34527574215) — surfaced by the CI added in [OI-259](#OI-259), on a **docs-only** commit | **HIGH (the append-only audit log silently loses records under contention — the GATE3 Critical bug believed fixed).** `tests/test_event_log_concurrency.py::test_concurrent_writers_lose_zero_events` failed on **both** matrix legs: `AssertionError: 234 != 240 … (6 events lost to the append race)` on 3.11 and `232 != 240 … (8 events lost)` on 3.13. The test drains to completion (up to 50 `drain_event_spool` passes) **before** counting, so this is not merely undrained spool — the records are absent from the NDJSON after a full drain. `docs/GATE3-REVIEW.md` records this exact failure mode (two near-simultaneous appends to `aaos-events.ndjson` silently clobbering each other) as Critical and **fixed** by the spool-file + `O_EXCL` drain-lock mechanism now in `_aaos_common.py`; `COWORK-BOOTSTRAP.md` §8 repeats "never append to `aaos-events.ndjson` directly" as a hard rule on the strength of that fix. Stakes are higher than a flaky test: `commit_state_change` treats the event write as **the commit point of every transaction**, and the NDJSON is the log the whole system audits from — so lost events mean lost evidence that a transaction happened. **Intermittent and contention-dependent**: passes 5/5 locally in isolation, and the immediately preceding CI run on the same branch (`ae39a76`) passed; CI's real 2-core parallelism is what exposes it. Same signature as [OI-264](#OI-264). **Not caused by the commit that surfaced it** — `598ef51` edits only `docs/adr/0006-lease-ownership-authority.md`. Fix direction: NOT by weakening the assertion. Determine first whether the events are destroyed or merely undrainable — a leaked drain lock would make every subsequent `drain_event_spool` return 0 (it skips rather than blocks when the lock is held), which would break the test's `if drain == 0: break` loop on its first pass and leave pending files unfolded forever |
+| [OI-267](#OI-267) | 2026-09-10 | Found while writing [ADR-0006](https://github.com/ZeOoba/AAOS/pull/5) after two refuted attempts at [OI-265](#OI-265); demonstrated | **HIGH (the designated double-run backstop cannot detect a double-run).** `AAOS-SPEC.md` §7 names `assert_lease_held` as the mechanism that closes the double-acquire risk — *"the double-run risk of reclaiming from a live-but-lapsed holder is closed instead by the commit-time lease check every mutating script runs"*. That function reads `task.lease` and **never reads the lock file**, but the lock file is what actually arbitrates acquisition; `task.lease` is a projection `lease-task.py` writes only AFTER `acquire_lease` returns, i.e. a settle window later. So the two artifacts disagree for ≥30s on EVERY acquisition, and the backstop consults the one that cannot tell two holders apart. Demonstrated (`AAOS/docs/adr/0006-evidence-backstop-blind-spot.py`): with the lock naming `cowork/sess-B` and `task.lease` still naming `claude-code/sess-A`, `assert_lease_held(task, "claude-code", "sess-A")` **PASSES**, clearing sess-A to commit against a task the lock says it lost. Fix: D1 of ADR-0006 (verify against the lock file). **Highest blast radius single edit in the OI-265 work** — every mutating script calls it — so it needs its own adversarial pass. `AAOS-SPEC.md` §7's sentence also has to be corrected: it currently claims a protection that artifact cannot provide |
+| [OI-268](#OI-268) | 2026-09-10 | Observed on ZeOoba/AAOS PRs [#4](https://github.com/ZeOoba/AAOS/pull/4) and [#5](https://github.com/ZeOoba/AAOS/pull/5) | **MEDIUM (a reviewer check that is green without reviewing).** `gh pr checks` reports `CodeRabbit  pass` while the same bot's PR comment says *"Review limit reached"* / *"Review rate limited"* (free plan, rate-limited); the second configured reviewer, `qodo-code-review`, posts *"reviews are paused because your trial has ended"*. So **both** automated reviewers on this repo are non-functional and one of them still reports a passing check. CLAUDE.md's merge gate already says a bot status check is never a review verdict — this is the case that makes the rule bite, since the check looks satisfied and reviewed nothing. **Fourth instance in one session of the same pattern** (`full-gate-selfhosted.yml` never ran — [OI-254](#OI-254); `check-contract-drift.py` wired to nothing — [OI-259](#OI-259); a mutation harness reporting 8/8 while a demonstrably double-acquiring build passed it — see [OI-265](#OI-265)'s second attempt). Fix direction: decide whether a rate-limited reviewer should report `neutral`/fail rather than `pass`, or drop the check; and treat the recurring shape as one probe (a "does this check ever fail?" sweep) rather than four separate fixes |
+| [OI-269](#OI-269) | 2026-09-10 | Surfaced while deriving [ADR-0006](https://github.com/ZeOoba/AAOS/pull/5)'s D3 thresholds | **MEDIUM-HIGH (a documented protocol feature that does not exist, and a reclamation clause that can never be false).** AAOS lease renewal is specified in three places — `AAOS-SPEC.md` §7 (*"45 minutes, **renewable before expiry**"*), `AAOS-SPEC.md` §"Lease expiry is 45 minutes, renewable", and `docs/adr/0003-locking-model.md` line 32 (*"The lease is renewable: the holder can request a renewal before expiry, emitting a `LeaseRenewed` event, for genuinely long-running jobs"*) — and **is not implemented**: no renew tool in `tools/`, no `LeaseRenewed` emitter anywhere. Two consequences beyond doc drift: (1) ADR-0003's reclamation rule is *"past expiry + grace, **with no renewal on record** — full stop"*, a condition that can never be false today, so the written rule and the shipped rule differ; (2) a genuinely long-running holder has **no way to keep a lease it is actively using** — it can only be reclaimed out from under itself at 45 minutes, which is precisely the case ADR-0003 says renewal exists to serve. Note ADR-0006's D3 derivation was written to hold whether or not renewal ships (a renewal sets `expires = renewal_time + ttl`, preserving the bound), so this does not block that work. Fix direction: build `renew-lease.py` + the `LeaseRenewed` event, or strike renewal from all three docs and say long jobs must be re-scoped (which is already `docs/CODE-ADAPTER.md`'s advice) |
+| [OI-265](#OI-265) | 2026-09-10, **root-caused + spec'd 2026-09-10 (ADR-0006 Accepted)** | Adversarial REFUTE pass on the [OI-264](#OI-264) fix (opus, independent) — found while checking the fix for fail-open regressions | **HIGH (genuine double-ACQUIRE — two agents can both believe they hold the same lease, the exact failure AAOS exists to prevent).** `_aaos_common.acquire_lease()` step 1 archives an incumbent lock file based SOLELY on the task's expired `lease` field, **without ever reading the lock**: `incumbent_file = lock_path(...); if incumbent_file.exists(): archive_lock(incumbent_file, ...)`. But `lease-task.py` writes the task's `lease` only AFTER `acquire_lease` returns — i.e. after the 30-second settle window. So for 30+ seconds a LIVE lock file coexists with a stale expired task lease, and a second caller archives that live lock unread and acquires over it. Demonstrated by the reviewer: holder A acquired, holder B acquired, lock file then held by B, `BOTH ACQUIRED: True`. This is the `chip-claims.log` double-run incident class that `docs/adr/0003` cites as the reason the lease protocol exists. **Distinct from and larger than [OI-264](#OI-264)**, which was about a contended lease surfacing as corruption; this one silently grants the lease twice. Fix direction (needs its own adversarial pass): read the incumbent lock and honour ITS expiry before archiving, rather than trusting the task's lease field, which is written a settle-window late by design |
+| [OI-266](#OI-266) | 2026-09-10 | Adversarial REFUTE pass on the [OI-264](#OI-264) fix (opus, independent) | **LOW-MEDIUM (untyped escape + unbounded sidecar accumulation).** Two coupled defects in `_aaos_common.acquire_lease()`'s reclaim path. (1) `archive_lock()` uses `os.replace`; if a concurrent sweep moved the file first, the `OSError` escapes `acquire_lease` **outside the `AaosError` hierarchy** every caller's `except` clauses are built on — reviewer demonstrated `OSError … (AaosError? False)`. `expire-leases.py` already learned this lesson and wraps its own `archive_lock` call; `acquire_lease` never did. (2) The same path leaks its staged sidecar (`<lock>.tmp-<holder>-<pid>`), and `expire-leases.py` filters `".tmp-" not in p.name`, so leaked sidecars are **never swept and accumulate indefinitely** in the seam's `locks/` directory. Reviewer demonstrated both in one run: `escaped as: OSError … (AaosError? False)` and `leaked sidecars: ['t-g.lock.tmp-cowork-35924']`. Fix direction: wrap `archive_lock` in `acquire_lease` the way `expire-leases.py:206` already does, ensure `_cleanup_sidecar()` runs on that path, and decide whether the sweeper should reclaim aged sidecars rather than ignoring them by name |
+| [OI-264](#OI-264) | 2026-09-10 | Surfaced by [OI-259](#OI-259)'s CI on [ZeOoba/AAOS PR #4](https://github.com/ZeOoba/AAOS/pull/4) (run 34518125534, 3.11 leg; 3.13 leg passed the SAME run) | **MEDIUM-HIGH (real concurrency defect in the lock protocol — the one thing AAOS exists to get right).** `_aaos_common.acquire_lease()` creates the lock with exclusive-create and writes its JSON content as a SEPARATE step. A second writer that opens the lock inside that window reads a zero-byte file and `load_json` raises `CorruptStateError: unparseable JSON at …/locks/t-race-8.lock: Expecting value: line 1 column 1 (char 0)` — instead of the clean `denied` the protocol promises. `tests/test_aaos_common.py::AcquireLeaseRaceTests::test_genuine_race_exactly_one_acquired_never_two` therefore observes `['acquired']` where it asserts `['acquired', 'denied']`, and `Scenario03TwoWritersRaceTests` fails with it. **Intermittent, not deterministic** — passed on the 3.13 leg of the same run, and reproduced once locally under heavy load (13 concurrent sessions) while passing in isolation and on two subsequent full runs, so this is a genuine timing window, not a platform-only artifact. The consequence is worse than a flaky test: a real contended lease raises a corruption error rather than denying, and `CorruptStateError` is the signal AAOS reserves for genuinely damaged state — so a routine race would read as data corruption and could trigger the wrong operator response. Also directly on the Cowork sandbox path (`docs/COWORK-BOOTSTRAP.md` contemplates Linux sandboxes). Fix direction — **the reader side, not the writer**: an existing-but-empty/unparseable lock inside the settle window means "held by a writer mid-create", i.e. deny/retry, not corrupt. That is a semantic change to the lease protocol and needs its own adversarial REFUTE pass (Engineering OS done-bar), NOT a CI-unblocking patch. **Do not fix by skipping or weakening the race test** |
+| [OI-263](#OI-263) | 2026-09-10 | Surfaced by [OI-259](#OI-259)'s new CI workflow on its FIRST run ([ZeOoba/AAOS PR #4](https://github.com/ZeOoba/AAOS/pull/4), run 34514715973) — green locally, red on every runner | **MEDIUM (false-confidence test coverage on the colonization guard).** 9 AAOS tests in `tests/test_queue_scripts.py` (`PostHandoffHappyPath/Idempotency/Blocker` classes) assert that a handoff artifact is IN write-scope, but `make_in_scope_artifact` (`tests/test_queue_scripts.py:522,528`) creates it under `REPO_ROOT` while the production `agent-registry.json:18` declares `claude-code`'s scope as the literal absolute `"C:/Users/Owner/AAOS/**"`. They pass ONLY because the operating machine's checkout happens to sit at that exact path — **they validate Gabriel's directory layout, not `match_write_scope()`'s logic**, and would break identically if the repo were ever moved or cloned elsewhere. On CI both matrix legs fail 9/226 with `WRITE-SCOPE VIOLATION: path '/home/runner/work/AAOS/AAOS/aaos-artifacts-*/evidence.txt' is outside agent 'claude-code's declared write_scope`. No seam exists to fix it cheaply: `tools/post-handoff.py:26` states outright "There is no `--registry` override here", and `_aaos_common.registry_path()` hard-returns `REPO_ROOT / "agent-registry.json"`. **Blocks OI-259** — PR #4 is deliberately held unmerged rather than landing a red-on-arrival CI. Fix direction (needs its own review — this touches the colonization guard's inputs): add a `--registry` override to `post-handoff.py` mirroring `validate.py`'s existing one, and have the test base write a temp registry whose `write_scope` is derived from `REPO_ROOT` at runtime |
+| [OI-254](#OI-254) | 2026-09-10 | Cross-repo architecture-diagram review (Gabriel-directed, this session); answers the residual [OI-137](#OI-137) `gate:ci` question | **HIGH (financial data integrity — a two-spine cross-check that has never run outside a human's terminal).** `oxford-command-center`'s `reconcile:noi-crosscheck` (Spine A `Property.noi` vs Spine B warehouse ledger NOI), `warehouse:verify`, `warehouse:drift` and `governance` live ONLY in `npm run gate`, never in `gate:ci`. Their intended CI home, `.github/workflows/full-gate-selfhosted.yml`, is `on: workflow_dispatch` only and targets `runs-on: [self-hosted, linux, ora-data]` — `gh api repos/ZeOoba/oxford-command-center/actions/runners` returns `{"total_count":0,"runners":[]}` and `gh run list --workflow full-gate-selfhosted.yml` shows ZERO runs ever. No live task on either fleet runs it either (only a 2026-07-08 archived entry matches). The workflow's own comment says to add a `schedule:` trigger "after the runner burn-in period" — the burn-in never happened. Fix direction: register a CC/MCP fleet task running `npm run gate` on the machine that already has the workbook mounted, emailing on non-zero exit; provision the self-hosted runner only if PR-blocking is actually wanted |
+| [OI-255](#OI-255) | 2026-09-10 | Cross-repo architecture-diagram review (Gabriel-directed, this session) | **HIGH (gate strength inverted against blast radius).** `ora-pm` is the only ORA repo that debits real bank accounts (Stripe ACH autopay, late-fee posting) and carries the weakest gate of the three application repos: `package.json` has `"lint": "tsc --noEmit"` — there is no linter, `lint` is an alias for `typecheck` — no `gate`/`check:refute`/reconcile script of any kind, and `.github/workflows/ci.yml` runs typecheck → test → build → `wrangler pages deploy` **on every push to `main`**. `oxford-command-center`, which only READS money, runs `eslint . --max-warnings 0` plus a `refute-required` PR job enforcing a Refute-Reviewed trailer on financial-decision diffs. Nothing equivalent guards `server/lib/billing.ts`, `server/routes/cron.ts`, `server/routes/stripe.ts` or `server/lib/cam.ts`. Fix direction: add ESLint and stop aliasing `lint`; port `scripts/check-refute-required.ts` scoped to those four paths and make the deploy step depend on it |
+| [OI-256](#OI-256) | 2026-09-10 | Cross-repo architecture-diagram review (Gabriel-directed, this session) | **MEDIUM-HIGH (output quality on the most public AI surface).** Five Claude model ids are pinned across three repos with no shared constant, and the public site's chat assistant is a generation behind a sibling function in its own repo: `Website/netlify/edge-functions/chat.ts:17` pins `claude-sonnet-4-5` while `Website/netlify/functions/_shared/broker-llm-extract.js:3` uses `claude-sonnet-5`; `oxford-command-center` uses `claude-opus-5` (`server/ai/agent.ts:176`, `server/ai/comps.ts:49`) and `claude-haiku-4-5-20251001` (`server/ai/narrative.ts:15`, `server/warehouse/om-extract.ts:150`); `ora-pm` uses `claude-opus-5` (`server/routes/intake.ts`). The chat assistant is the surface unknown brokers and tenants actually talk to. Fix direction: bump `chat.ts` to `claude-sonnet-5`, prove it with the EXISTING `npm run eval:chat -- --base=<preview>` harness against a deploy preview, then hoist each repo's model id into one exported constant. Production deploy still needs Gabriel's per-deploy confirmation (Hard Invariant 2) |
+| [OI-257](#OI-257) | 2026-09-10 | Cross-repo architecture-diagram review (Gabriel-directed, this session); subsumes [OI-164](#OI-164) as its worst instance | **MEDIUM (the connecting structural pattern — seven hand-rolled source→mirror pipelines, only two structurally prevented from drifting).** Each repo invented its own mirror and its own drift story: ora-skills→AppData cache (pre-commit Check 4, detect-only, [OI-164](#OI-164), bit 3x in one session); AAOS git→seam `contracts/` (`ora-aaos-publish-contracts` 1x/day weekdays 09:15 ET, push-based, self-heals within its own ≤24h window); oxford-command-center→Pages mirror (hourly Windows task + off-fleet classifier, see [OI-258](#OI-258)); Website→`dist/` (build-time allowlist that FAILS the build — structurally prevented); Website→`knowledge-base.json` (netlify build + committed copy); `~/.claude`→GitHub (manual push + pre-push scan chain); `scheduled-tasks/`→`_scheduled_tasks_backup/` (**no writer found — a backup nothing writes to reads as covered**). AAOS is the working template. Fix direction: do NOT unify all seven; apply the AAOS shape to OI-164 (a scheduled one-way repo→cache republish, making `repo_first_check.py` a confirmation rather than the sole defense), and either wire or delete `_scheduled_tasks_backup/` |
+| [OI-258](#OI-258) | 2026-09-10 | Cross-repo architecture-diagram review (Gabriel-directed, this session); regression of the fix filed as OI-197 (no longer in the Open table) | **MEDIUM (silent regression — an autostart never registered plus a redundancy watchdog that is erroring).** `oxford-command-center/scripts/register-brain-server-task.ps1` exists to register `ORA Command Center - Brain Server` at every logon; `Get-ScheduledTask` on LAPTOP-CSHSCBE6 shows **no such task** — only `ORA Command Center - Mirror Deploy` (State=Running, `0x41301`, normal) and `ORA Mirror Deploy Classifier`, whose last run (2026-09-10 11:07:33) exited `LastTaskResult=3221225786` = `0xC000013A` (STATUS_CONTROL_C_EXIT — a termination, not a script error). Net: the "always-on local-first primary surface" has no autostart on this machine, and the off-fleet classifier built specifically so classification survives a fleet pause is itself dying. Fix direction: re-run `register-brain-server-task.ps1`; separately root-cause the termination via the task's execution time limit / whatever is killing it, not the classifier logic |
+| [OI-259](#OI-259) | 2026-09-10 | Cross-repo architecture-diagram review (Gabriel-directed, this session); overlaps [OI-175](#OI-175) | **MEDIUM (unguarded correctness on the agent-coordination substrate).** `C:\Users\Owner\AAOS` has 216 tests and **no CI at all** — `.github/workflows` does not exist, so `python -m unittest discover -s tests` runs only when a human types it. AAOS owns the lease/lock discipline that stops two agents clobbering each other's task state, and its one documented Critical bug (two near-simultaneous appends to `aaos-events.ndjson` silently clobbering each other, `docs/GATE3-REVIEW.md`) is guarded by those tests alone. Compounding asymmetry: `tools/publish-contracts.py` runs 1x/day (weekdays 09:15 ET) as `ora-aaos-publish-contracts`, but `tools/check-contract-drift.py` — the script written to prove that publish worked — is referenced by **nothing** (0 hits across `~/.claude/scheduled-tasks/` and any CI). Fix direction: one GitHub Actions workflow (`pip install jsonschema` + `unittest discover`, ~31s, no secrets, no data access) on push/PR, plus `check-contract-drift.py` as a second step on the existing publish task. Closes OI-175's jsonschema pin as a side effect |
+| [OI-260](#OI-260) | 2026-09-10 | Cross-repo architecture-diagram review (Gabriel-directed, this session) | **MEDIUM (policy gap — the correct mitigation exists, but only as a one-off precedent).** Automation now runs on five substrates: CC/MCP fleet (36 recurring), LAMS/Cowork fleet (27), Windows Task Scheduler (8 live `ORA*` tasks), GitHub Actions (5 workflows across ora-cowork-watchdog / ora-pm / ora-claude-config) and Netlify build hooks. Both Claude fleets fire ONLY while the Desktop app is open, else the whole chain catches up in a burst at next open. That exposure has been correctly mitigated exactly once — `ora-pm/.github/workflows/monthly-billing-backup.yml` re-drains the billing endpoint off-box after the 2026-09-01 laptop outage deferred charge posting — and is unmitigated everywhere else a human relies on freshness, including the hourly Command Center mirror Gabriel reads from his phone. Fix direction: turn the one-off into a rule (any task whose LATENESS has an external consequence gets an off-box GitHub Actions drain; everything else stays on-fleet) and put the question into `register-scheduled-task`'s QC gate so the decision happens once per task rather than once per outage |
+| [OI-261](#OI-261) | 2026-09-10 | Cross-repo architecture-diagram review (Gabriel-directed, this session); adjacent to [OI-086](#OI-086) and [OI-235](#OI-235) | **LOW-MEDIUM (secret hygiene).** `ora-pm`'s `CRON_SECRET` exists in four independent locations with no runbook naming all four: a Cloudflare Pages encrypted secret, `$env:ORA_PM_CRON_SECRET` (read by `scripts/trigger-billing.ps1`), the plaintext file `C:\Users\Owner\ora-pm-cron\cron-secret.txt` (read by `ping-crons.ps1`), and a GitHub repo secret (`monthly-billing-backup.yml`). Rotating it means finding all four; nothing documents that there ARE four, so a partial rotation silently breaks one of the three cron paths and the failure surfaces as a missed billing run, not an auth error anyone reads. Fix direction: a four-line rotation checklist in the ora-pm README naming every location and the order to change them |
+| [OI-262](#OI-262) | 2026-09-10 | Cross-repo architecture-diagram review (Gabriel-directed, this session) | **LOW (dead link documented as an access path).** `brain.oxfordra.net`'s DNS lives on NS1/Netlify rather than Cloudflare, so a tunnel CNAME to it resolves only to a non-routable address — `oxford-command-center/README.md` §6 states this plainly, but the subdomain still appears in adjacent notes as though it were a working remote-access path. The path that actually works is the Cloudflare Pages mirror. Fix direction: either move that DNS record to Cloudflare or retire the subdomain from every doc that names it |
 | [OI-249](#OI-249) | 2026-09-09 | `dirty-tree-triage` run, this session (allocated via `allocate-oi-id.py`) | **MEDIUM-HIGH (structural, blast-radius files repeatedly caught in the churn) — the primary `~/.claude` checkout has never switched its HEAD back to `main` since reflog entry `2aae684` ("moving from main to feat/model-canary-probe-step25"), so it keeps re-accumulating large uncommitted backlogs on a long-lived feature branch instead of tracking `main` directly.** 3rd known occurrence of the same shape: [[project_primary_checkout_main_move_blocked_2026-08-12]] (117 dirty files, 19 ahead/48 behind, ruled unsafe to force-switch — 15+ sessions' WIP intermingled), cleared 2026-08-16 (6 dirty, 4 behind) **without ever moving HEAD off the branch**, `feat/model-canary-probe-step25` itself merged to `main` 2026-08-23 (45 commits, `efcd876`) **again without a HEAD switch**, and now (this session's `dirty-tree-triage` scan) back up to **97 dirty entries, 40 commits behind `origin/main`**. Root cause, not just recurrence: the mitigation that actually ran each time was `Merge origin/main into feat/model-canary-probe-step25` (visible in reflog/log, e.g. `c730328`) — a merge-forward that never requires a checkout switch — so the branch became a permanent stand-in for `main` on this checkout by default, and nothing enforces the merge-forward on a cadence; it only happens when some session's git housekeeping happens to include it, so 20-40-commit gaps accumulate silently between runs. No proactive detection exists either — all 3 occurrences were found by accident during unrelated triage/audit passes, never alarmed. Candidate fixes (not applied — this is a standing-doctrine change, needs Gabriel's call): (a) a scheduled/periodic supervised `merge origin/main into <branch>` sync task so drift never exceeds a few commits; (b) actually complete the deferred switch to `main` once the tree is genuinely clean, and stop treating the feature branch as the checkout's permanent identity; (c) a lightweight probe (alongside `doctrine-integrity-probe.py`/`governor-drift-probe.py`) that WARNs when the primary checkout has sat on a non-`main` branch, or been >N commits behind `origin/main`, for more than a set window. `dirty-tree-triage` itself correctly left the 97-file set untouched (out of its scope — branch-level divergence, not dirty-file triage; per its own boundary and this file's 08-12 precedent, no checkout/reset/rebase on the shared tree) — **PROGRESS 2026-09-09: (c) implemented, (a)/(b) deliberately deferred.** Investigated all three same session: (a) and (b) both require a git operation (merge-forward or checkout switch) on the live, currently ~100-file-dirty, actively-edited primary checkout — out of scope for an unattended/same-session change under the shared-checkout single-writer doctrine, and (b) in particular is the thing that has silently "resolved" this twice already without fixing the underlying default. (c) had no git-state risk, is pure detection, and directly closes the actual observed gap (found by accident 3/3 times, never alarmed) — implemented in `cross-repo-wip-scan.py` (already the wired-in, weekly-run home for this repo-set's staleness checks, via `ora-weekly-hygiene` Block I): a `CANONICAL_BRANCH` map (currently only `~/.claude` → `main`) flags `[ACTION] BRANCH_DRIFT` when current branch ≠ canonical, or ≥10 commits behind `origin/<canonical>`, or the count is undeterminable (treated as uncertain, never silently clean) — commit `41f4bac`, 44/44 tests passing (12 new, real local-remote git fixtures, no mocks). Verified live against the real checkout: correctly reports 84 commits behind at time of commit. Remains OPEN because the underlying drift itself is NOT fixed, only now alarmed — (a) vs (b) is Gabriel's call once the checkout is next genuinely clean enough to attempt either safely — **PROGRESS 2026-09-09 (2): (a) implemented and registered, Gabriel's explicit pick over (b).** `maintenance/checkout-merge-forward.py` (commit `63748d9`, 28/28 tests against real local-remote git fixtures) refuses to run if the index has anything staged (the exact cross-session hazard hit twice this same session), fetches read-only, and either lands a clean `--no-commit --no-ff` merge + commit, fully `git merge --abort`s back to the pre-merge state on a real textual conflict, or no-ops when git refuses upfront on dirty-tree overlap (the ordinary case here) — never a partial/stuck state. Smoke-tested live against the real checkout: correctly returned `BLOCKED_DIRTY_OVERLAP` and left the tree untouched (verified via MERGE_HEAD absence). Registered as `ora-checkout-merge-forward` (daily 16:45 ET, CC/MCP fleet, commit `fcf9b46`) via `register-scheduled-task`'s `create_scheduled_task` MCP tool — surface asserted native/CC per that skill's Rule 3, claims `sched-repo-housekeeping` per its step 3c, model-tagged. Registered `enabled:false` and folded into `ora-routine-pause-resume-2026-09-11` as item 37/37 to respect Gabriel's standing 2026-09-07 fleet-wide pause (resumes with everything else 2026-09-11 16:01 ET) rather than fire mid-pause. Both (a) [corrector, daily] and (c) [detector, weekly] are now live; OI-249 stays OPEN only until the corrector's first live MERGED result confirms it actually closes drift in practice, not just in tests |
 | [OI-248](#OI-248) | 2026-09-08 | Independent review during the OI-228 follow-up fix (PR pending), this session | **LOW — `hooks/eos-review-gate.py`'s `REVIEWER_MODEL_LADDER` has no Mythos-class entry at all (any generation), so a reviewer that genuinely ran on Mythos would be rejected by the commit gate the same way Fable 5.1 was before PR #176.** Flagged, not fixed — may be deliberate (Mythos is described as a limited-access program) rather than an oversight; needs a ruling, not a silent addition |
 | [OI-247](#OI-247) | 2026-09-08 | `repo-housekeeping` claim (session `ebc44356`, 2026-09-07T11:36:19) on `CLAUDE.md`; verified by a separate session monitoring for the promised PR | **MEDIUM (process, blast-radius file) — a CLAUDE.md tie-break fix landed by bypassing the exact process its own claim promised, and now sits on a branch already tracked as blocked from reaching main.** The claim said "via worktree off origin/main + PR"; the dedicated worktree (`.claude/worktrees/claude-md-tiebreak`, branch `fix/claude-md-exception-scan-tiebreak`) has **zero commits**, still 0 ahead of `origin/main`, 14 behind as of filing. The actual fix (adding `automation-health-monitor` to the Exception-scans tie-break line) instead landed **directly in the live checkout**, bundled inside commit `b95cef1` — titled "docs(governance): require a real review verdict on blast-radius PRs; retire Qodo skills", which never mentions it. Pushed to `origin/feat/model-canary-probe-step25` (0/0 ahead-behind) but **absent from `origin/main`**, confirmed by direct `git show`. See detail section |
@@ -202,6 +221,480 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | [OI-181](#OI-181) | 2026-08-16 | Hit live while recording the OI-176 review artifact (session 76023481), then reproduced deterministically | **MEDIUM — a stale copy of the review gate silently discards `--notes-file`, yielding an APPROVED security-review artifact with an EMPTY audit trail, exit 0, no warning.** Reproduced: same argv against LIVE (notes preserved, 50 chars) vs the stale `oi173-spec-liveness-probe` worktree copy (notes empty). Three compounding causes: (1) `_arg()` is a positional `argv.index()` scan (`eos-review-gate.py:768`), not argparse, so an **unsupported flag is ignored, never rejected** — tellingly the stale copy's own `_arg` DOES return the `--notes-file` value, it just never asks for it, so detection is cheap; (2) `config-write-guard` **prescribes the stale path** — its block message says to re-run against a worktree copy, while invoking the live binary by absolute path is blocked; (3) **no version stamp**, so skew is undetectable by tool or caller. Not cosmetic: `notes` is not part of the artifact key, so the gate still PASSES and the commit lands — the failure is invisible exactly when the audit trail is created, on the tool that exists to prove a blast-radius change was reviewed. Exposure: `--notes-file` is the ONLY flag divergence (15 others match); 1 of 3 live worktrees is stale; flag landed in `fe14d91` (PR #136), so any worktree branched earlier is affected. **LANDED 2026-08-16** as `4cbebe8` (from worktree commit `43be6ca`) on Gabriel's in-turn "land it the same way OI-176 went." `reject_unknown_flags()` on both `--key`/`--record`, correctly skipping value-taking flags' values; `KNOWN_CLI_FLAGS` self-checked against real `_arg()` call sites so the fix cannot itself go stale; `__version__` stamped into every artifact. Claim re-checked before landing (`hooks-override-auth` free; `fleet-status-reconcile`'s claimed paths were disjoint — `maintenance/fleet-status.py`/`test-fleet-status.py`, not this file); two-pass mtime identical; worktree branch point confirmed an ancestor of live HEAD. Live post-landing verification with the override token removed: unknown flag rejected on the LIVE binary (rc=1, names the flag + accepted set + staleness diagnosis); `--notes-file` itself still accepted (rc=0); the verification Bash calls themselves ran through the live dispatcher's `--chain bash` in-process path with no `unrecognised` output — proving the scoping fix live, not just in a harness; a real governance write was still BLOCKED through the same chain. Independently reviewed (claude-fable-5) before landing: scoping hazard proven both by tracing and by running the dispatcher both directions, flag-set completeness re-derived independently and matched exactly, adversarial parsing cases all correct, no artifact written on rejection. No lingering damage from the triggering incident: the empty artifact was overwritten at the same key, both this session's artifacts carry notes |
 | [OI-183](#OI-183) | 2026-08-16 | Mirror-deploy incident chain, this session, discovered while landing #280/#282 | **MEDIUM — the `oxford-command-center` canonical checkout has no auto-update mechanism, and a merged PR now reads as \"landed\" while sitting dead on disk.** PR #279 (isolated build root) deliberately removed `deploy-mirror.ps1`'s `git merge --ff-only` — correctly, since it was mutating a shared tree other sessions build from — but nothing replaced its incidental side effect of keeping the checkout current. Reproduced twice same evening: #280 merged to `origin/main`, checkout stayed 1 behind until manually fast-forwarded; #282 merged, checkout stayed 1 behind again, same manual fix. Anything that reads FROM the canonical checkout (`mirror-run-classify.ps1`, run unattended by the `ora-command-center-mirror-drift-check` weekday task) can silently classify against stale logic with no symptom — the same failure class #280 itself just fixed (a classifier making a claim that was true when written and false now). The isolated build root is unaffected (it pulls `origin/main` directly), so this does not threaten what the mirror serves — only the correctness of anything else that trusts this checkout being current. |
 
+### OI-270
+**Status:** OPEN
+**Opened:** 2026-09-10
+**Severity:** HIGH — the append-only event log, which is the commit point of every transaction, loses records under concurrent writers
+**Source:** CI on [ZeOoba/AAOS PR #5](https://github.com/ZeOoba/AAOS/pull/5), run 34527574215 — found by the CI workflow added in [OI-259](#OI-259)
+
+**Description:** `tests/test_event_log_concurrency.py::test_concurrent_writers_lose_zero_events` spawns concurrent writers emitting 240 events, drains the spool to completion, and asserts every one reaches `aaos-events.ndjson`. On PR #5 it failed on **both** matrix legs:
+
+```
+test (3.11)  AssertionError: 234 != 240 : expected 240 NDJSON lines, got 234 (6 events lost to the append race)
+test (3.13)  AssertionError: 232 != 240 : expected 240 NDJSON lines, got 232 (8 events lost to the append race)
+```
+
+**Why this is not "just a flaky test".** `docs/GATE3-REVIEW.md` records precisely this failure — two near-simultaneous direct appends to `aaos-events.ndjson` silently clobbering each other — as a **Critical** finding, and as **fixed** by the spool-file plus `O_EXCL` drain-lock mechanism that now lives in `_aaos_common.py`. `docs/COWORK-BOOTSTRAP.md` §8 repeats "never append to `aaos-events.ndjson` directly, even if it looks like just adding a line" as a hard rule, justified by that fix. This result says the guarantee does not hold under real contention.
+
+The consequence is worse than a lost log line. `commit_state_change`'s ordering contract makes the event write **the commit point of every transaction**: the event is committed before the state file is renamed into place. The NDJSON is also the record `expire-leases.py`, the double-failure escalation check, and every audit read from. A missing event is missing evidence that a transaction occurred.
+
+**What has been established:**
+
+- The test drains to completion before counting (`for _ in range(50): if drain_event_spool(...) == 0: break`), so this is **not** simply "events still pending in the spool".
+- **Intermittent and contention-dependent.** Passes 5/5 locally in isolation; the immediately preceding run on the same branch (`ae39a76`) passed. CI's genuine 2-core parallelism is what exposes it — the same signature as [OI-264](#OI-264), which passed locally and failed only on CI.
+- **Not caused by the commit that surfaced it.** `598ef51` touches only `docs/adr/0006-lease-ownership-authority.md`. This is a pre-existing latent defect that a docs-only PR happened to expose.
+
+**Candidate fix — diagnose before touching the mechanism.** The first question is whether the events are *destroyed* or merely *undrainable*, because the remedies differ entirely:
+
+- `drain_event_spool` skips immediately when the drain lock is held (by design — it never blocks). If a drain-lock file can leak (a writer dying between `O_EXCL` create and release, or a release path that misses an exception), every later drain returns 0. The test's `if drain == 0: break` would then exit on its first pass with pending files unfolded, and the count would be short **without any event having been lost** — a serious defect, but a recoverable one with a different fix.
+- If instead the spool files themselves are missing or overwritten, the loss is real and the collision is in the spool-filename scheme rather than the drain.
+
+Instrument the failing case to report pending-file count and drain-lock presence alongside the line count before proposing any change. **Do not fix this by relaxing the assertion** — it is the only check standing behind a guarantee two documents assert.
+
+**Related:** [OI-264](#OI-264) (same "green locally, red under CI contention" signature, in the lock protocol rather than the event log), [OI-259](#OI-259) (the CI that surfaced this — the third real defect it has found).
+
+### OI-267
+**Status:** OPEN — fix specified as D1 of ADR-0006 (Accepted 2026-09-10), not yet implemented
+**Opened:** 2026-09-10
+**Severity:** HIGH — the mechanism the spec designates to prevent double-runs cannot observe one
+**Source:** Found while writing ADR-0006 after two adversarially-refuted attempts at [OI-265](#OI-265) — [ZeOoba/AAOS PR #5](https://github.com/ZeOoba/AAOS/pull/5)
+
+**Description:** `AAOS-SPEC.md` §7 explains why heartbeat-gated reclamation was rejected, and names what closes the resulting risk instead:
+
+> the double-run risk of reclaiming from a live-but-lapsed holder is closed instead by the commit-time lease check every mutating script runs (`assert_lease_held`)
+
+`assert_lease_held(task, holder, session, ...)` takes the **task** dict and validates `task.get("lease")`. It never opens `locks/<task-id>.lock`.
+
+That is the wrong artifact. The lock file is the authority — its atomic exclusive create is what actually arbitrates who wins an acquisition. `task.lease` is a derived projection written by `lease-task.py` only after `acquire_lease` returns, which is after the 30-second settle window. The two are therefore guaranteed to disagree for at least one settle window on **every** acquisition, and the backstop reads the one that cannot distinguish two holders.
+
+Demonstrated — `python docs/adr/0006-evidence-backstop-blind-spot.py` from the AAOS repo root:
+
+```
+lock file (AUTHORITY) holder : cowork / sess-B
+task.lease (PROJECTION)      : claude-code / sess-A
+
+assert_lease_held(sess-A) -> PASSED
+```
+
+`sess-A` is cleared to run `commit_state_change` against a task the lock says it lost.
+
+Note the function's own docstring already discusses a "residual window" and concludes the realistic reclaim-vs-complete race "is already closed by the expiry check inside this function". That reasoning holds only if `task.lease` reflects reality, which is exactly what is not true during the settle window.
+
+**Candidate fix:** D1 of ADR-0006 — `assert_lease_held` verifies against the lock file. This is the **highest-blast-radius single edit** in the OI-265 remediation: `complete-task.py`, `fail-task.py` and `post-handoff.py` all call it immediately before committing, so a mistake here converts a safety net into a refusal-to-work. It warrants its own adversarial pass separate from the reclaim changes. `AAOS-SPEC.md` §7's sentence must be corrected in the same change — as written it documents a protection the named artifact cannot provide.
+
+**Related:** [OI-265](#OI-265) (same root cause — a correctness decision made from the projection), [OI-264](#OI-264), ADR-0006 D1.
+
+### OI-268
+**Status:** OPEN
+**Opened:** 2026-09-10
+**Severity:** MEDIUM — a green reviewer check on a repo where no automated reviewer is running
+**Source:** Observed on ZeOoba/AAOS PRs #4 and #5 while gating merges
+
+**Description:** `gh pr checks` on both PRs returns:
+
+```
+CodeRabbit   pass   0        Review rate limited
+test (3.11)  pass   14s      ...
+test (3.13)  pass   15s      ...
+```
+
+`pass`, from a reviewer whose own PR comment reads *"Review limit reached — next included review available in 27 minutes"* (Free plan). The repo's other configured reviewer, `qodo-code-review`, posts *"Qodo reviews are paused because your trial has ended."*
+
+So both automated reviewers are currently non-functional, and one reports a passing check anyway. Anyone reading the checks table — or any automation gating on it — sees a satisfied reviewer that reviewed nothing.
+
+CLAUDE.md's merge gate already anticipates this (*"a bot status check is never a review verdict — a blast-radius PR needs a real one before merge"*), and it was applied: PR #4 was held as a draft and merged only after an adversarial subagent pass, not on CodeRabbit's green. The item is that the signal is actively misleading and nothing prevents a future session or a human from trusting it.
+
+**Pattern, not a one-off.** This is the fourth instance in a single session of *a check that reports without checking*:
+
+- **OI-254** — `full-gate-selfhosted.yml`: targets a runner label that does not exist; zero runs ever.
+- **OI-259** — `check-contract-drift.py`: written to verify a publish; wired to no trigger.
+- **OI-265** — `tests/mutation_check.py` (2nd attempt): reported "all 8 mutants killed" while a demonstrably double-acquiring build passed.
+- **OI-268** — `CodeRabbit` status: green while rate-limited.
+
+(Ids above are deliberately plain text, not table rows — a `| [OI-NNN](#OI-NNN) |` line
+anywhere in this file is parsed as an Open-table row by
+`maintenance/check-open-items-duplicate-ids.py`, which reported three phantom duplicates
+when this list was first written as a table.)
+
+**Candidate fix:** two parts. Narrow — decide whether a rate-limited CodeRabbit should report `neutral`/failure rather than `pass`, or remove the check so the table does not imply coverage. Broad, and more valuable — treat the recurring shape as one investigation ("which of our checks can never fail?") rather than four independent fixes. A check that is structurally incapable of failing is worse than an absent one, because it is counted.
+
+**Related:** [OI-254](#OI-254), [OI-259](#OI-259), [OI-265](#OI-265).
+
+### OI-269
+**Status:** OPEN
+**Opened:** 2026-09-10
+**Severity:** MEDIUM-HIGH — a documented protocol feature that does not exist; a long-running holder cannot keep its lease
+**Source:** Surfaced while deriving ADR-0006's D3 thresholds (the derivation depends on how far ahead `expires` can legitimately sit)
+
+**Description:** AAOS lease renewal is specified in three places and implemented in none.
+
+Specified:
+- `docs/AAOS-SPEC.md` §7 — "Lease TTL is **45 minutes, renewable before expiry**"
+- `docs/AAOS-SPEC.md` — "Lease expiry is 45 minutes, renewable."
+- `docs/adr/0003-locking-model.md` line 32 — "The lease is renewable: the holder can request a renewal before expiry, emitting a `LeaseRenewed` event, for genuinely long-running jobs."
+
+Implemented: nothing. There is no renew tool in `tools/`, and no `LeaseRenewed` emitter anywhere in the codebase.
+
+Two consequences beyond documentation drift:
+
+1. **A written reclamation rule that can never be false.** ADR-0003's policy is "A lock is reclaimable on expiry alone: `now > expires + 5 minutes` grace, **with no renewal (no `LeaseRenewed` event) on record** — full stop." The emphasised clause is unconditionally true today, so the documented rule and the shipped rule are not the same rule. Anyone reasoning about reclamation from the ADR is reasoning about a guard that does not exist.
+
+2. **No way to hold a lease you are actively using.** ADR-0003 justifies the 45-minute TTL partly on renewal being available for "genuinely long-running jobs". Without it, a job that runs past 45 minutes has its lease reclaimed out from under it — the exact scenario renewal was specified to prevent. `docs/CODE-ADAPTER.md` independently advises re-scoping long jobs "rather than raced against expiry", which is sound advice and also an admission that renewal is not there.
+
+**Not a blocker for the OI-265 work.** ADR-0006's D3 derivation was written to hold either way: a renewal sets `expires = renewal_time + ttl`, so `expires ≤ now + TTL_CAP` remains true at any instant and `LEASE_EXPIRY_CEILING` stays correct if renewal later ships.
+
+**Candidate fix — pick one, do not leave it split:** either build `tools/renew-lease.py` plus the `LeaseRenewed` event (and wire it into the reclamation check so the ADR's clause becomes real), or strike renewal from all three documents and state that long jobs must be re-scoped, which is already `CODE-ADAPTER.md`'s position. The second is smaller and arguably more honest; the first is what the ADR promised.
+
+**Related:** [OI-265](#OI-265), ADR-0006 D3.
+
+### OI-265
+**Status:** OPEN — **two fix attempts adversarially REFUTED; root cause identified and specified in [ADR-0006](https://github.com/ZeOoba/AAOS/pull/5), Accepted 2026-09-10. Implementation not started.**
+
+**Progress note (2026-09-10).** Two attempts were made and both were refuted by independent adversarial review before landing. Neither is on `main`; both are preserved with full post-mortems on their worktree branches (`worktree-oi265-double-acquire`, `worktree-oi265-atomic-reclaim`).
+
+- **Attempt 1** — read the incumbent lock and honour its own expiry instead of the task's lease field. REFUTED: `archive_lock` moves whatever is *at the path*, not the file that was read and judged, so the read→archive window still allowed two callers to ACQUIRE. It also removed the only unwedge path, making a far-future `expires` permanently unleasable with no event emitted.
+- **Attempt 2** — atomic take via `os.rename` to a private name, then byte verification. REFUTED: the take *vacates the canonical lock path* while verifying, and `os.link` cannot distinguish "hole" from "free", so a third caller arriving in that gap acquires and the restoring caller then archives its live lock. It also left the real wedge untouched (the production state has lock AND task lease both far-future, which never reaches the new liveness rule) and its anti-wedge test used a fixture `lease-task.py` cannot produce.
+- **Verification lesson, recorded because it recurred:** attempt 2 shipped `tests/mutation_check.py` reporting "all 8 mutants killed" while a build with a demonstrated double-acquire passed it clean — every mutant targeted the code its author was thinking about. See [OI-268](#OI-268) for the wider pattern.
+
+**Root cause (ADR-0006).** Two artifacts answer "who holds this lease?" and are guaranteed to disagree: `locks/<task-id>.lock` is the authority (its atomic create arbitrates acquisition), while `task.lease` is a derived projection written a settle window later. Every defect found is the same category error — a correctness decision made from the projection. That also covers [OI-267](#OI-267), where the designated backstop has the identical flaw.
+
+**Ratified 2026-09-10 (Gabriel, in-turn):** ADR-0006 D3 — `LEASE_TTL_CAP` 45 min, `LEASE_EXPIRY_CEILING` 90 min (2× the ratified TTL). Implementation may now proceed against D1–D4.
+
+**Opened:** 2026-09-10
+**Severity:** HIGH — two agents can hold the same lease simultaneously
+**Source:** Adversarial REFUTE pass on the [OI-264](#OI-264) fix (opus, independent reviewer with no knowledge of the author's reasoning), 2026-09-10
+
+**Description:** The reviewer was asked whether the OI-264 retry introduced any fail-open path. It did not — but while tracing that question it found a pre-existing one roughly fifty lines above, and demonstrated it.
+
+`acquire_lease()` step 1 handles an expired incumbent by archiving its lock file:
+
+```python
+incumbent_file = lock_path(task_id, project_id, root=root)
+if incumbent_file.exists():
+    archive_lock(incumbent_file, now=resolved_now)
+```
+
+The decision to do that rests entirely on the TASK's `lease` field having expired. The lock file itself is never read. That would be fine if the two were written together — but `lease-task.py` writes the task's `lease` only after `acquire_lease` returns, and `acquire_lease` does not return until it has slept the full 30-second settle window (`AAOS-SPEC.md` §7 step 4). So there is a guaranteed ≥30s interval in which a genuinely live lock file coexists with a task whose `lease` field is stale or absent.
+
+A second caller arriving in that window reads the stale task lease, concludes the incumbent expired, archives the live lock unread, and acquires. Reviewer's demonstration:
+
+```
+holder A -> acquired (lock file holds A, task still shows the OLD lease)
+holder B -> acquired
+lock file holder is now: cowork / s-B
+-> BOTH ACQUIRED: True
+```
+
+**Why this is the serious one.** [OI-264](#OI-264) was a contended lease presenting as corruption — bad, but fail-closed: nobody got the lease who shouldn't have. This one silently grants the same lease twice, which is precisely the `chip-claims.log` double-run incident `docs/adr/0003-locking-model.md` cites as the reason AAOS was built. Every downstream guarantee (single-writer task state, `assert_lease_held`, the commit transaction) assumes this cannot happen.
+
+**Candidate fix (NOT applied — needs its own adversarial pass):** before archiving an incumbent lock, READ it and honour its own `expires`, rather than trusting the task's `lease` field which is written a settle-window late by design. The machinery already exists — the `except FileExistsError` branch a few lines below does exactly this correctly, including the fail-closed `incumbent_live = True` on an unparseable expiry. The two paths simply disagree about what evidence to trust. Also worth reconsidering whether `lease-task.py` should write the task's lease BEFORE the settle rather than after, so the two artifacts stop being 30s out of step.
+
+**Related:** [OI-264](#OI-264) (the fix whose review found this), [OI-266](#OI-266) (same reclaim path).
+
+### OI-266
+**Status:** OPEN
+**Opened:** 2026-09-10
+**Severity:** LOW-MEDIUM — an untyped exception escape plus unbounded file accumulation in the seam
+**Source:** Adversarial REFUTE pass on the [OI-264](#OI-264) fix (opus, independent), 2026-09-10
+
+**Description:** Two coupled defects on `acquire_lease()`'s reclaim path, both demonstrated.
+
+**(1) `archive_lock` OSError escapes untyped.** `archive_lock()` uses `os.replace`. If a concurrent sweep (or another session) moved the file first, the resulting `OSError` propagates straight out of `acquire_lease` — outside the `AaosError` hierarchy that every CLI's exception handling and documented exit-code contract is built on:
+
+```
+escaped as: OSError - simulated concurrent removal (AaosError? False)
+```
+
+`expire-leases.py` already encountered and fixed this class in its own code (its Finding 3b/3c wraps the call); `acquire_lease` never got the same treatment. Note the OI-264 fix's added retry marginally widens the window in which a concurrent sweep can intervene, which is how the reviewer surfaced it.
+
+**(2) Leaked sidecars are never swept.** The same path can leave the staged sidecar `<lock>.tmp-<holder>-<pid>` behind, and `expire-leases.py:118` filters `".tmp-" not in p.name` when enumerating locks — so leaked sidecars are invisible to the sweeper and accumulate indefinitely in the seam's `locks/` directory:
+
+```
+leaked sidecars: ['t-g.lock.tmp-cowork-35924']
+```
+
+Individually minor; together they mean a rare error path both breaks the exit-code contract and drops litter that nothing is responsible for collecting.
+
+**Candidate fix:** wrap `archive_lock` inside `acquire_lease` the way `expire-leases.py:206` already does, translating `OSError` into the appropriate `AaosError` subtype; guarantee `_cleanup_sidecar()` runs on that path; and separately decide whether the sweeper should reclaim aged sidecars rather than excluding them by name — a filter that makes files unsweepable is a deliberate choice worth re-confirming.
+
+**Related:** [OI-264](#OI-264), [OI-265](#OI-265) (same reclaim path).
+
+### OI-264
+**Status:** OPEN — blocks the 3.11 leg of [OI-259](#OI-259)'s CI
+**Opened:** 2026-09-10
+**Severity:** MEDIUM-HIGH — a contended lease can surface as data corruption rather than a clean denial
+**Source:** Surfaced by [OI-259](#OI-259)'s CI workflow — [ZeOoba/AAOS PR #4](https://github.com/ZeOoba/AAOS/pull/4), run 34518125534
+
+**Description:** AAOS's entire purpose is that two agents cannot both hold the same task. `acquire_lease()` implements that with the spec's 6-step protocol: stage the lock, exclusive-create it, settle, rescan for conflicts, fail closed on ambiguity. The exclusive-create is atomic — but the lock's JSON *content* is written as a separate step immediately after, and nothing makes create-plus-write atomic together.
+
+A second writer arriving inside that window opens a zero-byte lock file:
+
+```
+_aaos_common.CorruptStateError: unparseable JSON at
+  /tmp/aaos-test-1cp9nqfb/projects/ora-ops/locks/t-race-8.lock:
+  Expecting value: line 1 column 1 (char 0)
+```
+
+and the race assertion then observes:
+
+```
+FAIL: test_genuine_race_exactly_one_acquired_never_two
+  (test_aaos_common.AcquireLeaseRaceTests)
+AssertionError: Lists differ: ['acquired'] != ['acquired', 'denied']
+```
+
+`tests/test_failure_injection_matrix.py::Scenario03TwoWritersRaceTests` fails alongside it, since its meta-test asserts that coverage passes.
+
+**Evidence it is a timing window, not a platform difference.** The 3.13 leg of the SAME CI run passed while 3.11 failed. Locally it reproduced once during a full-suite run under heavy load (13 concurrent Claude sessions on the machine; that run took 193s against a 14s baseline), then passed in isolation (3.4s) and on two subsequent full runs. So the window is real and narrow, and load — not OS — decides whether it is hit. Windows is not immune; it is merely slower to lose the race.
+
+**Why this is worse than a flaky test.** `CorruptStateError` is the exception AAOS reserves for genuinely damaged state, and `docs/OPERATIONS.md`'s runbook treats it as such. A routine contended lease — the single most expected event in the whole system — can therefore present as corruption, inviting exactly the wrong operator response (inspect/repair state) to a situation whose correct handling is "back off and retry." The protocol's own promise, per `AAOS-SPEC.md` §7, is ACQUIRED / DENIED / CONTESTED; a corruption exception is outside that contract.
+
+It also sits on the Cowork path: `docs/COWORK-BOOTSTRAP.md` contemplates a Cowork sandbox driving these same tools, and a sandbox racing the local session is precisely the scenario the lease discipline was built for.
+
+**Candidate fix (NOT applied — needs its own review):** correct the READER, not the writer. Making create-and-write atomic is not available: the exclusive-create IS the mutual-exclusion primitive, so it cannot be replaced by the repo's atomic write-rename (a rename would clobber a rival's lock and destroy the guarantee). The tractable change is to teach the reader that an existing-but-empty/unparseable lock encountered inside the settle window means "held by a writer mid-create" — deny or retry — while an unparseable lock encountered OUTSIDE that window still means corruption. That is a semantic change to the lease state machine and carries the Engineering OS done-bar's mandatory adversarial REFUTE pass; it is explicitly not a CI-unblocking patch.
+
+**Explicitly rejected:** skipping the race test on POSIX, marking it `expectedFailure`, or loosening its assertion. Every one of those makes CI green by deleting the only evidence of a real defect in the system's core guarantee — the same move refused for [OI-263](#OI-263).
+
+**Related:** [OI-259](#OI-259) (the CI that surfaced this), [OI-263](#OI-263) (the other defect the same CI surfaced), [OI-174](#OI-174) (prior load-sensitive-test flake with the same "passes in isolation, fails under load" signature — worth checking whether that one was also a real window rather than a flake).
+
+### OI-263
+**Status:** OPEN — blocks [OI-259](#OI-259)
+**Opened:** 2026-09-10
+**Severity:** MEDIUM — nine tests that appear to guard the write-scope check actually assert a directory layout
+**Source:** Surfaced by [OI-259](#OI-259)'s CI workflow on its first run — [ZeOoba/AAOS PR #4](https://github.com/ZeOoba/AAOS/pull/4), Actions run 34514715973, both matrix legs (3.11 and 3.13)
+
+**Description:** AAOS's `match_write_scope()` is the "colonization guard" — it checks a handoff's artifact paths against the sending agent's declared `write_scope` in `agent-registry.json`, and it is the thing that stops one agent writing artifacts into another's territory. Nine tests exercise the positive path (an artifact that SHOULD be accepted), and all nine are coupled to one machine:
+
+- `tests/test_queue_scripts.py:522` — `PostHandoffTestBase.setUp` does `tempfile.mkdtemp(prefix="aaos-artifacts-", dir=str(REPO_ROOT))`.
+- `tests/test_queue_scripts.py:528` — `make_in_scope_artifact()` writes into that directory and returns its absolute path.
+- `agent-registry.json:18` — `claude-code`'s `write_scope` is the literal `"C:/Users/Owner/AAOS/**"`.
+
+So "in scope" is true only while `REPO_ROOT == C:/Users/Owner/AAOS`. The helper's name asserts a property the code does not establish; it establishes it by coincidence of where the repo sits.
+
+Verified failure on CI (identical on both legs, 9 of 226):
+
+```
+FAIL: test_posts_handoff_with_artifact_manifest (test_queue_scripts.PostHandoffHappyPathTests)
+AssertionError: 1 != 0 : VALIDATION FAILED: handoff failed validation:
+  ["WRITE-SCOPE VIOLATION: path '/home/runner/work/AAOS/AAOS/aaos-artifacts-py73zpen/evidence.txt'
+    is outside agent 'claude-code's declared write_scope"]
+```
+
+Also failing: `test_identical_repost_is_noop_exit_0_no_reemit`, `test_write_once_conflict_exits_3`, `test_nonempty_blocker_blocks_task_and_emits_blocked`, `test_blocking_drops_lease_and_archives_live_lock`, `test_blocker_with_lost_lease_exits_4`, and three others in the same base class. Every one fails for the same single reason, and each was previously asserting a DIFFERENT exit code (0, 3, 4) — so the coupling silently converts three distinct assertions into the same validation error, masking whatever those tests were actually meant to prove.
+
+**Why there is no cheap fix.** There is no injection seam:
+
+- `tools/post-handoff.py:26-27` says so explicitly in its own module docstring: *"agent-registry.json — aaos.validate_obj("handoff", registry=None) loads it via aaos.load_registry(). There is no --registry override here"*.
+- `tools/_aaos_common.py:268` — `def registry_path() -> Path: return REPO_ROOT / "agent-registry.json"`.
+
+Note `tools/validate.py` DOES accept `--registry`, so the seam exists in the codebase's own idiom; it simply was never extended to `post-handoff.py`.
+
+**Why this matters beyond CI.** Two things, independent of whether AAOS ever gets CI:
+1. The nine tests provide false confidence. Nothing in the suite currently proves `match_write_scope()` accepts a genuinely in-scope path for a reason other than the repo's location.
+2. It is a latent portability trap. AAOS's own `docs/MIGRATIONS.md` and the ora-claude-config `MIGRATION_RUNBOOK.md` contemplate restoring onto a fresh machine; a restore to any path other than `C:\Users\Owner\AAOS` would fail nine tests for a reason that looks like a real guard violation.
+
+**Candidate fix (NOT applied — needs its own review, this touches the colonization guard's inputs):** add a `--registry <path>` override to `tools/post-handoff.py`, mirroring the one `tools/validate.py` already has, and have `PostHandoffTestBase.setUp` write a temp `agent-registry.json` whose `claude-code` `write_scope` is derived from `REPO_ROOT` at runtime rather than hard-coded. That makes the positive-path assertions test the matcher instead of the filesystem, and leaves the production registry untouched. Deliberately NOT chosen: rewriting `agent-registry.json` to relative scopes (it is a schema-validated contract published to the seam mirror, so changing its shape has blast radius well past the tests), and monkeypatching `aaos.registry_path` from the test base (works, but hides the missing seam rather than closing it).
+
+**Blocking relationship:** [OI-259](#OI-259)'s CI workflow is written, verified, pushed and correct — the workflow itself is not at fault. PR #4 is held unmerged on purpose: landing a CI that is red on arrival trains everyone to ignore it, which is worse than having none. Merge PR #4 once this item is fixed.
+
+**Related:** [OI-259](#OI-259) (the CI that surfaced this — blocked by it), [OI-175](#OI-175) (also rides on PR #4).
+
+### OI-254
+**Status:** OPEN
+**Opened:** 2026-09-10
+**Severity:** HIGH — financial data integrity; the only cross-check between the two NOI spines has never run outside a human's terminal
+**Source:** Cross-repo architecture-diagram review (Gabriel-directed, this session) — `oxford-command-center/README.md` §2/§6, `package.json`, `.github/workflows/full-gate-selfhosted.yml`
+
+**Description:** Command Center's two data spines are independent computations by design, and CLAUDE.md §1 names the lack of reconciliation between them as "one critical defect." The reconciliation that was built for it — `reconcile:noi-crosscheck`, alongside `warehouse:verify`, `warehouse:drift` and `governance` — appears only in the full `npm run gate`, never in `gate:ci`, because CI has no live workbook or warehouse DB. That much is documented and deliberate.
+
+What is NOT documented is that the intended home for those checks has never executed. `.github/workflows/full-gate-selfhosted.yml` is `on: workflow_dispatch` only and requires `runs-on: [self-hosted, linux, ora-data]`. Verified this session:
+
+- `gh api repos/ZeOoba/oxford-command-center/actions/runners` -> `{"total_count":0,"runners":[]}` — the runner label does not exist, so a dispatch would queue indefinitely.
+- `gh run list --workflow full-gate-selfhosted.yml` -> zero rows. The workflow has never run.
+- `grep -rl "noi-crosscheck\|warehouse:drift\|npm run gate" ~/.claude/scheduled-tasks/` -> one match, in `_archive_2026-07-08_retired/`. Nothing live on either fleet runs it.
+
+The workflow's own header comment states the plan: "workflow_dispatch ONLY for now: add a `schedule:` trigger after the runner burn-in period, per docs/SERVER-MIGRATION-RUNBOOK.md." The burn-in never happened, so the plan stalled at provisioning and nothing surfaced that it had.
+
+This resolves the question [OI-137](#OI-137) explicitly left open ("whether `gate:ci` should include this step; if not, the local `gate` failing on `main` needs to be [caught some other way]"). The answer intended by the repo was the self-hosted runner; that answer was built and then never wired up.
+
+**Candidate fix:** cheapest correct path is not the runner. Register a CC/MCP fleet task that runs `npm run gate` on the machine that already has the Master Workbook and the 32 Property Financials files mounted, on a weekly cadence, emailing `ggoldberg@oxfordra.net` on non-zero exit — the same shape as the existing `ora-aaos-publish-contracts`. Provision the self-hosted runner and add a `schedule:` trigger only if the check should additionally BLOCK pull requests. Either way the `full-gate-selfhosted.yml` comment needs updating so the next reader is not told a burn-in is in progress.
+
+**Related:** [OI-137](#OI-137) (NOI cross-check classifier, fix landed 2026-08-17), [OI-143](#OI-143) (expense-coalesce-to-zero feeding Spine A's NOI), [OI-183](#OI-183) (canonical checkout goes stale, so an unattended run can classify against stale logic).
+
+### OI-255
+**Status:** OPEN
+**Opened:** 2026-09-10
+**Severity:** HIGH — the repo with the largest financial blast radius carries the weakest merge gate in the estate
+**Source:** Cross-repo architecture-diagram review (Gabriel-directed, this session) — `ora-pm/package.json`, `ora-pm/.github/workflows/ci.yml`, compared against `oxford-command-center/package.json`
+
+**Description:** `ora-pm` is the only ORA repo that moves real money: monthly billing generates charges and fires Stripe ACH autopay debits, and the delinquency cron posts late fees. Its gate, verified against `package.json` this session:
+
+- `"lint": "tsc --noEmit"` — there is no linter configured at all; `lint` is a second name for `typecheck`, so the whole `npm run lint` step is a no-op relative to the step before it. The README states this plainly, which means it was a known shortcut, not an accident.
+- No `gate`, no `check:refute`, no reconcile script of any kind exists in the scripts block.
+- `.github/workflows/ci.yml` is typecheck -> test -> build -> `npx wrangler pages deploy ./dist --project-name ora-pm`, with the deploy gated only on `github.ref == 'refs/heads/main' && github.event_name == 'push'`. Every push to `main` ships to production.
+
+`oxford-command-center`, which only reads money and never initiates a transfer, runs `eslint . --max-warnings 0` inside `gate:ci` plus a separate `refute-required` PR job that enforces a `Refute-Reviewed` commit trailer on financial-decision diffs. The protection is inversely proportional to the consequence.
+
+The exposure is not theoretical for this file set: `server/routes/cron.ts` alone carries five rounds of subrequest-budget fixes, an `AUTOPAY_BATCH_LIMIT`, and an in-file warning that the limit is "MAX SAFE for this endpoint's subrequest budget, not conservative." That is exactly the class of constant a linter cannot catch but a refute gate is designed to force a second pair of eyes onto.
+
+**Candidate fix:** two independent pieces, either shippable alone. (1) Add ESLint with a real config, stop aliasing `lint`, and add it to `ci.yml` before the test step. (2) Port `oxford-command-center/scripts/check-refute-required.ts` into ora-pm, scoped to `server/lib/billing.ts`, `server/routes/cron.ts`, `server/routes/stripe.ts` and `server/lib/cam.ts`, and make the `Deploy to Cloudflare Pages` step `needs:` it. Per CLAUDE.md's Engineering OS done-bar, changes to those four files should be carrying an adversarial REFUTE pass already; this makes that structural instead of remembered.
+
+**Related:** [OI-233](#OI-233), [OI-234](#OI-234), [OI-235](#OI-235) (all ora-pm financial-path findings from `ora-appsec-sweep` runs that a standing gate would have surfaced earlier), [OI-261](#OI-261) (same repo, secret hygiene).
+
+### OI-256
+**Status:** OPEN
+**Opened:** 2026-09-10
+**Severity:** MEDIUM-HIGH — the most public AI surface in the estate runs the oldest model in it
+**Source:** Cross-repo architecture-diagram review (Gabriel-directed, this session) — grep for pinned `claude-*` model ids across ora-pm, oxford-command-center and Website
+
+**Description:** Five distinct Claude model ids are pinned across three repos, each hard-coded at its call site with no shared constant, and the drift has left the single most externally-visible surface a generation behind a sibling function in its own repository:
+
+| Where | Pinned model | Surface |
+|---|---|---|
+| `Website/netlify/edge-functions/chat.ts:17` | `claude-sonnet-4-5` | public `/api/chat` assistant |
+| `Website/netlify/functions/_shared/broker-llm-extract.js:3` | `claude-sonnet-5` | broker OM term extraction |
+| `oxford-command-center/server/ai/agent.ts:176`, `comps.ts:49` | `claude-opus-5` | Ask panel, comps |
+| `oxford-command-center/server/ai/narrative.ts:15`, `warehouse/om-extract.ts:150` | `claude-haiku-4-5-20251001` | narrative briefings, OM extract |
+| `ora-pm/server/routes/intake.ts` | `claude-opus-5` | lease PDF field extraction |
+
+The chat assistant is the surface an unknown broker or prospective tenant actually converses with, and it is the one running the oldest model. This is the highest quality-per-effort change available in the estate: a one-line edit, behind an eval harness that already exists (`scripts/eval-chat.mjs` against `evals/fixtures.json`, deliberately excluded from `npm run verify` because it needs a live origin and spends real tokens).
+
+The deeper item is the absence of a per-repo model constant. Today a model bump is five greps across three repos, and nothing fails if one is missed — which is how a 4-5 pin survived alongside a 5 pin in the same `netlify/` tree.
+
+**Candidate fix:** (1) Bump `chat.ts:17` to `claude-sonnet-5`; run `npm run eval:chat -- --base=https://<preview>.netlify.app` against a deploy preview and diff the dated result run against the last snapshot in `evals/` before promoting. (2) Hoist each repo's model id into one exported constant (`server/ai/models.ts`, `netlify/functions/_shared/models.js`) so the next bump is one edit per repo. **Production deploy of oxfordra.net requires Gabriel's explicit per-deploy confirmation (Hard Invariant 2)** — the eval runs against a preview, and promotion is a separate ask.
+
+**Related:** [OI-257](#OI-257) (same shape one level up — no shared source for a value several places depend on).
+
+### OI-257
+**Status:** OPEN
+**Opened:** 2026-09-10
+**Severity:** MEDIUM — structural; the pattern connecting several other open items rather than a defect in one repo
+**Source:** Cross-repo architecture-diagram review (Gabriel-directed, this session) — every repo's README architecture diagram plus `~/.claude/scheduled-tasks/` and each repo's build config
+
+**Description:** Reading all eight repos' diagrams together surfaces one pattern no single-repo audit would: **every repo independently invented its own source->mirror pipeline**, with its own trigger discipline and its own drift story. Seven exist:
+
+| Mirror | Trigger | Drift handling |
+|---|---|---|
+| ora-skills -> AppData runtime cache | `tools/hooks/pre-commit` Check 4 | detect-only (`repo_first_check.py`, run by hand) |
+| AAOS git -> seam `contracts/` | `ora-aaos-publish-contracts`, 1x/day weekdays 09:15 ET | push-based; self-heals within its stated ≤24h window |
+| oxford-command-center -> Pages mirror | `ORA Command Center - Mirror Deploy`, hourly | off-fleet classifier ([OI-258](#OI-258)) |
+| Website -> `dist/` | `netlify.toml` build command | allowlist that FAILS the build on anything unclassified |
+| Website -> `knowledge-base.json` | `netlify.toml` build command | committed copy, inspected via `git diff` |
+| `~/.claude` -> GitHub | manual `git push` | pre-push confidential + doctrine chain |
+| `scheduled-tasks/` -> `_scheduled_tasks_backup/` | **none found** | **none** |
+
+Only two are structurally prevented from drifting rather than checked after the fact: Website's `dist/` allowlist (an unclassified file fails the build outright) and AAOS's scheduled republish (divergence heals on a cadence whether or not anyone notices). The rest bound how long a divergence survives; they do not stop one occurring — the distinction this audit's checklist exists to draw.
+
+The worst instance is already filed as [OI-164](#OI-164) and is the one that has actually bitten: `masterlease-jurisdiction-rebase` drifted cache-ahead of the repo three times in a single session, twice caught only by manual diffing. The response was a better detector (`repo_first_check.py` + `_staging/STORE_AHEAD_OF_REPO.md`), which is the right response to a divergence you cannot prevent — but AAOS demonstrates that this one CAN be prevented.
+
+`_scheduled_tasks_backup/` deserves its own line: the ora-claude-config README describes it as "a second, redundant-by-design snapshot of task SKILL.md specs (107 entries observed) — a belt-and-suspenders backup." No writer for it was found this session. A backup nothing writes to is worse than no backup, because it reads as coverage in exactly the moment coverage is being counted.
+
+**Candidate fix:** explicitly NOT a unification — rewriting seven working pipelines into one buys nothing and risks all of them. Two scoped moves: (1) apply the AAOS shape to OI-164 — a small scheduled task that republishes repo->cache on a cadence, demoting `repo_first_check.py` from sole defense to confirmation; (2) establish who writes `_scheduled_tasks_backup/` and either wire it or delete it. Anything beyond that should wait for a specific failure.
+
+**Related:** [OI-164](#OI-164) (the worst instance, still open), [OI-142](#OI-142) (a zero-commit cache install — the same root cause), [OI-258](#OI-258) (the Command Center mirror's own drift guard).
+
+### OI-258
+**Status:** OPEN
+**Opened:** 2026-09-10
+**Severity:** MEDIUM — a registered autostart that is not registered, and a redundancy watchdog that is erroring
+**Source:** Cross-repo architecture-diagram review (Gabriel-directed, this session) — `Get-ScheduledTask` on LAPTOP-CSHSCBE6 vs `oxford-command-center/scripts/register-*-task.ps1`
+
+**Description:** Command Center ships three Windows Task Scheduler registration scripts. Live state on this machine, verified with `Get-ScheduledTask ... | Get-ScheduledTaskInfo`:
+
+```
+ORA Command Center - Mirror Deploy   State=Running  Result=267009      (0x41301 = currently running, normal)
+ORA Mirror Deploy Classifier         State=Ready    Result=3221225786  (0xC000013A) LastRun=2026-09-10 11:07:33
+ORA Command Center - Brain Server    <not present>
+```
+
+Two separate problems.
+
+First, `scripts/register-brain-server-task.ps1` exists to register `ORA Command Center - Brain Server` to start "at every logon, auto-restarts on crash, no execution time limit." That task is absent from this machine entirely. Command Center's whole premise is local-first — the primary surface is the Brain Server on `127.0.0.1:8911`, with the Cloudflare Pages mirror as the read-only away-from-desk fallback. With no autostart, the primary surface is only live when Gabriel starts it by hand, which quietly inverts primary and fallback.
+
+Second, `ORA Mirror Deploy Classifier` exited `0xC000013A` (`STATUS_CONTROL_C_EXIT`) on its last run. That code is a termination, not an exception raised by the script — something killed the process. This task exists precisely as an off-fleet redundancy: its registration description reads "Off-fleet redundant classifier + alert for ORA Command Center - Mirror Deploy (OI-197 fix (a)). Runs independently of the CC/MCP fleet so classification survives a fleet pause." A redundancy component failing silently is the specific failure the redundancy was added to prevent, and OI-197 is no longer in the Open table, so nothing is watching it.
+
+**Candidate fix:** (1) Re-run `scripts/register-brain-server-task.ps1` and confirm with `Get-ScheduledTask`. Worth establishing WHY it is missing before re-registering — a machine migration that dropped it is a different story from something removing it, and only the second recurs. (2) Root-cause the `0xC000013A`: check the task's `ExecutionTimeLimit` and `Settings.DeleteExpiredTaskAfter`, and look for whatever is terminating it, rather than debugging `mirror-run-classify.ps1`'s logic — the exit code says the script did not choose to stop.
+
+**Related:** OI-197 (the fix this regresses; closed and archived), [OI-183](#OI-183) (the canonical checkout the classifier reads from goes stale), [OI-257](#OI-257) (this is one of the seven mirrors).
+
+### OI-259
+**Status:** OPEN
+**Opened:** 2026-09-10
+**Severity:** MEDIUM — 216 tests guarding a concurrency-critical substrate, with nothing running them
+**Source:** Cross-repo architecture-diagram review (Gabriel-directed, this session) — `AAOS/README.md` §2/§6, `ls AAOS/.github/workflows`, grep for `check-contract-drift` across the fleet
+
+**Description:** AAOS is the filesystem task-queue and lease/lock protocol that lets a Claude Code session and a Cowork session coordinate without clobbering each other's state. Two gaps, both verified this session:
+
+- `C:\Users\Owner\AAOS\.github\workflows` **does not exist**. There is no CI of any kind. The 216-test suite (`python -m unittest discover -s tests`, ~31 seconds) runs only when a human types it. AAOS's one documented Critical bug — two near-simultaneous direct appends to `aaos-events.ndjson` silently clobbering each other, recorded in `docs/GATE3-REVIEW.md` and fixed via the spool + `O_EXCL` drain-lock now in `_aaos_common.py` — is regression-guarded by those tests alone.
+- `tools/check-contract-drift.py` is referenced by **nothing**: zero hits across `~/.claude/scheduled-tasks/**/SKILL.md` and any CI. Meanwhile `tools/publish-contracts.py` runs once a day (weekdays 09:15 ET) as the registered `ora-aaos-publish-contracts` task. The publisher is automated; the auditor written to prove the publish worked has never been wired to a trigger.
+
+The second gap is the more interesting one, because it is the inverse of the usual failure: normally the detector runs and the fix is manual. Here the fix runs unattended and the detector is dormant, so a publish that silently half-succeeded would look identical to one that worked.
+
+Note the repo also has no dependency manifest — `jsonschema` is the single non-stdlib import and there is no `requirements.txt`, which is the standing problem in [OI-175](#OI-175).
+
+**Candidate fix:** one GitHub Actions workflow: `pip install jsonschema` then `python -m unittest discover -s tests -p "test_*.py"` on push and pull_request. It needs no secrets, no data access, and no self-hosted runner — this is a genuinely 20-minute change with a real safety return. Pinning `jsonschema` in a `requirements.txt` as part of the same change closes OI-175's non-durable pip fix, since the workflow gives that manifest a consumer. Separately, append `check-contract-drift.py` as a second step to the existing `ora-aaos-publish-contracts` scheduled task so publish and verify happen in one pass — an edit to that task's `SKILL.md`, not a new registration.
+
+**Related:** [OI-175](#OI-175) (AAOS jsonschema pin — closed incidentally by this fix), [OI-257](#OI-257) (the AAOS mirror is the estate's best-behaved one; this is what is missing behind it).
+
+### OI-260
+**Status:** OPEN
+**Opened:** 2026-09-10
+**Severity:** MEDIUM — a correct mitigation that exists once, as a precedent rather than a rule
+**Source:** Cross-repo architecture-diagram review (Gabriel-directed, this session) — cross-referencing every repo's scheduling section against the live fleet registries and Windows Task Scheduler
+
+**Description:** Automation across the estate now runs on five distinct substrates:
+
+1. CC/MCP fleet — 36 live recurring tasks
+2. LAMS/Cowork fleet — 27 live recurring
+3. Windows Task Scheduler — 8 live `ORA*` tasks (Brain Server intended, Mirror Deploy, Mirror Deploy Classifier, Fleet Dead-Man, Fleet Heartbeat Push, Fleet Pause-Resume Guard, Nightly Disk Clean, Stuck-Session Watchdog, Wake-and-Launch; `ORA PM Crons` disabled)
+4. GitHub Actions — 5 workflows across ora-cowork-watchdog (x2), ora-pm (billing backup), ora-claude-config (fleet-deadman), plus CI
+5. Netlify build hooks — the Website's `build-kb` + `build-dist` chain
+
+Substrate count is not itself the finding; each has a defensible reason. The finding is that substrates 1 and 2 — carrying 63 of the 71 recurring jobs — fire ONLY while the Claude Desktop app is open, otherwise the whole chain catches up in a burst at next open. That is a documented property, not a bug.
+
+It has been correctly mitigated exactly once. `ora-pm/.github/workflows/monthly-billing-backup.yml` (`40 17 1 * *` UTC, 90-150 minutes after the laptop slot) re-drains the same idempotent billing endpoint off-box, added after the 2026-09-01 laptop outage deferred charge posting to the next app open. That is precisely the right fix, chosen for precisely the right reason: lateness in monthly billing has an external consequence (a tenant's rent is not debited).
+
+The same exposure is unmitigated everywhere the same test would pass. The clearest case is the hourly Command Center mirror deploy — the artifact Gabriel reads from his phone, whose whole value is freshness. Others are worth testing against the rule rather than assumed.
+
+**Candidate fix:** promote the one-off to a standing rule — **any scheduled task whose LATENESS (not failure) has a consequence outside this machine gets an off-box GitHub Actions drain; everything else stays on-fleet** — and encode it as a question in `register-scheduled-task`'s registration QC gate, so the decision is made once per task at registration rather than once per outage in hindsight. Registering new unattended automation is a real decision, not a hygiene fix: this item proposes the rule and the gate question, and each individual backup workflow stays a separate call.
+
+**Related:** [OI-202](#OI-202) (a model-driven scheduled task stalling silently mid-run — the failure-mode sibling of this lateness-mode item).
+
+### OI-261
+**Status:** OPEN
+**Opened:** 2026-09-10
+**Severity:** LOW-MEDIUM — one secret, four copies, no runbook naming all four
+**Source:** Cross-repo architecture-diagram review (Gabriel-directed, this session) — `ora-pm/README.md` "Setup & Run" plus `scripts/trigger-billing.ps1` and `.github/workflows/monthly-billing-backup.yml`
+
+**Description:** `ora-pm`'s `CRON_SECRET` — the Bearer token gating `/api/cron/monthly-billing`, `/api/cron/critical-dates-alerts` and `/api/cron/delinquency-check` — exists in four independent places:
+
+1. The Cloudflare Pages encrypted secret (`wrangler pages secret put CRON_SECRET`) — the server side that validates it.
+2. `$env:ORA_PM_CRON_SECRET` on this machine, read by `scripts/trigger-billing.ps1` for `ora-pm-monthly-billing`.
+3. The plaintext file `C:\Users\Owner\ora-pm-cron\cron-secret.txt`, read by `ping-crons.ps1` for `ora-pm-daily-crons`.
+4. A GitHub repo secret `ORA_PM_CRON_SECRET`, used by `monthly-billing-backup.yml`.
+
+The README notes that the two local tasks read "the same `CRON_SECRET` from different local sources" but no document enumerates all four. The consequence of a partial rotation is quiet: the server rejects the stale caller with a 401 that nobody reads, and the symptom surfaces later as a billing run that did not happen — the lateness failure mode of [OI-260](#OI-260), reached by a different route.
+
+Copy 3 is additionally a plaintext credential on disk outside any secret store. That is a deliberate tradeoff for an unattended PowerShell task and is not being second-guessed here; it does mean the rotation checklist has to name a file path, not just three secret stores.
+
+**Candidate fix:** a four-line rotation checklist in `ora-pm/README.md` naming every location and the order to change them (server last, so the old value keeps working until every caller is updated). Optionally, a startup assertion in `ping-crons.ps1` that fails loudly on a 401 rather than logging and moving on.
+
+**Related:** [OI-086](#OI-086) (the same gate uses a short-circuiting string compare), [OI-235](#OI-235) (the backup workflow's own secret handling), [OI-260](#OI-260) (the lateness failure mode a partial rotation produces).
+
+### OI-262
+**Status:** OPEN
+**Opened:** 2026-09-10
+**Severity:** LOW — a hostname documented as an access path that resolves nowhere
+**Source:** Cross-repo architecture-diagram review (Gabriel-directed, this session) — `oxford-command-center/README.md` §6
+
+**Description:** `brain.oxfordra.net` was intended as the remote-access hostname for the Command Center Brain Server via a Cloudflare tunnel. Its DNS is delegated to NS1/Netlify rather than Cloudflare, so a tunnel CNAME pointed at it resolves only to a non-routable address. Command Center's own README §6 says this plainly — "does not currently route anywhere usable... The working remote-access path today is the Cloudflare Pages mirror itself, not that subdomain" — so the repo is honest about it.
+
+The item is that the hostname still appears in adjacent material as though it were live (it shows up in earlier tracker entries as a URL to verify Access against, e.g. in [OI-123](#OI-123)'s remediation notes), so anyone reading around the README rather than in it will try it. This is the "dead link documented as live" pattern; it costs a few minutes each time somebody rediscovers it.
+
+**Candidate fix:** decide, then make every doc agree. Either move the DNS record for that subdomain to Cloudflare so the tunnel resolves, or retire the hostname and strike it from every document that names it. Lowest-effort correct action is the second — the Pages mirror behind Cloudflare Access already serves the away-from-desk case the subdomain was meant to.
+
+**Related:** [OI-123](#OI-123) (mirror security headers — names the hostname), [OI-258](#OI-258) (the Brain Server the subdomain was meant to reach is not even running).
+
 ### OI-240
 **Status:** OPEN
 **Opened:** 2026-09-07
@@ -253,6 +746,20 @@ This is directly relevant to [OI-242](#OI-242) — the lost-deal calibration gap
 **Candidate fix:** either re-publish `deal-retirement` to the skill store by name (verify first whether the original unpublish reason still holds — check [[project_automation_audit_rev23_2026-09-06]]'s R23-12 finding on why this and `annual-cycle` stay repo-path-only), or repoint `deal-decision-ledger`'s write expectation to the same repo-path invocation pattern `ora-weekly-hygiene` already uses successfully, so no republish is needed.
 
 **Related:** [OI-242](#OI-242).
+
+### OI-248
+**Status:** OPEN
+**Opened:** 2026-09-08
+**Severity:** LOW — tooling gap, not a live incident (no Mythos-run review has actually been rejected by this gate yet, unlike OI-228's confirmed false FAILs)
+**Source:** Independent (Opus) review conducted while landing a follow-up fix for [OI-228](#OI-228) (`maintenance/check-dispatch-model-floor.py`'s missing `claude-mythos-5-1` entry), this session.
+
+**Description:** `hooks/eos-review-gate.py:164` — `REVIEWER_MODEL_LADDER = ("claude-fable-5-1", "claude-opus-5")` — carries no `claude-mythos-*` id of any generation. This is the SAME commit-gate whose stale-ladder incident (missing `claude-fable-5-1`/`claude-opus-4-8`, fixed [PR #176](https://github.com/ZeOoba/ora-claude-config/pull/176)) is what surfaced OI-228's twin gap in the model-floor probe. If a reviewer subagent ever genuinely dispatches on a Mythos-class model, `eos-review-gate.py --record` would refuse it (`reviewer_model not in accepted_models()`) exactly the way it refused Fable 5.1 before #176 — forcing the same `allow-unreviewed-commit` bootstrap override.
+
+**Why not fixed alongside OI-228:** `check-dispatch-model-floor.py`'s `MODEL_RANK` is a read-only POST-HOC floor check (was this transcript compliant), so adding an id there has no policy weight — it only recognizes a tier that already happened. `REVIEWER_MODEL_LADDER` is different: it's a PRE-HOC gate that decides whether a reviewer is *acceptable to dispatch* for blast-radius/financial code. Silently adding Mythos there is a policy question (should Mythos-tier reviews satisfy this gate at all, given it's described elsewhere as a limited-access program — is broad reviewer-dispatch access to it assumed or not?), not a mechanical staleness fix — the same distinction OI-228 itself draws between "the fix belongs in the probe script, not the floor logic."
+
+**Candidate fix (NOT applied, needs a ruling):** if Mythos-tier reviewer dispatch is intended to satisfy this gate, add `"claude-mythos-5-1"` (and `"claude-mythos-5"` for parity, per `check-dispatch-model-floor.py`'s own comment that they're "the same underlying model" as Fable) to `REVIEWER_MODEL_LADDER`, in an isolated worktree PR per the same process PR #176 used.
+
+**Auto-check:** none.
 
 ### OI-247
 **Status:** OPEN
@@ -812,7 +1319,7 @@ Scanning instead for the churn shape Step 8 was actually written to catch — on
 
 ### OI-228
 
-**Status:** OPEN
+**Status:** CLOSED 2026-09-08
 **Opened:** 2026-09-02 · **Source:** `ora-appsec-sweep` 2026-09-02, DISPATCH INTEGRITY GATE assertion 4 (post-hoc model-floor probe, mandatory per SKILL.md v1.5+)
 **Severity:** LOW (tooling false-positive, not a real floor breach)
 
@@ -825,6 +1332,8 @@ Scanning instead for the churn shape Step 8 was actually written to catch — on
 **Per the sweep's own doctrine, this had to be recorded and escalated regardless of diagnosis** ("Do NOT 'fix' a firing by loosening the floor below Opus or deleting the assertion") — see the completion report / escalation email for the mandatory MODEL-FLOOR BREACH notice. The actual fix belongs in the probe script, not the floor logic: add `claude-fable-5-1` (and, proactively, `claude-mythos-5-1`) to `MODEL_RANK` at rank 100.
 
 **Candidate fix (NOT applied):** `~/.claude/maintenance/check-dispatch-model-floor.py` — add `"claude-fable-5-1": 100` and `"claude-mythos-5-1": 100` to `MODEL_RANK`. Out of scope for this report-only task to apply (the file lives outside both audited repos and this task's writes are limited to Notion/tracker/scratch/worktrees).
+
+**Closed 2026-09-08.** Applied in two parts: `claude-fable-5-1` landed incidentally in [PR #176](https://github.com/ZeOoba/ora-claude-config/pull/176) (the `REVIEWER_MODEL_LADDER` staleness fix that surfaced this item's twin gap); `claude-mythos-5-1` — the half this item explicitly called for and #176 missed — landed in [PR #177](https://github.com/ZeOoba/ora-claude-config/pull/177), independently reviewed (Opus), with a regression test asserting both 5.1-generation ids rank at the floor (`maintenance/_tests/test_check_dispatch_model_floor.py`, 45/45 assertions). **Evidence:** `model_rank("claude-fable-5-1") == 100` and `model_rank("claude-mythos-5-1") == 100`, verified directly post-merge. See also [OI-248](#OI-248), a distinct adjacent gap the same review surfaced (`REVIEWER_MODEL_LADDER` itself has no Mythos entry) — flagged, not closed by this fix.
 
 **Auto-check:** none.
 
@@ -5695,3 +6204,19 @@ Shipped instead:
 **Auto-check:** none.
 
 **Related:** `projects/C--Users-Owner-oxford-command-center/memory/collections-ar-feed-pending.md` (the upstream feed item — a different project's memory dir, so deliberately NOT a `[[wikilink]]`, which would dangle from here), `ora-ar-feed-sweep` SKILL.md §"How the review queue actually gets resolved".
+
+---
+
+### OI-271
+
+**Status:** CLOSED 2026-09-11
+**Opened:** 2026-09-11 · **Source:** `dirty-tree-triage` follow-up — independent review (claude-opus-5) of CLAUDE.md commit `b777625`
+**Severity:** LOW (doc contradiction, no automated behavior affected — `rules.md` §2 has always been the operational-detail target, and the exit-code table itself is correct and complete)
+
+**Description:** `rules.md` §2's own bullet on the send path (line 32: "On non-zero COM exit: retry once, then flag loudly … do NOT halt") now directly contradicts the detailed exit-code table two lines below it (line 34: "Exit 1 (usage error) / Exit 3 (stuck wizard): do NOT retry — flag immediately"). This was harmless while CLAUDE.md still inlined the same exit 1/3 split and a reader would reconcile the two; CLAUDE.md's word-budget pass (2026-09-10, ORA Automation Audit R24-4) replaced its own inline copy with a pointer straight to §2, so §2's line 32 is now the first thing a top-down reader hits and it reads as blanket "always retry once," directly opposite the very next bullet's exit 1/3 carve-out.
+
+**Impact:** documentation-only today — no code reads line 32 as an instruction, `send-via-outlook.ps1`'s actual exit-code handling is unaffected. Risk was a future human or session reading only line 32 and retrying a stuck-wizard (exit 3) send, which the table two lines down explicitly says makes the stuck state worse.
+
+**Evidence:** fixed and committed together with landing the settled word-budget-pass insertion itself (`rules.md` commit `607a2d0`, dirty-tree-triage/OI-249 follow-up session) — reworded line 32 to "On non-zero COM exit: see the per-code table below — not every exit code retries — and never route through Composio/Rube/Gmail regardless of exit code," removing the blanket-retry claim. Verified via `git show 607a2d0 -- rules.md`: no remaining contradiction between line 32 and the exit-code table.
+
+**Auto-check:** none.
