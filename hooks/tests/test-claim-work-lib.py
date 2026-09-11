@@ -543,6 +543,20 @@ shutil.rmtree(root, ignore_errors=True)
 # the claim branch saw "no collision" -- but read_prior_claim is deliberately NOT
 # TTL-filtered, which is why `release` refuses in this identical state. Two write paths
 # disagreeing about one invariant is the defect.
+#
+# EXPECTATION REVISED 2026-09-10 (expired-claim clobber fix, test-claim-work-clobber.py).
+# The invariant under test is "a claim never leaves the slug with NO undo record", and
+# it still holds below. What changed is WHICH record, and that is a correction, not a
+# relaxation: this sequence used to assert sess-A, and it could only ever have been
+# sess-A because sess-B's expired claim was INVISIBLE to the claim branch -- the same
+# blind spot that let C destroy B's claim silently and irrecoverably. Now that C's
+# displacement of B is recorded, the immediately superseded claim is B, and
+# _strip_prior()'s ratified one-level-deep contract ("Only the IMMEDIATELY superseded
+# claim is restorable ... the only one a --force operator can meaningfully be said to
+# have displaced") names B as the answer. Restoring to A would hand the slug back to a
+# session displaced two steps ago while erasing B, who was the actual holder C
+# overwrote. sess-A is not lost by accident here -- it is dropped by the same
+# no-unbounded-chain rule that has always governed a takeover of a takeover.
 root = tempfile.mkdtemp(prefix="claim-undo-expired-")
 stale = datetime.datetime.now() - datetime.timedelta(minutes=cw.DEFAULT_TTL_MINUTES + 5)
 cw.write_claim("s", "sess-B", "B took it", base_dir=root, now=stale,
@@ -552,8 +566,12 @@ check("precondition: the takeover claim has aged out", cw.find_claim("s", base_d
       None)
 code, out, err = run_cli(["claim", "s", "C's fresh work"], root, session_id="sess-C")
 check("a plain claim over an EXPIRED takeover still succeeds", code, 0)
-check("...and still does not destroy the undo record",
-      (cw.read_prior_claim("s", base_dir=root) or {}).get("session_id"), "sess-A")
+check("...and still leaves an undo record behind",
+      (cw.read_prior_claim("s", base_dir=root) or {}) != {}, True)
+check("...naming the claim it ACTUALLY displaced (one-step undo, not a chain)",
+      (cw.read_prior_claim("s", base_dir=root) or {}).get("session_id"), "sess-B")
+check("...and the displacement was announced rather than silent",
+      "EXPIRED" in out, True)
 shutil.rmtree(root, ignore_errors=True)
 
 # The unattributable-overwrite NOTE used to advertise `restore`, which refuses exactly
