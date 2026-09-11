@@ -60,6 +60,24 @@ a sweep target for reference_model_release_checklist.md, and EOS_REVIEW_MODELS
 overrides it without a code change. Every dispatch must still PIN an explicit
 `model` -- inheritance can yield an unusable id.
 
+EOS_REVIEW_MODELS MUST be set in settings.json's top-level "env" block to reach
+this hook -- confirmed 2026-09-07 (incident: commit 4c5d441 on
+build/git-probe-dedup) that setting it inline on the gated Bash command's own
+shell (e.g. `EOS_REVIEW_MODELS=... python -c ... && git commit ...`) does NOT
+work: this hook is spawned by the harness as its own PreToolUse process, not as
+a child of the command it gates, so a shell-local assignment on that command
+line is invisible to it. settings.json's env block, by contrast, is written
+into every subprocess Claude Code spawns, hook processes included. TREAT THIS
+AS A TEMPORARY BRIDGE, not the fix: unlike OVERRIDE_TIER_ARGS below (single-use,
+30-min TTL), a settings.json env override is unbounded -- it silently widens
+this fail-closed gate for every commit in every session until someone removes
+it. Prefer sweeping REVIEWER_MODEL_LADDER itself (reference_model_release_
+checklist.md item 9) and pull the env override once that lands.
+
+A self-reported model id can carry a trailing context-window tag (e.g.
+"claude-opus-5[1m]"); `_bare_model()` strips it before every ladder/env
+comparison so that formatting alone never refuses a genuine top-tier reviewer.
+
 SAFETY INVARIANT, two-sided and deliberately asymmetric:
   - The gate's OWN machinery fails OPEN. Bad stdin, no git, unreadable repo,
     import failure, any unexpected exception -> exit 0, allow. A bug in a gate
@@ -143,7 +161,38 @@ REVIEWS_SUBDIR = "reviews"
 # hardcoded constant, by Gabriel's 2026-07-24 amendment -- a retired id must
 # degrade to the next entry rather than make the gate unsatisfiable. Sweep target
 # for reference_model_release_checklist.md.
-REVIEWER_MODEL_LADDER = ("claude-fable-5", "claude-opus-4-8")
+REVIEWER_MODEL_LADDER = ("claude-fable-5-1", "claude-opus-5")
+
+# A self-reported model id can carry a trailing context-window tag, e.g.
+# "claude-opus-5[1m]" -- same hazard maintenance/model-canary-probe.py's
+# bare_model() exists to strip. An exact-match comparison against the ladder
+# would otherwise refuse a genuine top-tier reviewer over formatting alone,
+# recreating the exact 2026-09-07 incident this ladder update fixes. Applied
+# once at --record intake (the artifact always stores the bare id) and again
+# on read, in case an older artifact was written before this normalization
+# existed.
+_MODEL_SUFFIX_RE = re.compile(r"\[[^\]]*\]$")
+
+# Splits an EOS_REVIEW_MODELS list on commas that are NOT inside an unclosed
+# "[...]" tag, so a comma-bearing context-window tag (theoretical -- no real
+# tag in this fleet's data has ever carried one, per 2026-09-08 review) can't
+# get shredded into two garbage tokens by a naive raw.split(","). See
+# accepted_models()'s comment for the fuller reasoning (findings 2+4).
+_MODEL_LIST_SPLIT_RE = re.compile(r",(?![^\[]*\])")
+
+
+def _bare_model(mid):
+    """Strip surrounding whitespace, then a trailing [...] suffix. Strips
+    INSIDE this function (not left to callers) so every call site gets the
+    same normalization for free -- an independent review (2026-09-08) found
+    this file's original callers stripped inconsistently (accepted_models()
+    did, cli_record()/valid_review() didn't), which meant a reviewer id with
+    trailing whitespace instead of a suffix could still be wrongly refused.
+    Matches maintenance/model-canary-probe.py's bare_model(), which already
+    strips before its own regex sub."""
+    if not isinstance(mid, str):
+        return mid
+    return _MODEL_SUFFIX_RE.sub("", mid.strip())
 
 APPROVED_VERDICTS = ("approved", "pass", "no-blocking-findings")
 
@@ -351,7 +400,23 @@ def _index_realcase_path(repo, rel):
     degrades to the documented worktree-digest fallback rather than a crash,
     but every real risk pattern in this gate (claude.md, settings.json,
     hooks/**, finance tokens) is ASCII, so this closes a gap with no
-    observed real-world trigger."""
+    observed real-world trigger.
+
+    UPDATE (2026-09-07, git-probe-dedup follow-up): this `-c
+    core.quotepath=false` flag is exactly what turned a THEORETICAL non-ASCII
+    gap into a real, always-live one -- it makes THIS call site the one
+    git_lines() caller in the whole module that is exposed to raw non-UTF-8
+    stdout bytes regardless of repo/global quotepath config, and until
+    git_commit_parse.git_lines() gained encoding="utf-8", errors="replace"
+    (via delegating to git_probe_common.git()), a non-ASCII path here did NOT
+    degrade to the fallback described above -- it crashed the whole hook with
+    an unhandled AttributeError (`None.splitlines()`), caught only by
+    __main__'s blanket `except Exception: pass`, i.e. a silent ALLOW of the
+    entire commit. See git_lines()'s own docstring for the verified mechanism
+    and hooks/tests/test-eos-review-gate.py's
+    test_index_realcase_path_survives_non_ascii_under_quotepath_false for the
+    regression proof. The fallback-not-crash claim above is accurate again as
+    of that fix."""
     out = git_lines(repo, ["-c", "core.quotepath=false", "ls-files", "--cached",
                            "--", ":(literal,icase)" + rel])
     return out[0] if out else None
@@ -493,7 +558,27 @@ def sessions_dir():
 def accepted_models():
     raw = os.environ.get("EOS_REVIEW_MODELS")
     if raw:
-        vals = tuple(v.strip() for v in raw.split(",") if v.strip())
+        # _bare_model here too -- an operator pastes EOS_REVIEW_MODELS straight
+        # from a self-reported id (the exact scenario the docstring points them
+        # at), and a suffixed value on this side must not wedge the gate the
+        # same way an unnormalized --model would (see _bare_model's callers).
+        #
+        # Split BEFORE normalizing, but bracket-aware (2026-09-08 independent
+        # review, findings 2+4): a plain `raw.split(",")` has two bugs. (a) A
+        # bracket-only entry (e.g. "claude-opus-5,[1m]") passes the `v.strip()`
+        # truthiness check on the RAW token, then _bare_model() reduces it to
+        # "" -- an empty string that still ends up IN the accepted tuple, so a
+        # reviewer_model of "" would validate: a genuine fail-OPEN hole in a
+        # fail-closed gate. (b) a comma inside a real tag ("claude-opus-5[1m,
+        # 200k]") splits mid-tag into two garbage tokens that match nothing --
+        # fail-closed, not a bypass, but it can wedge a genuinely valid id.
+        # _MODEL_LIST_SPLIT_RE splits only on a comma NOT inside an unclosed
+        # "[...]"; filtering on the truthiness of the NORMALIZED value (not
+        # the raw token) closes (a).
+        vals = tuple(
+            m for m in (_bare_model(v) for v in _MODEL_LIST_SPLIT_RE.split(raw))
+            if m
+        )
         if vals:
             return vals
     return REVIEWER_MODEL_LADDER
@@ -531,7 +616,7 @@ def valid_review(session_id, key):
         return None
     if str(data.get("verdict", "")).strip().lower() not in APPROVED_VERDICTS:
         return None
-    if data.get("reviewer_model") not in accepted_models():
+    if _bare_model(data.get("reviewer_model")) not in accepted_models():
         return None
     return data
 
@@ -750,7 +835,7 @@ def _resolve_notes(argv):
     if path:
         # utf-8-sig, not utf-8: this box is PowerShell-primary, where `>` and
         # Out-File default to UTF-16LE and Set-Content can emit a UTF-8 BOM.
-        # A BOM is NOT whitespace, so ﻿ survived .strip() straight into the
+        # A BOM is NOT whitespace, so U+FEFF survived .strip() straight into the
         # artifact's notes. UTF-16 still raises -- loudly and by design -- but
         # the error now says what to do about it.
         try:
@@ -934,7 +1019,7 @@ def cli_record(argv):
             "eos-review-gate: nothing at risk in the working tree -- there is no "
             "blast-radius diff to review, so no artifact is needed or written.\n")
         return 1
-    model = _arg(argv, "--model")
+    model = _bare_model(_arg(argv, "--model"))
     if model not in accepted_models():
         sys.stderr.write(
             "eos-review-gate: reviewer model %r is not in the accepted tier "
