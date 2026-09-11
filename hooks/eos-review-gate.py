@@ -835,7 +835,7 @@ def _resolve_notes(argv):
     if path:
         # utf-8-sig, not utf-8: this box is PowerShell-primary, where `>` and
         # Out-File default to UTF-16LE and Set-Content can emit a UTF-8 BOM.
-        # A BOM is NOT whitespace, so ﻿ survived .strip() straight into the
+        # A BOM is NOT whitespace, so U+FEFF survived .strip() straight into the
         # artifact's notes. UTF-16 still raises -- loudly and by design -- but
         # the error now says what to do about it.
         try:
