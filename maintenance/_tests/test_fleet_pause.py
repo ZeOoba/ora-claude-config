@@ -118,6 +118,45 @@ class PauseDetection(unittest.TestCase):
         self.assertTrue(fleet_pause.pause_state("cc", registry=reg)["paused"])
 
 
+class ResumeHorizon(unittest.TestCase):
+    """2026-09-12 review finding: ANY enabled future one-time task counted as the resume,
+    with no horizon. LAMS carries an enabled one-time task dated ~2027-08, so a real
+    mass-disable fault would have been read as a year-long 'pause' and fleet-deadman.ps1
+    would have stayed silent for a year. A resume must fall within MAX_RESUME_HORIZON_DAYS."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="fpz_")
+
+    def test_far_future_one_time_task_is_not_a_resume(self):
+        reg = _reg(self.tmp, [
+            {"id": "a", "cronExpression": "0 5 * * *", "enabled": False},
+            {"id": "counsel-review-2027", "fireAt": _ms(24 * 330), "enabled": True},
+        ])
+        st = fleet_pause.pause_state("cc", registry=reg)
+        self.assertFalse(st["paused"])
+        self.assertTrue(st["error"])
+
+    def test_resume_inside_horizon_still_counts_when_a_far_task_also_exists(self):
+        reg = _reg(self.tmp, [
+            {"id": "a", "cronExpression": "0 5 * * *", "enabled": False},
+            {"id": "counsel-review-2027", "fireAt": _ms(24 * 330), "enabled": True},
+            {"id": "resume", "fireAt": _ms(24 * 4), "enabled": True},
+        ])
+        st = fleet_pause.pause_state("cc", registry=reg)
+        self.assertTrue(st["paused"])
+        self.assertAlmostEqual(st["resume_epoch"], time.time() + 4 * 86400, delta=120)
+
+    def test_horizon_edge(self):
+        inside = _ms(24 * fleet_pause.MAX_RESUME_HORIZON_DAYS - 1)
+        outside = _ms(24 * fleet_pause.MAX_RESUME_HORIZON_DAYS + 1)
+        for fire, expect in ((inside, True), (outside, False)):
+            reg = _reg(self.tmp, [
+                {"id": "a", "cronExpression": "0 5 * * *", "enabled": False},
+                {"id": "r", "fireAt": fire, "enabled": True},
+            ])
+            self.assertEqual(fleet_pause.pause_state("cc", registry=reg)["paused"], expect)
+
+
 class FreshnessRule(unittest.TestCase):
     """The probe's core rule, exercised directly on its arithmetic."""
 
