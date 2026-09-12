@@ -183,6 +183,96 @@ with tempfile.TemporaryDirectory() as td:
     rc = cmf.main(["--repo", local, "--canonical", "main"])
     check("main: exit 1 on BLOCKED_STAGED", rc == 1, "got %r" % rc)
 
+# --- dirty overlap names EVERY overlapping path, git's CRLF warnings stripped ------
+# (2026-09-12: the live run's detail was truncated at 500 chars of LF->CRLF
+# warnings before git ever named a single overlapping file.)
+with tempfile.TemporaryDirectory() as td:
+    local, origin = make_pair(td)
+    for i in range(3):
+        write(origin, "ov%d.txt" % i, "origin %d\n" % i)
+        run(origin, "add", "ov%d.txt" % i)
+    run(origin, "commit", "-q", "-m", "origin adds ov0..ov2")
+    for i in range(3):
+        write(local, "ov%d.txt" % i, "local untracked %d\n" % i)  # untracked overlap
+    r = cmf.sync(local, "main")
+    check("blocked-paths: status BLOCKED_DIRTY_OVERLAP",
+          r["status"] == "BLOCKED_DIRTY_OVERLAP", repr(r))
+    check("blocked-paths: all three overlapping paths listed",
+          sorted(r.get("blocked_paths") or []) == ["ov0.txt", "ov1.txt", "ov2.txt"], repr(r))
+    check("blocked-paths: detail carries no 'warning:' noise",
+          "warning:" not in (r["detail"] or ""), repr(r))
+
+with tempfile.TemporaryDirectory() as td:
+    local, origin = make_pair(td)
+    commit(origin, "origin changes shared.txt", fname="shared.txt")
+    write(local, "shared.txt", "local committed\n")
+    run(local, "add", "shared.txt")
+    run(local, "commit", "-q", "-m", "local base for shared", "--no-verify")
+    write(local, "shared.txt", "local uncommitted on top\n")  # tracked, modified overlap
+    r = cmf.sync(local, "main")
+    check("blocked-paths: tracked modified overlap surfaced",
+          r["status"] == "BLOCKED_DIRTY_OVERLAP" and r.get("blocked_paths") == ["shared.txt"],
+          repr(r))
+
+check("parse: tracked + untracked headers, CRLF warnings ignored",
+      cmf.parse_overlap_paths(
+          "warning: in the working copy of 'a.md', LF will be replaced by CRLF\n"
+          "error: Your local changes to the following files would be overwritten by merge:\n"
+          "\tx/one.py\n\tx/two.py\n"
+          "Please commit your changes or stash them before you merge.\n"
+          "error: The following untracked working tree files would be overwritten by merge:\n"
+          "\tnew.txt\n"
+          "Please move or remove them before you merge.\nAborting")
+      == ["x/one.py", "x/two.py", "new.txt"])
+check("parse: nothing recognisable -> empty list", cmf.parse_overlap_paths("fatal: boom") == [])
+
+# --- state file: consecutive-unsynced counter ---------------------------------------
+import json as _json
+with tempfile.TemporaryDirectory() as td:
+    sp = os.path.join(td, "sub", "state.json")
+    blocked = {"status": "BLOCKED_DIRTY_OVERLAP", "commits_merged": None, "sha": None,
+               "blocked_paths": ["a.txt"]}
+    s1 = cmf.update_state(blocked, sp, now_iso="2026-09-10T16:45:00-04:00")
+    check("state: first blocked run -> consecutiveUnsynced 1", s1["consecutiveUnsynced"] == 1, repr(s1))
+    check("state: unsyncedSince set to first blocked run",
+          s1["unsyncedSince"] == "2026-09-10T16:45:00-04:00", repr(s1))
+    s2 = cmf.update_state(dict(blocked, status="BLOCKED_STAGED"), sp,
+                          now_iso="2026-09-11T16:45:00-04:00")
+    check("state: second non-landing run increments", s2["consecutiveUnsynced"] == 2, repr(s2))
+    check("state: unsyncedSince preserved across the streak",
+          s2["unsyncedSince"] == "2026-09-10T16:45:00-04:00", repr(s2))
+    on_disk = _json.load(open(sp, encoding="utf-8"))
+    check("state: written to disk with legacy keys intact",
+          on_disk["status"] == "BLOCKED_STAGED" and "lastRun" in on_disk
+          and "commitsMerged" in on_disk and on_disk["blockedPaths"] == ["a.txt"], repr(on_disk))
+    s3 = cmf.update_state({"status": "MERGED", "commits_merged": 4, "sha": "abc"}, sp,
+                          now_iso="2026-09-12T16:45:00-04:00")
+    check("state: MERGED resets the streak",
+          s3["consecutiveUnsynced"] == 0 and s3["unsyncedSince"] is None
+          and s3["commitsMerged"] == 4 and s3["sha"] == "abc", repr(s3))
+
+with tempfile.TemporaryDirectory() as td:
+    sp = os.path.join(td, "state.json")
+    write(td, "state.json", '{"lastRun": "x", "status": "BLOCKED_DIRTY_OVERLAP"}')  # legacy shape
+    s = cmf.update_state({"status": "ERROR", "commits_merged": None, "sha": None}, sp,
+                         now_iso="2026-09-12T16:45:00-04:00")
+    check("state: legacy file without counter counts itself as run 1 of streak",
+          s["consecutiveUnsynced"] == 1, repr(s))
+    write(td, "state.json", "not json{")
+    s = cmf.update_state({"status": "BLOCKED_DIRTY_OVERLAP", "commits_merged": None, "sha": None},
+                         sp, now_iso="2026-09-12T16:45:00-04:00")
+    check("state: corrupt prior file does not crash, restarts at 1",
+          s["consecutiveUnsynced"] == 1, repr(s))
+
+with tempfile.TemporaryDirectory() as td:
+    local, origin = make_pair(td)
+    sp = os.path.join(td, "st.json")
+    write(local, "x.txt", "uncommitted\n")
+    run(local, "add", "x.txt")
+    rc = cmf.main(["--repo", local, "--canonical", "main", "--json", "--state-file", sp])
+    check("main: --state-file written and exit code unchanged",
+          rc == 1 and _json.load(open(sp))["consecutiveUnsynced"] == 1, "rc=%r" % rc)
+
 passed = sum(1 for ok, _ in _results if ok)
 print("\ncheckout-merge-forward tests: %d/%d passed" % (passed, len(_results)))
 sys.exit(0 if passed == len(_results) else 1)
