@@ -26,15 +26,17 @@ the dispatched verifier and refuter agents, not this run. Two layers, same contr
 every other wired task (`_shared/README-DOUBLE-FIRE-GUARD.md`): this claim is Layer 1;
 the Sent-Items probe immediately before each STEP 8 send is Layer 2.
 
-**Derive `run_id` ONCE, now, and reuse that exact string for the claim and the close**
-(the scheduler's run identifier, or an ET timestamp such as
+**Derive `guard_run_id` ONCE, now, and reuse that exact string for the claim and the
+close** (the scheduler's run identifier for THIS auditor fire, or an ET timestamp such as
 `ora-ground-truth-auditor-20260913T0400`). A fresh id at close returns exit 12, writes
-nothing, and strands the claim IN_PROGRESS for the full 120-minute TTL.
+nothing, and strands the claim IN_PROGRESS for the full 240-minute TTL. `guard_run_id`
+identifies this auditor's own sentinel claim only; it is never the `run_id` of an
+AUDITED run that STEPS 3-6 refer to, and must not be substituted for one.
 
 Claim before anything else:
 
 ```
-C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-ground-truth-auditor --block main --run-id <run_id> --ttl-min 120
+C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-ground-truth-auditor --block main --run-id <guard_run_id> --ttl-min 240
 ```
 
 - **Exit 10** -> today's audit already completed. Log `BLOCK_MAIN_ALREADY_COMPLETE_TODAY`,
@@ -45,16 +47,19 @@ C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:\Users\Owner
   and surface the code in STEP 9's completion note. Likewise surface any non-null
   `stateFileError` or `"persisted": false` from an exit-0 claim -- the guard fails open,
   so that string is the only sign Layer 1 is degraded.
-- TTL is **120 min**, not the fleet default 30: STEP 3 fans out one model-laddered
-  verifier per side-effecting run plus STEP 4's refuter pass, which legitimately outlasts
-  30 minutes. An expired claim lets an overlapping fire re-claim; Layer 2 is the backstop
-  for that (and for wall-clock age accrued across a laptop sleep). The cost of the long
-  TTL is small -- the bucket is per-day, so a crashed run only blocks a same-day manual
-  rerun, which `claim --force` covers (a rerun meant to RE-SEND an already-delivered
-  digest also needs `-Force` on the Layer 2 probe).
+- TTL is **240 min**, not the fleet default 30: STEP 3 fans out one model-laddered
+  verifier per side-effecting run plus STEP 4's refuter pass. The 2026-09-12 run took
+  60+ minutes with 13 verifiers and 6 refuters, and a catch-up burst widens STEP 1's
+  window (more runs, more verifiers), so 120 left too little headroom. An expired claim
+  lets an overlapping fire re-claim; Layer 2 is the backstop for that (and for wall-clock
+  age accrued across a laptop sleep). The cost of the long TTL is small for a nightly
+  task -- it only slows crash recovery, and the bucket is per-day, so a crashed run only
+  blocks a same-day manual rerun, which `claim --force` covers (a rerun meant to RE-SEND
+  an already-delivered digest also needs `-Force` on the Layer 2 probe).
 - Only the run holding the claim closes it. A run that stood down here calls neither
   `complete` nor `fail`. A close that returns **exit 12** did not land -- report it as
-  FAIL-OPEN (guard degraded) with the helper's JSON verbatim; never retry with `--adopt`.
+  FAIL-OPEN (guard degraded) with `guard_run_id` and the helper's JSON verbatim; never
+  retry with `--adopt`.
 
 **How this run closes the claim -- exactly one of these, on every path that got exit 0:**
 
@@ -65,7 +70,7 @@ C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:\Users\Owner
   because re-running would repeat the whole verifier fan-out:
 
 ```
-C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-ground-truth-auditor --block main --run-id <run_id> --email-sent-at <ISO8601>
+C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-ground-truth-auditor --block main --run-id <guard_run_id> --email-sent-at <ISO8601>
 ```
 
 - **No audit happened** -- STEP 1 exit 2 (after its could-not-start digest is sent or
@@ -74,7 +79,7 @@ C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:\Users\Owner
   fire re-claims (`RECLAIMED_AFTER_FAILED`) and actually runs the audit:
 
 ```
-C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py fail --task ora-ground-truth-auditor --block main --run-id <run_id> --error "<what broke>"
+C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py fail --task ora-ground-truth-auditor --block main --run-id <guard_run_id> --error "<what broke>"
 ```
 
 ## STEP 1 -- build the run index (Stage 0, deterministic, no judgment)
@@ -356,8 +361,9 @@ powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\
 - **Exit 10** (`ALREADY_SENT`) -> do NOT send. Log `MAIN_EMAIL_ALREADY_IN_SENT_ITEMS`,
   record a NORMAL skip citing the earlier send, then close the claim per STEP 0b as if
   sent (`complete` for an audit digest, `fail` for a could-not-start digest -- both
-  without `--email-sent-at`). This also stops a registry outage that persists across a
-  catch-up burst from sending one could-not-start digest per fire.
+  without `--email-sent-at`, using the same `guard_run_id` as the claim). This also
+  stops a registry outage that persists across a catch-up burst from sending one
+  could-not-start digest per fire.
 - **Exit 1** (`PROBE_ERROR`), or any other code (e.g. 9009/127, PowerShell not found) ->
   fail open: send anyway, and name the probe gap in STEP 9's completion note.
 - **Exit 0** (`NOT_SENT`) -> send via:
@@ -371,8 +377,20 @@ loudly if it fails again (do not halt the task over a send failure once the dige
 drafted and saved). Exit 1 (usage error) or 3 (stuck wizard) -- do not retry, flag
 immediately with the exact exit code and stderr.
 
-Once the send has resolved, close the STEP 0b claim exactly as STEP 0b specifies (already
-done above if the probe returned 10 -- close once).
+**Before the exit-4 retry, re-run the Sent-Items probe** (same command, same stem file).
+A timeout does not prove the message failed -- COM can deliver it after the helper gave
+up, and a blind retry then sends the digest twice. **Exit 10** -> the timed-out send
+landed: do NOT retry, log `MAIN_EMAIL_DELIVERED_DESPITE_TIMEOUT`, and close with
+`complete --email-sent-at <match.sentOn from the probe's JSON>` (the timestamp of the
+message actually in Sent Items, not the time of the failed call); for a could-not-start
+digest close with `fail` as above. **Exit 0** -> retry the send once. **Exit 1 or any
+other code** -> fail open and retry, naming the probe gap in STEP 9. A send whose
+timeout the re-probe proves delivered counts as "this run's send actually succeeded" for
+STEP 0b's `--email-sent-at` rule.
+
+Once the send has resolved, close the STEP 0b claim exactly as STEP 0b specifies, with
+`guard_run_id` (already done above if either probe returned 10 -- close once). If that
+close returns exit 12, report `guard_run_id` and the helper's JSON verbatim in STEP 9.
 
 ## STEP 9 -- completion note
 
