@@ -240,6 +240,9 @@ def _run_main_with_fixtures(tasks_by_fleet, state_dir, send_alert_result, stalle
     prg.task_progress_marker.find_stalled = lambda grace_minutes: (stalled or [])
     prg.STATE_PATH = os.path.join(state_dir, "state.json")
     prg.RETIRE_PENDING_PATH = retire_pending_path or os.path.join(state_dir, "no-retire-pending.json")
+    # main() observes the LIVE registries into _state/fleet-pause-windows.json (2026-09-12);
+    # a unit test must never write live state.
+    prg.capture_pause_windows = lambda: {"held": {}, "errors": []}
 
     sent = {"calls": 0}
 
