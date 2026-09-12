@@ -27,3 +27,13 @@ All reversible (git revert; new `_state` file). Worst case = false negative, mit
 
 ## Must not touch
 `_shared/fleet_pause.py`, `_tests/test_fleet_pause.py`, `state-freshness-probe.py`, `fleet-deadman.ps1`, registries, settings.json, CLAUDE.md, hooks/.
+
+## Follow-up scope (same day, Gabriel-directed)
+| # | Size | Step | Verify |
+|---|---|---|---|
+| F1 | XS | ✅ Close stale OI-273 marker (38/38, after verifying all 38 ids enabled) | find_stalled() == [] |
+| F2 | S | `pause-resume-guard.py` `find_incomplete_resumes()`: a fired resume-shaped one-time task whose named recurring ids are still disabled after grace → alarm (OI-273 detection gap: 6/38 = 16% escaped the ≤10% ratio check) | new tests in test-pause-resume-guard.py; live run shows 0 |
+| F3 | XS | register-scheduled-task v2.23: unattended `update_scheduled_task` blocks on a permission prompt (root cause OI-273); resume needs Desktop-UI permission mode or attended run; marker command needs `--fleet` | doc diff |
+| F4 | XS | ✅ ora-health-guard v1.13 lid-close watch | commit 1e6dc71 |
+| F5 | XS | ✅ Land Rev 24 files + 14-day resume-horizon fix | 7199c53, cc1fd72 |
+| F6 | S | Land all commits on main via worktree cherry-pick branches + PRs (OI-249 friction) | check-branch-point --expect N; push gate |
