@@ -6220,3 +6220,29 @@ Shipped instead:
 **Evidence:** fixed and committed together with landing the settled word-budget-pass insertion itself (`rules.md` commit `607a2d0`, dirty-tree-triage/OI-249 follow-up session) — reworded line 32 to "On non-zero COM exit: see the per-code table below — not every exit code retries — and never route through Composio/Rube/Gmail regardless of exit code," removing the blanket-retry claim. Verified via `git show 607a2d0 -- rules.md`: no remaining contradiction between line 32 and the exit-code table.
 
 **Auto-check:** none.
+
+---
+
+### OI-273
+
+**Status:** OPEN
+**Opened:** 2026-09-11 · **Source:** Gabriel-directed "unpause all routines" (Code session) applying register-scheduled-task v2.21
+**Severity:** MEDIUM (fleet-automation reliability — second occurrence of a known false-success pattern)
+
+**Description:** `ora-routine-pause-resume-2026-09-11` (one-time, `fireAt` 2026-09-11T20:01Z) fired on schedule, ran to completion, and its `list_task_runs` status reads `succeeded` — but `list_scheduled_tasks` showed only the first 6 of its 38 target ids (`ora-master-workbook-ingest` through `ora-weekly-hygiene`, exactly its first progress-marker checkpoint) at `enabled:true`; the remaining 32 were still `enabled:false`. This is the identical shape of the OI-202 root incident (`ora-routine-pause-resume-08-21`, which stopped after re-enabling 2 of 35 tasks) that the task's own STEP 1 progress-marker mechanism (`task-progress-marker.py`, added precisely to make this failure mode visible) was built to catch — the marker infrastructure recorded the run's own checkpoint but nothing consumed it to contradict the run's `succeeded` status before the next session trusted it.
+
+**Impact:** a scheduled task's `succeeded` status is not reliable evidence of completion for a multi-step one-time job even with progress markers wired up — something else has to actually read the marker against the target step count and flag a mismatch, or a stalled-but-"succeeded" run silently leaves the fleet in a partially-paused state indefinitely (here, ~34 hours: pause was 2026-09-07, this resume fired and stalled 2026-09-11T20:01, discovered and fixed same session ~20:40 UTC only because Gabriel separately asked to confirm the unpause).
+
+**Immediate remediation (APPLIED, this session):** manually completed `update_scheduled_task(enabled:true)` for the remaining 32 ids per the task's own STEP 1 list, writing progress markers after each batch of 6 (per its STEP 1 instructions), then verified via `list_scheduled_tasks` that all 38 target ids show `enabled:true` and the resume task itself correctly auto-disabled. Full id list and per-batch verification: this session's transcript. `retire-pending.json` had zero pending entries, so no carve-outs applied.
+
+**Candidate fix (NOT applied):** `ORA Fleet Pause-Resume Guard` (native, off-fleet, every 6h — cited in register-scheduled-task v2.13 as the consumer of `task-progress-marker.py find_stalled()`) evidently did not catch this stall in the ~39 minutes between the 20:01 fire and this session's 20:40 discovery, which is within its stated 20-minute grace window at least once before discovery — worth confirming the guard actually ran in that window and, if it did, why a 6/38-with-stale-marker state didn't alarm. Separately, `list_task_runs`' `succeeded` status for a marker-bearing one-time task should arguably be contingent on the final marker's `step == of` — right now `succeeded` is a session-completion signal (the agent session exited cleanly), not a task-completion signal, and the two are being conflated by every consumer that reads it.
+
+**Auto-check:** `python "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe" C:\Users\Owner\.claude\maintenance\task-progress-marker.py find_stalled` (if it supports an ad-hoc invocation outside the guard's own schedule — verify flag name before relying on this).
+
+**Related:** OI-202 (root incident, same failure class, same task family, three weeks prior).
+
+---
+
+### LAMS/Cowork fleet resume — unresolved this session (not filed as an OI; a surface gap, not a defect)
+
+The CC/MCP fleet (this session's native surface, confirmed via `list_scheduled_tasks`' `path` field resolving to `C:\Users\Owner\.claude\scheduled-tasks\`) is now fully resumed and verified. This session cannot reach the LAMS/Cowork registry (`list_scheduled_tasks`/`update_scheduled_task` resolve session-local, per register-scheduled-task RULE 3/PATH-DISAMBIGUATOR) and has no evidence either way on whether the ~25 LAMS tasks paused 2026-09-07 have a resume task registered, or whether one fired/stalled/succeeded. Per RULE 4, this must be checked and, if needed, completed from a native on-device Cowork session — never a bare "Cowork session."

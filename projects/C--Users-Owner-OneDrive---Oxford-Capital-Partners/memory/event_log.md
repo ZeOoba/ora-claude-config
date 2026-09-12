@@ -5,12 +5,83 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-09-11T16:34:56.369Z
+  modified: 2026-09-11T20:42:27.283Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-09-11 -- CC/MCP fleet resume completed manually; ora-routine-pause-resume-2026-09-11 stalled at 6/38 despite `succeeded` status (OI-273)
+
+Gabriel: "Unpause all routines" (Code session, ~20:40Z, ahead of nothing further needed --
+resume was already due at 20:01Z). Followed register-scheduled-task v2.21.
+
+- `list_scheduled_tasks` showed the scheduled one-time resume `ora-routine-pause-resume-2026-09-11`
+  (fireAt 2026-09-11T20:01:00Z) had already fired -- `lastRunAt` 20:01:42Z, `list_task_runs`
+  status `succeeded` -- but only the first 6 of its 38 target ids (through `ora-weekly-hygiene`,
+  its first progress-marker checkpoint) showed `enabled:true`; the remaining 32 were still
+  `enabled:false`. Same shape as OI-202's root incident (`ora-routine-pause-resume-08-21`,
+  stalled at 2/35).
+- Read the task's own SKILL.md (STEP 1 list of 38 ids, STEP 0 retire-pending carve-out,
+  progress-marker-every-6 instruction). `retire-pending.json` had zero pending entries.
+- Completed the remaining 32 `update_scheduled_task(enabled:true)` calls manually, in the same
+  batches of 6 the task's own instructions specify, writing `task-progress-marker.py` markers
+  after each batch (fleet cc, task-id ora-routine-pause-resume-2026-09-11).
+- One `update_scheduled_task` call (`ora-doctrine-integrity-guard`) and a second
+  (`ora-aaos-publish-contracts`) tripped `scheduled-task-update-preguard` (hand-edit-since-last-
+  update warning). Verified both via `git diff HEAD -- <path>/SKILL.md` = empty both times --
+  the enabled-only partial update did not touch frontmatter/body content. No restoration needed.
+- Verified via a final `list_scheduled_tasks`: all 38 target ids `enabled:true`; the resume task
+  itself correctly stayed `enabled:false` (auto-disabled one-time, its own STEP 3).
+- LAMS/Cowork fleet resume status NOT verified this session -- this surface's MCP tools resolve
+  session-local to CC/MCP only (confirmed via the `path` field). Filed as an explicit open
+  question in open-items-tracker.md rather than assumed complete; needs a native on-device
+  Cowork session per RULE 4.
+- Filed [OI-273](open-items-tracker.md#OI-273): the false-success stall pattern, its impact
+  (~34h partial fleet pause with `succeeded` masking it), and a candidate fix (marker-vs-
+  target-step reconciliation should gate the `succeeded` status itself, not just feed a
+  separate guard).
+
+## 2026-09-11 -- insurance-climate-risk-comparison v1.0 installed via Save-skill click
+
+- Skill: insurance-climate-risk-comparison v1.0 (new skill, standalone, not plugin-bundled).
+- Repo source: ora-skills @ 79aaa4595f217de46bbc734c592df5c50f3c0972 (feat: add new
+  market-level insurance/climate risk comparison skill), tree clean at package time.
+- Packaged via tools/package_skills.py (exit 0; description 918/1024 OK; 2 entries OK).
+- Staged into a Cowork session and installed by Gabriel's Save-skill click (2026-09-11
+  ~15:04 ET), NOT merely the upstream repo commit.
+- Post-install verification: cache dir file hashes match repo exactly (SKILL.md,
+  references/data-sources.md). tools/reimport_correlate.py verify --baseline
+  "2026-09-11 15:00:00" -> CONFIRMED (CreationTime moved 15:00:00 -> 15:04:58.071427;
+  main.log Sync complete: 1 downloaded @ 15:04:58, exact-second match; enabled-skill
+  count 73 -> 74).
+- Ledger: pending_reimport.py clear insurance-climate-risk-comparison run immediately
+  after this log entry was confirmed appended.
+
+## 2026-09-11 -- vendor-contract-qc retirement confirmed (ORA Setup Audit Revision 25 remediation, cont.)
+vendor-contract-qc retired/unpublished by Gabriel via the Skills page. Confirmed two ways:
+ListSkills account call returns only vendor-management for vendor/contract-QC keywords (v2.0,
+enabled=true); tools/skill_drift_report.py --publish-status flipped vendor-contract-qc from
+CACHE-ONLY (17:25:28Z) to UNKNOWN/not found in either store (17:27:20Z), i.e. the local
+AppData cache mirror caught up with the unpublish. No stale duplicate remains to collide with
+vendor-management's QC-mode triggers.
+
+## 2026-09-11 -- ORA Setup Audit Revision 25 remediation: 3 skills reimported, vendor-management republished
+daily-brief v2.12, pma-qc v1.2, vendor-management v2.0 -- all three packaged from commit
+735a376 (vendor-contract-qc merged into vendor-management as QC mode; daily-brief changelog
+retention fix) and confirmed installed via Gabriel's Save-skill click. Confirmed by
+tools/reimport_correlate.py verify: all three show CreationTime move + exact-second main.log
+"Sync complete: 3 downloaded" @ 2026-09-11T13:25:17 -- a real reimport, not the
+sync_appdata_mirror.py mirror-sync artifact.
+
+vendor-management was NOT-INSTALLED going in (first-ever publish) because it sat in
+package_skills.py's DELIBERATELY_UNPUBLISHED set (Gabriel's 2026-08-09 ruling, OI-157 guard).
+Flagged to Gabriel in-turn; he confirmed publishing it now, so it was removed from that
+frozenset at commit 97ff6a4 before packaging. Reasoning logged inline in package_skills.py.
+
+vendor-contract-qc remains CACHE-ONLY (live in the account store) as of this entry --
+still pending Gabriel's Skills-page retirement click; not yet resolved.
 
 ## 2026-09-11 — dirty-tree-triage follow-up: OI-271 fixed, OI-272's overlap cut 30→8; one filter-blindness + one isolated-commit repair-step finding
 
