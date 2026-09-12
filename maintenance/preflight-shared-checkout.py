@@ -49,6 +49,17 @@ DESIGN STANCES carried over from those tools, each earned by a past failure:
   5. READ-ONLY. It runs `rev-parse` and `status` and reads claim JSON. It never
      claims, commits, stashes, checks out or resets. It reports; you decide.
 
+STALE OWNERS (added 2026-09-12): a recorded touch older than the path's last
+commit is reported as STALE, not silently counted as a live owner. That ended
+the false STOP from July-era touches on long-committed files, which looked
+identical to a live conflict and cost an investigation each time. A file
+whose only other owners are stale is still CONTESTED, labelled STALE-ONLY with
+the exact remedy. A partial commit (isolated_commit.py lands one hunk, leaves
+the rest) post-dates the touch while foreign hunks stay dirty, so nothing but
+the caller's own `git diff HEAD -- <path>` can clear it: `--accept-stale PATH`.
+The real fix (per-touch blob hashes in commit-provenance-recorder.py, so a
+stale verdict can be proven) touches hooks/** and is tracked separately.
+
 ACCEPTED LIMITATION: "mine" means mine among RECORDED touches. Provenance is
 written by the Edit/Write tool hook, so another session's edit made through
 Bash (sed, a redirect, a script) never appears, and a file I once touched can
@@ -276,8 +287,9 @@ def _default_sessions_dir():
 
 
 def _scan_provenance(sessions_dir):
-    """{normcase(abspath): set(session_id)} from every session's
-    touched-files.txt, or (None) when the directory itself cannot be listed.
+    """{normcase(path): {session_id: last_touch_epoch | None}} from every
+    session's touched-files.txt, or (None) when the directory itself cannot be
+    listed. None == old-format line with no timestamp (unknown touch time).
 
     Same source commit-provenance-recorder.py writes and
     dirty-file-owner-report.py reads -- deliberately not a second tracking
@@ -301,19 +313,40 @@ def _scan_provenance(sessions_dir):
         try:
             with open(tf, "r", encoding="utf-8", errors="replace") as fh:
                 for line in fh:
-                    path = line.split("\t", 1)[0].strip()
-                    if path:
-                        index.setdefault(os.path.normcase(path), set()).add(sid)
+                    parts = line.rstrip("\r\n").split("\t", 1)
+                    path = parts[0].strip()
+                    if not path:
+                        continue
+                    try:
+                        ts = float(parts[1]) if len(parts) > 1 and parts[1].strip() else None
+                    except ValueError:
+                        ts = None
+                    _merge_touch(index.setdefault(os.path.normcase(path), {}), sid, ts)
         except OSError:
             continue  # one unreadable session is not a reason to fail the scan
     return index
 
 
+def _merge_touch(owners, sid, ts):
+    """Keep each session's LATEST touch. An unknown (None) time wins: it can
+    never be proven older than a commit, so it must never be discounted."""
+    if sid in owners and (owners[sid] is None or ts is None):
+        owners[sid] = None
+    else:
+        owners[sid] = ts if sid not in owners else max(owners[sid], ts)
+
+
+def _merge_owners(into, other):
+    for sid, ts in other.items():
+        _merge_touch(into, sid, ts)
+
+
 def _owners(path, prov_index):
-    """Session ids known to have touched `path`. Empty set == nobody recorded
-    it, which is NOT the same as 'nobody touched it'."""
+    """{session_id: last_touch_epoch | None} known to have touched `path`.
+    Empty == nobody recorded it, which is NOT the same as 'nobody touched
+    it'."""
     if prov_index is None:
-        return set()
+        return {}
     # A foreign touch recorded under a junction/8.3 spelling never equals the
     # realpath key, so the file read as mine alone (CLEAR). Match every
     # recorded key with the same basename by resolving ITS directory. Only a
@@ -322,7 +355,8 @@ def _owners(path, prov_index):
     # took minutes.
     target = os.path.normcase(os.path.realpath(path))
     base = os.path.basename(target)
-    owners = set(prov_index.get(target, set()))
+    owners = {}
+    _merge_owners(owners, prov_index.get(target, {}))
     for key, sids in prov_index.items():
         if key == target:
             continue
@@ -333,7 +367,7 @@ def _owners(path, prov_index):
             if "~" in kbase and os.path.exists(key):
                 try:
                     if os.path.normcase(os.path.realpath(key)) == target:
-                        owners |= sids
+                        _merge_owners(owners, sids)
                 except (OSError, ValueError):
                     pass
             continue
@@ -347,8 +381,54 @@ def _owners(path, prov_index):
             except (OSError, ValueError):
                 _DIR_REAL[d] = None
         if _DIR_REAL[d] and os.path.join(_DIR_REAL[d], base) == target:
-            owners |= sids
+            _merge_owners(owners, sids)
     return owners
+
+
+def _stale_note(entry):
+    """Human-readable tail naming stale owners, so a discount is visible
+    rather than silent -- and, for a stale-only file, the exact remedy."""
+    stale = entry.get("stale_owners") or []
+    if not stale:
+        return ""
+    names = ", ".join(s[:8] for s in stale)
+    if entry.get("stale_only"):
+        return ("  STALE-ONLY other owner(s) %s: their touch predates the last commit,"
+                " but a partial commit can leave their hunks dirty. Check"
+                " `git diff HEAD -- %s` holds only your hunks, then re-run with"
+                " --accept-stale %s" % (names, entry["path"], entry["path"]))
+    if entry.get("stale_accepted"):
+        return "  (stale owner(s) %s accepted via --accept-stale)" % names
+    return "  (+%d stale, committed since their touch: %s)" % (len(stale), names)
+
+
+def _last_commit_time(repo, rel):
+    """Epoch of the newest commit touching `rel`, or None (never committed, or
+    git could not answer). `:(literal,icase)` for the same reason as
+    commit-provenance-guard.py last_commit_time(): provenance keys are
+    lowercased, and a plain pathspec silently misses any path with uppercase."""
+    proc = _git(repo, "log", "-1", "--format=%ct", "--", ":(literal,icase)" + rel)
+    out = (proc.stdout or "").strip()
+    if proc.returncode != 0 or not out:
+        return None
+    try:
+        return float(out.splitlines()[0])
+    except ValueError:
+        return None
+
+
+def _split_stale(owners, commit_ts):
+    """(live, stale) session-id sets. A touch is STALE when its time is KNOWN
+    and the path's last commit is at or after it -- the file was committed
+    after that session touched it. That does NOT prove all of its content is
+    in git: a partial commit can land one hunk and leave the rest dirty, so
+    the caller never auto-clears on stale alone (see --accept-stale). Same
+    timestamp rule as commit-provenance-guard.py already_committed_since().
+    Unknown touch time, or a never-committed path, stays live."""
+    if commit_ts is None:
+        return set(owners), set()
+    stale = {sid for sid, ts in owners.items() if ts is not None and commit_ts >= ts}
+    return set(owners) - stale, stale
 
 
 _DIR_REAL = {}  # per-run cache for _owners(): recorded dir -> normcase(realpath) | None
@@ -427,6 +507,9 @@ def main():
     ap.add_argument("--sessions-dir", default=None,
                     help="commit-provenance sessions dir (attribution)")
     ap.add_argument("--ttl-minutes", type=int, default=DEFAULT_TTL_MINUTES)
+    ap.add_argument("--accept-stale", nargs="+", default=None, metavar="PATH",
+                    help="after checking `git diff HEAD -- PATH` holds only your "
+                         "own hunks, accept a file whose only other owners are stale")
     ap.add_argument("--canonical", default="main",
                     help="branch this checkout should track (local-only advisory)")
     ap.add_argument("--json", action="store_true")
@@ -487,23 +570,40 @@ def main():
     sessions_dir = args.sessions_dir or _default_sessions_dir()
     prov_index = _scan_provenance(sessions_dir)
     mine = (args.session or "").lower()
+    accepted_stale = {
+        _norm(p if os.path.isabs(p) else os.path.join(args.repo, p))
+        for p in (args.accept_stale or [])}
 
     dirty_overlap_mine, dirty_overlap_foreign = [], []
     for p in dirty:
         if not _any_overlap(p, scope):
             continue
         rel = os.path.relpath(p, repo).replace("\\", "/")
-        owners = _owners(p, prov_index)
+        touches = _owners(p, prov_index)
+        # Stale-owner discount (2026-09-12): a touch the path's last commit
+        # already post-dates is history. Two false STOPs in one session came
+        # from July / 09-09 touches on files committed since. Discounting only
+        # ever REMOVES a session from `live`; an empty `live` still reads
+        # foreign below, so history can never turn "unknown" into "mine".
+        live, stale = _split_stale(
+            touches, _last_commit_time(repo, rel) if touches else None)
         # Exact id match: an 8-char prefix of a SHORT --session ('b') made
         # every 'b...' session's file read as mine.
-        only_mine = bool(owners) and bool(mine) and all(
-            o.lower() == mine for o in owners)
-        if only_mine:
-            dirty_overlap_mine.append({"path": rel,
-                                       "owners": sorted(owners)})
-        else:
-            dirty_overlap_foreign.append({"path": rel,
-                                          "owners": sorted(owners)})
+        only_mine = bool(live) and bool(mine) and all(
+            o.lower() == mine for o in live)
+        entry = {"path": rel, "owners": sorted(live), "stale_owners": sorted(stale)}
+        if only_mine and stale:
+            # NOT auto-cleared (independent review 2026-09-12): a PARTIAL
+            # commit -- hooks/lib/isolated_commit.py lands one hunk and leaves
+            # the rest -- post-dates the other session's touch while its
+            # remaining hunk is still dirty. Only the caller can check the
+            # diff, so it stays CONTESTED until they say so via --accept-stale.
+            if _norm(os.path.join(repo, rel)) in accepted_stale:
+                entry["stale_accepted"] = True
+            else:
+                entry["stale_only"] = True
+                only_mine = False
+        (dirty_overlap_mine if only_mine else dirty_overlap_foreign).append(entry)
     dirty_overlap_mine.sort(key=lambda d: d["path"])
     dirty_overlap_foreign.sort(key=lambda d: d["path"])
 
@@ -573,8 +673,8 @@ def main():
         say("  NOT-YOURS dirty in scope (%d of %d dirty in repo):"
             % (len(dirty_overlap_foreign), len(dirty)))
         for d in dirty_overlap_foreign[:20]:
-            who = ", ".join(o[:8] for o in d["owners"]) or "no recorded owner"
-            say("      %s   [%s]" % (d["path"], who))
+            who = ", ".join(o[:8] for o in d["owners"]) or "no live recorded owner"
+            say("      %s   [%s]%s" % (d["path"], who, _stale_note(d)))
         if len(dirty_overlap_foreign) > 20:
             say("      ... and %d more" % (len(dirty_overlap_foreign) - 20))
     else:
@@ -582,7 +682,7 @@ def main():
             % len(dirty))
     if dirty_overlap_mine:
         say("  (your own uncommitted edits in scope, not contesting: %s)"
-            % ", ".join(d["path"] for d in dirty_overlap_mine[:10]))
+            % ", ".join(d["path"] + _stale_note(d) for d in dirty_overlap_mine[:10]))
     if prov_index is None:
         say("  CAVEAT: provenance unavailable (%s) -- nothing can be proven"
             " yours, so every overlap is treated as not-yours." % sessions_dir)

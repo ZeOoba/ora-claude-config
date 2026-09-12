@@ -428,17 +428,21 @@ def _sessions_dir(td, name="sessions"):
     return p
 
 
-def _touched(sessions_dir, session, paths):
+def _touched(sessions_dir, session, paths, ts=None):
     """Write a session's touched-files.txt in commit_provenance's line format:
-    `<normcase(abspath)>\\t<epoch>`."""
+    `<normcase(abspath)>\\t<epoch>`. ts=None -> now; ts=False -> old-format
+    bare-path line with no timestamp."""
     import time
     d = os.path.join(sessions_dir, session)
     if not os.path.isdir(d):
         os.makedirs(d)
     with open(os.path.join(d, "touched-files.txt"), "w", encoding="utf-8") as fh:
         for p in paths:
-            fh.write("%s\t%.6f\n" % (os.path.normcase(os.path.abspath(p)),
-                                     time.time()))
+            key = os.path.normcase(os.path.abspath(p))
+            if ts is False:
+                fh.write("%s\n" % key)
+            else:
+                fh.write("%s\t%.6f\n" % (key, time.time() if ts is None else ts))
 
 
 def test_my_own_dirty_edit_does_not_contest():
@@ -823,6 +827,176 @@ def test_blank_or_too_short_since_is_indeterminate_not_unchanged():
         expect("since 7-char sha still CLEAR", rc == EXIT_CLEAR, (rc, out))
 
 
+# --------------------------------------------------------------------------
+# stale ownership discount (2026-09-12): a recorded touch that the file's last
+# commit already post-dates is history, not live WIP. Two false STOPs in one
+# session came from July / 09-09 touches on files committed since. Same rule
+# as commit-provenance-guard.py already_committed_since().
+# --------------------------------------------------------------------------
+def _commit_file(work, rel, body):
+    _dirty(work, rel, body)
+    _git(work, "add", rel)
+    _git(work, "commit", "-q", "-m", "commit " + rel)
+
+
+def _stale_run(td, work, sd):
+    return run("--repo", work, "--claims-dir", _claims_dir(td), "--sessions-dir", sd,
+               "--session", MY_SESSION, "--paths", "agents")
+
+
+def _stale_only_mine_fixture(td):
+    """Other session touched, its work got committed, then I edited."""
+    import time
+    work = _make_repo(td)
+    sd = _sessions_dir(td)
+    f = os.path.join(work, "agents", "one.md")
+    _touched(sd, OTHER_SESSION, [f], ts=time.time() - 3600)
+    _commit_file(work, "agents/one.md", "their work, now committed\n")
+    _dirty(work, "agents/one.md", "my new edit\n")
+    _touched(sd, MY_SESSION, [f], ts=time.time() + 2)
+    return work, sd
+
+
+def test_stale_only_foreign_owner_contests_with_stale_label_and_remedy():
+    """Review 2026-09-12: a PARTIAL/isolated commit of the other session's
+    hunks leaves the rest dirty while its touch still predates the commit, so
+    an automatic discount read CLEAR over live foreign work. Stale-only stays
+    CONTESTED -- but labelled, with the exact one-step remedy."""
+    with tempfile.TemporaryDirectory() as td:
+        work, sd = _stale_only_mine_fixture(td)
+        rc, out, _ = _stale_run(td, work, sd)
+        rj = result_json(out) or {}
+        expect("stale-only: still CONTESTED without explicit acceptance",
+               rc == EXIT_CONTESTED, (rc, out[-500:]))
+        foreign = rj.get("dirty_overlap_foreign") or [{}]
+        expect("stale-only: entry flags stale_only and names the stale session",
+               foreign[0].get("stale_only") is True
+               and foreign[0].get("stale_owners") == [OTHER_SESSION], foreign)
+        expect("stale-only: human output gives the diff check and --accept-stale remedy",
+               "git diff HEAD -- agents/one.md" in out and "--accept-stale agents/one.md" in out,
+               out[-700:])
+
+
+def test_accept_stale_clears_after_explicit_check():
+    with tempfile.TemporaryDirectory() as td:
+        work, sd = _stale_only_mine_fixture(td)
+        rc, out, _ = run("--repo", work, "--claims-dir", _claims_dir(td), "--sessions-dir", sd,
+                         "--session", MY_SESSION, "--paths", "agents",
+                         "--accept-stale", "agents/one.md")
+        rj = result_json(out) or {}
+        expect("accept-stale: CLEAR once the caller asserts the diff is theirs",
+               rc == EXIT_CLEAR, (rc, out[-500:]))
+        mine = rj.get("dirty_overlap_mine") or [{}]
+        expect("accept-stale: recorded as accepted, stale owner still reported",
+               mine[0].get("stale_accepted") is True
+               and mine[0].get("stale_owners") == [OTHER_SESSION], mine)
+
+
+def test_accept_stale_never_overrides_a_live_foreign_owner():
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        f = os.path.join(work, "agents", "one.md")
+        _commit_file(work, "agents/one.md", "base\n")
+        time.sleep(1.1)
+        _dirty(work, "agents/one.md", "both\n")
+        _touched(sd, OTHER_SESSION, [f], ts=time.time())
+        _touched(sd, MY_SESSION, [f], ts=time.time())
+        rc, out, _ = run("--repo", work, "--claims-dir", _claims_dir(td), "--sessions-dir", sd,
+                         "--session", MY_SESSION, "--paths", "agents",
+                         "--accept-stale", "agents/one.md")
+        expect("accept-stale: a LIVE foreign owner still CONTESTED", rc == EXIT_CONTESTED,
+               (rc, out[-500:]))
+
+
+def test_partial_commit_of_foreign_hunks_is_not_cleared_automatically():
+    """Pins the review's false-CLEAR: other session edits two hunks, only one
+    is committed (isolated_commit.py style), the other stays dirty."""
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        rel = "agents/one.md"
+        f = os.path.join(work, "agents", "one.md")
+        _commit_file(work, rel, "line1\nline2\nline3\nline4\nline5\n")
+        time.sleep(1.1)
+        _dirty(work, rel, "THEIRS-A\nline2\nline3\nline4\nTHEIRS-B\n")
+        _touched(sd, OTHER_SESSION, [f], ts=time.time())
+        time.sleep(1.1)
+        partial = "THEIRS-A\nline2\nline3\nline4\nline5\n"
+        blob = subprocess.run(["git", "-C", work, "hash-object", "-w", "--stdin"],
+                              input=partial, capture_output=True, text=True).stdout.strip()
+        _git(work, "update-index", "--cacheinfo", "100644,%s,%s" % (blob, rel))
+        _git(work, "commit", "-q", "-m", "partial: only hunk A")
+        with open(f, "a", encoding="utf-8") as fh:
+            fh.write("MINE\n")
+        _touched(sd, MY_SESSION, [f], ts=time.time() + 2)
+        rc, out, _ = _stale_run(td, work, sd)
+        expect("partial-commit: remaining foreign hunk is never auto-CLEARed",
+               rc == EXIT_CONTESTED, (rc, out[-500:]))
+
+
+def test_foreign_touch_after_last_commit_still_contests():
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        f = os.path.join(work, "agents", "one.md")
+        _commit_file(work, "agents/one.md", "base\n")
+        time.sleep(1.1)
+        _dirty(work, "agents/one.md", "both edited\n")
+        _touched(sd, OTHER_SESSION, [f], ts=time.time())
+        _touched(sd, MY_SESSION, [f], ts=time.time())
+        rc, out, _ = _stale_run(td, work, sd)
+        expect("stale-owner: foreign touch newer than last commit -> CONTESTED",
+               rc == EXIT_CONTESTED, (rc, out[-500:]))
+
+
+def test_only_stale_owners_stays_contested():
+    """Discounting history must never turn 'unknown' into 'mine'."""
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        f = os.path.join(work, "agents", "one.md")
+        _touched(sd, OTHER_SESSION, [f], ts=time.time() - 3600)
+        _commit_file(work, "agents/one.md", "committed\n")
+        _dirty(work, "agents/one.md", "edited by someone unrecorded\n")
+        rc, out, _ = _stale_run(td, work, sd)
+        expect("stale-owner: no live owner at all -> still CONTESTED", rc == EXIT_CONTESTED,
+               (rc, out[-500:]))
+
+
+def test_unknown_touch_time_is_never_discounted():
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        f = os.path.join(work, "agents", "one.md")
+        _touched(sd, OTHER_SESSION, [f], ts=False)
+        _commit_file(work, "agents/one.md", "committed\n")
+        _dirty(work, "agents/one.md", "mine\n")
+        _touched(sd, MY_SESSION, [f], ts=time.time() + 2)
+        rc, out, _ = _stale_run(td, work, sd)
+        expect("stale-owner: old-format line (no ts) stays live -> CONTESTED",
+               rc == EXIT_CONTESTED, (rc, out[-500:]))
+
+
+def test_never_committed_path_is_never_discounted():
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        f = os.path.join(work, "agents", "brand-new.md")
+        _dirty(work, "agents/brand-new.md", "untracked\n")
+        _touched(sd, OTHER_SESSION, [f], ts=time.time() - 3600)
+        _touched(sd, MY_SESSION, [f], ts=time.time())
+        rc, out, _ = _stale_run(td, work, sd)
+        expect("stale-owner: untracked file has no commit to post-date -> CONTESTED",
+               rc == EXIT_CONTESTED, (rc, out[-500:]))
+
+
 def test_unresolvable_canonical_is_reported_not_silent():
     with tempfile.TemporaryDirectory() as td:
         work = _branch_with_local_only_file(td)
@@ -881,6 +1055,14 @@ def main():
     test_foreign_touch_recorded_via_short_file_name_still_contests()
     test_unencodable_filename_still_prints_result_json()
     test_blank_or_too_short_since_is_indeterminate_not_unchanged()
+    test_stale_only_foreign_owner_contests_with_stale_label_and_remedy()
+    test_accept_stale_clears_after_explicit_check()
+    test_accept_stale_never_overrides_a_live_foreign_owner()
+    test_partial_commit_of_foreign_hunks_is_not_cleared_automatically()
+    test_foreign_touch_after_last_commit_still_contests()
+    test_only_stale_owners_stays_contested()
+    test_unknown_touch_time_is_never_discounted()
+    test_never_committed_path_is_never_discounted()
     passed = sum(1 for ok, _ in results if ok)
     print("\npreflight-shared-checkout tests: %d/%d passed"
           % (passed, len(results)))
