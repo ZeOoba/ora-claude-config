@@ -279,6 +279,19 @@ INCOMPLETE_RESUME_MIN_LISTED = 3
 _REENABLE_RE = re.compile(r"re-?enable|update_scheduled_task\s*\([^)]*enabled\s*:\s*true", re.IGNORECASE)
 
 
+def _parse_run_ts(v):
+    """lastRunAt -> aware UTC datetime, or None. Accepts ISO with Z/offset, NAIVE ISO
+    (treated as UTC -- a naive value used to raise TypeError out of the age subtraction and
+    kill main()), and epoch milliseconds (used to be skipped silently). Review 2026-09-12."""
+    try:
+        if isinstance(v, (int, float)):
+            return datetime.fromtimestamp(float(v) / 1000.0, tz=timezone.utc)
+        d = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        return d.replace(tzinfo=timezone.utc) if d.tzinfo is None else d.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
 def find_incomplete_resumes(tasks_by_fleet, retire_pending_path=None, now=None,
                             grace_minutes=INCOMPLETE_RESUME_GRACE_MINUTES,
                             lookback_hours=INCOMPLETE_RESUME_LOOKBACK_HOURS):
@@ -306,9 +319,8 @@ def find_incomplete_resumes(tasks_by_fleet, retire_pending_path=None, now=None,
         for t in tasks:
             if t.get("cronExpression") or fleet_status.fire_at(t) is None or not t.get("lastRunAt"):
                 continue
-            try:
-                fired = datetime.fromisoformat(str(t["lastRunAt"]).replace("Z", "+00:00"))
-            except Exception:
+            fired = _parse_run_ts(t["lastRunAt"])
+            if fired is None:
                 continue
             age = now - fired
             if age < timedelta(minutes=grace_minutes) or age > timedelta(hours=lookback_hours):
@@ -458,8 +470,17 @@ def main():
 
     # Incomplete resume (OI-273, 2026-09-12). Same per-key bookkeeping as retire-pending.
     ir_state = state.setdefault("_incompleteResume", {})
-    incomplete = find_incomplete_resumes(tasks_by_fleet)
     seen_ir = set()
+    try:
+        incomplete = find_incomplete_resumes(tasks_by_fleet)
+    except Exception as exc:  # noqa: BLE001 -- fail OPEN: an unanswerable check alarms, never kills the guard
+        incomplete = []
+        seen_ir.add("check-error")
+        alarms.append({"fleet": "incomplete-resume:check-error",
+                       "reason": f"incomplete-resume check could not run ({type(exc).__name__}: {exc}); "
+                                 f"a partially-completed resume would be invisible this run",
+                       "alreadyAlarmed": ir_state.get("check-error", {}).get("alarmed", False)})
+        ir_state.setdefault("check-error", {})["lastChecked"] = now_iso
     for ir in incomplete:
         key = f"{ir['fleet']}:{ir['taskId']}"
         seen_ir.add(key)
