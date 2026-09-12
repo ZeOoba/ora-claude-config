@@ -312,7 +312,47 @@ def main():
     test_non_resume_one_time_task_is_ignored_unit()
     test_retire_pending_ids_are_excluded_from_incomplete_resume_unit()
     test_incomplete_resume_alarms_once_and_clears_unit()
+    test_incomplete_resume_naive_and_epoch_lastrunat_unit()
+    test_incomplete_resume_crash_never_kills_main_unit()
     print("ALL PAUSE-RESUME-GUARD TESTS PASS")
+
+
+def test_incomplete_resume_naive_and_epoch_lastrunat_unit():
+    """Review finding: a naive ISO lastRunAt raised TypeError (would kill main()), and an
+    epoch-ms lastRunAt was silently skipped. Both must be judged."""
+    ids = [f"task-{i}" for i in range(10)]
+    ninety_ago = datetime.now(timezone.utc) - timedelta(minutes=90)
+    for variant in (ninety_ago.strftime("%Y-%m-%dT%H:%M:%S"), int(ninety_ago.timestamp() * 1000)):
+        tmp = tempfile.mkdtemp(prefix="prg-ir-v-")
+        tasks = {"cc": _fleet_with_resume(tmp, set(), ids, fired_minutes_ago=90)}
+        tasks["cc"][-1]["lastRunAt"] = variant
+        out = prg.find_incomplete_resumes(tasks, retire_pending_path=os.path.join(tmp, "none.json"))
+        assert len(out) == 1 and len(out[0]["disabled"]) == 10, (variant, out)
+    print("  PASS test_incomplete_resume_naive_and_epoch_lastrunat_unit")
+
+
+def test_incomplete_resume_crash_never_kills_main_unit():
+    tmp = tempfile.mkdtemp(prefix="prg-ir-crash-")
+    original = prg.find_incomplete_resumes
+
+    def boom(*a, **k):
+        raise RuntimeError("synthetic")
+    prg.find_incomplete_resumes = boom
+    try:
+        state, calls = _run_main_with_fixtures({"cc": _recurring_tasks(10, enabled=True)}, tmp,
+                                               send_alert_result=True)
+        _, calls_again = _run_main_with_fixtures({"cc": _recurring_tasks(10, enabled=True)}, tmp,
+                                                 send_alert_result=True)
+    finally:
+        prg.find_incomplete_resumes = original
+    assert calls == 1, "a crashed check must surface as an alarm, not kill main() or vanish"
+    assert calls_again == 0, "a persisting check error must not re-email every run"
+    state_ok, calls_ok = _run_main_with_fixtures({"cc": _recurring_tasks(10, enabled=True)}, tmp,
+                                                 send_alert_result=True)
+    assert calls_ok == 0
+    assert state_ok["_incompleteResume"]["check-error"]["alarmed"] is False, \
+        "a recovered check must clear its error alarm so a future failure re-alarms"
+    print("  PASS test_incomplete_resume_crash_never_kills_main_unit")
 
 
 # --- incomplete resume (OI-273, 2026-09-12) ------------------------------------------
