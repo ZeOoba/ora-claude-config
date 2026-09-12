@@ -41,7 +41,14 @@ import json
 import os
 import time
 
-__all__ = ["discover_registry", "pause_state", "STORES"]
+__all__ = ["discover_registry", "pause_state", "STORES", "MAX_RESUME_HORIZON_DAYS"]
+
+# A resume must fire within this many days to count (2026-09-12 review finding). Without a
+# horizon ANY enabled future one-time task was "the resume": LAMS carries one dated ~2027-08,
+# so a real mass-disable fault would have read as a year-long pause and fleet-deadman.ps1
+# would have stayed silent for a year. 14 days covers a "for two weeks" pause; a longer
+# genuine pause simply alarms (false alarm, the safe direction).
+MAX_RESUME_HORIZON_DAYS = 14
 
 STORES = {
     "cc": "claude-code-sessions",
@@ -134,7 +141,7 @@ def pause_state(fleet="cc", registry=None):
                 fa = float(fa)
             except (TypeError, ValueError):
                 continue
-            if fa <= now_ms:
+            if fa <= now_ms or fa > now_ms + MAX_RESUME_HORIZON_DAYS * 86400000.0:
                 continue
             if resume_ms is None or fa < resume_ms:
                 resume_ms = fa
@@ -148,8 +155,8 @@ def pause_state(fleet="cc", registry=None):
 
         if resume_ms is None:
             # Everything disabled with no resume queued -- NOT a bounded pause.
-            out["error"] = ("all %d recurring tasks disabled with NO resume queued "
-                            "-- this is not a bounded pause" % len(recurring))
+            out["error"] = ("all %d recurring tasks disabled with NO resume queued within %d days "
+                            "-- this is not a bounded pause" % (len(recurring), MAX_RESUME_HORIZON_DAYS))
             return out
 
         out["paused"] = True

@@ -74,12 +74,16 @@ function Test-BoundedPause($reg) {
         $enabledRecurring = @($recurring | Where-Object { $_.enabled })
         if ($enabledRecurring.Count -gt 0) { return $null }   # not paused: something still fires
         $nowMs  = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        # 2026-09-12 review finding: a resume must fire within 14 days (mirrors
+        # _shared/fleet_pause.py MAX_RESUME_HORIZON_DAYS). Unbounded, any far-future one-time
+        # task (LAMS has one dated ~2027-08) turned a real mass-disable into a year of silence.
+        $horizonMs = $nowMs + [long](14 * 86400000)
         $resume = $null
         foreach ($t in $tasks) {
             if ($t.enabled -and $t.fireAt) {
                 try {
                     $ms = [long]$t.fireAt
-                    if ($ms -gt $nowMs) {
+                    if ($ms -gt $nowMs -and $ms -le $horizonMs) {
                         $ts = [DateTimeOffset]::FromUnixTimeMilliseconds($ms).UtcDateTime
                         if ($null -eq $resume -or $ts -lt $resume) { $resume = $ts }
                     }
