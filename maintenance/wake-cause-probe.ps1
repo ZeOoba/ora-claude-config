@@ -27,11 +27,26 @@ Desktop app is running but not dispatching":
 This probe reports the CAUSE, so a late morning is never again attributed to a
 sleep-config regression by default.
 
+SLEEP-TIME STATE (2026-09-12). A late-wake annotation must describe the machine AT
+STANDBY ENTRY, never at run time. On 09-12 ora-health-guard read Win32_Battery at
+16:21, after the laptop was re-plugged, and declared the sleep cause EXCLUDED while
+the host had in fact slept on battery with the lid closed (506 at 23:38:19 Reason=15
+LidOpenState=false; 105 AcOnline=false since 09-11 17:38:02). This probe now decodes
+506/507/105 EventData via wake-cause-lib.ps1 and emits one [CAUSE] line per standby
+entry (LID-CLOSED-ON-BATTERY, STANDBY-ON-AC, ...), plus a SLEEP-TIME-POWER summary
+for the entry that governed -SlotTime (or the longest session). Evidence precedence
+and Reason-code provenance are documented in wake-cause-lib.ps1.
+
 Exit: 0 = no unexplained gap   1 = cause identified (report it)   2 = could not look
 #>
 param(
   [double]$WindowHours = 24,
-  [string]$JsonOut
+  [string]$JsonOut,
+  # Missed slot to attribute, e.g. '05:15' (today) or '2026-09-12 05:15'. Optional.
+  [string]$SlotTime,
+  # 105 power-source events are rare; look back further than the window so the
+  # source in force at the first standby entry is known.
+  [int]$AcLookbackDays = 7
 )
 
 $ErrorActionPreference = 'Continue'
@@ -39,6 +54,18 @@ $start = (Get-Date).AddHours(-$WindowHours)
 $findings = New-Object System.Collections.ArrayList
 $events   = New-Object System.Collections.ArrayList
 $unver    = New-Object System.Collections.ArrayList
+
+$libOk = $false
+try { . (Join-Path $PSScriptRoot 'wake-cause-lib.ps1'); $libOk = $true }
+catch { [void]$unver.Add("wake-cause-lib.ps1 unloadable -- no sleep-time attribution: $($_.Exception.Message)") }
+$slot = $null
+if ($SlotTime) {
+  try { $slot = Resolve-SlotTime $SlotTime (Get-Date) }
+  catch { [void]$unver.Add("SlotTime '$SlotTime' unparseable -- governing entry falls back to longest session") }
+}
+$msEnters = New-Object System.Collections.ArrayList
+$msExits  = New-Object System.Collections.ArrayList
+$acEvents = New-Object System.Collections.ArrayList
 
 function Add-Ev($t, $kind, $detail) {
   [void]$events.Add([pscustomobject]@{ time = $t; kind = $kind; detail = $detail })
@@ -59,9 +86,50 @@ try {
         577 { 'REBOOT-PREPARED' }  578 { 'REBOOT-DETECTED' }
       }
       Add-Ev $_.TimeCreated $k ($_.Message -split "`n")[0].Trim()
+      if ($libOk -and $_.Id -in @(506, 507)) {
+        try {
+          $rec = [pscustomobject]@{ time = $_.TimeCreated; data = (ConvertFrom-KpEventData $_.ToXml()) }
+          if ($_.Id -eq 506) { [void]$msEnters.Add($rec) } else { [void]$msExits.Add($rec) }
+        } catch { [void]$unver.Add("Kernel-Power $($_.Id) EventData unparseable at $($_.TimeCreated): $($_.Exception.Message)") }
+      }
     }
 } catch {
   [void]$unver.Add("Kernel-Power log unreadable: $($_.Exception.Message)")
+}
+
+# --- 1b. Power-source changes (Kernel-Power 105 AcOnline), longer lookback -----
+# Plus OS starts (Kernel-General 12): a 105 is only valid within its own boot.
+$bootTimes = New-Object System.Collections.ArrayList
+$bootUnknown = $false
+if ($libOk) {
+  try {
+    Get-WinEvent -FilterHashtable @{
+        LogName = 'System'; ProviderName = 'Microsoft-Windows-Kernel-General'
+        Id = 12; StartTime = $start.AddDays(-$AcLookbackDays)
+      } -ErrorAction Stop | ForEach-Object { [void]$bootTimes.Add($_.TimeCreated) }
+  } catch {
+    if ($_.Exception.Message -notmatch 'No events were found') {
+      $bootUnknown = $true
+      [void]$unver.Add("Kernel-General 12 unreadable -- 105 unused (cannot prove same boot): $($_.Exception.Message)")
+    }
+  }
+  try {
+    Get-WinEvent -FilterHashtable @{
+        LogName = 'System'; ProviderName = 'Microsoft-Windows-Kernel-Power'
+        Id = 105; StartTime = $start.AddDays(-$AcLookbackDays)
+      } -ErrorAction Stop | ForEach-Object {
+        $d = ConvertFrom-KpEventData $_.ToXml()
+        if ($d.ContainsKey('AcOnline')) {
+          [void]$acEvents.Add([pscustomobject]@{ time = $_.TimeCreated; acOnline = [bool]$d['AcOnline'] })
+        }
+      }
+  } catch {
+    # Get-WinEvent throws "No events were found" when the filter matches nothing --
+    # that is a real empty result, not a failure to look.
+    if ($_.Exception.Message -notmatch 'No events were found') {
+      [void]$unver.Add("Kernel-Power 105 unreadable -- sleep-time power falls back to 507/capacity: $($_.Exception.Message)")
+    }
+  }
 }
 
 # --- 2. Who initiated a restart / power-off (User32 1074) ---------------------
@@ -142,6 +210,14 @@ if ($msEnter -gt 0) {
     "host was in S0 low-power idle. STANDBYIDLE=Never on AC does NOT prevent this; " +
     "do not read a clean STANDBYIDLE as evidence the host stayed awake.")
 }
+$standby = @()
+$sleepPower = $null
+if ($libOk) {
+  $standby = @(Get-StandbyEntries -Enters $msEnters -Exits $msExits -AcEvents $acEvents -BootTimes $bootTimes -BootTimesUnknown:$bootUnknown -Now (Get-Date))
+  foreach ($se in $standby) { [void]$findings.Add((Format-StandbyCause $se)) }
+  $sleepPower = Get-SleepTimePowerSummary -Entries $standby -SlotTime $slot -AcEvents $acEvents `
+                  -BootTimes $bootTimes -BootTimesUnknown:$bootUnknown
+}
 if ($coldStarts.Count -gt 0) {
   [void]$findings.Add("[CAUSE] SCHEDULER-COLD-START x$($coldStarts.Count) at " +
     (($coldStarts | Sort-Object | ForEach-Object { $_.ToString('MM-dd HH:mm:ss') }) -join ', ') +
@@ -154,6 +230,14 @@ Write-Output ("WAKE-CAUSE PROBE window=${WindowHours}h  events=$($events.Count) 
   "cold_starts=$($coldStarts.Count)  resumes=$($resumes.Count)")
 Write-Output ("POWERCFG standbyidle_ac=$($pcfg['standbyidle_ac_secs'])s " +
   "standbyidle_dc=$($pcfg['standbyidle_dc_secs'])s modern_standby=$($pcfg['modern_standby'])")
+if ($sleepPower) {
+  $et = if ($sleepPower.entryTime) { $sleepPower.entryTime.ToString('yyyy-MM-dd HH:mm:ss') } else { 'n/a' }
+  Write-Output ("SLEEP-TIME-POWER state=$($sleepPower.state) cause=$($sleepPower.cause) entry=$et " +
+    "slot=$(if ($slot) { $slot.ToString('yyyy-MM-dd HH:mm') } else { 'longest-session' }) " +
+    "source=$($sleepPower.source) :: $($sleepPower.detail)")
+} else {
+  Write-Output "SLEEP-TIME-POWER state=UNKNOWN source=lib-unavailable"
+}
 if ($findings.Count -eq 0) { Write-Output "NO CAUSE FOUND in window -- gap is unexplained, escalate." }
 foreach ($f in $findings) { Write-Output $f }
 foreach ($u in $unver)    { Write-Output "[unverifiable] $u" }
@@ -168,6 +252,22 @@ if ($JsonOut) {
       ts           = (Get-Date).ToUniversalTime().ToString('o')
       windowHours  = $WindowHours
       powercfg     = $pcfg
+      slotTime     = $(if ($slot) { $slot.ToString('o') } else { $null })
+      sleepTimePower = $(if ($sleepPower) {
+                          [pscustomobject]@{ state = $sleepPower.state; source = $sleepPower.source
+                            cause = $sleepPower.cause
+                            entryTime = $(if ($sleepPower.entryTime) { $sleepPower.entryTime.ToString('o') } else { $null })
+                            lidOpen = $sleepPower.lidOpen; reason = $sleepPower.reason
+                            reasonName = $sleepPower.reasonName; detail = $sleepPower.detail }
+                        } else { [pscustomobject]@{ state = 'UNKNOWN'; source = 'lib-unavailable' } })
+      standbyEntries = @($standby | ForEach-Object {
+                          [pscustomobject]@{ time = $_.time.ToString('o'); cause = $_.cause
+                            reason = $_.reason; reasonName = $_.reasonName; lidOpen = $_.lidOpen
+                            extMonitor = $_.extMonitor; battRemain = $_.battRemain; battFull = $_.battFull
+                            powerState = $_.power.state; powerSource = $_.power.source
+                            powerDetail = $_.power.detail
+                            sessionEnd = $(if ($_.sessionEnd) { $_.sessionEnd.ToString('o') } else { $null })
+                            durationMin = $_.durationMin } })
       coldStarts   = @($coldStarts | Sort-Object | ForEach-Object { $_.ToString('o') })
       resumes      = @($resumes    | Sort-Object | ForEach-Object { $_.ToString('o') })
       findings     = @($findings)
