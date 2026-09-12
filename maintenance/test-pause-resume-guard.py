@@ -305,7 +305,112 @@ def main():
     test_retire_pending_only_matches_its_named_fleet_unit()
     test_retire_pending_missing_or_malformed_register_fails_open_unit()
     test_retire_pending_alarm_state_is_namespaced_not_a_top_level_fleet_key_unit()
+    test_incomplete_resume_oi273_shape_is_a_finding_unit()
+    test_complete_resume_is_not_a_finding_unit()
+    test_resume_within_grace_is_not_yet_judged_unit()
+    test_old_resume_outside_lookback_is_ignored_unit()
+    test_non_resume_one_time_task_is_ignored_unit()
+    test_retire_pending_ids_are_excluded_from_incomplete_resume_unit()
+    test_incomplete_resume_alarms_once_and_clears_unit()
     print("ALL PAUSE-RESUME-GUARD TESTS PASS")
+
+
+# --- incomplete resume (OI-273, 2026-09-12) ------------------------------------------
+# The 2026-09-11 resume fired, re-enabled 6 of 38 ids, and blocked on an unanswered
+# permission prompt; list_task_runs said `succeeded`. The fleet-ratio check (<=10% enabled)
+# could not see it -- 6/38 is 16% -- and the stalled-marker check only fires after the
+# marker goes stale. This check reads what the resume ASKED for against live `enabled`.
+
+def _resume_skill(tmp, ids, name="resume.md", verb="Re-enable exactly these ids:"):
+    p = os.path.join(tmp, name)
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write(verb + "\n" + "\n".join("%d. %s" % (n + 1, i) for n, i in enumerate(ids)))
+    return p
+
+
+def _fired(minutes_ago):
+    return (datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+def _fleet_with_resume(tmp, enabled_ids, all_ids, fired_minutes_ago, verb="Re-enable exactly these ids:"):
+    rec = [{"id": i, "cronExpression": "0 6 * * *", "enabled": i in enabled_ids} for i in all_ids]
+    rec.append({"id": "ora-routine-pause-resume-x", "fireAt": 1, "enabled": False,
+                "lastRunAt": _fired(fired_minutes_ago),
+                "filePath": _resume_skill(tmp, all_ids, verb=verb)})
+    return rec
+
+
+def test_incomplete_resume_oi273_shape_is_a_finding_unit():
+    tmp = tempfile.mkdtemp(prefix="prg-ir-")
+    ids = [f"task-{i}" for i in range(38)]
+    tasks = {"cc": _fleet_with_resume(tmp, set(ids[:6]), ids, fired_minutes_ago=90)}
+    out = prg.find_incomplete_resumes(tasks, retire_pending_path=os.path.join(tmp, "none.json"))
+    assert len(out) == 1, out
+    assert out[0]["taskId"] == "ora-routine-pause-resume-x"
+    assert out[0]["disabled"] == ids[6:], out[0]
+    assert out[0]["listed"] == 38
+    print("  PASS test_incomplete_resume_oi273_shape_is_a_finding_unit")
+
+
+def test_complete_resume_is_not_a_finding_unit():
+    tmp = tempfile.mkdtemp(prefix="prg-ir-")
+    ids = [f"task-{i}" for i in range(10)]
+    tasks = {"cc": _fleet_with_resume(tmp, set(ids), ids, fired_minutes_ago=90)}
+    assert prg.find_incomplete_resumes(tasks, retire_pending_path=os.path.join(tmp, "none.json")) == []
+    print("  PASS test_complete_resume_is_not_a_finding_unit")
+
+
+def test_resume_within_grace_is_not_yet_judged_unit():
+    tmp = tempfile.mkdtemp(prefix="prg-ir-")
+    ids = [f"task-{i}" for i in range(10)]
+    tasks = {"cc": _fleet_with_resume(tmp, set(), ids, fired_minutes_ago=5)}
+    assert prg.find_incomplete_resumes(tasks, retire_pending_path=os.path.join(tmp, "none.json")) == []
+    print("  PASS test_resume_within_grace_is_not_yet_judged_unit")
+
+
+def test_old_resume_outside_lookback_is_ignored_unit():
+    tmp = tempfile.mkdtemp(prefix="prg-ir-")
+    ids = [f"task-{i}" for i in range(10)]
+    tasks = {"cc": _fleet_with_resume(tmp, set(), ids, fired_minutes_ago=60 * 24 * 10)}
+    assert prg.find_incomplete_resumes(tasks, retire_pending_path=os.path.join(tmp, "none.json")) == []
+    print("  PASS test_old_resume_outside_lookback_is_ignored_unit")
+
+
+def test_non_resume_one_time_task_is_ignored_unit():
+    # an audit that lists disabled ids but never re-enables anything is not a resume
+    tmp = tempfile.mkdtemp(prefix="prg-ir-")
+    ids = [f"task-{i}" for i in range(10)]
+    tasks = {"cc": _fleet_with_resume(tmp, set(), ids, fired_minutes_ago=90,
+                                      verb="Audit report covering these ids:")}
+    assert prg.find_incomplete_resumes(tasks, retire_pending_path=os.path.join(tmp, "none.json")) == []
+    print("  PASS test_non_resume_one_time_task_is_ignored_unit")
+
+
+def test_retire_pending_ids_are_excluded_from_incomplete_resume_unit():
+    tmp = tempfile.mkdtemp(prefix="prg-ir-")
+    ids = [f"task-{i}" for i in range(10)]
+    tasks = {"cc": _fleet_with_resume(tmp, set(ids[:9]), ids, fired_minutes_ago=90)}
+    rp = _write_rp(tmp, {"pending": [{"fleet": "cc", "id": "task-9"}]})
+    assert prg.find_incomplete_resumes(tasks, retire_pending_path=rp) == []
+    print("  PASS test_retire_pending_ids_are_excluded_from_incomplete_resume_unit")
+
+
+def test_incomplete_resume_alarms_once_and_clears_unit():
+    tmp = tempfile.mkdtemp(prefix="prg-ir-e2e-")
+    ids = [f"task-{i}" for i in range(38)]
+    tasks = {"cc": _fleet_with_resume(tmp, set(ids[:6]), ids, fired_minutes_ago=90)}
+    state1, calls1 = _run_main_with_fixtures(tasks, tmp, send_alert_result=True)
+    assert calls1 == 1, "a partially-completed resume must alarm"
+    assert state1["_incompleteResume"]["cc:ora-routine-pause-resume-x"]["alarmed"] is True
+    _, calls2 = _run_main_with_fixtures(tasks, tmp, send_alert_result=True)
+    assert calls2 == 0, "an already-delivered incomplete-resume alarm must not re-send"
+    for t in tasks["cc"]:
+        if t.get("cronExpression"):
+            t["enabled"] = True
+    state3, calls3 = _run_main_with_fixtures(tasks, tmp, send_alert_result=True)
+    assert calls3 == 0
+    assert state3["_incompleteResume"]["cc:ora-routine-pause-resume-x"]["alarmed"] is False
+    print("  PASS test_incomplete_resume_alarms_once_and_clears_unit")
 
 
 if __name__ == "__main__":
