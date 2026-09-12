@@ -120,14 +120,17 @@ Read `Current AC Power Setting Index`:
 
 **Never flag the DC index.** `0x00002a30` (3h) on battery is the ratified 2026-08-12 configuration, not drift. Flagging it would manufacture a FAIL on every run.
 
-**Cause-annotation on a late wake.** If A.0 above determined this fire IS late (>45min), append exactly one line to that alert's body, choosing by the AC index just read plus the power source (`powershell.exe -NoProfile -Command "(Get-CimInstance Win32_Battery).BatteryStatus"` — `2` = on AC, `1` = discharging, null = no battery present, treat as AC):
+**Cause-annotation on a late wake.** If A.0 above determined this fire IS late (>45min), run A.0c's probe FIRST, then append exactly one line to that alert's body. Pick the line using the AC index just read plus the **SLEEP-TIME** power source: `sleepTimePower` in `_state/wake-cause.json`, also printed as the probe's `SLEEP-TIME-POWER` line, which describes the Modern Standby entry that governed the 05:15 slot.
 - AC index ≠ 0 → `Likely cause: power-sleep regression — AC sleep is <n>s, expected NEVER.`
-- AC index = 0 and BatteryStatus = 1 → `Machine was on BATTERY; DC sleep remains 3h by design (2026-08-12 ruling) — expected behaviour, not a regression.`
-- AC index = 0 and on AC → `Sleep config intact and machine on AC — the 2026-08-12 sleep cause is EXCLUDED for this wake; look elsewhere.`
+- AC index = 0 and `sleepTimePower.state` = `DC` → `Machine was on BATTERY at sleep time (<cause> at <entryTime>, via <source>); DC sleep remains 3h by design (2026-08-12 ruling) — expected behaviour, not a regression.`
+- AC index = 0 and `sleepTimePower.state` = `AC` → `Sleep config intact and machine on AC at sleep time (<cause> at <entryTime>, reason <reasonName>, via <source>) — the 2026-08-12 idle-timeout sleep cause is EXCLUDED for this wake; look elsewhere.`
+- AC index = 0 and `sleepTimePower.state` = `UNKNOWN`, or the probe exited 2 / the JSON is unreadable → `Power source at sleep time UNKNOWN (<detail>) — the 2026-08-12 sleep cause can NOT be excluded for this wake.` Quote `detail`, not `source`. A `kp105` source can sit on an UNKNOWN state (conflicting evidence, or a charger change during standby), and it must not read like a verdict.
 
-That third line matters as much as the first two: it stops a future session re-deriving the sleep hypothesis that has already been ruled out for this fire.
+The AC line still matters: it stops a future session from re-deriving a sleep hypothesis already ruled out for this fire. That only holds when the evidence dates from sleep time.
 
-**A.0c — WAKE-CAUSE CLASSIFIER (NEW v1.7, 2026-08-13, Gabriel-directed). Run this whenever A.0 determined the fire is late. It answers the question A.0b's third line can only pose.**
+**Never pick this line from `Win32_Battery.BatteryStatus` or any other run-time reading (corrected 2026-09-12).** This task fires only after the host wakes, and waking is exactly when the charger gets plugged back in. On 2026-09-12 the run fired at 16:21 ET, read `BatteryStatus=2`, and emitted "machine on AC — EXCLUDED". The host had actually been on battery since 09-11 17:38:02 (Kernel-Power 105 `AcOnline=false`). The lid was closed at 23:38:19 (506 `Reason=15 LidOpenState=false`), and the machine stayed in DC standby until 16:18:45. The true attribution was `LID-CLOSED-ON-BATTERY`, which is behavioural, not excluded. Evidence precedence, same-boot rule and Reason-code provenance: header of `maintenance/wake-cause-lib.ps1`. Tests: `maintenance/test-wake-cause-lib.ps1`.
+
+**A.0c — WAKE-CAUSE CLASSIFIER (NEW v1.7, 2026-08-13, Gabriel-directed). Run this whenever A.0 determined the fire is late. It answers the question A.0b's annotation line can only pose.**
 
 Three consecutive 5h+ late mornings (08-11, 08-12, 08-13) with `STANDBYIDLE` AC = 0 confirmed intact each time proved A.0b is structurally incapable of explaining a late wake on this host. It is not wrong — it is scoped to one cause out of at least four, and it cannot see the other three:
 
@@ -138,8 +141,8 @@ Three consecutive 5h+ late mornings (08-11, 08-12, 08-13) with `STANDBYIDLE` AC 
 
 **So the framing "why isn't the Desktop app dispatching through 05:15–06:30" is answerable and the answer is: on these mornings it was not running.** Not throttled, not hung, not misconfigured — absent. A cold `Initialized` is proof the process did not exist beforehand, and no scheduler dispatches a slot that falls while its process is gone.
 
-Run: `C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:/Users/Owner/.claude/maintenance/wake-cause-probe.ps1" -WindowHours 24 -JsonOut "C:/Users/Owner/.claude/maintenance/_state/wake-cause.json"`
-Exit 0 = no cause found in window (an UNEXPLAINED gap — escalate, do not treat as clean) · 1 = cause identified · 2 = could not look (a FAIL). It classifies `WU-REBOOT` / `HOST-POWER-OFF` / `MODERN-STANDBY` / `SCHEDULER-COLD-START` from Kernel-Power 42/107/109/506/507/577/578, User32 1074, WindowsUpdateClient 19/43, and the app's own `main*.log` lifecycle lines, and reports both power indices for the record. Put the `[CAUSE]` lines verbatim into A.0's alert body **in place of** A.0b's third annotation line whenever the probe returns one.
+Run: `C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:/Users/Owner/.claude/maintenance/wake-cause-probe.ps1" -WindowHours 24 -SlotTime 05:15 -JsonOut "C:/Users/Owner/.claude/maintenance/_state/wake-cause.json"`
+Exit 0 = no cause found in window (an UNEXPLAINED gap — escalate, do not treat as clean) · 1 = cause identified · 2 = could not look (a FAIL). It classifies `WU-REBOOT` / `HOST-POWER-OFF` / `MODERN-STANDBY` / `SCHEDULER-COLD-START` from Kernel-Power 42/107/109/506/507/577/578, User32 1074, WindowsUpdateClient 19/43, and the app's own `main*.log` lifecycle lines, and reports both power indices for the record. Since 2026-09-12 it also decodes each Modern Standby entry's EventData into a per-entry `[CAUSE]` line: `LID-CLOSED-ON-BATTERY` / `LID-CLOSED-ON-AC` / `STANDBY-ON-BATTERY` / `STANDBY-ON-AC` / `*-POWER-UNKNOWN`, carrying reason, lid, external monitor and battery at entry. Power source comes from Kernel-Power 105 in the same boot, then 507 `PowerStateAc`, then falling entry capacity, else UNKNOWN. The probe also writes the `SLEEP-TIME-POWER` summary that A.0b's annotation uses. Put the `[CAUSE]` lines verbatim into A.0's alert body beneath A.0b's annotation line. They add detail to that line and never replace it.
 
 **Host-level remediations — status CORRECTED 2026-08-27, re-read before reporting either as open:**
 
