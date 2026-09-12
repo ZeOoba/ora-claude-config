@@ -188,10 +188,20 @@ projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/event_log.md.i
 # these itself; these lines are the backstop for the one case it can't cover -- a kill
 # between the tmp write and os.replace. Added 2026-07-16 after a stranded 480KB copy
 # showed up as an untracked `??` next to the log, one `git add -A` from being committed.
+# (2026-09-12) `.tmp-append.*` added: PR #172 made the name unique per attempt
+# (`event_log.md.tmp-append.<pid>.<ns>`), which the exact-name line no longer matched.
+# Exact name kept for any pre-#172 copy; anchored to this one basename.
 projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/event_log.md.tmp-append
+projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/event_log.md.tmp-append.*
 # append-event-log.py's lock-contention spool (drains automatically into event_log.md on
 # the next successful append; transient by design, never track) -- see 2c above.
 projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/event_log.md.pending/
+# append-event-log.py's msvcrt byte-range lock sidecar (PR #172, 2026-09-07). Permanent by
+# design -- the script never deletes it, only unlocks it -- and 0 bytes: the lock lives on the
+# open handle, not in the file. Missed by #172; memory-commit-sweep.py committed it (9ce0923)
+# because nothing ignored it. Guarded by hooks/tests/test-memory-sidecar-hygiene.py, which
+# derives every sidecar name from the script's source (2026-09-12).
+projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/event_log.md.lock
 # county-parcel-screen code is TRACKED (counterparty names externalized 2026-06-11);
 # its data/ tree (public county dumps + the pipeline-guard.local.json counterparty
 # floor) stays local-only. *.local.json is the standing convention for
