@@ -481,8 +481,21 @@ def _own_interval_hours(expr, expected_utc, hops=8):
     return min(gaps)
 
 
+def _load_pause_windows_module():
+    try:
+        import importlib.util
+        p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_shared", "pause_windows.py")
+        spec = importlib.util.spec_from_file_location("pause_windows", p)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:
+        return None
+
+
 def find_missed_cycles(tasks, now_local=None, grace_hours=MISSED_CYCLE_GRACE_HOURS,
-                        interval_multiple=MISSED_CYCLE_INTERVAL_MULTIPLE):
+                        interval_multiple=MISSED_CYCLE_INTERVAL_MULTIPLE,
+                        pause_store=None, explained_out=None):
     """Recurring, enabled tasks that HAVE fired before but whose lastRunAt is
     older than their most recent expected cron fire time by more than the
     CRON-AWARE GUARD threshold: max(grace_hours, interval_multiple x the
@@ -490,8 +503,22 @@ def find_missed_cycles(tasks, now_local=None, grace_hours=MISSED_CYCLE_GRACE_HOU
     docstring above for the incident this closes (OI-031 /
     ora-master-workbook-ingest 2026-07-20), and MISSED_CYCLE_INTERVAL_MULTIPLE
     above for the 2026-08-10 false-positive incident that made the threshold
-    cadence-aware rather than a flat wall."""
+    cadence-aware rather than a flat wall.
+
+    PAUSE-AWARE (2026-09-12): when `pause_store` is given, hours the task was held
+    by a RECORDED bounded pause (_shared/pause_windows.py) are subtracted from the
+    gap before it is judged. An entry whose remaining gap is within threshold is
+    appended to `explained_out` (if a list is passed) instead of the returned list --
+    reported, never silently dropped. Flagged entries carry pause_hours too. An
+    unreadable store means no subtraction: it can cost a false alarm, never hide one.
+    Live incident: the first ora-health-guard run after the 2026-09-07 -> 09-11 CC
+    pause listed 11 'missed' tasks whose missed slots all fell inside that pause."""
     now_local = now_local or datetime.datetime.now()
+    pw = None
+    if pause_store:
+        pw = _load_pause_windows_module()
+        if pw is not None and pw.load_windows(pause_store, with_error=True)[1]:
+            pw = None
     out = []
     for t in tasks:
         if fire_at(t):
@@ -510,7 +537,7 @@ def find_missed_cycles(tasks, now_local=None, grace_hours=MISSED_CYCLE_GRACE_HOU
         if interval_hours is not None:
             threshold_hours = max(grace_hours, interval_multiple * interval_hours)
         if gap > datetime.timedelta(hours=threshold_hours):
-            out.append({
+            entry = {
                 "id": t.get("id"), "fleet": t.get("_fleet"),
                 "cron": t.get("cronExpression"),
                 "expected_fire_utc": expected_utc.isoformat() + "Z",
@@ -519,7 +546,17 @@ def find_missed_cycles(tasks, now_local=None, grace_hours=MISSED_CYCLE_GRACE_HOU
                 "own_interval_hours": (round(interval_hours, 1)
                                        if interval_hours is not None else None),
                 "threshold_hours": round(threshold_hours, 1),
-            })
+            }
+            if pw is not None:
+                pause_h = pw.overlap_hours(t.get("_fleet"), t.get("id"), last_run_utc,
+                                           expected_utc, path=pause_store)
+                entry["pause_hours"] = round(pause_h, 1)
+                entry["effective_gap_hours"] = round(entry["gap_hours"] - pause_h, 1)
+                if pause_h > 0 and entry["effective_gap_hours"] <= threshold_hours:
+                    if explained_out is not None:
+                        explained_out.append(entry)
+                    continue
+            out.append(entry)
     return out
 
 
@@ -740,7 +777,21 @@ def main():
             if 5 <= key[0] < 9 or (key[0] == 9 and key[1] <= 30):
                 am_pileup.append((("%02d:%02d" % key), t.get("id")))
 
-    missed_cycle = find_missed_cycles(tasks, now_local=datetime.datetime.fromtimestamp(now_ms / 1000))
+    # Pause-aware (2026-09-12): subtract recorded bounded-pause hours; explained entries
+    # are REPORTED on their own line, never dropped. A pause record that cannot be read
+    # is surfaced as pause_record_status so a silent fallback can't masquerade as clean.
+    pause_explained = []
+    _pw = _load_pause_windows_module()
+    if _pw is None:
+        pause_record_status = "UNAVAILABLE -- _shared/pause_windows.py failed to load; no pause subtraction"
+        _pause_store = None
+    else:
+        _wins, _perr = _pw.load_windows(_pw.DEFAULT_STORE, with_error=True)
+        pause_record_status = (("UNREADABLE -- %s; no pause subtraction" % _perr) if _perr
+                               else "%d recorded window(s)" % len(_wins))
+        _pause_store = None if _perr else _pw.DEFAULT_STORE
+    missed_cycle = find_missed_cycles(tasks, now_local=datetime.datetime.fromtimestamp(now_ms / 1000),
+                                      pause_store=_pause_store, explained_out=pause_explained)
 
     verdict_flags = []
     if never_ran_overdue:
@@ -789,6 +840,8 @@ def main():
             "expired_onetime": [t.get("id") for t in expired],
             "expired_needs_attention": [t.get("id") for t in expired_needs_attention],
             "missed_cycle": missed_cycle,
+            "missed_cycle_pause_explained": pause_explained,
+            "pause_record_status": pause_record_status,
             "missed_cycle_scope": ("point-in-time only -- lastRunAt vs. the most recent expected "
                                    "fire as of THIS run; a gap that already self-healed (task "
                                    "fired again) before this check is invisible here -- see OI-070 "
@@ -856,6 +909,11 @@ def main():
                     sorted(missed_cycle, key=lambda m: m["id"])) or "-"))
     print("      NOTE: point-in-time only -- a gap that already self-healed (task fired again "
           "since) is invisible here; see OI-070 and the scheduler's own run log for history.")
+    print("  pause-explained (NOT missed) %d   %s" % (len(pause_explained),
+          ", ".join("%s(%.1fh, %.1fh paused)" % (m["id"], m["gap_hours"], m["pause_hours"]) for m in
+                    sorted(pause_explained, key=lambda m: m["id"])) or "-"))
+    print("      pause record: %s  (_state/fleet-pause-windows.json; advisory, never a FAIL)"
+          % pause_record_status)
     print("  throttle skips ..... %d events across %d tasks (all-time)" % (total_skip_events, len(skip_counts)))
     if skip_counts:
         top = sorted(skip_counts.items(), key=lambda kv: kv[1], reverse=True)[:5]

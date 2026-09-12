@@ -273,6 +273,22 @@ def send_alert(subject, body, identifier=None):
             pass
 
 
+def capture_pause_windows():
+    """Observe both live registries into _state/fleet-pause-windows.json (see
+    _shared/pause_windows.py). Module-level so tests can stub it -- main() must not
+    write live state from a unit test. Never raises."""
+    out = {"held": {}, "errors": []}
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "pause_windows", os.path.join(os.path.dirname(os.path.abspath(__file__)), "_shared", "pause_windows.py"))
+        pw = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(pw)
+        return pw.capture()
+    except Exception as exc:  # noqa: BLE001
+        out["errors"].append("%s: %s" % (type(exc).__name__, exc))
+        return out
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--json", action="store_true")
@@ -280,6 +296,16 @@ def main():
     parser.add_argument("--resume-grace-minutes", type=float, default=30)
     parser.add_argument("--marker-grace-minutes", type=float, default=20)
     args = parser.parse_args()
+
+    # DURABLE PAUSE RECORD (2026-09-12). Observe both registries on EVERY run and extend
+    # per-task "held" intervals (disabled AND named by a pending resume) in
+    # _state/fleet-pause-windows.json. This guard is a native Windows task, so it keeps
+    # running through a fleet pause -- the one observer guaranteed to see a pause whether or
+    # not whoever paused the fleet remembered to write a ledger (the 09-07 pause had none).
+    # Observation cadence = this task's cadence, so interval edges under-count by up to one
+    # run (detectors alarm early, never late). health-guard-beacon.py and fleet-status.py
+    # subtract the intervals from gaps. Fail-open: a capture error is printed, never raised.
+    pause_capture = capture_pause_windows()
 
     registries = fleet_status.discover_registries()
     results = []
@@ -373,12 +399,16 @@ def main():
 
     if args.json:
         print(json.dumps({"results": results, "alarms": alarms, "stalledMarkers": stalled,
-                          "resurrectedRetirePending": resurrected}, indent=2, default=str))
+                          "resurrectedRetirePending": resurrected,
+                          "pauseWindowCapture": pause_capture}, indent=2, default=str))
     else:
         for r in results:
             print(f"{r['fleet']:6s} ratio={r.get('ratio')} enabled={r.get('enabledCount')}/{r.get('totalRecurring')} overdueResume={r.get('overdueResume')}")
         print(f"markers: {len(stalled)} stalled" if stalled else "markers: none stalled")
         print(f"retire-pending: {len(resurrected)} resurrected of {len(load_retire_pending())} filed")
+        held = pause_capture.get("held") or {}
+        print("pause observation: held " + (", ".join(f"{f}={len(v)}" for f, v in sorted(held.items())) or "-")
+              + (f"; ERRORS: {pause_capture['errors']}" if pause_capture.get("errors") else ""))
         if alarms:
             print(f"[ACTION] {len(alarms)} tripped: " + "; ".join(f"{a['fleet']}: {a['reason']}" for a in alarms))
         else:
