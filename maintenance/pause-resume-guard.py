@@ -273,6 +273,67 @@ def send_alert(subject, body, identifier=None):
             pass
 
 
+INCOMPLETE_RESUME_GRACE_MINUTES = 30
+INCOMPLETE_RESUME_LOOKBACK_HOURS = 72
+INCOMPLETE_RESUME_MIN_LISTED = 3
+_REENABLE_RE = re.compile(r"re-?enable|update_scheduled_task\s*\([^)]*enabled\s*:\s*true", re.IGNORECASE)
+
+
+def find_incomplete_resumes(tasks_by_fleet, retire_pending_path=None, now=None,
+                            grace_minutes=INCOMPLETE_RESUME_GRACE_MINUTES,
+                            lookback_hours=INCOMPLETE_RESUME_LOOKBACK_HOURS):
+    """Fired resume-shaped one-time tasks whose listed recurring ids are STILL disabled.
+
+    OI-273 (2026-09-12): the 2026-09-11 resume re-enabled 6 of 38 ids, then blocked on a
+    permission prompt nobody answered (the Desktop scheduled-task runner does not
+    auto-approve update_scheduled_task unattended), and list_task_runs reported
+    `succeeded`. The fleet-ratio check above cannot see that shape (6/38 = 16% > 10%), and
+    the stalled-marker check depends on the task's own marker calls. This compares what the
+    resume ASKED for against live `enabled` -- no dependency on session status or markers.
+
+    Resume-shaped = has fired (lastRunAt), carries a re-enable instruction, and names at
+    least INCOMPLETE_RESUME_MIN_LISTED of the fleet's recurring ids. Judged only between
+    grace_minutes and lookback_hours after firing. Retire-pending ids are excluded (they are
+    disabled on purpose). Ids no longer in the registry are ignored (retired). Direction of
+    error: a resume-shaped audit naming legitimately-disabled tasks could false-alarm; it
+    can never hide a partial resume.
+    """
+    now = now or datetime.now(timezone.utc)
+    pending = {(str(e["fleet"]).lower(), e["id"]) for e in load_retire_pending(retire_pending_path)}
+    out = []
+    for fleet, tasks in tasks_by_fleet.items():
+        recurring = {t.get("id"): t for t in tasks if t.get("id") and t.get("cronExpression")}
+        for t in tasks:
+            if t.get("cronExpression") or fleet_status.fire_at(t) is None or not t.get("lastRunAt"):
+                continue
+            try:
+                fired = datetime.fromisoformat(str(t["lastRunAt"]).replace("Z", "+00:00"))
+            except Exception:
+                continue
+            age = now - fired
+            if age < timedelta(minutes=grace_minutes) or age > timedelta(hours=lookback_hours):
+                continue
+            try:
+                with open(t.get("filePath") or "", encoding="utf-8") as fh:
+                    text = fh.read()
+            except Exception:
+                continue
+            if not _REENABLE_RE.search(text):
+                continue
+            listed = [i for i in recurring
+                      if re.search(r"(?<![\w-])" + re.escape(i) + r"(?![\w-])", text)]
+            if len(listed) < INCOMPLETE_RESUME_MIN_LISTED:
+                continue
+            order = {i: text.find(i) for i in listed}
+            listed.sort(key=lambda i: order[i])
+            disabled = [i for i in listed
+                        if not recurring[i].get("enabled") and (fleet, i) not in pending]
+            if disabled:
+                out.append({"fleet": fleet, "taskId": t.get("id"), "firedAt": t.get("lastRunAt"),
+                            "listed": len(listed), "disabled": disabled})
+    return out
+
+
 def capture_pause_windows():
     """Observe both live registries into _state/fleet-pause-windows.json (see
     _shared/pause_windows.py). Module-level so tests can stub it -- main() must not
@@ -395,6 +456,26 @@ def main():
         if key not in seen_rp:
             rp_state[key]["alarmed"] = False
 
+    # Incomplete resume (OI-273, 2026-09-12). Same per-key bookkeeping as retire-pending.
+    ir_state = state.setdefault("_incompleteResume", {})
+    incomplete = find_incomplete_resumes(tasks_by_fleet)
+    seen_ir = set()
+    for ir in incomplete:
+        key = f"{ir['fleet']}:{ir['taskId']}"
+        seen_ir.add(key)
+        already_alarmed = ir_state.get(key, {}).get("alarmed", False)
+        ir_state.setdefault(key, {})["lastChecked"] = now_iso
+        shown = ", ".join(ir["disabled"][:12]) + (" ..." if len(ir["disabled"]) > 12 else "")
+        reason = (f"resume task '{ir['taskId']}' ({ir['fleet']}) fired {ir['firedAt']} but "
+                  f"{len(ir['disabled'])} of its {ir['listed']} listed ids are still disabled: {shown}. "
+                  f"Its run status may say 'succeeded' -- the Desktop runner blocks unattended "
+                  f"update_scheduled_task calls on a permission prompt (OI-273). Finish the resume "
+                  f"from an attended session.")
+        alarms.append({"fleet": f"incomplete-resume:{key}", "reason": reason, "alreadyAlarmed": already_alarmed})
+    for key in list(ir_state.keys()):
+        if key not in seen_ir:
+            ir_state[key]["alarmed"] = False
+
     new_alarms = [a for a in alarms if not a["alreadyAlarmed"]]
 
     if args.json:
@@ -431,6 +512,8 @@ def main():
                 key = a["fleet"]
                 if key.startswith("marker:"):
                     marker_state.setdefault(key[len("marker:"):], {})["alarmed"] = True
+                elif key.startswith("incomplete-resume:"):
+                    ir_state.setdefault(key[len("incomplete-resume:"):], {})["alarmed"] = True
                 elif key.startswith("retire-pending:"):
                     # keyed "<fleet>:<id>" under _retirePending -- NOT a top-level fleet key,
                     # which is what the bare else below would have written.
