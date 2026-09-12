@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 8b8f8541-fc77-4ecd-ac4d-3074dc440ad1
-  modified: 2026-09-06T19:47:02.145Z
+  modified: 2026-09-12T22:03:03.510Z
 ---
 
 > **Companion file to [open-items-tracker.md](open-items-tracker.md).** Holds every CLOSED item's table row and `### OI-NNN` detail section, split out 2026-09-06 (Automation Audit R22-4) when the live tracker reached 901,718B with no archive-out path for closed material. Append-only, same rules as `event_log.md` and this repo's other `*-history.md` companions — never edit or remove an entry once archived (Invariant 6). Anchors are unchanged in form: a reference that used to read `open-items-tracker.md#OI-NNN` for a CLOSED item now reads `open-items-tracker-history.md#OI-NNN`.
@@ -2280,3 +2280,11 @@ under a Gabriel-approved `allow-hook-test-failure` override — the pre-push blo
 **Documented, NOT fixed — an explicit follow-up rather than silently expanded scope:** `package.json`'s
 own `lint`/`typecheck` script strings (`--max-warnings 0` etc.) achieve the same threat model with a
 smaller diff, and are outside the ratified 6-file scope. Needs its own scoping decision from Gabriel.
+
+### OI-287
+**Status:** CLOSED — fixed same-session, before the row was ever filed
+**Opened:** 2026-09-12 (id allocated by `ora-ground-truth-auditor`'s 2026-09-12 run via `allocate-oi-id.py`, per `maintenance/_state/oi-id-reservations.log`)
+**Closed:** 2026-09-12
+**Source:** `ora-ground-truth-auditor` 2026-09-12 digest / drafted correction at `maintenance/_state/ground-truth-pending-approval/2026-09-12/cc_ora-doctrine-integrity-guard_2026-09-12T16_55_00.000Z/correction-note.md` — the same root cause was independently diagnosed and fixed in a separate session earlier the same day while resolving an `ora-doctrine-integrity-guard` scheduled-run `[XREF-MISSING]` alarm, before the auditor's run reached its own OI-filing step
+**Description:** `session-context-xref-probe.py`'s `search_roots()` omitted `maintenance/_state`, so `session-context.md:20`'s `retire-pending.json` citation raised a false `[XREF-MISSING]` (the file genuinely exists there — the retirement-pending ledger). The line-20 "PAUSED 2026-09-07" bullet was also itself stale per its own "delete once resume fires and block reads 36" instruction — the resume had already completed (manually, per [OI-273](#OI-273)) days earlier.
+**Evidence:** Added `maintenance/_state/xref-extra-roots.json` (the probe's own pre-existing, documented extension point for citations outside its built-in search roots — no probe code touched) listing `maintenance/_state`; deleted the stale session-context.md line-20 bullet. Re-ran `session-context-xref-probe.py` -> exit 0, "19 file citation(s) checked", 0 `[XREF-MISSING]` (was 1). Re-ran `doctrine-integrity-probe.py` after the session-context.md edit -> still exit 0, confirming no regression. Logged same-session in `event_log.md` 2026-09-12 ("session-context-xref-probe [XREF-MISSING] false alarm fixed (probe root-coverage gap, not a missing file)"). Filed here CLOSED-on-arrival specifically so the auditor's independently-allocated OI-287 is not duplicated as a live fix task.

@@ -5,12 +5,157 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-09-11T20:42:27.283Z
+  modified: 2026-09-12T23:02:13.656Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-09-12 -- Preflight gate committed + hardened; stale-owner reporting; OI-249 port branch; isolated-commit foreign-file rule
+
+- **Preflight gate is now in git:** `maintenance/preflight-shared-checkout.py` and its tests, untracked everywhere since 2026-09-10 (author session b708ef7f), landed as `bf41aca` on `feat/model-canary-probe-step25` with Gabriel's in-turn authorization. Five independent Opus review rounds each surfaced false-CLEAR paths, all fixed with pinned tests: C-quoted non-ASCII porcelain names, subdirectory `--repo`, junction/8.3 spellings on repo and provenance, 8-char session-prefix matching, never-raise `_git`, and `--since` validation.
+- **Stale-owner reporting (`c9f2624`):** ownership records older than a file's last commit are shown as STALE, not as live owners. Files whose only other owners are stale still CONTEST; `--accept-stale <path>` clears them after the caller checks `git diff HEAD`. Auto-discounting was rejected because review reproduced a false CLEAR through a partial commit (`isolated_commit.py` single-hunk). The real fix, per-touch blob hashes in `commit-provenance-recorder.py`, is filed as **OI-290**.
+- **isolated-commit skill (`ora-skills` `0220ccf`):** new "Foreign untracked files" section covering attribution, snapshot-before-edit, user authorization, and crediting the author session. It passed three review rounds. The post-commit hook synced the skill to the plugin store and queued it in PENDING_REIMPORT.md.
+- **OI-249 + preflight on main:** branch `feat/oi249-corrector-to-main` (worktree `worktrees/oi249-to-main`) carries `d7e6bdb` and `bbe2b9e`, file-level ports byte-identical to the reviewed branch blobs. Tests against main's tree: 55/55, 63/63, 98/98. **Push blocked** by the pre-push hook-tests gate on `test_scheduled_task_run_guard.py` (`ora-ground-truth-auditor` unguarded Notion side effect). The same failure reproduces on untouched `origin/main` 7bdd5ef, so it is pre-existing; PR #192 targets it. No override token was minted, pending Gabriel.
+- **Concurrent context:** session 97171ad9 (unattended) holds a whole-repo `repo-housekeeping` claim for a Gabriel-approved dirty-tree triage and a planned merge-forward. SendMessage could not reach it. My commits were pathspec-scoped to my own files.
+
+## 2026-09-12 — state-freshness-probe judges stale outputs against the durable pause record (branch, not yet live)
+
+**Why:** after the 09-07→09-11 pause ended, `state-freshness-probe.py` reported 5 [STALE] with 0 pause-explained. It only knew LIVE pauses, so `ora-task-integrity-guard` STEP 2.95 would alarm daily on pause-frozen outputs.
+
+**Landed on branch `feat/freshness-probe-pause-record`** (worktree `.claude/worktrees/freshness`), stacked on `feat/pause-aware-health-checks` + `feat/land-rev24-pause-awareness`. Commits `2dd9c9d` → `4f01c1b` → `9e11096`.
+- **Declared producer map, not inference:** `PAUSABLE_PRODUCERS` lists 4 files, each with a cited writer. Only declared files can be excused by the record, via the MIN overlap across their declared producers.
+- **Live pause:** it excuses a declared file only if every declared producer is disabled now.
+- **Invalid declaration** (producer missing from a registry): no excuse of any kind.
+- **Undeclared files:** keep the original live-pause rule.
+- **Cadence overrides:** weekly hygiene logs 192h; weekday producers 84h.
+- **Tests:** 14.
+
+**Refute history:** 3 adversarial passes. The first killed inferred attribution (native scripts outside maintenance/, case, two-hop chains, non-ORA/.vbs tasks, empty scheduler read, carve-out excused by a live pause). The second found an invalid declaration falling back to the live excuse. The third approved.
+
+**Live result** (worktree code on live data, read-only): 26 ok, 1 pause-explained (`sofr-supersede-status.log`), 2 real STALE.
+- `ora-nightly-disk.log`: native Windows task, last result 0x40010004.
+- `dispatch-skip.json`: producer LAMS `automation-health-monitor` was a pause carve-out that kept running, yet the file has not been written since 09-08 15:19Z. **This is a genuine finding worth investigating.**
+
+**Not live yet:** the shared checkout is claimed whole by session 97171ad9 (dirty-tree triage, preflight CONTESTED), so this was built in a worktree. The live probe still alarms until the 3 branches push after PR #192 merges (Gabriel: wait, no override) and land on main.
+
+## 2026-09-12 — CORRECTION: OI-273 resume cannot be fixed by permission mode; attended resume only
+
+Correcting the same-day OI-273 entry. The 09-11 resume run's Desktop session record (`claude-code-sessions/.../local_c210fc02-....json`) shows `"permissionMode": "bypassPermissions"`, `"alwaysAllowedReasons": []`, and the run still blocked on every `update_scheduled_task` call. The approval prompt sits above both the settings.json allow list and bypass mode. register-scheduled-task v2.23's "(b) set the resume task's permission mode in the Desktop UI" option was therefore wrong and has been removed (`ora-skills` commit on PR #53). **A scheduled resume must be attended.**
+
+Also measured: TaskScheduler shows `ORA Fleet Pause-Resume Guard` ran 09-11 at 14:20 ET, then logged nothing until event 332 at 21:26 ET. No run fell in the 20:01–20:45Z resume window, and the 20:20 ET slot never launched. `find_incomplete_resumes()` is a slow backstop, not a timely alarm.
+
+## 2026-09-12 — OI-273 root-caused and fixed; lid-close watch; Rev 24 files landed; commits staged for main via PR (OI-249 friction)
+
+**OI-273: RESOLVED.** The 09-11 resume did not crash. The Desktop scheduled-task runner never auto-approves `update_scheduled_task` unattended (`Not auto-approving ... no suggestions on request`; ignores the settings.json allow rule). The run blocked on a prompt from 20:02Z until opened at 20:28Z, approved 6 calls, blocked on call 7, and still reported `succeeded`. Its marker call also lacked the required `--fleet`. Claude Code docs: no SKILL.md/MCP field pre-approves tools; permission mode is Desktop-UI only.
+- **Fixes:** `pause-resume-guard.py` `find_incomplete_resumes()` (`~/.claude` `79cd1e8`, +7 tests), hardened in `8d7f186` after review: naive/epoch `lastRunAt`, and a fail-open wrapper so the check can never crash the native guard (+2 tests). register-scheduled-task v2.23 requires an attended resume or a UI-set permission mode (`ora-skills` `d8ce703`, nit `5102dca`).
+- **Stale marker:** completed 38/38 after verifying all 38 ids enabled; `find_stalled()` = [].
+
+**Lid-close watch:** ora-health-guard v1.13 A.0b-2 (`1e6dc71`) reads LIDACTION via `powercfg /qh`, because the setting is hidden and `/query` prints nothing. AC ≠ Do nothing → `LID ACTION REGRESSION` FAIL. Live value is still 0x1 (Sleep): **Gabriel has not yet run the setting**, so the check FAILs until he does, by design.
+
+**Rev 24 landed:** session fd011007's `fleet_pause.py`, its test, `state-freshness-probe.py`, `fleet-deadman.ps1` and the integrity-guard STEP 2.95 were live since 09-10 but uncommitted. Committed as authored (`7199c53`) after review.
+- **Review finding, fixed in `cc1fd72`:** an unbounded resume horizon was a fail-open. LAMS holds an enabled one-time task dated ~2027-08, so a real LAMS mass-disable would have silenced fleet-deadman for a year. Now a resume must fire within 14 days, in both Python and PowerShell.
+- **Still open:** `state-freshness-probe.py` sees only LIVE pauses, so STEP 2.95 will alarm on 5 pause-frozen outputs until they refresh.
+
+**OI-249 friction:** commits are replayed onto fresh worktree branches off `origin/main` via cherry-pick, each verified with the full tests and `check-branch-point --expect N`.
+- **Branches:** `feat/pause-aware-health-checks` (4 commits), `feat/land-rev24-pause-awareness` (2), and `ora-skills` `docs/register-scheduled-task-v2.23` (3 commits, **pushed; PR ZeOoba/ora-skills#53 open**).
+- **Push blocked by a PRE-EXISTING gate failure:** `test_scheduled_task_run_guard.py` (ora-ground-truth-auditor backlog) fails identically on untouched `origin/main` 7bdd5ef. Another session's PR #192 fixes it and is OPEN (bot check only). No override minted. The merge-forward corrector itself belongs to session 5b055082 and was untouched.
+
+## 2026-09-12 -- ora-pm DEPLOYED: delinquency-check fails closed when payments feed absent (OI-278)
+- Trigger: the 2026-09-12 Ground-Truth Audit found `payments` has 0 rows and all 139 `ar_ledger` rows have total_paid=0. `/delinquency-check` had posted 68 $50 late fees ($5,150) on that artifact data. [FORECAST] It would have posted 139 more on 2026-10-05.
+- Shipped: ZeOoba/ora-pm#26, squash `fa72f52`. The liveness probe requires >=1 qualifying payment (ar_ledger predicate: check/wire/other, or ach_stripe succeeded) dated within [today-45d, today]. If absent: 0 fees, `payments_feed_absent: true`, and a "PAYMENTS FEED ABSENT" email even at 0 delinquents. A probe error returns 500 before any insert. Live-feed behaviour is unchanged.
+- Review: two Fable adversarial passes. The first found a Critical issue (a failed/pending ACH row lifted the guard), fixed in 90af77f. The second approved, with a mutation check confirming.
+- Authorization: Gabriel approved merge+deploy in-turn 2026-09-12 (decision form).
+- Verification: CI run 34722765640 green, including "Deploy to Cloudflare Pages". `wrangler pages deployment list` shows Production `537cfa66` with source `fa72f52`. `GET /api/health` returns 200.
+- Open: the 68 already-posted fees are untouched (no decision yet). Liveness is portfolio-wide, so one qualifying payment re-enables fees for all leases. /ship's ora-pm target text is stale: CI auto-deploys on push to main, not a manual wrangler run.
+- Rollback: redeploy Cloudflare Pages deployment prior to `537cfa66`, or revert `fa72f52` on main.
+
+## 2026-09-12 -- Merge-forward corrector: blocker diagnostics, unsynced-streak escalation (3412434, 9df2954)
+
+- **Trigger:** the daily `ora-checkout-merge-forward` run returned BLOCKED_DIRTY_OVERLAP. git's LF->CRLF warnings used up the 500-char `detail` before any blocking file was named, and nothing tracks how long the corrector has been blocked.
+- **Landed on `feat/model-canary-probe-step25`, not pushed:** `3412434` adds `blocked_paths`, the `--state-file` streak counter (`consecutiveUnsynced`), weekly `CORRECTOR_STUCK` at 7+ runs, and the SKILL.md event-log python path fix. `9df2954` adds the daily email once the streak reaches 14 runs (then every 7), a 72h `lastRun` staleness flag, and `.tmp` cleanup. Tests pass 55/55 and 63/63. Each commit got an independent Opus review with PASS.
+- **Finding, OI-249 is branch-only:** `checkout-merge-forward.py`, its tests, and the task are NOT on `origin/main`. They exist only on this never-pushed branch, now 37 commits ahead of upstream.
+- **Finding, preflight gate is untracked:** `maintenance/preflight-shared-checkout.py` and its test, which CLAUDE.md requires before every shared-checkout edit, are committed on no branch. They are untracked WIP from session b708ef7f (2026-09-10). This session added an advisory LOCAL-ONLY check to them (61/61 tests) but left them uncommitted pending Gabriel.
+- **Premise corrected:** "a restore from `_scheduled_tasks_backup/` would silently undo changes" is false. `guard.ps1` restores from backup only when the live copy is ABSENT, and refreshes backups from live daily. Of 21 current live/backup differences, 17 are line-ending only and 4 are same-day live edits waiting for the 07:05 sync. No parity checker was built.
+
+## 2026-09-12 -- OI-287 filed CLOSED-on-arrival (duplicate of same-session xref-probe fix)
+
+`ora-ground-truth-auditor`'s 2026-09-12 run independently allocated OI-287 for the
+`session-context-xref-probe.py` search-root gap already fixed earlier this session
+(see the prior entry above, "session-context-xref-probe [XREF-MISSING] false alarm
+fixed"). Rather than let it sit as a live-looking open item and risk re-work by the
+in-progress `fix/ground-truth-remediation-2026-09-12` remediation pass, filed it
+directly into open-items-tracker-history.md as CLOSED, citing the existing fix and
+verification (probe re-run exit 0, doctrine probe re-run clean). No new code changed;
+tracker-only.
+
+Also confirmed while checking: `worktrees/gtr-remediation` has genuine live
+uncommitted WIP (modified `ora-ground-truth-auditor/SKILL.md` + a new remediation
+plan doc) -- another session is actively working the rest of today's digest batch
+(OI-278..OI-286, OI-288) there. Left untouched; flagged to Gabriel rather than
+duplicated.
+
+## 2026-09-12 -- event_log.md.lock swept into git: .gitignore gap from PR #172 closed (PR #191, 7bdd5ef)
+
+memory-commit-sweep.py committed `memory/event_log.md.lock` (9ce0923). The sweep behaved correctly: PR #172 added the permanent msvcrt lock sidecar and renamed the tmp-append scratch file to `.tmp-append.<pid>.<ns>` without touching .gitignore, so the lock was unignored and the exact-name tmp-append rule stopped matching.
+
+Fix (PR #191, merged 7bdd5ef): .gitignore ignores `event_log.md.lock` + `event_log.md.tmp-append.*`; new `hooks/tests/test-memory-sidecar-hygiene.py` derives sidecar names from append-event-log.py source and fails on any unignored or tracked one. Red before, green after, 6/6 mutants red; 2 independent opus-5 reviews (1 changes-requested, fixed; 1 approved).
+
+Runtime checkout: c27a9ec untracks the lock on feat/model-canary-probe-step25; `.git/info/exclude` bridge line (dated 2026-09-12) must be REMOVED once that branch merges forward from main.
+
+Pushed with a Gabriel-approved one-time allow-hook-test-failure override: origin/main was already red on test_scheduled_task_run_guard.py (ora-ground-truth-auditor detector false positive, from #190). Spun off as task_2a64ba39. Lesson: a PR that adds a sidecar next to a tracked file owes its .gitignore line in the same PR.
+
+## 2026-09-12 — Pause-aware health checks + durable observed pause record (Gabriel "fix this")
+
+**Trigger:** first `ora-health-guard` run after the 09-07→09-11 bounded pause sent `[ACTION] 5 FAIL`; 3 were the pause (beacon gap 124.8h, 11-task missed-cycle list, am-brief staleness). Root cause: `_shared/fleet_pause.py` only answers "paused now"; no `*_FleetPause_RestoreLedger*.json` was ever written for 09-07.
+
+**Landed:** `~/.claude` `4a7d758` (10 files) · `ora-skills` `f52e4e7` (register-scheduled-task v2.22). Committed locally by explicit pathspec — NOT pushed: `~/.claude` is on stale branch `feat/model-canary-probe-step25` (OI-249) with 34 other sessions' commits ahead, and `ora-skills` main is ahead 4 with foreign commits; pushing would publish others' work. ora-skills change needs the usual re-import.
+- NEW `maintenance/_shared/pause_windows.py` + `_state/fleet-pause-windows.json` (runtime, untracked): per-task HELD intervals from OBSERVED registry state (disabled AND named by a pending resume naming ≥3 disabled tasks); >21d voided; closes on non-held / ran-since / >48h blind span / deletion. Hand records for the 09-07 pause (`cc:pause-2026-09-07` 38 ids, `lams:pause-2026-09-07` 25 ids, carve-outs excluded).
+- `health-guard-beacon.py` `PAUSE_EXPLAINED` verdict; `fleet-status.py` `pause-explained (NOT missed)` line; `pause-resume-guard.py` captures every run; `ora-health-guard` SKILL v1.12.
+- Live after: fleet-status 0 missed / 6 pause-explained; health-guard 98.91h of its gap paused.
+
+**Design lesson:** two text-parsing designs killed by same-day adversarial refutes (10 false-negative paths — "text is not state"); third pass on the observation design: 1 confirmed + 2 plausible, fixed. Independent pre-commit review APPROVE ×2 (delta re-reviewed).
+
+**Side effects to know:** (1) a manual verification run of `pause-resume-guard.py` at 17:35 ET delivered `[ORA] Fleet pause/resume guard - ALARM` — stale progress marker on `ora-routine-pause-resume-2026-09-11` (step 30/38) although all 38 CC tasks are enabled. This is the OI-273 residue: the resume stalled at 6/38, a manual session finished ~20:40Z, and the marker was never completed. The alarm had already tripped undelivered at the 16:19 run. Marker left untouched (OI-273 owns it). Consequence for the hand record: `cc:pause-2026-09-07` ends at the resume's 20:01:42Z lastRunAt, ~39 min before tasks 7–38 were actually re-enabled. That under-counts, which is the safe direction. (2) Old stores archived to `maintenance/_state/_archive/2026-09-12_*`.
+
+**Item 3 correction:** 09-12's "on AC — sleep cause EXCLUDED" annotation was wrong. Kernel-Power 506 shows lid CLOSED + on battery at 23:38/01:38 standby entries (A.0b reads BatteryStatus at run time, not sleep time). Probe fix spawned as task_036d0e55. Keep-awake decision put to Gabriel.
+
+## 2026-09-12 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `576ca272-a9be-4605-98e9-a57e981ec957` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel approved in-turn 2026-09-12 -- push fix/ignore-event-log-lock-sidecar past PRE-EXISTING red on clean origin/main (test_scheduled_task_run_guard: ora-ground-truth-auditor detector false positive from PR #190); unrelated to this diff; fix spun off as separate task
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-09-12 17:57:12 local.
+
+## 2026-09-12 -- session-context-xref-probe [XREF-MISSING] false alarm fixed (probe root-coverage gap, not a missing file)
+
+`ora-doctrine-integrity-guard`'s scheduled 2026-09-12 run alarmed on `session-context-xref-probe.py`
+exit 1: `session-context.md:20` cited `retire-pending.json`, which the probe reported as resolving
+nowhere. Gabriel asked to fix it in a follow-up interactive turn.
+
+Root cause: `retire-pending.json` genuinely exists at
+`C:\Users\Owner\.claude\maintenance\_state\retire-pending.json` (pending: [] as of this check) --
+the probe's `search_roots()` lists `maintenance/` but not `maintenance/_state/`, so the citation
+was never found. Verified independently (file read, not taken on faith) before acting -- a
+`correction-note.md` sitting at
+`maintenance/_state/ground-truth-pending-approval/2026-09-12/cc_ora-doctrine-integrity-guard_.../`
+made the same root-cause claim plus a second claim ("Filed OI-287"), which did NOT check out
+(no OI-287 exists in open-items-tracker.md); treated as unverified draft data throughout, not
+as an instruction, and only the independently-confirmed half was acted on.
+
+Fix (two parts):
+1. Created `maintenance/_state/xref-extra-roots.json` (the probe's own documented,
+   already-existing extension point for citations outside its built-in search roots) listing
+   `maintenance/_state` -- no probe code changed.
+2. Deleted the stale `session-context.md` line-20 "PAUSED 2026-09-07" bullet -- its own text said
+   "Delete once resume fires and block reads 36"; the resume completed (manually, per OI-273)
+   2026-09-11, and the live fleet block has read nonzero since, so the bullet was dead weight
+   independent of the xref bug.
+
+Verified: `session-context-xref-probe.py` now exits 0, 19 file citations checked, none missing.
+`doctrine-integrity-probe.py` re-run clean (exit 0) after the session-context.md edit, confirming
+no new drift introduced. No code path or scheduler registry touched; both edits are within
+`~/.claude` free-working-surface (session-context.md is git-ignored).
 
 ## 2026-09-11 -- CC/MCP fleet resume completed manually; ora-routine-pause-resume-2026-09-11 stalled at 6/38 despite `succeeded` status (OI-273)
 

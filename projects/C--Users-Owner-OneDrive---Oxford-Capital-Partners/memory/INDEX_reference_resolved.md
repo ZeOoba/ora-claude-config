@@ -1,9 +1,11 @@
 ---
 name: index-reference-resolved
 description: "Sub-index of MEMORY.md — RESOLVED/CLOSED reference findings and dated one-off gotchas, kept for the citation trail. Split out 2026-09-02 when INDEX_reference.md crossed the 24.4KB Read-tool limit."
-metadata:
+metadata: 
   node_type: memory
   type: reference
+  originSessionId: 0fc18634-d92f-4211-8be2-5903fcf2975f
+  modified: 2026-09-12T21:57:59.014Z
 ---
 
 # ORA Memory Index — Reference (resolved / closed)
@@ -16,6 +18,7 @@ metadata:
 
 
 ## Relocated from the root index 2026-09-02 (root crossed its 21,500-byte runway marker; moved verbatim, newest-first as they sat in MEMORY.md)
+- **[Machine clock on UTC+2 — RESOLVED 09-05](reference_machine_clock_utc_plus_2_fleet_shift_2026-09-02.md)** — skew window was 09-02→09-05 only (host back on Eastern); read host-local stamps inside it as UTC+2. Rule survives + was vindicated: check Get-TimeZone before calling a fire time odd; flag, never retime *(relocated 2026-09-12, same runway-marker reason)*
 - **[debt-scoring.ts JV-debt basis CONFIRMED 08-22](reference_debt_scoring_oxfordnoi_basis_conservative_not_correct_2026-08-22.md)** — 9cb6169 verified vs live workbook, not just conservative
 - ✅ [1900 Broadway insurance fix + BCL relabel 08-28](reference_1900broadway_insurance_fix_and_collapsetocurrentterm_tiebreak_2026-08-28.md) — warehouse AND live workbook both fixed (Gabriel confirmed the write); **fully CLOSED 09-02** — the scheduled portfolio.json re-extract landed both fixes in the snapshot the Daily Brief reads
 - **[claim_work.py --paths is space-separated, not comma 08-24](reference_claim_work_paths_comma_vs_space.md)** — a comma-joined value silently becomes ONE bogus path, no error; `covering N path(s)` in the output is the tell

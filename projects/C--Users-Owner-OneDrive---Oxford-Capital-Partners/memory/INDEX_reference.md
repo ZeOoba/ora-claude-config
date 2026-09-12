@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 83715320-ea98-4ae2-8ebd-e3ec6f2163dd
-  modified: 2026-08-24T19:30:00.000Z
+  modified: 2026-09-12T21:59:11.136Z
 ---
 
 # ORA Memory Index — Reference
@@ -15,9 +15,11 @@ metadata:
 > Same rules as the root index: one line per entry, pointers only, never content. Detail lives in the target file. Rationale for the split: [size gate is a runway marker](reference_memory_index_size_gate_is_a_runway_marker.md).
 
 ## Reference
+- [Sidecar file owes its .gitignore line in the same PR](feedback_sidecar_file_owes_gitignore_line_same_pr.md) — PR #172's lock sidecar got swept into git; renames break exact-name rules too; enforced for append-event-log.py by test-memory-sidecar-hygiene.py
 - [Tech Stack & Paths](tech.md) — paths, MCP connectors, secrets index, scheduler, machine constraints
 - [Standards — Financial & Communication](standards.md) — modeling conventions (DSCR 1.25×/LTV 40%) + comms tone
 - [Lean-RAM Toolkit](reference_lean_ram_toolkit.md) — RAM-saver commands + auto-park watchdog
+- **[Pause-aware health checks EXIST 09-12](reference_pause_windows_observed_state_2026-09-12.md)** — `_shared/pause_windows.py` observed per-task pause intervals feed beacon/fleet-status/health-guard; never parse resume SKILL.md text (refuted ×2)
 - [Memory Scope Fragmentation](reference_memory_scope_fragmentation.md) — `(1)` = ggoldberg's; no-suffix = **egoldberg's**
 - [Agent vs host session-id namespaces](reference_agent_vs_host_session_id_namespaces.md) — a claim id will NEVER resolve in `list_sessions`; look it up in `session-state.d`, and don't read the miss as a phantom session
 - [OneDrive Business/Personal Scope](reference_onedrive_business_scope.md) — read before broad OneDrive-root searches
