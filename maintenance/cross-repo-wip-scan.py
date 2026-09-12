@@ -43,6 +43,17 @@ signal (dirty-file staleness above catches a different dimension and did not
 catch this one). Repos with no CANONICAL_BRANCH entry are never flagged on
 this dimension, by design -- their feature-branch churn is expected.
 
+CORRECTOR STREAK (added 2026-09-12): for a repo with a paired daily corrector
+(currently only `~/.claude` -> checkout-merge-forward.py), this also reads the
+corrector's last-run state file and flags CORRECTOR_STUCK when its
+`consecutiveUnsynced` streak reaches CORRECTOR_UNSYNCED_ESCALATE_RUNS (default
+7 -- a week of daily runs that never ended MERGED/NOOP_CLEAN). Any single
+BLOCKED_* day is routine and the corrector stays silent on it by design; a
+week-long streak means the WIP backlog is pinning the checkout and drift is
+compounding with nothing correcting it. A missing, corrupt, or pre-counter
+state file is flagged too (unmeasurable, not clean). The corrector is the
+sole writer of that file; this only reads it.
+
 Detection only -- never commits, stages, touches repo content, or fetches
 (a fetch is a network/state-mutating action this script deliberately leaves
 to whatever already keeps `origin/*` current; a stale local `origin/<branch>`
@@ -52,7 +63,7 @@ no longer has a `.git` directory (e.g. archived/moved) is reported as MISSING
 rather than silently skipped, so a stale repo list doesn't quietly go stale
 itself.
 
-Exit 0 = no repo is STALE, MISSING, or BRANCH_DRIFT. Exit 1 = at least one
+Exit 0 = no repo is STALE, MISSING, BRANCH_DRIFT, or CORRECTOR_STUCK. Exit 1 = at least one
 is. Prints one line per repo plus a final RESULT_JSON={...} summary line.
 """
 import json
@@ -96,6 +107,56 @@ DEFAULT_CANONICAL_BRANCH = {
 CANONICAL_BRANCH_OVERRIDE = None
 
 BRANCH_BEHIND_THRESHOLD = 10
+
+# Repos with a paired daily corrector -> that corrector's last-run state file
+# (written solely by checkout-merge-forward.py --state-file).
+DEFAULT_CORRECTOR_STATE = {
+    r"C:\Users\Owner\.claude":
+        r"C:\Users\Owner\.claude\maintenance\_state\checkout-merge-forward-last-run.json",
+}
+
+# Test seam (mirrors KNOWN_REPOS_OVERRIDE). None -> canonical map above.
+CORRECTOR_STATE_OVERRIDE = None
+
+CORRECTOR_UNSYNCED_ESCALATE_RUNS = 7
+
+
+def corrector_state_map():
+    return dict(CORRECTOR_STATE_OVERRIDE) if CORRECTOR_STATE_OVERRIDE is not None \
+        else dict(DEFAULT_CORRECTOR_STATE)
+
+
+def _corrector_streak(state_path):
+    """Corrector-streak finding merged into a repo's scan_repo() result."""
+    out = {"corrector_state_path": state_path, "corrector_stuck": True,
+           "corrector_consecutive_unsynced": None, "corrector_last_status": None,
+           "corrector_last_run": None, "corrector_unsynced_since": None,
+           "corrector_blocked_paths_count": None, "corrector_error": None}
+    try:
+        with open(state_path, encoding="utf-8") as fh:
+            state = json.load(fh)
+    except OSError:
+        out["corrector_error"] = "no corrector state file at %s" % state_path
+        return out
+    except ValueError as e:
+        out["corrector_error"] = "corrector state unparseable: %s" % e
+        return out
+    if not isinstance(state, dict):
+        out["corrector_error"] = "corrector state is not a JSON object"
+        return out
+    out["corrector_last_status"] = state.get("status")
+    out["corrector_last_run"] = state.get("lastRun")
+    out["corrector_unsynced_since"] = state.get("unsyncedSince")
+    paths = state.get("blockedPaths")
+    out["corrector_blocked_paths_count"] = len(paths) if isinstance(paths, list) else None
+    streak = state.get("consecutiveUnsynced")
+    if not isinstance(streak, int) or isinstance(streak, bool) or streak < 0:
+        out["corrector_error"] = ("corrector state has no valid consecutiveUnsynced "
+                                  "(pre-2026-09-12 writer, or the task is not passing --state-file)")
+        return out
+    out["corrector_consecutive_unsynced"] = streak
+    out["corrector_stuck"] = streak >= CORRECTOR_UNSYNCED_ESCALATE_RUNS
+    return out
 
 
 def canonical_branch_map():
@@ -198,6 +259,9 @@ def scan_repo(repo_path, now=None):
 
     canonical = canonical_branch_map().get(repo_path)
     branch_info = _branch_drift(repo_path, canonical) if canonical else {}
+    corrector_path = corrector_state_map().get(repo_path)
+    if corrector_path:
+        branch_info.update(_corrector_streak(corrector_path))
 
     entries = _git_status_short(repo_path)
     if entries is None:
@@ -242,6 +306,10 @@ def any_branch_drift(results):
     return any(r.get("branch_drift") for r in results)
 
 
+def any_corrector_stuck(results):
+    return any(r.get("corrector_stuck") for r in results)
+
+
 def format_report(results):
     lines = []
     for r in results:
@@ -278,6 +346,19 @@ def format_report(results):
                                   r["path"], r["canonical_branch"],
                                   r["commits_behind_canonical"], r["canonical_branch"],
                                   BRANCH_BEHIND_THRESHOLD))
+        if r.get("corrector_stuck"):
+            if r.get("corrector_error"):
+                lines.append("[ACTION] CORRECTOR_STUCK %s -- cannot determine merge-forward "
+                              "streak: %s" % (r["path"], r["corrector_error"]))
+            else:
+                n_paths = r.get("corrector_blocked_paths_count")
+                lines.append("[ACTION] CORRECTOR_STUCK %s -- merge-forward has not synced for "
+                              "%d consecutive run(s) since %s (last status %s, %s blocked path(s)) "
+                              "-- triage the overlapping WIP (dirty-tree-triage)" % (
+                                  r["path"], r["corrector_consecutive_unsynced"],
+                                  r.get("corrector_unsynced_since") or "unknown",
+                                  r.get("corrector_last_status"),
+                                  "?" if n_paths is None else n_paths))
     return "\n".join(lines)
 
 
@@ -285,7 +366,8 @@ def main():
     results = scan_all()
     print(format_report(results))
     print("RESULT_JSON=%s" % json.dumps(results))
-    return 1 if (any_stale(results) or any_branch_drift(results)) else 0
+    return 1 if (any_stale(results) or any_branch_drift(results)
+                 or any_corrector_stuck(results)) else 0
 
 
 if __name__ == "__main__":
