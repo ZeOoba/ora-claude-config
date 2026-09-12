@@ -50,18 +50,64 @@ script could act on it).
   python maintenance/checkout-merge-forward.py                # ~/.claude, main
   python maintenance/checkout-merge-forward.py --repo <path> --canonical main
   python maintenance/checkout-merge-forward.py --json
+  python maintenance/checkout-merge-forward.py --json --state-file <path>
+
+BLOCKED DIAGNOSTICS (added 2026-09-12): on BLOCKED_DIRTY_OVERLAP the result
+carries `blocked_paths` -- every path git named under its "would be
+overwritten by merge" headers (tracked-modified and untracked alike) -- and
+`detail` has git's LF->CRLF `warning:` lines stripped. Before this, the
+500-char detail cap was consumed entirely by those warnings on the live
+checkout, so the run never said WHICH files blocked it.
+
+STATE FILE (added 2026-09-12): `--state-file` makes this script the sole
+writer of the corrector's last-run record (previously hand-written by the
+scheduled task). Beyond the legacy lastRun/status/commitsMerged/sha keys it
+keeps `consecutiveUnsynced` (runs in a row that did not end MERGED or
+NOOP_CLEAN -- reset to 0 by either), `unsyncedSince` (first run of the
+current streak) and `blockedPaths`. A blocked result is routine for any ONE
+day; a long streak means drift is compounding with nothing correcting it.
+cross-repo-wip-scan.py reads this file weekly and escalates past its
+threshold -- the threshold lives there, not here (one fact, one home).
 
 Exit 0 = MERGED or NOOP_CLEAN (nothing needed doing). Exit 1 = BLOCKED_*
 (needs a human, or was already blocked before this script touched anything).
 Exit 2 = usage/tooling error (bad --repo, git missing, etc).
 """
 import argparse
+import datetime
 import json
+import os
 import subprocess
 import sys
 
 DEFAULT_REPO = r"C:\Users\Owner\.claude"
 DEFAULT_CANONICAL = "main"
+SYNCED_STATUSES = ("MERGED", "NOOP_CLEAN")
+_OVERLAP_HEADER = "would be overwritten by merge:"
+
+
+def parse_overlap_paths(git_output):
+    """Paths git lists under each 'would be overwritten by merge:' header
+    (tracked-modified and untracked variants), in order, de-duplicated.
+    Listed paths are tab/space-indented; the first unindented line ends a
+    block."""
+    paths, in_block = [], False
+    for line in (git_output or "").splitlines():
+        if _OVERLAP_HEADER in line:
+            in_block = True
+            continue
+        if in_block and line[:1] in ("\t", " ") and line.strip():
+            p = line.strip()
+            if p not in paths:
+                paths.append(p)
+            continue
+        in_block = False
+    return paths
+
+
+def _strip_warnings(text):
+    return "\n".join(l for l in (text or "").splitlines()
+                     if not l.startswith("warning:"))
 
 
 def _git(args, repo):
@@ -80,7 +126,7 @@ def sync(repo=None, canonical=None):
     repo = repo or DEFAULT_REPO
     canonical = canonical or DEFAULT_CANONICAL
     out = {"repo": repo, "canonical": canonical, "status": None, "detail": None,
-           "commits_merged": None, "sha": None}
+           "commits_merged": None, "sha": None, "blocked_paths": None}
 
     rc, _, err = _git(["rev-parse", "--git-dir"], repo)
     if rc != 0:
@@ -143,10 +189,53 @@ def sync(repo=None, canonical=None):
             target, (merge_out or merge_err)[:500])
         return out
 
+    raw = "\n".join(s for s in (merge_err, merge_out) if s)
     out["status"] = "BLOCKED_DIRTY_OVERLAP"
-    out["detail"] = "git refused before writing anything (local changes overlap %s): %s" % (
-        target, (merge_err or merge_out)[:500])
+    out["blocked_paths"] = parse_overlap_paths(raw)
+    out["detail"] = "git refused before writing anything (%d local path(s) overlap %s): %s" % (
+        len(out["blocked_paths"]), target, _strip_warnings(raw)[:500])
     return out
+
+
+def update_state(result, state_path, now_iso=None):
+    """Write the corrector's last-run record, carrying the consecutive-
+    unsynced streak forward from the prior file. A missing, corrupt, or
+    legacy (pre-counter) prior file restarts the streak from this run.
+    Atomic replace; raises OSError on an unwritable path (caller decides)."""
+    now_iso = now_iso or datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+    prior = {}
+    try:
+        with open(state_path, encoding="utf-8") as fh:
+            loaded = json.load(fh)
+        if isinstance(loaded, dict):
+            prior = loaded
+    except (OSError, ValueError):
+        pass
+
+    if result["status"] in SYNCED_STATUSES:
+        streak, since = 0, None
+    else:
+        prev = prior.get("consecutiveUnsynced")
+        prev = prev if isinstance(prev, int) and prev >= 0 else 0
+        streak = prev + 1
+        since = (prior.get("unsyncedSince") if prev > 0 else None) or now_iso
+
+    state = {
+        "lastRun": now_iso,
+        "status": result["status"],
+        "commitsMerged": result.get("commits_merged"),
+        "sha": result.get("sha"),
+        "consecutiveUnsynced": streak,
+        "unsyncedSince": since,
+        "blockedPaths": result.get("blocked_paths"),
+    }
+    parent = os.path.dirname(os.path.abspath(state_path))
+    os.makedirs(parent, exist_ok=True)
+    tmp = state_path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(state, fh, indent=2)
+    os.replace(tmp, state_path)
+    return state
 
 
 def main(argv=None):
@@ -154,9 +243,18 @@ def main(argv=None):
     ap.add_argument("--repo", default=None)
     ap.add_argument("--canonical", default=None)
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--state-file", default=None,
+                    help="write/advance the last-run record (consecutiveUnsynced streak)")
     args = ap.parse_args(argv)
 
     r = sync(args.repo, args.canonical)
+    if args.state_file:
+        try:
+            st = update_state(r, args.state_file)
+            r["consecutive_unsynced"] = st["consecutiveUnsynced"]
+        except OSError as e:
+            # Best-effort: a state-write failure never changes the sync verdict.
+            r["state_error"] = str(e)
     if args.json:
         print(json.dumps(r, indent=2))
     else:

@@ -328,6 +328,87 @@ with tempfile.TemporaryDirectory() as td:
     expect("main: exit 1 when a repo has branch_drift even if not WIP-stale",
            rc == 1, "got %r" % rc)
 
+# --- CORRECTOR_STUCK: checkout-merge-forward.py's consecutiveUnsynced streak --------
+# (2026-09-12: the daily corrector returns BLOCKED_* silently by design; without
+# a streak check nothing notices it has not landed a merge in weeks.)
+import json as _json
+
+
+def _write_state(path, obj):
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(obj if isinstance(obj, str) else _json.dumps(obj))
+
+
+def _scan_with_state(repo, state_path):
+    wipscan.CORRECTOR_STATE_OVERRIDE = {repo: state_path}
+    try:
+        return wipscan.scan_repo(repo)
+    finally:
+        wipscan.CORRECTOR_STATE_OVERRIDE = None
+
+
+with tempfile.TemporaryDirectory() as td:
+    repo = init_repo(os.path.join(td, "r"))
+    sp = os.path.join(td, "state.json")
+    N = wipscan.CORRECTOR_UNSYNCED_ESCALATE_RUNS
+
+    _write_state(sp, {"lastRun": "2026-09-12T16:45:00-04:00", "status": "BLOCKED_DIRTY_OVERLAP",
+                      "consecutiveUnsynced": N - 1, "unsyncedSince": "2026-09-06T16:45:00-04:00",
+                      "blockedPaths": ["a", "b"]})
+    r = _scan_with_state(repo, sp)
+    expect("corrector: below threshold -> not stuck", r.get("corrector_stuck") is False, repr(r))
+    expect("corrector: streak surfaced", r.get("corrector_consecutive_unsynced") == N - 1, repr(r))
+
+    _write_state(sp, {"lastRun": "2026-09-12T16:45:00-04:00", "status": "BLOCKED_DIRTY_OVERLAP",
+                      "consecutiveUnsynced": N, "unsyncedSince": "2026-09-05T16:45:00-04:00",
+                      "blockedPaths": ["a", "b"]})
+    r = _scan_with_state(repo, sp)
+    expect("corrector: at threshold -> stuck", r.get("corrector_stuck") is True, repr(r))
+    rep = wipscan.format_report([r])
+    expect("corrector: report line names streak, since, and blocked-path count",
+           "CORRECTOR_STUCK" in rep and ("%d consecutive" % N) in rep
+           and "2026-09-05" in rep and "2 blocked path" in rep, rep)
+    expect("any_corrector_stuck: True", wipscan.any_corrector_stuck([r]) is True)
+
+    _write_state(sp, {"lastRun": "x", "status": "NOOP_CLEAN", "consecutiveUnsynced": 0})
+    r = _scan_with_state(repo, sp)
+    expect("corrector: synced -> not stuck, no report line",
+           r.get("corrector_stuck") is False and "CORRECTOR" not in wipscan.format_report([r]),
+           repr(r))
+
+    os.remove(sp)
+    r = _scan_with_state(repo, sp)
+    expect("corrector: missing state file -> stuck (unmeasurable is not clean)",
+           r.get("corrector_stuck") is True and r.get("corrector_error"), repr(r))
+    expect("corrector: missing file report says cannot determine",
+           "cannot determine" in wipscan.format_report([r]), wipscan.format_report([r]))
+
+    _write_state(sp, {"lastRun": "x", "status": "BLOCKED_DIRTY_OVERLAP"})  # legacy shape
+    r = _scan_with_state(repo, sp)
+    expect("corrector: legacy state without counter -> stuck with error",
+           r.get("corrector_stuck") is True and "consecutiveUnsynced" in (r.get("corrector_error") or ""),
+           repr(r))
+
+    _write_state(sp, "not json{")
+    r = _scan_with_state(repo, sp)
+    expect("corrector: corrupt state -> stuck with error",
+           r.get("corrector_stuck") is True and r.get("corrector_error"), repr(r))
+
+    plain = wipscan.scan_repo(repo)
+    expect("corrector: repo with no corrector mapping carries no corrector keys",
+           "corrector_stuck" not in plain, repr(plain))
+
+    _write_state(sp, {"lastRun": "x", "status": "BLOCKED_STAGED", "consecutiveUnsynced": N + 3,
+                      "unsyncedSince": "2026-09-01", "blockedPaths": None})
+    wipscan.KNOWN_REPOS_OVERRIDE = [repo]
+    wipscan.CORRECTOR_STATE_OVERRIDE = {repo: sp}
+    try:
+        rc = wipscan.main()
+    finally:
+        wipscan.KNOWN_REPOS_OVERRIDE = None
+        wipscan.CORRECTOR_STATE_OVERRIDE = None
+    expect("main: exit 1 when corrector stuck even if repo clean", rc == 1, "got %r" % rc)
+
 passed = sum(1 for ok, _ in results if ok)
 print("cross-repo-wip-scan tests: %d/%d passed" % (passed, len(results)))
 sys.exit(0 if passed == len(results) else 1)
