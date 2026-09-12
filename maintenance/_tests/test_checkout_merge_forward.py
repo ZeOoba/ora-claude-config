@@ -273,6 +273,63 @@ with tempfile.TemporaryDirectory() as td:
     check("main: --state-file written and exit code unchanged",
           rc == 1 and _json.load(open(sp))["consecutiveUnsynced"] == 1, "rc=%r" % rc)
 
+# --- streak_alarm: daily self-alarm at 14 unsynced runs, then every 7 ---------------
+A, R = cmf.STREAK_ALARM_RUNS, cmf.STREAK_ALARM_REPEAT_RUNS
+check("streak_alarm: constants are 14 / 7", (A, R) == (14, 7), repr((A, R)))
+check("streak_alarm: below threshold silent", cmf.streak_alarm(A - 1) is False)
+check("streak_alarm: fires at threshold", cmf.streak_alarm(A) is True)
+check("streak_alarm: silent between repeats", cmf.streak_alarm(A + 1) is False
+      and cmf.streak_alarm(A + R - 1) is False)
+check("streak_alarm: repeats every R runs", cmf.streak_alarm(A + R) is True
+      and cmf.streak_alarm(A + 2 * R) is True)
+check("streak_alarm: None/0 silent", cmf.streak_alarm(None) is False and cmf.streak_alarm(0) is False)
+
+with tempfile.TemporaryDirectory() as td:
+    local, origin = make_pair(td)
+    sp = os.path.join(td, "st.json")
+    write(td, "st.json", _json.dumps({"consecutiveUnsynced": A - 1, "unsyncedSince": "2026-08-30"}))
+    write(local, "x.txt", "uncommitted\n")
+    run(local, "add", "x.txt")
+    import io, contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = cmf.main(["--repo", local, "--canonical", "main", "--json", "--state-file", sp])
+    out = _json.loads(buf.getvalue())
+    check("main: streak_alarm true in JSON on the 14th unsynced run",
+          out.get("streak_alarm") is True and out.get("consecutive_unsynced") == A, repr(out))
+    check("main: unsynced_since surfaced for the alarm body",
+          out.get("unsynced_since") == "2026-08-30", repr(out))
+    check("main: exit code unchanged by the alarm flag", rc == 1, "rc=%r" % rc)
+
+with tempfile.TemporaryDirectory() as td:
+    local, origin = make_pair(td)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cmf.main(["--repo", local, "--canonical", "main", "--json"])
+    out = _json.loads(buf.getvalue())
+    check("main: no --state-file -> streak_alarm false (unmeasured, never fires)",
+          out.get("streak_alarm") is False, repr(out))
+
+# --- update_state leaves no orphan .tmp when the replace fails ----------------------
+with tempfile.TemporaryDirectory() as td:
+    sp = os.path.join(td, "state.json")
+    real_replace = cmf.os.replace
+    def boom(src, dst):
+        raise PermissionError("locked by AV")
+    cmf.os.replace = boom
+    try:
+        raised = False
+        try:
+            cmf.update_state({"status": "BLOCKED_STAGED", "commits_merged": None, "sha": None},
+                             sp, now_iso="2026-09-12T16:45:00-04:00")
+        except OSError:
+            raised = True
+    finally:
+        cmf.os.replace = real_replace
+    check("state: replace failure still raises OSError (caller records state_error)", raised)
+    check("state: replace failure leaves no .tmp behind", not os.path.exists(sp + ".tmp"),
+          repr(os.listdir(td)))
+
 passed = sum(1 for ok, _ in _results if ok)
 print("\ncheckout-merge-forward tests: %d/%d passed" % (passed, len(_results)))
 sys.exit(0 if passed == len(_results) else 1)

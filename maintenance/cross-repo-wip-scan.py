@@ -52,7 +52,11 @@ BLOCKED_* day is routine and the corrector stays silent on it by design; a
 week-long streak means the WIP backlog is pinning the checkout and drift is
 compounding with nothing correcting it. A missing, corrupt, or pre-counter
 state file is flagged too (unmeasurable, not clean). The corrector is the
-sole writer of that file; this only reads it.
+sole writer of that file; this only reads it. A `lastRun` older than
+CORRECTOR_STALE_HOURS (72h), or one that cannot be parsed, is also flagged:
+a disabled task, a run that keeps failing its claim step, or one that dies
+before invoking the script leaves the streak frozen below threshold, and
+without this check that frozen value would read as clean indefinitely.
 
 Detection only -- never commits, stages, touches repo content, or fetches
 (a fetch is a network/state-mutating action this script deliberately leaves
@@ -66,6 +70,7 @@ itself.
 Exit 0 = no repo is STALE, MISSING, BRANCH_DRIFT, or CORRECTOR_STUCK. Exit 1 = at least one
 is. Prints one line per repo plus a final RESULT_JSON={...} summary line.
 """
+import datetime
 import json
 import os
 import subprocess
@@ -120,14 +125,20 @@ CORRECTOR_STATE_OVERRIDE = None
 
 CORRECTOR_UNSYNCED_ESCALATE_RUNS = 7
 
+# The corrector is daily; 72h tolerates a missed day or a weekend with the
+# Desktop app closed (the fleet only fires while it is open) without masking
+# a task that has genuinely stopped.
+CORRECTOR_STALE_HOURS = 72
+
 
 def corrector_state_map():
     return dict(CORRECTOR_STATE_OVERRIDE) if CORRECTOR_STATE_OVERRIDE is not None \
         else dict(DEFAULT_CORRECTOR_STATE)
 
 
-def _corrector_streak(state_path):
-    """Corrector-streak finding merged into a repo's scan_repo() result."""
+def _corrector_streak(state_path, now=None):
+    """Corrector-streak finding merged into a repo's scan_repo() result.
+    `now` (aware or naive local datetime) is injectable for tests."""
     out = {"corrector_state_path": state_path, "corrector_stuck": True,
            "corrector_consecutive_unsynced": None, "corrector_last_status": None,
            "corrector_last_run": None, "corrector_unsynced_since": None,
@@ -155,6 +166,26 @@ def _corrector_streak(state_path):
                                   "(pre-2026-09-12 writer, or the task is not passing --state-file)")
         return out
     out["corrector_consecutive_unsynced"] = streak
+
+    try:
+        last = datetime.datetime.fromisoformat(str(state.get("lastRun")))
+    except ValueError:
+        out["corrector_error"] = "corrector state has unparseable lastRun %r" % state.get("lastRun")
+        return out
+    now = now or datetime.datetime.now().astimezone()
+    # Compare in local time; a naive stamp is taken as local, same as the writer.
+    if last.tzinfo is None:
+        last = last.astimezone()
+    if now.tzinfo is None:
+        now = now.astimezone()
+    age_hours = (now - last).total_seconds() / 3600.0
+    if age_hours > CORRECTOR_STALE_HOURS:
+        out["corrector_error"] = ("corrector has not run since %s (%.0fh ago, > %dh) -- "
+                                  "task disabled, repeatedly BLOCKED_CLAIMED, or dying "
+                                  "before STEP 1" % (state.get("lastRun"), age_hours,
+                                                     CORRECTOR_STALE_HOURS))
+        return out
+
     out["corrector_stuck"] = streak >= CORRECTOR_UNSYNCED_ESCALATE_RUNS
     return out
 
@@ -352,13 +383,13 @@ def format_report(results):
                               "streak: %s" % (r["path"], r["corrector_error"]))
             else:
                 n_paths = r.get("corrector_blocked_paths_count")
+                paths_note = "" if n_paths is None else ", %d blocked path(s)" % n_paths
                 lines.append("[ACTION] CORRECTOR_STUCK %s -- merge-forward has not synced for "
-                              "%d consecutive run(s) since %s (last status %s, %s blocked path(s)) "
+                              "%d consecutive run(s) since %s (last status %s%s) "
                               "-- triage the overlapping WIP (dirty-tree-triage)" % (
                                   r["path"], r["corrector_consecutive_unsynced"],
                                   r.get("corrector_unsynced_since") or "unknown",
-                                  r.get("corrector_last_status"),
-                                  "?" if n_paths is None else n_paths))
+                                  r.get("corrector_last_status"), paths_note))
     return "\n".join(lines)
 
 

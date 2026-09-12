@@ -347,19 +347,23 @@ def _scan_with_state(repo, state_path):
         wipscan.CORRECTOR_STATE_OVERRIDE = None
 
 
+import datetime as _dt
+FRESH = _dt.datetime.now().astimezone().isoformat(timespec="seconds")
+
+
 with tempfile.TemporaryDirectory() as td:
     repo = init_repo(os.path.join(td, "r"))
     sp = os.path.join(td, "state.json")
     N = wipscan.CORRECTOR_UNSYNCED_ESCALATE_RUNS
 
-    _write_state(sp, {"lastRun": "2026-09-12T16:45:00-04:00", "status": "BLOCKED_DIRTY_OVERLAP",
+    _write_state(sp, {"lastRun": FRESH, "status": "BLOCKED_DIRTY_OVERLAP",
                       "consecutiveUnsynced": N - 1, "unsyncedSince": "2026-09-06T16:45:00-04:00",
                       "blockedPaths": ["a", "b"]})
     r = _scan_with_state(repo, sp)
     expect("corrector: below threshold -> not stuck", r.get("corrector_stuck") is False, repr(r))
     expect("corrector: streak surfaced", r.get("corrector_consecutive_unsynced") == N - 1, repr(r))
 
-    _write_state(sp, {"lastRun": "2026-09-12T16:45:00-04:00", "status": "BLOCKED_DIRTY_OVERLAP",
+    _write_state(sp, {"lastRun": FRESH, "status": "BLOCKED_DIRTY_OVERLAP",
                       "consecutiveUnsynced": N, "unsyncedSince": "2026-09-05T16:45:00-04:00",
                       "blockedPaths": ["a", "b"]})
     r = _scan_with_state(repo, sp)
@@ -370,7 +374,7 @@ with tempfile.TemporaryDirectory() as td:
            and "2026-09-05" in rep and "2 blocked path" in rep, rep)
     expect("any_corrector_stuck: True", wipscan.any_corrector_stuck([r]) is True)
 
-    _write_state(sp, {"lastRun": "x", "status": "NOOP_CLEAN", "consecutiveUnsynced": 0})
+    _write_state(sp, {"lastRun": FRESH, "status": "NOOP_CLEAN", "consecutiveUnsynced": 0})
     r = _scan_with_state(repo, sp)
     expect("corrector: synced -> not stuck, no report line",
            r.get("corrector_stuck") is False and "CORRECTOR" not in wipscan.format_report([r]),
@@ -398,7 +402,7 @@ with tempfile.TemporaryDirectory() as td:
     expect("corrector: repo with no corrector mapping carries no corrector keys",
            "corrector_stuck" not in plain, repr(plain))
 
-    _write_state(sp, {"lastRun": "x", "status": "BLOCKED_STAGED", "consecutiveUnsynced": N + 3,
+    _write_state(sp, {"lastRun": FRESH, "status": "BLOCKED_STAGED", "consecutiveUnsynced": N + 3,
                       "unsyncedSince": "2026-09-01", "blockedPaths": None})
     wipscan.KNOWN_REPOS_OVERRIDE = [repo]
     wipscan.CORRECTOR_STATE_OVERRIDE = {repo: sp}
@@ -408,6 +412,48 @@ with tempfile.TemporaryDirectory() as td:
         wipscan.KNOWN_REPOS_OVERRIDE = None
         wipscan.CORRECTOR_STATE_OVERRIDE = None
     expect("main: exit 1 when corrector stuck even if repo clean", rc == 1, "got %r" % rc)
+
+# --- CORRECTOR_STUCK: a corrector that stopped RUNNING freezes its streak -----------
+# (review finding 2026-09-12: disabled task / repeated BLOCKED_CLAIMED / dying before
+# STEP 1 leaves consecutiveUnsynced frozen below threshold -> weekly scan clean forever.)
+with tempfile.TemporaryDirectory() as td:
+    repo = init_repo(os.path.join(td, "r"))
+    sp = os.path.join(td, "state.json")
+    H = wipscan.CORRECTOR_STALE_HOURS
+    expect("corrector-stale: threshold is 72h", H == 72, repr(H))
+
+    old = (_dt.datetime.now().astimezone() - _dt.timedelta(hours=H + 1)).isoformat(timespec="seconds")
+    _write_state(sp, {"lastRun": old, "status": "NOOP_CLEAN", "consecutiveUnsynced": 0})
+    r = _scan_with_state(repo, sp)
+    expect("corrector-stale: lastRun older than threshold -> stuck even with streak 0",
+           r.get("corrector_stuck") is True and "has not run" in (r.get("corrector_error") or ""),
+           repr(r))
+    expect("corrector-stale: report names last run",
+           old[:10] in wipscan.format_report([r]), wipscan.format_report([r]))
+
+    recent = (_dt.datetime.now().astimezone() - _dt.timedelta(hours=H - 1)).isoformat(timespec="seconds")
+    _write_state(sp, {"lastRun": recent, "status": "BLOCKED_STAGED", "consecutiveUnsynced": 2})
+    r = _scan_with_state(repo, sp)
+    expect("corrector-stale: lastRun inside threshold -> not stuck",
+           r.get("corrector_stuck") is False, repr(r))
+
+    _write_state(sp, {"lastRun": "not-a-date", "status": "NOOP_CLEAN", "consecutiveUnsynced": 0})
+    r = _scan_with_state(repo, sp)
+    expect("corrector-stale: unparseable lastRun -> stuck (unmeasurable)",
+           r.get("corrector_stuck") is True and "lastRun" in (r.get("corrector_error") or ""),
+           repr(r))
+
+    _write_state(sp, {"lastRun": "2026-09-12T16:45:00", "status": "NOOP_CLEAN",
+                      "consecutiveUnsynced": 0})  # naive timestamp -> treated as local time
+    r = wipscan._corrector_streak(sp, now=_dt.datetime(2026, 9, 13, 10, 0))
+    expect("corrector-stale: naive lastRun compared as local time, not a crash",
+           r.get("corrector_stuck") is False, repr(r))
+
+    _write_state(sp, {"lastRun": FRESH, "status": "BLOCKED_STAGED", "consecutiveUnsynced": 9,
+                      "unsyncedSince": "2026-09-01", "blockedPaths": None})
+    rep = wipscan.format_report([_scan_with_state(repo, sp)])
+    expect("corrector: BLOCKED_STAGED (no path list) omits the '?' path count",
+           "?" not in rep and "CORRECTOR_STUCK" in rep, rep)
 
 passed = sum(1 for ok, _ in results if ok)
 print("cross-repo-wip-scan tests: %d/%d passed" % (passed, len(results)))

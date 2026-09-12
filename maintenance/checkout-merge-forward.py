@@ -69,6 +69,14 @@ day; a long streak means drift is compounding with nothing correcting it.
 cross-repo-wip-scan.py reads this file weekly and escalates past its
 threshold -- the threshold lives there, not here (one fact, one home).
 
+STREAK ALARM (added 2026-09-12): the weekly check can sit a full week behind
+the streak it reports. With --state-file, the JSON also carries
+`streak_alarm`, true on the STREAK_ALARM_RUNS-th (14th) consecutive unsynced
+run and then every STREAK_ALARM_REPEAT_RUNS (7) runs after that. The daily
+scheduled task emails on it, so a two-week pin reaches the inbox without
+waiting for Sunday, and the repeat interval keeps it from mailing every day.
+Without --state-file the streak is unmeasured and `streak_alarm` is false.
+
 Exit 0 = MERGED or NOOP_CLEAN (nothing needed doing). Exit 1 = BLOCKED_*
 (needs a human, or was already blocked before this script touched anything).
 Exit 2 = usage/tooling error (bad --repo, git missing, etc).
@@ -84,6 +92,15 @@ DEFAULT_REPO = r"C:\Users\Owner\.claude"
 DEFAULT_CANONICAL = "main"
 SYNCED_STATUSES = ("MERGED", "NOOP_CLEAN")
 _OVERLAP_HEADER = "would be overwritten by merge:"
+STREAK_ALARM_RUNS = 14
+STREAK_ALARM_REPEAT_RUNS = 7
+
+
+def streak_alarm(consecutive_unsynced):
+    """True at the 14th consecutive unsynced run, then every 7th after."""
+    if not isinstance(consecutive_unsynced, int) or consecutive_unsynced < STREAK_ALARM_RUNS:
+        return False
+    return (consecutive_unsynced - STREAK_ALARM_RUNS) % STREAK_ALARM_REPEAT_RUNS == 0
 
 
 def parse_overlap_paths(git_output):
@@ -232,9 +249,17 @@ def update_state(result, state_path, now_iso=None):
     parent = os.path.dirname(os.path.abspath(state_path))
     os.makedirs(parent, exist_ok=True)
     tmp = state_path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(state, fh, indent=2)
-    os.replace(tmp, state_path)
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(state, fh, indent=2)
+        os.replace(tmp, state_path)
+    except OSError:
+        # An orphaned .tmp would itself age into cross-repo-wip-scan's WIP count.
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
     return state
 
 
@@ -248,10 +273,13 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     r = sync(args.repo, args.canonical)
+    r["streak_alarm"] = False
     if args.state_file:
         try:
             st = update_state(r, args.state_file)
             r["consecutive_unsynced"] = st["consecutiveUnsynced"]
+            r["unsynced_since"] = st["unsyncedSince"]
+            r["streak_alarm"] = streak_alarm(st["consecutiveUnsynced"])
         except OSError as e:
             # Best-effort: a state-write failure never changes the sync verdict.
             r["state_error"] = str(e)
