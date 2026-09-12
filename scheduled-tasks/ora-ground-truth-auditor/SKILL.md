@@ -17,6 +17,66 @@ excludes this id from its own index automatically -- if you ever see this task's
 run listed as something to audit, STOP. That means self-exclusion broke, and auditing
 your own run trivially "passes" every axis, which is worse than not auditing at all.
 
+## STEP 0b -- double-fire entry guard (run before STEP 1)
+
+This task is NOT read-only at the task level: STEP 8 emails a digest on every run,
+including the could-not-start path. A catch-up burst that fires it twice would send two
+digests and pay for two full verifier fan-outs. The READ-ONLY language in STEP 3/4 binds
+the dispatched verifier and refuter agents, not this run. Two layers, same contract as
+every other wired task (`_shared/README-DOUBLE-FIRE-GUARD.md`): this claim is Layer 1;
+the Sent-Items probe immediately before each STEP 8 send is Layer 2.
+
+**Derive `run_id` ONCE, now, and reuse that exact string for the claim and the close**
+(the scheduler's run identifier, or an ET timestamp such as
+`ora-ground-truth-auditor-20260913T0400`). A fresh id at close returns exit 12, writes
+nothing, and strands the claim IN_PROGRESS for the full 120-minute TTL.
+
+Claim before anything else:
+
+```
+C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-ground-truth-auditor --block main --run-id <run_id> --ttl-min 120
+```
+
+- **Exit 10** -> today's audit already completed. Log `BLOCK_MAIN_ALREADY_COMPLETE_TODAY`,
+  do NOT build an index, dispatch verifiers, or email; report a NORMAL skip (not a miss)
+  citing the earlier run. **Exit 11** -> another fire is live; stand down identically.
+  **Exit 0** -> proceed to STEP 1. **Any other exit** (2 = malformed command, 9009/127 =
+  interpreter not found) is a tooling failure, not a decision: fail open, run normally,
+  and surface the code in STEP 9's completion note. Likewise surface any non-null
+  `stateFileError` or `"persisted": false` from an exit-0 claim -- the guard fails open,
+  so that string is the only sign Layer 1 is degraded.
+- TTL is **120 min**, not the fleet default 30: STEP 3 fans out one model-laddered
+  verifier per side-effecting run plus STEP 4's refuter pass, which legitimately outlasts
+  30 minutes. An expired claim lets an overlapping fire re-claim; Layer 2 is the backstop
+  for that (and for wall-clock age accrued across a laptop sleep). The cost of the long
+  TTL is small -- the bucket is per-day, so a crashed run only blocks a same-day manual
+  rerun, which `claim --force` covers (a rerun meant to RE-SEND an already-delivered
+  digest also needs `-Force` on the Layer 2 probe).
+- Only the run holding the claim closes it. A run that stood down here calls neither
+  `complete` nor `fail`. A close that returns **exit 12** did not land -- report it as
+  FAIL-OPEN (guard degraded) with the helper's JSON verbatim; never retry with `--adopt`.
+
+**How this run closes the claim -- exactly one of these, on every path that got exit 0:**
+
+- **An audit digest reached STEP 8** -- sent, skipped because the Layer 2 probe found it
+  already in Sent Items, or unsent after the send retry but drafted and saved -- close
+  with `complete`. Pass `--email-sent-at` only when this run's send actually succeeded.
+  An unsent digest is still a complete run (flagged per STEP 8's exit-code canon),
+  because re-running would repeat the whole verifier fan-out:
+
+```
+C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-ground-truth-auditor --block main --run-id <run_id> --email-sent-at <ISO8601>
+```
+
+- **No audit happened** -- STEP 1 exit 2 (after its could-not-start digest is sent or
+  probe-skipped), or ANY abort at any step before an audit digest reaches STEP 8 (e.g. the
+  STEP 3 `ValueError` stop, which sends nothing) -- close with `fail`, so a later same-day
+  fire re-claims (`RECLAIMED_AFTER_FAILED`) and actually runs the audit:
+
+```
+C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py fail --task ora-ground-truth-auditor --block main --run-id <run_id> --error "<what broke>"
+```
+
 ## STEP 1 -- build the run index (Stage 0, deterministic, no judgment)
 
 ```
@@ -41,7 +101,8 @@ never treat them the same:**
   read. Skip directly to STEP 8 and send a digest whose ONLY content is this failure: the
   exact stderr line, and nothing else (no runs audited, no axes, no duplicate section --
   there is no data to report on). Do not attempt to synthesize a normal-shaped digest
-  around a missing run-index.
+  around a missing run-index. It goes out under the separate could-not-start subject
+  (STEP 8), then the claim closes with `fail` (STEP 0b).
 
 ## STEP 2 -- extract side effects (Stage 1, deterministic, no judgment)
 
@@ -275,16 +336,43 @@ exception does not extend here). Sections, in this exact order:
    for each.
 4. **Open items filed** -- the OI-NNN ids from STEP 7, one line each.
 
-Send via:
+**Subject -- two distinct dated stems, never one.** Audit digest:
+`[ORA] Ground-Truth Audit -- <today's date>`. STEP 1 exit-2 failure digest:
+`[ORA] Ground-Truth Audit COULD NOT START -- <today's date>`. They must differ: a
+could-not-start run closes with `fail` so a same-day fire can retry, and a shared stem
+would make that retry's Layer 2 probe find the failure digest and suppress the real audit.
+Type both subjects and stems exactly as written, with ASCII `--` -- an em dash in the
+subject makes the probe miss the earlier send.
+
+**PRE-SEND SENT-ITEMS PROBE (Layer 2 of the STEP 0b guard, immediately before the send).**
+Write the matching stem -- `Ground-Truth Audit -- <today's date>` or
+`Ground-Truth Audit COULD NOT START -- <today's date>`, no `[ORA]` tag -- to a temp .txt,
+then:
 
 ```
-powershell -File "C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1" -To "ggoldberg@oxfordra.net" -Subject "[ORA] Ground-Truth Audit -- <today's date>" -BodyFile "<path to the composed HTML>" -BodyFormat html
+powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly the stem>"
+```
+
+- **Exit 10** (`ALREADY_SENT`) -> do NOT send. Log `MAIN_EMAIL_ALREADY_IN_SENT_ITEMS`,
+  record a NORMAL skip citing the earlier send, then close the claim per STEP 0b as if
+  sent (`complete` for an audit digest, `fail` for a could-not-start digest -- both
+  without `--email-sent-at`). This also stops a registry outage that persists across a
+  catch-up burst from sending one could-not-start digest per fire.
+- **Exit 1** (`PROBE_ERROR`), or any other code (e.g. 9009/127, PowerShell not found) ->
+  fail open: send anyway, and name the probe gap in STEP 9's completion note.
+- **Exit 0** (`NOT_SENT`) -> send via:
+
+```
+powershell -File "C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1" -To "ggoldberg@oxfordra.net" -Subject "<the subject above>" -BodyFile "<path to the composed HTML>" -BodyFormat html
 ```
 
 Exit-code handling (canon): exit 2 (COM failure) or 4 (timeout) -- retry once, then flag
 loudly if it fails again (do not halt the task over a send failure once the digest is
 drafted and saved). Exit 1 (usage error) or 3 (stuck wizard) -- do not retry, flag
 immediately with the exact exit code and stderr.
+
+Once the send has resolved, close the STEP 0b claim exactly as STEP 0b specifies (already
+done above if the probe returned 10 -- close once).
 
 ## STEP 9 -- completion note
 
