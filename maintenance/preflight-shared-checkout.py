@@ -90,7 +90,14 @@ dirty in ora-skills was CONTESTED with --repo ~/ora-skills but CLEAR with
 this one's dirty set. The git-owner half also catches a nested checkout
 (~/.claude/.claude/worktrees/<name> is string-inside ~/.claude). A path whose
 owner cannot be established counts as outside: a path that was never
-evaluated is never CLEAR.
+evaluated is never CLEAR. Repository-selecting env (GIT_DIR, GIT_WORK_TREE,
+...) is scrubbed from every git call, and Win32 verbatim-prefix spellings
+are normalized.
+A DIRECTORY scope that merely contains a linked worktree is different: the
+directory's own files were evaluated, so the verdict stands, but each such
+worktree is reported as nested_checkouts_excluded with a --repo hint rather
+than silently skipped. Independent clones inside ignored directories are not
+enumerated (unbounded walk) -- name a path inside one and it IS caught.
 
 Usage:
     python maintenance/preflight-shared-checkout.py --paths P [P ...]
@@ -144,6 +151,21 @@ DEFAULT_TTL_MINUTES = 120  # matches claim_work.py's 2h window
 # --------------------------------------------------------------------------
 # path overlap -- segment-wise, both directions
 # --------------------------------------------------------------------------
+def _unverbatim(p):
+    """Drop a Win32 verbatim prefix. realpath keeps `\\\\?\\C:\\...` as-is, and
+    git never prints one, so an in-repo path spelled that way compared
+    unequal to its own toplevel (review finding, 2026-09-12)."""
+    if p.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + p[8:]
+    if p.startswith("\\\\?\\"):
+        return p[4:]
+    return p
+
+
+def _real(p):
+    return os.path.realpath(_unverbatim(os.path.abspath(p)))
+
+
 def _norm(p):
     """Absolute, case-folded, forward-slashed, no trailing separator.
 
@@ -153,7 +175,7 @@ def _norm(p):
     # realpath: a junction or an 8.3 short name (C:\Users\OWNER~1\...) is a
     # different spelling of the same directory. git reports the long real
     # path, so comparing spellings as strings made every overlap miss.
-    p = os.path.realpath(os.path.abspath(p)).replace("\\", "/").rstrip("/")
+    p = _unverbatim(_real(p)).replace("\\", "/").rstrip("/")
     return p.lower()
 
 
@@ -182,16 +204,25 @@ def _inside(path, root):
 # --------------------------------------------------------------------------
 # git facts
 # --------------------------------------------------------------------------
+_GIT_REPO_ENV = {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+                 "GIT_PREFIX", "GIT_OBJECT_DIRECTORY", "GIT_CEILING_DIRECTORIES",
+                 "GIT_DISCOVERY_ACROSS_FILESYSTEM", "GIT_NAMESPACE"}
+
+
 def _git(repo, *args, **kw):
     """Never raises: a missing git binary or a timeout comes back as a failed
     call (rc 127), so NOT_A_REPO / the advisory's error paths handle it instead
     of a traceback exiting 1 -- which reads as CONTESTED and prints no
     RESULT_JSON. --no-optional-locks keeps `git status` from taking index.lock
-    under a concurrent session's add/commit (this tool must stay read-only)."""
+    under a concurrent session's add/commit (this tool must stay read-only).
+    Repository-selecting variables are scrubbed: an inherited GIT_DIR /
+    GIT_WORK_TREE (a git hook, a wrapper) outranks -C, and pointed every fact
+    -- toplevel, status, owner -- at whatever checkout the caller came from."""
+    env = {k: v for k, v in os.environ.items() if k.upper() not in _GIT_REPO_ENV}
     try:
         return subprocess.run(["git", "--no-optional-locks", "-C", repo] + list(args),
                               capture_output=True, text=True, encoding="utf-8",
-                              errors="replace", timeout=kw.get("timeout", 30))
+                              errors="replace", timeout=kw.get("timeout", 30), env=env)
     except (OSError, subprocess.TimeoutExpired) as exc:
         return subprocess.CompletedProcess(["git"] + list(args), 127, "", str(exc))
 
@@ -217,26 +248,63 @@ def _own_toplevel(path):
     proc = _git(d, "rev-parse", "--show-toplevel")
     if proc.returncode != 0 or not proc.stdout.strip():
         return None
-    return os.path.realpath(proc.stdout.strip())
+    return _real(proc.stdout.strip())
 
 
 def _outside_repo(scope, repo):
-    """Scope entries this checkout cannot speak for, each with the checkout
-    that does (`suggested_repo`, None when it is in none).
+    """Scope entries this checkout cannot speak for. Each carries
+    `suggested_repo` (the checkout that owns it, None when unknown) and
+    `reason`: other_checkout | no_checkout (git named no owner: not in a work
+    tree, inside .git/, or git failed) | unrecognised_spelling (git says
+    --repo owns it but the spelling does not resolve under it).
 
     Two conditions, both required to count as inside: the realpath sits under
     the toplevel, AND git names that same toplevel as the path's owner. The
-    second catches a nested checkout -- ~/.claude/.claude/worktrees/<name> is
-    string-inside ~/.claude, but ~/.claude's `git status` never lists its
-    dirt, so evaluating it there is the same wrong-repo false CLEAR.
-    Failing to establish the owner is outside, never inside."""
+    second catches a path inside a nested checkout --
+    ~/.claude/.claude/worktrees/<name> is string-inside ~/.claude, but
+    ~/.claude's `git status` never lists its dirt, so evaluating it there is
+    the same wrong-repo false CLEAR. Failing to establish the owner is
+    outside, never inside."""
     out = []
     for p in scope:
         own = _own_toplevel(p)
-        if _inside(p, repo) and own is not None and _norm(own) == _norm(repo):
+        same_owner = own is not None and _norm(own) == _norm(repo)
+        if _inside(p, repo) and same_owner:
             continue
-        out.append({"path": p, "suggested_repo": own})
+        if same_owner:
+            # Never hint "re-run with --repo X" when X is what was passed.
+            out.append({"path": p, "suggested_repo": None, "reason": "unrecognised_spelling"})
+        else:
+            out.append({"path": p, "suggested_repo": own,
+                        "reason": "other_checkout" if own else "no_checkout"})
     return out
+
+
+def _nested_checkouts(repo, scope):
+    """Linked worktrees of this repo that sit UNDER a directory scope entry.
+    Their dirt never appears in this checkout's `git status` (review finding,
+    2026-09-12: `--paths .` in a repo holding .claude/worktrees read CLEAR
+    with no word that the worktrees went unexamined). Advisory, not a verdict:
+    the in-repo part of the scope WAS evaluated, and a permanent STOP on
+    `--paths .` in ~/.claude, which always has worktrees, is one nobody can
+    satisfy. Returns None when git cannot list worktrees (unmeasured, not
+    empty). Independent clones inside ignored directories are not enumerated
+    -- walking an ignored tree is unbounded; see ACCEPTED LIMITATION."""
+    proc = _git(repo, "worktree", "list", "--porcelain")
+    if proc.returncode != 0:
+        return None
+    found = []
+    for line in proc.stdout.splitlines():
+        if not line.startswith("worktree "):
+            continue
+        wt = _real(line[len("worktree "):].strip())
+        if _norm(wt) == _norm(repo) or not os.path.isdir(wt):
+            continue
+        under = [s for s in scope if _inside(wt, s) and _norm(wt) != _norm(s)]
+        if under:
+            found.append({"path": wt, "under_scope":
+                          [os.path.relpath(s, repo).replace("\\", "/") for s in under]})
+    return found
 
 
 def _dirty_paths(repo):
@@ -573,7 +641,7 @@ def main():
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
 
-    repo = os.path.abspath(args.repo)
+    repo = _unverbatim(os.path.abspath(args.repo))
     out = []          # human-readable lines, suppressed under --json
     def say(line=""):
         out.append(line)
@@ -593,19 +661,20 @@ def main():
     # resolved, `repo` becomes the toplevel for every other fact.
     # Both scope and repo go through realpath so every later relpath/overlap
     # compares one spelling (see _norm).
-    scope = [os.path.realpath(os.path.join(repo, p) if not os.path.isabs(p) else p)
+    scope = [_real(os.path.join(repo, p) if not os.path.isabs(p) else p)
              for p in args.paths]
     top = _git(repo, "rev-parse", "--show-toplevel")
     if top.returncode == 0 and top.stdout.strip():
-        repo = os.path.realpath(top.stdout.strip())
+        repo = _real(top.stdout.strip())
     else:
-        repo = os.path.realpath(repo)
+        repo = _real(repo)
 
     # --- fact 0b: does every scope path belong to THIS checkout? --------
     # A path in another checkout is absent from this one's dirty set by
     # construction, so it read CLEAR however contested it really was.
     out_of_repo = _outside_repo(scope, repo)
     outside = {o["path"] for o in out_of_repo}
+    nested = _nested_checkouts(repo, [p for p in scope if p not in outside])
 
     # --- fact 1: has HEAD moved since session start? --------------------
     # A blank or very short --since prefix-matches almost any HEAD and would
@@ -713,6 +782,7 @@ def main():
         "scope": [os.path.relpath(p, repo).replace("\\", "/")
                   if p not in outside else p for p in scope],
         "out_of_repo_paths": out_of_repo,
+        "nested_checkouts_excluded": nested,   # null == could not enumerate
         "dirty_overlap_foreign": dirty_overlap_foreign,
         "dirty_overlap_mine": dirty_overlap_mine,
         "dirty_total": len(dirty),
@@ -736,9 +806,19 @@ def main():
             if o["suggested_repo"]:
                 say("      %s   -> belongs to %s; re-run with --repo \"%s\""
                     % (o["path"], o["suggested_repo"], o["suggested_repo"]))
+            elif o["reason"] == "unrecognised_spelling":
+                say("      %s   -> git places it in this checkout but the spelling does"
+                    " not resolve under it; pass it relative to --repo" % o["path"])
             else:
-                say("      %s   -> not inside any git checkout (or git could not"
-                    " say which)" % o["path"])
+                say("      %s   -> git names no owning checkout (not in a work tree,"
+                    " inside .git/, or git failed)" % o["path"])
+    if nested is None:
+        say("  NOT COVERED ?: could not list this repo's worktrees -- any nested"
+            " under the scope went unexamined")
+    for n in nested or []:
+        say("  NOT COVERED  : nested worktree %s (under %s) -- its dirt is not in this"
+            " checkout's status; if you edit there, run again with --repo \"%s\""
+            % (n["path"], ", ".join(n["under_scope"]), n["path"]))
     if since_error:
         say("  HEAD         : %s  NOT CHECKED -- %s" % (head[:12], since_error))
     elif head_moved is None:
