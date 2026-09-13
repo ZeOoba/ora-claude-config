@@ -728,6 +728,86 @@ with tempfile.TemporaryDirectory() as td:
     check("bisect: status BLOCKED_OP_IN_PROGRESS", r["status"] == "BLOCKED_OP_IN_PROGRESS", repr(r))
     run(local, "bisect", "reset", check_rc=False)
 
+# =====================================================================================
+# Adversarial review round 2 (2026-09-12).
+# =====================================================================================
+
+# --- origin/main moves between resolving the target and merging -> own conflict still aborted --
+with tempfile.TemporaryDirectory() as td:
+    local, origin = make_pair(td)
+    write(origin, "shared.txt", "origin line\n"); run(origin, "add", "shared.txt")
+    run(origin, "commit", "-q", "-m", "origin edit", "--no-verify")
+    write(local, "shared.txt", "local line\n"); run(local, "add", "shared.txt")
+    run(local, "commit", "-q", "-m", "local edit", "--no-verify")
+    real = cmf._git
+    moved = []
+
+    def racing_fetch(args, repo):
+        if not moved and args[:2] == ["merge", "--no-commit"]:
+            commit(origin, "origin moves again", fname="later.txt")
+            run(local, "fetch", "-q", "origin")  # another session's fetch
+            moved.append(True)
+        return real(args, repo)
+    cmf._git = racing_fetch
+    try:
+        r = cmf.sync(local, "main")
+    finally:
+        cmf._git = real
+    check("moving target: status BLOCKED_CONFLICT", r["status"] == "BLOCKED_CONFLICT", repr(r))
+    check("moving target: own merge aborted, not stranded",
+          r.get("merge_aborted") is True and not _has(local, "MERGE_HEAD"), repr(r))
+    run(local, "merge", "--abort", check_rc=False)
+
+# --- a conflicted PATH containing a refusal phrase is not mistaken for a refusal ---------
+with tempfile.TemporaryDirectory() as td:
+    local, origin = make_pair(td)
+    os.makedirs(os.path.join(origin, "notes")); os.makedirs(os.path.join(local, "notes"))
+    name = os.path.join("notes", "unmerged files audit.md")
+    write(origin, name, "origin line\n"); run(origin, "add", name)
+    run(origin, "commit", "-q", "-m", "origin edit", "--no-verify")
+    write(local, name, "local line\n"); run(local, "add", name)
+    run(local, "commit", "-q", "-m", "local edit", "--no-verify")
+    r = cmf.sync(local, "main")
+    check("marker in path: status BLOCKED_CONFLICT", r["status"] == "BLOCKED_CONFLICT", repr(r))
+    check("marker in path: own merge aborted", not _has(local, "MERGE_HEAD"), repr(r))
+    run(local, "merge", "--abort", check_rc=False)
+
+# --- git output is pinned to English so the refusal markers can match -------------------
+_seen_env = []
+_real_run = cmf.subprocess.run
+
+
+def _spy(*a, **k):
+    _seen_env.append(k.get("env"))
+    return _real_run(*a, **k)
+cmf.subprocess.run = _spy
+try:
+    cmf._git(["--version"], HERE)
+finally:
+    cmf.subprocess.run = _real_run
+check("locale: _git runs git with LC_ALL=C",
+      bool(_seen_env) and (_seen_env[0] or {}).get("LC_ALL") == "C", repr(_seen_env[:1]))
+
+# --- untracked files inside a directory origin turns into a file -> routine, not ERROR --
+check("parse: 'would lose untracked files in them' header lists the directory",
+      cmf.parse_overlap_paths(
+          "error: Updating the following directories would lose untracked files in them:\n"
+          "\tx\n\nAborting\n") == ["x"])
+with tempfile.TemporaryDirectory() as td:
+    local, origin = make_pair(td)
+    os.makedirs(os.path.join(origin, "x"))
+    write(origin, os.path.join("x", "a.txt"), "a\n"); run(origin, "add", "x")
+    run(origin, "commit", "-q", "-m", "x dir", "--no-verify")
+    run(local, "pull", "-q", "origin", "main")
+    run(origin, "rm", "-q", "-r", "x"); write(origin, "x", "now a file\n"); run(origin, "add", "x")
+    run(origin, "commit", "-q", "-m", "x becomes a file", "--no-verify")
+    write(local, os.path.join("x", "untracked.txt"), "local wip\n")
+    r = cmf.sync(local, "main")
+    check("dir->file: routine BLOCKED_DIRTY_OVERLAP, not ERROR",
+          r["status"] == "BLOCKED_DIRTY_OVERLAP" and bool(r.get("blocked_paths")), repr(r))
+    check("dir->file: untracked WIP preserved",
+          os.path.isfile(os.path.join(local, "x", "untracked.txt")))
+
 passed = sum(1 for ok, _ in _results if ok)
 print("\ncheckout-merge-forward tests: %d/%d passed" % (passed, len(_results)))
 sys.exit(0 if passed == len(_results) else 1)
