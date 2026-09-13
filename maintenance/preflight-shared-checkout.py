@@ -99,7 +99,9 @@ A DIRECTORY scope that CONTAINS a linked worktree of this repo is checked
 too: each is listed in nested_checkouts_excluded with its dirty_count; a
 dirty (or unreadable) one is CONTESTED, since its work never appears in this
 checkout's status and a sweep over the parent would take it; a clean one is
-only counted. If the worktree list itself fails under a directory scope, the
+only counted. That includes the CALLER's own dirty worktree -- nested
+entries have no per-file attribution, so --accept-stale cannot clear one;
+narrow the scope instead. If the worktree list itself fails under a directory scope, the
 verdict is INDETERMINATE. Not enumerated (unbounded walk): independent clones,
 and worktrees of OTHER repos, inside ignored directories under the scope --
 name a path inside one and it IS caught (exit 5).
@@ -758,7 +760,9 @@ def main():
                 "owners": [], "stale_owners": [],
                 "nested_checkout": n["path"], "nested_dirty_count": n["dirty_count"]})
     dirty_overlap_mine.sort(key=lambda d: d["path"])
-    dirty_overlap_foreign.sort(key=lambda d: d["path"])
+    # Nested entries first: they carry the only --repo hint, and must not be
+    # pushed past the 20-line human cap by per-file entries.
+    dirty_overlap_foreign.sort(key=lambda d: (not d.get("nested_checkout"), d["path"]))
 
     # --- fact 3: other sessions' live claims overlapping my scope -------
     claims_dir = args.claims_dir or _default_claims_dir(repo)
@@ -853,15 +857,21 @@ def main():
     else:
         say("  HEAD         : %s  unchanged since session start" % head[:12])
     if dirty_overlap_foreign:
-        say("  NOT-YOURS dirty in scope (%d of %d dirty in repo):"
-            % (len(dirty_overlap_foreign), len(dirty)))
+        n_nested = sum(1 for d in dirty_overlap_foreign if d.get("nested_checkout"))
+        say("  NOT-YOURS dirty in scope (%d of %d dirty file(s) in repo%s):"
+            % (len(dirty_overlap_foreign) - n_nested, len(dirty),
+               " + %d dirty nested worktree(s)" % n_nested if n_nested else ""))
         for d in dirty_overlap_foreign[:20]:
             if d.get("nested_checkout"):
                 cnt = d["nested_dirty_count"]
-                say("      %s   [nested worktree, %s uncommitted -- not in this checkout's"
-                    " status; commit it, narrow the scope, or run with --repo \"%s\"]"
-                    % (d["path"], "status unreadable" if cnt is None else "%d file(s)" % cnt,
-                       d["nested_checkout"]))
+                if cnt is None:
+                    say("      %s   [nested worktree, git status UNREADABLE -- repair or"
+                        " prune it (`git worktree repair` / `prune`), or narrow the scope]"
+                        % d["path"])
+                else:
+                    say("      %s   [nested worktree, %d uncommitted file(s) -- not in this"
+                        " checkout's status; commit it, narrow the scope, or run with"
+                        " --repo \"%s\"]" % (d["path"], cnt, d["nested_checkout"]))
                 continue
             who = ", ".join(o[:8] for o in d["owners"]) or "no live recorded owner"
             say("      %s   [%s]%s" % (d["path"], who, _stale_note(d)))
