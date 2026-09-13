@@ -106,6 +106,43 @@ verdict is INDETERMINATE. Not enumerated (unbounded walk): independent clones,
 and worktrees of OTHER repos, inside ignored directories under the scope --
 name a path inside one and it IS caught (exit 5).
 
+MOVED OUT OF SCOPE (added 2026-09-13): HEAD moving since --since is a STOP
+only when a moved commit touches the scope. The "re-read what you are about to
+edit" remedy has nothing to re-read when every moved commit is elsewhere, and
+in ~/.claude, where a dozen sessions commit an hour, the blanket STOP held up a
+one-file cherry-pick over an unrelated docs commit. The move is still reported
+(head_moved true, a WARNING line) and only ever clears to the NEXT finding in
+precedence, never past CONTESTED. The in-scope set is a
+`git diff --name-only --no-renames <since> HEAD` over :(icase) pathspecs, so a
+rename that carries a scope file away still counts, and a scope spelled in a
+different case still matches. head_moved_in_scope is that list, [] when
+measured clean, and null when unmeasurable: --since does not resolve, is not an
+ancestor of HEAD (reset, rebase, branch switch: the diff would not describe
+what happened to the checkout), or git fails. null keeps HEAD_MOVED.
+The WARNING line names the moved range as <since>..<head>.
+
+STALE UNTRACKED KNOWN BLOB (added 2026-09-13): observed live the same day,
+scheduled-tasks/ora-ground-truth-auditor/SKILL.md returned CONTESTED because an
+UNTRACKED copy sat in the tree with "[no live recorded owner]" -- yet its
+`git hash-object` was byte-identical to a blob already committed at that same
+path. Nothing in such a file is unsaved work. An in-scope foreign dirty entry
+is classified STALE_UNTRACKED_KNOWN_BLOB only when ALL hold: it is untracked
+(`??`, never a modified tracked file -- a tracked file reverted to an older
+blob is still a modification of HEAD); it has no live recorded owner and no
+recorded touch by ANY session inside the --ttl-minutes window (default 2h; an
+unknown touch time counts as inside); no other session's live claim overlaps
+it; and its blob appears, as either side of a change, in
+`git log --exclude=refs/stash --all --no-renames --raw -n 200 -- :(literal)<path>`
+(same path only; a stash is live WIP, not history).
+At most 50 such files are hashed per run; the rest stay CONTESTED. Each is
+listed in the RESULT_JSON key stale_untracked_known_blob ({path, blob,
+commits}) and ALSO stays in dirty_overlap_foreign (with known_blob /
+known_blob_commits added), so a consumer reading only the old keys still
+sees dirt. The verdict is STALE_UNTRACKED_KNOWN_BLOB with exit 0 and a WARNING
+ONLY when every contesting item is of that kind; any other foreign dirt, a
+dirty nested worktree, or a competing claim keeps CONTESTED (exit 1), and it
+never outranks HEAD_MOVED or INDETERMINATE.
+
 Usage:
     python maintenance/preflight-shared-checkout.py --paths P [P ...]
         [--repo PATH]        checkout to inspect (default: cwd)
@@ -124,9 +161,16 @@ Usage:
 
 Exit codes:
     0  CLEAR          nothing contests these paths -- go ahead
+    0  STALE_UNTRACKED_KNOWN_BLOB
+                      go ahead WITH CARE: the only contesting items are
+                      untracked copies of blobs already committed at those
+                      paths (see STALE UNTRACKED KNOWN BLOB); a WARNING names
+                      the matching commit(s)
     1  CONTESTED      an overlapping dirty file, or another session's live claim
     2  NOT_A_REPO     --repo is not a git checkout, or git is unavailable
-    3  HEAD_MOVED     --since given and HEAD is not that commit
+    3  HEAD_MOVED     --since given, HEAD is not that commit, and the move
+                      touched the scope -- or that could not be established
+                      (see MOVED OUT OF SCOPE)
     4  INDETERMINATE  a fact could not be established (claims unreadable) --
                       uncertain, never treated as clean
     5  OUT_OF_REPO    a --paths entry is not in the --repo checkout, so it was
@@ -134,7 +178,8 @@ Exit codes:
                       checkout that owns it)
 
 Precedence when several apply: NOT_A_REPO > OUT_OF_REPO > HEAD_MOVED >
-CONTESTED > INDETERMINATE > CLEAR. All findings are reported regardless of
+CONTESTED > INDETERMINATE > STALE_UNTRACKED_KNOWN_BLOB > CLEAR. A HEAD move
+that touched no scope path sets nothing and falls through. All findings are reported regardless of
 which one sets the exit code. OUT_OF_REPO outranks the rest because --since and
 the dirty set then describe the wrong checkout.
 """
@@ -143,6 +188,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime, timedelta
 
 EXIT_CLEAR = 0
@@ -241,6 +287,29 @@ def _head_sha(repo):
     return proc.stdout.strip()
 
 
+def _moved_in_scope(repo, since, scope):
+    """Scope paths changed between --since and HEAD: repo-relative, forward-slash,
+    sorted. [] means measured and nothing in scope moved; None means it could not
+    be established, and None must keep HEAD_MOVED (see MOVED OUT OF SCOPE)."""
+    if not scope:
+        return None
+    base = _git(repo, "rev-parse", "--verify", "--quiet", since + "^{commit}")
+    if base.returncode != 0 or not base.stdout.strip():
+        return None
+    base_sha = base.stdout.strip()
+    if _git(repo, "merge-base", "--is-ancestor", base_sha, "HEAD").returncode != 0:
+        return None
+    # :(icase) -- NTFS does not care about case and neither may the caller; a
+    # wider match only ever keeps the STOP. No `literal` magic for the same
+    # reason: a glob character in a scope name can only widen it.
+    specs = [":(icase)" + os.path.relpath(p, repo).replace("\\", "/") for p in scope]
+    diff = _git(repo, "-c", "core.quotepath=off", "diff", "--name-only",
+                "--no-renames", "-z", base_sha, "HEAD", "--", *specs)
+    if diff.returncode != 0:
+        return None
+    return sorted(p for p in diff.stdout.split("\0") if p)
+
+
 def _own_toplevel(path):
     """realpath of the git toplevel that owns `path`, or None when it sits in
     no work tree (or git cannot say). A path that does not exist yet -- a file
@@ -312,8 +381,9 @@ def _nested_checkouts(repo, scope):
     return found
 
 
-def _dirty_paths(repo):
-    """Absolute paths of everything `git status --porcelain` reports.
+def _dirty_paths(repo, untracked=None):
+    """Absolute paths of everything `git status --porcelain` reports. When a
+    set is passed as `untracked`, the '??' entries are also added to it.
 
     Includes untracked files -- a stranger's brand-new file in my scope is
     exactly as much of a co-mingling hazard as a modified one. For a rename
@@ -343,8 +413,47 @@ def _dirty_paths(repo):
                 paths.append(fields[i])
             i += 1
         for part in paths:
-            out.append(os.path.join(repo, part.replace("/", os.sep)))
+            full = os.path.join(repo, part.replace("/", os.sep))
+            out.append(full)
+            if untracked is not None and code == "??":
+                untracked.add(full)
     return out
+
+
+KNOWN_BLOB_MAX_CANDIDATES = 50   # untracked in-scope files hashed per run
+KNOWN_BLOB_MAX_COMMITS = 200     # history entries scanned per path
+
+
+def _known_blob(repo, rel):
+    """(blob, [commit, ...]) when the working copy of untracked `rel` hashes to
+    a blob recorded AT THAT PATH in `git log --all` history (as either side of
+    a change, so a later deletion commit counts too), else None. Bounded to
+    KNOWN_BLOB_MAX_COMMITS entries; any git failure is None (stays CONTESTED)."""
+    ho = _git(repo, "hash-object", "--", rel)
+    blob = (ho.stdout or "").strip().lower()
+    if ho.returncode != 0 or not blob:
+        return None
+    # refs/stash excluded: a `stash -u` holds live WIP, not committed history.
+    lg = _git(repo, "-c", "core.quotepath=off", "log", "--exclude=refs/stash", "--all",
+              "--no-renames",
+              "--raw", "--no-abbrev", "--format=%H", "-n", str(KNOWN_BLOB_MAX_COMMITS),
+              "--", ":(literal)" + rel)
+    if lg.returncode != 0:
+        return None
+    commits, current = [], None
+    for line in lg.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if not line.startswith(":"):
+            current = line
+            continue
+        meta = line.split("\t", 1)[0].split()
+        # ":<mode> <mode> <old> <new> <status>"
+        if current and len(meta) >= 4 and blob in (meta[2].lower(), meta[3].lower()):
+            if current not in commits:
+                commits.append(current)
+    return (blob, commits) if commits else None
 
 
 def _local_only(repo, scope, canonical):
@@ -533,6 +642,17 @@ def _stale_note(entry):
     return "  (+%d stale, committed since their touch: %s)" % (len(stale), names)
 
 
+def _known_note(entry):
+    """Tail for an untracked foreign file whose bytes are already committed."""
+    commits = entry.get("known_blob_commits")
+    if not commits:
+        return ""
+    shown = ", ".join(c[:12] for c in commits[:3])
+    more = " +%d more" % (len(commits) - 3) if len(commits) > 3 else ""
+    return ("  WARNING: STALE_UNTRACKED_KNOWN_BLOB -- untracked, byte-identical to"
+            " blob %s committed at this path in %s%s" % (entry["known_blob"][:12], shown, more))
+
+
 def _last_commit_time(repo, rel):
     """Epoch of the newest commit touching `rel`, or None (never committed, or
     git could not answer). `:(literal,icase)` for the same reason as
@@ -695,9 +815,15 @@ def main():
         else:
             head_moved = not (head.lower().startswith(since)
                               or since.startswith(head.lower()))
+    # --- fact 1b: did the move touch my scope? --------------------------
+    head_moved_in_scope = None
+    if head_moved:
+        head_moved_in_scope = _moved_in_scope(
+            repo, since, [p for p in scope if p not in outside])
 
     # --- fact 2: dirty files overlapping my scope -----------------------
-    dirty = _dirty_paths(repo)
+    untracked = set()
+    dirty = _dirty_paths(repo, untracked)
     if dirty is None:
         report = {"verdict": "NOT_A_REPO", "repo": repo,
                   "detail": "git status failed"}
@@ -733,6 +859,9 @@ def main():
         only_mine = bool(live) and bool(mine) and all(
             o.lower() == mine for o in live)
         entry = {"path": rel, "owners": sorted(live), "stale_owners": sorted(stale)}
+        if p in untracked:
+            entry["_untracked"] = True
+            entry["_touches"] = touches
         if only_mine and stale:
             # NOT auto-cleared (independent review 2026-09-12): a PARTIAL
             # commit -- hooks/lib/isolated_commit.py lands one hunk and leaves
@@ -777,6 +906,40 @@ def main():
                 continue  # my own claim (exact id; see ownership note above)
             (expired_overlap if c["expired"] else competing).append(c)
 
+    # --- fact 4: untracked foreign copies of already-committed blobs ------
+    # (see STALE UNTRACKED KNOWN BLOB). Only untracked, per-file, foreign
+    # entries with no recorded owner inside the TTL window (an unknown touch
+    # time counts as inside it) and no other session's live claim on the path.
+    # Bounded: at most KNOWN_BLOB_MAX_CANDIDATES files are hashed; the rest
+    # stay plain CONTESTED.
+    touch_cutoff = time.time() - args.ttl_minutes * 60
+    known_blob = []
+    candidates = 0
+    for d in dirty_overlap_foreign:
+        is_untracked = d.pop("_untracked", False)
+        touches = d.pop("_touches", {})
+        if not is_untracked or d.get("nested_checkout") or d["owners"]:
+            continue
+        if any(ts is None or ts >= touch_cutoff for ts in touches.values()):
+            continue
+        full = os.path.join(repo, d["path"].replace("/", os.sep))
+        # Unreadable claims: classify anyway -- INDETERMINATE outranks the
+        # known-blob verdict, so the unknown still cannot read as go.
+        if any(any(_overlaps(cp, full) for cp in c["paths"]) for c in competing):
+            continue
+        if candidates >= KNOWN_BLOB_MAX_CANDIDATES:
+            continue
+        candidates += 1
+        found = _known_blob(repo, d["path"])
+        if found is None:
+            continue
+        d["known_blob"] = found[0]
+        d["known_blob_commits"] = found[1]
+        known_blob.append({"path": d["path"], "blob": found[0], "commits": found[1]})
+    for d in dirty_overlap_mine:
+        d.pop("_untracked", None)
+        d.pop("_touches", None)
+
     # --- advisory: is this work landing only on a non-canonical branch? ---
     branch_info = _local_only(repo, [p for p in scope if p not in outside],
                               args.canonical)
@@ -788,16 +951,22 @@ def main():
         os.path.isdir(p) for p in scope if p not in outside)
     indeterminate = (claims is None or bool(unreadable) or bool(since_error)
                      or nested_unmeasured)
-    contested = bool(dirty_overlap_foreign) or bool(competing)
+    known_paths = {k["path"] for k in known_blob}
+    known_only = (bool(dirty_overlap_foreign) and not competing
+                  and all(d["path"] in known_paths and not d.get("nested_checkout")
+                          for d in dirty_overlap_foreign))
+    contested = (bool(dirty_overlap_foreign) or bool(competing)) and not known_only
 
     if out_of_repo:
         verdict, code = "OUT_OF_REPO", EXIT_OUT_OF_REPO
-    elif head_moved:
+    elif head_moved and head_moved_in_scope != []:
         verdict, code = "HEAD_MOVED", EXIT_HEAD_MOVED
     elif contested:
         verdict, code = "CONTESTED", EXIT_CONTESTED
     elif indeterminate:
         verdict, code = "INDETERMINATE", EXIT_INDETERMINATE
+    elif known_only:
+        verdict, code = "STALE_UNTRACKED_KNOWN_BLOB", EXIT_CLEAR
     else:
         verdict, code = "CLEAR", EXIT_CLEAR
 
@@ -807,6 +976,9 @@ def main():
         "head": head,
         "since": args.since,
         "head_moved": head_moved,          # null == not checked / uncheckable
+        # only meaningful when head_moved: [] == measured, nothing in scope moved;
+        # null == not measured (or HEAD did not move)
+        "head_moved_in_scope": head_moved_in_scope,
         "since_error": since_error,
         "scope": [os.path.relpath(p, repo).replace("\\", "/")
                   if p not in outside else p for p in scope],
@@ -814,6 +986,9 @@ def main():
         "nested_checkouts_excluded": nested,   # null == could not enumerate
         "dirty_overlap_foreign": dirty_overlap_foreign,
         "dirty_overlap_mine": dirty_overlap_mine,
+        # untracked foreign copies byte-identical to a blob committed at the
+        # same path; they are ALSO listed in dirty_overlap_foreign
+        "stale_untracked_known_blob": known_blob,
         "dirty_total": len(dirty),
         "sessions_dir": sessions_dir,
         "provenance_available": prov_index is not None,
@@ -852,8 +1027,21 @@ def main():
         say("  HEAD         : %s  NOT CHECKED -- %s" % (head[:12], since_error))
     elif head_moved is None:
         say("  HEAD         : %s  (--since not given: not checked)" % head[:12])
+    elif head_moved and head_moved_in_scope == []:
+        say("  HEAD         : %s  WARNING: MOVED %s..%s -- no moved commit touches"
+            " the scope, so this does not stop you; re-read anything OUTSIDE the"
+            " scope you rely on" % (head[:12], since[:12], head[:12]))
+    elif head_moved and head_moved_in_scope:
+        say("  HEAD         : %s  MOVED since %s, touching %d scope path(s):"
+            % (head[:12], args.since, len(head_moved_in_scope)))
+        for p in head_moved_in_scope[:20]:
+            say("      %s" % p)
+        if len(head_moved_in_scope) > 20:
+            say("      ... and %d more" % (len(head_moved_in_scope) - 20))
     elif head_moved:
-        say("  HEAD         : %s  MOVED since %s" % (head[:12], args.since))
+        say("  HEAD         : %s  MOVED since %s (whether it touched the scope could"
+            " not be established -- --since unresolvable or not an ancestor of HEAD)"
+            % (head[:12], args.since))
     else:
         say("  HEAD         : %s  unchanged since session start" % head[:12])
     if dirty_overlap_foreign:
@@ -874,7 +1062,7 @@ def main():
                         " --repo \"%s\"]" % (d["path"], cnt, d["nested_checkout"]))
                 continue
             who = ", ".join(o[:8] for o in d["owners"]) or "no live recorded owner"
-            say("      %s   [%s]%s" % (d["path"], who, _stale_note(d)))
+            say("      %s   [%s]%s%s" % (d["path"], who, _stale_note(d), _known_note(d)))
         if len(dirty_overlap_foreign) > 20:
             say("      ... and %d more" % (len(dirty_overlap_foreign) - 20))
     else:
@@ -928,6 +1116,10 @@ def main():
     say()
     say({
         "CLEAR": "  -> go ahead.",
+        "STALE_UNTRACKED_KNOWN_BLOB": "  -> go ahead, WITH CARE: every contesting file"
+                                      " is an untracked copy of a blob already in git"
+                                      " history at that path (listed above). Nothing in"
+                                      " it is unsaved work; archive it when convenient.",
         "CONTESTED": "  -> STOP. Reconcile with the other session, or scope"
                      " into an isolated worktree.",
         "HEAD_MOVED": "  -> STOP. Re-read the files you are about to edit;"
