@@ -93,11 +93,16 @@ owner cannot be established counts as outside: a path that was never
 evaluated is never CLEAR. Repository-selecting env (GIT_DIR, GIT_WORK_TREE,
 ...) is scrubbed from every git call, and Win32 verbatim-prefix spellings
 are normalized.
-A DIRECTORY scope that merely contains a linked worktree is different: the
-directory's own files were evaluated, so the verdict stands, but each such
-worktree is reported as nested_checkouts_excluded with a --repo hint rather
-than silently skipped. Independent clones inside ignored directories are not
-enumerated (unbounded walk) -- name a path inside one and it IS caught.
+Repositories selected only through those env vars (a bare "dotfiles" repo)
+are therefore unsupported and read NOT_A_REPO -- closed, not open.
+A DIRECTORY scope that CONTAINS a linked worktree of this repo is checked
+too: each is listed in nested_checkouts_excluded with its dirty_count; a
+dirty (or unreadable) one is CONTESTED, since its work never appears in this
+checkout's status and a sweep over the parent would take it; a clean one is
+only counted. If the worktree list itself fails under a directory scope, the
+verdict is INDETERMINATE. Not enumerated (unbounded walk): independent clones,
+and worktrees of OTHER repos, inside ignored directories under the scope --
+name a path inside one and it IS caught (exit 5).
 
 Usage:
     python maintenance/preflight-shared-checkout.py --paths P [P ...]
@@ -284,12 +289,10 @@ def _nested_checkouts(repo, scope):
     """Linked worktrees of this repo that sit UNDER a directory scope entry.
     Their dirt never appears in this checkout's `git status` (review finding,
     2026-09-12: `--paths .` in a repo holding .claude/worktrees read CLEAR
-    with no word that the worktrees went unexamined). Advisory, not a verdict:
-    the in-repo part of the scope WAS evaluated, and a permanent STOP on
-    `--paths .` in ~/.claude, which always has worktrees, is one nobody can
-    satisfy. Returns None when git cannot list worktrees (unmeasured, not
-    empty). Independent clones inside ignored directories are not enumerated
-    -- walking an ignored tree is unbounded; see ACCEPTED LIMITATION."""
+    while those worktrees held uncommitted work). main() status-checks each
+    one: dirty contests, clean is only counted. Returns None when git cannot
+    list worktrees (unmeasured, not empty). Independent clones and other
+    repos' worktrees are not enumerated -- see PATH CONTAINMENT."""
     proc = _git(repo, "worktree", "list", "--porcelain")
     if proc.returncode != 0:
         return None
@@ -740,6 +743,20 @@ def main():
                 entry["stale_only"] = True
                 only_mine = False
         (dirty_overlap_mine if only_mine else dirty_overlap_foreign).append(entry)
+    # Nested worktrees under a directory scope (review round 2): a DIRTY one
+    # contests -- its work is invisible to this checkout's status, and a sweep
+    # over the parent (archive, cleanup) would take it. A CLEAN one has nothing
+    # to protect and stays advisory, so the STOP is always satisfiable. Its
+    # files are not attributed per-file (another checkout's provenance), and
+    # an unreadable status is unknown, which contests like any unknown owner.
+    for n in nested or []:
+        nd = _dirty_paths(n["path"])
+        n["dirty_count"] = None if nd is None else len(nd)
+        if nd is None or nd:
+            dirty_overlap_foreign.append({
+                "path": os.path.relpath(n["path"], repo).replace("\\", "/"),
+                "owners": [], "stale_owners": [],
+                "nested_checkout": n["path"], "nested_dirty_count": n["dirty_count"]})
     dirty_overlap_mine.sort(key=lambda d: d["path"])
     dirty_overlap_foreign.sort(key=lambda d: d["path"])
 
@@ -761,7 +778,12 @@ def main():
                               args.canonical)
 
     # --- verdict --------------------------------------------------------
-    indeterminate = claims is None or bool(unreadable) or bool(since_error)
+    # A directory scope whose worktrees could not be listed may hide dirty
+    # nested work: unmeasured, never clean. (File scopes cannot contain one.)
+    nested_unmeasured = nested is None and any(
+        os.path.isdir(p) for p in scope if p not in outside)
+    indeterminate = (claims is None or bool(unreadable) or bool(since_error)
+                     or nested_unmeasured)
     contested = bool(dirty_overlap_foreign) or bool(competing)
 
     if out_of_repo:
@@ -815,13 +837,13 @@ def main():
             else:
                 say("      %s   -> git names no owning checkout (not in a work tree,"
                     " inside .git/, or git failed)" % o["path"])
-    if nested is None:
+    if nested_unmeasured:
         say("  NOT COVERED ?: could not list this repo's worktrees -- any nested"
-            " under the scope went unexamined")
-    for n in nested or []:
-        say("  NOT COVERED  : nested worktree %s (under %s) -- its dirt is not in this"
-            " checkout's status; if you edit there, run again with --repo \"%s\""
-            % (n["path"], ", ".join(n["under_scope"]), n["path"]))
+            " under the directory scope went unexamined (INDETERMINATE)")
+    clean_nested = [n for n in nested or [] if n.get("dirty_count") == 0]
+    if clean_nested:
+        say("  NOT COVERED  : %d clean nested worktree(s) under the scope (no"
+            " uncommitted files; see nested_checkouts_excluded)" % len(clean_nested))
     if since_error:
         say("  HEAD         : %s  NOT CHECKED -- %s" % (head[:12], since_error))
     elif head_moved is None:
@@ -834,6 +856,13 @@ def main():
         say("  NOT-YOURS dirty in scope (%d of %d dirty in repo):"
             % (len(dirty_overlap_foreign), len(dirty)))
         for d in dirty_overlap_foreign[:20]:
+            if d.get("nested_checkout"):
+                cnt = d["nested_dirty_count"]
+                say("      %s   [nested worktree, %s uncommitted -- not in this checkout's"
+                    " status; commit it, narrow the scope, or run with --repo \"%s\"]"
+                    % (d["path"], "status unreadable" if cnt is None else "%d file(s)" % cnt,
+                       d["nested_checkout"]))
+                continue
             who = ", ".join(o[:8] for o in d["owners"]) or "no live recorded owner"
             say("      %s   [%s]%s" % (d["path"], who, _stale_note(d)))
         if len(dirty_overlap_foreign) > 20:

@@ -1220,29 +1220,47 @@ def test_inherited_git_env_cannot_redirect_the_gate():
         _out_of_repo_ok("GIT_DIR/GIT_WORK_TREE env set", rc, out, "wt/feature/agents/one.md", wt)
 
 
-def test_directory_scope_containing_nested_worktree_reports_exclusion():
-    """Review finding: `--paths .` (or the dir holding .claude/worktrees) in a
-    repo with an ignored nested worktree read CLEAR with no word that the
-    worktree's dirt was never looked at. Not exit 5 -- the in-repo part WAS
-    evaluated, and failing `--paths .` forever in ~/.claude (which always has
-    worktrees) is an unsatisfiable STOP -- but the exclusion must be explicit."""
+def test_directory_scope_containing_nested_worktree():
+    """Review findings (2026-09-12, two rounds): `--paths .` (or the dir holding
+    .claude/worktrees) read CLEAR while a nested worktree under it held
+    uncommitted work its parent's `git status` never lists -- a false go for
+    any sweep over a worktree parent (archiving, cleanup, triage). A DIRTY
+    nested worktree contests; a CLEAN one has nothing to protect and stays
+    advisory, so the STOP is always satisfiable (commit it, or narrow scope)."""
     with tempfile.TemporaryDirectory() as td:
         a = _make_repo(td)
         with open(os.path.join(a, ".git", "info", "exclude"), "a") as fh:
             fh.write("/wt/\n")
-        wt = os.path.join(a, "wt", "feature")
-        _git(a, "worktree", "add", "-b", "feature", wt)
-        _dirty(wt, "agents/one.md")
+        dirty_wt = os.path.join(a, "wt", "dirty")
+        clean_wt = os.path.join(a, "wt", "clean")
+        _git(a, "worktree", "add", "-b", "dirty", dirty_wt)
+        _git(a, "worktree", "add", "-b", "clean", clean_wt)
+        _dirty(dirty_wt, "agents/one.md")
         for i, scope in enumerate((".", "wt")):
             rc, out, _ = run("--repo", a, "--claims-dir", _claims_dir(td, "n%d" % i),
                              "--session", MY_SESSION, "--paths", scope)
             rj = result_json(out) or {}
             nested = rj.get("nested_checkouts_excluded") or []
-            expect("nested under dir scope %r: exit unchanged (CLEAR)" % scope, rc == EXIT_CLEAR, (rc, out[-500:]))
-            expect("nested under dir scope %r: worktree listed as excluded" % scope,
-                   any(_same_dir(n.get("path"), wt) for n in nested), nested)
-            expect("nested under dir scope %r: human line names it with a --repo hint" % scope,
-                   "NOT COVERED" in out and "--repo" in out, out[-600:])
+            foreign = rj.get("dirty_overlap_foreign") or []
+            expect("nested under dir scope %r: dirty nested worktree -> CONTESTED" % scope,
+                   rc == EXIT_CONTESTED, (rc, out[-500:]))
+            expect("nested under dir scope %r: dirty worktree in dirty_overlap_foreign" % scope,
+                   any(_same_dir(f.get("nested_checkout"), dirty_wt) and f.get("nested_dirty_count") == 1
+                       for f in foreign), foreign)
+            expect("nested under dir scope %r: both worktrees listed with dirty counts" % scope,
+                   sorted((os.path.basename(n.get("path") or ""), n.get("dirty_count")) for n in nested)
+                   == [("clean", 0), ("dirty", 1)], nested)
+            expect("nested under dir scope %r: human output hints --repo for the dirty one" % scope,
+                   "--repo" in out and "dirty" in out, out[-600:])
+        _git(dirty_wt, "add", "-A")
+        _git(dirty_wt, "commit", "-m", "land it")
+        rc, out, _ = run("--repo", a, "--claims-dir", _claims_dir(td, "n8"),
+                         "--session", MY_SESSION, "--paths", ".")
+        rj = result_json(out) or {}
+        expect("nested: once committed, clean nested worktrees -> CLEAR (satisfiable)",
+               rc == EXIT_CLEAR, (rc, out[-500:]))
+        expect("nested: clean worktrees summarized as a count, not one line each",
+               "2 clean nested worktree" in out and out.count("NOT COVERED") <= 1, out[-600:])
         rc, out, _ = run("--repo", a, "--claims-dir", _claims_dir(td, "n9"),
                          "--session", MY_SESSION, "--paths", "agents")
         rj = result_json(out) or {}
@@ -1279,7 +1297,7 @@ def test_literal_tilde_path_expands_to_home_not_a_dir_named_tilde():
 def main():
     test_verbatim_prefix_spelling_of_in_repo_path_is_not_out_of_repo()
     test_inherited_git_env_cannot_redirect_the_gate()
-    test_directory_scope_containing_nested_worktree_reports_exclusion()
+    test_directory_scope_containing_nested_worktree()
     test_out_of_repo_outranks_indeterminate_and_carries_reason()
     test_absolute_path_in_another_repo_is_out_of_repo()
     test_relative_dotdot_escape_is_out_of_repo()
