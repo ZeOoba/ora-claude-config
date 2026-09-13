@@ -5,12 +5,215 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-09-12T23:02:13.656Z
+  modified: 2026-09-13T15:09:24.040Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-09-13 — ora-pm PR #37 merged + live (deploy-env gate)
+
+- Merged `7061eda` (main had not moved since the branch base; PR CI green). First strict main run: build-env check OK, Pages production env check OK (3 Stripe deferred warnings), deploy succeeded and is the current Production deployment; `/api/health` 200, admin route with a bogus token 401 (not 503). Every future main deploy now blocks on a missing required Pages/build var. At tenant-payments launch, promote the 3 Stripe vars to `required` in `scripts/check-deploy-env.mjs`.
+
+## 2026-09-13 -- PR #201 (json_field_equals auto-check) MERGED; main verified == reviewed head
+- Merged `83c23a0` at 2026-09-13T15:06:27Z by ZeOoba.
+- Verified (not assumed from MERGED state):
+  - `origin/main` blobs for memory-integrity-probe.py and its test equal the reviewed head `bb86040`.
+  - No revert commits touch the probe.
+  - The runtime copies already equal them via mirror `f4cd1b5`, so merge-forward sees identical content.
+- Cleanup: the merged worktree `memory-integrity-json-autocheck` was removed. Local branch deleted; `bb86040` is still reachable from main.
+- Remote branch `feat/memory-integrity-json-field-autocheck` was left in place.
+
+## 2026-09-13 -- memory-integrity-probe: json_field_equals auto-check (PR #201), mirrored to runtime; OI-278 wired
+- Why: open-items auto-checks could only read fleet-registry state. So OI-278's closing condition (`ora-pm-cron/payments-feed-state.json` status=PRESENT) could not flag itself.
+- Shipped: [PR #201](https://github.com/ZeOoba/ora-claude-config/pull/201), head `bb86040`, OPEN (not merged).
+  - Adds `kind=json_field_equals path= field= expect= [max_age_hours=]`.
+  - True/False/None as before, plus a new str "could not evaluate" warning for missing, stale, oversized or unreadable evidence, so it is never a silent False.
+  - Unquoted values shed markdown punctuation and backticks.
+  - fleet-status is loaded lazily and only for registry kinds.
+- Tests 84/84, 48 of them new. Two Opus adversarial rounds:
+  - Round 1: 1 Important (trailing period -> silent False) plus 6 minors, all fixed test-first.
+  - Round 2: verified closed.
+  - Live-memory probe output is byte-identical to the pre-change probe.
+- Runtime mirror `f4cd1b5` on feat/model-canary-probe-step25:
+  - Both blobs == bb86040. Committed with `--only` on those two paths.
+  - Preflight --since b711880 CLEAR. Gabriel approved in-turn.
+  - allow-config-write token minted for this one mirror, then moved to the session overrides `_archive/`.
+- Tracker:
+  - Convention section documents the new kind.
+  - OI-278 carries `kind=json_field_equals ... expect=PRESENT max_age_hours=96`, which evaluates False today (feed ABSENT).
+  - An `Auto-check scope` note says a match covers only the feed half; the ruling on the 68 pre-guard fees is still manual.
+
+## 2026-09-13 — ora-pm deploy-env gate: PR #37 open (NOT merged)
+
+- [ZeOoba/ora-pm#37](https://github.com/ZeOoba/ora-pm/pull/37) (`ci/pages-secrets-check` @ `ff22265`): `scripts/check-deploy-env.mjs` + ci.yml block the production deploy when a required Pages production var (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, CRON_SECRET, ADMIN_EMAILS, CONFIDENTIAL_TERMS, ANTHROPIC_API_KEY) or build var (VITE_SUPABASE_URL/ANON_KEY) is missing; Stripe vars `deferred` (warn only) until tenant payments launch — promote them to `required` at launch. Fail-closed on Cloudflare API/credential error; warn-only on PRs.
+- Evidence: 646/646 tests, typecheck clean; adversarial review → drift-guard gaps fixed + mutation-checked (4 access patterns); PR CI run 34763674157 proved the existing `CLOUDFLARE_API_TOKEN` can read the Pages project (OK + the 3 expected Stripe warnings). Known limit: an existing-but-empty secret_text passes (API never returns secret values).
+
+## 2026-09-13 -- config-write-guard commit/run friction was already fixed; no new helper built
+
+- Session-end friction report claimed the config-write-guard blocked `git commit` and test-run commands twice, solely because their text mentioned `~/.claude`/`CLAUDE.md`, and proposed a new helper (commit message via a scratch file in a worktree) to route around it.
+- Before building, ran `hooks/config-write-guard.py` directly against synthetic PreToolUse payloads instead of trusting the report: a plain `git commit -m "... CLAUDE.md ..."`, the same message via the documented heredoc form, and `python hooks/tests/test-eos-claude-md-guard.py` (both bare and under pytest) all exited 0 (allow) on the current checkout (HEAD `602e64b`).
+- `git log -- hooks/config-write-guard.py` shows both false-positive classes already closed: `569ef4b` (shell-matcher false positives) and `7d01eff` (evidence-based WIP attribution; read-only escape hatch). The friction predates these fixes and does not reproduce now.
+- Decision: no helper built -- it would have re-solved an already-fixed problem. `hooks/lib/isolated_commit.py` was also checked and does not overlap (it solves cross-session staging collisions, not this false-positive class).
+- Lesson (reinforces `feedback_measure_before_arguing.md`): a friction report is a memory of a past event, not a claim about current code -- check `git log` on the implicated file before proposing a build, not just before asserting a gate's *behavior*.
+
+## 2026-09-13 -- ora-routine-pause-resume-2026-09-11 folder archived (retire step 2/2)
+
+- Completes the same-day RATIFIED retire (registry entry deleted earlier). Folder moved to `scheduled-tasks/_archive_2026-09-13_onetime-complete/ora-routine-pause-resume-2026-09-11/` (Gabriel-directed "archive once 5271f2eb is reconciled").
+- Reconciliation: preflight had returned CONTESTED on the SKILL.md (uncommitted hunk owned by session 5271f2eb). Evidence: owner idle since 2026-09-10 20:49 ET (transcript mtime), no active claim on the path, hunk = item 38 `ora-ground-truth-auditor` added to the resume list, already consumed by the 2026-09-11 fire; task no longer registered. SKILL.md moved intact with the hunk (sha1 a956be4b, verified pre/post); hunk also saved as `uncommitted-hunk-session-5271f2eb.patch` + ARCHIVED.txt beside it.
+- Primary checkout now shows ` D scheduled-tasks/ora-routine-pause-resume-2026-09-11/SKILL.md` + untracked archive dir -- left for commit hygiene. `_scheduled_tasks_backup/` copy left in place per the 2026-08-28 onetime-complete precedent.
+
+## 2026-09-13 -- ora-pm payments-feed-absent notice de-noised; OI-278 filed (was a dead pointer)
+- Trigger: the ora-pm#26 guard sends an identical "PAYMENTS FEED ABSENT" digest on every daily run. That trains the reader to ignore it. OI-278 was also cited in 3 places but had no tracker row.
+- Shipped (`C:/Users/Owner/ora-pm-cron`, not git; originals in `_archive/2026-09-13_pre-oi278-feed-state/`):
+  - `ping-crons-lib.ps1` adds `Get-PaymentsFeedPolicy` plus Read/Save state helpers.
+  - `ping-crons.ps1` gates delinquency-check emails on `payments-feed-state.json`. It sends on the first absent run, every 7 days, and on any nonzero or malformed fee count. Other days it logs `SEND SUPPRESSED ... tracked=OI-278`. When the feed returns it sends a one-time `PAYMENTS FEED RESTORED - OI-278 can be closed`.
+  - Every malformed shape fails open (sends). State advances only after a successful send. critical-dates-alerts is unchanged.
+- State seeded ABSENT since 2026-09-13T09:47:13, matching the 09:47 notice already sent. First suppressed run: 09-14. First reminder: 09-20.
+- Verified:
+  - `-SelfTest` 38/38.
+  - Stubbed end-to-end harness: 11 scenarios.
+  - Opus adversarial refute: 0 Critical, 1 Important (a non-integer fee count threw into the POST-error catch). That and Minor findings 2-6 were fixed test-first.
+- Also: OI-278 row and stub filed in open-items-tracker.md. `ora-pm-daily-crons` SKILL.md now treats SEND SUPPRESSED as expected (file edit only, no update_scheduled_task call). Neither is committed; the `~/.claude` checkout is dirty with other sessions' WIP.
+
+## 2026-09-13 — ora-pm PR #33 live-verified end to end
+
+- First expense ever created through the admin UI: `expenses` row `e6cb00aa-0efe-4a00-97be-7b3315ebb54a` (3540 E 5th Ave, taxes, $5,000, 2026-09-13), created 14:29:24Z, with `recoverable=true` and `vendor`/`invoice_ref`/`description` null — exactly the payload that previously failed PGRST204/422. Confirms both the schema fix (PR #33) and the `ADMIN_EMAILS` production secret fix from the prior entry. Test row to be deleted by Gabriel in the UI. Still open: production Stripe secrets absent (not investigated).
+
+## 2026-09-13 -- Ground-truth audit follow-ups (Gabriel-directed): expire-leases weekly, one-time resume RATIFIED retire, heartbeat clock source, sweep doc fix
+
+- **ora-aaos-expire-leases retimed daily -> weekly** (cron `20 7 * * *` -> `20 7 * * 1`, Mondays 07:20 ET) via update_scheduled_task; SKILL.md frontmatter v1.3 note added, `[MODEL:]` tag moved back to the end of the description (checked date left at 2026-07-26 -- not re-observed). Evidence: 2026-09-13 audit verifier found ora-ops `locks/` empty and `aaos-events.ndjson` unchanged since 2026-08-16, so the daily sweep was a guaranteed no-op. Revert trigger: any new lock file or event. Reclaim window now up to ~7d.
+- **RATIFIED retire: ora-routine-pause-resume-2026-09-11** (CC/MCP one-time, fired 2026-09-11T20:01:42Z, enabled:false since). Registry entry deleted via delete_scheduled_task (CC/MCP order: delete first). Folder archive NOT done: preflight-shared-checkout.py returned CONTESTED on `scheduled-tasks/ora-routine-pause-resume-2026-09-11/SKILL.md` (uncommitted edit owned by session 5271f2eb; stale owner 57f9ecd1). Archive the folder to `_archive_*` once that owner is reconciled. OI-277's stalled progress marker for this id is moot now the registration is gone.
+- **ora-cowork-heartbeat v07 (OI-297)** -- LAMS SKILL.md (OneDrive store, hand-edited; governance mirror `00_Governance/Scheduled/ora-cowork-heartbeat/SKILL.md` synced to the same hash 31e95b16b1d0; pre-edit copy kept in session scratchpad). Step 1 now requires `now_utc` from a real clock (shell `date -u` -> notion-fetch "as of" server timestamp -> abort `HB ❌ no clock source`), never derived from the prior page value. Watchdog prose 16h/KNOWN GAP -> 30h (OI-280 closed that gap 2026-09-12). Note: the LAMS registry description may lag this frontmatter until the next Cowork-side update. The live page still shows the wrong 2026-09-13T20:22:00Z value -- correction draft remains in ground-truth-pending-approval/2026-09-13/ (not applied).
+- **ora-memory-commit-sweep SKILL.md**: exit-1 line said "retries automatically next cycle 15 minutes later"; corrected to the registry cron `0 19 * * *` (next daily run, ~24h). Doc-only.
+- **Archived** `ground-truth-pending-approval/2026-09-12/cc_ora-doctrine-integrity-guard_...` -> `_archive/2026-09-12_resolved/` (finding resolved in-session 2026-09-12, OI-287 closed; never sent/applied).
+- **portfolio.json staleness (asOf 2026-09-06)**: not refreshed from this session -- `run_scheduled_task` is refused in unattended-classified sessions. Next producer fire: ora-cc-snapshot-refresh Mon 2026-09-14 06:15 ET (worktree-isolated extract + guarded auto-push). EXCEL.EXE currently holds the Master Workbook open.
+- Preflight gate CLEAR for both ~/.claude SKILL.md edits; edits sit uncommitted in the primary checkout (feat/model-canary-probe-step25) for memory/scheduled-task commit hygiene to pick up.
+
+## 2026-09-13 — ora-pm CI: main deploys serialized + tip-of-main guard (PR #36 merged)
+- ZeOoba/ora-pm PR #36 merged at `35669b8`. `ci.yml` now has workflow-level `concurrency` (`CI-<ref>`, cancel-in-progress only for PRs) plus a step that skips the Cloudflare Pages deploy unless `GITHUB_SHA` is the exact `refs/heads/main` tip. Fails closed if origin/main can't be resolved.
+- Verified on the first post-merge main run `34762480302`: the tip check succeeded (checkout-token `ls-remote` auth works), and wrangler deployed `https://1f9d35ac.ora-pm.pages.dev` (0 new files; CI-only change).
+- Adversarial subagent review (opus): no blockers. Fixed: `ls-remote` tail-match, notice→warning on skip, wrong incident citation.
+- ⚠️ Until 2026-10-13: do NOT re-run any ora-pm main CI run created before `35669b8`. It re-runs with the old `ci.yml` (no concurrency, no guard) and would redeploy a stale build over production.
+- Open: a main CI re-run of `6321afd` at 12:48:33Z (actor ZeOoba) was not started by the PR session and is unattributed; it was harmless (same tip). Actions also never fired for PR push `4f54173`; an empty commit re-triggered it.
+
+## 2026-09-13 — /ship ora-pm target: PR #198 MERGED after 3-round adversarial review
+- Merge commit `108f048` = origin/main tip; ship.md content verified on main; no revert. Head `a83212d` merged with `--match-head-commit`.
+- Review (independent opus subagent, read-only against ora-pm ci.yml, server/index.ts ADMIN_EXEMPT, live GETs, secrets, run history): R1 BLOCK — post-verify bundle check impossible for server-only changes, wrong 401 rationale, crons "don't ride the deploy" misleading (they POST to live `/api/cron/*`, money-moving), migrations omitted, merge=prod-deploy/unprotected main unstated, concurrency wording would rot on ora-pm PR #36. R2 BLOCK — my migration step was unexecutable (`db-migrate.yml` main-only; `SUPABASE_ACCESS_TOKEN`/`SUPABASE_DB_PASSWORD` secrets absent; its only run 32583466897 failed). R3 APPROVE-WITH-NITS — dashboard-fallback full-paste + money-table atomicity probe folded in.
+- Deferred follow-up (task chip): stale "manual deploy / Windows Task crons" copies in EOS spec §table, memory `reference_ora_pm.md` + `tech.md`, ora-pm `wrangler.toml`.
+- Runtime `~/.claude` checkout (on `feat/model-canary-probe-step25`) not yet carrying the fix — picks up via merge-forward.
+
+## 2026-09-13 — PR #193 (OI-249 corrector + preflight gate to main) and PR #196 (runtime doctrine promotion) merged
+
+- **#193** merged as `4fdc982` at reviewed head `f18a339`. It lands on `main` `checkout-merge-forward.py`, `cross-repo-wip-scan.py`, `preflight-shared-checkout.py`, and the `ora-checkout-merge-forward` SKILL.md.
+  - The five code-review findings were fixed, each reproduced first:
+    - The corrector stranded the shared checkout mid-merge on a commit failure.
+    - In-progress operations were reported as a silent BLOCKED_STAGED.
+    - Preflight read CLEAR for a `--paths` entry outside `--repo`. This fix was authored in a separate session and cherry-picked.
+    - The SKILL.md send-retry rule contradicted itself.
+    - Work claims could never make the corrector yield.
+  - Independent Opus adversarial review ran three rounds (REJECT, APPROVE, APPROVE). It added fixes for:
+    - another session's merge being aborted when it started during the fetch;
+    - rev-parse rc 127/128 read as MERGE_HEAD absent;
+    - a stale index.lock reported as routine;
+    - this run's own conflict stranded when origin moved mid-run;
+    - refusal markers matched against file paths; the fix also pins `LC_ALL=C`;
+    - the dir-to-file overlap header;
+    - a whole-repo STEP 0 claim putting every preflight into CONTESTED;
+    - a literal `~` in preflight `--paths` reading CLEAR.
+  - Tests: corrector 127/127, preflight 185/185, wip-scan 63/63.
+  - Pre-push gate: two attempts were blocked by a load timeout in `maintenance/test-append-event-log.py`, which #193 doesn't touch (40/40 in isolation, 11 min). Gabriel approved an allow-hook-test-failure token in-turn. The final gate run passed 119/119, so the token was not used.
+- **#196** was retargeted to `main` after #193 merged, then merged as `299cbf9` at head `0ddf9ea`. The diff was exactly `CLAUDE.md` and `memory/rules.md`: line 35 now points to rules.md §2, line 78 carries the preflight gate with `--repo` and fail-closed exits, and rules.md §2 gains the exit-5 row.
+- **Runtime:** `94c9ca6` on `feat/model-canary-probe-step25` mirrors the five #193 files byte-identically from `f18a339`, under Gabriel's in-turn allow-config-write approval with preflight CLEAR. Not pushed. The runtime CLAUDE.md/rules.md mirror is `c100167`, from earlier.
+- **Follow-ups, not done:**
+  - The corrector's claim gate matches paths by prefix, so claims on gitignored or worktree paths block it (fails safe).
+  - The CORRECTOR_STUCK remedy text still says dirty-tree-triage for BLOCKED_CLAIMED and BLOCKED_OP_IN_PROGRESS.
+  - The pre-push gate's 480s budget times out `test-append-event-log.py` under load.
+
+## 2026-09-13 — /ship ora-pm target corrected (PR #198, open)
+- `commands/ship.md` ora-pm target was stale: said MANUAL wrangler deploy + health-only verify + crons on Windows Task. Ground truth: ora-pm `ci.yml` auto-deploys on push to main (no concurrency group); `/api/health` is unauthenticated while other `/api` routes 401 without admin auth, so a health hit can't prove a route shipped; Windows Task `ORA PM Crons` Disabled since 08-16 (OI-162), crons on CC fleet `ora-pm-daily-crons` + `ora-pm-monthly-billing` with GH Actions backups.
+- New target: gate = PR CI green on merge ref · deploy = merge (wait out in-flight main push run) · post-verify = deploy step ok + served `/assets/index-*.js` changed w/ change-unique string + health 200 + origin/main tip == merge commit · rollback = revert merge commit.
+- Isolated worktree `fix/ship-ora-pm-target` off origin/main; preflight CLEAR (first run HEAD_MOVED from a concurrent commit, ship.md untouched); verify-push MATCH d02aec3. https://github.com/ZeOoba/ora-claude-config/pull/198 — needs merge + runtime checkout sync (runtime is on `feat/model-canary-probe-step25`, 48 ahead).
+
+## 2026-09-13 — ora-pm: admin API dark in production since OI-036 (ADMIN_EMAILS never set) — FIXED; expense schema PR #33 merged
+
+- **Symptom:** a test expense saved from the admin UI after merging [PR #33](https://github.com/ZeOoba/ora-pm/pull/33) (expense schema `is_cam_recoverable`→`recoverable` fix) never reached the DB; `expenses` held 0 rows.
+- **Root cause (verified):** `adminAuthMiddleware` fails closed with 503 when `ADMIN_EMAILS` is empty (OI-036, `079be5c`, 2026-08-03). Cloudflare Pages production held no `ADMIN_EMAILS` (neither secret_text nor plain_text, confirmed via Pages project API). Every admin `/api/*` call returned `503 "Admin access is disabled: ADMIN_EMAILS is not configured."` — the entire admin console was non-functional in production, independent of the schema bug. Portal/cron/webhooks exempt and unaffected. Gabriel's last Supabase sign-in 2026-08-16 is consistent with this.
+- **Fix (Gabriel-approved 2026-09-13):** `ADMIN_EMAILS=ggoldberg@oxfordra.net,egoldberg@oxfordra.net` set as a Pages production secret (both verified to have 0 `tenants` rows); redeployed the already-live commit `6321afd` by re-running CI run 34733280462 (Pages deploys are Direct Upload from CI, so the Cloudflare "retry" API refuses them). Verified: bogus token now gets 401 "Invalid or expired token", not 503.
+- **Open:** live end-to-end expense create not yet re-verified; production also has no `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET` secrets (not investigated). Lesson: an app whose tables stay at 0 rows for weeks is a dead-path signal — check the auth gate's env before blaming the payload.
+
+## 2026-09-12 — preflight-shared-checkout: wrong-repo fail-open closed (PR #197, stacked on #193, NOT merged)
+
+- **Defect:** `--paths` never checked against `--repo`. A file dirty in ora-skills gated with `--repo ~/.claude` returned exit 0 CLEAR, both relative and absolute (reproduced in the #196 review). Two further forms: paths inside `~/.claude/.claude/worktrees/<name>` (string-inside, separate checkout), and `--paths .claude` returning CLEAR while 6 nested worktrees held uncommitted work.
+- **Fix** ([PR #197](https://github.com/ZeOoba/ora-claude-config/pull/197), branch `fix/preflight-path-containment` @ `e6be957`, 4 commits, 2 files):
+  - New **exit 5 OUT_OF_REPO**, ranked just below NOT_A_REPO. A path counts as inside only when its realpath sits under the toplevel AND git's own toplevel for it matches.
+  - `RESULT_JSON.out_of_repo_paths` lists `{path, suggested_repo, reason}`.
+  - A dirty nested worktree under a directory scope → CONTESTED; clean ones are counted only.
+  - `\\?\` spellings are normalized, and `GIT_DIR`/`GIT_WORK_TREE` are scrubbed from git calls.
+- **Evidence:**
+  - Tests were written first and run red; suite 184/184 with no skips.
+  - Live replay: the wrong `--repo` now exits 5 with an ora-skills hint.
+  - Independent Opus REFUTE, 3 rounds: REQUEST-CHANGES ×2, then APPROVE-WITH-NITS (nits fixed).
+- **Doctrine:** unchanged. CLAUDE.md `0=go · any nonzero=STOP` already fails closed on 5.
+- **Open:** awaiting Gabriel's go to merge. Retarget to main after #193 merges. The live `~/.claude/maintenance` copy (from #193's branch) still has the defect until this lands.
+
+## 2026-09-12 — ora-pm release: PR #30 (+ stacked #32) merged to main and deploy VERIFIED on served assets
+
+Gabriel-directed ("MERGE 30 VERIFY THE DEPLOY"), run through /ship L7.
+- **Shipped (merge 6321afd on c3d120b):**
+  - #30: /reports/actuals and /exports/qb-iif reads are keyset-paged and chunked, and every error is checked. A failed read or unknown property no longer yields $0 actuals or a $0 QuickBooks journal entry. The paging helpers moved to server/lib/postgrest-paging.ts.
+  - #32 (merged into #30's branch as 188ed9e): new GET /api/cam/recoverable-expenses computes the CAM recoverable total server-side. The page previously summed a 50-row /expenses page, and its UTC-parse/ET-read year filter moved Jan 1 expenses into the prior year. CAMList gates Calculate on a settled load.
+- **Gate:** PR CI run 34732803154 (tests + build on #30 merged into main incl. #31/#33) passed. Both PRs had independent Opus refute passes with no blocking findings.
+- **Deploy:** push run 34733280462 passed all steps, including Deploy to Cloudflare Pages (wrangler: https://9059e573.ora-pm.pages.dev).
+- **Verified on served assets:**
+  - ora-pm.pages.dev bundle changed index-D6se7rE4.js -> index-lU7WOFbf.js. The new bundle contains `cam/recoverable-expenses` (0 before, 1 after) and the new load-error text; the hash URL serves the same bundle.
+  - /api/health returned 200. origin/main tip is 6321afd, and no later push run could overwrite the deploy.
+  - Not verifiable without an admin JWT: the API routes' behavior (unauthenticated requests get 401 before routing).
+- **Race avoided:** ci.yml has no `concurrency` group. #35's deploy run was still in flight when the merge was requested, so I waited for it to finish; an older build finishing last would have silently overwritten this one.
+- **Doctrine drift:** /ship's ora-pm target says "MANUAL — no git auto-deploy". False: ci.yml deploys via wrangler on every push to main after tests and build. The skill needs correcting.
+- **Rollback:** revert 6321afd on main (CI redeploys c3d120b's tree).
+
+## 2026-09-12 — ora-pm admin-form schema drift fixed (PR #34 merged) + tenant email/422 display (PR #35 open)
+- PR #34 (merged 44a9102, then #33 at 35eb2c3; main CI green, 558 tests on combined main): Property/Tenant/Payment insert schemas now accept the admin forms' nulls (.nullish), add payments.check_number (was silently stripped), .strict() per OI-041; manual POST /payments no longer accepts stripe_payment_intent_id or ach_stripe (forged PI id would occupy payments_stripe_pi_uniq); properties.zip optional per 0005.
+- PR #35 (open, not merged): TenantForm email check now matches server zod .email() (copied regex, parity-tested; zod import would add 54 KB); src/lib/api.ts rendered 422 fieldErrors as "[object Object]" on every admin form — now "field: msg".
+- Cloudflare Pages served-asset deploy of #34 NOT independently verified.
+
+## 2026-09-12 -- Runtime CLAUDE.md doctrine fork found and closed: PR #196 promotes 2 stranded triage refinements, exception-scan clause dropped
+
+Gabriel-directed investigation ("investigate further", then "proceed with all recommendations").
+
+**Finding: the live runtime's CLAUDE.md had forked from origin/main.** The whole content delta was one dirty-tree-triage commit, `b777625` (2026-09-11), plus its rules.md companion `607a2d0`. Both sat only on the stale runtime branch `feat/model-canary-probe-step25`. They made three changes: (1) line 35, the Outlook per-exit-code procedure relocated to a rules.md §2 pointer (R24-4); (2) line 78, a shared-checkout gate rule telling sessions to run `maintenance/preflight-shared-checkout.py`, a script absent from main; (3) line 51, the `automation-health-monitor` exception-scan clause. A reconciliation onto main (OI-249) would silently revert all three, including a gating rule sessions currently follow.
+
+**Closed:**
+- **PR #196** (stacked on #193, which ports the preflight script): promotes lines 35 and 78 plus the rules.md §2 hunk, byte-identical, and leaves line 51 off. Merge #193 first. An independent Opus review APPROVED the content on all 10 mechanical checks. It REJECTED the first commit message on D1–D5; all five were corrected before push.
+- **Runtime commit `876b9b3`** (pathspec, NOT pushed): removed line 51 from the live CLAUDE.md, restoring it byte-identical to origin/main. preflight-shared-checkout.py returned CLEAR after the prior repo-housekeeping claim expired. A first run returned CONTESTED, and I waited rather than forcing. Words 1,817 -> 1,810 (40 headroom).
+- **Orphaned worktree** `worktrees/claude-md-tiebreak` and branch `fix/claude-md-exception-scan-tiebreak` (0 unique commits): archived to `_archive/2026-09-12_orphaned-worktree-claude-md-tiebreak/` (patch + restore README), then removed.
+
+**Correction recorded:** the clause was NOT unreviewed. Gabriel approved it in-turn 2026-09-06, and b777625 records an independent review APPROVED; the 2026-09-07 review rejected only a commit message. It was dropped on Gabriel's 2026-09-12 ruling as redundant: tenant-intelligence v1.1's description already routes "fleet health to automation-health-monitor". A draft message of mine claimed otherwise and was caught by the reviewer before it landed.
+
+**Process gap surfaced:** a dirty-tree-triage pass that "lands what's already in effect" commits governance edits onto whatever branch the runtime is on. When that branch isn't main, doctrine forks silently. This happened twice here (`b777625`, `607a2d0`).
+
+**Follow-ups:** the four line-78 wording gaps are listed in PR #196 (exit 2 omitted, `--since` optional, `--repo` unmentioned, rules.md §14 silent on the script). OI-247 tracks my stale 2026-09-07 repo-housekeeping claim on CLAUDE.md, which is now moot.
+
+## 2026-09-12 — Why dispatch-skip.json stopped updating after 09-08 (investigation, report-only)
+
+**Producer:** LAMS `automation-health-monitor` (`5 11 * * 1-5`) Step 0.08 runs `dispatch-skip-probe.py --json-out _state/dispatch-skip.json`. Last write 2026-09-08 11:19:48 ET. It was a carve-out, so it was NOT paused 09-07→09-11.
+
+**Per-run evidence** (run session records, transcripts and Desktop `main.log`):
+- **09-07 and 09-08:** probe called, file written. 09-08's Notion publish failed ("workspace has used all of its free blocks").
+- **09-09** (`local_2d8ae630`): run executed, 0 probe calls; it improvised `ahm_probe_20260909.py` instead. Desktop Commander disconnected mid-run at 11:17/11:19. Run dominated by the Notion block-quota failure.
+- **09-10** (`local_e59d1b67`, 42 min): 0 probe calls. It derived "no throttling" from `Select-String` on main.log (the method its SKILL.md says must not be restored). It spent the run moving 20 old Automation Health pages to the archive (does not free blocks). It rewrote its own 105 KB SKILL.md at 13:28 (change not diffed; no git history for LAMS SKILL files).
+- **09-11** (`local_853cf6e7`, 4 min): 0 probe calls; hit the quota and fell straight to the email fallback.
+- **09-12:** Saturday, not scheduled.
+
+**Root cause:**
+- **Proximate:** the model skipped a mandated deterministic step on three consecutive runs. The LLM run is the only thing that ever writes this file.
+- **Contributing:** (1) Notion workspace block quota exhausted since ≤09-08, which hijacked each run's attention. The quota blocks ALL new-page creation workspace-wide; in-place edits still work. (2) A 105 KB SKILL.md.
+
+**Forward risk:** the Cowork VM cannot mount C: since 2026-09-10 21:54. `startVM failed: Claude couldn't connect your C: drive to its workspace ... Reinstalling won't fix this` recurred 8 times through 09-12 16:21, and bash inside the VM fails `failed to mount /mnt/.virtiofs-root/shared/c/...`. The next run (Mon 09-14) may be unable to touch local files at all.
+
+**Correct detection:** state-freshness-probe (branch `feat/freshness-probe-pause-record`) keeps this file STALE because its producer was not paused.
 
 ## 2026-09-12 -- Preflight gate committed + hardened; stale-owner reporting; OI-249 port branch; isolated-commit foreign-file rule
 
