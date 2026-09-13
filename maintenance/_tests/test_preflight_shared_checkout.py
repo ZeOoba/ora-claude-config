@@ -1010,7 +1010,189 @@ def test_unresolvable_canonical_is_reported_not_silent():
         expect("no-canonical: human line says it could not check", "could not" in out, out)
 
 
+# --------------------------------------------------------------------------
+# path containment (2026-09-12): a --paths entry outside the --repo checkout
+# was evaluated against the WRONG repository's dirty set and read CLEAR.
+# Reproduced from ~/.claude on a file dirty in ora-skills: --repo ~/ora-skills
+# -> CONTESTED, --repo ~/.claude -> CLEAR, relative and absolute alike.
+# --------------------------------------------------------------------------
+EXIT_OUT_OF_REPO = 5
+
+
+def _two_repos(td):
+    """(a, b): two sibling checkouts; b has a dirty file at agents/one.md, so
+    a CLEAR for it can only come from evaluating the wrong repository."""
+    a = _make_repo(os.path.join(td, "a"))
+    b = _make_repo(os.path.join(td, "b"))
+    _dirty(b, "agents/one.md")
+    return a, b
+
+
+def _same_dir(x, y):
+    return bool(x) and bool(y) and (os.path.normcase(os.path.realpath(x))
+                                    == os.path.normcase(os.path.realpath(y)))
+
+
+def _out_of_repo_ok(label, rc, out, expect_path_tail, expect_repo):
+    rj = result_json(out) or {}
+    expect("%s -> exit 5 OUT_OF_REPO (not CLEAR)" % label, rc == EXIT_OUT_OF_REPO, (rc, out[-600:]))
+    expect("%s: RESULT_JSON verdict OUT_OF_REPO" % label, rj.get("verdict") == "OUT_OF_REPO", rj)
+    offenders = rj.get("out_of_repo_paths") or []
+    hit = [o for o in offenders
+           if (o.get("path") or "").replace("\\", "/").lower().endswith(expect_path_tail.lower())]
+    expect("%s: offending path listed in RESULT_JSON" % label, hit, offenders)
+    if expect_repo is None:
+        expect("%s: no suggested repo when path is in no checkout" % label,
+               hit and hit[0].get("suggested_repo") is None, offenders)
+    else:
+        expect("%s: suggested_repo is the path's own toplevel" % label,
+               hit and _same_dir(hit[0].get("suggested_repo"), expect_repo), (offenders, expect_repo))
+    human = "\n".join(l for l in out.splitlines() if not l.startswith("RESULT_JSON="))
+    expect("%s: human output names the offending path" % label,
+           expect_path_tail.lower() in human.replace("\\", "/").lower(), human)
+    if expect_repo is not None:
+        expect("%s: human output hints --repo" % label, "--repo" in human, human)
+
+
+def test_absolute_path_in_another_repo_is_out_of_repo():
+    with tempfile.TemporaryDirectory() as td:
+        a, b = _two_repos(td)
+        target = os.path.join(b, "agents", "one.md")
+        rc, out, _ = run("--repo", b, "--claims-dir", _claims_dir(td),
+                         "--session", MY_SESSION, "--paths", target)
+        expect("containment control: correct --repo still CONTESTED", rc == EXIT_CONTESTED, (rc, out[-400:]))
+        rc, out, _ = run("--repo", a, "--claims-dir", _claims_dir(td, "c2"),
+                         "--session", MY_SESSION, "--paths", target)
+        _out_of_repo_ok("absolute other-repo path", rc, out, "b/repo/agents/one.md", b)
+
+
+def test_relative_dotdot_escape_is_out_of_repo():
+    with tempfile.TemporaryDirectory() as td:
+        a, b = _two_repos(td)
+        rel = os.path.join("..", "..", "b", "repo", "agents", "one.md")
+        rc, out, _ = run("--repo", a, "--claims-dir", _claims_dir(td),
+                         "--session", MY_SESSION, "--paths", rel)
+        _out_of_repo_ok("relative ../ escape", rc, out, "b/repo/agents/one.md", b)
+
+
+def test_path_outside_any_checkout_is_out_of_repo_without_hint():
+    with tempfile.TemporaryDirectory() as td:
+        a = _make_repo(os.path.join(td, "a"))
+        loose = os.path.join(td, "loose", "notes.md")
+        _dirty(td, os.path.join("loose", "notes.md"))
+        rc, out, _ = run("--repo", a, "--claims-dir", _claims_dir(td),
+                         "--session", MY_SESSION, "--paths", loose)
+        _out_of_repo_ok("path in no checkout", rc, out, "loose/notes.md", None)
+
+
+def test_junction_inside_repo_resolving_elsewhere_is_out_of_repo():
+    """The sneaky spelling: `a/linked/agents/one.md` LOOKS inside a, but the
+    junction lands in b. Containment must be decided on the realpath."""
+    with tempfile.TemporaryDirectory() as td:
+        a, b = _two_repos(td)
+        link = os.path.join(a, "linked")
+        mk = subprocess.run(["cmd", "/c", "mklink", "/J", link, b],
+                            capture_output=True, text=True)
+        if mk.returncode != 0:
+            print("  (skip junction containment: mklink /J unavailable)")
+        else:
+            with open(os.path.join(a, ".git", "info", "exclude"), "a") as fh:
+                fh.write("linked\n")
+            rc, out, _ = run("--repo", a, "--claims-dir", _claims_dir(td),
+                             "--session", MY_SESSION,
+                             "--paths", os.path.join(link, "agents", "one.md"))
+            _out_of_repo_ok("junction resolving into other repo", rc, out, "agents/one.md", b)
+        short = _short_path(b)
+        if short.lower() == b.lower():
+            print("  (skip 8.3 containment: no short name generated for %s)" % b)
+        else:
+            rc, out, _ = run("--repo", a, "--claims-dir", _claims_dir(td, "c83"),
+                             "--session", MY_SESSION,
+                             "--paths", os.path.join(short, "agents", "one.md"))
+            _out_of_repo_ok("8.3 spelling of other repo", rc, out, "agents/one.md", b)
+
+
+def test_nested_worktree_under_repo_is_out_of_repo():
+    """~/.claude's own layout: .claude/worktrees/<name> sits string-INSIDE the
+    ~/.claude toplevel but is a separate checkout whose dirt ~/.claude's
+    `git status` never lists. A string-prefix containment check reads it
+    as in-repo and CLEAR -- the same wrong-repo false green."""
+    with tempfile.TemporaryDirectory() as td:
+        a = _make_repo(td)
+        with open(os.path.join(a, ".git", "info", "exclude"), "a") as fh:
+            fh.write("/wt/\n")
+        wt = os.path.join(a, "wt", "feature")
+        add = _git(a, "worktree", "add", "-b", "feature", wt)
+        expect("nested worktree fixture created", add.returncode == 0, add.stderr)
+        _dirty(wt, "agents/one.md")
+        target = os.path.join(wt, "agents", "one.md")
+        rc, out, _ = run("--repo", wt, "--claims-dir", _claims_dir(td),
+                         "--session", MY_SESSION, "--paths", target)
+        expect("nested-worktree control: its own --repo -> CONTESTED", rc == EXIT_CONTESTED, (rc, out[-400:]))
+        rc, out, _ = run("--repo", a, "--claims-dir", _claims_dir(td, "c2"),
+                         "--session", MY_SESSION, "--paths", target)
+        _out_of_repo_ok("nested worktree path under parent --repo", rc, out,
+                        "wt/feature/agents/one.md", wt)
+
+
+def test_in_repo_paths_still_clear_after_containment_check():
+    """Controls: absolute, relative, subdirectory --repo, a not-yet-created
+    file in a not-yet-created directory, and the repo root itself."""
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        cases = [
+            ("absolute in-repo file", work, [os.path.join(work, "agents", "one.md")]),
+            ("relative in-repo dir", work, ["agents"]),
+            ("relative from subdir --repo", os.path.join(work, "maintenance"), ["p.py"]),
+            ("new file in new dir", work, [os.path.join("brand", "new", "file.md")]),
+            ("repo root itself", work, ["."]),
+        ]
+        for i, (label, repo_arg, paths) in enumerate(cases):
+            rc, out, _ = run("--repo", repo_arg, "--claims-dir", _claims_dir(td, "ctl%d" % i),
+                             "--session", MY_SESSION, "--paths", *paths)
+            rj = result_json(out) or {}
+            expect("containment control (%s) -> CLEAR" % label, rc == EXIT_CLEAR, (rc, out[-400:]))
+            expect("containment control (%s): out_of_repo_paths empty list" % label,
+                   rj.get("out_of_repo_paths") == [], rj.get("out_of_repo_paths"))
+
+
+def test_mixed_scope_one_outside_is_not_clear():
+    """One good path must not launder a bad one."""
+    with tempfile.TemporaryDirectory() as td:
+        a, b = _two_repos(td)
+        rc, out, _ = run("--repo", a, "--claims-dir", _claims_dir(td),
+                         "--session", MY_SESSION, "--paths", "agents",
+                         os.path.join(b, "agents", "one.md"))
+        _out_of_repo_ok("mixed in/out scope", rc, out, "b/repo/agents/one.md", b)
+        rj = result_json(out) or {}
+        expect("mixed scope: only the outside path is listed",
+               len(rj.get("out_of_repo_paths") or []) == 1, rj.get("out_of_repo_paths"))
+
+
+def test_out_of_repo_outranks_head_moved_and_contested():
+    """--since and the dirty set both describe the wrong checkout when a path
+    is outside it, so the invocation itself is the first thing to fix."""
+    with tempfile.TemporaryDirectory() as td:
+        a, b = _two_repos(td)
+        _dirty(a, "agents/one.md")
+        rc, out, _ = run("--repo", a, "--claims-dir", _claims_dir(td),
+                         "--session", MY_SESSION, "--since", "0" * 40,
+                         "--paths", "agents", os.path.join(b, "agents", "one.md"))
+        rj = result_json(out) or {}
+        expect("OUT_OF_REPO outranks HEAD_MOVED and CONTESTED", rc == EXIT_OUT_OF_REPO, (rc, out[-400:]))
+        expect("lower findings still reported alongside",
+               rj.get("head_moved") is True and rj.get("dirty_overlap_foreign"), rj)
+
+
 def main():
+    test_absolute_path_in_another_repo_is_out_of_repo()
+    test_relative_dotdot_escape_is_out_of_repo()
+    test_path_outside_any_checkout_is_out_of_repo_without_hint()
+    test_junction_inside_repo_resolving_elsewhere_is_out_of_repo()
+    test_nested_worktree_under_repo_is_out_of_repo()
+    test_in_repo_paths_still_clear_after_containment_check()
+    test_mixed_scope_one_outside_is_not_clear()
+    test_out_of_repo_outranks_head_moved_and_contested()
     test_clean_repo_no_claims_is_clear()
     test_dirty_file_inside_requested_path_contests()
     test_dirty_file_outside_requested_path_does_not_contest()
