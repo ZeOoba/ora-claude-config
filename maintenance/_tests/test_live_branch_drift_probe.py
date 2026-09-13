@@ -44,6 +44,7 @@ import gitfixture  # noqa: E402  (shared repo fixture -- open-items-tracker.md#O
 EXIT_NO_DRIFT = 0
 EXIT_DRIFT = 1
 EXIT_ERROR = 2
+EXIT_UNVERIFIED = 3
 
 results = []
 
@@ -96,6 +97,7 @@ BASE_FILES = {
     "settings.json": "{}\n",
     "CLAUDE.md": "doc v1\n",
     "agents/x.md": "agent v1\n",
+    "scheduled-tasks/alpha/SKILL.md": "alpha v1\n",
 }
 
 
@@ -168,20 +170,22 @@ def test_behind_base_classification_and_scope_globs():
                   "maintenance/_tests/test_tool.py": "TT = 2\n",
                   "settings.json": "{\"a\": 1}\n",
                   "CLAUDE.md": "doc v2\n",
-                  "agents/x.md": "agent v2\n"},
+                  "agents/x.md": "agent v2\n",
+                  "scheduled-tasks/alpha/SKILL.md": "alpha v2\n"},
            deletes=["hooks/gone.py"], msg="main moves")
     to_feature(repo)
     proc, rep = run_probe(repo)
     d = by_path(rep)
     expect("exit 1 on drift", proc.returncode == EXIT_DRIFT, proc.stdout + proc.stderr)
     for p in ("hooks/a.py", "maintenance/tool.py", "maintenance/_tests/test_tool.py",
-              "settings.json", "CLAUDE.md", "agents/x.md"):
+              "settings.json", "CLAUDE.md", "agents/x.md",
+              "scheduled-tasks/alpha/SKILL.md"):
         expect("%s BEHIND_BASE" % p, d.get(p, {}).get("class") == "BEHIND_BASE", d.get(p))
     expect("deletion on base is BEHIND_BASE with deleted_on_base flag",
            d.get("hooks/gone.py", {}).get("class") == "BEHIND_BASE"
            and "DELETED_ON_BASE" in d.get("hooks/gone.py", {}).get("flags", []),
            d.get("hooks/gone.py"))
-    expect("counts grouped by class", rep["counts"].get("BEHIND_BASE") == 7, rep["counts"])
+    expect("counts grouped by class", rep["counts"].get("BEHIND_BASE") == 8, rep["counts"])
     expect("human summary names the class", "BEHIND_BASE" in proc.stdout)
 
 
@@ -274,6 +278,22 @@ def test_dependency_hint_sync_requires():
            not any("os" == os.path.splitext(os.path.basename(r))[0] or "present" in r
                    for r in req), req)
     expect("human output says 'sync requires'", "sync requires" in proc.stdout, proc.stdout)
+
+
+def test_dependency_hint_function_level_import():
+    print("dependency hint: function-level import of a BASE_ONLY sibling (review MAJOR 2)")
+    repo = make_repo()
+    commit(repo, {
+        "hooks/lib/probe_common.py": "def git():\n    return 0\n",
+        "hooks/a.py": ("def main():\n"
+                       "    from probe_common import git\n"
+                       "    return git()\n"),
+    }, msg="main: lazy import")
+    to_feature(repo)
+    proc, rep = run_probe(repo)
+    a = by_path(rep).get("hooks/a.py", {})
+    expect("function-level import reported in sync_requires",
+           a.get("sync_requires") == ["hooks/lib/probe_common.py"], a)
 
 
 def test_dependency_hint_ignores_unparseable_base_source():
@@ -376,6 +396,31 @@ def test_fetch_default_updates_base_and_offline_fails_open():
            rep3 and rep3["fetch"])
     expect("offline fetch prints a WARNING", "WARNING" in proc3.stdout, proc3.stdout)
     expect("offline fetch adds a warnings entry", rep3 and rep3.get("warnings"), rep3)
+    expect("offline + drift carries top-level fetch_ok=false",
+           rep3 and rep3.get("fetch_ok") is False, rep3)
+    expect("fetch_ok true after a good fetch", rep and rep.get("fetch_ok") is True, rep)
+
+
+def test_offline_fetch_with_no_drift_is_unverified_not_clean():
+    print("fetch: offline + no drift -> UNVERIFIED, never exit 0 (review BLOCKER 1)")
+    td = tempfile.mkdtemp(prefix="drift-probe-origin2-")
+    origin = os.path.join(td, "origin.git")
+    subprocess.run(["git", "init", "-q", "--bare", origin], capture_output=True)
+    repo = make_repo()
+    g(repo, "remote", "add", "origin", origin)
+    g(repo, "push", "-q", "origin", "main")
+    g(repo, "fetch", "-q", "origin")
+    to_feature(repo)
+    g(repo, "remote", "set-url", "origin", os.path.join(td, "gone.git"))
+    proc, rep = run_probe(repo, base="origin/main", fetch=True)
+    expect("exit is UNVERIFIED (3), not 0", proc.returncode == EXIT_UNVERIFIED,
+           proc.stdout + proc.stderr)
+    expect("verdict UNVERIFIED", rep and rep.get("verdict") == "UNVERIFIED", rep)
+    expect("fetch_ok false", rep and rep.get("fetch_ok") is False, rep)
+    expect("drift list still empty", rep and rep.get("drift") == [], rep)
+    proc2, rep2 = run_probe(repo, base="origin/main", fetch=False)
+    expect("--no-fetch on the same repo is plain NO_DRIFT (caller declined)",
+           proc2.returncode == EXIT_NO_DRIFT and rep2.get("verdict") == "NO_DRIFT", rep2)
 
 
 def test_errors_exit_2():
@@ -388,6 +433,78 @@ def test_errors_exit_2():
     proc, rep = run_probe(repo, base="nope/nothing")
     expect("unresolvable base -> exit 2", proc.returncode == EXIT_ERROR, proc.stdout)
     expect("unresolvable base -> RESULT_JSON present", rep and rep.get("verdict") == "ERROR")
+
+
+def test_unexpected_exception_exits_error_with_result_json():
+    print("unexpected exception -> exit 2 + RESULT_JSON, never exit 1 (review MAJOR 3)")
+    import io
+    mod = _load_module()
+    real_probe = mod.probe
+
+    def boom(*a, **k):
+        raise RuntimeError("synthetic crash")
+    mod.probe = boom
+    buf, old = io.StringIO(), sys.stdout
+    sys.stdout = buf
+    try:
+        code = mod.main(["--repo", tempfile.mkdtemp(prefix="drift-probe-crash-"), "--no-fetch"])
+    except BaseException as exc:          # a leaked exception is itself the failure
+        code = "raised %r" % exc
+    finally:
+        sys.stdout = old
+        mod.probe = real_probe
+    lines = buf.getvalue().strip().splitlines()
+    rep = json.loads(lines[-1][len("RESULT_JSON="):]) if lines and \
+        lines[-1].startswith("RESULT_JSON=") else None
+    expect("crash exit code is EXIT_ERROR (2)", code == EXIT_ERROR, code)
+    expect("crash RESULT_JSON verdict ERROR", rep and rep.get("verdict") == "ERROR", lines[-1:])
+    expect("crash RESULT_JSON names the exception type",
+           rep and rep.get("error_type") == "RuntimeError", rep)
+
+
+def test_runtime_budget_exceeded_is_error():
+    print("runtime budget exceeded -> exit 2 (review NIT 9)")
+    repo = make_repo()
+    to_feature(repo)
+    proc, rep = run_probe(repo, "--budget-seconds", "0.001")
+    expect("budget exceeded -> exit 2", proc.returncode == EXIT_ERROR, proc.stdout + proc.stderr)
+    expect("budget error named", rep and "budget" in (rep.get("error") or ""), rep)
+
+
+def test_untracked_stale_non_ascii_gitignored_case_and_staged():
+    print("UNTRACKED_STALE: non-ASCII path, gitignored copy, case-fold, staged add"
+          " (review MINOR 4/6/7/8)")
+    repo = make_repo()
+    uni = "scheduled-tasks/caf\u00e9/SKILL.md"
+    commit(repo, {uni: "uni v1\n"}, msg="uni v1")
+    commit(repo, {uni: "uni v2\n",
+                  "scheduled-tasks/ignored/SKILL.md": "ign v1\n",
+                  "scheduled-tasks/casey/SKILL.md": "case v1\n",
+                  "scheduled-tasks/staged/SKILL.md": "staged v1\n"}, msg="more")
+    to_feature(repo)
+    commit(repo, {".gitignore": "scheduled-tasks/ignored/\n"}, msg="feature ignores")
+    write(repo, uni, "uni v1\n")
+    write(repo, "scheduled-tasks/ignored/SKILL.md", "ign v1\n")
+    write(repo, "scheduled-tasks/casey/skill.md", "lowercase twin\n")   # different case
+    write(repo, "scheduled-tasks/staged/SKILL.md", "staged local\n")
+    g(repo, "add", "scheduled-tasks/staged/SKILL.md")
+    proc, rep = run_probe(repo)
+    d = by_path(rep)
+    u = d.get(uni, {})
+    expect("non-ASCII path BASE_ONLY + UNTRACKED_STALE",
+           u.get("class") == "BASE_ONLY" and "UNTRACKED_STALE" in u.get("flags", []), u)
+    expect("non-ASCII untracked copy matches historical blob",
+           u.get("untracked", {}).get("matches_historical_blob") is True, u)
+    i = d.get("scheduled-tasks/ignored/SKILL.md", {})
+    expect("gitignored untracked copy still UNTRACKED_STALE (matches base)",
+           "UNTRACKED_STALE" in i.get("flags", [])
+           and i.get("untracked", {}).get("matches_base") is True, i)
+    c = d.get("scheduled-tasks/casey/SKILL.md", {})
+    expect("case-folded twin (skill.md) is NOT UNTRACKED_STALE for SKILL.md",
+           c.get("class") == "BASE_ONLY" and "UNTRACKED_STALE" not in c.get("flags", []), c)
+    s_ = d.get("scheduled-tasks/staged/SKILL.md", {})
+    expect("staged add at BASE_ONLY path flagged STAGED, not UNTRACKED_STALE",
+           "STAGED" in s_.get("flags", []) and "UNTRACKED_STALE" not in s_.get("flags", []), s_)
 
 
 def test_json_mode_is_pure_json():
@@ -422,11 +539,16 @@ def test_read_only():
     expect("repository state unchanged", _snapshot(repo) == before)
 
 
-def test_scope_matcher_unit():
-    print("scope matcher unit")
+def _load_module():
     spec = importlib.util.spec_from_file_location("drift_probe", PROBE)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
+    return mod
+
+
+def test_scope_matcher_unit():
+    print("scope matcher unit")
+    mod = _load_module()
     m = mod.in_scope
     expect("hooks/** deep", m("hooks/lib/x/y.py"))
     expect("maintenance/*.py direct", m("maintenance/tool.py"))
@@ -448,12 +570,17 @@ def main():
     test_base_only_and_untracked_stale_with_history_match()
     test_local_dirty_over_behind()
     test_dependency_hint_sync_requires()
+    test_dependency_hint_function_level_import()
     test_dependency_hint_ignores_unparseable_base_source()
     test_coupling_module_behind_test_synced()
     test_coupling_test_behind_module_synced()
     test_no_fetch_skips_fetch()
     test_fetch_default_updates_base_and_offline_fails_open()
+    test_offline_fetch_with_no_drift_is_unverified_not_clean()
     test_errors_exit_2()
+    test_unexpected_exception_exits_error_with_result_json()
+    test_runtime_budget_exceeded_is_error()
+    test_untracked_stale_non_ascii_gitignored_case_and_staged()
     test_json_mode_is_pure_json()
     test_read_only()
     passed = sum(1 for ok, _ in results if ok)

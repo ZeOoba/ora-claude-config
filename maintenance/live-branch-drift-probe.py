@@ -39,16 +39,22 @@ paths identical to base are skipped):
                           sits at that path; `untracked` records whether its
                           blob matches base or ANY historical blob at that path
                           (base and HEAD history).
+                          An exact-case file must exist (Windows case-folding
+                          would otherwise match skill.md for SKILL.md). A
+                          STAGED add at that path is flagged STAGED instead.
   LOCAL_DIRTY_OVER_BEHIND a BEHIND_BASE path whose working tree is dirty --
                           foreign WIP; report only. worktree_matches_base
                           distinguishes a hand-sync from real WIP.
 Changes made only on HEAD are local work, counted as local_ahead_count, never
-drift.
+drift. Paths are compared by name, not by content lineage: a RENAME on base
+shows up as two entries (the new path BASE_ONLY, the old path BEHIND_BASE with
+DELETED_ON_BASE).
 
 HINTS:
-  sync_requires  for a behind .py (any class), its BASE version's module-level
-                 imports (ast; into try/if/with, not into def/class) are
-                 resolved against hooks/lib and maintenance/_shared; each such
+  sync_requires  for a behind .py (any class), every import in its BASE
+                 version (ast, anywhere in the file -- hooks import lazily
+                 inside functions) is resolved against hooks/lib and
+                 maintenance/_shared only, so stdlib names never match; each such
                  sibling that is BASE_ONLY must land in the same sync.
                  also_behind lists siblings that are themselves behind.
   coupling       a test under hooks/tests or maintenance/_tests and its
@@ -60,9 +66,16 @@ DESIGN STANCES:
   * READ-ONLY. The only write is `git fetch` (skip with --no-fetch). Every git
     call runs with --no-optional-locks and a scrubbed GIT_DIR/GIT_WORK_TREE
     env; hash-object is never given -w.
-  * Fetch FAILS OPEN: offline or slow (timeout-bounded) is a WARNING and the
-    probe runs on the last-fetched ref -- a stale base under-reports drift, it
-    never invents it.
+  * Fetch FAILS OPEN for DRIFT, never for CLEAN: offline or slow
+    (timeout-bounded) is a WARNING and the probe runs on the last-fetched
+    ref. A stale base can only under-report, so drift found is still real
+    (exit 1, fetch_ok=false) -- but "no drift" against a ref that could not
+    be refreshed is not proven clean: verdict UNVERIFIED, exit 3.
+    --no-fetch is the caller declining the fetch: NO_DRIFT stays exit 0.
+    Fetch runs with --no-write-fetch-head --no-auto-maintenance; its only
+    write is the remote-tracking ref.
+  * Bounded: a total runtime budget (--budget-seconds, default 120) caps every
+    git call; exceeding it is ERROR, exit 2.
   * Batched: up to three `ls-tree -r`, one `status`, one `hash-object
     --stdin-paths`, one `cat-file --batch`, one `log --raw` -- never one
     subprocess per file.
@@ -74,12 +87,21 @@ Usage:
         [--base REF]    default: origin/main
         [--no-fetch]    skip `git fetch <remote> <branch>`
         [--json]        machine-readable only
+        [--budget-seconds N]  total runtime budget, default 120
 
 Exit codes:
-    0  NO_DRIFT   nothing in scope is behind base
-    1  DRIFT      at least one drift entry (see RESULT_JSON drift[])
-    2  ERROR      not a checkout, git unavailable, base unresolvable, or a
-                  tree could not be read
+    0  NO_DRIFT    nothing in scope is behind base (fetched, or --no-fetch)
+    1  DRIFT       at least one drift entry (see RESULT_JSON drift[]);
+                   fetch_ok=false when the base could not be refreshed
+    2  ERROR       not a checkout, git unavailable, base unresolvable, a tree
+                   could not be read, runtime budget exceeded, or any
+                   unexpected exception (error_type names it)
+    3  UNVERIFIED  fetch attempted and failed, and no drift against the stale
+                   base -- not proven clean
+
+RESULT_JSON consumers must key on `verdict`. ERROR reports carry only
+verdict/repo/base/error/error_type/scope_globs -- no drift, counts or
+fetch_ok keys.
 """
 import argparse
 import ast
@@ -92,6 +114,7 @@ import time
 EXIT_NO_DRIFT = 0
 EXIT_DRIFT = 1
 EXIT_ERROR = 2
+EXIT_UNVERIFIED = 3
 
 # The blast-radius scope. `**` = any depth (at least one segment below);
 # `*` = exactly one path segment. Everything else is literal and root-anchored.
@@ -112,6 +135,9 @@ TEST_DIRS = ("hooks/tests/", "maintenance/_tests/")
 
 FETCH_TIMEOUT_S = 45
 GIT_TIMEOUT_S = 60
+DEFAULT_BUDGET_S = 120.0
+
+_DEADLINE = [None]   # monotonic deadline for the whole run; set by main()
 
 C_BEHIND = "BEHIND_BASE"
 C_DIVERGED = "DIVERGED"
@@ -172,9 +198,18 @@ def _env():
 
 
 def git(repo, *args, stdin=None, timeout=GIT_TIMEOUT_S, binary=False):
-    """Never raises: failures come back as rc 127 so the caller reports ERROR
-    with a RESULT_JSON line instead of a traceback."""
+    """Git failures come back as rc 127 so the caller reports ERROR with a
+    RESULT_JSON line instead of a traceback. The one exception is the
+    runtime budget: BudgetExceeded (a ProbeError) is raised when the run's
+    deadline has passed or a call is cut short by it."""
     cmd = ["git", "--no-optional-locks", "-C", repo] + list(args)
+    clipped = False
+    if _DEADLINE[0] is not None:
+        remaining = _DEADLINE[0] - time.monotonic()
+        if remaining <= 0:
+            raise BudgetExceeded("runtime budget exceeded before `git %s`" % args[0])
+        if remaining < timeout:
+            timeout, clipped = remaining, True
     try:
         if binary:
             return subprocess.run(cmd, input=stdin, capture_output=True,
@@ -182,13 +217,37 @@ def git(repo, *args, stdin=None, timeout=GIT_TIMEOUT_S, binary=False):
         return subprocess.run(cmd, input=stdin, capture_output=True, text=True,
                               encoding="utf-8", errors="replace",
                               timeout=timeout, env=_env())
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except subprocess.TimeoutExpired as exc:
+        if clipped:
+            raise BudgetExceeded("runtime budget exceeded during `git %s`" % args[0])
+        empty = b"" if binary else ""
+        return subprocess.CompletedProcess(cmd, 127, empty, str(exc))
+    except OSError as exc:
         empty = b"" if binary else ""
         return subprocess.CompletedProcess(cmd, 127, empty, str(exc))
 
 
 class ProbeError(Exception):
     pass
+
+
+class BudgetExceeded(ProbeError):
+    pass
+
+
+def exists_exact_case(repo, rel):
+    """True only when `rel` exists as a FILE with exactly this spelling.
+    os.path.isfile folds case on Windows, so a local skill.md would pass for
+    a base SKILL.md and be hashed as a stale copy of it."""
+    cur = repo
+    for seg in rel.split("/"):
+        try:
+            if seg not in os.listdir(cur):
+                return False
+        except OSError:
+            return False
+        cur = os.path.join(cur, seg)
+    return os.path.isfile(cur)
 
 
 def _ok(proc, what):
@@ -247,7 +306,7 @@ def dirty_tracked(repo):
 
 def hash_worktree(repo, paths):
     """{path: blob_sha} for existing working-tree files (no -w: never writes)."""
-    paths = [p for p in paths if os.path.isfile(os.path.join(repo, p))]
+    paths = [p for p in paths if exists_exact_case(repo, p)]
     if not paths:
         return {}
     proc = git(repo, "hash-object", "--stdin-paths", stdin="\n".join(paths) + "\n")
@@ -285,12 +344,19 @@ def historical_blobs(repo, refs, paths):
     hist = {p: set() for p in paths}
     if not paths:
         return hist
-    proc = git(repo, "log", "--format=", "--raw", "--no-abbrev", "--no-renames",
+    # -z: without it core.quotepath C-quotes non-ASCII paths ("caf\\303\\251")
+    # and they never equal the verbatim ls-tree path.
+    proc = git(repo, "log", "-z", "--format=", "--raw", "--no-abbrev", "--no-renames",
                *refs, "--", *paths)
-    for line in _ok(proc, "git log --raw").splitlines():
-        if not line.startswith(":") or "\t" not in line:
+    fields = _ok(proc, "git log --raw").split("\0")
+    i = 0
+    while i < len(fields):
+        meta = fields[i].lstrip("\n")
+        i += 1
+        if not meta.startswith(":"):
             continue
-        meta, path = line.split("\t", 1)
+        path = fields[i] if i < len(fields) else ""
+        i += 1
         parts = meta.split()
         if len(parts) >= 4 and path in hist:
             for sha in (parts[2], parts[3]):
@@ -310,7 +376,8 @@ def do_fetch(repo, base):
     info.update(attempted=True, remote=remote, branch=branch)
     # No explicit refspec: `git fetch <remote> <branch>` updates
     # refs/remotes/<remote>/<branch> through the configured refspec.
-    proc = git(repo, "fetch", "--quiet", "--no-tags", remote, branch, timeout=FETCH_TIMEOUT_S)
+    proc = git(repo, "fetch", "--quiet", "--no-tags", "--no-write-fetch-head",
+               "--no-auto-maintenance", remote, branch, timeout=FETCH_TIMEOUT_S)
     info["ok"] = proc.returncode == 0
     if not info["ok"]:
         info["detail"] = (proc.stderr or "").strip()[:300] or "rc %d" % proc.returncode
@@ -470,7 +537,9 @@ def probe(repo, base, fetch):
             entry["class"] = C_BASE_ONLY
             if m is not None:
                 entry["flags"].append("DELETED_ON_HEAD")
-            if os.path.isfile(os.path.join(repo, path)):
+            if path in dirty:
+                entry["flags"].append("STAGED")          # an add in the index
+            elif exists_exact_case(repo, path):
                 entry["flags"].append("UNTRACKED_STALE")
         elif on_head:
             entry["class"] = C_DIVERGED
@@ -531,7 +600,7 @@ def probe(repo, base, fetch):
         if src is None:
             names, err = set(), "base blob unreadable"
         else:
-            names, err = parse_imports(src, full=False)
+            names, err = parse_imports(src, full=True)
         req, also = set(), set()
         for n in names:
             for sib in sibling_paths(n, (base_t,)):
@@ -581,8 +650,18 @@ def probe(repo, base, fetch):
     class_counts = {c: 0 for c in CLASS_ORDER}
     for d in entries:
         class_counts[d["class"]] += 1
+    f = report["fetch"]
+    fetch_failed = bool(f["attempted"]) and not f["ok"]
+    if entries:
+        verdict = "DRIFT"
+    elif fetch_failed:
+        verdict = "UNVERIFIED"
+        report["warnings"].append("no drift against a base that could not be refreshed"
+                                  " -- UNVERIFIED, not clean")
+    else:
+        verdict = "NO_DRIFT"
     report.update(drift=entries, counts=class_counts, local_ahead_count=local_ahead,
-                  verdict="DRIFT" if entries else "NO_DRIFT",
+                  verdict=verdict, fetch_ok=(f["ok"] if f["attempted"] else None),
                   elapsed_s=round(time.time() - t0, 2))
     return report
 
@@ -646,6 +725,9 @@ def human(report):
     if report["verdict"] == "DRIFT":
         say("  -> drift found. Sync each path together with its 'sync requires' modules"
             " and coupled tests/modules (checkout-merge-forward.py, or a worktree).")
+    elif report["verdict"] == "UNVERIFIED":
+        say("  -> UNVERIFIED: no drift against the last-fetched %s, but the fetch failed."
+            " Re-run online before treating this checkout as current." % report["base"])
     else:
         say("  -> no blast-radius drift against %s." % report["base"])
     return out
@@ -667,17 +749,23 @@ def main(argv=None):
     ap.add_argument("--base", default="origin/main")
     ap.add_argument("--no-fetch", action="store_true")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--budget-seconds", type=float, default=DEFAULT_BUDGET_S)
     args = ap.parse_args(argv)
     repo = os.path.abspath(os.path.expanduser(args.repo))
+    _DEADLINE[0] = time.monotonic() + args.budget_seconds
     try:
         report = probe(repo, args.base, fetch=not args.no_fetch)
-    except ProbeError as exc:
-        report = {"verdict": "ERROR", "repo": repo, "base": args.base, "error": str(exc),
-                  "scope_globs": list(SCOPE_GLOBS)}
+    except Exception as exc:   # noqa: BLE001 -- any crash must read ERROR, never DRIFT
+        report = {"verdict": "ERROR", "repo": repo, "base": args.base,
+                  "error": str(exc) or type(exc).__name__,
+                  "error_type": type(exc).__name__, "scope_globs": list(SCOPE_GLOBS)}
         emit(report, args.json)
         return EXIT_ERROR
+    finally:
+        _DEADLINE[0] = None
     emit(report, args.json)
-    return EXIT_DRIFT if report["verdict"] == "DRIFT" else EXIT_NO_DRIFT
+    return {"DRIFT": EXIT_DRIFT, "UNVERIFIED": EXIT_UNVERIFIED}.get(report["verdict"],
+                                                                  EXIT_NO_DRIFT)
 
 
 def _utf8_stdout():
