@@ -2294,6 +2294,301 @@ def test_main_exit2_path_appends_a_stage0_attempt():
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
+# ---------------------------------------------------------------------------
+# OI-296 review round 4 (post-merge follow-up on commit a95f4f0):
+#
+# req 1: main()'s body is wrapped in try/finally so a Stage-0 attempt line
+# is ALWAYS appended, even on an unhandled exception (recording
+# "exception": "<type>: <msg>" instead of an exit code) -- fail-open on the
+# attempt write itself.
+#
+# req 2: a plain manual run (no --out, not the scheduled invocation) must
+# never write the canonical run-index-<date>.json -- ONLY an explicit --out
+# (as SKILL.md STEP 1 always passes) lands there; every other invocation
+# shape defaults to _state/ground-truth/adhoc/. Docs under adhoc/ are
+# structurally invisible to load_previously_audited's glob.
+#
+# req 3: a corrupt/partial line in stage0-attempts.jsonl must not poison
+# boundary detection (the per-line skip already existed in
+# _load_stage0_attempts; this adds the missing explicit test).
+#
+# req 4: a carried-forward previously_audited entry omits `transcript_size`
+# entirely (not just sets it None) when the ORIGINAL credit had none, so a
+# later reader correctly falls back to the mtime rule rather than treating
+# a None baseline as "any size counts as growth".
+#
+# req 5: an attempt from a --window-hours/adhoc run is recorded in
+# stage0-attempts.jsonl but IGNORED when computing the next boundary for a
+# NIGHTLY document's credit window -- an ad-hoc investigation between a
+# real Stage 0 run and its own send must never close that run's window.
+# ---------------------------------------------------------------------------
+
+def test_main_appends_stage0_attempt_with_exception_info_on_unhandled_exception():
+    tmp = tempfile.mkdtemp()
+    try:
+        marker_path = os.path.join(tmp, "last-auditor-run.json")
+        cc_reg = os.path.join(tmp, "cc", "scheduled-tasks.json")
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        _write_registry(cc_reg, [])
+        _write_registry(lams_reg, [])
+
+        class FakeSD:
+            @staticmethod
+            def discover_store(name):
+                return cc_reg if name == "claude-code-sessions" else lams_reg
+
+        orig_sd = gti._sd
+        orig_marker = gti.LAST_RUN_MARKER
+        orig_build = gti.build_run_index
+        gti._sd = FakeSD()
+        gti.LAST_RUN_MARKER = marker_path
+
+        def _boom(*a, **k):
+            raise RuntimeError("synthetic failure for req-1 kill-proof")
+        gti.build_run_index = _boom
+        raised = False
+        try:
+            try:
+                gti.main(["--out", os.path.join(tmp, "out.json")])
+            except RuntimeError:
+                raised = True
+        finally:
+            gti._sd = orig_sd
+            gti.LAST_RUN_MARKER = orig_marker
+            gti.build_run_index = orig_build
+        check("main() still propagates the unhandled exception (the "
+              "try/finally does not swallow it)", raised, raised)
+        attempts_path = os.path.join(tmp, "stage0-attempts.jsonl")
+        check("an attempt is still appended even though main() raised",
+              os.path.isfile(attempts_path), attempts_path)
+        rec = json.loads(open(attempts_path, encoding="utf-8").read().strip().splitlines()[0])
+        check("the attempt records the exception's type and message",
+              rec.get("exception") == "RuntimeError: synthetic failure for req-1 kill-proof", rec)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_main_attempt_write_failure_itself_fails_open():
+    # req 1: "fail-open on the attempt write itself" -- a broken attempts-log
+    # write (here: the path collides with a directory) must never crash
+    # main() or block its normal return.
+    tmp = tempfile.mkdtemp()
+    try:
+        out_path = os.path.join(tmp, "out.json")
+        os.makedirs(os.path.join(tmp, "stage0-attempts.jsonl"), exist_ok=True)  # a DIRECTORY, not a file
+        rc, out, _ = _run_main_with_state(["--out", out_path], tmp)
+        check("main() still exits 0 despite the attempts-log write failing",
+              rc == 0, rc)
+        check("the run-index file was still written normally",
+              os.path.isfile(out_path), out_path)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_main_plain_run_without_out_writes_to_adhoc_not_canonical():
+    tmp = tempfile.mkdtemp()
+    try:
+        rc, out, marker_path = _run_main_with_state([], tmp)  # no --out, no --window-hours, no --json
+        state_dir = os.path.dirname(marker_path)
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        adhoc_path = os.path.join(state_dir, "adhoc", "run-index-{}.json".format(today))
+        canonical_path = os.path.join(state_dir, "run-index-{}.json".format(today))
+        check("main() exits 0", rc == 0, rc)
+        check("a plain manual run with no --out writes to adhoc/, not the "
+              "canonical path", os.path.isfile(adhoc_path), adhoc_path)
+        check("the canonical nightly path was never touched",
+              not os.path.isfile(canonical_path), canonical_path)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_main_explicit_out_still_writes_wherever_specified_no_window_hours():
+    # matches the real SKILL.md STEP 1 invocation shape (--out, no
+    # --window-hours) -- confirmed by reading
+    # scheduled-tasks/ora-ground-truth-auditor/SKILL.md STEP 1, which always
+    # passes an explicit --out to the canonical run-index-<date>.json path.
+    tmp = tempfile.mkdtemp()
+    try:
+        explicit_out = os.path.join(tmp, "run-index-explicit.json")
+        rc, out, _ = _run_main_with_state(["--out", explicit_out], tmp)
+        check("main() exits 0", rc == 0, rc)
+        check("an explicit --out is always honored",
+              os.path.isfile(explicit_out), explicit_out)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_never_scans_adhoc_subdirectory():
+    # req 2: docs under adhoc/ are never dedup candidates -- the glob only
+    # scans state_dir itself, never state_dir/adhoc, so an adhoc doc is
+    # structurally invisible even with a matching send.
+    tmp = tempfile.mkdtemp()
+    try:
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        run_id = "cc:ora-pm-ledger:2026-09-12T19:00:00.000Z"
+        os.makedirs(state_dir, exist_ok=True)
+        _write_prior_run_index(os.path.join(state_dir, "adhoc"), "2026-09-12",
+                                [{"run_id": run_id, "task_id": "ora-pm-ledger", "fleet": "cc"}],
+                                generated_at="2026-09-12T20:00:00.000Z")
+        _write_stage0_attempts(os.path.join(state_dir, "stage0-attempts.jsonl"), [])
+        _write_send_log(send_log, [_gt_send_line("2026-09-12T16:34:00-04:00", "2026-09-12")])
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        prior, _ = gti.load_previously_audited(state_dir, now, send_log_path=send_log)
+        check("a run-index file sitting under state_dir/adhoc/ is never "
+              "scanned as a dedup candidate", run_id not in prior, prior)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_corrupt_attempts_line_skipped_boundary_still_works():
+    # req 3: kill the "bad line fatal" mutant -- a corrupt/partial line in
+    # stage0-attempts.jsonl must be skipped, not poison the whole log, and
+    # boundary detection must still use the surviving good line.
+    tmp = tempfile.mkdtemp()
+    try:
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        run_id = "cc:ora-pm-ledger:2026-09-12T19:00:00.000Z"
+        os.makedirs(state_dir, exist_ok=True)
+        _write_prior_run_index(state_dir, "2026-09-12",
+                                [{"run_id": run_id, "task_id": "ora-pm-ledger", "fleet": "cc"}],
+                                generated_at="2026-09-12T20:00:00.000Z")
+        attempts_path = os.path.join(state_dir, "stage0-attempts.jsonl")
+        # one corrupt/partial (truncated) line, then one GOOD line that
+        # legitimately closes the window before the failure-digest send below
+        open(attempts_path, "w", encoding="utf-8").write(
+            '{"at": "2026-09-13T04:05:00.000Z", "exit": 2, "index_p\n'  # truncated mid-object
+            + json.dumps({"at": "2026-09-13T04:06:00.000Z", "exit": 2,
+                          "index_path": None, "window_reason": None}) + "\n"
+        )
+        _write_send_log(send_log, [_gt_send_line("2026-09-13T00:10:00-04:00", "2026-09-13")])  # -> 04:10Z
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        prior, warnings = gti.load_previously_audited(state_dir, now, send_log_path=send_log)
+        check("the corrupt line does not trigger the missing/unreadable "
+              "attempts-log fallback warning",
+              not any("stage0-attempts" in w for w in warnings), warnings)
+        check("the surviving good attempt line still correctly closes "
+              "night N's credit window before the failure-digest send",
+              run_id not in prior, prior)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_build_run_index_carried_entry_omits_transcript_size_when_original_had_none():
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_dir = os.path.join(tmp, "cc")
+        cc_reg = os.path.join(cc_dir, "scheduled-tasks.json")
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        last_run = "2026-09-12T19:00:00.000Z"
+        _write_registry(cc_reg, [
+            {"id": "ora-pm-ledger", "cronExpression": "0 19 * * *",
+             "enabled": True, "lastRunAt": last_run, "lastScheduledFor": last_run},
+        ])
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        _write_registry(lams_reg, [])
+        run_id = gti.build_run_id("cc", "ora-pm-ledger", last_run)
+        # OLD-shaped prior record -- no transcript_size field at all
+        _write_prior_run_index(state_dir, "2026-09-12",
+                                [_prior_run_record(run_id, "ora-pm-ledger", "cc",
+                                                    include_transcript_size=False)],
+                                generated_at="2026-09-12T20:00:00.000Z")
+        _write_stage0_attempts(os.path.join(state_dir, "stage0-attempts.jsonl"), [])
+        _write_send_log(send_log, [_gt_send_line("2026-09-12T16:34:00-04:00", "2026-09-12")])
+
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        index = gti.build_run_index(cc_reg, lams_reg, [], now=now,
+                                     ground_truth_state_dir=state_dir, send_log_path=send_log)
+        hits = [p for p in index["previously_audited"] if p["run_id"] == run_id]
+        check("the carried entry OMITS transcript_size entirely (not just "
+              "sets it to None) when the original credit had none",
+              hits and "transcript_size" not in hits[0], hits)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_carried_entry_without_transcript_size_falls_back_to_mtime():
+    # req 4's payoff: reading such an entry back must correctly resolve
+    # has_transcript_size=False and preserve the mtime-fallback chain,
+    # rather than a None baseline masquerading as "any size is growth".
+    tmp = tempfile.mkdtemp()
+    try:
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        run_id = "cc:ora-pm-ledger:2026-09-12T19:00:00.000Z"
+        _write_prior_run_index(
+            state_dir, "2026-09-12",
+            runs=[],
+            generated_at="2026-09-12T22:00:00.000Z",
+            previously_audited=[{
+                "run_id": run_id, "task_id": "ora-pm-ledger", "fleet": "cc",
+                "audited_in_digest": "2026-09-12T20:34:00+00:00",
+                "candidate_session_count": 1, "transcript_mtime": 1000.0,
+                # deliberately no "transcript_size" key at all
+            }])
+        _write_stage0_attempts(os.path.join(state_dir, "stage0-attempts.jsonl"), [])
+        _write_send_log(send_log, [])
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        prior, _ = gti.load_previously_audited(state_dir, now, send_log_path=send_log)
+        check("the carried-forward entry correctly reports "
+              "has_transcript_size=False",
+              prior[run_id]["has_transcript_size"] is False, prior)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_override_attempt_does_not_close_nightly_window():
+    # req 5: an attempt from a --window-hours/adhoc run is recorded but
+    # IGNORED when finding the next boundary -- it must never close a
+    # nightly document's credit window.
+    tmp = tempfile.mkdtemp()
+    try:
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        run_id = "cc:ora-pm-ledger:2026-09-12T19:00:00.000Z"
+        _write_prior_run_index(state_dir, "2026-09-12",
+                                [{"run_id": run_id, "task_id": "ora-pm-ledger", "fleet": "cc"}],
+                                generated_at="2026-09-12T20:00:00.000Z")
+        # an ad-hoc --window-hours attempt, BETWEEN the nightly doc's
+        # generation (20:00Z) and its own send (20:34Z, below)
+        _write_stage0_attempts(os.path.join(state_dir, "stage0-attempts.jsonl"), [
+            {"at": "2026-09-12T20:15:00.000Z", "exit": 0, "index_path": None,
+             "window_reason": "explicit --window-hours override"},
+        ])
+        _write_send_log(send_log, [_gt_send_line("2026-09-12T16:34:00-04:00", "2026-09-12")])  # -> 20:34Z
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        prior, _ = gti.load_previously_audited(state_dir, now, send_log_path=send_log)
+        check("the nightly document IS credited by its own send -- the "
+              "intervening override attempt did NOT close its window",
+              run_id in prior, prior)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_override_attempt_still_recorded_but_ignored_for_boundary():
+    # Companion negative check: an override attempt's PRESENCE in the log
+    # doesn't make it disappear from the log itself (it's still a real
+    # attempt, just excluded from boundary computation) -- proven by loading
+    # the raw attempts list directly.
+    tmp = tempfile.mkdtemp()
+    try:
+        attempts_path = os.path.join(tmp, "stage0-attempts.jsonl")
+        _write_stage0_attempts(attempts_path, [
+            {"at": "2026-09-12T20:15:00.000Z", "exit": 0, "index_path": None,
+             "window_reason": "explicit --window-hours override"},
+        ])
+        attempts, warning = gti._load_stage0_attempts(attempts_path)
+        check("the override attempt IS present in the raw loaded list",
+              len(attempts) == 1 and attempts[0]["window_reason"] ==
+              "explicit --window-hours override", attempts)
+        next_at = gti._next_attempt_at_after(attempts, datetime(2026, 9, 12, 20, 0, tzinfo=timezone.utc))
+        check("but _next_attempt_at_after skips it, returning None (no "
+              "non-override attempt exists)", next_at is None, next_at)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
 
 # ---------------------------------------------------------------------------
 # I3 -- resolve_registry_paths() / main() exit-2 on total registry-discovery
@@ -2605,6 +2900,16 @@ if __name__ == "__main__":
     test_main_appends_stage0_attempt_on_normal_and_window_hours_runs()
     test_main_json_never_appends_a_stage0_attempt()
     test_main_exit2_path_appends_a_stage0_attempt()
+    test_main_appends_stage0_attempt_with_exception_info_on_unhandled_exception()
+    test_main_attempt_write_failure_itself_fails_open()
+    test_main_plain_run_without_out_writes_to_adhoc_not_canonical()
+    test_main_explicit_out_still_writes_wherever_specified_no_window_hours()
+    test_load_previously_audited_never_scans_adhoc_subdirectory()
+    test_load_previously_audited_corrupt_attempts_line_skipped_boundary_still_works()
+    test_build_run_index_carried_entry_omits_transcript_size_when_original_had_none()
+    test_load_previously_audited_carried_entry_without_transcript_size_falls_back_to_mtime()
+    test_load_previously_audited_override_attempt_does_not_close_nightly_window()
+    test_load_previously_audited_override_attempt_still_recorded_but_ignored_for_boundary()
     test_resolve_registry_paths_errors_when_sd_unavailable()
     test_resolve_registry_paths_errors_when_discover_store_returns_none()
     test_resolve_registry_paths_errors_when_only_one_fleet_fails()
