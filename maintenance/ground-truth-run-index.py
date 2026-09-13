@@ -694,22 +694,37 @@ def _default_stage0_attempts_path():
     return os.path.join(os.path.dirname(LAST_RUN_MARKER), _STAGE0_ATTEMPTS_FILENAME)
 
 
-def _append_stage0_attempt(attempts_path, at, exit_code, index_path, window_reason):
+def _append_stage0_attempt(attempts_path, at, exit_code, index_path, window_reason, exception=None):
     """Appends one line to the Stage 0 attempts log (OI-296 review round 3,
-    req 1) -- called from main() on EVERY non-`--json` invocation, including
-    the exit-2 "could not start" path, BEFORE main() returns. Best-effort and
-    fails open: a write failure here (e.g. a permissions issue) must never
-    itself turn into a Stage 0 crash, so it is silently swallowed."""
+    req 1; round 4 added `exception`) -- called from main()'s `finally`
+    clause on EVERY non-`--json` invocation, including the exit-2 "could not
+    start" path and an unhandled exception, BEFORE main() returns or
+    re-raises. Best-effort and fails open: a write failure here (e.g. a
+    permissions issue, or the path colliding with an existing directory)
+    must never itself turn into a Stage 0 crash or mask the real exception,
+    so ANY failure writing this line is silently swallowed (round 4
+    broadened this from `except OSError` to `except Exception` -- the
+    guarantee is "this call never raises," not "this call never raises for
+    a specific failure class").
+
+    `exception`, when given, is a short "<type>: <message>" string recorded
+    instead of (not in addition to reasoning about) a normal exit code --
+    main() passes `exit_code=None` alongside it in that case, since no
+    controlled exit code exists for an attempt that ended in an unhandled
+    exception."""
     try:
         os.makedirs(os.path.dirname(attempts_path), exist_ok=True)
+        rec = {
+            "at": at.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+            "exit": exit_code,
+            "index_path": index_path,
+            "window_reason": window_reason,
+        }
+        if exception is not None:
+            rec["exception"] = exception
         with open(attempts_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps({
-                "at": at.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
-                "exit": exit_code,
-                "index_path": index_path,
-                "window_reason": window_reason,
-            }) + "\n")
-    except OSError:
+            f.write(json.dumps(rec) + "\n")
+    except Exception:
         pass
 
 
@@ -768,8 +783,18 @@ def _load_stage0_attempts(attempts_path):
 def _next_attempt_at_after(attempts, gen_at):
     """The earliest attempt's `at` strictly after `gen_at`, or None if no
     such attempt exists yet. `attempts` must already be sorted ascending by
-    `at` (as _load_stage0_attempts returns it)."""
+    `at` (as _load_stage0_attempts returns it).
+
+    Review round 4, req 5: an attempt whose `window_reason` is the explicit
+    --window-hours override is skipped here -- it is still RECORDED in the
+    attempts log (needed elsewhere, e.g. to know an ad-hoc run happened at
+    all), but an ad-hoc investigation must never be able to close a real
+    nightly document's credit window early. Without this, a manual
+    --window-hours run fired between a nightly Stage 0 and its own later
+    send would wrongly exclude that send from the nightly document's window."""
     for a in attempts:
+        if a.get("window_reason") == "explicit --window-hours override":
+            continue
         if a["at"] > gen_at:
             return a["at"]
     return None
@@ -1251,15 +1276,27 @@ def build_run_index(cc_registry_path, lams_registry_path, project_dirs,
                     # keep detecting real growth, immune to this document's
                     # on-disk file ever overwriting the doc that first
                     # earned the credit.
-                    previously_audited_out.append({
+                    carried = {
                         "run_id": run_id,
                         "task_id": task_id,
                         "fleet": fleet,
                         "audited_in_digest": prior["audited_in_digest"],
                         "candidate_session_count": prior.get("candidate_session_count"),
-                        "transcript_size": prior.get("transcript_size") if prior.get("has_transcript_size") else None,
                         "transcript_mtime": prior.get("transcript_mtime"),
-                    })
+                    }
+                    # req 4 (review round 4): OMIT transcript_size entirely
+                    # -- not merely set it to None -- when the ORIGINAL
+                    # credit never had one. A future reader checks presence
+                    # ("transcript_size" in pa) to decide has_transcript_size;
+                    # a present-but-None value would wrongly read as "we
+                    # have a real baseline of None", which the growth check
+                    # (`prior_size is None or transcript_size > prior_size`)
+                    # treats as "any transcript at all counts as growth" --
+                    # collapsing the intended mtime-fallback chain into an
+                    # over-eager re-audit-everything rule instead.
+                    if prior.get("has_transcript_size"):
+                        carried["transcript_size"] = prior.get("transcript_size")
+                    previously_audited_out.append(carried)
                     continue  # excluded from runs/"audited" -- NOT from total/joined counted above
                 reaudited_out.append({
                     "run_id": run_id,
@@ -1350,7 +1387,11 @@ def main(argv=None):
     parser.add_argument("--window-hours", type=float, default=None,
                          help="Override automatic window sizing (ad-hoc investigation only).")
     parser.add_argument("--out", default=None,
-                         help="Output path. Default: _state/ground-truth/run-index-<date>.json")
+                         help="Output path. Default (no --out given): "
+                              "_state/ground-truth/adhoc/run-index-<date>.json -- the canonical "
+                              "nightly _state/ground-truth/run-index-<date>.json is written ONLY "
+                              "when --out names it explicitly, exactly as the scheduled SKILL.md "
+                              "invocation always does (review round 4, req 2).")
     parser.add_argument("--json", action="store_true",
                          help="Print the run index to stdout instead of writing a file.")
     parser.add_argument("--no-dedup", action="store_true",
@@ -1364,90 +1405,108 @@ def main(argv=None):
     now = datetime.now(timezone.utc)
     attempts_path = _default_stage0_attempts_path()
 
-    cc_path, lams_path, discovery_error = resolve_registry_paths()
-    if discovery_error is not None:
-        # Fail LOUD, not empty: without this check, a total registry-read
-        # failure (_sd is None, or discover_store returns None for either
-        # fleet) fell through to _registry_tasks(None), whose try/except
-        # swallows the resulting TypeError and returns [] -- producing 0
-        # runs, both floors trivially "ok" (assert_join_rate_floor treats an
-        # empty window as vacuously passing), and exit 0. That makes a
-        # completely broken auditor indistinguishable from a genuinely quiet
-        # night. Exit 2 is a NEW code, distinct from 0 (clean) and 1 (join-
-        # rate floor breached), so a caller can tell "could not even start"
-        # apart from both.
-        print("GROUND-TRUTH AUDITOR COULD NOT START: " + discovery_error, file=sys.stderr)
-        # req 1: this Stage-0 ATTEMPT is recorded even though it produced no
-        # index -- SKILL.md STEP 8 still sends a failure-only digest under
-        # the SAME subject line after an exit-2, and without this attempt's
-        # timestamp on record, that send could wrongly close (or fail to
-        # close) an EARLIER night's still-open credit window. Never for
-        # --json (investigative, read-only).
-        if not args.json:
-            _append_stage0_attempt(attempts_path, now, 2, None, None)
-        return 2
-    project_dirs = find_project_dirs()
+    # Review round 4, req 1: the entire body below runs under try/finally so
+    # a Stage-0 attempt line is recorded on EVERY exit from this function --
+    # a controlled return (0/1/2) OR an unhandled exception propagating out.
+    # These three accumulate whatever the try block manages to set before
+    # returning or raising; `attempt_exception` is set only in the `except`
+    # clause below and left None on every controlled-return path.
+    attempt_exit = None
+    attempt_index_path = None
+    attempt_window_reason = None
+    attempt_exception = None
 
-    # --window-hours and --json are investigative overrides, not exemptions
-    # from OI-296 dedup -- re-selecting an already-published run is still
-    # wrong under either. Only --no-dedup disables it.
-    index = build_run_index(cc_path, lams_path, project_dirs, now=now,
-                             window_hours_override=args.window_hours,
-                             dedup_previously_audited=not args.no_dedup)
+    try:
+        cc_path, lams_path, discovery_error = resolve_registry_paths()
+        if discovery_error is not None:
+            # Fail LOUD, not empty: without this check, a total registry-read
+            # failure (_sd is None, or discover_store returns None for either
+            # fleet) fell through to _registry_tasks(None), whose try/except
+            # swallows the resulting TypeError and returns [] -- producing 0
+            # runs, both floors trivially "ok" (assert_join_rate_floor treats
+            # an empty window as vacuously passing), and exit 0. That makes a
+            # completely broken auditor indistinguishable from a genuinely
+            # quiet night. Exit 2 is a NEW code, distinct from 0 (clean) and
+            # 1 (join-rate floor breached), so a caller can tell "could not
+            # even start" apart from both.
+            print("GROUND-TRUTH AUDITOR COULD NOT START: " + discovery_error, file=sys.stderr)
+            # req 1 (round 3): this Stage-0 ATTEMPT is recorded even though
+            # it produced no index -- SKILL.md STEP 8 still sends a
+            # failure-only digest under the SAME subject line after an
+            # exit-2, and without this attempt's timestamp on record, that
+            # send could wrongly close (or fail to close) an EARLIER night's
+            # still-open credit window.
+            attempt_exit = 2
+            return 2
+        project_dirs = find_project_dirs()
 
-    out = None
-    if args.json:
-        print(json.dumps(index, indent=2))
-    else:
-        state_dir_for_out = os.path.dirname(LAST_RUN_MARKER)
-        if args.out:
-            out = args.out
-        elif args.window_hours is not None:
-            # req 2: an ad-hoc --window-hours run (no explicit --out) must
-            # never be able to land on -- and so overwrite -- the canonical
-            # nightly run-index-<date>.json; a same-day manual investigation
-            # must not be able to erase or shadow the real nightly document.
-            # Derived from LAST_RUN_MARKER's own directory (not a separately
-            # hardcoded __file__-relative path) so this follows the SAME
-            # base a test's LAST_RUN_MARKER monkeypatch already redirects
-            # everything else in main() to.
-            out = os.path.join(state_dir_for_out, "adhoc",
-                                "run-index-{}.json".format(now.strftime("%Y-%m-%d")))
+        # --window-hours and --json are investigative overrides, not
+        # exemptions from OI-296 dedup -- re-selecting an already-published
+        # run is still wrong under either. Only --no-dedup disables it.
+        index = build_run_index(cc_path, lams_path, project_dirs, now=now,
+                                 window_hours_override=args.window_hours,
+                                 dedup_previously_audited=not args.no_dedup)
+
+        out = None
+        if args.json:
+            print(json.dumps(index, indent=2))
         else:
-            out = os.path.join(state_dir_for_out,
-                                "run-index-{}.json".format(now.strftime("%Y-%m-%d")))
-        os.makedirs(os.path.dirname(out), exist_ok=True)
-        json.dump(index, open(out, "w", encoding="utf-8"), indent=2)
-        print("wrote {} ({} runs, {} duplicate flags, {} previously audited skipped)".format(
-            out, len(index["runs"]), len(index["duplicate_flags"]),
-            len(index["previously_audited"])))
+            state_dir_for_out = os.path.dirname(LAST_RUN_MARKER)
+            if args.out:
+                # req 2 (round 4): the ONLY way to land on the canonical
+                # run-index-<date>.json (or any other specific path) --
+                # exactly how the real SKILL.md STEP 1 invocation always
+                # calls this script (verified against its current text).
+                out = args.out
+            else:
+                # req 2 (round 4): every OTHER invocation shape -- a plain
+                # manual run with no flags at all, or a --window-hours
+                # ad-hoc investigation -- defaults to adhoc/, never the
+                # canonical nightly path. A manual run must never be able to
+                # silently overwrite (or masquerade as) the real nightly
+                # document. Derived from LAST_RUN_MARKER's own directory
+                # (not a separately hardcoded __file__-relative path) so
+                # this follows the SAME base a test's LAST_RUN_MARKER
+                # monkeypatch already redirects everything else in main() to.
+                out = os.path.join(state_dir_for_out, "adhoc",
+                                    "run-index-{}.json".format(now.strftime("%Y-%m-%d")))
+            os.makedirs(os.path.dirname(out), exist_ok=True)
+            json.dump(index, open(out, "w", encoding="utf-8"), indent=2)
+            print("wrote {} ({} runs, {} duplicate flags, {} previously audited skipped)".format(
+                out, len(index["runs"]), len(index["duplicate_flags"]),
+                len(index["previously_audited"])))
 
-    # Only a normal automatic run resets the "when did the auditor last run"
-    # clock. --json is a read-only investigative dump (no run-index file is
-    # even written), and --window-hours is an ad-hoc manual override (not the
-    # real nightly cadence) -- either one writing the marker would silently
-    # reset the gap-tracking clock that a REAL scheduled run depends on for
-    # decide_window_hours' auditor-gap widen, potentially suppressing a
-    # legitimate future widen because this ad-hoc invocation looked like the
-    # last real run.
-    if not args.json and args.window_hours is None:
-        _write_last_auditor_run(now)
+        # Only a normal automatic run resets the "when did the auditor last
+        # run" clock. --json is a read-only investigative dump (no run-index
+        # file is even written), and --window-hours is an ad-hoc manual
+        # override (not the real nightly cadence) -- either one writing the
+        # marker would silently reset the gap-tracking clock that a REAL
+        # scheduled run depends on for decide_window_hours' auditor-gap
+        # widen, potentially suppressing a legitimate future widen because
+        # this ad-hoc invocation looked like the last real run.
+        if not args.json and args.window_hours is None:
+            _write_last_auditor_run(now)
 
-    floor_failures = [f for f in (index["join_stats"]["cc"], index["join_stats"]["lams"])
-                      if not f["rate_ok"]]
-    rc = 1 if floor_failures else 0
-    if floor_failures:
-        print("JOIN-RATE FLOOR BREACHED: " + "; ".join(f["message"] for f in floor_failures),
-              file=sys.stderr)
+        floor_failures = [f for f in (index["join_stats"]["cc"], index["join_stats"]["lams"])
+                          if not f["rate_ok"]]
+        rc = 1 if floor_failures else 0
+        if floor_failures:
+            print("JOIN-RATE FLOOR BREACHED: " + "; ".join(f["message"] for f in floor_failures),
+                  file=sys.stderr)
 
-    # req 1: record this attempt (whatever its outcome) so a LATER run's
-    # credit-window computation has it on the timeline -- covers the normal
-    # nightly path AND an ad-hoc --window-hours run (req 1 explicitly
-    # includes "--window-hours runs"); never for --json.
-    if not args.json:
-        _append_stage0_attempt(attempts_path, now, rc, out, index["window_reason"])
-
-    return rc
+        attempt_exit = rc
+        attempt_index_path = out
+        attempt_window_reason = index["window_reason"] if not args.json else None
+        return rc
+    except Exception as e:
+        attempt_exception = "{}: {}".format(type(e).__name__, e)
+        raise
+    finally:
+        # req 1 (round 4): fires on every exit path -- return OR re-raise
+        # above. Never for --json (investigative, read-only -- round 3).
+        if not args.json:
+            _append_stage0_attempt(attempts_path, now, attempt_exit, attempt_index_path,
+                                    attempt_window_reason, exception=attempt_exception)
 
 
 if __name__ == "__main__":
