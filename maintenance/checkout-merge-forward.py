@@ -16,6 +16,25 @@ SAFETY MODEL -- this repo is shared across a dozen+ concurrent sessions, so
 every step is designed to either land a clean merge commit or leave the
 checkout in EXACTLY the state it was found in. Never a partial/stuck state.
 
+  0a. Refuse if a merge, cherry-pick, revert, rebase, paused cherry-pick/revert
+      sequence or bisect is ALREADY in progress (MERGE_HEAD / CHERRY_PICK_HEAD /
+      REVERT_HEAD / rebase-merge / rebase-apply / sequencer / BISECT_START). A
+      marker that cannot be checked (rev-parse exit other than 0 or 1) counts
+      as in progress. Re-checked immediately before step 4's merge, because the
+      fetch opens a window for another session to start one.
+      BLOCKED_OP_IN_PROGRESS -- and never abort it: it may be another session's
+      half-resolved conflict, or this script's own stranded merge from a run
+      that died between merge and commit. Before this check (PR #193 review,
+      2026-09-12) such a state has staged content, so it fell through to step 1
+      and was misreported as a routine, silent BLOCKED_STAGED indefinitely.
+  0b. Refuse if a live work claim (hooks/lib/claim_work.py) other than this
+      task's own `sched-repo-housekeeping` overlaps this repo, or declares no
+      paths and so cannot
+      be proven disjoint. BLOCKED_CLAIMED. A merge forward rewrites arbitrary
+      tracked paths, so any declared work inside the repo is contended. The
+      task's own STEP 0 claim cannot enforce this: cross-slug claims only WARN,
+      and claim_work's cross-slug check is one-directional. An unloadable
+      claim_work is ERROR -- a safety check that cannot run is not a pass.
   1. Refuse to run at all if the index already has ANYTHING staged
      (`git diff --cached` non-empty). A bare `git commit` after the merge
      would sweep that stranger's staged content into the merge commit --
@@ -29,18 +48,36 @@ checkout in EXACTLY the state it was found in. Never a partial/stuck state.
      nothing to do.
   4. Attempt `git merge --no-commit --no-ff origin/<canonical>`.
        - Exit 0 (no conflicts): the index now holds the merge result and
-         NOTHING else (guaranteed by step 1) -- `git commit --no-edit` is
-         safe. MERGED, report the new sha and how many commits it closed.
-       - Exit != 0 with a MERGE_HEAD present: a REAL textual conflict.
+         NOTHING else (git itself refuses a merge while anything is staged)
+         -- `git commit --no-edit`. MERGED, report the new sha and how many
+         commits it closed. If the COMMIT fails (routinely: a concurrent
+         session's git command holding .git/index.lock at that instant), the
+         merge is ABORTED and verified gone before returning ERROR. Before
+         this fix it returned ERROR with MERGE_HEAD still present, leaving the
+         shared checkout mid-merge -- every other session's pathspec commit
+         then failed with "cannot do a partial commit during a merge".
+       - Exit != 0 and git REFUSED to start ("have not concluded", "unmerged
+         files", "unresolved conflict"), or MERGE_HEAD is unverifiable or names
+         anything but the origin/<canonical> sha this run merged: the merge is
+         not provably this run's. BLOCKED_OP_IN_PROGRESS, never aborted. The
+         adversarial review of the first fix reproduced a session's merge that
+         started during the fetch being aborted, destroying its staged resolution.
+       - Exit != 0 with THIS run's MERGE_HEAD present: a REAL textual conflict.
          `git merge --abort` immediately, fully restoring the pre-merge
          state (working tree, index, HEAD all untouched) -- this is the one
          shape that genuinely needs a human. BLOCKED_CONFLICT, never left
          mid-merge for someone else to trip over.
+       Every abort is retried (a lock holder is usually a short-lived git
+       command) and then VERIFIED: `merge_aborted` reports whether MERGE_HEAD
+       is actually gone, and a failed abort says "LEFT MID-MERGE" in `detail`
+       rather than claiming the tree was restored.
        - Exit != 0 with no MERGE_HEAD: git refused before writing anything
          (uncommitted local changes overlap the incoming diff -- the
          ordinary case on this checkout, since it usually carries a large
          WIP backlog). Nothing to abort; the tree was never touched.
-         BLOCKED_DIRTY_OVERLAP.
+         BLOCKED_DIRTY_OVERLAP. If git named NO overlapping path (e.g. a
+         stale .git/index.lock, which blocks every session's commits) it is
+         ERROR instead, so it alarms rather than passing as routine.
 
 Never runs `git add -A`, never touches any path outside the merge/commit it
 performs, never resets/rebases/force-anything. Detection-only companion:
@@ -83,10 +120,12 @@ Exit 2 = usage/tooling error (bad --repo, git missing, etc).
 """
 import argparse
 import datetime
+import importlib.util
 import json
 import os
 import subprocess
 import sys
+import time
 
 DEFAULT_REPO = r"C:\Users\Owner\.claude"
 DEFAULT_CANONICAL = "main"
@@ -94,6 +133,33 @@ SYNCED_STATUSES = ("MERGED", "NOOP_CLEAN")
 _OVERLAP_HEADER = "would be overwritten by merge:"
 STREAK_ALARM_RUNS = 14
 STREAK_ALARM_REPEAT_RUNS = 7
+
+# In-progress operation markers (step 0a): refs, then git-path files/directories.
+IN_PROGRESS_REFS = (("MERGE_HEAD", "merge"), ("CHERRY_PICK_HEAD", "cherry-pick"),
+                    ("REVERT_HEAD", "revert"))
+# Marker files/dirs under the git dir. `sequencer` covers a paused multi-commit
+# cherry-pick/revert whose CHERRY_PICK_HEAD is already gone; BISECT_START a bisect.
+IN_PROGRESS_PATHS = (("rebase-merge", "rebase"), ("rebase-apply", "rebase-apply"),
+                     ("sequencer", "cherry-pick/revert sequence"), ("BISECT_START", "bisect"))
+
+# `git merge` stderr when it REFUSES to start because an operation already exists.
+# The merge then created nothing of its own, so there is nothing for this run to abort.
+MERGE_REFUSAL_MARKERS = ("have not concluded", "unmerged files", "unresolved conflict")
+
+# Abort retry (step 4): the usual lock holder is a short-lived git command.
+ABORT_ATTEMPTS = 5
+ABORT_RETRY_SECONDS = 1.0
+
+# Work-claim gate (step 0b). The claims module lives in this same tree; the
+# claims DIRECTORY is claim_work.CLAIMS_DIR (the live, machine-wide one) unless
+# the test seam overrides it.
+CLAIM_WORK_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                               "hooks", "lib", "claim_work.py")
+CLAIMS_DIR_OVERRIDE = None
+# Only THIS task's own STEP 0 claim is ignored. Other unattended tasks also claim
+# under `sched-<slug>` and may be writing into this repo, so a prefix match would
+# wave their work through.
+OWN_CLAIM_SLUG = "sched-repo-housekeeping"
 
 
 def streak_alarm(consecutive_unsynced):
@@ -139,16 +205,121 @@ def _git(args, repo):
     return p.returncode, (p.stdout or "").strip(), (p.stderr or "").strip()
 
 
+def ref_state(repo, ref):
+    """(state, sha) with state "present" / "absent" / "unknown". `rev-parse -q --verify`
+    exits 1 ONLY for a missing ref; 127 (timeout/OSError) or 128 (fatal) prove nothing,
+    and reading them as "absent" would report a mid-merge checkout as restored."""
+    rc, sha, _ = _git(["rev-parse", "-q", "--verify", ref], repo)
+    if rc == 0 and sha:
+        return "present", sha
+    if rc == 1:
+        return "absent", None
+    return "unknown", None
+
+
+def in_progress_ops(repo):
+    """Names of git operations already in progress in `repo` (step 0a). Fails closed:
+    a marker that cannot be checked is reported as in progress ("... (unverifiable)")."""
+    ops = []
+    for ref, name in IN_PROGRESS_REFS:
+        state, _ = ref_state(repo, ref)
+        if state == "present":
+            ops.append(name)
+        elif state == "unknown":
+            ops.append("%s (unverifiable)" % name)
+    for sub, name in IN_PROGRESS_PATHS:
+        rc, path, _ = _git(["rev-parse", "--git-path", sub], repo)
+        if rc != 0 or not path:
+            ops.append("%s (unverifiable)" % name)
+            continue
+        full = path if os.path.isabs(path) else os.path.join(repo, path)
+        if os.path.exists(full):
+            ops.append(name)
+    return ops
+
+
+def abort_merge(repo):
+    """`git merge --abort`, retried, then VERIFIED. True only if MERGE_HEAD is
+    provably gone afterwards -- never infer success from the abort's exit code,
+    and never from a rev-parse that failed for some other reason."""
+    for attempt in range(ABORT_ATTEMPTS):
+        _git(["merge", "--abort"], repo)
+        if ref_state(repo, "MERGE_HEAD")[0] == "absent":
+            return True
+        if attempt + 1 < ABORT_ATTEMPTS and ABORT_RETRY_SECONDS:
+            time.sleep(ABORT_RETRY_SECONDS)
+    return False
+
+
+def _mid_merge_note(repo):
+    return ("ABORT FAILED -- checkout LEFT MID-MERGE (MERGE_HEAD present); every "
+            "session's pathspec commit will fail until someone runs `git merge --abort` "
+            "in %s" % repo)
+
+
+def blocking_claims(repo):
+    """Live work claims (other than this task's own) that overlap `repo` or cannot be proven
+    disjoint from it (step 0b). Raises if claim_work cannot be loaded -- the
+    caller turns that into ERROR, because a safety gate that cannot run is not
+    a pass. Uses claim_work.paths_conflict(), which checks BOTH directions and
+    returns None (treated as blocking) for a claim that declares no paths."""
+    spec = importlib.util.spec_from_file_location("claim_work_cmf", CLAIM_WORK_PATH)
+    if spec is None or spec.loader is None:
+        raise ImportError("cannot locate claim_work at %s" % CLAIM_WORK_PATH)
+    cw = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cw)
+    claims_dir = CLAIMS_DIR_OVERRIDE or cw.CLAIMS_DIR
+    hits = []
+    for c in cw.read_active_claims(base_dir=claims_dir):
+        slug = str(c.get("slug") or "")
+        if slug == OWN_CLAIM_SLUG:
+            continue  # this task's own STEP 0 claim, or a prior run's
+        verdict = cw.paths_conflict([os.path.abspath(repo)], c.get("paths") or [])
+        if verdict is False:
+            continue
+        hits.append({"slug": slug, "session_id": c.get("session_id"),
+                     "reason": "overlaps repo" if verdict else "declares no paths"})
+    return hits
+
+
+def _op_in_progress(out, ops):
+    out["status"] = "BLOCKED_OP_IN_PROGRESS"
+    out["in_progress_ops"] = ops
+    out["detail"] = ("a %s is already in progress -- left untouched (it may be another "
+                     "session's, or a stranded run of this corrector); resolve or abort "
+                     "it by hand" % " + ".join(ops))
+    return out
+
+
 def sync(repo=None, canonical=None):
     repo = repo or DEFAULT_REPO
     canonical = canonical or DEFAULT_CANONICAL
     out = {"repo": repo, "canonical": canonical, "status": None, "detail": None,
-           "commits_merged": None, "sha": None, "blocked_paths": None}
+           "commits_merged": None, "sha": None, "blocked_paths": None,
+           "merge_aborted": None, "in_progress_ops": None, "blocking_claims": None}
 
     rc, _, err = _git(["rev-parse", "--git-dir"], repo)
     if rc != 0:
         out["status"] = "ERROR"
         out["detail"] = "not a git repo: %s" % err
+        return out
+
+    ops = in_progress_ops(repo)
+    if ops:
+        return _op_in_progress(out, ops)
+
+    try:
+        claims = blocking_claims(repo)
+    except Exception as e:  # noqa: BLE001 -- any load/read failure fails closed
+        out["status"] = "ERROR"
+        out["detail"] = "work-claim gate could not run (%s: %s) -- not merging" % (
+            type(e).__name__, e)
+        return out
+    if claims:
+        out["status"] = "BLOCKED_CLAIMED"
+        out["blocking_claims"] = claims
+        out["detail"] = "live work claim(s) cover this repo: %s" % ", ".join(
+            "%s (%s)" % (c["slug"], c["reason"]) for c in claims[:10])
         return out
 
     rc, staged, _ = _git(["diff", "--cached", "--name-only"], repo)
@@ -181,15 +352,30 @@ def sync(repo=None, canonical=None):
         out["commits_merged"] = 0
         return out
 
+    # Step 0a again, immediately before merging: another session may have started an
+    # operation during the fetch. This run may only ever abort a merge it CREATED.
+    ops = in_progress_ops(repo)
+    if ops:
+        return _op_in_progress(out, ops)
+    rc, target_sha, _ = _git(["rev-parse", "--verify", target], repo)
+    if rc != 0 or not target_sha:
+        out["status"] = "ERROR"
+        out["detail"] = "cannot resolve %s" % target
+        return out
+
     rc, merge_out, merge_err = _git(
         ["merge", "--no-commit", "--no-ff", target], repo)
     if rc == 0:
         rc2, _, commit_err = _git(["commit", "--no-edit"], repo)
         if rc2 != 0:
-            # Should not happen given the staged-index guard above, but
-            # never claim success on an unverified commit.
+            # Never return with the merge still staged: a mid-merge shared
+            # checkout blocks every other session's pathspec commits.
+            aborted = abort_merge(repo)
             out["status"] = "ERROR"
-            out["detail"] = "merge staged cleanly but commit failed: %s" % commit_err
+            out["merge_aborted"] = aborted
+            out["detail"] = "merge staged cleanly but commit failed (%s): %s" % (
+                "merge aborted, tree restored" if aborted else _mid_merge_note(repo),
+                commit_err[:400])
             return out
         rc3, sha, _ = _git(["rev-parse", "HEAD"], repo)
         out["status"] = "MERGED"
@@ -198,17 +384,32 @@ def sync(repo=None, canonical=None):
         out["detail"] = "merged %d commit(s) from %s" % (behind, target)
         return out
 
-    rc_head, merge_head, _ = _git(["rev-parse", "-q", "--verify", "MERGE_HEAD"], repo)
-    if rc_head == 0 and merge_head:
-        _git(["merge", "--abort"], repo)
+    raw = "\n".join(s for s in (merge_err, merge_out) if s)
+    head_state, merge_head = ref_state(repo, "MERGE_HEAD")
+    refused = any(m in raw.lower() for m in MERGE_REFUSAL_MARKERS)
+    if head_state != "absent" and (refused or head_state == "unknown" or merge_head != target_sha):
+        # Not provably this run's merge: git refused because one already existed, or
+        # MERGE_HEAD names something other than what we merged. Never abort it.
+        return _op_in_progress(out, in_progress_ops(repo) or ["merge"])
+    if head_state == "present":
+        aborted = abort_merge(repo)
         out["status"] = "BLOCKED_CONFLICT"
-        out["detail"] = "textual conflict merging %s -- aborted, tree restored: %s" % (
-            target, (merge_out or merge_err)[:500])
+        out["merge_aborted"] = aborted
+        out["detail"] = "textual conflict merging %s -- %s: %s" % (
+            target, "aborted, tree restored" if aborted else _mid_merge_note(repo),
+            (merge_out or merge_err)[:500])
         return out
 
-    raw = "\n".join(s for s in (merge_err, merge_out) if s)
+    paths = parse_overlap_paths(raw)
+    if not paths:
+        # git refused, but not over overlapping WIP (e.g. a stale index.lock that blocks
+        # every session's commits). Routine-silent BLOCKED_DIRTY_OVERLAP would hide it.
+        out["status"] = "ERROR"
+        out["detail"] = "git refused the merge with no overlapping paths named: %s" % (
+            _strip_warnings(raw)[:500])
+        return out
     out["status"] = "BLOCKED_DIRTY_OVERLAP"
-    out["blocked_paths"] = parse_overlap_paths(raw)
+    out["blocked_paths"] = paths
     out["detail"] = "git refused before writing anything (%d local path(s) overlap %s): %s" % (
         len(out["blocked_paths"]), target, _strip_warnings(raw)[:500])
     return out
