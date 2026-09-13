@@ -85,7 +85,10 @@ Usage:
     python maintenance/live-branch-drift-probe.py
         [--repo PATH]   checkout to inspect (default: ~/.claude)
         [--base REF]    default: origin/main
-        [--no-fetch]    skip `git fetch <remote> <branch>`
+        [--no-fetch]    skip `git fetch <remote> <branch>`. The base is then
+                        taken as-is: a STALE base with no drift reads NO_DRIFT,
+                        exit 0. Interactive/ad-hoc use only -- a scheduled run
+                        must NEVER pass --no-fetch.
         [--json]        machine-readable only
         [--budget-seconds N]  total runtime budget, default 120
 
@@ -96,8 +99,11 @@ Exit codes:
     2  ERROR       not a checkout, git unavailable, base unresolvable, a tree
                    could not be read, runtime budget exceeded, or any
                    unexpected exception (error_type names it)
-    3  UNVERIFIED  fetch attempted and failed, and no drift against the stale
-                   base -- not proven clean
+    3  UNVERIFIED  no drift, but the fetch was requested and did not refresh
+                   the base (fetch failed, `git remote` failed, or the base is
+                   not a <remote>/<branch> / refs/remotes/<remote>/<branch>
+                   ref) -- not proven clean. Schedulers must route it as a
+                   warning, never silent.
 
 RESULT_JSON consumers must key on `verdict`. ERROR reports carry only
 verdict/repo/base/error/error_type/scope_globs -- no drift, counts or
@@ -365,13 +371,32 @@ def historical_blobs(repo, refs, paths):
     return hist
 
 
+def _split_remote_ref(base, names):
+    """(remote, branch) for `<remote>/<branch>` or `refs/remotes/<remote>/<branch>`
+    against the configured remote names (longest name wins, so a remote whose
+    name contains '/' still resolves); (None, None) for anything else."""
+    ref = base[len("refs/remotes/"):] if base.startswith("refs/remotes/") else base
+    for name in sorted(names, key=len, reverse=True):
+        if ref.startswith(name + "/") and len(ref) > len(name) + 1:
+            return name, ref[len(name) + 1:]
+    return None, None
+
+
 def do_fetch(repo, base):
+    """attempted=False means the base has no remote-tracking spelling (a local
+    ref) -- probe() treats that as NOT refreshed. A failing `git remote` is a
+    failed fetch (attempted=True, ok=False), never 'nothing to fetch'."""
     info = {"attempted": False, "ok": None, "remote": None, "branch": None, "detail": None}
     remotes = git(repo, "remote")
-    names = set(remotes.stdout.split()) if remotes.returncode == 0 else set()
-    remote, _, branch = base.partition("/")
-    if not branch or remote not in names:
-        info["detail"] = "base %r is not a <remote>/<branch> ref; nothing to fetch" % base
+    if remotes.returncode != 0:
+        info.update(attempted=True, ok=False,
+                    detail="`git remote` failed (rc %d): %s"
+                    % (remotes.returncode, (remotes.stderr or "").strip()[:200]))
+        return info
+    remote, branch = _split_remote_ref(base, set(remotes.stdout.split()))
+    if remote is None:
+        info["detail"] = ("base %r is not a <remote>/<branch> or refs/remotes/<remote>/<branch>"
+                          " ref of a configured remote; it cannot be refreshed" % base)
         return info
     info.update(attempted=True, remote=remote, branch=branch)
     # No explicit refspec: `git fetch <remote> <branch>` updates
@@ -651,17 +676,20 @@ def probe(repo, base, fetch):
     for d in entries:
         class_counts[d["class"]] += 1
     f = report["fetch"]
-    fetch_failed = bool(f["attempted"]) and not f["ok"]
+    # Refreshed = the caller declined the fetch (--no-fetch), or it ran and
+    # succeeded. A requested fetch that failed OR could not be attempted
+    # leaves the base unrefreshed: drift found is still real, "no drift" is not.
+    unrefreshed = fetch and not (f["attempted"] and f["ok"])
     if entries:
         verdict = "DRIFT"
-    elif fetch_failed:
+    elif unrefreshed:
         verdict = "UNVERIFIED"
-        report["warnings"].append("no drift against a base that could not be refreshed"
-                                  " -- UNVERIFIED, not clean")
+        report["warnings"].append("no drift against a base that was not refreshed (%s)"
+                                  " -- UNVERIFIED, not clean" % (f.get("detail") or "fetch failed"))
     else:
         verdict = "NO_DRIFT"
     report.update(drift=entries, counts=class_counts, local_ahead_count=local_ahead,
-                  verdict=verdict, fetch_ok=(f["ok"] if f["attempted"] else None),
+                  verdict=verdict, fetch_ok=(None if not fetch else bool(f["attempted"] and f["ok"])),
                   elapsed_s=round(time.time() - t0, 2))
     return report
 
@@ -759,11 +787,23 @@ def main(argv=None):
         report = {"verdict": "ERROR", "repo": repo, "base": args.base,
                   "error": str(exc) or type(exc).__name__,
                   "error_type": type(exc).__name__, "scope_globs": list(SCOPE_GLOBS)}
-        emit(report, args.json)
+        try:
+            emit(report, args.json)
+        except (BrokenPipeError, OSError):
+            pass
         return EXIT_ERROR
     finally:
         _DEADLINE[0] = None
-    emit(report, args.json)
+    try:
+        emit(report, args.json)
+    except (BrokenPipeError, OSError):
+        # Reader went away (e.g. piped into `head`): the verdict was never
+        # delivered, so it must not read as DRIFT (1) or clean (0).
+        try:
+            sys.stdout = open(os.devnull, "w")
+        except OSError:
+            pass
+        return EXIT_ERROR
     return {"DRIFT": EXIT_DRIFT, "UNVERIFIED": EXIT_UNVERIFIED}.get(report["verdict"],
                                                                   EXIT_NO_DRIFT)
 

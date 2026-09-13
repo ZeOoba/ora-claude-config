@@ -423,6 +423,131 @@ def test_offline_fetch_with_no_drift_is_unverified_not_clean():
            proc2.returncode == EXIT_NO_DRIFT and rep2.get("verdict") == "NO_DRIFT", rep2)
 
 
+def _origin_fixture(prefix):
+    """repo on `feature` == main, with a bare origin fetched once."""
+    td = tempfile.mkdtemp(prefix=prefix)
+    origin = os.path.join(td, "origin.git")
+    subprocess.run(["git", "init", "-q", "--bare", origin], capture_output=True)
+    repo = make_repo()
+    g(repo, "remote", "add", "origin", origin)
+    g(repo, "push", "-q", "origin", "main")
+    g(repo, "fetch", "-q", "origin")
+    to_feature(repo)
+    return repo
+
+
+def _run_main_inprocess(mod, argv):
+    import io
+    buf, old = io.StringIO(), sys.stdout
+    sys.stdout = buf
+    try:
+        code = mod.main(argv)
+    except BaseException as exc:
+        code = "raised %r" % exc
+    finally:
+        sys.stdout = old
+    lines = buf.getvalue().strip().splitlines()
+    rep = (json.loads(lines[-1][len("RESULT_JSON="):])
+           if lines and lines[-1].startswith("RESULT_JSON=") else None)
+    return code, rep
+
+
+def test_git_remote_failure_is_unverified():
+    print("fetch: `git remote` itself failing -> UNVERIFIED, not NO_DRIFT (re-review B)")
+    import subprocess as sp
+    repo = _origin_fixture("drift-probe-remotefail-")
+    mod = _load_module()
+    real_git = mod.git
+
+    def fake_git(r, *args, **kw):
+        if args and args[0] == "remote":
+            return sp.CompletedProcess(["git"] + list(args), 127, "", "timed out")
+        return real_git(r, *args, **kw)
+    mod.git = fake_git
+    try:
+        info = mod.do_fetch(repo, "origin/main")
+        code, rep = _run_main_inprocess(mod, ["--repo", repo, "--base", "origin/main"])
+    finally:
+        mod.git = real_git
+    expect("do_fetch marks attempted=True ok=False", info["attempted"] is True
+           and info["ok"] is False and info["detail"], info)
+    expect("no drift + failed `git remote` -> exit 3", code == EXIT_UNVERIFIED, code)
+    expect("verdict UNVERIFIED", rep and rep.get("verdict") == "UNVERIFIED", rep)
+
+
+def test_base_ref_spellings_and_unfetchable_base():
+    print("fetch: refs/remotes/<r>/<b> spelling fetched; unfetchable base -> UNVERIFIED"
+          " (re-review C)")
+    repo = _origin_fixture("drift-probe-spelling-")
+    for base in ("origin/main", "refs/remotes/origin/main"):
+        proc, rep = run_probe(repo, base=base, fetch=True)
+        expect("%s: fetch attempted and ok" % base,
+               rep and rep["fetch"]["attempted"] and rep["fetch"]["ok"], rep and rep["fetch"])
+        expect("%s: NO_DRIFT exit 0" % base, proc.returncode == EXIT_NO_DRIFT
+               and rep.get("verdict") == "NO_DRIFT", proc.stdout[-400:])
+    proc, rep = run_probe(repo, base="main", fetch=True)   # local ref: cannot be refreshed
+    expect("local base with fetch requested: not attempted",
+           rep and rep["fetch"]["attempted"] is False, rep and rep["fetch"])
+    expect("local base + no drift + fetch requested -> exit 3",
+           proc.returncode == EXIT_UNVERIFIED, proc.stdout[-400:])
+    expect("unfetchable base warns", rep and any("not refreshed" in w or "could not be"
+                                                  in w for w in rep.get("warnings", [])), rep)
+    proc, rep = run_probe(repo, base="main", fetch=False)
+    expect("local base with --no-fetch stays NO_DRIFT exit 0",
+           proc.returncode == EXIT_NO_DRIFT, proc.stdout[-400:])
+
+
+def test_broken_pipe_on_success_emit_is_error_not_traceback():
+    print("emit failure (BrokenPipe) on the success path -> exit 2, no raise (re-review F)")
+    repo = make_repo()
+    to_feature(repo)
+    mod = _load_module()
+    real_emit = mod.emit
+
+    def broken(report, as_json):
+        raise BrokenPipeError(32, "Broken pipe")
+    mod.emit = broken
+    real_stdout = sys.stdout
+    try:
+        code, _rep = _run_main_inprocess(mod, ["--repo", repo, "--base", "main", "--no-fetch"])
+    finally:
+        mod.emit = real_emit
+        sys.stdout = real_stdout
+    expect("BrokenPipe on emit -> EXIT_ERROR, not a traceback", code == EXIT_ERROR, code)
+
+
+def test_budget_clipped_timeout_branch():
+    print("budget: a git call cut short by the deadline raises BudgetExceeded (re-review G)")
+    import subprocess as sp
+    import time as _time
+    import types
+    mod = _load_module()
+    seen = []
+
+    def fake_run(cmd, **kw):
+        seen.append(kw.get("timeout"))
+        raise sp.TimeoutExpired(cmd, kw.get("timeout"))
+    real_sub = mod.subprocess
+    mod.subprocess = types.SimpleNamespace(run=fake_run, TimeoutExpired=sp.TimeoutExpired,
+                                           CompletedProcess=sp.CompletedProcess)
+    try:
+        mod._DEADLINE[0] = _time.monotonic() + 5.0
+        try:
+            mod.git(".", "status")
+            clipped = "no raise"
+        except mod.BudgetExceeded as exc:
+            clipped = str(exc)
+        mod._DEADLINE[0] = None
+        unclipped = mod.git(".", "status")
+    finally:
+        mod.subprocess = real_sub
+        mod._DEADLINE[0] = None
+    expect("timeout clipped to the remaining budget", seen and seen[0] <= 5.0, seen)
+    expect("clipped timeout raises BudgetExceeded", "budget" in clipped, clipped)
+    expect("unclipped timeout (no deadline) returns rc 127, no raise",
+           getattr(unclipped, "returncode", None) == 127, unclipped)
+
+
 def test_errors_exit_2():
     print("probe errors exit 2 with RESULT_JSON")
     td = tempfile.mkdtemp(prefix="drift-probe-notrepo-")
@@ -577,6 +702,10 @@ def main():
     test_no_fetch_skips_fetch()
     test_fetch_default_updates_base_and_offline_fails_open()
     test_offline_fetch_with_no_drift_is_unverified_not_clean()
+    test_git_remote_failure_is_unverified()
+    test_base_ref_spellings_and_unfetchable_base()
+    test_broken_pipe_on_success_emit_is_error_not_traceback()
+    test_budget_clipped_timeout_branch()
     test_errors_exit_2()
     test_unexpected_exception_exits_error_with_result_json()
     test_runtime_budget_exceeded_is_error()
