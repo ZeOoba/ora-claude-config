@@ -5,12 +5,48 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-09-13T15:50:14.728Z
+  modified: 2026-09-13T18:50:10.802Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-09-13 -- ora-ground-truth-auditor frozen-backlog push blocker cleared on live step25 branch (session 4af15615)
+- Root cause (reported by peer session f2a12aac and verified here): scheduled-tasks/ora-ground-truth-auditor/SKILL.md was UNTRACKED on feat/model-canary-probe-step25, a stale 2026-09-10 20:26 copy (blob c790c41b, identical to 1059741/e35a4de) predating the run guard. test_scheduled_task_run_guard.py:385 failed "unguarded notion side effect is on the frozen backlog", which blocked the pre-push hook-tests gate.
+- Fix: commit e8ecb53 lands origin/main's guarded version (blob 5d70be51, origin/main 95448e6) via a pathspec commit. The stale copy was moved to the gitignored scheduled-tasks/_archive_2026-09-13_stale-copies/ (byte-verified). UNGUARDED_BACKLOG was not touched. The live CC/MCP ora-ground-truth-auditor now runs the guarded spec.
+- Gates: preflight-shared-checkout returned CONTESTED rc=1 because the orphan untracked file is inherently "not yours". The evidence showed no live owner, no claim, and no live-tree touch by any session. Gabriel approved proceeding in-turn ("proceed"), with allow-config-write minted for that approval. eos-review-gate does not cover this path (empty key); an independent opus review confirmed the pathspec, blob ids, guard-marker match at SKILL.md:39, and that no folder probe treats the _archive_ dir as a task.
+- Verify: test_scheduled_task_run_guard.py ALL passed ("ora-ground-truth-auditor :: guarded" PASS). Not pushed. The event_log uncommitted backlog the peer flagged was already committed by the b3300ed memory sync.
+
+## 2026-09-13 -- Graft D landed: acquisition-underwriting v4.22 Discount Decomposition (ora-skills #57) + underwriting-checker tie-out (ora-claude-config #203) MERGED
+
+- Gabriel in-turn: "MERGE THEM WHEN READY".
+- #57 merged as `b57acfe`; #203 merged as `95448e6`.
+- origin/main blobs verified equal to the reviewed heads: `02bee5b` (SKILL.md, ic-memo-structure.md, CHANGELOG-v3.2-v4.18.md) and `32ed0e2` (checker).
+- Review chain: 3 Fable passes. 1st: APPROVE-WITH-FIXES, 4 Important. 2nd: APPROVE-WITH-FIXES, 1 Medium. 3rd, on the exact staged content: APPROVE.
+  - The CodeRabbit "SUCCESS" status was rate-limited and is not a verdict.
+  - Qodo posted a trial-ended notice; Qodo was retired 2026-09-06, but the GitHub app still appears installed.
+- Local ora-skills main forward-merged as `93688f1`. `repo_first_check`: acquisition-underwriting IN-SYNC; the DIVERGENT ledger entry cleared.
+  - The remaining DIVERGENT `automation-health-monitor` is not from this work: it came from #55/#56, forward-merged by another session.
+- Side effect noted: the ora-skills post-commit hook synced the FEATURE-branch content into the installed Cowork cache before merge. Surfaced by a peer session. Harmless here only because the PR merged unchanged after its last sync.
+- The live `~/.claude/agents/underwriting-checker.md` stays pre-v4.22 until `ora-checkout-merge-forward` runs: that checkout is on another session's branch and was left untouched.
+- Worktrees removed, local branches deleted. Remote branches left in place.
+- Eval-harness rerun is expected on the next `14 12 * * *` fire (SKILL.md hash change); expected Combined delta is ~0.
+- Remaining grafts: B, E, A-groundwork. Tracker rows OI-301..303 are still pending, blocked on a tracker claim held by a scheduled run.
+
+## 2026-09-13 — oxfordra.net release: SEO audit fixes (ZeOoba/Website#77)
+- **Target:** oxfordra.net production (Netlify auto-publish on merge to main). Gabriel confirmed deploy in-turn; scope choice "fix grid, then deploy".
+- **Shipped:** merge `ac1356c` → Netlify deploy `6aa6c9a265ed3d0008ea9c69` (published 16:05 UTC). `.html`→clean-URL `301!` rules for all sitemap pages; `/404` real 404 + no canonical on 404.html; Organization logo → `images/oxford-logo-512.png`; closing claim unified to 30–45 days (site copy + `scripts/meta.md` chat KB); Article dates on 4 guides; owner-guide card blocks (home/for-brokers/markets hub/Columbus/Maryland, 1/2/4 and 1/3 breakpoints); meta/title/OG fixes; `tests/site/seo.test.mjs` in CI. KC market page (#4) and H1 rewrites (#7) out of scope by decision.
+- **Gates:** `npm run verify` green; CI + Netlify header/redirect checks green; deploy-preview redirect proof (no loops); site-qc-reviewer APPROVE (0 confidential-term hits; roster `_meta.roster_last_verified` 2026-08-09 flagged stale >30d).
+- **Post-verify (live):** `/about.html`→301 `/about` (1 hop); `/index.html`, `/markets/index.html`, `/resources/index.html`, `/privacy.html` → 301; `/404` + unknown → 404; logo 200; new hero copy + guides section served. Netlify Lighthouse (mobile, `/`): Perf 100 (was 97) / A11y 100 / BP 100 / SEO 100; secret scan 0 matches.
+- **Rollback:** Netlify "publish deploy" on prior production `6aa6c7b64b7bde00084a963a` (commit 80ee86c).
+- **Follow-ups (non-blocking QC):** `--gold` on parchment stat text (for-brokers:213-225, sell-your-building:271,275) → `--gold-accessible`; sitemap lastmod for resources/* + about; Article publisher.logo → 512 logo; `--gold-accessible` missing from application-received inline :root; promote guide-card CSS to styles.css; exclude `assets/chat.test.js` from dist; `/tenant-application.html` duplicate 200. Related: ora-skills#56 (website-perfection v1.1) open; website-canonical `.claude/launch.json` now has `site`/`worktree` serve-dist configs.
+
+## 2026-09-13 -- PR #202 prepush worktree test fix landed on live step25 branch (session 4af15615)
+- Landed blob 39a73ffa (4015782, PR #202) of hooks/tests/test-git-prepush-doctrine-gate-worktree.py onto feat/model-canary-probe-step25 in the primary ~/.claude checkout as commit 63dd51a: single-file checkout plus pathspec commit, no merge or cherry-pick, so none of the ~110 foreign dirty files were touched.
+- Gates: preflight-shared-checkout CLEAR (rc=0, run twice); claim repo-housekeeping; allow-config-write minted on Gabriel's in-turn "approve"; eos-review-gate key 629aa2190d77 matched the prior review, and a fresh independent review (claude-fable-5-1) was recorded APPROVED because review artifacts are session-scoped. Three nits, none reachable via the production writer.
+- Verify: test-git-prepush-doctrine-gate-worktree.py 34/34 passed. doctrine-status.json has 0 "2020-01-01" records; the newest record is 2026-09-13T11:47:34 (clean). File mtime 11:51:56 predates the test run, so the canonical file was untouched. The 11:50 fixture record was already gone, and no scrub was needed.
+- Not pushed (Gabriel-scoped). Pushing the branch still hits the pre-existing frozen-backlog finding (ora-ground-truth-auditor unguarded notion side effect), which is unclaimed and needs a separate override decision by the branch owner. HEAD has since advanced to b3300ed (8bb1e13 PR #199/#200 landing, memory sync), and 63dd51a is an ancestor with the blob intact.
 
 ## 2026-09-13 -- Pre-push worktree test stopped polluting canonical doctrine-status.json (PR #202 merged); 19 fixture records scrubbed
 
