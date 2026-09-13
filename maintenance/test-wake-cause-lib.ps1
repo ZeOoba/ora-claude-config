@@ -193,6 +193,88 @@ Check "xml Reason -> int 15" ($d.Reason -is [int] -and $d.Reason -eq 15)
 Check "xml LidOpenState -> bool false" ($d.LidOpenState -is [bool] -and -not $d.LidOpenState)
 Check "xml capacity -> number" ([long]$d.BatteryRemainingCapacityOnEnter -eq 55409)
 
+# ---------------------------------------------------------------------------
+# 7. Host-off classification (follow-up, 2026-09-12). A User32 1074 is a REQUEST.
+#    It counts as a power-off/restart only when the host actually went down: a
+#    Kernel-General 13 (full shutdown) or a Kernel-Power 42 TargetState=6 (Fast
+#    Startup hybrid shutdown -- this host has HiberbootEnabled=1 and those log NO
+#    6006/109/13). Power comes back at the next Kernel-Boot 27. Fixtures are the real
+#    09-11/09-12, 08-11/12 and 08-13 events from this host.
+# ---------------------------------------------------------------------------
+function Req($t, $action, $proc) { [pscustomobject]@{ time = (T $t); action = $action; process = $proc } }
+function S42($t, $ts, $es, $r) { [pscustomobject]@{ time = (T $t); targetState = $ts; effectiveState = $es; reason = $r } }
+function Boot($t, $bt) { [pscustomobject]@{ time = (T $t); bootType = $bt } }
+
+$reqs = @(
+    (Req '2026-08-13 04:32:22' 'restart'   'C:\Windows\uus\AMD64\MoUsoCoreWorker.exe'),
+    (Req '2026-09-11 17:36:02' 'restart'   'C:\Windows\system32\winlogon.exe'),
+    (Req '2026-09-11 17:37:55' 'power off' 'C:\Windows\system32\winlogon.exe'),
+    (Req '2026-09-05 10:00:00' 'power off' 'C:\Windows\system32\winlogon.exe')
+)
+$s42 = @((S42 '2026-08-11 19:38:06' 5 5 2), (S42 '2026-09-11 17:38:03' 6 5 4))
+$m13 = @((T '2026-08-13 04:36:58'), (T '2026-09-11 17:36:19'), (T '2026-09-12 16:19:48'))
+$boots = @((Boot '2026-08-12 11:00:17' 2), (Boot '2026-08-13 04:37:21' 0), (Boot '2026-09-11 17:36:37' 0),
+           (Boot '2026-09-11 21:26:05' 1), (Boot '2026-09-12 16:20:06' 0))
+$off = @(Resolve-HostOffPeriods -Requests $reqs -Sleep42 $s42 -ShutdownMarkers $m13 -Boots $boots)
+function OffAt($t) { $off | Where-Object { $_.start -eq (T $t) } | Select-Object -First 1 }
+
+$po = OffAt '2026-09-11 17:37:55'
+Check "09-11 17:37:55 power off is CONFIRMED (not a false positive)" ($po.kind -eq 'HOST-POWER-OFF' -and $po.confirmed)
+Check "confirmed by 42 TargetState=6 -> fast-startup mode" ($po.mode -eq 'fast-startup')
+Check "power restored at the 21:26:05 BootType=1 boot" ($po.end -eq (T '2026-09-11 21:26:05') -and $po.bootType -eq 1)
+$rs = OffAt '2026-09-11 17:36:02'
+Check "17:36:02 restart confirmed by the 13 at 17:36:19, not by the later 42" ($rs.kind -eq 'RESTART' -and $rs.confirmedBy -like '*13*')
+Check "restart back up at 17:36:37" ($rs.end -eq (T '2026-09-11 17:36:37'))
+$wu = OffAt '2026-08-13 04:32:22'
+Check "WU reboot confirmed 4.5 min later (install window)" ($wu.kind -eq 'WU-REBOOT' -and $wu.confirmed)
+$un = OffAt '2026-09-05 10:00:00'
+Check "power-off request with no shutdown evidence -> UNCONFIRMED" ($un.kind -eq 'POWER-OFF-REQUESTED' -and -not $un.confirmed)
+$hb = OffAt '2026-08-11 19:38:06'
+Check "42 TargetState=5 -> HOST-HIBERNATE" ($hb.kind -eq 'HOST-HIBERNATE' -and $hb.confirmed)
+Check "hibernate ends at the 08-12 11:00:17 BootType=2 resume" ($hb.end -eq (T '2026-08-12 11:00:17') -and $hb.bootType -eq 2)
+$sd = OffAt '2026-09-12 16:19:48'
+# Real 09-12 16:19:48 13 had no 1074 and a boot 18s later: a restart, not a shutdown.
+Check "13 with no 1074, boot 18s later -> RESTART-UNATTRIBUTED" ($sd.kind -eq 'RESTART-UNATTRIBUTED' -and $sd.end -eq (T '2026-09-12 16:20:06'))
+Check "the 42 at 17:38:03 is claimed by the request, not duplicated" (@($off | Where-Object { $_.start -eq (T '2026-09-11 17:38:03') }).Count -eq 0)
+$open = @(Resolve-HostOffPeriods -Requests @((Req '2026-09-12 23:00:00' 'power off' 'x')) -Sleep42 @((S42 '2026-09-12 23:00:05' 6 5 4)) -ShutdownMarkers @() -Boots @())
+# A restart never takes the Fast Startup path (hybrid shutdown applies to power-off
+# only), so a 42 TargetState=6 after a restart request is not that restart's evidence.
+$rx = @(Resolve-HostOffPeriods -Requests @((Req '2026-09-12 22:00:00' 'restart' 'x')) -Sleep42 @((S42 '2026-09-12 22:00:10' 6 5 4)) -ShutdownMarkers @() -Boots @())
+Check "restart is not confirmed by a hybrid-shutdown 42" (@($rx | Where-Object { $_.start -eq (T '2026-09-12 22:00:00') })[0].kind -eq 'RESTART-REQUESTED')
+Check "confirmed off with no later boot -> end null (still off / unobserved)" ($open[0].confirmed -and $null -eq $open[0].end)
+Check "CAUSE line for confirmed off" ((Format-HostOffPeriod $po) -like '`[CAUSE`] HOST-POWER-OFF at 2026-09-11 17:37:55 until 2026-09-11 21:26:05 (3.8h, fast-startup*')
+Check "sub-hour span prints minutes, not 0h" ((Format-HostOffPeriod $rs) -like '*until 2026-09-11 17:36:37 (0.6min, full*')
+Check "unconfirmed request is a note, never a CAUSE" ((Format-HostOffPeriod $un) -like '`[note`] POWER-OFF-REQUESTED*')
+
+# Review round 2 (2026-09-12).
+# CONFIRMED-1: dirty power-off (Kernel-Power 41 + 6008, no 1074/42/13) must be visible.
+# Real: 41 at 09-02 08:37:23 (logged at boot; boot 27 at 08:37:19), last prior event 07:41:09.
+$dirty = @([pscustomobject]@{ time = (T '2026-09-02 08:37:23'); lastSeen = (T '2026-09-02 07:41:09') })
+$dOff = @(Resolve-HostOffPeriods -DirtyOff $dirty -Boots @((Boot '2026-09-02 08:37:19' 0)))
+Check "41 -> HOST-DIRTY-OFF from last seen event to its boot" ($dOff[0].kind -eq 'HOST-DIRTY-OFF' -and $dOff[0].start -eq (T '2026-09-02 07:41:09') -and $dOff[0].end -eq (T '2026-09-02 08:37:19'))
+# CONFIRMED-2: a standalone 13 followed by a boot ~18s later is a restart, not a shutdown.
+$q = @(Resolve-HostOffPeriods -ShutdownMarkers @((T '2026-08-12 17:42:01'), (T '2026-08-20 18:18:22')) `
+        -Boots @((Boot '2026-08-12 17:42:20' 0), (Boot '2026-08-21 10:13:57' 0)))
+Check "standalone 13 + boot within 2 min -> RESTART-UNATTRIBUTED" ($q[0].kind -eq 'RESTART-UNATTRIBUTED')
+Check "standalone 13 + boot hours later -> HOST-SHUTDOWN" ($q[1].kind -eq 'HOST-SHUTDOWN')
+# PLAUSIBLE-4: battery-standby timeout -> hibernate (42 TS=5 12-18s after a 507) is tagged.
+$h2 = @(Resolve-HostOffPeriods -Sleep42 @((S42 '2026-09-11 06:33:32' 5 5 13)) -StandbyExitTimes @((T '2026-09-11 06:33:17')) `
+        -Boots @((Boot '2026-09-11 10:06:42' 2)))
+Check "42 TS=5 within 60s of a 507 -> hibernate (from-standby)" ($h2[0].kind -eq 'HOST-HIBERNATE' -and $h2[0].mode -eq 'hibernate-from-standby')
+Check "hibernate without a preceding 507 stays plain" ($hb.mode -eq 'hibernate')
+
+# Boot records: Kernel-Boot 27 marks EVERY boot (50 in 35d); Kernel-General 12 missed
+# all 16 Fast Startup / hibernate boots. 12 is kept only where no 27 is within 120s.
+$br = @(Get-BootRecords -Boot27 @((Boot '2026-09-11 17:36:37' 0), (Boot '2026-09-11 21:26:05' 1)) `
+          -KernelGeneral12 @((T '2026-09-11 17:36:37'), (T '2026-09-01 08:00:00')))
+Check "boot records merge 27+12 without duplicates" ($br.Count -eq 3)
+Check "Fast Startup boot present in boot records" (@($br | Where-Object { $_.bootType -eq 1 }).Count -eq 1)
+# PR #1 gap: the 21:26:05 entry followed a Fast Startup boot that Kernel-General 12 never
+# logged, so the 17:38:02 105 (written during the hybrid shutdown) passed as same-boot.
+$fsb = @(Get-StandbyEntries -Enters $enters -Exits $exits -AcEvents $ac -BootTimes @($br | ForEach-Object { $_.time }) -Now $now)
+Check "105 from before a Fast Startup shutdown is not same-boot -> 21:26 via kp507" ($fsb[0].power.source -eq 'kp507' -and $fsb[0].power.state -eq 'DC')
+
+
 if ($script:failures.Count -gt 0) { Write-Output "`n$($script:failures.Count) FAILED"; exit 1 }
 Write-Output "`nALL PASS"
 exit 0
