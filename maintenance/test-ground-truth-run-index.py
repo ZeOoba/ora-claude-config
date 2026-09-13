@@ -884,6 +884,531 @@ def test_build_run_index_default_last_auditor_run_at_falls_back_to_real_file_rea
 
 
 # ---------------------------------------------------------------------------
+# OI-296 -- skip runs already audited and published by a prior night's
+# digest. Before this fix, Stage 0 re-selected every registry task whose
+# lastRunAt fell in the trailing window even if a PRIOR run-index had already
+# been verified and published -- measured 2026-09-13: the 2026-09-12 auditor
+# ran at 20:34Z, shortly after 5 of the next day's 12 in-window runs, so all
+# 5 were re-verified and re-drafted a second time. A run counts as "already
+# audited" only once its digest is actually on disk (an index with no sibling
+# digest means that night's audit never finished composition, so nothing was
+# ever published from it) -- and even then it is re-included if its
+# transcript kept changing AFTER that digest was written (e.g. a scheduled
+# session that continued as interactive work is new evidence the prior audit
+# never saw).
+# ---------------------------------------------------------------------------
+
+def _write_prior_run_index(state_dir, date_str, runs):
+    os.makedirs(state_dir, exist_ok=True)
+    path = os.path.join(state_dir, "run-index-{}.json".format(date_str))
+    json.dump({"runs": runs}, open(path, "w", encoding="utf-8"))
+    return path
+
+
+def _write_digest(state_dir, date_str, mtime=None):
+    os.makedirs(state_dir, exist_ok=True)
+    path = os.path.join(state_dir, "digest-{}.html".format(date_str))
+    open(path, "w").close()
+    if mtime is not None:
+        os.utime(path, (mtime, mtime))
+    return path
+
+
+def test_load_previously_audited_collects_run_ids_with_published_digest():
+    tmp = tempfile.mkdtemp()
+    try:
+        run_id = "cc:ora-pm-ledger:2026-09-12T19:00:00.000Z"
+        _write_prior_run_index(tmp, "2026-09-12", [
+            {"run_id": run_id, "task_id": "ora-pm-ledger", "fleet": "cc"}])
+        _write_digest(tmp, "2026-09-12")
+        prior, warnings = gti.load_previously_audited(tmp, datetime(2026, 9, 13).date())
+        check("run_id from the prior published digest is collected",
+              run_id in prior, prior)
+        check("no warnings on a clean prior index", warnings == [], warnings)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_ignores_index_without_a_digest():
+    tmp = tempfile.mkdtemp()
+    try:
+        run_id = "cc:ora-pm-ledger:2026-09-12T19:00:00.000Z"
+        _write_prior_run_index(tmp, "2026-09-12", [
+            {"run_id": run_id, "task_id": "ora-pm-ledger", "fleet": "cc"}])
+        # no digest written -- audit never completed through composition
+        prior, _ = gti.load_previously_audited(tmp, datetime(2026, 9, 13).date())
+        check("an index with no sibling digest contributes nothing "
+              "(never actually published)", prior == {}, prior)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_ignores_same_day_and_future_index():
+    tmp = tempfile.mkdtemp()
+    try:
+        run_id = "cc:ora-pm-ledger:2026-09-13T05:00:00.000Z"
+        _write_prior_run_index(tmp, "2026-09-13", [
+            {"run_id": run_id, "task_id": "ora-pm-ledger", "fleet": "cc"}])
+        _write_digest(tmp, "2026-09-13")
+        prior, _ = gti.load_previously_audited(tmp, datetime(2026, 9, 13).date())
+        check("an index dated TODAY (not strictly earlier) is never treated "
+              "as a prior audit", prior == {}, prior)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_uses_latest_digest_mtime_across_files():
+    tmp = tempfile.mkdtemp()
+    try:
+        run_id = "cc:ora-pm-ledger:2026-09-10T19:00:00.000Z"
+        _write_prior_run_index(tmp, "2026-09-10", [
+            {"run_id": run_id, "task_id": "ora-pm-ledger", "fleet": "cc"}])
+        _write_digest(tmp, "2026-09-10", mtime=1000.0)
+        _write_prior_run_index(tmp, "2026-09-11", [
+            {"run_id": run_id, "task_id": "ora-pm-ledger", "fleet": "cc"}])
+        _write_digest(tmp, "2026-09-11", mtime=5000.0)
+        prior, _ = gti.load_previously_audited(tmp, datetime(2026, 9, 13).date())
+        check("the LATER digest's mtime wins when a run_id spans two prior "
+              "published nights", prior[run_id]["digest_mtime"] == 5000.0, prior)
+        check("the later digest's filename is recorded",
+              prior[run_id]["digest_file"] == "digest-2026-09-11.html", prior)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_corrupt_prior_index_warns_without_crash():
+    tmp = tempfile.mkdtemp()
+    try:
+        os.makedirs(tmp, exist_ok=True)
+        bad_path = os.path.join(tmp, "run-index-2026-09-12.json")
+        open(bad_path, "w", encoding="utf-8").write("{not valid json")
+        _write_digest(tmp, "2026-09-12")
+        prior, warnings = gti.load_previously_audited(tmp, datetime(2026, 9, 13).date())
+        check("a corrupt prior index never raises and yields nothing",
+              prior == {}, prior)
+        check("a corrupt prior index adds a warning naming the file",
+              len(warnings) == 1 and "run-index-2026-09-12.json" in warnings[0], warnings)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_missing_state_dir_is_safe():
+    prior, warnings = gti.load_previously_audited(
+        os.path.join(tempfile.gettempdir(), "definitely-does-not-exist-oi296"),
+        datetime(2026, 9, 13).date())
+    check("a missing state dir yields empty results, never raises",
+          prior == {} and warnings == [], (prior, warnings))
+
+
+def test_build_run_index_skips_run_previously_audited_and_unjoined():
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_dir = os.path.join(tmp, "cc")
+        cc_reg = os.path.join(cc_dir, "scheduled-tasks.json")
+        state_dir = os.path.join(tmp, "state")
+        last_run = "2026-09-12T19:00:00.000Z"
+        _write_registry(cc_reg, [
+            {"id": "ora-pm-ledger", "cronExpression": "0 19 * * *",
+             "enabled": True, "lastRunAt": last_run, "lastScheduledFor": last_run},
+        ])
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        _write_registry(lams_reg, [])
+
+        run_id = gti.build_run_id("cc", "ora-pm-ledger", last_run)
+        _write_prior_run_index(state_dir, "2026-09-12", [
+            {"run_id": run_id, "task_id": "ora-pm-ledger", "fleet": "cc"}])
+        _write_digest(state_dir, "2026-09-12")
+
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        index = gti.build_run_index(cc_reg, lams_reg, [], now=now,
+                                     ground_truth_state_dir=state_dir)
+        check("the previously-audited, unjoined run does not appear in runs",
+              all(r["run_id"] != run_id for r in index["runs"]), index["runs"])
+        hits = [p for p in index["previously_audited"] if p["run_id"] == run_id]
+        check("it is recorded in previously_audited instead", hits != [],
+              index["previously_audited"])
+        check("previously_audited entry carries task_id/fleet/digest filename",
+              hits and hits[0]["task_id"] == "ora-pm-ledger" and hits[0]["fleet"] == "cc"
+              and hits[0]["audited_in_digest"] == "digest-2026-09-12.html", hits)
+        check("cc join_stats totals exclude the skipped run",
+              index["join_stats"]["cc"]["total"] == 0, index["join_stats"])
+        check("no reaudited_after_prior_digest entries for a plain skip",
+              index["reaudited_after_prior_digest"] == [], index)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_build_run_index_no_skip_when_prior_index_has_no_digest():
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_dir = os.path.join(tmp, "cc")
+        cc_reg = os.path.join(cc_dir, "scheduled-tasks.json")
+        state_dir = os.path.join(tmp, "state")
+        last_run = "2026-09-12T19:00:00.000Z"
+        _write_registry(cc_reg, [
+            {"id": "ora-pm-ledger", "cronExpression": "0 19 * * *",
+             "enabled": True, "lastRunAt": last_run, "lastScheduledFor": last_run},
+        ])
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        _write_registry(lams_reg, [])
+        run_id = gti.build_run_id("cc", "ora-pm-ledger", last_run)
+        _write_prior_run_index(state_dir, "2026-09-12", [
+            {"run_id": run_id, "task_id": "ora-pm-ledger", "fleet": "cc"}])
+        # no digest written
+
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        index = gti.build_run_index(cc_reg, lams_reg, [], now=now,
+                                     ground_truth_state_dir=state_dir)
+        check("an unpublished prior index (no digest) never causes a skip",
+              any(r["run_id"] == run_id for r in index["runs"]), index["runs"])
+        check("previously_audited is empty", index["previously_audited"] == [],
+              index["previously_audited"])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_build_run_index_no_skip_for_same_day_index():
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_dir = os.path.join(tmp, "cc")
+        cc_reg = os.path.join(cc_dir, "scheduled-tasks.json")
+        state_dir = os.path.join(tmp, "state")
+        last_run = "2026-09-13T05:00:00.000Z"
+        _write_registry(cc_reg, [
+            {"id": "ora-pm-ledger", "cronExpression": "0 5 * * *",
+             "enabled": True, "lastRunAt": last_run, "lastScheduledFor": last_run},
+        ])
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        _write_registry(lams_reg, [])
+        run_id = gti.build_run_id("cc", "ora-pm-ledger", last_run)
+        # a SAME-DAY run-index (e.g. an earlier --json investigative dump today)
+        _write_prior_run_index(state_dir, "2026-09-13", [
+            {"run_id": run_id, "task_id": "ora-pm-ledger", "fleet": "cc"}])
+        _write_digest(state_dir, "2026-09-13")
+
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        index = gti.build_run_index(cc_reg, lams_reg, [], now=now,
+                                     ground_truth_state_dir=state_dir)
+        check("a same-day prior index/digest never causes a skip -- only "
+              "STRICTLY earlier dates count as 'prior'",
+              any(r["run_id"] == run_id for r in index["runs"]), index["runs"])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_build_run_index_reincludes_when_transcript_newer_than_prior_digest():
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_dir = os.path.join(tmp, "cc")
+        cc_reg = os.path.join(cc_dir, "scheduled-tasks.json")
+        state_dir = os.path.join(tmp, "state")
+        last_run = "2026-09-12T19:00:00.000Z"
+        _write_registry(cc_reg, [
+            {"id": "ora-pm-ledger", "cronExpression": "0 19 * * *",
+             "enabled": True, "lastRunAt": last_run, "lastScheduledFor": last_run},
+        ])
+        t_ms = int(datetime.fromisoformat(last_run.replace("Z", "+00:00")).timestamp() * 1000)
+        _write_session_record(cc_dir, "local_pmledger", t_ms,
+                               "Ora pm ledger", cli_session_id="pmledger-cli",
+                               scheduled_task_id="ora-pm-ledger")
+        proj_dir = os.path.join(tmp, "proj")
+        os.makedirs(proj_dir)
+        transcript_path = os.path.join(proj_dir, "pmledger-cli.jsonl")
+        open(transcript_path, "w").close()
+
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        _write_registry(lams_reg, [])
+
+        run_id = gti.build_run_id("cc", "ora-pm-ledger", last_run)
+        _write_prior_run_index(state_dir, "2026-09-12", [
+            {"run_id": run_id, "task_id": "ora-pm-ledger", "fleet": "cc"}])
+        # digest written BEFORE the transcript's later modification below
+        _write_digest(state_dir, "2026-09-12", mtime=1000.0)
+        os.utime(transcript_path, (2000.0, 2000.0))  # session kept producing side effects after the digest
+
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        index = gti.build_run_index(cc_reg, lams_reg, [proj_dir], now=now,
+                                     ground_truth_state_dir=state_dir)
+        check("a run whose transcript was modified AFTER the prior digest is "
+              "re-included, not skipped",
+              any(r["run_id"] == run_id for r in index["runs"]), index["runs"])
+        reaud_hits = [r for r in index["reaudited_after_prior_digest"] if r["run_id"] == run_id]
+        check("it is recorded in reaudited_after_prior_digest", reaud_hits != [],
+              index["reaudited_after_prior_digest"])
+        check("the reason names the transcript-modified-after-digest condition",
+              reaud_hits and reaud_hits[0]["reason"] == "transcript modified after prior digest",
+              reaud_hits)
+        check("previously_audited does NOT also list this run (it was "
+              "re-included, not skipped)",
+              all(p["run_id"] != run_id for p in index["previously_audited"]),
+              index["previously_audited"])
+        check("cc join_stats totals COUNT the re-included run (it's a real "
+              "candidate again)", index["join_stats"]["cc"]["total"] == 1, index["join_stats"])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_build_run_index_skips_joined_run_when_transcript_older_than_digest():
+    # Same shape as the re-include test, but the transcript predates the
+    # digest -- the ordinary case (no post-digest side effects) -- must still
+    # be skipped even though it DID join to a transcript.
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_dir = os.path.join(tmp, "cc")
+        cc_reg = os.path.join(cc_dir, "scheduled-tasks.json")
+        state_dir = os.path.join(tmp, "state")
+        last_run = "2026-09-12T19:00:00.000Z"
+        _write_registry(cc_reg, [
+            {"id": "ora-pm-ledger", "cronExpression": "0 19 * * *",
+             "enabled": True, "lastRunAt": last_run, "lastScheduledFor": last_run},
+        ])
+        t_ms = int(datetime.fromisoformat(last_run.replace("Z", "+00:00")).timestamp() * 1000)
+        _write_session_record(cc_dir, "local_pmledger", t_ms,
+                               "Ora pm ledger", cli_session_id="pmledger-cli",
+                               scheduled_task_id="ora-pm-ledger")
+        proj_dir = os.path.join(tmp, "proj")
+        os.makedirs(proj_dir)
+        transcript_path = os.path.join(proj_dir, "pmledger-cli.jsonl")
+        open(transcript_path, "w").close()
+        os.utime(transcript_path, (1000.0, 1000.0))
+
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        _write_registry(lams_reg, [])
+
+        run_id = gti.build_run_id("cc", "ora-pm-ledger", last_run)
+        _write_prior_run_index(state_dir, "2026-09-12", [
+            {"run_id": run_id, "task_id": "ora-pm-ledger", "fleet": "cc"}])
+        _write_digest(state_dir, "2026-09-12", mtime=5000.0)  # digest written AFTER the transcript
+
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        index = gti.build_run_index(cc_reg, lams_reg, [proj_dir], now=now,
+                                     ground_truth_state_dir=state_dir)
+        check("a joined run whose transcript predates the prior digest is "
+              "still skipped", all(r["run_id"] != run_id for r in index["runs"]),
+              index["runs"])
+        check("cc join_stats totals exclude it", index["join_stats"]["cc"]["total"] == 0,
+              index["join_stats"])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_build_run_index_join_stats_and_duplicates_exclude_mixed_skips():
+    # 2 runs in window: one previously audited (skip), one genuinely new.
+    # join_stats totals and duplicate detection must reflect ONLY the new one.
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_dir = os.path.join(tmp, "cc")
+        cc_reg = os.path.join(cc_dir, "scheduled-tasks.json")
+        state_dir = os.path.join(tmp, "state")
+        skipped_last_run = "2026-09-12T19:00:00.000Z"
+        new_last_run = "2026-09-13T05:00:00.000Z"
+        _write_registry(cc_reg, [
+            {"id": "ora-pm-ledger", "cronExpression": "0 19 * * *",
+             "enabled": True, "lastRunAt": skipped_last_run, "lastScheduledFor": skipped_last_run},
+            {"id": "ora-am-brief", "cronExpression": "0 5 * * *",
+             "enabled": True, "lastRunAt": new_last_run, "lastScheduledFor": new_last_run},
+        ])
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        _write_registry(lams_reg, [])
+
+        skipped_run_id = gti.build_run_id("cc", "ora-pm-ledger", skipped_last_run)
+        _write_prior_run_index(state_dir, "2026-09-12", [
+            {"run_id": skipped_run_id, "task_id": "ora-pm-ledger", "fleet": "cc"}])
+        _write_digest(state_dir, "2026-09-12")
+
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        index = gti.build_run_index(cc_reg, lams_reg, [], now=now,
+                                     ground_truth_state_dir=state_dir)
+        check("exactly one run survives (the new one)", len(index["runs"]) == 1, index["runs"])
+        check("the surviving run is the new one, not the skipped one",
+              index["runs"] and index["runs"][0]["task_id"] == "ora-am-brief", index["runs"])
+        check("join_stats total counts only the new run",
+              index["join_stats"]["cc"]["total"] == 1, index["join_stats"])
+        check("exactly one previously_audited entry recorded",
+              len(index["previously_audited"]) == 1, index["previously_audited"])
+        check("duplicate detection never sees the skipped run (it isn't in "
+              "runs at all)",
+              all(skipped_run_id not in f.get("run_ids", []) for f in index["duplicate_flags"]),
+              index["duplicate_flags"])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_build_run_index_no_dedup_disables_skip():
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_dir = os.path.join(tmp, "cc")
+        cc_reg = os.path.join(cc_dir, "scheduled-tasks.json")
+        state_dir = os.path.join(tmp, "state")
+        last_run = "2026-09-12T19:00:00.000Z"
+        _write_registry(cc_reg, [
+            {"id": "ora-pm-ledger", "cronExpression": "0 19 * * *",
+             "enabled": True, "lastRunAt": last_run, "lastScheduledFor": last_run},
+        ])
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        _write_registry(lams_reg, [])
+        run_id = gti.build_run_id("cc", "ora-pm-ledger", last_run)
+        _write_prior_run_index(state_dir, "2026-09-12", [
+            {"run_id": run_id, "task_id": "ora-pm-ledger", "fleet": "cc"}])
+        _write_digest(state_dir, "2026-09-12")
+
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        index = gti.build_run_index(cc_reg, lams_reg, [], now=now,
+                                     ground_truth_state_dir=state_dir,
+                                     dedup_previously_audited=False)
+        check("dedup_previously_audited=False (the --no-dedup wiring) disables "
+              "the skip entirely -- an ad-hoc re-audit sees everything",
+              any(r["run_id"] == run_id for r in index["runs"]), index["runs"])
+        check("previously_audited is empty when dedup is disabled",
+              index["previously_audited"] == [], index["previously_audited"])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_build_run_index_corrupt_prior_index_adds_warning_not_crash():
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_dir = os.path.join(tmp, "cc")
+        cc_reg = os.path.join(cc_dir, "scheduled-tasks.json")
+        state_dir = os.path.join(tmp, "state")
+        os.makedirs(state_dir)
+        last_run = "2026-09-13T05:00:00.000Z"
+        _write_registry(cc_reg, [
+            {"id": "ora-am-brief", "cronExpression": "0 5 * * *",
+             "enabled": True, "lastRunAt": last_run, "lastScheduledFor": last_run},
+        ])
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        _write_registry(lams_reg, [])
+
+        open(os.path.join(state_dir, "run-index-2026-09-12.json"), "w",
+             encoding="utf-8").write("{not valid json")
+        _write_digest(state_dir, "2026-09-12")
+
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        index = gti.build_run_index(cc_reg, lams_reg, [], now=now,
+                                     ground_truth_state_dir=state_dir)
+        check("a corrupt prior index never crashes build_run_index",
+              len(index["runs"]) == 1, index["runs"])
+        check("the corrupt index produces a warning in the output document",
+              len(index.get("warnings", [])) == 1
+              and "run-index-2026-09-12.json" in index["warnings"][0], index.get("warnings"))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_build_run_index_default_ground_truth_state_dir_is_last_run_marker_dirname():
+    # Injectability contract: omitting ground_truth_state_dir must fall back
+    # to os.path.dirname(LAST_RUN_MARKER), not silently disable dedup.
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_dir = os.path.join(tmp, "cc")
+        cc_reg = os.path.join(cc_dir, "scheduled-tasks.json")
+        last_run = "2026-09-12T19:00:00.000Z"
+        _write_registry(cc_reg, [
+            {"id": "ora-pm-ledger", "cronExpression": "0 19 * * *",
+             "enabled": True, "lastRunAt": last_run, "lastScheduledFor": last_run},
+        ])
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        _write_registry(lams_reg, [])
+        run_id = gti.build_run_id("cc", "ora-pm-ledger", last_run)
+
+        fake_marker_dir = os.path.join(tmp, "fake-state")
+        _write_prior_run_index(fake_marker_dir, "2026-09-12", [
+            {"run_id": run_id, "task_id": "ora-pm-ledger", "fleet": "cc"}])
+        _write_digest(fake_marker_dir, "2026-09-12")
+
+        orig_marker = gti.LAST_RUN_MARKER
+        gti.LAST_RUN_MARKER = os.path.join(fake_marker_dir, "last-auditor-run.json")
+        try:
+            now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+            index = gti.build_run_index(cc_reg, lams_reg, [], now=now)  # no state dir passed
+            check("omitting ground_truth_state_dir falls back to "
+                  "dirname(LAST_RUN_MARKER), so the dedup still fires",
+                  all(r["run_id"] != run_id for r in index["runs"]), index["runs"])
+        finally:
+            gti.LAST_RUN_MARKER = orig_marker
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_main_reports_previously_audited_skip_count_in_stdout():
+    # main() uses the REAL current time internally, so this fixture is built
+    # relative to actual now rather than a fixed 2026-09-1x date -- the run
+    # sits an hour ago (inside the default 24h window) and the prior
+    # run-index/digest sit on the prior CALENDAR day, whatever that is.
+    tmp = tempfile.mkdtemp()
+    try:
+        real_now = datetime.now(timezone.utc)
+        run_last_run = real_now - timedelta(hours=1)
+        run_last_run_iso = run_last_run.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        prior_date = (real_now - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        cc_tasks = [
+            {"id": "ora-pm-ledger", "cronExpression": "0 19 * * *",
+             "enabled": True, "lastRunAt": run_last_run_iso,
+             "lastScheduledFor": run_last_run_iso},
+        ]
+        run_id = gti.build_run_id("cc", "ora-pm-ledger", run_last_run_iso)
+        _write_prior_run_index(tmp, prior_date, [
+            {"run_id": run_id, "task_id": "ora-pm-ledger", "fleet": "cc"}])
+        _write_digest(tmp, prior_date)
+
+        rc, out, _ = _run_main_with_state(
+            ["--out", os.path.join(tmp, "out.json")], tmp, cc_tasks=cc_tasks)
+        check("main() still exits 0 on a fully-skipped (now empty) index",
+              rc == 0, rc)
+        check("stdout reports the previously-audited skip count",
+              "1 previously audited skipped" in out, out)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_main_no_dedup_flag_includes_previously_audited_run():
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_dir = os.path.join(tmp, "cc")
+        os.makedirs(cc_dir, exist_ok=True)
+        real_now = datetime.now(timezone.utc)
+        run_last_run = real_now - timedelta(hours=1)
+        run_last_run_iso = run_last_run.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        prior_date = (real_now - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        cc_tasks = [
+            {"id": "ora-pm-ledger", "cronExpression": "0 19 * * *",
+             "enabled": True, "lastRunAt": run_last_run_iso,
+             "lastScheduledFor": run_last_run_iso},
+        ]
+        # give the run a real joinable transcript so the pre-existing
+        # join-rate floor (unrelated to OI-296) doesn't itself fail main() --
+        # this test is about the --no-dedup wiring, not the floor.
+        t_ms = int(run_last_run.timestamp() * 1000)
+        _write_session_record(cc_dir, "local_pmledger", t_ms,
+                               "Ora pm ledger", cli_session_id="pmledger-cli",
+                               scheduled_task_id="ora-pm-ledger")
+        proj_dir = os.path.join(tmp, "proj")
+        os.makedirs(proj_dir)
+        open(os.path.join(proj_dir, "pmledger-cli.jsonl"), "w").close()
+
+        run_id = gti.build_run_id("cc", "ora-pm-ledger", run_last_run_iso)
+        _write_prior_run_index(tmp, prior_date, [
+            {"run_id": run_id, "task_id": "ora-pm-ledger", "fleet": "cc"}])
+        _write_digest(tmp, prior_date)
+
+        out_path = os.path.join(tmp, "out.json")
+        rc, out, _ = _run_main_with_state(
+            ["--out", out_path, "--no-dedup"], tmp, cc_tasks=cc_tasks,
+            project_dirs=[proj_dir])
+        check("main() exits 0", rc == 0, rc)
+        check("stdout reports 0 previously audited skipped under --no-dedup",
+              "0 previously audited skipped" in out, out)
+        written = json.load(open(out_path, encoding="utf-8"))
+        check("the run survives in the written index under --no-dedup",
+              any(r["run_id"] == run_id for r in written["runs"]), written["runs"])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
 # I3 -- resolve_registry_paths() / main() exit-2 on total registry-discovery
 # failure. Before this fix, `_sd is None` or `discover_store` returning None
 # for either fleet fell through to `_registry_tasks(None)`, whose try/except
@@ -1014,6 +1539,47 @@ def _run_main_with_fake_registries(argv, tmp):
         gti.LAST_RUN_MARKER = orig_marker
 
 
+def _run_main_with_state(argv, tmp, cc_tasks=None, lams_tasks=None, project_dirs=None):
+    """Like _run_main_with_fake_registries, but seeds the CC/LAMS registries
+    with real tasks and points LAST_RUN_MARKER's directory at `tmp` -- so
+    `tmp` doubles as the ground-truth state dir the OI-296 dedup reads from
+    by default (dirname(LAST_RUN_MARKER)), exercising the real main()/argparse
+    path end to end. `project_dirs`, if given, monkeypatches
+    find_project_dirs() so a fixture-created transcript can actually join
+    (main() otherwise always reads the real ~/.claude/projects tree).
+    Returns (rc, stdout_text, marker_path)."""
+    import io
+    import contextlib
+
+    cc_reg = os.path.join(tmp, "cc", "scheduled-tasks.json")
+    lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+    _write_registry(cc_reg, cc_tasks or [])
+    _write_registry(lams_reg, lams_tasks or [])
+
+    class FakeSD:
+        @staticmethod
+        def discover_store(name):
+            return cc_reg if name == "claude-code-sessions" else lams_reg
+
+    marker_path = os.path.join(tmp, "last-auditor-run.json")
+    orig_sd = gti._sd
+    orig_marker = gti.LAST_RUN_MARKER
+    orig_find_project_dirs = gti.find_project_dirs
+    gti._sd = FakeSD()
+    gti.LAST_RUN_MARKER = marker_path
+    if project_dirs is not None:
+        gti.find_project_dirs = lambda *a, **k: project_dirs
+    try:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            rc = gti.main(argv)
+        return rc, buf.getvalue(), marker_path
+    finally:
+        gti._sd = orig_sd
+        gti.LAST_RUN_MARKER = orig_marker
+        gti.find_project_dirs = orig_find_project_dirs
+
+
 def test_main_json_flag_does_not_write_last_auditor_run_marker():
     tmp = tempfile.mkdtemp()
     try:
@@ -1099,6 +1665,23 @@ if __name__ == "__main__":
     test_build_run_index_persists_file_path_and_session_model_for_verifier_dispatch()
     test_build_run_index_last_auditor_run_at_is_injectable()
     test_build_run_index_default_last_auditor_run_at_falls_back_to_real_file_reader()
+    test_load_previously_audited_collects_run_ids_with_published_digest()
+    test_load_previously_audited_ignores_index_without_a_digest()
+    test_load_previously_audited_ignores_same_day_and_future_index()
+    test_load_previously_audited_uses_latest_digest_mtime_across_files()
+    test_load_previously_audited_corrupt_prior_index_warns_without_crash()
+    test_load_previously_audited_missing_state_dir_is_safe()
+    test_build_run_index_skips_run_previously_audited_and_unjoined()
+    test_build_run_index_no_skip_when_prior_index_has_no_digest()
+    test_build_run_index_no_skip_for_same_day_index()
+    test_build_run_index_reincludes_when_transcript_newer_than_prior_digest()
+    test_build_run_index_skips_joined_run_when_transcript_older_than_digest()
+    test_build_run_index_join_stats_and_duplicates_exclude_mixed_skips()
+    test_build_run_index_no_dedup_disables_skip()
+    test_build_run_index_corrupt_prior_index_adds_warning_not_crash()
+    test_build_run_index_default_ground_truth_state_dir_is_last_run_marker_dirname()
+    test_main_reports_previously_audited_skip_count_in_stdout()
+    test_main_no_dedup_flag_includes_previously_audited_run()
     test_resolve_registry_paths_errors_when_sd_unavailable()
     test_resolve_registry_paths_errors_when_discover_store_returns_none()
     test_resolve_registry_paths_errors_when_only_one_fleet_fails()

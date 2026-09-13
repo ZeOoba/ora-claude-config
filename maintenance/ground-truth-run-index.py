@@ -19,6 +19,7 @@ import argparse
 import glob
 import json
 import os
+import re
 import sys
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -613,6 +614,88 @@ def _write_last_auditor_run(now):
               open(LAST_RUN_MARKER, "w", encoding="utf-8"))
 
 
+_RUN_INDEX_FILENAME_RE = re.compile(r"^run-index-(\d{4}-\d{2}-\d{2})\.json$")
+
+
+def load_previously_audited(state_dir, today_date):
+    """Collects run_ids already audited AND published by a PRIOR night's
+    digest (OI-296 -- Stage 0 was re-selecting runs a prior audit had already
+    verified, because the prior auditor's own run time can land shortly after
+    those runs' lastRunAt; measured 2026-09-13: 5/12 runs re-selected this
+    way).
+
+    Scans `state_dir` (the same directory as LAST_RUN_MARKER) for every
+    `run-index-<YYYY-MM-DD>.json` whose date is STRICTLY earlier than
+    `today_date` (a date, not datetime) AND which has a sibling
+    `digest-<same date>.html`. The digest is only written after that night's
+    audit completed through composition (Stage 4) -- an index with no digest
+    means the audit never finished, so nothing from it was ever actually
+    published, and its runs must NOT be treated as already-audited.
+
+    Returns (previously_audited, warnings):
+      - previously_audited: dict run_id -> {"task_id", "fleet", "digest_file",
+        "digest_mtime"}. If a run_id appears in more than one prior published
+        digest, the LATEST digest_mtime (and its filename) wins.
+      - warnings: list[str], one entry per prior run-index file that could
+        not be read/parsed.
+
+    Fails open, never raises: a missing state_dir, a missing digest, or an
+    unreadable/malformed prior run-index file is silently treated as "this
+    file contributes nothing" -- EXCEPT a corrupt/unreadable prior run-index
+    also appends a human-readable warning, so the anomaly stays visible
+    without ever blocking Stage 0.
+    """
+    result = {}
+    warnings = []
+    if not state_dir or not os.path.isdir(state_dir):
+        return result, warnings
+
+    for path in sorted(glob.glob(os.path.join(state_dir, "run-index-*.json"))):
+        base = os.path.basename(path)
+        m = _RUN_INDEX_FILENAME_RE.match(base)
+        if not m:
+            continue
+        file_date_str = m.group(1)
+        try:
+            file_date = datetime.strptime(file_date_str, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if file_date >= today_date:
+            continue  # not strictly earlier than today -- e.g. today's own --json dump
+
+        digest_path = os.path.join(state_dir, "digest-{}.html".format(file_date_str))
+        if not os.path.isfile(digest_path):
+            continue  # audit never completed through composition -- never published
+
+        try:
+            digest_mtime = os.path.getmtime(digest_path)
+        except OSError:
+            continue
+
+        try:
+            doc = json.load(open(path, encoding="utf-8"))
+            file_runs = doc.get("runs", []) or []
+            for r in file_runs:
+                run_id = r.get("run_id")
+                if not run_id:
+                    continue
+                existing = result.get(run_id)
+                if existing is None or digest_mtime > existing["digest_mtime"]:
+                    result[run_id] = {
+                        "task_id": r.get("task_id"),
+                        "fleet": r.get("fleet"),
+                        "digest_file": os.path.basename(digest_path),
+                        "digest_mtime": digest_mtime,
+                    }
+        except Exception as e:
+            warnings.append(
+                "previously_audited: could not read prior run-index {} -- "
+                "treating its runs as NOT previously audited ({})".format(base, e))
+            continue
+
+    return result, warnings
+
+
 def _registry_tasks(registry_path):
     try:
         d = json.load(open(registry_path, encoding="utf-8-sig"))
@@ -635,13 +718,28 @@ def _in_window(task, window_start):
 
 
 def build_run_index(cc_registry_path, lams_registry_path, project_dirs,
-                     now=None, window_hours_override=None, last_auditor_run_at=None):
+                     now=None, window_hours_override=None, last_auditor_run_at=None,
+                     ground_truth_state_dir=None, dedup_previously_audited=True):
     """Stage 0 orchestrator -- produces the complete run-index document.
 
     `last_auditor_run_at` -- override for `_read_last_auditor_run()` (tests
     inject a controlled value here instead of depending on the real marker
     file; `None` means "use whatever the real file says", i.e. current
     default behavior is unchanged).
+
+    `ground_truth_state_dir` -- override for where OI-296's
+    load_previously_audited() looks for prior `run-index-*.json`/
+    `digest-*.html` files. `None` (the default) resolves to
+    `os.path.dirname(LAST_RUN_MARKER)`, i.e. the real state dir -- tests
+    inject a temp dir instead.
+
+    `dedup_previously_audited` -- OI-296: when True (the default), a
+    candidate run whose run_id was already audited AND published by a prior
+    night's digest is skipped rather than re-selected (see
+    load_previously_audited's docstring for the exact rule, including the
+    transcript-modified-after-digest re-include exception). `False` is the
+    `--no-dedup` escape hatch for ad-hoc re-audits -- it disables the skip
+    entirely, restoring pre-OI-296 behavior.
 
     Returns a dict:
       {
@@ -656,6 +754,10 @@ def build_run_index(cc_registry_path, lams_registry_path, project_dirs,
         "duplicate_flags": [ ... ],
         "join_stats": { "cc": {joined, total, rate_ok, message},
                          "lams": {...} },
+        "previously_audited": [ {run_id, task_id, fleet, audited_in_digest}, ... ],
+        "reaudited_after_prior_digest": [ {run_id, task_id, fleet,
+                    audited_in_digest, reason}, ... ],
+        "warnings": [ str, ... ],
       }
 
     `window_widen_kind` -- one of "none", "auditor_gap", "resume_event",
@@ -665,10 +767,24 @@ def build_run_index(cc_registry_path, lams_registry_path, project_dirs,
     resume-event widen, so it gets the same width-only floor tiers "none"
     gets from decide_window_hours (no special relaxation or extra strictness
     beyond window_hours itself).
+
+    `previously_audited`/`reaudited_after_prior_digest`/`warnings` (OI-296):
+    a run skipped under the dedup rule is excluded from `runs` entirely --
+    it never reaches join_stats totals or detect_duplicates, since both
+    operate only on the `runs` list built below. `warnings` carries one
+    entry per prior run-index file load_previously_audited() could not read
+    (fail-open, never a crash -- see its docstring).
     """
     now = now or datetime.now(timezone.utc)
     cc_tasks_all = _registry_tasks(cc_registry_path)
     lams_tasks_all = _registry_tasks(lams_registry_path)
+
+    if dedup_previously_audited:
+        state_dir = ground_truth_state_dir if ground_truth_state_dir is not None \
+            else os.path.dirname(LAST_RUN_MARKER)
+        previously_audited_index, warnings = load_previously_audited(state_dir, now.date())
+    else:
+        previously_audited_index, warnings = {}, []
 
     if window_hours_override is not None:
         window_hours, window_reason = float(window_hours_override), "explicit --window-hours override"
@@ -688,6 +804,8 @@ def build_run_index(cc_registry_path, lams_registry_path, project_dirs,
     lams_recorded_skips = _registry_recorded_skips(lams_registry_path)
 
     runs = []
+    previously_audited_out = []
+    reaudited_out = []
     cc_joined = cc_total = 0
     lams_joined = lams_total = 0
 
@@ -707,16 +825,53 @@ def build_run_index(cc_registry_path, lams_registry_path, project_dirs,
             matching_sessions = find_all_sessions_for_task(t, session_records)
             if fleet == "cc":
                 transcript = join_cc_transcript(session, project_dirs) if session else None
+            else:
+                transcript = join_lams_transcript(session, lams_registry_dir) if session else None
+
+            run_id = build_run_id(fleet, task_id, t.get("lastScheduledFor"))
+
+            # --- OI-296: skip a run a PRIOR published digest already audited,
+            # unless its transcript kept changing after that digest was
+            # written (see load_previously_audited's docstring for the full
+            # rule). An unjoined run (transcript is None) can never clear the
+            # re-include check -- there is nothing to compare a mtime against
+            # -- so it is always skipped when previously audited.
+            prior = previously_audited_index.get(run_id)
+            if prior is not None:
+                skip = True
+                if transcript is not None:
+                    try:
+                        transcript_mtime = os.path.getmtime(transcript)
+                    except OSError:
+                        transcript_mtime = None
+                    if transcript_mtime is not None and transcript_mtime > prior["digest_mtime"]:
+                        skip = False
+                if skip:
+                    previously_audited_out.append({
+                        "run_id": run_id,
+                        "task_id": task_id,
+                        "fleet": fleet,
+                        "audited_in_digest": prior["digest_file"],
+                    })
+                    continue  # excluded from runs -- never counted, never a duplicate-detection input
+                reaudited_out.append({
+                    "run_id": run_id,
+                    "task_id": task_id,
+                    "fleet": fleet,
+                    "audited_in_digest": prior["digest_file"],
+                    "reason": "transcript modified after prior digest",
+                })
+
+            if fleet == "cc":
                 cc_total += 1
                 if transcript:
                     cc_joined += 1
             else:
-                transcript = join_lams_transcript(session, lams_registry_dir) if session else None
                 lams_total += 1
                 if transcript:
                     lams_joined += 1
             runs.append({
-                "run_id": build_run_id(fleet, task_id, t.get("lastScheduledFor")),
+                "run_id": run_id,
                 "fleet": fleet,
                 "task_id": task_id,
                 "last_scheduled_for": t.get("lastScheduledFor"),
@@ -745,6 +900,9 @@ def build_run_index(cc_registry_path, lams_registry_path, project_dirs,
         "window_widen_kind": widen_kind,
         "runs": runs,
         "duplicate_flags": duplicate_flags,
+        "previously_audited": previously_audited_out,
+        "reaudited_after_prior_digest": reaudited_out,
+        "warnings": warnings,
         "join_stats": {
             "cc": {"joined": cc_joined, "total": cc_total, "rate_ok": cc_ok, "message": cc_msg},
             "lams": {"joined": lams_joined, "total": lams_total, "rate_ok": lams_ok, "message": lams_msg},
@@ -788,6 +946,9 @@ def main(argv=None):
                          help="Output path. Default: _state/ground-truth/run-index-<date>.json")
     parser.add_argument("--json", action="store_true",
                          help="Print the run index to stdout instead of writing a file.")
+    parser.add_argument("--no-dedup", action="store_true",
+                         help="Disable the OI-296 previously-audited-run skip (ad-hoc "
+                              "re-audits only) -- applies to --window-hours and --json too.")
     args = parser.parse_args(argv)
 
     cc_path, lams_path, discovery_error = resolve_registry_paths()
@@ -807,8 +968,12 @@ def main(argv=None):
     project_dirs = find_project_dirs()
 
     now = datetime.now(timezone.utc)
+    # --window-hours and --json are investigative overrides, not exemptions
+    # from OI-296 dedup -- re-selecting an already-published run is still
+    # wrong under either. Only --no-dedup disables it.
     index = build_run_index(cc_path, lams_path, project_dirs, now=now,
-                             window_hours_override=args.window_hours)
+                             window_hours_override=args.window_hours,
+                             dedup_previously_audited=not args.no_dedup)
 
     if args.json:
         print(json.dumps(index, indent=2))
@@ -818,8 +983,9 @@ def main(argv=None):
             "run-index-{}.json".format(now.strftime("%Y-%m-%d")))
         os.makedirs(os.path.dirname(out), exist_ok=True)
         json.dump(index, open(out, "w", encoding="utf-8"), indent=2)
-        print("wrote {} ({} runs, {} duplicate flags)".format(
-            out, len(index["runs"]), len(index["duplicate_flags"])))
+        print("wrote {} ({} runs, {} duplicate flags, {} previously audited skipped)".format(
+            out, len(index["runs"]), len(index["duplicate_flags"]),
+            len(index["previously_audited"])))
 
     # Only a normal automatic run resets the "when did the auditor last run"
     # clock. --json is a read-only investigative dump (no run-index file is
