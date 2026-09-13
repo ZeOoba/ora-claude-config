@@ -113,13 +113,19 @@ in ~/.claude, where a dozen sessions commit an hour, the blanket STOP held up a
 one-file cherry-pick over an unrelated docs commit. The move is still reported
 (head_moved true, a WARNING line) and only ever clears to the NEXT finding in
 precedence, never past CONTESTED. The in-scope set is a
-`git diff --name-only --no-renames <since> HEAD` over :(icase) pathspecs, so a
+`git diff --name-only --no-renames <since> HEAD` over :(literal,icase)
+pathspecs, so a
 rename that carries a scope file away still counts, and a scope spelled in a
 different case still matches. head_moved_in_scope is that list, [] when
 measured clean, and null when unmeasurable: --since does not resolve, is not an
 ancestor of HEAD (reset, rebase, branch switch: the diff would not describe
 what happened to the checkout), or git fails. null keeps HEAD_MOVED.
-The WARNING line names the moved range as <since>..<head>.
+The WARNING line names the moved range as <since>..<head>. Pathspecs are
+:(literal,icase), matching _last_commit_time. BY DESIGN the diff compares end
+states only: churn inside the range that nets out -- a scope file changed and
+reverted, a merge into scope later reverted, a file created and deleted within
+since..HEAD -- reads as nothing-in-scope (CLEAR), because the scope content at
+HEAD equals the content at --since and there is nothing new to re-read.
 
 STALE UNTRACKED KNOWN BLOB (added 2026-09-13): observed live the same day,
 scheduled-tasks/ora-ground-truth-auditor/SKILL.md returned CONTESTED because an
@@ -130,8 +136,12 @@ is classified STALE_UNTRACKED_KNOWN_BLOB only when ALL hold: it is untracked
 (`??`, never a modified tracked file -- a tracked file reverted to an older
 blob is still a modification of HEAD); it has no live recorded owner and no
 recorded touch by ANY session inside the --ttl-minutes window (default 2h; an
-unknown touch time counts as inside); no other session's live claim overlaps
-it; and its blob appears, as either side of a change, in
+unknown or non-numeric touch time counts as inside), and provenance was read
+COMPLETELY -- a missing sessions dir (provenance_available false) or any
+session touched-files.txt that exists but cannot be read (counted in the new
+RESULT_JSON key provenance_partial) disables the classification entirely, since
+an empty owner map is then not evidence of no touch (review #208); no other
+session's live claim overlaps it; and its blob appears, as either side of a change, in
 `git log --exclude=refs/stash --all --no-renames --raw -n 200 -- :(literal)<path>`
 (same path only; a stash is live WIP, not history).
 At most 50 such files are hashed per run; the rest stay CONTESTED. Each is
@@ -299,10 +309,14 @@ def _moved_in_scope(repo, since, scope):
     base_sha = base.stdout.strip()
     if _git(repo, "merge-base", "--is-ancestor", base_sha, "HEAD").returncode != 0:
         return None
-    # :(icase) -- NTFS does not care about case and neither may the caller; a
-    # wider match only ever keeps the STOP. No `literal` magic for the same
-    # reason: a glob character in a scope name can only widen it.
-    specs = [":(icase)" + os.path.relpath(p, repo).replace("\\", "/") for p in scope]
+    # :(literal,icase), the same magic _last_commit_time uses. literal: a scope
+    # entry is a path, not a pattern -- without it `agents/[draft].md` is also
+    # a glob that matches `agents/d.md`, so the in-scope list would name files
+    # the caller never scoped. icase: git can record a path in a different case
+    # than the file on disk (and than the caller's --paths, which _real()
+    # canonicalizes to disk case); NTFS treats them as one file, so must we.
+    # Directory entries and "." still match everything beneath them.
+    specs = [":(literal,icase)" + os.path.relpath(p, repo).replace("\\", "/") for p in scope]
     diff = _git(repo, "-c", "core.quotepath=off", "diff", "--name-only",
                 "--no-renames", "-z", base_sha, "HEAD", "--", *specs)
     if diff.returncode != 0:
@@ -527,9 +541,13 @@ def _default_sessions_dir():
 
 
 def _scan_provenance(sessions_dir):
-    """{normcase(path): {session_id: last_touch_epoch | None}} from every
-    session's touched-files.txt, or (None) when the directory itself cannot be
-    listed. None == old-format line with no timestamp (unknown touch time).
+    """(index, skipped). index is {normcase(path): {session_id:
+    last_touch_epoch | None}} from every session's touched-files.txt, or None
+    when the directory itself cannot be listed. None == old-format line with
+    no timestamp (unknown touch time). skipped counts session touched-files.txt
+    entries that EXIST but could not be read (not a regular file, or OSError):
+    their touches are unknown, so the index is partial (review #208) --
+    reported as provenance_partial, and it disables known-blob classification.
 
     Same source commit-provenance-recorder.py writes and
     dirty-file-owner-report.py reads -- deliberately not a second tracking
@@ -538,17 +556,19 @@ def _scan_provenance(sessions_dir):
     preflight down with it.
     """
     if not os.path.isdir(sessions_dir):
-        return None
-    index = {}
+        return None, 0
+    index, skipped = {}, 0
     try:
         names = os.listdir(sessions_dir)
     except OSError:
-        return None
+        return None, 0
     # Keys are stored raw, as the Edit hook saw them (possibly a junction or
     # 8.3 spelling); _owners() reconciles spellings at lookup time.
     for sid in names:
         tf = os.path.join(sessions_dir, sid, "touched-files.txt")
         if not os.path.isfile(tf):
+            if os.path.lexists(tf):
+                skipped += 1  # present but not a readable regular file
             continue
         try:
             with open(tf, "r", encoding="utf-8", errors="replace") as fh:
@@ -563,8 +583,11 @@ def _scan_provenance(sessions_dir):
                         ts = None
                     _merge_touch(index.setdefault(os.path.normcase(path), {}), sid, ts)
         except OSError:
-            continue  # one unreadable session is not a reason to fail the scan
-    return index
+            # one unreadable session is not a reason to fail the scan, but it
+            # is a reason not to treat the scan as complete
+            skipped += 1
+            continue
+    return index, skipped
 
 
 def _merge_touch(owners, sid, ts):
@@ -835,7 +858,7 @@ def main():
     # owner, or one ALSO touched by someone else, stays foreign: unknown and
     # shared are both hazards, only "provably mine alone" is exempt.
     sessions_dir = args.sessions_dir or _default_sessions_dir()
-    prov_index = _scan_provenance(sessions_dir)
+    prov_index, prov_skipped = _scan_provenance(sessions_dir)
     mine = (args.session or "").lower()
     accepted_stale = {
         _norm(p if os.path.isabs(p) else os.path.join(args.repo, p))
@@ -912,15 +935,23 @@ def main():
     # time counts as inside it) and no other session's live claim on the path.
     # Bounded: at most KNOWN_BLOB_MAX_CANDIDATES files are hashed; the rest
     # stay plain CONTESTED.
+    # FAIL CLOSED (review #208): "no touch inside the window" is only evidence
+    # when provenance was fully read. A missing/unlistable sessions dir, or any
+    # session file that exists but could not be read, leaves the touch set
+    # unknown -- an empty owner map there proves nothing, so classify nothing.
+    provenance_complete = prov_index is not None and prov_skipped == 0
     touch_cutoff = time.time() - args.ttl_minutes * 60
     known_blob = []
     candidates = 0
     for d in dirty_overlap_foreign:
         is_untracked = d.pop("_untracked", False)
         touches = d.pop("_touches", {})
+        if not provenance_complete:
+            continue
         if not is_untracked or d.get("nested_checkout") or d["owners"]:
             continue
-        if any(ts is None or ts >= touch_cutoff for ts in touches.values()):
+        # `not ts < cutoff` also catches a NaN timestamp (never provably old)
+        if any(ts is None or not ts < touch_cutoff for ts in touches.values()):
             continue
         full = os.path.join(repo, d["path"].replace("/", os.sep))
         # Unreadable claims: classify anyway -- INDETERMINATE outranks the
@@ -992,6 +1023,9 @@ def main():
         "dirty_total": len(dirty),
         "sessions_dir": sessions_dir,
         "provenance_available": prov_index is not None,
+        # count of session touched-files.txt that exist but could not be read;
+        # > 0 means attribution is partial and known-blob classification is off
+        "provenance_partial": prov_skipped,
         "competing_claims": competing,
         "expired_claims_overlapping": expired_overlap,
         "claims_dir": claims_dir,
@@ -1074,6 +1108,10 @@ def main():
     if prov_index is None:
         say("  CAVEAT: provenance unavailable (%s) -- nothing can be proven"
             " yours, so every overlap is treated as not-yours." % sessions_dir)
+    elif prov_skipped:
+        say("  CAVEAT: provenance PARTIAL -- %d session touched-files.txt could not be"
+            " read (%s); untracked known-blob files are not exempted." % (prov_skipped,
+                                                                         sessions_dir))
     if competing:
         say("  COMPETING CLAIMS:")
         for c in competing:

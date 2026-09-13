@@ -293,6 +293,7 @@ def test_head_moved_out_of_scope_only_is_clear_with_warning():
         since = head_sha(work)
         _commit(work, "maintenance/p.py")
         rc, out, _ = run("--repo", work, "--claims-dir", _claims_dir(td),
+                         "--sessions-dir", _sessions_dir(td),
                          "--session", MY_SESSION, "--since", since,
                          "--paths", os.path.join(work, "agents"))
         j = result_json(out) or {}
@@ -312,6 +313,7 @@ def test_head_moved_touching_scope_still_stops():
         _commit(work, "maintenance/p.py")
         _commit(work, "agents/one.md")
         rc, out, _ = run("--repo", work, "--claims-dir", _claims_dir(td),
+                         "--sessions-dir", _sessions_dir(td),
                          "--session", MY_SESSION, "--since", since,
                          "--paths", os.path.join(work, "agents"))
         j = result_json(out) or {}
@@ -328,22 +330,33 @@ def test_head_moved_rename_out_of_scope_still_stops():
         _git(work, "mv", "agents/one.md", "maintenance/one.md")
         _git(work, "commit", "-m", "move it")
         rc, out, _ = run("--repo", work, "--claims-dir", _claims_dir(td),
+                         "--sessions-dir", _sessions_dir(td),
                          "--session", MY_SESSION, "--since", since,
                          "--paths", os.path.join(work, "agents", "one.md"))
         expect("rename away from scope -> exit 3", rc == EXIT_HEAD_MOVED, (rc, out))
 
 
 def test_head_moved_scope_match_ignores_case():
-    """Windows: a --paths spelled in a different case than git records must still
-    see the in-scope commit, not read 'nothing in scope'."""
+    """Windows: git records a path in a different case than the file on disk
+    (and than the caller's --paths, which _real() canonicalizes to disk case).
+    The mismatch is created on GIT's side via update-index --cacheinfo, so this
+    fails without :(icase) in the in-scope diff (review #208 minor 2)."""
     with tempfile.TemporaryDirectory() as td:
         work = _make_repo(td)
         since = head_sha(work)
-        _commit(work, "agents/one.md")
+        blob = subprocess.run(["git", "-C", work, "hash-object", "-w", "--stdin"],
+                              input="moved\n", capture_output=True,
+                              text=True).stdout.strip()
+        _git(work, "update-index", "--add", "--cacheinfo",
+             "100644,%s,AGENTS/ONE.MD" % blob)
+        _git(work, "commit", "-q", "-m", "git-side case differs")
         rc, out, _ = run("--repo", work, "--claims-dir", _claims_dir(td),
-                         "--session", MY_SESSION, "--since", since,
-                         "--paths", "AGENTS/ONE.MD")
-        expect("case-different scope spelling -> exit 3", rc == EXIT_HEAD_MOVED, (rc, out))
+                         "--sessions-dir", _sessions_dir(td), "--since", since,
+                         "--session", MY_SESSION, "--paths", "agents/one.md")
+        j = result_json(out) or {}
+        expect("git-side case-different path -> exit 3", rc == EXIT_HEAD_MOVED, (rc, out))
+        expect("git-side case-different path named in head_moved_in_scope",
+               j.get("head_moved_in_scope") == ["AGENTS/ONE.MD"], j)
 
 
 def test_head_moved_since_not_ancestor_still_stops():
@@ -356,6 +369,7 @@ def test_head_moved_since_not_ancestor_still_stops():
         _git(work, "reset", "--hard", "HEAD~1")
         _commit(work, "maintenance/p.py", body="other\n", msg="replacement")
         rc, out, _ = run("--repo", work, "--claims-dir", _claims_dir(td),
+                         "--sessions-dir", _sessions_dir(td),
                          "--session", MY_SESSION, "--since", orphan,
                          "--paths", os.path.join(work, "agents"))
         j = result_json(out) or {}
@@ -371,6 +385,7 @@ def test_head_moved_out_of_scope_does_not_mask_contested():
         _commit(work, "maintenance/p.py")
         _dirty(work, "agents/one.md")
         rc, out, _ = run("--repo", work, "--claims-dir", _claims_dir(td),
+                         "--sessions-dir", _sessions_dir(td),
                          "--session", MY_SESSION, "--since", since,
                          "--paths", os.path.join(work, "agents"))
         expect("out-of-scope move + foreign dirty -> CONTESTED (exit 1)",
@@ -1613,6 +1628,44 @@ def test_known_blob_only_in_stash_is_contested():
                rc == EXIT_CONTESTED and j.get("stale_untracked_known_blob") == [], (rc, out))
 
 
+def test_known_blob_missing_provenance_stays_contested():
+    """Review #208 MAJOR: 'no touch inside the TTL window' is unmeasurable when
+    the sessions dir cannot be read -- an empty owner map is not evidence of
+    no touch, so nothing may be classified known-blob (fail closed)."""
+    with tempfile.TemporaryDirectory() as td:
+        work, _ = _known_blob_fixture(td)
+        rc, out, _ = _kb_run(td, work, sd=os.path.join(td, "no-such-sessions"))
+        j = result_json(out) or {}
+        expect("known-blob: provenance dir missing -> CONTESTED exit 1",
+               rc == EXIT_CONTESTED and j.get("verdict") == "CONTESTED", (rc, out))
+        expect("known-blob: provenance dir missing -> nothing classified",
+               j.get("stale_untracked_known_blob") == [], j)
+
+
+def test_known_blob_partial_provenance_stays_contested():
+    """One session's touched-files.txt unreadable (here: a directory) means that
+    session's touches are unknown -- also fail closed, and say so."""
+    with tempfile.TemporaryDirectory() as td:
+        work, _ = _known_blob_fixture(td)
+        sd = _sessions_dir(td)
+        os.makedirs(os.path.join(sd, OTHER_SESSION, "touched-files.txt"))
+        rc, out, _ = _kb_run(td, work, sd=sd)
+        j = result_json(out) or {}
+        expect("known-blob: one unreadable touched-files.txt -> CONTESTED exit 1",
+               rc == EXIT_CONTESTED and j.get("stale_untracked_known_blob") == [], (rc, out))
+        expect("known-blob: provenance_partial reports the skipped session file",
+               j.get("provenance_partial") == 1, j)
+
+
+def test_provenance_partial_zero_when_all_readable():
+    with tempfile.TemporaryDirectory() as td:
+        work, _ = _known_blob_fixture(td)
+        rc, out, _ = _kb_run(td, work)
+        j = result_json(out) or {}
+        expect("provenance_partial is 0 when every session file was read",
+               j.get("provenance_partial") == 0, j)
+
+
 def test_head_moved_warning_names_the_range():
     with tempfile.TemporaryDirectory() as td:
         work = _make_repo(td)
@@ -1620,6 +1673,7 @@ def test_head_moved_warning_names_the_range():
         _commit(work, "maintenance/p.py")
         head = head_sha(work)
         rc, out, _ = run("--repo", work, "--claims-dir", _claims_dir(td),
+                         "--sessions-dir", _sessions_dir(td),
                          "--session", MY_SESSION, "--since", since,
                          "--paths", os.path.join(work, "agents"))
         warn = [l for l in out.splitlines() if "WARNING" in l and "MOVED" in l]
@@ -1715,6 +1769,9 @@ def main():
     test_known_blob_does_not_mask_indeterminate()
     test_known_blob_does_not_mask_head_moved_in_scope()
     test_known_blob_only_in_stash_is_contested()
+    test_known_blob_missing_provenance_stays_contested()
+    test_known_blob_partial_provenance_stays_contested()
+    test_provenance_partial_zero_when_all_readable()
     passed = sum(1 for ok, _ in results if ok)
     print("\npreflight-shared-checkout tests: %d/%d passed"
           % (passed, len(results)))
