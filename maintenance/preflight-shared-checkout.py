@@ -82,6 +82,30 @@ test-pinned), and an unresolvable canonical ref is reported as "could not
 check" with local_only_paths=null, never as an empty (clean) list. No fetch --
 a stale origin ref can under-report, same limitation as cross-repo-wip-scan.
 
+PATH CONTAINMENT (added 2026-09-12): every --paths entry must belong to the
+--repo checkout, decided on its realpath AND on git's own answer for which
+toplevel owns it. Reproduced in the PR #196 review: from ~/.claude, a file
+dirty in ora-skills was CONTESTED with --repo ~/ora-skills but CLEAR with
+--repo ~/.claude, because a path in another checkout is simply absent from
+this one's dirty set. The git-owner half also catches a nested checkout
+(~/.claude/.claude/worktrees/<name> is string-inside ~/.claude). A path whose
+owner cannot be established counts as outside: a path that was never
+evaluated is never CLEAR. Repository-selecting env (GIT_DIR, GIT_WORK_TREE,
+...) is scrubbed from every git call, and Win32 verbatim-prefix spellings
+are normalized.
+Repositories selected only through those env vars (a bare "dotfiles" repo)
+are therefore unsupported and read NOT_A_REPO -- closed, not open.
+A DIRECTORY scope that CONTAINS a linked worktree of this repo is checked
+too: each is listed in nested_checkouts_excluded with its dirty_count; a
+dirty (or unreadable) one is CONTESTED, since its work never appears in this
+checkout's status and a sweep over the parent would take it; a clean one is
+only counted. That includes the CALLER's own dirty worktree -- nested
+entries have no per-file attribution, so --accept-stale cannot clear one;
+narrow the scope instead. If the worktree list itself fails under a directory scope, the
+verdict is INDETERMINATE. Not enumerated (unbounded walk): independent clones,
+and worktrees of OTHER repos, inside ignored directories under the scope --
+name a path inside one and it IS caught (exit 5).
+
 Usage:
     python maintenance/preflight-shared-checkout.py --paths P [P ...]
         [--repo PATH]        checkout to inspect (default: cwd)
@@ -95,7 +119,8 @@ Usage:
                              (local-only advisory only)
         [--json]             machine-readable only, nothing else on stdout
 
-    --paths accepts files or directories, absolute or relative to --repo.
+    --paths accepts files or directories, absolute or relative to --repo, and
+    all of them must be inside that one checkout (else exit 5).
 
 Exit codes:
     0  CLEAR          nothing contests these paths -- go ahead
@@ -104,10 +129,14 @@ Exit codes:
     3  HEAD_MOVED     --since given and HEAD is not that commit
     4  INDETERMINATE  a fact could not be established (claims unreadable) --
                       uncertain, never treated as clean
+    5  OUT_OF_REPO    a --paths entry is not in the --repo checkout, so it was
+                      never evaluated (out_of_repo_paths names each one and the
+                      checkout that owns it)
 
-Precedence when several apply: NOT_A_REPO > HEAD_MOVED > CONTESTED >
-INDETERMINATE > CLEAR. All findings are reported regardless of which one sets
-the exit code.
+Precedence when several apply: NOT_A_REPO > OUT_OF_REPO > HEAD_MOVED >
+CONTESTED > INDETERMINATE > CLEAR. All findings are reported regardless of
+which one sets the exit code. OUT_OF_REPO outranks the rest because --since and
+the dirty set then describe the wrong checkout.
 """
 import argparse
 import json
@@ -121,6 +150,7 @@ EXIT_CONTESTED = 1
 EXIT_NOT_A_REPO = 2
 EXIT_HEAD_MOVED = 3
 EXIT_INDETERMINATE = 4
+EXIT_OUT_OF_REPO = 5
 
 DEFAULT_TTL_MINUTES = 120  # matches claim_work.py's 2h window
 
@@ -128,6 +158,21 @@ DEFAULT_TTL_MINUTES = 120  # matches claim_work.py's 2h window
 # --------------------------------------------------------------------------
 # path overlap -- segment-wise, both directions
 # --------------------------------------------------------------------------
+def _unverbatim(p):
+    """Drop a Win32 verbatim prefix. realpath keeps `\\\\?\\C:\\...` as-is, and
+    git never prints one, so an in-repo path spelled that way compared
+    unequal to its own toplevel (review finding, 2026-09-12)."""
+    if p.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + p[8:]
+    if p.startswith("\\\\?\\"):
+        return p[4:]
+    return p
+
+
+def _real(p):
+    return os.path.realpath(_unverbatim(os.path.abspath(p)))
+
+
 def _norm(p):
     """Absolute, case-folded, forward-slashed, no trailing separator.
 
@@ -137,7 +182,7 @@ def _norm(p):
     # realpath: a junction or an 8.3 short name (C:\Users\OWNER~1\...) is a
     # different spelling of the same directory. git reports the long real
     # path, so comparing spellings as strings made every overlap miss.
-    p = os.path.realpath(os.path.abspath(p)).replace("\\", "/").rstrip("/")
+    p = _unverbatim(_real(p)).replace("\\", "/").rstrip("/")
     return p.lower()
 
 
@@ -157,19 +202,34 @@ def _any_overlap(path, scope):
     return any(_overlaps(path, s) for s in scope)
 
 
+def _inside(path, root):
+    """Segment-wise: `root` itself or anything under it, never `root2/`."""
+    p, r = _norm(path), _norm(root)
+    return p == r or p.startswith(r + "/")
+
+
 # --------------------------------------------------------------------------
 # git facts
 # --------------------------------------------------------------------------
+_GIT_REPO_ENV = {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+                 "GIT_PREFIX", "GIT_OBJECT_DIRECTORY", "GIT_CEILING_DIRECTORIES",
+                 "GIT_DISCOVERY_ACROSS_FILESYSTEM", "GIT_NAMESPACE"}
+
+
 def _git(repo, *args, **kw):
     """Never raises: a missing git binary or a timeout comes back as a failed
     call (rc 127), so NOT_A_REPO / the advisory's error paths handle it instead
     of a traceback exiting 1 -- which reads as CONTESTED and prints no
     RESULT_JSON. --no-optional-locks keeps `git status` from taking index.lock
-    under a concurrent session's add/commit (this tool must stay read-only)."""
+    under a concurrent session's add/commit (this tool must stay read-only).
+    Repository-selecting variables are scrubbed: an inherited GIT_DIR /
+    GIT_WORK_TREE (a git hook, a wrapper) outranks -C, and pointed every fact
+    -- toplevel, status, owner -- at whatever checkout the caller came from."""
+    env = {k: v for k, v in os.environ.items() if k.upper() not in _GIT_REPO_ENV}
     try:
         return subprocess.run(["git", "--no-optional-locks", "-C", repo] + list(args),
                               capture_output=True, text=True, encoding="utf-8",
-                              errors="replace", timeout=kw.get("timeout", 30))
+                              errors="replace", timeout=kw.get("timeout", 30), env=env)
     except (OSError, subprocess.TimeoutExpired) as exc:
         return subprocess.CompletedProcess(["git"] + list(args), 127, "", str(exc))
 
@@ -179,6 +239,77 @@ def _head_sha(repo):
     if proc.returncode != 0:
         return None
     return proc.stdout.strip()
+
+
+def _own_toplevel(path):
+    """realpath of the git toplevel that owns `path`, or None when it sits in
+    no work tree (or git cannot say). A path that does not exist yet -- a file
+    about to be created, in a directory about to be created -- is answered by
+    its nearest existing ancestor directory."""
+    d = path
+    while not os.path.isdir(d):
+        parent = os.path.dirname(d)
+        if parent == d:
+            return None
+        d = parent
+    proc = _git(d, "rev-parse", "--show-toplevel")
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return None
+    return _real(proc.stdout.strip())
+
+
+def _outside_repo(scope, repo):
+    """Scope entries this checkout cannot speak for. Each carries
+    `suggested_repo` (the checkout that owns it, None when unknown) and
+    `reason`: other_checkout | no_checkout (git named no owner: not in a work
+    tree, inside .git/, or git failed) | unrecognised_spelling (git says
+    --repo owns it but the spelling does not resolve under it).
+
+    Two conditions, both required to count as inside: the realpath sits under
+    the toplevel, AND git names that same toplevel as the path's owner. The
+    second catches a path inside a nested checkout --
+    ~/.claude/.claude/worktrees/<name> is string-inside ~/.claude, but
+    ~/.claude's `git status` never lists its dirt, so evaluating it there is
+    the same wrong-repo false CLEAR. Failing to establish the owner is
+    outside, never inside."""
+    out = []
+    for p in scope:
+        own = _own_toplevel(p)
+        same_owner = own is not None and _norm(own) == _norm(repo)
+        if _inside(p, repo) and same_owner:
+            continue
+        if same_owner:
+            # Never hint "re-run with --repo X" when X is what was passed.
+            out.append({"path": p, "suggested_repo": None, "reason": "unrecognised_spelling"})
+        else:
+            out.append({"path": p, "suggested_repo": own,
+                        "reason": "other_checkout" if own else "no_checkout"})
+    return out
+
+
+def _nested_checkouts(repo, scope):
+    """Linked worktrees of this repo that sit UNDER a directory scope entry.
+    Their dirt never appears in this checkout's `git status` (review finding,
+    2026-09-12: `--paths .` in a repo holding .claude/worktrees read CLEAR
+    while those worktrees held uncommitted work). main() status-checks each
+    one: dirty contests, clean is only counted. Returns None when git cannot
+    list worktrees (unmeasured, not empty). Independent clones and other
+    repos' worktrees are not enumerated -- see PATH CONTAINMENT."""
+    proc = _git(repo, "worktree", "list", "--porcelain")
+    if proc.returncode != 0:
+        return None
+    found = []
+    for line in proc.stdout.splitlines():
+        if not line.startswith("worktree "):
+            continue
+        wt = _real(line[len("worktree "):].strip())
+        if _norm(wt) == _norm(repo) or not os.path.isdir(wt):
+            continue
+        under = [s for s in scope if _inside(wt, s) and _norm(wt) != _norm(s)]
+        if under:
+            found.append({"path": wt, "under_scope":
+                          [os.path.relpath(s, repo).replace("\\", "/") for s in under]})
+    return found
 
 
 def _dirty_paths(repo):
@@ -515,7 +646,7 @@ def main():
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
 
-    repo = os.path.abspath(args.repo)
+    repo = _unverbatim(os.path.abspath(args.repo))
     out = []          # human-readable lines, suppressed under --json
     def say(line=""):
         out.append(line)
@@ -535,13 +666,23 @@ def main():
     # resolved, `repo` becomes the toplevel for every other fact.
     # Both scope and repo go through realpath so every later relpath/overlap
     # compares one spelling (see _norm).
-    scope = [os.path.realpath(os.path.join(repo, p) if not os.path.isabs(p) else p)
-             for p in args.paths]
+    # expanduser first: Windows PowerShell 5.1 passes `~` through unexpanded, and
+    # "~/x" joined under the repo named a directory called "~" -- evaluated
+    # nothing, read CLEAR.
+    scope = [_real(os.path.join(repo, p) if not os.path.isabs(p) else p)
+             for p in (os.path.expanduser(q) for q in args.paths)]
     top = _git(repo, "rev-parse", "--show-toplevel")
     if top.returncode == 0 and top.stdout.strip():
-        repo = os.path.realpath(top.stdout.strip())
+        repo = _real(top.stdout.strip())
     else:
-        repo = os.path.realpath(repo)
+        repo = _real(repo)
+
+    # --- fact 0b: does every scope path belong to THIS checkout? --------
+    # A path in another checkout is absent from this one's dirty set by
+    # construction, so it read CLEAR however contested it really was.
+    out_of_repo = _outside_repo(scope, repo)
+    outside = {o["path"] for o in out_of_repo}
+    nested = _nested_checkouts(repo, [p for p in scope if p not in outside])
 
     # --- fact 1: has HEAD moved since session start? --------------------
     # A blank or very short --since prefix-matches almost any HEAD and would
@@ -572,7 +713,7 @@ def main():
     mine = (args.session or "").lower()
     accepted_stale = {
         _norm(p if os.path.isabs(p) else os.path.join(args.repo, p))
-        for p in (args.accept_stale or [])}
+        for p in (os.path.expanduser(q) for q in (args.accept_stale or []))}
 
     dirty_overlap_mine, dirty_overlap_foreign = [], []
     for p in dirty:
@@ -604,8 +745,24 @@ def main():
                 entry["stale_only"] = True
                 only_mine = False
         (dirty_overlap_mine if only_mine else dirty_overlap_foreign).append(entry)
+    # Nested worktrees under a directory scope (review round 2): a DIRTY one
+    # contests -- its work is invisible to this checkout's status, and a sweep
+    # over the parent (archive, cleanup) would take it. A CLEAN one has nothing
+    # to protect and stays advisory, so the STOP is always satisfiable. Its
+    # files are not attributed per-file (another checkout's provenance), and
+    # an unreadable status is unknown, which contests like any unknown owner.
+    for n in nested or []:
+        nd = _dirty_paths(n["path"])
+        n["dirty_count"] = None if nd is None else len(nd)
+        if nd is None or nd:
+            dirty_overlap_foreign.append({
+                "path": os.path.relpath(n["path"], repo).replace("\\", "/"),
+                "owners": [], "stale_owners": [],
+                "nested_checkout": n["path"], "nested_dirty_count": n["dirty_count"]})
     dirty_overlap_mine.sort(key=lambda d: d["path"])
-    dirty_overlap_foreign.sort(key=lambda d: d["path"])
+    # Nested entries first: they carry the only --repo hint, and must not be
+    # pushed past the 20-line human cap by per-file entries.
+    dirty_overlap_foreign.sort(key=lambda d: (not d.get("nested_checkout"), d["path"]))
 
     # --- fact 3: other sessions' live claims overlapping my scope -------
     claims_dir = args.claims_dir or _default_claims_dir(repo)
@@ -621,13 +778,21 @@ def main():
             (expired_overlap if c["expired"] else competing).append(c)
 
     # --- advisory: is this work landing only on a non-canonical branch? ---
-    branch_info = _local_only(repo, scope, args.canonical)
+    branch_info = _local_only(repo, [p for p in scope if p not in outside],
+                              args.canonical)
 
     # --- verdict --------------------------------------------------------
-    indeterminate = claims is None or bool(unreadable) or bool(since_error)
+    # A directory scope whose worktrees could not be listed may hide dirty
+    # nested work: unmeasured, never clean. (File scopes cannot contain one.)
+    nested_unmeasured = nested is None and any(
+        os.path.isdir(p) for p in scope if p not in outside)
+    indeterminate = (claims is None or bool(unreadable) or bool(since_error)
+                     or nested_unmeasured)
     contested = bool(dirty_overlap_foreign) or bool(competing)
 
-    if head_moved:
+    if out_of_repo:
+        verdict, code = "OUT_OF_REPO", EXIT_OUT_OF_REPO
+    elif head_moved:
         verdict, code = "HEAD_MOVED", EXIT_HEAD_MOVED
     elif contested:
         verdict, code = "CONTESTED", EXIT_CONTESTED
@@ -644,7 +809,9 @@ def main():
         "head_moved": head_moved,          # null == not checked / uncheckable
         "since_error": since_error,
         "scope": [os.path.relpath(p, repo).replace("\\", "/")
-                  if _norm(p).startswith(_norm(repo)) else p for p in scope],
+                  if p not in outside else p for p in scope],
+        "out_of_repo_paths": out_of_repo,
+        "nested_checkouts_excluded": nested,   # null == could not enumerate
         "dirty_overlap_foreign": dirty_overlap_foreign,
         "dirty_overlap_mine": dirty_overlap_mine,
         "dirty_total": len(dirty),
@@ -661,6 +828,26 @@ def main():
     # --- human-readable ------------------------------------------------
     say("PREFLIGHT %s -- %s" % (verdict, repo))
     say("  scope        : %s" % ", ".join(report["scope"]))
+    if out_of_repo:
+        say("  OUT-OF-REPO  : %d scope path(s) are not in this checkout -- nothing"
+            " below was checked for them:" % len(out_of_repo))
+        for o in out_of_repo:
+            if o["suggested_repo"]:
+                say("      %s   -> belongs to %s; re-run with --repo \"%s\""
+                    % (o["path"], o["suggested_repo"], o["suggested_repo"]))
+            elif o["reason"] == "unrecognised_spelling":
+                say("      %s   -> git places it in this checkout but the spelling does"
+                    " not resolve under it; pass it relative to --repo" % o["path"])
+            else:
+                say("      %s   -> git names no owning checkout (not in a work tree,"
+                    " inside .git/, or git failed)" % o["path"])
+    if nested_unmeasured:
+        say("  NOT COVERED ?: could not list this repo's worktrees -- any nested"
+            " under the directory scope went unexamined (INDETERMINATE)")
+    clean_nested = [n for n in nested or [] if n.get("dirty_count") == 0]
+    if clean_nested:
+        say("  NOT COVERED  : %d clean nested worktree(s) under the scope (no"
+            " uncommitted files; see nested_checkouts_excluded)" % len(clean_nested))
     if since_error:
         say("  HEAD         : %s  NOT CHECKED -- %s" % (head[:12], since_error))
     elif head_moved is None:
@@ -670,9 +857,22 @@ def main():
     else:
         say("  HEAD         : %s  unchanged since session start" % head[:12])
     if dirty_overlap_foreign:
-        say("  NOT-YOURS dirty in scope (%d of %d dirty in repo):"
-            % (len(dirty_overlap_foreign), len(dirty)))
+        n_nested = sum(1 for d in dirty_overlap_foreign if d.get("nested_checkout"))
+        say("  NOT-YOURS dirty in scope (%d of %d dirty file(s) in repo%s):"
+            % (len(dirty_overlap_foreign) - n_nested, len(dirty),
+               " + %d dirty nested worktree(s)" % n_nested if n_nested else ""))
         for d in dirty_overlap_foreign[:20]:
+            if d.get("nested_checkout"):
+                cnt = d["nested_dirty_count"]
+                if cnt is None:
+                    say("      %s   [nested worktree, git status UNREADABLE -- repair or"
+                        " prune it (`git worktree repair` / `prune`), or narrow the scope]"
+                        % d["path"])
+                else:
+                    say("      %s   [nested worktree, %d uncommitted file(s) -- not in this"
+                        " checkout's status; commit it, narrow the scope, or run with"
+                        " --repo \"%s\"]" % (d["path"], cnt, d["nested_checkout"]))
+                continue
             who = ", ".join(o[:8] for o in d["owners"]) or "no live recorded owner"
             say("      %s   [%s]%s" % (d["path"], who, _stale_note(d)))
         if len(dirty_overlap_foreign) > 20:
@@ -735,6 +935,8 @@ def main():
         "INDETERMINATE": "  -> uncertain, not clean. Establish the missing"
                          " fact before editing.",
         "NOT_A_REPO": "  -> not a checkout.",
+        "OUT_OF_REPO": "  -> STOP. Paths outside --repo were never evaluated. Run"
+                       " once per checkout, with the --repo that owns them.",
     }[verdict])
 
     _emit(report, out, args.json)
