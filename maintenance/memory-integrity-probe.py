@@ -14,13 +14,15 @@ Checks the consolidated memory set for:
            memory/*.md whose ID has no matching row in the tracker           [fail]
        4b. auto-check drift (warnings) — any tracker item marked OPEN that carries an
            Auto-check line gets evaluated against live fleet-status.py --json output
-           (bounded vocabulary only, no code execution); a match means the item looks
-           resolved but is still marked OPEN — WARN, never auto-closes.  Skipped
+           (registry_* kinds) or one scalar field of a JSON state file
+           (json_field_equals, 2026-09-13) — bounded vocabulary only, no code execution;
+           a match means the item looks resolved but is still marked OPEN — WARN, never
+           auto-closes. A state file that can't be read warns as "could not evaluate".  Skipped
            entirely if open-items-tracker.md doesn't exist (optional companion file).
 
 Exit 0 = integrity OK (staleness warnings allowed). Exit 1 = integrity issue. Exit 2 = probe error.
 """
-import os, re, sys, glob, json, subprocess, datetime
+import os, re, sys, glob, json, math, subprocess, datetime
 
 for _s in (sys.stdout, sys.stderr):
     try: _s.reconfigure(encoding="utf-8", errors="replace")
@@ -147,7 +149,30 @@ def parse_open_items(text):
 
 
 def parse_kv(raw):
-    return {k: v.strip('"') for k, v in KV_RE.findall(raw)}
+    kv, quoted = {}, set()
+    for k, v in KV_RE.findall(raw):
+        kv[k] = v.strip('"')
+        # Which keys were written "quoted" (balanced, and per the LAST occurrence -- the
+        # value that wins) -- json_field_equals keeps a quoted value verbatim and cleans
+        # markdown punctuation off unquoted ones. Registry kinds ignore it.
+        if len(v) >= 2 and v.startswith('"') and v.endswith('"'):
+            quoted.add(k)
+        else:
+            quoted.discard(k)
+    kv["__quoted__"] = frozenset(quoted)
+    return kv
+
+
+# Tracker prose routinely ends an Auto-check line with a period or wraps a value in
+# backticks; an unquoted `expect=PRESENT.` must not become a silent non-match.
+_UNQUOTED_TRAIL = ".,;:)`'"
+
+
+def _clean_unquoted(kv, key):
+    v = kv.get(key)
+    if v is None or key in kv.get("__quoted__", ()):
+        return v
+    return v.lstrip("`").rstrip(_UNQUOTED_TRAIL)
 
 
 def load_fleet_json():
@@ -168,9 +193,87 @@ def load_fleet_json():
         return None, "fleet-status.py --json unparseable: %s" % e
 
 
+# json_field_equals reads at most this much -- a state file, not a data dump. Anything
+# larger is reported as could-not-evaluate rather than read into memory.
+AUTOCHECK_JSON_MAX_BYTES = 1024 * 1024
+
+
+def eval_json_field_autocheck(kv, now=None):
+    """kind=json_field_equals path=<abs|~ path> field=<dotted.key> expect=<v> [max_age_hours=<n>]
+
+    For OPEN items whose closing condition lives in a state file a NON-fleet producer
+    writes (first use: OI-278, ora-pm-cron's payments-feed-state.json). Read-only JSON
+    parse + one scalar comparison -- no code execution, same bound as the registry kinds.
+
+    Returns True (matches), False (read fine, value differs), None (the auto-check text
+    is malformed), or a str naming why the condition could NOT be looked at. The str is
+    deliberate: a missing/stale/unreadable file must surface as its own warning, never
+    collapse into False -- that would be a verified-null-vs-inferred-null failure, an
+    item that silently never flags because the probe couldn't see its evidence.
+
+    Comparison is on the JSON value's string form (bools true/false, null "null", numbers
+    as Python prints them -- so expect=1 does NOT match 1.0). Unquoted values lose markdown
+    backticks and trailing .,;:)' so tracker prose can't turn a match into a silent False;
+    quote a value to keep it verbatim."""
+    path, field, expect = (_clean_unquoted(kv, "path"), _clean_unquoted(kv, "field"),
+                           _clean_unquoted(kv, "expect"))
+    if not path or not field or expect is None:
+        return None
+    path = os.path.expanduser(path)
+    if not os.path.isabs(path):
+        return None
+    max_age = _clean_unquoted(kv, "max_age_hours")
+    if max_age is not None:
+        try:
+            max_age = float(max_age)
+        except ValueError:
+            return None
+        if not math.isfinite(max_age) or max_age <= 0:
+            return None
+    if not os.path.isfile(path):
+        return "state file not found: %s" % path
+    try:
+        if max_age is not None:
+            age_h = ((now if now is not None else datetime.datetime.now().timestamp())
+                     - os.path.getmtime(path)) / 3600.0
+            if age_h < -1:
+                return "state file %s has an mtime %.1fh in the future (clock skew?)" % (path, -age_h)
+            if age_h > max_age:
+                return "state file %s is stale (%.1fh old > max_age_hours=%g)" % (path, age_h, max_age)
+        # Read at most cap+1 bytes: the size check and the read are one operation, so a
+        # file growing between a stat and a read can't slip past the cap.
+        with open(path, "rb") as fh:
+            blob = fh.read(AUTOCHECK_JSON_MAX_BYTES + 1)
+        if len(blob) > AUTOCHECK_JSON_MAX_BYTES:
+            return "state file %s exceeds %d bytes" % (path, AUTOCHECK_JSON_MAX_BYTES)
+        # utf-8-sig: PowerShell 5.1's Set-Content -Encoding UTF8 writes a BOM.
+        doc = json.loads(blob.decode("utf-8-sig"))
+    except Exception as e:
+        return "state file %s unreadable: %s" % (path, e)
+    node = doc
+    for part in field.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return "field %r missing from %s" % (field, path)
+        node = node[part]
+    if isinstance(node, (dict, list)):
+        return "field %r in %s is not a scalar" % (field, path)
+    if isinstance(node, bool):
+        actual = "true" if node else "false"
+    elif node is None:
+        actual = "null"
+    else:
+        actual = str(node)
+    return actual == expect
+
+
 def eval_autocheck(kv, fleet_json):
-    """Bounded vocabulary only -- no arbitrary code execution. True/False/None (unsupported/malformed)."""
+    """Bounded vocabulary only -- no arbitrary code execution. True/False/None (unsupported/malformed),
+    or a str (could not evaluate) from the non-fleet kinds -- see eval_json_field_autocheck."""
     kind = kv.get("kind")
+    if kind == "json_field_equals":
+        return eval_json_field_autocheck(kv)
+    if fleet_json is None:
+        return None
     try:
         if kind == "registry_disabled_count":
             fleet = kv.get("fleet", "all")
@@ -633,14 +736,23 @@ def main():
     open_autochecks = [(oid, it) for oid, it in combined_items.items()
                        if it["status"] == "OPEN" and it["autocheck"] and "kind=" in it["autocheck"]]
     if open_autochecks:
-        fleet_json, ferr = load_fleet_json()
+        # fleet-status.py is only needed by the registry_* kinds, and is loaded at most
+        # once. json_field_equals must never depend on it: an unavailable fleet snapshot
+        # would otherwise blank out every file-backed check with "could not run".
+        fleet_json, ferr, fleet_loaded = None, None, False
         for oid, it in open_autochecks:
-            if fleet_json is None:
-                warnings.append("open-items-tracker.md#%s: auto-check could not run (%s)" % (oid, ferr))
-                continue
             kv = parse_kv(it["autocheck"])
+            if kv.get("kind") != "json_field_equals":
+                if not fleet_loaded:
+                    fleet_json, ferr = load_fleet_json()
+                    fleet_loaded = True
+                if fleet_json is None:
+                    warnings.append("open-items-tracker.md#%s: auto-check could not run (%s)" % (oid, ferr))
+                    continue
             result = eval_autocheck(kv, fleet_json)
-            if result is None:
+            if isinstance(result, str):
+                warnings.append("open-items-tracker.md#%s: auto-check could not evaluate (%s)" % (oid, result))
+            elif result is None:
                 warnings.append("open-items-tracker.md#%s: auto-check malformed or unsupported kind "
                                 "(%s)" % (oid, it["autocheck"]))
             elif result is True:

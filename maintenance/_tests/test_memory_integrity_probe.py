@@ -531,6 +531,169 @@ try:
 finally:
     __import__("shutil").rmtree(_tmp, ignore_errors=True)
 
+# --- check 4b: kind=json_field_equals (2026-09-13, OI-278 follow-up) ---------------
+# Lets an OPEN item close against a state file a non-fleet producer writes (e.g.
+# ora-pm-cron's payments-feed-state.json). Contract:
+#   True  -> the field equals expect (closing condition met)
+#   False -> file read fine, field present, value differs (genuinely not met)
+#   str   -> could NOT look (missing/unreadable/oversized/stale file, missing or
+#            non-scalar field) -- surfaced as its own warning, never a silent False
+#   None  -> the auto-check text itself is malformed
+import json as _json
+import time as _time
+
+_jtmp = tempfile.mkdtemp(prefix="mip_json_ac_")
+try:
+    def _jfile(name, obj=None, raw=None, bom=False):
+        p = os.path.join(_jtmp, name)
+        data = raw if raw is not None else _json.dumps(obj)
+        with open(p, "w", encoding="utf-8-sig" if bom else "utf-8") as fh:
+            fh.write(data)
+        return p
+
+    def _jac(text):
+        return mip.eval_autocheck(mip.parse_kv(text), None)
+
+    st = _jfile("state.json", {"status": "PRESENT", "ok": True, "n": 3, "nest": {"a": {"b": "x"}}, "lst": [1]})
+    expect("json: string field match -> True",
+           _jac("kind=json_field_equals path=%s field=status expect=PRESENT" % st) is True)
+    expect("json: string field mismatch -> False",
+           _jac("kind=json_field_equals path=%s field=status expect=ABSENT" % st) is False)
+    expect("json: boolean field compares as lowercase true",
+           _jac("kind=json_field_equals path=%s field=ok expect=true" % st) is True)
+    expect("json: number field compares as its string form",
+           _jac("kind=json_field_equals path=%s field=n expect=3" % st) is True)
+    expect("json: dotted field path walks nested objects",
+           _jac("kind=json_field_equals path=%s field=nest.a.b expect=x" % st) is True)
+
+    bom = _jfile("bom.json", {"status": "PRESENT"}, bom=True)
+    expect("json: UTF-8 BOM file (PowerShell Set-Content) parses -> True",
+           _jac("kind=json_field_equals path=%s field=status expect=PRESENT" % bom) is True)
+
+    spaced_dir = os.path.join(_jtmp, "with space")
+    os.makedirs(spaced_dir)
+    sp = os.path.join(spaced_dir, "s.json")
+    with open(sp, "w", encoding="utf-8") as fh:
+        fh.write('{"status": "PRESENT"}')
+    expect("json: quoted path containing a space -> True",
+           _jac('kind=json_field_equals path="%s" field=status expect=PRESENT' % sp) is True)
+
+    r = _jac("kind=json_field_equals path=%s field=status expect=PRESENT" % os.path.join(_jtmp, "nope.json"))
+    expect("json: missing file -> could-not-look reason string, not False",
+           isinstance(r, str) and "not found" in r, "got %r" % r)
+    bad = _jfile("bad.json", raw="{broken")
+    r = _jac("kind=json_field_equals path=%s field=status expect=PRESENT" % bad)
+    expect("json: invalid JSON -> reason string", isinstance(r, str), "got %r" % r)
+    r = _jac("kind=json_field_equals path=%s field=missing expect=PRESENT" % st)
+    expect("json: absent field -> reason string", isinstance(r, str) and "missing" in r, "got %r" % r)
+    r = _jac("kind=json_field_equals path=%s field=lst expect=1" % st)
+    expect("json: non-scalar field -> reason string", isinstance(r, str), "got %r" % r)
+    r = _jac("kind=json_field_equals path=%s field=status.x expect=1" % st)
+    expect("json: dotted path through a scalar -> reason string", isinstance(r, str), "got %r" % r)
+    big = _jfile("big.json", raw='{"status": "' + ("x" * (mip.AUTOCHECK_JSON_MAX_BYTES + 1)) + '"}')
+    r = _jac("kind=json_field_equals path=%s field=status expect=PRESENT" % big)
+    expect("json: file over the size cap -> reason string (never read whole)",
+           isinstance(r, str) and "exceeds" in r, "got %r" % r)
+
+    expect("json: relative path -> malformed (None)",
+           _jac("kind=json_field_equals path=state.json field=status expect=PRESENT") is None)
+    expect("json: missing expect -> malformed (None)",
+           _jac("kind=json_field_equals path=%s field=status" % st) is None)
+    expect("json: missing field key -> malformed (None)",
+           _jac("kind=json_field_equals path=%s expect=PRESENT" % st) is None)
+    expect("json: non-numeric max_age_hours -> malformed (None)",
+           _jac("kind=json_field_equals path=%s field=status expect=PRESENT max_age_hours=soon" % st) is None)
+
+    expect("json: fresh file within max_age_hours -> True",
+           _jac("kind=json_field_equals path=%s field=status expect=PRESENT max_age_hours=48" % st) is True)
+    old = _jfile("old.json", {"status": "PRESENT"})
+    _t = _time.time() - 72 * 3600
+    os.utime(old, (_t, _t))
+    r = _jac("kind=json_field_equals path=%s field=status expect=PRESENT max_age_hours=48" % old)
+    expect("json: stale file past max_age_hours -> reason string, not True",
+           isinstance(r, str) and "stale" in r, "got %r" % r)
+
+    # Review finding (Important): tracker prose commonly ends the Auto-check line with
+    # a period or wraps values in backticks. Parsed through the REAL line regex, those
+    # must still match -- never a silent False.
+    for label, tail in (("trailing period", "expect=PRESENT."),
+                        ("trailing prose after period", "expect=PRESENT. Closes once the feed returns."),
+                        ("backticked value", "expect=`PRESENT`"),
+                        ("backticked value + period", "expect=`PRESENT`."),
+                        ("trailing semicolon", "expect=PRESENT;")):
+        line = "### OI-810\n**Status:** OPEN\n**Auto-check:** kind=json_field_equals path=%s field=status %s\n" % (st, tail)
+        ac = mip.parse_open_items(line)["OI-810"]["autocheck"]
+        r = mip.eval_autocheck(mip.parse_kv(ac), None)
+        expect("json: %s still matches (not a silent False)" % label, r is True, "got %r from %r" % (r, ac))
+    lit = _jfile("lit.json", {"status": "v1."})
+    expect("json: a QUOTED value keeps its trailing period verbatim",
+           _jac('kind=json_field_equals path=%s field=status expect="v1."' % lit) is True)
+    expect("json: unbalanced opening quote is NOT treated as quoted (period still cleaned)",
+           _jac('kind=json_field_equals path=%s field=status expect="PRESENT.' % st) is True)
+    expect("json: duplicate key -- quotedness follows the LAST occurrence (the value that wins)",
+           _jac('kind=json_field_equals path=%s field=status expect="x" expect=PRESENT.' % st) is True)
+    expect("json: backticked path is unwrapped",
+           _jac("kind=json_field_equals path=`%s` field=status expect=PRESENT" % st) is True)
+    expect("registry kinds' parsed values are untouched by json punctuation cleanup",
+           mip.parse_kv("kind=registry_disabled_count fleet=all expect=0.")["expect"] == "0.")
+    expect("json: max_age_hours=nan -> malformed (None), never disables staleness",
+           _jac("kind=json_field_equals path=%s field=status expect=PRESENT max_age_hours=nan" % st) is None)
+    fut = _jfile("future.json", {"status": "PRESENT"})
+    _t = _time.time() + 48 * 3600
+    os.utime(fut, (_t, _t))
+    r = _jac("kind=json_field_equals path=%s field=status expect=PRESENT max_age_hours=24" % fut)
+    expect("json: future-dated mtime (clock skew) -> reason string, not fresh",
+           isinstance(r, str) and "future" in r, "got %r" % r)
+
+    home_rel = mip.eval_autocheck({"kind": "json_field_equals", "path": "~/definitely-not-here-%d.json" % os.getpid(),
+                                   "field": "status", "expect": "PRESENT"}, None)
+    expect("json: ~ path is expanded (reported as not found, not malformed)",
+           isinstance(home_rel, str), "got %r" % home_rel)
+
+    # registry kinds are unchanged by the new dispatch.
+    expect("registry kind still evaluates against fleet json",
+           mip.eval_autocheck({"kind": "registry_disabled_count", "fleet": "all", "expect": "1"},
+                              {"disabled_by_fleet": {"cc": 1}}) is True)
+
+    # --- main(): json kinds never touch fleet-status; reasons surface as warnings ---
+    _saved_lfj = mip.load_fleet_json
+    _fleet_calls = []
+
+    def _no_fleet():
+        _fleet_calls.append(1)
+        return None, "fleet-status unavailable (test stub)"
+
+    mip.load_fleet_json = _no_fleet
+    try:
+        _m = tempfile.mkdtemp(prefix="mip_json_main_")
+        try:
+            _base_memory_fixture(_m, tracker_body=(
+                "### OI-800\n**Status:** OPEN\n**Auto-check:** kind=json_field_equals path=%s field=status expect=PRESENT\n\n"
+                "### OI-801\n**Status:** OPEN\n**Auto-check:** kind=json_field_equals path=%s field=status expect=PRESENT\n\n"
+                "### OI-802\n**Status:** OPEN\n**Auto-check:** kind=json_field_equals path=%s field=status expect=ABSENT\n"
+                % (st, os.path.join(_jtmp, "nope.json"), st)))
+            rc, out = _run_main_in(_m)
+            expect("main: json-only auto-checks never call fleet-status", _fleet_calls == [], "calls=%r" % _fleet_calls)
+            expect("main: json match -> MATCHES warning for OI-800",
+                   "OI-800 is marked OPEN but its auto-check now MATCHES" in out, out)
+            expect("main: missing state file -> could-not-evaluate warning for OI-801",
+                   "OI-801: auto-check could not evaluate" in out, out)
+            expect("main: genuine mismatch -> no warning for OI-802", "OI-802" not in out, out)
+            expect("main: json auto-check warnings stay non-fatal (rc 0)", rc == 0, "rc=%r out=%r" % (rc, out))
+
+            _base_memory_fixture(_m, tracker_body=(
+                "### OI-803\n**Status:** OPEN\n**Auto-check:** kind=registry_disabled_count fleet=all expect=0\n"))
+            rc, out = _run_main_in(_m)
+            expect("main: registry kind still loads fleet-status", _fleet_calls == [1], "calls=%r" % _fleet_calls)
+            expect("main: registry kind still reports could-not-run when fleet-status fails",
+                   "OI-803: auto-check could not run" in out, out)
+        finally:
+            __import__("shutil").rmtree(_m, ignore_errors=True)
+    finally:
+        mip.load_fleet_json = _saved_lfj
+finally:
+    __import__("shutil").rmtree(_jtmp, ignore_errors=True)
+
 passed = sum(1 for ok, _ in results if ok)
 print("memory-integrity-probe tests: %d/%d passed" % (passed, len(results)))
 sys.exit(0 if passed == len(results) else 1)
