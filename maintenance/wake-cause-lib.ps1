@@ -263,3 +263,164 @@ function Format-StandbyCause($E) {
     "power=$($E.power.state) via $($E.power.source) ($($E.power.detail)) " +
     "session_end=$end ($([math]::Round($E.durationMin / 60, 1))h)")
 }
+
+<#
+HOST-OFF CLASSIFICATION (follow-up, 2026-09-12).
+
+A User32 1074 is a shutdown/restart REQUEST, not proof the host went down. The host
+went down only when one of these follows the request (before the next request, within
+30 min -- Windows Update restarts take minutes: 08-13 04:32:22 request -> 04:36:58 13):
+  Kernel-General 13          full shutdown ("The operating system is shutting down")
+  Kernel-Power 42 TargetState=6
+                             Fast Startup hybrid shutdown. This host has
+                             HiberbootEnabled=1; a "power off" logs 42 TargetState=6
+                             EffectiveState=5 and NO 6006/109/13 (all 4 power-offs in
+                             the 35 days to 09-12 did this).
+Standalone (no request): 42 TargetState=5 -> HOST-HIBERNATE (08-11 19:38:06 -> 08-12
+11:00:17), tagged hibernate-from-standby when a 507 ended <=60s before (the battery
+standby timeout: every 42 TS=5 Reason=13 here came 12-18s after a 6-27h battery
+standby); 42 TargetState=6 -> HOST-POWER-OFF; 13 -> RESTART-UNATTRIBUTED when a boot
+follows within 2 min (4/4 standalone 13s here rebooted in 17-19s), else HOST-SHUTDOWN.
+Kernel-Power 41 (dirty: crash or held power button, no 1074/42/13) -> HOST-DIRTY-OFF,
+from the last event logged before it to the boot it was logged at (41 is written
+during the NEXT boot: 09-02 41 at 08:37:23, boot 27 at 08:37:19).
+Power is back at the next Kernel-Boot 27.
+
+TargetState/EffectiveState: SYSTEM_POWER_STATE (winnt.h), 5 = PowerSystemHibernate (S4),
+6 = PowerSystemShutdown (S5):
+https://learn.microsoft.com/en-us/windows/win32/api/winnt/ne-winnt-system_power_state
+Kernel-Boot 27 BootType 0 = cold boot, 1 = Fast Startup (hybrid) boot, 2 = resume from
+hibernation. Microsoft does not document these values; secondary sources agree
+(thewindowsclub.com, elevenforum.com) and this host corroborates it: every 42
+TargetState=6 is followed by BootType=1 and every 42 TargetState=5 by BootType=2.
+
+BOOT BOUNDARIES. Kernel-Boot 27 is logged on EVERY boot (50 in 35 days here);
+Kernel-General 12 is not logged on Fast Startup or hibernate-resume boots (34 of 50).
+A 12 is used only where no 27 is within 120s.
+#>
+
+$script:HostOffWindow = [timespan]::FromMinutes(30)
+$script:WuProcessPattern = 'MoUsoCoreWorker|MoNotificationUx|TrustedInstaller|wuauclt'
+
+# Boot27: objects { time; bootType }. KernelGeneral12: [datetime]s.
+function Get-BootRecords {
+  param($Boot27 = @(), $KernelGeneral12 = @())
+  $out = New-Object System.Collections.ArrayList
+  foreach ($b in @($Boot27 | Where-Object { $_ })) { [void]$out.Add([pscustomobject]@{ time = $b.time; bootType = $b.bootType }) }
+  foreach ($t in @($KernelGeneral12 | Where-Object { $_ })) {
+    $near = @($Boot27 | Where-Object { $_ -and [math]::Abs(($_.time - $t).TotalSeconds) -le 120 })
+    if ($near.Count -eq 0) { [void]$out.Add([pscustomobject]@{ time = $t; bootType = $null }) }
+  }
+  return @($out | Sort-Object time)
+}
+
+# Requests: { time; action ('power off'|'restart'|...); process }
+# Sleep42:  { time; targetState; effectiveState; reason }
+# ShutdownMarkers: [datetime]s of Kernel-General 13.   Boots: { time; bootType }
+function Resolve-HostOffPeriods {
+  param($Requests = @(), $Sleep42 = @(), $ShutdownMarkers = @(), $Boots = @(),
+        # DirtyOff: { time (the 41); lastSeen (last System event before that boot) }
+        $DirtyOff = @(), $StandbyExitTimes = @())
+  $reqs = @($Requests | Where-Object { $_ } | Sort-Object time)
+  $s42  = @($Sleep42 | Where-Object { $_ } | Sort-Object time)
+  $m13  = @($ShutdownMarkers | Where-Object { $_ } | Sort-Object)
+  $bts  = @($Boots | Where-Object { $_ } | Sort-Object time)
+  $used42 = @{}; $used13 = @{}
+  $out = New-Object System.Collections.ArrayList
+
+  $nextBoot = { param($after) $bts | Where-Object { $_.time -gt $after } | Select-Object -First 1 }
+
+  for ($i = 0; $i -lt $reqs.Count; $i++) {
+    $r = $reqs[$i]
+    $limit = $r.time + $script:HostOffWindow
+    if ($i + 1 -lt $reqs.Count -and $reqs[$i + 1].time -lt $limit) { $limit = $reqs[$i + 1].time }
+    $isOff = ($r.action -match 'power off|shutdown')
+    $cands = New-Object System.Collections.ArrayList
+    for ($k = 0; $k -lt $m13.Count; $k++) {
+      if (-not $used13.ContainsKey($k) -and $m13[$k] -ge $r.time -and $m13[$k] -lt $limit) {
+        [void]$cands.Add([pscustomobject]@{ time = $m13[$k]; src = '13'; idx = $k; mode = 'full'
+          by = "Kernel-General 13 at $($m13[$k].ToString('yyyy-MM-dd HH:mm:ss'))" })
+      }
+    }
+    if ($isOff) {
+      for ($k = 0; $k -lt $s42.Count; $k++) {
+        $e = $s42[$k]
+        if (-not $used42.ContainsKey($k) -and [int]$e.targetState -eq 6 -and $e.time -ge $r.time -and $e.time -lt $limit) {
+          [void]$cands.Add([pscustomobject]@{ time = $e.time; src = '42'; idx = $k; mode = 'fast-startup'
+            by = "Kernel-Power 42 TargetState=6 EffectiveState=$($e.effectiveState) at $($e.time.ToString('yyyy-MM-dd HH:mm:ss'))" })
+        }
+      }
+    }
+    $c = $cands | Sort-Object time | Select-Object -First 1
+    if ($r.action -match 'restart') {
+      $kind = if ($r.process -match $script:WuProcessPattern) { 'WU-REBOOT' } else { 'RESTART' }
+    } else { $kind = 'HOST-POWER-OFF' }
+    if ($c) {
+      if ($c.src -eq '13') { $used13[$c.idx] = $true } else { $used42[$c.idx] = $true }
+      $b = & $nextBoot $c.time
+      [void]$out.Add([pscustomobject]@{ kind = $kind; start = $r.time; downAt = $c.time
+        end = $(if ($b) { $b.time } else { $null }); bootType = $(if ($b) { $b.bootType } else { $null })
+        mode = $c.mode; confirmed = $true; confirmedBy = $c.by; process = $r.process })
+    } else {
+      $reqKind = if ($isOff) { 'POWER-OFF-REQUESTED' } else { 'RESTART-REQUESTED' }
+      [void]$out.Add([pscustomobject]@{ kind = $reqKind; start = $r.time; downAt = $null; end = $null
+        bootType = $null; mode = $null; confirmed = $false; confirmedBy = $null; process = $r.process })
+    }
+  }
+
+  for ($k = 0; $k -lt $s42.Count; $k++) {
+    if ($used42.ContainsKey($k)) { continue }
+    $e = $s42[$k]
+    $ts = [int]$e.targetState
+    if ($ts -ne 5 -and $ts -ne 6) { continue }
+    $b = & $nextBoot $e.time
+    $mode = 'fast-startup'
+    if ($ts -eq 5) {
+      $fromStandby = @($StandbyExitTimes | Where-Object { $_ -and $_ -le $e.time -and ($e.time - $_).TotalSeconds -le 60 }).Count -gt 0
+      $mode = if ($fromStandby) { 'hibernate-from-standby' } else { 'hibernate' }
+    }
+    [void]$out.Add([pscustomobject]@{
+      kind = $(if ($ts -eq 5) { 'HOST-HIBERNATE' } else { 'HOST-POWER-OFF' })
+      start = $e.time; downAt = $e.time
+      end = $(if ($b) { $b.time } else { $null }); bootType = $(if ($b) { $b.bootType } else { $null })
+      mode = $mode; confirmed = $true
+      confirmedBy = "Kernel-Power 42 TargetState=$ts EffectiveState=$($e.effectiveState) Reason=$($e.reason) (no 1074 request)"
+      process = $null })
+  }
+  for ($k = 0; $k -lt $m13.Count; $k++) {
+    if ($used13.ContainsKey($k)) { continue }
+    $b = & $nextBoot $m13[$k]
+    $quick = ($b -and ($b.time - $m13[$k]).TotalSeconds -le 120)
+    [void]$out.Add([pscustomobject]@{ kind = $(if ($quick) { 'RESTART-UNATTRIBUTED' } else { 'HOST-SHUTDOWN' })
+      start = $m13[$k]; downAt = $m13[$k]
+      end = $(if ($b) { $b.time } else { $null }); bootType = $(if ($b) { $b.bootType } else { $null })
+      mode = 'full'; confirmed = $true; confirmedBy = 'Kernel-General 13 (no 1074 request)'; process = $null })
+  }
+  foreach ($x in @($DirtyOff | Where-Object { $_ })) {
+    # The 41 is logged during the boot that follows the loss of power.
+    $b = @($bts | Where-Object { $_.time -le $x.time -and ($x.time - $_.time).TotalSeconds -le 120 }) | Select-Object -Last 1
+    if (-not $b) { $b = & $nextBoot $x.time }
+    $st = if ($x.lastSeen) { $x.lastSeen } else { $x.time }
+    [void]$out.Add([pscustomobject]@{ kind = 'HOST-DIRTY-OFF'; start = $st; downAt = $null
+      end = $(if ($b) { $b.time } else { $null }); bootType = $(if ($b) { $b.bootType } else { $null })
+      mode = 'dirty'; confirmed = $true
+      confirmedBy = "Kernel-Power 41 at $($x.time.ToString('yyyy-MM-dd HH:mm:ss')); start = last event logged before it (power loss time is not recorded)"
+      process = $null })
+  }
+  return @($out | Sort-Object start)
+}
+
+function Format-HostOffPeriod($P) {
+  $st = $P.start.ToString('yyyy-MM-dd HH:mm:ss')
+  $proc = if ($P.process) { $P.process } else { 'unattributed' }
+  if (-not $P.confirmed) {
+    return "[note] $($P.kind) at $st :: no Kernel-General 13 or Kernel-Power 42 TargetState=6 before the next request or within 30 min -- the request did not complete; not a cause :: $proc"
+  }
+  if ($P.end) {
+    $until = $P.end.ToString('yyyy-MM-dd HH:mm:ss')
+    $span = $P.end - $P.start
+    $hrs = if ($span.TotalHours -ge 1) { "$([math]::Round($span.TotalHours, 1))h" } else { "$([math]::Round($span.TotalMinutes, 1))min" }
+  } else { $until = 'no later boot logged'; $hrs = 'open' }
+  $bt = if ($null -ne $P.bootType) { "boot BootType=$($P.bootType)" } else { 'boot type unknown' }
+  return "[CAUSE] $($P.kind) at $st until $until ($hrs, $($P.mode); confirmed by $($P.confirmedBy); $bt) :: $proc"
+}
