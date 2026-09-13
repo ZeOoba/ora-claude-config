@@ -1,37 +1,90 @@
 {
   "active": true,
   "since": "2026-09-08",
+  "review_by": "2026-09-22",
   "reason": "Notion workspace free-block quota exhausted — notion-create-pages fails; update-page still works",
-  "tracking": ["OI-281", "OI-288"],
+  "tracking": [
+    "OI-281",
+    "OI-288"
+  ],
   "mode": "email-only",
   "clear_when": "a notion-create-pages call succeeds (plan upgraded or blocks freed) — set active:false and record cleared_at",
   "cleared_at": null,
   "consumers": [
     "~/.claude/scheduled-tasks/ora-health-guard/SKILL.md (B.2(C.0c))",
-    "ora-skills/automation-health-monitor/SKILL.md (Step 2a)"
+    "ora-skills/automation-health-monitor/SKILL.md (Step 2a)",
+    "OneDrive…/Documents/Claude/Scheduled/automation-health-monitor/SKILL.md (Step 0.55a, live LAMS task)"
   ],
   "matching": {
-    "normalize_subject": "Before matching: fold the dash family (em dash, en dash, figure dash, minus) to '-', drop every non-ASCII character (emoji), collapse runs of whitespace to one space, compare case-insensitively. Same normalization as _shared/outlook-sent-probe.ps1 Normalized mode.",
-    "pattern_syntax": "fallback_email_subject_pattern is a regular expression applied with search (not anchored unless it starts with ^) to the NORMALIZED subject. It is written as ASCII lookaheads so the tokens match in any order — live subjects for the same producer vary in token order (e.g. 'PUBLICATION FAILED ora-automation-health-monitor 2026-09-10' vs '❌ ora-automation-health-monitor PUBLICATION FAILED — 2026-09-11').",
+    "evidence_source": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\_shared\\send-log.txt — '[OK] Sent' lines only. Outlook Sent Items may corroborate but never substitutes: only the send-log records bytes=.",
+    "normalize_subject": "Fold the dash family (em dash, en dash, figure dash, minus) to '-', drop every non-ASCII character (emoji), collapse whitespace, compare case-insensitively (same as _shared/outlook-sent-probe.ps1 Normalized mode).",
+    "pattern_syntax": "fallback_email_subject_pattern and must_not_match are regular expressions applied with search to the NORMALIZED subject. Patterns are ASCII lookaheads so tokens match in any order.",
     "placeholders": {
-      "{DATE}": "the expected output date as YYYY-MM-DD",
-      "{MONTH_YYYY}": "the expected output month as 'September 2026'"
+      "{DATE}": "expected output date, YYYY-MM-DD",
+      "{DATE_LONG}": "expected output date as 'September 2, 2026'",
+      "{MONTH_YYYY}": "expected output month as 'September 2026'"
     },
-    "undated_subjects": "If a pattern contains no date placeholder, the email counts only if its send time (Sent Items SentOn, or the send-log line's timestamp, ET) falls on the expected date or within the following 24h.",
-    "evidence_sources": [
-      "Outlook Sent Items, mailbox ggoldberg@oxfordra.net",
-      "C:\\Users\\Owner\\.claude\\scheduled-tasks\\_shared\\send-log.txt — '[OK] Sent' lines only; a '[FAIL]' line is not delivery"
-    ],
-    "null_pattern": "fallback_email_subject_pattern null = the producer has no email path while Notion create is blocked; a missing page escalates exactly as before."
+    "send_date": "Convert the logged ISO offset to ET before taking the date — the log carries -04:00 and +02:00 lines.",
+    "undated_subjects": "A pattern with no date placeholder starts with the negative lookahead ^(?!\\s*(re|fw|fwd):) and counts only if the line's ET send date equals the expected date.",
+    "delivery_proof": "EMAIL-ONLY requires one [OK] Sent line that matches fallback_email_subject_pattern, does NOT match must_not_match, has bytes >= min_bytes, on the expected ET date. A pattern match that hits must_not_match or has bytes < min_bytes is a 'fallback notice without report body' and escalates as before.",
+    "null_pattern": "fallback_email_subject_pattern null = no email path that can prove delivery while Notion create is blocked; a missing output escalates exactly as before (the producer is DARK).",
+    "dark_on": "Names the run path(s) on which a producer's only output is Notion; a missing page on that path has no email proof and escalates as before."
   },
+  "dark_producers": [
+    "ora-master-workbook-ingest (cc) — when: no-op / clean runs (Ops Hub one-liner, no email)",
+    "ora-command-center-mirror-drift-check (cc) — when: HEALTHY / BENIGN_* / RUN_IN_PROGRESS (every non-alarm run: the Notion page is the only output)",
+    "ora-deal-command-board (cc) — always (no pinned email pattern)",
+    "ora-psa-drift-watch (cc) — always (no pinned email pattern)",
+    "ora-acquisition-underwriting-eval-harness (cc) — always (no pinned email pattern)",
+    "ora-appsec-sweep (cc) — when: clean / low-only week (row only, no email)",
+    "ora-financial-code-integrity-sweep (cc) — when: clean week",
+    "ora-calibration-snapshot (cc) — always (no pinned email pattern)",
+    "ora-cc-snapshot-refresh (cc) — when: exit 0 and exit 2",
+    "ora-lease-snapshot-refresh (cc) — when: exit 2 (exit 0 posts nothing)",
+    "ora-passed-deal-tracker (cc) — when: zero-trade month with no overdue tickler",
+    "ora-broker-touch-cadence (cc) — when: guard path (DB unreachable / zero qualifying brokers)",
+    "ora-site-exposure-probe (cc) — always (no pinned email pattern)",
+    "ora-model-release-watch (cc) — when: unreadable-lineup case (Notion QUESTIONS only)",
+    "ora-sofr-direct-prefetch (cc) — always (no pinned email pattern)",
+    "ora-ar-export-freshness-nudge (lams) — when: clean pass",
+    "ora-bearmode-refresh (lams) — always (no pinned email pattern)",
+    "ora-capex-idea-stage-nudge (lams) — when: clean pass (no STALE rows)",
+    "ora-exit-cap-spotcheck (lams) — always (no pinned email pattern)",
+    "ora-gis-endpoint-liveping (lams) — always (no pinned email pattern)",
+    "ora-hubspot-notion-contact-sync (lams) — always (no pinned email pattern)",
+    "ora-ic-memo-pipeline-reconciliation (lams) — when: clean pass",
+    "ora-insurance-renewal-monitor (lams) — when: clean week",
+    "ora-loan-terms-reconciliation (lams) — when: clean pass",
+    "ora-session-sweep (lams) — always (no pinned email pattern)",
+    "ora-stale-pipeline-nudge (lams) — always (no pinned email pattern)",
+    "ora-tenant-contact-gap-sweep (lams) — always (no pinned email pattern)",
+    "ora-underwrite-doctrine-staleness-check (lams) — when: weeks with no newly-stale deal"
+  ],
+  "known_side_effects": [
+    {
+      "task_id": "ora-pm-ledger",
+      "effect": "Its double-fire dedupe guard (SKILL.md L52-54) skips a block only when BOTH the email AND the Notion page exist. While page creation is blocked the page never exists, so a double-fire re-sends the Block B (Outbox QC) and Block C (EOD Action Ledger) emails. Expect duplicate B/C emails on catch-up-burst days while degraded; not fixed here."
+    },
+    {
+      "task_id": "ora-am-brief",
+      "effect": "Block B's sentinel close expects --notion-page-id (SKILL.md L159); with no page the COMPLETE record may be weaker while degraded (observation, not verified live)."
+    },
+    {
+      "task_id": "ora-underwrite-doctrine-staleness-check",
+      "effect": "Dedups against its own prior Notion post (L24); blocked posts lose that history, so it may re-flag already-reported deals after recovery."
+    }
+  ],
   "producers": [
     {
       "task_id": "ora-am-brief",
       "fleet": "cc",
-      "block": "B (Daily Brief)",
+      "block": "B (Daily Brief, daily)",
       "notion_output": "Daily Brief — {DATE}",
       "fallback_email_subject_pattern": "^(?=.*daily[- ]brief publication failed)(?=.*{DATE})",
-      "source": "ora-am-brief/SKILL.md Block B publication guard: '❌ ora-am-brief DAILY-BRIEF PUBLICATION FAILED — [YYYY-MM-DD]'; live variant 2026-09-12 'ORA Daily Brief PUBLICATION FAILED - 2026-09-12'"
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 10000,
+      "min_bytes_basis": "observed full fallback sends 26008 (2026-09-12) and 21681 (2026-09-13); normal briefs 12025-26263; no bare notice observed — 10000 sits below every observed brief",
+      "source": "ora-am-brief/SKILL.md Block B publication guard (L193): '❌ ora-am-brief DAILY-BRIEF PUBLICATION FAILED — [YYYY-MM-DD]', full brief in body"
     },
     {
       "task_id": "ora-am-brief",
@@ -39,128 +92,565 @@
       "block": "C (Inbox Pre-Brief, weekdays)",
       "notion_output": "Inbox Pre-Brief — {DATE}",
       "fallback_email_subject_pattern": "^(?=.*inbox pre-brief)(?=.*{DATE})",
-      "source": "ora-am-brief/SKILL.md C.8 + BLOCK C ERROR HANDLING (Notion error -> brief sent by email anyway): 'ORA Inbox Pre-Brief — [YYYY-MM-DD] — [n] for triage, [n] RED'"
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 3000,
+      "min_bytes_basis": "observed full sends 5141 (09-03), 5679 (09-02); no bare notice observed",
+      "source": "ora-am-brief/SKILL.md C.8 + BLOCK C ERROR HANDLING (L352: Notion error -> send the brief by email anyway)"
     },
     {
       "task_id": "ora-am-brief",
       "fleet": "cc",
       "block": "D (Cash Position, Mondays)",
       "notion_output": "Cash Position Snapshot — {DATE}",
-      "fallback_email_subject_pattern": "^(?=.*cash)(?=.*(position|snapshot))(?=.*{DATE})",
-      "source": "ora-am-brief/SKILL.md Block D: summary 'ORA Cash Position — [date]' always; publication-failed '❌ ora-am-brief CASH-SNAPSHOT PUBLICATION FAILED — [date]'. [date] format not pinned in the SKILL.md — assumes ISO"
+      "fallback_email_subject_pattern": "^(?=.*cash[- ](position|snapshot))(?=.*{DATE})",
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 1500,
+      "min_bytes_basis": "no Cash Position send observed 09-01..09-13 — conservative floor",
+      "source": "ora-am-brief/SKILL.md Block D (L376-377): 'ORA Cash Position — [date]' every Monday; '❌ ora-am-brief CASH-SNAPSHOT PUBLICATION FAILED — [date]' with snapshot inlined. [date] format not pinned — assumes ISO"
     },
     {
       "task_id": "ora-doctrine-integrity-guard",
       "fleet": "cc",
       "notion_output": "Doctrine/Governor Integrity — {DATE}",
-      "output_conditional": "alarm runs only — a clean run posts no page and sends no email by design",
       "fallback_email_subject_pattern": "^(?=.*doctrine/governor integrity)(?=.*{DATE})",
-      "source": "ora-doctrine-integrity-guard/SKILL.md STEP 3 (b)/(c); live 2026-09-12 'ORA Doctrine/Governor Integrity - 2026-09-12: session-context XREF-MISSING (Notion post FAILED)'"
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 1500,
+      "min_bytes_basis": "observed alarm reports 1933-3267 (09-02, 09-03, 09-12); no bare notice observed",
+      "output_conditional": "alarm runs only; a clean run posts nothing and sends nothing by design",
+      "source": "ora-doctrine-integrity-guard/SKILL.md STEP 3 (a)-(c) L61-71"
     },
     {
       "task_id": "ora-pm-ledger",
       "fleet": "cc",
-      "block": "B (Outbox QC)",
+      "block": "B (Outbox QC, weekdays)",
       "notion_output": "Outbox QC — {DATE}",
       "fallback_email_subject_pattern": "^(?=.*outbox qc)(?=.*{DATE})",
-      "source": "ora-pm-ledger/SKILL.md B.5: child page + email 'ORA Outbox QC — [YYYY-MM-DD] — ...' (the SKILL.md says 'child page', not the literal tool name)"
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 1000,
+      "min_bytes_basis": "observed full report 5550 (09-02); B.5 allows a one-line zero-defect confirmation that would fall below 1000 and escalate — accepted conservative false alarm",
+      "source": "ora-pm-ledger/SKILL.md B.5 L1015-1019; B.7 L1056 'still deliver the email report'"
     },
     {
       "task_id": "ora-pm-ledger",
       "fleet": "cc",
-      "block": "C (EOD Action Ledger)",
+      "block": "C (EOD Action Ledger, daily)",
       "notion_output": "EOD Action Ledger — {DATE}",
       "fallback_email_subject_pattern": "^(?=.*eod action ledger)(?=.*{DATE})",
-      "source": "ora-pm-ledger/SKILL.md C.5; live 2026-09-12 'ORA EOD Action Ledger - 2026-09-12 - 7 need you (Notion post FAILED - block quota)'"
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 4000,
+      "min_bytes_basis": "observed full ledgers 7190-8641 (09-02..09-12); no bare notice observed",
+      "source": "ora-pm-ledger/SKILL.md C.5 L1245, C.7 L1262"
     },
     {
       "task_id": "ora-weekly-hygiene",
       "fleet": "cc",
-      "block": "C (SharePoint Freshness)",
+      "block": "C (SharePoint Freshness, Sundays)",
       "notion_output": "SharePoint Freshness Audit — {DATE}",
       "fallback_email_subject_pattern": "^(?=.*(sharepoint freshness|weekly[- ]hygiene))(?=.*{DATE})",
-      "source": "ora-weekly-hygiene/SKILL.md SHARED PUBLICATION GUARD + Block C: 'ORA SharePoint Freshness — {YYYY-MM-DD} — ...' / '❌ ora-weekly-hygiene/<block> PUBLICATION FAILED — <YYYY-MM-DD>'; live 2026-09-07 consolidated 'ORA Weekly Hygiene — 2026-09-07 (consolidated)'. Block E's Session Pruner page is created only when Outlook is unavailable, so it is not listed"
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 1500,
+      "min_bytes_basis": "observed real report 2162 (09-02) and consolidated 11778 (09-07) vs 'COVERAGE GAP, not run' notice 903 (09-02)",
+      "source": "ora-weekly-hygiene/SKILL.md L31-37 shared publication guard ('❌ ora-weekly-hygiene/<block> PUBLICATION FAILED — <YYYY-MM-DD>', page content verbatim) + Block C L235-236"
     },
     {
       "task_id": "ora-county-sales-monitor",
       "fleet": "cc",
-      "notion_output": "County Sales Comps DB rows (collection://63a5e6b3-2655-4e0c-9843-3102d78adc0d), monthly",
+      "notion_output": "County Sales Comps DB rows (collection://63a5e6b3-2655-4e0c-9843-3102d78adc0d)",
       "fallback_email_subject_pattern": "^(?=.*county sales monitor)(?=.*{DATE})",
-      "source": "ora-county-sales-monitor/SKILL.md (county-sales-monitor skill upserts via notion-create-pages): '[ORA] County Sales Monitor - Monthly Digest - <ISO date>'. The digest email does not by itself prove the rows landed"
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 2000,
+      "min_bytes_basis": "no send observed 09-01..09-13 (monthly, 15th) — conservative floor",
+      "output_conditional": "monthly; rows only for new keys",
+      "source": "ora-county-sales-monitor/SKILL.md L61-66 (upsert rows; 'Send the email anyway')"
     },
     {
       "task_id": "ora-monthly-portfolio-briefing",
       "fleet": "cc",
-      "notion_output": "ORA Monthly Portfolio Briefing — {MONTH_YYYY} (Ops Hub archive page)",
+      "notion_output": "Ops Hub archive page of the monthly briefing (title not specified)",
       "fallback_email_subject_pattern": "^(?=.*monthly portfolio briefing)(?=.*{MONTH_YYYY})",
-      "source": "ora-monthly-portfolio-briefing/SKILL.md: email 'ORA Monthly Portfolio Briefing — [Month YYYY]' is primary; Notion page is the archive copy"
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 5000,
+      "min_bytes_basis": "observed full briefing 11729 (09-06)",
+      "source": "ora-monthly-portfolio-briefing/SKILL.md L59-60 (email primary; page is archive; on publish fail full briefing in email)"
+    },
+    {
+      "task_id": "ora-master-workbook-ingest",
+      "fleet": "cc",
+      "notion_output": "Portfolio Metrics Snapshot — {DATE} (Knowledge Base 3386ecd8…) + Ops Hub one-liners",
+      "fallback_email_subject_pattern": "^(?=.*ora-master-workbook-ingest)(?=.*{DATE})",
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 1500,
+      "min_bytes_basis": "no send observed 09-01..09-13 — conservative floor",
+      "dark_on": "no-op / clean runs (Ops Hub one-liner, no email)",
+      "source": "ora-master-workbook-ingest/SKILL.md L65 (dated KB page), L78-93 ('[ALERT] ora-master-workbook-ingest — [reason] — [date]'; condition (a) always fires on publication failure)"
+    },
+    {
+      "task_id": "ora-deal-aging-sla",
+      "fleet": "cc",
+      "notion_output": "Deal Aging SLA — {DATE}",
+      "fallback_email_subject_pattern": "^(?=.*deal aging sla)(?=.*{DATE})",
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 1000,
+      "min_bytes_basis": "observed summaries 1288-2858 (09-02..09-05); no bare notice observed",
+      "source": "ora-deal-aging-sla/SKILL.md L241-249 (dated child page + one-paragraph summary email every run)"
+    },
+    {
+      "task_id": "ora-deal-sourcing-scan",
+      "fleet": "cc",
+      "notion_output": "Deal Sourcing Log rows (9a6ae219…)",
+      "fallback_email_subject_pattern": "^(?=.*deal-sourcing scan)(?=.*({DATE}|{DATE_LONG}))",
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 5000,
+      "min_bytes_basis": "observed full digests 10863-13556 (09-02, 09-05)",
+      "output_conditional": "rows only for new listings",
+      "source": "ora-deal-sourcing-scan/SKILL.md L578-581 (create records), L707-729 (digest every run)"
+    },
+    {
+      "task_id": "ora-entry-market-scan",
+      "fleet": "cc",
+      "notion_output": "Deal Sourcing Log rows (9a6ae219…)",
+      "fallback_email_subject_pattern": "^(?=.*entry market scan)(?=.*{MONTH_YYYY})",
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 4000,
+      "min_bytes_basis": "observed full scans 8083 (09-02), 10430 (09-07)",
+      "output_conditional": "first-Tuesday runs with new listings",
+      "source": "ora-entry-market-scan/SKILL.md L57 (create records), L76-83"
+    },
+    {
+      "task_id": "ora-command-center-mirror-drift-check",
+      "fleet": "cc",
+      "notion_output": "[HEALTHY|ALARM|…] CC Mirror Drift & Health Check — {DATE} ~HH:MM ET",
+      "fallback_email_subject_pattern": "^(?=.*mirror drift)(?=.*alarm)(?=.*{DATE})",
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 2000,
+      "min_bytes_basis": "observed ALARM report 5067 (09-03, '[ORA] ALARM - CC Mirror Drift and Health Check - 2026-09-03'); subject not pinned in SKILL.md (L64)",
+      "dark_on": "HEALTHY / BENIGN_* / RUN_IN_PROGRESS (every non-alarm run: the Notion page is the only output)",
+      "source": "ora-command-center-mirror-drift-check/SKILL.md L63-67"
+    },
+    {
+      "task_id": "ora-deal-command-board",
+      "fleet": "cc",
+      "notion_output": "Deal Command Board — {DATE}",
+      "fallback_email_subject_pattern": null,
+      "must_not_match": null,
+      "min_bytes": null,
+      "min_bytes_basis": null,
+      "dark_on": "every run",
+      "source": "ora-deal-command-board/SKILL.md L52-63 (optional pointer email, subject not specified; board otherwise in-session only)"
+    },
+    {
+      "task_id": "ora-psa-drift-watch",
+      "fleet": "cc",
+      "notion_output": "PSA Drift Watch — {DATE}",
+      "fallback_email_subject_pattern": null,
+      "must_not_match": null,
+      "min_bytes": null,
+      "min_bytes_basis": null,
+      "dark_on": "every run",
+      "source": "ora-psa-drift-watch/SKILL.md L19 'Do not send email', L50-61"
+    },
+    {
+      "task_id": "ora-acquisition-underwriting-eval-harness",
+      "fleet": "cc",
+      "notion_output": "Ops Hub status block (untitled)",
+      "fallback_email_subject_pattern": null,
+      "must_not_match": null,
+      "min_bytes": null,
+      "min_bytes_basis": null,
+      "dark_on": "every alarm (Notion is the only alarm channel)",
+      "source": "ora-acquisition-underwriting-eval-harness/SKILL.md L26-30 (posts only on FLAG / parse failure; no email step)"
+    },
+    {
+      "task_id": "ora-appsec-sweep",
+      "fleet": "cc",
+      "notion_output": "Ops Hub completion row (untitled)",
+      "fallback_email_subject_pattern": "^(?!\\s*(re|fw|fwd):)(?=.*appsec sweep)",
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 2000,
+      "min_bytes_basis": "observed finding reports 2565-4445 (09-02, 09-05); subjects are often undated — matched by ET send date",
+      "dark_on": "clean / low-only week (row only, no email)",
+      "source": "ora-appsec-sweep/SKILL.md L264-268"
+    },
+    {
+      "task_id": "ora-financial-code-integrity-sweep",
+      "fleet": "cc",
+      "notion_output": "Ops Hub completion row (untitled)",
+      "fallback_email_subject_pattern": "^(?!\\s*(re|fw|fwd):)(?=.*financial-code integrity sweep)",
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 2000,
+      "min_bytes_basis": "observed defect report 3865 (09-06); undated subject",
+      "dark_on": "clean week",
+      "source": "ora-financial-code-integrity-sweep/SKILL.md L98-109"
+    },
+    {
+      "task_id": "ora-calibration-snapshot",
+      "fleet": "cc",
+      "notion_output": "calibration-log row (target ambiguous: 8dbbaec0 or Ops Hub)",
+      "fallback_email_subject_pattern": null,
+      "must_not_match": null,
+      "min_bytes": null,
+      "min_bytes_basis": null,
+      "dark_on": "every successful run and pre-flight failure",
+      "source": "ora-calibration-snapshot/SKILL.md L15, L30-32 (failure email subject not specified)"
+    },
+    {
+      "task_id": "ora-cc-snapshot-refresh",
+      "fleet": "cc",
+      "notion_output": "Ops Hub status note",
+      "fallback_email_subject_pattern": "^(?=.*\\[alert\\] ora-cc-snapshot-refresh)(?=.*{DATE})",
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 2000,
+      "min_bytes_basis": "observed alert reports 4885-6092 (09-02, 09-05, 09-07)",
+      "dark_on": "exit 0 and exit 2",
+      "source": "ora-cc-snapshot-refresh/SKILL.md L48-51 (L240 contradicts for exit 0)"
+    },
+    {
+      "task_id": "ora-lease-snapshot-refresh",
+      "fleet": "cc",
+      "notion_output": "Ops Hub status note",
+      "fallback_email_subject_pattern": "^(?=.*lease snapshot)(?=.*{DATE})",
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 1500,
+      "min_bytes_basis": "observed 3287 (09-02); exit 1/3 subject not pinned",
+      "dark_on": "exit 2 (exit 0 posts nothing)",
+      "source": "ora-lease-snapshot-refresh/SKILL.md L212-216"
+    },
+    {
+      "task_id": "ora-passed-deal-tracker",
+      "fleet": "cc",
+      "notion_output": "Ops Hub note/block (untitled)",
+      "fallback_email_subject_pattern": "^(?=.*passed-deal tracker)(?=.*{DATE})",
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 1500,
+      "min_bytes_basis": "no send observed 09-01..09-13 (monthly, 15th) — conservative floor",
+      "dark_on": "zero-trade month with no overdue tickler",
+      "source": "ora-passed-deal-tracker/SKILL.md L176-194, L224-241"
+    },
+    {
+      "task_id": "ora-broker-touch-cadence",
+      "fleet": "cc",
+      "notion_output": "Ops Hub row (untitled)",
+      "fallback_email_subject_pattern": "^(?=.*broker touch cadence)(?=.*{DATE})",
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 800,
+      "min_bytes_basis": "observed summaries 1120 (09-02), 1192 (09-05)",
+      "dark_on": "guard path (DB unreachable / zero qualifying brokers)",
+      "source": "ora-broker-touch-cadence/SKILL.md L10, L55"
+    },
+    {
+      "task_id": "ora-site-exposure-probe",
+      "fleet": "cc",
+      "notion_output": "Ops Hub completion row (untitled)",
+      "fallback_email_subject_pattern": null,
+      "must_not_match": null,
+      "min_bytes": null,
+      "min_bytes_basis": null,
+      "dark_on": "CLEAN runs (and ALARM runs until an alarm subject is pinned)",
+      "source": "ora-site-exposure-probe/SKILL.md L56-62 (ALARM email subject not specified, so no pattern can be pinned)"
+    },
+    {
+      "task_id": "ora-model-release-watch",
+      "fleet": "cc",
+      "notion_output": "Ops Hub block (old->new lineup)",
+      "fallback_email_subject_pattern": "^(?!\\s*(re|fw|fwd):)(?=.*new claude model detected)",
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 1000,
+      "min_bytes_basis": "observed detection email 2001 (09-02); undated subject",
+      "output_conditional": "detection only; no-change weeks are silent by design",
+      "dark_on": "unreadable-lineup case (Notion QUESTIONS only)",
+      "source": "ora-model-release-watch/SKILL.md L22-35"
+    },
+    {
+      "task_id": "ora-sofr-direct-prefetch",
+      "fleet": "cc",
+      "notion_output": "failure-path Ops Hub line (append vs child page unclear)",
+      "fallback_email_subject_pattern": null,
+      "must_not_match": null,
+      "min_bytes": null,
+      "min_bytes_basis": null,
+      "dark_on": "failure path",
+      "source": "ora-sofr-direct-prefetch/SKILL.md L41 (update-page), L99 ('No email')"
     },
     {
       "task_id": "automation-health-monitor",
       "fleet": "lams",
       "notion_output": "Automation Health — {DATE}",
       "fallback_email_subject_pattern": "^(?=.*automation[- ]health)(?=.*publication failed)(?=.*{DATE})",
-      "source": "Scheduled/automation-health-monitor/SKILL.md Step 3: '❌ ora-automation-health-monitor PUBLICATION FAILED — [today's date]'; live variants 2026-09-08..11 include '[AUTO-SENT] Automation Health 2026-09-09 - Notion publication FAILED (block quota) ...' and 'PUBLICATION FAILED ora-automation-health-monitor 2026-09-10'"
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 5000,
+      "min_bytes_basis": "observed full-report fallback 6624 (09-09) vs bare PUBLICATION FAILED notices 2401 (09-08), 2856 (09-10), 2147 (09-11)",
+      "source": "Scheduled/automation-health-monitor/SKILL.md Step 1 L348-368, Step 3 L377-383"
     },
     {
-      "task_id": "ora-skill-text-audit",
+      "task_id": "ora-ar-export-freshness-nudge",
       "fleet": "lams",
-      "notion_output": "Skill Text Audit — {DATE}",
-      "output_conditional": "only when findings >= 1",
-      "fallback_email_subject_pattern": "^(?=.*skill[- ]text[- ]audit)(?=.*{DATE})",
-      "source": "Scheduled/ora-skill-text-audit/SKILL.md: 'ORA Skill Text Audit — [Date]' and '❌ ora-skill-text-audit PUBLICATION FAILED — <YYYY-MM-DD>'"
+      "notion_output": "Ops Hub note (clean pass or gap list)",
+      "fallback_email_subject_pattern": "^(?=.*ar export gap)(?=.*{DATE})",
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 3000,
+      "min_bytes_basis": "observed gap report 7368 (09-02)",
+      "dark_on": "clean pass",
+      "source": "Scheduled/ora-ar-export-freshness-nudge/SKILL.md L21-27"
     },
     {
-      "task_id": "ora-owner-outreach-queue-refresh",
+      "task_id": "ora-bearmode-refresh",
       "fleet": "lams",
-      "notion_output": "Owner Outreach ledger rows (data source caa809b7-1da3-49d5-ab…), weekly",
-      "fallback_email_subject_pattern": "^(?=.*owner-outreach)(?=.*weekly)(?=.*{DATE})",
-      "source": "Scheduled/ora-owner-outreach-queue-refresh/SKILL.md STEP 5 + output_contract subject_pattern 'ORA Owner-Outreach — Weekly — {DATE}'. Writes via Notion API script, MCP notion-create-pages fallback — both hit the block quota"
+      "notion_output": "Ops Hub dated block",
+      "fallback_email_subject_pattern": null,
+      "must_not_match": null,
+      "min_bytes": null,
+      "min_bytes_basis": null,
+      "dark_on": "every run (no pinned subject); quarterly",
+      "source": "Scheduled/ora-bearmode-refresh/SKILL.md L34-35 (change email subject not specified)"
+    },
+    {
+      "task_id": "ora-capex-idea-stage-nudge",
+      "fleet": "lams",
+      "notion_output": "Ops Hub summary",
+      "fallback_email_subject_pattern": "^(?=.*capex idea-stage nudge)(?=.*{DATE})",
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 1000,
+      "min_bytes_basis": "observed nudge 1959 (09-02)",
+      "dark_on": "clean pass (no STALE rows)",
+      "source": "Scheduled/ora-capex-idea-stage-nudge/SKILL.md L15-17"
+    },
+    {
+      "task_id": "ora-critical-deadlines-scan",
+      "fleet": "lams",
+      "notion_output": "Critical Deadlines Scan — {DATE}",
+      "fallback_email_subject_pattern": "^(?=.*critical deadlines scan)(?=.*{DATE})",
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 2500,
+      "min_bytes_basis": "observed summaries 4028 (09-03), 4725 (09-05)",
+      "source": "Scheduled/ora-critical-deadlines-scan/SKILL.md L10, L43-44"
+    },
+    {
+      "task_id": "ora-dd-critical-tracker",
+      "fleet": "lams",
+      "notion_output": "DD-Critical Tracker -- {DATE}",
+      "fallback_email_subject_pattern": "^(?=.*dd-critical tracker)(?=.*{DATE})",
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 1500,
+      "min_bytes_basis": "observed summaries 2528 (09-03), 2574 (09-05)",
+      "source": "Scheduled/ora-dd-critical-tracker/SKILL.md L10, L42-43"
+    },
+    {
+      "task_id": "ora-exit-cap-spotcheck",
+      "fleet": "lams",
+      "notion_output": "Ops Hub dated entry (10-market table)",
+      "fallback_email_subject_pattern": null,
+      "must_not_match": null,
+      "min_bytes": null,
+      "min_bytes_basis": null,
+      "dark_on": "every run until a subject is pinned; quarterly",
+      "source": "Scheduled/ora-exit-cap-spotcheck/SKILL.md L17-18 (emails every run but subject not specified, so no pattern can be pinned)"
     },
     {
       "task_id": "ora-friday-closeout",
       "fleet": "lams",
       "notion_output": "Friday Closeout & Week Ahead — {DATE}",
       "fallback_email_subject_pattern": "^(?=.*friday closeout)(?=.*{DATE})",
-      "source": "Scheduled/ora-friday-closeout/SKILL.md step 1-2 (publication guard + email 'ORA Friday Closeout & Week Ahead — [date]')"
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 3000,
+      "min_bytes_basis": "no send observed 09-01..09-13 — conservative floor",
+      "source": "Scheduled/ora-friday-closeout/SKILL.md L53-54 (Notion error stated in the normal full email). Frontmatter note L18 contradicts L53 on every-run posting"
+    },
+    {
+      "task_id": "ora-gis-endpoint-liveping",
+      "fleet": "lams",
+      "notion_output": "Ops Hub dated status table",
+      "fallback_email_subject_pattern": null,
+      "must_not_match": null,
+      "min_bytes": null,
+      "min_bytes_basis": null,
+      "dark_on": "every run until a subject is pinned; quarterly",
+      "source": "Scheduled/ora-gis-endpoint-liveping/SKILL.md L23-25 (summary email subject not specified)"
+    },
+    {
+      "task_id": "ora-health-guard-fail-aging-nudge",
+      "fleet": "lams",
+      "notion_output": "[ACTION] Health Guard FAIL Aging -- {DATE}",
+      "fallback_email_subject_pattern": "^(?!\\s*(re|fw|fwd):)(?=.*health guard fail aging)",
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 1500,
+      "min_bytes_basis": "observed 2912 (09-05); undated subject — matched by ET send date",
+      "output_conditional": "only when a FAIL is 48h+ unresolved; clean days post nothing",
+      "source": "Scheduled/ora-health-guard-fail-aging-nudge/SKILL.md L16-17"
+    },
+    {
+      "task_id": "ora-hubspot-notion-contact-sync",
+      "fleet": "lams",
+      "notion_output": "HubSpot→Notion Contact Sync — {DATE} (+ 'Contact Sync — Unresolved: <tenant>')",
+      "fallback_email_subject_pattern": null,
+      "must_not_match": null,
+      "min_bytes": null,
+      "min_bytes_basis": null,
+      "dark_on": "every run",
+      "source": "Scheduled/ora-hubspot-notion-contact-sync/SKILL.md L100-114 ('Do not email this report', 'If Notion is unavailable, stop')"
+    },
+    {
+      "task_id": "ora-ic-memo-pipeline-reconciliation",
+      "fleet": "lams",
+      "notion_output": "Ops Hub status block",
+      "fallback_email_subject_pattern": "^(?!\\s*(re|fw|fwd):)(?=.*ic memo / pipeline tracker reconciliation)",
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 1000,
+      "min_bytes_basis": "observed gap report 2095 (09-02); undated subject",
+      "dark_on": "clean pass",
+      "source": "Scheduled/ora-ic-memo-pipeline-reconciliation/SKILL.md L25-27"
+    },
+    {
+      "task_id": "ora-insurance-renewal-monitor",
+      "fleet": "lams",
+      "notion_output": "Insurance Renewal Monitor — {DATE}",
+      "fallback_email_subject_pattern": "^(?!\\s*(re|fw|fwd):)(?=.*insurance lapse/renewal alert)",
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 1500,
+      "min_bytes_basis": "observed alerts 2833 (09-02), 3116 (09-07); undated subject",
+      "dark_on": "clean week",
+      "source": "Scheduled/ora-insurance-renewal-monitor/SKILL.md L10, L36-41"
+    },
+    {
+      "task_id": "ora-lease-expiration-brief",
+      "fleet": "lams",
+      "notion_output": "Lease Expiration Brief — {DATE}",
+      "fallback_email_subject_pattern": "^(?=.*lease expiration brief)(?=.*{DATE})",
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 3000,
+      "min_bytes_basis": "observed full briefs 4983 (09-02), 11396 (09-07)",
+      "source": "Scheduled/ora-lease-expiration-brief/SKILL.md L10, L38-39"
+    },
+    {
+      "task_id": "ora-loan-terms-reconciliation",
+      "fleet": "lams",
+      "notion_output": "Loan Terms Reconciliation — {DATE}",
+      "fallback_email_subject_pattern": "^(?=.*loan terms drift)(?=.*{DATE})",
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 1500,
+      "min_bytes_basis": "observed mismatch report 3030 (09-06)",
+      "dark_on": "clean pass",
+      "parent_mismatch": true,
+      "parent_id": "32b6ecd8-9e59-81ed-b571-dfc871ab9f25",
+      "parent_note": "posts under 32b6ecd8-9e59-81ed-b571-dfc871ab9f25, not the Ops Hub 32b6ecd8-9e59-81f2-b329-df3fd0e25062 every other producer uses — recorded here only; the task is not changed",
+      "source": "Scheduled/ora-loan-terms-reconciliation/SKILL.md L43-54"
     },
     {
       "task_id": "ora-monday-sync",
       "fleet": "lams",
       "notion_output": "Monday Sync — {DATE}",
       "fallback_email_subject_pattern": "^(?=.*monday sync)(?=.*{DATE})",
-      "source": "Scheduled/ora-monday-sync/SKILL.md output_contract + step 7 ('ORA Monday Sync - [date]', dash form unstable — normalization covers it)"
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 4000,
+      "min_bytes_basis": "observed full syncs 8315 (09-07), 9043 (09-02)",
+      "source": "Scheduled/ora-monday-sync/SKILL.md L10, L37-40 (its Sent-Items probe L38 uses a hyphen while the send uses an em dash; normalization covers matching here)"
     },
     {
-      "task_id": "ora-health-guard-fail-aging-nudge",
+      "task_id": "ora-om-intake-ocr",
       "fleet": "lams",
-      "notion_output": "[ACTION] Health Guard FAIL Aging -- {DATE}",
-      "output_conditional": "only when >= 1 stale FAIL",
-      "fallback_email_subject_pattern": "^(?=.*health guard fail aging)",
-      "source": "Scheduled/ora-health-guard-fail-aging-nudge/SKILL.md step 6: '[ACTION] Health Guard FAIL Aging -- N stale' (undated subject — match by send date)"
+      "notion_output": "Deal Sourcing Log rows (gate-passing new OMs)",
+      "fallback_email_subject_pattern": "^(?=.*om intake)(?=.*{DATE})",
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 3000,
+      "min_bytes_basis": "observed report 8347 (09-02)",
+      "output_conditional": "rows and email only when new OM files arrive",
+      "source": "Scheduled/ora-om-intake-ocr/SKILL.md L99-116"
     },
     {
-      "task_id": "ora-hubspot-notion-contact-sync",
+      "task_id": "ora-owner-outreach-queue-refresh",
       "fleet": "lams",
-      "notion_output": "HubSpot→Notion Contact Sync — {DATE} (+ 'Contact Sync — Unresolved: <tenant>' pages)",
+      "notion_output": "Owner Outreach Queue DB rows (data source caa809b7…)",
+      "fallback_email_subject_pattern": "^(?=.*owner-outreach)(?=.*weekly)(?=.*{DATE})",
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 1200,
+      "min_bytes_basis": "observed weekly summaries 1973 (09-02), 2102 (09-07)",
+      "output_conditional": "rows only with net-new owners and no STALE hold; email every run",
+      "source": "Scheduled/ora-owner-outreach-queue-refresh/SKILL.md L75-91"
+    },
+    {
+      "task_id": "ora-replacement-cost-refresh",
+      "fleet": "lams",
+      "notion_output": "Notion mirror (not specified; main output is a versioned xlsx)",
+      "fallback_email_subject_pattern": "^(?!\\s*(re|fw|fwd):)(?=.*quarterly replacement-cost refresh)",
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 2000,
+      "min_bytes_basis": "no send observed 09-01..09-13 (quarterly) — conservative floor; undated subject",
+      "source": "Scheduled/ora-replacement-cost-refresh/SKILL.md L15-20 ('RCT vNN — Quarterly Replacement-Cost Refresh')"
+    },
+    {
+      "task_id": "ora-session-sweep",
+      "fleet": "lams",
+      "notion_output": "Ops Hub report (X new indexed …)",
       "fallback_email_subject_pattern": null,
-      "source": "Scheduled/ora-hubspot-notion-contact-sync/SKILL.md step 7 — Notion run report only, no email path found. DARK while degraded"
+      "must_not_match": null,
+      "min_bytes": null,
+      "min_bytes_basis": null,
+      "dark_on": "every run",
+      "source": "Scheduled/ora-session-sweep/SKILL.md L61-65 (no email step)"
+    },
+    {
+      "task_id": "ora-skill-text-audit",
+      "fleet": "lams",
+      "notion_output": "Skill Text Audit — {DATE} (or '… — CLEAN PASS')",
+      "fallback_email_subject_pattern": "^(?=.*skill[- ]text[- ]audit)(?=.*{DATE})",
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 3000,
+      "min_bytes_basis": "no send observed 09-01..09-13 (monthly, 15th) — conservative floor",
+      "source": "Scheduled/ora-skill-text-audit/SKILL.md L85-101 ('❌ ora-skill-text-audit PUBLICATION FAILED — <YYYY-MM-DD>' with page content verbatim)"
+    },
+    {
+      "task_id": "ora-stale-pipeline-nudge",
+      "fleet": "lams",
+      "notion_output": "Ops Hub post (primary delivery)",
+      "fallback_email_subject_pattern": null,
+      "must_not_match": null,
+      "min_bytes": null,
+      "min_bytes_basis": null,
+      "dark_on": "every run",
+      "source": "Scheduled/ora-stale-pipeline-nudge/SKILL.md L47, L95-102 (email optional and pointer-only, so it is not delivery proof)"
     },
     {
       "task_id": "ora-tenant-contact-gap-sweep",
       "fleet": "lams",
       "notion_output": "Tenant Contact Gap Sweep — {DATE}",
       "fallback_email_subject_pattern": null,
-      "source": "Scheduled/ora-tenant-contact-gap-sweep/SKILL.md step 6 — Notion page only, no email path found. DARK while degraded"
+      "must_not_match": null,
+      "min_bytes": null,
+      "min_bytes_basis": null,
+      "dark_on": "every run",
+      "source": "Scheduled/ora-tenant-contact-gap-sweep/SKILL.md L73-91 ('Do not email this report')"
+    },
+    {
+      "task_id": "ora-underwrite-doctrine-staleness-check",
+      "fleet": "lams",
+      "notion_output": "Ops Hub status block",
+      "fallback_email_subject_pattern": "^(?!\\s*(re|fw|fwd):)(?=.*stale-doctrine underwrite flag)",
+      "must_not_match": "not run|coverage gap|skipped",
+      "min_bytes": 1000,
+      "min_bytes_basis": "no send observed 09-01..09-13 — conservative floor; undated subject",
+      "dark_on": "weeks with no newly-stale deal",
+      "source": "Scheduled/ora-underwrite-doctrine-staleness-check/SKILL.md L24-31 (reads its prior Notion post for dedup)"
     }
   ],
   "excluded_update_only": [
-    "ora-cowork-heartbeat (updates one fixed page; creates only on disaster-restore)",
-    "ora-health-guard (Connector Pre-Flight beacon is notion-update-page)",
-    "ora-sofr-direct-prefetch / ora-am-brief Block A (Rate Snapshot — Current is notion-update-page)",
-    "ora-master-workbook-ingest (updates Portfolio Intelligence Dashboard + DSOR page; no page create found)",
-    "ora-ground-truth-auditor (mentions notion-create-pages only as transcript evidence to parse)"
+    "ora-health-guard (cc) — Connector Pre-Flight beacon is notion-update-page; Block C publishes no page",
+    "ora-cowork-heartbeat (lams) — notion-update-page on one fixed page; 'Do NOT call notion-create-pages'",
+    "ora-skill-store-drift-check (lams) — posts a Notion COMMENT, not a page",
+    "ora-ground-truth-auditor (cc) — read-only; mentions notion-create-pages only as transcript evidence",
+    "ora-aaos-expire-leases (cc) — no Notion writes",
+    "ora-aaos-publish-contracts (cc) — no Notion writes",
+    "ora-ar-feed-sweep (cc) — no Notion writes",
+    "ora-cc-schematic-refresh (cc) — republishes an Artifact, no Notion",
+    "ora-checkout-merge-forward (cc) — no Notion writes",
+    "ora-claude-setup-audit (cc) — Artifact + memory only",
+    "ora-memory-commit-sweep (cc) — 'Do not touch Notion'",
+    "ora-open-sessions-board (cc) — Notion read-only",
+    "ora-pm-daily-crons (cc) — no Notion writes",
+    "ora-pm-monthly-billing (cc) — no Notion writes",
+    "ora-task-integrity-guard (cc) — no Notion writes",
+    "ora-tenant-hubspot-reconciliation (cc) — 'never writes to HubSpot or Notion'",
+    "ora-consolidate-memory-monthly (lams) — no Notion step"
   ],
-  "updated_at": "2026-09-13T10:28:00-04:00",
-  "updated_by": "Claude Code session (Opus 5) — notion-publish-degraded email-only flag build"
+  "roster_coverage": "Cross-checked 2026-09-13 against maintenance/_state/fleet-roster.md (generated 2026-09-13T08:50:38): CC 38 live recurring = 24 producers + 14 excluded; LAMS 27 live recurring = 24 producers + 3 excluded. The pending one-time ora-counsel-review-standard-positions-2027 (@2027-08-02) is not classified.",
+  "updated_at": "2026-09-13T11:40:00-04:00",
+  "updated_by": "Claude Code session (Opus 5) — review fixes 1-9 on PR #199 / #55"
 }
