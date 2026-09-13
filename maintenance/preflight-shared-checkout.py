@@ -82,6 +82,16 @@ test-pinned), and an unresolvable canonical ref is reported as "could not
 check" with local_only_paths=null, never as an empty (clean) list. No fetch --
 a stale origin ref can under-report, same limitation as cross-repo-wip-scan.
 
+PATH CONTAINMENT (added 2026-09-12): every --paths entry must belong to the
+--repo checkout, decided on its realpath AND on git's own answer for which
+toplevel owns it. Reproduced in the PR #196 review: from ~/.claude, a file
+dirty in ora-skills was CONTESTED with --repo ~/ora-skills but CLEAR with
+--repo ~/.claude, because a path in another checkout is simply absent from
+this one's dirty set. The git-owner half also catches a nested checkout
+(~/.claude/.claude/worktrees/<name> is string-inside ~/.claude). A path whose
+owner cannot be established counts as outside: a path that was never
+evaluated is never CLEAR.
+
 Usage:
     python maintenance/preflight-shared-checkout.py --paths P [P ...]
         [--repo PATH]        checkout to inspect (default: cwd)
@@ -95,7 +105,8 @@ Usage:
                              (local-only advisory only)
         [--json]             machine-readable only, nothing else on stdout
 
-    --paths accepts files or directories, absolute or relative to --repo.
+    --paths accepts files or directories, absolute or relative to --repo, and
+    all of them must be inside that one checkout (else exit 5).
 
 Exit codes:
     0  CLEAR          nothing contests these paths -- go ahead
@@ -104,10 +115,14 @@ Exit codes:
     3  HEAD_MOVED     --since given and HEAD is not that commit
     4  INDETERMINATE  a fact could not be established (claims unreadable) --
                       uncertain, never treated as clean
+    5  OUT_OF_REPO    a --paths entry is not in the --repo checkout, so it was
+                      never evaluated (out_of_repo_paths names each one and the
+                      checkout that owns it)
 
-Precedence when several apply: NOT_A_REPO > HEAD_MOVED > CONTESTED >
-INDETERMINATE > CLEAR. All findings are reported regardless of which one sets
-the exit code.
+Precedence when several apply: NOT_A_REPO > OUT_OF_REPO > HEAD_MOVED >
+CONTESTED > INDETERMINATE > CLEAR. All findings are reported regardless of
+which one sets the exit code. OUT_OF_REPO outranks the rest because --since and
+the dirty set then describe the wrong checkout.
 """
 import argparse
 import json
@@ -121,6 +136,7 @@ EXIT_CONTESTED = 1
 EXIT_NOT_A_REPO = 2
 EXIT_HEAD_MOVED = 3
 EXIT_INDETERMINATE = 4
+EXIT_OUT_OF_REPO = 5
 
 DEFAULT_TTL_MINUTES = 120  # matches claim_work.py's 2h window
 
@@ -157,6 +173,12 @@ def _any_overlap(path, scope):
     return any(_overlaps(path, s) for s in scope)
 
 
+def _inside(path, root):
+    """Segment-wise: `root` itself or anything under it, never `root2/`."""
+    p, r = _norm(path), _norm(root)
+    return p == r or p.startswith(r + "/")
+
+
 # --------------------------------------------------------------------------
 # git facts
 # --------------------------------------------------------------------------
@@ -179,6 +201,42 @@ def _head_sha(repo):
     if proc.returncode != 0:
         return None
     return proc.stdout.strip()
+
+
+def _own_toplevel(path):
+    """realpath of the git toplevel that owns `path`, or None when it sits in
+    no work tree (or git cannot say). A path that does not exist yet -- a file
+    about to be created, in a directory about to be created -- is answered by
+    its nearest existing ancestor directory."""
+    d = path
+    while not os.path.isdir(d):
+        parent = os.path.dirname(d)
+        if parent == d:
+            return None
+        d = parent
+    proc = _git(d, "rev-parse", "--show-toplevel")
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return None
+    return os.path.realpath(proc.stdout.strip())
+
+
+def _outside_repo(scope, repo):
+    """Scope entries this checkout cannot speak for, each with the checkout
+    that does (`suggested_repo`, None when it is in none).
+
+    Two conditions, both required to count as inside: the realpath sits under
+    the toplevel, AND git names that same toplevel as the path's owner. The
+    second catches a nested checkout -- ~/.claude/.claude/worktrees/<name> is
+    string-inside ~/.claude, but ~/.claude's `git status` never lists its
+    dirt, so evaluating it there is the same wrong-repo false CLEAR.
+    Failing to establish the owner is outside, never inside."""
+    out = []
+    for p in scope:
+        own = _own_toplevel(p)
+        if _inside(p, repo) and own is not None and _norm(own) == _norm(repo):
+            continue
+        out.append({"path": p, "suggested_repo": own})
+    return out
 
 
 def _dirty_paths(repo):
@@ -543,6 +601,12 @@ def main():
     else:
         repo = os.path.realpath(repo)
 
+    # --- fact 0b: does every scope path belong to THIS checkout? --------
+    # A path in another checkout is absent from this one's dirty set by
+    # construction, so it read CLEAR however contested it really was.
+    out_of_repo = _outside_repo(scope, repo)
+    outside = {o["path"] for o in out_of_repo}
+
     # --- fact 1: has HEAD moved since session start? --------------------
     # A blank or very short --since prefix-matches almost any HEAD and would
     # report "unchanged". Under 7 hex chars the fact cannot be established.
@@ -621,13 +685,16 @@ def main():
             (expired_overlap if c["expired"] else competing).append(c)
 
     # --- advisory: is this work landing only on a non-canonical branch? ---
-    branch_info = _local_only(repo, scope, args.canonical)
+    branch_info = _local_only(repo, [p for p in scope if p not in outside],
+                              args.canonical)
 
     # --- verdict --------------------------------------------------------
     indeterminate = claims is None or bool(unreadable) or bool(since_error)
     contested = bool(dirty_overlap_foreign) or bool(competing)
 
-    if head_moved:
+    if out_of_repo:
+        verdict, code = "OUT_OF_REPO", EXIT_OUT_OF_REPO
+    elif head_moved:
         verdict, code = "HEAD_MOVED", EXIT_HEAD_MOVED
     elif contested:
         verdict, code = "CONTESTED", EXIT_CONTESTED
@@ -644,7 +711,8 @@ def main():
         "head_moved": head_moved,          # null == not checked / uncheckable
         "since_error": since_error,
         "scope": [os.path.relpath(p, repo).replace("\\", "/")
-                  if _norm(p).startswith(_norm(repo)) else p for p in scope],
+                  if p not in outside else p for p in scope],
+        "out_of_repo_paths": out_of_repo,
         "dirty_overlap_foreign": dirty_overlap_foreign,
         "dirty_overlap_mine": dirty_overlap_mine,
         "dirty_total": len(dirty),
@@ -661,6 +729,16 @@ def main():
     # --- human-readable ------------------------------------------------
     say("PREFLIGHT %s -- %s" % (verdict, repo))
     say("  scope        : %s" % ", ".join(report["scope"]))
+    if out_of_repo:
+        say("  OUT-OF-REPO  : %d scope path(s) are not in this checkout -- nothing"
+            " below was checked for them:" % len(out_of_repo))
+        for o in out_of_repo:
+            if o["suggested_repo"]:
+                say("      %s   -> belongs to %s; re-run with --repo \"%s\""
+                    % (o["path"], o["suggested_repo"], o["suggested_repo"]))
+            else:
+                say("      %s   -> not inside any git checkout (or git could not"
+                    " say which)" % o["path"])
     if since_error:
         say("  HEAD         : %s  NOT CHECKED -- %s" % (head[:12], since_error))
     elif head_moved is None:
@@ -735,6 +813,8 @@ def main():
         "INDETERMINATE": "  -> uncertain, not clean. Establish the missing"
                          " fact before editing.",
         "NOT_A_REPO": "  -> not a checkout.",
+        "OUT_OF_REPO": "  -> STOP. Paths outside --repo were never evaluated. Run"
+                       " once per checkout, with the --repo that owns them.",
     }[verdict])
 
     _emit(report, out, args.json)
