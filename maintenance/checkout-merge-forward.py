@@ -130,7 +130,10 @@ import time
 DEFAULT_REPO = r"C:\Users\Owner\.claude"
 DEFAULT_CANONICAL = "main"
 SYNCED_STATUSES = ("MERGED", "NOOP_CLEAN")
-_OVERLAP_HEADER = "would be overwritten by merge:"
+# Second header: origin turns a tracked directory into a file while local
+# untracked files sit inside it.
+_OVERLAP_HEADERS = ("would be overwritten by merge:",
+                    "would lose untracked files in them:")
 STREAK_ALARM_RUNS = 14
 STREAK_ALARM_REPEAT_RUNS = 7
 
@@ -176,7 +179,7 @@ def parse_overlap_paths(git_output):
     block."""
     paths, in_block = [], False
     for line in (git_output or "").splitlines():
-        if _OVERLAP_HEADER in line:
+        if any(h in line for h in _OVERLAP_HEADERS):
             in_block = True
             continue
         if in_block and line[:1] in ("\t", " ") and line.strip():
@@ -194,11 +197,14 @@ def _strip_warnings(text):
 
 
 def _git(args, repo):
-    """(rc, stdout, stderr) -- never raises on a non-zero/missing git."""
+    """(rc, stdout, stderr) -- never raises on a non-zero/missing git. Output is
+    pinned to English (LC_ALL=C): the overlap headers and MERGE_REFUSAL_MARKERS
+    are matched as text, and a translated refusal would read as this run's merge."""
     try:
         p = subprocess.run(
             ["git"] + args, cwd=repo, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=60,
+            env=dict(os.environ, LC_ALL="C", LANGUAGE="C"),
         )
     except (OSError, subprocess.TimeoutExpired) as e:
         return 127, "", str(e)
@@ -363,8 +369,12 @@ def sync(repo=None, canonical=None):
         out["detail"] = "cannot resolve %s" % target
         return out
 
+    # Merge the resolved SHA, not the ref name: a concurrent fetch moving origin/<canonical>
+    # in between would otherwise make this run's own MERGE_HEAD fail the check below,
+    # stranding its own conflict as "someone else's".
     rc, merge_out, merge_err = _git(
-        ["merge", "--no-commit", "--no-ff", target], repo)
+        ["merge", "--no-commit", "--no-ff", "-m",
+         "Merge remote-tracking branch '%s'" % target, target_sha], repo)
     if rc == 0:
         rc2, _, commit_err = _git(["commit", "--no-edit"], repo)
         if rc2 != 0:
@@ -386,7 +396,9 @@ def sync(repo=None, canonical=None):
 
     raw = "\n".join(s for s in (merge_err, merge_out) if s)
     head_state, merge_head = ref_state(repo, "MERGE_HEAD")
-    refused = any(m in raw.lower() for m in MERGE_REFUSAL_MARKERS)
+    # Only git's own fatal:/error: lines -- a conflicted file's PATH can contain a marker.
+    diag = [l.lower() for l in raw.splitlines() if l.startswith(("fatal:", "error:"))]
+    refused = any(m in l for l in diag for m in MERGE_REFUSAL_MARKERS)
     if head_state != "absent" and (refused or head_state == "unknown" or merge_head != target_sha):
         # Not provably this run's merge: git refused because one already existed, or
         # MERGE_HEAD names something other than what we merged. Never abort it.

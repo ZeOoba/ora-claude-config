@@ -1263,6 +1263,19 @@ def test_out_of_repo_outranks_indeterminate_and_carries_reason():
                reasons == ["no_checkout", "other_checkout"], rj.get("out_of_repo_paths"))
 
 
+def test_literal_tilde_path_expands_to_home_not_a_dir_named_tilde():
+    # Windows PowerShell 5.1 passes `~` to native commands unexpanded. Joined under
+    # --repo as a directory literally named "~", it evaluated nothing and read CLEAR.
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        _dirty(work, "agents/one.md")
+        env = dict(os.environ, HOME=td, USERPROFILE=td)
+        rc, out, _ = run("--repo", work, "--claims-dir", _claims_dir(td),
+                         "--session", MY_SESSION, "--paths", "~/repo/agents/one.md", env=env)
+        expect("literal ~ path -> CONTESTED like its real spelling, never CLEAR",
+               rc == EXIT_CONTESTED, (rc, out[-500:]))
+
+
 def main():
     test_verbatim_prefix_spelling_of_in_repo_path_is_not_out_of_repo()
     test_inherited_git_env_cannot_redirect_the_gate()
@@ -1328,6 +1341,7 @@ def main():
     test_only_stale_owners_stays_contested()
     test_unknown_touch_time_is_never_discounted()
     test_never_committed_path_is_never_discounted()
+    test_literal_tilde_path_expands_to_home_not_a_dir_named_tilde()
     passed = sum(1 for ok, _ in results if ok)
     print("\npreflight-shared-checkout tests: %d/%d passed"
           % (passed, len(results)))

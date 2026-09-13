@@ -661,8 +661,11 @@ def main():
     # resolved, `repo` becomes the toplevel for every other fact.
     # Both scope and repo go through realpath so every later relpath/overlap
     # compares one spelling (see _norm).
+    # expanduser first: Windows PowerShell 5.1 passes `~` through unexpanded, and
+    # "~/x" joined under the repo named a directory called "~" -- evaluated
+    # nothing, read CLEAR.
     scope = [_real(os.path.join(repo, p) if not os.path.isabs(p) else p)
-             for p in args.paths]
+             for p in (os.path.expanduser(q) for q in args.paths)]
     top = _git(repo, "rev-parse", "--show-toplevel")
     if top.returncode == 0 and top.stdout.strip():
         repo = _real(top.stdout.strip())
@@ -705,7 +708,7 @@ def main():
     mine = (args.session or "").lower()
     accepted_stale = {
         _norm(p if os.path.isabs(p) else os.path.join(args.repo, p))
-        for p in (args.accept_stale or [])}
+        for p in (os.path.expanduser(q) for q in (args.accept_stale or []))}
 
     dirty_overlap_mine, dirty_overlap_foreign = [], []
     for p in dirty:
