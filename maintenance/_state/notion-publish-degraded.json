@@ -1,0 +1,166 @@
+{
+  "active": true,
+  "since": "2026-09-08",
+  "reason": "Notion workspace free-block quota exhausted — notion-create-pages fails; update-page still works",
+  "tracking": ["OI-281", "OI-288"],
+  "mode": "email-only",
+  "clear_when": "a notion-create-pages call succeeds (plan upgraded or blocks freed) — set active:false and record cleared_at",
+  "cleared_at": null,
+  "consumers": [
+    "~/.claude/scheduled-tasks/ora-health-guard/SKILL.md (B.2(C.0c))",
+    "ora-skills/automation-health-monitor/SKILL.md (Step 2a)"
+  ],
+  "matching": {
+    "normalize_subject": "Before matching: fold the dash family (em dash, en dash, figure dash, minus) to '-', drop every non-ASCII character (emoji), collapse runs of whitespace to one space, compare case-insensitively. Same normalization as _shared/outlook-sent-probe.ps1 Normalized mode.",
+    "pattern_syntax": "fallback_email_subject_pattern is a regular expression applied with search (not anchored unless it starts with ^) to the NORMALIZED subject. It is written as ASCII lookaheads so the tokens match in any order — live subjects for the same producer vary in token order (e.g. 'PUBLICATION FAILED ora-automation-health-monitor 2026-09-10' vs '❌ ora-automation-health-monitor PUBLICATION FAILED — 2026-09-11').",
+    "placeholders": {
+      "{DATE}": "the expected output date as YYYY-MM-DD",
+      "{MONTH_YYYY}": "the expected output month as 'September 2026'"
+    },
+    "undated_subjects": "If a pattern contains no date placeholder, the email counts only if its send time (Sent Items SentOn, or the send-log line's timestamp, ET) falls on the expected date or within the following 24h.",
+    "evidence_sources": [
+      "Outlook Sent Items, mailbox ggoldberg@oxfordra.net",
+      "C:\\Users\\Owner\\.claude\\scheduled-tasks\\_shared\\send-log.txt — '[OK] Sent' lines only; a '[FAIL]' line is not delivery"
+    ],
+    "null_pattern": "fallback_email_subject_pattern null = the producer has no email path while Notion create is blocked; a missing page escalates exactly as before."
+  },
+  "producers": [
+    {
+      "task_id": "ora-am-brief",
+      "fleet": "cc",
+      "block": "B (Daily Brief)",
+      "notion_output": "Daily Brief — {DATE}",
+      "fallback_email_subject_pattern": "^(?=.*daily[- ]brief publication failed)(?=.*{DATE})",
+      "source": "ora-am-brief/SKILL.md Block B publication guard: '❌ ora-am-brief DAILY-BRIEF PUBLICATION FAILED — [YYYY-MM-DD]'; live variant 2026-09-12 'ORA Daily Brief PUBLICATION FAILED - 2026-09-12'"
+    },
+    {
+      "task_id": "ora-am-brief",
+      "fleet": "cc",
+      "block": "C (Inbox Pre-Brief, weekdays)",
+      "notion_output": "Inbox Pre-Brief — {DATE}",
+      "fallback_email_subject_pattern": "^(?=.*inbox pre-brief)(?=.*{DATE})",
+      "source": "ora-am-brief/SKILL.md C.8 + BLOCK C ERROR HANDLING (Notion error -> brief sent by email anyway): 'ORA Inbox Pre-Brief — [YYYY-MM-DD] — [n] for triage, [n] RED'"
+    },
+    {
+      "task_id": "ora-am-brief",
+      "fleet": "cc",
+      "block": "D (Cash Position, Mondays)",
+      "notion_output": "Cash Position Snapshot — {DATE}",
+      "fallback_email_subject_pattern": "^(?=.*cash)(?=.*(position|snapshot))(?=.*{DATE})",
+      "source": "ora-am-brief/SKILL.md Block D: summary 'ORA Cash Position — [date]' always; publication-failed '❌ ora-am-brief CASH-SNAPSHOT PUBLICATION FAILED — [date]'. [date] format not pinned in the SKILL.md — assumes ISO"
+    },
+    {
+      "task_id": "ora-doctrine-integrity-guard",
+      "fleet": "cc",
+      "notion_output": "Doctrine/Governor Integrity — {DATE}",
+      "output_conditional": "alarm runs only — a clean run posts no page and sends no email by design",
+      "fallback_email_subject_pattern": "^(?=.*doctrine/governor integrity)(?=.*{DATE})",
+      "source": "ora-doctrine-integrity-guard/SKILL.md STEP 3 (b)/(c); live 2026-09-12 'ORA Doctrine/Governor Integrity - 2026-09-12: session-context XREF-MISSING (Notion post FAILED)'"
+    },
+    {
+      "task_id": "ora-pm-ledger",
+      "fleet": "cc",
+      "block": "B (Outbox QC)",
+      "notion_output": "Outbox QC — {DATE}",
+      "fallback_email_subject_pattern": "^(?=.*outbox qc)(?=.*{DATE})",
+      "source": "ora-pm-ledger/SKILL.md B.5: child page + email 'ORA Outbox QC — [YYYY-MM-DD] — ...' (the SKILL.md says 'child page', not the literal tool name)"
+    },
+    {
+      "task_id": "ora-pm-ledger",
+      "fleet": "cc",
+      "block": "C (EOD Action Ledger)",
+      "notion_output": "EOD Action Ledger — {DATE}",
+      "fallback_email_subject_pattern": "^(?=.*eod action ledger)(?=.*{DATE})",
+      "source": "ora-pm-ledger/SKILL.md C.5; live 2026-09-12 'ORA EOD Action Ledger - 2026-09-12 - 7 need you (Notion post FAILED - block quota)'"
+    },
+    {
+      "task_id": "ora-weekly-hygiene",
+      "fleet": "cc",
+      "block": "C (SharePoint Freshness)",
+      "notion_output": "SharePoint Freshness Audit — {DATE}",
+      "fallback_email_subject_pattern": "^(?=.*(sharepoint freshness|weekly[- ]hygiene))(?=.*{DATE})",
+      "source": "ora-weekly-hygiene/SKILL.md SHARED PUBLICATION GUARD + Block C: 'ORA SharePoint Freshness — {YYYY-MM-DD} — ...' / '❌ ora-weekly-hygiene/<block> PUBLICATION FAILED — <YYYY-MM-DD>'; live 2026-09-07 consolidated 'ORA Weekly Hygiene — 2026-09-07 (consolidated)'. Block E's Session Pruner page is created only when Outlook is unavailable, so it is not listed"
+    },
+    {
+      "task_id": "ora-county-sales-monitor",
+      "fleet": "cc",
+      "notion_output": "County Sales Comps DB rows (collection://63a5e6b3-2655-4e0c-9843-3102d78adc0d), monthly",
+      "fallback_email_subject_pattern": "^(?=.*county sales monitor)(?=.*{DATE})",
+      "source": "ora-county-sales-monitor/SKILL.md (county-sales-monitor skill upserts via notion-create-pages): '[ORA] County Sales Monitor - Monthly Digest - <ISO date>'. The digest email does not by itself prove the rows landed"
+    },
+    {
+      "task_id": "ora-monthly-portfolio-briefing",
+      "fleet": "cc",
+      "notion_output": "ORA Monthly Portfolio Briefing — {MONTH_YYYY} (Ops Hub archive page)",
+      "fallback_email_subject_pattern": "^(?=.*monthly portfolio briefing)(?=.*{MONTH_YYYY})",
+      "source": "ora-monthly-portfolio-briefing/SKILL.md: email 'ORA Monthly Portfolio Briefing — [Month YYYY]' is primary; Notion page is the archive copy"
+    },
+    {
+      "task_id": "automation-health-monitor",
+      "fleet": "lams",
+      "notion_output": "Automation Health — {DATE}",
+      "fallback_email_subject_pattern": "^(?=.*automation[- ]health)(?=.*publication failed)(?=.*{DATE})",
+      "source": "Scheduled/automation-health-monitor/SKILL.md Step 3: '❌ ora-automation-health-monitor PUBLICATION FAILED — [today's date]'; live variants 2026-09-08..11 include '[AUTO-SENT] Automation Health 2026-09-09 - Notion publication FAILED (block quota) ...' and 'PUBLICATION FAILED ora-automation-health-monitor 2026-09-10'"
+    },
+    {
+      "task_id": "ora-skill-text-audit",
+      "fleet": "lams",
+      "notion_output": "Skill Text Audit — {DATE}",
+      "output_conditional": "only when findings >= 1",
+      "fallback_email_subject_pattern": "^(?=.*skill[- ]text[- ]audit)(?=.*{DATE})",
+      "source": "Scheduled/ora-skill-text-audit/SKILL.md: 'ORA Skill Text Audit — [Date]' and '❌ ora-skill-text-audit PUBLICATION FAILED — <YYYY-MM-DD>'"
+    },
+    {
+      "task_id": "ora-owner-outreach-queue-refresh",
+      "fleet": "lams",
+      "notion_output": "Owner Outreach ledger rows (data source caa809b7-1da3-49d5-ab…), weekly",
+      "fallback_email_subject_pattern": "^(?=.*owner-outreach)(?=.*weekly)(?=.*{DATE})",
+      "source": "Scheduled/ora-owner-outreach-queue-refresh/SKILL.md STEP 5 + output_contract subject_pattern 'ORA Owner-Outreach — Weekly — {DATE}'. Writes via Notion API script, MCP notion-create-pages fallback — both hit the block quota"
+    },
+    {
+      "task_id": "ora-friday-closeout",
+      "fleet": "lams",
+      "notion_output": "Friday Closeout & Week Ahead — {DATE}",
+      "fallback_email_subject_pattern": "^(?=.*friday closeout)(?=.*{DATE})",
+      "source": "Scheduled/ora-friday-closeout/SKILL.md step 1-2 (publication guard + email 'ORA Friday Closeout & Week Ahead — [date]')"
+    },
+    {
+      "task_id": "ora-monday-sync",
+      "fleet": "lams",
+      "notion_output": "Monday Sync — {DATE}",
+      "fallback_email_subject_pattern": "^(?=.*monday sync)(?=.*{DATE})",
+      "source": "Scheduled/ora-monday-sync/SKILL.md output_contract + step 7 ('ORA Monday Sync - [date]', dash form unstable — normalization covers it)"
+    },
+    {
+      "task_id": "ora-health-guard-fail-aging-nudge",
+      "fleet": "lams",
+      "notion_output": "[ACTION] Health Guard FAIL Aging -- {DATE}",
+      "output_conditional": "only when >= 1 stale FAIL",
+      "fallback_email_subject_pattern": "^(?=.*health guard fail aging)",
+      "source": "Scheduled/ora-health-guard-fail-aging-nudge/SKILL.md step 6: '[ACTION] Health Guard FAIL Aging -- N stale' (undated subject — match by send date)"
+    },
+    {
+      "task_id": "ora-hubspot-notion-contact-sync",
+      "fleet": "lams",
+      "notion_output": "HubSpot→Notion Contact Sync — {DATE} (+ 'Contact Sync — Unresolved: <tenant>' pages)",
+      "fallback_email_subject_pattern": null,
+      "source": "Scheduled/ora-hubspot-notion-contact-sync/SKILL.md step 7 — Notion run report only, no email path found. DARK while degraded"
+    },
+    {
+      "task_id": "ora-tenant-contact-gap-sweep",
+      "fleet": "lams",
+      "notion_output": "Tenant Contact Gap Sweep — {DATE}",
+      "fallback_email_subject_pattern": null,
+      "source": "Scheduled/ora-tenant-contact-gap-sweep/SKILL.md step 6 — Notion page only, no email path found. DARK while degraded"
+    }
+  ],
+  "excluded_update_only": [
+    "ora-cowork-heartbeat (updates one fixed page; creates only on disaster-restore)",
+    "ora-health-guard (Connector Pre-Flight beacon is notion-update-page)",
+    "ora-sofr-direct-prefetch / ora-am-brief Block A (Rate Snapshot — Current is notion-update-page)",
+    "ora-master-workbook-ingest (updates Portfolio Intelligence Dashboard + DSOR page; no page create found)",
+    "ora-ground-truth-auditor (mentions notion-create-pages only as transcript evidence to parse)"
+  ],
+  "updated_at": "2026-09-13T10:28:00-04:00",
+  "updated_by": "Claude Code session (Opus 5) — notion-publish-degraded email-only flag build"
+}
