@@ -127,7 +127,7 @@
       "fallback_email_subject_pattern": "^(?=.*outbox qc)(?=.*{DATE})",
       "must_not_match": "not run|coverage gap|skipped",
       "min_bytes": 1000,
-      "min_bytes_basis": "observed full report 5550 (09-02); B.5 allows a one-line zero-defect confirmation that would fall below 1000 and escalate — accepted conservative false alarm",
+      "min_bytes_basis": "full send-log replay: 12 Outbox QC sends 2026-08-04..09-02, 4926-18774; no zero-defect one-line confirmation has ever been sent, so the floor stays 1000. If a genuine one-liner appears below 1000 it escalates (conservative false alarm) — re-measure then",
       "source": "ora-pm-ledger/SKILL.md B.5 L1015-1019; B.7 L1056 'still deliver the email report'"
     },
     {
@@ -147,9 +147,9 @@
       "block": "C (SharePoint Freshness, Sundays)",
       "notion_output": "SharePoint Freshness Audit — {DATE}",
       "fallback_email_subject_pattern": "^(?=.*(sharepoint freshness|weekly[- ]hygiene))(?=.*{DATE})",
-      "must_not_match": "not run|coverage gap|skipped",
+      "must_not_match": "coverage gap,\\s*not run|\\bnot run\\b|\\bskipped\\b",
       "min_bytes": 1500,
-      "min_bytes_basis": "observed real report 2162 (09-02) and consolidated 11778 (09-07) vs 'COVERAGE GAP, not run' notice 903 (09-02)",
+      "min_bytes_basis": "observed real report 2162 (09-02) and consolidated 11778 (09-07) vs 'COVERAGE GAP, not run' notice 903 (09-02); must_not_match tightened 2026-09-13 so a real partial report ('REDUCED SCOPE, see coverage gaps', 2827, 2026-08-23) is kept while 'COVERAGE GAP, not run' (903, 2026-09-02) is still rejected",
       "source": "ora-weekly-hygiene/SKILL.md L31-37 shared publication guard ('❌ ora-weekly-hygiene/<block> PUBLICATION FAILED — <YYYY-MM-DD>', page content verbatim) + Block C L235-236"
     },
     {
@@ -190,8 +190,8 @@
       "notion_output": "Deal Aging SLA — {DATE}",
       "fallback_email_subject_pattern": "^(?=.*deal aging sla)(?=.*{DATE})",
       "must_not_match": "not run|coverage gap|skipped",
-      "min_bytes": 1000,
-      "min_bytes_basis": "observed summaries 1288-2858 (09-02..09-05); no bare notice observed",
+      "min_bytes": 700,
+      "min_bytes_basis": "full send-log replay: smallest genuine one-paragraph summary 861 (2026-08-17); 09-02..09-05 1288-2858; no bare notice observed (was 1000, which rejected the real 08-17 summary)",
       "source": "ora-deal-aging-sla/SKILL.md L241-249 (dated child page + one-paragraph summary email every run)"
     },
     {
@@ -516,8 +516,8 @@
       "notion_output": "Lease Expiration Brief — {DATE}",
       "fallback_email_subject_pattern": "^(?=.*lease expiration brief)(?=.*{DATE})",
       "must_not_match": "not run|coverage gap|skipped",
-      "min_bytes": 3000,
-      "min_bytes_basis": "observed full briefs 4983 (09-02), 11396 (09-07)",
+      "min_bytes": 1000,
+      "min_bytes_basis": "full send-log replay: smallest genuine full brief 1226 (2026-08-10); 09-02 4983, 09-07 11396; no bare notice observed — 1000 sits below every observed brief (was 3000, which rejected the real 08-10 brief)",
       "source": "Scheduled/ora-lease-expiration-brief/SKILL.md L10, L38-39"
     },
     {
@@ -593,8 +593,8 @@
       "notion_output": "Skill Text Audit — {DATE} (or '… — CLEAN PASS')",
       "fallback_email_subject_pattern": "^(?=.*skill[- ]text[- ]audit)(?=.*{DATE})",
       "must_not_match": "not run|coverage gap|skipped",
-      "min_bytes": 3000,
-      "min_bytes_basis": "no send observed 09-01..09-13 (monthly, 15th) — conservative floor",
+      "min_bytes": 1500,
+      "min_bytes_basis": "full send-log replay: only observed send is a real findings report, 2236 (2026-08-15); floor 1500 keeps it. No bare PUBLICATION FAILED notice from this task has been observed, so 1500 is a conservative estimate (was 3000, which rejected the real 08-15 report)",
       "source": "Scheduled/ora-skill-text-audit/SKILL.md L85-101 ('❌ ora-skill-text-audit PUBLICATION FAILED — <YYYY-MM-DD>' with page content verbatim)"
     },
     {
@@ -651,6 +651,6 @@
     "ora-consolidate-memory-monthly (lams) — no Notion step"
   ],
   "roster_coverage": "Cross-checked 2026-09-13 against maintenance/_state/fleet-roster.md (generated 2026-09-13T08:50:38): CC 38 live recurring = 24 producers + 14 excluded; LAMS 27 live recurring = 24 producers + 3 excluded. The pending one-time ora-counsel-review-standard-positions-2027 (@2027-08-02) is not classified.",
-  "updated_at": "2026-09-13T11:40:00-04:00",
-  "updated_by": "Claude Code session (Opus 5) — review fixes 1-9 on PR #199 / #55"
+  "updated_at": "2026-09-13T13:30:00-04:00",
+  "updated_by": "Claude Code session (Opus 5) — Fable re-review follow-up (min_bytes floors, hygiene must_not_match)"
 }
