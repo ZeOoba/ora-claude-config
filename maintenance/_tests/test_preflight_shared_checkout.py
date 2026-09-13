@@ -1252,6 +1252,16 @@ def test_directory_scope_containing_nested_worktree():
                    == [("clean", 0), ("dirty", 1)], nested)
             expect("nested under dir scope %r: human output hints --repo for the dirty one" % scope,
                    "--repo" in out and "dirty" in out, out[-600:])
+        for k in range(25):
+            _dirty(a, "agents/f%02d.md" % k)
+        rc, out, _ = run("--repo", a, "--claims-dir", _claims_dir(td, "n7"),
+                         "--session", MY_SESSION, "--paths", ".")
+        shown = out.split("NOT-YOURS dirty in scope", 1)[-1].split("... and", 1)[0]
+        expect("nested: dirty worktree shown before per-file entries despite the 20-line cap",
+               "wt/dirty" in shown.replace("\\", "/"), out[-900:])
+        expect("nested: header separates files from nested worktrees",
+               "25 of 25 dirty file(s) in repo + 1 dirty nested worktree(s)" in out, out[:600])
+        subprocess.run(["git", "-C", a, "clean", "-fdq", "--", "agents"], capture_output=True)
         _git(dirty_wt, "add", "-A")
         _git(dirty_wt, "commit", "-m", "land it")
         rc, out, _ = run("--repo", a, "--claims-dir", _claims_dir(td, "n8"),
