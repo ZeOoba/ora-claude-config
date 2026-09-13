@@ -1184,7 +1184,90 @@ def test_out_of_repo_outranks_head_moved_and_contested():
                rj.get("head_moved") is True and rj.get("dirty_overlap_foreign"), rj)
 
 
+def test_verbatim_prefix_spelling_of_in_repo_path_is_not_out_of_repo():
+    """Review finding (2026-09-12): realpath keeps a \\\\?\\ prefix, so an
+    in-repo path spelled that way exited 5 with a hint to re-run with the
+    SAME --repo -- an unsatisfiable STOP, which is how gates get bypassed."""
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        _dirty(work, "agents/one.md")
+        vpath = "\\\\?\\" + os.path.join(os.path.abspath(work), "agents", "one.md")
+        rc, out, _ = run("--repo", work, "--claims-dir", _claims_dir(td),
+                         "--session", MY_SESSION, "--paths", vpath)
+        expect("\\\\?\\ in-repo path -> CONTESTED, not OUT_OF_REPO", rc == EXIT_CONTESTED, (rc, out[-500:]))
+        rc, out, _ = run("--repo", "\\\\?\\" + os.path.abspath(work), "--claims-dir", _claims_dir(td, "c2"),
+                         "--session", MY_SESSION, "--paths", "agents")
+        expect("\\\\?\\ --repo with relative scope -> CONTESTED", rc == EXIT_CONTESTED, (rc, out[-500:]))
+        a, b = _two_repos(os.path.join(td, "pair"))
+        rc, out, _ = run("--repo", a, "--claims-dir", _claims_dir(td, "c3"), "--session", MY_SESSION,
+                         "--paths", "\\\\?\\" + os.path.join(os.path.abspath(b), "agents", "one.md"))
+        _out_of_repo_ok("\\\\?\\ other-repo path", rc, out, "b/repo/agents/one.md", b)
+
+
+def test_inherited_git_env_cannot_redirect_the_gate():
+    """Review finding: GIT_DIR/GIT_WORK_TREE in the caller's environment (a git
+    hook, a wrapper) overrode -C, so a nested checkout's file read CLEAR."""
+    with tempfile.TemporaryDirectory() as td:
+        a = _make_repo(td)
+        with open(os.path.join(a, ".git", "info", "exclude"), "a") as fh:
+            fh.write("/wt/\n")
+        wt = os.path.join(a, "wt", "feature")
+        _git(a, "worktree", "add", "-b", "feature", wt)
+        _dirty(wt, "agents/one.md")
+        env = dict(os.environ, GIT_DIR=os.path.join(a, ".git"), GIT_WORK_TREE=a)
+        rc, out, _ = run("--repo", a, "--claims-dir", _claims_dir(td), "--session", MY_SESSION,
+                         "--paths", os.path.join(wt, "agents", "one.md"), env=env)
+        _out_of_repo_ok("GIT_DIR/GIT_WORK_TREE env set", rc, out, "wt/feature/agents/one.md", wt)
+
+
+def test_directory_scope_containing_nested_worktree_reports_exclusion():
+    """Review finding: `--paths .` (or the dir holding .claude/worktrees) in a
+    repo with an ignored nested worktree read CLEAR with no word that the
+    worktree's dirt was never looked at. Not exit 5 -- the in-repo part WAS
+    evaluated, and failing `--paths .` forever in ~/.claude (which always has
+    worktrees) is an unsatisfiable STOP -- but the exclusion must be explicit."""
+    with tempfile.TemporaryDirectory() as td:
+        a = _make_repo(td)
+        with open(os.path.join(a, ".git", "info", "exclude"), "a") as fh:
+            fh.write("/wt/\n")
+        wt = os.path.join(a, "wt", "feature")
+        _git(a, "worktree", "add", "-b", "feature", wt)
+        _dirty(wt, "agents/one.md")
+        for i, scope in enumerate((".", "wt")):
+            rc, out, _ = run("--repo", a, "--claims-dir", _claims_dir(td, "n%d" % i),
+                             "--session", MY_SESSION, "--paths", scope)
+            rj = result_json(out) or {}
+            nested = rj.get("nested_checkouts_excluded") or []
+            expect("nested under dir scope %r: exit unchanged (CLEAR)" % scope, rc == EXIT_CLEAR, (rc, out[-500:]))
+            expect("nested under dir scope %r: worktree listed as excluded" % scope,
+                   any(_same_dir(n.get("path"), wt) for n in nested), nested)
+            expect("nested under dir scope %r: human line names it with a --repo hint" % scope,
+                   "NOT COVERED" in out and "--repo" in out, out[-600:])
+        rc, out, _ = run("--repo", a, "--claims-dir", _claims_dir(td, "n9"),
+                         "--session", MY_SESSION, "--paths", "agents")
+        rj = result_json(out) or {}
+        expect("nested: unrelated dir scope has empty exclusion list",
+               rj.get("nested_checkouts_excluded") == [], rj.get("nested_checkouts_excluded"))
+
+
+def test_out_of_repo_outranks_indeterminate_and_carries_reason():
+    with tempfile.TemporaryDirectory() as td:
+        a, b = _two_repos(td)
+        rc, out, _ = run("--repo", a, "--claims-dir", os.path.join(td, "missing-claims"),
+                         "--session", MY_SESSION, "--paths", os.path.join(b, "agents", "one.md"),
+                         os.path.join(td, "loose.md"))
+        rj = result_json(out) or {}
+        expect("OUT_OF_REPO outranks INDETERMINATE", rc == EXIT_OUT_OF_REPO, (rc, out[-400:]))
+        reasons = sorted(o.get("reason") or "" for o in rj.get("out_of_repo_paths") or [])
+        expect("out_of_repo entries carry reasons other_checkout / no_checkout",
+               reasons == ["no_checkout", "other_checkout"], rj.get("out_of_repo_paths"))
+
+
 def main():
+    test_verbatim_prefix_spelling_of_in_repo_path_is_not_out_of_repo()
+    test_inherited_git_env_cannot_redirect_the_gate()
+    test_directory_scope_containing_nested_worktree_reports_exclusion()
+    test_out_of_repo_outranks_indeterminate_and_carries_reason()
     test_absolute_path_in_another_repo_is_out_of_repo()
     test_relative_dotdot_escape_is_out_of_repo()
     test_path_outside_any_checkout_is_out_of_repo_without_hint()
