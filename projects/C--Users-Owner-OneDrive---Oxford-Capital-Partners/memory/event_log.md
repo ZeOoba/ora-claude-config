@@ -5,12 +5,49 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-09-13T18:50:10.802Z
+  modified: 2026-09-13T19:21:18.604Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-09-13 — oxfordra.net perf-score investigation, confidential roster re-verified, outline-button a11y fix (ZeOoba/Website#80)
+- **Lighthouse 96 (post-#79) = measurement noise, no code cause.** Netlify's per-deploy Lighthouse is ONE mobile lab run. Byte-identical git trees (preview vs. its squash-merge) scored 77 vs 100 (990400f/ac1356c), 97 vs 96 (7194a1b/27672b6), 97 vs 100 (1bfe019/76a9d34). 19 production deploys 2026-08-13 to 09-13: median 97, range 88-100, stdev 2.9. **Rule:** never read one deploy's score as a regression; pull `npx netlify api listSiteDeploys` history and compare `git rev-parse <sha>^{tree}` first. Local Lighthouse is not viable from the Claude Bash sandbox (chrome-launcher spawn UNKNOWN; a Playwright CDP port handoff hung) and the keyless PSI API quota was exhausted.
+- **Confidential roster re-verified; `_meta.roster_last_verified` 2026-08-09 to 2026-09-13** (Gabriel in-turn approval). Checked session-context.md (none active), memory/projects.md (E. Fulton declassified 2026-07-09, nothing added) and this log (no new confidential designations). Roster content unchanged. Gitignored file, no commit. Preflight CLEAR; claim `confidential-roster-verify` taken and released; single-use `allow-config-write` token minted with the quoted approval and revoked (archived) immediately after; an expired `allow-website-write` token also archived.
+- **PR #80 (open, not deployed):** QC-8 inline `.btn--outline` base text raw `--gold` (about 2.2:1) on contact/index/portfolio/track-record/tenant-resources now `--gold-accessible` with dark-ground overrides. QC-9, found while fixing: `.section--navy .btn--outline{color:gold}` equal specificity and after `:hover`, so gold text on a gold hover fill (label invisible) on 10 pages; reproduced in headless Chromium; all overrides scoped `:not(:hover)`. Chromium verification on dist: light rgb(128,99,57); dark rgb(201,169,110); hovers rgb(27,42,74) on gold. `npm run verify` green (unit 160, site 29).
+- **Hook friction:** the autonomy gate matches the site-repo name inside this repo's per-project memory folder path under ~/.claude/projects, so per-project memory writes for the site repo are blocked without a site-write token; scratchpad writes hit the same false positive.
+
+## 2026-09-13 — eval-harness transcript parser built (branch, not merged)
+- `ora-skills` branch `feat/eval-harness-transcript-parser` @ `a45caa5` (worktree `C:\Users\Owner\ora-skills-worktrees\eval-transcript-parser`): new `acquisition-underwriting-eval-harness/lib/parse_replays.py` reads replay subagent transcripts (`<session>/subagents/agent-<id>.jsonl`) straight into aggregate → diff → record_run. Removes the hand-copy of replay scores into a scratch driver.
+- Fable REFUTE pass found 1 Critical (≈5% of real completed replays carry no `end_turn`; 09-12 E Fulton r2) + 5 Important; all fixed with tests before commit. Residual, documented: a differing earlier completion notification can leave no transcript trace (09-12 Hamilton r3) → orchestrator passes `--failed-agent-ids`.
+- Verified: 2026-09-13 run's 18 transcripts reproduce identical combined_observed/category_deltas/status (exit 0). Suite 126/126. Not pushed; scheduled-task wrapper unchanged (it defers to harness SKILL.md).
+
+## 2026-09-13 -- OI-296 run-index dedup + OI-288 Notion email-only rule: 6 PRs merged and landed on the live step25 branch
+
+- **Merged after independent review verdicts** (reviewer tier at or above the implementer each round; heads pinned with --match-head-commit):
+  - ora-claude-config #199 -> 9816047, ora-health-guard v1.14 email-only rule + `maintenance/_state/notion-publish-degraded.json`. Fable CHANGES-REQUESTED once, then APPROVE.
+  - ora-skills #55 -> b8b7024, automation-health-monitor v1.11. Approved conditionally, then APPROVE after the rule block was re-synced.
+  - ora-claude-config #200 -> a95f4f0, OI-296: skip Stage-0 runs whose prior digest send is confirmed in the send-log. Opus reviewed 3 rounds of CHANGES-REQUESTED, then APPROVE.
+  - ora-claude-config #204 -> 230f9a4 and ora-skills #58 -> ad46140: re-review minors (min_bytes floors, hygiene must_not_match, flag-age excluded from FAIL-aging). Fable APPROVE.
+  - ora-claude-config #205 -> 09b22ad, OI-296 minors (attempt always logged, manual runs go to adhoc/). Fable APPROVE.
+- **Landed on feat/model-canary-probe-step25**, because the primary checkout runs from this branch and merge-forward is blocked: 8bb1e13 (#199 + #200), 2f2dd7e (#204 state file + replay test), 7a22999 (#205). Each commit's blobs were verified equal to origin/main, except ora-health-guard/SKILL.md, which is this branch's v1.12/v1.13 plus the PR hunks.
+- **Commit-message correction:** 8bb1e13's message names only PR #199's SKILL.md hunks, but the live file had already been synced with #204's item-6 and v1.15 lines, so 8bb1e13 carried those too while they were still unreviewed. They were then reviewed, approved and merged unchanged in #204. 2f2dd7e's message records this.
+- **Live Cowork edits (OneDrive store, no git):**
+  - automation-health-monitor task SKILL.md -> v1.27, Step 0.55a; backup `_state-history/_skill-versions/SKILL.v1.26-...`.
+  - ora-health-guard-fail-aging-nudge step 3a exclusion.
+  - The installed Cowork skill copy for automation-health-monitor was synced by the ora-skills push hook.
+- **Follow-ups:** OI-304 (pm-ledger double-send while degraded). The flag file's `dark_producers` lists 28 tasks that go silent while Notion page creation is blocked. Flag review_by is 2026-09-22.
+- **Tonight's first run:** the ground-truth auditor uses the round-2 fallback, because `stage0-attempts.jsonl` does not exist yet. The reviewer confirmed it cannot mis-credit, since every existing digest has a confirmed [OK] Sent line.
+
+## 2026-09-13 — oxfordra.net release: PR #77 QC follow-ups (ZeOoba/Website#79)
+- **Target:** oxfordra.net production (Netlify auto-publish on merge). Gabriel confirmed deploy in-turn via AskUserQuestion ("Deploy now").
+- **Shipped:** merge `27672b6` → deploy `6aa6f429d28c240008907baa` (published 19:06 UTC). QC-1 gold stat text on parchment → `--gold-accessible` (for-brokers, sell-your-building); QC-2 sitemap lastmod (about, sell-your-building, 4 guides); QC-3 Article publisher.logo → 512px logo; QC-4 `--gold-accessible` added to inline `:root` on 16 pages (reviewer flagged 1, site-wide test found 15 more); QC-5 guide-card CSS promoted to styles.css, `?v=16`→`?v=17` on 22 pages; QC-6 build-dist excludes `*.test.js` from dist and `assets/chat.test.js` (7 tests) now runs in CI; QC-7 `301!` for `/tenant-application.html` + `/application-received.html`. Guards QC-1..7 added to `tests/site/seo.test.mjs`.
+- **Gates:** `npm run verify` green (unit 160, site 27); CI + Netlify header/redirect checks green; CodeRabbit no comments; preview proof (new 301s, chat.test.js 404); site-qc-reviewer APPROVE (0 confidential hits; roster stale caveat — session context confirms no active confidential deals).
+- **Post-verify (live):** both new `.html` paths 301; `/about.html` 301; `/404` + unknown 404; `/assets/chat.test.js` 404; `styles.css?v=17` 200 with guide rules; 5 sampled pages on v17; 4 accessible-gold stats on for-brokers; no inline guide CSS on home. Netlify Lighthouse mobile `/`: Perf 96 / A11y 100 / BP 100 / SEO 100 (prior deploys: 100 after #77, 97 after content-identical #78 → within observed ±3–4 lab variance; PSI API quota exhausted, independent recheck pending). Secret scan 0.
+- **Rollback:** publish prior production deploy `6aa6c9a265ed3d0008ea9c69` (ac1356c).
+- **Open (non-blocking QC):** raw `--gold` `.btn--outline` on contact/index/portfolio/track-record/tenant-resources (light-ground buttons ~2.2:1); sitemap lastmod not bumped for pages whose only change was the CSS version; confidential roster `roster_last_verified` still 2026-08-09 (governance write needs Gabriel).
+- **Tooling lesson:** Browser pane rAF does not fire while the pane isn't painting → async `media="print"` stylesheet swap never completes → false layout regressions; force `link.media='all'` for measurement only.
 
 ## 2026-09-13 -- ora-ground-truth-auditor frozen-backlog push blocker cleared on live step25 branch (session 4af15615)
 - Root cause (reported by peer session f2a12aac and verified here): scheduled-tasks/ora-ground-truth-auditor/SKILL.md was UNTRACKED on feat/model-canary-probe-step25, a stale 2026-09-10 20:26 copy (blob c790c41b, identical to 1059741/e35a4de) predating the run guard. test_scheduled_task_run_guard.py:385 failed "unguarded notion side effect is on the frozen backlog", which blocked the pre-push hook-tests gate.
