@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: rules
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-09-10T19:53:22.000Z
+  modified: 2026-09-13T02:05:21.525Z
 ---
 
 # ORA Standing Rules & Preferences
@@ -29,7 +29,13 @@ feedback_qb_desktop, feedback_netlify_mcp, feedback_less_permission_prompts, fee
 ## 2. Email — Outlook only, no Gmail
 
 - Gabriel uses **Outlook (Microsoft 365) only**. Never use Gmail for drafts, notifications, automation, or any email delivery.
-- **Send path:** Outlook COM via PowerShell is the SOLE path: `C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1` (uses authenticated desktop profile; no OAuth/tokens). **Composio fallback REMOVED 2026-06-11** (connector gone). On non-zero COM exit: retry once, then flag loudly (Notion completion row; automation-health-monitor producer-beacon check catches the silent send) — do NOT halt, never route through Composio/Rube/Gmail.
+- **Send path:** Outlook COM via PowerShell is the SOLE path: `C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1` (uses authenticated desktop profile; no OAuth/tokens). **Composio fallback REMOVED 2026-06-11** (connector gone). On non-zero COM exit: see the per-code table below — not every exit code retries — and never route through Composio/Rube/Gmail regardless of exit code.
+- **Send-path EXIT-CODE handling (relocated from CLAUDE.md, word-budget pass 2026-09-10, ORA Automation Audit R24-4).** CLAUDE.md's "Send:" line keeps the doctrine (Outlook COM is the SOLE automated path) and now points here for the per-code procedure, which is operational detail rather than an invariant. `send-via-outlook.ps1` exit codes:
+  - **Exit 2 (COM failure) / Exit 4 (timeout):** retry ONCE, then flag loudly (Notion row) — **do NOT halt** the calling task. These are transient-failure classes; the caller's remaining work still has value and stopping it hides more than it protects. The `automation-health-monitor` producer-beacon check is what catches a send that failed silently after the retry.
+  - **Exit 1 (usage error) / Exit 3 (stuck wizard):** **do NOT retry** — flag immediately. A retry cannot fix a malformed invocation, and re-driving a stuck Outlook wizard makes the stuck state worse.
+  - **Exit 5 (external recipient(s) not authorized):** **do NOT retry, and never route around it** — flag immediately. This is the fail-closed outbound-send gate (Hard Invariant 1): it fires when no live session backs the send, when `check_external_send.py` cannot run, or when the check denies. A retry cannot authorize an external send; only Gabriel's in-turn confirmation can.
+  - **Any exit code not listed above:** treat as no-retry and flag immediately. An unclassified failure is never assumed transient.
+  - The retry/no-retry split is the whole point: it is keyed on whether the failure class is transient, never on how urgent the message is.
 - **Rube is retired (EOL 2026-05-15) — never reference or route to it.**
 - **Zapier is RETIRED — removal ratified 2026-07-16** (Gabriel, setup-audit ratification session; see `tech.md` §4, SoR §10, event_log_2026-07-18). Never re-auth, never route through it, never design around it. Use Outlook COM, Power Automate (if premium), or local PowerShell. *Corrected 2026-08-17: this line previously read "out of space (since 2026-04-16)", which was the pre-ratification premise. That framing is what justified the 2026-06-02/06-10 "keep connected" posture — capacity-capped, would resume when space freed. That premise became false ~2026-06-22 when the connection was de-authed and disappeared from the live tool list, which is precisely why Gabriel ratified removal on 07-16. Leaving the old wording in place kept a superseded rationale alive in a canonical file.*
 

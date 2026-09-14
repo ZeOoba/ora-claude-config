@@ -12,16 +12,20 @@ itself drifted -- the gate must BLOCK. This is the exact auto-check named in OI-
 
 Fully isolated: every test builds its own throwaway git repo in a temp dir (never the
 real ~/.claude repo) via REPO_ROOT_OVERRIDE/PROBE_SCRIPT_OVERRIDE, so `git worktree add`
-never registers anything against the real repo's worktree list.
+never registers anything against the real repo's worktree list. The end-to-end main()
+run also redirects STATUS_PATH_OVERRIDE/EVENT_LOG_OVERRIDE, so no canonical _state
+snapshot or event log is written either.
 
 Run: python test-git-prepush-doctrine-gate-worktree.py  (exit 0 = pass)
 """
 import importlib.util
+import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import datetime
 
 # Same hazard/fix as maintenance/test-doctrine-integrity-probe.py's module-level scrub:
 # an inherited GIT_DIR/GIT_WORK_TREE would silently redirect every git call below at the
@@ -39,6 +43,15 @@ spec = importlib.util.spec_from_file_location(
     "dg", os.path.join(HOOKS, "git-prepush-doctrine-gate.py"))
 dg = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(dg)
+
+# The status file main() writes when STATUS_PATH_OVERRIDE is None -- resolved from the
+# writer module itself (not hardcoded) so this names whatever file a leak would hit. Run
+# from the live ~/.claude checkout, that is the canonical
+# maintenance/_state/doctrine-status.json read by ora-doctrine-integrity-guard.
+_ws_spec = importlib.util.spec_from_file_location("wds", dg.STATUS_WRITER)
+_ws = importlib.util.module_from_spec(_ws_spec)
+_ws_spec.loader.exec_module(_ws)
+CANONICAL_STATUS_PATH = _ws.DEFAULT_STATUS_PATH
 
 results = []
 
@@ -65,6 +78,26 @@ def make_throwaway_repo():
     probe_script = os.path.join(repo_dir, "doctrine-integrity-probe.py")
     shutil.copyfile(REAL_PROBE_SCRIPT, probe_script)
     return repo_dir, probe_script
+
+
+def fixture_records_since(path, since_iso):
+    """Records in the status file at `path` stamped at/after `since_iso` that carry this
+    suite's fixture drift (2020-01-01) -- the top-level snapshot AND every history entry
+    (a first write has no `history` key at all, so reading history alone misses it).
+    Signature-based rather than a byte-for-byte compare: a real push from a concurrent
+    session legitimately rewrites the canonical file mid-run, and must not fail this test --
+    only a record THIS fixture produced should."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            snap = json.load(f)
+    except (OSError, ValueError):
+        return []
+    records = [{"last_check": snap.get("last_check"),
+                "doctrine_summary": (snap.get("doctrine_probe") or {}).get("summary")}]
+    records += snap.get("history", [])
+    return [r for r in records
+            if str(r.get("last_check", "")) >= since_iso
+            and "2020-01-01" in str(r.get("doctrine_summary") or "")]
 
 
 def write_claude_md(repo_dir, text):
@@ -200,14 +233,31 @@ try:
     dg.EVENT_LOG_OVERRIDE = os.path.join(repo3, "_unused_event_log.md")
     with open(dg.EVENT_LOG_OVERRIDE, "w", encoding="utf-8") as f:
         f.write("# test log\n")
+    # main() runs the REAL probe here, so it takes the real_run branch and writes the
+    # Layer-2 status snapshot. Without this redirect every push wrote the fixture's drift
+    # ("bare date 2020-01-01") into the canonical doctrine-status.json that
+    # ora-doctrine-integrity-guard and the health checks read.
+    _status_dir = tempfile.mkdtemp(prefix="ora-oi100-status-")
+    dg.STATUS_PATH_OVERRIDE = os.path.join(_status_dir, "doctrine-status.json")
+    _main_started = datetime.now().isoformat()
     try:
         main_rc = dg.main()
+        _redirected = fixture_records_since(dg.STATUS_PATH_OVERRIDE, _main_started)
     finally:
         dg.REPO_ROOT_OVERRIDE = None
         dg.PROBE_SCRIPT_OVERRIDE = None
         dg.EVENT_LOG_OVERRIDE = None
+        dg.STATUS_PATH_OVERRIDE = None
+        shutil.rmtree(_status_dir, ignore_errors=True)
     expect("NEW: main() exits non-zero (git pre-push BLOCK convention) for the same "
            "committed-but-reverted drift", main_rc != 0, "main_rc=%r" % main_rc)
+    expect("status isolation: the snapshot lands at STATUS_PATH_OVERRIDE (the redirect "
+           "is live, not an unwritten path that would make the next check vacuous)",
+           bool(_redirected), "redirected=%r" % (_redirected,))
+    _leaked = fixture_records_since(CANONICAL_STATUS_PATH, _main_started)
+    expect("status isolation: main()'s real-probe run leaves NO fixture record in the "
+           "canonical doctrine-status.json", not _leaked,
+           "path=%s leaked=%r" % (CANONICAL_STATUS_PATH, _leaked))
 finally:
     shutil.rmtree(repo3, ignore_errors=True)
 
