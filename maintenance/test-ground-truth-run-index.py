@@ -25,8 +25,19 @@ def check(label, cond, detail=""):
     if cond:
         print("  [OK] %s" % label)
     else:
-        print("  [FAIL] %s %s" % (label, detail))
+        msg = "%s %s" % (label, detail)
+        print("  [FAIL] %s" % msg)
         FAILURES.append(label)
+        # OI-296 review round 2, req 4: under pytest, a failed check() must
+        # actually fail the test -- previously it only appended to FAILURES,
+        # which pytest never inspects, so every test_* function "passed"
+        # regardless of what check() found (pytest run: 54/54, 71/71 "green"
+        # even with real assertion failures inside). The direct-run harness
+        # (`python test-ground-truth-run-index.py`, __main__ below) is
+        # unaffected -- it already reads FAILURES itself and is what the
+        # repo's pre-push tests gate actually runs.
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            raise AssertionError(msg)
 
 
 def test_build_run_id_keys_on_last_scheduled_for():
@@ -686,7 +697,11 @@ def test_build_run_index_excludes_its_own_run():
              "lastScheduledFor": now.strftime("%Y-%m-%dT%H:%M:%S.000Z")},
         ])
         _write_registry(lams_reg, [])
-        index = gti.build_run_index(cc_reg, lams_reg, [], now=now)
+        # dedup disabled -- isolates this baseline test from real machine
+        # state (an un-injected ground_truth_state_dir/send_log_path would
+        # otherwise resolve to the REAL production paths).
+        index = gti.build_run_index(cc_reg, lams_reg, [], now=now,
+                                     dedup_previously_audited=False)
         check("the auditor's own run never appears in its own index",
               all(r["task_id"] != "ora-ground-truth-auditor" for r in index["runs"]),
               index["runs"])
@@ -722,7 +737,8 @@ def test_build_run_index_end_to_end_joins_a_real_shaped_run():
         lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
         _write_registry(lams_reg, [])
 
-        index = gti.build_run_index(cc_reg, lams_reg, [proj_dir], now=now)
+        index = gti.build_run_index(cc_reg, lams_reg, [proj_dir], now=now,
+                                     dedup_previously_audited=False)
         check("exactly one run indexed", len(index["runs"]) == 1, index["runs"])
         run = index["runs"][0]
         check("run is joined to its transcript", run["joined"] is True, run)
@@ -767,7 +783,8 @@ def test_build_run_index_end_to_end_flags_a_genuine_duplicate_fire():
         lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
         _write_registry(lams_reg, [])
 
-        index = gti.build_run_index(cc_reg, lams_reg, [proj_dir], now=now)
+        index = gti.build_run_index(cc_reg, lams_reg, [proj_dir], now=now,
+                                     dedup_previously_audited=False)
         check("the registry still yields exactly ONE row/run for the task -- "
               "which is why row counting could never have detected this",
               len(index["runs"]) == 1, index["runs"])
@@ -818,7 +835,8 @@ def test_build_run_index_persists_file_path_and_session_model_for_verifier_dispa
         lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
         _write_registry(lams_reg, [])
 
-        index = gti.build_run_index(cc_reg, lams_reg, [proj_dir], now=now)
+        index = gti.build_run_index(cc_reg, lams_reg, [proj_dir], now=now,
+                                     dedup_previously_audited=False)
         by_task = {r["task_id"]: r for r in index["runs"]}
 
         joined_run = by_task["ora-doctrine-integrity-guard"]
@@ -852,7 +870,8 @@ def test_build_run_index_last_auditor_run_at_is_injectable():
         now = datetime(2026, 9, 11, 4, 0, tzinfo=timezone.utc)
         injected_last_run = now - timedelta(hours=72)  # far older than 24h
         index = gti.build_run_index(cc_reg, lams_reg, [], now=now,
-                                     last_auditor_run_at=injected_last_run)
+                                     last_auditor_run_at=injected_last_run,
+                                     dedup_previously_audited=False)
         check("an injected old last_auditor_run_at widens the window past the default "
               "-- proves the parameter is actually used, not ignored",
               index["window_hours"] >= 72.0, index["window_hours"])
@@ -876,9 +895,1697 @@ def test_build_run_index_default_last_auditor_run_at_falls_back_to_real_file_rea
         _write_registry(cc_reg, [])
         _write_registry(lams_reg, [])
         now = datetime(2026, 9, 11, 4, 0, tzinfo=timezone.utc)
-        index = gti.build_run_index(cc_reg, lams_reg, [], now=now)  # no injection
+        index = gti.build_run_index(cc_reg, lams_reg, [], now=now,
+                                     dedup_previously_audited=False)  # no injection
         check("omitting last_auditor_run_at does not raise and yields a sane window",
               index["window_hours"] >= 24.0, index["window_hours"])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# OI-296 -- skip runs already audited and ACTUALLY PUBLISHED (sent) by a
+# prior night's digest. Round 1 measured 2026-09-13: Stage 0 re-selected 5 of
+# 12 in-window runs a 2026-09-12 20:34Z audit had already verified. Round-1's
+# fix used "a sibling digest-<date>.html exists" as the published signal and
+# excluded any run-index filename-dated today or later. Independent review
+# (round 2) found both wrong: an HTML file can be rendered and never actually
+# emailed (retry/SMTP failure/killed process), and filename-date exclusion
+# both silently drops a legitimately-published same-day rerun and can pair a
+# send with the wrong document. The real signal is send-via-outlook.ps1's own
+# append-only send log (a line lands ONLY on a confirmed send), and ordering
+# uses each document's own `generated_at`, never its filename -- see
+# load_ground_truth_digest_sends/load_previously_audited's docstrings.
+# ---------------------------------------------------------------------------
+
+def _write_prior_run_index(state_dir, filename_date_str, runs, generated_at,
+                            window_reason=None, previously_audited=None):
+    """Writes a prior run-index-<filename_date_str>.json. `generated_at` is
+    set INDEPENDENTLY of the filename on purpose -- OI-296 review round 2:
+    published-ness and ordering are decided by the document's own
+    generated_at field, never by its filename, and several tests below rely
+    on being able to prove that by deliberately mismatching the two.
+    `window_reason` (review round 3, req 2) and `previously_audited`
+    (review round 3, req 3 -- carry-forward baselines) default to the
+    normal-nightly-run shape (no override, no carried entries)."""
+    os.makedirs(state_dir, exist_ok=True)
+    path = os.path.join(state_dir, "run-index-{}.json".format(filename_date_str))
+    doc = {"generated_at": generated_at, "runs": runs,
+           "previously_audited": previously_audited or []}
+    if window_reason is not None:
+        doc["window_reason"] = window_reason
+    json.dump(doc, open(path, "w", encoding="utf-8"))
+    return path
+
+
+def _write_send_log(send_log_path, lines):
+    """Writes a synthetic send-log.txt from pre-formatted lines (use
+    _gt_send_line to build realistic ones)."""
+    os.makedirs(os.path.dirname(send_log_path), exist_ok=True)
+    open(send_log_path, "w", encoding="utf-8").write("\n".join(lines) + ("\n" if lines else ""))
+    return send_log_path
+
+
+def _write_stage0_attempts(attempts_path, attempts):
+    """Writes a synthetic stage0-attempts.jsonl (review round 3, req 1) from
+    a list of dicts, each {"at", "exit", "index_path"(optional),
+    "window_reason"(optional)}. An empty `attempts` list still creates the
+    file (present-but-empty), which is NOT "missing/unreadable" and so does
+    NOT trigger the round-2-fallback warning -- use this in any test whose
+    intent has nothing to do with the attempts log itself, to keep it out of
+    the picture."""
+    os.makedirs(os.path.dirname(attempts_path), exist_ok=True)
+    lines = [json.dumps({"at": a["at"], "exit": a.get("exit", 0),
+                          "index_path": a.get("index_path"),
+                          "window_reason": a.get("window_reason")})
+             for a in attempts]
+    open(attempts_path, "w", encoding="utf-8").write(
+        "\n".join(lines) + ("\n" if lines else ""))
+    return attempts_path
+
+
+def _gt_send_line(iso_ts, date_label, subject_sep="--", ok=True):
+    """One realistic send-log line for a Ground-Truth Audit digest send --
+    real shape verified against the live log 2026-09-13:
+    '2026-09-13T09:21:33-04:00 [OK] Sent to=ggoldberg@oxfordra.net cc=none
+    subject="[ORA] Ground-Truth Audit -- 2026-09-13" bytes=14030 format=html'
+    """
+    subject = "[ORA] Ground-Truth Audit {} {}".format(subject_sep, date_label)
+    status = "[OK] Sent" if ok else "[FAIL] Send"
+    return '{} {} to=ggoldberg@oxfordra.net cc=none subject="{}" bytes=14030 format=html'.format(
+        iso_ts, status, subject)
+
+
+def _prior_run_record(run_id, task_id, fleet, candidate_session_count=1,
+                       transcript_size=0, transcript_mtime=0.0, include_transcript_size=True):
+    """One run entry as it would appear inside a prior published run-index
+    document. `include_transcript_size=False` simulates an OLDER index file
+    that predates the transcript_size/transcript_mtime fields (req 7
+    back-compat)."""
+    rec = {"run_id": run_id, "task_id": task_id, "fleet": fleet,
+           "candidate_session_count": candidate_session_count}
+    if include_transcript_size:
+        rec["transcript_size"] = transcript_size
+        rec["transcript_mtime"] = transcript_mtime
+    return rec
+
+
+# --- load_ground_truth_digest_sends -----------------------------------------
+
+def test_load_ground_truth_digest_sends_parses_ok_matching_lines_and_ignores_others():
+    tmp = tempfile.mkdtemp()
+    try:
+        send_log = os.path.join(tmp, "send-log.txt")
+        _write_send_log(send_log, [
+            _gt_send_line("2026-09-13T09:21:33-04:00", "2026-09-13"),
+            # wrong subject -- must be ignored
+            '2026-09-13T09:00:00-04:00 [OK] Sent to=ggoldberg@oxfordra.net cc=none '
+            'subject="[ORA] Daily Brief -- 2026-09-13" bytes=500 format=html',
+            # right subject, but a FAILED send -- must be ignored
+            _gt_send_line("2026-09-13T08:00:00-04:00", "2026-09-13", ok=False),
+        ])
+        sends, warning = gti.load_ground_truth_digest_sends(send_log)
+        check("no warning on a readable send log", warning is None, warning)
+        check("exactly one real ground-truth OK send is parsed", len(sends) == 1, sends)
+        check("the parsed send is converted to aware UTC",
+              sends and sends[0].tzinfo is not None and sends[0].utcoffset().total_seconds() == 0,
+              sends)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_ground_truth_digest_sends_tolerates_dash_variants():
+    tmp = tempfile.mkdtemp()
+    try:
+        send_log = os.path.join(tmp, "send-log.txt")
+        _write_send_log(send_log, [
+            _gt_send_line("2026-09-12T20:34:00-04:00", "2026-09-12", subject_sep="—"),
+        ])
+        sends, _ = gti.load_ground_truth_digest_sends(send_log)
+        check("an em-dash subject separator still matches (prefix-only check)",
+              len(sends) == 1, sends)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_ground_truth_digest_sends_converts_et_offset_correctly():
+    tmp = tempfile.mkdtemp()
+    try:
+        send_log = os.path.join(tmp, "send-log.txt")
+        _write_send_log(send_log, [_gt_send_line("2026-09-12T20:00:00-04:00", "2026-09-12")])
+        sends, _ = gti.load_ground_truth_digest_sends(send_log)
+        check("a -04:00 ET send converts to the correct UTC instant (crosses "
+              "into the next calendar day)",
+              sends and sends[0] == datetime(2026, 9, 13, 0, 0, tzinfo=timezone.utc), sends)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_ground_truth_digest_sends_missing_file_is_fail_open_with_warning():
+    sends, warning = gti.load_ground_truth_digest_sends(
+        os.path.join(tempfile.gettempdir(), "definitely-missing-oi296-sendlog.txt"))
+    check("a missing send log yields no sends", sends == [], sends)
+    check("a missing send log produces a warning naming dedup being disabled",
+          warning is not None and "dedup disabled" in warning, warning)
+
+
+def test_load_ground_truth_digest_sends_unreadable_path_is_fail_open_with_warning():
+    tmp = tempfile.mkdtemp()
+    try:
+        # a directory where a file is expected -- open() raises OSError
+        sends, warning = gti.load_ground_truth_digest_sends(tmp)
+        check("an unreadable (directory) send log path yields no sends", sends == [], sends)
+        check("an unreadable send log produces a warning", warning is not None, warning)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+# --- load_previously_audited (published-via-send-log semantics) ------------
+
+def test_load_previously_audited_requires_an_actual_send_to_count_as_published():
+    tmp = tempfile.mkdtemp()
+    try:
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        run_id = "cc:ora-pm-ledger:2026-09-12T19:00:00.000Z"
+        _write_prior_run_index(state_dir, "2026-09-12",
+                                [{"run_id": run_id, "task_id": "ora-pm-ledger", "fleet": "cc"}],
+                                generated_at="2026-09-12T20:00:00.000Z")
+        _write_send_log(send_log, [])  # index exists, nothing was ever sent
+        _write_stage0_attempts(os.path.join(state_dir, "stage0-attempts.jsonl"), [])
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        prior, warnings = gti.load_previously_audited(state_dir, now, send_log_path=send_log)
+        check("an index with no matching send is never treated as published",
+              prior == {}, prior)
+        check("no warnings for a legitimately-empty send log and a present "
+              "(if empty) attempts log", warnings == [], warnings)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_orders_candidates_by_generated_at_not_filename():
+    # req 8: order candidate indexes by generated_at, never by filename --
+    # the OLDER-generated document is filed under a LATER-looking filename
+    # date to prove filename order is never consulted.
+    tmp = tempfile.mkdtemp()
+    try:
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        run_id_early = "cc:ora-early-task:2026-09-12T19:00:00.000Z"
+        run_id_late = "cc:ora-late-task:2026-09-12T23:00:00.000Z"
+        # filename says "09-11" but is actually generated LATER than "09-12"
+        _write_prior_run_index(state_dir, "2026-09-11",
+                                [{"run_id": run_id_late, "task_id": "ora-late-task", "fleet": "cc"}],
+                                generated_at="2026-09-13T00:00:00.000Z")
+        _write_prior_run_index(state_dir, "2026-09-12",
+                                [{"run_id": run_id_early, "task_id": "ora-early-task", "fleet": "cc"}],
+                                generated_at="2026-09-12T20:00:00.000Z")
+        _write_send_log(send_log, [
+            _gt_send_line("2026-09-12T16:05:00-04:00", "2026-09-12"),  # -> 20:05Z, pairs with EARLY
+            _gt_send_line("2026-09-12T20:10:00-04:00", "2026-09-13"),  # -> 00:10Z next day, pairs with LATE
+        ])
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        prior, _ = gti.load_previously_audited(state_dir, now, send_log_path=send_log)
+        check("the early-generated doc's run is published (paired by "
+              "generated_at, not its '09-12' filename)", run_id_early in prior, prior)
+        check("the late-generated doc's run is ALSO published (its '09-11' "
+              "filename is a red herring -- ordering used generated_at)",
+              run_id_late in prior, prior)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_same_utc_day_rerun_dedups_against_earlier_published_run():
+    tmp = tempfile.mkdtemp()
+    try:
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        run_id = "cc:ora-pm-ledger:2026-09-13T05:00:00.000Z"
+        _write_prior_run_index(state_dir, "2026-09-13",
+                                [{"run_id": run_id, "task_id": "ora-pm-ledger", "fleet": "cc"}],
+                                generated_at="2026-09-13T09:00:00.000Z")
+        _write_send_log(send_log, [_gt_send_line("2026-09-13T05:21:00-04:00", "2026-09-13")])  # -> 09:21Z
+        now = datetime(2026, 9, 13, 11, 0, tzinfo=timezone.utc)  # SAME calendar day as the prior index
+        prior, _ = gti.load_previously_audited(state_dir, now, send_log_path=send_log)
+        check("a same-UTC-day published prior run IS deduped -- the old "
+              "filename/calendar-day exclusion is gone (OI-296 review round 2)",
+              run_id in prior, prior)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_overwritten_index_does_not_pair_with_earlier_send():
+    # the on-disk index for today was overwritten by a SECOND same-day run
+    # AFTER an earlier send already went out (for now-lost prior content) --
+    # its generated_at (10:00Z) postdates that send (09:21Z), so it must NOT
+    # be credited with a publish it never itself received.
+    tmp = tempfile.mkdtemp()
+    try:
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        run_id_b = "cc:ora-task-b:2026-09-13T09:30:00.000Z"
+        _write_prior_run_index(state_dir, "2026-09-13",
+                                [{"run_id": run_id_b, "task_id": "ora-task-b", "fleet": "cc"}],
+                                generated_at="2026-09-13T10:00:00.000Z")
+        _write_send_log(send_log, [_gt_send_line("2026-09-13T09:21:00+00:00", "2026-09-13")])
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        prior, _ = gti.load_previously_audited(state_dir, now, send_log_path=send_log)
+        check("the overwritten index's run is NOT paired with a send that "
+              "predates its own generated_at -- it was never itself actually "
+              "sent", run_id_b not in prior, prior)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_et_evening_send_crossing_utc_midnight():
+    tmp = tempfile.mkdtemp()
+    try:
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        run_id = "cc:ora-pm-ledger:2026-09-12T19:00:00.000Z"
+        # generated late UTC-evening on 09-12 (23:50Z)
+        _write_prior_run_index(state_dir, "2026-09-12",
+                                [{"run_id": run_id, "task_id": "ora-pm-ledger", "fleet": "cc"}],
+                                generated_at="2026-09-12T23:50:00.000Z")
+        # sent at 20:00 ET on 09-12 (local date string still "09-12") but
+        # that instant is 00:00Z on 09-13 -- a DIFFERENT UTC calendar date
+        # than either the generated_at's date or the send's own local date
+        _write_send_log(send_log, [_gt_send_line("2026-09-12T20:00:00-04:00", "2026-09-12")])
+        now = datetime(2026, 9, 13, 6, 0, tzinfo=timezone.utc)
+        prior, _ = gti.load_previously_audited(state_dir, now, send_log_path=send_log)
+        check("an ET-evening send whose UTC instant lands on the NEXT "
+              "calendar day still correctly pairs with the prior "
+              "UTC-evening index (true instant comparison, not date-string "
+              "matching)", run_id in prior, prior)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_send_log_unreadable_disables_dedup_with_warning():
+    tmp = tempfile.mkdtemp()
+    try:
+        state_dir = os.path.join(tmp, "state")
+        run_id = "cc:ora-pm-ledger:2026-09-12T19:00:00.000Z"
+        _write_prior_run_index(state_dir, "2026-09-12",
+                                [{"run_id": run_id, "task_id": "ora-pm-ledger", "fleet": "cc"}],
+                                generated_at="2026-09-12T20:00:00.000Z")
+        missing_send_log = os.path.join(tmp, "does-not-exist-send-log.txt")
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        prior, warnings = gti.load_previously_audited(state_dir, now, send_log_path=missing_send_log)
+        check("an unreadable/missing send log yields NOTHING previously "
+              "audited (fail open)", prior == {}, prior)
+        check("a warning explains dedup was disabled because the send log "
+              "was unreadable", warnings and "dedup disabled" in warnings[0], warnings)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_prefilter_skips_far_out_of_range_files_without_opening():
+    # req 9: a cheap filename-date prefilter bounds the lookback before ANY
+    # file is opened -- proven here by making the far-out-of-range file
+    # corrupt: if it were opened, a "could not read" warning would appear.
+    tmp = tempfile.mkdtemp()
+    try:
+        state_dir = os.path.join(tmp, "state")
+        os.makedirs(state_dir, exist_ok=True)
+        send_log = os.path.join(tmp, "send-log.txt")
+        _write_send_log(send_log, [])
+        far_path = os.path.join(state_dir, "run-index-2020-01-01.json")
+        open(far_path, "w", encoding="utf-8").write("{not valid json at all")
+        _write_stage0_attempts(os.path.join(state_dir, "stage0-attempts.jsonl"), [])
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        prior, warnings = gti.load_previously_audited(
+            state_dir, now, window_hours=24.0, send_log_path=send_log)
+        check("a far-out-of-range corrupt file produces no warning -- the "
+              "cheap prefilter skipped it before ever opening it",
+              warnings == [], warnings)
+        check("nothing previously audited (the only file was prefiltered "
+              "out)", prior == {}, prior)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_corrupt_prior_index_in_range_still_warns():
+    tmp = tempfile.mkdtemp()
+    try:
+        state_dir = os.path.join(tmp, "state")
+        os.makedirs(state_dir, exist_ok=True)
+        send_log = os.path.join(tmp, "send-log.txt")
+        _write_send_log(send_log, [])
+        near_path = os.path.join(state_dir, "run-index-2026-09-12.json")
+        open(near_path, "w", encoding="utf-8").write("{not valid json")
+        _write_stage0_attempts(os.path.join(state_dir, "stage0-attempts.jsonl"), [])
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        prior, warnings = gti.load_previously_audited(
+            state_dir, now, window_hours=24.0, send_log_path=send_log)
+        check("a corrupt prior index inside the horizon still produces a "
+              "warning", len(warnings) == 1 and "run-index-2026-09-12.json" in warnings[0],
+              warnings)
+        check("a corrupt prior index never crashes / yields nothing", prior == {}, prior)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_missing_generated_at_warns():
+    tmp = tempfile.mkdtemp()
+    try:
+        state_dir = os.path.join(tmp, "state")
+        os.makedirs(state_dir, exist_ok=True)
+        send_log = os.path.join(tmp, "send-log.txt")
+        _write_send_log(send_log, [])
+        path = os.path.join(state_dir, "run-index-2026-09-12.json")
+        json.dump({"runs": []}, open(path, "w", encoding="utf-8"))  # no generated_at at all
+        _write_stage0_attempts(os.path.join(state_dir, "stage0-attempts.jsonl"), [])
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        prior, warnings = gti.load_previously_audited(state_dir, now, send_log_path=send_log)
+        check("a prior index with no generated_at warns and contributes "
+              "nothing", prior == {} and len(warnings) == 1 and "generated_at" in warnings[0],
+              (prior, warnings))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_missing_state_dir_is_safe():
+    prior, warnings = gti.load_previously_audited(
+        os.path.join(tempfile.gettempdir(), "definitely-does-not-exist-oi296"),
+        datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc))
+    check("a missing state dir yields empty results, never raises",
+          prior == {} and warnings == [], (prior, warnings))
+
+
+# --- build_run_index integration --------------------------------------------
+
+def test_build_run_index_no_skip_when_prior_index_was_never_sent():
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_dir = os.path.join(tmp, "cc")
+        cc_reg = os.path.join(cc_dir, "scheduled-tasks.json")
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        last_run = "2026-09-12T19:00:00.000Z"
+        _write_registry(cc_reg, [
+            {"id": "ora-pm-ledger", "cronExpression": "0 19 * * *",
+             "enabled": True, "lastRunAt": last_run, "lastScheduledFor": last_run},
+        ])
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        _write_registry(lams_reg, [])
+        run_id = gti.build_run_id("cc", "ora-pm-ledger", last_run)
+        _write_prior_run_index(state_dir, "2026-09-12",
+                                [_prior_run_record(run_id, "ora-pm-ledger", "cc")],
+                                generated_at="2026-09-12T20:00:00.000Z")
+        _write_send_log(send_log, [])  # index exists, nothing was ever sent
+
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        index = gti.build_run_index(cc_reg, lams_reg, [], now=now,
+                                     ground_truth_state_dir=state_dir, send_log_path=send_log)
+        check("a run whose prior index was never actually SENT is not "
+              "skipped", any(r["run_id"] == run_id for r in index["runs"]), index["runs"])
+        check("previously_audited is empty", index["previously_audited"] == [],
+              index["previously_audited"])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_build_run_index_skips_previously_published_unjoined_run():
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_dir = os.path.join(tmp, "cc")
+        cc_reg = os.path.join(cc_dir, "scheduled-tasks.json")
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        last_run = "2026-09-12T19:00:00.000Z"
+        _write_registry(cc_reg, [
+            {"id": "ora-pm-ledger", "cronExpression": "0 19 * * *",
+             "enabled": True, "lastRunAt": last_run, "lastScheduledFor": last_run},
+        ])
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        _write_registry(lams_reg, [])
+        run_id = gti.build_run_id("cc", "ora-pm-ledger", last_run)
+        _write_prior_run_index(state_dir, "2026-09-12",
+                                [_prior_run_record(run_id, "ora-pm-ledger", "cc", candidate_session_count=1)],
+                                generated_at="2026-09-12T20:00:00.000Z")
+        _write_send_log(send_log, [_gt_send_line("2026-09-12T16:34:00-04:00", "2026-09-12")])  # -> 20:34Z
+
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        index = gti.build_run_index(cc_reg, lams_reg, [], now=now,
+                                     ground_truth_state_dir=state_dir, send_log_path=send_log)
+        check("the previously-published, unjoined run does not appear in "
+              "runs", all(r["run_id"] != run_id for r in index["runs"]), index["runs"])
+        hits = [p for p in index["previously_audited"] if p["run_id"] == run_id]
+        check("it is recorded in previously_audited", hits != [], index["previously_audited"])
+        check("audited_in_digest names the actual send time (UTC)",
+              hits and hits[0]["audited_in_digest"].startswith("2026-09-12T20:34:00"), hits)
+        check("no reaudited_after_prior_digest entries for a plain skip",
+              index["reaudited_after_prior_digest"] == [], index)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_build_run_index_reincludes_on_session_count_growth():
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_dir = os.path.join(tmp, "cc")
+        cc_reg = os.path.join(cc_dir, "scheduled-tasks.json")
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        last_run = "2026-09-12T19:00:00.000Z"
+        _write_registry(cc_reg, [
+            {"id": "ora-pm-ledger", "cronExpression": "0 19 * * *",
+             "enabled": True, "lastRunAt": last_run, "lastScheduledFor": last_run},
+        ])
+        t_ms = int(datetime.fromisoformat(last_run.replace("Z", "+00:00")).timestamp() * 1000)
+        # TWO session records claiming this firing NOW -- a new session for
+        # the same cycle appeared AFTER the prior audit only recorded ONE
+        _write_session_record(cc_dir, "local_fire_a", t_ms, "Ora pm ledger",
+                               cli_session_id="fire-a", scheduled_task_id="ora-pm-ledger")
+        _write_session_record(cc_dir, "local_fire_b", t_ms + 4000, "Ora pm ledger",
+                               cli_session_id="fire-b", scheduled_task_id="ora-pm-ledger")
+        proj_dir = os.path.join(tmp, "proj")
+        os.makedirs(proj_dir)
+        open(os.path.join(proj_dir, "fire-a.jsonl"), "w").close()
+        open(os.path.join(proj_dir, "fire-b.jsonl"), "w").close()
+
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        _write_registry(lams_reg, [])
+
+        run_id = gti.build_run_id("cc", "ora-pm-ledger", last_run)
+        # prior published index recorded only 1 session for this cycle, and
+        # a deliberately huge transcript_size so size-growth never fires --
+        # isolating this test to the session-count-growth path
+        _write_prior_run_index(state_dir, "2026-09-12",
+                                [_prior_run_record(run_id, "ora-pm-ledger", "cc",
+                                                    candidate_session_count=1,
+                                                    transcript_size=1_000_000, transcript_mtime=0.0)],
+                                generated_at="2026-09-12T20:00:00.000Z")
+        _write_send_log(send_log, [_gt_send_line("2026-09-12T16:34:00-04:00", "2026-09-12")])
+
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        index = gti.build_run_index(cc_reg, lams_reg, [proj_dir], now=now,
+                                     ground_truth_state_dir=state_dir, send_log_path=send_log)
+        check("a run whose candidate_session_count GREW past the prior "
+              "published count is re-included",
+              any(r["run_id"] == run_id for r in index["runs"]), index["runs"])
+        reaud = [r for r in index["reaudited_after_prior_digest"] if r["run_id"] == run_id]
+        check("it is recorded with the session-growth reason", reaud and
+              reaud[0]["reason"] == "new session for same cycle after prior digest", reaud)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_build_run_index_reincludes_on_transcript_size_growth():
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_dir = os.path.join(tmp, "cc")
+        cc_reg = os.path.join(cc_dir, "scheduled-tasks.json")
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        last_run = "2026-09-12T19:00:00.000Z"
+        _write_registry(cc_reg, [
+            {"id": "ora-pm-ledger", "cronExpression": "0 19 * * *",
+             "enabled": True, "lastRunAt": last_run, "lastScheduledFor": last_run},
+        ])
+        t_ms = int(datetime.fromisoformat(last_run.replace("Z", "+00:00")).timestamp() * 1000)
+        _write_session_record(cc_dir, "local_pmledger", t_ms, "Ora pm ledger",
+                               cli_session_id="pmledger-cli", scheduled_task_id="ora-pm-ledger")
+        proj_dir = os.path.join(tmp, "proj")
+        os.makedirs(proj_dir)
+        transcript_path = os.path.join(proj_dir, "pmledger-cli.jsonl")
+        open(transcript_path, "w", encoding="utf-8").write("x" * 500)  # 500 bytes NOW
+
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        _write_registry(lams_reg, [])
+
+        run_id = gti.build_run_id("cc", "ora-pm-ledger", last_run)
+        _write_prior_run_index(state_dir, "2026-09-12",
+                                [_prior_run_record(run_id, "ora-pm-ledger", "cc",
+                                                    candidate_session_count=1,
+                                                    transcript_size=100,  # smaller than the 500 bytes above
+                                                    transcript_mtime=0.0)],
+                                generated_at="2026-09-12T20:00:00.000Z")
+        _write_send_log(send_log, [_gt_send_line("2026-09-12T16:34:00-04:00", "2026-09-12")])
+
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        index = gti.build_run_index(cc_reg, lams_reg, [proj_dir], now=now,
+                                     ground_truth_state_dir=state_dir, send_log_path=send_log)
+        check("a run whose transcript GREW past the prior published size "
+              "is re-included", any(r["run_id"] == run_id for r in index["runs"]), index["runs"])
+        reaud = [r for r in index["reaudited_after_prior_digest"] if r["run_id"] == run_id]
+        check("it carries the transcript-growth reason", reaud and
+              reaud[0]["reason"] == "transcript grew after prior audit", reaud)
+        run = [r for r in index["runs"] if r["run_id"] == run_id][0]
+        check("the run record itself carries transcript_size/transcript_mtime",
+              run["transcript_size"] == 500 and run["transcript_mtime"] is not None, run)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_build_run_index_falls_back_to_mtime_rule_when_prior_lacks_transcript_size():
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_dir = os.path.join(tmp, "cc")
+        cc_reg = os.path.join(cc_dir, "scheduled-tasks.json")
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        last_run = "2026-09-12T19:00:00.000Z"
+        _write_registry(cc_reg, [
+            {"id": "ora-pm-ledger", "cronExpression": "0 19 * * *",
+             "enabled": True, "lastRunAt": last_run, "lastScheduledFor": last_run},
+        ])
+        t_ms = int(datetime.fromisoformat(last_run.replace("Z", "+00:00")).timestamp() * 1000)
+        _write_session_record(cc_dir, "local_pmledger", t_ms, "Ora pm ledger",
+                               cli_session_id="pmledger-cli", scheduled_task_id="ora-pm-ledger")
+        proj_dir = os.path.join(tmp, "proj")
+        os.makedirs(proj_dir)
+        transcript_path = os.path.join(proj_dir, "pmledger-cli.jsonl")
+        open(transcript_path, "w").close()
+
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        _write_registry(lams_reg, [])
+
+        run_id = gti.build_run_id("cc", "ora-pm-ledger", last_run)
+        # OLD-shaped prior record -- no transcript_size/transcript_mtime keys
+        # at all (predates this round of changes)
+        _write_prior_run_index(state_dir, "2026-09-12",
+                                [_prior_run_record(run_id, "ora-pm-ledger", "cc",
+                                                    candidate_session_count=1,
+                                                    include_transcript_size=False)],
+                                generated_at="2026-09-12T20:00:00.000Z")
+        send_dt = "2026-09-12T16:34:00-04:00"  # -> 20:34:00Z
+        _write_send_log(send_log, [_gt_send_line(send_dt, "2026-09-12")])
+        publish_epoch = datetime.fromisoformat(send_dt).astimezone(timezone.utc).timestamp()
+        os.utime(transcript_path, (publish_epoch + 100, publish_epoch + 100))  # modified AFTER the send
+
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        index = gti.build_run_index(cc_reg, lams_reg, [proj_dir], now=now,
+                                     ground_truth_state_dir=state_dir, send_log_path=send_log)
+        check("with no prior transcript_size, the OLD mtime-vs-send-time "
+              "rule re-includes a transcript modified after the send",
+              any(r["run_id"] == run_id for r in index["runs"]), index["runs"])
+        reaud = [r for r in index["reaudited_after_prior_digest"] if r["run_id"] == run_id]
+        check("it carries the back-compat mtime reason", reaud and
+              reaud[0]["reason"] == "transcript modified after prior digest", reaud)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_build_run_index_does_not_reinclude_when_transcript_size_not_greater():
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_dir = os.path.join(tmp, "cc")
+        cc_reg = os.path.join(cc_dir, "scheduled-tasks.json")
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        last_run = "2026-09-12T19:00:00.000Z"
+        _write_registry(cc_reg, [
+            {"id": "ora-pm-ledger", "cronExpression": "0 19 * * *",
+             "enabled": True, "lastRunAt": last_run, "lastScheduledFor": last_run},
+        ])
+        t_ms = int(datetime.fromisoformat(last_run.replace("Z", "+00:00")).timestamp() * 1000)
+        _write_session_record(cc_dir, "local_pmledger", t_ms, "Ora pm ledger",
+                               cli_session_id="pmledger-cli", scheduled_task_id="ora-pm-ledger")
+        proj_dir = os.path.join(tmp, "proj")
+        os.makedirs(proj_dir)
+        transcript_path = os.path.join(proj_dir, "pmledger-cli.jsonl")
+        open(transcript_path, "w", encoding="utf-8").write("x" * 200)  # 200 bytes now
+
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        _write_registry(lams_reg, [])
+
+        run_id = gti.build_run_id("cc", "ora-pm-ledger", last_run)
+        _write_prior_run_index(state_dir, "2026-09-12",
+                                [_prior_run_record(run_id, "ora-pm-ledger", "cc",
+                                                    candidate_session_count=1,
+                                                    transcript_size=200,  # SAME size -- no growth
+                                                    transcript_mtime=0.0)],
+                                generated_at="2026-09-12T20:00:00.000Z")
+        _write_send_log(send_log, [_gt_send_line("2026-09-12T16:34:00-04:00", "2026-09-12")])
+
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        index = gti.build_run_index(cc_reg, lams_reg, [proj_dir], now=now,
+                                     ground_truth_state_dir=state_dir, send_log_path=send_log)
+        check("an unchanged transcript size does NOT re-include -- still "
+              "skipped", all(r["run_id"] != run_id for r in index["runs"]), index["runs"])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_build_run_index_join_stats_total_includes_skipped_runs_but_audited_excludes_them():
+    # req 3 (MAJOR): join_stats total/joined measure transcript-join health
+    # across EVERY in-window candidate, before dedup; "audited" is the
+    # post-dedup count.
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_dir = os.path.join(tmp, "cc")
+        cc_reg = os.path.join(cc_dir, "scheduled-tasks.json")
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        skipped_last_run = "2026-09-12T19:00:00.000Z"
+        new_last_run = "2026-09-13T05:00:00.000Z"
+        _write_registry(cc_reg, [
+            {"id": "ora-pm-ledger", "cronExpression": "0 19 * * *",
+             "enabled": True, "lastRunAt": skipped_last_run, "lastScheduledFor": skipped_last_run},
+            {"id": "ora-am-brief", "cronExpression": "0 5 * * *",
+             "enabled": True, "lastRunAt": new_last_run, "lastScheduledFor": new_last_run},
+        ])
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        _write_registry(lams_reg, [])
+
+        skipped_run_id = gti.build_run_id("cc", "ora-pm-ledger", skipped_last_run)
+        _write_prior_run_index(state_dir, "2026-09-12",
+                                [_prior_run_record(skipped_run_id, "ora-pm-ledger", "cc")],
+                                generated_at="2026-09-12T20:00:00.000Z")
+        _write_send_log(send_log, [_gt_send_line("2026-09-12T16:34:00-04:00", "2026-09-12")])
+
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        index = gti.build_run_index(cc_reg, lams_reg, [], now=now,
+                                     ground_truth_state_dir=state_dir, send_log_path=send_log)
+        check("exactly one run survives into `runs` (the new one)",
+              len(index["runs"]) == 1, index["runs"])
+        check("join_stats TOTAL counts BOTH in-window candidates regardless "
+              "of the skip", index["join_stats"]["cc"]["total"] == 2, index["join_stats"])
+        check("join_stats AUDITED counts only the one that survived dedup",
+              index["join_stats"]["cc"]["audited"] == 1, index["join_stats"])
+        check("exactly one previously_audited entry recorded",
+              len(index["previously_audited"]) == 1, index["previously_audited"])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_build_run_index_duplicate_detection_excludes_skipped_run_even_with_multiple_sessions():
+    # req 5 (strengthened): give the SKIPPED run >= 2 matching sessions --
+    # it WOULD raise same_cycle_refire if it weren't excluded from `runs`
+    # before detect_duplicates ever saw it.
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_dir = os.path.join(tmp, "cc")
+        cc_reg = os.path.join(cc_dir, "scheduled-tasks.json")
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        last_run = "2026-09-12T19:00:00.000Z"
+        _write_registry(cc_reg, [
+            {"id": "ora-pm-ledger", "cronExpression": "0 19 * * *",
+             "enabled": True, "lastRunAt": last_run, "lastScheduledFor": last_run},
+        ])
+        t_ms = int(datetime.fromisoformat(last_run.replace("Z", "+00:00")).timestamp() * 1000)
+        _write_session_record(cc_dir, "local_fire_a", t_ms, "Ora pm ledger",
+                               cli_session_id="fire-a", scheduled_task_id="ora-pm-ledger")
+        _write_session_record(cc_dir, "local_fire_b", t_ms + 4000, "Ora pm ledger",
+                               cli_session_id="fire-b", scheduled_task_id="ora-pm-ledger")
+        proj_dir = os.path.join(tmp, "proj")
+        os.makedirs(proj_dir)
+        open(os.path.join(proj_dir, "fire-a.jsonl"), "w").close()
+        open(os.path.join(proj_dir, "fire-b.jsonl"), "w").close()
+
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        _write_registry(lams_reg, [])
+
+        run_id = gti.build_run_id("cc", "ora-pm-ledger", last_run)
+        # prior published index already recorded 2 sessions for this cycle
+        # (no session-growth) and a huge transcript_size (no size-growth) --
+        # stays skipped despite carrying 2 matching sessions NOW.
+        _write_prior_run_index(state_dir, "2026-09-12",
+                                [_prior_run_record(run_id, "ora-pm-ledger", "cc",
+                                                    candidate_session_count=2,
+                                                    transcript_size=10_000_000, transcript_mtime=0.0)],
+                                generated_at="2026-09-12T20:00:00.000Z")
+        _write_send_log(send_log, [_gt_send_line("2026-09-12T16:34:00-04:00", "2026-09-12")])
+
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        index = gti.build_run_index(cc_reg, lams_reg, [proj_dir], now=now,
+                                     ground_truth_state_dir=state_dir, send_log_path=send_log)
+        check("the run (with 2 matching sessions) is still skipped -- no "
+              "growth in either signal",
+              all(r["run_id"] != run_id for r in index["runs"]), index["runs"])
+        check("same_cycle_refire never fires for a run excluded before "
+              "detect_duplicates ever saw it",
+              all(f["type"] != "same_cycle_refire" for f in index["duplicate_flags"]),
+              index["duplicate_flags"])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_build_run_index_no_dedup_disables_everything():
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_dir = os.path.join(tmp, "cc")
+        cc_reg = os.path.join(cc_dir, "scheduled-tasks.json")
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        last_run = "2026-09-12T19:00:00.000Z"
+        _write_registry(cc_reg, [
+            {"id": "ora-pm-ledger", "cronExpression": "0 19 * * *",
+             "enabled": True, "lastRunAt": last_run, "lastScheduledFor": last_run},
+        ])
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        _write_registry(lams_reg, [])
+        run_id = gti.build_run_id("cc", "ora-pm-ledger", last_run)
+        _write_prior_run_index(state_dir, "2026-09-12",
+                                [_prior_run_record(run_id, "ora-pm-ledger", "cc")],
+                                generated_at="2026-09-12T20:00:00.000Z")
+        _write_send_log(send_log, [_gt_send_line("2026-09-12T16:34:00-04:00", "2026-09-12")])
+
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        index = gti.build_run_index(cc_reg, lams_reg, [], now=now,
+                                     ground_truth_state_dir=state_dir, send_log_path=send_log,
+                                     dedup_previously_audited=False)
+        check("dedup_previously_audited=False disables the skip entirely",
+              any(r["run_id"] == run_id for r in index["runs"]), index["runs"])
+        check("previously_audited is empty when dedup is disabled",
+              index["previously_audited"] == [], index["previously_audited"])
+        check("join_stats audited count equals total when dedup is disabled",
+              index["join_stats"]["cc"]["audited"] == index["join_stats"]["cc"]["total"],
+              index["join_stats"])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_build_run_index_corrupt_prior_index_adds_warning_not_crash():
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_dir = os.path.join(tmp, "cc")
+        cc_reg = os.path.join(cc_dir, "scheduled-tasks.json")
+        state_dir = os.path.join(tmp, "state")
+        os.makedirs(state_dir)
+        send_log = os.path.join(tmp, "send-log.txt")
+        _write_send_log(send_log, [])
+        last_run = "2026-09-13T05:00:00.000Z"
+        _write_registry(cc_reg, [
+            {"id": "ora-am-brief", "cronExpression": "0 5 * * *",
+             "enabled": True, "lastRunAt": last_run, "lastScheduledFor": last_run},
+        ])
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        _write_registry(lams_reg, [])
+
+        open(os.path.join(state_dir, "run-index-2026-09-12.json"), "w",
+             encoding="utf-8").write("{not valid json")
+        _write_stage0_attempts(os.path.join(state_dir, "stage0-attempts.jsonl"), [])
+
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        index = gti.build_run_index(cc_reg, lams_reg, [], now=now,
+                                     ground_truth_state_dir=state_dir, send_log_path=send_log)
+        check("a corrupt prior index never crashes build_run_index",
+              len(index["runs"]) == 1, index["runs"])
+        check("the corrupt index produces a warning in the output document",
+              len(index.get("warnings", [])) == 1
+              and "run-index-2026-09-12.json" in index["warnings"][0], index.get("warnings"))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_build_run_index_default_ground_truth_state_dir_is_last_run_marker_dirname():
+    # Injectability contract: omitting ground_truth_state_dir must fall back
+    # to os.path.dirname(LAST_RUN_MARKER), not silently disable dedup.
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_dir = os.path.join(tmp, "cc")
+        cc_reg = os.path.join(cc_dir, "scheduled-tasks.json")
+        last_run = "2026-09-12T19:00:00.000Z"
+        _write_registry(cc_reg, [
+            {"id": "ora-pm-ledger", "cronExpression": "0 19 * * *",
+             "enabled": True, "lastRunAt": last_run, "lastScheduledFor": last_run},
+        ])
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        _write_registry(lams_reg, [])
+        run_id = gti.build_run_id("cc", "ora-pm-ledger", last_run)
+
+        fake_marker_dir = os.path.join(tmp, "fake-state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        _write_prior_run_index(fake_marker_dir, "2026-09-12",
+                                [_prior_run_record(run_id, "ora-pm-ledger", "cc")],
+                                generated_at="2026-09-12T20:00:00.000Z")
+        _write_send_log(send_log, [_gt_send_line("2026-09-12T16:34:00-04:00", "2026-09-12")])
+
+        orig_marker = gti.LAST_RUN_MARKER
+        gti.LAST_RUN_MARKER = os.path.join(fake_marker_dir, "last-auditor-run.json")
+        try:
+            now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+            index = gti.build_run_index(cc_reg, lams_reg, [], now=now, send_log_path=send_log)
+            check("omitting ground_truth_state_dir falls back to "
+                  "dirname(LAST_RUN_MARKER), so the dedup still fires",
+                  all(r["run_id"] != run_id for r in index["runs"]), index["runs"])
+        finally:
+            gti.LAST_RUN_MARKER = orig_marker
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_build_run_index_default_send_log_path_is_shared_send_log():
+    check("the default send log path resolves under scheduled-tasks/_shared",
+          gti._default_send_log_path().replace("\\", "/").endswith(
+              "scheduled-tasks/_shared/send-log.txt"),
+          gti._default_send_log_path())
+
+
+def test_main_reports_previously_audited_skip_count_via_send_log():
+    # main() uses REAL current time internally, so this fixture is built
+    # relative to actual now rather than a fixed 2026-09-1x date.
+    #
+    # req 3 (round 2): join_stats now measures the floor over ALL in-window
+    # candidates BEFORE dedup, so a skipped-but-UNJOINED run would legitimately
+    # fail the floor and make main() exit 1 -- that is not what this test is
+    # about, so the run is given a real joinable transcript (kept smaller
+    # than the prior recorded size, so it still gets skipped by dedup).
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_dir = os.path.join(tmp, "cc")
+        os.makedirs(cc_dir, exist_ok=True)
+        real_now = datetime.now(timezone.utc)
+        run_last_run = real_now - timedelta(hours=3)
+        run_last_run_iso = run_last_run.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        prior_date = (real_now - timedelta(days=1)).strftime("%Y-%m-%d")
+        prior_generated_at = (real_now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        send_time_iso = (real_now - timedelta(hours=1, minutes=50)).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+
+        cc_tasks = [
+            {"id": "ora-pm-ledger", "cronExpression": "0 19 * * *",
+             "enabled": True, "lastRunAt": run_last_run_iso,
+             "lastScheduledFor": run_last_run_iso},
+        ]
+        t_ms = int(run_last_run.timestamp() * 1000)
+        _write_session_record(cc_dir, "local_pmledger", t_ms, "Ora pm ledger",
+                               cli_session_id="pmledger-cli", scheduled_task_id="ora-pm-ledger")
+        proj_dir = os.path.join(tmp, "proj")
+        os.makedirs(proj_dir)
+        open(os.path.join(proj_dir, "pmledger-cli.jsonl"), "w").close()  # 0 bytes -- joined but tiny
+
+        run_id = gti.build_run_id("cc", "ora-pm-ledger", run_last_run_iso)
+        _write_prior_run_index(tmp, prior_date,
+                                [_prior_run_record(run_id, "ora-pm-ledger", "cc",
+                                                    transcript_size=1_000_000)],  # no size growth possible
+                                generated_at=prior_generated_at)
+        send_log = os.path.join(tmp, "send-log.txt")
+        _write_send_log(send_log, [_gt_send_line(send_time_iso, prior_date)])
+
+        rc, out, _ = _run_main_with_state(
+            ["--out", os.path.join(tmp, "out.json")], tmp, cc_tasks=cc_tasks,
+            project_dirs=[proj_dir], send_log_path=send_log)
+        check("main() still exits 0 -- the run is joined (floor passes) even "
+              "though dedup skips it", rc == 0, rc)
+        check("stdout reports the previously-audited skip count",
+              "1 previously audited skipped" in out, out)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_main_no_dedup_flag_includes_previously_audited_run():
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_dir = os.path.join(tmp, "cc")
+        os.makedirs(cc_dir, exist_ok=True)
+        real_now = datetime.now(timezone.utc)
+        run_last_run = real_now - timedelta(hours=3)
+        run_last_run_iso = run_last_run.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        prior_date = (real_now - timedelta(days=1)).strftime("%Y-%m-%d")
+        prior_generated_at = (real_now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        send_time_iso = (real_now - timedelta(hours=1, minutes=50)).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+
+        cc_tasks = [
+            {"id": "ora-pm-ledger", "cronExpression": "0 19 * * *",
+             "enabled": True, "lastRunAt": run_last_run_iso,
+             "lastScheduledFor": run_last_run_iso},
+        ]
+        # give the run a real joinable transcript so the pre-existing
+        # join-rate floor (unrelated to OI-296) doesn't itself fail main()
+        t_ms = int(run_last_run.timestamp() * 1000)
+        _write_session_record(cc_dir, "local_pmledger", t_ms, "Ora pm ledger",
+                               cli_session_id="pmledger-cli", scheduled_task_id="ora-pm-ledger")
+        proj_dir = os.path.join(tmp, "proj")
+        os.makedirs(proj_dir)
+        open(os.path.join(proj_dir, "pmledger-cli.jsonl"), "w").close()
+
+        run_id = gti.build_run_id("cc", "ora-pm-ledger", run_last_run_iso)
+        _write_prior_run_index(tmp, prior_date,
+                                [_prior_run_record(run_id, "ora-pm-ledger", "cc")],
+                                generated_at=prior_generated_at)
+        send_log = os.path.join(tmp, "send-log.txt")
+        _write_send_log(send_log, [_gt_send_line(send_time_iso, prior_date)])
+
+        out_path = os.path.join(tmp, "out.json")
+        rc, out, _ = _run_main_with_state(
+            ["--out", out_path, "--no-dedup"], tmp, cc_tasks=cc_tasks,
+            project_dirs=[proj_dir], send_log_path=send_log)
+        check("main() exits 0", rc == 0, rc)
+        check("stdout reports 0 previously audited skipped under --no-dedup",
+              "0 previously audited skipped" in out, out)
+        written = json.load(open(out_path, encoding="utf-8"))
+        check("the run survives in the written index under --no-dedup",
+              any(r["run_id"] == run_id for r in written["runs"]), written["runs"])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+# ---------------------------------------------------------------------------
+# OI-296 review round 3 -- two remaining majors identified by an independent
+# re-review of round 2 (commit 8cd8a6f):
+#
+# req 1: a Stage-0 exit-2 ("could not start") still reaches SKILL.md STEP 8,
+# which sends a failure-only digest under the SAME "[ORA] Ground-Truth Audit
+# -- <date>" subject. Night N writes a real index and crashes before its own
+# send; night N+1 exits 2 (no new index at all) but its failure digest still
+# goes out -- landing chronologically after night N's generated_at with no
+# next-newer DOCUMENT to bound it, wrongly crediting night N's real runs.
+# Fixed by recording every non-`--json` Stage-0 ATTEMPT (any exit code) in
+# an append-only stage0-attempts.jsonl, and using the NEXT ATTEMPT's
+# timestamp -- not the next-newer document's generated_at -- as each
+# published document's credit-window upper bound.
+#
+# req 2: a manual `--window-hours` run must never itself become a candidate
+# for "previously audited" (an ad-hoc investigation must never steal the
+# nightly send's credit), and must never be able to overwrite the canonical
+# run-index-<date>.json on disk.
+#
+# req 3: when a same-date rerun overwrites run-index-<date>.json, the
+# OVERWRITING document's own `previously_audited` list (which it computed
+# correctly against whatever it saw on disk AT THE TIME) must be carried
+# forward on every future scan, using the ORIGINAL baseline fields stored on
+# each entry -- otherwise the earlier document's already-earned publish
+# credit (and its growth-detection baselines) simply vanishes once its file
+# is gone.
+# ---------------------------------------------------------------------------
+
+def test_load_previously_audited_earlier_unsent_doc_not_credited_by_later_docs_send():
+    tmp = tempfile.mkdtemp()
+    try:
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        run_id_a = "cc:ora-task-a:2026-09-11T19:00:00.000Z"
+        run_id_b = "cc:ora-task-b:2026-09-12T19:00:00.000Z"
+        # doc A (night N-1): generated, never independently sent
+        _write_prior_run_index(state_dir, "2026-09-11",
+                                [{"run_id": run_id_a, "task_id": "ora-task-a", "fleet": "cc"}],
+                                generated_at="2026-09-11T20:00:00.000Z")
+        # doc B (night N): a LATER, separately and legitimately published doc
+        _write_prior_run_index(state_dir, "2026-09-12",
+                                [{"run_id": run_id_b, "task_id": "ora-task-b", "fleet": "cc"}],
+                                generated_at="2026-09-12T20:00:00.000Z")
+        # night N's own (successful) Stage-0 attempt closes night N-1's window
+        _write_stage0_attempts(os.path.join(state_dir, "stage0-attempts.jsonl"), [
+            {"at": "2026-09-12T20:00:00.000Z", "exit": 0,
+             "index_path": "run-index-2026-09-12.json", "window_reason": None},
+        ])
+        # ONE send in the log -- it belongs to doc B's window, not doc A's
+        _write_send_log(send_log, [_gt_send_line("2026-09-12T16:34:00-04:00", "2026-09-12")])  # -> 20:34Z
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        prior, _ = gti.load_previously_audited(state_dir, now, send_log_path=send_log)
+        check("doc B's run IS credited by its own matching send",
+              run_id_b in prior, prior)
+        check("doc A's run is NOT credited -- the one send in the log lands "
+              "AFTER night N's own attempt closed doc A's window, so it "
+              "belongs to doc B, not doc A", run_id_a not in prior, prior)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_exit2_attempt_between_index_and_send_blocks_credit():
+    # THE central review-round-3 fix (req 1). Night N writes a real index
+    # and crashes before its own send goes out. Night N+1's Stage 0 exits 2
+    # (no new index at all), but SKILL.md STEP 8 still sends a failure-only
+    # digest under the SAME subject line -- that send must NOT credit night
+    # N's real, still-unpublished runs.
+    tmp = tempfile.mkdtemp()
+    try:
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        run_id = "cc:ora-pm-ledger:2026-09-12T19:00:00.000Z"
+        _write_prior_run_index(state_dir, "2026-09-12",
+                                [{"run_id": run_id, "task_id": "ora-pm-ledger", "fleet": "cc"}],
+                                generated_at="2026-09-12T20:00:00.000Z")
+        # night N+1's Stage-0 exit-2 attempt, AFTER night N's index but
+        # BEFORE the failure digest gets sent
+        _write_stage0_attempts(os.path.join(state_dir, "stage0-attempts.jsonl"), [
+            {"at": "2026-09-13T04:05:00.000Z", "exit": 2, "index_path": None, "window_reason": None},
+        ])
+        # the failure-only digest -- SKILL.md STEP 8 always runs AFTER
+        # Stage 0 itself returns, so this send postdates the exit-2 attempt
+        _write_send_log(send_log, [_gt_send_line("2026-09-13T00:10:00-04:00", "2026-09-13")])  # -> 04:10Z
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        prior, warnings = gti.load_previously_audited(state_dir, now, send_log_path=send_log)
+        check("night N's run is NOT credited by night N+1's failure-only "
+              "digest -- the intervening exit-2 attempt closed its credit "
+              "window first", run_id not in prior, prior)
+        check("no unexpected warnings (a valid attempts log is present)",
+              warnings == [], warnings)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_falls_back_to_next_newer_doc_when_attempts_log_missing():
+    # Degraded-mode contract: when stage0-attempts.jsonl itself is missing/
+    # unreadable, fall back to round 2's next-newer-candidate-DOCUMENT rule
+    # and warn -- the gap this test's sibling above closes can reopen here,
+    # but Stage 0 must still run rather than fail closed.
+    tmp = tempfile.mkdtemp()
+    try:
+        state_dir = os.path.join(tmp, "state")
+        os.makedirs(state_dir, exist_ok=True)
+        send_log = os.path.join(tmp, "send-log.txt")
+        run_id = "cc:ora-pm-ledger:2026-09-12T19:00:00.000Z"
+        _write_prior_run_index(state_dir, "2026-09-12",
+                                [{"run_id": run_id, "task_id": "ora-pm-ledger", "fleet": "cc"}],
+                                generated_at="2026-09-12T20:00:00.000Z")
+        # NO stage0-attempts.jsonl written at all
+        _write_send_log(send_log, [_gt_send_line("2026-09-13T00:10:00-04:00", "2026-09-13")])  # -> 04:10Z
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        prior, warnings = gti.load_previously_audited(state_dir, now, send_log_path=send_log)
+        check("a missing attempts log produces a fallback warning",
+              any("stage0-attempts" in w for w in warnings), warnings)
+        check("with no other candidate document to bound it, the fallback "
+              "credit window stays open and the run IS credited (degraded, "
+              "documented behavior -- not the fixed path)",
+              run_id in prior, prior)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_override_doc_never_a_candidate():
+    tmp = tempfile.mkdtemp()
+    try:
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        run_id = "cc:ora-pm-ledger:2026-09-12T19:00:00.000Z"
+        _write_prior_run_index(state_dir, "2026-09-12",
+                                [{"run_id": run_id, "task_id": "ora-pm-ledger", "fleet": "cc"}],
+                                generated_at="2026-09-12T20:00:00.000Z",
+                                window_reason="explicit --window-hours override")
+        _write_stage0_attempts(os.path.join(state_dir, "stage0-attempts.jsonl"), [])
+        # a send that WOULD normally pair with this doc's window
+        _write_send_log(send_log, [_gt_send_line("2026-09-12T16:34:00-04:00", "2026-09-12")])
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        prior, _ = gti.load_previously_audited(state_dir, now, send_log_path=send_log)
+        check("a document produced by an explicit --window-hours override "
+              "is NEVER a candidate for previously_audited, even with a "
+              "qualifying send sitting right in its window",
+              run_id not in prior, prior)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_latest_wins_baseline_across_published_docs():
+    # req 3: when the SAME run_id is carried by more than one published
+    # document, the one with the LATEST generated_at wins as the baseline
+    # used for future growth detection -- proven via transcript_size.
+    tmp = tempfile.mkdtemp()
+    try:
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        run_id = "cc:ora-pm-ledger:2026-09-10T19:00:00.000Z"
+        _write_prior_run_index(state_dir, "2026-09-10",
+                                [_prior_run_record(run_id, "ora-pm-ledger", "cc", transcript_size=100)],
+                                generated_at="2026-09-10T20:00:00.000Z")
+        _write_prior_run_index(state_dir, "2026-09-11",
+                                [_prior_run_record(run_id, "ora-pm-ledger", "cc", transcript_size=500)],
+                                generated_at="2026-09-11T20:00:00.000Z")
+        _write_stage0_attempts(os.path.join(state_dir, "stage0-attempts.jsonl"), [])
+        _write_send_log(send_log, [
+            _gt_send_line("2026-09-10T16:34:00-04:00", "2026-09-10"),  # -> 20:34Z, pairs with 09-10 doc
+            _gt_send_line("2026-09-11T16:34:00-04:00", "2026-09-11"),  # -> 20:34Z, pairs with 09-11 doc
+        ])
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        prior, _ = gti.load_previously_audited(state_dir, now, send_log_path=send_log)
+        check("the run_id is published", run_id in prior, prior)
+        check("the LATER document's transcript_size (500) is the baseline, "
+              "not the earlier one's (100)", prior[run_id]["transcript_size"] == 500, prior)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_send_after_now_ignored():
+    tmp = tempfile.mkdtemp()
+    try:
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        run_id = "cc:ora-pm-ledger:2026-09-12T19:00:00.000Z"
+        _write_prior_run_index(state_dir, "2026-09-12",
+                                [{"run_id": run_id, "task_id": "ora-pm-ledger", "fleet": "cc"}],
+                                generated_at="2026-09-12T20:00:00.000Z")
+        _write_stage0_attempts(os.path.join(state_dir, "stage0-attempts.jsonl"), [])
+        now = datetime(2026, 9, 13, 0, 0, tzinfo=timezone.utc)
+        # chronologically valid for the doc's window, but AFTER `now`
+        _write_send_log(send_log, [_gt_send_line("2026-09-13T08:00:00+00:00", "2026-09-13")])
+        prior, _ = gti.load_previously_audited(state_dir, now, send_log_path=send_log)
+        check("a send timestamped after `now` is never treated as a "
+              "qualifying publish", run_id not in prior, prior)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_doc_generated_at_at_or_after_now_ignored():
+    tmp = tempfile.mkdtemp()
+    try:
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        run_id = "cc:ora-pm-ledger:2026-09-13T11:00:00.000Z"
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        # generated_at EXACTLY equal to `now` -- strictly earlier is required
+        _write_prior_run_index(state_dir, "2026-09-13",
+                                [{"run_id": run_id, "task_id": "ora-pm-ledger", "fleet": "cc"}],
+                                generated_at=now.strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+        _write_stage0_attempts(os.path.join(state_dir, "stage0-attempts.jsonl"), [])
+        _write_send_log(send_log, [_gt_send_line("2026-09-13T08:00:00+00:00", "2026-09-13")])
+        prior, _ = gti.load_previously_audited(state_dir, now, send_log_path=send_log)
+        check("a document generated_at EXACTLY at `now` is excluded",
+              run_id not in prior, prior)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_carries_forward_baseline_when_doc_overwritten():
+    # req 3: doc B is the ONLY file on disk for its date (an earlier doc's
+    # file was overwritten). Doc B's OWN previously_audited list already
+    # carries the earlier doc's original credit forward -- a later scan must
+    # still find it via doc B, and doc B's own fresh run is ALSO published.
+    tmp = tempfile.mkdtemp()
+    try:
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        carried_run_id = "cc:ora-pm-ledger:2026-09-12T19:00:00.000Z"
+        fresh_run_id = "cc:ora-am-brief:2026-09-12T21:00:00.000Z"
+        _write_prior_run_index(
+            state_dir, "2026-09-12",
+            runs=[{"run_id": fresh_run_id, "task_id": "ora-am-brief", "fleet": "cc"}],
+            generated_at="2026-09-12T22:00:00.000Z",
+            previously_audited=[{
+                "run_id": carried_run_id, "task_id": "ora-pm-ledger", "fleet": "cc",
+                "audited_in_digest": "2026-09-12T20:34:00+00:00",
+                "candidate_session_count": 1, "transcript_size": 250, "transcript_mtime": 1000.0,
+            }])
+        _write_stage0_attempts(os.path.join(state_dir, "stage0-attempts.jsonl"), [])
+        _write_send_log(send_log, [_gt_send_line("2026-09-12T18:34:00-04:00", "2026-09-12")])  # -> 22:34Z
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        prior, _ = gti.load_previously_audited(state_dir, now, send_log_path=send_log)
+        check("the earlier doc's ORIGINAL run_id survives via doc B's "
+              "carried-forward previously_audited list, even though that "
+              "earlier doc's own file is gone", carried_run_id in prior, prior)
+        check("the carried-forward entry preserves the ORIGINAL send time",
+              prior[carried_run_id]["audited_in_digest"] == "2026-09-12T20:34:00+00:00", prior)
+        check("the carried-forward entry preserves the ORIGINAL "
+              "transcript_size baseline",
+              prior[carried_run_id]["transcript_size"] == 250, prior)
+        check("doc B's own freshly-published run is ALSO present",
+              fresh_run_id in prior, prior)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_carries_forward_baseline_even_when_containing_doc_unpublished():
+    tmp = tempfile.mkdtemp()
+    try:
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        carried_run_id = "cc:ora-pm-ledger:2026-09-12T19:00:00.000Z"
+        _write_prior_run_index(
+            state_dir, "2026-09-12",
+            runs=[],  # doc B produced no fresh runs of its own
+            generated_at="2026-09-12T22:00:00.000Z",
+            previously_audited=[{
+                "run_id": carried_run_id, "task_id": "ora-pm-ledger", "fleet": "cc",
+                "audited_in_digest": "2026-09-12T20:34:00+00:00",
+                "candidate_session_count": 1, "transcript_size": 250, "transcript_mtime": 1000.0,
+            }])
+        _write_stage0_attempts(os.path.join(state_dir, "stage0-attempts.jsonl"), [])
+        _write_send_log(send_log, [])  # doc B itself was NEVER sent
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        prior, _ = gti.load_previously_audited(state_dir, now, send_log_path=send_log)
+        check("the carried-forward credit survives even though the "
+              "CONTAINING document was never itself independently published",
+              carried_run_id in prior, prior)
+        check("the baseline is the ORIGINAL one, not anything from this scan",
+              prior[carried_run_id]["transcript_size"] == 250, prior)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_build_run_index_previously_audited_output_carries_baseline_fields_forward():
+    # req 3: build_run_index's OWN previously_audited output entries must
+    # carry the baseline fields forward so a FUTURE scan reading THIS
+    # document can propagate them again.
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_dir = os.path.join(tmp, "cc")
+        cc_reg = os.path.join(cc_dir, "scheduled-tasks.json")
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        last_run = "2026-09-12T19:00:00.000Z"
+        _write_registry(cc_reg, [
+            {"id": "ora-pm-ledger", "cronExpression": "0 19 * * *",
+             "enabled": True, "lastRunAt": last_run, "lastScheduledFor": last_run},
+        ])
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        _write_registry(lams_reg, [])
+        run_id = gti.build_run_id("cc", "ora-pm-ledger", last_run)
+        _write_prior_run_index(state_dir, "2026-09-12",
+                                [_prior_run_record(run_id, "ora-pm-ledger", "cc",
+                                                    candidate_session_count=3, transcript_size=777,
+                                                    transcript_mtime=12345.0)],
+                                generated_at="2026-09-12T20:00:00.000Z")
+        _write_stage0_attempts(os.path.join(state_dir, "stage0-attempts.jsonl"), [])
+        _write_send_log(send_log, [_gt_send_line("2026-09-12T16:34:00-04:00", "2026-09-12")])
+
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        index = gti.build_run_index(cc_reg, lams_reg, [], now=now,
+                                     ground_truth_state_dir=state_dir, send_log_path=send_log)
+        hits = [p for p in index["previously_audited"] if p["run_id"] == run_id]
+        check("the skipped entry carries the ORIGINAL baseline fields "
+              "forward", hits and hits[0]["candidate_session_count"] == 3
+              and hits[0]["transcript_size"] == 777
+              and hits[0]["transcript_mtime"] == 12345.0, hits)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_build_run_index_join_floor_uses_pre_dedup_counts_for_rate_ok_and_message():
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_dir = os.path.join(tmp, "cc")
+        cc_reg = os.path.join(cc_dir, "scheduled-tasks.json")
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        skipped_last_run = "2026-09-12T19:00:00.000Z"
+        new_last_run = "2026-09-13T05:00:00.000Z"
+        _write_registry(cc_reg, [
+            {"id": "ora-pm-ledger", "cronExpression": "0 19 * * *",
+             "enabled": True, "lastRunAt": skipped_last_run, "lastScheduledFor": skipped_last_run},
+            {"id": "ora-am-brief", "cronExpression": "0 5 * * *",
+             "enabled": True, "lastRunAt": new_last_run, "lastScheduledFor": new_last_run},
+        ])
+        # neither task has a session record -- BOTH are unjoined
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        _write_registry(lams_reg, [])
+
+        skipped_run_id = gti.build_run_id("cc", "ora-pm-ledger", skipped_last_run)
+        _write_prior_run_index(state_dir, "2026-09-12",
+                                [_prior_run_record(skipped_run_id, "ora-pm-ledger", "cc")],
+                                generated_at="2026-09-12T20:00:00.000Z")
+        _write_stage0_attempts(os.path.join(state_dir, "stage0-attempts.jsonl"), [])
+        _write_send_log(send_log, [_gt_send_line("2026-09-12T16:34:00-04:00", "2026-09-12")])
+
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        index = gti.build_run_index(cc_reg, lams_reg, [], now=now,
+                                     ground_truth_state_dir=state_dir, send_log_path=send_log)
+        check("one run is dedup-skipped", len(index["previously_audited"]) == 1,
+              index["previously_audited"])
+        check("the floor is measured over BOTH in-window candidates (2), "
+              "not just the 1 that survived dedup",
+              index["join_stats"]["cc"]["total"] == 2, index["join_stats"])
+        check("neither candidate is joined, so the floor correctly FAILS "
+              "(rate_ok is False) despite the skip",
+              index["join_stats"]["cc"]["rate_ok"] is False, index["join_stats"])
+        check("the floor message reports the real pre-dedup 0/2 rate",
+              index["join_stats"]["cc"]["message"] ==
+              "0/2 joined (0%) against a 90% floor for a 24.0h window (widen_kind=none)",
+              index["join_stats"]["cc"]["message"])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_main_window_hours_without_out_writes_to_adhoc_dir():
+    tmp = tempfile.mkdtemp()
+    try:
+        rc, out, marker_path = _run_main_with_state(["--window-hours", "48"], tmp)
+        state_dir = os.path.dirname(marker_path)
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        adhoc_path = os.path.join(state_dir, "adhoc", "run-index-{}.json".format(today))
+        canonical_path = os.path.join(state_dir, "run-index-{}.json".format(today))
+        check("main() exits 0", rc == 0, rc)
+        check("the ad-hoc --window-hours run wrote its index under adhoc/, "
+              "not the canonical run-index-<date>.json",
+              os.path.isfile(adhoc_path), adhoc_path)
+        check("the canonical nightly path was never touched",
+              not os.path.isfile(canonical_path), canonical_path)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_main_window_hours_with_explicit_out_still_respects_out():
+    tmp = tempfile.mkdtemp()
+    try:
+        explicit_out = os.path.join(tmp, "my-explicit-path.json")
+        rc, out, _ = _run_main_with_state(["--window-hours", "48", "--out", explicit_out], tmp)
+        check("main() exits 0", rc == 0, rc)
+        check("an explicit --out is still honored even with --window-hours",
+              os.path.isfile(explicit_out), explicit_out)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_main_appends_stage0_attempt_on_normal_and_window_hours_runs():
+    tmp = tempfile.mkdtemp()
+    try:
+        out_path = os.path.join(tmp, "out.json")
+        rc, _, marker_path = _run_main_with_state(["--out", out_path], tmp)
+        attempts_path = os.path.join(os.path.dirname(marker_path), "stage0-attempts.jsonl")
+        check("a normal run appends a stage0-attempts.jsonl line",
+              os.path.isfile(attempts_path), attempts_path)
+        lines = open(attempts_path, encoding="utf-8").read().strip().splitlines()
+        check("exactly one attempt recorded", len(lines) == 1, lines)
+        rec = json.loads(lines[0])
+        check("the attempt records the real exit code and index path",
+              rec["exit"] == rc and rec["index_path"] == out_path, rec)
+
+        # a SECOND, --window-hours (ad-hoc) run against the SAME tmp state
+        # dir must ALSO append its own attempt (req 1 explicitly includes
+        # "--window-hours runs")
+        rc2, _, _ = _run_main_with_state(["--window-hours", "48"], tmp)
+        lines2 = open(attempts_path, encoding="utf-8").read().strip().splitlines()
+        check("a --window-hours run also appends its own attempt",
+              len(lines2) == 2, lines2)
+        rec2 = json.loads(lines2[1])
+        check("the ad-hoc attempt's window_reason names the override",
+              rec2["window_reason"] == "explicit --window-hours override", rec2)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_main_json_never_appends_a_stage0_attempt():
+    tmp = tempfile.mkdtemp()
+    try:
+        rc, _, marker_path = _run_main_with_state(["--json"], tmp)
+        attempts_path = os.path.join(os.path.dirname(marker_path), "stage0-attempts.jsonl")
+        check("main() with --json exits 0", rc == 0, rc)
+        check("a --json invocation never appends a stage0-attempts.jsonl line",
+              not os.path.isfile(attempts_path), attempts_path)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_main_exit2_path_appends_a_stage0_attempt():
+    tmp = tempfile.mkdtemp()
+    try:
+        import io
+        import contextlib
+        marker_path = os.path.join(tmp, "last-auditor-run.json")
+        orig_sd = gti._sd
+        orig_marker = gti.LAST_RUN_MARKER
+        gti._sd = None  # forces resolve_registry_paths() to fail -> exit 2
+        gti.LAST_RUN_MARKER = marker_path
+        try:
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                rc = gti.main([])
+        finally:
+            gti._sd = orig_sd
+            gti.LAST_RUN_MARKER = orig_marker
+        attempts_path = os.path.join(tmp, "stage0-attempts.jsonl")
+        check("main() returns exit code 2", rc == 2, rc)
+        check("the exit-2 could-not-start path still appends an attempt",
+              os.path.isfile(attempts_path), attempts_path)
+        rec = json.loads(open(attempts_path, encoding="utf-8").read().strip().splitlines()[0])
+        check("the exit-2 attempt records exit=2 and no index_path",
+              rec["exit"] == 2 and rec["index_path"] is None, rec)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+# ---------------------------------------------------------------------------
+# OI-296 review round 4 (post-merge follow-up on commit a95f4f0):
+#
+# req 1: main()'s body is wrapped in try/finally so a Stage-0 attempt line
+# is ALWAYS appended, even on an unhandled exception (recording
+# "exception": "<type>: <msg>" instead of an exit code) -- fail-open on the
+# attempt write itself.
+#
+# req 2: a plain manual run (no --out, not the scheduled invocation) must
+# never write the canonical run-index-<date>.json -- ONLY an explicit --out
+# (as SKILL.md STEP 1 always passes) lands there; every other invocation
+# shape defaults to _state/ground-truth/adhoc/. Docs under adhoc/ are
+# structurally invisible to load_previously_audited's glob.
+#
+# req 3: a corrupt/partial line in stage0-attempts.jsonl must not poison
+# boundary detection (the per-line skip already existed in
+# _load_stage0_attempts; this adds the missing explicit test).
+#
+# req 4: a carried-forward previously_audited entry omits `transcript_size`
+# entirely (not just sets it None) when the ORIGINAL credit had none, so a
+# later reader correctly falls back to the mtime rule rather than treating
+# a None baseline as "any size counts as growth".
+#
+# req 5: an attempt from a --window-hours/adhoc run is recorded in
+# stage0-attempts.jsonl but IGNORED when computing the next boundary for a
+# NIGHTLY document's credit window -- an ad-hoc investigation between a
+# real Stage 0 run and its own send must never close that run's window.
+# ---------------------------------------------------------------------------
+
+def test_main_appends_stage0_attempt_with_exception_info_on_unhandled_exception():
+    tmp = tempfile.mkdtemp()
+    try:
+        marker_path = os.path.join(tmp, "last-auditor-run.json")
+        cc_reg = os.path.join(tmp, "cc", "scheduled-tasks.json")
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        _write_registry(cc_reg, [])
+        _write_registry(lams_reg, [])
+
+        class FakeSD:
+            @staticmethod
+            def discover_store(name):
+                return cc_reg if name == "claude-code-sessions" else lams_reg
+
+        orig_sd = gti._sd
+        orig_marker = gti.LAST_RUN_MARKER
+        orig_build = gti.build_run_index
+        gti._sd = FakeSD()
+        gti.LAST_RUN_MARKER = marker_path
+
+        def _boom(*a, **k):
+            raise RuntimeError("synthetic failure for req-1 kill-proof")
+        gti.build_run_index = _boom
+        raised = False
+        try:
+            try:
+                gti.main(["--out", os.path.join(tmp, "out.json")])
+            except RuntimeError:
+                raised = True
+        finally:
+            gti._sd = orig_sd
+            gti.LAST_RUN_MARKER = orig_marker
+            gti.build_run_index = orig_build
+        check("main() still propagates the unhandled exception (the "
+              "try/finally does not swallow it)", raised, raised)
+        attempts_path = os.path.join(tmp, "stage0-attempts.jsonl")
+        check("an attempt is still appended even though main() raised",
+              os.path.isfile(attempts_path), attempts_path)
+        rec = json.loads(open(attempts_path, encoding="utf-8").read().strip().splitlines()[0])
+        check("the attempt records the exception's type and message",
+              rec.get("exception") == "RuntimeError: synthetic failure for req-1 kill-proof", rec)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_main_attempt_write_failure_itself_fails_open():
+    # req 1: "fail-open on the attempt write itself" -- a broken attempts-log
+    # write (here: the path collides with a directory) must never crash
+    # main() or block its normal return.
+    tmp = tempfile.mkdtemp()
+    try:
+        out_path = os.path.join(tmp, "out.json")
+        os.makedirs(os.path.join(tmp, "stage0-attempts.jsonl"), exist_ok=True)  # a DIRECTORY, not a file
+        rc, out, _ = _run_main_with_state(["--out", out_path], tmp)
+        check("main() still exits 0 despite the attempts-log write failing",
+              rc == 0, rc)
+        check("the run-index file was still written normally",
+              os.path.isfile(out_path), out_path)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_main_plain_run_without_out_writes_to_adhoc_not_canonical():
+    tmp = tempfile.mkdtemp()
+    try:
+        rc, out, marker_path = _run_main_with_state([], tmp)  # no --out, no --window-hours, no --json
+        state_dir = os.path.dirname(marker_path)
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        adhoc_path = os.path.join(state_dir, "adhoc", "run-index-{}.json".format(today))
+        canonical_path = os.path.join(state_dir, "run-index-{}.json".format(today))
+        check("main() exits 0", rc == 0, rc)
+        check("a plain manual run with no --out writes to adhoc/, not the "
+              "canonical path", os.path.isfile(adhoc_path), adhoc_path)
+        check("the canonical nightly path was never touched",
+              not os.path.isfile(canonical_path), canonical_path)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_main_explicit_out_still_writes_wherever_specified_no_window_hours():
+    # matches the real SKILL.md STEP 1 invocation shape (--out, no
+    # --window-hours) -- confirmed by reading
+    # scheduled-tasks/ora-ground-truth-auditor/SKILL.md STEP 1, which always
+    # passes an explicit --out to the canonical run-index-<date>.json path.
+    tmp = tempfile.mkdtemp()
+    try:
+        explicit_out = os.path.join(tmp, "run-index-explicit.json")
+        rc, out, _ = _run_main_with_state(["--out", explicit_out], tmp)
+        check("main() exits 0", rc == 0, rc)
+        check("an explicit --out is always honored",
+              os.path.isfile(explicit_out), explicit_out)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_never_scans_adhoc_subdirectory():
+    # req 2: docs under adhoc/ are never dedup candidates -- the glob only
+    # scans state_dir itself, never state_dir/adhoc, so an adhoc doc is
+    # structurally invisible even with a matching send.
+    tmp = tempfile.mkdtemp()
+    try:
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        run_id = "cc:ora-pm-ledger:2026-09-12T19:00:00.000Z"
+        os.makedirs(state_dir, exist_ok=True)
+        _write_prior_run_index(os.path.join(state_dir, "adhoc"), "2026-09-12",
+                                [{"run_id": run_id, "task_id": "ora-pm-ledger", "fleet": "cc"}],
+                                generated_at="2026-09-12T20:00:00.000Z")
+        _write_stage0_attempts(os.path.join(state_dir, "stage0-attempts.jsonl"), [])
+        _write_send_log(send_log, [_gt_send_line("2026-09-12T16:34:00-04:00", "2026-09-12")])
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        prior, _ = gti.load_previously_audited(state_dir, now, send_log_path=send_log)
+        check("a run-index file sitting under state_dir/adhoc/ is never "
+              "scanned as a dedup candidate", run_id not in prior, prior)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_corrupt_attempts_line_skipped_boundary_still_works():
+    # req 3: kill the "bad line fatal" mutant -- a corrupt/partial line in
+    # stage0-attempts.jsonl must be skipped, not poison the whole log, and
+    # boundary detection must still use the surviving good line.
+    tmp = tempfile.mkdtemp()
+    try:
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        run_id = "cc:ora-pm-ledger:2026-09-12T19:00:00.000Z"
+        os.makedirs(state_dir, exist_ok=True)
+        _write_prior_run_index(state_dir, "2026-09-12",
+                                [{"run_id": run_id, "task_id": "ora-pm-ledger", "fleet": "cc"}],
+                                generated_at="2026-09-12T20:00:00.000Z")
+        attempts_path = os.path.join(state_dir, "stage0-attempts.jsonl")
+        # one corrupt/partial (truncated) line, then one GOOD line that
+        # legitimately closes the window before the failure-digest send below
+        open(attempts_path, "w", encoding="utf-8").write(
+            '{"at": "2026-09-13T04:05:00.000Z", "exit": 2, "index_p\n'  # truncated mid-object
+            + json.dumps({"at": "2026-09-13T04:06:00.000Z", "exit": 2,
+                          "index_path": None, "window_reason": None}) + "\n"
+        )
+        _write_send_log(send_log, [_gt_send_line("2026-09-13T00:10:00-04:00", "2026-09-13")])  # -> 04:10Z
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        prior, warnings = gti.load_previously_audited(state_dir, now, send_log_path=send_log)
+        check("the corrupt line does not trigger the missing/unreadable "
+              "attempts-log fallback warning",
+              not any("stage0-attempts" in w for w in warnings), warnings)
+        check("the surviving good attempt line still correctly closes "
+              "night N's credit window before the failure-digest send",
+              run_id not in prior, prior)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_build_run_index_carried_entry_omits_transcript_size_when_original_had_none():
+    tmp = tempfile.mkdtemp()
+    try:
+        cc_dir = os.path.join(tmp, "cc")
+        cc_reg = os.path.join(cc_dir, "scheduled-tasks.json")
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        last_run = "2026-09-12T19:00:00.000Z"
+        _write_registry(cc_reg, [
+            {"id": "ora-pm-ledger", "cronExpression": "0 19 * * *",
+             "enabled": True, "lastRunAt": last_run, "lastScheduledFor": last_run},
+        ])
+        lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+        _write_registry(lams_reg, [])
+        run_id = gti.build_run_id("cc", "ora-pm-ledger", last_run)
+        # OLD-shaped prior record -- no transcript_size field at all
+        _write_prior_run_index(state_dir, "2026-09-12",
+                                [_prior_run_record(run_id, "ora-pm-ledger", "cc",
+                                                    include_transcript_size=False)],
+                                generated_at="2026-09-12T20:00:00.000Z")
+        _write_stage0_attempts(os.path.join(state_dir, "stage0-attempts.jsonl"), [])
+        _write_send_log(send_log, [_gt_send_line("2026-09-12T16:34:00-04:00", "2026-09-12")])
+
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        index = gti.build_run_index(cc_reg, lams_reg, [], now=now,
+                                     ground_truth_state_dir=state_dir, send_log_path=send_log)
+        hits = [p for p in index["previously_audited"] if p["run_id"] == run_id]
+        check("the carried entry OMITS transcript_size entirely (not just "
+              "sets it to None) when the original credit had none",
+              hits and "transcript_size" not in hits[0], hits)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_carried_entry_without_transcript_size_falls_back_to_mtime():
+    # req 4's payoff: reading such an entry back must correctly resolve
+    # has_transcript_size=False and preserve the mtime-fallback chain,
+    # rather than a None baseline masquerading as "any size is growth".
+    tmp = tempfile.mkdtemp()
+    try:
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        run_id = "cc:ora-pm-ledger:2026-09-12T19:00:00.000Z"
+        _write_prior_run_index(
+            state_dir, "2026-09-12",
+            runs=[],
+            generated_at="2026-09-12T22:00:00.000Z",
+            previously_audited=[{
+                "run_id": run_id, "task_id": "ora-pm-ledger", "fleet": "cc",
+                "audited_in_digest": "2026-09-12T20:34:00+00:00",
+                "candidate_session_count": 1, "transcript_mtime": 1000.0,
+                # deliberately no "transcript_size" key at all
+            }])
+        _write_stage0_attempts(os.path.join(state_dir, "stage0-attempts.jsonl"), [])
+        _write_send_log(send_log, [])
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        prior, _ = gti.load_previously_audited(state_dir, now, send_log_path=send_log)
+        check("the carried-forward entry correctly reports "
+              "has_transcript_size=False",
+              prior[run_id]["has_transcript_size"] is False, prior)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_override_attempt_does_not_close_nightly_window():
+    # req 5: an attempt from a --window-hours/adhoc run is recorded but
+    # IGNORED when finding the next boundary -- it must never close a
+    # nightly document's credit window.
+    tmp = tempfile.mkdtemp()
+    try:
+        state_dir = os.path.join(tmp, "state")
+        send_log = os.path.join(tmp, "send-log.txt")
+        run_id = "cc:ora-pm-ledger:2026-09-12T19:00:00.000Z"
+        _write_prior_run_index(state_dir, "2026-09-12",
+                                [{"run_id": run_id, "task_id": "ora-pm-ledger", "fleet": "cc"}],
+                                generated_at="2026-09-12T20:00:00.000Z")
+        # an ad-hoc --window-hours attempt, BETWEEN the nightly doc's
+        # generation (20:00Z) and its own send (20:34Z, below)
+        _write_stage0_attempts(os.path.join(state_dir, "stage0-attempts.jsonl"), [
+            {"at": "2026-09-12T20:15:00.000Z", "exit": 0, "index_path": None,
+             "window_reason": "explicit --window-hours override"},
+        ])
+        _write_send_log(send_log, [_gt_send_line("2026-09-12T16:34:00-04:00", "2026-09-12")])  # -> 20:34Z
+        now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+        prior, _ = gti.load_previously_audited(state_dir, now, send_log_path=send_log)
+        check("the nightly document IS credited by its own send -- the "
+              "intervening override attempt did NOT close its window",
+              run_id in prior, prior)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_previously_audited_override_attempt_still_recorded_but_ignored_for_boundary():
+    # Companion negative check: an override attempt's PRESENCE in the log
+    # doesn't make it disappear from the log itself (it's still a real
+    # attempt, just excluded from boundary computation) -- proven by loading
+    # the raw attempts list directly.
+    tmp = tempfile.mkdtemp()
+    try:
+        attempts_path = os.path.join(tmp, "stage0-attempts.jsonl")
+        _write_stage0_attempts(attempts_path, [
+            {"at": "2026-09-12T20:15:00.000Z", "exit": 0, "index_path": None,
+             "window_reason": "explicit --window-hours override"},
+        ])
+        attempts, warning = gti._load_stage0_attempts(attempts_path)
+        check("the override attempt IS present in the raw loaded list",
+              len(attempts) == 1 and attempts[0]["window_reason"] ==
+              "explicit --window-hours override", attempts)
+        next_at = gti._next_attempt_at_after(attempts, datetime(2026, 9, 12, 20, 0, tzinfo=timezone.utc))
+        check("but _next_attempt_at_after skips it, returning None (no "
+              "non-override attempt exists)", next_at is None, next_at)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -1014,6 +2721,55 @@ def _run_main_with_fake_registries(argv, tmp):
         gti.LAST_RUN_MARKER = orig_marker
 
 
+def _run_main_with_state(argv, tmp, cc_tasks=None, lams_tasks=None, project_dirs=None,
+                          send_log_path=None):
+    """Like _run_main_with_fake_registries, but seeds the CC/LAMS registries
+    with real tasks and points LAST_RUN_MARKER's directory at `tmp` -- so
+    `tmp` doubles as the ground-truth state dir the OI-296 dedup reads from
+    by default (dirname(LAST_RUN_MARKER)), exercising the real main()/argparse
+    path end to end. `project_dirs`, if given, monkeypatches
+    find_project_dirs() so a fixture-created transcript can actually join
+    (main() otherwise always reads the real ~/.claude/projects tree).
+    `send_log_path`, if given, monkeypatches `_default_send_log_path()` so
+    main() (which has no --send-log-path CLI flag) reads a fixture send log
+    instead of the real scheduled-tasks/_shared/send-log.txt.
+    Returns (rc, stdout_text, marker_path)."""
+    import io
+    import contextlib
+
+    cc_reg = os.path.join(tmp, "cc", "scheduled-tasks.json")
+    lams_reg = os.path.join(tmp, "lams", "scheduled-tasks.json")
+    _write_registry(cc_reg, cc_tasks or [])
+    _write_registry(lams_reg, lams_tasks or [])
+
+    class FakeSD:
+        @staticmethod
+        def discover_store(name):
+            return cc_reg if name == "claude-code-sessions" else lams_reg
+
+    marker_path = os.path.join(tmp, "last-auditor-run.json")
+    orig_sd = gti._sd
+    orig_marker = gti.LAST_RUN_MARKER
+    orig_find_project_dirs = gti.find_project_dirs
+    orig_default_send_log_path = gti._default_send_log_path
+    gti._sd = FakeSD()
+    gti.LAST_RUN_MARKER = marker_path
+    if project_dirs is not None:
+        gti.find_project_dirs = lambda *a, **k: project_dirs
+    if send_log_path is not None:
+        gti._default_send_log_path = lambda: send_log_path
+    try:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            rc = gti.main(argv)
+        return rc, buf.getvalue(), marker_path
+    finally:
+        gti._sd = orig_sd
+        gti.LAST_RUN_MARKER = orig_marker
+        gti.find_project_dirs = orig_find_project_dirs
+        gti._default_send_log_path = orig_default_send_log_path
+
+
 def test_main_json_flag_does_not_write_last_auditor_run_marker():
     tmp = tempfile.mkdtemp()
     try:
@@ -1099,6 +2855,61 @@ if __name__ == "__main__":
     test_build_run_index_persists_file_path_and_session_model_for_verifier_dispatch()
     test_build_run_index_last_auditor_run_at_is_injectable()
     test_build_run_index_default_last_auditor_run_at_falls_back_to_real_file_reader()
+    test_load_ground_truth_digest_sends_parses_ok_matching_lines_and_ignores_others()
+    test_load_ground_truth_digest_sends_tolerates_dash_variants()
+    test_load_ground_truth_digest_sends_converts_et_offset_correctly()
+    test_load_ground_truth_digest_sends_missing_file_is_fail_open_with_warning()
+    test_load_ground_truth_digest_sends_unreadable_path_is_fail_open_with_warning()
+    test_load_previously_audited_requires_an_actual_send_to_count_as_published()
+    test_load_previously_audited_orders_candidates_by_generated_at_not_filename()
+    test_load_previously_audited_same_utc_day_rerun_dedups_against_earlier_published_run()
+    test_load_previously_audited_overwritten_index_does_not_pair_with_earlier_send()
+    test_load_previously_audited_et_evening_send_crossing_utc_midnight()
+    test_load_previously_audited_send_log_unreadable_disables_dedup_with_warning()
+    test_load_previously_audited_prefilter_skips_far_out_of_range_files_without_opening()
+    test_load_previously_audited_corrupt_prior_index_in_range_still_warns()
+    test_load_previously_audited_missing_generated_at_warns()
+    test_load_previously_audited_missing_state_dir_is_safe()
+    test_build_run_index_no_skip_when_prior_index_was_never_sent()
+    test_build_run_index_skips_previously_published_unjoined_run()
+    test_build_run_index_reincludes_on_session_count_growth()
+    test_build_run_index_reincludes_on_transcript_size_growth()
+    test_build_run_index_falls_back_to_mtime_rule_when_prior_lacks_transcript_size()
+    test_build_run_index_does_not_reinclude_when_transcript_size_not_greater()
+    test_build_run_index_join_stats_total_includes_skipped_runs_but_audited_excludes_them()
+    test_build_run_index_duplicate_detection_excludes_skipped_run_even_with_multiple_sessions()
+    test_build_run_index_no_dedup_disables_everything()
+    test_build_run_index_corrupt_prior_index_adds_warning_not_crash()
+    test_build_run_index_default_ground_truth_state_dir_is_last_run_marker_dirname()
+    test_build_run_index_default_send_log_path_is_shared_send_log()
+    test_main_reports_previously_audited_skip_count_via_send_log()
+    test_main_no_dedup_flag_includes_previously_audited_run()
+    test_load_previously_audited_earlier_unsent_doc_not_credited_by_later_docs_send()
+    test_load_previously_audited_exit2_attempt_between_index_and_send_blocks_credit()
+    test_load_previously_audited_falls_back_to_next_newer_doc_when_attempts_log_missing()
+    test_load_previously_audited_override_doc_never_a_candidate()
+    test_load_previously_audited_latest_wins_baseline_across_published_docs()
+    test_load_previously_audited_send_after_now_ignored()
+    test_load_previously_audited_doc_generated_at_at_or_after_now_ignored()
+    test_load_previously_audited_carries_forward_baseline_when_doc_overwritten()
+    test_load_previously_audited_carries_forward_baseline_even_when_containing_doc_unpublished()
+    test_build_run_index_previously_audited_output_carries_baseline_fields_forward()
+    test_build_run_index_join_floor_uses_pre_dedup_counts_for_rate_ok_and_message()
+    test_main_window_hours_without_out_writes_to_adhoc_dir()
+    test_main_window_hours_with_explicit_out_still_respects_out()
+    test_main_appends_stage0_attempt_on_normal_and_window_hours_runs()
+    test_main_json_never_appends_a_stage0_attempt()
+    test_main_exit2_path_appends_a_stage0_attempt()
+    test_main_appends_stage0_attempt_with_exception_info_on_unhandled_exception()
+    test_main_attempt_write_failure_itself_fails_open()
+    test_main_plain_run_without_out_writes_to_adhoc_not_canonical()
+    test_main_explicit_out_still_writes_wherever_specified_no_window_hours()
+    test_load_previously_audited_never_scans_adhoc_subdirectory()
+    test_load_previously_audited_corrupt_attempts_line_skipped_boundary_still_works()
+    test_build_run_index_carried_entry_omits_transcript_size_when_original_had_none()
+    test_load_previously_audited_carried_entry_without_transcript_size_falls_back_to_mtime()
+    test_load_previously_audited_override_attempt_does_not_close_nightly_window()
+    test_load_previously_audited_override_attempt_still_recorded_but_ignored_for_boundary()
     test_resolve_registry_paths_errors_when_sd_unavailable()
     test_resolve_registry_paths_errors_when_discover_store_returns_none()
     test_resolve_registry_paths_errors_when_only_one_fleet_fails()
