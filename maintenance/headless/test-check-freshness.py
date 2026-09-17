@@ -86,6 +86,18 @@ class Freshness(unittest.TestCase):
         rc._task_info = lambda _n: (None, None)
         self.assertEqual(self.run_check().exit_code(), lib.EXIT_CANT_VERIFY)
 
+    def test_production_watched_dict_uses_the_weekly_threshold(self):
+        """Every other test in this class INJECTS `watched=`, so the real WATCHED
+        dict is never exercised -- proven 2026-09-17: reverting it to the old
+        30/30/96 while leaving _WEEKLY_MAX_AGE_H defined left the whole suite
+        green. This is the one test that fails if production regresses."""
+        self.assertTrue(rc.WATCHED, "WATCHED must not be empty")
+        for name, cfg in rc.WATCHED.items():
+            self.assertEqual(
+                cfg["max_age_h"], rc._WEEKLY_MAX_AGE_H,
+                "%s carries %sh, not the weekly threshold %sh -- a cadence-derived "
+                "number was left behind" % (name, cfg["max_age_h"], rc._WEEKLY_MAX_AGE_H))
+
     def test_a_full_week_between_runs_stays_silent(self):
         """THE weekly case, and the reason the threshold is 176h (2026-09-17).
 
