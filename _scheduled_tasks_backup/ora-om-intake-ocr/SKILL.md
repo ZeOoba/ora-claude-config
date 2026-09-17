@@ -66,7 +66,7 @@ try {
   $pdf = Get-Item "<path-to-pdf>"
   $form = @{ file = $pdf }
   $r = Invoke-RestMethod -Uri "http://localhost:8911/api/actions/om-extract" `
-       -Method Post -Form $form -TimeoutSec 60
+       -Method Post -Form $form -Headers @{ 'X-ORA-Client' = '1' } -TimeoutSec 60
   if ($r.ok -and $r.fieldCount -gt 0) { $extractedFields = $r.fields }
 } catch { $extractedFields = $null }
 ```
@@ -128,3 +128,5 @@ the dated intake report when email is unavailable.
 - **v1.3 (2026-07-29): corrected Folder: path (missing \Business\ segment; pointed to a nonexistent location). [MODEL: claude-sonnet-5 | set 2026-07-13]
 
 - **v1.4 (2026-08-12): added Step 3.6 stale seen-backlog sweep (closes the gap that let "OM  Dollar General  Cincinnati OH.pdf" sit un-gated for ~2 months); OCR now Tesseract-backed (winget-installed 2026-08-12) with a Ghostscript deviation (blocked by non-admin session — see Step 2 note)
+
+- **v1.6 (2026-09-12): Step 3.5's `om-extract` POST now sends `-Headers @{ 'X-ORA-Client' = '1' }`.** Paired with the `oxford-command-center` OI-050 fix (Host/CSRF request-boundary guard on the Brain Server), which requires this header on every non-GET request or 403s it — this task's call was the one caller the repo-scoped sweep for that fix could not see (lives outside the repo). Without this edit, extraction would have silently failed every Wednesday from 2026-09-16 onward (indistinguishable from "Brain offline" per Step 3.5's own catch-and-skip handling). No other logic changed.
