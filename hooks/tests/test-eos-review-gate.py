@@ -1529,6 +1529,199 @@ def test_index_realcase_path_survives_non_ascii_under_quotepath_false():
     print("PASS test_index_realcase_path_survives_non_ascii_under_quotepath_false")
 
 
+# --------------------------------------------------------------------------
+# degraded contract: guarded import failed -> fail CLOSED on commits
+# --------------------------------------------------------------------------
+# Root incident 2026-09-17: a partial branch sync left eos-review-gate.py
+# expecting hooks/lib/git_probe_common.py, which that branch did not have. The
+# guarded import caught it, PARSE_CONTRACT_LOADED went False, and main()
+# returned immediately -- so the gate SILENTLY allowed every blast-radius
+# commit, indistinguishable from "nothing to gate". A gate that cannot run its
+# own contract must not be the quiet one in the room.
+
+
+def _degraded_gate_copy():
+    """A copy of this gate whose hooks/lib is EMPTY, so the guarded import fails
+    exactly the way the missing-module incident did -- no monkeypatching."""
+    td = tempfile.mkdtemp(prefix="eos-rg-degraded-")
+    hooks_dir = os.path.join(td, "hooks")
+    os.makedirs(os.path.join(hooks_dir, "lib"))
+    shutil.copy2(HOOK, os.path.join(hooks_dir, "eos-review-gate.py"))
+    return td, os.path.join(hooks_dir, "eos-review-gate.py")
+
+
+def _run_degraded(command, extra_env=None, sessions_dir=None):
+    td, hook = _degraded_gate_copy()
+    try:
+        env = dict(os.environ)
+        env.pop("EOS_REVIEW_MODELS", None)
+        env.pop("EOS_REVIEW_GATE_MODE", None)
+        # The real hooks/lib must not satisfy the import from elsewhere and
+        # quietly un-degrade the fixture. (Belt-and-braces: the copied hook puts
+        # its OWN empty lib on sys.path[0], which is what actually isolates it.)
+        env.pop("PYTHONPATH", None)
+        if sessions_dir:
+            env["EOS_SESSIONS_DIR"] = sessions_dir
+            env["ORA_OVERRIDE_SESSIONS_DIR"] = sessions_dir
+        if extra_env:
+            env.update(extra_env)
+        stdin_text = json.dumps({
+            "session_id": "sess1", "cwd": td, "tool_name": "Bash",
+            "tool_input": {"command": command},
+        })
+        proc = subprocess.run([sys.executable, hook], input=stdin_text,
+                              capture_output=True, text=True, env=env)
+        return proc.returncode, proc.stderr
+    finally:
+        shutil.rmtree(td, ignore_errors=True)
+
+
+def test_degraded_contract_blocks_a_commit():
+    rc, err = _run_degraded('git commit -m "x" -- hooks/lib/git_commit_parse.py')
+    assert rc == 2, (
+        "a gate whose contract failed to import must FAIL CLOSED on a commit, "
+        "got rc=%s err=%r" % (rc, err))
+    assert "BLOCKED (eos-review-gate)" in err, err
+    assert "could not be imported" in err, (
+        "the block must name the real cause, not read as an ordinary review "
+        "block: %r" % err)
+
+
+def test_degraded_contract_allows_non_commit():
+    rc, err = _run_degraded("ls -la")
+    assert rc == 0, (
+        "a degraded gate must still allow non-commit tool calls -- blocking "
+        "every Bash call would brick the fleet, got rc=%s err=%r" % (rc, err))
+
+
+def test_degraded_contract_announces_on_the_non_commit_path():
+    """Fail-closed covers commits; everything else must at least be VISIBLE."""
+    rc, err = _run_degraded("ls -la")
+    assert "eos-review-gate" in err and "could not be imported" in err, (
+        "a degraded gate must announce itself even when it allows: %r" % err)
+
+
+def test_degraded_over_block_does_not_consume_a_token():
+    """The detector is over-broad on purpose, so a loose-only match must block
+    WITHOUT spending Gabriel's single-use approval -- otherwise an intervening
+    `git log --grep commit` eats the token and the real commit is then blocked
+    with none left (the 2026-07-24 m7 failure in a sharper form)."""
+    sessions = tempfile.mkdtemp(prefix="eos-rg-degraded-notok-")
+    td, hook = _partially_degraded_gate_copy()
+    token = os.path.join(sessions, "sess1", "overrides", "allow-unreviewed-commit")
+    try:
+        os.makedirs(os.path.dirname(token))
+        with open(token, "w") as fh:
+            fh.write("scope: unreviewed-blast-radius-commit\n"
+                     "session: sess1\nreason: must survive an over-match\n")
+        env = dict(os.environ)
+        for var in ("EOS_REVIEW_MODELS", "EOS_REVIEW_GATE_MODE", "PYTHONPATH"):
+            env.pop(var, None)
+        env["EOS_SESSIONS_DIR"] = sessions
+        env["ORA_OVERRIDE_SESSIONS_DIR"] = sessions
+        proc = subprocess.run(
+            [sys.executable, hook],
+            input=json.dumps({"session_id": "sess1", "cwd": td, "tool_name": "Bash",
+                              "tool_input": {"command": "git log --grep commit"}}),
+            capture_output=True, text=True, env=env)
+        assert proc.returncode == 2, "a loose-only match must still block, got %s" % proc.returncode
+        assert os.path.exists(token), (
+            "the single-use token was CONSUMED by a non-commit -- it must survive")
+        assert "without consuming" in proc.stderr, proc.stderr
+    finally:
+        shutil.rmtree(sessions, ignore_errors=True)
+        shutil.rmtree(td, ignore_errors=True)
+
+
+def test_degraded_over_blocks_git_add_of_a_commit_named_file():
+    """The degraded detector is a substring scan, not is_git_commit()'s
+    tokenizer, so this DOES match and block. Pinned deliberately: over-blocking
+    is the accepted trade on a path that only runs when hooks/lib is broken, and
+    an earlier version of this change claimed the opposite in a comment."""
+    rc, err = _run_degraded("git add hooks/commit-provenance-guard.py")
+    assert rc == 2, "expected the accepted over-block, got rc=%s err=%r" % (rc, err)
+    assert "MENTIONS a git commit but is not shaped like one" in err, (
+        "an over-block must say it is one, or it reads as a real verdict: %r" % err)
+
+
+def test_degraded_never_blocks_the_repair_command():
+    """No bootstrap deadlock: restoring the missing module must stay possible."""
+    rc, err = _run_degraded("git checkout origin/main -- hooks/lib/git_probe_common.py")
+    assert rc == 0, (
+        "the repair for the very failure this path reports must not be blocked, "
+        "got rc=%s err=%r" % (rc, err))
+
+
+def test_degraded_honors_mode_off():
+    rc, err = _run_degraded('git commit -m "x"',
+                            extra_env={"EOS_REVIEW_GATE_MODE": "off"})
+    assert rc == 0, "EOS_REVIEW_GATE_MODE=off must win even while degraded, got rc=%s" % rc
+
+
+def test_degraded_honors_mode_warn():
+    rc, err = _run_degraded('git commit -m "x"',
+                            extra_env={"EOS_REVIEW_GATE_MODE": "warn"})
+    assert rc == 0, "warn mode must not block even while degraded, got rc=%s" % rc
+    assert "not blocking" in err, err
+
+
+def _partially_degraded_gate_copy():
+    """The REAL 2026-09-17 shape: hooks/lib is present but ONE module is gone,
+    so override_tokens (the first name in the guarded import) is still bound
+    while git_commit_parse's own dependency is not. Distinct from the
+    empty-lib fixture above, where nothing at all can be imported."""
+    # Copy ONLY the gate and lib/*.py -- never the whole hooks/ tree, which
+    # contains hooks/sessions/ that other live sessions write concurrently (a
+    # copytree of it raced and produced a spurious failure while this test was
+    # being written).
+    td = tempfile.mkdtemp(prefix="eos-rg-partial-")
+    lib_dir = os.path.join(td, "hooks", "lib")
+    os.makedirs(lib_dir)
+    for name in os.listdir(os.path.join(HERE, "lib")):
+        if name.endswith(".py") and name != "git_probe_common.py":
+            shutil.copy2(os.path.join(HERE, "lib", name), os.path.join(lib_dir, name))
+    shutil.copy2(HOOK, os.path.join(td, "hooks", "eos-review-gate.py"))
+    return td, os.path.join(td, "hooks", "eos-review-gate.py")
+
+
+def test_degraded_honors_an_override_token():
+    """The block message points at the token contract -- so the token must
+    actually work in the failure this path exists for. Uses the partial fixture:
+    with the WHOLE lib gone, override_tokens cannot load either and the gate
+    correctly says no token can be honored (covered by the message assertion in
+    test_degraded_contract_blocks_a_commit)."""
+    sessions = tempfile.mkdtemp(prefix="eos-rg-degraded-tok-")
+    td, hook = _partially_degraded_gate_copy()
+    try:
+        overrides = os.path.join(sessions, "sess1", "overrides")
+        os.makedirs(overrides)
+        with open(os.path.join(overrides, "allow-unreviewed-commit"), "w") as fh:
+            fh.write("scope: unreviewed-blast-radius-commit\n"
+                     "session: sess1\n"
+                     "reason: degraded-path token test\n")
+        env = dict(os.environ)
+        env.pop("EOS_REVIEW_MODELS", None)
+        env.pop("EOS_REVIEW_GATE_MODE", None)
+        env.pop("PYTHONPATH", None)
+        env["EOS_SESSIONS_DIR"] = sessions
+        env["ORA_OVERRIDE_SESSIONS_DIR"] = sessions
+        stdin_text = json.dumps({
+            "session_id": "sess1", "cwd": td, "tool_name": "Bash",
+            "tool_input": {"command": 'git commit -m "x"'},
+        })
+        proc = subprocess.run([sys.executable, hook], input=stdin_text,
+                              capture_output=True, text=True, env=env)
+        assert proc.returncode == 0, (
+            "a valid single-use token must be honored on the degraded path, "
+            "got rc=%s err=%r" % (proc.returncode, proc.stderr))
+        assert "UNREVIEWED" in proc.stderr, proc.stderr
+        assert "could not be imported" in proc.stderr, (
+            "the token path must still say the gate was degraded: %r" % proc.stderr)
+    finally:
+        shutil.rmtree(sessions, ignore_errors=True)
+        shutil.rmtree(td, ignore_errors=True)
+
+
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
 
 
