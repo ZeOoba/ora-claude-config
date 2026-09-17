@@ -1,4 +1,5 @@
-# Register the three ORA headless checks on WINDOWS Task Scheduler.
+# Register the ORA headless checks on WINDOWS Task Scheduler (four defined; only
+# the ones this checkout's run-check.py implements are actually registered).
 # ---------------------------------------------------------------------------
 # WHY WINDOWS TASK SCHEDULER AND NOT create_scheduled_task:
 # The dual CC/MCP + LAMS fleets do not run scripts -- they launch Claude sessions
@@ -31,8 +32,8 @@ if (-not (Test-Path $runner)) { throw "runner not found: $runner" }
 
 # Cadences mirror the in-fleet twins (offset ~15 min so the headless run observes
 # the same day's state) so burn-in is an apples-to-apples comparison:
-#   ora-task-integrity-guard              15 5 * * 1   -> Mondays 07:20
-#   ora-command-center-mirror-drift-check Mondays 10:40 -> Mondays 10:55
+#   ora-task-integrity-guard              5 7 * * 1    -> Mondays 07:05, headless 07:20 (+15)
+#   ora-command-center-mirror-drift-check 40 10 * * 1  -> Mondays 10:40, headless 10:55 (+15)
 #   freshness has no in-fleet twin -- it ages the other three heartbeats, so it runs
 #   at 07:50, AFTER the 07:20 pair, or it would read their previous run's files and
 #   page on a staleness it created by running too early.
@@ -64,26 +65,66 @@ $tasks = @(
 # Deploy) all carry StartWhenAvailable for the same reason.
 function Set-HeadlessRunConditions {
     param([Parameter(Mandatory)][string]$TaskName)
+    # -TaskPath '\' on BOTH queries: without it a same-named task in a subfolder
+    # makes $task an array and -TaskPath $task.TaskPath throws. These tasks are
+    # registered at the root by the schtasks call above.
     try {
-        $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+        $task = Get-ScheduledTask -TaskName $TaskName -TaskPath '\' -ErrorAction Stop
         $s = $task.Settings
         $s.StartWhenAvailable = $true
         $s.DisallowStartIfOnBatteries = $false
         $s.StopIfGoingOnBatteries = $false
+        # NOTE for anyone copying this helper: Set-ScheduledTask DROPS a stored
+        # password on a Password-logon task. Safe here -- these run InteractiveToken.
         Set-ScheduledTask -TaskName $TaskName -TaskPath $task.TaskPath -Settings $s | Out-Null
-        $v = (Get-ScheduledTask -TaskName $TaskName).Settings
+        $v = (Get-ScheduledTask -TaskName $TaskName -TaskPath '\' -ErrorAction Stop).Settings
         if ($v.StartWhenAvailable -and -not $v.DisallowStartIfOnBatteries -and
             -not $v.StopIfGoingOnBatteries) {
             Write-Host "    run conditions: catch-up ON, battery restrictions OFF"
-        } else {
-            Write-Warning ("    run conditions NOT applied to {0} -- it will drop missed slots" -f $TaskName)
+            return $true
         }
+        Write-Warning ("    run conditions NOT applied to {0} -- it will drop missed slots" -f $TaskName)
+        return $false
     } catch {
         Write-Warning ("    could not set run conditions on {0}: {1}" -f $TaskName, $_.Exception.Message)
+        return $false
     }
 }
 
+# NEVER REGISTER A CHECK THE RUNNER DOES NOT IMPLEMENT (2026-09-17). The four
+# task names here are a superset of what a given checkout's run-check.py can
+# actually run: `freshness` exists on main but not in the 09-10 pre-review draft
+# that is still the LIVE copy on this machine. Registering it there creates a
+# task that exits 2 ("unknown check") every week, writes no heartbeat, and pages
+# nobody -- a permanently dead task the other guards then trip over. run-check.py
+# --help lists its checks machine-readably, so ask it rather than assuming.
+function Get-RunnerChecks {
+    param([Parameter(Mandatory)][string]$Python, [Parameter(Mandatory)][string]$Runner)
+    try {
+        $help = & $Python $Runner --help 2>&1 | Out-String
+    } catch {
+        return $null   # cannot ask -> caller registers everything, as before
+    }
+    $m = [regex]::Match($help, '(?m)^\s*checks:\s*(.+)$')
+    if (-not $m.Success) { return $null }
+    return ($m.Groups[1].Value -split ',' | ForEach-Object { $_.Trim() } |
+            Where-Object { $_ })
+}
+
+$runnerChecks = Get-RunnerChecks -Python $py -Runner $runner
+if ($runnerChecks) {
+    Write-Host ("runner implements: {0}" -f ($runnerChecks -join ', '))
+} else {
+    Write-Warning "could not read the runner's check list -- registering all tasks unfiltered"
+}
+
+$failed = 0
+
 foreach ($t in $tasks) {
+    if ($runnerChecks -and ($runnerChecks -notcontains $t.Check)) {
+        Write-Warning ("SKIPPED {0}: this checkout's run-check.py does not implement '{1}' -- register it after the runner catches up" -f $t.Name, $t.Check)
+        continue
+    }
     $log = Join-Path $logDir ("{0}.log" -f $t.Check)
     # cmd wrapper so the exit code is preserved in LastTaskResult AND the output
     # is teed to a log: a clean run is silent to the user but must not be silent
@@ -101,13 +142,22 @@ foreach ($t in $tasks) {
         & schtasks.exe @args | Out-Null
         if ($LASTEXITCODE -eq 0) {
             Write-Host "registered: $($t.Name)  [$($t.Sc) $($t.St), starts 09/11/2026]"
-            Set-HeadlessRunConditions -TaskName $t.Name
+            if (-not (Set-HeadlessRunConditions -TaskName $t.Name)) { $failed++ }
         }
-        else { Write-Warning "FAILED to register $($t.Name) (rc=$LASTEXITCODE)" }
+        else {
+            Write-Warning "FAILED to register $($t.Name) (rc=$LASTEXITCODE)"
+            $failed++
+        }
     }
 }
 
 if (-not $WhatIf) {
     Write-Host ""
     Write-Host "Verify:  schtasks /Query /TN `"ORA Headless - integrity-guard`" /V /FO LIST"
+    # A task registered WITHOUT its run conditions is the exact silent failure
+    # this script exists to close -- it must not report success to a caller or CI.
+    if ($failed -gt 0) {
+        Write-Warning ("{0} task(s) did not get their run conditions -- they will DROP missed slots" -f $failed)
+        exit 1
+    }
 }
