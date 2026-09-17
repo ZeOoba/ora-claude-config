@@ -142,6 +142,13 @@ UNGUARDED_BACKLOG = {
     # a live entrypoint; listed only so this suite is green against main, where the
     # folder still exists in git. Inert once that deletion is committed.
     "ora-754-flaute-escalation-check",
+    # Added 2026-09-17 (dirty-tree-triage). One-time ATTENDED resume of the 37 CC tasks
+    # paused 09-14, same class as ora-routine-pause-resume-2026-09-11 above: side effects
+    # (update_scheduled_task, run_scheduled_task, a COM send), no run guard. It was
+    # UNTRACKED until a7d87ca, so this suite passed at every commit and failed only in the
+    # live working tree -- which is how it reached a push gate as a surprise. Inert once
+    # the task fires and its folder is archived.
+    "ora-routine-pause-resume-09-21",
 }
 
 # The ONLY way to declare a task harmless. Each entry means a human read the spec
