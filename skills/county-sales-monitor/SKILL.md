@@ -13,8 +13,7 @@ description: >
   markets are a documented next phase. MARKET INTELLIGENCE, not sourcing: does
   NOT replace county-parcel-screen (off-market owner call lists, motivated
   sellers, delinquent-tax/estate leads). Single-property comp grids route to
-  acquisition-underwriting COMPS mode. v0.5 (2026-08-15) — piloted (304
-  transactions live in Notion) and scheduled monthly (ora-county-sales-monitor).
+  acquisition-underwriting COMPS mode. v0.5 — changelog in body.
 ---
 
 # county-sales-monitor
