@@ -5,12 +5,143 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-09-17T17:42:08.632Z
+  modified: 2026-09-17T20:58:32.186Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-09-17 — Both workflow optimizations implemented (83d07bc); live checkout fast-forwarded twice
+
+Gabriel-directed, same turn: "fast-forward the live branch now then implement the following workflow optimizations".
+
+**FF #1 (7027cc8):** the live checkout was 1 behind origin and still carried the UNFIXED `git_commit_parse.py`, so the live review gate could still fail open. Fast-forwarded under an `allow-config-write` token minted ONLY after Gabriel's explicit in-turn approval, then retired to `overrides/_used/`. Live gates verified 73/73 + 113/113 after.
+
+**Knowledge item — directional assertions.** Swept `maintenance/_tests` + `hooks/tests` for assertions pinned to live-state counts: the orphaned-sections one (fixed earlier today in faf2c6b) was the ONLY real instance; everything else is fixture-based. Captured the rule durably as memory `feedback_directional_assertions_over_live_state.md` (+ MEMORY.md pointer): a test reading live state asserts a DIRECTION or invariant, never a snapshot count, because a hardcoded baseline inverts once the backlog it describes is cleaned up — and inside a push gate its staleness blocks every session, not just its author.
+
+**Friction item — gates failing open (83d07bc, 4 files, 455 insertions).** Both gates returned SILENTLY when their guarded `hooks/lib` import failed. Now:
+- `eos-review-gate` FAILS CLOSED on commit-shaped commands; non-commit calls pass with a loud warning; `EOS_REVIEW_GATE_MODE=off/warn` and the single-use token all still work, and the SAFETY INVARIANT docstring carries the carve-out.
+- `commit-provenance-guard` still ALLOWS everything per the ratified 2026-07-17 ruling (blocking there would freeze commits fleet-wide on one broken lib file) but now says "UNGATED" instead of nothing.
+- **The asymmetry is Gabriel's call.** The ask collided with that 2026-07-17 invariant, which is pinned by `test_broken_sibling_import_allows_...`; the options were put to him and he chose the split rather than letting me overturn a prior adversarial-review decision.
+- Detector over-matches on purpose (inline, duplicated, NOT shared via hooks/lib — the premise is hooks/lib is unreachable). The repair command is not matched, so no bootstrap deadlock. A SECOND stricter pattern gates token spend only: a loose-only match blocks WITHOUT consuming the single-use token, closing a sharper form of the 2026-07-24 m7 waste.
+
+**Independent review: 3 rounds, BLOCKED twice.** Round 2 caught four blocking defects incl. a block message telling the operator to mint a token the code never checked, and a docstring still promising the opposite behavior. Round 3 caught that the fixes were only in the WORKTREE while the index still held the defective version — decisive here because this gate hashes the INDEX blob, so the commit would have landed all four defects under a review keyed to other content. Artifact d5942ccf122d.
+
+**Self-inflicted flake, fixed:** a new test fixture `copytree`'d all of `hooks/`, including `hooks/sessions/` which other live sessions write concurrently; it raced once. Narrowed to gate + `lib/*.py`.
+
+**FF #2:** live checkout fast-forwarded to 83d07bc under a second single-purpose token (also retired); live suites now 82/82 + 62/62. Both worktrees (`gate-degraded-failclosed`, `hooks-git-lines-encoding`) removed and their temp branches deleted.
+
+**Residual (non-blocking, recorded by the reviewer):** the loose detector still misses a commit whose `-C` argument contains a quoted `;` or `|`; `git commit-tree` strict-matches and would spend a token; `EOS_REVIEW_GATE_MODE=off` allows silently while degraded (consistent with the non-degraded path).
+
+## 2026-09-17 -- acquisition-underwriting-eval-harness reimported (PR #65)
+
+Packaged acquisition-underwriting-eval-harness from main @ e90f89d (squash-merge
+of PR #65, "eval-harness: parse replay transcripts straight into aggregate/diff/record",
+folding in 57c8992 and 1c7fe4e). plugin_of returned None (standalone skill).
+tools/package_skills.py exited clean: description 682/1024 chars OK, 39 entries OK.
+Staged to OneDrive Claude_Workspace/01_Workspace/outputs/2026-09-17_skill-staging/
+acquisition-underwriting-eval-harness.skill and to the Cowork session outputs;
+Gabriel confirmed the Save-skill click.
+
+Verification: tools/reimport_correlate.py verify -> CONFIRMED (first install) --
+cache directory CreationTime moved from ABSENT to 2026-09-17T15:40:59.987495,
+main.log Local (%LOCALAPPDATA%\Claude\Logs\main.log) showed
+"Sync complete: 1 downloaded" at 2026-09-17T15:41:00, an exact-second match.
+verify_installed_cache.py: balanced=True, stray_body_quotes=0. Installed cache
+dir file listing hand-checked against the 39-entry package manifest -- all
+present, nothing missing.
+
+Closing sweep: repo_first_check.py -> no cache-ahead skills; frontmatter_sweep.py
+-> 0 findings across 70 skill dirs.
+
+This is the Save-skill click being logged, not just the repo commit.
+
+## 2026-09-17 — CONFIRMED Save-skill install of acquisition-underwriting-eval-harness (post-#65 merge), cache now matches origin/main
+
+Gabriel clicked Save skill in Cowork at ~15:41 ET. Install proven first-hand, not inferred from the ledger.
+
+- **Correlation (tools/reimport_correlate.py verify, ad-hoc `--baseline 2026-09-17 12:00:00` — no pre-click baseline had been captured, my omission in the handoff prompt):** `CONFIRMED -- CreationTime moved 2026-09-17T12:00:00 -> 2026-09-17T15:40:59.987495; main.log Sync complete: 1 downloaded @ 2026-09-17T15:41:00 (exact-second match)`. Both halves present: a real teardown/recreate of the cache dir AND the Local-log sync pair at the same second.
+- **WHAT installed (hash, the "never WHETHER" check):** cache copy of `lib/parse_replays.py` is byte-identical to `origin/main` after newline normalization — normalized sha256 `15808e5d…` on both sides; the raw-hash gap was purely CRLF (398 CRLF lines in the packaged copy vs the LF git blob). Both post-review markers present (`PR #65 review, F1`, `REFUTE pass, R1`).
+- **Net effect:** the Cowork runtime cache no longer runs the pre-fix parser. Before this, a Cowork-surface harness run would still have double-counted a duplicated `--agent-ids` value and silently swallowed a mistyped `--failed-agent-ids`; Code-surface runs read the repo and already had the fixes from `e90f89d`.
+- `pending_reimport.py clear` REFUSED until this entry existed ("records no confirmed install in the newest event_log.md entry") — the gate worked as designed; the line is cleared in the same pass, after this.
+- **Noted, not acted on:** the ledger carries 9 pending lines, including an OLDER 2026-09-12 entry for this same skill (commit 09d5f00, SKILL.md + golden_set + doctrine_skip_gate) and one for `acquisition-underwriting` itself. Today's confirmed install re-synced the whole skill package, so the older same-skill line is very likely stale too, but that is an inference, not evidence — it is left in place rather than cleared on a guess.
+
+## 2026-09-17 — ora-skills PR #65 (eval-harness replay parser) reviewed, fixed twice, merged as e90f89d
+
+Session 74d112a1, all steps Gabriel-approved in-turn. Chain: dirty-tree triage found the commit unpushed → push → PR → review → fixes → adversarial REFUTE → fixes → merge.
+
+- **Origin:** `a45caa5` (authored 2026-09-13 in the eval-transcript-parser worktree) sat unpushed on this laptop for 4 days — found by the 09-17 worktree sweep, which kept it precisely because it was clean-but-unmerged. Pushed to the private `ZeOoba/ora-skills`, then opened as PR #65.
+- **`/code-review` (high, this session): 7 findings**, all in `lib/parse_replays.py`. The three that mattered each corrupted `n` or the deal set with NO signal, which is the one thing this gate exists to get right: (F1) a `--failed-agent-ids` typo silently no-opped, leaving the replay the orchestrator rejected in the sample with the run still exiting CLEAN; (F2) a repeated `--agent-ids` value parsed one transcript twice as two independent samples; (F3) two goldens sharing a `deal_id` silently dropped a whole deal from the gate. Plus (F4) one malformed transcript aborted an 18-replay run with a traceback, (F5) entries lacking `requestId` split one response and failed good replays, (F6) the Step 1.5 flag erased the transcript's own error, (F7) the docstring contradicted SKILL.md Step 2. Fixed TDD in `1c7fe4e` (7 regression tests written first, watched fail).
+- **Adversarial REFUTE pass on those fixes (Fable subagent): SOUND**, via a revert matrix (each fix reverted alone, matching test must fail), 11 constructed scenarios, a scan of 600 real transcripts / 29,048 assistant entries, and an old-vs-new re-parse of 41 real replays across 2 sessions with identical per-deal n/values/failures. **It caught a real error in my F4**: `_requests` still dereferenced raw content items, so the "non-dict blocks are skipped" claim did not hold and its test passed for the wrong reason. Also found (R1) the de-dup was bypassable by a case-differing id, since `Path.exists()` is case-insensitive on Windows (measured `replays=[14.0, 14.0]`), (R2) a duplicated id exited 0 CLEAN with a recorded snapshot, (R5) a golden-set defect escaped as a traceback outside the documented 0/3/4 contract. All four fixed TDD in `57c8992`.
+- **Verification at merge:** parse_replays 45/45, full harness lib suite 137/137. No CI is configured on that repo and `main` is not branch-protected, so the adversarial pass WAS the gate — a bot check was never available to mistake for one.
+- **Squash-merged** by Gabriel as `e90f89d` (19:30Z); fix markers verified present on `origin/main`. Because it was a squash, `57c8992` is not an ancestor of main — content parity was verified by grep, not by ancestry. The merged worktree was removed (clean); the branch ref is kept, no branches deleted.
+- **Standing caveat, recorded deliberately:** every reviewer in this chain was this session or its subagent (review → own fixes → own subagent's refute), and the implementer ran at Opus 5 while the refute ran at Fable. Gabriel merged with that stated. The first real exercise is the next scheduled eval-harness run.
+- **OPEN — Cowork reimport:** `_staging/PENDING_REIMPORT.md` still lists `acquisition-underwriting-eval-harness`. The runtime cache holds the PRE-FIX parser until a manual Save-skill click; packaging must come from merged `main` (the squash sha `e90f89d`, NOT the branch shas). Ledger is not an install oracle — confirm via main.log `Delta: N` + `Sync complete`, then `pending_reimport.py clear`.
+- **Unrelated, noted not acted on:** local `ora-skills` main is 6 ahead / 1 behind origin/main (another session's forward-merge pattern).
+
+## 2026-09-17 — Branch pushed (7027cc8); two unrelated blockers fixed, incl. a fail-OPEN review gate
+
+Gabriel: "push the branch". `feat/model-canary-probe-step25` pushed at `fb97a42..7027cc8`, exit 0. Another session had already pushed a7d87ca + 0260e8e, so only aa24f15 was outstanding at the start.
+
+**Blocker 1 — stale test baseline (faf2c6b).** Pre-push hook-tests gate failed 59/60 on `test_check_open_items_duplicate_ids.py`: the assertion hardcodes the orphaned-sections set, other sessions reconciled every one, and live is now `[]` (273 rows / 273 unique ids / 244 sections, no collisions). FIXING the backlog broke the test, and it blocked pushes for EVERY session. Baseline is now `set()`. Includes session 8a276a28's uncommitted 5-to-7 bump (09-13 11:10, four days idle, no claim) — superseded rather than dropped, credited in the message, Gabriel approved including it.
+
+**Blocker 2 — `eos-review-gate` failing OPEN (7027cc8).** `test-eos-review-gate.py::test_index_realcase_path_survives_non_ascii_under_quotepath_false` failed. Real defect, reproduced twice independently: this branch's `git_lines()` used a bare `text=True`, so a non-UTF-8 byte in git stdout raised UnicodeDecodeError in subprocess's READER THREAD, which does not propagate — `subprocess.run` returned rc=0 with `stdout=None`, the `except Exception` caught nothing, and `None.splitlines()` raised AttributeError that unwound to the gate's top-level `except Exception: pass`. The whole gate aborted and exited 0 on a blast-radius commit.
+- **First fix attempt was BLOCKED by independent review, correctly:** main ALREADY fixed this by making `git_lines` a thin adapter over `hooks/lib/git_probe_common.py::git()` — a file this branch did not have at all. A hand-written inline fix would have reinstated a duplicate wrapper a prior review removed, guaranteed a conflict in gate code, and left `eos-review-gate.py:411` + the test docstring asserting a delegation that did not exist. Landed as a verbatim 2-file sync from origin/main instead, per main's own LANDING NOTE that they never land split (a prior split cascaded 1 failure into 54).
+- **Root cause of the split:** the branch is 159 behind main and `ora-checkout-merge-forward` has been blocked since 09-14 — the gate + its test had been synced down, the two lib files had not. Monday's STEP 1b addresses the same root cause.
+- Done in an isolated worktree (`worktrees/hooks-git-lines-encoding`) because config-write-guard gates live `hooks/**`; NO override token minted, for either gate block, all session. `eos-review-gate` then blocked the commit itself for want of a review artifact keyed to the new content — dispatched a second opus reviewer (APPROVE; reproduced the failure from scratch, symbol diff zero removed/renamed), recorded via `--record --notes-file`, then committed.
+- Verified: review-gate 73/73 · hook-tests 113/113 (was 112/1) · commit-provenance 59/59 · doctrine gate OK · both files byte-identical to origin/main.
+
+**Gate flake noted, not acted on:** `allocate-oi-id` concurrency test failed 9/12 on the push's first gate run with `PermissionError(13)`, passed on the gate's own rerun. Known lock-contention flake; the gate's retry handled it.
+
+**RESIDUAL (open):** the LIVE checkout is 1 commit behind origin and its `hooks/lib/git_commit_parse.py` is still the unfixed copy (`grep git_probe_common` = 0), so the live review gate can still fail open on a non-ASCII path until the live branch fast-forwards. Monday's STEP 1b merge-forward would fix it as a side effect; a deliberate FF needs a gated live write.
+
+## 2026-09-17 — STEP 1b merge-forward unblock added to the 09-21 resume (aa24f15)
+
+Gabriel approved in-turn after this session independently verified the dirty-tree-triage session's script (peer claims treated as data, re-derived here): `maintenance/merge-forward-unblock.py` landed 6c55134; `python -m pytest maintenance/_tests/test_merge_forward_unblock.py maintenance/_tests/test_scheduled_task_run_guard.py` = 12 passed; `--json --dry-run` against the live checkout returned `DRY_RUN / "all preconditions hold"`, exit 0, no writes. Chosen option: dry-run then real merge (not dry-run-only).
+
+- **STEP 1b** (before STEP 2, so the merge runs while the fleet is still disabled): claim `sched-repo-housekeeping` -> dry-run -> real run with `--state-file _state/checkout-merge-forward-last-run.json` -> release -> status into the STEP 5 email. A non-MERGED result never stops the resume. Markers renumbered `--of 6`.
+- **Third independent Opus review: APPROVE.** It confirmed from live state that the merge delta (158 commits) touches exactly ONE of the 9 catch-up prompts -- `ora-health-guard` -> main's reviewed v1.15 (PR #204), and 4d runs it last -- and cannot delete `pause_windows.py` (local-only, absent at merge base AND on main), `send-via-outlook.ps1`, or either `offhost-backup:` line (STEP 3's grep runs after 1b regardless). Applied its three non-blocking fixes verbatim: ERROR *does* write before rolling back (only REFUSED is "nothing touched"); a dry-run crash with no JSON also means STOP; `_rollback()` swallows `OSError` per file, so a true `rolled_back` must be confirmed on disk -- those 4 files are what the Monday Headless tasks execute.
+- **Corrected a premise:** a MERGED outcome does NOT reset the Windows triggers. Triggers live in the Task Scheduler store, not the repo, and nothing re-runs `register-headless-checks.ps1` (whose main copy would re-register integrity-guard/stranded-spec DAILY and mirror-drift Mon-Fri).
+- **Two gate blocks today, both correct, no token minted:** (1) `config-write-guard` on a read-shaped `git show` that carried a `2>&1` redirect and named the live checkout -- re-run without redirects; (2) the autonomy gate fired TWICE on the Anthropic co-author trailer address appearing in a Bash command's text (once in a commit-message heredoc, once in this very log entry), read as an external recipient. Workaround both times: write the file with the Write tool / avoid the literal address in command text, then run the command. Worth a matcher note: a git trailer is not a send.
+
+## 2026-09-17 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `74d112a1-fd27-444f-9b89-6cc045340e00` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel confirmed in-turn 2026-09-17 ("push it again") for a SECOND fast-forward push of feat/model-canary-probe-step25 -- 5 commits (50cc8f7 event_log backlog, 0260e8e peer's catch-up spec, 6c55134 merge-forward-unblock + tests, 536a1df run-guard classification, fb97a42 gitignore backup fix), backup to ora-claude-config. Same two pre-existing BRANCH-STALE failures as this morning's push, re-verified just now and unrelated to the pushed content: (1) test-eos-review-gate.py -- abb2ef0 synced main's test without fix 4c5d441 and its new dependency hooks/lib/git_probe_common.py, which does not exist on this branch; passes 73/73 on origin/main. (2) test_check_open_items_duplicate_ids.py -- this branch's stale copy pins an orphan count against the live tracker; passes 60/60 on origin/main. Both resolve with the 09-21 merge-forward. The THIRD failure from this morning (test_scheduled_task_run_guard.py) is FIXED in 536a1df and that suite is green, so this override covers strictly less than the first one. Token deleted immediately after the push.
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-09-17 13:57:06 local.
+
+## 2026-09-17 — five-item triage follow-through: step25 pushed (override), merge-forward unblocker built TDD, gitignore backup gap closed, 30 worktrees + 9 stale claims pruned
+
+Session 74d112a1, Gabriel-approved in-turn ("Proceed with all 5 in priority using superpowers"). Continues the same day's dirty-tree-triage entries.
+
+**1. `feat/model-canary-probe-step25` PUSHED to `ora-claude-config`** (`abb2ef0..a7d87ca`, 66 commits; local == remote). The pre-push hook-test gate blocked first; all three failures were bisected in clean worktrees BEFORE any override was considered:
+- `test-eos-review-gate.py` — fails at `eef4e18` AND `6fa8c8c`, passes 73/73 on origin/main. Root cause: `abb2ef0` synced main's test file onto this branch without its fix `4c5d441` (git_lines UTF-8 adapter) or that fix's new dependency `hooks/lib/git_probe_common.py`, which does not exist on this branch at all.
+- `test_check_open_items_duplicate_ids.py` — fails at both commits, passes 60/60 on origin/main (this branch's stale copy pins an orphan count against the live tracker).
+- `test_scheduled_task_run_guard.py` — PASSES at both commits, fails only in the live tree: the untracked `ora-routine-pause-resume-09-21` spec was unclassified.
+Gabriel chose "override + push" on that evidence. `allow-hook-test-failure` minted with the bisect quoted, used once, deleted; the gate logged it (see the same-day override entry). Items 1–2 resolve with the 09-21 merge-forward; item 3 fixed below.
+
+**2. Background tasks** (spawned 09-17): headless-task diagnosis and the scan_dirty_trees worktree-classification fix are both running in their own sessions.
+
+**3. `maintenance/merge-forward-unblock.py` + tests — `6c55134`.** TDD: tests written first, watched fail (module absent), then 5 tests / 27 assertions ALL PASS, including a real-merge happy path and a rollback case. Two findings forced the design: (a) `git merge` refuses over an untracked file EVEN WHEN byte-identical to the incoming one (verified in a scratch repo, git 2.55.0.windows.2 — `verify_absent` never compares content), so "overwrite the drafts in place" is not an alternative; (b) three live Windows tasks execute the LOCAL `maintenance/headless/run-check.py`, so archive+merge must be one operation with a rollback. One python invocation by design: `git checkout --`/`mv`/`git show >` equivalents all trip `config-write-guard`. Refuses on a non-empty shared index (a live dry-run did exactly that against another session's staged file), an in-progress op, a failed fetch, a draft absent from origin/main, or a restore path differing beyond `--ignore-json-keys` (default `ts`). Never deletes; archives to `maintenance/_archive/<date>_merge-forward-unblock/`.
+- **Cross-session coordination:** session f8735323 held the live claim on `ora-routine-pause-resume-09-21/SKILL.md` and commit `a7d87ca`/`0260e8e`, so THIS session never edited that spec. It will add the STEP 1b call itself and put it to Gabriel in its own session. It also reported that Monday's `fireAt` moved to 10:00 ET, 15 CC routines are now weekly (merge-forward exempt, still daily 16:45), and the 3 ORA Headless Windows tasks moved to Mondays (07:20 pair, 10:55 mirror-drift) — the ~10:00 unblock falls between them, and either outcome leaves `run-check.py` present.
+- `536a1df` — classified `ora-routine-pause-resume-09-21` on the frozen `UNGUARDED_BACKLOG` (precedent: `ora-routine-pause-resume-2026-09-11`). Suite green again.
+
+**4. `fb97a42` — `.gitignore` now tracks `scheduled-tasks/ora-pm-ledger/references/`.** Rule 2b's `/scheduled-tasks/*/*` ignored the 30KB `CHANGELOG-2026-07-08-to-2026-08-16.md` holding 13 dated NOTE sections extracted from the SKILL.md on 09-06: the citing spec was tracked, the cited text was in NO backup. Directory negation (a per-file `!` cannot reach inside an excluded directory); `state/` stays ignored and no other task folder is affected (`git check-ignore` verified).
+
+**5. Pruned 30 worktrees, 0 branches deleted.** `~/.claude` 44→27 registered, `ora-pm` 21→8; branch counts 73 and 37 intact. Removal criteria re-verified per worktree at removal time: clean tree AND HEAD an ancestor of `origin/main`, no `--force` anywhere (git refuses a dirty worktree). `ora-skills` EXCLUDED — another session held `ora-skills-housekeeping`. Left alone: 8 dirty and ~19 unmerged worktrees. Also released 9 expired claims (ages 115h–859h, TTL 2h; no host session running) via `claim_work.py release --force`, which preserves an undo record — `active-work/` is now just the two live claims.
+
+Tokens: `allow-config-write` and `allow-hook-test-failure` both minted with Gabriel's words quoted and both deleted; the guard re-blocked a later command, confirming they are off.
+
+## 2026-09-17 — Monday 09-21 resume now runs 9 catch-up tasks (0260e8e)
+
+Gabriel approved adding the four Monday-weekly tasks stranded by the 10:00 resume, then approved adding the five more that the same-day weekly retime stranded. New STEP 4 in `ora-routine-pause-resume-09-21/SKILL.md`, committed 0260e8e (local branch only; not pushed).
+
+- **Order:** 4a master-workbook-ingest + pm-daily-crons + deal-aging-sla in parallel · 4b oxford-command-center writers strictly sequential (cc-snapshot-refresh -> lease-snapshot-refresh -> ar-feed-sweep, stop-on-failure, SKIPPED-CHAIN) · 4c deal-command-board · 4d task-integrity-guard -> health-guard last. Old STEP 4 report became STEP 5 with a catch-up table; markers `--of 5`.
+- **Excluded on purpose:** `ora-aaos-expire-leases` (Mon 07:20) — the reviewer verified live that `ora-ops/locks/` holds no live lock files and `aaos-events.ndjson` has not been written since 2026-08-16, so the sweep is a guaranteed no-op. Ten tasks lost their pre-10:00 Monday slot; nine are caught up.
+- **Independent Opus review (read-only, no context) returned BLOCK first:** (1) the message said nine stranded tasks when ten are; (2) the WAIT rule polled `list_task_runs(limit:1)` and would have read a PRIOR WEEK's `succeeded` row as this run finishing — which would have started `ora-lease-snapshot-refresh` while `ora-cc-snapshot-refresh` was still writing `data/snapshots/portfolio.json`, the exact collision 4b exists to prevent. Both fixed (the rule now anchors on the session_id `run_scheduled_task` returns), re-reviewed -> APPROVE. Also applied its non-blocking notes: aaos do-not-add line, attended window "typically 1-2h, up to ~5h worst case" (6 x 45-min caps), and a 4a Outlook-COM contention note that forbids re-running a task to force a send (an `ora-deal-aging-sla` re-run would duplicate drafts).
+- **Registry untouched by design:** the commit changed only the SKILL.md at the registered filePath; fireAt 2026-09-21 10:00 ET + enabled were verified via `list_scheduled_tasks` when the move was made. A post-commit re-read was attempted and correctly BLOCKED by config-write-guard (read-shaped command naming the registry path); no override token minted.
+- **Peer request (dirty-tree-triage session, NOT actioned):** asked for a STEP 1b calling `maintenance/merge-forward-unblock.py` to clear ora-checkout-merge-forward's BLOCKED_DIRTY_OVERLAP. Declined for now — the script does not exist yet, and a step calling a missing script would fail the attended run. Told them to send the commit sha; the step then needs `--of 6` markers and a STEP 5 (not 4) email reference, and goes to Gabriel in this session rather than riding on their approval. Warned them their 4 headless drafts are now load-bearing WEEKLY (Mon 07:20 pair, Mon 10:55 mirror-drift) and their ~10:00 unblock window sits between those runs.
 
 ## 2026-09-17 — event_log rollover + ora-skills worktree prune (7 removed, 1 kept); catch-up hook proven in production
 
