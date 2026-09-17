@@ -1,6 +1,8 @@
 # Headless checks — burn-in and cutover runbook
 
-Status as of 2026-09-10: **parallel burn-in, nothing retired.** Gabriel's ruling.
+Status as of 2026-09-17: **parallel burn-in, nothing retired, and currently PAUSED**
+(see the note under the table — both in-fleet twins are disabled by the 09-14 fleet
+pause, so burn-in is not accruing). Original ruling 2026-09-10, Gabriel's.
 The in-fleet twins keep running. Do not retire anything until the exit criteria below are met.
 
 ## Why this file exists
@@ -13,8 +15,6 @@ half they cared about. The exclusions in `run-check.py` are real: the headless
 
 ## What is running in parallel
 
-| Headless (Windows Task Scheduler) | In-fleet twin (CC/MCP) | Overlap |
-|---|---|---|
 Cadences below are **weekly (Mondays)** since 2026-09-17, when Gabriel capped all
 routines at once per week; the in-fleet twins moved the same day. Both sides are
 listed at their current times, not the 09-10 daily/weekday originals.

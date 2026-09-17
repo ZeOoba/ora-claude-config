@@ -261,13 +261,24 @@ def check_integrity_guard(result):
 # The old numbers become a guaranteed false HIGH under that cadence -- freshness
 # runs Mon 07:50, BEFORE mirror-drift's Mon 10:55, so it reads LAST Monday's
 # heartbeat at 168h - 3h05m = 164.9h against a 96h threshold, every single week.
-# 176h = 7d + 8h of slack, which also survives the other weekly hazard: with
+# 176h = 7d + 8h of slack, which covers a SAME-DAY catch-up: with
 # StartWhenAvailable now ON, a slept-through Monday fires all four missed
-# triggers in one catch-up burst with NO defined ordering, so freshness can run
-# before the checks it ages. Under the old daily cadence a mis-ordered catch-up
-# cost 24h and stayed under 30h; at weekly it costs a full 168h and cannot.
-# The 07:50-after-07:20 offset is therefore BEST-EFFORT, not a guarantee, and
-# these thresholds -- not the ordering -- are what keep the check honest.
+# triggers in one burst with NO defined ordering, so freshness can run before the
+# checks it ages. Under the old daily cadence a mis-ordered catch-up cost 24h and
+# stayed under 30h; at weekly it costs a full 168h. The 07:50-after-07:20 offset
+# is therefore BEST-EFFORT, not a guarantee, and these thresholds -- not the
+# ordering -- are what keep the check honest.
+#
+# Two limits of 176h, accepted deliberately rather than papered over:
+#   - The slack runs out at Mon 18:55 (176h after the prior Mon 10:55). A machine
+#     that sleeps through Monday and wakes that evening, or on Tuesday, can still
+#     false-page if freshness wins the ordering race. Widening further would eat
+#     into real detection; this is the trade, not an oversight.
+#   - Detection latency is ~2 weeks for mirror-drift: because freshness runs
+#     BEFORE it, ONE missed Monday reads 168.25h -- under the threshold -- and
+#     stays silent; it only fires at ~333h after a SECOND miss. Moving freshness
+#     last on Monday would cut that to one week, at the cost of no longer ageing
+#     the 07:20 pair's same-day output.
 _WEEKLY_MAX_AGE_H = 176
 WATCHED = {
     "integrity-guard": {"task": "ORA Headless - integrity-guard",

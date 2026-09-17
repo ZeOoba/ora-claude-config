@@ -105,20 +105,28 @@ function Get-RunnerChecks {
     } catch {
         return $null   # cannot ask -> caller registers everything, as before
     }
-    $m = [regex]::Match($help, '(?m)^\s*checks:\s*(.+)$')
+    # (?i) so a future '--help' that capitalises the label still matches.
+    $m = [regex]::Match($help, '(?im)^\s*checks:\s*(.+)$')
     if (-not $m.Success) { return $null }
     return ($m.Groups[1].Value -split ',' | ForEach-Object { $_.Trim() } |
             Where-Object { $_ })
 }
 
+$failed = 0
+
+# Fail-OPEN on purpose: if the runner cannot be asked, register everything, as
+# this script always did. Fail-closed would leave the machine with ZERO headless
+# guards, which is worse than a task that exits 2 into a log that exists. But it
+# still counts toward $failed -- "I could not verify what I registered" must not
+# report success to a caller, which is the same silent-success this script's
+# exit-1 block exists to close.
 $runnerChecks = Get-RunnerChecks -Python $py -Runner $runner
 if ($runnerChecks) {
     Write-Host ("runner implements: {0}" -f ($runnerChecks -join ', '))
 } else {
     Write-Warning "could not read the runner's check list -- registering all tasks unfiltered"
+    $failed++
 }
-
-$failed = 0
 
 foreach ($t in $tasks) {
     if ($runnerChecks -and ($runnerChecks -notcontains $t.Check)) {
