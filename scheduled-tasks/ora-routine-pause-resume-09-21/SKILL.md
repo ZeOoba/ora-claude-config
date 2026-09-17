@@ -1,0 +1,21 @@
+---
+name: ora-routine-pause-resume-09-21
+description: One-time ATTENDED resume of the 37 CC/MCP tasks Gabriel paused 2026-09-14 for the rest of the week (ora-am-brief was carved out and never paused). Needs someone to approve each update_scheduled_task call in the Desktop app (register-scheduled-task v2.23).
+---
+
+ORA bounded-pause RESUME — CC/MCP fleet. Gabriel paused these tasks on 2026-09-14 ("pause all routines for the rest of the week besides the daily brief"). Registered under register-scheduled-task v2.24.
+
+NOTE: this run needs someone watching. The Desktop runner does not auto-approve update_scheduled_task, so each call waits for approval in the app. Batch the calls so approvals go quickly.
+
+STEP 0 — Surface assertion. Confirm list_scheduled_tasks is in this session's tool registry, and that its `path` fields resolve to C:\Users\Owner\.claude\scheduled-tasks\ (the CC/MCP fleet). If the tool is absent, STOP and email ggoldberg@oxfordra.net (see STEP 4). Record a progress marker:
+C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:\Users\Owner\.claude\maintenance\task-progress-marker.py write --fleet cc --task-id ora-routine-pause-resume-09-21 --step 1 --of 4 --note "surface asserted"
+
+STEP 1 — Exclusions. Read C:\Users\Owner\.claude\maintenance\_state\retire-pending.json. Remove any id under "pending" with fleet "cc" from the list below, and do NOT re-enable it. Never touch ora-am-brief; it was never paused.
+
+STEP 2 — Re-enable. Call update_scheduled_task(taskId, enabled: true) for EACH of these 37 ids. Send them in as few turns as possible, and pass ONLY taskId + enabled:
+ora-master-workbook-ingest, ora-financial-code-integrity-sweep, ora-monthly-portfolio-briefing, ora-health-guard, ora-task-integrity-guard, ora-weekly-hygiene, ora-deal-sourcing-scan, ora-pm-ledger, ora-doctrine-integrity-guard, ora-open-sessions-board, ora-command-center-mirror-drift-check, ora-site-exposure-probe, ora-aaos-expire-leases, ora-aaos-publish-contracts, ora-model-release-watch, ora-calibration-snapshot, ora-entry-market-scan, ora-cc-schematic-refresh, ora-sofr-direct-prefetch, ora-broker-touch-cadence, ora-deal-command-board, ora-deal-aging-sla, ora-appsec-sweep, ora-tenant-hubspot-reconciliation, ora-cc-snapshot-refresh, ora-lease-snapshot-refresh, ora-psa-drift-watch, ora-claude-setup-audit, ora-acquisition-underwriting-eval-harness, ora-county-sales-monitor, ora-passed-deal-tracker, ora-memory-commit-sweep, ora-ar-feed-sweep, ora-pm-daily-crons, ora-pm-monthly-billing, ora-checkout-merge-forward, ora-ground-truth-auditor
+Do NOT change any description, prompt, cron, or [MODEL:] tag or date. A resume is not a model observation. After the calls, write marker --step 2 --of 4 --note "re-enabled N/37".
+
+STEP 3 — Verify money-moving frontmatter and state. Grep C:\Users\Owner\.claude\scheduled-tasks\ora-pm-daily-crons\SKILL.md and ora-pm-monthly-billing\SKILL.md for an `offhost-backup:` line. If one is missing, restore it from `git -C C:\Users\Owner\.claude show HEAD:scheduled-tasks/<id>/SKILL.md` (or the last commit containing it) by file edit, never by another update call. Then call list_scheduled_tasks and confirm all 37 show enabled:true. Run `python C:\Users\Owner\.claude\maintenance\_shared\pause_windows.py capture` to close the pause window. Write marker --step 3 --of 4 --note "verified".
+
+STEP 4 — Report. Send ONE email to ggoldberg@oxfordra.net only, with no cc, using powershell -File C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1. Subject: "[ORA] CC fleet resumed — N/37" (prefix [ACTION] if any id is still disabled). Body: which ids were re-enabled, any still disabled, the offhost-backup check result, the pause_windows capture output, and a reminder that the LAMS/Cowork fleet has its own separate resume. On a non-zero send exit, retry once, then record the failure in the marker note. Write marker --step 4 --of 4 --note "done". Never fabricate a count; report exactly what list_scheduled_tasks shows.
