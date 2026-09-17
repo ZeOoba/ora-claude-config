@@ -31,17 +31,57 @@ if (-not (Test-Path $runner)) { throw "runner not found: $runner" }
 
 # Cadences mirror the in-fleet twins (offset ~15 min so the headless run observes
 # the same day's state) so burn-in is an apples-to-apples comparison:
-#   ora-task-integrity-guard            5 7 * * *      -> 07:20 daily
-#   ora-command-center-mirror-drift-check weekday 10:40 -> 10:55 weekdays
+#   ora-task-integrity-guard              15 5 * * 1   -> Mondays 07:20
+#   ora-command-center-mirror-drift-check Mondays 10:40 -> Mondays 10:55
 #   freshness has no in-fleet twin -- it ages the other three heartbeats, so it runs
-#   at 07:50, AFTER the 07:20 pair, or it would read their previous day's files and
+#   at 07:50, AFTER the 07:20 pair, or it would read their previous run's files and
 #   page on a staleness it created by running too early.
+#
+# WEEKLY, NOT DAILY (2026-09-17, Gabriel-directed "all routines at most once per
+# week"): the in-fleet twins were capped the same day, and these must not drift
+# back to a cadence the fleet no longer runs. Re-running this script previously
+# reset the live tasks to DAILY, silently undoing that policy.
 $tasks = @(
-    @{ Name = 'ORA Headless - integrity-guard'; Check = 'integrity-guard'; Sc = 'DAILY';  St = '07:20'; Days = $null },
-    @{ Name = 'ORA Headless - stranded-spec';   Check = 'stranded-spec';   Sc = 'DAILY';  St = '07:20'; Days = $null },
-    @{ Name = 'ORA Headless - mirror-drift';    Check = 'mirror-drift';    Sc = 'WEEKLY'; St = '10:55'; Days = 'MON,TUE,WED,THU,FRI' },
-    @{ Name = 'ORA Headless - freshness';       Check = 'freshness';       Sc = 'DAILY';  St = '07:50'; Days = $null }
+    @{ Name = 'ORA Headless - integrity-guard'; Check = 'integrity-guard'; Sc = 'WEEKLY'; St = '07:20'; Days = 'MON' },
+    @{ Name = 'ORA Headless - stranded-spec';   Check = 'stranded-spec';   Sc = 'WEEKLY'; St = '07:20'; Days = 'MON' },
+    @{ Name = 'ORA Headless - mirror-drift';    Check = 'mirror-drift';    Sc = 'WEEKLY'; St = '10:55'; Days = 'MON' },
+    @{ Name = 'ORA Headless - freshness';       Check = 'freshness';       Sc = 'WEEKLY'; St = '07:50'; Days = 'MON' }
 )
+
+# WHY THIS EXISTS -- these three flags are the difference between a registered
+# task and a task that RUNS (root incident 2026-09-17, diagnosed live):
+# `schtasks /Create` cannot set them, and its defaults are wrong for a laptop.
+#   StartWhenAvailable        $false -> a missed slot is DROPPED, not caught up.
+#   DisallowStartIfOnBatteries $true -> a catch-up run on battery is REFUSED.
+#   StopIfGoingOnBatteries     $true -> a running check dies when AC is unplugged.
+# integrity-guard and stranded-spec were registered 2026-09-10 and had NEVER
+# executed once by 09-17: this machine is asleep or hibernated at 07:20 every
+# day and unplugged overnight, so every slot was missed, then refused on wake
+# with 0x800710E0 (ERROR_REQUEST_REFUSED). The log files the runner appends to
+# did not exist at all, which is how we know. Task Scheduler reported the tasks
+# as Ready the whole time. Do not "simplify" this away -- the other out-of-band
+# ORA guards (Fleet Dead-Man, Pause-Resume Guard, Wake-and-Launch, Mirror
+# Deploy) all carry StartWhenAvailable for the same reason.
+function Set-HeadlessRunConditions {
+    param([Parameter(Mandatory)][string]$TaskName)
+    try {
+        $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+        $s = $task.Settings
+        $s.StartWhenAvailable = $true
+        $s.DisallowStartIfOnBatteries = $false
+        $s.StopIfGoingOnBatteries = $false
+        Set-ScheduledTask -TaskName $TaskName -TaskPath $task.TaskPath -Settings $s | Out-Null
+        $v = (Get-ScheduledTask -TaskName $TaskName).Settings
+        if ($v.StartWhenAvailable -and -not $v.DisallowStartIfOnBatteries -and
+            -not $v.StopIfGoingOnBatteries) {
+            Write-Host "    run conditions: catch-up ON, battery restrictions OFF"
+        } else {
+            Write-Warning ("    run conditions NOT applied to {0} -- it will drop missed slots" -f $TaskName)
+        }
+    } catch {
+        Write-Warning ("    could not set run conditions on {0}: {1}" -f $TaskName, $_.Exception.Message)
+    }
+}
 
 foreach ($t in $tasks) {
     $log = Join-Path $logDir ("{0}.log" -f $t.Check)
@@ -59,7 +99,10 @@ foreach ($t in $tasks) {
         Write-Host "    $cmd"
     } else {
         & schtasks.exe @args | Out-Null
-        if ($LASTEXITCODE -eq 0) { Write-Host "registered: $($t.Name)  [$($t.Sc) $($t.St), starts 09/11/2026]" }
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "registered: $($t.Name)  [$($t.Sc) $($t.St), starts 09/11/2026]"
+            Set-HeadlessRunConditions -TaskName $t.Name
+        }
         else { Write-Warning "FAILED to register $($t.Name) (rc=$LASTEXITCODE)" }
     }
 }
