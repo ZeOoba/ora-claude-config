@@ -11,6 +11,7 @@ Stdlib only. ASCII-only. Windows (`python`).
 """
 import os
 import sys
+import unicodedata
 
 HOOKS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(HOOKS_DIR, "lib"))
@@ -189,6 +190,191 @@ def test_shell_analysis_unicode_evasion_folded():
     normalized = tcp.normalize_text(cmd)
     check("normalize_text strips zero-width chars", ".claude/hooks" in
           normalized.replace("\\", "/").lower())
+
+
+def test_strip_categories_is_the_shared_constant():
+    """2026-09-18: the stripped-category tuple lives in hooks/lib/text_normalization.py
+    and is SHARED with ora-autonomy-gate.py. It used to be an independent `_STRIP_
+    CATEGORIES` here that merely happened to equal the gate's -- harden one, forget the
+    other, and the gate (sole enforcement of hard invariant 2 under bypassPermissions)
+    silently becomes the weakest normalizer in the layer while the guards routing through
+    normalize_text are stronger."""
+    import text_normalization  # noqa: E402 -- lib/ is already on sys.path above
+
+    check("normalize_text reads the SHARED constant, not a local copy",
+          tcp.STRIP_CATEGORIES is text_normalization.STRIP_CATEGORIES)
+    check("the private duplicate _STRIP_CATEGORIES is gone",
+          not hasattr(tcp, "_STRIP_CATEGORIES"))
+    # Without this, the "iff" probes below are satisfied by an EMPTY tuple (nothing is
+    # stripped, nothing is expected to be -- vacuously true on every probe). 2026-09-18
+    # review finding: the probes alone would stay green on `STRIP_CATEGORIES = ()`.
+    check("the shared tuple is a non-empty tuple of category names",
+          isinstance(text_normalization.STRIP_CATEGORIES, tuple)
+          and len(text_normalization.STRIP_CATEGORIES) > 0
+          and all(isinstance(c, str) and len(c) == 2
+                  for c in text_normalization.STRIP_CATEGORIES))
+
+    # Behavioral, and written against the tuple rather than against a frozen expectation:
+    # whatever the shared module lists is stripped, and whatever it does not list survives.
+    # Stays honest if the set is ever widened -- that is the point of sharing it.
+    # Codepoints written as chr(), never as raw fixture bytes: this file's docstring
+    # declares ASCII-only, and ascii-only-guard.py enforces that declaration.
+    probes = [
+        chr(0x200B),  # Cf  zero-width space
+        chr(0x202E),  # Cf  RTL override
+        chr(0x0332),  # Mn  combining low line
+        chr(0x0001),  # Cc  control -- NOT in the shipped set, and NFKC leaves it alone,
+                      #     so it is the one probe that isolates category stripping from
+                      #     the fold (a U+00A0 probe would not: NFKC folds it to a plain
+                      #     space regardless of any category decision).
+    ]
+    stripped_any = False
+    for ch in probes:
+        cat = unicodedata.category(ch)
+        survived = ch in tcp.normalize_text("a" + ch + "b")
+        should_strip = cat in text_normalization.STRIP_CATEGORIES
+        stripped_any = stripped_any or (should_strip and not survived)
+        check("normalize_text strips U+%04X (%s) iff the shared tuple lists it"
+              % (ord(ch), cat), survived != should_strip)
+    check("at least one probe was actually stripped (the iff loop is not vacuous)",
+          stripped_any)
+
+
+def test_strip_categories_fallbacks_match_shared_module():
+    """tool_call_paths.py holds a pinned fallback copy of STRIP_CATEGORIES, added
+    2026-09-18 after an adversarial pass MEASURED what a bare import costs: with
+    text_normalization.py absent, this module fails to import, and config-write-guard
+    (225 of its checks) plus lint-config-guard (17) go fully inert -- including their
+    protection of hooks/** itself. The fallback is the only copy here that can drift, so
+    it is pinned to the canonical tuple by VALUE."""
+    import ast
+    import text_normalization  # noqa: E402
+
+    src_path = os.path.join(HOOKS_DIR, "lib", "tool_call_paths.py")
+    with open(src_path, encoding="utf-8") as fh:
+        tree = ast.parse(fh.read())
+
+    def _targets_name(node):
+        # Accepts AnnAssign too (`STRIP_CATEGORIES: tuple = (...)`), matching the gate-side
+        # test's check -- an ast.Assign-only filter here false-reds a valid annotated
+        # fallback (2026-09-18 review nit).
+        if isinstance(node, ast.Assign):
+            return any(isinstance(t, ast.Name) and t.id == "STRIP_CATEGORIES"
+                       for t in node.targets)
+        if isinstance(node, ast.AnnAssign):
+            return isinstance(node.target, ast.Name) and node.target.id == "STRIP_CATEGORIES"
+        return False
+
+    assigns = [n for n in ast.walk(tree) if _targets_name(n)]
+    check("tool_call_paths declares exactly one STRIP_CATEGORIES fallback",
+          len(assigns) == 1, "found %d" % len(assigns))
+    if len(assigns) != 1:
+        return
+    owning = []
+    for tr in [n for n in ast.walk(tree) if isinstance(n, ast.Try)]:
+        if any(isinstance(s, ast.ImportFrom)
+               and any(a.name == "STRIP_CATEGORIES" for a in s.names)
+               for s in ast.walk(ast.Module(body=tr.body, type_ignores=[]))):
+            owning.extend(tr.handlers)
+    check("the fallback is a direct statement of the importing try's handler "
+          "(anywhere else is dead code and the import failure is unhandled)",
+          any(assigns[0] in h.body for h in owning))
+    check("the tool_call_paths fallback has not drifted from the shared module",
+          ast.literal_eval(assigns[0].value) == text_normalization.STRIP_CATEGORIES)
+
+
+def test_missing_shared_module_does_not_disarm_the_write_guards():
+    """The behavioral half of the above, and the reason the fallback exists at all.
+
+    MEASURED, not hypothetical (2026-09-18 adversarial review). With a bare import, losing
+    hooks/lib/text_normalization.py took tool_call_paths down with it, and config-write-
+    guard went from exit 2 to exit 0 on a Write into hooks/ -- the guard that protects the
+    hook layer, including ora-autonomy-gate.py, silently disarmed by one missing file. The
+    likeliest trigger is mundane: a commit that misses the module, or a partial pull on the
+    shared checkout.
+
+    Runs the guard as a real subprocess against a tree with the module deleted."""
+    import json
+    import shutil
+    import subprocess
+    import tempfile
+
+    sandbox = tempfile.mkdtemp(prefix="tcp-nolib-")   # the guard's own code + lib
+    guard_root = tempfile.mkdtemp(prefix="tcp-root-")  # stand-in for C:/Users/Owner/.claude
+    try:
+        hooks_dir = os.path.join(sandbox, "hooks")
+        os.makedirs(hooks_dir)
+        shutil.copy2(os.path.join(HOOKS_DIR, "config-write-guard.py"),
+                     os.path.join(hooks_dir, "config-write-guard.py"))
+        shutil.copytree(os.path.join(HOOKS_DIR, "lib"), os.path.join(hooks_dir, "lib"))
+        guard = os.path.join(hooks_dir, "config-write-guard.py")
+
+        # Governance target via the guard's documented ORA_CONFIG_GUARD_ROOT test seam --
+        # NOT a live repo path. A worktree checkout's own hooks/ dir carries no contiguous
+        # ".claude/hooks" segment, so it is not a governance path and the guard correctly
+        # allows it; an earlier draft of this test used one and failed for that reason,
+        # not because the fallback was broken.
+        target = os.path.join(guard_root, "hooks", "g.py")
+        payload = {"tool_name": "Write",
+                   "tool_input": {"file_path": target, "content": "x"},
+                   "session_id": "cccccccc-1111-2222-3333-444444444444"}
+
+        def run_guard():
+            env = dict(os.environ)
+            env.pop("PYTHONPATH", None)  # inherited PYTHONPATH would re-supply the module
+            env["ORA_CONFIG_GUARD_ROOT"] = guard_root
+            env["ORA_OVERRIDE_SESSIONS_DIR"] = tempfile.mkdtemp(prefix="tcp-sess-")
+            env["ORA_CHIP_CLAIMS_LOG"] = os.path.join(guard_root, "chip-claims.log")
+            p = subprocess.run([sys.executable, guard], input=json.dumps(payload),
+                               capture_output=True, text=True, env=env)
+            return p.returncode, (p.stderr or "")[:200]
+
+        rc_before, err_before = run_guard()
+        check("control: the sandboxed guard blocks the governance write while "
+              "text_normalization.py is present", rc_before == 2,
+              "got exit %s: %s" % (rc_before, err_before))
+
+        os.remove(os.path.join(hooks_dir, "lib", "text_normalization.py"))
+        rc_after, err_after = run_guard()
+        check("config-write-guard still blocks a governance write with "
+              "text_normalization.py absent (exit 2, not silently disarmed)",
+              rc_after == 2, "got exit %s: %s" % (rc_after, err_after))
+
+        # 2026-09-18 review nit: the Write payload above only proves the fallback NAME is
+        # bound (a dead-code fallback that never binds STRIP_CATEGORIES would also make
+        # config-write-guard raise -> exit 1 -> non-blocking -> the write PROCEEDS, so
+        # that case is not silently indistinguishable from this test's pass condition --
+        # but it does not prove the fallback's VALUE is right, since this guard's Write
+        # branch never calls normalize_text at all. shell_may_write (Bash branch) does,
+        # via _FD_DUP_RE/_NULL_REDIRECT_RE matching on normalize_text() output -- so drive
+        # a ZWSP-obfuscated redirect through THAT path: it only blocks if the fallback
+        # tuple actually strips Cf (zero-width space), same as the shipped constant.
+        zwsp = chr(0x200B)  # chr(), not a raw fixture byte -- this file is ASCII-only
+        redirect_payload = {
+            "tool_name": "Bash",
+            "tool_input": {"command": 'echo x > "%s"'
+                           % os.path.join(guard_root, "hooks", "g" + zwsp + ".py")},
+            "session_id": "cccccccc-1111-2222-3333-444444444444",
+        }
+
+        def run_guard_bash():
+            env = dict(os.environ)
+            env.pop("PYTHONPATH", None)
+            env["ORA_CONFIG_GUARD_ROOT"] = guard_root
+            env["ORA_OVERRIDE_SESSIONS_DIR"] = tempfile.mkdtemp(prefix="tcp-sess-")
+            env["ORA_CHIP_CLAIMS_LOG"] = os.path.join(guard_root, "chip-claims.log")
+            p = subprocess.run([sys.executable, guard], input=json.dumps(redirect_payload),
+                               capture_output=True, text=True, env=env)
+            return p.returncode, (p.stderr or "")[:200]
+
+        rc_bash, err_bash = run_guard_bash()
+        check("config-write-guard still blocks a ZWSP-obfuscated shell redirect into "
+              "hooks/ with text_normalization.py absent -- proves the fallback's VALUE "
+              "strips Cf, not merely that STRIP_CATEGORIES is bound to something",
+              rc_bash == 2, "got exit %s: %s" % (rc_bash, err_bash))
+    finally:
+        shutil.rmtree(sandbox, ignore_errors=True)
+        shutil.rmtree(guard_root, ignore_errors=True)
 
 
 # ---------------------------------------------------------------- coverage registry
@@ -923,6 +1109,9 @@ if __name__ == "__main__":
     test_shell_analysis_dc_start_process_and_interact()
     test_shell_analysis_non_shell_tool_is_none()
     test_shell_analysis_unicode_evasion_folded()
+    test_strip_categories_is_the_shared_constant()
+    test_strip_categories_fallbacks_match_shared_module()
+    test_missing_shared_module_does_not_disarm_the_write_guards()
     test_shapes_registry_enumerates_all_write_capable_shapes()
     test_is_write_capable()
     test_refute_family_suffix_matching_and_new_shapes()

