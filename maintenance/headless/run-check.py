@@ -253,13 +253,40 @@ def check_integrity_guard(result):
 # design. This closes that loop by ageing each check's `-latest.json` heartbeat
 # against its own cadence AND cross-checking the Windows task's own LastRunTime.
 #
-# Thresholds are cadence-aware. 30h for a daily check matches fleet-deadman.ps1's
-# ThresholdHours. mirror-drift is WEEKDAY-only, so a Friday run is still the most
-# recent one on Monday morning -- 96h, not 30h, or it would page every weekend.
+# Thresholds are cadence-aware, and MUST be re-derived whenever the cadence moves.
+# History: 30h for a daily check (matching fleet-deadman.ps1's ThresholdHours) and
+# 96h for weekday-only mirror-drift, so a Friday run still read fresh on Monday.
+#
+# 2026-09-17: all four checks went WEEKLY/Monday (Gabriel's once-per-week cap).
+# The old numbers become a guaranteed false HIGH under that cadence -- freshness
+# runs Mon 07:50, BEFORE mirror-drift's Mon 10:55, so it reads LAST Monday's
+# heartbeat at 168h - 3h05m = 164.9h against a 96h threshold, every single week.
+# 176h = 7d + 8h of slack, which covers a SAME-DAY catch-up: with
+# StartWhenAvailable now ON, a slept-through Monday fires all four missed
+# triggers in one burst with NO defined ordering, so freshness can run before the
+# checks it ages. Under the old daily cadence a mis-ordered catch-up cost 24h and
+# stayed under 30h; at weekly it costs a full 168h. The 07:50-after-07:20 offset
+# is therefore BEST-EFFORT, not a guarantee, and these thresholds -- not the
+# ordering -- are what keep the check honest.
+#
+# Two limits of 176h, accepted deliberately rather than papered over:
+#   - The slack runs out at Mon 18:55 (176h after the prior Mon 10:55). A machine
+#     that sleeps through Monday and wakes that evening, or on Tuesday, can still
+#     false-page if freshness wins the ordering race. Widening further would eat
+#     into real detection; this is the trade, not an oversight.
+#   - Detection latency is ~2 weeks for mirror-drift: because freshness runs
+#     BEFORE it, ONE missed Monday reads 168.25h -- under the threshold -- and
+#     stays silent; it only fires at ~333h after a SECOND miss. Moving freshness
+#     last on Monday would cut that to one week, at the cost of no longer ageing
+#     the 07:20 pair's same-day output.
+_WEEKLY_MAX_AGE_H = 176
 WATCHED = {
-    "integrity-guard": {"task": "ORA Headless - integrity-guard", "max_age_h": 30},
-    "stranded-spec": {"task": "ORA Headless - stranded-spec", "max_age_h": 30},
-    "mirror-drift": {"task": "ORA Headless - mirror-drift", "max_age_h": 96},
+    "integrity-guard": {"task": "ORA Headless - integrity-guard",
+                        "max_age_h": _WEEKLY_MAX_AGE_H},
+    "stranded-spec": {"task": "ORA Headless - stranded-spec",
+                      "max_age_h": _WEEKLY_MAX_AGE_H},
+    "mirror-drift": {"task": "ORA Headless - mirror-drift",
+                     "max_age_h": _WEEKLY_MAX_AGE_H},
 }
 # Windows stamps a never-run task with an ancient date (11/30/1999 on this box)
 # rather than null. This is a THRESHOLD, not a sentinel value: any LastRunTime

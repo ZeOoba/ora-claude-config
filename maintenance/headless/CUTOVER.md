@@ -1,6 +1,8 @@
 # Headless checks — burn-in and cutover runbook
 
-Status as of 2026-09-10: **parallel burn-in, nothing retired.** Gabriel's ruling.
+Status as of 2026-09-17: **parallel burn-in, nothing retired, and currently PAUSED**
+(see the note under the table — both in-fleet twins are disabled by the 09-14 fleet
+pause, so burn-in is not accruing). Original ruling 2026-09-10, Gabriel's.
 The in-fleet twins keep running. Do not retire anything until the exit criteria below are met.
 
 ## Why this file exists
@@ -13,12 +15,21 @@ half they cared about. The exclusions in `run-check.py` are real: the headless
 
 ## What is running in parallel
 
+Cadences below are **weekly (Mondays)** since 2026-09-17, when Gabriel capped all
+routines at once per week; the in-fleet twins moved the same day. Both sides are
+listed at their current times, not the 09-10 daily/weekday originals.
+
 | Headless (Windows Task Scheduler) | In-fleet twin (CC/MCP) | Overlap |
 |---|---|---|
-| `ORA Headless - integrity-guard` (daily 07:20) | `ora-task-integrity-guard` (`5 7 * * *`) | **Partial** — see exclusions |
-| `ORA Headless - mirror-drift` (weekdays 10:55) | `ora-command-center-mirror-drift-check` (weekday 10:40) | Near-full — both key on `mirror-run-classify.ps1`'s verdict |
-| `ORA Headless - stranded-spec` (daily 07:20) | (a step inside `ora-task-integrity-guard`) | Full for that step |
-| `ORA Headless - freshness` (daily 07:50) | none — new capability | n/a |
+| `ORA Headless - integrity-guard` (Mon 07:20) | `ora-task-integrity-guard` (`5 7 * * 1`) | **Partial** — see exclusions |
+| `ORA Headless - mirror-drift` (Mon 10:55) | `ora-command-center-mirror-drift-check` (`40 10 * * 1`) | Near-full — both key on `mirror-run-classify.ps1`'s verdict |
+| `ORA Headless - stranded-spec` (Mon 07:20) | (a step inside `ora-task-integrity-guard`) | Full for that step |
+| `ORA Headless - freshness` (Mon 07:50) | none — new capability | n/a — **not registered on this machine yet**; the live `run-check.py` has no `freshness` handler, and the register script now skips any check its runner does not implement |
+
+> **Burn-in is paused, not progressing.** Both in-fleet twins are currently
+> `enabled: false` (the 09-14 fleet pause; `ora-routine-pause-resume-09-21`
+> restores them), so the apples-to-apples comparison this runbook rests on is
+> not running. Do not read the elapsed calendar as burn-in time.
 
 ### Exclusions that block a straight integrity-guard retirement
 
@@ -37,7 +48,9 @@ replacing it. Retiring it would silently drop 1–3 above.
 
 ## Exit criteria — all must hold before retiring any twin
 
-1. **≥ 10 firing days** of both copies (weekday-only checks: 10 weekdays).
+1. **≥ 10 firing OCCASIONS** of both copies. Under the 2026-09-17 weekly cadence
+   that is ten *Mondays*, i.e. ~10 weeks, not ten days — re-read this criterion
+   before claiming burn-in is done, and do not silently reinterpret it as days.
 2. **Zero unexplained disagreements.** Compare the headless findings file against the
    in-fleet task's Notion row / email for the same day:
    `~/.claude/maintenance/_state/headless-findings/<check>-latest.json`
