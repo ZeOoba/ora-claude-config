@@ -233,6 +233,36 @@ except Exception:
     # rather than silently disabling it entirely.
     SITE_PATH_MARKERS = ("website-canonical", "oxford-site")
 
+try:
+    from text_normalization import STRIP_CATEGORIES  # noqa: E402
+    # Shape-validate the shared value before trusting it -- the same defensive move the
+    # override_tokens `consume`-signature check below makes for the same reason. A module
+    # that imports cleanly but exports the wrong TYPE (None, an int, a list of ints) does
+    # not fail here; it raises inside _normalize_for_matching on EVERY call, and an
+    # uncaught exception exits 1 -- non-blocking, i.e. BOTH gates silently off on every
+    # tool call in the session. Confirmed 2026-09-18: `STRIP_CATEGORIES = None` produced
+    # exit 1 even for a benign `git status`. Wrong shape routes to the fallback instead.
+    if (not isinstance(STRIP_CATEGORIES, tuple) or not STRIP_CATEGORIES
+            or not all(isinstance(c, str) for c in STRIP_CATEGORIES)):
+        raise TypeError("STRIP_CATEGORIES must be a non-empty tuple of str")
+except BaseException:
+    # Fallback matches text_normalization.py's current value, and exists for exactly the
+    # reason the SITE_PATH_MARKERS one does: an uncaught ImportError here exits 1, which
+    # PreToolUse treats as a NON-BLOCKING error -- the tool call PROCEEDS and BOTH gates
+    # are silently off. A stale-but-present tuple is strictly better than no gate.
+    #
+    # BaseException, deliberately wider than the SITE_PATH_MARKERS block above it: a
+    # shared module that called sys.exit() at import time raises SystemExit, which
+    # `except Exception` does NOT catch -- and sys.exit(0) in particular would take this
+    # hook to exit 0, disarming every gate with no error at all. Contrived for a constants
+    # module, but the cost of the wider catch is nil and the failure is silent.
+    #
+    # This copy is pinned to the canonical tuple by
+    # test-ora-autonomy-gate.py::test_strip_categories_fallback_matches_shared_module,
+    # which reads this literal out of the source and compares it to the shared module.
+    # A fallback nothing pins is just the pre-2026-09-18 duplicate under another name.
+    STRIP_CATEGORIES = ("Cf", "Mn")
+
 # The token contract is SHARED with git-prepush-doctrine-gate.py (hooks/lib/override_tokens.py):
 # path resolution + traversal defense, size cap, UTF-8, duplicate-key refusal, TTL with
 # clock-skew tolerance and future-dating refusal, single-use consumption, and the
@@ -370,23 +400,24 @@ NETLIFY_INVOKE_RE = re.compile(r"\bnetlify(?:-cli)?(?:\.cmd|\.exe)?\b", re.IGNOR
 # passive, standing alternate name for this ONE known, fixed script, worth naming directly.
 # Matches the known short-name family (~1, ~2, ... if a future colliding file bumps the digit).
 SEND_SHORTNAME_RE = re.compile(r"\bsend-v~\d\.ps1\b", re.IGNORECASE)
-# Unicode categories stripped by _normalize_for_matching, ON TOP OF NFKC: Cf (format --
-# zero-width space U+200B, RTL/LTR override U+202E/U+202D, soft hyphen, ...) and Mn
-# (nonspacing combining marks -- e.g. combining low line U+0332). NFKC folds COMPATIBILITY
-# forms (fullwidth, mathematical-alphanumeric) to ASCII but does NOT remove these -- a ZWSP
-# inserted mid-word (`net<ZWSP>lify`, or inside `send-via-outlook.ps1` itself, breaking the
-# Gate 1 trigger phrase) breaks a `\bword\b` match invisibly. Proven live 2026-07-17 (Round 3
-# adversarial review): both reached exit 0. Legitimate infra command/path text has no
-# legitimate reason to contain either category, so stripping them is a safe, targeted
-# hardening, not a breadth tradeoff like the site-marker/netlify de-anchoring above.
-_STRIP_CATEGORIES = ("Cf", "Mn")
+# The stripped-category set (Cf format characters, Mn combining marks) is SHARED with
+# tool_call_paths.py via hooks/lib/text_normalization.py (2026-09-18) -- imported at the top
+# of this file with a pinned fallback. It was an independent copy of the same tuple here
+# until then, and nothing kept the two in sync; read that module for the Round 3 (2026-07-17)
+# rationale, for why the two consumers share the CONSTANT but deliberately NOT the matcher,
+# and for the path-ordering rule.
 
 
 def _normalize_for_matching(text):
     """NFKC-fold compatibility Unicode forms, then strip invisible format/combining
-    characters, so detection matches what a human reads rather than raw codepoints."""
+    characters, so detection matches what a human reads rather than raw codepoints.
+
+    str-ONLY, deliberately -- see text_normalization.py. main() has already rejected a
+    non-str command/file_path with block_shape() (exit 2, fail CLOSED) before any caller
+    reaches here, so a "return '' on non-str" guard would not add safety: it would replace
+    that fail-closed refusal with an empty string that matches no marker."""
     folded = unicodedata.normalize("NFKC", text)
-    return "".join(ch for ch in folded if unicodedata.category(ch) not in _STRIP_CATEGORIES)
+    return "".join(ch for ch in folded if unicodedata.category(ch) not in STRIP_CATEGORIES)
 
 
 def override_active(session_id, tier, external=None, consume=True):
