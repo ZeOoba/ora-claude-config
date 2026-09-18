@@ -44,15 +44,19 @@ flowchart TB
         HOOKS -->|invokes, e.g. doctrine/governor probes\nduring the git pre-push chain| MAINT
     end
 
-    SCHEDULER(("External Windows Task Scheduler\n/ Cowork scheduler"))
+    SCHEDULER(("Claude Desktop CC/MCP scheduler\n(registry: AppData/Roaming/Claude/\nclaude-code-sessions/.../scheduled-tasks.json)\nfires ONLY while the Desktop app is open"))
     SCHED -.read by, not this repo.-> SCHEDULER
+    LAMS(("LAMS/Cowork fleet\nspecs live in OneDrive\nDocuments/Claude/Scheduled/,\nNOT in this repo"))
+    WINTASKS(("Windows Task Scheduler (off-fleet)\na few ORA* tasks, e.g.\nobsidian-fleet-mirror/write-fleet.ps1\nevery 60s -> Obsidian BrainVault/_Claude"))
+    DEADMAN(("GitHub Actions\n.github/workflows/fleet-deadman.yml\ndaily off-box dead-man check"))
+    SCHEDULER -.health watched by.-> DEADMAN
 
     LOCALDIR[("Live directory on disk\nC:\\Users\\Owner\\.claude\n(~40 entries, mostly runtime state)")]
     LOCALDIR ==contains==> SESSION
     LOCALDIR -.git add / commit / push\n(opt-in files only).-> REPO[("This repo:\nGitHub ZeOoba/ora-claude-config\n(PRIVATE — backup mirror, not a deploy target)")]
     REPO -.git clone / pull\n(disaster recovery).-> LOCALDIR
 ```
-<!-- diagram-verified: 2026-08-21 -->
+<!-- diagram-verified: 2026-09-18 -->
 
 **Reading the diagram:** everything in the top box happens inside one live Claude Code
 session. `settings.json` wires up the hooks and exposes the skills/agents/commands/
@@ -63,8 +67,15 @@ own child back to the subgraph). `HOOKS -> MAINT` is a real, not illustrative, e
 `maintenance/doctrine-integrity-probe.py` as part of the pre-push chain, so a hook calling
 into a maintenance probe is load-bearing, not simplified for the picture.
 `scheduled-tasks/*/SKILL.md` specs point outward to an
-external scheduler node because they're read by the Windows/Cowork scheduler, not by
-this session directly. Below that, the live directory on disk contains the whole session
+external scheduler node because they're read by the Claude Desktop CC/MCP scheduler, not by
+this session directly. That scheduler is neither Windows Task Scheduler nor Cowork (an earlier
+revision of this diagram said both): its registry lives under `AppData/Roaming/Claude/`, it
+fires only while the Desktop app is open, and the LAMS/Cowork fleet's specs live in OneDrive
+rather than here. Windows Task Scheduler does run a few off-fleet `ORA*` jobs (the
+`obsidian-fleet-mirror` writer is the one whose scripts are tracked here), and
+`fleet-deadman.yml` is the one check that runs off this machine entirely. Cadences are
+deliberately not drawn: the live registry is the authority, and most tasks moved to weekly on
+2026-09-17. Below that, the live directory on disk contains the whole session
 and is the only thing that ever pushes to GitHub (dotted arrow, opt-in files only) — the
 repo is downstream of the live directory, never the other way around: nothing deploys
 *from* GitHub back into a running session automatically. A clone only becomes "live"
