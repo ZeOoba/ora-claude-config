@@ -171,6 +171,11 @@ ORDERING_VERIFIED_BY_HAND = {
     # :8 is a RESTORATION NOTE naming send-via-outlook.ps1 in prose, not a step.
     # Real sends are :195 and :233, both after claim@15.
     "ora-passed-deal-tracker": "claim@15 precedes real sends@195,233 (:8 is prose)",
+    # :3 is the frontmatter description's own changelog prose (names "block-sentinel.py
+    # claim/complete/fail" while describing the STEP 0 addition) -- not an invocation.
+    # Real claim is @18; real send is @69, both unfenced/unmarked so the regex can't
+    # see them either, same shape as ora-deal-aging-sla/ora-passed-deal-tracker above.
+    "ora-forward-calendar-digest": "claim@18 precedes send@69 (:3 is frontmatter prose)",
 }
 
 # Guarded entrypoints whose guard does NOT yet satisfy a check below. Each entry
