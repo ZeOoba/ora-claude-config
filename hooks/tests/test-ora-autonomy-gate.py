@@ -1157,6 +1157,370 @@ def test_stdin_decoded_as_utf8_not_platform_codepage():
     print("PASS test_stdin_decoded_as_utf8_not_platform_codepage")
 
 
+# ---------------------------------------------------------------------------
+# 2026-09-18 -- check_file_write's Claude-managed slug-directory exemption.
+#
+# Claude Code names two directories after the PROJECT PATH, so working in the site repo
+# produces slugs that embed a site marker while pointing nowhere near the site tree:
+#   ~/.claude/projects/C--Users-Owner-website-canonical/memory/
+#   %TEMP%/claude/C--Users-Owner-website-canonical/<session>/scratchpad/
+# Both blocked every Write (confirmed live, exit 2), so a session in this project could
+# not save a memory without minting a live-site write override. The exemption keys on the
+# RESOLVED real path only; these tests pin both the relief and its boundaries.
+# ---------------------------------------------------------------------------
+
+# The hook derives its anchor from its own location (hooks/ -> .claude/); mirror that
+# here so these tests follow the file whether it runs from a worktree or the live tree.
+CLAUDE_ROOT = os.path.dirname(HERE)
+SLUG = "C--Users-Owner-website-canonical"
+OTHER_MARKER = "oxford-site"
+
+
+def _load_hook_module():
+    """Import the hook for direct unit calls. main() is under a __main__ guard, so import
+    is side-effect-free apart from resolving the module-level exemption anchors."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ora_autonomy_gate_under_test", HOOK)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_project_memory_write_allowed():
+    """The reported friction: this session's OWN memory directory is not the site tree."""
+    path = os.path.join(CLAUDE_ROOT, "projects", SLUG, "memory", "reference_x.md")
+    rc, out, err = run_hook(write_payload(path))
+    assert rc == 0, (
+        "a write to the project memory dir must not need a live-site override, got %s (%s)"
+        % (rc, err)
+    )
+    print("PASS test_project_memory_write_allowed")
+
+
+def test_session_scratchpad_write_allowed():
+    """The harness MANDATES the scratchpad for temp files, and its slug embeds the marker."""
+    path = os.path.join(tempfile.gettempdir(), "claude", SLUG, SESSION_A, "scratchpad", "n.txt")
+    rc, out, err = run_hook(write_payload(path))
+    assert rc == 0, (
+        "a write to the session scratchpad must not need a live-site override, got %s (%s)"
+        % (rc, err)
+    )
+    print("PASS test_session_scratchpad_write_allowed")
+
+
+def test_real_site_tree_write_still_blocks():
+    """Control for the two tests above -- the gate's actual job is untouched."""
+    for path in (SITE_FILE, "C:/Users/Owner/%s/index.html" % OTHER_MARKER):
+        rc, out, err = run_hook(write_payload(path))
+        assert rc == 2, "a real site-tree write must still block: %s got %s (%s)" % (path, rc, err)
+    print("PASS test_real_site_tree_write_still_blocks")
+
+
+def test_slug_dir_exemption_defeated_by_junction():
+    """The exemption keys on the RESOLVED path, so a directory named exactly like an
+    exempt scratchpad but junctioned INTO the site tree resolves back out of the
+    exemption and still blocks. This is the bypass a literal-text exemption would open."""
+    tmp = tempfile.mkdtemp(prefix="oag-slugjunc-")
+    real_site = os.path.join(tmp, "actual-target", "website-canonical")
+    os.makedirs(real_site, exist_ok=True)
+    fake = os.path.join(tempfile.gettempdir(), "claude", "oag-slugjunc-" + SESSION_A,
+                        SESSION_B, "scratchpad")
+    os.makedirs(os.path.dirname(fake), exist_ok=True)
+    proc = subprocess.run(["cmd", "/c", "mklink", "/J", fake, real_site],
+                          capture_output=True, text=True)
+    if proc.returncode != 0:
+        print("SKIP test_slug_dir_exemption_defeated_by_junction (junction unavailable: %s)"
+              % (proc.stderr or proc.stdout).strip())
+        return
+    try:
+        rc, out, err = run_hook(write_payload(os.path.join(fake, "index.html")))
+        assert rc == 2, (
+            "a scratchpad-shaped path junctioned into the site tree must still block, "
+            "got %s (%s)" % (rc, err)
+        )
+    finally:
+        subprocess.run(["cmd", "/c", "rmdir", fake], capture_output=True, text=True)
+        shutil.rmtree(tmp, ignore_errors=True)
+        shutil.rmtree(os.path.join(tempfile.gettempdir(), "claude",
+                                   "oag-slugjunc-" + SESSION_A), ignore_errors=True)
+    print("PASS test_slug_dir_exemption_defeated_by_junction")
+
+
+def test_dot_claude_inside_site_tree_not_exempt():
+    """The exemption is ANCHORED to the real Claude root, not to the shape alone -- so a
+    `.claude/projects/<slug>/memory/` directory sitting INSIDE a site checkout matches the
+    shape but not the anchor, and a write into the site repo still blocks."""
+    path = "C:/Users/Owner/website-canonical/.claude/projects/%s/memory/y.md" % SLUG
+    rc, out, err = run_hook(write_payload(path))
+    assert rc == 2, (
+        "a memory-shaped path inside the site checkout must still block, got %s (%s)"
+        % (rc, err)
+    )
+    print("PASS test_dot_claude_inside_site_tree_not_exempt")
+
+
+def test_slug_dir_exemption_is_narrow():
+    """Only the two named shapes are exempt. A sibling directory under the same project
+    slug, or the slug directory itself, still carries the marker and still blocks --
+    the fix relieves the reported friction, it does not open `~/.claude/projects/<slug>/`."""
+    for path in (
+        os.path.join(CLAUDE_ROOT, "projects", SLUG, "todos", "x.md"),
+        os.path.join(CLAUDE_ROOT, "projects", SLUG, "memory.md"),
+        os.path.join(tempfile.gettempdir(), "claude", SLUG, SESSION_A, "not-scratchpad", "n.txt"),
+    ):
+        rc, out, err = run_hook(write_payload(path))
+        assert rc == 2, "outside the exempt shapes must still block: %s got %s (%s)" % (
+            path, rc, err)
+    print("PASS test_slug_dir_exemption_is_narrow")
+
+
+def _junction(link_path, target):
+    """mklink /J, returning False when junctions are unavailable in this environment."""
+    os.makedirs(os.path.dirname(link_path), exist_ok=True)
+    proc = subprocess.run(["cmd", "/c", "mklink", "/J", link_path, target],
+                          capture_output=True, text=True)
+    return proc.returncode == 0
+
+
+def test_normalization_differential_junction_blocks():
+    """CRITICAL, adversarial review 2026-09-18. The exemption resolved the NORMALIZED path
+    while the Write tool opens the LITERAL one. A directory whose name differs from an
+    exempt directory only by a character that NFKC folds or that the Cf/Mn strip deletes is
+    a DIFFERENT object to Windows and the SAME object to this hook -- so a junction named
+    `scratchpad<ZWSP>` pointing into a site checkout was exempted while the bytes landed in
+    the site tree (exit 0, proven). `mklink` is not a write indicator, so Gate 2b does not
+    see the junction being created either: the whole chain needed no override.
+
+    Each variant below is test_slug_dir_exemption_defeated_by_junction with ONE character
+    changed. They must all block."""
+    tmp = tempfile.mkdtemp(prefix="oag-normdiff-")
+    real_site = os.path.join(tmp, "actual-target", "website-canonical")
+    os.makedirs(real_site, exist_ok=True)
+    variants = [
+        ("zero-width space (Cf, stripped)", u"scratchpad\u200b"),
+        ("fullwidth latin (NFKC-folded)", u"\uff53\uff43\uff52\uff41\uff54\uff43\uff48"
+                                          u"\uff50\uff41\uff44"),
+        ("combining low line (Mn, stripped)", u"scratchpad\u0332"),
+    ]
+    made_any = False
+    for label, component in variants:
+        base = os.path.join(tempfile.gettempdir(), "claude",
+                            "oag-normdiff-" + SESSION_A, SESSION_B + label[:3])
+        link = os.path.join(base, component)
+        if not _junction(link, real_site):
+            continue
+        made_any = True
+        try:
+            assert _normalize_for_matching_component(component) != component, (
+                "test setup bug: %s must not be a normalization fixed point" % label)
+            rc, out, err = run_hook(write_payload(os.path.join(link, "index.html")))
+            assert rc == 2, (
+                "a junction into the site tree named `%s` must block, got %s (%s)"
+                % (label, rc, err)
+            )
+        finally:
+            # rmdir the LINK, then remove the sandbox parent. Removing only the link
+            # leaves junction sandboxes outliving the session that made them, and a
+            # future pass that points one at the real checkout and forgets it would
+            # leave a standing alias into the live site tree (adversarial review,
+            # 2026-09-18, which found this suite's own leftovers still on disk).
+            subprocess.run(["cmd", "/c", "rmdir", link], capture_output=True, text=True)
+            shutil.rmtree(base, ignore_errors=True)
+    shutil.rmtree(tmp, ignore_errors=True)
+    shutil.rmtree(os.path.join(tempfile.gettempdir(), "claude",
+                               "oag-normdiff-" + SESSION_A), ignore_errors=True)
+    if not made_any:
+        print("SKIP test_normalization_differential_junction_blocks (junctions unavailable)")
+        return
+    print("PASS test_normalization_differential_junction_blocks")
+
+
+def _normalize_for_matching_component(text):
+    """Local mirror of the hook's normalization, for test SETUP assertions only."""
+    import unicodedata
+    folded = unicodedata.normalize("NFKC", text)
+    return "".join(ch for ch in folded
+                   if unicodedata.category(ch) not in ("Cf", "Mn"))
+
+
+def test_invisible_char_junction_blocks_without_any_slug():
+    """Same root cause, but PRE-EXISTING on main and reachable with no slug directory
+    anywhere: a junction whose name carries an invisible character, sitting in an ordinary
+    temp directory, resolved to the site tree while the hook resolved the normalized name
+    to something else -- exit 0 on both main and the first draft of this branch. Marker-
+    matching the realpath of the RAW path closes it. No exemption is involved; this pins
+    the base gate."""
+    tmp = tempfile.mkdtemp(prefix="oag-plainjunc-")
+    real_site = os.path.join(tmp, "actual-target", "oxford-site")
+    os.makedirs(real_site, exist_ok=True)
+    link = os.path.join(tmp, u"mem\u200bory")
+    if not _junction(link, real_site):
+        print("SKIP test_invisible_char_junction_blocks_without_any_slug (junctions unavailable)")
+        return
+    target = os.path.join(link, "a.html")
+    assert not any(m in target.replace("\\", "/").lower()
+                   for m in ("website-canonical", "oxford-site")), (
+        "test setup bug: the literal path must name no site marker")
+    try:
+        rc, out, err = run_hook(write_payload(target))
+        assert rc == 2, (
+            "a write reaching the site tree through an invisible-character junction must "
+            "block even with no slug directory involved, got %s (%s)" % (rc, err)
+        )
+    finally:
+        subprocess.run(["cmd", "/c", "rmdir", link], capture_output=True, text=True)
+        shutil.rmtree(tmp, ignore_errors=True)
+    print("PASS test_invisible_char_junction_blocks_without_any_slug")
+
+
+def test_embedded_nul_path_is_not_exempt():
+    """os.path.realpath() swallows the ValueError for an embedded NUL and returns an
+    UNRESOLVED normpath, so the exemption would have been reachable on a path the
+    filesystem never confirmed. Benign today only because Node refuses NUL in paths --
+    pinned so it stays that way."""
+    path = os.path.join(tempfile.gettempdir(), "claude", SLUG, SESSION_A,
+                        "scratchpad", "c\x00.txt")
+    rc, out, err = run_hook(write_payload(path))
+    assert rc == 2, "a NUL-bearing path must never be exempt, got %s (%s)" % (rc, err)
+    print("PASS test_embedded_nul_path_is_not_exempt")
+
+
+def test_gettempdir_failure_yields_no_anchor_not_a_crash():
+    """The branch test_hostile_temp_vars_do_not_disable_the_gate does NOT reach (adversarial
+    review, 2026-09-18: with the temp vars SET, `_temp_dir_names()` returns them and the
+    guarded gettempdir() call is never made, so that test proves the env path only).
+
+    A module-level tempfile.gettempdir() raises FileNotFoundError when no candidate temp dir
+    is writable, and this hook exiting 1 is treated as NON-BLOCKING by the harness -- so an
+    unguarded traceback would not merely lose the exemption, it would silently disable Gates
+    1/2a/2b/2c for that call. Strictly worse than any narrowing miss. Clear the vars so the
+    fallback is actually taken, and make it raise."""
+    mod = _load_hook_module()
+    saved_env = dict(os.environ)
+    saved_gettempdir = mod.tempfile.gettempdir
+    try:
+        for var in ("TEMP", "TMP", "TMPDIR"):
+            os.environ.pop(var, None)
+
+        def _boom():
+            raise FileNotFoundError("No usable temporary directory found")
+
+        mod.tempfile.gettempdir = _boom
+        assert mod._temp_dir_names() == [], (
+            "a raising gettempdir() with no temp vars set must yield NO anchor, not an "
+            "exception: got %r" % (mod._temp_dir_names(),)
+        )
+    finally:
+        mod.tempfile.gettempdir = saved_gettempdir
+        os.environ.clear()
+        os.environ.update(saved_env)
+    print("PASS test_gettempdir_failure_yields_no_anchor_not_a_crash")
+
+
+def test_existing_hardlink_forfeits_the_exemption():
+    """A hardlink is a second NAME for one inode, not a reparse point -- realpath() has
+    nothing to follow, so a file inside an exempt directory that is hardlinked to a site
+    file would be written through the exempt name. The general hardlink class is documented
+    as deferred and is reachable today through any marker-free path with no exemption
+    involved; this pins only that the exemption does not become a second, more convenient
+    spelling of it (adversarial review, 2026-09-18)."""
+    tmp = tempfile.mkdtemp(prefix="oag-hardlink-")
+    site_dir = os.path.join(tmp, "target", "website-canonical")
+    os.makedirs(site_dir, exist_ok=True)
+    site_file = os.path.join(site_dir, "index.html")
+    with open(site_file, "w") as handle:
+        handle.write("original")
+    # The slug component must be the REAL marker-bearing slug: with a marker-free slug the
+    # path trips no marker match at all, the gate returns without ever reaching the
+    # exemption, and the test would pass vacuously against the pre-existing hardlink class
+    # rather than against this exemption.
+    exempt_dir = os.path.join(tempfile.gettempdir(), "claude", SLUG,
+                              "oag-hardlink-" + SESSION_B, "scratchpad")
+    os.makedirs(exempt_dir, exist_ok=True)
+    link = os.path.join(exempt_dir, "hl.txt")
+    try:
+        os.link(site_file, link)
+    except (OSError, NotImplementedError, AttributeError) as exc:
+        print("SKIP test_existing_hardlink_forfeits_the_exemption (hardlinks unavailable: %s)"
+              % exc)
+        shutil.rmtree(tmp, ignore_errors=True)
+        return
+    try:
+        rc, out, err = run_hook(write_payload(link))
+        assert rc == 2, (
+            "an exempt-shaped path that is already a hardlink must forfeit the exemption, "
+            "got %s (%s)" % (rc, err)
+        )
+        # Control: an ordinary new file in the same exempt directory still passes, so the
+        # guard costs nothing in the case this whole change exists to enable.
+        rc, out, err = run_hook(write_payload(os.path.join(exempt_dir, "ordinary.txt")))
+        assert rc == 0, "an ordinary scratchpad write must still pass, got %s (%s)" % (rc, err)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+        # Remove the session PARENT, not just the scratchpad leaf, or an empty
+        # oag-hardlink-* directory outlives every run (adversarial re-review, 2026-09-18).
+        shutil.rmtree(os.path.dirname(exempt_dir), ignore_errors=True)
+    print("PASS test_existing_hardlink_forfeits_the_exemption")
+
+
+def test_overlong_exempt_path_blocks_and_does_not_crash():
+    """os.stat() raises ValueError -- NOT OSError -- at >= 32768 characters on Windows
+    ("stat: path too long for Windows"), while os.path.realpath() at that length does not
+    raise. So resolve_ok stays True, the four earlier exemption conditions pass on an
+    exempt-SHAPED path, and an uncaught throw in _is_multiply_linked escapes
+    check_file_write. This hook exiting 1 is NON-BLOCKING, so that would disable Gates
+    1/2a/2b/2c for the call -- strictly worse than any narrowing miss, and the exact class
+    the realpath guard already catches. Exit 1 is the failure this pins; exit 2 is the
+    contract (adversarial re-review, 2026-09-18)."""
+    path = os.path.join(tempfile.gettempdir(), "claude", SLUG, SESSION_A, "scratchpad",
+                        "a" * 40000)
+    rc, out, err = run_hook(write_payload(path))
+    assert rc != 1, (
+        "an overlong exempt-shaped path must never crash the hook to exit 1 (the harness "
+        "treats that as NON-BLOCKING, disabling every gate for this call): %s" % err[:400]
+    )
+    assert rc == 2, "an overlong exempt-shaped path must block, got %s (%s)" % (rc, err)
+    print("PASS test_overlong_exempt_path_blocks_and_does_not_crash")
+
+
+def test_hostile_temp_vars_do_not_disable_the_gate():
+    """Every temp variable pointed at a nonexistent directory: the site-tree write must
+    still BLOCK (exit 2), never crash (exit 1). Covers the env path; the guarded
+    gettempdir() fallback is covered by the test above."""
+    env_overrides = {"TMPDIR": r"Z:\no-such-temp-dir",
+                     "TEMP": r"Z:\no-such-temp-dir",
+                     "TMP": r"Z:\no-such-temp-dir"}
+    env = dict(os.environ)
+    env.update(env_overrides)
+    env["ORA_OVERRIDE_SESSIONS_DIR"] = fresh_sessions_dir()
+    payload = {"tool_name": "Write",
+               "tool_input": {"file_path": SITE_FILE, "content": "x"},
+               "session_id": SESSION_A}
+    proc = subprocess.run([sys.executable, HOOK], input=json.dumps(payload),
+                          capture_output=True, text=True, env=env)
+    assert proc.returncode == 2, (
+        "with no usable temp dir the gate must still BLOCK a site write, got %s (%s)"
+        % (proc.returncode, proc.stderr)
+    )
+    print("PASS test_hostile_temp_vars_do_not_disable_the_gate")
+
+
+def test_exemption_anchor_refuses_site_contaminated_root():
+    """If the hook layer itself were ever relocated under a site checkout, the anchor must
+    be discarded rather than becoming a write hole into that checkout."""
+    mod = _load_hook_module()
+    assert mod._exemption_anchor("C:/Users/Owner/website-canonical/.claude") is None, (
+        "an anchor root inside the site tree must yield no exemption"
+    )
+    assert mod._exemption_anchor("C:/Users/Owner/%s/.claude" % OTHER_MARKER) is None, (
+        "an anchor root inside the second site checkout must yield no exemption"
+    )
+    assert mod._exemption_anchor(CLAUDE_ROOT) is not None, (
+        "control: the real Claude root must resolve to a usable anchor"
+    )
+    print("PASS test_exemption_anchor_refuses_site_contaminated_root")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for t in tests:
