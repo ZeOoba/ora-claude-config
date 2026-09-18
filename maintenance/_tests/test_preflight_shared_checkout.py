@@ -277,6 +277,121 @@ def test_head_moved_outranks_contested():
                and bool(j.get("dirty_overlap_foreign")), j)
 
 
+def _commit(work, rel, body="moved\n", msg="advance"):
+    _dirty(work, rel, body)
+    _git(work, "add", "-A")
+    _git(work, "commit", "-m", msg)
+
+
+def test_head_moved_out_of_scope_only_is_clear_with_warning():
+    """The checkout advanced, but no moved commit touches my scope: re-reading my
+    files would show nothing new, so a STOP here only teaches bypassing. Exit 0,
+    and the move is still reported (2026-09-13: a one-file cherry-pick was held up
+    by an unrelated docs commit)."""
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        since = head_sha(work)
+        _commit(work, "maintenance/p.py")
+        rc, out, _ = run("--repo", work, "--claims-dir", _claims_dir(td),
+                         "--sessions-dir", _sessions_dir(td),
+                         "--session", MY_SESSION, "--since", since,
+                         "--paths", os.path.join(work, "agents"))
+        j = result_json(out) or {}
+        expect("moved, nothing in scope -> exit 0", rc == EXIT_CLEAR, (rc, out))
+        expect("moved, nothing in scope -> verdict CLEAR", j.get("verdict") == "CLEAR", j)
+        expect("move is still reported (head_moved true)", j.get("head_moved") is True, j)
+        expect("in-scope change list is present and empty",
+               j.get("head_moved_in_scope") == [], j)
+        expect("human output carries a WARNING about the move",
+               "WARNING" in out and "MOVED" in out, out)
+
+
+def test_head_moved_touching_scope_still_stops():
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        since = head_sha(work)
+        _commit(work, "maintenance/p.py")
+        _commit(work, "agents/one.md")
+        rc, out, _ = run("--repo", work, "--claims-dir", _claims_dir(td),
+                         "--sessions-dir", _sessions_dir(td),
+                         "--session", MY_SESSION, "--since", since,
+                         "--paths", os.path.join(work, "agents"))
+        j = result_json(out) or {}
+        expect("moved INTO scope -> exit 3", rc == EXIT_HEAD_MOVED, (rc, out))
+        expect("in-scope moved paths are named", j.get("head_moved_in_scope") == ["agents/one.md"], j)
+
+
+def test_head_moved_rename_out_of_scope_still_stops():
+    """A rename that carries a scope file elsewhere changed my scope, even though
+    the new path is outside it -- rename detection must not hide the source."""
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        since = head_sha(work)
+        _git(work, "mv", "agents/one.md", "maintenance/one.md")
+        _git(work, "commit", "-m", "move it")
+        rc, out, _ = run("--repo", work, "--claims-dir", _claims_dir(td),
+                         "--sessions-dir", _sessions_dir(td),
+                         "--session", MY_SESSION, "--since", since,
+                         "--paths", os.path.join(work, "agents", "one.md"))
+        expect("rename away from scope -> exit 3", rc == EXIT_HEAD_MOVED, (rc, out))
+
+
+def test_head_moved_scope_match_ignores_case():
+    """Windows: git records a path in a different case than the file on disk
+    (and than the caller's --paths, which _real() canonicalizes to disk case).
+    The mismatch is created on GIT's side via update-index --cacheinfo, so this
+    fails without :(icase) in the in-scope diff (review #208 minor 2)."""
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        since = head_sha(work)
+        blob = subprocess.run(["git", "-C", work, "hash-object", "-w", "--stdin"],
+                              input="moved\n", capture_output=True,
+                              text=True).stdout.strip()
+        _git(work, "update-index", "--add", "--cacheinfo",
+             "100644,%s,AGENTS/ONE.MD" % blob)
+        _git(work, "commit", "-q", "-m", "git-side case differs")
+        rc, out, _ = run("--repo", work, "--claims-dir", _claims_dir(td),
+                         "--sessions-dir", _sessions_dir(td), "--since", since,
+                         "--session", MY_SESSION, "--paths", "agents/one.md")
+        j = result_json(out) or {}
+        expect("git-side case-different path -> exit 3", rc == EXIT_HEAD_MOVED, (rc, out))
+        expect("git-side case-different path named in head_moved_in_scope",
+               j.get("head_moved_in_scope") == ["AGENTS/ONE.MD"], j)
+
+
+def test_head_moved_since_not_ancestor_still_stops():
+    """--since is no longer in HEAD's history (reset, rebase, branch switch): the
+    diff no longer describes what happened to the checkout, so it cannot clear."""
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        _commit(work, "maintenance/p.py", msg="soon orphaned")
+        orphan = head_sha(work)
+        _git(work, "reset", "--hard", "HEAD~1")
+        _commit(work, "maintenance/p.py", body="other\n", msg="replacement")
+        rc, out, _ = run("--repo", work, "--claims-dir", _claims_dir(td),
+                         "--sessions-dir", _sessions_dir(td),
+                         "--session", MY_SESSION, "--since", orphan,
+                         "--paths", os.path.join(work, "agents"))
+        j = result_json(out) or {}
+        expect("--since not an ancestor -> exit 3", rc == EXIT_HEAD_MOVED, (rc, out))
+        expect("in-scope list is null (unmeasured), not []",
+               j.get("head_moved_in_scope") is None, j)
+
+
+def test_head_moved_out_of_scope_does_not_mask_contested():
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        since = head_sha(work)
+        _commit(work, "maintenance/p.py")
+        _dirty(work, "agents/one.md")
+        rc, out, _ = run("--repo", work, "--claims-dir", _claims_dir(td),
+                         "--sessions-dir", _sessions_dir(td),
+                         "--session", MY_SESSION, "--since", since,
+                         "--paths", os.path.join(work, "agents"))
+        expect("out-of-scope move + foreign dirty -> CONTESTED (exit 1)",
+               rc == EXIT_CONTESTED, (rc, out))
+
+
 def test_matching_since_sha_is_clear():
     with tempfile.TemporaryDirectory() as td:
         work = _make_repo(td)
@@ -1304,6 +1419,269 @@ def test_literal_tilde_path_expands_to_home_not_a_dir_named_tilde():
                rc == EXIT_CONTESTED, (rc, out[-500:]))
 
 
+# --------------------------------------------------------------------------
+# STALE_UNTRACKED_KNOWN_BLOB (2026-09-13): an untracked in-scope file whose
+# content is byte-identical to a blob already committed at that same path.
+# Observed live: scheduled-tasks/ora-ground-truth-auditor/SKILL.md sat
+# untracked with "[no live recorded owner]" and returned CONTESTED, though
+# nothing in it was unsaved work -- git history already held every byte.
+# --------------------------------------------------------------------------
+KNOWN_BODY = "known committed content\n"
+
+
+def _known_blob_fixture(td, via_branch=False):
+    """agents/gone.md committed with KNOWN_BODY, then removed from HEAD (or
+    committed only on another branch), then an untracked copy with the same
+    bytes written back. Returns (work, introducing_commit_sha)."""
+    work = _make_repo(td)
+    if via_branch:
+        _git(work, "checkout", "-q", "-b", "side")
+        _commit_file(work, "agents/gone.md", KNOWN_BODY)
+        sha = head_sha(work)
+        _git(work, "checkout", "-q", "main")
+    else:
+        _commit_file(work, "agents/gone.md", KNOWN_BODY)
+        sha = head_sha(work)
+        _git(work, "rm", "-q", "agents/gone.md")
+        _git(work, "commit", "-q", "-m", "remove gone.md")
+    _dirty(work, "agents/gone.md", KNOWN_BODY)
+    return work, sha
+
+
+def _kb_run(td, work, sd=None, claims=None, extra=()):
+    return run("--repo", work, "--claims-dir", claims or _claims_dir(td),
+               "--sessions-dir", sd or _sessions_dir(td),
+               "--session", MY_SESSION, "--paths", "agents", *extra)
+
+
+def test_known_blob_untracked_copy_is_rc0_with_warning():
+    with tempfile.TemporaryDirectory() as td:
+        work, sha = _known_blob_fixture(td)
+        rc, out, _ = _kb_run(td, work)
+        j = result_json(out) or {}
+        expect("known-blob: untracked identical copy -> exit 0", rc == EXIT_CLEAR, (rc, out))
+        expect("known-blob: verdict label STALE_UNTRACKED_KNOWN_BLOB",
+               j.get("verdict") == "STALE_UNTRACKED_KNOWN_BLOB", j)
+        kb = j.get("stale_untracked_known_blob") or []
+        expect("known-blob: new RESULT_JSON key lists the path",
+               [k.get("path") for k in kb] == ["agents/gone.md"], j)
+        expect("known-blob: matching commit named",
+               bool(kb) and sha in (kb[0].get("commits") or []), kb)
+        expect("known-blob: existing keys unchanged (still in dirty_overlap_foreign)",
+               [d["path"] for d in j.get("dirty_overlap_foreign", [])] == ["agents/gone.md"], j)
+        expect("known-blob: human output carries a WARNING naming the commit",
+               "WARNING" in out and sha[:12] in out, out)
+
+
+def test_known_blob_on_other_branch_only_is_rc0():
+    with tempfile.TemporaryDirectory() as td:
+        work, sha = _known_blob_fixture(td, via_branch=True)
+        rc, out, _ = _kb_run(td, work)
+        j = result_json(out) or {}
+        expect("known-blob via --all history (other branch) -> exit 0",
+               rc == EXIT_CLEAR and j.get("verdict") == "STALE_UNTRACKED_KNOWN_BLOB",
+               (rc, out))
+
+
+def test_untracked_with_different_content_still_contested():
+    with tempfile.TemporaryDirectory() as td:
+        work, _ = _known_blob_fixture(td)
+        _dirty(work, "agents/gone.md", KNOWN_BODY + "one new line\n")
+        rc, out, _ = _kb_run(td, work)
+        j = result_json(out) or {}
+        expect("known-blob: content differs from every committed blob -> CONTESTED",
+               rc == EXIT_CONTESTED and j.get("verdict") == "CONTESTED", (rc, out))
+        expect("known-blob: new key present and empty when nothing matches",
+               j.get("stale_untracked_known_blob") == [], j)
+
+
+def test_known_blob_same_bytes_at_other_path_does_not_count():
+    """The blob must be in history AT THAT PATH: seed content lives at
+    agents/one.md, not at agents/copy.md."""
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        _dirty(work, "agents/copy.md", "seed\n")
+        rc, out, _ = _kb_run(td, work)
+        expect("known-blob: identical bytes committed only at ANOTHER path -> CONTESTED",
+               rc == EXIT_CONTESTED, (rc, out))
+
+
+def test_known_blob_mixed_with_other_foreign_dirt_is_contested():
+    with tempfile.TemporaryDirectory() as td:
+        work, _ = _known_blob_fixture(td)
+        _dirty(work, "agents/one.md", "foreign edit\n")
+        rc, out, _ = _kb_run(td, work)
+        j = result_json(out) or {}
+        expect("known-blob + other foreign dirt -> CONTESTED exit 1",
+               rc == EXIT_CONTESTED and j.get("verdict") == "CONTESTED", (rc, out))
+        expect("known-blob item still reported under the new key",
+               [k.get("path") for k in j.get("stale_untracked_known_blob") or []]
+               == ["agents/gone.md"], j)
+
+
+def test_modified_tracked_file_reverted_to_old_blob_is_contested():
+    """Only UNTRACKED files qualify: a tracked file whose working copy equals an
+    older committed version is a modification of HEAD, i.e. real dirt."""
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        _commit_file(work, "agents/one.md", "second version\n")
+        _dirty(work, "agents/one.md", "seed\n")
+        rc, out, _ = _kb_run(td, work)
+        j = result_json(out) or {}
+        expect("known-blob: modified-tracked (reverted) file -> CONTESTED",
+               rc == EXIT_CONTESTED and j.get("stale_untracked_known_blob") == [], (rc, out))
+
+
+def test_known_blob_recent_session_touch_is_contested():
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work, _ = _known_blob_fixture(td)
+        sd = _sessions_dir(td)
+        _touched(sd, OTHER_SESSION, [os.path.join(work, "agents", "gone.md")],
+                 ts=time.time() - 30 * 60)
+        rc, out, _ = _kb_run(td, work, sd=sd)
+        expect("known-blob: a session touched it within 2h -> CONTESTED",
+               rc == EXIT_CONTESTED, (rc, out))
+
+
+def test_known_blob_recent_touch_even_if_stale_is_contested():
+    """A touch within the window that predates the removal commit (so it reads
+    STALE) still disqualifies: the rule is 'no touch within 2h', not 'no live
+    owner'."""
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        f = os.path.join(work, "agents", "gone.md")
+        _touched(sd, OTHER_SESSION, [f], ts=time.time() - 60)
+        time.sleep(1.1)
+        _commit_file(work, "agents/gone.md", KNOWN_BODY)
+        _git(work, "rm", "-q", "agents/gone.md")
+        _git(work, "commit", "-q", "-m", "remove gone.md")
+        _dirty(work, "agents/gone.md", KNOWN_BODY)
+        rc, out, _ = _kb_run(td, work, sd=sd)
+        expect("known-blob: stale-but-recent touch -> CONTESTED", rc == EXIT_CONTESTED, (rc, out))
+
+
+def test_known_blob_old_touch_is_rc0():
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work, _ = _known_blob_fixture(td)
+        sd = _sessions_dir(td)
+        _touched(sd, OTHER_SESSION, [os.path.join(work, "agents", "gone.md")],
+                 ts=time.time() - 3 * 3600)
+        rc, out, _ = _kb_run(td, work, sd=sd)
+        expect("known-blob: only a >2h-old touch -> exit 0", rc == EXIT_CLEAR, (rc, out))
+
+
+def test_known_blob_unknown_touch_time_is_contested():
+    with tempfile.TemporaryDirectory() as td:
+        work, _ = _known_blob_fixture(td)
+        sd = _sessions_dir(td)
+        _touched(sd, OTHER_SESSION, [os.path.join(work, "agents", "gone.md")], ts=False)
+        rc, out, _ = _kb_run(td, work, sd=sd)
+        expect("known-blob: touch with unknown time -> CONTESTED", rc == EXIT_CONTESTED, (rc, out))
+
+
+def test_known_blob_with_live_claim_is_contested():
+    with tempfile.TemporaryDirectory() as td:
+        work, _ = _known_blob_fixture(td)
+        cd = _claims_dir(td)
+        _write_claim(cd, "theirs", OTHER_SESSION, [os.path.join(work, "agents", "gone.md")])
+        rc, out, _ = _kb_run(td, work, claims=cd)
+        j = result_json(out) or {}
+        expect("known-blob: another session's live claim on it -> CONTESTED",
+               rc == EXIT_CONTESTED, (rc, out))
+        expect("known-blob: claimed item is not classified known-blob",
+               j.get("stale_untracked_known_blob") == [], j)
+
+
+def test_known_blob_does_not_mask_indeterminate():
+    with tempfile.TemporaryDirectory() as td:
+        work, _ = _known_blob_fixture(td)
+        rc, out, _ = _kb_run(td, work, claims=os.path.join(td, "no-such-claims"))
+        expect("known-blob + unreadable claims -> INDETERMINATE exit 4",
+               rc == EXIT_INDETERMINATE, (rc, out))
+
+
+def test_known_blob_does_not_mask_head_moved_in_scope():
+    with tempfile.TemporaryDirectory() as td:
+        work, _ = _known_blob_fixture(td)
+        since = head_sha(work)
+        _commit(work, "agents/one.md")
+        rc, out, _ = _kb_run(td, work, extra=("--since", since))
+        expect("known-blob + HEAD moved into scope -> HEAD_MOVED exit 3",
+               rc == EXIT_HEAD_MOVED, (rc, out))
+
+
+def test_known_blob_only_in_stash_is_contested():
+    """A `git stash -u` is live WIP parked in refs/stash, not committed history:
+    an untracked file matching only a stash blob must not read as known."""
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        _dirty(work, "agents/wip.md", KNOWN_BODY)
+        _git(work, "stash", "push", "-u", "-m", "parked")
+        _git(work, "stash", "apply")
+        rc, out, _ = _kb_run(td, work)
+        j = result_json(out) or {}
+        expect("known-blob: blob only in refs/stash -> CONTESTED",
+               rc == EXIT_CONTESTED and j.get("stale_untracked_known_blob") == [], (rc, out))
+
+
+def test_known_blob_missing_provenance_stays_contested():
+    """Review #208 MAJOR: 'no touch inside the TTL window' is unmeasurable when
+    the sessions dir cannot be read -- an empty owner map is not evidence of
+    no touch, so nothing may be classified known-blob (fail closed)."""
+    with tempfile.TemporaryDirectory() as td:
+        work, _ = _known_blob_fixture(td)
+        rc, out, _ = _kb_run(td, work, sd=os.path.join(td, "no-such-sessions"))
+        j = result_json(out) or {}
+        expect("known-blob: provenance dir missing -> CONTESTED exit 1",
+               rc == EXIT_CONTESTED and j.get("verdict") == "CONTESTED", (rc, out))
+        expect("known-blob: provenance dir missing -> nothing classified",
+               j.get("stale_untracked_known_blob") == [], j)
+
+
+def test_known_blob_partial_provenance_stays_contested():
+    """One session's touched-files.txt unreadable (here: a directory) means that
+    session's touches are unknown -- also fail closed, and say so."""
+    with tempfile.TemporaryDirectory() as td:
+        work, _ = _known_blob_fixture(td)
+        sd = _sessions_dir(td)
+        os.makedirs(os.path.join(sd, OTHER_SESSION, "touched-files.txt"))
+        rc, out, _ = _kb_run(td, work, sd=sd)
+        j = result_json(out) or {}
+        expect("known-blob: one unreadable touched-files.txt -> CONTESTED exit 1",
+               rc == EXIT_CONTESTED and j.get("stale_untracked_known_blob") == [], (rc, out))
+        expect("known-blob: provenance_partial reports the skipped session file",
+               j.get("provenance_partial") == 1, j)
+
+
+def test_provenance_partial_zero_when_all_readable():
+    with tempfile.TemporaryDirectory() as td:
+        work, _ = _known_blob_fixture(td)
+        rc, out, _ = _kb_run(td, work)
+        j = result_json(out) or {}
+        expect("provenance_partial is 0 when every session file was read",
+               j.get("provenance_partial") == 0, j)
+
+
+def test_head_moved_warning_names_the_range():
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        since = head_sha(work)
+        _commit(work, "maintenance/p.py")
+        head = head_sha(work)
+        rc, out, _ = run("--repo", work, "--claims-dir", _claims_dir(td),
+                         "--sessions-dir", _sessions_dir(td),
+                         "--session", MY_SESSION, "--since", since,
+                         "--paths", os.path.join(work, "agents"))
+        warn = [l for l in out.splitlines() if "WARNING" in l and "MOVED" in l]
+        expect("moved-out-of-scope WARNING line names since..head range",
+               rc == EXIT_CLEAR and bool(warn)
+               and ("%s..%s" % (since[:12], head[:12])) in warn[0], (rc, out))
+
+
 def main():
     test_verbatim_prefix_spelling_of_in_repo_path_is_not_out_of_repo()
     test_inherited_git_env_cannot_redirect_the_gate()
@@ -1370,6 +1748,30 @@ def main():
     test_unknown_touch_time_is_never_discounted()
     test_never_committed_path_is_never_discounted()
     test_literal_tilde_path_expands_to_home_not_a_dir_named_tilde()
+    test_head_moved_out_of_scope_only_is_clear_with_warning()
+    test_head_moved_touching_scope_still_stops()
+    test_head_moved_rename_out_of_scope_still_stops()
+    test_head_moved_scope_match_ignores_case()
+    test_head_moved_since_not_ancestor_still_stops()
+    test_head_moved_out_of_scope_does_not_mask_contested()
+    test_head_moved_warning_names_the_range()
+    test_known_blob_untracked_copy_is_rc0_with_warning()
+    test_known_blob_on_other_branch_only_is_rc0()
+    test_untracked_with_different_content_still_contested()
+    test_known_blob_same_bytes_at_other_path_does_not_count()
+    test_known_blob_mixed_with_other_foreign_dirt_is_contested()
+    test_modified_tracked_file_reverted_to_old_blob_is_contested()
+    test_known_blob_recent_session_touch_is_contested()
+    test_known_blob_recent_touch_even_if_stale_is_contested()
+    test_known_blob_old_touch_is_rc0()
+    test_known_blob_unknown_touch_time_is_contested()
+    test_known_blob_with_live_claim_is_contested()
+    test_known_blob_does_not_mask_indeterminate()
+    test_known_blob_does_not_mask_head_moved_in_scope()
+    test_known_blob_only_in_stash_is_contested()
+    test_known_blob_missing_provenance_stays_contested()
+    test_known_blob_partial_provenance_stays_contested()
+    test_provenance_partial_zero_when_all_readable()
     passed = sum(1 for ok, _ in results if ok)
     print("\npreflight-shared-checkout tests: %d/%d passed"
           % (passed, len(results)))
