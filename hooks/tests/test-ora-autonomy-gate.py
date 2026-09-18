@@ -1520,6 +1520,8 @@ def test_exemption_anchor_refuses_site_contaminated_root():
         "control: the real Claude root must resolve to a usable anchor"
     )
     print("PASS test_exemption_anchor_refuses_site_contaminated_root")
+
+
 # --------------------------------------------------------------------------
 # STRIP_CATEGORIES single-source-of-truth (2026-09-18)
 #
