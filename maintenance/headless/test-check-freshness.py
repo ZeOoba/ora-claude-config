@@ -86,19 +86,59 @@ class Freshness(unittest.TestCase):
         rc._task_info = lambda _n: (None, None)
         self.assertEqual(self.run_check().exit_code(), lib.EXIT_CANT_VERIFY)
 
-    def test_weekend_does_not_kill_the_weekday_only_check(self):
-        """Friday 10:55 run, checked Monday 07:20 = ~66h. Must stay silent at 96h."""
-        self.watched = {"mirror-drift": {"task": "ORA Headless - mirror-drift", "max_age_h": 96}}
-        rc._task_info = fake_task(last_run="2026-09-04T10:55:00")
-        write_heartbeat(self.dir, "mirror-drift", age_hours=66)
+    def test_production_watched_dict_uses_the_weekly_threshold(self):
+        """Every other test in this class INJECTS `watched=`, so the real WATCHED
+        dict is never exercised -- proven 2026-09-17: reverting it to the old
+        30/30/96 while leaving _WEEKLY_MAX_AGE_H defined left the whole suite
+        green. This is the one test that fails if production regresses."""
+        self.assertTrue(rc.WATCHED, "WATCHED must not be empty")
+        for name, cfg in rc.WATCHED.items():
+            self.assertEqual(
+                cfg["max_age_h"], rc._WEEKLY_MAX_AGE_H,
+                "%s carries %sh, not the weekly threshold %sh -- a cadence-derived "
+                "number was left behind" % (name, cfg["max_age_h"], rc._WEEKLY_MAX_AGE_H))
+
+    def test_a_full_week_between_runs_stays_silent(self):
+        """THE weekly case, and the reason the threshold is 176h (2026-09-17).
+
+        All four checks are Monday-only. freshness runs Mon 07:50, BEFORE
+        mirror-drift's Mon 10:55, so it necessarily reads LAST Monday's
+        heartbeat: 168h - 3h05m = 164.9h. That is the NORMAL, healthy state --
+        it must be silent, or the check pages every single week forever."""
+        self.watched = {"mirror-drift": {"task": "ORA Headless - mirror-drift",
+                                         "max_age_h": rc._WEEKLY_MAX_AGE_H}}
+        rc._task_info = fake_task(last_run="2026-09-14T10:55:00")
+        write_heartbeat(self.dir, "mirror-drift", age_hours=164.9)
         self.assertEqual(self.run_check().exit_code(), lib.EXIT_CLEAN)
 
-    def test_thirty_hour_threshold_would_have_false_paged_on_that_weekend(self):
-        """Guards the reason mirror-drift gets 96h and not the daily 30h."""
-        self.watched = {"mirror-drift": {"task": "ORA Headless - mirror-drift", "max_age_h": 30}}
-        rc._task_info = fake_task(last_run="2026-09-04T10:55:00")
-        write_heartbeat(self.dir, "mirror-drift", age_hours=66)
+    def test_the_old_weekday_threshold_would_now_false_page_every_week(self):
+        """Guards the 96h -> 176h move: 96h was derived from a WEEKDAY cadence
+        (Friday run still fresh on Monday). At weekly it is below the healthy
+        floor, so it would fire on a check that is working perfectly."""
+        self.watched = {"mirror-drift": {"task": "ORA Headless - mirror-drift", "max_age_h": 96}}
+        rc._task_info = fake_task(last_run="2026-09-14T10:55:00")
+        write_heartbeat(self.dir, "mirror-drift", age_hours=164.9)
         self.assertEqual(self.run_check().exit_code(), lib.EXIT_FINDINGS)
+
+    def test_a_genuinely_missed_week_still_pages(self):
+        """The threshold must not be so loose it stops detecting real silence:
+        two missed Mondays (~333h) is a stopped check and must still fire."""
+        self.watched = {"mirror-drift": {"task": "ORA Headless - mirror-drift",
+                                         "max_age_h": rc._WEEKLY_MAX_AGE_H}}
+        rc._task_info = fake_task(last_run="2026-09-07T10:55:00")
+        write_heartbeat(self.dir, "mirror-drift", age_hours=332.9)
+        self.assertEqual(self.run_check().exit_code(), lib.EXIT_FINDINGS)
+
+    def test_catch_up_burst_ordering_does_not_false_page(self):
+        """With StartWhenAvailable ON, a slept-through Monday fires all four
+        missed triggers together with NO defined ordering, so freshness can run
+        BEFORE the checks it ages -- reading a full 168h-old heartbeat. The
+        thresholds, not the 07:50-after-07:20 offset, are what keep that quiet."""
+        self.watched = {"integrity-guard": {"task": "ORA Headless - integrity-guard",
+                                            "max_age_h": rc._WEEKLY_MAX_AGE_H}}
+        rc._task_info = fake_task(last_run="2026-09-14T07:20:00")
+        write_heartbeat(self.dir, "integrity-guard", age_hours=168.0)
+        self.assertEqual(self.run_check().exit_code(), lib.EXIT_CLEAN)
 
 
 class DateParsing(unittest.TestCase):
