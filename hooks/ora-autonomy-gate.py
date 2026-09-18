@@ -167,6 +167,44 @@ ROUND 3 FIXES (final gauntlet round, 2026-07-17):
      fail-open-on-unparseable-input path, not get silently replaced with U+FFFD (which could
      reintroduce the same class of spurious-character corruption this fix closes).
 
+2026-09-18 -- check_file_write ONLY: Claude-managed slug-directory exemption.
+  Claude Code derives a directory name from the project path -- `~/.claude/projects/
+  C--Users-Owner-website-canonical/` and `%TEMP%/claude/C--Users-Owner-website-canonical/
+  <session>/scratchpad/`. Those SLUGS embed a site marker, so check_file_write blocked
+  every Write to this session's own memory directory and to the harness-mandated
+  scratchpad -- neither of which is the site tree at all. Confirmed live 2026-09-18:
+  exit 2 on both, with the site-tree controls blocking correctly alongside. A session in
+  this project therefore could not save a memory without minting a live-site write
+  override, which is strictly worse than the write it actually wanted.
+  This is NOT a re-litigation of the paragraph below. That paragraph is about Gate 2b's
+  BASH matcher, where the undecidable question is "which command consumes this quoted
+  token, and does that command write" -- four attempts, four confirmed bypasses (see
+  memory/feedback_autonomy_gate_matcher_cannot_be_safely_narrowed.md, incl. the Round 4
+  real-tokenizer attempt). Here there is no shell, no quoting and no argv: one absolute
+  path, and realpath() answers the only question asked -- where do the bytes land.
+  The exemption is keyed on the RESOLVED real path, deliberately not on the literal path
+  text: the resolved path is where the write truly goes, so a junction/symlink named to
+  look like a memory or scratchpad directory while pointing into the site tree resolves
+  back OUT of the exemption and still blocks. Fail-closed on every uncertainty -- if
+  realpath() raises, or the path is not a normalization fixed point, or an anchor root
+  cannot be resolved, or an anchor root itself sits inside the site tree, no exemption
+  exists and the block stands. See _SLUG_DIR_EXEMPTIONS and check_file_write.
+  The first draft of this got the central claim WRONG and an adversarial pass caught it:
+  it resolved the NORMALIZED path while the tool opens the LITERAL one, so "realpath()
+  answers where the bytes land" was false for every path the two disagree on -- three
+  proven exit-0 writes into a site checkout. Fixed in check_file_write; the same pass also
+  found that this predates the exemption (a junction whose name carries an invisible
+  character bypassed the plain marker match on main too, no slug involved), so the raw
+  path's realpath is now marker-matched unconditionally, exemption or not.
+  ACCEPTED RESIDUAL (TOCTOU, new with this exemption, cannot be closed here): between this
+  hook's realpath() and the tool's open(), a concurrent process from the same session could
+  swap an exempt directory for a junction into the site tree. Pre-exemption, slug-named
+  paths blocked on literal text regardless of filesystem state, so the race had no window;
+  now the window is hook-exit to tool-open. A PreToolUse hook structurally cannot close it
+  -- only a PostToolUse verifier that re-resolves the path AFTER the write can see that
+  state. Logged as a follow-up, not a blocker: winning the race requires an already-
+  compromised session, which has cheaper paths to the same outcome.
+
 STILL NOT IN SCOPE (deliberately): Gate 2b's BREADTH itself -- SITE_PATH_MARKERS and
 SITE_WRITE_INDICATORS matching ANYWHERE in a command, unrelated occurrences included. See
 memory/feedback_autonomy_gate_matcher_cannot_be_safely_narrowed.md — three adversarial review
@@ -181,6 +219,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import unicodedata
 
 LIB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib")
@@ -501,6 +540,134 @@ def check_bash(command, session_id):
                       "  tools directly rather than a shell redirect -- they carry their own gate.\n")
 
 
+def _exemption_anchor(path):
+    """Resolve one Claude-managed root to a lowercased, slash-normalized prefix.
+
+    Returns None -- meaning "no exemption is reachable through this root" -- if the root
+    cannot be resolved, or if the root ITSELF sits inside the site tree. That second
+    guard is what keeps the exemption from ever widening into a site-write hole: if this
+    whole hook layer were somehow relocated under a site checkout (a `.claude/` inside
+    the site repo, or `~/.claude` junctioned into one), the anchor is discarded and
+    check_file_write falls back to its pre-2026-09-18 unconditional block.
+    """
+    try:
+        resolved = os.path.realpath(path).replace("\\", "/").lower().rstrip("/")
+    except (OSError, ValueError):
+        return None
+    if not resolved or any(marker in resolved for marker in SITE_PATH_MARKERS):
+        return None
+    return resolved + "/"
+
+
+# Anchors are resolved ONCE at import: a per-call realpath() of a fixed root buys nothing
+# and this hook runs on every file write.
+#   - _CLAUDE_HOME is derived from THIS file's own location (hooks/ -> .claude/), never a
+#     hardcoded user path, so the exemption follows the installation rather than assuming
+#     one. Deliberately no test seam: the anchor must describe the real tree a write lands
+#     in, and an env-overridable anchor would itself be the bypass.
+#   - The temp roots are EVERY value of TEMP/TMP/TMPDIR (see _temp_dir_names), because the
+#     harness and Python disagree about which one wins and a wrong pick fails silently. A
+#     root that matches nothing simply never satisfies a prefix, so the write blocks --
+#     fail-closed, not open.
+# Each shape is matched against the remainder AFTER the anchor prefix, and each requires a
+# non-empty final component so a bare directory path cannot satisfy it.
+def _temp_dir_names():
+    """EVERY plausible temp ROOT name, for prefix comparison only.
+
+    Returns all of them rather than picking one by precedence, because the two ends
+    disagree on precedence and a wrong pick fails silently (adversarial review,
+    2026-09-18). Node's os.tmpdir() -- which is what the harness derives the scratchpad
+    path from -- reads TEMP then TMP and IGNORES TMPDIR; Python's tempfile.gettempdir()
+    reads TMPDIR first. So an environment setting TMPDIR to anything other than TEMP would
+    make this hook anchor on a directory the scratchpad never lives in: fail-closed, but
+    the friction this whole change exists to remove would quietly come back. Accepting
+    every candidate costs one extra prefix comparison and removes the ordering question.
+    Each candidate still has to clear _exemption_anchor and a full shape match, so a
+    hostile TEMP buys nothing.
+
+    Deliberately NOT a bare tempfile.gettempdir() call (adversarial review, 2026-09-18,
+    two findings). First: gettempdir() raises FileNotFoundError when no candidate temp dir
+    is writable, and at module scope that traceback exits the process 1 -- which this
+    harness treats as NON-BLOCKING, so an environment with no writable temp would not just
+    lose the exemption, it would silently disable Gates 1/2a/2b/2c entirely. Second:
+    gettempdir() probes for writability by CREATING AND DELETING a file, and this hook is a
+    fresh process on EVERY PreToolUse call, so that probe would run on every tool use. We
+    only need the directory's NAME, never a writable handle, so read the environment
+    variables directly and keep the probing call as a guarded last resort. The sequence
+    below is a DEDUP order, not a precedence: every value is returned, so which variable
+    comes first does not affect the outcome."""
+    names = []
+    for var in ("TEMP", "TMP", "TMPDIR"):
+        value = os.environ.get(var)
+        if value and value not in names:
+            names.append(value)
+    if not names:
+        try:
+            names.append(tempfile.gettempdir())
+        except Exception:
+            pass
+    return names
+
+
+try:
+    _HOOK_PARENT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+except Exception:
+    # abspath() can raise on a deleted/unreachable cwd. No anchor simply means no
+    # exemption; it must never mean no gate.
+    _HOOK_PARENT = None
+_CLAUDE_HOME = _exemption_anchor(_HOOK_PARENT) if _HOOK_PARENT else None
+_TEMP_ROOTS = tuple(_exemption_anchor(name) for name in _temp_dir_names())
+# ~/.claude/projects/<project-slug>/memory/<file>
+_PROJECT_MEMORY_SHAPE = re.compile(r"^projects/[^/]+/memory/[^/].*$")
+# %TEMP%/claude/<project-slug>/<session-id>/scratchpad/<file>
+_SCRATCHPAD_SHAPE = re.compile(r"^claude/[^/]+/[^/]+/scratchpad/[^/].*$")
+_SLUG_DIR_EXEMPTIONS = tuple(
+    [(_CLAUDE_HOME, _PROJECT_MEMORY_SHAPE)]
+    + [(root, _SCRATCHPAD_SHAPE) for root in _TEMP_ROOTS]
+)
+
+
+def _is_multiply_linked(path):
+    """True when the write target ALREADY EXISTS with more than one directory entry.
+
+    A hardlink is a second name for the same inode, so a file created inside an exempt
+    directory and hardlinked to a site file would be written through the exempt name --
+    realpath() cannot see it, because a hardlink is not a reparse point and has no target
+    to resolve. This does NOT close the hardlink class generally (that is documented as
+    deferred above, and is reachable today through any marker-free path with no exemption
+    involved); it only stops the exemption from becoming a second, more convenient spelling
+    of it. Adversarial review, 2026-09-18.
+
+    Fail-closed: the ordinary case is creating a NEW file, which does not exist and is not
+    multiply linked; any OTHER stat failure counts as multiply linked and forfeits the
+    exemption."""
+    try:
+        stat_result = os.stat(path)
+    except FileNotFoundError:
+        return False
+    except (OSError, ValueError):
+        # ValueError, not just OSError: on Windows os.stat() raises ValueError("stat: path
+        # too long for Windows") at >= 32768 characters, while os.path.realpath() at that
+        # length does NOT raise -- so resolve_ok stays True, the four prior conditions pass,
+        # and an uncaught throw here would escape check_file_write entirely. This hook
+        # exiting 1 is NON-BLOCKING, so that would disable Gates 1/2a/2b/2c for the call --
+        # the one outcome the doctrine above says must never happen. Same pair the realpath
+        # guard already catches; missed here in the first draft (adversarial re-review,
+        # 2026-09-18).
+        return True
+    return getattr(stat_result, "st_nlink", 1) > 1
+
+
+def _is_claude_slug_dir(resolved):
+    """True only for a RESOLVED real path inside a Claude-managed directory whose name
+    embeds the project slug. Callers must pass the realpath(), never the literal path --
+    see the 2026-09-18 note in the module docstring."""
+    for root, shape in _SLUG_DIR_EXEMPTIONS:
+        if root and resolved.startswith(root) and shape.match(resolved[len(root):]):
+            return True
+    return False
+
+
 def check_file_write(file_path, session_id):
     # Check both the literal path text AND its OS-resolved real path. A directory
     # junction/symlink pointing INTO the site tree from an innocuous-looking name (whose
@@ -520,12 +687,58 @@ def check_file_write(file_path, session_id):
     # -- not proven exploitable here, but cheap and closes the same class of gap defensively).
     normalized_path = _normalize_for_matching(file_path)
     normalized = normalized_path.replace("\\", "/").lower()
+    # THE LITERAL PATH IS WHAT THE TOOL OPENS -- resolve THAT (2026-09-18 adversarial
+    # review, CRITICAL). Resolving only normalized_path, as this did until that review,
+    # asks the filesystem about a string the tool never passes to open(): any component
+    # differing from a real directory only by a character normalization folds or deletes
+    # is a DIFFERENT object to Windows and the SAME object to this hook. Proven live: a
+    # junction named `scratchpad​` (zero-width space, category Cf) reached exit 0
+    # while the bytes landed in a site checkout -- and the junction itself is created by
+    # `mklink`, which is not a write indicator, so Gate 2b never saw it either. The
+    # fullwidth (NFKC) and combining-mark (Mn) forms are the same bug. resolve the raw
+    # path, THEN normalize the result for marker matching.
+    resolve_ok = "\x00" not in file_path  # realpath() swallows an embedded NUL silently
     try:
         resolved = os.path.realpath(normalized_path).replace("\\", "/").lower()
-    except OSError:
+        resolved_literal = _normalize_for_matching(
+            os.path.realpath(file_path)).replace("\\", "/").lower()
+    except (OSError, ValueError):
+        # No real path means no trustworthy answer to "where do the bytes land", so the
+        # slug-dir exemption below is unavailable and the marker match stands unmodified.
         resolved = normalized
+        resolved_literal = normalized
+        resolve_ok = False
     if any(marker in normalized for marker in SITE_PATH_MARKERS) or \
-            any(marker in resolved for marker in SITE_PATH_MARKERS):
+            any(marker in resolved for marker in SITE_PATH_MARKERS) or \
+            any(marker in resolved_literal for marker in SITE_PATH_MARKERS):
+        # The marker may be nothing but a Claude-derived project SLUG -- a memory or
+        # scratchpad directory NAMED after this project, not a path into the site tree
+        # (2026-09-18; see the module docstring).
+        #
+        # Three conditions, each load-bearing, all fail-closed:
+        #   resolve_ok                      -- we got a real answer from the filesystem.
+        #   normalized_path == file_path    -- normalization changed NOTHING, so the path
+        #                                      this hook reasoned about and the path the
+        #                                      tool opens are the same string. Any
+        #                                      normalization-visible character anywhere in
+        #                                      the path forfeits the exemption outright,
+        #                                      which is the general form of the CRITICAL
+        #                                      above rather than a patch of its three
+        #                                      known spellings.
+        #   both resolved forms exempt      -- redundant while the equality holds (they are
+        #                                      then the same string), and deliberately kept
+        #                                      so a future refactor that weakens the
+        #                                      equality guard cannot silently re-open it.
+        #   not multiply linked          -- an existing hardlink is a second name for a
+        #                                   file that may live in the site tree, and
+        #                                   realpath() cannot see it (see
+        #                                   _is_multiply_linked).
+        if (resolve_ok
+                and normalized_path == file_path
+                and _is_claude_slug_dir(resolved_literal)
+                and _is_claude_slug_dir(resolved)
+                and not _is_multiply_linked(file_path)):
+            return
         if not override_active(session_id, WEBSITE_WRITE):
             block("write to oxfordra.net site tree: %s" % file_path, WEBSITE_WRITE, session_id)
 
