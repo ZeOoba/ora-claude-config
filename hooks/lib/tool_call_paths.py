@@ -46,8 +46,35 @@ Stdlib only. ASCII-only. Windows (`python`).
 """
 import os
 import re
+import sys
 import unicodedata
 from collections import namedtuple
+
+# Same self-sufficient sibling-import pattern as email_send_tier.py / website_deploy_tier.py:
+# resolve lib/ from this file rather than trusting whatever a consumer put on sys.path.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from text_normalization import STRIP_CATEGORIES  # noqa: E402
+    # Shape-validate before trusting it: a shared module that imports but exports the
+    # wrong TYPE would raise inside normalize_text on every call instead of here.
+    if (not isinstance(STRIP_CATEGORIES, tuple) or not STRIP_CATEGORIES
+            or not all(isinstance(c, str) for c in STRIP_CATEGORIES)):
+        raise TypeError("STRIP_CATEGORIES must be a non-empty tuple of str")
+except BaseException:
+    # MEASURED, not theoretical (2026-09-18 adversarial review). An unguarded import here
+    # is not "the documented degrade-to-inert": losing this one file takes THIS module
+    # down, and with it config-write-guard (225 of its checks fail) and lint-config-guard
+    # (17) go fully inert -- including their protection of hooks/** itself, i.e. of this
+    # file and of ora-autonomy-gate.py. The most likely trigger is mundane: a commit that
+    # misses the untracked module, or a partial pull on the shared checkout.
+    #
+    # BaseException, not Exception: a shared module that called sys.exit() at import time
+    # would raise SystemExit, which Exception does not catch, and the guard importing this
+    # module would die rather than degrade.
+    #
+    # Pinned to the canonical tuple by
+    # test-tool-call-paths.py::test_strip_categories_fallbacks_match_shared_module.
+    STRIP_CATEGORIES = ("Cf", "Mn")
 
 # --------------------------------------------------------------------- tool names
 DC_PREFIXES = (
@@ -126,12 +153,15 @@ def is_write_capable(tool_name):
 
 
 # --------------------------------------------------------------------- normalization
-# Unicode categories stripped ON TOP OF NFKC, mirroring ora-autonomy-gate.py's
-# _normalize_for_matching (Round 3 adversarial finding, 2026-07-17): Cf (zero-width
-# space, RTL override, soft hyphen, ...) and Mn (combining marks) inserted MID-WORD
-# break substring/word-boundary matching invisibly. Legitimate command/path text has
-# no legitimate reason to contain either category.
-_STRIP_CATEGORIES = ("Cf", "Mn")
+# The stripped-category set is SHARED with ora-autonomy-gate.py via
+# hooks/lib/text_normalization.py (2026-09-18). It used to be an independent copy of the
+# same tuple here, mirroring the gate's by convention only -- read that module for the
+# Round 3 (2026-07-17) rationale, for why the two consumers share the CONSTANT but
+# deliberately NOT the matcher, and for the path-ordering rule.
+#
+# The non-str contract below is this module's half of that split and is deliberate: this
+# function parses arbitrary tool_input JSON, where a field may legitimately be any type, so
+# an odd payload must not raise inside every importing guard.
 
 
 def normalize_text(text):
@@ -141,7 +171,7 @@ def normalize_text(text):
         return ""
     folded = unicodedata.normalize("NFKC", text)
     return "".join(ch for ch in folded
-                   if unicodedata.category(ch) not in _STRIP_CATEGORIES)
+                   if unicodedata.category(ch) not in STRIP_CATEGORIES)
 
 
 def resolve_path(path):
