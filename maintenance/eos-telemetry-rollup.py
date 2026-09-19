@@ -93,7 +93,7 @@ def load_records(path):
 
     An empty `records` list is NOT self-explanatory, so the status says which
     empty it is. Previously every one of these collapsed to a bare [] and the
-    caller printed "(no telemetry recorded yet)" — meaning a corrupt, moved, or
+    caller printed "(no telemetry recorded yet)" -- meaning a corrupt, moved, or
     unreadable telemetry file was indistinguishable from a genuine first run.
 
       "absent"     - file does not exist. The ONLY legitimate empty.
@@ -127,7 +127,7 @@ def load_records(path):
                 else:
                     skipped += 1
     except Exception as exc:
-        # Do NOT discard what was already read — a partial I/O failure used to
+        # Do NOT discard what was already read -- a partial I/O failure used to
         # zero out an otherwise-valid dataset.
         return records, "unreadable", "%s: %s" % (type(exc).__name__, exc)
     if not records and skipped:
@@ -310,7 +310,7 @@ def main():
         # Loud and unmistakable: this is NOT the benign first-run empty. Exit
         # stays 0 so the calling block does not halt, but the caller must never
         # report this as "no telemetry yet".
-        print("!! TELEMETRY READ FAILED (%s) — %s" % (status, detail))
+        print("!! TELEMETRY READ FAILED (%s) -- %s" % (status, detail))
         print("!! This is a FAILURE, not a null result. Do NOT report it as "
               "'(no telemetry recorded yet)'. Verify the file at the source "
               "path above before trusting any Block G ratio this run.")

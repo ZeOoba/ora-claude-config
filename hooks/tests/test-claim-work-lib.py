@@ -543,6 +543,20 @@ shutil.rmtree(root, ignore_errors=True)
 # the claim branch saw "no collision" -- but read_prior_claim is deliberately NOT
 # TTL-filtered, which is why `release` refuses in this identical state. Two write paths
 # disagreeing about one invariant is the defect.
+#
+# EXPECTATION REVISED 2026-09-10 (expired-claim clobber fix, test-claim-work-clobber.py).
+# The invariant under test is "a claim never leaves the slug with NO undo record", and
+# it still holds below. What changed is WHICH record, and that is a correction, not a
+# relaxation: this sequence used to assert sess-A, and it could only ever have been
+# sess-A because sess-B's expired claim was INVISIBLE to the claim branch -- the same
+# blind spot that let C destroy B's claim silently and irrecoverably. Now that C's
+# displacement of B is recorded, the immediately superseded claim is B, and
+# _strip_prior()'s ratified one-level-deep contract ("Only the IMMEDIATELY superseded
+# claim is restorable ... the only one a --force operator can meaningfully be said to
+# have displaced") names B as the answer. Restoring to A would hand the slug back to a
+# session displaced two steps ago while erasing B, who was the actual holder C
+# overwrote. sess-A is not lost by accident here -- it is dropped by the same
+# no-unbounded-chain rule that has always governed a takeover of a takeover.
 root = tempfile.mkdtemp(prefix="claim-undo-expired-")
 stale = datetime.datetime.now() - datetime.timedelta(minutes=cw.DEFAULT_TTL_MINUTES + 5)
 cw.write_claim("s", "sess-B", "B took it", base_dir=root, now=stale,
@@ -552,8 +566,12 @@ check("precondition: the takeover claim has aged out", cw.find_claim("s", base_d
       None)
 code, out, err = run_cli(["claim", "s", "C's fresh work"], root, session_id="sess-C")
 check("a plain claim over an EXPIRED takeover still succeeds", code, 0)
-check("...and still does not destroy the undo record",
-      (cw.read_prior_claim("s", base_dir=root) or {}).get("session_id"), "sess-A")
+check("...and still leaves an undo record behind",
+      (cw.read_prior_claim("s", base_dir=root) or {}) != {}, True)
+check("...naming the claim it ACTUALLY displaced (one-step undo, not a chain)",
+      (cw.read_prior_claim("s", base_dir=root) or {}).get("session_id"), "sess-B")
+check("...and the displacement was announced rather than silent",
+      "EXPIRED" in out, True)
 shutil.rmtree(root, ignore_errors=True)
 
 # The unattributable-overwrite NOTE used to advertise `restore`, which refuses exactly
@@ -1019,6 +1037,98 @@ check("...and excluding one session leaves the rest still newest-first",
       [c["slug"] for c in cw.claims_touching([SHARED], base_dir=root, now=now,
                                               exclude_session="sess-mid")],
       ["brandnew-one", "aged-thirty"])
+shutil.rmtree(root, ignore_errors=True)
+
+# ---------------------------------------------------------------------------
+# Reserved 'sched-' namespace for UNATTENDED claims (ratified 2026-09-07).
+# An unattended holder cannot be messaged, so its claim must age out fast and
+# takeover must read as routine rather than as a transgression.
+# ---------------------------------------------------------------------------
+check("is_sched_slug true for the reserved prefix",
+      cw.is_sched_slug("sched-repo-housekeeping"), True)
+check("is_sched_slug false for an ordinary slug",
+      cw.is_sched_slug("repo-housekeeping"), False)
+# PREFIX, not substring. An `in`-based implementation passed the entire suite in the
+# 2026-09-07 adversarial review; this repo coins narrower slugs by suffixing, so a slug
+# like "ora-skills-sched-sweep" would silently inherit the 30m TTL and force-is-routine
+# messaging it was never meant to have.
+check("is_sched_slug is a PREFIX test, not a substring test",
+      [cw.is_sched_slug("my-sched-run"), cw.is_sched_slug("ora-skills-sched-sweep")],
+      [False, False])
+check("is_sched_slug false for empty/None (no crash)",
+      [cw.is_sched_slug(""), cw.is_sched_slug(None)], [False, False])
+# The prefix uses a HYPHEN because the slug is the filename and ':' is illegal on
+# Windows -- guard the constant so nobody "tidies" it back to 'sched:'.
+check("prefix is filename-safe (no colon)", ":" in cw.SCHED_SLUG_PREFIX, False)
+check("sched slug gets the short TTL",
+      cw._effective_ttl("sched-x", cw.DEFAULT_TTL_MINUTES), cw.SCHED_TTL_MINUTES)
+check("ordinary slug keeps the caller's TTL",
+      cw._effective_ttl("ordinary", cw.DEFAULT_TTL_MINUTES), cw.DEFAULT_TTL_MINUTES)
+check("a caller TTL SHORTER than the sched TTL is not widened by the rule",
+      cw._effective_ttl("sched-x", 10), 10)
+
+# End-to-end through read_active_claims: same age, different survival.
+root = tempfile.mkdtemp(prefix="claim-sched-")
+now = datetime.datetime(2026, 9, 7, 12, 0, 0)
+for slug, age in (("sched-nightly", 45), ("human-work", 45),
+                  ("sched-fresh", 20), ("human-fresh", 20)):
+    at = now - datetime.timedelta(minutes=age)
+    with open(os.path.join(root, slug + ".json"), "w", encoding="utf-8") as f:
+        json.dump({"session_id": "s-" + slug, "description": "d", "paths": [],
+                   "title": "t", "cwd": "",
+                   "claimed_at": at.strftime("%Y-%m-%dT%H:%M:%S")}, f)
+live = sorted(c["slug"] for c in cw.read_active_claims(base_dir=root, now=now))
+check("a 45m-old sched- claim has EXPIRED while the human one at the same age lives",
+      live, ["human-fresh", "human-work", "sched-fresh"])
+
+# And the refusal text tells the challenger that force is routine here.
+with open(os.path.join(root, "sched-live.json"), "w", encoding="utf-8") as f:
+    json.dump({"session_id": "unattended-holder", "description": "nightly sweep",
+               "paths": [], "title": "t", "cwd": "",
+               "claimed_at": datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")}, f)
+code, out, err = run_cli(["claim", "sched-live", "my work"], root,
+                         session_id="challenger")
+blob = (out or "") + (err or "")
+check("claiming over a live sched- claim is still REFUSED", code, cw.EXIT_CLAIM_REFUSED)
+check("...and the refusal says takeover is ROUTINE for an unattended holder",
+      "ROUTINE" in blob, True)
+# Anchored to the NOTE LINE, not to the whole blob: `str(SCHED_TTL_MINUTES) in blob`
+# passed with the entire NOTE deleted, because the refusal header's "(%.0fm ago)" age
+# field supplies a "30" of its own (2026-09-07 adversarial review, proven false pass).
+note_lines = [l for l in blob.splitlines()
+              if l.strip().startswith("NOTE:")
+              and "self-expires after %d minutes" % cw.SCHED_TTL_MINUTES in l]
+check("...and the NOTE line itself names the self-expiry window", len(note_lines), 1)
+check("...and that NOTE is the line carrying the ROUTINE guidance",
+      "ROUTINE" in (note_lines[0] if note_lines else ""), True)
+# Pin the constant itself, not just the band: a mutation to 40 passed the old assertion.
+check("SCHED_TTL_MINUTES is 30 and below the default",
+      [cw.SCHED_TTL_MINUTES, cw.SCHED_TTL_MINUTES < cw.DEFAULT_TTL_MINUTES], [30, True])
+shutil.rmtree(root, ignore_errors=True)
+
+# restore must judge expiry against the EFFECTIVE TTL. Before the 2026-09-07 fix this
+# compared against DEFAULT_TTL_MINUTES, so restoring a 45m sched- claim printed plain
+# success while read_active_claims() already treated it as gone.
+root = tempfile.mkdtemp(prefix="claim-sched-restore-")
+old_at = datetime.datetime.now() - datetime.timedelta(minutes=45)
+with open(os.path.join(root, "sched-nightly.json"), "w", encoding="utf-8") as f:
+    json.dump({"session_id": "challenger", "description": "took it", "paths": [],
+               "title": "t", "cwd": "",
+               "claimed_at": datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+               "prior_claim": {"session_id": "unattended", "description": "nightly",
+                               "paths": [], "title": "t", "cwd": "",
+                               "claimed_at": old_at.strftime("%Y-%m-%dT%H:%M:%S")}}, f)
+# --force because the takeover holder is live and restore rightly refuses otherwise;
+# this is the real operator sequence: force-take an unattended claim, then undo it.
+code, out, err = run_cli(["restore", "sched-nightly", "--force"], root)
+blob = (out or "") + (err or "")
+check("restore of a 45m sched- claim succeeds", code, 0)
+check("restoring a 45m sched- claim WARNS that it is already expired",
+      "already expired" in blob, True)
+check("...and cites the 30m effective TTL, not the 120m default",
+      "past the %dm TTL" % cw.SCHED_TTL_MINUTES in blob, True)
+check("...and read_active_claims agrees it is gone (no false success)",
+      cw.read_active_claims(base_dir=root), [])
 shutil.rmtree(root, ignore_errors=True)
 
 print()

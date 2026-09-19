@@ -412,6 +412,64 @@ def parse_last_run_utc(s):
         return None
 
 
+def _local_to_utc(naive_local):
+    """Interpret a naive local datetime in the MACHINE's zone using the DST rule
+    in force on THAT date (not today's fixed offset) and return naive UTC.
+
+    Cron is evaluated in machine-local time per doctrine -- the Desktop
+    scheduler uses whatever zone Windows is on (2026-09-02: Romance Standard
+    Time, not Eastern), so this deliberately does NOT hard-code
+    America/New_York. Before 2026-09-03 every candidate was shifted by the
+    CURRENT offset, so a slot on the far side of a DST transition landed an
+    hour off and could move an overdue verdict across the 24h grace boundary
+    (PR #157 review). A nonexistent/ambiguous local time (the spring-forward
+    gap, the fall-back fold) resolves however the C runtime's mktime resolves
+    it -- one hour of slack at most, twice a year, on a 24h grace window."""
+    return naive_local.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+
+
+def _utc_to_local(naive_utc):
+    """Inverse of _local_to_utc: naive UTC -> naive machine-local, per-date DST."""
+    return (naive_utc.replace(tzinfo=datetime.timezone.utc)
+            .astimezone().replace(tzinfo=None))
+
+
+def first_expected_fire_after_utc(expr, after_utc, lookahead_days=400):
+    """The EARLIEST local fire strictly after `after_utc` (naive UTC), as naive
+    UTC -- the mirror image of most_recent_expected_fire_utc(). Returns None
+    for a cron the walker can't evaluate (same contract: caller falls back).
+
+    Why a separate forward walker (PR #157 review, finding 1): the never-ran
+    first-slot rule needs "did the task's FIRST post-registration slot go by
+    unfired?", and the most-recent slot is the wrong witness for that. A
+    multi-fire or daily cron always has a slot inside the last 24h, so
+    comparing the most recent one against the grace window never flags --
+    a daily 0 7,13,19 task registered yesterday 06:00 read as not overdue at
+    20:00 today despite a 37h-old first miss."""
+    hms = cron_hms(expr)
+    if not hms:
+        return None
+    parts = expr.split()
+    if len(parts) != 5:
+        return None
+    _mn, _hr, dom, mon, dow = parts
+    after_local = _utc_to_local(after_utc)
+    d0 = after_local.date()
+    for day_offset in range(lookahead_days):
+        d = d0 + datetime.timedelta(days=day_offset)
+        dow_val = (d.weekday() + 1) % 7
+        try:
+            fires = _cron_fires_on(dom, mon, dow, d.day, d.month, dow_val)
+        except ValueError:
+            return None
+        if fires:
+            for hour, minute in sorted(hms):
+                candidate_local = datetime.datetime(d.year, d.month, d.day, hour, minute)
+                if candidate_local > after_local:
+                    return _local_to_utc(candidate_local)
+    return None
+
+
 def most_recent_expected_fire_utc(expr, now_local, lookback_days=400):
     """For a fixed-time 5-field cron (single- or multi-fire), walk backward from
     now_local to find the most recent local datetime at/before now that the
@@ -722,18 +780,52 @@ def main():
     # RECALIBRATED VERDICT INPUTS (2026-07-14) -- see cadence_buffer_days() docstring.
     # never-ran is only overdue for a RECURRING task (no fireAt -- one-time tasks are
     # handled by expired_needs_attention instead) whose age exceeds its cadence buffer.
+    #
+    # FIRST-SLOT RULE (2026-09-02, closes Automation Audit R21-2b). The cadence
+    # buffer alone measures age-since-createdAt, so a day-of-month cron gets a
+    # flat 40-day grace regardless of whether a real slot has already come and
+    # gone. That hid a money-moving miss: ora-pm-monthly-billing (10 11 1 * *,
+    # registered 2026-08-21) missed its first-ever fire on 2026-09-01 inside a
+    # host outage and read "0 overdue" -- and would have kept reading that
+    # until ~09-30 -- while find_missed_cycles() explicitly excludes never-ran
+    # tasks. A never-ran task whose FIRST post-registration slot has elapsed by
+    # more than MISSED_CYCLE_GRACE_HOURS is overdue now, whatever its cadence;
+    # the buffer remains the fallback for crons most_recent_expected_fire_utc()
+    # can't evaluate. A slot that predates createdAt never counts (a task
+    # registered on the 16th for the 15th is simply waiting for next month).
     never_ran_overdue = []
+    never_ran_overdue_reason = []
+    now_utc_naive = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+    grace_td = datetime.timedelta(hours=MISSED_CYCLE_GRACE_HOURS)
     for t in never_ran:
         if fire_at(t):
             continue  # one-time -- not this check's business
         created = t.get("createdAt")
         if not isinstance(created, (int, float)):
             continue  # can't determine age -- don't flag on missing data
+        created_utc = datetime.datetime.fromtimestamp(
+            created / 1000.0, datetime.timezone.utc).replace(tzinfo=None)
+        first_utc = first_expected_fire_after_utc(t.get("cronExpression"), created_utc)
+        if first_utc is not None:
+            if first_utc <= now_utc_naive and (now_utc_naive - first_utc) > grace_td:
+                never_ran_overdue.append(t)
+                never_ran_overdue_reason.append({
+                    "id": t.get("id"), "fleet": t.get("_fleet"),
+                    "reason": "first slot %sZ elapsed >%dh unfired"
+                              % (first_utc.strftime("%Y-%m-%dT%H:%M"), MISSED_CYCLE_GRACE_HOURS)})
+            # else: first post-registration slot is still ahead, or inside
+            # the grace window -- waiting, not overdue. Do NOT fall through to
+            # the cadence buffer: a slot walker that CAN evaluate the cron is
+            # a stronger witness than an age heuristic.
+            continue
         buf = cadence_buffer_days(t.get("cronExpression"))
         if buf is None:
             continue  # can't classify cadence -- don't guess
         if (now_ms - created) / 86400000.0 > buf:
             never_ran_overdue.append(t)
+            never_ran_overdue_reason.append({
+                "id": t.get("id"), "fleet": t.get("_fleet"),
+                "reason": "age exceeds %dd cadence buffer (cron not evaluable by the slot walker)" % buf})
 
     # expired one-time is only VERDICT-worthy if it never fired (missed) or is still
     # enabled past its fireAt (didn't auto-disable) -- a normal successful one-time
@@ -824,6 +916,9 @@ def main():
             "eastern_offset_now": eastern_offset_now,
             "host_clock_shifted_from_eastern": host_clock_shifted,
             "staleness_note": STALENESS_NOTE,
+            "host_clock": host_clock,
+            "eastern_offset_now": eastern_offset_now,
+            "host_clock_shifted_from_eastern": host_clock_shifted,
             "registries": {lbl: p for lbl, p in regs},
             "per_fleet_enabled": {lbl: sum(1 for t in enabled if t.get("_fleet") == lbl)
                                   for lbl, _ in regs},
@@ -836,6 +931,7 @@ def main():
             "total": len(tasks), "enabled": len(enabled), "disabled": len(disabled),
             "never_ran": [t.get("id") for t in never_ran],
             "never_ran_overdue": [t.get("id") for t in never_ran_overdue],
+            "never_ran_overdue_reason": never_ran_overdue_reason,
             "onetime": [t.get("id") for t in onetime],
             "expired_onetime": [t.get("id") for t in expired],
             "expired_needs_attention": [t.get("id") for t in expired_needs_attention],
@@ -899,7 +995,11 @@ def main():
              ", ".join("%s=%d" % kv for kv in per_fleet.items())))
     print("  never-ran .......... %d   %s" % (len(never_ran), ", ".join(sorted(t.get("id") for t in never_ran)) or "-"))
     print("      of which overdue  %d   %s" % (len(never_ran_overdue),
-          ", ".join(sorted(t.get("id") for t in never_ran_overdue)) or "- (not yet due, by cadence)"))
+          ", ".join("%s [%s] (%s)" % (r["id"], r["fleet"] or "?", r["reason"])
+                    for r in sorted(never_ran_overdue_reason,
+                                    key=lambda r: (r["fleet"] or "", r["id"] or "")))
+          or "- (not yet due: no post-registration slot elapsed >%dh, none past cadence buffer)"
+          % MISSED_CYCLE_GRACE_HOURS))
     print("  one-time fireAt .... %d   %s" % (len(onetime), ", ".join(sorted(t.get("id") for t in onetime)) or "-"))
     print("  EXPIRED one-time ... %d   %s" % (len(expired), ", ".join(sorted(t.get("id") for t in expired)) or "-"))
     print("      of which missed/stuck %d   %s" % (len(expired_needs_attention),

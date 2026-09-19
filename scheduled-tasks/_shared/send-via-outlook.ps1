@@ -31,6 +31,26 @@
 .PARAMETER Cc
     Optional CC recipients (comma-separated).
 
+.PARAMETER Attachment
+    Optional file path(s) to attach. Accepts one path or several.
+
+    Every path is resolved to an absolute path BEFORE the COM call, because
+    Outlook resolves a relative path against its own working directory rather
+    than the caller's. Validation is fail-closed: a missing file, a directory,
+    an empty string, or a combined size over 20 MB rejects the WHOLE send with
+    exit 1 and nothing is sent -- a message whose body promises an attachment
+    must never go out without it.
+
+    ATTACHMENTS ARE INTERNAL-ONLY. A send that carries any attachment AND any
+    external recipient is refused (exit 5), regardless of outbound-check
+    authorization: that check authorizes recipients and has no view of file
+    content, and an attachment bypasses every content scan in the fleet. Per
+    the ORA routing canon every legitimate automated send is internal-only, so
+    this never fires for real automation.
+
+    The resolved paths are recorded in send-log.txt on the OK line, so the
+    audit trail says exactly which bytes left the machine.
+
 .EXAMPLE
     # Short message
     .\send-via-outlook.ps1 -To "ggoldberg@oxfordra.net" -Subject "Test" -Body "Hello"
@@ -41,6 +61,13 @@
     .\send-via-outlook.ps1 -To "ggoldberg@oxfordra.net" `
         -Subject "[ORA] Morning Brief - 2026-04-17" `
         -BodyFile "$env:TEMP\brief.html" -BodyFormat html
+
+.EXAMPLE
+    # Report with a generated calendar file attached (internal recipient only)
+    .\send-via-outlook.ps1 -To "ggoldberg@oxfordra.net" `
+        -Subject "[ORA] Forward Calendar - week of 2026-09-21" `
+        -BodyFile "$env:TEMP\digest.html" -BodyFormat html `
+        -Attachment "C:\Users\Owner\.claude\artifacts\ora-forward-calendar\out\ora-forward-calendar.ics"
 
 .EXAMPLE
     # Non-ASCII subject (emoji / em-dash) -- REQUIRED when a task's subject is a
@@ -106,7 +133,14 @@
     gating logic can be tested end-to-end without ever sending a real email.
 #>
 
-[CmdletBinding()]
+# PositionalBinding=$false (2026-09-18): every real caller in the fleet invokes
+# this script with NAMED parameters (verified by sweep before this was added), and
+# positional binding actively hides mistakes. "-Attachment a b" used to bind 'a'
+# and then silently drop 'b' into the next free positional slot -- which is
+# $BodyFile -- surfacing as a baffling "-Body and -BodyFile are mutually
+# exclusive". With positional binding off, that stray token is a loud parameter
+# error instead. No caller changes; a positional call was never used.
+[CmdletBinding(PositionalBinding=$false)]
 param(
     [Parameter(Mandatory=$true)][string]$To,
     [Parameter(Mandatory=$true)][string]$Subject,
@@ -114,11 +148,19 @@ param(
     [string]$BodyFile,
     [ValidateSet("html","text")][string]$BodyFormat = "html",
     [string]$Cc,
+    [string[]]$Attachment,
     [switch]$WhatIf
 )
 
 $ErrorActionPreference = "Stop"
 $LogPath = "C:\Users\Owner\.claude\scheduled-tasks\_shared\send-log.txt"
+# Tests redirect the audit log, but ONLY under -WhatIf. A real send always writes
+# the canonical log, so this can never be used to blind the audit trail.
+if ($WhatIf -and $env:ORA_SEND_LOG_PATH) { $LogPath = $env:ORA_SEND_LOG_PATH }
+
+# Cap chosen to fail FAST with a readable message rather than let Exchange reject
+# the message with an opaque COM HRESULT (typical Exchange ceiling is 25 MB).
+$MaxAttachmentBytes = 20MB
 
 function Write-Log {
     param([string]$Level, [string]$Message)
@@ -148,6 +190,85 @@ if ($BodyFile) {
     }
     $Body = Get-Content -Path $BodyFile -Raw -Encoding UTF8
 }
+
+# --- Validate attachments (2026-09-18) ---
+# Fail-closed by design: a message whose body promises an attachment must never
+# go out without it, so ANY bad entry rejects the whole send before Outlook is
+# touched. Same exit code as the other argument faults above (1) -- the exit
+# contract (0 sent / 1 bad args / 2 COM / 3 wizard / 4 timeout / 5 outbound
+# refused) is deliberately NOT widened, so no existing caller changes meaning.
+$ResolvedAttachments = @()
+if ($PSBoundParameters.ContainsKey('Attachment')) {
+    # Under `powershell -File` -- how the whole fleet invokes this script -- a
+    # [string[]] parameter can NEVER receive more than one element: PowerShell
+    # binds "-Attachment a b" as one value plus a stray positional, and
+    # "-Attachment a,b" as the single literal string "a,b" (both verified
+    # empirically 2026-09-18). So MULTIPLE attachments travel as one
+    # '|'-delimited token -- unambiguous because '|' is illegal in a Windows
+    # filename. An in-process caller passing a real array still works unchanged.
+    # In Windows PowerShell 5.1, @($Attachment) on a [string[]]-typed parameter
+    # explicitly bound to $null returns $null itself, NOT a 1-element array (it
+    # does the opposite -- return a 1-element array -- for an untyped variable
+    # holding $null; verified empirically 2026-09-18, this file's own type
+    # annotation is what triggers it). `foreach` over $null runs zero iterations
+    # silently, so a guard placed INSIDE the loop below would never fire and an
+    # in-process caller passing -Attachment $null by mistake would silently
+    # degrade to "no attachment sent" instead of erroring. Checked here, before
+    # the wrap, so it fires regardless of that quirk.
+    if ($null -eq $Attachment) {
+        Write-Log "ERROR" "Attachment path is null"
+        exit 1
+    }
+    $AttachmentList = @()
+    foreach ($a in @($Attachment)) {
+        # Defense in depth for the narrower case the check above does not cover:
+        # a real array with one NULL ELEMENT inside it (e.g. -Attachment @($x, $null)
+        # from an in-process caller). $null -split anything returns an EMPTY array,
+        # not $null, so without this a null element would silently vanish here
+        # rather than being rejected.
+        if ($null -eq $a) {
+            Write-Log "ERROR" "Attachment path is null"
+            exit 1
+        }
+        $AttachmentList += ($a -split '\|')
+    }
+
+    $totalBytes = 0
+    foreach ($a in $AttachmentList) {
+        if ([string]::IsNullOrWhiteSpace($a)) {
+            Write-Log "ERROR" "Attachment path is empty"
+            exit 1
+        }
+        # Resolve BEFORE handing anything to COM. Outlook resolves a relative path
+        # against ITS OWN working directory, not the caller's -- so a relative path
+        # either attaches the wrong file or fails deep inside the COM job where the
+        # error surfaces only as a generic HRESULT.
+        $resolved = $null
+        try { $resolved = (Resolve-Path -LiteralPath $a -ErrorAction Stop).ProviderPath } catch { $resolved = $null }
+        if (-not $resolved) {
+            Write-Log "ERROR" "Attachment not found: $a"
+            exit 1
+        }
+        if ((Get-Item -LiteralPath $resolved).PSIsContainer) {
+            Write-Log "ERROR" "Attachment is not a file (directory): $resolved"
+            exit 1
+        }
+        $totalBytes += (Get-Item -LiteralPath $resolved).Length
+        $ResolvedAttachments += $resolved
+    }
+    if ($totalBytes -gt $MaxAttachmentBytes) {
+        Write-Log "ERROR" ("Attachment total {0:N0} bytes exceeds the {1:N0}-byte cap" -f $totalBytes, $MaxAttachmentBytes)
+        exit 1
+    }
+}
+
+# Full resolved paths, not basenames: the audit log should say exactly which bytes
+# left the building. '|' is not a legal Windows filename character, so it is also
+# the safe delimiter for handing this list to the background job below.
+$AttachJoined = ($ResolvedAttachments -join '|')
+$AttachLog = if ($ResolvedAttachments.Count -gt 0) {
+    " attachments=$($ResolvedAttachments.Count) [$($ResolvedAttachments -join '; ')]"
+} else { "" }
 
 # --- Preflight: detect a stuck startup-wizard Outlook before ever touching COM ---
 # (root cause 2026-07-07: a headless DCOM-spawned Outlook instance can get stuck on the
@@ -213,6 +334,22 @@ $allRecipients = @($To -split ';') + @($Cc -split ';') |
     ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique
 $externalRecipients = @($allRecipients | Where-Object { -not (Test-IsInternalRecipient $_) })
 
+# --- ATTACHMENT x EXTERNAL RECIPIENT (2026-09-18) -- fail-closed, deliberately strict.
+# The outbound-action check below authorizes RECIPIENTS. It has no view of file
+# CONTENT, and an attachment bypasses every content scan the fleet has: the
+# confidentiality hooks inspect commands and page sources, never a file handed
+# straight to Outlook. That makes "external recipient + arbitrary file" the one
+# path by which an unscanned document could leave the firm under automation --
+# precisely what Hard Invariant 3 exists to prevent.
+# Per the ORA routing canon every legitimate scheduled/automated send is
+# internal-only (ggoldberg@ / egoldberg@), so refusing the COMBINATION costs no
+# real automation. It is also strictly more conservative than the status quo,
+# where this script could not attach anything at all.
+if ($ResolvedAttachments.Count -gt 0 -and $externalRecipients.Count -gt 0) {
+    Write-Log "ERROR" "ATTACHMENT-CHECK: refusing to attach $($ResolvedAttachments.Count) file(s) to a send with external recipient(s) [$($externalRecipients -join ', ')] -- this send path is internal-only for attachments"
+    exit 5
+}
+
 if ($externalRecipients.Count -gt 0) {
     $sessionId = $env:CLAUDE_CODE_SESSION_ID
     if (-not $sessionId) {
@@ -262,22 +399,31 @@ if ($externalRecipients.Count -gt 0) {
 
 if ($WhatIf) {
     $ccLog = if ($Cc) { $Cc } else { "none" }
-    Write-Log "OK" "DRY RUN: would send to=$To cc=$ccLog subject=`"$Subject`" (no Outlook COM call made)"
+    Write-Log "OK" "DRY RUN: would send to=$To cc=$ccLog subject=`"$Subject`"$AttachLog (no Outlook COM call made)"
     exit 0
 }
 
 function Invoke-OutlookSend {
-    param($To, $Cc, $Subject, $Body, $BodyFormat)
+    # $AttachJoined is a '|'-delimited string of ALREADY-RESOLVED absolute paths,
+    # not an array: an array passed as the last -ArgumentList element is splatted
+    # into the remaining job parameters by PowerShell, which would silently drop
+    # or misbind attachments. '|' cannot occur in a Windows filename.
+    param($To, $Cc, $Subject, $Body, $BodyFormat, $AttachJoined)
     $job = Start-Job -ScriptBlock {
-        param($To, $Cc, $Subject, $Body, $BodyFormat)
+        param($To, $Cc, $Subject, $Body, $BodyFormat, $AttachJoined)
         $Outlook = New-Object -ComObject Outlook.Application
         $Mail = $Outlook.CreateItem(0)  # 0 = olMailItem
         $Mail.To = $To
         if ($Cc) { $Mail.CC = $Cc }
         $Mail.Subject = $Subject
         if ($BodyFormat -eq "html") { $Mail.HTMLBody = $Body } else { $Mail.Body = $Body }
+        if ($AttachJoined) {
+            foreach ($p in ($AttachJoined -split '\|')) {
+                if ($p) { $Mail.Attachments.Add($p) | Out-Null }
+            }
+        }
         $Mail.Send()
-    } -ArgumentList $To, $Cc, $Subject, $Body, $BodyFormat
+    } -ArgumentList $To, $Cc, $Subject, $Body, $BodyFormat, $AttachJoined
 
     if (Wait-Job $job -Timeout 15) {
         $errVar = $null
@@ -291,7 +437,7 @@ function Invoke-OutlookSend {
     }
 }
 
-$attempt = Invoke-OutlookSend -To $To -Cc $Cc -Subject $Subject -Body $Body -BodyFormat $BodyFormat
+$attempt = Invoke-OutlookSend -To $To -Cc $Cc -Subject $Subject -Body $Body -BodyFormat $BodyFormat -AttachJoined $AttachJoined
 
 if ($attempt.Timeout) {
     Write-Log "ERROR" "TIMEOUT: COM call exceeded 15s (Outlook likely blocked)"
@@ -302,7 +448,7 @@ elseif (-not $attempt.Success) {
     if ($hresult -eq 0x80010001) {
         # RPC_E_CALL_REJECTED - one bounded retry after a short cooldown
         Start-Sleep -Seconds 5
-        $retry = Invoke-OutlookSend -To $To -Cc $Cc -Subject $Subject -Body $Body -BodyFormat $BodyFormat
+        $retry = Invoke-OutlookSend -To $To -Cc $Cc -Subject $Subject -Body $Body -BodyFormat $BodyFormat -AttachJoined $AttachJoined
         if ($retry.Timeout) {
             Write-Log "ERROR" "TIMEOUT on retry: COM call exceeded 15s (Outlook likely blocked)"
             exit 4
@@ -312,7 +458,7 @@ elseif (-not $attempt.Success) {
         } else {
             $bytes = [System.Text.Encoding]::UTF8.GetByteCount($Body)
             $ccLog = if ($Cc) { $Cc } else { "none" }
-            Write-Log "OK" "Sent to=$To cc=$ccLog subject=`"$Subject`" bytes=$bytes format=$BodyFormat (after 1 retry)"
+            Write-Log "OK" "Sent to=$To cc=$ccLog subject=`"$Subject`" bytes=$bytes format=$BodyFormat$AttachLog (after 1 retry)"
             exit 0
         }
     } else {
@@ -323,6 +469,6 @@ elseif (-not $attempt.Success) {
 else {
     $bytes = [System.Text.Encoding]::UTF8.GetByteCount($Body)
     $ccLog = if ($Cc) { $Cc } else { "none" }
-    Write-Log "OK" "Sent to=$To cc=$ccLog subject=`"$Subject`" bytes=$bytes format=$BodyFormat"
+    Write-Log "OK" "Sent to=$To cc=$ccLog subject=`"$Subject`" bytes=$bytes format=$BodyFormat$AttachLog"
     exit 0
 }

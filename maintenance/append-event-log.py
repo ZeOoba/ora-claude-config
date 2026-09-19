@@ -40,14 +40,52 @@ never picks it up. Both are now cleaned up once their content is durably in the 
 (the .inplace-backup only after its read-back verify passes, so failure paths keep it).
 Orphans read as unmerged data and cost a real investigation to clear, which is the
 actual harm -- the content was a pure duplicate both times.
+
+LOCK (2026-09-07): the mtime-guard above only protects the READ of `log` -- the WRITE
+side stages through a FIXED path, `log + ".tmp-append"`, shared by every process. Two
+sessions appending within the same instant both stat/write/os.replace that same tmp
+name, and Windows can refuse the losing process's rename with WinError 5 ("Access is
+denied") while the other still holds it open -- observed live this session: two retries
+before the append landed. The existing retry loop already self-heals it, so nothing was
+ever lost, but every such collision burns an attempt and a sleep for no reason other
+than two processes racing the same filename. _log_lock() now wraps the read-modify-
+write critical section in _atomic_insert and _inplace_insert, AND main()'s own
+post-write verification read (found only once the multi-process test in
+_tests/test_append_event_log_lock.py still saw retries with just the two insert
+functions guarded -- that plain read holds `log` open without FILE_SHARE_DELETE just
+like the write path does, so it reproduces the identical race if left unguarded), with
+a real OS byte-range lock (msvcrt.locking on a `log + ".lock"` sidecar handle) so
+concurrent runs of THIS SCRIPT queue for their turn instead of colliding on the tmp
+path or on each other's reads. It is scoped
+narrowly on purpose: it excludes other holders of this same lock, nothing else -- an
+external process (the Desktop app) holding `log` itself open is untouched by it, so the
+mtime-guard/retry/in-place-fallback/spool net above is still the thing that catches
+that case and stays exactly as it was. Bounded by LOCK_ACQUIRE_TIMEOUT_S: if it can't
+be acquired in time (contention or an unexpected holder), the attempt proceeds WITHOUT
+the lock rather than blocking indefinitely -- this script's whole design is "the append
+must always succeed," and the pre-existing retry loop is the fallback if the lock
+itself is ever what's in the way. Uses msvcrt.locking (byte-range on an open handle),
+not a bare O_CREAT|O_EXCL lockfile, deliberately: a byte-range lock is released by
+Windows the instant the holding handle closes, including on a crash, so a dead writer
+can never strand a stale lock the way an existence-based lockfile can. The `.lock` file
+itself is never deleted (only unlocked) -- recreating it would itself race the next
+locker in the same way the old `.tmp-append` collision did, so it is a small,
+intentional, permanent sidecar next to `event_log.md`, not orphaned residue.
 """
 import argparse
+import contextlib
 import datetime
 import os
 import re
 import subprocess
 import sys
 import time
+
+try:
+    import msvcrt
+    _HAVE_MSVCRT = True
+except ImportError:  # pragma: no cover - this environment is Windows-only
+    _HAVE_MSVCRT = False
 
 # A real entry header is a DATED '## YYYY-MM-DD ...' line (see insert_newest's and
 # this module's own docstrings). A bare '## ' prefix is NOT sufficient: entry
@@ -67,6 +105,14 @@ LOG = os.path.join(os.path.expanduser("~"), ".claude", "projects",
 # attempt to exhaust before ever trying it).
 INPLACE_FALLBACK_AFTER = 3
 
+# _log_lock(): how long to wait for the byte-range lock before giving up and
+# proceeding without it (see the module docstring's LOCK section). Generous relative
+# to a single read-modify-write (milliseconds in practice) but well inside the outer
+# retry loop's own budget (6 attempts x up to ~1.5s of sleep), so a lock timeout still
+# leaves room for that loop to do its job.
+LOCK_ACQUIRE_TIMEOUT_S = 5.0
+LOCK_POLL_INTERVAL_S = 0.05
+
 # Print a WARN (never blocks -- this script's whole design is "append must always
 # succeed") once this many uncommitted '## ' entries have piled up against HEAD.
 UNCOMMITTED_BACKLOG_WARN_AT = 4
@@ -78,6 +124,58 @@ UNCOMMITTED_BACKLOG_WARN_AT = 4
 # warning tracked uncommitted entry COUNT, not total file size, so nothing fired
 # until someone remembered to run rollover-event-log.py by hand.
 LOG_SIZE_WARN_AT = 400_000
+
+
+@contextlib.contextmanager
+def _log_lock(log, timeout=LOCK_ACQUIRE_TIMEOUT_S):
+    """Cross-process exclusive lock serializing the read-modify-write critical
+    section for `log` (see the module docstring's LOCK section for the full why).
+
+    A byte-range lock on a dedicated `log + ".lock"` sidecar handle, acquired via
+    msvcrt.locking -- NOT a bare O_CREAT|O_EXCL lockfile, because a bare lockfile's
+    mere existence would need a staleness heuristic to recover from a crashed
+    holder; a byte-range lock is released by the OS the moment the holding handle
+    closes (including on a crash), so there is nothing to go stale.
+
+    Polls LK_NBLCK rather than blocking on LK_LOCK so the wait is bounded by
+    `timeout` and interruptible in the same style as the rest of this file's retry
+    loops. On timeout, yields WITHOUT the lock held -- this function's job is to
+    remove a common cause of retries, not to introduce a new way for an append to
+    hang or fail; the caller's own retry loop is still the backstop.
+
+    No-op on a non-Windows interpreter (there is none in this environment, but the
+    test suite gates the same way around ctypes.WinDLL, so this matches).
+    """
+    if not _HAVE_MSVCRT:
+        yield
+        return
+    lock_path = log + ".lock"
+    # "a+b" both creates the sidecar if absent and never truncates one another
+    # process currently holds -- see the module docstring on why it is never
+    # deleted, only unlocked.
+    f = open(lock_path, "a+b")
+    locked = False
+    try:
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                f.seek(0)
+                msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+                locked = True
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    break
+                time.sleep(LOCK_POLL_INTERVAL_S)
+        yield
+    finally:
+        if locked:
+            try:
+                f.seek(0)
+                msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+            except OSError:
+                pass
+        f.close()
 
 
 def insert_newest(content, entry):
@@ -248,31 +346,42 @@ def _atomic_insert(log, entry, allow_duplicate=False):
     spooled entries through this same function, so a spooled entry that turns
     out to already be in the log (e.g. two locked runs both spooled the same
     content) is silently recognized and discarded here, not blindly rewritten."""
-    st_before = os.stat(log).st_mtime_ns
-    with open(log, encoding="utf-8") as f:
-        content = f.read()
-    if os.stat(log).st_mtime_ns != st_before:
-        raise BlockingIOError("log changed mid-read")
-    if _is_duplicate_fail_open(content, entry, allow_duplicate):
-        return False
-    new = stamp_modified(insert_newest(content, entry))
-    tmp = log + ".tmp-append"
-    try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write(new)
-        os.replace(tmp, log)  # atomic on the same volume; consumes tmp on success
-    except Exception:
-        # os.replace is the ONLY thing that consumes tmp, so any failure here orphans
-        # it -- and the in-place fallback that follows writes straight to `log` and
-        # never picks it up (2026-07-16: a 480KB orphan sat next to event_log.md,
-        # reading as unmerged data until a hash proved it a pure duplicate). The
-        # content is re-derived from `log` on the next attempt, so it is pure scratch.
+    with _log_lock(log):
+        st_before = os.stat(log).st_mtime_ns
+        with open(log, encoding="utf-8") as f:
+            content = f.read()
+        if os.stat(log).st_mtime_ns != st_before:
+            raise BlockingIOError("log changed mid-read")
+        if _is_duplicate_fail_open(content, entry, allow_duplicate):
+            return False
+        new = stamp_modified(insert_newest(content, entry))
+        # Unique per attempt (2026-09-07): a fixed ".tmp-append" name raced every
+        # concurrent writer over the SAME staging path -- two sessions appending
+        # within the same instant could both hold it open at once, and Windows
+        # would refuse the loser's os.replace with WinError 5 (see the module
+        # docstring's LOCK section). _log_lock above now serializes this whole
+        # block across runs of this script, which removes that race for the
+        # common case; the name stays unique anyway as defense in depth for any
+        # write that reaches here unlocked (the lock's own timeout fallback, or a
+        # future caller that bypasses it) -- two processes can no longer collide
+        # on the SAME tmp path even if they overlap.
+        tmp = "%s.tmp-append.%d.%d" % (log, os.getpid(), time.time_ns())
         try:
-            os.remove(tmp)
-        except OSError:
-            pass
-        raise
-    return True
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(new)
+            os.replace(tmp, log)  # atomic on the same volume; consumes tmp on success
+        except Exception:
+            # os.replace is the ONLY thing that consumes tmp, so any failure here orphans
+            # it -- and the in-place fallback that follows writes straight to `log` and
+            # never picks it up (2026-07-16: a 480KB orphan sat next to event_log.md,
+            # reading as unmerged data until a hash proved it a pure duplicate). The
+            # content is re-derived from `log` on the next attempt, so it is pure scratch.
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            raise
+        return True
 
 
 def _inplace_insert(log, entry, allow_duplicate=False):
@@ -289,31 +398,32 @@ def _inplace_insert(log, entry, allow_duplicate=False):
     Returns True if written, False if already a content-identical duplicate
     (nothing written); raises on any check failure -- caller decides whether to
     retry or spool, and the backup is left on disk for recovery."""
-    st_before = os.stat(log).st_mtime_ns
-    with open(log, encoding="utf-8") as f:
-        content = f.read()
-    if os.stat(log).st_mtime_ns != st_before:
-        raise BlockingIOError("log changed mid-read")
-    if _is_duplicate_fail_open(content, entry, allow_duplicate):
-        return False
-    new = stamp_modified(insert_newest(content, entry))
-    backup = log + ".inplace-backup"
-    with open(backup, "w", encoding="utf-8") as f:
-        f.write(content)
-    with open(log, "w", encoding="utf-8") as f:
-        f.write(new)
-    with open(log, encoding="utf-8") as f:
-        written = f.read()
-    if written != new:
-        raise IOError("in-place write verify mismatch -- backup at %s" % backup)
-    # Verify passed, so `log` is known-good and the backup has discharged its purpose.
-    # Removing it ONLY here keeps the net intact on every failure path: a partial write
-    # or a failed verify never reaches this line, so the backup survives for recovery.
-    try:
-        os.remove(backup)
-    except OSError:
-        pass
-    return True
+    with _log_lock(log):
+        st_before = os.stat(log).st_mtime_ns
+        with open(log, encoding="utf-8") as f:
+            content = f.read()
+        if os.stat(log).st_mtime_ns != st_before:
+            raise BlockingIOError("log changed mid-read")
+        if _is_duplicate_fail_open(content, entry, allow_duplicate):
+            return False
+        new = stamp_modified(insert_newest(content, entry))
+        backup = log + ".inplace-backup"
+        with open(backup, "w", encoding="utf-8") as f:
+            f.write(content)
+        with open(log, "w", encoding="utf-8") as f:
+            f.write(new)
+        with open(log, encoding="utf-8") as f:
+            written = f.read()
+        if written != new:
+            raise IOError("in-place write verify mismatch -- backup at %s" % backup)
+        # Verify passed, so `log` is known-good and the backup has discharged its purpose.
+        # Removing it ONLY here keeps the net intact on every failure path: a partial write
+        # or a failed verify never reaches this line, so the backup survives for recovery.
+        try:
+            os.remove(backup)
+        except OSError:
+            pass
+        return True
 
 
 def _insert_or_inplace(log, entry, try_inplace, allow_duplicate=False):
@@ -536,11 +646,22 @@ def main(argv=None):
                     % os.path.basename(a.log))
                 print("skipped (duplicate): %s" % header)
                 return 0
-            with open(a.log, encoding="utf-8") as f:
-                if header in f.read():
-                    print("appended: %s" % header)
-                    warn_if_uncommitted_backlog(a.log)
-                    return 0
+            # This read must be lock-guarded too (2026-09-07): it is a plain
+            # open()-for-read, which on Windows does NOT grant FILE_SHARE_DELETE
+            # (see the module docstring's LOCK section, and _HoldWithoutDeleteShare
+            # in test-append-event-log.py, which simulates exactly this share mode
+            # to reproduce the blocked-os.replace bug). Left unguarded, this read
+            # reproduces the very race _log_lock exists to close: a losing process
+            # could hold this file open just long enough for a concurrent winner's
+            # os.replace to hit WinError 5 against it -- found live via the new
+            # multi-process test in _tests/test_append_event_log_lock.py, which
+            # still saw retries with only _atomic_insert/_inplace_insert guarded.
+            with _log_lock(a.log):
+                with open(a.log, encoding="utf-8") as f:
+                    if header in f.read():
+                        print("appended: %s" % header)
+                        warn_if_uncommitted_backlog(a.log)
+                        return 0
         except ValueError:
             raise
         except Exception as e:

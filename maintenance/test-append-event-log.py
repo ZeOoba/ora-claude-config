@@ -9,6 +9,7 @@ pure function inserts a new '## ' entry immediately BEFORE the first existing
 Run: python test-append-event-log.py   (exit 0 = all pass)
 """
 import ctypes
+import glob
 import importlib.util
 import os
 import sys
@@ -126,7 +127,11 @@ def _make_temp_log(content):
 
 
 def _cleanup(path):
-    for p in (path, path + ".tmp-append", path + ".inplace-backup"):
+    # ".tmp-append" is now suffixed with pid+nanoseconds per attempt (2026-09-07,
+    # closing the shared-tmp-filename race -- see append-event-log.py's module
+    # docstring LOCK section), so sweep it by glob rather than an exact name.
+    for p in [path, path + ".inplace-backup", path + ".lock"] + \
+             glob.glob(path + ".tmp-append.*"):
         if os.path.exists(p):
             os.remove(p)
 
@@ -243,13 +248,19 @@ finally:
 # paths leaked a ~480KB scratch file next to event_log.md. os.replace is the ONLY
 # thing that consumes .tmp-append, so a blocked atomic attempt orphaned it -- and the
 # in-place fallback that rescued the append writes straight to the log and never
-# picked it up. Filenames are fixed, so at most one of each can strand; the harm is
-# that an orphan reads as unmerged data and costs a real investigation to clear.
+# picked it up. The harm is that an orphan reads as unmerged data and costs a real
+# investigation to clear. NOTE (2026-09-07): ".tmp-append" now carries a pid+ns
+# suffix per attempt (see append-event-log.py's LOCK section), so this checks by
+# glob rather than an exact name -- ".lock" is deliberately excluded: it is a
+# permanent sidecar, not residue (same docstring).
 
 def _residue(path):
-    """Scratch files still on disk next to `path`."""
-    return sorted(s for s in (".tmp-append", ".inplace-backup")
-                  if os.path.exists(path + s))
+    """Scratch files still on disk next to `path` (excludes the permanent .lock
+    sidecar -- see the comment above)."""
+    found = [os.path.basename(p)[len(os.path.basename(path)):]
+             for p in glob.glob(path + ".tmp-append.*")]
+    found += [".inplace-backup"] if os.path.exists(path + ".inplace-backup") else []
+    return sorted(found)
 
 
 # a blocked atomic insert must not strand its scratch file

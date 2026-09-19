@@ -11,6 +11,9 @@ Contract under test (the recalibration, not the pre-existing table/collision cod
   * never-ran is only VERDICT-worthy if the task is a RECURRING task (no fireAt) whose
     createdAt is older than a cadence-aware buffer inferred from its cron fields --
     a quarterly/annual task that simply hasn't reached its next fire yet must not flag.
+  * FIRST-SLOT RULE (2026-09-02, R21-2b): a never-ran recurring task whose first
+    post-registration slot elapsed more than MISSED_CYCLE_GRACE_HOURS ago IS overdue
+    regardless of that buffer; a slot that predates createdAt never counts.
   * A one-time task (has fireAt) is never counted under never-ran-overdue; it's
     handled by the expired-needs-attention check below instead.
   * expired one-time is only VERDICT-worthy if it never fired (missed) or is still
@@ -175,13 +178,58 @@ def test_daily_never_run_for_weeks_is_overdue():
           "expected ATTENTION verdict, got %r" % (data,))
 
 
-# 4. A monthly task created 10 days ago has NOT exceeded its cadence buffer.
+# 4. A monthly task created 10 days ago whose next slot is still AHEAD has NOT
+#    exceeded its cadence buffer and has no elapsed post-registration slot.
+#    (Pinned to a day-of-month 3 days in the future: a fixed `1 * *` here was
+#    date-dependent -- run on the 2nd or 3rd of a month, the 1st has just
+#    elapsed and the first-slot rule correctly flags it, which is test 4b.)
+def _dom_days_from_today(delta_days):
+    import datetime
+    return (datetime.date.today() + datetime.timedelta(days=delta_days)).day
+
+
 def test_monthly_recent_creation_not_overdue():
-    tasks = [task("monthly-new", cron="0 5 1 * *", created_days_ago=10)]
+    cron = "0 5 %d * *" % _dom_days_from_today(+3)
+    tasks = [task("monthly-new", cron=cron, created_days_ago=10)]
     data, _ = run(tasks)
     check("test_monthly_recent_creation_not_overdue",
           data is not None and data.get("never_ran_overdue") == [],
           "expected not overdue, got %r" % (data,))
+
+
+# 4b. FIRST-SLOT RULE (2026-09-02, Automation Audit R21-2b): a never-ran
+#     recurring task whose first post-registration slot elapsed more than the
+#     grace window ago IS overdue, regardless of the cadence buffer. This is the
+#     ora-pm-monthly-billing shape: registered 08-21, slot 09-01 11:10 missed
+#     in an outage, previously read "0 overdue" until ~09-30.
+def test_monthly_never_ran_first_slot_elapsed_is_overdue():
+    cron = "0 0 %d * *" % _dom_days_from_today(-2)   # slot ~2 days ago, 00:00 local
+    tasks = [task("monthly-missed", cron=cron, created_days_ago=5)]
+    data, _ = run(tasks)
+    check("test_monthly_never_ran_first_slot_elapsed_is_overdue",
+          data is not None and data.get("never_ran_overdue") == ["monthly-missed"],
+          "expected monthly-missed flagged, got %r" % (data,))
+    check("test_monthly_never_ran_first_slot_elapsed_reason",
+          data is not None and any(r.get("id") == "monthly-missed" and "first slot" in r.get("reason", "")
+                                   for r in data.get("never_ran_overdue_reason", [])),
+          "expected first-slot reason, got %r" % (data,))
+    check("test_monthly_never_ran_first_slot_elapsed_verdict",
+          data is not None and data.get("verdict", "").startswith("ATTENTION"),
+          "expected ATTENTION verdict, got %r" % (data,))
+
+
+# 4c. A slot that predates registration never counts: the same cron registered
+#     AFTER the slot passed is simply waiting for next month (the
+#     ora-passed-deal-tracker shape -- registered 08-16 on a `15 * *` cron).
+
+
+def test_monthly_never_ran_slot_before_registration_not_overdue():
+    cron = "0 0 %d * *" % _dom_days_from_today(-2)
+    tasks = [task("monthly-fresh", cron=cron, created_days_ago=1)]
+    data, _ = run(tasks)
+    check("test_monthly_never_ran_slot_before_registration_not_overdue",
+          data is not None and data.get("never_ran_overdue") == [],
+          "expected not overdue (slot predates createdAt), got %r" % (data,))
 
 
 # 5. A one-time task with a FUTURE fireAt is never-ran but not due -- no flag anywhere.
@@ -348,11 +396,69 @@ def test_json_tasks_expose_last_run_at():
           "expected never-ran's last_run_at to be null, got %r" % (data,))
 
 
+def test_duplicate_id_overdue_reasons_are_not_collapsed():
+    tasks = [task("dup", cron="0 6 * * *", created_days_ago=3),          # first-slot reason
+             task("dup", cron="0 5 * */2 *", created_days_ago=200)]      # buffer reason
+    data, _ = run(tasks)
+    reasons = [r for r in (data or {}).get("never_ran_overdue_reason", []) if r.get("id") == "dup"]
+    check("test_duplicate_id_overdue_reasons_are_not_collapsed",
+          data is not None and data.get("never_ran_overdue") == ["dup", "dup"] and len(reasons) == 2
+          and any("first slot" in r["reason"] for r in reasons)
+          and any("cadence buffer" in r["reason"] for r in reasons),
+          "expected two distinct reasons for two 'dup' registrations, got %r" % (data,))
+
+
+# 5. A one-time task with a FUTURE fireAt is never-ran but not due -- no flag anywhere.
+
+
+def test_multifire_never_ran_first_slot_elapsed_is_overdue():
+    tasks = [task("multifire-missed", cron="0 7,13,19 * * *", created_days_ago=2)]
+    data, _ = run(tasks)
+    check("test_multifire_never_ran_first_slot_elapsed_is_overdue",
+          data is not None and data.get("never_ran_overdue") == ["multifire-missed"],
+          "expected multifire-missed flagged via first slot, got %r" % (data,))
+    check("test_multifire_never_ran_first_slot_reason_is_first_slot_not_buffer",
+          data is not None and any(r.get("id") == "multifire-missed" and "first slot" in r.get("reason", "")
+                                   for r in data.get("never_ran_overdue_reason", [])),
+          "expected a first-slot reason (not the 3d cadence buffer), got %r" % (data,))
+
+
+# 4e. PR #157 review, finding 3: dom/month/dow syntax the walker can't parse
+#     (a stepped month) must NOT crash the whole report -- it returns None and
+#     the cadence buffer runs as the documented fallback (120d for a
+#     month-restricted cron; created 10d ago -> not overdue).
+
+
+def test_unsupported_cron_field_falls_back_to_cadence_buffer():
+    tasks = [task("stepped-month", cron="0 5 * */2 *", created_days_ago=10),
+             task("daily-ok", cron="0 6 * * *", created_days_ago=1, last_run=recent_iso())]
+    data, err = run(tasks)
+    check("test_unsupported_cron_field_does_not_crash",
+          data is not None, "fleet-status crashed on a stepped month field: %s" % (err,))
+    check("test_unsupported_cron_field_not_overdue_within_buffer",
+          data is not None and data.get("never_ran_overdue") == [],
+          "expected cadence-buffer fallback (not overdue at 10d/120d), got %r" % (data,))
+    tasks = [task("stepped-month-old", cron="0 5 * */2 *", created_days_ago=200)]
+    data, _ = run(tasks)
+    check("test_unsupported_cron_field_overdue_past_buffer_with_buffer_reason",
+          data is not None and data.get("never_ran_overdue") == ["stepped-month-old"]
+          and any(r.get("id") == "stepped-month-old" and "cadence buffer" in r.get("reason", "")
+                  for r in data.get("never_ran_overdue_reason", [])),
+          "expected buffer-reason flag at 200d/120d, got %r" % (data,))
+
+
+# 4f. PR #157 review, finding 4: reasons are per registration, not per id.
+#     Two never-ran registrations sharing an id (a supported duplicate-id
+#     failure mode) must each keep their own reason.
+
+
 if __name__ == "__main__":
     test_all_healthy_is_ok()
     test_quarterly_not_yet_due_is_not_overdue()
     test_daily_never_run_for_weeks_is_overdue()
     test_monthly_recent_creation_not_overdue()
+    test_monthly_never_ran_first_slot_elapsed_is_overdue()
+    test_monthly_never_ran_slot_before_registration_not_overdue()
     test_onetime_future_fire_not_flagged()
     test_onetime_normal_completion_not_flagged()
     test_onetime_missed_fire_flagged()
@@ -366,6 +472,9 @@ if __name__ == "__main__":
     test_multifire_cron_counted_in_am_pileup()
     test_multifire_cron_collides_on_shared_fire_time()
     test_json_tasks_expose_last_run_at()
+    test_multifire_never_ran_first_slot_elapsed_is_overdue()
+    test_unsupported_cron_field_falls_back_to_cadence_buffer()
+    test_duplicate_id_overdue_reasons_are_not_collapsed()
     if _failures:
         print("\n%d FAILURE(S): %s" % (len(_failures), ", ".join(_failures)))
         sys.exit(1)
