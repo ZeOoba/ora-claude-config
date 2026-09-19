@@ -13,11 +13,7 @@ description: >
   Cincinnati, Kansas City, Indianapolis, Maryland, Madison, Grand Rapids,
   Richmond, Des Moines, or a new county). Also trigger for "next market",
   "run the screen on X", or any request to build owner-level lead lists from
-  public property records. v1.1 (2026-07-19: added references/county-endpoints.v1.json,
-  a machine-readable parcel/CAMA-layer registry live-verified across all 22
-  documented counties, for cross-skill consumption — ora-flood-zoning-dd Step 1
-  now cross-links it for parcel-geometry lookups). v1.0 - validated Franklin
-  (Columbus) + Hamilton/Butler/Clermont/Warren (Cincinnati), June 2026.
+  public property records. v1.1 — changelog in body.
 ---
 
 # county-parcel-screen
