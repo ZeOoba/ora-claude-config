@@ -17,7 +17,7 @@
 # Fail-OPEN: any internal error -> exit 0 (never nag on a bug). ASCII-only (PS 5.1 reads non-BOM as ANSI).
 #
 # Install/refresh (run once):
-#   schtasks /Create /TN "ORA Fleet Dead-Man" /SC DAILY /ST 07:30 /F `
+#   schtasks /Create /TN "ORA Fleet Dead-Man" /SC DAILY /ST 07:45 /F `
 #     /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"C:\Users\Owner\.claude\maintenance\fleet-deadman.ps1\""
 
 # CHECK 4 added 2026-08-05: PHANTOM DISPATCH (maintenance\phantom-dispatch-probe.py).
@@ -218,6 +218,31 @@ try {
         }
     }
 
+    # (5) Heartbeat publish (OI-323, 2026-09-19). push-fleet-heartbeat.ps1 publishes the
+    # heartbeat to GitHub and, on failure, leaves a marker; the GitHub Action only notices a day
+    # later and buries it in issue #19. --status exits 1 when the marker is present OR when no
+    # successful publish is on record within ~26h (a task that never ran leaves no marker).
+    # This task fires once a day: it reports the publish that finished BEFORE it. It only sees
+    # the same morning's result if it is scheduled after the 07:30 ET publish (07:45 or later);
+    # at the same minute it reads the previous cycle.
+    $pub = Join-Path $env:USERPROFILE '.claude\maintenance\publish-fleet-heartbeat.py'
+    if (-not (Test-Path $pub)) {
+        $problems += 'publish-fleet-heartbeat.py MISSING - the external dead-man heartbeat publish is unmonitored'
+    } else {
+        $py = 'C:\Users\Owner\AppData\Local\Programs\Python\Python313\python.exe'
+        if (-not (Test-Path $py)) { $py = 'python' }
+        $pout = & $py $pub --status 2>&1
+        $prc  = $LASTEXITCODE
+        if ($prc -eq 1) {
+            $problems += ('HEARTBEAT PUBLISH FAILED: ' + (($pout | Out-String).Trim()) +
+                          ' - the GitHub dead-man is reading a stale heartbeat')
+        } elseif ($prc -eq 0) {
+            $okBits += 'heartbeat-publish=ok'
+        } else {
+            $problems += ('publish-fleet-heartbeat.py --status returned unexpected exit ' + $prc)
+        }
+    }
+
     if ($problems.Count -eq 0) {
         Log ('OK: ' + ($okBits -join '; ') + '; last send ' + $sendAgeH + 'h ago')
         if (Test-Path $alert) { Remove-Item $alert -Force }
@@ -246,7 +271,8 @@ Checks: (1) BOTH live registries present (cc = claude-code-sessions, lams = loca
 sessions; Roaming + MSIX LocalCache mirror, biggest-then-newest, GUIDs never hardcoded);
 (2) per-fleet liveness via newest lastRunAt (fallback registry mtime); (3) send-log.txt freshness;
 (4) phantom dispatch via maintenance\phantom-dispatch-probe.py (the only check here that does
-NOT trust lastRunAt).
+NOT trust lastRunAt); (5) heartbeat publish via maintenance\publish-fleet-heartbeat.py --status
+(marker left by push-fleet-heartbeat.ps1 when the GitHub publish failed).
 NOTE: during a Composio key-rotation window, sends fail so send-log stays stale even if tasks
 run -- the first SUCCESSFUL send after rotation clears this. Both fleets fire only while the
 Desktop app is open -- if a registry is stale, check the app is running before re-creating tasks.
