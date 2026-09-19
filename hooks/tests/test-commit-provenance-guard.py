@@ -1275,6 +1275,78 @@ def test_add_sandwiched_between_two_commits_is_collected_for_the_second():
     print("PASS test_add_sandwiched_between_two_commits_is_collected_for_the_second")
 
 
+# --------------------------------------------------------------------------
+# degraded contract: guarded import failed -> ANNOUNCE, still allow
+# --------------------------------------------------------------------------
+# Same incident as the review gate's equivalent tests (2026-09-17): a partial
+# branch sync left a hooks/lib module missing, the guarded import caught it,
+# PROVENANCE_CONTRACT_LOADED went False, and main() returned immediately -- so
+# the guard silently allowed commits that could sweep up another session's
+# uncommitted work, looking exactly like "nothing to flag".
+#
+# The fix here is VISIBILITY, not blocking. eos-review-gate.py fails closed on
+# the same signal; this guard does not, because the 2026-07-17 adversarial
+# review ratified allow-on-import-failure for ANY command (the test above,
+# test_broken_sibling_import_allows_..., pins it) and because blocking here
+# would freeze commits fleet-wide on one broken lib file. Gabriel chose that
+# split 2026-09-17.
+
+
+def _run_degraded(command):
+    """Run a COPY of the guard whose hooks/lib is EMPTY, so the guarded import
+    fails for real rather than by monkeypatching."""
+    td = tempfile.mkdtemp(prefix="cpg-degraded-")
+    try:
+        hooks_dir = os.path.join(td, "hooks")
+        os.makedirs(os.path.join(hooks_dir, "lib"))
+        hook = os.path.join(hooks_dir, "commit-provenance-guard.py")
+        shutil.copy2(HOOK, hook)
+        env = dict(os.environ)
+        env["PYTHONPATH"] = ""  # the real hooks/lib must not satisfy the import
+        stdin_text = json.dumps({
+            "session_id": "me", "cwd": td, "tool_name": "Bash",
+            "tool_input": {"command": command},
+        })
+        proc = subprocess.run([sys.executable, hook], input=stdin_text,
+                              capture_output=True, text=True, env=env)
+        return proc.returncode, proc.stderr
+    finally:
+        shutil.rmtree(td, ignore_errors=True)
+
+
+def test_degraded_contract_allows_a_commit_but_says_it_is_ungated():
+    """This guard does NOT fail closed -- see _degraded()'s docstring. The
+    2026-07-17 ruling (allow on import failure, commits included) stands; what
+    changed 2026-09-17 is that the allow is no longer SILENT."""
+    rc, err = _run_degraded('git commit -m "x" -- hooks/lib/git_commit_parse.py')
+    assert rc == 0, (
+        "the 2026-07-17 invariant is allow-on-no-information, commits included; "
+        "got rc=%s err=%r" % (rc, err))
+    assert "could not be imported" in err, (
+        "the allow must name the real cause: %r" % err)
+    assert "UNGATED" in err, (
+        "an allowed commit must say plainly that nothing checked it: %r" % err)
+
+
+def test_degraded_wording_does_not_assert_a_git_add_is_a_commit():
+    """The detector over-matches (`\\bcommit\\b` fires on the hyphen in
+    commit-provenance-guard.py), so the warning says a command MENTIONS a commit
+    rather than asserting it IS one. Nothing gates on this side -- the claim is
+    purely textual, which is exactly why it needs a test."""
+    rc, err = _run_degraded("git add hooks/commit-provenance-guard.py")
+    assert rc == 0, "this guard never blocks while degraded, got rc=%s" % rc
+    assert "mentions a git commit" in err, (
+        "an over-match must not be worded as a certainty: %r" % err)
+
+
+def test_degraded_contract_allows_non_commit_but_announces():
+    rc, err = _run_degraded("ls -la")
+    assert rc == 0, (
+        "blocking every Bash call would brick the fleet, got rc=%s err=%r" % (rc, err))
+    assert "commit-provenance-guard" in err and "could not be imported" in err, (
+        "a degraded guard must announce itself even when it allows: %r" % err)
+
+
 if __name__ == "__main__":
     test_non_git_command_silent()
     test_git_commit_with_no_foreign_files_allows()
@@ -1335,4 +1407,7 @@ if __name__ == "__main__":
     test_newline_separated_add_blocks_foreign_file_end_to_end()
     test_add_sandwiched_between_two_commits_is_collected_for_the_second()
     test_heredoc_body_mentioning_git_add_in_single_commit_does_not_false_block()
+    test_degraded_contract_allows_a_commit_but_says_it_is_ungated()
+    test_degraded_wording_does_not_assert_a_git_add_is_a_commit()
+    test_degraded_contract_allows_non_commit_but_announces()
     print("ALL COMMIT-PROVENANCE-GUARD TESTS PASS")
