@@ -95,6 +95,7 @@ Stdlib only. ASCII-only. Windows (`python`).
 
 import json
 import os
+import re
 import sys
 import time
 
@@ -230,12 +231,66 @@ def foreign_hits(candidates, my_sid, repo):
     return hits
 
 
+# Crude, dependency-free commit detector, used ONLY to word the degraded warning
+# below -- it never gates anything here. DELIBERATELY NOT imported from hooks/lib
+# (the premise is that hooks/lib could not be imported) and duplicated in
+# eos-review-gate.py for the same reason.
+#
+# IT OVER-MATCHES, ON PURPOSE: a substring scan, not is_git_commit()'s tokenizer,
+# so `git add commit-provenance-guard.py` and `git log --grep commit` also match.
+# Harmless on this side (the text is advisory and nothing blocks), which is why
+# the wording below says "mentions a commit" rather than asserting it IS one.
+_DEGRADED_COMMIT_RE = re.compile(r"\bgit\b[^;&|]*\bcommit\b")
+
+_DEGRADED_CAUSE = (
+    "hooks/lib could not be imported, so this guard cannot parse the command or "
+    "see which files the commit would capture (PROVENANCE_CONTRACT_LOADED is "
+    "False). Most likely a partial sync that left a lib module missing -- the "
+    "2026-09-17 incident was a gate expecting hooks/lib/git_probe_common.py on a "
+    "branch that did not carry it. Run "
+    "`python hooks/tests/test-commit-provenance-guard.py` to see the real import "
+    "error."
+)
+
+
+def _degraded(payload):
+    """Guarded import failed: ANNOUNCE, always allow. This guard does NOT fail
+    closed, deliberately.
+
+    Before 2026-09-17 this was a bare `return` -- silent, and indistinguishable
+    at the call site from "no foreign work found", which is how a missing lib
+    module went unnoticed for days. It now says so on stderr, loudly, on every
+    call it cannot gate.
+
+    WHY NOT FAIL CLOSED (Gabriel, 2026-09-17, choosing the split): blocking
+    commits here would overturn the 2026-07-17 adversarial-review ruling that
+    this guard's "no information -> ALLOW" invariant covers an import failure on
+    ANY command, commits included -- pinned by
+    test_broken_sibling_import_allows_and_does_not_traceback_on_non_commits. It
+    would also mean one broken hooks/lib file freezes commits in EVERY session
+    until repaired. eos-review-gate.py takes the opposite call on the same
+    signal, and that asymmetry is intentional: an unverifiable REVIEW is not an
+    approved one, whereas this guard's own override already exists for the case
+    where foreign work is landed knowingly.
+
+    A louder degradation than silence, without the fleet-wide stop."""
+    cmd = (payload.get("tool_input") or {}).get("command") if isinstance(payload, dict) else None
+    looks_like_commit = isinstance(cmd, str) and bool(_DEGRADED_COMMIT_RE.search(cmd))
+    sys.stderr.write(
+        "WARNING (commit-provenance-guard, DEGRADED -- allowing): " + _DEGRADED_CAUSE
+        + (" This command mentions a git commit, and it is being allowed "
+           "UNGATED: nothing here checked whether it sweeps up another session's "
+           "uncommitted work. Fix the import, or check `git status` yourself "
+           "before landing it.\n" if looks_like_commit
+           else " Nothing in this command looks commit-shaped.\n"))
+
+
 def main():
     payload = json.loads(sys.stdin.read())
     if not isinstance(payload, dict):
         return
     if not PROVENANCE_CONTRACT_LOADED:
-        return  # no information -> allow (see the import guard above)
+        return _degraded(payload)
     tool_input = payload.get("tool_input") or {}
     if not isinstance(tool_input, dict):
         return

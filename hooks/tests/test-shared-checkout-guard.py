@@ -29,6 +29,33 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # hooks/ (te
 HOOK = os.path.join(HERE, "shared-checkout-guard.py")
 
 
+def hook_sandbox():
+    """A throwaway hooks/ tree holding ONLY what shared-checkout-guard.py loads:
+    the hook itself and lib/ (it does sys.path.insert(0, <its dir>/lib) and pulls
+    nothing else from the tree).
+
+    Was shutil.copytree(HERE, ...), which copied the ENTIRE LIVE hooks/ directory
+    -- including hooks/sessions/ (435 dirs on this machine) and hooks/active-work/,
+    both written continuously by every other running Claude session. copytree
+    lists a directory and then copies its entries; when a concurrent session
+    created or removed one in between, it raised shutil.Error and the test blew up
+    BEFORE asserting anything, so the flake could also mask a real regression in
+    the guard rather than merely annoy. Caught 2026-09-07 by the pre-push
+    hook-tests gate, which reran it green -- the gate's fail-retry line was the
+    only record it had ever failed.
+
+    Allowlist, deliberately, not shutil.ignore_patterns(): a blacklist silently
+    regains the race the next time a volatile directory is added under hooks/.
+    Copying two things instead of ~450 directories is also markedly faster."""
+    sandbox = tempfile.mkdtemp(prefix="scg-broken-")
+    dst = os.path.join(sandbox, "hooks")
+    os.makedirs(dst)
+    shutil.copy2(HOOK, os.path.join(dst, os.path.basename(HOOK)))
+    shutil.copytree(os.path.join(HERE, "lib"), os.path.join(dst, "lib"),
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    return sandbox
+
+
 def run_hook(stdin_text, repos, sessions_dir, extra_env=None):
     env = dict(os.environ)
     env["SHARED_CHECKOUT_REPOS"] = os.pathsep.join(repos)
@@ -208,8 +235,7 @@ def test_broken_sibling_import_still_warns_and_does_not_traceback():
     has something to say about. Proves TWO things: no traceback with the module missing,
     AND the unrelated dirty-file warning still fires -- the stub degrades only the one
     session-collision detail, not the whole hook."""
-    sandbox = tempfile.mkdtemp(prefix="scg-broken-")
-    shutil.copytree(HERE, os.path.join(sandbox, "hooks"))
+    sandbox = hook_sandbox()
     broken_hook = os.path.join(sandbox, "hooks", "shared-checkout-guard.py")
     os.remove(os.path.join(sandbox, "hooks", "lib", "session_liveness.py"))
 
@@ -417,12 +443,35 @@ def test_never_denies_even_when_warning():
     print("PASS test_never_denies_even_when_warning")
 
 
+
+def test_sandbox_holds_no_live_session_state():
+    """Regression, 2026-09-07: the sandbox must never contain the live, concurrently
+    written directories under hooks/ -- copying them is what made this file flaky
+    (see hook_sandbox's docstring). Asserts the copy is the intended two things and
+    nothing volatile."""
+    sandbox = hook_sandbox()
+    try:
+        hooks_dir = os.path.join(sandbox, "hooks")
+        for volatile in ("sessions", "active-work", "_state", "state", "overrides",
+                         "archive", "tests", "__pycache__"):
+            assert not os.path.exists(os.path.join(hooks_dir, volatile)), (
+                "sandbox copied %r -- live/irrelevant state must not be copied; that "
+                "is the copytree race this test exists to prevent" % volatile)
+        assert os.path.isfile(os.path.join(hooks_dir, "shared-checkout-guard.py")), \
+            "sandbox is missing the hook under test"
+        assert os.path.isfile(os.path.join(hooks_dir, "lib", "session_liveness.py")), \
+            "sandbox is missing lib/, which the hook imports at module load"
+    finally:
+        shutil.rmtree(sandbox, ignore_errors=True)
+    print("PASS test_sandbox_holds_no_live_session_state")
+
 if __name__ == "__main__":
     test_outside_repo_silent()
     test_worktree_silent()
     test_nested_worktree_silent_even_when_outer_repo_dirty()
     test_main_clean_silent()
     test_main_dirty_warns()
+    test_sandbox_holds_no_live_session_state()
     test_broken_sibling_import_still_warns_and_does_not_traceback()
     test_dedupe_once_per_session()
     test_malformed_stdin_fails_open()
