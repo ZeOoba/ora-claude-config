@@ -99,6 +99,30 @@ unconditional, so a crashed session can never lock anyone out; and a claim that 
 be attributed to a session at all (missing/placeholder `session_id`) still fails OPEN,
 so a malformed file can never deny a slug.
 
+EXPIRED-CLAIM DISPLACEMENT (added 2026-09-10, Gabriel-reported after hand-reinstating a
+destroyed `repo-housekeeping` claim). The 2026-08-09 refusal read the slug's current
+holder via find_claim(), which is TTL-FILTERED -- so a claim file that was present on
+disk but no longer live (past its TTL, future-dated by clock skew, or carrying an
+unparseable `claimed_at`) was invisible to it. Both protections missed that file: no
+refusal fired, and -- the damaging half -- `prior_claim` was not recorded either, since
+that expression keyed on the same value. The claim was overwritten at exit 0 with no
+record and nothing for `restore` to put back. The fix is NOT to start blocking on
+expired claims (that would invert the fail-open posture above): read_stale_claim() is
+consulted only when find_claim() comes back empty, the write proceeds without --force,
+and the displaced claim is announced and preserved in `prior_claim` exactly as a forced
+takeover's is. `restore` carries the identical fix, for the identical reason. The rule
+this settles: a displacement may be ALLOWED, but it is never SILENT and never
+IRRECOVERABLE.
+
+Every displaced-claim message also carries the ACTUAL cause now (`prior_claim_reason`:
+"force" / "expired" / "unattributable"), a same-day independent-review finding: with
+an expired displacement recording `prior_claim` too, `release`'s refusal ("still
+carries the claim your '--force' takeover displaced") became false on what is now the
+COMMON path, not just the `--force` one -- and the same review caught the expired-
+displacement report itself advertising a `restore` that unconditionally refuses an
+unattributable entry. Both are now honest about which of the three causes applies, and
+about whether `restore` is actually a live option for what was just displaced.
+
 Stdlib only. ASCII-only. Windows (`python`).
 """
 import datetime
@@ -123,10 +147,42 @@ EXIT_CLAIM_REFUSED = 3   # `claim`/`restore` declined to clobber another session
                           # claim. Distinct from 1 so a caller can tell "you asked for
                           # something impossible" from "someone else is already here"
                           # without parsing stdout.
+SCHED_SLUG_PREFIX = "sched-"  # Reserved namespace for UNATTENDED (scheduled-task) claims.
+                               # Ratified 2026-09-07 after an unattended task held
+                               # 'repo-housekeeping', committed into ora-skills main
+                               # mid-session, and was unreachable by send_message --
+                               # absent from all 445 peer sessions. The single-writer
+                               # rule assumes a holder you can talk to; a scheduled task
+                               # is structurally not that. NOTE the hyphen: the slug IS
+                               # the filename (<slug>.json) and ':' is illegal on
+                               # Windows, so 'sched:' would be silently mangled by
+                               # _safe_filename() into a DIFFERENT slug than the caller
+                               # asked for.
+SCHED_TTL_MINUTES = 30         # Unattended claims expire fast. An interactive session
+                               # can be asked to release; a scheduled one cannot, so its
+                               # claim must age out on its own well before the 120-min
+                               # default would let a dead run block a live person.
 DEFAULT_TTL_MINUTES = 120  # headroom above the 90-min stuck-session-watchdog kill
                             # threshold, so a legitimately long task's claim survives
                             # while a genuinely stuck session's claim goes stale before
                             # it can mislead anyone for long
+
+
+def is_sched_slug(slug):
+    """True for a claim in the reserved unattended namespace (see SCHED_SLUG_PREFIX)."""
+    return str(slug or "").startswith(SCHED_SLUG_PREFIX)
+
+
+def _effective_ttl(slug, ttl_minutes):
+    """Unattended claims get the shorter TTL; everything else keeps the caller's.
+
+    Deliberately min() rather than a flat override: a caller that already passed a
+    TTL SHORTER than SCHED_TTL_MINUTES (a probe sweeping for very fresh claims, say)
+    must not have its window silently widened by this rule.
+    """
+    if is_sched_slug(slug):
+        return min(ttl_minutes, SCHED_TTL_MINUTES)
+    return ttl_minutes
 
 
 def _safe_filename(slug):
@@ -333,6 +389,31 @@ def read_prior_claim(slug, base_dir=None):
     return _strip_prior(d.get("prior_claim"))
 
 
+def read_prior_claim_reason(slug, base_dir=None):
+    """The `prior_claim_reason` string recorded on `slug`'s CURRENT record, or "".
+
+    ADDED 2026-09-10 (independent review: `release`'s refusal message named every
+    displacement "your '--force' takeover", which is simply false for the two other
+    displacement paths this module has -- an expired-claim clobber or an
+    unattributable-claim overwrite -- and misleads a reader into thinking `--force`
+    is what caused the record they are about to delete to exist. Same read pattern as
+    read_prior_claim(): direct file read, empty/malformed reads as "" (fail-open,
+    never raise), and this is enrichment for a MESSAGE, never a decision input --
+    callers must not branch write behavior on it."""
+    path = claim_path(slug, base_dir or CLAIMS_DIR)
+    try:
+        if os.path.getsize(path) > MAX_CLAIM_BYTES:
+            return ""
+        with open(path, "r", encoding="utf-8") as f:
+            d = json.load(f)
+    except Exception:
+        return ""
+    if not isinstance(d, dict):
+        return ""
+    reason = d.get("prior_claim_reason")
+    return reason if isinstance(reason, str) else ""
+
+
 def paths_conflict(mine, theirs):
     """TRI-STATE overlap verdict between two claims' declared paths:
     True = they overlap, False = provably disjoint, None = undeterminable.
@@ -357,7 +438,8 @@ def paths_conflict(mine, theirs):
 
 
 def write_claim(slug, session_id, description, title=None, cwd=None, base_dir=None,
-                 now=None, paths=None, host_session_id=None, prior_claim=None):
+                 now=None, paths=None, host_session_id=None, prior_claim=None,
+                 prior_claim_reason=None):
     """Write (or overwrite) this session's claim on `slug`. Atomic rename + a
     pid-unique tmp name, same pattern as fleet-session-hook.py's save_session() --
     closes the exact same "two writers share one tmp path" hazard that pattern was
@@ -395,6 +477,17 @@ def write_claim(slug, session_id, description, title=None, cwd=None, base_dir=No
     prior = _strip_prior(prior_claim)
     if prior:
         data["prior_claim"] = prior
+        # ADDED 2026-09-10 (release's misattributed refusal message, independent
+        # review). A SIBLING of `prior_claim`, not a field inside it: this describes
+        # HOW *this* record came to displace one, not a property of the displaced
+        # claim itself, so it does not belong in _PRIOR_CLAIM_FIELDS. One of "force"
+        # (a --force takeover of a LIVE claim), "expired" (a plain claim/restore over
+        # a claim find_claim() could no longer see), or "unattributable" (a claim
+        # naming no session, overwritten fail-open). Optional and present-but-
+        # possibly-absent for an older file, same contract as `paths`/`host_session_id`
+        # above -- a reader must not assume it is there.
+        if prior_claim_reason:
+            data["prior_claim_reason"] = prior_claim_reason
     path = claim_path(slug, base_dir)
     tmp = "%s.tmp.%d" % (path, os.getpid())
     with open(tmp, "w", encoding="utf-8") as f:
@@ -423,6 +516,84 @@ def release_claim(slug, base_dir=None):
         return True
     except Exception:
         return False
+
+
+def _claim_view(slug_stem, d, now=None):
+    """Normalize ONE raw claim dict into read_active_claims()' output shape.
+
+    Extracted 2026-09-10 so read_active_claims() and read_stale_claim() cannot drift:
+    they are the two readers a displacement decision consults, and a field normalized
+    by one but not the other is exactly how a displaced claim loses information on the
+    way into `prior_claim`. Every defaulting/sanitizing decision below is the one
+    read_active_claims() already made -- see its inline notes; nothing new is trusted.
+
+    `age_minutes` is None -- NOT 0, and NOT now -- when `claimed_at` is unparseable.
+    Callers must branch on it: read_active_claims() DROPS such a claim (you cannot
+    age-order what you cannot parse), while read_stale_claim() KEEPS it, because
+    "invisible to the TTL reader" is precisely the population it exists to surface."""
+    now = now or datetime.datetime.now()
+    claimed_at = _parse_iso(d.get("claimed_at", ""))
+    return {
+        "slug": slug_stem,
+        "session_id": d.get("session_id", "?"),
+        # Defaulted AND normalized, not trusted as written -- same posture as
+        # `paths` below. Absent key (pre-2026-08-09 file), null, a non-string, a
+        # whitespace-only value, an over-long one, or one carrying control
+        # characters all degrade to "" rather than reaching a display site.
+        "host_session_id": _clean_host_session_id(d.get("host_session_id")),
+        "title": d.get("title", "?"),
+        "description": d.get("description", ""),
+        "claimed_at": d.get("claimed_at", ""),
+        "cwd": d.get("cwd", ""),
+        # Re-normalized on READ, not trusted as written: claim files are
+        # world-writable by design ("NOT a security boundary", above), so a
+        # hand-edited or older-format file may carry raw/relative paths. Running
+        # them back through _clean_paths() means a malformed `paths` value
+        # degrades to [] (no match) instead of raising inside a PreToolUse hook.
+        "paths": _clean_paths(d.get("paths")),
+        "age_minutes": (None if claimed_at is None
+                        else (now - claimed_at).total_seconds() / 60.0),
+    }
+
+
+def read_stale_claim(slug, base_dir=None, ttl_minutes=DEFAULT_TTL_MINUTES, now=None):
+    """The claim file on `slug` that find_claim() CANNOT SEE, or None.
+
+    ADDED 2026-09-10 (the expired-claim clobber, Gabriel-reported). `claim` and
+    `restore` both decide what they are about to displace from find_claim(), which is
+    TTL-filtered -- so a claim file that is present on disk but not LIVE (aged past
+    DEFAULT_TTL_MINUTES / SCHED_TTL_MINUTES, future-dated by clock skew, or carrying an
+    unparseable `claimed_at`) read to them as "no claim at all". Both the refusal gate
+    and, far worse, the `prior_claim` preservation were keyed on that same value, so
+    such a file was overwritten at exit 0 with NOTHING recorded and nothing for
+    `restore` to put back. Recovery was hand-rewriting the JSON.
+
+    This does NOT make an expired claim block anyone -- fail-open on expiry is ratified
+    doctrine, and a crashed session must never wedge a slug. It only makes the
+    displacement VISIBLE and REVERSIBLE, which is the property the 2026-08-09 refusal
+    was actually protecting.
+
+    Returns None for a LIVE claim, deliberately: this is the strict complement of
+    find_claim(), so a caller asks find_claim() first and falls back here, and the two
+    can never both answer. Honours the per-slug TTL (`sched-` claims expire at 30 min),
+    or an expiring unattended claim would again be live to neither reader.
+
+    Reads the file directly, and fails open like every other reader here."""
+    path = claim_path(slug, base_dir or CLAIMS_DIR)
+    try:
+        if os.path.getsize(path) > MAX_CLAIM_BYTES:
+            return None
+        with open(path, "r", encoding="utf-8") as f:
+            d = json.load(f)
+    except Exception:
+        return None
+    if not isinstance(d, dict):
+        return None
+    view = _claim_view(_safe_filename(slug)[:-5], d, now=now)
+    age = view["age_minutes"]
+    if age is not None and 0 <= age <= _effective_ttl(view["slug"], ttl_minutes):
+        return None  # LIVE -- find_claim() already sees it; not this function's job
+    return view
 
 
 def read_active_claims(base_dir=None, ttl_minutes=DEFAULT_TTL_MINUTES, now=None):
@@ -466,32 +637,18 @@ def read_active_claims(base_dir=None, ttl_minutes=DEFAULT_TTL_MINUTES, now=None)
             continue
         if not isinstance(d, dict):
             continue
-        claimed_at = _parse_iso(d.get("claimed_at", ""))
-        if claimed_at is None:
+        view = _claim_view(name[:-5], d, now=now)
+        age_minutes = view["age_minutes"]
+        # A claim with an unparseable `claimed_at` is dropped rather than trusted,
+        # since a caller cannot age-order a claim it can't parse. (read_stale_claim()
+        # is the reader that deliberately keeps it -- see its docstring.)
+        if age_minutes is None:
             continue
-        age_minutes = (now - claimed_at).total_seconds() / 60.0
-        if age_minutes > ttl_minutes or age_minutes < 0:
+        # Per-claim TTL: an unattended 'sched-' claim ages out at SCHED_TTL_MINUTES
+        # even when the caller asked for the 120-min default (see _effective_ttl).
+        if age_minutes > _effective_ttl(name[:-5], ttl_minutes) or age_minutes < 0:
             continue
-        out.append({
-            "slug": name[:-5],
-            "session_id": d.get("session_id", "?"),
-            # Defaulted AND normalized, not trusted as written -- same posture as
-            # `paths` below. Absent key (pre-2026-08-09 file), null, a non-string, a
-            # whitespace-only value, an over-long one, or one carrying control
-            # characters all degrade to "" rather than reaching a display site.
-            "host_session_id": _clean_host_session_id(d.get("host_session_id")),
-            "title": d.get("title", "?"),
-            "description": d.get("description", ""),
-            "claimed_at": d.get("claimed_at", ""),
-            "cwd": d.get("cwd", ""),
-            # Re-normalized on READ, not trusted as written: claim files are
-            # world-writable by design ("NOT a security boundary", above), so a
-            # hand-edited or older-format file may carry raw/relative paths. Running
-            # them back through _clean_paths() means a malformed `paths` value
-            # degrades to [] (no match) instead of raising inside a PreToolUse hook.
-            "paths": _clean_paths(d.get("paths")),
-            "age_minutes": age_minutes,
-        })
+        out.append(view)
     out.sort(key=lambda c: c["age_minutes"])
     return out
 
@@ -568,7 +725,17 @@ def renew_claim(slug, session_id, description=None, base_dir=None, now=None,
                # the takeover noticed they had destroyed the thing they meant to
                # preserve. Re-read from disk because read_active_claims() (which
                # produced `existing`) deliberately omits the field.
-               prior_claim=read_prior_claim(slug, base_dir=base_dir))
+               prior_claim=read_prior_claim(slug, base_dir=base_dir),
+               # ADDED 2026-09-10 (independent review): `prior_claim_reason` is
+               # `prior_claim`'s sibling and was NOT being carried forward here even
+               # though `write_claim()`'s own comment claims every re-claim carries it
+               # forward "exactly like prior_claim itself" -- true in `main()`'s claim
+               # branch, false here. shared-checkout-guard.py's ~20-minute self-renewal
+               # erased the reason on the very next cycle, so `release`'s refusal fell
+               # back to the honest-but-generic "a claim it displaced" instead of the
+               # correct one. Never a false attribution either way, but worth carrying
+               # forward for the same reason `prior_claim` itself is.
+               prior_claim_reason=read_prior_claim_reason(slug, base_dir=base_dir))
     return existing
 
 
@@ -659,24 +826,45 @@ def _fmt_paths(paths):
     return ", ".join(_one_line(p) for p in paths) if paths else "(none declared)"
 
 
-def _collision_report(slug, existing, my_paths, overlap, refused=True):
-    """The lines describing a slug collision, shared by the REFUSED and --force
-    branches so a takeover shows exactly what it is displacing.
+def _collision_report(slug, existing, my_paths, overlap, refused=True,
+                       heading=None, state="LIVE"):
+    """The lines describing a slug collision, shared by the REFUSED, --force and
+    expired-displacement branches so every one of them shows exactly what it is
+    displacing.
 
     `overlap` is paths_conflict()'s tri-state verdict; each state gets its own
     closing recommendation, because the right next move genuinely differs: provably
     disjoint work wants a distinct slug, provably overlapping work wants a
-    conversation, and undeterminable wants the conservative assumption."""
+    conversation, and undeterminable wants the conservative assumption.
+
+    `heading`/`state` (2026-09-10) let the expired-claim path reuse this verbatim
+    instead of growing a near-copy that would drift. They default to the pre-existing
+    wording, so the REFUSED and FORCED TAKEOVER lines are byte-identical to before.
+    `age_minutes` is formatted defensively rather than with a bare "%.0f": that field
+    is None for a claim whose `claimed_at` will not parse -- a population find_claim()
+    never returned, but read_stale_claim() does, so the old format string would now
+    raise inside the very report explaining what is being displaced."""
     sid8 = _one_line(str(existing.get("session_id", "?")))[:8]
-    lines = ["%s: '%s' has a LIVE claim held by session %s (%.0fm ago)." % (
-        "REFUSED" if refused else "FORCED TAKEOVER", slug, sid8,
-        existing.get("age_minutes", 0.0))]
+    age = existing.get("age_minutes")
+    age_str = ("%.0fm ago" % age) if isinstance(age, (int, float)) else "age unknown"
+    lines = ["%s: '%s' has a %s claim held by session %s (%s)." % (
+        heading or ("REFUSED" if refused else "FORCED TAKEOVER"), slug, state, sid8,
+        age_str)]
     lines.append("  Their work:  %s" % _one_line(existing.get("description", "")))
     host = existing.get("host_session_id") or ""
     if host:
         # The reason host_session_id was recorded at all (2026-08-09): a claim you
         # can read but whose owner you cannot contact leaves no move except clobbering.
         lines.append("  Contact:     send_message to %s" % host)
+    if is_sched_slug(slug):
+        # Ratified 2026-09-07: for an unattended holder the "contact them" step above
+        # is not merely inconvenient, it is impossible -- so say so here rather than
+        # leaving each session to rediscover it and treat --force as a transgression.
+        lines.append("  NOTE:        '%s' is an UNATTENDED (scheduled-task) claim. Its holder "
+                     "cannot be messaged and will not answer. Taking it over with --force is "
+                     "ROUTINE here, not a transgression -- verify its work landed first, then "
+                     "force. It also self-expires after %d minutes."
+                     % (slug, SCHED_TTL_MINUTES))
     lines.append("  Their paths: %s" % _fmt_paths(existing.get("paths")))
     lines.append("  Your paths:  %s" % _fmt_paths(my_paths))
     if overlap is True:
@@ -778,6 +966,13 @@ def main():
     if args.cmd == "claim":
         sid = own_session_id()
         existing = find_claim(args.slug)
+        # THE EXPIRED-CLAIM BLIND SPOT (2026-09-10). find_claim() is TTL-filtered, so
+        # a claim file that is present but NOT live was invisible to BOTH the refusal
+        # gate below and the `prior_claim` preservation at the bottom -- overwritten
+        # at exit 0 with nothing recorded and nothing to restore. Consulted only when
+        # find_claim() came back empty; read_stale_claim() is its strict complement,
+        # so the two can never both answer.
+        stale = read_stale_claim(args.slug) if existing is None else None
         holder = attributable_session(existing) if existing is not None else None
         if existing is not None and holder is None:
             # Fail OPEN, loudly: a claim naming no session cannot be collided with,
@@ -814,6 +1009,41 @@ def main():
             print("--force given: proceeding with the TAKEOVER. The displaced claim "
                   "is preserved in this claim's `prior_claim` -- restore it with:")
             print("    python claim_work.py restore %s" % args.slug)
+
+        # EXPIRED DISPLACEMENT (2026-09-10). Deliberately NOT a refusal: an expired
+        # claim must never deny a slug, or a crashed session would wedge every other
+        # one -- the fail-open property tech.md Sec3d ratified. What it must never be
+        # again is SILENT, because the file being overwritten is the only record that
+        # someone started this work. So: proceed, but say what is being displaced and
+        # how to put it back, exactly as --force does.
+        stale_holder = attributable_session(stale) if stale is not None else None
+        displaced_stale = stale is not None and stale_holder != sid
+        if displaced_stale:
+            print("")
+            for line in _collision_report(args.slug, stale, args.paths,
+                                          paths_conflict(args.paths,
+                                                         stale.get("paths")),
+                                          heading="DISPLACING AN EXPIRED CLAIM",
+                                          state="STALE (past its TTL)"):
+                print(line)
+            if stale_holder is None:
+                # FIX (2026-09-10, independent review finding). The `restore` this
+                # branch used to advertise unconditionally REFUSES an entry naming no
+                # session (see restore's own guard) -- so telling the reader to run it
+                # sent them to a dead end that then looked like a SECOND bug. Mirror
+                # the honest wording the live-claim unattributable-overwrite NOTE
+                # above already uses instead of promising a command that will fail.
+                print("  -> It is past its TTL, so it does NOT block you and no "
+                      "--force is needed. It names no session, so it is kept in this "
+                      "claim's `prior_claim` for manual recovery only -- NOT via "
+                      "'restore', which refuses an entry naming no session (putting "
+                      "it back would install a claim owned by nobody).")
+            else:
+                print("  -> It is past its TTL, so it does NOT block you and no "
+                      "--force is needed. It is preserved in this claim's "
+                      "`prior_claim`; put it back with:")
+                print("    python claim_work.py restore %s" % args.slug)
+            print("")
         # OI-166 (2026-08-16): surface a CROSS-SLUG path collision. Everything
         # above is keyed on the SLUG, so two sessions holding DIFFERENT slugs over
         # the SAME files never collide and neither refusal can fire. Observed live:
@@ -874,7 +1104,14 @@ def main():
                            # re-opening, through the fail-open branch, the exact
                            # unrecoverable clobber the refusal exists to prevent
                            # (adversarial REFUTE, 2026-08-09).
-                           prior_claim=(existing
+                           # `stale` joins `existing` here on the SAME footing
+                           # (2026-09-10): whether the claim being overwritten was
+                           # live or expired changes whether it BLOCKS you, and
+                           # nothing else. It does not change that a record of
+                           # someone's work is about to be destroyed, which is the
+                           # only question this argument answers.
+                           prior_claim=(stale if displaced_stale
+                                        else existing
                                         if (existing is not None and holder != sid)
                                         # NOT None (final review, 2026-08-11): the
                                         # else-branch used to drop the undo record on
@@ -894,7 +1131,21 @@ def main():
                                         # carry-forward pattern renew_claim already
                                         # uses; a real takeover still replaces it,
                                         # preserving one-step-undo semantics.
-                                        else read_prior_claim(args.slug)))
+                                        else read_prior_claim(args.slug)),
+                           # ADDED 2026-09-10 (independent review): so `release`'s
+                           # refusal can name what ACTUALLY displaced the claim it is
+                           # protecting, instead of unconditionally blaming "your
+                           # '--force' takeover" for a displacement --force had no
+                           # part in. Carried forward on a re-claim exactly like
+                           # `prior_claim` itself (the else-branch below), or the
+                           # reason would read stale/wrong on the second write.
+                           prior_claim_reason=(
+                               "expired" if displaced_stale
+                               else "unattributable" if (existing is not None and
+                                                         holder is None)
+                               else "force" if (existing is not None and
+                                                holder != sid)
+                               else read_prior_claim_reason(args.slug)))
         n = len(_clean_paths(args.paths))
         print("Claimed '%s' as session %s -> %s" % (args.slug, sid, path))
         if n:
@@ -950,15 +1201,38 @@ def main():
                   "one over. Re-run with --force if you really mean to delete it.")
             return EXIT_CLAIM_REFUSED
         # Second half of the same finding, and this one IS introduced here: the undo
-        # record for a `--force` takeover lives INSIDE the claim file, so the forcing
-        # session releasing its own claim silently destroys the only copy of the
-        # displaced session's claim -- after being told it was "restorable".
-        if read_prior_claim(args.slug) is not None and not args.force:
-            print("REFUSED: '%s' still carries the claim your '--force' takeover "
-                  "displaced. Releasing it deletes that record permanently -- the "
-                  "displaced session would have nothing to come back to." % args.slug)
-            print("  Put it back instead:  python claim_work.py restore %s" % args.slug)
-            print("  Or, if that claim is genuinely finished, re-run with --force.")
+        # record for a displacement lives INSIDE the claim file, so releasing your own
+        # claim silently destroys the only copy of the displaced session's claim --
+        # after being told it was "restorable".
+        prior_here = read_prior_claim(args.slug)
+        if prior_here is not None and not args.force:
+            # FIX (2026-09-10, independent review): this used to say "your '--force'
+            # takeover displaced" UNCONDITIONALLY -- false, and increasingly the
+            # COMMON case once a plain claim/restore over an EXPIRED or UNATTRIBUTABLE
+            # file also records a prior_claim (2026-09-10 change above). A reader
+            # told their ordinary slug reuse was a "--force takeover" has no reason to
+            # trust the rest of the message, which is exactly the outcome the honest
+            # `read_prior_claim_reason()` wording avoids.
+            what = {"force": "the claim your '--force' takeover displaced",
+                    "expired": "an EXPIRED claim it displaced (no --force was needed "
+                               "or used)",
+                    "unattributable": "an UNATTRIBUTABLE claim it overwrote (no "
+                                      "--force was needed or used)"}.get(
+                read_prior_claim_reason(args.slug), "a claim it displaced")
+            if attributable_session(prior_here) is None:
+                # It names no session -- 'restore' would refuse it too (see restore's
+                # own guard), so the recovery route below does not apply here.
+                print("REFUSED: '%s' still carries %s, which names no session and is "
+                      "not restorable. Releasing discards that record permanently "
+                      "with no way to recover it." % (args.slug, what))
+                print("  Re-run with --force if you really mean to delete it.")
+            else:
+                print("REFUSED: '%s' still carries %s. Releasing it deletes that "
+                      "record permanently -- the displaced session would have "
+                      "nothing to come back to." % (args.slug, what))
+                print("  Put it back instead:  python claim_work.py restore %s"
+                      % args.slug)
+                print("  Or, if that claim is genuinely finished, re-run with --force.")
             return EXIT_CLAIM_REFUSED
         ok = release_claim(args.slug)
         print(("Released '%s'" % args.slug) if ok else
@@ -969,9 +1243,11 @@ def main():
         prior = read_prior_claim(args.slug)
         if prior is None or attributable_session(prior) is None:
             print("No superseded claim recorded on '%s' -- nothing to restore. "
-                  "(Only a '--force' takeover records one, and only the claim it "
-                  "displaced. A recorded entry naming no session is not restorable: "
-                  "putting it back would install a claim owned by nobody.)" % args.slug)
+                  "(A displacement records one -- a '--force' takeover, a displacing "
+                  "'restore', or a plain claim over an expired/unattributable file -- "
+                  "and only the claim it displaced. A recorded entry naming no session "
+                  "is not restorable: putting it back would install a claim owned by "
+                  "nobody.)" % args.slug)
             return 1
         # RESTORE IS A WRITE, so it gets the SAME gate `claim` does (independent
         # review, 2026-08-09). The first cut wrote unconditionally, without even
@@ -985,6 +1261,12 @@ def main():
         # and preserves it.
         sid = own_session_id()
         current = find_claim(args.slug)
+        # Same expired-claim blind spot the `claim` branch above closes, and it bit
+        # here identically: a restore over a present-but-not-live claim file destroyed
+        # it at exit 0 with no record. It must NOT start refusing (expired never
+        # blocks) -- only preserving, so `displacing` below stays keyed on the LIVE
+        # claim while the preservation target widens.
+        stale_current = read_stale_claim(args.slug) if current is None else None
         holder = attributable_session(current) if current is not None else None
         displacing = holder is not None and holder != sid
         if displacing:
@@ -1011,6 +1293,27 @@ def main():
         # NOTE below then fires and says so.
         when = _parse_iso(prior.get("claimed_at", "")) or (
             datetime.datetime.now() - datetime.timedelta(minutes=DEFAULT_TTL_MINUTES + 1))
+        stale_current_holder = (attributable_session(stale_current)
+                                if stale_current is not None else None)
+        displaced_stale = stale_current is not None and stale_current_holder != sid
+        if displaced_stale:
+            if stale_current_holder is None:
+                # Same fix as the `claim` branch above, for the same reason: this
+                # entry names no session, and 'restore' unconditionally refuses one --
+                # advertising it here would be a promise this tool itself breaks.
+                print("NOTE: this restore overwrites an EXPIRED claim file on '%s' "
+                      "naming no session. It is past its TTL so it did not block the "
+                      "restore, but it names no one to restore it TO -- kept in this "
+                      "claim's `prior_claim` for manual recovery only, not via "
+                      "'restore'." % args.slug)
+            else:
+                print("NOTE: this restore overwrites an EXPIRED claim file on '%s' "
+                      "held by session %s. It is past its TTL so it did not block the "
+                      "restore, but it is preserved in turn -- 'restore %s' again puts "
+                      "THAT one back."
+                      % (args.slug,
+                         _one_line(str(stale_current.get("session_id", "?")))[:8],
+                         args.slug))
         write_claim(args.slug, attributable_session(prior),
                     prior.get("description") or "", title=prior.get("title"),
                     cwd=prior.get("cwd"), now=when, paths=prior.get("paths"),
@@ -1021,17 +1324,34 @@ def main():
                     # Same `holder != sid` widening as the claim branch above -- an
                     # unattributable current holder is still a live claim being
                     # overwritten, and still has to be preserved.
-                    prior_claim=current if (current is not None and
-                                            holder != sid) else None)
+                    prior_claim=(stale_current if displaced_stale
+                                 else current if (current is not None and
+                                                  holder != sid) else None),
+                    # Mirrors `claim`'s reasoning above: "expired" when this restore
+                    # displaced a stale file, "force"/"unattributable" when it
+                    # displaced a live one via --force, else None (nothing displaced).
+                    prior_claim_reason=(
+                        "expired" if displaced_stale
+                        else "unattributable" if (current is not None and
+                                                  holder is None)
+                        else "force" if (current is not None and holder != sid)
+                        else None))
         print("Restored '%s' to session %s (originally claimed %s)." % (
             args.slug, _one_line(attributable_session(prior))[:8],
             _one_line(str(prior.get("claimed_at", "?")))))
         age = (datetime.datetime.now() - when).total_seconds() / 60.0
-        if age > DEFAULT_TTL_MINUTES:
+        # Must use the EFFECTIVE TTL, not the default: a reserved 'sched-' slug
+        # expires at 30 minutes, so comparing against 120 here would stay silent
+        # for the one namespace whose claims expire soonest -- restoring a 45m
+        # sched- claim would print success while read_active_claims() already
+        # treats it as gone, which is exactly the miscommunication this NOTE exists
+        # to prevent (found by adversarial review, 2026-09-07).
+        eff_ttl = _effective_ttl(args.slug, DEFAULT_TTL_MINUTES)
+        if age > eff_ttl:
             print("  NOTE: that timestamp is %.0fm old, past the %dm TTL -- the "
                   "restored claim is already expired and will not broadcast. Ask "
                   "that session to re-claim if it is still working." % (
-                      age, DEFAULT_TTL_MINUTES))
+                      age, eff_ttl))
         return 0
 
     if args.cmd == "list":
