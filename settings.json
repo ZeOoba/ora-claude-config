@@ -159,6 +159,16 @@
         "hooks": [
           {
             "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/ora-skills/tools/catch_up_main.py\" --hook",
+            "timeout": 360
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
             "command": "bash -c 'INPUT=$(cat); CMD=$(echo \"$INPUT\" | grep -o \"deploy\" || true); if [ -n \"$CMD\" ]; then STATUS=$(curl -s -o /dev/null -w \"%{http_code}\" https://oxfordra.net); if [ \"$STATUS\" != \"200\" ]; then echo \"WARNING: oxfordra.net returned HTTP $STATUS after deploy\" >&2; fi; fi'"
           }
         ]
