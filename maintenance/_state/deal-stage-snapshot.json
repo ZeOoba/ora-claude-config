@@ -15,10 +15,6 @@
     "deal": "2146 Enterprise Pkwy — Twinsburg, OH",
     "stage": "Passed"
   },
-  "3516ecd8-9e59-8126-a0ac-ca117d8447ea": {
-    "deal": "Stall Alert — 2026-04-29",
-    "stage": "Passed"
-  },
   "35f6ecd8-9e59-813f-9678-dcb87e016d66": {
     "deal": "Liberty Office Park — West Chester, OH 45069",
     "stage": "Candidate"
@@ -78,5 +74,9 @@
   "3b96ecd8-9e59-8187-910f-f728748470aa": {
     "deal": "Pike Plaza Portfolio — Indianapolis, IN",
     "stage": "Passed"
+  },
+  "3c06ecd8-9e59-813f-9679-e2905c34a488": {
+    "deal": "3700 Kinsman Blvd — Madison WI (FedEx)",
+    "stage": "Candidate"
   }
 }

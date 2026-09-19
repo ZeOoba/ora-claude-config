@@ -74,6 +74,33 @@ CRON_HOUR, CRON_MINUTE = 5, 15          # ora-health-guard's own cron slot, ET
 # follow-up, not fixed here.
 MAX_ENTRIES = 30          # ~a month of daily runs; bounded so the file cannot grow forever
 
+# PAUSE-AWARE GAP (2026-09-12). A deliberate bounded pause of the CC fleet holds this
+# task too, and the gap it leaves is indistinguishable from a dead task by timestamps
+# alone. Live: the first run after the 2026-09-07 -> 09-11 pause read a 124.8h gap against
+# a 35.1h tolerance and reported BEACON GAP FAIL, though 98.9h of it was the pause. Hours
+# this task spent held by a RECORDED pause (_shared/pause_windows.py) are subtracted from
+# the gap before judging it; the raw gap is still reported. Only ever turns STALE into
+# PAUSE_EXPLAINED -- an unreadable pause store changes nothing, so it can cost a false
+# alarm but never suppress a real one.
+TASK_ID, FLEET = "ora-health-guard", "cc"
+_PW_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_shared", "pause_windows.py")
+
+
+def _pause_hours(start, end, pause_store):
+    """(hours, error). Error is set when the pause record could not be consulted."""
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("pause_windows", _PW_PATH)
+        pw = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(pw)
+        store = pause_store or pw.DEFAULT_STORE
+        _, err = pw.load_windows(store, with_error=True)
+        if err:
+            return 0.0, "pause store unreadable: %s" % err
+        return pw.overlap_hours(FLEET, TASK_ID, start, end, path=store), None
+    except Exception as exc:                     # noqa: BLE001 -- never raise into the guard
+        return 0.0, "%s: %s" % (type(exc).__name__, exc)
+
 
 def _todays_lateness_hours(now):
     """Hours since the most recent 05:15 ET boundary at/before `now`. Always
@@ -191,14 +218,17 @@ def write_beacon(path, status, subject_sent, failed_connectors,
         return False
 
 
-def read_beacon(path, now_iso=None):
+def read_beacon(path, now_iso=None, pause_store=None):
     """Gap verdict from the LOCAL ledger.
 
     Returns {verdict, gap_hours, last_run_et, last_entry, notion_gap_explained,
-             last_notion_write_et}.
+             last_notion_write_et, pause_hours_in_gap, effective_gap_hours, pause_error}.
 
       verdict OK       -- ran within tolerance (NOMINAL_INTERVAL_HOURS + today's
                           own wake-lateness against the 05:15 ET slot)
+      verdict PAUSE_EXPLAINED -- raw gap exceeds tolerance, but after subtracting the
+                          hours this task was held by a RECORDED bounded pause it does
+                          not. Advisory, not a FAIL.
       verdict STALE    -- genuinely silent too long (a real missed cycle)
       verdict UNKNOWN  -- no readable store; explicitly NOT a pass
 
@@ -209,21 +239,28 @@ def read_beacon(path, now_iso=None):
     now = _parse(now_iso) or datetime.datetime.now().astimezone()
     data = _load(path)
     entries = (data or {}).get("entries") or []
+    _unknown_pause = {"pause_hours_in_gap": None, "effective_gap_hours": None, "pause_error": None}
     if not entries:
-        return {"verdict": "UNKNOWN", "gap_hours": None, "last_run_et": None,
-                "last_entry": None, "notion_gap_explained": False,
-                "last_notion_write_et": None}
+        return dict({"verdict": "UNKNOWN", "gap_hours": None, "last_run_et": None,
+                     "last_entry": None, "notion_gap_explained": False,
+                     "last_notion_write_et": None}, **_unknown_pause)
 
     last = entries[-1]
     ts = _parse(last.get("last_run_et"))
     if ts is None:
-        return {"verdict": "UNKNOWN", "gap_hours": None, "last_run_et": None,
-                "last_entry": last, "notion_gap_explained": False,
-                "last_notion_write_et": None}
+        return dict({"verdict": "UNKNOWN", "gap_hours": None, "last_run_et": None,
+                     "last_entry": last, "notion_gap_explained": False,
+                     "last_notion_write_et": None}, **_unknown_pause)
 
     gap = (now - ts).total_seconds() / 3600.0
     tolerance = _nominal_interval_hours(now) + _todays_lateness_hours(now)
     verdict = "OK" if gap <= tolerance else "STALE"
+    pause_h, pause_err, effective = 0.0, None, gap
+    if verdict == "STALE":
+        pause_h, pause_err = _pause_hours(ts, now, pause_store)
+        effective = gap - pause_h
+        if pause_h > 0 and effective <= tolerance:
+            verdict = "PAUSE_EXPLAINED"
 
     last_notion = next((e.get("last_run_et") for e in reversed(entries)
                         if e.get("notion_written")), None)
@@ -234,6 +271,9 @@ def read_beacon(path, now_iso=None):
 
     return {"verdict": verdict, "gap_hours": round(gap, 2),
             "tolerance_hours": round(tolerance, 2),
+            "pause_hours_in_gap": round(pause_h, 2),
+            "effective_gap_hours": round(effective, 2),
+            "pause_error": pause_err,
             "last_run_et": last.get("last_run_et"), "last_entry": last,
             "notion_gap_explained": notion_explained,
             "last_notion_write_et": last_notion}
