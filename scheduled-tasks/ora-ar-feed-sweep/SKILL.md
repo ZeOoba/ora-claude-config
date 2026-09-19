@@ -40,18 +40,73 @@ npx tsx scripts/ar-import-headless.ts
 
 No environment variable overrides — this writes directly to the live `data/overlay.json` and `data/snapshots/portfolio.json`, which is the intended behavior now that both guards passed. Capture the full console output; exit code 0 is success (per-file quarantines are logged, not fatal), exit code 1 means the overlay write itself failed (treat as a real failure).
 
+## Step 2.5 — feed-freshness alarm (compute BEFORE writing the report)
+
+A stalled upstream feed is invisible in this task's normal output: the four platform exports are pulled BY HAND on no fixed cadence, a re-import at the same as-of date overwrites cleanly (`server/ar/resolve-latest.ts`, `incomingMs >= existingMs`), and the script exits 0. **A dead feed and a healthy week produce identical summary emails.** This step exists to make that impossible.
+
+Do NOT invent a staleness threshold. The app already has one — `arStalenessMaxDays` in `src/analytics/conditions.ts` — and it drives the real consequence: when ANY stamped `tenantArrears` record is older than it (or carries a null `asOfDate`), the `ar-stale` condition fires and **all per-lease collections alerting is suppressed portfolio-wide**. Mirror that gate exactly, so this email and the app can never disagree.
+
+Read the threshold from source, then compute the ages from the same field `conditions.ts` judges. Write this to a `.py` file and run it with `python -X utf8` from `C:\Users\Owner\oxford-command-center` — do NOT pipe it as a heredoc, the shell hands Python cp1252 and any non-ASCII in the script breaks it:
+
+```python
+import json, datetime, re, io
+thr = None
+src = io.open('src/analytics/conditions.ts', encoding='utf-8').read()
+m = re.search(r'arStalenessMaxDays:\s*(\d+)', src)
+if m: thr = int(m.group(1))
+print("threshold arStalenessMaxDays =", thr if thr is not None else "UNREADABLE")
+ov = json.load(io.open('data/overlay.json', encoding='utf-8'))
+ar = ov.get('tenantArrears') or {}
+stamped = {k: v for k, v in ar.items() if 'asOfDate' in v}
+now = datetime.datetime.now(datetime.timezone.utc)
+ages, nulls = {}, []
+for k, v in stamped.items():
+    a = v.get('asOfDate')
+    if not a:
+        nulls.append(k); continue
+    d = datetime.datetime.fromisoformat(a.replace('Z', '+00:00'))
+    if d.tzinfo is None: d = d.replace(tzinfo=datetime.timezone.utc)
+    ages[k] = ((now - d).days, a[:10])
+worst = max(ages.values())[0] if ages else None
+newest = min(ages.values())[0] if ages else None
+dates = sorted(set(v[1] for v in ages.values()))
+print("records:", len(ar), "stamped:", len(stamped), "null asOfDate:", len(nulls))
+print("newest as-of:", dates[-1] if dates else None, "=", newest, "days")
+print("oldest as-of:", dates[0] if dates else None, "=", worst, "days  <-- decides the gate")
+print("distinct as-of dates:", dates)
+stale = bool(nulls) or (thr is not None and worst is not None and worst > thr)
+print("VERDICT:", "STALE" if stale else "OK")
+if len(dates) > 1:
+    lag = dates[0]
+    strag = {k: v for k, v in stamped.items() if (v.get('asOfDate') or '')[:10] == lag}
+    tot = sum(sum(float(r.get(b) or 0) for b in ('d30','d60','d90','d90plus')) for r in strag.values())
+    print(f"STRAGGLERS on {lag}: {len(strag)} record(s), ${tot:,.2f}")
+    for k in sorted(strag): print("   ", k, "src=", strag[k].get('sourceFile'))
+```
+
+Verdict rules — apply exactly, never soften:
+
+- **STALE** if the oldest stamped record exceeds `arStalenessMaxDays`, or ANY stamped record has a null `asOfDate`. Prefix the subject with `[STALE FEED] ` and make the freshness block the FIRST thing in the body, above the import summary. State plainly that `ar-stale` is firing and per-lease collections alerting is suppressed portfolio-wide — that is the operational consequence, not a footnote.
+- **OK** otherwise. Still print the freshness block, still state the newest and oldest as-of dates and their ages. A healthy run must say so explicitly; silence is not a pass.
+- If the threshold could not be read from `conditions.ts`, say so verbatim in the email and evaluate against 35 as a stated fallback. Never present a fallback number as if it were read from source.
+
+**Stragglers (more than one distinct as-of date) are always reported**, whatever the verdict. This is the failure mode that actually bites: a delinquency export lists only currently-delinquent tenants, so a tenant who PAID simply vanishes from the next report — and the importer only writes what it sees, it never clears a record that disappeared. Those rows keep their old balance and old `asOfDate` forever, and because the gate degrades on the WORST record, a handful of paid-off tenants can hold `ar-stale` on and disable collections monitoring for the entire portfolio while every current file is fresh. Report the straggler count, their dollar total, and their lease ids so the cause is legible. Do NOT delete or edit those records — diagnosing paid-vs-not-covered is Gabriel's call, and this task never edits overlay rows by hand.
+
+**Never suppress the import over staleness, and never exit non-zero for it.** Stale data is still the best available data; the alarm changes what the email SAYS, not whether the sweep runs.
+
 ## Step 3 — report
 
-Send one summary email via Outlook COM to `ggoldberg@oxfordra.net` ONLY (never cc anyone — this is not the Daily Brief exception). Subject: "AR feed sweep — <files written> written, <files in review> in review". Body, plain and factual, quoting the script's own final summary line verbatim plus:
+Send one summary email via Outlook COM to `ggoldberg@oxfordra.net` ONLY (never cc anyone — this is not the Daily Brief exception). Subject: "AR feed sweep — <files written> written, <files in review> in review — source <newest as-of date> (<N>d)", prefixed with "[STALE FEED] " when Step 2.5 returned STALE. The age belongs in the subject on EVERY run, pass or fail, so a stalled feed is visible without opening the mail. Keep the subject plain ASCII apart from the em dash, which must be built from a codepoint inside a written .ps1 ([char]0x2014) as the send helper's notes require — do not add emoji or other non-ASCII markers. Body, plain and factual, quoting the script's own final summary line verbatim plus:
 - Any file that quarantined this run, with its stated reason verbatim — never paraphrase a quarantine reason.
 - The count and total dollar value currently sitting in `data/ar/review-queue.json` (read the file; sum `d30+d60+d90+d90plus` per row).
+- The Step 2.5 freshness block: verdict, the threshold actually read from `conditions.ts`, newest and oldest as-of dates with ages, and any stragglers with their count, dollar total and lease ids. On a STALE verdict this goes FIRST, above the import summary.
 - If the exit code was 1 (overlay write failed): state this as the headline, not a footnote — this is the failure mode that must never look like a quiet success.
 
 Never fabricate a number. If any step in the console output is unclear or the review-queue file is missing/malformed, say so plainly in the email rather than guessing a count.
 
 ## What this task does NOT do
 
-Does not resolve the review queue. Does not touch git. Does not modify anything under `Business/`. Does not retry automatically on a guard trip — it reports and waits for next Monday.
+Does not resolve the review queue. Does not touch git. Does not modify anything under `Business/`. Does not retry automatically on a guard trip — it reports and waits for next Monday. Does not edit, clear, or evict `tenantArrears` records, including the stale stragglers Step 2.5 reports — it diagnoses and reports them only. Does not chase the upstream exports: it cannot cause a pull, and the freshness alarm is a detector, not a fix.
 
 ### How the review queue actually gets resolved (for the human reading the summary email)
 
