@@ -89,5 +89,24 @@ anticipated in the original scope):
    OAuth doesn't carry over). Don't re-attempt it; ORA's scheduled-task fleet (runs inside the
    authenticated Desktop app) is the correct unattended-execution mechanism instead.
 
+   **RE-VERIFIED 2026-09-10, with one correction to the framing above.** Re-tested
+   deliberately (the ask was to build headless `claude -p` wrappers), this time with a
+   CLEANED environment -- `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ID`,
+   `CLAUDE_PID`, `AI_AGENT` all unset -- so it was NOT the nested-subprocess case this
+   entry originally described. Still fails:
+       $ claude -p "Reply with exactly: HEADLESS_OK" --allowedTools "Read"
+       Failed to authenticate: OAuth session expired and could not be refreshed   (exit 1)
+   `claude` CLI 2.1.233; `~/.claude/.credentials.json` present but dated 2026-08-13.
+   **The correction: the observed cause is an EXPIRED credential, not an architectural
+   impossibility.** "Dead end" is too strong -- a fresh Desktop re-auth (which rewrites
+   `.credentials.json`) or a provisioned `ANTHROPIC_API_KEY` may well make headless work.
+   That has NOT been tested. Do not cite this entry as proof headless can never work;
+   cite it as "unavailable as-is, blocked on credentials."
+
+   Practical consequence 2026-09-10: the three requested headless checks were built to run
+   their underlying deterministic scripts directly instead (`maintenance/headless/`), which
+   was the better design anyway -- all three already emit machine-readable verdicts, so an
+   LLM in the loop would have added cost and nondeterminism for nothing.
+
 Kickoff prompt that started this build: session scratchpad
 `2026-08-14_acquisition-underwriting-eval-harness_kickoff-prompt.md` (historical only now).
