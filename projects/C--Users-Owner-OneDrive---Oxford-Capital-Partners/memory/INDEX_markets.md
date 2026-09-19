@@ -1,9 +1,11 @@
 ---
 name: index-markets
 description: "Sub-index of MEMORY.md — market, deal, portfolio-data and workbook pointers (buy box, ledgers, decided deals, rent-roll/lease-data gotchas). Split out 2026-08-24; MEMORY.md links this file, and memory-integrity-probe check 1 follows it one level."
-metadata:
+metadata: 
   node_type: memory
   type: reference
+  originSessionId: 0fc18634-d92f-4211-8be2-5903fcf2975f
+  modified: 2026-09-12T21:57:53.286Z
 ---
 
 # ORA Memory Index — Markets & Deals
@@ -35,7 +37,9 @@ metadata:
 - [parseLeases vacancy-block phantom leases](reference_parseleases_vacancy_block_phantom_leases_2026-08-03.md) — CLOSED 08-03
 - [Both snapshot tasks write ONE file](reference_snapshot_tasks_share_one_file_diff_absorption.md) — the sibling's "no commit" is correct, not broken
 - [CC snapshot is TRACKED, not ignored](reference_command_center_snapshot_is_tracked_not_ignored.md) — auto-committed unattended; the task file's "git-ignored" claim is wrong
+- **[Worktree isolation dropped gitignored overlay.json — CLOSED 09-06](reference_worktree_isolation_drops_gitignored_overlay_2026-09-05.md)** — PRs #312 then #311 merged (order mattered: #311 unmasked #312's silent loss). Refute found BOTH incomplete after green CI: #311's guard judged RAW JSON while the loader coerces, so junk passed and still zeroed; #312's writers gated on a flag that is null for `not-configured`. **Lessons: a guard must judge what the consumer PRODUCES, not its input; a partial vi.mock silently yields `undefined` for omitted exports (broke 21 tests).** STILL OPEN: partial-shrink of `tasks` (not a shrink-guard key), bake-mirror warns-only
 - [Notion Tenant DB Completeness Gap](reference_tenant_db_completeness_gap.md) — split on `Row Retired`, not the ⛔ARCHIVED prefix
+- **[Step 8 CHURN population = 07-12 Category-B dedup residue, not the phantom batch 09-05](reference_step8_churn_population_is_dedup_residue_not_phantom_batch_2026-09-05.md)** — OI-221's 09-05 update cites the wrong ruling and a title+expiration signature that fails on 3/13; scope Step 8 to `Row Retired == false` instead. Handy is not "the one exception"
 - [ora-pm critical-dates feed unreliable 08-04](reference_ora_pm_critical_dates_feed_unreliable_2026-08-04.md) — wrong on 5 of 10 rows; match on property+unit, never tenant name
 - [Lease-date detector defects 07-24](reference_lease_date_detector_defects_2026-07-24.md) — PR #232 merged; diff by business key not id
 - [HubSpot missed the 07-16 lease-date correction](reference_hubspot_missed_lease_date_correction.md) — HubSpot never fixed; J&R live conflict

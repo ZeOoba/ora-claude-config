@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 16c5371f-037c-41a7-907c-504cc9671b5b
-  modified: 2026-08-22T21:58:56.573Z
+  modified: 2026-09-12T22:26:00.877Z
 ---
 
 # ORA Memory Index — Projects & System
@@ -17,6 +17,7 @@ metadata:
 > Same rules as the root index: one line per entry, pointers only, never content. Detail lives in the target file. Rationale for the split: [size gate is a runway marker](reference_memory_index_size_gate_is_a_runway_marker.md).
 
 ## Automation / setup audit revisions
+- **[Usage-report remediation 08-21](project_usage_report_horizon_builds_scoped_2026-08-21.md)** — 5 items shipped (commit-hygiene GAP C advisory PR #142, isolated-commit skill, rules.md §22-24); 3 "on the horizon" builds scoped-only, NOT implemented — read before starting the self-healing fleet, adversarial pre-push swarm, or environment-preflight builds
 - [Automation Audit Rev 18 08-22](project_automation_audit_rev18_2026-08-22.md) — MEMORY.md 266B from hard ceiling; event_log 35d unrolled; superseded by Rev 20
 - [Automation Audit Rev 17 08-21](project_automation_audit_rev17_2026-08-21.md) — LAMS resume would have resurrected the retired passed-deal-tracker twin; fixed pre-fire
 - **[Automation Audit Rev 12 08-16](project_automation_audit_rev12_2026-08-16.md)** — both Rev 9 data-quality items REFUTED: capex-budgeting never republished (repo commit ≠ store publish); `@inline` store plugins never appear in `enabledPlugins`, so that test proves nothing
@@ -72,3 +73,7 @@ metadata:
 
 ---
 *Sub-index holds pointers, not narration — history in [event_log.md](event_log.md). Back to [MEMORY.md](MEMORY.md).*
+
+## Relocated from the root index 2026-09-02 (root crossed its 21,500-byte runway marker; entries moved verbatim, newest-first as they sat in MEMORY.md)
+- [Automation Audit Rev 17–19](project_automation_audit_rev19_2026-08-28.md) · [Rev 20](project_automation_audit_rev20_2026-08-28.md) — both superseded by Rev 21; Rev20's 93/24h throttle figure is a PRE-OUTAGE baseline, do not cite it
+- ✅ [3700 Kinsman Blvd FedEx — walk-price breach, RESOLVED 08-24](project_fedex_kinsman_walk_price_breach_2026-08-23.md) — Gabriel let the $3.8M LOI lapse, never transmitted; confirmed via ora-deal-aging-sla 08-26 pull

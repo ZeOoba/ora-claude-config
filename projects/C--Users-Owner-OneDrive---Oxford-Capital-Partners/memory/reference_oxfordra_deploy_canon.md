@@ -5,6 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: ac8cd07a-65a5-4241-b6a5-8fc60c23a6ad
+  modified: 2026-09-05T19:54:33.198Z
 ---
 
 Verified 2026-07-09 while shipping fix/mobile-nav-overflow:
@@ -33,3 +34,5 @@ Verified 2026-07-09 while shipping fix/mobile-nav-overflow:
 
 **PR #11 briefly broke the build (2026-07-10, ~16:47–17:27Z):** it added root `package.json`/`package-lock.json` without updating `build-dist.mjs`'s `EXPECTED_EXCLUSIONS`, so the allowlist guard failed the build (exit 2) for ~40 min. Fixed by **PR #12** (`fix/build-dist-classify-package-files`, merged 17:27:16Z, squash commit `1bbfca2`) — classified all three (`package.json`, `package-lock.json`, `node_modules`) as excluded. A separate branch/worktree may still exist locally with the same pre-squash commit (different SHA, identical diff) — that content is **already shipped**; don't re-merge it as if it were still outstanding, and don't be confused when `git merge-base --is-ancestor` on the pre-squash SHA returns false against `main` (expected for any squash-merged branch).
 Full detail: `event_log.md` 2026-07-10 "Publish-dir-exposure follow-up: 3 systematization candidates implemented".
+
+**Re-confirmed live, 2026-09-05 (`ora-site-exposure-probe` weekly run):** ~2 months post-merge, still holding — no regression. `git log --all --grep=publish` still shows PR #10 on `main`; `netlify.toml` still `publish = "dist"` with the assemble command wired. Full 30-path curl matrix (24 exclusion/banned paths + 6 known-sensitive nested files) all 404, all six required security headers on prod match `_headers` exactly. Verdict CLEAN, Notion completion row only (no alarm). Note: `ora-site-exposure-probe`'s own SKILL.md purpose text still frames this as "only actually safe once that branch is merged AND deployed to prod" — that framing predates the merge and is now stale; this memory (not the task file) is the source of record that it shipped 2026-07-10 and has stayed shipped.
