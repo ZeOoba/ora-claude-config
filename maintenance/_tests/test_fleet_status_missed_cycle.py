@@ -274,5 +274,68 @@ class TestMultiFireMissedCycle(unittest.TestCase):
         self.assertEqual(out, [])
 
 
+class TestPauseAwareMissedCycles(unittest.TestCase):
+    """2026-09-12: the first health-guard run after the 09-07 -> 09-11 CC pause listed 11
+    'missed' tasks, every one of whose missed slots fell inside the pause. Hours a task
+    was held by a RECORDED pause (_shared/pause_windows.py) are subtracted before the
+    gap is judged; explained entries move to a separate list instead of vanishing."""
+
+    def setUp(self):
+        import tempfile
+        pw_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "_shared",
+                               "pause_windows.py")
+        s = importlib.util.spec_from_file_location("pause_windows", pw_path)
+        self.pw = importlib.util.module_from_spec(s)
+        s.loader.exec_module(self.pw)
+        self.store = os.path.join(tempfile.mkdtemp(prefix="fsmc_"), "fleet-pause-windows.json")
+        utc = datetime.timezone.utc
+        self.pw.record_window("cc", datetime.datetime(2026, 9, 7, 17, 7, 11, tzinfo=utc),
+                              datetime.datetime(2026, 9, 11, 20, 1, 42, tzinfo=utc),
+                              task_ids=["ora-deal-aging-sla"], key="cc:t", path=self.store)
+        self.now_local = datetime.datetime(2026, 9, 12, 16, 26, 1)  # Saturday, live replay
+
+    def _task(self, tid="ora-deal-aging-sla", last="2026-09-07T16:03:56.824Z"):
+        return [{"id": tid, "_fleet": "cc", "enabled": True,
+                 "cronExpression": "25 9 * * 1-5", "lastRunAt": last}]
+
+    def test_no_pause_store_keeps_legacy_behaviour(self):
+        out = fs.find_missed_cycles(self._task(), now_local=self.now_local)
+        self.assertEqual([m["id"] for m in out], ["ora-deal-aging-sla"])
+
+    def test_gap_inside_recorded_pause_is_explained_not_missed(self):
+        explained = []
+        out = fs.find_missed_cycles(self._task(), now_local=self.now_local,
+                                    pause_store=self.store, explained_out=explained)
+        self.assertEqual(out, [])
+        self.assertEqual([m["id"] for m in explained], ["ora-deal-aging-sla"])
+        self.assertGreater(explained[0]["pause_hours"], 90)
+        self.assertLessEqual(explained[0]["effective_gap_hours"], explained[0]["threshold_hours"])
+
+    def test_pause_for_a_different_task_does_not_excuse(self):
+        explained = []
+        out = fs.find_missed_cycles(self._task(tid="ora-sofr-direct-prefetch"),
+                                    now_local=self.now_local, pause_store=self.store,
+                                    explained_out=explained)
+        self.assertEqual([m["id"] for m in out], ["ora-sofr-direct-prefetch"])
+        self.assertEqual(explained, [])
+
+    def test_gap_that_started_long_before_the_pause_still_flags(self):
+        # last ran 08-20: ~18 days stale before the pause even began
+        explained = []
+        out = fs.find_missed_cycles(self._task(last="2026-08-20T13:30:00.000Z"),
+                                    now_local=self.now_local, pause_store=self.store,
+                                    explained_out=explained)
+        self.assertEqual([m["id"] for m in out], ["ora-deal-aging-sla"])
+        self.assertGreater(out[0]["pause_hours"], 90)
+        self.assertEqual(explained, [])
+
+    def test_unreadable_pause_store_flags_as_before(self):
+        with open(self.store, "w") as fh:
+            fh.write("{broken")
+        out = fs.find_missed_cycles(self._task(), now_local=self.now_local,
+                                    pause_store=self.store, explained_out=[])
+        self.assertEqual([m["id"] for m in out], ["ora-deal-aging-sla"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
