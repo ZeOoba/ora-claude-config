@@ -14,7 +14,7 @@ deal-recon, market-monitor and acquisition-underwriting market context.
 Requires env var CENSUS_API_KEY (free key: https://api.census.gov/data/key_signup.html).
 The Census API rejects keyless calls (verified 2026-09-19: 302 -> missing_key.html).
 
-Run:  uv run --with mcp --with httpx python server.py
+Run:  uv run --with "mcp<2" --with httpx python server.py   (mcp 2.x renamed FastMCP)
 
 Defaults to ACS 5-year (acs/acs5), the only ACS product covering every county.
 Geography here is state / county only.
@@ -74,8 +74,9 @@ def _get(url: str, params: dict | None = None) -> dict | list:
         with httpx.Client(timeout=60, follow_redirects=False) as client:
             r = client.get(url, params=q)
             if r.status_code in (301, 302, 303, 307, 308):
-                return {"error": "Census API rejected the key or request "
-                                 f"(redirect to {r.headers.get('location', '?')}). "
+                # Deliberately not echoing the Location header: it is server-controlled
+                # and could carry the query string (and with it the key).
+                return {"error": "Census API rejected the key or request (HTTP redirect). "
                                  "Check CENSUS_API_KEY is activated (the key email link must be clicked)."}
             r.raise_for_status()
             if not r.content.strip():
@@ -90,6 +91,8 @@ def _get(url: str, params: dict | None = None) -> dict | list:
 
 def _rows(table: list) -> list[dict]:
     """Census returns [header_row, *data_rows]; convert to list of dicts."""
+    if not table:  # a bare [] body would otherwise raise on unpacking
+        return []
     header, *data = table
     return [dict(zip(header, row)) for row in data]
 
