@@ -36,6 +36,17 @@ FINANCIAL-CODE PATHS (the review scope — only changes touching these matter):
                         (added 2026-08-17 — see the lesson below. These are DATA artifacts, not
                          code, but they carry NOI/AR/tax figures directly and this task's own scope
                          had never named a single data file before this.)
+  scripts/**, server/index.ts, server/brief/run.ts
+                        (added 2026-08-24 — see the lesson below. scripts/** is now IN SCOPE
+                         WHOLESALE, not by individual filename: scripts/bake-warehouse.ts bakes
+                         /analytics/*, /debt/scores, and /brain/report financial outputs into the
+                         unattended-deploy artifact, scripts/ar-import-headless.ts writes AR
+                         balances, scripts/prepush-confidential-scan.mjs enforces Hard Invariant 3
+                         — three DIFFERENT financial-adjacent classes already living in this one
+                         directory the list had never named. server/index.ts and server/brief/run.ts
+                         are named individually because they wire the warehouse's sub-routers/mount
+                         list and the daily-brief alert path respectively — small, rarely-touched
+                         files whose CHANGES matter disproportionately to what they route to.)
   (2026-07-24 lesson: the previous version enumerated individual warehouse FILES; the week the
   Debt & Maturity module landed, none of its files were on the list, and a literal reading of the
   scope would have reported CLEAN while two HIGH governor false-clearance defects sat in the

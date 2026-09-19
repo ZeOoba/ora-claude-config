@@ -22,13 +22,34 @@ For each selected broker, DRAFT a short, personal check-in email: institutional-
 STEP 4 — Park drafts in Outlook. NEVER send.
 Create each broker draft as an Outlook DRAFT via COM — never via .Send(). Use exactly this pattern (spelled out verbatim so an unattended run never improvises):
 
+# THE BODY MUST BE A SINGLE-QUOTED HERE-STRING (@'...'@). A double-quoted string
+# SILENTLY DESTROYS EVERY DOLLAR FIGURE: PowerShell reads "$7.50" as the undefined
+# variable $7 followed by ".50". Proven by repro 2026-08-27:
+#   "clear $7.50/SF NNN ... $80.87/SF list ... $50,000 deposit"
+#   -> "clear .50/SF NNN ... .87/SF list ... ,000 deposit"
+# This defect shipped three corrupted counterparty drafts on 2026-08-13 that then
+# sat unsent for 14 days. It bites this task hard: broker check-ins are numbers-forward
+# and name the buy-box ($10M / 50K SF). Never interpolate. Never use @"..."@ either.
+$body = @'
+<body text — pasted verbatim, no escaping required>
+'@
+
 $outlook = New-Object -ComObject Outlook.Application
 $mail = $outlook.CreateItem(0)
-$mail.To = "<broker email>"
-$mail.Subject = "<subject>"
-$mail.Body = "<body text>"
+$mail.To      = '<broker email>'
+$mail.Subject = '<subject>'
+$mail.Body    = $body
 $mail.Save()
 # NEVER call $mail.Send() — drafts stay parked in the Outlook Drafts folder for Gabriel's own review and send.
+
+# MANDATORY POST-SAVE FIGURE CHECK — a draft that fails this is NOT parked.
+if ($body -match '\$\d' -and $mail.Body -notmatch '\$\d') {
+  Write-Output 'FIGURE_CORRUPTION — dollar figures did not survive the save. Report the draft as defective in the STEP 5 Ops Hub row; do NOT tell Gabriel it is ready to send.'
+} elseif ($mail.Body -match '(?<![\w$])[.,]\d{2}/SF') {
+  Write-Output ('FIGURE_CORRUPTION_SUSPECTED — orphaned decimal before /SF: ' + $Matches[0])
+} else {
+  Write-Output ('PARKED_OK EntryID=' + $mail.EntryID)
+}
 
 STEP 5 — Completion reporting.
 Post one row to the Notion Ops Hub (parent page 32b6ecd8-9e59-81f2-b329-df3fd0e25062) listing who was drafted, their market, and why (stale-touch trigger + any Outlook thread context used). Then email a one-paragraph summary to ggoldberg@oxfordra.net ONLY (no cc — routing canon; the ora-am-brief Daily Brief is the sole cc-egoldberg exception and does not apply here) via C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1 — this summary is the ONLY send this task ever performs; the broker drafts themselves are never sent. On a COM failure for either the drafts or the summary send: retry once, then flag loudly in the Notion Ops Hub row if the retry also fails — do not halt the run.
