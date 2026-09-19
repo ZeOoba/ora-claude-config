@@ -142,6 +142,10 @@
 - mdgeodata MD_PropertyData service, JURSCODE='BACO'. *** KEY: unlike the name-scrubbed state extract,
   Baltimore County publishes OWNER NAMES on its OWN GIS — join the state ACCTID to county
   `https://bcgis.baltimorecountymd.gov/.../Property/MapServer/1` on ACCTID[4:]=TAXPIN (1,274/1,276 matched).
+  - **Full URL (added 2026-09-07 — the line above elides the path with `...`, so it is human-readable but
+    not machine-extractable):** `https://bcgis.baltimorecountymd.gov/arcgis/rest/services/Property/Property/MapServer/1`
+    — layer 1 "Tax parcel", Feature Layer, esriGeometryPolygon. VERIFIED 2026-07-19.
+    Mirrored in `county-endpoints.v1.json` as `baltimore_md.supplemental_arcgis`.
   This restores the FULL 0-100 scale (entity-owner + named estate_v2 + named institutional/ORA-self exclusion).
   Check every MD county for a county-level GIS that re-publishes names before falling back to SDAT browser pulls.
 - FULL disclosure once joined: SQFTSTRC (SF, 89% pop), CONSIDR1/TRADATE (sale price/date), NFMTTLVL
@@ -192,6 +196,12 @@ Columbus/Cincinnati estate lists for the same contamination on next pass.
 ## Jackson County MO (KCMO core) — RICH CAMA TABLE, QUERY QUIRK
 - REST (CAMA table, THE source): https://jcgis.jacksongov.org/arcgis/rest/services/ParcelViewer/ParcelsAscendRelate/FeatureServer/2
   (Ascend_GisInfo standalone table; layer 1 = parcel geometry w/ TIFproject/TIFdistrict/CID/TDD).
+- **Layer 1 full URL (added 2026-09-07 — layer 1 was described in prose above but never given its own
+  URL, so it was human-readable but not machine-extractable):**
+  `https://jcgis.jacksongov.org/arcgis/rest/services/ParcelViewer/ParcelsAscendRelate/FeatureServer/1`
+  — layer 1 "Parcels", Feature Layer, esriGeometryPolygon. VERIFIED 2026-07-19. This is the GEOMETRY
+  layer; layer 2 above remains THE source for CAMA attributes. Mirrored in `county-endpoints.v1.json`
+  as `jackson_mo.arcgis`.
   CRITICAL QUIRK: attribute queries on table 2 FAIL ('Unable to perform query operation') unless
   orderByFields=OBJECTID is supplied. returnIdsOnly also fails. Distinct/count queries work without it.
   maxRecordCount 2000 (pull 1000/page to be safe).
