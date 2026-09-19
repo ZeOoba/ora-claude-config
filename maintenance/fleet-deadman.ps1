@@ -48,6 +48,52 @@ $probe   = Join-Path $env:USERPROFILE '.claude\maintenance\phantom-dispatch-prob
 
 function Log($m) { "$([DateTime]::UtcNow.ToString('s'))Z  $m" | Out-File -FilePath $log -Append -Encoding utf8 }
 
+function Test-BoundedPause($reg) {
+    # Added 2026-09-10 (ORA Automation Audit R24-3). Returns the earliest future resume
+    # time (UTC DateTime) if this fleet is under a DELIBERATE bounded pause, else $null.
+    #
+    # WHY: on 2026-09-07 both fleets were deliberately paused with synchronized one-time
+    # resume tasks. This watchdog has no knowledge of that, so it logged
+    # "fleet cc: no task run in 45.6h (threshold 30h)" on 09-09 with no resolving OK line
+    # and would have re-alarmed every cycle until the Friday resume. An alarm channel that
+    # fires continuously through a correctly-registered pause trains its reader to ignore
+    # it -- which is exactly backwards for the one out-of-band monitor that has to be
+    # believed during a REAL outage (see Revision 21's four-day fleet outage).
+    #
+    # The test is STRUCTURAL, deliberately not name-matching on "resume"/"pause": a task
+    # can be renamed, and a title is not state. A bounded pause is:
+    #     every recurring task disabled  AND  >=1 ENABLED one-time task with a FUTURE fireAt.
+    # A fleet that is merely idle still has enabled recurring tasks, so it cannot match.
+    # Fail-OPEN like everything else here: any parse problem returns $null (alarm normally).
+    try {
+        $d = Get-Content -Raw -Path $reg | ConvertFrom-Json
+        $tasks = @($d.scheduledTasks)
+        if ($tasks.Count -eq 0) { return $null }
+        $recurring = @($tasks | Where-Object { $_.cronExpression })
+        if ($recurring.Count -eq 0) { return $null }
+        $enabledRecurring = @($recurring | Where-Object { $_.enabled })
+        if ($enabledRecurring.Count -gt 0) { return $null }   # not paused: something still fires
+        $nowMs  = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        # 2026-09-12 review finding: a resume must fire within 14 days (mirrors
+        # _shared/fleet_pause.py MAX_RESUME_HORIZON_DAYS). Unbounded, any far-future one-time
+        # task (LAMS has one dated ~2027-08) turned a real mass-disable into a year of silence.
+        $horizonMs = $nowMs + [long](14 * 86400000)
+        $resume = $null
+        foreach ($t in $tasks) {
+            if ($t.enabled -and $t.fireAt) {
+                try {
+                    $ms = [long]$t.fireAt
+                    if ($ms -gt $nowMs -and $ms -le $horizonMs) {
+                        $ts = [DateTimeOffset]::FromUnixTimeMilliseconds($ms).UtcDateTime
+                        if ($null -eq $resume -or $ts -lt $resume) { $resume = $ts }
+                    }
+                } catch { }
+            }
+        }
+        return $resume    # $null if every recurring task is disabled with NO resume queued
+    } catch { return $null }
+}
+
 function Find-Registry($store) {
     # One live registry per store: most tasks wins, tie-break newest mtime (Roaming listed first).
     $appdata = if ($env:APPDATA) { $env:APPDATA } else { Join-Path $env:USERPROFILE 'AppData\Roaming' }
@@ -73,8 +119,9 @@ function Find-Registry($store) {
 }
 
 try {
-    $problems = @()
-    $okBits   = @()
+    $problems     = @()
+    $okBits       = @()
+    $pausedFleets = @()   # R24-3: fleets found under a deliberate bounded pause this run
 
     $fleets = @(
         @{ Label = 'cc';   Store = 'claude-code-sessions' },
@@ -104,7 +151,17 @@ try {
         if ($null -eq $last) { $last = (Get-Item $reg).LastWriteTime }   # fallback: registry mtime
         $ageH = [math]::Round(((Get-Date) - $last).TotalHours, 1)
         if ($ageH -gt $ThresholdHours) {
-            $problems += ('fleet ' + $fleet.Label + ': no task run in ' + $ageH + 'h (threshold ' + $ThresholdHours + 'h)  [' + $reg + ']')
+            # R24-3: a deliberate bounded pause is not an outage. Suppress the alarm, but
+            # ALWAYS log the suppression and the resume time -- the evidence is never hidden,
+            # only the alert, same principle as $PhantomThreshold above.
+            $pauseUntil = Test-BoundedPause $reg
+            if ($null -ne $pauseUntil) {
+                $pausedFleets += $fleet.Label
+                $okBits += ($fleet.Label + '=' + $count + ' tasks, BOUNDED PAUSE (all recurring disabled, resume queued ' +
+                            $pauseUntil.ToString('s') + 'Z) - last run ' + $ageH + 'h ago, alarm suppressed')
+            } else {
+                $problems += ('fleet ' + $fleet.Label + ': no task run in ' + $ageH + 'h (threshold ' + $ThresholdHours + 'h)  [' + $reg + ']')
+            }
         } else {
             $okBits += ($fleet.Label + '=' + $count + ' tasks, last run ' + $ageH + 'h ago')
         }
@@ -115,8 +172,19 @@ try {
     if (Test-Path $sendLog) {
         $sendAgeH = [math]::Round(((Get-Date) - (Get-Item $sendLog).LastWriteTime).TotalHours, 1)
     }
+    # R24-3: when EVERY fleet is under a bounded pause, nothing is scheduled to send, so a
+    # stale send-log is the expected consequence of the pause rather than independent evidence
+    # of a broken send path. Suppress it only in that total-pause case -- if even one fleet is
+    # live and still nothing has sent, that is a real finding and still alarms.
+    $allPaused = ($pausedFleets.Count -gt 0 -and $pausedFleets.Count -eq $fleets.Count)
     if ($null -eq $sendAgeH) { $problems += 'no send-log.txt - no successful send ever recorded' }
-    elseif ($sendAgeH -gt $ThresholdHours) { $problems += ('no successful Outlook send in ' + $sendAgeH + 'h (threshold ' + $ThresholdHours + 'h)') }
+    elseif ($sendAgeH -gt $ThresholdHours) {
+        if ($allPaused) {
+            $okBits += ('send-log ' + $sendAgeH + 'h stale - expected, all fleets under bounded pause')
+        } else {
+            $problems += ('no successful Outlook send in ' + $sendAgeH + 'h (threshold ' + $ThresholdHours + 'h)')
+        }
+    }
 
     # (4) Phantom dispatch -- tasks that never started. Invisible to checks 1-3.
     $phantomDetail = @()

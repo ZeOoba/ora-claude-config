@@ -88,26 +88,33 @@ WINDOW = 0
 # matchers cannot detect a pinned flag that has VANISHED from the snapshot, which
 # is exactly the allowlist-rot case (a dead allowlist entry silently stops
 # covering anything, and the next flag to occupy that slot is unguarded).
-PINNED_FLAGS = [
-    {
-        "key": "loans-row24-tombstone",
-        "entity": "loans",
-        "field": "name",
-        "issue_substr": "Loan Index row 24 is tombstoned",
-        # EXACT, and load-bearing. ora-cc-snapshot-refresh's v1.3 allowlist keys on
-        # all four of entity/field/issue/rawValue, so matching on only the first
-        # three would make this probe strictly weaker than the contract it guards:
-        # reword the workbook marker and the allowlist silently stops covering the
-        # flag while the probe still reported [OK]. Now that is allowlist rot.
-        "raw_value": "⚠ DUPLICATE OF ROW 22 — DO NOT USE",
-        # Surfaces a spec uses to refer to this flag. Kept narrow: each must be
-        # unambiguous enough that a passing mention of "loans" cannot trip it.
-        "identity_patterns": [
-            re.compile(r"loans\s*[·|]\s*name", re.IGNORECASE),
-            re.compile(r"Loan Index row 24", re.IGNORECASE),
-        ],
-    },
-]
+#
+# EMPTY as of 2026-09-03 (OI-212 close-out). The one entry ever pinned here --
+# loans/name, "Loan Index row 24 is tombstoned" -- did its job: it caught OI-171
+# (2026-08-16), and OI-212's re-diagnosis (reading the 08-17/08-24
+# ora-cc-snapshot-refresh transcripts) found the underlying workbook condition
+# itself had resolved around 2026-08-16/17. ora-cc-snapshot-refresh/SKILL.md v1.5
+# (2026-08-28) retired the RATIFIED-TOMBSTONE ALLOWLIST this entry guarded and now
+# states plainly "No allowlist is currently active." Everything this probe kept
+# matching after that point was the v1.5 retirement changelog and the STEP 5
+# recurrence-warning bullet ("if it reappears ... it is NOT allowlisted -- it
+# emails") -- both intentional, load-bearing, permanent text, not a live claim.
+# check_allowlist_rot matches identity patterns anywhere in the spec text with no
+# way to tell a changelog entry from an active pin, so a resolved entry left in
+# this list produces exactly the "permanent unfixable noise" collect_spec_sources
+# already avoids for archived specs -- a probe that cries wolf on an
+# already-fixed, already-documented file gets ignored, which is the failure this
+# whole probe exists to prevent (see module docstring).
+#
+# If ora-cc-snapshot-refresh's STEP 5 gate ever needs a NEW ratified allowlist (a
+# fresh Gabriel ruling -- the SKILL.md's own text is explicit that a recurrence
+# is "not automatic reinstatement"), add its identity here fresh. Do not
+# resurrect the retired entry by uncommenting it: the rawValue/issue_substr it
+# guarded is retired history now, quoted verbatim in the SKILL.md changelog, not
+# a spec claim to keep re-checking against live data. The matching algorithm
+# itself stays covered by test-spec-liveness-probe.py's own synthetic fixture,
+# independent of whatever is (or isn't) pinned here in production.
+PINNED_FLAGS = []
 
 
 def load_live_flags(path):
@@ -166,19 +173,25 @@ def _claims_in(text, pinned):
     return out
 
 
-def check_severity_drift(sources, live_flags):
+def check_severity_drift(sources, live_flags, pinned_flags=None):
     """sources = [(label, text)]. One finding per (source, pinned flag) whose
     asserted severity conflicts with the live snapshot.
 
     Reports EVERY conflicting source, not just the first -- the identity-drift
     check in doctrine-integrity-probe.py carries the same note because 38 sources
     drifted at once there, and a first-hit-only report lets the rest survive a
-    'fixed it' claim."""
+    'fixed it' claim.
+
+    pinned_flags defaults to the module-level PINNED_FLAGS (production, currently
+    empty -- see its own comment). Tests pass a synthetic fixture explicitly so
+    the matching algorithm stays exercised independent of what production pins."""
+    if pinned_flags is None:
+        pinned_flags = PINNED_FLAGS
     if live_flags is None:
         return []
     out = []
     for label, text in sources:
-        for pinned in PINNED_FLAGS:
+        for pinned in pinned_flags:
             live = _match_live(pinned, live_flags)
             if live is None:
                 continue  # vanished -> allowlist rot's job, not a severity claim
@@ -205,17 +218,23 @@ def check_severity_drift(sources, live_flags):
     return out
 
 
-def check_allowlist_rot(sources, live_flags):
+def check_allowlist_rot(sources, live_flags, pinned_flags=None):
     """One finding per source that pins a flag identity no longer present live.
 
     Direction matters: a dead pin is low-harm on its own, but it means the
     suppression it authorises now covers nothing, so whatever next occupies that
-    slot is unguarded."""
+    slot is unguarded.
+
+    pinned_flags defaults to the module-level PINNED_FLAGS (production, currently
+    empty -- see its own comment). Tests pass a synthetic fixture explicitly so
+    the matching algorithm stays exercised independent of what production pins."""
+    if pinned_flags is None:
+        pinned_flags = PINNED_FLAGS
     if live_flags is None:
         return []
     out = []
     for label, text in sources:
-        for pinned in PINNED_FLAGS:
+        for pinned in pinned_flags:
             if _match_live(pinned, live_flags) is not None:
                 continue
             if not any(p.search(text) for p in pinned["identity_patterns"]):
