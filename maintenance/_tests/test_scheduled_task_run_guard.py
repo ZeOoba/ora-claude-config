@@ -164,6 +164,20 @@ ORDERING_VERIFIED_BY_HAND = {
     # :8 is a RESTORATION NOTE naming send-via-outlook.ps1 in prose, not a step.
     # Real sends are :195 and :233, both after claim@15.
     "ora-passed-deal-tracker": "claim@15 precedes real sends@195,233 (:8 is prose)",
+    # Computed via claim_lines()/first_side_effect(lines) (any-mode), 2026-09-18: claim
+    # is the sole fenced block at :13. The email side effect is STEP 5's unfenced prose
+    # paragraph at :62 ("Send ONE summary email via ... send-via-outlook.ps1 ..."), which
+    # matches neither a fence nor STEP_LINE -- same unfenced-prose shape as
+    # ora-deal-aging-sla/ora-passed-deal-tracker above.
+    "ora-excess-usage-sweep": "claim@13 precedes send@62",
+    # Computed the same way, 2026-09-18: claim is the sole fenced block at :13. The
+    # email side effect is STEP 6's unfenced prose sentence at :70 ("TO
+    # `ggoldberg@oxfordra.net` ONLY ... via the sole send path `...send-via-outlook.ps1`.
+    # On non-zero exit: retry once; ..."). The STEP 1c fail-loud-gate send (an earlier,
+    # conditional path) is prose too ("send the email anyway with subject ...") and does
+    # not literally match the SIDE_EFFECTS email regex (no "send-via-outlook" substring
+    # on that line), so :70 is genuinely the first regex-matchable occurrence either way.
+    "ora-vacancy-aging-report": "claim@13 precedes send@70",
 }
 
 # Guarded entrypoints whose guard does NOT yet satisfy a check below. Each entry
