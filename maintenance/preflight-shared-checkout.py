@@ -127,6 +127,26 @@ reverted, a merge into scope later reverted, a file created and deleted within
 since..HEAD -- reads as nothing-in-scope (CLEAR), because the scope content at
 HEAD equals the content at --since and there is nothing new to re-read.
 
+ORPHANED OWNER LABEL (added 2026-09-19): "stale" above means committed-since-touch,
+so an owner whose edit was never committed read as live forever -- a two-day-old
+uncommitted settings.json hunk kept contesting every later edit, and telling
+abandoned from working took a manual transcript search. Each NOT-YOURS line now
+carries `last active <age> ago`, from the newer of the owner's recorded touch and
+its session transcript's mtime (<projects>/*/<session>.jsonl, rewritten every
+turn). When EVERY live owner of a file has a transcript AND is idle longer than
+--orphan-hours (default 12, deliberately not the 2h claim TTL) the line also says
+ORPHANED and the RESULT_JSON entry gets orphaned:true; `orphaned_only` is true when
+every contesting entry is orphaned and no claim competes. This is a LABEL: the
+verdict stays CONTESTED and the exit code stays 1. Every unknown fails live -- no
+transcript (they get pruned), an untimed touch, a future-dated touch (clock
+skew), a co-owner still active, or your own touch all leave the file un-orphaned.
+Only LIVE owners are aged; a stale owner (committed since its touch) is already
+discounted above. KNOWN LIMITS, all in the safe-to-mislabel direction the STOP
+text hedges: a session paused for 12h+ (overnight, a permission prompt) reads
+ORPHANED; a session resumed under a NEW id leaves the old id looking abandoned
+while the work continues; a remote/other-machine session has no local transcript
+here, so it is never labelled. The label never authorises an edit.
+
 STALE UNTRACKED KNOWN BLOB (added 2026-09-13): observed live the same day,
 scheduled-tasks/ora-ground-truth-auditor/SKILL.md returned CONTESTED because an
 UNTRACKED copy sat in the tree with "[no live recorded owner]" -- yet its
@@ -162,6 +182,10 @@ Usage:
         [--claims-dir DIR]   default: <repo>/hooks/active-work, else
                              ~/.claude/hooks/active-work
         [--ttl-minutes N]    claim TTL, default 120 (matches claim_work.py)
+        [--orphan-hours N]   label a foreign owner ORPHANED once idle longer than
+                             N hours, default 12 (label only; never clears)
+        [--session-transcripts-dir DIR]
+                             session transcripts, default <claude home>/projects
         [--canonical BRANCH] branch the checkout should track, default main
                              (local-only advisory only)
         [--json]             machine-readable only, nothing else on stdout
@@ -195,6 +219,7 @@ the dirty set then describe the wrong checkout.
 """
 import argparse
 import json
+import math
 import os
 import subprocess
 import sys
@@ -209,6 +234,9 @@ EXIT_INDETERMINATE = 4
 EXIT_OUT_OF_REPO = 5
 
 DEFAULT_TTL_MINUTES = 120  # matches claim_work.py's 2h window
+# A foreign owner idle longer than this is LABELLED orphaned. Deliberately not the
+# 2h claim TTL: a session that idles overnight is not abandoned.
+DEFAULT_ORPHAN_HOURS = 12
 
 
 # --------------------------------------------------------------------------
@@ -708,6 +736,126 @@ def _split_stale(owners, commit_ts):
 _DIR_REAL = {}  # per-run cache for _owners(): recorded dir -> normcase(realpath) | None
 
 
+# --- orphaned-owner reporting (2026-09-19) -----------------------------------
+# _split_stale() only knows "committed since their touch". An owner whose edit
+# was NEVER committed therefore read as live forever: session b6521d5d's
+# uncommitted settings.json hunk contested every later edit for two days, and
+# telling live from abandoned took a manual transcript search. The data was
+# already here -- a per-owner touch time, and every session's transcript, which
+# is rewritten on each turn. This only LABELS; it never changes a verdict.
+
+def _finite(x):
+    return x is not None and isinstance(x, (int, float)) and math.isfinite(x)
+
+
+def _default_projects_dir(sessions_dir):
+    """<claude home>/projects, beside <claude home>/hooks/sessions."""
+    home = os.path.dirname(os.path.dirname(os.path.abspath(sessions_dir)))
+    return os.path.join(home, "projects")
+
+
+def _project_subdirs(projects_dir):
+    try:
+        with os.scandir(projects_dir) as it:
+            return [e.path for e in it if e.is_dir()]
+    except OSError:
+        return []
+
+
+def _plain_session_id(sid):
+    """Only [0-9A-Za-z_-], 6..80 chars: a session id is joined into a path, so
+    anything with a separator or dot never reaches the filesystem."""
+    return (6 <= len(sid) <= 80
+            and all(c.isascii() and (c.isalnum() or c in "_-") for c in sid))
+
+
+def _transcript_mtime(sid, project_dirs):
+    """Newest mtime of <projects>/*/<sid>.jsonl, or None (no transcript, or not a
+    plain session id). Written every turn, so it is the session's last ACTIVITY
+    -- what a file-touch timestamp cannot say."""
+    if not _plain_session_id(sid):
+        return None
+    newest = None
+    for d in project_dirs:
+        try:
+            m = os.stat(os.path.join(d, sid + ".jsonl")).st_mtime
+        except OSError:
+            continue
+        if _finite(m):
+            newest = m if newest is None else max(newest, m)
+    return newest
+
+
+def _owner_activity(owners, project_dirs, now):
+    """{sid: {last_touch, last_transcript, last_activity, idle_s}} for
+    {sid: touch_epoch | None}. last_activity is the newest KNOWN of the touch and
+    the transcript mtime; None when neither is known (idle_s is then None too)."""
+    out = {}
+    for sid, touch in owners.items():
+        touch = touch if _finite(touch) else None
+        tr = _transcript_mtime(sid, project_dirs)
+        known = [t for t in (touch, tr) if t is not None]
+        last = max(known) if known else None
+        out[sid] = {"last_touch": touch, "last_transcript": tr,
+                    "last_activity": last,
+                    "idle_s": None if last is None else now - last}
+    return out
+
+
+def _is_orphaned(activity, orphan_hours):
+    """True only when there is at least one owner AND every owner has a session
+    transcript AND its idle time is KNOWN and over the threshold. A missing
+    transcript, an unknown time, a future-dated one (negative idle: clock skew)
+    or an empty owner set all read live -- nothing proves them abandoned, so the
+    safe answer stays 'someone may be working on this'."""
+    if not activity:
+        return False
+    limit = orphan_hours * 3600
+    # A transcript is REQUIRED, not just a touch time (independent review, 2026-09-19):
+    # /cleardisk-sessions prunes transcripts (203 of 529 recorded sessions had none),
+    # so "no transcript" says nothing about whether the session is alive. A touch
+    # time alone is only the age of one file write.
+    return all(a["last_transcript"] is not None
+               and a["idle_s"] is not None and a["idle_s"] > limit
+               for a in activity.values())
+
+
+def _fmt_age(seconds):
+    s = max(0, int(seconds))
+    d, rem = divmod(s, 86400)
+    h, rem = divmod(rem, 3600)
+    if d:
+        return "%dd %dh" % (d, h)
+    if h:
+        return "%dh %dm" % (h, rem // 60)
+    return "%dm" % (rem // 60)
+
+
+def _activity_note(entry, orphan_hours):
+    """Tail for a NOT-YOURS line: how recently the owner(s) were active, plus the
+    ORPHANED label. Empty for entries with no owner (nested checkouts, unowned)."""
+    act = entry.get("owner_activity") or {}
+    if not act:
+        return ""
+    idles = [a["idle_s"] for a in act.values() if a["idle_s"] is not None]
+    unknown = sum(1 for a in act.values() if a["idle_s"] is None)
+    no_transcript = sum(1 for a in act.values() if a["last_transcript"] is None)
+    parts = []
+    if idles:
+        parts.append("last active %s ago" % _fmt_age(min(idles)))
+    if unknown:
+        parts.append("activity unknown for %d owner(s)" % unknown)
+    if no_transcript:
+        # Never contains the label word: the label must appear ONLY when it is true,
+        # or a grep for it would match the very files it declined to label.
+        parts.append("no session transcript found for %d owner(s); the age is a"
+                     " file-touch time only" % no_transcript)
+    note = "  " + "; ".join(parts)
+    if entry.get("orphaned"):
+        note += "  ORPHANED (every owner idle > %gh)" % orphan_hours
+    return note
+
+
 def _default_claims_dir(repo):
     # Same override claim_work.py honors -- otherwise the two can read
     # different directories and a live claim goes unseen.
@@ -781,6 +929,16 @@ def main():
     ap.add_argument("--sessions-dir", default=None,
                     help="commit-provenance sessions dir (attribution)")
     ap.add_argument("--ttl-minutes", type=int, default=DEFAULT_TTL_MINUTES)
+    ap.add_argument("--orphan-hours", type=float, default=DEFAULT_ORPHAN_HOURS,
+                    help="label a foreign owner ORPHANED once idle longer than this "
+                         "(default %d); a label only, the verdict never changes"
+                         % DEFAULT_ORPHAN_HOURS)
+    # Not "--projects-dir": that would make the previously unique abbreviation
+    # `--p` (for --paths) ambiguous. "--session-" keeps `--sessions` and every
+    # other existing prefix resolving exactly as before.
+    ap.add_argument("--session-transcripts-dir", default=None,
+                    help="where session transcripts live (default: <claude home>/"
+                         "projects, beside --sessions-dir's hooks/sessions)")
     ap.add_argument("--accept-stale", nargs="+", default=None, metavar="PATH",
                     help="after checking `git diff HEAD -- PATH` holds only your "
                          "own hunks, accept a file whose only other owners are stale")
@@ -788,6 +946,11 @@ def main():
                     help="branch this checkout should track (local-only advisory)")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
+    # Finite and positive. 0, negative and NaN would call every owner orphaned;
+    # inf/1e999 would never, and json.dumps writes them as the bare token
+    # `Infinity`, which is not valid JSON for jq / JSON.parse / ConvertFrom-Json.
+    if not (0 < args.orphan_hours < math.inf):
+        ap.error("--orphan-hours must be a finite, positive number of hours")
 
     repo = _unverbatim(os.path.abspath(args.repo))
     out = []          # human-readable lines, suppressed under --json
@@ -859,6 +1022,10 @@ def main():
     # shared are both hazards, only "provably mine alone" is exempt.
     sessions_dir = args.sessions_dir or _default_sessions_dir()
     prov_index, prov_skipped = _scan_provenance(sessions_dir)
+    projects_dir = (args.session_transcripts_dir
+                    or _default_projects_dir(sessions_dir))
+    project_dirs = _project_subdirs(projects_dir)
+    now = time.time()
     mine = (args.session or "").lower()
     accepted_stale = {
         _norm(p if os.path.isabs(p) else os.path.join(args.repo, p))
@@ -882,6 +1049,11 @@ def main():
         only_mine = bool(live) and bool(mine) and all(
             o.lower() == mine for o in live)
         entry = {"path": rel, "owners": sorted(live), "stale_owners": sorted(stale)}
+        # Label-only (see _is_orphaned): never feeds only_mine or the verdict.
+        activity = _owner_activity({s: touches[s] for s in live},
+                                   project_dirs, now)
+        entry["owner_activity"] = activity
+        entry["orphaned"] = _is_orphaned(activity, args.orphan_hours)
         if p in untracked:
             entry["_untracked"] = True
             entry["_touches"] = touches
@@ -915,6 +1087,9 @@ def main():
     # Nested entries first: they carry the only --repo hint, and must not be
     # pushed past the 20-line human cap by per-file entries.
     dirty_overlap_foreign.sort(key=lambda d: (not d.get("nested_checkout"), d["path"]))
+    for d in dirty_overlap_foreign:  # nested-checkout entries have no owner to age
+        d.setdefault("owner_activity", {})
+        d.setdefault("orphaned", False)
 
     # --- fact 3: other sessions' live claims overlapping my scope -------
     claims_dir = args.claims_dir or _default_claims_dir(repo)
@@ -1001,6 +1176,12 @@ def main():
     else:
         verdict, code = "CLEAR", EXIT_CLEAR
 
+    # True only when every contesting entry is an ORPHANED per-file owner and no
+    # live claim competes. Informational: `verdict`/exit code are unaffected.
+    orphaned_only = (bool(dirty_overlap_foreign) and not competing
+                     and all(d["orphaned"] and not d.get("nested_checkout")
+                             for d in dirty_overlap_foreign))
+
     report = {
         "verdict": verdict,
         "repo": repo,
@@ -1022,6 +1203,9 @@ def main():
         "stale_untracked_known_blob": known_blob,
         "dirty_total": len(dirty),
         "sessions_dir": sessions_dir,
+        "projects_dir": projects_dir,
+        "orphan_hours": args.orphan_hours,
+        "orphaned_only": orphaned_only,
         "provenance_available": prov_index is not None,
         # count of session touched-files.txt that exist but could not be read;
         # > 0 means attribution is partial and known-blob classification is off
@@ -1096,7 +1280,9 @@ def main():
                         " --repo \"%s\"]" % (d["path"], cnt, d["nested_checkout"]))
                 continue
             who = ", ".join(o[:8] for o in d["owners"]) or "no live recorded owner"
-            say("      %s   [%s]%s%s" % (d["path"], who, _stale_note(d), _known_note(d)))
+            say("      %s   [%s]%s%s%s" % (d["path"], who, _stale_note(d),
+                                          _known_note(d),
+                                          _activity_note(d, args.orphan_hours)))
         if len(dirty_overlap_foreign) > 20:
             say("      ... and %d more" % (len(dirty_overlap_foreign) - 20))
     else:
@@ -1152,7 +1338,7 @@ def main():
                 % (branch_info["current_branch"], args.canonical, push_note,
                    branch_info["canonical_ref"]))
     say()
-    say({
+    verdict_text = {
         "CLEAR": "  -> go ahead.",
         "STALE_UNTRACKED_KNOWN_BLOB": "  -> go ahead, WITH CARE: every contesting file"
                                       " is an untracked copy of a blob already in git"
@@ -1167,7 +1353,14 @@ def main():
         "NOT_A_REPO": "  -> not a checkout.",
         "OUT_OF_REPO": "  -> STOP. Paths outside --repo were never evaluated. Run"
                        " once per checkout, with the --repo that owns them.",
-    }[verdict])
+    }[verdict]
+    if verdict == "CONTESTED" and orphaned_only:
+        verdict_text = ("  -> STOP. Every contesting owner looks ORPHANED (no activity"
+                        " for over %gh). That is a label, not a clearance: confirm with"
+                        " Gabriel, check `git diff HEAD -- <path>` holds nothing you"
+                        " would overwrite, or scope into an isolated worktree."
+                        % args.orphan_hours)
+    say(verdict_text)
 
     _emit(report, out, args.json)
     return code
