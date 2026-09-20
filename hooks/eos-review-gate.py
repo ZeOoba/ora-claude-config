@@ -1083,12 +1083,14 @@ def cli_record(argv):
 # degraded. Over-blocking is the accepted trade here: this path only runs when
 # hooks/lib is broken, and the repair itself
 # (`git checkout <ref> -- hooks/lib/<module>.py`) is NOT a match, so there is no
-# bootstrap deadlock. Note the precise form: a checkout of a path whose own NAME
-# contains "commit" DOES match. `;`, `&&` and `|` end the
+# bootstrap deadlock. Precisely: hyphenated names such as
+# hooks/commit-provenance-guard.py DO match (`-` is a word boundary); the
+# underscore lib modules (commit_provenance.py, git_commit_parse.py,
+# isolated_commit.py) do NOT, so no lib repair command is ever blocked. `;`, `&&` and `|` end the
 # span so a chained non-git tail cannot drag `commit` in; a newline does not,
 # which closes the `git \<newline> commit` line-continuation hole at the cost
 # of matching a multi-line script that mentions both.
-_DEGRADED_COMMIT_RE = re.compile(r"\bgit\b[^;&|]*\bcommit\b")
+_DEGRADED_COMMIT_RE = re.compile(r"\bgit\b[^;&|]*\bcommit\b", re.IGNORECASE)
 
 # Stricter form: `git`, optional global -C/-c options, then `commit` as the
 # SUBCOMMAND. Used for ONE decision only -- whether to spend a SINGLE-USE
@@ -1098,8 +1100,22 @@ _DEGRADED_COMMIT_RE = re.compile(r"\bgit\b[^;&|]*\bcommit\b")
 # a commit, leaving the real commit blocked with no token left. That is the
 # 2026-07-24 m7 failure (test_warn_mode_does_not_consume_override_token) in a
 # sharper form. So: loose match blocks, strict match may also SPEND.
+# Hardened after the PR #234 adversarial review (2026-09-19): `commit` must not
+# be followed by `-` or a word char (else `git commit-graph write` / `commit-tree`
+# spent the token on a non-commit); global options may carry quoted values with
+# spaces and long `--opt[=val]` forms (else a real `git -C "a b" commit` could
+# never spend a valid token); and case is ignored (Git Bash resolves `GIT`).
+_ARG_UNIT = r"""(?:[^\s"']|"[^"]*"|'[^']*')"""
 _DEGRADED_STRICT_COMMIT_RE = re.compile(
-    r"\bgit\b(?:\s+-(?:C|c)\s+\S+)*\s+commit\b")
+    # `--help` / `--version` / `--*-path` (bare, no `=`) make git PRINT AND EXIT
+    # before any subcommand runs, so `git --help commit` is a man-page lookup, not a
+    # commit; the second review (2026-09-19) reproduced it burning the token. The
+    # `(?![\w=-])` keeps `--exec-path=/x commit` (which sets the path and DOES run
+    # the command) spendable.
+    r"\bgit\b(?:\s+(?:-[Cc]\s+" + _ARG_UNIT + r"+"
+    r"|--(?!(?:help|version|exec-path|html-path|man-path|info-path)(?![\w=-]))[\w-]+"
+    r"(?:=" + _ARG_UNIT + r"*)?))*"
+    r"\s+commit(?![\w-])", re.IGNORECASE)
 
 _DEGRADED_CAUSE = (
     "hooks/lib could not be imported, so this gate cannot parse the command or "
@@ -1125,7 +1141,8 @@ def _degraded(stdin_text):
         payload = json.loads(stdin_text)
     except Exception:
         payload = {}
-    cmd = (payload.get("tool_input") or {}).get("command") if isinstance(payload, dict) else None
+    tool_input = payload.get("tool_input") if isinstance(payload, dict) else None
+    cmd = tool_input.get("command") if isinstance(tool_input, dict) else None
     if not isinstance(cmd, str) or not _DEGRADED_COMMIT_RE.search(cmd):
         sys.stderr.write("WARNING (eos-review-gate, DEGRADED): " + _DEGRADED_CAUSE
                          + " Non-commit tool calls are still allowed.\n")
