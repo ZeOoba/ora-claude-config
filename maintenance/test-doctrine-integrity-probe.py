@@ -120,27 +120,65 @@ def test_agent_and_workflow_references_resolve():
     `lease-sweep` agent", "the `portfolio-anomaly-scout` agent") resolve at
     ~/.claude/agents/<name>.md; verified-deal-recon is workflow-backed at
     ~/.claude/workflows/<name>.js. Before this fix they were false MISSING.
+
+    WHICH tier a real token lands in depends on what is installed on the machine: the probe
+    resolves skill dir -> plugin allowlist -> agent -> workflow, so a synced skill dir of the
+    same name (a Cowork sync put one at ~/.claude/skills/synced/ for verified-deal-recon on
+    2026-09-19) legitimately wins over the workflow and used to fail this test on a clean
+    checkout. So the real-doctrine assertion is only "resolves [OK] via a real home"; the tier
+    ORDER is pinned hermetically in test_resolution_tier_order_hermetic.
     """
     r = run_probe()
     assert r.returncode == 0, (
         "expected exit 0 against real CLAUDE.md, got %d\nSTDOUT:\n%s\nSTDERR:\n%s"
         % (r.returncode, r.stdout, r.stderr))
+    ok_tiers = ("agent definition", "skill dir", "workflow")
     # v2.1 (2026-06-11): lease-sweep left the tie-breaks section -> not asserted.
-    for agent in ("deal-recon", "portfolio-anomaly-scout"):
+    for tok in ("deal-recon", "portfolio-anomaly-scout", "verified-deal-recon"):
         line = next((l for l in r.stdout.splitlines()
-                     if l.lstrip().startswith("[OK]") and (" " + agent + " ") in l), "")
-        assert "agent definition" in line, (
-            "%s should resolve as an agent definition:\n%s" % (agent, r.stdout))
-    vdr = next((l for l in r.stdout.splitlines()
-                if l.lstrip().startswith("[OK]") and " verified-deal-recon " in l), "")
-    # 2026-09-19: the probe resolves a token against skill dirs BEFORE workflows, and
-    # verified-deal-recon is now ALSO an installed skill dir on this machine, so it
-    # reports "skill dir ... (Code/Cowork surface)" and never says "workflow". The
-    # regression this test guards is a false MISSING, so accept either resolution.
-    assert "workflow" in vdr or "skill dir" in vdr, (
-        "verified-deal-recon should resolve (as a workflow or a skill dir), not MISSING:\n%s"
-        % r.stdout)
+                     if l.lstrip().startswith("[OK]") and (" " + tok + " ") in l), "")
+        assert any(t in line for t in ok_tiers), (
+            "%s should resolve [OK] as an agent, skill dir or workflow:\n%s" % (tok, r.stdout))
+    # The workflow file itself is tracked; a skill dir of the same name must not be able to
+    # mask its deletion.
+    wf = os.path.join(HERE, "..", "workflows", "verified-deal-recon.js")
+    assert os.path.isfile(wf), "workflows/verified-deal-recon.js is missing from the repo"
     print("  PASS test_agent_and_workflow_references_resolve (agents + workflow resolve)")
+
+
+def test_resolution_tier_order_hermetic():
+    """Pin the probe's resolution ORDER against a throwaway root, independent of what is
+    installed on this machine: an agent-only token -> 'agent definition', a workflow-only
+    token -> 'workflow', and a token that exists as BOTH a skill dir and a workflow -> 'skill
+    dir' (the shadowing that made the real-doctrine test fail on a clean checkout)."""
+    root = tempfile.mkdtemp(prefix="probe_tier_root_")
+    try:
+        for d in ("workflows", "agents", os.path.join("skills", "zz-both"), "commands"):
+            os.makedirs(os.path.join(root, d))
+        with open(os.path.join(root, "CLAUDE.md"), "w", encoding="utf-8") as f:
+            f.write("# t\n\n## Engineering OS (Code-only)\n- nothing referenced.\n\n"
+                    "## Skill precedence\n"
+                    "- `zz-wf-only` workflow, `zz-agent-only` agent, `zz-both` shadowed.\n")
+        for name in ("zz-wf-only", "zz-both"):
+            with open(os.path.join(root, "workflows", name + ".js"), "w", encoding="utf-8") as f:
+                f.write("// workflow\n")
+        with open(os.path.join(root, "agents", "zz-agent-only.md"), "w", encoding="utf-8") as f:
+            f.write("---\nname: zz-agent-only\ndescription: x\n---\nbody\n")
+        with open(os.path.join(root, "skills", "zz-both", "SKILL.md"), "w", encoding="utf-8") as f:
+            f.write("---\nname: zz-both\ndescription: x\n---\nbody\n")
+        r = run_probe(["--live-root=" + root])
+        out = r.stdout
+
+        def line_for(tok):
+            return next((l for l in out.splitlines()
+                         if l.lstrip().startswith("[OK]") and (" " + tok + " ") in l), "")
+
+        assert "agent definition" in line_for("zz-agent-only"), out
+        assert "workflow" in line_for("zz-wf-only"), out
+        assert "skill dir" in line_for("zz-both") and "workflow" not in line_for("zz-both"), out
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    print("  PASS test_resolution_tier_order_hermetic (agent / workflow / skill-dir-wins-over-workflow)")
 
 
 def test_legacy_deprecated_references_resolve():
@@ -1550,6 +1588,7 @@ def main():
     test_missing_section_fails()
     test_real_doctrine_skills_resolve()
     test_agent_and_workflow_references_resolve()
+    test_resolution_tier_order_hermetic()
     test_legacy_deprecated_references_resolve()
     test_missing_skill_fails()
     test_missing_skill_section_fails()

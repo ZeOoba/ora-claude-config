@@ -21,6 +21,7 @@ import io
 import json
 import os
 import stat
+import time
 import sys
 import tempfile
 from datetime import datetime, timedelta
@@ -229,6 +230,130 @@ finally:
 
 expect("run_test_file: parent's GIT_DIR/GIT_WORK_TREE/etc. do not leak into the "
        "test subprocess", rc_leak == 0, "got rc=%r out=%r" % (rc_leak, out_leak))
+
+# --- run_test_file(): every test subprocess gets a PRIVATE temp dir, removed afterwards --
+# Root cause (2026-09-19 census, 124 discovered test files run with an empty private TEMP):
+# 64 of them leave entries behind in the shared flat %TEMP% -- ~1,344 per full-suite run --
+# and %TEMP% had accumulated ~1.7M top-level entries from exactly these fixtures
+# (eos-rg-*, cwg-*, cpg-*, oag-*, ...). Fixing 64 tests one by one rots; the spawn point
+# is the one place that covers all of them.
+_parent_tmp_before = {k: os.environ.get(k) for k in ("TEMP", "TMP", "TMPDIR")}
+scratch_parent = tempfile.mkdtemp(prefix="gt-scratch-parent-")
+gt.SCRATCH_PARENT_OVERRIDE = scratch_parent
+priv_root = tempfile.mkdtemp(prefix="gt-private-tmp-")
+priv_probe = write_dummy_test(
+    priv_root, "test-private-tmp.py",
+    "import os, stat, sys, tempfile\n"
+    "d = tempfile.mkdtemp(prefix='leaky-fixture-')\n"
+    "f = os.path.join(d, 'ro.bin')\n"
+    "open(f, 'w').write('x')\n"
+    "os.chmod(f, stat.S_IREAD)  # read-only, like git object files\n"
+    "print('TMPDIR=' + tempfile.gettempdir())\n"
+    "print('ENV=' + os.environ.get('TEMP', '') + '|' + os.environ.get('TMP', '') + '|' + os.environ.get('TMPDIR', ''))\n"
+    "sys.exit(0)\n")
+rc_priv, out_priv, _ = gt.run_test_file(priv_probe)
+child_tmp = [l[len("TMPDIR="):] for l in out_priv.splitlines() if l.startswith("TMPDIR=")]
+child_env = [l[len("ENV="):] for l in out_priv.splitlines() if l.startswith("ENV=")]
+expect("private tmp: probe ran ok", rc_priv == 0, "got rc=%r out=%r" % (rc_priv, out_priv))
+expect("private tmp: child's temp dir is under the gate scratch parent, not the shared TEMP",
+       bool(child_tmp) and os.path.normcase(os.path.abspath(child_tmp[0])).startswith(
+           os.path.normcase(os.path.abspath(scratch_parent)) + os.sep),
+       "child tmp=%r parent=%r" % (child_tmp, scratch_parent))
+expect("private tmp: TEMP, TMP and TMPDIR all point at the same private dir",
+       bool(child_env) and len(set(child_env[0].split("|"))) == 1 and child_env[0].split("|")[0] != "",
+       "env=%r" % child_env)
+expect("private tmp: scratch dir (and the read-only file the child left in it) is removed "
+       "once the test finishes", os.listdir(scratch_parent) == [],
+       "leftover=%r" % os.listdir(scratch_parent))
+expect("private tmp: run_test_file does not mutate the parent's TEMP/TMP/TMPDIR (8 worker "
+       "threads share one os.environ)",
+       {k: os.environ.get(k) for k in ("TEMP", "TMP", "TMPDIR")} == _parent_tmp_before)
+
+# a timed-out child is killed mid-run; its scratch must still be cleaned up
+hang_probe = write_dummy_test(
+    priv_root, "test-private-tmp-hang.py",
+    "import os, tempfile, time\n"
+    "os.makedirs(os.path.join(tempfile.gettempdir(), 'half-made'))\n"
+    "print('started', flush=True)\n"
+    "time.sleep(60)\n")
+rc_hang, out_hang, to_hang = gt.run_test_file(hang_probe, timeout=3)
+expect("private tmp: a timed-out child is reported as a timeout", to_hang and rc_hang == 124,
+       "got rc=%r to=%r" % (rc_hang, to_hang))
+expect("private tmp: scratch of a timed-out child is removed too", os.listdir(scratch_parent) == [],
+       "leftover=%r" % os.listdir(scratch_parent))
+
+# concurrent runs must not share a scratch dir (the suite runs MAX_PARALLEL_TESTS at once)
+import concurrent.futures as _cf
+with _cf.ThreadPoolExecutor(4) as _pool:
+    _outs = list(_pool.map(lambda _i: gt.run_test_file(priv_probe)[1], range(4)))
+_dirs = [l for o in _outs for l in o.splitlines() if l.startswith("TMPDIR=")]
+expect("private tmp: 4 concurrent test subprocesses get 4 distinct scratch dirs",
+       len(_dirs) == 4 and len(set(_dirs)) == 4, "dirs=%r" % _dirs)
+expect("private tmp: nothing left behind after the concurrent runs",
+       os.listdir(scratch_parent) == [], "leftover=%r" % os.listdir(scratch_parent))
+
+# fail open: if the scratch dir cannot be made, the test still runs (on the shared TEMP)
+_real_make = gt.make_test_scratch
+def _boom():
+    raise OSError("simulated: TEMP not writable")
+gt.make_test_scratch = _boom
+try:
+    rc_fo, out_fo, _ = gt.run_test_file(priv_probe)
+finally:
+    gt.make_test_scratch = _real_make
+expect("private tmp: scratch-dir creation failure fails OPEN (test still runs, gate is not "
+       "the thing that blocks a push)", rc_fo == 0 and "TMPDIR=" in out_fo,
+       "got rc=%r out=%r" % (rc_fo, out_fo))
+
+# orphans from a gate run that was itself killed: swept by AGE, scanning only the small
+# scratch parent (never the multi-million-entry flat TEMP)
+old_dir = os.path.join(scratch_parent, "orphan-old")
+new_dir = os.path.join(scratch_parent, "orphan-new")
+alien = os.path.join(scratch_parent, "not-ours.txt")
+os.makedirs(old_dir); os.makedirs(new_dir)
+open(alien, "w").write("x")
+_old_ts = time.time() - 3 * 86400
+os.utime(old_dir, (_old_ts, _old_ts))
+gt.sweep_stale_scratch(max_age_seconds=86400)
+expect("sweep_stale_scratch: removes a scratch dir older than the age gate",
+       not os.path.exists(old_dir))
+expect("sweep_stale_scratch: keeps a fresh scratch dir (may belong to a live gate run)",
+       os.path.isdir(new_dir))
+expect("sweep_stale_scratch: leaves non-directory entries alone", os.path.exists(alien))
+# review finding: a scratch dir replaced by a junction must still be removed, target untouched
+if os.name == "nt":
+    import subprocess as _sp
+    _jt = tempfile.mkdtemp(prefix="gt-junction-target-")
+    open(os.path.join(_jt, "keep.txt"), "w").write("keep")
+    _jl = os.path.join(scratch_parent, "orphan-junction")
+    if _sp.run(["cmd", "/c", "mklink", "/J", _jl, _jt], capture_output=True).returncode == 0:
+        gt.remove_test_scratch(_jl)
+        expect("private tmp: a junction in place of a scratch dir is unlinked", not os.path.lexists(_jl))
+        expect("private tmp: ...and the junction target is never touched",
+               os.path.exists(os.path.join(_jt, "keep.txt")))
+    gt._force_rmtree(_jt)
+
+# review finding: the retry in remove_test_scratch was untested (mutation survived)
+_calls = []
+_real_frm = gt._force_rmtree
+_stub = os.path.join(scratch_parent, "stubborn")
+os.makedirs(_stub)
+def _flaky(path):
+    _calls.append(path)
+    if len(_calls) >= 2:
+        _real_frm(path)
+gt._force_rmtree = _flaky
+try:
+    gt.remove_test_scratch(_stub)
+finally:
+    gt._force_rmtree = _real_frm
+expect("private tmp: remove_test_scratch retries once when the first delete leaves the dir "
+       "(a killed child's grandchild can still hold a handle)",
+       len(_calls) == 2 and not os.path.exists(_stub), "calls=%r" % _calls)
+
+gt.SCRATCH_PARENT_OVERRIDE = None
+gt._force_rmtree(scratch_parent)
+gt._force_rmtree(priv_root)
 
 # --- run_suite() ---------------------------------------------------------------------
 suite = gt.run_suite(fixture_root)
