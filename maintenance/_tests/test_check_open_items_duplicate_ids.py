@@ -404,8 +404,19 @@ _live_combined = codc.check(
     open(codc.DEFAULT_TRACKER_PATH, encoding="utf-8").read() + "\n" + _live_history_text)
 expect("canonical tracker+history combined has zero id collisions right now",
        codc.collision_finding(_live_combined) is False, "got %r" % _live_combined)
-expect("the 5 pre-existing orphaned sections are unchanged by the split (not new damage)",
-       set(_live_combined["orphaned_sections"]) == {"OI-205", "OI-206", "OI-208", "OI-209", "OI-210"},
+# Baseline history: 5 -> 7 (2026-09-13, uncommitted at the time: OI-273 and OI-287, both
+# row-less detail sections) -> EMPTY (2026-09-17). Every one of those 7 has since been
+# reconciled -- check-open-items-duplicate-ids.py against the live pair now reports
+# "orphaned_sections": [] over 273 rows / 273 unique ids / 244 detail sections.
+#
+# A hardcoded baseline inverts once the backlog it describes is cleaned up: FIXING the
+# orphans made this assertion fail, and because it runs in the pre-push hook-tests gate it
+# blocked EVERY push, for every session, until the number was refreshed (hit 2026-09-17).
+# Empty is the right invariant to hold now -- a new orphan is new damage and should fail
+# this test. If a deliberate row-less section is added again, name it here with its reason
+# rather than widening the check, and re-verify with check-open-items-duplicate-ids.py first.
+expect("no orphaned sections in the live tracker+history pair (a new one is new damage)",
+       set(_live_combined["orphaned_sections"]) == set(),
        "got %r" % _live_combined["orphaned_sections"])
 
 passed = sum(1 for ok, _ in results if ok)
