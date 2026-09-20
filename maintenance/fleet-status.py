@@ -912,9 +912,6 @@ def main():
     if args.json:
         print(json.dumps({
             "generated_at": generated_at_iso,
-            "host_clock": host_clock,
-            "eastern_offset_now": eastern_offset_now,
-            "host_clock_shifted_from_eastern": host_clock_shifted,
             "staleness_note": STALENESS_NOTE,
             "host_clock": host_clock,
             "eastern_offset_now": eastern_offset_now,
