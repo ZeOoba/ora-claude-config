@@ -207,13 +207,33 @@ Sign as "Gabriel Goldberg, Oxford Realty Advisors" per the Module 2 standard sig
 Create each nudge as an Outlook DRAFT via COM — never via `.Send()`. Use exactly this pattern:
 
 ```powershell
+# THE BODY MUST BE A SINGLE-QUOTED HERE-STRING (@'...'@). A double-quoted string
+# SILENTLY DESTROYS EVERY DOLLAR FIGURE: PowerShell reads "$7.50" as the undefined
+# variable $7 followed by ".50". Proven by repro 2026-08-27:
+#   "clear $7.50/SF NNN ... $80.87/SF list ... $50,000 deposit"
+#   -> "clear .50/SF NNN ... .87/SF list ... ,000 deposit"
+# This defect shipped three corrupted counterparty drafts on 2026-08-13 that then
+# sat unsent for 14 days. Never interpolate the body. Never use @"..."@ either.
+$body = @'
+<body text — pasted verbatim, no escaping required>
+'@
+
 $outlook = New-Object -ComObject Outlook.Application
 $mail = $outlook.CreateItem(0)
-$mail.To = "<counterparty email>"
-$mail.Subject = "<subject>"
-$mail.Body = "<body text>"
+$mail.To      = '<counterparty email>'
+$mail.Subject = '<subject>'
+$mail.Body    = $body
 $mail.Save()
 # NEVER call $mail.Send() — drafts stay parked in the Outlook Drafts folder for Gabriel's own review and send.
+
+# MANDATORY POST-SAVE FIGURE CHECK — a draft that fails this is NOT parked.
+if ($body -match '\$\d' -and $mail.Body -notmatch '\$\d') {
+  Write-Output 'FIGURE_CORRUPTION — dollar figures did not survive the save. Report the draft as defective in STEP 7; do NOT tell Gabriel it is ready to send.'
+} elseif ($mail.Body -match '(?<![\w$])[.,]\d{2}/SF') {
+  Write-Output ('FIGURE_CORRUPTION_SUSPECTED — orphaned decimal before /SF: ' + $Matches[0])
+} else {
+  Write-Output ('PARKED_OK EntryID=' + $mail.EntryID)
+}
 ```
 
 ## STEP 7 — Completion reporting

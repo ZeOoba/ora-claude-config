@@ -198,6 +198,73 @@ open(p, "w", encoding="utf-8").write("{not json")
 r = hgb.read_beacon(p, now_iso="2026-08-05T05:35:00-04:00")
 expect("corrupt store -> UNKNOWN, no exception", r["verdict"] == "UNKNOWN", "got %r" % r)
 
+# --- PAUSE-AWARE gap (2026-09-12) ---------------------------------------------------
+# Live replay: last run 2026-09-07 11:36 ET, CC fleet deliberately paused 09-07 17:07Z ->
+# resume fired 09-11 20:01Z, next run 09-12 16:21 ET (host in Modern Standby all morning).
+# Raw gap 124.8h vs tolerance 35.1h was reported as a BEACON GAP FAIL; 98.9h of it was the
+# pause, leaving ~25.9h -- a normal interval.
+
+pw_spec = importlib.util.spec_from_file_location(
+    "pause_windows", os.path.join(MAINT, "_shared", "pause_windows.py"))
+pw = importlib.util.module_from_spec(pw_spec)
+pw_spec.loader.exec_module(pw)
+import datetime as _dt
+_UTC = _dt.timezone.utc
+
+
+def pause_store(task_ids=("ora-health-guard",), start=(2026, 9, 7, 17, 7, 11),
+                end=(2026, 9, 11, 20, 1, 42)):
+    s = os.path.join(tempfile.mkdtemp(prefix="hgb_pw_"), "fleet-pause-windows.json")
+    pw.record_window("cc", _dt.datetime(*start, tzinfo=_UTC), _dt.datetime(*end, tzinfo=_UTC),
+                     task_ids=list(task_ids), key="cc:t", path=s)
+    return s
+
+
+def replay_store():
+    p = fresh_store()
+    hgb.write_beacon(p, status="OK", subject_sent="s", failed_connectors="none",
+                     notion_written=True, now_iso="2026-09-07T11:36:13-04:00")
+    return p
+
+
+NOW_0912 = "2026-09-12T16:21:00-04:00"
+
+r = hgb.read_beacon(replay_store(), now_iso=NOW_0912, pause_store=pause_store())
+expect("gap explained by a recorded pause -> PAUSE_EXPLAINED, not STALE",
+       r["verdict"] == "PAUSE_EXPLAINED", "got %r" % r)
+expect("pause hours are reported", abs((r.get("pause_hours_in_gap") or 0) - 98.91) < 0.05, "got %r" % r)
+expect("effective gap = raw gap - pause hours",
+       abs(r.get("effective_gap_hours", -1) - (r["gap_hours"] - r["pause_hours_in_gap"])) < 0.02,
+       "got %r" % r)
+expect("raw gap is still reported unchanged", abs(r["gap_hours"] - 124.75) < 0.05, "got %r" % r)
+
+r = hgb.read_beacon(replay_store(), now_iso=NOW_0912,
+                    pause_store=os.path.join(tempfile.mkdtemp(prefix="hgb_pw_"), "absent.json"))
+expect("same gap with no recorded pause is still STALE", r["verdict"] == "STALE", "got %r" % r)
+
+r = hgb.read_beacon(replay_store(), now_iso=NOW_0912,
+                    pause_store=pause_store(start=(2026, 9, 10, 20, 0, 0)))
+expect("a pause covering only part of the gap, remainder > tolerance -> STALE",
+       r["verdict"] == "STALE", "got %r" % r)
+
+r = hgb.read_beacon(replay_store(), now_iso=NOW_0912,
+                    pause_store=pause_store(task_ids=("ora-am-brief",)))
+expect("a pause that held a DIFFERENT task does not excuse this one",
+       r["verdict"] == "STALE", "got %r" % r)
+
+bad = os.path.join(tempfile.mkdtemp(prefix="hgb_pw_"), "fleet-pause-windows.json")
+open(bad, "w").write("{broken")
+r = hgb.read_beacon(replay_store(), now_iso=NOW_0912, pause_store=bad)
+expect("unreadable pause store -> alarm as before (STALE) and surface the error",
+       r["verdict"] == "STALE" and r.get("pause_error"), "got %r" % r)
+
+p = fresh_store()
+hgb.write_beacon(p, status="OK", subject_sent="s", failed_connectors="none",
+                 notion_written=True, now_iso="2026-08-04T06:05:18-04:00")
+r = hgb.read_beacon(p, now_iso="2026-08-05T05:35:00-04:00", pause_store=pause_store())
+expect("an in-tolerance gap stays OK (pause logic never downgrades OK)", r["verdict"] == "OK",
+       "got %r" % r)
+
 # --- ledger retention ---------------------------------------------------------------
 
 p = fresh_store()
