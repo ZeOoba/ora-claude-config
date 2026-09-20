@@ -59,6 +59,37 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    Match on normalized address, not on row identity, and never count two rows as
    two losses. Surface any newly-detected duplicate in the QUESTIONS FOR GABRIEL
    block rather than silently merging.
+
+   **2b — DUPLICATE-EXCLUSION FILTER (added 2026-09-19, Gabriel-directed).** Apply
+   `AND Exclude from Calibration is unchecked (treat null as false)` to EVERY arm of
+   the watch list above (Status/Verdict arm, flag-notes arm and 2a). Rows retired as
+   duplicates carry that checkbox plus `Duplicate Of` (plain `app.notion.com/<id>`
+   text naming the canonical row); status `Dead` alone did NOT remove them, which is
+   how the three `3849 N Richardt Ave` rows all entered the 2026-09-19 read-back. SQL
+   form: `coalesce("Exclude from Calibration",'__NO__') <> '__YES__'` (verified
+   2026-09-19: 146 rows without the clause, 123 with it, the 23 flagged rows
+   dropped). Canonical rows stay unflagged and stay on the list. The address-match
+   and QUESTIONS-FOR-GABRIEL instruction above remains the backstop for any duplicate
+   not yet flagged — never count two rows as two losses. Do not clear or set the
+   checkbox from this task; flagging is Gabriel-directed or `deal-retirement` step 3a.
+
+   **2c — DILIGENCE-EXIT arm (added 2026-09-19, Gabriel-directed).** Additionally
+   include every row where `LOI Outcome = TERMINATED-DILIGENCE`. These are deals ORA
+   bid on or put under contract and then exited **on its own diligence findings** —
+   title, environmental, physical inspection, financing, seller default. This is a
+   THIRD question, distinct from both arms above: a pass tests the screen, a loss
+   tests the bid, a diligence exit tests **diligence-stage discovery and the P(exec)
+   band**. Rows on this arm get the Step 4e treatment and are **excluded from 4b** —
+   there is no competitor and no clearing price, so 4b's comparison has no operand.
+
+   `TERMINATED-DILIGENCE` is mutually exclusive with 2a's `{LOST, PENDING,
+   WINNER-BUSTED}` by construction: one row, one `LOI Outcome`. **A row that is
+   plainly a diligence exit but still carries `LOST` or `PENDING` is NOT re-tagged by
+   this task** — writing the arm key is a lifecycle write, owned by `deal-retirement`
+   or Gabriel. Report it under QUESTIONS FOR GABRIEL as a mis-keyed row, naming the
+   field and the value it should hold, and hold it out of 4b for that sweep (4b's own
+   exclusion clause covers this). 2b's `Exclude from Calibration` filter applies to
+   this arm exactly as to the others.
 3. For each (batch by market): check for a sale/trade since last run via
    (a) the **County Sales Comps** Notion database FIRST — see below — then
    (b) `CoStar Exports\` folder under `Investment Candidates -- 2026\`
@@ -135,6 +166,23 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    (live example: `511 Industrial Mile Road` carries Walk $930,000 against a
    $1,450,000 LOI — those cannot both be right, so that row is held UNCLASSIFIED).
 
+   **4b EXCLUSION — diligence exits never run through this classifier (added
+   2026-09-19).** A row with `LOI Outcome = TERMINATED-DILIGENCE` is out of scope for
+   4b entirely: skip it here and run Step 4e instead. R1–R6 all pivot on a competitor's
+   `Winning Price`, and there is no competitor — running them would produce a
+   permanent, unfillable `UNCLASSIFIED` on a row that is not unclassifiable, only
+   differently classified, and would pollute the QUESTIONS FOR GABRIEL block every
+   month with a question that has no answer.
+
+   **The same exclusion applies to a row still mis-keyed `LOST` or `PENDING`** where
+   the evidence shows ORA itself terminated on its own diligence finding with no
+   competing bidder and no clearing price — hold it out of 4b for this sweep, run 4e's
+   analysis on it, and report the mis-keyed field under QUESTIONS FOR GABRIEL. Do not
+   re-tag `LOI Outcome` from this task (2c). Live example as of 2026-09-19: `E Fulton
+   St Portfolio` (`37a6ecd8-9e59-8156-912e-dd9680cb1660`) — executed PSA $4.0M
+   4/21/2026, ORA terminated 7/9/2026 on the AEI Phase II environmental finding, no
+   competing bidder; routed to `LOST` on 2026-09-19 before this arm existed.
+
    **`Loss Evidence` is mandatory and must carry a citation** — source document,
    Notion row, deed reference, or named broker plus date. A classification with no
    source line is invalid; downgrade it to UNCLASSIFIED rather than shipping it.
@@ -156,6 +204,106 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    competing contract survived DD and financing. A row whose tickler date has passed
    with the flag still set is itself reportable — `808 Rhoads Avenue` sat 50+ days.
 
+   **4d — PASSED-DEAL RE-CHECK scan (added 2026-09-19, Gabriel-directed; additive and
+   read-only).** ORA's passed-deal watch-date convention puts a re-engagement trigger for
+   a deal it never bid on in the Sourcing Log row's `Notes / Flags`, as one line
+   `RE-CHECK: YYYY-MM-DD - <trigger>` (`~/ora-skills/deal-retirement/SKILL.md` Killed Deal
+   Retirement step 3d, v1.4). The `Re-Engagement Flag` / `Re-Engagement Tickler Date` pair
+   is NOT used for these — it stays scoped to 4c's WINNER-BUSTED arm — so this scan is the
+   only thing that surfaces them.
+
+   Over the Step 2 watch list already in hand, scan each row's `Notes / Flags` for lines
+   matching `RE-CHECK:` and parse the ISO date that follows. Report any whose date is
+   **already past or falls within the next 30 days**, one line each:
+   deal · date · trigger text verbatim · days until/overdue.
+
+   - **Read-only.** Do not tick `Re-Engagement Flag`, do not set a tickler date, do not
+     write a `Loss Class`, and do not contact anyone — a `RE-CHECK` deal was never bid on,
+     so none of 4b's classifier applies to it. Outbound contact is Gabriel's call.
+   - **A malformed or unparseable `RE-CHECK:` line is reported verbatim under QUESTIONS FOR
+     GABRIEL, never silently dropped and never date-guessed.**
+   - **Scope limit, stated so it is not mistaken for coverage:** this scan changes nothing
+     about when this task sends. A sweep with zero trades and zero overdue 4c ticklers still
+     takes the Step 6 no-email branch even if a `RE-CHECK` line is due — the due list then
+     rides the one-line Ops Hub note. Widening the Step 6 gate is a separate, deliberate
+     change and is not made here.
+
+   **4e — DILIGENCE-EXIT classifier (added 2026-09-19, Gabriel-directed). Requires NO
+   competitor price.** For every row that arrived via the Step 2c arm, produce the block
+   below. Nothing here compares ORA against another bidder, because there was none.
+
+   Record, in order — a field that cannot be sourced is written `UNK`, never inferred:
+
+   1. **Exit cause** — exactly one of `environmental` · `title` · `physical-inspection` ·
+      `financing` · `seller-default` · `other`. `other` requires a one-clause description.
+      Two contributing causes → name the one that independently justified termination and
+      list the second in the evidence citation; never write two causes.
+   2. **Stage of discovery** — `psa_exec` (PSA execution date), `discovered` (date the
+      finding first landed in a document ORA holds — the report date, not the date it was
+      read), `terminated` (termination notice date), and the two derived integers
+      `days_to_discovery` and `days_to_termination`, both measured from `psa_exec`. The
+      gap between them is the decision latency and is reported, not judged.
+   3. **Price at exit vs walk price** — contract price in force at termination, the `Walk
+      Price` on the row, and the delta in $ and %. Both figures are read as recorded at
+      the time; **the walk price is never recomputed now** — the same hindsight-bias
+      prohibition that governs `ORA Max Defensible Price` in 4b applies here verbatim.
+   4. **Would it have been caught earlier — THIS IS THE CALIBRATION OUTPUT.** Answer both
+      halves separately, against the row's own contemporaneous fields (`DD-Critical
+      Status`, `Edge Findings`, `Score Components`, `Gate Review`), not against what is
+      known now:
+      - **Pre-LOI screen:** was the risk visible, and did the screen price it? Three
+        outcomes only — `SCREEN-CAUGHT-AND-PRICED` · `SCREEN-SAW-BUT-DID-NOT-PRICE` ·
+        `SCREEN-BLIND`.
+      - **DD checklist:** did the checklist item that found it exist, and did it run on
+        time? `DD-CHECKLIST-CAUGHT-IT` · `DD-CHECKLIST-ITEM-MISSING` · `DD-RAN-LATE`.
+      A finding the screen listed as an open unknown and the DD then confirmed is a
+      process **working**, not a defect — say so plainly. Only `SCREEN-BLIND` or
+      `DD-CHECKLIST-ITEM-MISSING` is a gap.
+   5. **Carry-forward** — does the cause map to (a) a proposed **pre-LOI screen gate**,
+      (b) a proposed **DD-checklist item**, (c) **both**, or (d) **neither** (a genuine
+      one-off or a market risk that is priced, not gated)? State the proposed gate or
+      item in one line. **PROPOSAL ONLY.** It goes to the December back-test with every
+      other recommendation this task produces (Step 5) — this task never edits a
+      checklist, a screen gate, a Buy Box weight, or a P(exec) band.
+   6. **P(exec) reconciliation** — the `P(exec) %` recorded on the row at LOI/PSA time
+      against the realized outcome (`NON-EXECUTION`, always, on this arm). Report the
+      pair. Do **not** adjust the band, do not propose a new band number, and do not
+      recompute the recorded value. The standing rule is unchanged: bands move ONLY at
+      the December back-test with Gabriel's explicit sign-off.
+
+   **Notion writes on this arm — read-only apart from the same logging the other arms
+   already do.** Write exactly ONE field: `Loss Evidence`, as a single line in this fixed
+   format, so it stays greppable without a new column:
+
+   ```
+   DILIGENCE-EXIT | cause=<...> | psa_exec=<ISO> | discovered=<ISO> | terminated=<ISO> |
+   days_to_discovery=<n> | days_to_termination=<n> | price_at_exit=<$> | walk=<$> |
+   delta_vs_walk=<$ / %> | p_exec_at_loi=<%> | realized=NON-EXECUTION |
+   caught_earlier=<screen-verdict> / <dd-verdict> | carry_forward=<...> | src=<citation>
+   ```
+
+   Write it on ONE physical line. **A `src=` citation is mandatory** — source document,
+   Notion row, or named report plus date. No citation ⇒ write nothing to Notion and put
+   the row in QUESTIONS FOR GABRIEL, exactly as 4b downgrades an uncited classification.
+
+   **Citation form — avoid a bare `*.md` filename token in `src=` (added 2026-09-19 from
+   the Stage 1 apply).** Notion's rich-text editor auto-links a bare filename such as
+   `deal-decision-ledger.md` into a hyperlink on write. The visible text is unchanged, so
+   the fixed format and a `WHERE Loss Evidence LIKE 'DILIGENCE-EXIT |%'` grep both still
+   hold, and the existing E Fulton line is **not** to be rewritten (re-writing the
+   property re-triggers the same auto-link). For new rows, prefer a citation with no bare
+   `*.md` token — e.g. `memory/deal-decision-ledger (2026-07-09 row)`. If this format is
+   ever machine-parsed rather than grepped, this becomes mandatory rather than preferred.
+
+   **Never written by this arm:** `Loss Class` (a diligence exit is not a loss — leaving
+   it blank also keeps the Step 7 sample-size denominator honest, since that count is
+   defined over `Loss Class`), `Winning Price`, `Winning Price Confidence`, `Winner
+   Entity`, `Winner Type`, `Winner Close Date`, `Days LOI to Close`, `Winner Implied
+   Basis`, `Re-Engagement Flag`, `Re-Engagement Tickler Date`, `Exclude from
+   Calibration`, `LOI Outcome`, `Status`, and every governor/Buy Box file. A
+   diligence-exit row stays ON the calibration list; it is different evidence, not
+   excluded evidence.
+
 ## Calibration use
 5. Each logged trade calibrates two things (report, do not auto-adjust — this is a HARD RULE, not a suggestion):
    - RCT: implied $/SF vs RCT v02 point ± band for that market (flag if outside band);
@@ -173,7 +321,20 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    expecting the model to discover it by name.
 
 ## Output
-6. If zero trades detected: one-line "no trades" note to Ops Hub; NO email.
+6. If zero trades detected: one-line "no trades" note to Ops Hub; NO email. **If Step 4d
+   found any passed-deal `RE-CHECK:` line due or overdue, carry that list on the Ops Hub
+   note** (added 2026-09-19) — it is the only surface this branch writes, and a due
+   re-check that lands nowhere is the same silent-loss failure 4d was added to close.
+   **Carry any Step 4e DILIGENCE-EXIT block on that same Ops Hub note** (added
+   2026-09-19), one line per row, same rule.
+
+   **The send gate is NOT widened by 4e. Stated explicitly so a later reader does not
+   "fix" it:** a diligence exit is a post-mortem on a decision ORA already made and
+   already acted on — it carries no live clock, unlike 4c's re-engagement tickler, which
+   is the ONLY condition that promotes a zero-trades sweep to the Step 7 email path. A
+   sweep with zero trades and zero overdue ticklers still takes this branch even when a
+   4e block was produced this month. Zero trades AND zero overdue ticklers → this branch,
+   unchanged.
 
    **Exception (added 2026-08-16): an overdue re-engagement tickler still emails.**
    Before taking this branch, check for Sourcing Log rows where
@@ -205,6 +366,29 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    evidence citation. Also list any row whose `Re-Engagement Tickler Date` has
    passed with `Re-Engagement Flag` still ticked. **If nothing resolved, print
    nothing** — no "no post-mortems this month" filler, no synthetic content.
+
+   **"PASSED-DEAL RE-CHECKS DUE" section (added 2026-09-19).** If Step 4d found any
+   `RE-CHECK:` line already past or due within 30 days, add a section listing one line per
+   row: deal · date · trigger verbatim · days until/overdue. Same rule as above — **if
+   nothing is due, print nothing.** These are not post-mortems and must not be folded into
+   that section or counted toward its sample-size banner: a `RE-CHECK` deal was never bid
+   on and carries no `Loss Class`.
+
+   **"DILIGENCE EXITS" section (added 2026-09-19).** If Step 4e produced any block this
+   sweep, add a section with ONE line per row:
+   deal · exit cause · days PSA→discovery / PSA→termination · price at exit vs walk ($ and
+   %) · P(exec) at LOI → realized · screen verdict / DD verdict · carry-forward · citation.
+   **If nothing was produced, print nothing** — no filler, no "no diligence exits this
+   month."
+
+   **This section is separate from LOI POST-MORTEMS and must not be merged into it, and
+   its rows must NOT be counted in that section's `INSUFFICIENT SAMPLE (n=X)` banner.**
+   That banner counts classified *losses* — rows carrying a `Loss Class` other than
+   UNCLASSIFIED — and a diligence exit carries no `Loss Class` at all (4e). Folding these
+   rows in would inflate the ledger's apparent sample toward the 10–15 threshold with
+   evidence about a different question, which is the precise failure the banner exists to
+   prevent. If a diligence-exit count is ever wanted in the digest, it is its own separate
+   count with its own label.
 
    **MANDATORY sample-size banner.** While the count of rows with a `Loss Class`
    other than UNCLASSIFIED is **under 10**, every LOI POST-MORTEMS section must
