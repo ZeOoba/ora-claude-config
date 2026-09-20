@@ -1,6 +1,6 @@
 ---
 name: security-and-hardening
-description: Hardens code against vulnerabilities. Use when handling user input, authentication, data storage, or external integrations. Use when building any feature that accepts untrusted data, manages user sessions, or interacts with third-party services.
+description: Hardens code against vulnerabilities. Use for a dedicated security review or hardening pass — authentication, data storage, external integrations, or untrusted-input handling — once a feature exists or is designed. Generic "build a feature" / "fix a bug" requests route through Engineering OS's lane triage first; this applies once security is the explicit ask, not as a first-touch gate on every feature.
 ---
 
 # Security and Hardening

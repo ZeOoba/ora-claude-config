@@ -13,6 +13,22 @@ STEP 1b — Outlook evidence sweep (MANDATORY, added 2026-08-13 v2.1). Before fi
   3. **Folder coverage** — Inbox AND Sent Items AND **the DRAFTS folder** (`GetDefaultFolder(16)`). An abandoned or half-written draft is frequently the single most diagnostic artifact on a stalled deal and appears in neither Inbox nor Sent.
   **Motivating incident (2026-08-09):** this task excluded 808 Rhoads Avenue on the stated basis that "no correspondence exists at all," derived from a listing-domain/surname ladder built off the row. In fact Lauren Alexander (Elford Realty | CORFAC) had emailed an off-market opportunity on 2026-06-22 — a competing buyer under contract at ~$80/SF expected to terminate before a DD period expiring ~2026-07-27 — Gabriel replied the same day, and it went unanswered for 52 days. She appears nowhere on the pipeline row, so no row-derived search could have found her, and the abandoned 16:04 draft was invisible to any Inbox/Sent query. **An affirmative "no correspondence exists" claim is worse than silence; never make one without all three passes above.**
   If the run has no Outlook reach at all, say so explicitly in the STEP 7 post and downgrade every exclusion to "unverified this run" rather than asserting an all-clear.
+  **Canonical tool (v2.4, 2026-09-06):** on any COM-capable run, execute all three passes with `C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-deal-evidence-sweep.ps1 -Terms <addresses, deal names, cities, counterparty surnames/domains> -Since <today-45d> -OutFile <_shared\tmp\...>` (run detached via `Start-Process`; a 45-day pass takes 3–6 min — poll the OutFile for `DONE`). Do NOT use the Graph `outlook_email_search` MCP for this sweep: every ORA automation email names every deal, so free-text results are ~90% self-mail, and Graph does not distinguish drafts from sent mail. The script excludes automation senders on the Inbox pass and reads Drafts by CreationTime. Exit 2 = no COM → downgrade exclusions as above. Never build the body-search inline in a `-Command` string (Desktop Commander strips `$`); always the `.ps1`.
+  **Follow-up-to-nothing guard (v2.4):** before drafting any "circling back / following up on my email of <date>" message, confirm in **Sent Items** that the referenced email actually left the store. Two drafts (808 Rhoads → Koon 2026-08-28; 250 NW 10th → Wilcox 2026-09-05) were composed as follow-ups to drafts that were never sent. A follow-up to an unsent draft is a defect, not a nudge: the correct output is to re-surface the original draft.
+
+STEP 1c — Draft-age probe (MANDATORY on any COM-capable run; added 2026-08-27 v2.3). Run:
+
+```
+powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-draft-age-probe.ps1 -DaysStale 7
+```
+
+**Why this is a step and not an optional nicety.** On 2026-08-13 this task parked three counterparty drafts via the STEP 4b primary path and reported them as parked. Nothing then watched them. They sat unsent for 14 days and were found on 2026-08-27 only because that run happened to widen its evidence sweep into the Drafts folder. Two of the three were additionally corrupted (see STEP 4b). **Parking a draft is not an outcome; a sent email is.** This probe closes the gap between them.
+
+Report every **T1 CRITICAL** (figure corruption) and **T2 ACTION** (aged, fresh-composed, external recipient) finding in the STEP 5 summary and the STEP 7 post, in their own section, **whether or not the draft's deal appears anywhere in this run's stale list** — an unsent draft is a finding in its own right. T3 reply-stub findings are suppressed by design: Outlook autosaves a copy of nearly every reply, so listing them produced 171 hits out of 227 items on the v1.0 probe and would habituate Gabriel past the report exactly the way the Daily Brief flags failed on 470 McCormick. Exit 1 means findings; exit 2 means no COM (say so, do not claim clean).
+
+**Never re-draft a deal that already has a live parked draft.** Check this probe's output before STEP 4a. If a draft already exists for the blocking action, the correct output is to surface the existing draft (and any defect in it), not to create a second one. **Repair-in-place is permitted (v2.4):** a T1 figure-corrupted draft may be repaired via COM (`.Body` string-replace on literal single-quoted strings, `.Save()`, then the STEP 4b figure check) rather than reported as dead — proven 2026-09-03 on the 808 Rhoads → Elford draft (REPAIRED_OK).
+
+STEP 1d — Send-flow hand-off (v2.4, 2026-09-06). The STEP 7 post must end with a **"READY TO SEND"** block listing each clean parked draft as `Subject → To · EntryID` so Gabriel can send from an interactive session in one confirmation via `C:\Users\Owner\.claude\scheduled-tasks\_shared\send-parked-drafts.ps1 -EntryId <ids> -Confirm SEND`. That script lists by default, refuses without `-Confirm SEND`, refuses figure-corrupted bodies, refuses empty To, and logs to `_shared\send-log.txt`. **This scheduled task never invokes it in send mode** (Hard Invariant 1 — the send is Gabriel's in-turn act). Get the EntryIDs from `send-parked-drafts.ps1 -Match '<deal terms>'` (read-only list mode).
 
 STEP 2 — Filter for staleness. A deal qualifies for the nudge if ALL of:
   (a) **`Last Substantive Update`** (manual date property, added 2026-08-13) is more than 14 days before today — see STEP 2a for the field's provenance and the fallback rule,
@@ -47,14 +63,35 @@ STEP 4a — Draft the unblocking email. For each deal that produced an identifia
 STEP 4b — Park the draft. Never send.
   - **Primary path** (COM-capable surface — a Claude Code / Desktop Commander host-exec bridge available in this run): create an Outlook DRAFT via COM and `.Save()` it. Never `.Send()`. Use exactly this shape so an unattended run doesn't improvise the mechanism:
     ```powershell
+    # THE BODY MUST BE A SINGLE-QUOTED HERE-STRING (@'...'@). A double-quoted
+    # string SILENTLY DESTROYS EVERY DOLLAR FIGURE: PowerShell reads "$7.50" as
+    # the undefined variable $7 followed by ".50". Proven by repro 2026-08-27:
+    #   "clear $7.50/SF NNN ... $80.87/SF list ... $50,000 deposit"
+    #   -> "clear .50/SF NNN ... .87/SF list ... ,000 deposit"
+    # This defect corrupted three live counterparty drafts on 2026-08-13
+    # (808 Rhoads x2, 250 NW 10th) which then sat unsent for 14 days.
+    # Never build the body by interpolation. Never use @"..."@ either.
+    $body = @'
+    <full body from STEP 4a — pasted verbatim, no escaping required>
+    '@
+
     $outlook = New-Object -ComObject Outlook.Application
     $mail = $outlook.CreateItem(0)   # olMailItem
-    $mail.To = "<named counterparty email>"
-    $mail.Subject = "<subject from STEP 4a>"
-    $mail.Body = "<full body from STEP 4a>"
+    $mail.To      = '<named counterparty email>'
+    $mail.Subject = '<subject from STEP 4a>'
+    $mail.Body    = $body
     $mail.Save()                     # NEVER $mail.Send()
+
+    # MANDATORY POST-SAVE FIGURE CHECK — a draft that fails this is NOT parked.
+    if ($body -match '\$\d' -and $mail.Body -notmatch '\$\d') {
+      Write-Output 'FIGURE_CORRUPTION — dollar figures did not survive the save. Do NOT report this draft as parked; report it as a QUESTIONS FOR GABRIEL line instead.'
+    } elseif ($mail.Body -match '(?<![\w$])[.,]\d{2}/SF') {
+      Write-Output ('FIGURE_CORRUPTION_SUSPECTED — orphaned decimal before /SF: ' + $Matches[0])
+    } else {
+      Write-Output ('PARKED_OK EntryID=' + $mail.EntryID)
+    }
     ```
-    Confirm the item landed in the Outlook Drafts folder before logging it as parked in STEP 5/7.
+    Confirm the item landed in the Outlook Drafts folder AND that the figure check printed `PARKED_OK` before logging it as parked in STEP 5/7. A `FIGURE_CORRUPTION*` result means the draft is defective: say so in the STEP 5 summary and the STEP 7 post rather than pointing Gabriel at a draft whose numbers are dead.
   - **Fallback path** (COM bridge unavailable — the normal case on an unattended Cowork/LAMS run): post the complete draft text (recipient, subject, full body verbatim — not summarized) into the deal's Notion pipeline row as a **"DRAFT READY — {today's date}"** comment or section, AND include the same draft (or an explicit pointer to it) in the Ops Hub completion row (STEP 7). This lets Gabriel copy-paste and send in one step without this task ever touching a send path.
 
 STEP 5 — Compose the weekly summary (replaces the prior flag-only output). Subject unchanged: "[ORA] Stale Pipeline Nudge — {today's date} — N deal(s) need a Target Close Date or disposition decision". Body: for each qualifying deal, one tight block with Deal Name, Address, Stage, days stale, the blocking action determined in STEP 4, and WHERE its ready draft is parked (e.g. "Outlook Drafts" or "Notion pipeline row — DRAFT READY 2026-07-16"). Do not re-paste the full drafted email body into this summary — the summary points to the parked draft, it does not duplicate it, to keep the weekly output tight. Any deal that produced a QUESTIONS FOR GABRIEL line instead of a draft (STEP 4/4a gap) gets that line here verbatim, clearly flagged as having no draft yet. STEP 2b STATUS CONFLICT rows still appear in their own sub-section as before, with no draft attached.
@@ -70,9 +107,14 @@ FIELD-NAME RATIFICATIONS (scoped, dated — add an entry only after an explicit 
 - ~~(none yet as of 2026-07-14 — this guard has never actually tripped for real.)~~ Superseded 2026-08-13 by the entry below.
 - **2026-08-13 — staleness signal (Gabriel-approved in-turn).** Schema state: Acquisition Pipeline Tracker carries BOTH the system `Last Updated` (`last_edited_time`) and a manual `Last Substantive Update` (date), the latter added and backfilled across all 20 rows on 2026-08-13. **Ratified mapping: STEP 2(a) reads `Last Substantive Update`.** `Last Updated` is confirmed defective for this purpose (five consecutive runs) and, post-backfill, reads 2026-08-13 on every row — falling back to it yields a false all-clear. A row with an empty `Last Substantive Update` is UNVERIFIED and must be surfaced, not silently defaulted. Full rationale in STEP 2a.
 
+STANDING WRITES (scoped, dated — the only pipeline-row writes this task may make without a fresh in-turn instruction; everything else on the tracker stays read-only):
+- **2026-09-06 — `Broker / Source` identity backfill (Gabriel-ratified in-turn).** When the STEP 1b sweep proves a live counterparty thread on a deal (≥1 inbound AND ≥1 ORA outbound with that party on that address) and that party is absent from the row's `Broker / Source`, APPEND them to the field — never replace the listing side — stamped `[backfilled YYYY-MM-DD by ora-stale-pipeline-nudge from Outlook thread "<subject>"]`. Identity only; never posture, price, or status. First execution: 808 Rhoads Avenue, Elford Realty | CORFAC (Lauren Alexander lalexander@elfordrealty.com; Jackie Delay jdelay@elfordrealty.com), 2026-09-06, after the gap recurred on 08-13, 08-28 and 09-03 (memory: reference_808_rhoads_real_broker_is_elford_not_koon).
+
 HARD GUARDRAILS (v2.0, stated verbatim — non-negotiable, apply to every run):
 - **Never `.Send()` under any circumstances.** The COM snippet in STEP 4b ends at `.Save()`. No code path in this task ever calls `.Send()`, `SendUsingAccount`, or any Outlook API that transmits a message.
 - **Drafts to counterparties are parked only.** An actual send requires Gabriel's explicit in-turn confirmation in an interactive session (Hard Invariant 1) — this scheduled, unattended task can never be the one that pulls that trigger.
+- **Never build an email body by string interpolation.** The body is always a single-quoted here-string (`@'...'@`) and always passes the STEP 4b post-save figure check before it is reported as parked. A double-quoted body silently eats every dollar figure; this shipped three corrupted counterparty drafts on 2026-08-13. A draft whose figures did not survive is reported as DEFECTIVE, never as ready to send.
+- **Never report a draft as "parked" as though that were the outcome.** The outcome is a sent email. Every run must re-check previously parked drafts via STEP 1c and keep surfacing them until they leave the Drafts folder.
 - **Never fabricate deal facts.** A data gap (missing counterparty, missing date, missing figure, unclear next action) becomes a QUESTIONS FOR GABRIEL line — in the draft body, in the STEP 5 summary, or both — not an invented email claim.
 - **Never reference confidential-deal terms on any external-facing draft surface** (an Outlook draft or a Notion comment both count, since either could later be seen by someone outside the firm) **without first checking the confidential-terms roster** (CLAUDE.md Hard Invariant 3 / `confidential-terms.json`). If the current run's surface cannot verify a deal's confidentiality status against that roster, treat the deal as confidential by default and hold the draft to the Notion fallback path with the sensitive terms omitted, flagging the gap rather than guessing.
 
@@ -84,5 +126,9 @@ Do not duplicate deal-scoring logic — this task only checks staleness/data-com
 - **v1.1 (2026-07-09)
 
 - **v1.2 (2026-07-14): FIELD-NAME RATIFICATIONS list added so a schema question Gabriel already resolved once won't re-ask identically the following Thursday (detail in body)
+
+- **v2.4 (2026-09-06, Gabriel-ratified in-turn "Fix this" on the 2026-09-03 run's systematization candidates):** (1) STEP 1b now runs the canonical `_shared/outlook-deal-evidence-sweep.ps1` (promoted from `_shared/tmp/stale-nudge-sweep-20260903.ps1`); Graph `outlook_email_search` is prohibited for the sweep — self-mail swamps it and it hides isDraft. (2) New STEP 1d: every post ends with a READY TO SEND block (Subject → To · EntryID) feeding `_shared/send-parked-drafts.ps1`, the sole sanctioned draft-send path (list by default; `-EntryId` + `-Confirm SEND` only; figure gate; send-log). The 808 Rhoads → Elford draft had been surfaced by three tasks over 21 days without leaving Drafts — the probe could report, nothing could act. This task never calls send mode. (3) Repair-in-place of T1 figure-corrupted drafts is permitted (STEP 1c). (4) Follow-up-to-nothing guard (STEP 1b): confirm Sent before drafting a "circling back". (5) Standing write ratified: `Broker / Source` on 808 Rhoads backfilled with Elford (Alexander/Delay) — see STANDING WRITES below; future identity-only backfills of a proven live counterparty onto the row no longer wait for a per-run instruction.
+
+- **v2.3 (2026-08-27): the draft-parking loop is closed at both ends.** (1) STEP 4b's COM snippet used a DOUBLE-QUOTED body, which PowerShell silently strips of every dollar figure — `"clear $7.50/SF NNN"` saves as `"clear .50/SF NNN"`, because `$7` parses as an undefined variable. Reproduced under controlled test 2026-08-27. This shipped three corrupted counterparty drafts on 2026-08-13 (808 Rhoads x2, 250 NW 10th). The snippet is now a single-quoted here-string plus a mandatory post-save figure check; the same defect was found and fixed in `ora-deal-aging-sla` and `ora-broker-touch-cadence`, which carried a byte-identical pattern. (2) New STEP 1c runs `_shared/outlook-draft-age-probe.ps1` every COM-capable run, so a parked draft that never gets sent is re-surfaced weekly instead of going quiet — the 2026-08-13 drafts sat 14 days with nothing watching them. Two new HARD GUARDRAILS added: never interpolate a body, and never treat "parked" as the outcome.
 
 - **v2.1 (2026-08-13, Gabriel-approved in-turn): staleness now reads the new manual `Last Substantive Update` date property instead of the defective system `Last Updated` (STEP 2a); adds a mandatory Outlook evidence sweep (STEP 1b) that covers the DRAFTS folder and runs a row-independent free-text pass, after the 2026-08-09 run wrongly reported "no correspondence exists" on 808 Rhoads because its live broker was not named on the Notion row; STEP 6 reframed surface-dependent, not fleet-dependent. [MODEL: claude-sonnet-5 | set 2026-08-05]
