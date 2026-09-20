@@ -1682,7 +1682,378 @@ def test_head_moved_warning_names_the_range():
                and ("%s..%s" % (since[:12], head[:12])) in warn[0], (rc, out))
 
 
+# --------------------------------------------------------------------------
+# orphaned-owner reporting (2026-09-19). A foreign owner whose last activity
+# (newest of: its recorded touch, its session-transcript mtime) is older than
+# --orphan-hours is LABELLED ORPHANED and its age is shown. It is never
+# cleared: the verdict stays CONTESTED / exit 1. Every unknown fails LIVE.
+# --------------------------------------------------------------------------
+THIRD_SESSION = "cccccccc-9999-aaaa-bbbb-cccccccccccc"
+DAY = 86400.0
+
+
+def _pd(td):
+    p = os.path.join(td, "projects")
+    os.makedirs(p, exist_ok=True)
+    return p
+
+
+def _transcript(projects_dir, session, age_hours, sub="C--proj"):
+    """projects/<sub>/<session>.jsonl whose mtime is `age_hours` old."""
+    import time
+    d = os.path.join(projects_dir, sub)
+    os.makedirs(d, exist_ok=True)
+    p = os.path.join(d, session + ".jsonl")
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write("{}\n")
+    t = time.time() - age_hours * 3600
+    os.utime(p, (t, t))
+    return p
+
+
+_ORPHAN_RUNS = [0]
+
+
+def _backdate_head(work, days=10):
+    """Amend HEAD so its commit time is `days` old. Without this every fixture
+    file was last committed 'now', so any touch older than a few seconds is
+    discounted as STALE (committed since) and never reaches the orphan check --
+    which is not the situation being tested (an owner whose hunk was never
+    committed after its touch)."""
+    import time
+    when = time.strftime("%Y-%m-%dT%H:%M:%S",
+                         time.gmtime(time.time() - days * DAY)) + " +0000"
+    env = dict(os.environ, GIT_COMMITTER_DATE=when, GIT_AUTHOR_DATE=when)
+    subprocess.run(["git", "-C", work, "commit", "--amend", "--no-edit",
+                    "--date", when], capture_output=True, text=True, env=env)
+
+
+def _orphan_run(td, work, sd, *extra):
+    # A fresh claims dir per call (os.makedirs would raise on the 2nd call in one
+    # tempdir); a later duplicate flag in `extra` overrides an earlier one.
+    _ORPHAN_RUNS[0] += 1
+    _backdate_head(work)
+    return run("--repo", work,
+               "--claims-dir", _claims_dir(td, "claims_o%d" % _ORPHAN_RUNS[0]),
+               "--sessions-dir", sd, "--session-transcripts-dir", _pd(td),
+               "--session", MY_SESSION,
+               "--paths", os.path.join(work, "agents"), *extra)
+
+
+def _strict_json(out):
+    """RESULT_JSON parsed the way jq / JSON.parse / ConvertFrom-Json would: bare
+    NaN / Infinity tokens (which Python tolerates) are an error."""
+    def _bad(tok):
+        raise ValueError("non-standard JSON token %s" % tok)
+    for line in out.splitlines():
+        if line.startswith("RESULT_JSON="):
+            return json.loads(line[len("RESULT_JSON="):], parse_constant=_bad)
+    return None
+
+
+def _one(work):
+    return os.path.join(work, "agents", "one.md")
+
+
+def test_orphaned_owner_reports_age_and_label_but_stays_contested():
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        _dirty(work, "agents/one.md")
+        _touched(sd, OTHER_SESSION, [_one(work)], ts=time.time() - 3 * DAY)
+        _transcript(_pd(td), OTHER_SESSION, 3 * 24)
+        rc, out, _ = _orphan_run(td, work, sd)
+        j = result_json(out) or {}
+        ent = (j.get("dirty_overlap_foreign") or [{}])[0]
+        expect("orphan: still CONTESTED (a label informs, it never clears)",
+               rc == EXIT_CONTESTED, (rc, out))
+        expect("orphan: human output shows the last-active age",
+               "last active 3d" in out, out)
+        expect("orphan: human output carries the ORPHANED label",
+               "ORPHANED" in out, out)
+        expect("orphan: entry flagged orphaned in JSON",
+               ent.get("orphaned") is True, ent)
+        expect("orphan: entry carries per-owner activity",
+               OTHER_SESSION in (ent.get("owner_activity") or {}), ent)
+        expect("orphan: report says orphaned_only", j.get("orphaned_only") is True, j)
+        expect("orphan: report echoes the default 12h threshold",
+               j.get("orphan_hours") == 12, j.get("orphan_hours"))
+        expect("orphan: the STOP line names the orphan situation",
+               "-> STOP" in out and "ORPHANED" in out.split("-> STOP")[-1], out)
+        expect("orphan: JSON verdict is still CONTESTED (label never changes it)",
+               j.get("verdict") == "CONTESTED", j.get("verdict"))
+        try:
+            strict_ok = _strict_json(out) is not None
+        except ValueError as exc:
+            strict_ok = False
+            out = "%s :: %s" % (exc, out)
+        expect("orphan: RESULT_JSON is valid standard JSON (no NaN/Infinity)",
+               strict_ok, out)
+
+
+def test_recent_transcript_keeps_an_old_touch_live():
+    """The transcript mtime is the last-ACTIVITY signal: a session that wrote
+    its transcript six minutes ago is alive whatever its last file touch says."""
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        _dirty(work, "agents/one.md")
+        _touched(sd, OTHER_SESSION, [_one(work)], ts=time.time() - 3 * DAY)
+        _transcript(_pd(td), OTHER_SESSION, 0.1)
+        rc, out, _ = _orphan_run(td, work, sd)
+        j = result_json(out) or {}
+        ent = (j.get("dirty_overlap_foreign") or [{}])[0]
+        expect("live transcript: CONTESTED", rc == EXIT_CONTESTED, (rc, out))
+        expect("live transcript: not labelled ORPHANED", "ORPHANED" not in out, out)
+        expect("live transcript: entry not orphaned", ent.get("orphaned") is False, ent)
+        expect("live transcript: orphaned_only is False", j.get("orphaned_only") is False, j)
+        expect("live transcript: age is still shown", "last active" in out, out)
+
+
+def test_missing_transcript_is_never_orphaned():
+    """Transcripts get pruned (/cleardisk-sessions), so 'no transcript' proves
+    nothing about liveness. An old touch alone must NOT earn the label -- the
+    age is still shown and the output says why it was not called orphaned."""
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        _dirty(work, "agents/one.md")
+        _touched(sd, OTHER_SESSION, [_one(work)], ts=time.time() - 3 * DAY)
+        rc, out, _ = _orphan_run(td, work, sd)
+        j = result_json(out) or {}
+        ent = (j.get("dirty_overlap_foreign") or [{}])[0]
+        expect("no transcript: CONTESTED and NOT orphaned",
+               rc == EXIT_CONTESTED and ent.get("orphaned") is False
+               and j.get("orphaned_only") is False and "ORPHANED (" not in out, (rc, out))
+        expect("no transcript: the touch age is still shown",
+               "last active 3d" in out, out)
+        expect("no transcript: says why it was not labelled",
+               "no session transcript found" in out, out)
+
+
+def test_transcript_older_than_a_recent_touch_uses_the_newer_time():
+    """last_activity is the NEWER of touch and transcript: a fresh touch keeps an
+    owner live even when its transcript is days old."""
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        _dirty(work, "agents/one.md")
+        _touched(sd, OTHER_SESSION, [_one(work)], ts=time.time() - 300)
+        _transcript(_pd(td), OTHER_SESSION, 3 * 24)
+        rc, out, _ = _orphan_run(td, work, sd)
+        j = result_json(out) or {}
+        expect("recent touch + old transcript: live, not orphaned",
+               rc == EXIT_CONTESTED and j.get("orphaned_only") is False
+               and "ORPHANED (" not in out, (rc, out))
+
+
+def test_unknown_activity_is_never_orphaned():
+    """No timestamp on the touch AND no transcript: nothing proves it idle, so
+    it stays live -- the same rule as _merge_touch's unknown-time handling."""
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        _dirty(work, "agents/one.md")
+        _touched(sd, OTHER_SESSION, [_one(work)], ts=False)
+        rc, out, _ = _orphan_run(td, work, sd)
+        j = result_json(out) or {}
+        ent = (j.get("dirty_overlap_foreign") or [{}])[0]
+        expect("unknown activity: CONTESTED", rc == EXIT_CONTESTED, (rc, out))
+        expect("unknown activity: not orphaned",
+               ent.get("orphaned") is False and "ORPHANED" not in out, (ent, out))
+        expect("unknown activity: says so", "unknown" in out.lower(), out)
+
+
+def test_mixed_orphan_and_live_owner_is_not_orphaned():
+    """One live co-owner makes the file live: only 'every owner idle' counts."""
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        _dirty(work, "agents/one.md")
+        _touched(sd, OTHER_SESSION, [_one(work)], ts=time.time() - 3 * DAY)
+        _touched(sd, THIRD_SESSION, [_one(work)])
+        _transcript(_pd(td), OTHER_SESSION, 3 * 24)
+        rc, out, _ = _orphan_run(td, work, sd)
+        j = result_json(out) or {}
+        ent = (j.get("dirty_overlap_foreign") or [{}])[0]
+        expect("mixed owners: CONTESTED", rc == EXIT_CONTESTED, (rc, out))
+        expect("mixed owners: not orphaned",
+               ent.get("orphaned") is False and j.get("orphaned_only") is False
+               and "ORPHANED" not in out, (ent, out))
+
+
+def test_my_own_touch_plus_an_orphan_is_not_orphaned():
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        _dirty(work, "agents/one.md")
+        _touched(sd, MY_SESSION, [_one(work)])
+        _touched(sd, OTHER_SESSION, [_one(work)], ts=time.time() - 3 * DAY)
+        _transcript(_pd(td), OTHER_SESSION, 3 * 24)
+        rc, out, _ = _orphan_run(td, work, sd)
+        j = result_json(out) or {}
+        expect("mine + orphan: CONTESTED and not labelled orphaned",
+               rc == EXIT_CONTESTED and j.get("orphaned_only") is False
+               and "ORPHANED" not in out, (rc, out))
+
+
+def test_orphan_threshold_is_configurable():
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        _dirty(work, "agents/one.md")
+        _touched(sd, OTHER_SESSION, [_one(work)], ts=time.time() - 5 * 3600)
+        _transcript(_pd(td), OTHER_SESSION, 5)
+        _, out12, _ = _orphan_run(td, work, sd)
+        _, out4, _ = _orphan_run(td, work, sd, "--orphan-hours", "4")
+        _, out6, _ = _orphan_run(td, work, sd, "--orphan-hours", "6")
+        expect("5h idle, default 12h -> not orphaned",
+               (result_json(out12) or {}).get("orphaned_only") is False, out12)
+        expect("5h idle, --orphan-hours 4 -> orphaned",
+               (result_json(out4) or {}).get("orphaned_only") is True, out4)
+        expect("5h idle, --orphan-hours 6 -> not orphaned",
+               (result_json(out6) or {}).get("orphaned_only") is False, out6)
+
+
+def test_future_timestamp_is_never_orphaned():
+    """Clock skew or a bad write: a touch stamped in the future is not 'old'."""
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        _dirty(work, "agents/one.md")
+        _touched(sd, OTHER_SESSION, [_one(work)], ts=time.time() + DAY)
+        rc, out, _ = _orphan_run(td, work, sd)
+        j = result_json(out) or {}
+        expect("future touch: CONTESTED, not orphaned",
+               rc == EXIT_CONTESTED and j.get("orphaned_only") is False
+               and "ORPHANED" not in out, (rc, out))
+
+
+def test_orphaned_and_live_files_are_flagged_per_file():
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        _dirty(work, "agents/one.md")
+        _dirty(work, "agents/two.md")
+        _touched(sd, OTHER_SESSION, [_one(work)], ts=time.time() - 3 * DAY)
+        _touched(sd, THIRD_SESSION, [os.path.join(work, "agents", "two.md")])
+        _transcript(_pd(td), OTHER_SESSION, 3 * 24)
+        rc, out, _ = _orphan_run(td, work, sd)
+        j = result_json(out) or {}
+        by = {e["path"]: e for e in j.get("dirty_overlap_foreign", [])}
+        expect("per-file: orphaned file flagged, live file not, orphaned_only False",
+               by.get("agents/one.md", {}).get("orphaned") is True
+               and by.get("agents/two.md", {}).get("orphaned") is False
+               and j.get("orphaned_only") is False, j)
+
+
+def test_non_finite_or_non_positive_orphan_hours_is_rejected():
+    """0/negative/NaN would call every owner orphaned; inf/1e999 never would and
+    json.dumps writes them as the bare token `Infinity` (invalid JSON). Assert
+    the MESSAGE, not just the exit code: an unknown-flag error also exits 2, so
+    a bare rc check would pass even with the flag deleted."""
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        for bad in ("0", "-3", "nan", "inf", "1e999", "abc"):
+            rc, out, err = _orphan_run(td, work, sd, "--orphan-hours", bad)
+            expect("--orphan-hours %s is rejected with a clear message" % bad,
+                   rc not in (EXIT_CLEAR, EXIT_CONTESTED) and "--orphan-hours" in err
+                   and "unrecognized" not in err and "RESULT_JSON=" not in out,
+                   (rc, err))
+
+
+def test_orphaned_owner_plus_competing_claim_is_not_orphaned_only():
+    """A live claim by another session means someone IS working here, so the
+    whole-verdict flag must stay False even though the dirty owner looks idle."""
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        _dirty(work, "agents/one.md")
+        _touched(sd, OTHER_SESSION, [_one(work)], ts=time.time() - 3 * DAY)
+        _transcript(_pd(td), OTHER_SESSION, 3 * 24)
+        cd = _claims_dir(td, "claims_live")
+        _write_claim(cd, "livework", THIRD_SESSION, [os.path.join(work, "agents")])
+        rc, out, _ = _orphan_run(td, work, sd, "--claims-dir", cd)
+        j = result_json(out) or {}
+        ent = (j.get("dirty_overlap_foreign") or [{}])[0]
+        expect("orphan + live claim: CONTESTED, file orphaned, orphaned_only False",
+               rc == EXIT_CONTESTED and ent.get("orphaned") is True
+               and j.get("orphaned_only") is False and "COMPETING CLAIMS" in out,
+               (rc, out))
+        expect("orphan + live claim: STOP text is the generic one",
+               "looks ORPHANED" not in out, out)
+
+
+def test_path_like_session_ids_never_reach_the_filesystem():
+    """A session-dir name is joined into a transcript path. One with a dot or a
+    separator-like character must be refused, not resolved."""
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        _dirty(work, "agents/one.md")
+        weird = "evil.session.id"
+        _touched(sd, weird, [_one(work)], ts=time.time() - 3 * DAY)
+        # a transcript that WOULD match if the id were joined naively
+        _transcript(_pd(td), weird, 3 * 24)
+        rc, out, err = _orphan_run(td, work, sd)
+        j = result_json(out) or {}
+        expect("dotted session id: no crash, CONTESTED, never orphaned",
+               rc == EXIT_CONTESTED and j.get("orphaned_only") is False
+               and "Traceback" not in err, (rc, out, err))
+
+
+def test_old_abbreviations_still_resolve():
+    """Adding flags must not make an abbreviation that used to be unique
+    ambiguous (`--projects-dir` did that to `--p`)."""
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        rc, out, err = run("--repo", work, "--claims-dir", _claims_dir(td),
+                           "--sessions-dir", _sessions_dir(td),
+                           "--session", MY_SESSION,
+                           "--p", os.path.join(work, "agents"))
+        expect("`--p` still means --paths (clean repo -> exit 0)",
+               rc == EXIT_CLEAR and "ambiguous" not in err, (rc, err))
+
+
+def test_clean_run_is_unchanged_by_orphan_reporting():
+    """No dirty foreign file: no orphan noise, exit 0, orphaned_only False."""
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        rc, out, _ = _orphan_run(td, work, _sessions_dir(td))
+        j = result_json(out) or {}
+        expect("clean: exit 0, no orphan label, orphaned_only False",
+               rc == EXIT_CLEAR and "ORPHANED" not in out
+               and j.get("orphaned_only") is False, (rc, out))
+
+
 def main():
+    test_orphaned_owner_reports_age_and_label_but_stays_contested()
+    test_recent_transcript_keeps_an_old_touch_live()
+    test_missing_transcript_is_never_orphaned()
+    test_transcript_older_than_a_recent_touch_uses_the_newer_time()
+    test_unknown_activity_is_never_orphaned()
+    test_mixed_orphan_and_live_owner_is_not_orphaned()
+    test_my_own_touch_plus_an_orphan_is_not_orphaned()
+    test_orphan_threshold_is_configurable()
+    test_future_timestamp_is_never_orphaned()
+    test_orphaned_and_live_files_are_flagged_per_file()
+    test_non_finite_or_non_positive_orphan_hours_is_rejected()
+    test_orphaned_owner_plus_competing_claim_is_not_orphaned_only()
+    test_path_like_session_ids_never_reach_the_filesystem()
+    test_old_abbreviations_still_resolve()
+    test_clean_run_is_unchanged_by_orphan_reporting()
     test_verbatim_prefix_spelling_of_in_repo_path_is_not_out_of_repo()
     test_inherited_git_env_cannot_redirect_the_gate()
     test_directory_scope_containing_nested_worktree()
