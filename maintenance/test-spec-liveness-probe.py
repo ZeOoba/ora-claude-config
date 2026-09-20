@@ -18,6 +18,7 @@ Run: python test-spec-liveness-probe.py   (exit 0 = all pass)
 import importlib.util
 import json
 import os
+import re
 import sys
 import tempfile
 
@@ -28,6 +29,25 @@ slp = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(slp)
 
 FAILURES = []
+
+# Synthetic fixture for the matching algorithm's own regression coverage,
+# independent of whatever production's PINNED_FLAGS currently holds (retired to
+# [] on 2026-09-03, OI-212 close-out -- see spec-liveness-probe.py's own comment
+# on PINNED_FLAGS). Same shape as the real OI-171 entry so these tests still
+# exercise entity/field/issue/rawValue matching exactly as production code does;
+# passed explicitly into every check_severity_drift/check_allowlist_rot call
+# below rather than read from the module global.
+FIXTURE_PINNED_FLAGS = [{
+    "key": "loans-row24-tombstone",
+    "entity": "loans",
+    "field": "name",
+    "issue_substr": "Loan Index row 24 is tombstoned",
+    "raw_value": "⚠ DUPLICATE OF ROW 22 — DO NOT USE",
+    "identity_patterns": [
+        re.compile(r"loans\s*[·|]\s*name", re.IGNORECASE),
+        re.compile(r"Loan Index row 24", re.IGNORECASE),
+    ],
+}]
 
 
 def check(label, cond, detail=""):
@@ -86,40 +106,42 @@ RULE_ONLY_SPEC = (
 
 print("test 1: REPLAY -- pre-fix spec asserting `info` against live `warn` is reported")
 f = slp.check_severity_drift([("ora-cc-snapshot-refresh/SKILL.md", PREFIX_SPEC)],
-                             LIVE_WARN)
+                             LIVE_WARN, pinned_flags=FIXTURE_PINNED_FLAGS)
 check("reports exactly one drift", len(f) == 1, "got %r" % (f,))
 check("names the source", any("ora-cc-snapshot-refresh" in x for x in f), "got %r" % (f,))
 check("states spec-vs-live", any("info" in x and "warn" in x for x in f), "got %r" % (f,))
 
 print("test 2: post-fix spec asserting `warn` against live `warn` is silent")
 f = slp.check_severity_drift([("ora-cc-snapshot-refresh/SKILL.md", POSTFIX_SPEC)],
-                             LIVE_WARN)
+                             LIVE_WARN, pinned_flags=FIXTURE_PINNED_FLAGS)
 check("no findings", f == [], "got %r" % (f,))
 
 print("test 3: rule-only text (threshold, not a flag claim) is NOT a false positive")
 f = slp.check_severity_drift([("ora-cc-snapshot-refresh/SKILL.md", RULE_ONLY_SPEC)],
-                             LIVE_WARN)
+                             LIVE_WARN, pinned_flags=FIXTURE_PINNED_FLAGS)
 check("no findings", f == [], "got %r" % (f,))
 
 print("test 4: reverse direction -- spec `warn`, live `info` -- is also reported")
 live_info = [dict(LIVE_WARN[0], severity="info")]
-f = slp.check_severity_drift([("x/SKILL.md", POSTFIX_SPEC)], live_info)
+f = slp.check_severity_drift([("x/SKILL.md", POSTFIX_SPEC)], live_info,
+                             pinned_flags=FIXTURE_PINNED_FLAGS)
 check("reports drift", len(f) == 1, "got %r" % (f,))
 
 print("test 5: EVERY conflicting source reported, not just the first")
 f = slp.check_severity_drift(
     [("a/SKILL.md", PREFIX_SPEC), ("b/SKILL.md", PREFIX_SPEC),
-     ("c/SKILL.md", POSTFIX_SPEC)], LIVE_WARN)
+     ("c/SKILL.md", POSTFIX_SPEC)], LIVE_WARN, pinned_flags=FIXTURE_PINNED_FLAGS)
 check("two findings", len(f) == 2, "got %r" % (f,))
 check("both sources named",
       any("a/SKILL.md" in x for x in f) and any("b/SKILL.md" in x for x in f),
       "got %r" % (f,))
 
 print("test 6: allowlist rot -- spec pins a rawValue no longer present live")
-f = slp.check_allowlist_rot([("ora-cc-snapshot-refresh/SKILL.md", POSTFIX_SPEC)], [])
+f = slp.check_allowlist_rot([("ora-cc-snapshot-refresh/SKILL.md", POSTFIX_SPEC)], [],
+                            pinned_flags=FIXTURE_PINNED_FLAGS)
 check("reports rot", len(f) == 1, "got %r" % (f,))
 f = slp.check_allowlist_rot([("ora-cc-snapshot-refresh/SKILL.md", POSTFIX_SPEC)],
-                            LIVE_WARN)
+                            LIVE_WARN, pinned_flags=FIXTURE_PINNED_FLAGS)
 check("silent when flag still live", f == [], "got %r" % (f,))
 
 print("test 7: fail-open -- unreadable/missing snapshot yields None, never raises")
@@ -151,7 +173,7 @@ check("exit code 0 when snapshot unreadable", rc == 0, "got %r" % (rc,))
 
 print("test 10: REGRESSION -- a threshold rule ADJACENT to a flag mention is not a claim")
 f = slp.check_severity_drift([("ora-cc-snapshot-refresh/SKILL.md", ADJACENT_RULE_SPEC)],
-                             LIVE_WARN)
+                             LIVE_WARN, pinned_flags=FIXTURE_PINNED_FLAGS)
 check("no false positive on the already-correct post-fix file", f == [], "got %r" % (f,))
 
 print("test 11: non-cp1252 characters in a finding surface do not crash the printer")
@@ -168,20 +190,23 @@ print("test 12: REVIEW FIX -- claim satisfied if ANY severity token on the line 
 # drift; the pre-fix spec, which names ONLY the stale value, still must.
 correct_hist = "- `loans · name` was `info` historically but now reads `warn`.\n"
 check("stale-value-first but correct => silent",
-      slp.check_severity_drift([("a", correct_hist)], LIVE_WARN) == [], "regression")
+      slp.check_severity_drift([("a", correct_hist)], LIVE_WARN,
+                               pinned_flags=FIXTURE_PINNED_FLAGS) == [], "regression")
 only_stale = "- `loans · name` severity info -- permanent, never an exception.\n"
 check("only the stale value => still reported",
-      len(slp.check_severity_drift([("a", only_stale)], LIVE_WARN)) == 1)
+      len(slp.check_severity_drift([("a", only_stale)], LIVE_WARN,
+                                   pinned_flags=FIXTURE_PINNED_FLAGS)) == 1)
 
 print("test 13: REVIEW FIX -- rawValue drift trips allowlist rot")
 # The SKILL.md allowlist keys on an EXACT rawValue. If the marker is reworded while
 # entity/field/issue stay put, the allowlist silently stops covering the flag.
 reworded = [dict(LIVE_WARN[0], rawValue="⚠ DUP OF ROW 22")]
 f = slp.check_allowlist_rot([("ora-cc-snapshot-refresh/SKILL.md", POSTFIX_SPEC)],
-                            reworded)
+                            reworded, pinned_flags=FIXTURE_PINNED_FLAGS)
 check("reworded rawValue => rot reported", len(f) == 1, "got %r" % (f,))
 check("exact rawValue => silent",
-      slp.check_allowlist_rot([("x/SKILL.md", POSTFIX_SPEC)], LIVE_WARN) == [])
+      slp.check_allowlist_rot([("x/SKILL.md", POSTFIX_SPEC)], LIVE_WARN,
+                              pinned_flags=FIXTURE_PINNED_FLAGS) == [])
 
 print("test 14: REVIEW FIX -- both fleets are scanned, and coverage is reported")
 check("SPEC_ROOTS covers CC and LAMS", len(slp.SPEC_ROOTS) == 2,

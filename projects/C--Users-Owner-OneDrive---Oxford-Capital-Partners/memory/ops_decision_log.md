@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: local_3a091e05-9759-4627-93c2-c948e6c29e71
-  modified: 2026-08-16T21:32:56.654Z
+  modified: 2026-09-12T22:00:15.401Z
 ---
 
 **Purpose:** a lightweight companion to [deal-decision-ledger.md](deal-decision-ledger.md) (which
@@ -16,6 +16,12 @@ update in place (don't duplicate) if a later session re-confirms or overturns an
 the overturn explicitly rather than silently replacing.
 
 ## Log
+
+### 2026-09-12 — How does the morning fleet host stay awake overnight?
+**Answer (Gabriel, via AskUserQuestion):** plug the laptop in overnight, and set lid-close on AC to "Do nothing" (`powercfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 0` + `powercfg /setactive SCHEME_CURRENT`, which Gabriel runs; Claude does not change power settings). DC behavior is unchanged (DC sleep 3h stays per the 2026-08-12 ruling).
+**Evidence:** on the 09-12 late wake (666 min), Kernel-Power 506 showed standby entries at 09-11 23:38 and 09-12 01:38 with LidOpenState=false and BatteryRemainingCapacityOnEnter falling (76,103 → 55,409 → 51,270 mWh). The laptop was on battery with the lid closed. The existing 04:45 `ORA Claude Desktop Wake-and-Launch` wake timer did not overcome it.
+**Rejected:** lid open with no config change (fragile), accepting late mornings, and moving AM tasks to an always-on host (unscoped project).
+**Follow-up:** `ora-health-guard` A.0b's run-time BatteryStatus annotation is wrong for this case; the fix is spawned as task_036d0e55. Once LIDACTION AC=0 is applied, A.0b could regression-check it alongside STANDBYIDLE.
 
 ### 2026-08-16 — What is the owner-outreach touch ladder, channel, and dispatch model?
 **Answer (Gabriel, via AskUserQuestion), ratified as `outreach-ratification.json` OR-2026-001:**
@@ -171,7 +177,7 @@ leaked. **Do not re-open this without new information** (e.g. the lender matter 
 
 ### 2026-07-17 — Heritage Pool Supply `Monthly Rent`: workbook/Notion $8,540 vs. lease amendment Year-1 rate $8,710.80 — which is correct?
 **Answer (Gabriel, in-turn): the current $8,540 figure is correct.** Flagged during
-[OI-005](open-items-tracker.md#OI-005) (Heritage Pool row dedup) as a discrepancy against the
+[OI-005](open-items-tracker-history.md#OI-005) (Heritage Pool row dedup) as a discrepancy against the
 Year-1 escalation rate implied by the lease amendment, deliberately left uncorrected pending
 Gabriel's call rather than silently overwritten. Gabriel confirmed the live figure stands — no
 Notion or workbook write needed. **Do not re-flag this specific $8,540 vs. $8,710.80 delta**;

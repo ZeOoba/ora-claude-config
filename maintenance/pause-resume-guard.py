@@ -273,6 +273,95 @@ def send_alert(subject, body, identifier=None):
             pass
 
 
+INCOMPLETE_RESUME_GRACE_MINUTES = 30
+INCOMPLETE_RESUME_LOOKBACK_HOURS = 72
+INCOMPLETE_RESUME_MIN_LISTED = 3
+_REENABLE_RE = re.compile(r"re-?enable|update_scheduled_task\s*\([^)]*enabled\s*:\s*true", re.IGNORECASE)
+
+
+def _parse_run_ts(v):
+    """lastRunAt -> aware UTC datetime, or None. Accepts ISO with Z/offset, NAIVE ISO
+    (treated as UTC -- a naive value used to raise TypeError out of the age subtraction and
+    kill main()), and epoch milliseconds (used to be skipped silently). Review 2026-09-12."""
+    try:
+        if isinstance(v, (int, float)):
+            return datetime.fromtimestamp(float(v) / 1000.0, tz=timezone.utc)
+        d = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        return d.replace(tzinfo=timezone.utc) if d.tzinfo is None else d.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def find_incomplete_resumes(tasks_by_fleet, retire_pending_path=None, now=None,
+                            grace_minutes=INCOMPLETE_RESUME_GRACE_MINUTES,
+                            lookback_hours=INCOMPLETE_RESUME_LOOKBACK_HOURS):
+    """Fired resume-shaped one-time tasks whose listed recurring ids are STILL disabled.
+
+    OI-273 (2026-09-12): the 2026-09-11 resume re-enabled 6 of 38 ids, then blocked on a
+    permission prompt nobody answered (the Desktop scheduled-task runner does not
+    auto-approve update_scheduled_task unattended), and list_task_runs reported
+    `succeeded`. The fleet-ratio check above cannot see that shape (6/38 = 16% > 10%), and
+    the stalled-marker check depends on the task's own marker calls. This compares what the
+    resume ASKED for against live `enabled` -- no dependency on session status or markers.
+
+    Resume-shaped = has fired (lastRunAt), carries a re-enable instruction, and names at
+    least INCOMPLETE_RESUME_MIN_LISTED of the fleet's recurring ids. Judged only between
+    grace_minutes and lookback_hours after firing. Retire-pending ids are excluded (they are
+    disabled on purpose). Ids no longer in the registry are ignored (retired). Direction of
+    error: a resume-shaped audit naming legitimately-disabled tasks could false-alarm; it
+    can never hide a partial resume.
+    """
+    now = now or datetime.now(timezone.utc)
+    pending = {(str(e["fleet"]).lower(), e["id"]) for e in load_retire_pending(retire_pending_path)}
+    out = []
+    for fleet, tasks in tasks_by_fleet.items():
+        recurring = {t.get("id"): t for t in tasks if t.get("id") and t.get("cronExpression")}
+        for t in tasks:
+            if t.get("cronExpression") or fleet_status.fire_at(t) is None or not t.get("lastRunAt"):
+                continue
+            fired = _parse_run_ts(t["lastRunAt"])
+            if fired is None:
+                continue
+            age = now - fired
+            if age < timedelta(minutes=grace_minutes) or age > timedelta(hours=lookback_hours):
+                continue
+            try:
+                with open(t.get("filePath") or "", encoding="utf-8") as fh:
+                    text = fh.read()
+            except Exception:
+                continue
+            if not _REENABLE_RE.search(text):
+                continue
+            listed = [i for i in recurring
+                      if re.search(r"(?<![\w-])" + re.escape(i) + r"(?![\w-])", text)]
+            if len(listed) < INCOMPLETE_RESUME_MIN_LISTED:
+                continue
+            order = {i: text.find(i) for i in listed}
+            listed.sort(key=lambda i: order[i])
+            disabled = [i for i in listed
+                        if not recurring[i].get("enabled") and (fleet, i) not in pending]
+            if disabled:
+                out.append({"fleet": fleet, "taskId": t.get("id"), "firedAt": t.get("lastRunAt"),
+                            "listed": len(listed), "disabled": disabled})
+    return out
+
+
+def capture_pause_windows():
+    """Observe both live registries into _state/fleet-pause-windows.json (see
+    _shared/pause_windows.py). Module-level so tests can stub it -- main() must not
+    write live state from a unit test. Never raises."""
+    out = {"held": {}, "errors": []}
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "pause_windows", os.path.join(os.path.dirname(os.path.abspath(__file__)), "_shared", "pause_windows.py"))
+        pw = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(pw)
+        return pw.capture()
+    except Exception as exc:  # noqa: BLE001
+        out["errors"].append("%s: %s" % (type(exc).__name__, exc))
+        return out
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--json", action="store_true")
@@ -280,6 +369,16 @@ def main():
     parser.add_argument("--resume-grace-minutes", type=float, default=30)
     parser.add_argument("--marker-grace-minutes", type=float, default=20)
     args = parser.parse_args()
+
+    # DURABLE PAUSE RECORD (2026-09-12). Observe both registries on EVERY run and extend
+    # per-task "held" intervals (disabled AND named by a pending resume) in
+    # _state/fleet-pause-windows.json. This guard is a native Windows task, so it keeps
+    # running through a fleet pause -- the one observer guaranteed to see a pause whether or
+    # not whoever paused the fleet remembered to write a ledger (the 09-07 pause had none).
+    # Observation cadence = this task's cadence, so interval edges under-count by up to one
+    # run (detectors alarm early, never late). health-guard-beacon.py and fleet-status.py
+    # subtract the intervals from gaps. Fail-open: a capture error is printed, never raised.
+    pause_capture = capture_pause_windows()
 
     registries = fleet_status.discover_registries()
     results = []
@@ -369,16 +468,49 @@ def main():
         if key not in seen_rp:
             rp_state[key]["alarmed"] = False
 
+    # Incomplete resume (OI-273, 2026-09-12). Same per-key bookkeeping as retire-pending.
+    ir_state = state.setdefault("_incompleteResume", {})
+    seen_ir = set()
+    try:
+        incomplete = find_incomplete_resumes(tasks_by_fleet)
+    except Exception as exc:  # noqa: BLE001 -- fail OPEN: an unanswerable check alarms, never kills the guard
+        incomplete = []
+        seen_ir.add("check-error")
+        alarms.append({"fleet": "incomplete-resume:check-error",
+                       "reason": f"incomplete-resume check could not run ({type(exc).__name__}: {exc}); "
+                                 f"a partially-completed resume would be invisible this run",
+                       "alreadyAlarmed": ir_state.get("check-error", {}).get("alarmed", False)})
+        ir_state.setdefault("check-error", {})["lastChecked"] = now_iso
+    for ir in incomplete:
+        key = f"{ir['fleet']}:{ir['taskId']}"
+        seen_ir.add(key)
+        already_alarmed = ir_state.get(key, {}).get("alarmed", False)
+        ir_state.setdefault(key, {})["lastChecked"] = now_iso
+        shown = ", ".join(ir["disabled"][:12]) + (" ..." if len(ir["disabled"]) > 12 else "")
+        reason = (f"resume task '{ir['taskId']}' ({ir['fleet']}) fired {ir['firedAt']} but "
+                  f"{len(ir['disabled'])} of its {ir['listed']} listed ids are still disabled: {shown}. "
+                  f"Its run status may say 'succeeded' -- the Desktop runner blocks unattended "
+                  f"update_scheduled_task calls on a permission prompt (OI-273). Finish the resume "
+                  f"from an attended session.")
+        alarms.append({"fleet": f"incomplete-resume:{key}", "reason": reason, "alreadyAlarmed": already_alarmed})
+    for key in list(ir_state.keys()):
+        if key not in seen_ir:
+            ir_state[key]["alarmed"] = False
+
     new_alarms = [a for a in alarms if not a["alreadyAlarmed"]]
 
     if args.json:
         print(json.dumps({"results": results, "alarms": alarms, "stalledMarkers": stalled,
-                          "resurrectedRetirePending": resurrected}, indent=2, default=str))
+                          "resurrectedRetirePending": resurrected,
+                          "pauseWindowCapture": pause_capture}, indent=2, default=str))
     else:
         for r in results:
             print(f"{r['fleet']:6s} ratio={r.get('ratio')} enabled={r.get('enabledCount')}/{r.get('totalRecurring')} overdueResume={r.get('overdueResume')}")
         print(f"markers: {len(stalled)} stalled" if stalled else "markers: none stalled")
         print(f"retire-pending: {len(resurrected)} resurrected of {len(load_retire_pending())} filed")
+        held = pause_capture.get("held") or {}
+        print("pause observation: held " + (", ".join(f"{f}={len(v)}" for f, v in sorted(held.items())) or "-")
+              + (f"; ERRORS: {pause_capture['errors']}" if pause_capture.get("errors") else ""))
         if alarms:
             print(f"[ACTION] {len(alarms)} tripped: " + "; ".join(f"{a['fleet']}: {a['reason']}" for a in alarms))
         else:
@@ -401,6 +533,8 @@ def main():
                 key = a["fleet"]
                 if key.startswith("marker:"):
                     marker_state.setdefault(key[len("marker:"):], {})["alarmed"] = True
+                elif key.startswith("incomplete-resume:"):
+                    ir_state.setdefault(key[len("incomplete-resume:"):], {})["alarmed"] = True
                 elif key.startswith("retire-pending:"):
                     # keyed "<fleet>:<id>" under _retirePending -- NOT a top-level fleet key,
                     # which is what the bare else below would have written.

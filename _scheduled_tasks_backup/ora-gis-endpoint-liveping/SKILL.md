@@ -5,7 +5,14 @@ description: Quarterly live-ping health check of GIS/CAMA endpoints in parcel-da
 
 You are running the ORA quarterly GIS/CAMA endpoint live-ping check. This replaces trusting the static "confirmed down"/"untested" claims in the parcel-data-recovery skill's references/endpoints.md — those claims go stale, and a stale "down" note previously blocked Hamilton County work for an unknown period until someone happened to re-test it.
 
-Read C:\Users\Owner\.claude\skills\parcel-data-recovery\references\endpoints.md (or the equivalent skill cache path) first to get the current list of endpoints marked DOWN, UNTESTED, or "not yet ruled dead" as of the last edit. As of 2026-07-12 that list includes at minimum:
+**Read BOTH registries — corrected 2026-09-06 (ORA Automation Audit R23-8). The path this task carried until now, `C:\Users\Owner\.claude\skills\parcel-data-recovery\references\endpoints.md`, DOES NOT EXIST** — `parcel-data-recovery` lives in the `ora-skills` repo, not `~/.claude/skills`, so every run since registration has been silently falling through to the unstated "equivalent skill cache path" clause. Use the repo path first, the skills-plugin cache only as fallback:
+
+1. **`C:\Users\Owner\ora-skills\parcel-data-recovery\references\endpoints.md`** — building-footprint / CAMA / bulk-export endpoints (FEMA USA Structures, county building outlines, Beacon/Schneider, auditor data exports). This is the file whose DOWN/UNTESTED claims this task exists to re-test.
+2. **`C:\Users\Owner\ora-skills\county-parcel-screen\references\county-endpoints.v1.json`** — parcel-layer endpoints, 22 counties, machine-readable.
+
+**These two are COMPLEMENTARY, not duplicates, and must both be checked.** Measured 2026-09-06: of 17 URLs in the `.md` and 21 in the `.json`, only **2 are shared**. An earlier audit read them as a dual-write pair and nearly merged them, which would have deleted 15 working endpoints. Never treat one as a superset of the other on the strength of overlapping county names — the counties overlap, the endpoints do not.
+
+Get the current list of endpoints marked DOWN, UNTESTED, or "not yet ruled dead" as of the last edit. As of 2026-07-12 that list includes at minimum:
 1. Hamilton County OH (Cincinnati) CAGIS — test all three known domain variants: cagis.hamilton-co.org, cagisportal.hamilton-co.org, cagisonline.hamilton-co.org (hit /arcgis/rest/services?f=json). Also confirm the OGRIP bypass (services2.arcgis.com/MlJ0G8iWUyC7jAmu/arcgis/rest/services/OhioStatewidePacels_full_view/FeatureServer/0) is still live.
 2. Wyandotte County KS CAMA — landsweb.wycokck.org and maps.wycokck.org (was down 2026-06-11, recheck before any Wyandotte reprice).
 3. Polk County IA — gis4.polkcountyiowa.gov (untested from research sandbox as of 2026-07-12; confirm live or dead off-sandbox).

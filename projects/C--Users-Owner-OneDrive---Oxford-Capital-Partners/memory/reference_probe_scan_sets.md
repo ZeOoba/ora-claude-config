@@ -21,6 +21,7 @@ most scan sets are invisible from the output line. See
 | `task-folder-registration-probe.py` | both fleet roots via `_sd.skill_folder_root` | Correct |
 | `registry-membership-probe.py` / `fleet-status.py` / `cc-verifier-probe.py` | registry JSON via `_shared/store_discovery.py` | Correct — single source is `_shared/scheduler-stores.json` |
 | `connector-drift-probe.py` / `open_sessions_probe.py` | connector config / session stores | Correct — scoped |
+| `mcp-liveness-probe.py` (added 2026-09-03) | `~/.claude.json` `mcpServers` only — stdio + Streamable-HTTP servers driven through a real `initialize`→`tools/list`; cloud-managed connectors (Notion/HubSpot/M365/Netlify/plugins) are unreachable from a subprocess and the probe SAYS so in its `scope:` line | Correct — scoped by construction; read its `scope:` line with the green line |
 | `model-currency-probe.py` | `tasks_dir` is a **required CLI arg, no default** | Caller-determined; not registered to any live task (only `plans/` + tests) — dormant |
 
 ## governor-drift-probe gap — CLOSED 2026-07-24 (Gabriel-approved)

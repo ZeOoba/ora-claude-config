@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: feedback
   originSessionId: ebb67ffe-c6aa-4b85-aeff-a2edf57cf1eb
-  modified: 2026-08-04T04:06:31.713Z
+  modified: 2026-09-07T16:29:08.577Z
 ---
 
 A read is evidence about a moment, not a fact. With several sessions live on
@@ -49,6 +49,25 @@ feared for — the exact failure the ID-collision checker exists to catch.
 4. **When a search comes back empty on a shared file, treat empty as
    provisional.** Re-run it right before acting, and prefer a claim +
    re-check over a write built on the first result.
+
+**The inverse failure — a re-enumerated BATCH sweeps in new arrivals
+(2026-09-07).** Rule 1 says re-read immediately before the write. That is right
+for a *condition*, and wrong for a *file set*. Archiving 26 loose scratch files
+from `ora-skills/_staging/`, the inventory was taken at 11:52 and the move
+re-globbed `find _staging -maxdepth 1 -type f` at 12:02 — by which time another
+live session had written two new files (12:00, 12:01). The fresh glob dutifully
+included them and both were archived out from under a running session; caught
+only because the moved count (28) did not match the reviewed count (26), and
+restored immediately.
+
+So: **for a batch operation, act on the reviewed inventory — an explicit list —
+not on a glob re-run at write time.** Re-enumerating is the correct instinct for
+"is this still true?" and the wrong one for "which files did I decide to move?"
+The cheap safeguard is the one that worked: **assert the acted-on count against
+the reviewed count**, and treat any mismatch as a stop, not a rounding error.
+Corollary: an explicit skip-list (the live `PENDING_REIMPORT.md` ledger and
+`reimport-baselines/` were correctly protected) only guards what you already knew
+about — it cannot protect a file that did not exist when you wrote the list.
 
 **Not a counsel of paralysis.** This applies to writes into *shared,
 concurrently-edited* surfaces — `open-items-tracker.md`, `event_log.md`,
