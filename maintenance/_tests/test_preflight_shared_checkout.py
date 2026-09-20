@@ -31,8 +31,10 @@ Run: python maintenance/_tests/test_preflight_shared_checkout.py
 Pure stdlib. ASCII-only output (Windows cp1252 console). Temp repos and temp
 claim dirs only -- never touches a real checkout or the live claims directory.
 """
+import atexit
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -69,22 +71,58 @@ def _git(repo, *args):
                           capture_output=True, text=True)
 
 
+def _force_rm(path):
+    """rmtree that also removes git's read-only object files. shutil.rmtree(..., True) cannot
+    unlink them on Windows and, with errors ignored, silently leaves the whole tree in %TEMP%
+    (TemporaryDirectory has a read-only handler; a bare rmtree does not)."""
+    for dirpath, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                os.chmod(os.path.join(dirpath, name), 0o700)
+            except OSError:
+                pass
+    shutil.rmtree(path, True)
+
+
+_SEED_REPO = None
+
+
+def _seed_repo():
+    """Build the one-commit seed repo ONCE per process (6 git spawns) and hand back its path.
+
+    _make_repo() runs ~85 times per file. Rebuilding the repo with init + 3 config + add +
+    commit each time was ~500 of this file's ~965 subprocess spawns, and on Windows under
+    load (the pre-push gate runs ~8 test files in parallel while other sessions do the same)
+    the spawn cost is what pushes this file past the gate's per-test budget."""
+    global _SEED_REPO
+    if _SEED_REPO is None:
+        root = tempfile.mkdtemp(prefix="pfs-seed-")
+        atexit.register(_force_rm, root)
+        work = os.path.join(root, "repo")
+        os.makedirs(os.path.join(work, "agents"))
+        os.makedirs(os.path.join(work, "agents-archive"))
+        os.makedirs(os.path.join(work, "maintenance"))
+        subprocess.run(["git", "init", "-b", "main", work],
+                       capture_output=True, text=True)
+        _git(work, "config", "user.email", "t@example.com")
+        _git(work, "config", "user.name", "Test")
+        _git(work, "config", "commit.gpgsign", "false")
+        for rel in ("agents/one.md", "agents-archive/old.md", "maintenance/p.py"):
+            with open(os.path.join(work, rel), "w", encoding="utf-8") as fh:
+                fh.write("seed\n")
+        _git(work, "add", "-A")
+        _git(work, "commit", "-m", "seed")
+        _SEED_REPO = work
+    return _SEED_REPO
+
+
 def _make_repo(td):
-    """A git repo with one commit and a couple of committed, clean files."""
+    """A git repo with one commit and a couple of committed, clean files.
+
+    A copy of the process-wide seed repo (copy2 keeps mtimes, so the copied index still
+    matches the files and `git status` does not have to re-hash anything)."""
     work = os.path.join(td, "repo")
-    os.makedirs(os.path.join(work, "agents"))
-    os.makedirs(os.path.join(work, "agents-archive"))
-    os.makedirs(os.path.join(work, "maintenance"))
-    subprocess.run(["git", "init", "-b", "main", work],
-                   capture_output=True, text=True)
-    _git(work, "config", "user.email", "t@example.com")
-    _git(work, "config", "user.name", "Test")
-    _git(work, "config", "commit.gpgsign", "false")
-    for rel in ("agents/one.md", "agents-archive/old.md", "maintenance/p.py"):
-        with open(os.path.join(work, rel), "w", encoding="utf-8") as fh:
-            fh.write("seed\n")
-    _git(work, "add", "-A")
-    _git(work, "commit", "-m", "seed")
+    shutil.copytree(_seed_repo(), work, copy_function=shutil.copy2)
     return work
 
 
