@@ -1722,6 +1722,93 @@ def test_degraded_honors_an_override_token():
         shutil.rmtree(td, ignore_errors=True)
 
 
+def _run_partial_with_token(tool_input):
+    """Run the partially-degraded gate with a valid single-use token present and
+    return (rc, stderr, token_survived). `tool_input` is the raw payload value so a
+    test can also pass a non-dict."""
+    sessions = tempfile.mkdtemp(prefix="eos-rg-degraded-strict-")
+    td, hook = _partially_degraded_gate_copy()
+    token = os.path.join(sessions, "sess1", "overrides", "allow-unreviewed-commit")
+    try:
+        os.makedirs(os.path.dirname(token))
+        with open(token, "w") as fh:
+            fh.write("scope: unreviewed-blast-radius-commit\n"
+                     "session: sess1\nreason: strict-regex test\n")
+        env = dict(os.environ)
+        for var in ("EOS_REVIEW_MODELS", "EOS_REVIEW_GATE_MODE", "PYTHONPATH"):
+            env.pop(var, None)
+        env["EOS_SESSIONS_DIR"] = sessions
+        env["ORA_OVERRIDE_SESSIONS_DIR"] = sessions
+        proc = subprocess.run(
+            [sys.executable, hook],
+            input=json.dumps({"session_id": "sess1", "cwd": td, "tool_name": "Bash",
+                              "tool_input": tool_input}),
+            capture_output=True, text=True, env=env)
+        return proc.returncode, proc.stderr, os.path.exists(token)
+    finally:
+        shutil.rmtree(sessions, ignore_errors=True)
+        shutil.rmtree(td, ignore_errors=True)
+
+
+def test_degraded_token_not_spent_on_commit_graph_or_commit_tree():
+    """REVIEW FINDING (PR #234, adversarial, verified): `commit\\b` has a word
+    boundary before `-`, so `git commit-graph write` and `git commit-tree ...`
+    matched the STRICT pattern and burned Gabriel's single-use token on a command
+    that is not a commit, leaving the real commit blocked with none left -- the
+    exact failure the strict pattern exists to prevent. They must still BLOCK
+    (loose match) but must not spend the token."""
+    for cmd in ("git -c x=y commit-graph write",
+                "git commit-tree HEAD^{tree} -m x",
+                # SECOND REVIEW (same day): value-less long options that make git
+                # print and exit before any subcommand -- a flag lookup, not a commit.
+                "git --help commit",
+                "git --version commit",
+                "git --exec-path commit",
+                "git --html-path commit"):
+        rc, err, survived = _run_partial_with_token({"command": cmd})
+        assert rc == 2, "%r must still block while degraded, got rc=%s" % (cmd, rc)
+        assert survived, "%r CONSUMED the single-use token: %r" % (cmd, err)
+
+
+def test_degraded_token_spendable_on_quoted_and_global_option_commits():
+    """REVIEW FINDING (PR #234, verified): the strict pattern rejected real commits
+    whose global options contain a quoted space or use a long option, so a valid
+    token could not be spent on them. The non-degraded is_git_commit() accepts all
+    of these."""
+    for cmd in ('git -C "C:/path with space" commit -m x',
+                'git -c user.name="a b" commit -m x',
+                "git --no-pager commit -m x",
+                "git --exec-path=/x commit -m x",   # sets the path AND runs the command
+                "git -C 'C:/p q' -c core.x=1 commit -m x"):
+        rc, err, survived = _run_partial_with_token({"command": cmd})
+        assert rc == 0, "%r is a real commit; a valid token must be honored, rc=%s err=%r" % (
+            cmd, rc, err)
+        assert not survived, "%r should have spent the single-use token" % cmd
+
+
+def test_degraded_detector_is_case_insensitive():
+    """REVIEW FINDING (PR #234, verified): Git Bash on Windows resolves `GIT`, so an
+    upper-case `GIT commit` created a commit while the case-sensitive degraded
+    detector allowed it ungated."""
+    rc, err = _run_degraded('GIT commit -m "x"')   # empty-lib fixture: no token
+    assert rc == 2, "upper-case GIT commit must block while degraded, got rc=%s err=%r" % (rc, err)
+    # ...and with a token present the strict pattern must recognise it as a commit
+    # too, so the token is honored (spent) rather than the commit being unreachable.
+    rc2, err2, survived = _run_partial_with_token({"command": 'GIT commit -m "x"'})
+    assert rc2 == 0 and not survived, (
+        "upper-case GIT commit must be spendable with a valid token, rc=%s err=%r" % (rc2, err2))
+
+
+def test_degraded_non_dict_tool_input_still_announces():
+    """REVIEW FINDING (PR #234, verified): a non-dict tool_input raised inside
+    _degraded, was swallowed by main's catch-all and produced rc=0 with EMPTY
+    stderr -- the 'always announce' promise was not kept."""
+    rc, err, _ = _run_partial_with_token(["git commit -m x"])
+    assert rc == 0, "a malformed payload is not a commit; expected allow, got rc=%s" % rc
+    assert "eos-review-gate" in err and "could not be imported" in err, (
+        "a degraded gate must announce even on a malformed payload: %r" % err)
+
+
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
 
 
