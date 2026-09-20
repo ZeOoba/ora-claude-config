@@ -137,9 +137,12 @@ import hashlib
 import importlib.util
 import json
 import os
+import shutil
+import stat
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timedelta
 
 HOOK_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -253,6 +256,79 @@ def display_name(path):
     return rel.replace(os.sep, "/")
 
 
+# Every test file runs with its OWN private TEMP/TMP/TMPDIR, deleted when it exits.
+# Measured 2026-09-19 (all 124 discovered files run against an empty private TEMP): 64
+# leave entries behind -- ~1,344 per full-suite run -- and the shared %TEMP% had grown to
+# ~1.7M top-level entries of exactly those fixtures. Fixing 64 tests one by one rots; the
+# spawn point covers every test file, present and future. Everything lives under ONE
+# fixed parent so neither cleanup nor the stale sweep ever scans the flat %TEMP%.
+SCRATCH_PARENT_NAME = "ora-gate-tmp"
+SCRATCH_STALE_SECONDS = 24 * 3600  # a single test is capped at 480s; a day-old dir is an orphan
+# Test seam only: when set, scratch dirs live here instead of <TEMP>/ora-gate-tmp.
+SCRATCH_PARENT_OVERRIDE = None
+
+
+def _scratch_parent():
+    return SCRATCH_PARENT_OVERRIDE or os.path.join(tempfile.gettempdir(), SCRATCH_PARENT_NAME)
+
+
+def make_test_scratch():
+    parent = _scratch_parent()
+    os.makedirs(parent, exist_ok=True)
+    return tempfile.mkdtemp(prefix="run-", dir=parent)
+
+
+def _force_rmtree(path):
+    """Best-effort recursive delete that copes with read-only files (git object files are
+    read-only on Windows) and never raises."""
+    def _fix(func, p, *_):
+        try:
+            os.chmod(p, stat.S_IWRITE)
+            func(p)
+        except OSError:
+            pass
+    # shutil.rmtree refuses a top-level junction/symlink; unlink the LINK itself (never
+    # follow it) so a test that swaps its scratch dir for a junction cannot orphan it.
+    try:
+        st = os.lstat(path)
+        if stat.S_ISLNK(st.st_mode) or (getattr(st, "st_file_attributes", 0) & 0x400):
+            os.rmdir(path) if os.path.isdir(path) else os.unlink(path)
+            return
+    except OSError:
+        return
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=_fix)
+    else:
+        shutil.rmtree(path, onerror=_fix)
+
+
+def remove_test_scratch(path):
+    """Delete one scratch dir. A killed (timed-out) child's own children can hold handles
+    for a moment, so retry once; anything still left is swept by age next run."""
+    for attempt in range(2):
+        _force_rmtree(path)
+        if not os.path.exists(path):
+            return
+        time.sleep(0.5)
+
+
+def sweep_stale_scratch(max_age_seconds=None):
+    """Remove scratch dirs orphaned by a gate run that was itself killed. Age-gated, and
+    scans only the (tiny) scratch parent. Never raises: this is housekeeping, not a gate."""
+    max_age = SCRATCH_STALE_SECONDS if max_age_seconds is None else max_age_seconds
+    try:
+        cutoff = time.time() - max_age
+        with os.scandir(_scratch_parent()) as it:
+            for e in list(it):
+                try:
+                    if e.is_dir(follow_symlinks=False) and e.stat().st_mtime < cutoff:
+                        _force_rmtree(e.path)
+                except OSError:
+                    continue
+    except OSError:
+        pass
+
+
 def run_test_file(path, timeout=None):
     """Run one test file exactly as a human would (`python <file>`). Returns (rc,
     combined_output, timed_out). A timeout is reported as rc 124 (shell convention)
@@ -262,6 +338,12 @@ def run_test_file(path, timeout=None):
     module docstring for how a first genuine timeout is retried before it can block."""
     timeout = timeout if timeout is not None else PER_TEST_TIMEOUT_SECONDS
     env = {k: v for k, v in os.environ.items() if k not in GIT_ENV_LEAK_VARS}
+    try:
+        scratch = make_test_scratch()
+    except Exception:  # fail OPEN: housekeeping must never be what blocks a push
+        scratch = None
+    if scratch:
+        env["TEMP"] = env["TMP"] = env["TMPDIR"] = scratch
     try:
         # encoding="utf-8" (found 2026-08-22): text=True with no explicit encoding decodes
         # the child's stdout/stderr using locale.getpreferredencoding() (cp1252 on Windows).
@@ -281,6 +363,9 @@ def run_test_file(path, timeout=None):
         return 124, partial + "\nTIMEOUT after %ss\n" % timeout, True
     except Exception as e:  # pragma: no cover - defensive
         return 1, "COULD NOT LAUNCH: %s\n" % e, False
+    finally:
+        if scratch:
+            remove_test_scratch(scratch)
 
 
 def classify(rc, output):
@@ -405,6 +490,7 @@ def run_suite(root=None):
     run_test_file), so there is no correctness reason to serialize them. Output order
     is restored to the original discovery order after collection, regardless of which
     worker finishes first, so reports stay deterministic/diffable run to run."""
+    sweep_stale_scratch()
     paths = discover_test_files(root)
     if not paths:
         return []
