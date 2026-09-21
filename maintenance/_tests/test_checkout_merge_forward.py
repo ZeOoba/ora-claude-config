@@ -988,6 +988,26 @@ for label, fail_fallback, want in (("both fail", True, "ERROR"),
         check("incoming %s: status %s" % (label, want), r["status"] == want, repr(r))
         check("incoming %s: git merge never invoked" % label, merges == [], repr(merges))
 
+with tempfile.TemporaryDirectory() as td:
+    local, origin, snap = _non_ff_with_dirty(td)
+    merges = []
+    real = cmf._git
+
+    def broken_ls(args, repo):
+        if args[:1] == ["merge"]:
+            merges.append(args)
+        if args[:1] == ["ls-files"]:
+            return 128, "", "fatal: simulated"
+        return real(args, repo)
+    cmf._git = broken_ls
+    try:
+        r = cmf.sync(local, "main")
+    finally:
+        cmf._git = real
+    check("ls-files fails: status ERROR naming it",
+          r["status"] == "ERROR" and "ls-files" in (r["detail"] or ""), repr(r))
+    check("ls-files fails: git merge never invoked", merges == [], repr(merges))
+
 check("overlap: exact, dir-prefix both ways, case-insensitive, disjoint",
       cmf.overlapping_paths(["a/b.txt", "x/wip.txt", "D/e.md", "keep.txt", "sub/new.txt"],
                             ["a/b.txt", "x", "d/E.md", "sub", "other.txt"])
