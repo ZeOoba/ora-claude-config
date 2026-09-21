@@ -44,7 +44,9 @@ param(
 
 $log   = Join-Path $env:USERPROFILE '.claude\maintenance\stuck-session-watchdog.log'
 
-# --- Log rotation (added 2026-09-06, Automation Audit R21-10 / R22-8) ------------
+# --- Log rotation (added 2026-09-06, Automation Audit R21-10 / R22-8; restored 2026-09-11,
+#     Automation Audit R25-3 -- this code merged to main in PR #162 but was absent from the
+#     live checkout, a symptom of the same checkout-drift finding as R24-5/R25-4) ------------
 # This log had no cap of ANY kind: `grep -icE "rotat|MaxLog|trim|Clear-Content|prune|archive"`
 # returned 0 against this file, and it was growing unbounded (~8.0KB/day for the
 # watchdog, ~5.5KB/day for the heartbeat push). Rotation ARCHIVES, never deletes,

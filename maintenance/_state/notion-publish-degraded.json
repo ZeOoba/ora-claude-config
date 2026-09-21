@@ -648,9 +648,10 @@
     "ora-pm-monthly-billing (cc) — no Notion writes",
     "ora-task-integrity-guard (cc) — no Notion writes",
     "ora-tenant-hubspot-reconciliation (cc) — 'never writes to HubSpot or Notion'",
+    "ora-hubspot-renewal-closeout-tasks (cc) — no Notion writes (creates HubSpot tasks + local state/log files only; emails ggoldberg only when it acts or errors, so a NOOP weekday leaves no Notion page and no send-log line by design)",
     "ora-consolidate-memory-monthly (lams) — no Notion step"
   ],
-  "roster_coverage": "Cross-checked 2026-09-13 against maintenance/_state/fleet-roster.md (generated 2026-09-13T08:50:38): CC 38 live recurring = 24 producers + 14 excluded; LAMS 27 live recurring = 24 producers + 3 excluded. The pending one-time ora-counsel-review-standard-positions-2027 (@2027-08-02) is not classified.",
-  "updated_at": "2026-09-13T13:30:00-04:00",
-  "updated_by": "Claude Code session (Opus 5) — Fable re-review follow-up (min_bytes floors, hygiene must_not_match)"
+  "roster_coverage": "Cross-checked 2026-09-13 against maintenance/_state/fleet-roster.md (generated 2026-09-13T08:50:38): CC 38 live recurring = 24 producers + 14 excluded; LAMS 27 live recurring = 24 producers + 3 excluded. The pending one-time ora-counsel-review-standard-positions-2027 (@2027-08-02) is not classified. 2026-09-19 delta: ora-hubspot-renewal-closeout-tasks (cc, registered 2026-09-19, weekdays 10:50 ET) added to excluded_update_only, so CC excluded 14 -> 15; the 09-13 CC/LAMS live totals above are otherwise unchanged and not re-derived here.",
+  "updated_at": "2026-09-19T16:56:00-04:00",
+  "updated_by": "Claude Code session (Sonnet 5) — added ora-hubspot-renewal-closeout-tasks to excluded_update_only"
 }

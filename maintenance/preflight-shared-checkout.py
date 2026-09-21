@@ -60,6 +60,22 @@ the caller's own `git diff HEAD -- <path>` can clear it: `--accept-stale PATH`.
 The real fix (per-touch blob hashes in commit-provenance-recorder.py, so a
 stale verdict can be proven) touches hooks/** and is tracked separately.
 
+`--accept-stale` ONLY clears the partial-commit shape above (you ARE a live
+owner, some OTHER owners are merely stale) -- it cannot and will not clear a
+file with ZERO live owners at all, only stale ones (confirmed live, 2026-09-13:
+`--accept-stale <path>` on exactly that path still reported CONTESTED, because
+`only_mine` requires a non-empty live set before the stale check ever runs --
+see the code). A file written exclusively through a script that bypasses the
+Edit/Write tool hook (below) is structurally ALWAYS in that zero-live-owner
+shape, so it reads CONTESTED-STALE-ONLY forever with no escape through this
+flag. KNOWN INSTANCE: `event_log.md`, written only via
+`maintenance/append-event-log.py` -- it has its own bespoke, already-safe
+commit procedure that never calls this tool at all; see
+`memory/reference_event_log_uncommitted_backlog.md` and `memory/rules.md`
+sec 14. Don't spend an investigation re-discovering this: if a scope path is
+append-only and lock-free by convention, verify its diff by hand and use that
+file's own documented technique instead of trying to force a CLEAR here.
+
 ACCEPTED LIMITATION: "mine" means mine among RECORDED touches. Provenance is
 written by the Edit/Write tool hook, so another session's edit made through
 Bash (sed, a redirect, a script) never appears, and a file I once touched can
