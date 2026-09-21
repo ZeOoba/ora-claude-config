@@ -158,6 +158,116 @@ $procs = @(
 $result = Get-KillCandidates -Procs $procs -Now $Now -ThresholdMinutes 90
 Check "live-shaped batch: ONLY the stuck task session (34012) is flagged" (($result.ProcessId -join ',') -eq '34012')
 
+# ---------------------------------------------------------------------------
+# 16-34 added 2026-09-21. THE SECOND BUG: interactive Code-tab sessions.
+# Desktop-launched sessions (interactive AND scheduled) are ALL claude.exe children of the
+# desktop app with identical flags (stream-json, --permission-prompt-tool stdio, an
+# --allowedTools list); a FRESH interactive session carries no --resume=, so the flag
+# exclusions passed it straight to the age test. Live evidence: a -WhatIf run flagged a
+# 112-min-old interactive session (PID 12928) under the old rules, and the 14:05 run on
+# 2026-09-21 killed a 114.5-min-old session (its kind cannot be verified after the fact).
+# Whether this watchdog also kills the Mirror Deploy task is NOT established.
+# Command-line flags CANNOT separate the two, so the
+# discriminator is the session's own identity: ~/.claude/sessions/<pid>.json ->
+# hostSessionId -> Desktop session record, whose `scheduledTaskId` exists ONLY on scheduled
+# sessions. Get-KillCandidates takes that as -SessionInfo (pid -> {Resolved, ScheduledTaskId,
+# ScheduledRunContinued}); anything not positively identified as a scheduled session is
+# spared (fail SAFE).
+# ---------------------------------------------------------------------------
+function Info($resolved, $taskId, $continued = $false) {
+    [PSCustomObject]@{ Resolved = $resolved; ScheduledTaskId = $taskId; ScheduledRunContinued = $continued }
+}
+$fresh = ('C:\Users\Owner\AppData\Roaming\Claude\claude-code\2.1.275\claude.exe ' + (LongCmd '--permission-prompt-tool stdio --input-format stream-json'))
+
+# 16. THE REGRESSION: a fresh interactive session (no --resume=), 114 min old -> NEVER a candidate.
+$procs = @([PSCustomObject]@{ ProcessId = 12928; CommandLine = $fresh; CreationDate = $Now.AddMinutes(-114) })
+$result = Get-KillCandidates -Procs $procs -Now $Now -ThresholdMinutes 90 -SessionInfo @{ 12928 = (Info $true $null) }
+Check "fresh INTERACTIVE session, 114 min -> never a candidate" ($result.Count -eq 0)
+
+# 17. THE FIX MUST NOT NEUTER THE WATCHDOG: a resolved scheduled-task session past the threshold is still flagged.
+$procs = @([PSCustomObject]@{ ProcessId = 900; CommandLine = $fresh; CreationDate = $Now.AddMinutes(-120) })
+$result = Get-KillCandidates -Procs $procs -Now $Now -ThresholdMinutes 90 -SessionInfo @{ 900 = (Info $true 'ora-am-brief') }
+Check "resolved SCHEDULED session past threshold -> still a candidate" ($result.Count -eq 1 -and $result[0].ProcessId -eq 900)
+
+# 18. A scheduled session the user took over (scheduledRunContinued) is interactive now -> spared.
+$procs = @([PSCustomObject]@{ ProcessId = 901; CommandLine = $fresh; CreationDate = $Now.AddMinutes(-300) })
+$result = Get-KillCandidates -Procs $procs -Now $Now -ThresholdMinutes 90 -SessionInfo @{ 901 = (Info $true 'ora-am-brief' $true) }
+Check "scheduled session CONTINUED by the user -> never a candidate" ($result.Count -eq 0)
+
+# 19. Unresolvable (no registry / PID reuse / no host record) -> spared, and it must be REPORTED, not silent.
+$procs = @([PSCustomObject]@{ ProcessId = 902; CommandLine = $fresh; CreationDate = $Now.AddMinutes(-300) })
+$skipped = New-Object System.Collections.ArrayList
+$result = Get-KillCandidates -Procs $procs -Now $Now -ThresholdMinutes 90 -SessionInfo @{ 902 = (Info $false $null) } -Skipped $skipped
+Check "UNRESOLVED session -> never a candidate (fail safe)" ($result.Count -eq 0)
+Check "unresolved session is reported in -Skipped as 'unresolved'" ($skipped.Count -eq 1 -and $skipped[0].ProcessId -eq 902 -and $skipped[0].Reason -eq 'unresolved')
+
+# 20. A PID with no entry in the map at all is treated as unresolved, not as "no info -> legacy kill".
+$procs = @([PSCustomObject]@{ ProcessId = 903; CommandLine = $fresh; CreationDate = $Now.AddMinutes(-300) })
+$result = Get-KillCandidates -Procs $procs -Now $Now -ThresholdMinutes 90 -SessionInfo @{}
+Check "PID absent from -SessionInfo map -> never a candidate" ($result.Count -eq 0)
+
+# 21. Skipped-interactive is reported with reason 'interactive'; young sessions are not reported at all.
+$procs = @(
+    [PSCustomObject]@{ ProcessId = 12928; CommandLine = $fresh; CreationDate = $Now.AddMinutes(-114) }
+    [PSCustomObject]@{ ProcessId = 27184; CommandLine = $fresh; CreationDate = $Now.AddMinutes(-1) }
+)
+$skipped = New-Object System.Collections.ArrayList
+$result = Get-KillCandidates -Procs $procs -Now $Now -ThresholdMinutes 90 -SessionInfo @{ 12928 = (Info $true $null); 27184 = (Info $true $null) } -Skipped $skipped
+Check "interactive skip reported as 'interactive' (old one only)" ($skipped.Count -eq 1 -and $skipped[0].ProcessId -eq 12928 -and $skipped[0].Reason -eq 'interactive')
+
+# 22. Live-shaped mixed batch WITH session info: exactly the stuck scheduled session dies.
+$procs = @(
+    [PSCustomObject]@{ ProcessId = 8324;  CommandLine = (ElectronChild 'renderer'); CreationDate = $Now.AddMinutes(-600) }   # app internals
+    [PSCustomObject]@{ ProcessId = 40632; CommandLine = ($fresh + ' --resume=de576307-980f-43fd-b5c4-4e7b76c361e2'); CreationDate = $Now.AddMinutes(-900) }  # resumed
+    [PSCustomObject]@{ ProcessId = 12928; CommandLine = $fresh; CreationDate = $Now.AddMinutes(-114) }   # fresh interactive
+    [PSCustomObject]@{ ProcessId = 903;   CommandLine = $fresh; CreationDate = $Now.AddMinutes(-200) }   # unresolvable
+    [PSCustomObject]@{ ProcessId = 900;   CommandLine = $fresh; CreationDate = $Now.AddMinutes(-120) }   # STUCK scheduled
+)
+$map = @{ 40632 = (Info $true 'x'); 12928 = (Info $true $null); 900 = (Info $true 'ora-am-brief') }
+$result = Get-KillCandidates -Procs $procs -Now $Now -ThresholdMinutes 90 -SessionInfo $map
+Check "mixed batch with session info: ONLY the stuck scheduled session (900)" (($result.ProcessId -join ',') -eq '900')
+
+# --- Get-SessionInfoMap: the I/O half, tested against a temp-dir fixture, never a real process ---
+$tmp = Join-Path ([IO.Path]::GetTempPath()) ("wd-test-" + [guid]::NewGuid().ToString('N'))
+$sessDir = Join-Path $tmp 'sessions'
+$hostDir = Join-Path $tmp 'host\acct1\org1'
+New-Item -ItemType Directory -Path $sessDir, $hostDir -Force | Out-Null
+function WriteJson($path, $obj) { $obj | ConvertTo-Json -Compress | Set-Content -LiteralPath $path -Encoding utf8 }
+$created = $Now.AddMinutes(-100)
+$ps = $created.ToFileTimeUtc().ToString()
+# 1001 = scheduled, 1002 = interactive, 1003 = PID reuse (procStart wrong), 1004 = no host record,
+# 1005 = no registry file, 1006 = malformed registry JSON, 1007 = scheduled but continued by the user
+WriteJson (Join-Path $sessDir '1001.json') @{ pid = 1001; procStart = $ps; hostSessionId = 'local_aaa' }
+WriteJson (Join-Path $hostDir 'local_aaa.json') @{ sessionId = 'local_aaa'; scheduledTaskId = 'ora-am-brief' }
+WriteJson (Join-Path $sessDir '1002.json') @{ pid = 1002; procStart = $ps; hostSessionId = 'local_bbb' }
+WriteJson (Join-Path $hostDir 'local_bbb.json') @{ sessionId = 'local_bbb'; title = 'a chat' }
+WriteJson (Join-Path $sessDir '1003.json') @{ pid = 1003; procStart = $created.AddHours(-5).ToFileTimeUtc().ToString(); hostSessionId = 'local_bbb' }
+WriteJson (Join-Path $sessDir '1004.json') @{ pid = 1004; procStart = $ps; hostSessionId = 'local_missing' }
+'{ not json' | Set-Content -LiteralPath (Join-Path $sessDir '1006.json')
+WriteJson (Join-Path $sessDir '1007.json') @{ pid = 1007; procStart = $ps; hostSessionId = 'local_ccc' }
+WriteJson (Join-Path $hostDir 'local_ccc.json') @{ sessionId = 'local_ccc'; scheduledTaskId = 'ora-am-brief'; scheduledRunContinued = $true }
+# 1008/1009 pin the PID-reuse tolerance (5 s): 4 s off still resolves, 6 s off is a mismatch.
+# 1010 = registry present but no hostSessionId.
+WriteJson (Join-Path $sessDir '1008.json') @{ pid = 1008; procStart = $created.AddSeconds(4).ToFileTimeUtc().ToString(); hostSessionId = 'local_bbb' }
+WriteJson (Join-Path $sessDir '1009.json') @{ pid = 1009; procStart = $created.AddSeconds(6).ToFileTimeUtc().ToString(); hostSessionId = 'local_bbb' }
+WriteJson (Join-Path $sessDir '1010.json') @{ pid = 1010; procStart = $ps }
+$procs = 1001..1010 | ForEach-Object { [PSCustomObject]@{ ProcessId = $_; CommandLine = $fresh; CreationDate = $created } }
+$map = Get-SessionInfoMap -Procs $procs -SessionsDir $sessDir -HostSessionsRoot (Join-Path $tmp 'host')
+Check "map: scheduled session resolves with its task id" ($map[1001].Resolved -and $map[1001].ScheduledTaskId -eq 'ora-am-brief')
+Check "map: interactive session resolves with NO task id" ($map[1002].Resolved -and -not $map[1002].ScheduledTaskId)
+Check "map: procStart mismatch (PID reuse) -> unresolved" (-not $map[1003].Resolved)
+Check "map: missing host record -> unresolved" (-not $map[1004].Resolved)
+Check "map: missing registry file -> unresolved" (-not $map[1005].Resolved)
+Check "map: malformed registry JSON -> unresolved, no crash" (-not $map[1006].Resolved)
+Check "map: scheduled-but-continued carries ScheduledRunContinued" ($map[1007].Resolved -and $map[1007].ScheduledRunContinued)
+Check "map: procStart 4 s off (inside the 5 s tolerance) -> still resolves" ($map[1008].Resolved)
+Check "map: procStart 6 s off (outside the 5 s tolerance) -> unresolved" (-not $map[1009].Resolved)
+Check "map: registry without hostSessionId -> unresolved" (-not $map[1010].Resolved)
+# End-to-end: fixture map through the decision function -> only 1001 is killable.
+$result = Get-KillCandidates -Procs ($procs | ForEach-Object { $_.CreationDate = $Now.AddMinutes(-100); $_ }) -Now $Now -ThresholdMinutes 90 -SessionInfo $map
+Check "end-to-end fixture: ONLY the scheduled, un-continued, resolved session (1001) is a candidate" (($result.ProcessId -join ',') -eq '1001')
+Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
+
 Write-Output ""
 if ($script:failures.Count -gt 0) {
     Write-Output "$($script:failures.Count) FAILED: $($script:failures -join '; ')"
