@@ -1739,6 +1739,40 @@ def test_index_projects_system_narrative_excluded_unit():
     print("  PASS test_index_projects_system_narrative_excluded_unit")
 
 
+def test_open_items_tracker_narrative_excluded_unit():
+    """2026-09-21 false positive: memory/open-items-tracker.md line 37 (the OI-338 row, one 4,454-char
+    table row) failed test_event_log_excluded_e2e and blocked every push from this repo. The row
+    quotes ordinary PER-LOAN LTVs (66.8% / 7.7% / 37.7%) and, once, at offset ~2,400, the words
+    "Governor flag (no constant changed)". _is_gov_line() arms the WHOLE line on that single word, and
+    the bare-proximity pass (RE_LTV_NEAR, the weakest) then reads every "LTV near a percent" on the
+    line -- thousands of characters away -- as a governor declaration. Verified: neutralising that
+    one word gives zero findings; a synthetic with the LTV figure ~600 chars from "Governor" flags.
+
+    The open-items tracker is the same append-only NARRATIVE class as event_log.md and the decision
+    ledgers: one row per open item, RECORDING findings ("Governor flag (no constant changed)" is the
+    row reporting a flag, not declaring a governor). The living governor stays declared in
+    standards.md / rules.md / CLAUDE.md / skills / capital-config.ts, all still in scope. Exempt by
+    EXACT FILENAME (pattern tokens were REFUTE-rejected, see DATED_AUDIT_RE), both the live tracker
+    AND its -history rollover file: rows roll from one into the other, so exempting only the live file
+    would re-trip the moment the OI-338 row is archived. Accepted blind spot, unchanged in kind from
+    the ledger precedent: a governor change recorded ONLY in a tracker row goes unseen.
+    skip_names is main()-local, so this pins the exemption at SOURCE level."""
+    m = _load_probe_module()
+    with open(PROBE, "r", encoding="utf-8") as fh:
+        src = fh.read()
+    for name in ("open-items-tracker.md", "open-items-tracker-history.md"):
+        assert '"%s"' % name in src, (
+            "narrative exemption missing from skip_names: %s" % name)
+    # FILE-scoped, not logic-level: a row shaped like OI-338 (per-loan LTV in one sentence, the word
+    # "Governor" a long way away in another) must STILL trip scan_line() -- the exemption removes the
+    # FILE from scope, it does not gut detection or window the arming.
+    far = ("3540 E 5th is at about 66.8% LTV on its lender's appraisal. " + ("filler words " * 45)
+           + "**Governor flag (no constant changed):** the workbook value gives 54%.")
+    assert m.scan_line(far), (
+        "detection logic must be intact -- the tracker is excluded by FILE, not by gutting scan_line")
+    print("  PASS test_open_items_tracker_narrative_excluded_unit")
+
+
 def test_intervening_qualifier_dscr_floor_flags_unit():
     """GAP (2026-08-11): GOV_KEYWORDS held the CONTIGUOUS literal 'dscr floor', so any qualifier
     between the metric and its floor-word defeated the is_gov gate and the whole equality branch
@@ -2810,6 +2844,7 @@ def main():
     test_ledger_files_excluded_source_pin()
     test_concurrent_session_hardening_narrative_excluded_unit()
     test_index_projects_system_narrative_excluded_unit()
+    test_open_items_tracker_narrative_excluded_unit()
     test_review_hole3_paired_gap_drift_flags_unit()
     test_review_hole4_veto_window_and_refi_gate_flags_unit()
     test_review_hole5_dscr_extraction_regressions_flags_unit()
