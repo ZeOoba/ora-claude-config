@@ -1347,6 +1347,86 @@ def test_degraded_contract_allows_non_commit_but_announces():
         "a degraded guard must announce itself even when it allows: %r" % err)
 
 
+# Same time-bound finding as eos-review-gate.py (PR #234 review, measured
+# 2026-09-19): this guard's copy of the loose pattern is O(n^2) too. It only
+# words a warning and always allows, so nothing fails OPEN here -- but the
+# dispatcher runs guards in-process, in sequence, with no per-guard timeout, so a
+# 99KB `git -c git=git ...` command that spends ~40s in this regex starves every
+# guard after it in the chain (worktree-isolation, memory-orphan-link,
+# commit-hygiene). Same fix, same cap, same order of checks.
+_DEGRADED_TIME_BUDGET_S = 15.0
+
+
+def _quadratic_cmd(n, tail=" x"):
+    return "git" + " -c git=git" * n + tail
+
+
+def test_degraded_quadratic_input_is_bounded_and_still_worded_as_a_commit():
+    cmd = _quadratic_cmd(9000, " log; git commit -m x")   # ~99KB, IS a commit
+    t0 = time.monotonic()
+    rc, err = _run_degraded(cmd)
+    elapsed = time.monotonic() - t0
+    assert rc == 0, "this guard never blocks while degraded, got rc=%s" % rc
+    assert "mentions a git commit" in err, err[:300]
+    assert elapsed < _DEGRADED_TIME_BUDGET_S, (
+        "degraded detector took %.1fs on a 99KB command (budget %.0fs) -- the "
+        "quadratic scan is back" % (elapsed, _DEGRADED_TIME_BUDGET_S))
+
+
+def test_degraded_quadratic_input_without_commit_word_is_bounded():
+    t0 = time.monotonic()
+    rc, err = _run_degraded(_quadratic_cmd(9000))
+    elapsed = time.monotonic() - t0
+    assert rc == 0, rc
+    assert "looks commit-shaped" in err, err[:300]
+    assert elapsed < _DEGRADED_TIME_BUDGET_S, (
+        "degraded detector took %.1fs on a 99KB non-commit (budget %.0fs)" % (
+            elapsed, _DEGRADED_TIME_BUDGET_S))
+
+
+def test_degraded_oversize_commit_is_flagged_not_scanned():
+    rc, err = _run_degraded('git commit -m "' + "x" * 40_000 + '"')
+    assert rc == 0, rc
+    assert "mentions a git commit" in err, err[:300]
+
+
+def test_degraded_oversize_without_git_is_not_worded_as_a_commit():
+    """Same prefilter as the gate: no `git` -> the pattern cannot match, so size
+    alone must not make the warning claim the command mentions a git commit."""
+    rc, err = _run_degraded("echo " + "x" * 40_000 + " # db.commit()")
+    assert rc == 0, rc
+    assert "looks commit-shaped" in err, err[:300]
+
+
+def test_degraded_wording_is_case_insensitive():
+    """Git Bash on Windows resolves `GIT`; the review gate's copy already ignores
+    case, and the two must not drift (the gate BLOCKS `GIT commit` while this
+    guard's warning used to say the command was not commit-shaped)."""
+    rc, err = _run_degraded('GIT commit -m "x"')
+    assert rc == 0, rc
+    assert "mentions a git commit" in err, err[:300]
+
+
+def test_degraded_detector_stays_in_step_with_the_review_gate():
+    """Deliberately duplicated (hooks/lib may be the thing that is broken), so the
+    only thing keeping the two copies honest is this comparison."""
+    def load(name, fname):
+        spec = importlib.util.spec_from_file_location(name, os.path.join(HERE, fname))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    gate = load("cpg_parity_gate", "eos-review-gate.py")
+    guard = load("cpg_parity_guard", "commit-provenance-guard.py")
+    assert guard._DEGRADED_COMMIT_RE.pattern == gate._DEGRADED_COMMIT_RE.pattern
+    assert guard._DEGRADED_COMMIT_RE.flags == gate._DEGRADED_COMMIT_RE.flags
+    assert guard._DEGRADED_MAX_CMD_CHARS == gate._DEGRADED_MAX_CMD_CHARS
+    for cmd in ("git commit -m x", "GIT commit", "git log --grep commit", "ls -la",
+                "git add hooks/commit-provenance-guard.py", "echo commit", "",
+                "git" + " -c git=git" * 4000 + " log; git commit -m x"):
+        assert guard._looks_like_commit(cmd) == (gate._degraded_commit_kind(cmd) is not None), cmd
+    assert guard._looks_like_commit(None) is False
+
+
 if __name__ == "__main__":
     test_non_git_command_silent()
     test_git_commit_with_no_foreign_files_allows()
@@ -1410,4 +1490,10 @@ if __name__ == "__main__":
     test_degraded_contract_allows_a_commit_but_says_it_is_ungated()
     test_degraded_wording_does_not_assert_a_git_add_is_a_commit()
     test_degraded_contract_allows_non_commit_but_announces()
+    test_degraded_quadratic_input_is_bounded_and_still_worded_as_a_commit()
+    test_degraded_quadratic_input_without_commit_word_is_bounded()
+    test_degraded_oversize_commit_is_flagged_not_scanned()
+    test_degraded_oversize_without_git_is_not_worded_as_a_commit()
+    test_degraded_wording_is_case_insensitive()
+    test_degraded_detector_stays_in_step_with_the_review_gate()
     print("ALL COMMIT-PROVENANCE-GUARD TESTS PASS")

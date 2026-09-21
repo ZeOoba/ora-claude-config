@@ -253,6 +253,7 @@ Wired so far:
 | `ora-open-sessions-board` | CC/MCP | `main` | **45** | Longer TTL: STEP 5 renders an interactive board and STEP 6 waits on Gabriel, so the claim is closed at the end of STEP 5, before that wait |
 | `ora-monday-sync` | **LAMS** | `main` | 30 | Both layers. See the caveat below |
 | `ora-health-guard` | CC/MCP | `blockA`/`blockB`/`blockC` | **45** | Wired 2026-08-11. Per-block because the three blocks fail independently and Block C is the fleet's health surface — a Block B crash must not cost the probe suite. TTL 45 because B waits on live connector probes and C runs seven of them |
+| `ora-ground-truth-auditor` | CC/MCP | `main` | **240** | Wired 2026-09-12 (it shipped unguarded in PR #190 and turned `test_scheduled_task_run_guard.py` red). Both layers. Emails a digest every run; TTL 240 because STEP 3 fans out one model-laddered verifier per side-effecting run plus STEP 4's refuters -- the 2026-09-12 run took 60+ min (13 verifiers, 6 refuters) and catch-up bursts widen the window; a long TTL only slows crash recovery for a nightly task. The sentinel id is `guard_run_id`, distinct from the audited runs' `run_id`. A send that times out (exit 4) is re-probed before its retry. The could-not-start digest has its own dated stem and closes with `fail`, so a same-day fire retries without the probe suppressing the real audit |
 
 **`ora-monday-sync` lives on the LAMS/Cowork fleet**, whose SKILL.md files sit under
 `OneDrive.../Documents/Claude/Scheduled/` and are **NOT in this git repo** — so that

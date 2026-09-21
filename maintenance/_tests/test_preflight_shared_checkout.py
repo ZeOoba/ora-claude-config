@@ -31,8 +31,10 @@ Run: python maintenance/_tests/test_preflight_shared_checkout.py
 Pure stdlib. ASCII-only output (Windows cp1252 console). Temp repos and temp
 claim dirs only -- never touches a real checkout or the live claims directory.
 """
+import atexit
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -69,22 +71,58 @@ def _git(repo, *args):
                           capture_output=True, text=True)
 
 
+def _force_rm(path):
+    """rmtree that also removes git's read-only object files. shutil.rmtree(..., True) cannot
+    unlink them on Windows and, with errors ignored, silently leaves the whole tree in %TEMP%
+    (TemporaryDirectory has a read-only handler; a bare rmtree does not)."""
+    for dirpath, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                os.chmod(os.path.join(dirpath, name), 0o700)
+            except OSError:
+                pass
+    shutil.rmtree(path, True)
+
+
+_SEED_REPO = None
+
+
+def _seed_repo():
+    """Build the one-commit seed repo ONCE per process (6 git spawns) and hand back its path.
+
+    _make_repo() runs ~85 times per file. Rebuilding the repo with init + 3 config + add +
+    commit each time was ~500 of this file's ~965 subprocess spawns, and on Windows under
+    load (the pre-push gate runs ~8 test files in parallel while other sessions do the same)
+    the spawn cost is what pushes this file past the gate's per-test budget."""
+    global _SEED_REPO
+    if _SEED_REPO is None:
+        root = tempfile.mkdtemp(prefix="pfs-seed-")
+        atexit.register(_force_rm, root)
+        work = os.path.join(root, "repo")
+        os.makedirs(os.path.join(work, "agents"))
+        os.makedirs(os.path.join(work, "agents-archive"))
+        os.makedirs(os.path.join(work, "maintenance"))
+        subprocess.run(["git", "init", "-b", "main", work],
+                       capture_output=True, text=True)
+        _git(work, "config", "user.email", "t@example.com")
+        _git(work, "config", "user.name", "Test")
+        _git(work, "config", "commit.gpgsign", "false")
+        for rel in ("agents/one.md", "agents-archive/old.md", "maintenance/p.py"):
+            with open(os.path.join(work, rel), "w", encoding="utf-8") as fh:
+                fh.write("seed\n")
+        _git(work, "add", "-A")
+        _git(work, "commit", "-m", "seed")
+        _SEED_REPO = work
+    return _SEED_REPO
+
+
 def _make_repo(td):
-    """A git repo with one commit and a couple of committed, clean files."""
+    """A git repo with one commit and a couple of committed, clean files.
+
+    A copy of the process-wide seed repo (copy2 keeps mtimes, so the copied index still
+    matches the files and `git status` does not have to re-hash anything)."""
     work = os.path.join(td, "repo")
-    os.makedirs(os.path.join(work, "agents"))
-    os.makedirs(os.path.join(work, "agents-archive"))
-    os.makedirs(os.path.join(work, "maintenance"))
-    subprocess.run(["git", "init", "-b", "main", work],
-                   capture_output=True, text=True)
-    _git(work, "config", "user.email", "t@example.com")
-    _git(work, "config", "user.name", "Test")
-    _git(work, "config", "commit.gpgsign", "false")
-    for rel in ("agents/one.md", "agents-archive/old.md", "maintenance/p.py"):
-        with open(os.path.join(work, rel), "w", encoding="utf-8") as fh:
-            fh.write("seed\n")
-    _git(work, "add", "-A")
-    _git(work, "commit", "-m", "seed")
+    shutil.copytree(_seed_repo(), work, copy_function=shutil.copy2)
     return work
 
 
@@ -275,6 +313,121 @@ def test_head_moved_outranks_contested():
         expect("both findings still reported in JSON",
                j.get("head_moved") is True
                and bool(j.get("dirty_overlap_foreign")), j)
+
+
+def _commit(work, rel, body="moved\n", msg="advance"):
+    _dirty(work, rel, body)
+    _git(work, "add", "-A")
+    _git(work, "commit", "-m", msg)
+
+
+def test_head_moved_out_of_scope_only_is_clear_with_warning():
+    """The checkout advanced, but no moved commit touches my scope: re-reading my
+    files would show nothing new, so a STOP here only teaches bypassing. Exit 0,
+    and the move is still reported (2026-09-13: a one-file cherry-pick was held up
+    by an unrelated docs commit)."""
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        since = head_sha(work)
+        _commit(work, "maintenance/p.py")
+        rc, out, _ = run("--repo", work, "--claims-dir", _claims_dir(td),
+                         "--sessions-dir", _sessions_dir(td),
+                         "--session", MY_SESSION, "--since", since,
+                         "--paths", os.path.join(work, "agents"))
+        j = result_json(out) or {}
+        expect("moved, nothing in scope -> exit 0", rc == EXIT_CLEAR, (rc, out))
+        expect("moved, nothing in scope -> verdict CLEAR", j.get("verdict") == "CLEAR", j)
+        expect("move is still reported (head_moved true)", j.get("head_moved") is True, j)
+        expect("in-scope change list is present and empty",
+               j.get("head_moved_in_scope") == [], j)
+        expect("human output carries a WARNING about the move",
+               "WARNING" in out and "MOVED" in out, out)
+
+
+def test_head_moved_touching_scope_still_stops():
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        since = head_sha(work)
+        _commit(work, "maintenance/p.py")
+        _commit(work, "agents/one.md")
+        rc, out, _ = run("--repo", work, "--claims-dir", _claims_dir(td),
+                         "--sessions-dir", _sessions_dir(td),
+                         "--session", MY_SESSION, "--since", since,
+                         "--paths", os.path.join(work, "agents"))
+        j = result_json(out) or {}
+        expect("moved INTO scope -> exit 3", rc == EXIT_HEAD_MOVED, (rc, out))
+        expect("in-scope moved paths are named", j.get("head_moved_in_scope") == ["agents/one.md"], j)
+
+
+def test_head_moved_rename_out_of_scope_still_stops():
+    """A rename that carries a scope file elsewhere changed my scope, even though
+    the new path is outside it -- rename detection must not hide the source."""
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        since = head_sha(work)
+        _git(work, "mv", "agents/one.md", "maintenance/one.md")
+        _git(work, "commit", "-m", "move it")
+        rc, out, _ = run("--repo", work, "--claims-dir", _claims_dir(td),
+                         "--sessions-dir", _sessions_dir(td),
+                         "--session", MY_SESSION, "--since", since,
+                         "--paths", os.path.join(work, "agents", "one.md"))
+        expect("rename away from scope -> exit 3", rc == EXIT_HEAD_MOVED, (rc, out))
+
+
+def test_head_moved_scope_match_ignores_case():
+    """Windows: git records a path in a different case than the file on disk
+    (and than the caller's --paths, which _real() canonicalizes to disk case).
+    The mismatch is created on GIT's side via update-index --cacheinfo, so this
+    fails without :(icase) in the in-scope diff (review #208 minor 2)."""
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        since = head_sha(work)
+        blob = subprocess.run(["git", "-C", work, "hash-object", "-w", "--stdin"],
+                              input="moved\n", capture_output=True,
+                              text=True).stdout.strip()
+        _git(work, "update-index", "--add", "--cacheinfo",
+             "100644,%s,AGENTS/ONE.MD" % blob)
+        _git(work, "commit", "-q", "-m", "git-side case differs")
+        rc, out, _ = run("--repo", work, "--claims-dir", _claims_dir(td),
+                         "--sessions-dir", _sessions_dir(td), "--since", since,
+                         "--session", MY_SESSION, "--paths", "agents/one.md")
+        j = result_json(out) or {}
+        expect("git-side case-different path -> exit 3", rc == EXIT_HEAD_MOVED, (rc, out))
+        expect("git-side case-different path named in head_moved_in_scope",
+               j.get("head_moved_in_scope") == ["AGENTS/ONE.MD"], j)
+
+
+def test_head_moved_since_not_ancestor_still_stops():
+    """--since is no longer in HEAD's history (reset, rebase, branch switch): the
+    diff no longer describes what happened to the checkout, so it cannot clear."""
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        _commit(work, "maintenance/p.py", msg="soon orphaned")
+        orphan = head_sha(work)
+        _git(work, "reset", "--hard", "HEAD~1")
+        _commit(work, "maintenance/p.py", body="other\n", msg="replacement")
+        rc, out, _ = run("--repo", work, "--claims-dir", _claims_dir(td),
+                         "--sessions-dir", _sessions_dir(td),
+                         "--session", MY_SESSION, "--since", orphan,
+                         "--paths", os.path.join(work, "agents"))
+        j = result_json(out) or {}
+        expect("--since not an ancestor -> exit 3", rc == EXIT_HEAD_MOVED, (rc, out))
+        expect("in-scope list is null (unmeasured), not []",
+               j.get("head_moved_in_scope") is None, j)
+
+
+def test_head_moved_out_of_scope_does_not_mask_contested():
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        since = head_sha(work)
+        _commit(work, "maintenance/p.py")
+        _dirty(work, "agents/one.md")
+        rc, out, _ = run("--repo", work, "--claims-dir", _claims_dir(td),
+                         "--sessions-dir", _sessions_dir(td),
+                         "--session", MY_SESSION, "--since", since,
+                         "--paths", os.path.join(work, "agents"))
+        expect("out-of-scope move + foreign dirty -> CONTESTED (exit 1)",
+               rc == EXIT_CONTESTED, (rc, out))
 
 
 def test_matching_since_sha_is_clear():
@@ -1304,7 +1457,641 @@ def test_literal_tilde_path_expands_to_home_not_a_dir_named_tilde():
                rc == EXIT_CONTESTED, (rc, out[-500:]))
 
 
+# --------------------------------------------------------------------------
+# STALE_UNTRACKED_KNOWN_BLOB (2026-09-13): an untracked in-scope file whose
+# content is byte-identical to a blob already committed at that same path.
+# Observed live: scheduled-tasks/ora-ground-truth-auditor/SKILL.md sat
+# untracked with "[no live recorded owner]" and returned CONTESTED, though
+# nothing in it was unsaved work -- git history already held every byte.
+# --------------------------------------------------------------------------
+KNOWN_BODY = "known committed content\n"
+
+
+def _known_blob_fixture(td, via_branch=False):
+    """agents/gone.md committed with KNOWN_BODY, then removed from HEAD (or
+    committed only on another branch), then an untracked copy with the same
+    bytes written back. Returns (work, introducing_commit_sha)."""
+    work = _make_repo(td)
+    if via_branch:
+        _git(work, "checkout", "-q", "-b", "side")
+        _commit_file(work, "agents/gone.md", KNOWN_BODY)
+        sha = head_sha(work)
+        _git(work, "checkout", "-q", "main")
+    else:
+        _commit_file(work, "agents/gone.md", KNOWN_BODY)
+        sha = head_sha(work)
+        _git(work, "rm", "-q", "agents/gone.md")
+        _git(work, "commit", "-q", "-m", "remove gone.md")
+    _dirty(work, "agents/gone.md", KNOWN_BODY)
+    return work, sha
+
+
+def _kb_run(td, work, sd=None, claims=None, extra=()):
+    return run("--repo", work, "--claims-dir", claims or _claims_dir(td),
+               "--sessions-dir", sd or _sessions_dir(td),
+               "--session", MY_SESSION, "--paths", "agents", *extra)
+
+
+def test_known_blob_untracked_copy_is_rc0_with_warning():
+    with tempfile.TemporaryDirectory() as td:
+        work, sha = _known_blob_fixture(td)
+        rc, out, _ = _kb_run(td, work)
+        j = result_json(out) or {}
+        expect("known-blob: untracked identical copy -> exit 0", rc == EXIT_CLEAR, (rc, out))
+        expect("known-blob: verdict label STALE_UNTRACKED_KNOWN_BLOB",
+               j.get("verdict") == "STALE_UNTRACKED_KNOWN_BLOB", j)
+        kb = j.get("stale_untracked_known_blob") or []
+        expect("known-blob: new RESULT_JSON key lists the path",
+               [k.get("path") for k in kb] == ["agents/gone.md"], j)
+        expect("known-blob: matching commit named",
+               bool(kb) and sha in (kb[0].get("commits") or []), kb)
+        expect("known-blob: existing keys unchanged (still in dirty_overlap_foreign)",
+               [d["path"] for d in j.get("dirty_overlap_foreign", [])] == ["agents/gone.md"], j)
+        expect("known-blob: human output carries a WARNING naming the commit",
+               "WARNING" in out and sha[:12] in out, out)
+
+
+def test_known_blob_on_other_branch_only_is_rc0():
+    with tempfile.TemporaryDirectory() as td:
+        work, sha = _known_blob_fixture(td, via_branch=True)
+        rc, out, _ = _kb_run(td, work)
+        j = result_json(out) or {}
+        expect("known-blob via --all history (other branch) -> exit 0",
+               rc == EXIT_CLEAR and j.get("verdict") == "STALE_UNTRACKED_KNOWN_BLOB",
+               (rc, out))
+
+
+def test_untracked_with_different_content_still_contested():
+    with tempfile.TemporaryDirectory() as td:
+        work, _ = _known_blob_fixture(td)
+        _dirty(work, "agents/gone.md", KNOWN_BODY + "one new line\n")
+        rc, out, _ = _kb_run(td, work)
+        j = result_json(out) or {}
+        expect("known-blob: content differs from every committed blob -> CONTESTED",
+               rc == EXIT_CONTESTED and j.get("verdict") == "CONTESTED", (rc, out))
+        expect("known-blob: new key present and empty when nothing matches",
+               j.get("stale_untracked_known_blob") == [], j)
+
+
+def test_known_blob_same_bytes_at_other_path_does_not_count():
+    """The blob must be in history AT THAT PATH: seed content lives at
+    agents/one.md, not at agents/copy.md."""
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        _dirty(work, "agents/copy.md", "seed\n")
+        rc, out, _ = _kb_run(td, work)
+        expect("known-blob: identical bytes committed only at ANOTHER path -> CONTESTED",
+               rc == EXIT_CONTESTED, (rc, out))
+
+
+def test_known_blob_mixed_with_other_foreign_dirt_is_contested():
+    with tempfile.TemporaryDirectory() as td:
+        work, _ = _known_blob_fixture(td)
+        _dirty(work, "agents/one.md", "foreign edit\n")
+        rc, out, _ = _kb_run(td, work)
+        j = result_json(out) or {}
+        expect("known-blob + other foreign dirt -> CONTESTED exit 1",
+               rc == EXIT_CONTESTED and j.get("verdict") == "CONTESTED", (rc, out))
+        expect("known-blob item still reported under the new key",
+               [k.get("path") for k in j.get("stale_untracked_known_blob") or []]
+               == ["agents/gone.md"], j)
+
+
+def test_modified_tracked_file_reverted_to_old_blob_is_contested():
+    """Only UNTRACKED files qualify: a tracked file whose working copy equals an
+    older committed version is a modification of HEAD, i.e. real dirt."""
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        _commit_file(work, "agents/one.md", "second version\n")
+        _dirty(work, "agents/one.md", "seed\n")
+        rc, out, _ = _kb_run(td, work)
+        j = result_json(out) or {}
+        expect("known-blob: modified-tracked (reverted) file -> CONTESTED",
+               rc == EXIT_CONTESTED and j.get("stale_untracked_known_blob") == [], (rc, out))
+
+
+def test_known_blob_recent_session_touch_is_contested():
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work, _ = _known_blob_fixture(td)
+        sd = _sessions_dir(td)
+        _touched(sd, OTHER_SESSION, [os.path.join(work, "agents", "gone.md")],
+                 ts=time.time() - 30 * 60)
+        rc, out, _ = _kb_run(td, work, sd=sd)
+        expect("known-blob: a session touched it within 2h -> CONTESTED",
+               rc == EXIT_CONTESTED, (rc, out))
+
+
+def test_known_blob_recent_touch_even_if_stale_is_contested():
+    """A touch within the window that predates the removal commit (so it reads
+    STALE) still disqualifies: the rule is 'no touch within 2h', not 'no live
+    owner'."""
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        f = os.path.join(work, "agents", "gone.md")
+        _touched(sd, OTHER_SESSION, [f], ts=time.time() - 60)
+        time.sleep(1.1)
+        _commit_file(work, "agents/gone.md", KNOWN_BODY)
+        _git(work, "rm", "-q", "agents/gone.md")
+        _git(work, "commit", "-q", "-m", "remove gone.md")
+        _dirty(work, "agents/gone.md", KNOWN_BODY)
+        rc, out, _ = _kb_run(td, work, sd=sd)
+        expect("known-blob: stale-but-recent touch -> CONTESTED", rc == EXIT_CONTESTED, (rc, out))
+
+
+def test_known_blob_old_touch_is_rc0():
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work, _ = _known_blob_fixture(td)
+        sd = _sessions_dir(td)
+        _touched(sd, OTHER_SESSION, [os.path.join(work, "agents", "gone.md")],
+                 ts=time.time() - 3 * 3600)
+        rc, out, _ = _kb_run(td, work, sd=sd)
+        expect("known-blob: only a >2h-old touch -> exit 0", rc == EXIT_CLEAR, (rc, out))
+
+
+def test_known_blob_unknown_touch_time_is_contested():
+    with tempfile.TemporaryDirectory() as td:
+        work, _ = _known_blob_fixture(td)
+        sd = _sessions_dir(td)
+        _touched(sd, OTHER_SESSION, [os.path.join(work, "agents", "gone.md")], ts=False)
+        rc, out, _ = _kb_run(td, work, sd=sd)
+        expect("known-blob: touch with unknown time -> CONTESTED", rc == EXIT_CONTESTED, (rc, out))
+
+
+def test_known_blob_with_live_claim_is_contested():
+    with tempfile.TemporaryDirectory() as td:
+        work, _ = _known_blob_fixture(td)
+        cd = _claims_dir(td)
+        _write_claim(cd, "theirs", OTHER_SESSION, [os.path.join(work, "agents", "gone.md")])
+        rc, out, _ = _kb_run(td, work, claims=cd)
+        j = result_json(out) or {}
+        expect("known-blob: another session's live claim on it -> CONTESTED",
+               rc == EXIT_CONTESTED, (rc, out))
+        expect("known-blob: claimed item is not classified known-blob",
+               j.get("stale_untracked_known_blob") == [], j)
+
+
+def test_known_blob_does_not_mask_indeterminate():
+    with tempfile.TemporaryDirectory() as td:
+        work, _ = _known_blob_fixture(td)
+        rc, out, _ = _kb_run(td, work, claims=os.path.join(td, "no-such-claims"))
+        expect("known-blob + unreadable claims -> INDETERMINATE exit 4",
+               rc == EXIT_INDETERMINATE, (rc, out))
+
+
+def test_known_blob_does_not_mask_head_moved_in_scope():
+    with tempfile.TemporaryDirectory() as td:
+        work, _ = _known_blob_fixture(td)
+        since = head_sha(work)
+        _commit(work, "agents/one.md")
+        rc, out, _ = _kb_run(td, work, extra=("--since", since))
+        expect("known-blob + HEAD moved into scope -> HEAD_MOVED exit 3",
+               rc == EXIT_HEAD_MOVED, (rc, out))
+
+
+def test_known_blob_only_in_stash_is_contested():
+    """A `git stash -u` is live WIP parked in refs/stash, not committed history:
+    an untracked file matching only a stash blob must not read as known."""
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        _dirty(work, "agents/wip.md", KNOWN_BODY)
+        _git(work, "stash", "push", "-u", "-m", "parked")
+        _git(work, "stash", "apply")
+        rc, out, _ = _kb_run(td, work)
+        j = result_json(out) or {}
+        expect("known-blob: blob only in refs/stash -> CONTESTED",
+               rc == EXIT_CONTESTED and j.get("stale_untracked_known_blob") == [], (rc, out))
+
+
+def test_known_blob_missing_provenance_stays_contested():
+    """Review #208 MAJOR: 'no touch inside the TTL window' is unmeasurable when
+    the sessions dir cannot be read -- an empty owner map is not evidence of
+    no touch, so nothing may be classified known-blob (fail closed)."""
+    with tempfile.TemporaryDirectory() as td:
+        work, _ = _known_blob_fixture(td)
+        rc, out, _ = _kb_run(td, work, sd=os.path.join(td, "no-such-sessions"))
+        j = result_json(out) or {}
+        expect("known-blob: provenance dir missing -> CONTESTED exit 1",
+               rc == EXIT_CONTESTED and j.get("verdict") == "CONTESTED", (rc, out))
+        expect("known-blob: provenance dir missing -> nothing classified",
+               j.get("stale_untracked_known_blob") == [], j)
+
+
+def test_known_blob_partial_provenance_stays_contested():
+    """One session's touched-files.txt unreadable (here: a directory) means that
+    session's touches are unknown -- also fail closed, and say so."""
+    with tempfile.TemporaryDirectory() as td:
+        work, _ = _known_blob_fixture(td)
+        sd = _sessions_dir(td)
+        os.makedirs(os.path.join(sd, OTHER_SESSION, "touched-files.txt"))
+        rc, out, _ = _kb_run(td, work, sd=sd)
+        j = result_json(out) or {}
+        expect("known-blob: one unreadable touched-files.txt -> CONTESTED exit 1",
+               rc == EXIT_CONTESTED and j.get("stale_untracked_known_blob") == [], (rc, out))
+        expect("known-blob: provenance_partial reports the skipped session file",
+               j.get("provenance_partial") == 1, j)
+
+
+def test_provenance_partial_zero_when_all_readable():
+    with tempfile.TemporaryDirectory() as td:
+        work, _ = _known_blob_fixture(td)
+        rc, out, _ = _kb_run(td, work)
+        j = result_json(out) or {}
+        expect("provenance_partial is 0 when every session file was read",
+               j.get("provenance_partial") == 0, j)
+
+
+def test_head_moved_warning_names_the_range():
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        since = head_sha(work)
+        _commit(work, "maintenance/p.py")
+        head = head_sha(work)
+        rc, out, _ = run("--repo", work, "--claims-dir", _claims_dir(td),
+                         "--sessions-dir", _sessions_dir(td),
+                         "--session", MY_SESSION, "--since", since,
+                         "--paths", os.path.join(work, "agents"))
+        warn = [l for l in out.splitlines() if "WARNING" in l and "MOVED" in l]
+        expect("moved-out-of-scope WARNING line names since..head range",
+               rc == EXIT_CLEAR and bool(warn)
+               and ("%s..%s" % (since[:12], head[:12])) in warn[0], (rc, out))
+
+
+# --------------------------------------------------------------------------
+# orphaned-owner reporting (2026-09-19). A foreign owner whose last activity
+# (newest of: its recorded touch, its session-transcript mtime) is older than
+# --orphan-hours is LABELLED ORPHANED and its age is shown. It is never
+# cleared: the verdict stays CONTESTED / exit 1. Every unknown fails LIVE.
+# --------------------------------------------------------------------------
+THIRD_SESSION = "cccccccc-9999-aaaa-bbbb-cccccccccccc"
+DAY = 86400.0
+
+
+def _pd(td):
+    p = os.path.join(td, "projects")
+    os.makedirs(p, exist_ok=True)
+    return p
+
+
+def _transcript(projects_dir, session, age_hours, sub="C--proj"):
+    """projects/<sub>/<session>.jsonl whose mtime is `age_hours` old."""
+    import time
+    d = os.path.join(projects_dir, sub)
+    os.makedirs(d, exist_ok=True)
+    p = os.path.join(d, session + ".jsonl")
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write("{}\n")
+    t = time.time() - age_hours * 3600
+    os.utime(p, (t, t))
+    return p
+
+
+_ORPHAN_RUNS = [0]
+
+
+def _backdate_head(work, days=10):
+    """Amend HEAD so its commit time is `days` old. Without this every fixture
+    file was last committed 'now', so any touch older than a few seconds is
+    discounted as STALE (committed since) and never reaches the orphan check --
+    which is not the situation being tested (an owner whose hunk was never
+    committed after its touch)."""
+    import time
+    when = time.strftime("%Y-%m-%dT%H:%M:%S",
+                         time.gmtime(time.time() - days * DAY)) + " +0000"
+    env = dict(os.environ, GIT_COMMITTER_DATE=when, GIT_AUTHOR_DATE=when)
+    subprocess.run(["git", "-C", work, "commit", "--amend", "--no-edit",
+                    "--date", when], capture_output=True, text=True, env=env)
+
+
+def _orphan_run(td, work, sd, *extra):
+    # A fresh claims dir per call (os.makedirs would raise on the 2nd call in one
+    # tempdir); a later duplicate flag in `extra` overrides an earlier one.
+    _ORPHAN_RUNS[0] += 1
+    _backdate_head(work)
+    return run("--repo", work,
+               "--claims-dir", _claims_dir(td, "claims_o%d" % _ORPHAN_RUNS[0]),
+               "--sessions-dir", sd, "--session-transcripts-dir", _pd(td),
+               "--session", MY_SESSION,
+               "--paths", os.path.join(work, "agents"), *extra)
+
+
+def _strict_json(out):
+    """RESULT_JSON parsed the way jq / JSON.parse / ConvertFrom-Json would: bare
+    NaN / Infinity tokens (which Python tolerates) are an error."""
+    def _bad(tok):
+        raise ValueError("non-standard JSON token %s" % tok)
+    for line in out.splitlines():
+        if line.startswith("RESULT_JSON="):
+            return json.loads(line[len("RESULT_JSON="):], parse_constant=_bad)
+    return None
+
+
+def _one(work):
+    return os.path.join(work, "agents", "one.md")
+
+
+def test_orphaned_owner_reports_age_and_label_but_stays_contested():
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        _dirty(work, "agents/one.md")
+        _touched(sd, OTHER_SESSION, [_one(work)], ts=time.time() - 3 * DAY)
+        _transcript(_pd(td), OTHER_SESSION, 3 * 24)
+        rc, out, _ = _orphan_run(td, work, sd)
+        j = result_json(out) or {}
+        ent = (j.get("dirty_overlap_foreign") or [{}])[0]
+        expect("orphan: still CONTESTED (a label informs, it never clears)",
+               rc == EXIT_CONTESTED, (rc, out))
+        expect("orphan: human output shows the last-active age",
+               "last active 3d" in out, out)
+        expect("orphan: human output carries the ORPHANED label",
+               "ORPHANED" in out, out)
+        expect("orphan: entry flagged orphaned in JSON",
+               ent.get("orphaned") is True, ent)
+        expect("orphan: entry carries per-owner activity",
+               OTHER_SESSION in (ent.get("owner_activity") or {}), ent)
+        expect("orphan: report says orphaned_only", j.get("orphaned_only") is True, j)
+        expect("orphan: report echoes the default 12h threshold",
+               j.get("orphan_hours") == 12, j.get("orphan_hours"))
+        expect("orphan: the STOP line names the orphan situation",
+               "-> STOP" in out and "ORPHANED" in out.split("-> STOP")[-1], out)
+        expect("orphan: JSON verdict is still CONTESTED (label never changes it)",
+               j.get("verdict") == "CONTESTED", j.get("verdict"))
+        try:
+            strict_ok = _strict_json(out) is not None
+        except ValueError as exc:
+            strict_ok = False
+            out = "%s :: %s" % (exc, out)
+        expect("orphan: RESULT_JSON is valid standard JSON (no NaN/Infinity)",
+               strict_ok, out)
+
+
+def test_recent_transcript_keeps_an_old_touch_live():
+    """The transcript mtime is the last-ACTIVITY signal: a session that wrote
+    its transcript six minutes ago is alive whatever its last file touch says."""
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        _dirty(work, "agents/one.md")
+        _touched(sd, OTHER_SESSION, [_one(work)], ts=time.time() - 3 * DAY)
+        _transcript(_pd(td), OTHER_SESSION, 0.1)
+        rc, out, _ = _orphan_run(td, work, sd)
+        j = result_json(out) or {}
+        ent = (j.get("dirty_overlap_foreign") or [{}])[0]
+        expect("live transcript: CONTESTED", rc == EXIT_CONTESTED, (rc, out))
+        expect("live transcript: not labelled ORPHANED", "ORPHANED" not in out, out)
+        expect("live transcript: entry not orphaned", ent.get("orphaned") is False, ent)
+        expect("live transcript: orphaned_only is False", j.get("orphaned_only") is False, j)
+        expect("live transcript: age is still shown", "last active" in out, out)
+
+
+def test_missing_transcript_is_never_orphaned():
+    """Transcripts get pruned (/cleardisk-sessions), so 'no transcript' proves
+    nothing about liveness. An old touch alone must NOT earn the label -- the
+    age is still shown and the output says why it was not called orphaned."""
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        _dirty(work, "agents/one.md")
+        _touched(sd, OTHER_SESSION, [_one(work)], ts=time.time() - 3 * DAY)
+        rc, out, _ = _orphan_run(td, work, sd)
+        j = result_json(out) or {}
+        ent = (j.get("dirty_overlap_foreign") or [{}])[0]
+        expect("no transcript: CONTESTED and NOT orphaned",
+               rc == EXIT_CONTESTED and ent.get("orphaned") is False
+               and j.get("orphaned_only") is False and "ORPHANED (" not in out, (rc, out))
+        expect("no transcript: the touch age is still shown",
+               "last active 3d" in out, out)
+        expect("no transcript: says why it was not labelled",
+               "no session transcript found" in out, out)
+
+
+def test_transcript_older_than_a_recent_touch_uses_the_newer_time():
+    """last_activity is the NEWER of touch and transcript: a fresh touch keeps an
+    owner live even when its transcript is days old."""
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        _dirty(work, "agents/one.md")
+        _touched(sd, OTHER_SESSION, [_one(work)], ts=time.time() - 300)
+        _transcript(_pd(td), OTHER_SESSION, 3 * 24)
+        rc, out, _ = _orphan_run(td, work, sd)
+        j = result_json(out) or {}
+        expect("recent touch + old transcript: live, not orphaned",
+               rc == EXIT_CONTESTED and j.get("orphaned_only") is False
+               and "ORPHANED (" not in out, (rc, out))
+
+
+def test_unknown_activity_is_never_orphaned():
+    """No timestamp on the touch AND no transcript: nothing proves it idle, so
+    it stays live -- the same rule as _merge_touch's unknown-time handling."""
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        _dirty(work, "agents/one.md")
+        _touched(sd, OTHER_SESSION, [_one(work)], ts=False)
+        rc, out, _ = _orphan_run(td, work, sd)
+        j = result_json(out) or {}
+        ent = (j.get("dirty_overlap_foreign") or [{}])[0]
+        expect("unknown activity: CONTESTED", rc == EXIT_CONTESTED, (rc, out))
+        expect("unknown activity: not orphaned",
+               ent.get("orphaned") is False and "ORPHANED" not in out, (ent, out))
+        expect("unknown activity: says so", "unknown" in out.lower(), out)
+
+
+def test_mixed_orphan_and_live_owner_is_not_orphaned():
+    """One live co-owner makes the file live: only 'every owner idle' counts."""
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        _dirty(work, "agents/one.md")
+        _touched(sd, OTHER_SESSION, [_one(work)], ts=time.time() - 3 * DAY)
+        _touched(sd, THIRD_SESSION, [_one(work)])
+        _transcript(_pd(td), OTHER_SESSION, 3 * 24)
+        rc, out, _ = _orphan_run(td, work, sd)
+        j = result_json(out) or {}
+        ent = (j.get("dirty_overlap_foreign") or [{}])[0]
+        expect("mixed owners: CONTESTED", rc == EXIT_CONTESTED, (rc, out))
+        expect("mixed owners: not orphaned",
+               ent.get("orphaned") is False and j.get("orphaned_only") is False
+               and "ORPHANED" not in out, (ent, out))
+
+
+def test_my_own_touch_plus_an_orphan_is_not_orphaned():
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        _dirty(work, "agents/one.md")
+        _touched(sd, MY_SESSION, [_one(work)])
+        _touched(sd, OTHER_SESSION, [_one(work)], ts=time.time() - 3 * DAY)
+        _transcript(_pd(td), OTHER_SESSION, 3 * 24)
+        rc, out, _ = _orphan_run(td, work, sd)
+        j = result_json(out) or {}
+        expect("mine + orphan: CONTESTED and not labelled orphaned",
+               rc == EXIT_CONTESTED and j.get("orphaned_only") is False
+               and "ORPHANED" not in out, (rc, out))
+
+
+def test_orphan_threshold_is_configurable():
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        _dirty(work, "agents/one.md")
+        _touched(sd, OTHER_SESSION, [_one(work)], ts=time.time() - 5 * 3600)
+        _transcript(_pd(td), OTHER_SESSION, 5)
+        _, out12, _ = _orphan_run(td, work, sd)
+        _, out4, _ = _orphan_run(td, work, sd, "--orphan-hours", "4")
+        _, out6, _ = _orphan_run(td, work, sd, "--orphan-hours", "6")
+        expect("5h idle, default 12h -> not orphaned",
+               (result_json(out12) or {}).get("orphaned_only") is False, out12)
+        expect("5h idle, --orphan-hours 4 -> orphaned",
+               (result_json(out4) or {}).get("orphaned_only") is True, out4)
+        expect("5h idle, --orphan-hours 6 -> not orphaned",
+               (result_json(out6) or {}).get("orphaned_only") is False, out6)
+
+
+def test_future_timestamp_is_never_orphaned():
+    """Clock skew or a bad write: a touch stamped in the future is not 'old'."""
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        _dirty(work, "agents/one.md")
+        _touched(sd, OTHER_SESSION, [_one(work)], ts=time.time() + DAY)
+        rc, out, _ = _orphan_run(td, work, sd)
+        j = result_json(out) or {}
+        expect("future touch: CONTESTED, not orphaned",
+               rc == EXIT_CONTESTED and j.get("orphaned_only") is False
+               and "ORPHANED" not in out, (rc, out))
+
+
+def test_orphaned_and_live_files_are_flagged_per_file():
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        _dirty(work, "agents/one.md")
+        _dirty(work, "agents/two.md")
+        _touched(sd, OTHER_SESSION, [_one(work)], ts=time.time() - 3 * DAY)
+        _touched(sd, THIRD_SESSION, [os.path.join(work, "agents", "two.md")])
+        _transcript(_pd(td), OTHER_SESSION, 3 * 24)
+        rc, out, _ = _orphan_run(td, work, sd)
+        j = result_json(out) or {}
+        by = {e["path"]: e for e in j.get("dirty_overlap_foreign", [])}
+        expect("per-file: orphaned file flagged, live file not, orphaned_only False",
+               by.get("agents/one.md", {}).get("orphaned") is True
+               and by.get("agents/two.md", {}).get("orphaned") is False
+               and j.get("orphaned_only") is False, j)
+
+
+def test_non_finite_or_non_positive_orphan_hours_is_rejected():
+    """0/negative/NaN would call every owner orphaned; inf/1e999 never would and
+    json.dumps writes them as the bare token `Infinity` (invalid JSON). Assert
+    the MESSAGE, not just the exit code: an unknown-flag error also exits 2, so
+    a bare rc check would pass even with the flag deleted."""
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        for bad in ("0", "-3", "nan", "inf", "1e999", "abc"):
+            rc, out, err = _orphan_run(td, work, sd, "--orphan-hours", bad)
+            expect("--orphan-hours %s is rejected with a clear message" % bad,
+                   rc not in (EXIT_CLEAR, EXIT_CONTESTED) and "--orphan-hours" in err
+                   and "unrecognized" not in err and "RESULT_JSON=" not in out,
+                   (rc, err))
+
+
+def test_orphaned_owner_plus_competing_claim_is_not_orphaned_only():
+    """A live claim by another session means someone IS working here, so the
+    whole-verdict flag must stay False even though the dirty owner looks idle."""
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        _dirty(work, "agents/one.md")
+        _touched(sd, OTHER_SESSION, [_one(work)], ts=time.time() - 3 * DAY)
+        _transcript(_pd(td), OTHER_SESSION, 3 * 24)
+        cd = _claims_dir(td, "claims_live")
+        _write_claim(cd, "livework", THIRD_SESSION, [os.path.join(work, "agents")])
+        rc, out, _ = _orphan_run(td, work, sd, "--claims-dir", cd)
+        j = result_json(out) or {}
+        ent = (j.get("dirty_overlap_foreign") or [{}])[0]
+        expect("orphan + live claim: CONTESTED, file orphaned, orphaned_only False",
+               rc == EXIT_CONTESTED and ent.get("orphaned") is True
+               and j.get("orphaned_only") is False and "COMPETING CLAIMS" in out,
+               (rc, out))
+        expect("orphan + live claim: STOP text is the generic one",
+               "looks ORPHANED" not in out, out)
+
+
+def test_path_like_session_ids_never_reach_the_filesystem():
+    """A session-dir name is joined into a transcript path. One with a dot or a
+    separator-like character must be refused, not resolved."""
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        sd = _sessions_dir(td)
+        _dirty(work, "agents/one.md")
+        weird = "evil.session.id"
+        _touched(sd, weird, [_one(work)], ts=time.time() - 3 * DAY)
+        # a transcript that WOULD match if the id were joined naively
+        _transcript(_pd(td), weird, 3 * 24)
+        rc, out, err = _orphan_run(td, work, sd)
+        j = result_json(out) or {}
+        expect("dotted session id: no crash, CONTESTED, never orphaned",
+               rc == EXIT_CONTESTED and j.get("orphaned_only") is False
+               and "Traceback" not in err, (rc, out, err))
+
+
+def test_old_abbreviations_still_resolve():
+    """Adding flags must not make an abbreviation that used to be unique
+    ambiguous (`--projects-dir` did that to `--p`)."""
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        rc, out, err = run("--repo", work, "--claims-dir", _claims_dir(td),
+                           "--sessions-dir", _sessions_dir(td),
+                           "--session", MY_SESSION,
+                           "--p", os.path.join(work, "agents"))
+        expect("`--p` still means --paths (clean repo -> exit 0)",
+               rc == EXIT_CLEAR and "ambiguous" not in err, (rc, err))
+
+
+def test_clean_run_is_unchanged_by_orphan_reporting():
+    """No dirty foreign file: no orphan noise, exit 0, orphaned_only False."""
+    with tempfile.TemporaryDirectory() as td:
+        work = _make_repo(td)
+        rc, out, _ = _orphan_run(td, work, _sessions_dir(td))
+        j = result_json(out) or {}
+        expect("clean: exit 0, no orphan label, orphaned_only False",
+               rc == EXIT_CLEAR and "ORPHANED" not in out
+               and j.get("orphaned_only") is False, (rc, out))
+
+
 def main():
+    test_orphaned_owner_reports_age_and_label_but_stays_contested()
+    test_recent_transcript_keeps_an_old_touch_live()
+    test_missing_transcript_is_never_orphaned()
+    test_transcript_older_than_a_recent_touch_uses_the_newer_time()
+    test_unknown_activity_is_never_orphaned()
+    test_mixed_orphan_and_live_owner_is_not_orphaned()
+    test_my_own_touch_plus_an_orphan_is_not_orphaned()
+    test_orphan_threshold_is_configurable()
+    test_future_timestamp_is_never_orphaned()
+    test_orphaned_and_live_files_are_flagged_per_file()
+    test_non_finite_or_non_positive_orphan_hours_is_rejected()
+    test_orphaned_owner_plus_competing_claim_is_not_orphaned_only()
+    test_path_like_session_ids_never_reach_the_filesystem()
+    test_old_abbreviations_still_resolve()
+    test_clean_run_is_unchanged_by_orphan_reporting()
     test_verbatim_prefix_spelling_of_in_repo_path_is_not_out_of_repo()
     test_inherited_git_env_cannot_redirect_the_gate()
     test_directory_scope_containing_nested_worktree()
@@ -1370,6 +2157,30 @@ def main():
     test_unknown_touch_time_is_never_discounted()
     test_never_committed_path_is_never_discounted()
     test_literal_tilde_path_expands_to_home_not_a_dir_named_tilde()
+    test_head_moved_out_of_scope_only_is_clear_with_warning()
+    test_head_moved_touching_scope_still_stops()
+    test_head_moved_rename_out_of_scope_still_stops()
+    test_head_moved_scope_match_ignores_case()
+    test_head_moved_since_not_ancestor_still_stops()
+    test_head_moved_out_of_scope_does_not_mask_contested()
+    test_head_moved_warning_names_the_range()
+    test_known_blob_untracked_copy_is_rc0_with_warning()
+    test_known_blob_on_other_branch_only_is_rc0()
+    test_untracked_with_different_content_still_contested()
+    test_known_blob_same_bytes_at_other_path_does_not_count()
+    test_known_blob_mixed_with_other_foreign_dirt_is_contested()
+    test_modified_tracked_file_reverted_to_old_blob_is_contested()
+    test_known_blob_recent_session_touch_is_contested()
+    test_known_blob_recent_touch_even_if_stale_is_contested()
+    test_known_blob_old_touch_is_rc0()
+    test_known_blob_unknown_touch_time_is_contested()
+    test_known_blob_with_live_claim_is_contested()
+    test_known_blob_does_not_mask_indeterminate()
+    test_known_blob_does_not_mask_head_moved_in_scope()
+    test_known_blob_only_in_stash_is_contested()
+    test_known_blob_missing_provenance_stays_contested()
+    test_known_blob_partial_provenance_stays_contested()
+    test_provenance_partial_zero_when_all_readable()
     passed = sum(1 for ok, _ in results if ok)
     print("\npreflight-shared-checkout tests: %d/%d passed"
           % (passed, len(results)))

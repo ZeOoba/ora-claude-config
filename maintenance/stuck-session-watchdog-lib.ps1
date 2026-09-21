@@ -51,7 +51,15 @@ function Get-KillCandidates {
     param(
         [Parameter(Mandatory)] $Procs,
         [Parameter(Mandatory)] [datetime] $Now,
-        [int] $ThresholdMinutes = 90
+        [int] $ThresholdMinutes = 90,
+        # pid -> [PSCustomObject]@{ Resolved; ScheduledTaskId; ScheduledRunContinued }, from
+        # Get-SessionInfoMap. When supplied, a process is killable ONLY if it is positively identified
+        # as a scheduled-task session the user has not taken over (2026-09-21, see below). When $null
+        # the legacy command-line-only rules apply (kept so callers/tests that predate it still work).
+        $SessionInfo = $null,
+        # Optional ArrayList that receives {ProcessId; AgeMin; Reason} for every over-threshold process
+        # the session rule SPARED ('interactive' | 'continued' | 'unresolved'), so the caller can log it.
+        $Skipped = $null
     )
     $out = @()
     foreach ($p in $Procs) {
@@ -61,6 +69,23 @@ function Get-KillCandidates {
         if ($p.CommandLine -match 'WindowsApps\\Claude_') { continue } # packaged desktop app, not the CLI
         $ageMin = ($Now - [datetime]$p.CreationDate).TotalMinutes
         if ($ageMin -gt $ThresholdMinutes) {
+            if ($null -ne $SessionInfo) {
+                # Exclusion 5 (2026-09-21): flags cannot separate a FRESH interactive Code-tab session from a
+                # scheduled one (identical stream-json/stdio/--allowedTools shape, neither carries --resume=),
+                # and the age test alone killed interactive sessions ~114 min old. Use the session's identity.
+                # Everything short of positive identification is spared -- fail SAFE, same as exclusions 3-4.
+                $info = $SessionInfo[[int]$p.ProcessId]
+                $reason = $null
+                if ($null -eq $info -or -not $info.Resolved) { $reason = 'unresolved' }
+                elseif (-not $info.ScheduledTaskId)          { $reason = 'interactive' }
+                elseif ($info.ScheduledRunContinued)         { $reason = 'continued' }
+                if ($reason) {
+                    if ($null -ne $Skipped) {
+                        [void]$Skipped.Add([PSCustomObject]@{ ProcessId = $p.ProcessId; AgeMin = [math]::Round($ageMin, 1); Reason = $reason })
+                    }
+                    continue
+                }
+            }
             $out += [PSCustomObject]@{
                 ProcessId = $p.ProcessId
                 AgeMin    = [math]::Round($ageMin, 1)
@@ -72,4 +97,64 @@ function Get-KillCandidates {
     # a bare scalar on return otherwise, which breaks every caller's .Count check exactly
     # when there's precisely one candidate (caught by this function's own test suite).
     return ,$out
+}
+
+function Get-SessionInfoMap {
+    <#
+    .SYNOPSIS
+    The I/O half of the session rule: resolve each claude.exe process to "is this a scheduled-task
+    session?" from the app's own records. Returns a hashtable pid -> { Resolved; ScheduledTaskId;
+    ScheduledRunContinued; Reason }, for Get-KillCandidates -SessionInfo.
+
+    .DESCRIPTION
+    Chain (added 2026-09-21): ~/.claude/sessions/<pid>.json (written by the CLI itself; carries
+    procStart + hostSessionId) -> the Desktop's session record
+    %APPDATA%\Claude\claude-code-sessions\<acct>\<org>\<hostSessionId>.json, whose `scheduledTaskId`
+    exists ONLY on scheduled sessions. `kind`/`entrypoint` in the registry are useless here: every
+    session, scheduled or not, reports kind=interactive / entrypoint=claude-desktop.
+
+    Resolved=$false (=> spared by Get-KillCandidates) on ANY break in the chain: no registry file,
+    unreadable JSON, procStart not matching the live process (PID reuse guard, 5s tolerance), or no
+    host record. Never throws -- a broken lookup must mean "don't kill", never "crash the watchdog".
+    Walks the two directory levels itself: a recursive scan of claude-code-sessions is minutes-slow.
+    #>
+    param(
+        [Parameter(Mandatory)] $Procs,
+        [string] $SessionsDir = (Join-Path $env:USERPROFILE '.claude\sessions'),
+        [string] $HostSessionsRoot = (Join-Path $env:APPDATA 'Claude\claude-code-sessions')
+    )
+    $map = @{}
+    $hostDirs = @()
+    try {
+        foreach ($a in (Get-ChildItem -LiteralPath $HostSessionsRoot -Directory -ErrorAction Stop)) {
+            $hostDirs += @(Get-ChildItem -LiteralPath $a.FullName -Directory -ErrorAction SilentlyContinue)
+        }
+    } catch { }
+    foreach ($p in $Procs) {
+        $procId = [int]$p.ProcessId
+        $bad = { param($r) [PSCustomObject]@{ Resolved = $false; ScheduledTaskId = $null; ScheduledRunContinued = $false; Reason = $r } }
+        try {
+            $regFile = Join-Path $SessionsDir "$procId.json"
+            if (-not (Test-Path -LiteralPath $regFile)) { $map[$procId] = & $bad 'no-registry'; continue }
+            $reg = Get-Content -Raw -LiteralPath $regFile | ConvertFrom-Json
+            $liveStart = ([datetime]$p.CreationDate).ToFileTimeUtc()
+            if ([math]::Abs([int64]$reg.procStart - $liveStart) -gt 50000000) { $map[$procId] = & $bad 'procstart-mismatch'; continue }   # 5s in 100ns ticks
+            if (-not $reg.hostSessionId) { $map[$procId] = & $bad 'no-host-id'; continue }
+            $hostRec = $null
+            foreach ($d in $hostDirs) {
+                $f = Join-Path $d.FullName "$($reg.hostSessionId).json"
+                if (Test-Path -LiteralPath $f) { $hostRec = Get-Content -Raw -LiteralPath $f | ConvertFrom-Json; break }
+            }
+            if ($null -eq $hostRec) { $map[$procId] = & $bad 'no-host-record'; continue }
+            $map[$procId] = [PSCustomObject]@{
+                Resolved              = $true
+                ScheduledTaskId       = $hostRec.scheduledTaskId
+                ScheduledRunContinued = [bool]$hostRec.scheduledRunContinued
+                Reason                = 'ok'
+            }
+        } catch {
+            $map[$procId] = & $bad 'error'
+        }
+    }
+    return $map
 }

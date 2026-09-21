@@ -72,7 +72,7 @@ def pre_snapshot_path(session_id, task_id):
 
 def read_text(path):
     # utf-8-sig: strips a leading BOM if present, transparent no-op otherwise.
-    # Without this, a BOM'd SKILL.md makes frontmatter_keys() see "﻿---"
+    # Without this, a BOM'd SKILL.md makes frontmatter_keys() see "U+FEFF---"
     # on line 1 -- not "---" -- so it returns None (malformed) and both guards
     # silently stop covering that task permanently, with no warning that they
     # stopped (adversarial review finding N3, 2026-08-13).

@@ -1,12 +1,13 @@
 # ORA Fleet Heartbeat + Pending-Work Push -- local pulse leg of the EXTERNAL cross-fleet dead-man (v2.0 2026-08-23)
 # ----------------------------------------------------------------------------------
 # WHY v1.0 (2026-07-09): Task 6 (DEADMAN_APPROACH=GITHUB-ACTION, Gabriel-ratified). The
-# GitHub Action .github/workflows/fleet-deadman.yml checks the COMMITTED copy of
-# maintenance/_state/fleet-heartbeat.json daily at 13:00 UTC and alarms if it is
-# >24h stale. Something on THIS machine must therefore refresh + push the heartbeat
-# daily. No automated ~/.claude push existed when this was built (verified
+# GitHub Action .github/workflows/fleet-deadman.yml checks a copy of the heartbeat on GitHub
+# daily (14:00 UTC since v3.0; 13:00 UTC originally) and alarms if it is >24h stale, late, or
+# below the ratified fleet floors. Something on THIS machine must therefore refresh + publish
+# the heartbeat daily. No automated ~/.claude push existed when this was built (verified
 # 2026-07-09: commits to ZeOoba/ora-claude-config are manual/per-session) -- this
-# script IS that missing pulse.
+# script IS that missing pulse. (Through v2.0 the Action read maintenance/_state/
+# fleet-heartbeat.json on main; since v3.0 it reads the deadman-heartbeat branch.)
 #
 # WHY v2.0 (2026-08-23, Gabriel-ratified): v1.0's narrow scope (heartbeat commit
 # only) meant any OTHER work already committed in the main-checkout worktree sat
@@ -33,10 +34,16 @@
 # the whole MACHINE is dark, the pulse stops and the GitHub Action alarms. That
 # is the dead-man working as designed.
 #
-# Fail-OPEN: any internal error, or any real merge conflict, -> log + exit 0
-# (never block; a missed pulse is exactly what the external monitor exists to
-# catch, and a stuck merge is exactly what a human session must resolve). ASCII-only
-# (PS 5.1 reads non-BOM as ANSI).
+# WHY v3.0 (2026-09-19, OI-323): the heartbeat rode the SAME `git push origin main` as the
+# backup work, so the ~12-min pre-push gate (unrelated failing hook tests, or a remote main
+# that moved mid-gate) kept it off GitHub for days -- while this script exited 0, so Task
+# Scheduler showed green. v3.0 publishes the heartbeat FIRST via publish-fleet-heartbeat.py
+# (GitHub API, dedicated branch, no gate) and exits NONZERO when that publish fails. The
+# backup push below is unchanged and stays best-effort.
+#
+# Backup step is Fail-OPEN: any internal error, or any real merge conflict, -> log and carry
+# on (a stuck merge is exactly what a human session must resolve); only the heartbeat publish
+# sets the exit code. ASCII-only (PS 5.1 reads non-BOM as ANSI).
 #
 # Install (run once -- NOT auto-installed; needs Gabriel's ratification, choose
 # 07:30 local so both winter and summer land before the 13:00 UTC check):
@@ -74,6 +81,23 @@ Invoke-LogRotation $log
 
 function Log($m) { "$([DateTime]::UtcNow.ToString('s'))Z  $m" | Out-File -FilePath $log -Append -Encoding utf8 }
 
+# v3.0 (OI-323): publish the heartbeat FIRST, on its own path. It goes to the dedicated
+# deadman-heartbeat branch through the GitHub API, so it no longer waits on the reconcile,
+# the ~12-min pre-push gate or a race with main below. This is the ONLY result that sets the
+# exit code: nonzero (2) on failure, and publish-fleet-heartbeat.py leaves a marker that
+# fleet-deadman.ps1 reports the same day. The backup push below stays best-effort.
+$pubExit = 0
+try {
+    $py = 'C:\Users\Owner\AppData\Local\Programs\Python\Python313\python.exe'
+    if (-not (Test-Path $py)) { $py = 'python' }
+    & $py (Join-Path $PSScriptRoot 'publish-fleet-heartbeat.py') 2>&1 | ForEach-Object { Log ("publish: " + $_) }
+    $pubExit = $LASTEXITCODE
+} catch {
+    Log ('publish ERROR: ' + $_.Exception.Message)
+    $pubExit = 2
+}
+if ($pubExit -ne 0) { $pubExit = 2 }
+
 try {
     # 0) Resolve whichever worktree actually has 'main' checked out -- NEVER
     #    assume the primary checkout ($primaryRepo) is on main (fixed 2026-08-22,
@@ -92,8 +116,8 @@ try {
         elseif ($_ -match '^branch refs/heads/main$') { $repo = $wtPath }
     }
     if (-not $repo) {
-        Log 'FAIL-OPEN: no worktree has main checked out (git worktree list) - skipping push, Action alarms if stale >24h'
-        exit 0
+        Log 'FAIL-OPEN: no worktree has main checked out (git worktree list) - skipping backup push'
+        exit $pubExit
     }
     Log ("using main worktree: " + $repo)
 
@@ -120,8 +144,8 @@ try {
         $unmerged = git -C $repo diff --name-only --diff-filter=U
         if ($mergeExit -ne 0 -or $unmerged) {
             git -C $repo merge --abort 2>&1 | ForEach-Object { Log ("abort: " + $_) }
-            Log 'REAL CONFLICT - merge aborted, tree left clean and unchanged; needs a session to reconcile by hand. Heartbeat NOT refreshed this cycle (by design -- see step 1 comment); Action alarms if stale >24h'
-            exit 0
+            Log 'REAL CONFLICT - merge aborted, tree left clean and unchanged; needs a session to reconcile by hand. Backup push skipped this cycle (the heartbeat itself was published above)'
+            exit $pubExit
         }
         Log 'auto-merge clean, no conflicts - reconciled, will push everything below'
     }
@@ -165,15 +189,15 @@ try {
     #    fails loud and this script does not retry; log and let the next run, or
     #    a human, reconcile.
     $ahead = git -C $repo log 'origin/main..HEAD' --oneline
-    if (-not $ahead) { Log 'nothing ahead of origin/main - nothing to push'; exit 0 }
+    if (-not $ahead) { Log 'nothing ahead of origin/main - nothing to push'; exit $pubExit }
     $aheadCount = ($ahead | Measure-Object).Count
     Log ("pushing " + $aheadCount + " commit(s) ahead of origin/main")
     git -C $repo push origin main 2>&1 | ForEach-Object { Log ("push: " + $_) }
-    if ($LASTEXITCODE -ne 0) { Log 'push FAILED - heartbeat/pending work NOT on GitHub; Action alarms if stale >24h (by design)' }
+    if ($LASTEXITCODE -ne 0) { Log 'backup push FAILED - pending main work NOT on GitHub (heartbeat unaffected: published above); needs a session to reconcile' }
     else { Log 'OK - pushed' }
-    exit 0
+    exit $pubExit
 }
 catch {
-    Log ('ERROR (fail-open): ' + $_.Exception.Message)
-    exit 0
+    Log ('ERROR (backup step, fail-open): ' + $_.Exception.Message)
+    exit $pubExit
 }

@@ -6,10 +6,12 @@ registry, and the one guard built to catch that was itself a fleet member and
 died with it (~14 CC functions dark ~3 weeks). The fix (Task 6, decision
 DEADMAN_APPROACH=GITHUB-ACTION, Gabriel-ratified 2026-07-09) monitors the fleet
 from OUTSIDE the machine: this script writes maintenance/_state/
-fleet-heartbeat.json; push-fleet-heartbeat.ps1 (or any ~/.claude push) ships it
-to PRIVATE ZeOoba/ora-claude-config; .github/workflows/fleet-deadman.yml checks
-it daily on GitHub and opens an issue when the pulse stops or a fleet shrinks
-below its ratified floor.
+fleet-heartbeat.json (the local copy); publish-fleet-heartbeat.py, run by
+push-fleet-heartbeat.ps1, builds the same payload with build_heartbeat() and
+publishes it to the deadman-heartbeat branch of PRIVATE ZeOoba/ora-claude-config
+through the GitHub API (OI-323; through v2.0 it rode `git push origin main`);
+.github/workflows/fleet-deadman.yml checks that branch daily on GitHub and opens
+an issue when the pulse stops or a fleet shrinks below its ratified floor.
 
 SIBLING, NOT AN EDIT: registry-membership-probe.py carried another session's
 uncommitted work when this was built (single-writer doctrine forbids co-editing),

@@ -237,7 +237,21 @@ class LivenessReport:
 
 
 def _read_mtimes(log_dir):
-    """Return (files_read, problems, newest_mtime) without loading contents."""
+    """Return (files_read, problems, newest_mtime).
+
+    A candidate only counts toward files_read/newest -- the evidence every
+    caller's `usable`/OK verdict rests on -- if it is BOTH (a) a regular file,
+    not a directory/FIFO/socket/etc, and (b) actually openable for reading.
+    stat() succeeding proves neither: a directory named `main.log` stats fine
+    and carries a real mtime (Qodo #2), and a permission-denied or ACL-locked
+    regular file stats fine too (Qodo #1). Every real consumer of this module
+    (dispatch-skip-probe.py, phantom-dispatch-probe.py, host-availability-
+    report.py) actually open()s the candidate paths and would fail on either
+    case, so "read" here has to mean the same thing it means for them, not
+    "stat() didn't raise". We don't load full contents (that's each caller's
+    own job and can be tens of MB) -- a 1-byte probe read is enough to prove
+    openability without duplicating their scan cost.
+    """
     files_read, problems, newest = [], [], None
     log_dir = pathlib.Path(log_dir)
     if not log_dir.is_dir():
@@ -246,6 +260,15 @@ def _read_mtimes(log_dir):
         p = log_dir / name
         if not p.exists():
             problems.append("%s: absent" % name)
+            continue
+        if not p.is_file():
+            problems.append("%s: not a regular file" % name)
+            continue
+        try:
+            with open(p, "rb") as fh:
+                fh.read(1)
+        except OSError as exc:
+            problems.append("%s: %s: %s" % (name, exc.__class__.__name__, exc))
             continue
         try:
             mt = dt.datetime.fromtimestamp(p.stat().st_mtime)
