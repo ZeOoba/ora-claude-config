@@ -51,6 +51,19 @@ import shlex
 import subprocess
 import sys
 
+# Linear-time shlex (see hooks/lib/linear_shlex.py): stdlib shlex is O(len^2) on ONE long
+# token, and this guard tokenizes the WHOLE command whenever its text contains "commit"
+# (not only `git commit`). Imported in its own try/except so a partial deploy -- this guard
+# landing before the lib on the shared checkout -- degrades to stdlib shlex, never inert.
+_LIB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib")
+if _LIB_DIR not in sys.path:
+    sys.path.insert(0, _LIB_DIR)
+try:
+    from linear_shlex import shlex_class as _shlex_class
+except Exception:
+    def _shlex_class(text):
+        return shlex.shlex
+
 # SHARED SAFE SEGMENTATION (2026-07-24, two rounds). Round A (local review): every
 # raw-string `re.split(r"(?:&&|\|\||;|\|)", cmd)` in this file (three call sites) was
 # quote-BLIND. A crafted quoted argument with an embedded ';'/'&&'/'|' could TEAR across
@@ -169,7 +182,8 @@ def _tokenize_segments(cmd):
     newline between two statements). Returns None if `cmd` cannot be tokenized at all
     (unbalanced quoting) -- see the module comment above for the FOUR live-verified
     bypasses this closes and why each of the three prior, simpler attempts failed."""
-    lex = shlex.shlex(cmd, posix=True, punctuation_chars="".join(_FULL_PUNCTUATION_CHARS))
+    lex = _shlex_class(cmd)(cmd, posix=True,
+                            punctuation_chars="".join(_FULL_PUNCTUATION_CHARS))
     lex.whitespace_split = True
     lex.whitespace = lex.whitespace.replace("\n", "")
     lex.commenters = ""
