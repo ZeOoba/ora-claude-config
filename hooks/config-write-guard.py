@@ -74,6 +74,7 @@ same caveat as OVERRIDE_DIR / ORA_OVERRIDE_SESSIONS_DIR):
 
 Stdlib only. ASCII-only. Windows (`python`).
 """
+import bisect
 import json
 import os
 import posixpath
@@ -127,6 +128,14 @@ try:
     TOOL_PATHS_LOADED = True
 except Exception:
     TOOL_PATHS_LOADED = False
+# Imported SEPARATELY so a lib that predates blank_exempt_token (a partial deploy: the
+# guards landing before the lib on the shared checkout) degrades to the raw pattern
+# instead of tripping the import above and turning this whole guard inert.
+try:
+    from tool_call_paths import blank_exempt_token  # noqa: E402
+except Exception:
+    def blank_exempt_token(text, marker):
+        return re.sub(r"\S*" + re.escape(marker) + r"\S*", " <exempt> ", text)
 
 CONFIG_WRITE = Tier("allow-config-write", "config-write", 3600)
 DESTRUCTIVE_DELETE = Tier("allow-destructive-delete", "destructive-delete", 1800)
@@ -278,6 +287,25 @@ def claims_log_path():
         os.path.join(guard_root(), "chip-claims.log")
 
 
+# TIME BOUND (2026-09-21). classify_shell() resolves each drive-qualified token with
+# os.path.realpath from up to 3 shlex passes x 4 text variants (~7x per token), and on
+# Python 3.13 realpath of a nonexistent `c:/a/a/a/...` costs O(components x length)
+# until the 32,767-char path ceiling (`ls c:/a/a/...` 32KB: 4.4s; with a quote and a
+# caret in the command 25.8s). The filesystem does not change inside one call, so
+# classify_shell() memoizes realpath per path string for the duration of that call ONLY
+# (this is None otherwise, so every other caller and every test sees no cache).
+# KNOWN, ACCEPTED RESIDUAL (review 2026-09-21, accepted by Gabriel): the memo is keyed on
+# the exact string, and the token layer and the lexical net hand _norm different
+# SPELLINGS of one token (case-preserved vs lowered, quote-cut vs dequoted, caret vs
+# decareted), so a long nonexistent drive path is still resolved up to ~5x, and each
+# resolution is OS-cost (one 30KB path ~3.9s; two 30KB tokens with quote+caret ~36s).
+# Path length is capped at 32,767 chars by the OS. Keying on a folded spelling would
+# change behavior on case-sensitive directories, skipping realpath for long tokens
+# would let a padded junction path evade the gate, and re-implementing realpath is too
+# risky for a security gate, so this is NOT closed here. The pre-change cost was ~7x.
+_REALPATH_MEMO = None
+
+
 def _norm(p):
     """Forward-slash, lower-cased, junction-resolved absolute form for matching.
 
@@ -290,10 +318,16 @@ def _norm(p):
     single call site, so fixed once here for every caller (classify_path's
     structured file-tool targets AND _shell_absolute_hits' shell-text
     tokens)."""
-    try:
-        resolved = os.path.realpath(p)
-    except (OSError, ValueError):
-        resolved = os.path.abspath(p)
+    memo = _REALPATH_MEMO
+    if memo is not None and p in memo:
+        resolved = memo[p]
+    else:
+        try:
+            resolved = os.path.realpath(p)
+        except (OSError, ValueError):
+            resolved = os.path.abspath(p)
+        if memo is not None:
+            memo[p] = resolved
     normalized = resolved.replace("\\", "/").lower().rstrip("/")
     head, sep, tail = normalized.rpartition("/")
     stripped_tail = tail.rstrip(". ")
@@ -367,7 +401,7 @@ def _blank_exempt(text, exempt_markers):
     an exempted path (a worktree tree, a hooks/sessions token write) contributes
     NOTHING to later marker/root matching -- not even its root prefix."""
     for marker in exempt_markers:
-        text = re.sub(r"\S*" + re.escape(marker) + r"\S*", " <exempt> ", text)
+        text = blank_exempt_token(text, marker)
     return text
 
 
@@ -465,6 +499,7 @@ def _marker_matches(text, marker):
     precision). A glued-substring occurrence (fails the boundary check, e.g.
     ".claude" inside ".claude-worktrees") is not a real occurrence."""
     start = 0
+    spans = None  # (starts, ends) of the absolute tokens, computed once, on demand
     while True:
         idx = text.find(marker, start)
         if idx == -1:
@@ -473,7 +508,15 @@ def _marker_matches(text, marker):
         start = idx + 1
         if not _boundary_ok(text, idx, end):
             continue
-        if _absolute_token_containing(text, idx) is not None:
+        # TIME BOUND (2026-09-21): this used to re-run _ABS_PATH_TOKEN_RE.finditer from
+        # offset 0 for EVERY occurrence (`c:/.claude/hooks ` * N: 64KB 5.2s). The
+        # tokens are ordered and non-overlapping, so one scan + a bisect finds the
+        # same "token overlapping idx" that _absolute_token_containing() does.
+        if spans is None:
+            found = [(m.start(), m.end()) for m in _ABS_PATH_TOKEN_RE.finditer(text)]
+            spans = ([s for s, _e in found], [e for _s, e in found])
+        pos = bisect.bisect_right(spans[0], idx) - 1
+        if pos >= 0 and idx < spans[1][pos]:
             continue  # handled by _shell_absolute_hits instead
         return True
 
@@ -548,11 +591,22 @@ _UNC_ADMIN_SHARE_RE = re.compile(
 # `.claudeX/hooks` is unaffected. Complements the leaf-dot handling in the two
 # boundary matchers (which covers a dot at the END of a match, with no trailing
 # separator).
-_INTERIOR_DOT_RE = re.compile(r"(?<=[^\s/.\\])[.\s]*\.[.\s]*(?=[/\\])")
+#
+# TIME BOUND (2026-09-21). This used to be one pattern,
+#     (?<=[^\s/.\\])[.\s]*\.[.\s]*(?=[/\\])
+# whose two stars over the SAME class are ambiguous, so a long dot/space run with no
+# separator after it (`echo x` + "."*N + ` > out.txt`) cost O(N^2) -- 16KB 2.5s CPU
+# through classify_shell(), x4 per doubling -- on every write-shaped Bash call.
+# EXACT unrolling: the lookahead (`/` or `\`) is disjoint from [.\s], so a match must
+# end at the end of the whole [.\s] run, and the lookbehind (not `.` or whitespace)
+# forces the start to be the run's own first char. So a run is stripped iff it holds
+# at least one `.` and is followed by a separator; one linear pattern finds the runs.
+_INTERIOR_DOT_RE = re.compile(r"(?<=[^\s/.\\])[.\s]+(?=[/\\])")
 
 
 def _strip_interior_component_dots(text):
-    return _INTERIOR_DOT_RE.sub("", text)
+    return _INTERIOR_DOT_RE.sub(
+        lambda m: "" if "." in m.group() else m.group(), text)
 
 
 def _normalize_unc(text):
@@ -717,6 +771,18 @@ def _interpreter_inline(command, rest):
     return any(t in _INLINE_CODE_FLAGS for t in lowered)
 
 
+def _is_tar_extract_bundle(tok):
+    """`re.match(r"^-[A-Za-z]*x[A-Za-z]*$", tok)`, linear. The raw pattern's two
+    stars over one class made `tar -xxxx...x!` O(n^2) (32KB 7.5s) on every Bash call.
+    The `$` also matches just before ONE trailing newline, which is kept here."""
+    if not tok.startswith("-"):
+        return False
+    body = tok[1:]
+    if body.endswith("\n"):
+        body = body[:-1]
+    return "x" in body and body.isascii() and body.isalpha()
+
+
 def _is_output_flag(command, tok):
     if tok in _OUTPUT_FLAG_TOKENS:
         return True
@@ -725,7 +791,7 @@ def _is_output_flag(command, tok):
     if command in ("tar", "bsdtar"):
         if tok in ("--extract", "--get"):
             return True
-        if re.match(r"^-[A-Za-z]*x[A-Za-z]*$", tok) and not tok.startswith("--"):
+        if _is_tar_extract_bundle(tok) and not tok.startswith("--"):
             return True
     return False
 # Wrappers/keywords that pass command position through to the next token --
@@ -742,6 +808,57 @@ _TOKEN_BOUNDARY_PUNCT = frozenset("();<>|&{}\n")
 _WRITE_REDIRECT_TOKENS = frozenset((">", ">>"))
 
 
+# TIME BOUND (2026-09-21). stdlib shlex builds each token with `self.token += ch`, one
+# full string copy per character: ONE long token (a base64 blob, a minified one-liner)
+# is O(len^2) memcpy -- 256KB 1.5s, 512KB 6.3s per pass, and _shlex_passes() makes
+# three passes on every write-shaped Bash call. The subclass below swaps the token
+# accumulator for a list-backed buffer and changes NOTHING else: the state machine is
+# still the stdlib's own (no copied logic to drift), so behavior is identical by
+# construction and pinned against stdlib shlex by differential fuzz. It is only used
+# past _SHLEX_LINEAR_MIN_CHARS; small commands keep the stdlib class untouched.
+_SHLEX_LINEAR_MIN_CHARS = 12288  # below ~12KB the stdlib class is the faster one
+
+
+class _TokenBuf(object):
+    """Append-only token accumulator supporting exactly what shlex.read_token does to
+    `self.token`: `+= str`, truthiness, `== ''`, and being read out once. (After a
+    parse `lex.token` is a _TokenBuf, not a str as in stdlib; nothing reads it.)"""
+    __slots__ = ("_parts",)
+
+    def __init__(self, first=""):
+        self._parts = [first] if first else []
+
+    def __iadd__(self, piece):
+        if piece:
+            self._parts.append(piece)
+        return self
+
+    def __bool__(self):
+        return bool(self._parts)
+
+    def __eq__(self, other):
+        return "".join(self._parts) == other
+
+    __hash__ = None
+
+    def __str__(self):
+        return "".join(self._parts)
+
+
+class _LinearShlex(shlex.shlex):
+    @property
+    def token(self):
+        return self._tokbuf
+
+    @token.setter
+    def token(self, value):
+        self._tokbuf = value if isinstance(value, _TokenBuf) else _TokenBuf(value)
+
+    def read_token(self):
+        result = shlex.shlex.read_token(self)
+        return str(result) if isinstance(result, _TokenBuf) else result
+
+
 def _tokenize(text, escape):
     """shlex-split `text` into argv-style tokens, or None if unparseable.
     posix mode merges quoted fragments exactly as the shell does;
@@ -749,7 +866,8 @@ def _tokenize(text, escape):
     never glue onto a path. escape=False turns off backslash-escaping for the
     Windows-path pass."""
     try:
-        lex = shlex.shlex(text, posix=True, punctuation_chars=True)
+        lex = (_LinearShlex if len(text) > _SHLEX_LINEAR_MIN_CHARS
+               else shlex.shlex)(text, posix=True, punctuation_chars=True)
         lex.whitespace_split = True
         if not escape:
             lex.escape = ""
@@ -1013,6 +1131,17 @@ def _classify_shell_variant(text, live_root, governance, claim):
 
 
 def classify_shell(command, may_write=True, undecidable=False):
+    """See _classify_shell_impl. Runs it with a per-call realpath memo (_REALPATH_MEMO)."""
+    global _REALPATH_MEMO
+    outer = _REALPATH_MEMO
+    _REALPATH_MEMO = {} if outer is None else outer
+    try:
+        return _classify_shell_impl(command, may_write, undecidable)
+    finally:
+        _REALPATH_MEMO = outer
+
+
+def _classify_shell_impl(command, may_write=True, undecidable=False):
     """('governance'|'claim', label) for a write-shaped shell command naming a
     protected path, else None.
 

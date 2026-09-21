@@ -288,7 +288,24 @@ _IDENT_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
 _STRING_LITERAL_RE = re.compile(r"^r?(['\"]).*\1$", re.DOTALL)
 
 
-def _resolve_identifier_literal(lowered_text, ident):
+# WORK BOUND (2026-09-21). Every save-shaped call whose argument is a bare identifier
+# used to rescan the WHOLE command for that identifier's assignment, so
+# `wb.save(p); ` * N + <master name> was O(N * len): 64KB 10.4s, ~4x per doubling,
+# on the shell path of every Bash call that names the workbook. Resolutions are now
+# memoized per identifier (exact: same text, same ident, same answer), and a command
+# needing more than _MAX_DISTINCT_IDENTIFIERS DISTINCT identifiers resolved fails
+# TOWARD BLOCK -- the same (None, True) "unresolved" verdict a nested-paren save call
+# already gets. Consequence for legitimate use: a command that names the master
+# workbook AND holds >64 save-shaped calls with distinct bare-identifier arguments
+# needs the allow-workbook-write token. Nothing that blocked before stops blocking.
+_MAX_DISTINCT_IDENTIFIERS = 64
+
+
+class _TooManyIdentifiers(Exception):
+    pass
+
+
+def _resolve_identifier_literal(lowered_text, ident, cache=None):
     """The literal string value of the LAST plain `ident = <quoted literal>`
     assignment in `lowered_text`, or None if `ident` is never assigned a plain
     literal there.
@@ -303,6 +320,11 @@ def _resolve_identifier_literal(lowered_text, ident):
     Desktop-Commander REPL turn, exactly the B2 shape) is NOT provably safe."""
     if not _IDENT_RE.match(ident):
         return None
+    if cache is not None:
+        if ident in cache:
+            return cache[ident]
+        if len(cache) >= _MAX_DISTINCT_IDENTIFIERS:
+            raise _TooManyIdentifiers()
     # BUG (found by round-3's independent review, live-verified): `r?` sat INSIDE
     # the capture group, so for `p = r'...'` group 1 captured the two characters
     # "r'" and the closing `\1` backreference then demanded a literal "r'" to
@@ -317,12 +339,13 @@ def _resolve_identifier_literal(lowered_text, ident):
     pattern = re.compile(r"\b%s\s*=\s*r?(['\"])((?:(?!\1).)*)\1"
                          % re.escape(ident))
     matches = list(pattern.finditer(lowered_text))
-    if not matches:
-        return None
-    return matches[-1].group(2)  # last assignment wins -- normal execution order
+    result = matches[-1].group(2) if matches else None  # last assignment wins
+    if cache is not None:
+        cache[ident] = result
+    return result
 
 
-def _arg_verdict(lowered_text, arg_text, strict):
+def _arg_verdict(lowered_text, arg_text, strict, cache=None):
     """True/False/None for whether one save-shaped call's argument names the
     workbook. None means unresolvable -- the caller fails toward block ONLY when
     `strict` (a direct-path-argument call, e.g. .save()); a writer-object call
@@ -346,7 +369,7 @@ def _arg_verdict(lowered_text, arg_text, strict):
         return False
     first_token = stripped.split(",", 1)[0].strip()
     if _IDENT_RE.match(first_token):
-        resolved = _resolve_identifier_literal(lowered_text, first_token)
+        resolved = _resolve_identifier_literal(lowered_text, first_token, cache)
         if resolved is None:
             return None if strict else False
         return _names_workbook(resolved)
@@ -527,8 +550,14 @@ def _save_call_targets_workbook(lowered_text):
     # actually detects that mismatch.
     if len(direct_calls) + len(writer_calls) != total_save_shaped:
         return (None, True)  # some call's args have nested parens -- unresolvable
-    verdicts = [_arg_verdict(lowered_text, m.group(1), True) for m in direct_calls]
-    verdicts += [_arg_verdict(lowered_text, m.group(1), False) for m in writer_calls]
+    cache = {}
+    try:
+        verdicts = [_arg_verdict(lowered_text, m.group(1), True, cache)
+                    for m in direct_calls]
+        verdicts += [_arg_verdict(lowered_text, m.group(1), False, cache)
+                     for m in writer_calls]
+    except _TooManyIdentifiers:
+        return (None, True)  # bounded work: fail toward block (see _MAX_DISTINCT_IDENTIFIERS)
     if any(v is True for v in verdicts):
         return (True, False)
     if any(v is None for v in verdicts):
