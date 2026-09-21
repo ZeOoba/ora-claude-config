@@ -44,6 +44,7 @@ the CALLING GUARD's decision, not this module's.
 
 Stdlib only. ASCII-only. Windows (`python`).
 """
+import bisect
 import os
 import re
 import sys
@@ -457,9 +458,159 @@ _NULL_REDIRECT_RE = re.compile(r"\d*>\s*(?:/dev/null|nul)\b", re.IGNORECASE)
 # "git checkout" substring also missed it; live-proven). Matches "git", then any
 # same-segment args (no |;&), then a mutating verb as a whole word. Read-only git
 # (log/diff/status/show/ls-files) is deliberately absent.
-GIT_MUTATE_RE = re.compile(
-    r"\bgit\b[^|;&\n]*?\b(checkout|restore|reset|apply|stash|merge|rebase|"
+#
+# TIME BOUND (PR #234 follow-up, measured 2026-09-20). The single pattern
+#     \bgit\b[^|;&\n]*?\b(verb)\b
+# is O(n^2): re.search retries it at every `git` and each failed attempt rescans the
+# rest of the segment ("git" + " git" * n: 16KB 1.2-3.9s CPU, 32KB 11-15s, 64KB
+# 46-60s -- the spread is machine load; the growth is 4x per doubling). This runs on
+# EVERY Bash call via shell_may_write() -- config-write-guard.py and
+# workbook-write-guard.py, whatever the hooks/lib health -- and the dispatcher runs
+# guards in-process with no per-guard timeout, so one slow scan stalls every guard
+# behind it.
+#
+# EXACT, NOT CAPPED: no size cap, no decision change, so nothing legitimate is
+# stranded and no protective direction has to be chosen. The pattern matches iff
+# some segment (maximal run of non-[|;&\n]) holds a whole-word `git` followed LATER IN
+# THAT SEGMENT by a whole-word verb. The FIRST `git` of a segment offers the widest
+# tail, so if any `git` works it does; hence one `git` search and one verb search per
+# segment, each linear. `pos`/`endpos` (not slicing) keep `\b` reading the real
+# neighbouring characters; at a segment edge that neighbour is a separator (a
+# non-word char) or the end of the text, exactly what the one-shot pattern saw.
+# test-always-on-regex-bound.py pins equality with the raw pattern by seeded
+# differential fuzz and pins the CPU bound at 64KB on several worst-case shapes.
+_GIT_WORD_RE = re.compile(r"\bgit\b", re.IGNORECASE)
+_GIT_VERB_RE = re.compile(
+    r"\b(checkout|restore|reset|apply|stash|merge|rebase|"
     r"cherry-pick|clean|revert|pull|switch)\b", re.IGNORECASE)
+_GIT_SEGMENT_RE = re.compile(r"[^|;&\n]+")
+
+
+class _GitMutateMatcher(object):
+    """Drop-in for the old compiled GIT_MUTATE_RE: `.search(text)` returns the
+    verb's re.Match (truthy) or None. Linear in len(text). Consumers only test
+    truthiness; the Match is the mutating verb, not the whole `git ... verb` span."""
+
+    def search(self, text):
+        for seg in _GIT_SEGMENT_RE.finditer(text):
+            start, end = seg.span()
+            git = _GIT_WORD_RE.search(text, start, end)
+            if git is None:
+                continue
+            verb = _GIT_VERB_RE.search(text, git.end(), end)
+            if verb is not None:
+                return verb
+        return None
+
+
+GIT_MUTATE_RE = _GitMutateMatcher()
+
+
+# ------------------------------------------------------ heredoc body stripping
+# Shared by config-write-guard.py and lint-config-guard.py (each had its own copy of
+# the same regex). A heredoc body is DATA being written into a file, not a path any
+# command argument names; a commit message that merely MENTIONS hooks/** in prose
+# must not trip a governance marker. The opening line and everything after the
+# closing delimiter stay untouched, so a heredoc actually used to write INTO a
+# protected path is still caught via its redirect target.
+#
+# TIME BOUND (PR #234 follow-up, measured 2026-09-20). The original single regex
+#     <<-?\s*['"]?(WORD)['"]?[^\n]*\n.*?\n[ \t]*\1(?=[ \t\r\n]|$)     (DOTALL)
+# rescans to the end of the input for the closer of EVERY `<<WORD` marker that has
+# none, so N unclosed markers cost O(N * len): 5000 markers/37KB 7s CPU, 8000 markers
+# in a 63KB command 15-20s. Always-on (every Bash call), in-process, no per-guard
+# timeout -> it stalls every guard behind it.
+#
+# EXACT, NOT CAPPED: strip_heredoc_bodies() returns byte-for-byte what
+# RAW.sub(_blank, text) returns (test-always-on-regex-bound.py fuzzes the equality
+# against the verbatim original), in near-linear time. What the regex
+# actually does, which the scanner reproduces on purpose (quirks included):
+#   * the opener's `-?`, `\s*` and quote are forced (nothing else can precede the
+#     word), so the delimiter word is the maximal [A-Za-z0-9_] run `w`; group 1 may
+#     backtrack to any non-empty PREFIX of `w`, longest first (so `<<EOFX` can be
+#     closed by a bare `EOF` line -- an existing quirk, preserved, not endorsed);
+#   * the opening line ends at the first newline at/after the word (`[^\n]*\n`);
+#   * the closer is a newline at index >= that newline + 1, then `[ \t]*`, then
+#     exactly the delimiter, then space/tab/CR/LF/end. Because the delimiter is all
+#     word characters and must be followed by a non-word character, a closer line
+#     is simply "word run W after optional indentation, then [ \t\r\n] or end";
+#   * leftmost opener wins, then the longest prefix that has a closer, then the
+#     EARLIEST such closer (lazy body); scanning resumes after the match.
+# So: index every candidate closer line ONCE (word -> ascending positions), then
+# each opener is a dict lookup + bisect instead of a scan to end of input.
+#
+# COST, STATED HONESTLY: the git matcher is linear. The heredoc scanner is linear
+# for every shape tried EXCEPT one, where it is O(n * sqrt(n)): each opener tries
+# every distinct closer length <= its word length, slicing/hashing word[:L] (O(L))
+# each time, so k distinct closer lengths (which cost ~k^2/2 chars to build) times
+# k/2 long-word openers grows ~2.5-4x per doubling (independent review, 2026-09-21):
+# 1MB 0.16s, 2MB 0.43s, 4MB 1.1s, 8MB 4.8s, 16MB 16s CPU. At 64KB it is ~5ms. It is
+# left as-is deliberately: no bash command anywhere near 1MB exists in this fleet,
+# and the exact O(n log n) alternative (walk a prefix-linked sorted key list) adds
+# real complexity to security-gate code for a case that cannot occur. If commands
+# ever reach MBs, revisit; do NOT add a size cap (it would have to pick a direction
+# and would strand legitimate large heredocs).
+_HEREDOC_OPEN_RE = re.compile(r"<<-?\s*['\"]?([a-zA-Z0-9_]+)")
+_HEREDOC_CLOSER_RE = re.compile(r"\n[ \t]*([a-zA-Z0-9_]+)(?=[ \t\r\n]|$)")
+
+
+def _heredoc_closer_index(text):
+    """({word: [newline_index, ...]}, {word: [closer_end, ...]}, sorted key lengths)."""
+    starts, ends = {}, {}
+    for m in _HEREDOC_CLOSER_RE.finditer(text):
+        word = m.group(1)
+        starts.setdefault(word, []).append(m.start())
+        ends.setdefault(word, []).append(m.end())
+    return starts, ends, sorted({len(w) for w in starts})
+
+
+def strip_heredoc_bodies(text):
+    """Replace each heredoc body with ' <heredoc-body> ' (see the block comment)."""
+    if "<<" not in text:
+        return text
+    out = []
+    copied = 0            # text[:copied] is already in `out`
+    index = None          # built lazily, once
+    newline = None        # cached first "\n" at/after the last word end (-1: none)
+    at = text.find("<<")
+    while at != -1:
+        opener = _HEREDOC_OPEN_RE.match(text, at)
+        if opener is None:
+            at = text.find("<<", at + 1)
+            continue
+        word, word_end = opener.group(1), opener.end(1)
+        # Openers are visited left to right and word_end only grows, so a cached
+        # newline still valid for this word_end (or "no newline left") is reusable.
+        if newline is None or (newline != -1 and newline < word_end):
+            newline = text.find("\n", word_end)
+        if newline == -1:
+            break         # no later opener can have an opening line either
+        if index is None:
+            index = _heredoc_closer_index(text)
+        starts, ends, lengths = index
+        found = None
+        for i in range(bisect.bisect_right(lengths, len(word)) - 1, -1, -1):
+            key = word[:lengths[i]]
+            positions = starts.get(key)
+            if positions is None:
+                continue
+            j = bisect.bisect_left(positions, newline + 1)
+            if j < len(positions):
+                found = (key, ends[key][j])
+                break
+        if found is None:
+            at = text.find("<<", at + 1)
+            continue
+        key, end = found
+        first_nl = text.find("\n", at, end)
+        out.append(text[copied:at])
+        out.append(text[at:first_nl] + "\n <heredoc-body> \n" + key)
+        copied = end
+        at = text.find("<<", end)
+    if not out:
+        return text
+    out.append(text[copied:])
+    return "".join(out)
 
 
 def _shell_text(tool_name, tool_input):
