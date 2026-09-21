@@ -146,6 +146,90 @@ def main():
     check("non-repo: errors rather than raising", bool(a["error"]) and a["ok"] is False,
           repr(a))
 
+    # --- added 2026-09-07 alongside the hooks/lib/git_probe_common.py
+    # extraction: repo=None must mean "run against cwd" (a naive shared git()
+    # that always passes `-C <repo>` breaks this, since `-C None` is not a
+    # valid path -- caught before it shipped). ---------------------------------
+    r4 = make_repo()
+    try:
+        run(r4, "checkout", "-q", "-b", "feature")
+        commit(r4, "my work one")
+        prev_cwd = os.getcwd()
+        try:
+            os.chdir(r4)
+            a = cbp.analyze("main", None, expect=1)
+            check("repo=None resolves against cwd (not a broken -C None)",
+                  a["ok"] is True, repr(a))
+            check("repo=None: cbp.main() with no --repo also works",
+                  cbp.main(["--base", "main", "--expect", "1"]) == 0)
+        finally:
+            os.chdir(prev_cwd)
+    finally:
+        shutil.rmtree(r4, ignore_errors=True)
+
+    # --- repo="" (explicit-but-empty -- what argparse yields for `--repo ""`,
+    # distinct from the None default) must FAIL, never silently fall back to
+    # cwd. `git -C ""` is a documented no-op that resolves against the CURRENT
+    # directory, so a naive `-C repo` translation would let a caller's
+    # `--repo "$UNSET_VAR"` silently certify whatever repo the process
+    # happens to be sitting in -- the exact false-green this tool exists to
+    # prevent. cwd is deliberately set to a VALID repo here, so a pass would
+    # prove the empty string fell back to cwd, not merely "found no repo". ---
+    r5 = make_repo()
+    try:
+        prev_cwd = os.getcwd()
+        try:
+            os.chdir(r5)
+            a = cbp.analyze("main", "", expect=0)
+            check("repo='' does not silently fall back to cwd",
+                  a["ok"] is False and bool(a["error"]), repr(a))
+        finally:
+            os.chdir(prev_cwd)
+    finally:
+        shutil.rmtree(r5, ignore_errors=True)
+
+    # --- the repo= argument is actually USED, not silently ignored in favor
+    # of cwd -- mutation-tested: dropping the repo argument from the git()
+    # call site made this check (and only this check) fail. ------------------
+    r6a = make_repo()
+    r6b = make_repo()
+    try:
+        run(r6b, "checkout", "-q", "-b", "other-feature")
+        commit(r6b, "work only in r6b")
+        prev_cwd = os.getcwd()
+        try:
+            os.chdir(r6a)  # cwd points at r6a...
+            a = cbp.analyze("main", r6b, expect=1)  # ...--repo explicitly says r6b
+            check("explicit --repo overrides cwd, not silently ignored",
+                  a["ok"] is True and len(a["commits"]) == 1, repr(a))
+        finally:
+            os.chdir(prev_cwd)
+    finally:
+        shutil.rmtree(r6a, ignore_errors=True)
+        shutil.rmtree(r6b, ignore_errors=True)
+
+    # --- white-box: force the very first git() call (rev-parse HEAD) to fail
+    # -- real git essentially never fails this on a valid repo, so failure-
+    # path coverage needs a monkeypatch. --------------------------------------
+    r7 = make_repo()
+    try:
+        orig_git = cbp.git
+
+        def fake_git(args, repo=None):
+            if args and args[0] == "rev-parse" and args[1:2] == ["HEAD"]:
+                return 128, "simulated HEAD resolve failure"
+            return orig_git(args, repo)
+
+        cbp.git = fake_git
+        try:
+            a = cbp.analyze("main", r7)
+            check("HEAD resolve failure is undetermined, not a crash",
+                  a["error"] is not None and "cannot resolve HEAD" in a["error"], repr(a))
+        finally:
+            cbp.git = orig_git
+    finally:
+        shutil.rmtree(r7, ignore_errors=True)
+
     passed = sum(1 for ok, _ in _results if ok)
     print("\ncheck-branch-point tests: %d/%d passed" % (passed, len(_results)))
     return 0 if passed == len(_results) else 1

@@ -30,7 +30,7 @@
   </Settings>
   <Triggers>
     <CalendarTrigger>
-      <StartBoundary>2026-07-16T07:30:00</StartBoundary>
+      <StartBoundary>2026-07-16T07:45:00</StartBoundary>
       <ScheduleByDay>
         <DaysInterval>1</DaysInterval>
       </ScheduleByDay>

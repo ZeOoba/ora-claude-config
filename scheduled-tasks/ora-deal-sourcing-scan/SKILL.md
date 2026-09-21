@@ -1,9 +1,37 @@
 ---
 name: ora-deal-sourcing-scan
-description: Weekly on-market deal-sourcing scan (Tuesdays) — searches new industrial/flex listings across ORA's ten target markets, applies the basis/physical hard floors as a GATE, scores survivors, dedupes against the Notion Deal Sourcing Log, mechanically detects price cuts off the stored first-sighting ask, and emails a ranked digest. Restored 2026-07-07 — no replacement task applies the scoring rubric or writes to the Deal Sourcing Log. [MODEL: claude-opus-5 observed | checked 2026-08-12 via live-run transcript canary]
+description: Weekly on-market deal-sourcing scan (Tuesdays) — searches new industrial/flex listings across ORA's ten target markets, applies the basis/physical hard floors as a GATE, scores survivors, dedupes against the Notion Deal Sourcing Log, mechanically detects price cuts off the stored first-sighting ask, and emails a ranked digest. Restored 2026-07-07 — no replacement task applies the scoring rubric or writes to the Deal Sourcing Log. v2.7: links listings to Broker Relationships on unambiguous roster matches. [MODEL: claude-opus-5 observed | checked 2026-08-12 via live-run transcript canary]
 ---
 
-ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.5, 2026-08-11).
+ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.7, 2026-09-13).
+
+v2.7 — BROKER LINK (graft B, Gabriel-ratified 2026-09-13; no scoring weight changed).
+The Deal Sourcing Log and the Acquisition Pipeline Tracker now carry a `Broker (Linked)`
+relation to the Broker Relationships DB, which rolls up per-broker Listings Sent / T1-T2
+Listings / LOIs / Closed. `Broker / Contact` stayed free text with no join, so no broker
+could ever be scored. STEP 5 now sets the relation on an UNAMBIGUOUS roster match only,
+never creates roster rows, backfills the link on every re-sighted row whose link is empty,
+and STEP 6 lists this run's unlinked brokers for Gabriel. The Pipeline Tracker's
+`Broker (Linked)` is maintained by the deal owner; this task never writes it.
+
+v2.6 — FOUR COVERAGE-GAP FINDINGS CLOSED FROM THE 2026-09-05 RUN (three coverage-gap
+fixes + one procedure made mandatory, no scoring weight changed; this entry documents
+changes already made inline below — the version banner and this changelog entry were
+the only pieces missing when those edits first landed). Full remediation analysis for
+that run: `docs/superpowers/plans/2026-09-05-deal-sourcing-scan-remediation.md`.
+(1) BROWSER-TOOL REQUIREMENT added as a sibling bullet to the Step 1 dispatch guardrail
+— a per-market agent given only WebSearch/WebFetch cannot read JS-rendered broker-direct
+inventory pages and was reporting 7 real brokerage sites across four target markets
+(Michigan, Virginia, Iowa, Kentucky) as having "no crawlable inventory" when the gap was
+the dispatch's own tooling, not the market. (2) Baltimore's Curtis Bay/Dundalk/Rosedale/Glen
+Burnie MD now get the same explicit per-submarket query treatment Howard County already
+had — a generic "Baltimore" metro-level sweep does not reliably surface addressable
+listings for any of these four. (3) Indianapolis's Whiteland/Beech Grove IN get the same
+treatment — they were getting folded into a combined Noblesville-area query. (4) The
+Step 1 construction-photo-analysis procedure (v2.4) is now MANDATORY, not a discretionary
+scope trade-off a run can skip — Gabriel ratified this 2026-09-05 after that run skipped
+it entirely with no compensating check; skipping it going forward is a reportable
+coverage gap, same standing as an unsearched submarket.
 
 v2.5 — LOUISVILLE KY LEG ADDED; THE SCAN IS NOW TEN MARKETS, NOT NINE (2026-08-11,
 coverage fix + mirror sync, no scoring weight changed). Louisville was ratified as the
@@ -273,7 +301,8 @@ For each of the ten clusters, web-search for newly listed industrial/flex produc
   2026-08-04 run ALL NINE market agents reported it as impossible and returned UNKNOWN
   for every candidate. UNKNOWN scores the same as PEMB (2/5), so that silently
   suppressed ~3 points on essentially the whole scan. The instruction was wrong, not
-  the agents — WebFetch returns text only and cannot see images. Use this instead: ***
+  the agents — WebFetch returns text only and cannot see images. ***
+
   *** MANDATORY, NOT DISCRETIONARY (ratified by Gabriel 2026-09-05, after the 2026-09-05
   run skipped this whole procedure "for scope reasons" with no compensating check). The
   score impact is genuinely small — ~1 in 5 candidates resolvable, up to 3 points each
@@ -282,7 +311,9 @@ For each of the ten clusters, web-search for newly listed industrial/flex produc
   the real yield is the by-products below, which listing text never discloses. Skipping
   this step is a COVERAGE GAP to name explicitly in that run's digest, exactly like a
   submarket that returned nothing — never a silent scope trade-off a run makes on its
-  own. Restore it every run. ***
+  own. Run it every run, not at a run's discretion. ***
+
+  Use this instead:
   1. Read the listing text first. A minority state it outright ("masonry", "precast
      concrete", "pre-engineered steel", "block"). Cheapest win; take it and stop.
   2. Otherwise open the listing in the BROWSER PANE (preview_start / navigate), then:
@@ -564,7 +595,9 @@ spot. All 144 priced rows were backfilled on 2026-07-14, so the baseline exists:
   $2,332,000)". No manual arithmetic; read it.
 
 On each run:
-- Existing + unchanged: skip silently.
+- Existing + unchanged: skip silently — EXCEPT set `Broker (Linked)` per the BROKER LINK
+  RULE (STEP 5) when it is empty. This exception applies in EVERY branch below too (price
+  cut, re-list, correction); besides `Listing URL` (STEP 5), it is the only extra field a re-sighting may write.
 - Existing + PRICE CUT: update `Asking Price` and `Price / SF` ONLY. Leave
   `Ask at First Sighting` untouched. The formula surfaces the delta. These LEAD the
   digest — a cut is the strongest motivation signal in the whole scan.
@@ -591,10 +624,30 @@ update); Asking Price;
 (FUNCTIONAL — per Step 2.5); Year Built; Buy Box Score (100); **Verdict** (T1 PURSUE /
 T2 WATCH / PASS / KILLED); **Floor Result** (PASS / FAIL-BASIS / FAIL-YIELD /
 FAIL-BOTH / N/A — this is the gate outcome from Step 3A); Asset Type; Broker /
-Contact; Date Seen; Notes / Flags (gate outcome FIRST, then score breakdown, the
+Contact; **`Broker (Linked)`** (see BROKER LINK RULE below); Date Seen; Notes / Flags (gate outcome FIRST, then score breakdown, the
 pre-mortem, the benchmark used and whether the deal sits near the floor line, plus
 PRICE CUT / RE-LIST / REQUEST PRICE / PROVISIONAL / SUB-SCALE flags); Next Action
 (what to do, and the decision rule — e.g. "decline if the ask implies over $105/SF").
+
+BROKER LINK RULE (v2.7). Keep writing the raw `Broker / Contact` text exactly as today — the
+relation supplements it, never replaces it. Then, for each named listing broker (not a
+platform sender such as Crexi/CommercialCafe/CommercialSearch/LoopNet, not a role mailbox
+(info@, investments@, team@, listings@, emails@ — on any domain) with no person named, not a
+firm-only string, not a placeholder). First strip credentials (CCIM/SIOR/Jr./III) and Inc/LLC;
+then split co-listed strings on "&", "/" and ";" only (never on ",", which separates name from
+firm) and treat each named person separately:
+  1. Load the Broker Relationships roster once per run (data source
+     48e43778-b1f2-4b16-8f3c-0bf18f8642e9: Broker Name, Company / Brokerage, Email, url).
+  2. Match by EXACT email (case-insensitive) first; else by exact normalized full name
+     (strip CCIM/SIOR/Jr./III and punctuation) AND the same normalized firm (lower-case;
+     strip Inc/LLC/Co./punctuation and any "|" affiliate suffix, so "Cushman & Wakefield |
+     Thalhimer" == "Cushman & Wakefield"). A role-mailbox email never counts as a match.
+  3. Exactly one roster match → add that page to `Broker (Linked)` (append; never remove an
+     existing link). Zero or more than one match → leave the relation untouched.
+  4. NEVER create a Broker Relationships row from this task. New roster entries are
+     Gabriel-approved only.
+  5. On an UPDATE to an existing row, apply the same rule if `Broker (Linked)` is empty.
+Tally every named broker you could NOT link, with its listing count this run, for STEP 6.
 
 STEP 5B — CROSS-WRITE THE VERIFIED ASK TO THE ACQUISITION PIPELINE TRACKER
 (added 2026-08-12, Gabriel-directed in-turn. Closes a real 36-minute-fuse defect: on
@@ -659,7 +712,7 @@ fields, ratified by Gabriel 2026-08-12 over the simpler option of reusing `Purch
 An ask is broker marketing. `Purchase Price` is what ORA would or did pay. They are
 different quantities and they now live in different fields — keep it that way.
 
-ALSO NEVER WRITE, from this task, on a pipeline-tracker row: `Next Action`, `Stage`,
+ALSO NEVER WRITE, from this task, on a pipeline-tracker row: `Broker (Linked)` (v2.7), `Next Action`, `Stage`,
 `LOI Status`, `PSA Status`, `Last Activity`, `Last Updated`, `Notes`, `Kill Reason`.
 Those are posture and clock fields owned by the deal owner and by `ora-deal-aging-sla`,
 which measures staleness against them — a scan touching them would reset the very clock
@@ -725,7 +778,10 @@ Body order:
       [EST] and PROVISIONAL, and any deal within ~3 ppt of the floor line.
   (7) Coverage gaps, named explicitly — a submarket that returned nothing gets said
       out loud, never silently omitted.
-  (8) Link to the Deal Sourcing Log.
+  (8) Unlinked brokers (v2.7): named brokers from this run with no `Broker (Linked)` roster
+      match, with listing counts, plus one line "X of Y active (Status not Dead/Passed) log rows broker-linked". Candidates for Gabriel to add to Broker Relationships —
+      this task never adds them. Omit the section when every named broker linked.
+  (9) Link to the Deal Sourcing Log.
 If nothing new: send a brief "no new on-doctrine listings this week" note — a short,
 honest digest is the correct output of a quiet week.
 

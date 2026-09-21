@@ -44,10 +44,38 @@ the CALLING GUARD's decision, not this module's.
 
 Stdlib only. ASCII-only. Windows (`python`).
 """
+import bisect
 import os
 import re
+import sys
 import unicodedata
 from collections import namedtuple
+
+# Same self-sufficient sibling-import pattern as email_send_tier.py / website_deploy_tier.py:
+# resolve lib/ from this file rather than trusting whatever a consumer put on sys.path.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from text_normalization import STRIP_CATEGORIES  # noqa: E402
+    # Shape-validate before trusting it: a shared module that imports but exports the
+    # wrong TYPE would raise inside normalize_text on every call instead of here.
+    if (not isinstance(STRIP_CATEGORIES, tuple) or not STRIP_CATEGORIES
+            or not all(isinstance(c, str) for c in STRIP_CATEGORIES)):
+        raise TypeError("STRIP_CATEGORIES must be a non-empty tuple of str")
+except BaseException:
+    # MEASURED, not theoretical (2026-09-18 adversarial review). An unguarded import here
+    # is not "the documented degrade-to-inert": losing this one file takes THIS module
+    # down, and with it config-write-guard (225 of its checks fail) and lint-config-guard
+    # (17) go fully inert -- including their protection of hooks/** itself, i.e. of this
+    # file and of ora-autonomy-gate.py. The most likely trigger is mundane: a commit that
+    # misses the untracked module, or a partial pull on the shared checkout.
+    #
+    # BaseException, not Exception: a shared module that called sys.exit() at import time
+    # would raise SystemExit, which Exception does not catch, and the guard importing this
+    # module would die rather than degrade.
+    #
+    # Pinned to the canonical tuple by
+    # test-tool-call-paths.py::test_strip_categories_fallbacks_match_shared_module.
+    STRIP_CATEGORIES = ("Cf", "Mn")
 
 # --------------------------------------------------------------------- tool names
 DC_PREFIXES = (
@@ -126,12 +154,15 @@ def is_write_capable(tool_name):
 
 
 # --------------------------------------------------------------------- normalization
-# Unicode categories stripped ON TOP OF NFKC, mirroring ora-autonomy-gate.py's
-# _normalize_for_matching (Round 3 adversarial finding, 2026-07-17): Cf (zero-width
-# space, RTL override, soft hyphen, ...) and Mn (combining marks) inserted MID-WORD
-# break substring/word-boundary matching invisibly. Legitimate command/path text has
-# no legitimate reason to contain either category.
-_STRIP_CATEGORIES = ("Cf", "Mn")
+# The stripped-category set is SHARED with ora-autonomy-gate.py via
+# hooks/lib/text_normalization.py (2026-09-18). It used to be an independent copy of the
+# same tuple here, mirroring the gate's by convention only -- read that module for the
+# Round 3 (2026-07-17) rationale, for why the two consumers share the CONSTANT but
+# deliberately NOT the matcher, and for the path-ordering rule.
+#
+# The non-str contract below is this module's half of that split and is deliberate: this
+# function parses arbitrary tool_input JSON, where a field may legitimately be any type, so
+# an odd payload must not raise inside every importing guard.
 
 
 def normalize_text(text):
@@ -141,7 +172,35 @@ def normalize_text(text):
         return ""
     folded = unicodedata.normalize("NFKC", text)
     return "".join(ch for ch in folded
-                   if unicodedata.category(ch) not in _STRIP_CATEGORIES)
+                   if unicodedata.category(ch) not in STRIP_CATEGORIES)
+
+
+_WHITESPACE_RE = re.compile(r"\s")
+
+
+def blank_exempt_token(text, marker):
+    """Replace every whitespace-delimited token of `text` that contains `marker` with
+    ` <exempt> ` -- config-write-guard.py's and lint-config-guard.py's `_blank_exempt`
+    step. Identical to
+        re.sub(r"\\S*" + re.escape(marker) + r"\\S*", " <exempt> ", text)
+    but linear. That raw pattern is O(token^2) on a long token that does NOT contain
+    the marker (`\\S*` re-scans to the token's end from every start offset): `echo <one
+    16KB token> > out.txt` cost ~10s in config-write-guard (~12 markers x 4 variants),
+    ~0.7s in lint-config-guard, x3-4 per doubling -- a base64 blob or minified one-liner
+    redirected to a file stalled every guard behind it. Here a match may only START at
+    a token start (`(?<!\\S)`) and reaches the marker lazily, so a failed attempt is not
+    retried from each offset. Exact for any marker that is non-empty and holds no
+    whitespace (the match is then the whole token either way); a marker with
+    whitespace (a guard root under `C:/Some User/`) spans tokens, which the anchored
+    form cannot express, so that case keeps the raw pattern -- its cost is bounded by
+    the root, which the caller does not control an attacker over. `marker not in text`
+    short-circuits both: no match is possible without the literal."""
+    if marker not in text:
+        return text
+    body = re.escape(marker)
+    if marker and not _WHITESPACE_RE.search(marker):
+        return re.sub(r"(?<!\S)\S*?" + body + r"\S*", " <exempt> ", text)
+    return re.sub(r"\S*" + body + r"\S*", " <exempt> ", text)
 
 
 def resolve_path(path):
@@ -404,7 +463,21 @@ UNBOUNDED_WRITE_INDICATORS = tuple(
 # os.path.join(...)) -- stays flagged. Fail-toward-block on any unresolved
 # shape, the same posture as the rest of this module's static text analysis.
 _OPEN_CALL_RE = re.compile(r"open\(([^()]*)\)")
-_OPEN_SAFE_ARGS_RE = re.compile(r"^\s*[^,]*?\s*(?:,\s*['\"]r[bt]?['\"]\s*)?$")
+# The safe-args shape, unrolled. It used to be ONE regex,
+#     ^\s*[^,]*?\s*(?:,\s*['"]r[bt]?['"]\s*)?$
+# whose lazy `[^,]*?` and adjacent `\s*` are ambiguous over a whitespace run, so an
+# argument like `a` + N spaces + `b` cost O(N^2) (16KB: 2.4s CPU, x4 per doubling)
+# -- and this runs on EVERY Bash call via shell_may_write(). The split below is
+# EXACT: `[^,]*?` cannot cross a comma, so the optional mode group can only start
+# at the FIRST comma; with no comma the whole argument is `[^,]*?`. Pinned against
+# the raw pattern by seeded differential fuzz in
+# tests/test-always-on-linear-redirect-exempt.py.
+_OPEN_MODE_TAIL_RE = re.compile(r"\s*['\"]r[bt]?['\"]\s*$")
+
+
+def _open_args_safe(arg):
+    _head, comma, tail = arg.partition(",")
+    return not comma or _OPEN_MODE_TAIL_RE.match(tail) is not None
 
 
 def _open_may_write(lowered):
@@ -416,20 +489,184 @@ def _open_may_write(lowered):
     if len(calls) != lowered.count("open("):
         return True  # some open( call has a shape we can't cleanly isolate
                      # (nested parens, etc.) -- unresolved, fail toward block
-    return any(not _OPEN_SAFE_ARGS_RE.match(m.group(1)) for m in calls)
+    return any(not _open_args_safe(m.group(1)) for m in calls)
 # fd-duplication (2>&1, >&2, &>) and null-device (2>/dev/null, >nul) redirects write
 # nothing -- must not trip the bare ">" indicator (autonomy-gate 2026-07-09/10 fixes).
-_FD_DUP_RE = re.compile(r"\d*>&\d*|&>{1,2}")
-_NULL_REDIRECT_RE = re.compile(r"\d*>\s*(?:/dev/null|nul)\b", re.IGNORECASE)
+#
+# TIME BOUND (measured 2026-09-21). Both used to lead with a bare `\d*`, which is
+# retried from EVERY start inside a digit run and rescans to the run's end each
+# time: `echo ` + "1"*N cost O(N^2) CPU (16KB 1.4s, x4 per doubling, ~25s at 64KB)
+# in shell_may_write() -- every Bash call -- and in config-write-guard's token
+# layer. The digit prefix is now `(?:(?<!\d)\d+)?`: a digit run can only START a
+# match at its own first digit, while the zero-digit form (`>&`, `> /dev/null`) is
+# still tried at every position. That is EXACT, including the case a plain
+# `(?<!\d)\d*` gets wrong (`1>&23>&4`: the second redirect directly follows digits
+# consumed by the FIRST match, so a lookbehind on the zero-digit form would refuse
+# it and leave `>&4` behind, flipping the write verdict). Differentially fuzzed
+# against the raw patterns on .sub() and .search().
+_DIGIT_RUN_START = r"(?:(?<!\d)\d+)?"
+_FD_DUP_RE = re.compile(_DIGIT_RUN_START + r">&\d*|&>{1,2}")
+_NULL_REDIRECT_RE = re.compile(
+    _DIGIT_RUN_START + r">\s*(?:/dev/null|nul)\b", re.IGNORECASE)
 # git verbs that REWRITE working-tree files (REFUTE 2026-07-18: `git -C ~/.claude
 # checkout main -- hooks/` rewrites the live governance layer with no classic write
 # verb in its text -- and the verb is NOT adjacent to "git", so a literal
 # "git checkout" substring also missed it; live-proven). Matches "git", then any
 # same-segment args (no |;&), then a mutating verb as a whole word. Read-only git
 # (log/diff/status/show/ls-files) is deliberately absent.
-GIT_MUTATE_RE = re.compile(
-    r"\bgit\b[^|;&\n]*?\b(checkout|restore|reset|apply|stash|merge|rebase|"
+#
+# TIME BOUND (PR #234 follow-up, measured 2026-09-20). The single pattern
+#     \bgit\b[^|;&\n]*?\b(verb)\b
+# is O(n^2): re.search retries it at every `git` and each failed attempt rescans the
+# rest of the segment ("git" + " git" * n: 16KB 1.2-3.9s CPU, 32KB 11-15s, 64KB
+# 46-60s -- the spread is machine load; the growth is 4x per doubling). This runs on
+# EVERY Bash call via shell_may_write() -- config-write-guard.py and
+# workbook-write-guard.py, whatever the hooks/lib health -- and the dispatcher runs
+# guards in-process with no per-guard timeout, so one slow scan stalls every guard
+# behind it.
+#
+# EXACT, NOT CAPPED: no size cap, no decision change, so nothing legitimate is
+# stranded and no protective direction has to be chosen. The pattern matches iff
+# some segment (maximal run of non-[|;&\n]) holds a whole-word `git` followed LATER IN
+# THAT SEGMENT by a whole-word verb. The FIRST `git` of a segment offers the widest
+# tail, so if any `git` works it does; hence one `git` search and one verb search per
+# segment, each linear. `pos`/`endpos` (not slicing) keep `\b` reading the real
+# neighbouring characters; at a segment edge that neighbour is a separator (a
+# non-word char) or the end of the text, exactly what the one-shot pattern saw.
+# test-always-on-regex-bound.py pins equality with the raw pattern by seeded
+# differential fuzz and pins the CPU bound at 64KB on several worst-case shapes.
+_GIT_WORD_RE = re.compile(r"\bgit\b", re.IGNORECASE)
+_GIT_VERB_RE = re.compile(
+    r"\b(checkout|restore|reset|apply|stash|merge|rebase|"
     r"cherry-pick|clean|revert|pull|switch)\b", re.IGNORECASE)
+_GIT_SEGMENT_RE = re.compile(r"[^|;&\n]+")
+
+
+class _GitMutateMatcher(object):
+    """Drop-in for the old compiled GIT_MUTATE_RE: `.search(text)` returns the
+    verb's re.Match (truthy) or None. Linear in len(text). Consumers only test
+    truthiness; the Match is the mutating verb, not the whole `git ... verb` span."""
+
+    def search(self, text):
+        for seg in _GIT_SEGMENT_RE.finditer(text):
+            start, end = seg.span()
+            git = _GIT_WORD_RE.search(text, start, end)
+            if git is None:
+                continue
+            verb = _GIT_VERB_RE.search(text, git.end(), end)
+            if verb is not None:
+                return verb
+        return None
+
+
+GIT_MUTATE_RE = _GitMutateMatcher()
+
+
+# ------------------------------------------------------ heredoc body stripping
+# Shared by config-write-guard.py and lint-config-guard.py (each had its own copy of
+# the same regex). A heredoc body is DATA being written into a file, not a path any
+# command argument names; a commit message that merely MENTIONS hooks/** in prose
+# must not trip a governance marker. The opening line and everything after the
+# closing delimiter stay untouched, so a heredoc actually used to write INTO a
+# protected path is still caught via its redirect target.
+#
+# TIME BOUND (PR #234 follow-up, measured 2026-09-20). The original single regex
+#     <<-?\s*['"]?(WORD)['"]?[^\n]*\n.*?\n[ \t]*\1(?=[ \t\r\n]|$)     (DOTALL)
+# rescans to the end of the input for the closer of EVERY `<<WORD` marker that has
+# none, so N unclosed markers cost O(N * len): 5000 markers/37KB 7s CPU, 8000 markers
+# in a 63KB command 15-20s. Always-on (every Bash call), in-process, no per-guard
+# timeout -> it stalls every guard behind it.
+#
+# EXACT, NOT CAPPED: strip_heredoc_bodies() returns byte-for-byte what
+# RAW.sub(_blank, text) returns (test-always-on-regex-bound.py fuzzes the equality
+# against the verbatim original), in near-linear time. What the regex
+# actually does, which the scanner reproduces on purpose (quirks included):
+#   * the opener's `-?`, `\s*` and quote are forced (nothing else can precede the
+#     word), so the delimiter word is the maximal [A-Za-z0-9_] run `w`; group 1 may
+#     backtrack to any non-empty PREFIX of `w`, longest first (so `<<EOFX` can be
+#     closed by a bare `EOF` line -- an existing quirk, preserved, not endorsed);
+#   * the opening line ends at the first newline at/after the word (`[^\n]*\n`);
+#   * the closer is a newline at index >= that newline + 1, then `[ \t]*`, then
+#     exactly the delimiter, then space/tab/CR/LF/end. Because the delimiter is all
+#     word characters and must be followed by a non-word character, a closer line
+#     is simply "word run W after optional indentation, then [ \t\r\n] or end";
+#   * leftmost opener wins, then the longest prefix that has a closer, then the
+#     EARLIEST such closer (lazy body); scanning resumes after the match.
+# So: index every candidate closer line ONCE (word -> ascending positions), then
+# each opener is a dict lookup + bisect instead of a scan to end of input.
+#
+# COST, STATED HONESTLY: the git matcher is linear. The heredoc scanner is linear
+# for every shape tried EXCEPT one, where it is O(n * sqrt(n)): each opener tries
+# every distinct closer length <= its word length, slicing/hashing word[:L] (O(L))
+# each time, so k distinct closer lengths (which cost ~k^2/2 chars to build) times
+# k/2 long-word openers grows ~2.5-4x per doubling (independent review, 2026-09-21):
+# 1MB 0.16s, 2MB 0.43s, 4MB 1.1s, 8MB 4.8s, 16MB 16s CPU. At 64KB it is ~5ms. It is
+# left as-is deliberately: no bash command anywhere near 1MB exists in this fleet,
+# and the exact O(n log n) alternative (walk a prefix-linked sorted key list) adds
+# real complexity to security-gate code for a case that cannot occur. If commands
+# ever reach MBs, revisit; do NOT add a size cap (it would have to pick a direction
+# and would strand legitimate large heredocs).
+_HEREDOC_OPEN_RE = re.compile(r"<<-?\s*['\"]?([a-zA-Z0-9_]+)")
+_HEREDOC_CLOSER_RE = re.compile(r"\n[ \t]*([a-zA-Z0-9_]+)(?=[ \t\r\n]|$)")
+
+
+def _heredoc_closer_index(text):
+    """({word: [newline_index, ...]}, {word: [closer_end, ...]}, sorted key lengths)."""
+    starts, ends = {}, {}
+    for m in _HEREDOC_CLOSER_RE.finditer(text):
+        word = m.group(1)
+        starts.setdefault(word, []).append(m.start())
+        ends.setdefault(word, []).append(m.end())
+    return starts, ends, sorted({len(w) for w in starts})
+
+
+def strip_heredoc_bodies(text):
+    """Replace each heredoc body with ' <heredoc-body> ' (see the block comment)."""
+    if "<<" not in text:
+        return text
+    out = []
+    copied = 0            # text[:copied] is already in `out`
+    index = None          # built lazily, once
+    newline = None        # cached first "\n" at/after the last word end (-1: none)
+    at = text.find("<<")
+    while at != -1:
+        opener = _HEREDOC_OPEN_RE.match(text, at)
+        if opener is None:
+            at = text.find("<<", at + 1)
+            continue
+        word, word_end = opener.group(1), opener.end(1)
+        # Openers are visited left to right and word_end only grows, so a cached
+        # newline still valid for this word_end (or "no newline left") is reusable.
+        if newline is None or (newline != -1 and newline < word_end):
+            newline = text.find("\n", word_end)
+        if newline == -1:
+            break         # no later opener can have an opening line either
+        if index is None:
+            index = _heredoc_closer_index(text)
+        starts, ends, lengths = index
+        found = None
+        for i in range(bisect.bisect_right(lengths, len(word)) - 1, -1, -1):
+            key = word[:lengths[i]]
+            positions = starts.get(key)
+            if positions is None:
+                continue
+            j = bisect.bisect_left(positions, newline + 1)
+            if j < len(positions):
+                found = (key, ends[key][j])
+                break
+        if found is None:
+            at = text.find("<<", at + 1)
+            continue
+        key, end = found
+        first_nl = text.find("\n", at, end)
+        out.append(text[copied:at])
+        out.append(text[at:first_nl] + "\n <heredoc-body> \n" + key)
+        copied = end
+        at = text.find("<<", end)
+    if not out:
+        return text
+    out.append(text[copied:])
+    return "".join(out)
 
 
 def _shell_text(tool_name, tool_input):
@@ -546,7 +783,7 @@ RecursiveDelete = namedtuple("RecursiveDelete", "command recursive force targets
 # eos-review-gate deadlock were caused by, and which this whole change set has
 # been careful to avoid. A separate constant used ONLY by recursive_delete()
 # keeps the additivity guarantee intact.
-_RD_FD_DUP_RE = re.compile(r"\d*[<>]&\d*-?|&>{1,2}")
+_RD_FD_DUP_RE = re.compile(_DIGIT_RUN_START + r"[<>]&\d*-?|&>{1,2}")  # see _FD_DUP_RE
 
 # A redirect operator separated from its `&` by whitespace (`2> &1`). This exists
 # because ${IFS} normalization CREATES that shape: `2>${IFS}&1` becomes `2> &1`,
@@ -603,14 +840,43 @@ _RM_VERB_RE = re.compile(r"(?<![\w-])rm(?![\w-])", re.IGNORECASE)
 # close (2) first -- command-position false positives are the operationally
 # damaging class, not a cosmetic one.
 _RM_SHORT_OPTS = "rfidv"  # r/R recursive, f force, i/I prompt, d dir, v verbose
-_RECURSIVE_FLAG_RE = re.compile(
-    r"(?<![\w-])--recursive(?![\w-])"
-    r"|(?<![\w-])-[%s]*r[%s]*(?![\w-])" % (_RM_SHORT_OPTS, _RM_SHORT_OPTS),
-    re.IGNORECASE)
-_FORCE_FLAG_RE = re.compile(
-    r"(?<![\w-])--force(?![\w-])"
-    r"|(?<![\w-])-[%s]*f[%s]*(?![\w-])" % (_RM_SHORT_OPTS, _RM_SHORT_OPTS),
-    re.IGNORECASE)
+#
+# TIME BOUND (measured 2026-09-21). These two used to be single patterns of the shape
+#     (?<![\w-])-[rfidv]*r[rfidv]*(?![\w-])
+# whose two adjacent stars over the SAME class are ambiguous: `rm -` + "r"*N + "x"
+# cost O(N^2) CPU (16KB 2.1s, x4 per doubling), on every Bash call via
+# config-write-guard's recursive_delete(). EXACT unrolling: the lookahead forces the
+# match to end at the end of the whole [rfidv] run (a shorter match would leave a
+# [rfidv] char, which is \w, next), so a bundle arms iff its run contains the letter.
+# One linear pattern finds the runs; the letter test is a membership check. `r`/`f`
+# have no non-ASCII case-fold partners, so [rR] / [fF] is exactly what IGNORECASE
+# matched. The long options stay literal patterns (their fold partners, e.g. U+017F
+# for `s`, are handled by the same IGNORECASE compile as before).
+_RM_LONG_RECURSIVE_RE = re.compile(r"(?<![\w-])--recursive(?![\w-])", re.IGNORECASE)
+_RM_LONG_FORCE_RE = re.compile(r"(?<![\w-])--force(?![\w-])", re.IGNORECASE)
+_RM_BUNDLE_RE = re.compile(r"(?<![\w-])-[%s]+(?![\w-])" % _RM_SHORT_OPTS,
+                           re.IGNORECASE)
+
+
+def _last_rm_flag_starts(segment):
+    """(start of the LAST recursive flag, start of the LAST force flag) in `segment`,
+    -1 when absent. `rm` at [s, e) has a recursive flag in `segment[e:]` iff the first
+    value is >= e: no flag can START at e itself (the verb's `(?![\\w-])` forbids a
+    `-` there) and flags cannot overlap each other (a start needs a non-[\\w-]
+    char before its `-`, which no flag's interior offers), so a scan of the whole
+    segment sees exactly the flags a scan of segment[e:] would."""
+    last_rec = last_force = -1
+    for m in _RM_LONG_RECURSIVE_RE.finditer(segment):
+        last_rec = m.start()
+    for m in _RM_LONG_FORCE_RE.finditer(segment):
+        last_force = m.start()
+    for m in _RM_BUNDLE_RE.finditer(segment):
+        bundle = m.group()
+        if "r" in bundle or "R" in bundle:
+            last_rec = max(last_rec, m.start())
+        if "f" in bundle or "F" in bundle:
+            last_force = max(last_force, m.start())
+    return last_rec, last_force
 
 # Argument tokens, quote-aware so a quoted path keeps its spaces.
 _ARG_TOKEN_RE = re.compile(r"\"[^\"]*\"|'[^']*'|[^\s\"']+")
@@ -620,6 +886,36 @@ _ARG_TOKEN_RE = re.compile(r"\"[^\"]*\"|'[^']*'|[^\s\"']+")
 _REDIRECT_TOKEN_RE = re.compile(r"^\d*[<>]")
 # A redirect operator with NO target attached: the target is the next token.
 _BARE_REDIRECT_RE = re.compile(r"^\d*[<>]{1,2}&?\d*$")
+
+
+# WORK BOUND for recursive_delete() (2026-09-21). For every `rm` that has a recursive
+# flag after it, the loop pays O(segment) (the command-position scan of the text
+# before it, the operand scan of the text after it), so k such `rm`s in ONE segment
+# cost O(k * n): `rm x ` * 3000 + `-rf y` was 10s at 16KB and ~160s at 64KB, on every
+# Bash call via config-write-guard. That cannot be made linear without changing what
+# is reported (each later `rm`'s operand list is re-tokenized from a different start,
+# so quote pairing can differ from the earlier rm's), so the count is BOUNDED instead.
+# A real segment has one, rarely two or three (segments split on ; & | newline, so
+# `rm -rf a && rm -rf b` is already two). Past the bound the answer FAILS TOWARD BLOCK:
+# the call is reported as a recursive delete of "/" -- a catastrophic-scope target
+# config-write-guard blocks unless a DESTRUCTIVE_DELETE token is minted. Consequence
+# for legitimate use: a single un-separated command segment naming more than 16
+# `rm ... -r` occurrences (prose in an `echo`, generated junk) needs that token. No
+# path that used to block stops blocking.
+_RD_MAX_CANDIDATES_PER_SEGMENT = 16
+_RD_OVERFLOW_TARGET = "/"
+
+
+def _strip_unbalanced_tail(token, close, open_):
+    """Strip trailing `close` chars while they outnumber `open_` chars -- the loop
+    `while token.endswith(close) and token.count(close) > token.count(open_)` without
+    its O(n) recount per stripped char (`rm -rf ` + ")"*N was O(N^2)). Each strip
+    removes one `close`, so the loop stops at min(trailing run, excess)."""
+    excess = token.count(close) - token.count(open_)
+    if excess <= 0:
+        return token
+    run = len(token) - len(token.rstrip(close))
+    return token[:len(token) - min(run, excess)]
 
 
 def _delete_targets(rest):
@@ -634,19 +930,23 @@ def _delete_targets(rest):
     # exact regression class this module's 2026-08-03 anchoring work exists to
     # prevent (independent review 2026-08-16, MAJOR 5). Adjacency = no whitespace
     # between matches, so merge on position.
+    # Fragments are collected as lists and joined once: `pieces[-1] += token` copied the
+    # growing piece per abutting quoted fragment (`'a'` * N: 512KB 2.6s, ~3.5x per
+    # doubling). Same pieces, same order.
     pieces, spans = [], []
     for m in _ARG_TOKEN_RE.finditer(rest):
         token = m.group(0)
         if pieces and spans[-1] == m.start():
-            pieces[-1] += token
+            pieces[-1].append(token)
         else:
-            pieces.append(token)
+            pieces.append([token])
             spans.append(0)
         spans[-1] = m.end()
 
     targets = []
     skip_next = False
-    for token in pieces:
+    for parts in pieces:
+        token = parts[0] if len(parts) == 1 else "".join(parts)
         if skip_next:
             skip_next = False
             continue
@@ -673,9 +973,7 @@ def _delete_targets(rest):
         # MAJOR A). Strip only UNBALANCED delimiters, so a real directory named
         # "Closing (final)" survives intact.
         for close, open_ in ((")", "("), ("}", "{")):
-            while (token.endswith(close)
-                   and token.count(close) > token.count(open_)):
-                token = token[:-1]
+            token = _strip_unbalanced_tail(token, close, open_)
         while token.endswith("`") and token.count("`") % 2 == 1:
             token = token[:-1]
         if token:
@@ -700,7 +998,23 @@ _EXEC_WRAPPERS = frozenset((
 _WRAPPER_OPERAND_RE = re.compile(r"^\d+(\.\d+)?[smhd]?$")
 
 # A path prefix attached directly to the command word: /bin/rm, ./rm, C:\bin\rm.
-_ATTACHED_PATH_RE = re.compile(r"[\w.:$~\\/-]*[\\/]$")
+_ATTACHED_PATH_CHAR_RE = re.compile(r"[\w.:$~\\/-]")
+
+
+def _strip_attached_path(joined):
+    """`re.compile(r"[\\w.:$~\\\\/-]*[\\\\/]$").sub(" ", joined)`, linear. The raw pattern
+    was O(n^2) on a long word run ahead of `rm -r` (`aaaa...` + ` rm -r x`: 32KB 13.7s;
+    each sub start greedily ate the run, failed the `[\\\\/]$` tail and backtracked it
+    all -- and it is called once per candidate rm). It can only match at the very end
+    of the string (`$`; `joined` is " ".join of whitespace-split tokens, so it never
+    ends in a newline), and then as the LEFTMOST start of the maximal run of class
+    characters that ends the string, provided that run ends in a separator."""
+    if not joined or joined[-1] not in "\\/":
+        return joined
+    i = len(joined)
+    while i > 0 and _ATTACHED_PATH_CHAR_RE.match(joined[i - 1]):
+        i -= 1
+    return joined[:i] + " "
 
 
 def _in_command_position(prefix):
@@ -744,7 +1058,7 @@ def _in_command_position(prefix):
         if toks[i].lower() in ("-exec", "-execdir", "-ok", "-okdir"):
             toks = toks[i + 1:]
             break
-    prefix = _ATTACHED_PATH_RE.sub(" ", " ".join(toks))
+    prefix = _strip_attached_path(" ".join(toks))
     seen_wrapper = False
     for tok in prefix.split():
         if _ENV_ASSIGN_RE.match(tok):
@@ -806,18 +1120,32 @@ def recursive_delete(command):
     text = _RD_FD_DUP_RE.sub(" ", text)
 
     targets, force = [], False
+    seen = set()
     hit = False
     for segment in _SEGMENT_SPLIT_RE.split(text):
-        for m in _RM_VERB_RE.finditer(segment):
-            rest = segment[m.end():]
-            if not _RECURSIVE_FLAG_RE.search(rest):
-                continue
+        rm_matches = list(_RM_VERB_RE.finditer(segment))
+        if not rm_matches:
+            continue
+        last_rec, last_force = _last_rm_flag_starts(segment)
+        candidates = 0
+        for m in rm_matches:
+            if last_rec < m.end():
+                continue  # no recursive flag after this rm
+            candidates += 1
+            if candidates > _RD_MAX_CANDIDATES_PER_SEGMENT:
+                # BOUND (see the constant). Fail toward BLOCK, never toward allow.
+                hit = True
+                if _RD_OVERFLOW_TARGET not in seen:
+                    seen.add(_RD_OVERFLOW_TARGET)
+                    targets.append(_RD_OVERFLOW_TARGET)
+                break
             if not _in_command_position(segment[:m.start()]):
                 continue  # `git rm -r --cached`, `grep rm -r .`, `# rm -rf x`
             hit = True
-            force = force or bool(_FORCE_FLAG_RE.search(rest))
-            for t in _delete_targets(rest):
-                if t not in targets:
+            force = force or last_force >= m.end()
+            for t in _delete_targets(segment[m.end():]):
+                if t not in seen:
+                    seen.add(t)
                     targets.append(t)
     if not hit:
         return None

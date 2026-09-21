@@ -122,6 +122,73 @@ verdict is INDETERMINATE. Not enumerated (unbounded walk): independent clones,
 and worktrees of OTHER repos, inside ignored directories under the scope --
 name a path inside one and it IS caught (exit 5).
 
+MOVED OUT OF SCOPE (added 2026-09-13): HEAD moving since --since is a STOP
+only when a moved commit touches the scope. The "re-read what you are about to
+edit" remedy has nothing to re-read when every moved commit is elsewhere, and
+in ~/.claude, where a dozen sessions commit an hour, the blanket STOP held up a
+one-file cherry-pick over an unrelated docs commit. The move is still reported
+(head_moved true, a WARNING line) and only ever clears to the NEXT finding in
+precedence, never past CONTESTED. The in-scope set is a
+`git diff --name-only --no-renames <since> HEAD` over :(literal,icase)
+pathspecs, so a
+rename that carries a scope file away still counts, and a scope spelled in a
+different case still matches. head_moved_in_scope is that list, [] when
+measured clean, and null when unmeasurable: --since does not resolve, is not an
+ancestor of HEAD (reset, rebase, branch switch: the diff would not describe
+what happened to the checkout), or git fails. null keeps HEAD_MOVED.
+The WARNING line names the moved range as <since>..<head>. Pathspecs are
+:(literal,icase), matching _last_commit_time. BY DESIGN the diff compares end
+states only: churn inside the range that nets out -- a scope file changed and
+reverted, a merge into scope later reverted, a file created and deleted within
+since..HEAD -- reads as nothing-in-scope (CLEAR), because the scope content at
+HEAD equals the content at --since and there is nothing new to re-read.
+
+ORPHANED OWNER LABEL (added 2026-09-19): "stale" above means committed-since-touch,
+so an owner whose edit was never committed read as live forever -- a two-day-old
+uncommitted settings.json hunk kept contesting every later edit, and telling
+abandoned from working took a manual transcript search. Each NOT-YOURS line now
+carries `last active <age> ago`, from the newer of the owner's recorded touch and
+its session transcript's mtime (<projects>/*/<session>.jsonl, rewritten every
+turn). When EVERY live owner of a file has a transcript AND is idle longer than
+--orphan-hours (default 12, deliberately not the 2h claim TTL) the line also says
+ORPHANED and the RESULT_JSON entry gets orphaned:true; `orphaned_only` is true when
+every contesting entry is orphaned and no claim competes. This is a LABEL: the
+verdict stays CONTESTED and the exit code stays 1. Every unknown fails live -- no
+transcript (they get pruned), an untimed touch, a future-dated touch (clock
+skew), a co-owner still active, or your own touch all leave the file un-orphaned.
+Only LIVE owners are aged; a stale owner (committed since its touch) is already
+discounted above. KNOWN LIMITS, all in the safe-to-mislabel direction the STOP
+text hedges: a session paused for 12h+ (overnight, a permission prompt) reads
+ORPHANED; a session resumed under a NEW id leaves the old id looking abandoned
+while the work continues; a remote/other-machine session has no local transcript
+here, so it is never labelled. The label never authorises an edit.
+
+STALE UNTRACKED KNOWN BLOB (added 2026-09-13): observed live the same day,
+scheduled-tasks/ora-ground-truth-auditor/SKILL.md returned CONTESTED because an
+UNTRACKED copy sat in the tree with "[no live recorded owner]" -- yet its
+`git hash-object` was byte-identical to a blob already committed at that same
+path. Nothing in such a file is unsaved work. An in-scope foreign dirty entry
+is classified STALE_UNTRACKED_KNOWN_BLOB only when ALL hold: it is untracked
+(`??`, never a modified tracked file -- a tracked file reverted to an older
+blob is still a modification of HEAD); it has no live recorded owner and no
+recorded touch by ANY session inside the --ttl-minutes window (default 2h; an
+unknown or non-numeric touch time counts as inside), and provenance was read
+COMPLETELY -- a missing sessions dir (provenance_available false) or any
+session touched-files.txt that exists but cannot be read (counted in the new
+RESULT_JSON key provenance_partial) disables the classification entirely, since
+an empty owner map is then not evidence of no touch (review #208); no other
+session's live claim overlaps it; and its blob appears, as either side of a change, in
+`git log --exclude=refs/stash --all --no-renames --raw -n 200 -- :(literal)<path>`
+(same path only; a stash is live WIP, not history).
+At most 50 such files are hashed per run; the rest stay CONTESTED. Each is
+listed in the RESULT_JSON key stale_untracked_known_blob ({path, blob,
+commits}) and ALSO stays in dirty_overlap_foreign (with known_blob /
+known_blob_commits added), so a consumer reading only the old keys still
+sees dirt. The verdict is STALE_UNTRACKED_KNOWN_BLOB with exit 0 and a WARNING
+ONLY when every contesting item is of that kind; any other foreign dirt, a
+dirty nested worktree, or a competing claim keeps CONTESTED (exit 1), and it
+never outranks HEAD_MOVED or INDETERMINATE.
+
 Usage:
     python maintenance/preflight-shared-checkout.py --paths P [P ...]
         [--repo PATH]        checkout to inspect (default: cwd)
@@ -131,6 +198,10 @@ Usage:
         [--claims-dir DIR]   default: <repo>/hooks/active-work, else
                              ~/.claude/hooks/active-work
         [--ttl-minutes N]    claim TTL, default 120 (matches claim_work.py)
+        [--orphan-hours N]   label a foreign owner ORPHANED once idle longer than
+                             N hours, default 12 (label only; never clears)
+        [--session-transcripts-dir DIR]
+                             session transcripts, default <claude home>/projects
         [--canonical BRANCH] branch the checkout should track, default main
                              (local-only advisory only)
         [--json]             machine-readable only, nothing else on stdout
@@ -140,9 +211,16 @@ Usage:
 
 Exit codes:
     0  CLEAR          nothing contests these paths -- go ahead
+    0  STALE_UNTRACKED_KNOWN_BLOB
+                      go ahead WITH CARE: the only contesting items are
+                      untracked copies of blobs already committed at those
+                      paths (see STALE UNTRACKED KNOWN BLOB); a WARNING names
+                      the matching commit(s)
     1  CONTESTED      an overlapping dirty file, or another session's live claim
     2  NOT_A_REPO     --repo is not a git checkout, or git is unavailable
-    3  HEAD_MOVED     --since given and HEAD is not that commit
+    3  HEAD_MOVED     --since given, HEAD is not that commit, and the move
+                      touched the scope -- or that could not be established
+                      (see MOVED OUT OF SCOPE)
     4  INDETERMINATE  a fact could not be established (claims unreadable) --
                       uncertain, never treated as clean
     5  OUT_OF_REPO    a --paths entry is not in the --repo checkout, so it was
@@ -150,15 +228,18 @@ Exit codes:
                       checkout that owns it)
 
 Precedence when several apply: NOT_A_REPO > OUT_OF_REPO > HEAD_MOVED >
-CONTESTED > INDETERMINATE > CLEAR. All findings are reported regardless of
+CONTESTED > INDETERMINATE > STALE_UNTRACKED_KNOWN_BLOB > CLEAR. A HEAD move
+that touched no scope path sets nothing and falls through. All findings are reported regardless of
 which one sets the exit code. OUT_OF_REPO outranks the rest because --since and
 the dirty set then describe the wrong checkout.
 """
 import argparse
 import json
+import math
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime, timedelta
 
 EXIT_CLEAR = 0
@@ -169,6 +250,9 @@ EXIT_INDETERMINATE = 4
 EXIT_OUT_OF_REPO = 5
 
 DEFAULT_TTL_MINUTES = 120  # matches claim_work.py's 2h window
+# A foreign owner idle longer than this is LABELLED orphaned. Deliberately not the
+# 2h claim TTL: a session that idles overnight is not abandoned.
+DEFAULT_ORPHAN_HOURS = 12
 
 
 # --------------------------------------------------------------------------
@@ -257,6 +341,33 @@ def _head_sha(repo):
     return proc.stdout.strip()
 
 
+def _moved_in_scope(repo, since, scope):
+    """Scope paths changed between --since and HEAD: repo-relative, forward-slash,
+    sorted. [] means measured and nothing in scope moved; None means it could not
+    be established, and None must keep HEAD_MOVED (see MOVED OUT OF SCOPE)."""
+    if not scope:
+        return None
+    base = _git(repo, "rev-parse", "--verify", "--quiet", since + "^{commit}")
+    if base.returncode != 0 or not base.stdout.strip():
+        return None
+    base_sha = base.stdout.strip()
+    if _git(repo, "merge-base", "--is-ancestor", base_sha, "HEAD").returncode != 0:
+        return None
+    # :(literal,icase), the same magic _last_commit_time uses. literal: a scope
+    # entry is a path, not a pattern -- without it `agents/[draft].md` is also
+    # a glob that matches `agents/d.md`, so the in-scope list would name files
+    # the caller never scoped. icase: git can record a path in a different case
+    # than the file on disk (and than the caller's --paths, which _real()
+    # canonicalizes to disk case); NTFS treats them as one file, so must we.
+    # Directory entries and "." still match everything beneath them.
+    specs = [":(literal,icase)" + os.path.relpath(p, repo).replace("\\", "/") for p in scope]
+    diff = _git(repo, "-c", "core.quotepath=off", "diff", "--name-only",
+                "--no-renames", "-z", base_sha, "HEAD", "--", *specs)
+    if diff.returncode != 0:
+        return None
+    return sorted(p for p in diff.stdout.split("\0") if p)
+
+
 def _own_toplevel(path):
     """realpath of the git toplevel that owns `path`, or None when it sits in
     no work tree (or git cannot say). A path that does not exist yet -- a file
@@ -328,8 +439,9 @@ def _nested_checkouts(repo, scope):
     return found
 
 
-def _dirty_paths(repo):
-    """Absolute paths of everything `git status --porcelain` reports.
+def _dirty_paths(repo, untracked=None):
+    """Absolute paths of everything `git status --porcelain` reports. When a
+    set is passed as `untracked`, the '??' entries are also added to it.
 
     Includes untracked files -- a stranger's brand-new file in my scope is
     exactly as much of a co-mingling hazard as a modified one. For a rename
@@ -359,8 +471,47 @@ def _dirty_paths(repo):
                 paths.append(fields[i])
             i += 1
         for part in paths:
-            out.append(os.path.join(repo, part.replace("/", os.sep)))
+            full = os.path.join(repo, part.replace("/", os.sep))
+            out.append(full)
+            if untracked is not None and code == "??":
+                untracked.add(full)
     return out
+
+
+KNOWN_BLOB_MAX_CANDIDATES = 50   # untracked in-scope files hashed per run
+KNOWN_BLOB_MAX_COMMITS = 200     # history entries scanned per path
+
+
+def _known_blob(repo, rel):
+    """(blob, [commit, ...]) when the working copy of untracked `rel` hashes to
+    a blob recorded AT THAT PATH in `git log --all` history (as either side of
+    a change, so a later deletion commit counts too), else None. Bounded to
+    KNOWN_BLOB_MAX_COMMITS entries; any git failure is None (stays CONTESTED)."""
+    ho = _git(repo, "hash-object", "--", rel)
+    blob = (ho.stdout or "").strip().lower()
+    if ho.returncode != 0 or not blob:
+        return None
+    # refs/stash excluded: a `stash -u` holds live WIP, not committed history.
+    lg = _git(repo, "-c", "core.quotepath=off", "log", "--exclude=refs/stash", "--all",
+              "--no-renames",
+              "--raw", "--no-abbrev", "--format=%H", "-n", str(KNOWN_BLOB_MAX_COMMITS),
+              "--", ":(literal)" + rel)
+    if lg.returncode != 0:
+        return None
+    commits, current = [], None
+    for line in lg.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if not line.startswith(":"):
+            current = line
+            continue
+        meta = line.split("\t", 1)[0].split()
+        # ":<mode> <mode> <old> <new> <status>"
+        if current and len(meta) >= 4 and blob in (meta[2].lower(), meta[3].lower()):
+            if current not in commits:
+                commits.append(current)
+    return (blob, commits) if commits else None
 
 
 def _local_only(repo, scope, canonical):
@@ -434,9 +585,13 @@ def _default_sessions_dir():
 
 
 def _scan_provenance(sessions_dir):
-    """{normcase(path): {session_id: last_touch_epoch | None}} from every
-    session's touched-files.txt, or (None) when the directory itself cannot be
-    listed. None == old-format line with no timestamp (unknown touch time).
+    """(index, skipped). index is {normcase(path): {session_id:
+    last_touch_epoch | None}} from every session's touched-files.txt, or None
+    when the directory itself cannot be listed. None == old-format line with
+    no timestamp (unknown touch time). skipped counts session touched-files.txt
+    entries that EXIST but could not be read (not a regular file, or OSError):
+    their touches are unknown, so the index is partial (review #208) --
+    reported as provenance_partial, and it disables known-blob classification.
 
     Same source commit-provenance-recorder.py writes and
     dirty-file-owner-report.py reads -- deliberately not a second tracking
@@ -445,17 +600,19 @@ def _scan_provenance(sessions_dir):
     preflight down with it.
     """
     if not os.path.isdir(sessions_dir):
-        return None
-    index = {}
+        return None, 0
+    index, skipped = {}, 0
     try:
         names = os.listdir(sessions_dir)
     except OSError:
-        return None
+        return None, 0
     # Keys are stored raw, as the Edit hook saw them (possibly a junction or
     # 8.3 spelling); _owners() reconciles spellings at lookup time.
     for sid in names:
         tf = os.path.join(sessions_dir, sid, "touched-files.txt")
         if not os.path.isfile(tf):
+            if os.path.lexists(tf):
+                skipped += 1  # present but not a readable regular file
             continue
         try:
             with open(tf, "r", encoding="utf-8", errors="replace") as fh:
@@ -470,8 +627,11 @@ def _scan_provenance(sessions_dir):
                         ts = None
                     _merge_touch(index.setdefault(os.path.normcase(path), {}), sid, ts)
         except OSError:
-            continue  # one unreadable session is not a reason to fail the scan
-    return index
+            # one unreadable session is not a reason to fail the scan, but it
+            # is a reason not to treat the scan as complete
+            skipped += 1
+            continue
+    return index, skipped
 
 
 def _merge_touch(owners, sid, ts):
@@ -549,6 +709,17 @@ def _stale_note(entry):
     return "  (+%d stale, committed since their touch: %s)" % (len(stale), names)
 
 
+def _known_note(entry):
+    """Tail for an untracked foreign file whose bytes are already committed."""
+    commits = entry.get("known_blob_commits")
+    if not commits:
+        return ""
+    shown = ", ".join(c[:12] for c in commits[:3])
+    more = " +%d more" % (len(commits) - 3) if len(commits) > 3 else ""
+    return ("  WARNING: STALE_UNTRACKED_KNOWN_BLOB -- untracked, byte-identical to"
+            " blob %s committed at this path in %s%s" % (entry["known_blob"][:12], shown, more))
+
+
 def _last_commit_time(repo, rel):
     """Epoch of the newest commit touching `rel`, or None (never committed, or
     git could not answer). `:(literal,icase)` for the same reason as
@@ -579,6 +750,126 @@ def _split_stale(owners, commit_ts):
 
 
 _DIR_REAL = {}  # per-run cache for _owners(): recorded dir -> normcase(realpath) | None
+
+
+# --- orphaned-owner reporting (2026-09-19) -----------------------------------
+# _split_stale() only knows "committed since their touch". An owner whose edit
+# was NEVER committed therefore read as live forever: session b6521d5d's
+# uncommitted settings.json hunk contested every later edit for two days, and
+# telling live from abandoned took a manual transcript search. The data was
+# already here -- a per-owner touch time, and every session's transcript, which
+# is rewritten on each turn. This only LABELS; it never changes a verdict.
+
+def _finite(x):
+    return x is not None and isinstance(x, (int, float)) and math.isfinite(x)
+
+
+def _default_projects_dir(sessions_dir):
+    """<claude home>/projects, beside <claude home>/hooks/sessions."""
+    home = os.path.dirname(os.path.dirname(os.path.abspath(sessions_dir)))
+    return os.path.join(home, "projects")
+
+
+def _project_subdirs(projects_dir):
+    try:
+        with os.scandir(projects_dir) as it:
+            return [e.path for e in it if e.is_dir()]
+    except OSError:
+        return []
+
+
+def _plain_session_id(sid):
+    """Only [0-9A-Za-z_-], 6..80 chars: a session id is joined into a path, so
+    anything with a separator or dot never reaches the filesystem."""
+    return (6 <= len(sid) <= 80
+            and all(c.isascii() and (c.isalnum() or c in "_-") for c in sid))
+
+
+def _transcript_mtime(sid, project_dirs):
+    """Newest mtime of <projects>/*/<sid>.jsonl, or None (no transcript, or not a
+    plain session id). Written every turn, so it is the session's last ACTIVITY
+    -- what a file-touch timestamp cannot say."""
+    if not _plain_session_id(sid):
+        return None
+    newest = None
+    for d in project_dirs:
+        try:
+            m = os.stat(os.path.join(d, sid + ".jsonl")).st_mtime
+        except OSError:
+            continue
+        if _finite(m):
+            newest = m if newest is None else max(newest, m)
+    return newest
+
+
+def _owner_activity(owners, project_dirs, now):
+    """{sid: {last_touch, last_transcript, last_activity, idle_s}} for
+    {sid: touch_epoch | None}. last_activity is the newest KNOWN of the touch and
+    the transcript mtime; None when neither is known (idle_s is then None too)."""
+    out = {}
+    for sid, touch in owners.items():
+        touch = touch if _finite(touch) else None
+        tr = _transcript_mtime(sid, project_dirs)
+        known = [t for t in (touch, tr) if t is not None]
+        last = max(known) if known else None
+        out[sid] = {"last_touch": touch, "last_transcript": tr,
+                    "last_activity": last,
+                    "idle_s": None if last is None else now - last}
+    return out
+
+
+def _is_orphaned(activity, orphan_hours):
+    """True only when there is at least one owner AND every owner has a session
+    transcript AND its idle time is KNOWN and over the threshold. A missing
+    transcript, an unknown time, a future-dated one (negative idle: clock skew)
+    or an empty owner set all read live -- nothing proves them abandoned, so the
+    safe answer stays 'someone may be working on this'."""
+    if not activity:
+        return False
+    limit = orphan_hours * 3600
+    # A transcript is REQUIRED, not just a touch time (independent review, 2026-09-19):
+    # /cleardisk-sessions prunes transcripts (203 of 529 recorded sessions had none),
+    # so "no transcript" says nothing about whether the session is alive. A touch
+    # time alone is only the age of one file write.
+    return all(a["last_transcript"] is not None
+               and a["idle_s"] is not None and a["idle_s"] > limit
+               for a in activity.values())
+
+
+def _fmt_age(seconds):
+    s = max(0, int(seconds))
+    d, rem = divmod(s, 86400)
+    h, rem = divmod(rem, 3600)
+    if d:
+        return "%dd %dh" % (d, h)
+    if h:
+        return "%dh %dm" % (h, rem // 60)
+    return "%dm" % (rem // 60)
+
+
+def _activity_note(entry, orphan_hours):
+    """Tail for a NOT-YOURS line: how recently the owner(s) were active, plus the
+    ORPHANED label. Empty for entries with no owner (nested checkouts, unowned)."""
+    act = entry.get("owner_activity") or {}
+    if not act:
+        return ""
+    idles = [a["idle_s"] for a in act.values() if a["idle_s"] is not None]
+    unknown = sum(1 for a in act.values() if a["idle_s"] is None)
+    no_transcript = sum(1 for a in act.values() if a["last_transcript"] is None)
+    parts = []
+    if idles:
+        parts.append("last active %s ago" % _fmt_age(min(idles)))
+    if unknown:
+        parts.append("activity unknown for %d owner(s)" % unknown)
+    if no_transcript:
+        # Never contains the label word: the label must appear ONLY when it is true,
+        # or a grep for it would match the very files it declined to label.
+        parts.append("no session transcript found for %d owner(s); the age is a"
+                     " file-touch time only" % no_transcript)
+    note = "  " + "; ".join(parts)
+    if entry.get("orphaned"):
+        note += "  ORPHANED (every owner idle > %gh)" % orphan_hours
+    return note
 
 
 def _default_claims_dir(repo):
@@ -654,6 +945,16 @@ def main():
     ap.add_argument("--sessions-dir", default=None,
                     help="commit-provenance sessions dir (attribution)")
     ap.add_argument("--ttl-minutes", type=int, default=DEFAULT_TTL_MINUTES)
+    ap.add_argument("--orphan-hours", type=float, default=DEFAULT_ORPHAN_HOURS,
+                    help="label a foreign owner ORPHANED once idle longer than this "
+                         "(default %d); a label only, the verdict never changes"
+                         % DEFAULT_ORPHAN_HOURS)
+    # Not "--projects-dir": that would make the previously unique abbreviation
+    # `--p` (for --paths) ambiguous. "--session-" keeps `--sessions` and every
+    # other existing prefix resolving exactly as before.
+    ap.add_argument("--session-transcripts-dir", default=None,
+                    help="where session transcripts live (default: <claude home>/"
+                         "projects, beside --sessions-dir's hooks/sessions)")
     ap.add_argument("--accept-stale", nargs="+", default=None, metavar="PATH",
                     help="after checking `git diff HEAD -- PATH` holds only your "
                          "own hunks, accept a file whose only other owners are stale")
@@ -661,6 +962,11 @@ def main():
                     help="branch this checkout should track (local-only advisory)")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
+    # Finite and positive. 0, negative and NaN would call every owner orphaned;
+    # inf/1e999 would never, and json.dumps writes them as the bare token
+    # `Infinity`, which is not valid JSON for jq / JSON.parse / ConvertFrom-Json.
+    if not (0 < args.orphan_hours < math.inf):
+        ap.error("--orphan-hours must be a finite, positive number of hours")
 
     repo = _unverbatim(os.path.abspath(args.repo))
     out = []          # human-readable lines, suppressed under --json
@@ -711,9 +1017,15 @@ def main():
         else:
             head_moved = not (head.lower().startswith(since)
                               or since.startswith(head.lower()))
+    # --- fact 1b: did the move touch my scope? --------------------------
+    head_moved_in_scope = None
+    if head_moved:
+        head_moved_in_scope = _moved_in_scope(
+            repo, since, [p for p in scope if p not in outside])
 
     # --- fact 2: dirty files overlapping my scope -----------------------
-    dirty = _dirty_paths(repo)
+    untracked = set()
+    dirty = _dirty_paths(repo, untracked)
     if dirty is None:
         report = {"verdict": "NOT_A_REPO", "repo": repo,
                   "detail": "git status failed"}
@@ -725,7 +1037,11 @@ def main():
     # owner, or one ALSO touched by someone else, stays foreign: unknown and
     # shared are both hazards, only "provably mine alone" is exempt.
     sessions_dir = args.sessions_dir or _default_sessions_dir()
-    prov_index = _scan_provenance(sessions_dir)
+    prov_index, prov_skipped = _scan_provenance(sessions_dir)
+    projects_dir = (args.session_transcripts_dir
+                    or _default_projects_dir(sessions_dir))
+    project_dirs = _project_subdirs(projects_dir)
+    now = time.time()
     mine = (args.session or "").lower()
     accepted_stale = {
         _norm(p if os.path.isabs(p) else os.path.join(args.repo, p))
@@ -749,6 +1065,14 @@ def main():
         only_mine = bool(live) and bool(mine) and all(
             o.lower() == mine for o in live)
         entry = {"path": rel, "owners": sorted(live), "stale_owners": sorted(stale)}
+        # Label-only (see _is_orphaned): never feeds only_mine or the verdict.
+        activity = _owner_activity({s: touches[s] for s in live},
+                                   project_dirs, now)
+        entry["owner_activity"] = activity
+        entry["orphaned"] = _is_orphaned(activity, args.orphan_hours)
+        if p in untracked:
+            entry["_untracked"] = True
+            entry["_touches"] = touches
         if only_mine and stale:
             # NOT auto-cleared (independent review 2026-09-12): a PARTIAL
             # commit -- hooks/lib/isolated_commit.py lands one hunk and leaves
@@ -779,6 +1103,9 @@ def main():
     # Nested entries first: they carry the only --repo hint, and must not be
     # pushed past the 20-line human cap by per-file entries.
     dirty_overlap_foreign.sort(key=lambda d: (not d.get("nested_checkout"), d["path"]))
+    for d in dirty_overlap_foreign:  # nested-checkout entries have no owner to age
+        d.setdefault("owner_activity", {})
+        d.setdefault("orphaned", False)
 
     # --- fact 3: other sessions' live claims overlapping my scope -------
     claims_dir = args.claims_dir or _default_claims_dir(repo)
@@ -793,6 +1120,48 @@ def main():
                 continue  # my own claim (exact id; see ownership note above)
             (expired_overlap if c["expired"] else competing).append(c)
 
+    # --- fact 4: untracked foreign copies of already-committed blobs ------
+    # (see STALE UNTRACKED KNOWN BLOB). Only untracked, per-file, foreign
+    # entries with no recorded owner inside the TTL window (an unknown touch
+    # time counts as inside it) and no other session's live claim on the path.
+    # Bounded: at most KNOWN_BLOB_MAX_CANDIDATES files are hashed; the rest
+    # stay plain CONTESTED.
+    # FAIL CLOSED (review #208): "no touch inside the window" is only evidence
+    # when provenance was fully read. A missing/unlistable sessions dir, or any
+    # session file that exists but could not be read, leaves the touch set
+    # unknown -- an empty owner map there proves nothing, so classify nothing.
+    provenance_complete = prov_index is not None and prov_skipped == 0
+    touch_cutoff = time.time() - args.ttl_minutes * 60
+    known_blob = []
+    candidates = 0
+    for d in dirty_overlap_foreign:
+        is_untracked = d.pop("_untracked", False)
+        touches = d.pop("_touches", {})
+        if not provenance_complete:
+            continue
+        if not is_untracked or d.get("nested_checkout") or d["owners"]:
+            continue
+        # `not ts < cutoff` also catches a NaN timestamp (never provably old)
+        if any(ts is None or not ts < touch_cutoff for ts in touches.values()):
+            continue
+        full = os.path.join(repo, d["path"].replace("/", os.sep))
+        # Unreadable claims: classify anyway -- INDETERMINATE outranks the
+        # known-blob verdict, so the unknown still cannot read as go.
+        if any(any(_overlaps(cp, full) for cp in c["paths"]) for c in competing):
+            continue
+        if candidates >= KNOWN_BLOB_MAX_CANDIDATES:
+            continue
+        candidates += 1
+        found = _known_blob(repo, d["path"])
+        if found is None:
+            continue
+        d["known_blob"] = found[0]
+        d["known_blob_commits"] = found[1]
+        known_blob.append({"path": d["path"], "blob": found[0], "commits": found[1]})
+    for d in dirty_overlap_mine:
+        d.pop("_untracked", None)
+        d.pop("_touches", None)
+
     # --- advisory: is this work landing only on a non-canonical branch? ---
     branch_info = _local_only(repo, [p for p in scope if p not in outside],
                               args.canonical)
@@ -804,18 +1173,30 @@ def main():
         os.path.isdir(p) for p in scope if p not in outside)
     indeterminate = (claims is None or bool(unreadable) or bool(since_error)
                      or nested_unmeasured)
-    contested = bool(dirty_overlap_foreign) or bool(competing)
+    known_paths = {k["path"] for k in known_blob}
+    known_only = (bool(dirty_overlap_foreign) and not competing
+                  and all(d["path"] in known_paths and not d.get("nested_checkout")
+                          for d in dirty_overlap_foreign))
+    contested = (bool(dirty_overlap_foreign) or bool(competing)) and not known_only
 
     if out_of_repo:
         verdict, code = "OUT_OF_REPO", EXIT_OUT_OF_REPO
-    elif head_moved:
+    elif head_moved and head_moved_in_scope != []:
         verdict, code = "HEAD_MOVED", EXIT_HEAD_MOVED
     elif contested:
         verdict, code = "CONTESTED", EXIT_CONTESTED
     elif indeterminate:
         verdict, code = "INDETERMINATE", EXIT_INDETERMINATE
+    elif known_only:
+        verdict, code = "STALE_UNTRACKED_KNOWN_BLOB", EXIT_CLEAR
     else:
         verdict, code = "CLEAR", EXIT_CLEAR
+
+    # True only when every contesting entry is an ORPHANED per-file owner and no
+    # live claim competes. Informational: `verdict`/exit code are unaffected.
+    orphaned_only = (bool(dirty_overlap_foreign) and not competing
+                     and all(d["orphaned"] and not d.get("nested_checkout")
+                             for d in dirty_overlap_foreign))
 
     report = {
         "verdict": verdict,
@@ -823,6 +1204,9 @@ def main():
         "head": head,
         "since": args.since,
         "head_moved": head_moved,          # null == not checked / uncheckable
+        # only meaningful when head_moved: [] == measured, nothing in scope moved;
+        # null == not measured (or HEAD did not move)
+        "head_moved_in_scope": head_moved_in_scope,
         "since_error": since_error,
         "scope": [os.path.relpath(p, repo).replace("\\", "/")
                   if p not in outside else p for p in scope],
@@ -830,9 +1214,18 @@ def main():
         "nested_checkouts_excluded": nested,   # null == could not enumerate
         "dirty_overlap_foreign": dirty_overlap_foreign,
         "dirty_overlap_mine": dirty_overlap_mine,
+        # untracked foreign copies byte-identical to a blob committed at the
+        # same path; they are ALSO listed in dirty_overlap_foreign
+        "stale_untracked_known_blob": known_blob,
         "dirty_total": len(dirty),
         "sessions_dir": sessions_dir,
+        "projects_dir": projects_dir,
+        "orphan_hours": args.orphan_hours,
+        "orphaned_only": orphaned_only,
         "provenance_available": prov_index is not None,
+        # count of session touched-files.txt that exist but could not be read;
+        # > 0 means attribution is partial and known-blob classification is off
+        "provenance_partial": prov_skipped,
         "competing_claims": competing,
         "expired_claims_overlapping": expired_overlap,
         "claims_dir": claims_dir,
@@ -868,8 +1261,21 @@ def main():
         say("  HEAD         : %s  NOT CHECKED -- %s" % (head[:12], since_error))
     elif head_moved is None:
         say("  HEAD         : %s  (--since not given: not checked)" % head[:12])
+    elif head_moved and head_moved_in_scope == []:
+        say("  HEAD         : %s  WARNING: MOVED %s..%s -- no moved commit touches"
+            " the scope, so this does not stop you; re-read anything OUTSIDE the"
+            " scope you rely on" % (head[:12], since[:12], head[:12]))
+    elif head_moved and head_moved_in_scope:
+        say("  HEAD         : %s  MOVED since %s, touching %d scope path(s):"
+            % (head[:12], args.since, len(head_moved_in_scope)))
+        for p in head_moved_in_scope[:20]:
+            say("      %s" % p)
+        if len(head_moved_in_scope) > 20:
+            say("      ... and %d more" % (len(head_moved_in_scope) - 20))
     elif head_moved:
-        say("  HEAD         : %s  MOVED since %s" % (head[:12], args.since))
+        say("  HEAD         : %s  MOVED since %s (whether it touched the scope could"
+            " not be established -- --since unresolvable or not an ancestor of HEAD)"
+            % (head[:12], args.since))
     else:
         say("  HEAD         : %s  unchanged since session start" % head[:12])
     if dirty_overlap_foreign:
@@ -890,7 +1296,9 @@ def main():
                         " --repo \"%s\"]" % (d["path"], cnt, d["nested_checkout"]))
                 continue
             who = ", ".join(o[:8] for o in d["owners"]) or "no live recorded owner"
-            say("      %s   [%s]%s" % (d["path"], who, _stale_note(d)))
+            say("      %s   [%s]%s%s%s" % (d["path"], who, _stale_note(d),
+                                          _known_note(d),
+                                          _activity_note(d, args.orphan_hours)))
         if len(dirty_overlap_foreign) > 20:
             say("      ... and %d more" % (len(dirty_overlap_foreign) - 20))
     else:
@@ -902,6 +1310,10 @@ def main():
     if prov_index is None:
         say("  CAVEAT: provenance unavailable (%s) -- nothing can be proven"
             " yours, so every overlap is treated as not-yours." % sessions_dir)
+    elif prov_skipped:
+        say("  CAVEAT: provenance PARTIAL -- %d session touched-files.txt could not be"
+            " read (%s); untracked known-blob files are not exempted." % (prov_skipped,
+                                                                         sessions_dir))
     if competing:
         say("  COMPETING CLAIMS:")
         for c in competing:
@@ -942,8 +1354,12 @@ def main():
                 % (branch_info["current_branch"], args.canonical, push_note,
                    branch_info["canonical_ref"]))
     say()
-    say({
+    verdict_text = {
         "CLEAR": "  -> go ahead.",
+        "STALE_UNTRACKED_KNOWN_BLOB": "  -> go ahead, WITH CARE: every contesting file"
+                                      " is an untracked copy of a blob already in git"
+                                      " history at that path (listed above). Nothing in"
+                                      " it is unsaved work; archive it when convenient.",
         "CONTESTED": "  -> STOP. Reconcile with the other session, or scope"
                      " into an isolated worktree.",
         "HEAD_MOVED": "  -> STOP. Re-read the files you are about to edit;"
@@ -953,7 +1369,14 @@ def main():
         "NOT_A_REPO": "  -> not a checkout.",
         "OUT_OF_REPO": "  -> STOP. Paths outside --repo were never evaluated. Run"
                        " once per checkout, with the --repo that owns them.",
-    }[verdict])
+    }[verdict]
+    if verdict == "CONTESTED" and orphaned_only:
+        verdict_text = ("  -> STOP. Every contesting owner looks ORPHANED (no activity"
+                        " for over %gh). That is a label, not a clearance: confirm with"
+                        " Gabriel, check `git diff HEAD -- <path>` holds nothing you"
+                        " would overwrite, or scope into an isolated worktree."
+                        % args.orphan_hours)
+    say(verdict_text)
 
     _emit(report, out, args.json)
     return code

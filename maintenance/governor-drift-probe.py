@@ -1917,6 +1917,18 @@ def main():
     # ALREADY-LANDED fix, not a live governor declaration. Same reasoning as MEMORY.md itself:
     # exact-name exemption, not a pattern token (REFUTE-rejected precedent above).
     skip_names |= {"INDEX_projects_system.md"}
+    # open-items-tracker.md + open-items-tracker-history.md (2026-09-21): the append-only open-items
+    # ledger and its rollover file -- the same NARRATIVE class as event_log.md and the decision
+    # ledgers above. One row per item, each RECORDING a finding; OI-338's row (a single 4,454-char
+    # table line) reports "Governor flag (no constant changed)" ONCE, at offset ~2,400, and that one
+    # word armed the whole line (_is_gov_line), so the bare-proximity pass read three ordinary
+    # per-loan LTVs (66.8% / 7.7% / 37.7%) thousands of characters away as governor declarations --
+    # failing test_event_log_excluded_e2e and blocking every push. Exact names, no pattern token
+    # (REFUTE-rejected precedent above). Both files, not just the live one: rows roll into -history,
+    # so exempting only the live file would re-trip the moment OI-338 is archived. Accepted blind
+    # spot, unchanged in kind from the ledgers: a governor change recorded ONLY in a tracker row,
+    # never in standards.md / rules.md / firm.md / CLAUDE.md / skills / capital-config.ts, goes unseen.
+    skip_names |= {"open-items-tracker.md", "open-items-tracker-history.md"}
     # DATED AUDIT/PROJECT memory files: exempt by pattern -- see DATED_AUDIT_RE at module level.
     # Dated event_log rollover archives (memory-policy.md's rollover rule, first exercised
     # 2026-07-09: _archive/event_log_<YYYY-MM-DD>.md) are the SAME append-only narrative class
