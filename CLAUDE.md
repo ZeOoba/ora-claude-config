@@ -55,6 +55,7 @@
 - Scheduling: any "schedule this"/recurring-task ask routes to `register-scheduled-task` (dual-fleet, ratified) — never the generic `schedule` skill, which has no fleet/routing awareness.
 - Morning brief: "morning brief"/"daily brief" phrasing routes to `daily-brief` (ORA's sourced pipeline) — the generic `morning` skill only on explicit `/morning`.
 - Setup audit/prune: `ora-setup-audit` is the sole skill for "audit/optimize/declutter my Claude Code setup" — check it before building a parallel one.
+- Vendor proposals: `vendor-management` QC mode scans ONE proposal/service agreement pre-signature; two or more proposals for one scope → `capital-bid-comparison` (leveling, code-check, award), then the winner passes QC before signature.
 - If a referenced skill is absent on the current surface, say so — never improvise its procedure.
 - Debugging/code-audit: generic "debug"/"fix errors"/"code audit" routes through Engineering OS's `/debug` lane first; `code-debugging-optimizations` applies once explicitly named or handed off from `/debug`. Its autonomous-mode (no approval gates on edits/commits) never overrides Invariant 2's oxfordra.net confirmation.
 - Code review: bare code-reviewer agent → pr-review-toolkit's; `requesting-code-review` routes to native `/code-review` on the diff, not a bare subagent. Detail: tech.md §3g.
