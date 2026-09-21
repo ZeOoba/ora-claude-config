@@ -13,6 +13,30 @@ When another Claude Code session is currently open (per
 hooks/lib/session_liveness.py, itself a fail-open enrichment signal), the
 warning names it specifically.
 
+PATH-SCOPED (2026-09-10, Gabriel-reported friction). The hygiene nudge used to
+report REPO-WIDE dirt regardless of the file being edited -- "the .claude MAIN
+checkout has 97 uncommitted change(s) that may be another session's WIP" -- which
+in a checkout that is essentially always dirty is a constant, un-actionable
+alarm, and which read IDENTICALLY whether or not the file under the cursor was
+one of those 97. It now splits on that question, which is the only one that
+changes what the reader should do:
+  * the edited file IS in the dirty set -> a real co-mingling hazard, said so,
+    with attribution narrowed to sessions that touched THAT file;
+  * it is NOT -> labelled repo background explicitly, keeping only the commit-
+    hygiene half (`git add <path>`, never `git add -A`) that genuinely applies.
+Costs no extra git call -- _status_paths() parses the `git status` output the
+hook already has. The dedupe fingerprint carries the in/out bit, so moving from a
+clean file to a dirty one inside one unchanged dirty set still re-arms.
+
+Membership goes through _dirty_set_covers(), not a bare `in` test against
+_status_paths()'s set (independent-review finding, same day): `git status
+--porcelain` collapses a whole untracked DIRECTORY into one `?? dir/` line, never
+one line per file beneath it, so a file living under such a directory is not
+itself a member of that set and a naive test asserted "is NOT among them" for a
+file that plainly was uncommitted -- a false assertion in exactly the direction
+this change was meant to fix. _dirty_set_covers() additionally matches a target
+against any dirty entry that IS a directory on disk.
+
 DELIVERY (fixed 2026-07-16 -- this hook was silently useless to the agent for 7
 days). v1 emitted ONLY `systemMessage` + stderr. Per the PreToolUse contract,
 `systemMessage` is "shown to the USER" and is NEVER injected into the model's
@@ -210,6 +234,36 @@ def _status_paths(repo, lines):
         if rest:
             out.add(prov_norm(os.path.join(repo, rest)))
     return out
+
+
+def _dirty_set_covers(dirty_paths, target):
+    """Is `target` (already prov_norm'd) inside `dirty_paths`, INCLUDING when it
+    lives under an untracked DIRECTORY that git status collapsed to one entry?
+
+    FIX (2026-09-10, independent review finding on the path-scoping change below):
+    `git status --porcelain` reports a whole untracked directory as ONE line --
+    `?? newdir/` -- never one line per file beneath it. `_status_paths()` above (and
+    prov_norm, which is `normcase(abspath(...))` and does not preserve a trailing
+    separator) turns that into a single path indistinguishable from a same-named
+    FILE entry. A plain `target in dirty_paths` membership test, reproduced live in
+    review, therefore MISSES every file under such a directory and asserts "is NOT
+    among them" for a file that plainly is -- a false assertion introduced by this
+    same change, in the exact direction it was meant to fix.
+
+    Exact membership first (the common case: file-level porcelain entries), then a
+    prefix check ONLY against entries that are actually directories on disk -- so a
+    file entry that merely happens to prefix-match another path's name (e.g.
+    `a.py` vs `a.py.bak`) is never wrongly treated as a container."""
+    if target in dirty_paths:
+        return True
+    for p in dirty_paths:
+        try:
+            if os.path.isdir(p) and (target == p or
+                                     target.startswith(p + os.sep)):
+                return True
+        except Exception:
+            continue  # a stat failure here is enrichment, not correctness
+    return False
 
 
 def _recent_window_s():
@@ -468,8 +522,15 @@ def _same_file_collision(file_path, session_id, get_others, sessions_dir):
             + ("" if len(who) <= 4 else "; and %d more" % (len(who) - 4))), sorted(identity)
 
 
-def _attribute_wip(repo, lines, others, sessions_dir):
+def _attribute_wip(repo, lines, others, sessions_dir, scope=None):
     """Evidence-based attribution clause, or an honest unattributed one.
+
+    `scope` (2026-09-10) narrows the attribution question from "who else has edits
+    somewhere in this repo's dirty set" to "who else has edits to THESE paths". The
+    caller passes the single file being edited when that file is itself dirty, so the
+    named session is one with a recorded edit to the file under the cursor rather than
+    to any of the other 96 unrelated dirty files -- which is what made the clause read
+    as noise. Default None preserves the repo-wide behaviour exactly.
 
     BUG FIX (2026-07-24): this used to name `others[0]` -- an ARBITRARY index
     into the liveness dict -- and assert it was "likely the source of this
@@ -489,17 +550,22 @@ def _attribute_wip(repo, lines, others, sessions_dir):
     """
     if not others:
         return ""
-    hits = _sessions_touching(_status_paths(repo, lines), others, sessions_dir)
+    hits = _sessions_touching(
+        _status_paths(repo, lines) if scope is None else scope,
+        others, sessions_dir)
+    where = "in this dirty set" if scope is None else "to it"
+    noun = "these files" if scope is None else "this file"
     if hits:
         who = ", ".join(
             "`%s`%s" % (sid[:8], (" (" + st + ")") if st else "")
             for sid, st in hits[:3])
         more = "" if len(hits) <= 3 else " and %d more" % (len(hits) - 3)
         verb = " has" if len(hits) == 1 else " have"
-        return (" Session " + who + more + verb + " recorded edit(s) to file(s)"
-                " in this dirty set -- reconcile with it before committing.")
+        return (" Session " + who + more + verb + " recorded edit(s) " +
+                ("to file(s) " + where if scope is None else where) +
+                " -- reconcile with it before committing.")
     return (" " + str(len(others)) + " other session(s) are open, but none has"
-            " a recorded edit to these files -- this WIP is UNATTRIBUTED."
+            " a recorded edit to " + noun + " -- this WIP is UNATTRIBUTED."
             " Do not assume a specific session; check `git log -1` and"
             " `git status` yourself before committing.")
 
@@ -592,7 +658,20 @@ def main():
             _commit_marker(sess_dir, sf_marker, sf_fp)
         return
 
-    fp = status_fingerprint(lines)
+    # PATH SCOPING (2026-09-10, Gabriel-reported friction). The nudge below used to
+    # report REPO-WIDE dirt on every Edit -- "the .claude MAIN checkout has 97
+    # uncommitted change(s) that may be another session's WIP" -- with no regard for
+    # whether the file under the cursor was one of them. In a checkout that is
+    # essentially always dirty, that is a constant, un-actionable alarm, and it fired
+    # identically for the one case that genuinely matters (your file IS someone's
+    # uncommitted WIP) and the 99% case that does not. Same git output, no extra
+    # subprocess: _status_paths() is pure parsing of `lines`, already in hand.
+    target_dirty = _dirty_set_covers(_status_paths(repo, lines), prov_norm(file_path))
+    # The dedupe fingerprint has to carry this bit too. Keyed on the dirty SET alone,
+    # editing a dirty file right after a clean one -- the transition from background
+    # noise to a real collision -- would be suppressed as "already warned", losing the
+    # sharper warning to a marker written for the weaker one.
+    fp = status_fingerprint(lines) + (":in" if target_dirty else ":out")
     repo_key = os.path.basename(repo.rstrip("/\\")) or "repo"
     marker = os.path.join(sess_dir, "shared-checkout-warned-" + repo_key)
 
@@ -614,14 +693,34 @@ def main():
         return
 
     n = len(lines)
-    collision_note = _attribute_wip(repo, lines, get_others(), sessions_dir)
-
-    msg = (
-        "Shared-checkout hygiene: the " + repo_key + " MAIN checkout has " + str(n) +
-        " uncommitted change(s) that may be another session's WIP." + collision_note +
-        " Editing here risks co-mingling their hunks. Consider an isolated worktree "
-        "(npm run worktree / EnterWorktree) and verify `git status` before committing."
-    )
+    base = os.path.basename(file_path)
+    if target_dirty:
+        # The file under the cursor IS part of the uncommitted set. Attribution is
+        # scoped to that one file, so a named session is one that touched THIS file.
+        collision_note = _attribute_wip(repo, lines, get_others(), sessions_dir,
+                                        scope={prov_norm(file_path)})
+        msg = (
+            "Shared-checkout hygiene: " + base + " is ITSELF one of the " + str(n) +
+            " uncommitted change(s) in the " + repo_key + " MAIN checkout -- your edit "
+            "lands on top of work that is already uncommitted." + collision_note +
+            " Re-read the file immediately before writing, keep your edit additive, and "
+            "stage only your own hunks (`git add -p`, never `git add -A`). An isolated "
+            "worktree (npm run worktree / EnterWorktree) avoids the co-mingling entirely."
+        )
+    else:
+        # Repo background, explicitly labelled as such. Saying so is the point: the
+        # previous wording asserted a co-mingling risk this case does not carry, and
+        # a warning that cries wolf on every edit stops being read on the edit that
+        # matters. The commit-hygiene half is still real -- a blanket `git add -A`
+        # here WOULD sweep up the other N files -- so that, and only that, stays.
+        collision_note = _attribute_wip(repo, lines, get_others(), sessions_dir)
+        msg = (
+            "Shared-checkout hygiene: the " + repo_key + " MAIN checkout has " + str(n) +
+            " uncommitted change(s), but " + base + " is NOT among them -- this is repo "
+            "background, not a collision on your file." + collision_note +
+            " Commit only your own paths (`git add <path>`, never `git add -A`); an "
+            "isolated worktree (npm run worktree / EnterWorktree) avoids the question."
+        )
     # Same-file first: it is the sharper, more actionable signal (a named session on
     # THIS file) and must not be buried under the generic dirty-set nudge.
     if same_file:

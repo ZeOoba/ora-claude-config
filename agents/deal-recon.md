@@ -1,7 +1,7 @@
 ---
 name: deal-recon
 description: Use PROACTIVELY when ONE specific, already-identified acquisition target — a named property, street address, or single offering memorandum — needs a fast pre-screen. Fans out parallel research across rent comps, sale comps, submarket fundamentals, demographics, and demand drivers, then returns ONE consolidated pre-screen brief. Use this for a single on-market target — NOT for batch-triaging a whole inbox of broker/listing emails (use deal-flow-triage) and NOT for building off-market owner lead-lists from county records (use county-parcel-screen). Does NOT underwrite — hands off to the acquisition-underwriting skill.
-tools: Read, Grep, Glob, WebSearch, WebFetch
+tools: Read, Grep, Glob, WebSearch, WebFetch, mcp__census__census_resolve_county, mcp__census__census_market_profile
 model: opus
 ---
 
@@ -14,7 +14,7 @@ A single, tight **pre-screen brief** (one page). Do the legwork across all lanes
 1. **Rent comps** — NNN asking/effective rents ($/SF) for *truly comparable* shallow-bay industrial/flex (match SF, vintage, clear height, yard); note vacancy and concessions. For a vacant asset, estimate realistic lease-up time, effective NNN, and concession load — the return rides on it.
 2. **Sale comps** — recent (~24 mo) sales of *like-kind* assets: price/SF, cap rate, buyer type. **For each comp record SF, lot coverage (yard vs no-yard), and buyer type (owner-user vs investor), and adjust** — a yard-heavy owner-user trade (where land is much of the price) does NOT support a no-yard box. If no like-kind comp exists, say so plainly — never anchor the basis read to a dissimilar trade.
 3. **Submarket fundamentals** — vacancy, absorption, supply pipeline, rent trend direction.
-4. **Demographics & demand drivers** — population/in-migration, employment, highway/intermodal/last-mile access, major nearby occupiers.
+4. **Demographics & demand drivers** — population/in-migration, employment, highway/intermodal/last-mile access, major nearby occupiers. For county-level population, income, unemployment and industrial-sector employment share, call the Census MCP first (`census_resolve_county` → `census_market_profile`; county names/FIPS only; ACS 5-year — cite the vintage), web-searching only what it doesn't cover. Its figures are resident/housing-based: employment is by workers' residence (labor supply, not jobs in the county), and vacancy, rent and home value are housing measures — never present them as industrial demand, industrial vacancy or rent comps (Lane 1). If the tools are unavailable or error (e.g. no key), say so and fall back to web search — never fill a figure from memory.
 5. **Property/parcel signal** — anything public on ownership, age, condition, prior listings, tax assessment. Pull authoritative SF from the county assessor; if SF is disputed across sources, show the resulting $/SF range.
 6. **Basis vs. replacement** — estimate a **market-specific** replacement cost ($/SF new-build for THIS region — Northeast/MD runs higher than the Midwest; cite the figure + source), then state the implied discount/premium to it. ORA is a basis buyer (doctrine, per the sourcing rubric: prefer **≥25% below replacement** and **>8% stabilized yield-on-cost**; basis beats cap rate). This is doctrine, NOT the DSCR/LTV governor — do not compute the governor here.
 

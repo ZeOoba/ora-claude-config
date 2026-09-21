@@ -120,6 +120,20 @@ import shlex
 import subprocess
 import sys
 
+# Linear-time shlex (see hooks/lib/linear_shlex.py): stdlib shlex is O(len^2) on ONE long
+# token, and this guard tokenizes the WHOLE command whenever its text contains "commit"
+# (not only `git commit`). Imported in its own try/except so a partial deploy -- this guard
+# landing before the lib on the shared checkout -- degrades to stdlib shlex, never inert.
+_LIB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib")
+if _LIB_DIR not in sys.path:
+    sys.path.insert(0, _LIB_DIR)
+try:
+    from linear_shlex import shlex_class as _shlex_class, split as _shlex_split
+except Exception:
+    def _shlex_class(text):
+        return shlex.shlex
+    _shlex_split = shlex.split
+
 MEM_RE = re.compile(r"(?:^|/)memory/.+\.md$", re.IGNORECASE)
 MODIFIED_RE = re.compile(r"^\s*modified:\s*(\S+)\s*$", re.MULTILINE)
 # Global `git` options that take a separate value argument; the subcommand is whatever
@@ -143,7 +157,7 @@ def _tokens(cmd):
     naive split rather than giving up, since a missing warning is this guard's only real
     failure mode."""
     try:
-        return shlex.split(cmd, posix=True)
+        return _shlex_split(cmd, posix=True)
     except Exception:
         try:
             return cmd.split()
@@ -165,7 +179,7 @@ def _segments(cmd):
     behavior is strictly better than going silent.
     """
     try:
-        lex = shlex.shlex(cmd, posix=True, punctuation_chars=SEP_CHARS)
+        lex = _shlex_class(cmd)(cmd, posix=True, punctuation_chars=SEP_CHARS)
         lex.whitespace_split = True
         # A newline must act as a SEPARATOR, not as whitespace, or multi-line blocks
         # collapse into one segment (round-2 finding M4).
