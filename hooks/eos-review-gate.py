@@ -80,13 +80,28 @@ comparison so that formatting alone never refuses a genuine top-tier reviewer.
 
 SAFETY INVARIANT, two-sided and deliberately asymmetric:
   - The gate's OWN machinery fails OPEN. Bad stdin, no git, unreadable repo,
-    import failure, any unexpected exception -> exit 0, allow. A bug in a gate
-    must never wedge the fleet.
+    any unexpected exception -> exit 0, allow. A bug in a gate must never wedge
+    the fleet.
+    ONE CARVE-OUT (2026-09-17, Gabriel): a failed hooks/lib import + a
+    commit-SHAPED command -> BLOCK. Not a bug in the gate but the gate being
+    absent, and the old silent allow was unfalsifiable -- a missing
+    git_probe_common.py left this gate allowing every blast-radius commit for
+    days, looking exactly like "nothing to gate". Non-commit calls still pass
+    (loudly), EOS_REVIEW_GATE_MODE=off/warn still wins, and the
+    allow-unreviewed-commit token is still honored -- for commands the detector
+    can classify: one over _DEGRADED_MAX_CMD_CHARS (16,384) that names both `git`
+    and `commit` blocks WITHOUT spending the token, because the scan is O(n^2)
+    and is bounded rather than trusted (see TIME BOUND at the detector). The
+    other escape hatches below survive the carve-out.
+    commit-provenance-guard.py deliberately does NOT
+    copy this: its 2026-07-17 allow-on-import-failure ruling stands, and it
+    announces instead.
   - A GRANT fails CLOSED. A missing, corrupt, stale, mis-keyed, cross-session, or
     under-tier artifact is not an approval. Ambiguity never resolves in the
     grant's favour -- same stance as lib/override_tokens.py.
   Concretely: "I cannot tell what this commit touches" -> allow. "I can tell it
-  touches risk code and I cannot find a valid review" -> block.
+  touches risk code and I cannot find a valid review" -> block. "I cannot run at
+  all AND this looks like a commit" -> block (the carve-out above).
 
 ESCAPE HATCH: the shared session-scoped override-token contract
 (lib/override_tokens.py), tier `allow-unreviewed-commit`, SINGLE-USE. Single-use
@@ -1060,9 +1075,210 @@ def cli_record(argv):
 # hook
 # ---------------------------------------------------------------------------
 
+# Crude, dependency-free commit detector for the degraded path below.
+# DELIBERATELY NOT imported from hooks/lib and deliberately duplicated in
+# commit-provenance-guard.py: the entire premise of this path is that hooks/lib
+# could not be imported, so a shared helper there would be unreachable exactly
+# when it is needed.
+#
+# IT OVER-MATCHES, ON PURPOSE. This is a substring scan, not is_git_commit()'s
+# tokenizer, so `git add commit-provenance-guard.py`, `git log --grep commit`
+# and `git config commit.gpgsign false` all match and get blocked while
+# degraded. Over-blocking is the accepted trade here: this path only runs when
+# hooks/lib is broken, and the repair itself
+# (`git checkout <ref> -- hooks/lib/<module>.py`) is NOT a match, so there is no
+# bootstrap deadlock. Precisely: hyphenated names such as
+# hooks/commit-provenance-guard.py DO match (`-` is a word boundary); the
+# underscore lib modules (commit_provenance.py, git_commit_parse.py,
+# isolated_commit.py) do NOT, so no lib repair command is ever blocked. `;`, `&&` and `|` end the
+# span so a chained non-git tail cannot drag `commit` in; a newline does not,
+# which closes the `git \<newline> commit` line-continuation hole at the cost
+# of matching a multi-line script that mentions both.
+_DEGRADED_COMMIT_RE = re.compile(r"\bgit\b[^;&|]*\bcommit\b", re.IGNORECASE)
+
+# Stricter form: `git`, optional global -C/-c options, then `commit` as the
+# SUBCOMMAND. Used for ONE decision only -- whether to spend a SINGLE-USE
+# override token. The loose pattern above deliberately matches `git log --grep
+# commit` and `git add commit-provenance-guard.py`; consuming Gabriel's
+# single-use approval on one of those would burn it on something that was never
+# a commit, leaving the real commit blocked with no token left. That is the
+# 2026-07-24 m7 failure (test_warn_mode_does_not_consume_override_token) in a
+# sharper form. So: loose match blocks, strict match may also SPEND.
+# Hardened after the PR #234 adversarial review (2026-09-19): `commit` must not
+# be followed by `-` or a word char (else `git commit-graph write` / `commit-tree`
+# spent the token on a non-commit); global options may carry quoted values with
+# spaces and long `--opt[=val]` forms (else a real `git -C "a b" commit` could
+# never spend a valid token); and case is ignored (Git Bash resolves `GIT`).
+_ARG_UNIT = r"""(?:[^\s"']|"[^"]*"|'[^']*')"""
+_DEGRADED_STRICT_COMMIT_RE = re.compile(
+    # `--help` / `--version` / `--*-path` (bare, no `=`) make git PRINT AND EXIT
+    # before any subcommand runs, so `git --help commit` is a man-page lookup, not a
+    # commit; the second review (2026-09-19) reproduced it burning the token. The
+    # `(?![\w=-])` keeps `--exec-path=/x commit` (which sets the path and DOES run
+    # the command) spendable.
+    r"\bgit\b(?:\s+(?:-[Cc]\s+" + _ARG_UNIT + r"+"
+    r"|--(?!(?:help|version|exec-path|html-path|man-path|info-path)(?![\w=-]))[\w-]+"
+    r"(?:=" + _ARG_UNIT + r"*)?))*"
+    r"\s+commit(?![\w-])", re.IGNORECASE)
+
+# TIME BOUND (PR #234 review, measured 2026-09-19). Both patterns above are
+# O(n^2): re.search retries at every `\bgit\b` and each attempt scans on to the
+# end of the `;&|` segment (or through the whole option chain, for the strict
+# form). Worst shape `git` + ` -c git=git` * n: 22KB ~2s, 44KB ~8s, and a 99KB
+# command that IS a real commit ~76-84s. The dispatcher runs guards in-process
+# with no per-guard timeout, so on the one path that exists to fail CLOSED on
+# commits that could outlive Claude Code's own hook timeout, and every guard
+# after this one in the chain would never run.
+#
+# So, in this order, before any pattern runs:
+#   1. no whole word `commit` OR no whole word `git` anywhere -> None. Exact, not
+#      a heuristic: BOTH patterns need both (each begins `\bgit\b`; loose needs
+#      `\bcommit\b`; strict's `\s+commit(?![\w-])` implies a boundary each side),
+#      so this changes no decision. Two linear passes, so size alone never blocks
+#      a command that cannot be a commit. (The first cut checked `commit` only and
+#      so blocked a big `echo ... db.commit()` for length alone -- review finding.)
+#   2. longer than _DEGRADED_MAX_CMD_CHARS -> "oversize": BLOCK, and NEVER spend a
+#      token (an input the strict scan was too expensive to classify must not burn
+#      Gabriel's single-use approval). Over-blocking is this path's stated
+#      contract. The cap sits ~2x above any commit message seen in this fleet
+#      (long heredocs run 3-6KB). It bounds the scan, it does not make it cheap:
+#      the worst shape found at the cap (`git` + ` --git` * n + `; git commit-x`,
+#      every `git` chains) measured 1.1-2.4s CPU per call, and cost grows ~4x per
+#      doubling, so do NOT raise the cap without re-measuring
+#      (test_degraded_commit_kind_time_is_bounded_at_the_cap pins it).
+#      A real commit past it is not stranded: `git commit -F <file>` keeps the
+#      command short, and the message file can be made with the Write tool (this
+#      gate is not in the Edit/Write chain; a Bash heredoc that mentions both
+#      `git` and `commit` is scanned like any other command).
+#   3. otherwise the two patterns, unchanged, so under the cap the decision is
+#      byte-for-byte what the patterns alone say (fuzz-pinned by
+#      test_degraded_commit_kind_matches_the_raw_regexes_under_the_cap).
+# The same guard exists in commit-provenance-guard.py (its copy of the loose
+# pattern is subject to the same blow-up) -- keep the two in step.
+_DEGRADED_COMMIT_WORD_RE = re.compile(r"\bcommit\b", re.IGNORECASE)
+_DEGRADED_GIT_WORD_RE = re.compile(r"\bgit\b", re.IGNORECASE)
+_DEGRADED_MAX_CMD_CHARS = 16_384
+
+
+def _degraded_commit_kind(cmd):
+    """None (not commit-shaped) | "loose" | "strict" | "oversize". Never raises;
+    a non-string is None. See the TIME BOUND note above for the ordering."""
+    if (not isinstance(cmd, str) or not _DEGRADED_COMMIT_WORD_RE.search(cmd)
+            or not _DEGRADED_GIT_WORD_RE.search(cmd)):
+        return None
+    if len(cmd) > _DEGRADED_MAX_CMD_CHARS:
+        return "oversize"
+    if not _DEGRADED_COMMIT_RE.search(cmd):
+        return None
+    return "strict" if _DEGRADED_STRICT_COMMIT_RE.search(cmd) else "loose"
+
+
+_DEGRADED_CAUSE = (
+    "hooks/lib could not be imported, so this gate cannot parse the command or "
+    "verify a review artifact (PARSE_CONTRACT_LOADED is False). Most likely a "
+    "partial sync that left a lib module missing -- the 2026-09-17 incident was "
+    "eos-review-gate.py expecting hooks/lib/git_probe_common.py on a branch that "
+    "did not carry it. Run `python hooks/tests/test-eos-review-gate.py` to see "
+    "the real import error."
+)
+
+
+def _degraded(stdin_text):
+    """Guarded import failed: FAIL CLOSED on anything that looks like a commit,
+    and ANNOUNCE on everything else.
+
+    Before 2026-09-17 this path was a bare `return` -- the gate went silent and
+    allowed every blast-radius commit, which is indistinguishable from "nothing
+    to gate" at the call site and is how a missing lib module went unnoticed.
+    Blocking EVERY Bash call instead would brick the fleet (the guarded import
+    exists precisely to avoid that), so the split is: commits fail closed,
+    everything else passes with a loud note. Classification is
+    `_degraded_commit_kind`, which is size-bounded: past the cap a command that
+    names both `git` and `commit` blocks without spending a token."""
+    try:
+        payload = json.loads(stdin_text)
+    except Exception:
+        payload = {}
+    tool_input = payload.get("tool_input") if isinstance(payload, dict) else None
+    cmd = tool_input.get("command") if isinstance(tool_input, dict) else None
+    kind = _degraded_commit_kind(cmd)
+    if kind is None:
+        sys.stderr.write("WARNING (eos-review-gate, DEGRADED): " + _DEGRADED_CAUSE
+                         + " Non-commit tool calls are still allowed.\n")
+        return
+
+    # The documented escape hatches must survive the carve-out, or a broken lib
+    # file would leave no in-band way past this gate at all.
+    mode = (os.environ.get("EOS_REVIEW_GATE_MODE") or "block").strip().lower()
+    if mode == "off":
+        return
+    session_id = payload.get("session_id") or ""
+    if mode == "warn":
+        sys.stderr.write("WARNING (eos-review-gate, DEGRADED, warn mode -- not "
+                         "blocking): " + _DEGRADED_CAUSE + "\n")
+        return
+    # override_tokens is the FIRST name in the guarded import, so in the failure
+    # this path exists for (a later name in that same try, e.g. git_commit_parse
+    # missing its own dependency) it is still bound and the token contract still
+    # works. Guarded anyway: if override_tokens itself was what failed, fall
+    # through to the block rather than raising inside a degraded gate.
+    strict = kind == "strict"
+    try:
+        token_hint = override_tokens.token_path(session_id, OVERRIDE_TIER_ARGS[0])
+        if strict:
+            tier = override_tokens.Tier(*OVERRIDE_TIER_ARGS, single_use=True)
+            if override_tokens.token_grants(session_id, tier) is not None:
+                sys.stderr.write(
+                    "eos-review-gate (DEGRADED): proceeding UNREVIEWED under a "
+                    "single-use override token (consumed). " + _DEGRADED_CAUSE + "\n")
+                return
+    except Exception:
+        token_hint = None
+    if kind == "oversize":
+        # Too long to classify in bounded time (see the TIME BOUND note), so it
+        # cannot be told apart from a non-commit: block, spend NO token.
+        sys.stderr.write(
+            "BLOCKED (eos-review-gate): " + _DEGRADED_CAUSE + "\n"
+            "This command mentions `git` and `commit` and is %d characters, over "
+            "the %d-character limit this gate can scan safely while degraded, so "
+            "it blocks -- without consuming any override token.\n"
+            "Fix the import, or shorten the command: write the message to a file "
+            "with the Write tool (a Bash heredoc naming git and commit is "
+            "scanned too) and run `git commit -F <file>` on its own line.\n"
+            % (len(cmd), _DEGRADED_MAX_CMD_CHARS))
+        sys.exit(2)
+    if not strict:
+        # Loose match only: block, but do NOT spend a single-use token on a
+        # command that is probably not a commit at all.
+        sys.stderr.write(
+            "BLOCKED (eos-review-gate): " + _DEGRADED_CAUSE + "\n"
+            "This command MENTIONS a git commit but is not shaped like one "
+            "(`git [-C dir] commit ...`). While degraded this gate cannot tell "
+            "the difference, so it blocks -- without consuming any override "
+            "token, which would otherwise be spent on a non-commit.\n"
+            "Fix the import, or re-run the real commit on its own line.\n")
+        sys.exit(2)
+    sys.stderr.write(
+        "BLOCKED (eos-review-gate): " + _DEGRADED_CAUSE + "\n"
+        "This command looks like a `git commit` (a deliberately over-broad "
+        "match while degraded), and an unverifiable review is not an approved "
+        "one -- so this gate fails CLOSED rather than allowing an unreviewed "
+        "blast-radius commit.\n"
+        "Fix the import -- `git checkout <ref> -- hooks/lib/<module>.py` is NOT "
+        "matched by the degraded detector, so the repair itself is never "
+        "blocked.\n"
+        + ("Or, if Gabriel has approved landing this UNREVIEWED, the usual "
+           "single-use token is still honored here:\n  %s\n" % token_hint
+           if token_hint else
+           "The override-token contract could not be loaded either, so no token "
+           "can be honored while degraded: fix the import, or set "
+           "EOS_REVIEW_GATE_MODE=off for one call.\n"))
+    sys.exit(2)
+
+
 def main():
     if not PARSE_CONTRACT_LOADED:
-        return  # no information -> allow (see the guarded import above)
+        return _degraded(sys.stdin.read())
 
     payload = json.loads(sys.stdin.read())
     if not isinstance(payload, dict):
