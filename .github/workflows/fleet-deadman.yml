@@ -7,15 +7,18 @@
 # the machine, so it survives total local fleet loss -- if the machine stops pushing a
 # fresh heartbeat, THIS still fires.
 #
-# HOW: maintenance/emit-fleet-heartbeat.py writes maintenance/_state/fleet-heartbeat.json
-# locally (counts + registry hashes, nothing sensitive); maintenance/push-fleet-heartbeat.ps1
-# commits + pushes it daily. This workflow parses the committed copy and FAILS when:
+# HOW (v2, OI-323): maintenance/publish-fleet-heartbeat.py, run daily by
+# maintenance/push-fleet-heartbeat.ps1, writes ONLY the heartbeat JSON (counts + registry
+# hashes, nothing sensitive) to the `deadman-heartbeat` branch through the GitHub API -- no
+# git push, no pre-push gate, no race with main. (v1 rode `git push origin main`, so an
+# unrelated failing hook test or a main that moved mid-gate kept it off GitHub for days.)
+# This workflow checks that branch out at hb/ and FAILS when:
 #   (a) heartbeat timestamp older than 24h vs run time
 #   (b) cc  enabled-recurring count < 10  (ratified floor, 2026-07-09)
 #   (c) lams enabled-recurring count < 18 (ratified floor, 2026-07-09)
 #   (d) heartbeat file missing or unparseable
 #   (e) either registry existence flag is false
-#   (f) the AM cluster did not complete on time -- heartbeat ts later than 08:30 America/
+#   (f) the AM cluster did not complete on time -- heartbeat ts later than 08:00 America/
 #       New_York on the run date (ADDED 2026-07-28, Gabriel-directed)
 #
 # WHY (f) EXISTS: (a)'s 24h window is calibrated for TOTAL fleet loss and is structurally
@@ -43,9 +46,10 @@
 # (repo Watch setting "All Activity", and Settings -> Notifications -> email enabled).
 #
 # Schedule: 14:00 UTC daily (10:00 ET summer / 09:00 ET winter). MOVED from 13:00 UTC on
-# 2026-07-28 so check (f) has usable margin year-round: the 08:30 ET grace deadline lands
-# at 13:30 UTC in winter, which a 13:00 UTC run would evaluate BEFORE the deadline had even
-# passed. 14:00 UTC leaves ~90min margin in summer and ~30min in winter, and still alarms
+# 2026-07-28 so check (f) has usable margin year-round: the 08:00 ET grace deadline (tightened
+# from 08:30 the same day, see the code comment in the evaluator) lands at 13:00 UTC in winter,
+# which a 13:00 UTC run would evaluate AT the deadline, not after it. 14:00 UTC leaves ~120min
+# margin in summer and ~60min in winter, and still alarms
 # ahead of automation-health-monitor's 11:05 ET catch. (a)'s 24h total-loss check is not
 # hour-sensitive, so the 1h shift costs it nothing.
 # Runbook on alarm: memory/oxford-cc-repo-health.md
@@ -69,6 +73,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # continue-on-error: a missing branch must surface as check (d) below (file missing),
+      # not as a crashed checkout step that opens no issue.
+      - name: Check out heartbeat branch
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          ref: deadman-heartbeat
+          path: hb
+
       - name: Evaluate heartbeat
         id: check
         run: |
@@ -76,7 +89,7 @@ jobs:
           import datetime, json, os
           from zoneinfo import ZoneInfo
 
-          HB_PATH = "maintenance/_state/fleet-heartbeat.json"
+          HB_PATH = "hb/fleet-heartbeat.json"
           MAX_AGE_H = 24
           FLOORS = {"cc": 10, "lams": 18}  # ratified 2026-07-09; a count below floor = silent registry shrink
           # (f) AM-cluster completion deadline, LOCAL time (see header). The local push is
@@ -95,7 +108,11 @@ jobs:
           try:
               with open(HB_PATH, encoding="utf-8") as f:
                   hb = json.load(f)
-          except Exception as e:  # (d) missing/unparseable
+          except FileNotFoundError:  # (d) branch absent (never published) or file not on it
+              reasons.append("heartbeat file missing or unparseable (FileNotFoundError): branch "
+                             "`deadman-heartbeat` is absent or has no fleet-heartbeat.json -- has "
+                             "publish-fleet-heartbeat.py ever published?")
+          except Exception as e:  # (d) unparseable
               reasons.append("heartbeat file missing or unparseable (%s)" % e.__class__.__name__)
 
           if hb is not None:
@@ -159,7 +176,8 @@ jobs:
                  "Runbook: `memory/oxford-cc-repo-health.md` (July 2026 fleet-loss incident record; "
                  "locally under `~/.claude/projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/`).",
                  "First checks: is the Desktop app open on the workstation? Did "
-                 "`maintenance/push-fleet-heartbeat.ps1` push last night (see its .log)? Then run "
+                 "`maintenance/push-fleet-heartbeat.ps1` publish last night (its .log, lines starting `publish:`; "
+                 "`python maintenance/publish-fleet-heartbeat.py --status`)? Then run "
                  "`maintenance/registry-membership-probe.py` locally for the per-task drop detail."])
           with open("deadman-body.md", "w", encoding="utf-8") as f:
               f.write(body + "\n")
