@@ -46,6 +46,23 @@ checkout in EXACTLY the state it was found in. Never a partial/stuck state.
      only updates the remote-tracking ref.
   3. If HEAD is already 0 commits behind `origin/<canonical>`: NOOP_CLEAN,
      nothing to do.
+  3b. Compute the overlap READ-ONLY (added 2026-09-21): `git status --porcelain=v2
+      -z --untracked-files=all` (tracked + untracked dirty paths) plus
+      assume-unchanged / on-disk skip-worktree entries (`ls-files -v`; invisible to
+      status, but git still refuses over them), intersected with the paths the
+      merge would change (`git merge-tree --write-tree --name-only -z HEAD <sha>`:
+      its result tree diffed against HEAD PLUS its conflicted-path list -- a
+      modify/delete or binary conflict keeps HEAD's version in the result tree, so
+      the diff alone misses it and the merge's --abort then REVERTED the dirty
+      edit; fallback `HEAD...<sha>`), matching across directory
+      boundaries and case-insensitively. Any overlap -> BLOCKED_DIRTY_OVERLAP with
+      those paths, and `git merge` is NEVER invoked. Why: on a branch with its own
+      commits, a refused `git merge` (ort, "would be overwritten") rewrites EVERY
+      dirty tracked file -- content kept, but new mtime and LF->CRLF under
+      core.autocrlf=true -- including files that do not overlap. The live 16:47
+      run on 2026-09-21 did this to all 50 modified files in ~/.claude, resetting
+      dirty-tree-triage's mtime settlement and breaking live sessions' Read->Edit.
+      If the overlap cannot be computed: ERROR, never a blind merge.
   4. Attempt `git merge --no-commit --no-ff origin/<canonical>`.
        - Exit 0 (no conflicts): the index now holds the merge result and
          NOTHING else (git itself refuses a merge while anything is staged)
@@ -71,11 +88,11 @@ checkout in EXACTLY the state it was found in. Never a partial/stuck state.
        command) and then VERIFIED: `merge_aborted` reports whether MERGE_HEAD
        is actually gone, and a failed abort says "LEFT MID-MERGE" in `detail`
        rather than claiming the tree was restored.
-       - Exit != 0 with no MERGE_HEAD: git refused before writing anything
-         (uncommitted local changes overlap the incoming diff -- the
-         ordinary case on this checkout, since it usually carries a large
-         WIP backlog). Nothing to abort; the tree was never touched.
-         BLOCKED_DIRTY_OVERLAP. If git named NO overlapping path (e.g. a
+       - Exit != 0 with no MERGE_HEAD: git refused (uncommitted local changes
+         overlap the incoming diff in a way 3b did not see, e.g. a file dirtied
+         between 3b and the merge). FALLBACK only -- the ordinary overlap case
+         is caught by 3b. Nothing to abort, but dirty files may have been
+         re-written (see 3b). BLOCKED_DIRTY_OVERLAP. If git named NO overlapping path (e.g. a
          stale .git/index.lock, which blocks every session's commits) it is
          ERROR instead, so it alarms rather than passing as routine.
 
@@ -189,6 +206,88 @@ def parse_overlap_paths(git_output):
             continue
         in_block = False
     return paths
+
+
+# `git status --porcelain=v2 -z` field count before the path, per entry type. v2, not
+# v1: v1's first entry starts with a space (" M path") that _git's strip() would eat.
+_V2_PATH_FIELD = {"1": 8, "2": 9, "u": 10, "?": 1}
+
+
+def parse_porcelain_v2_z(text):
+    """Paths from `git status --porcelain=v2 -z`. A rename/copy ("2") entry is followed
+    by a second NUL field (its source path); both are returned."""
+    fields, paths, i = (text or "").split("\0"), [], 0
+    while i < len(fields):
+        f = fields[i]
+        i += 1
+        n = _V2_PATH_FIELD.get(f[:1])
+        if n is None:
+            continue
+        parts = f.split(" ", n)
+        if len(parts) > n:
+            paths.append(parts[n])
+        if f[:1] == "2":
+            if i < len(fields) and fields[i]:
+                paths.append(fields[i])
+            i += 1
+    return paths
+
+
+def overlapping_paths(dirty, changed):
+    """Dirty paths that equal a changed path or sit on either side of a directory
+    boundary with one (origin turns dir->file, or adds under an untracked dir).
+    Case-insensitive: a false block is safe, a missed one rewrites the tree."""
+    ch = [c.casefold() for c in changed]
+    hits = []
+    for d in dirty:
+        dc = d.casefold()
+        if any(dc == c or dc.startswith(c + "/") or c.startswith(dc + "/") for c in ch):
+            if d not in hits:
+                hits.append(d)
+    return hits
+
+
+def incoming_paths(repo, target_sha):
+    """Paths the merge of target_sha into HEAD would change, computed without touching
+    the index or working tree, or None if it cannot be computed. `merge-tree
+    --write-tree` (git >= 2.38) gives the real result tree -- exit 1 only means
+    conflicts, and the tree is still written. Fallback: merge-base..target, a
+    superset (it also lists changes HEAD already has)."""
+    rc, out, _ = _git(["merge-tree", "--write-tree", "--name-only", "-z", "HEAD", target_sha], repo)
+    fields = out.split("\0") if rc in (0, 1) and out else [""]
+    tree, conflicted = fields[0].strip(), []
+    # Conflicted paths follow the tree id up to an empty field. They MUST be added: for
+    # modify/delete or binary conflicts the result tree keeps HEAD's version, so the diff
+    # below omits them -- and the merge's `--abort` then reverts a dirty edit there.
+    for f in fields[1:]:
+        if not f:
+            break
+        conflicted.append(f)
+    if tree:
+        rc, names, _ = _git(["diff", "--name-only", "--no-renames", "-z", "HEAD", tree], repo)
+    else:
+        rc, names, _ = _git(["diff", "--name-only", "--no-renames", "-z",
+                             "HEAD...%s" % target_sha], repo)
+    if rc != 0:
+        return None
+    return [n for n in names.split("\0") if n] + conflicted
+
+
+def hidden_dirty_paths(repo):
+    """Index entries `git status` cannot see as dirty but `git merge` still refuses over:
+    assume-unchanged (lowercase `ls-files -v` tag) always, skip-worktree (`S`) only when
+    the file is present on disk (absent = ordinary sparse checkout). None on failure."""
+    rc, out, _ = _git(["ls-files", "-v", "-z"], repo)
+    if rc != 0:
+        return None
+    hits = []
+    for f in out.split("\0"):
+        if len(f) < 3 or f[1] != " ":
+            continue
+        tag, path = f[0], f[2:]
+        if tag.islower() or (tag == "S" and os.path.lexists(os.path.join(repo, path))):
+            hits.append(path)
+    return hits
 
 
 def _strip_warnings(text):
@@ -369,6 +468,26 @@ def sync(repo=None, canonical=None):
         out["detail"] = "cannot resolve %s" % target
         return out
 
+    # Overlap BEFORE merging, read-only. A refused `git merge` on a non-ff branch
+    # rewrites every dirty tracked file (new mtime, LF->CRLF under autocrlf) even
+    # though it keeps their content -- so when overlap is knowable, never invoke it.
+    rc, status_out, _ = _git(["status", "--porcelain=v2", "-z", "--untracked-files=all"], repo)
+    hidden = hidden_dirty_paths(repo) if rc == 0 else None
+    incoming = incoming_paths(repo, target_sha) if hidden is not None else None
+    if incoming is None:
+        out["status"] = "ERROR"
+        out["detail"] = ("cannot compute the dirty/incoming overlap read-only (%s failed) "
+                         "-- not merging" % ("git status" if rc != 0 else
+                                             "ls-files" if hidden is None else "merge-tree/diff"))
+        return out
+    overlap = overlapping_paths(parse_porcelain_v2_z(status_out) + hidden, incoming)
+    if overlap:
+        out["status"] = "BLOCKED_DIRTY_OVERLAP"
+        out["blocked_paths"] = overlap
+        out["detail"] = ("%d local path(s) overlap %s; git merge not attempted, tree "
+                         "untouched: %s" % (len(overlap), target, ", ".join(overlap[:20])))[:500]
+        return out
+
     # Merge the resolved SHA, not the ref name: a concurrent fetch moving origin/<canonical>
     # in between would otherwise make this run's own MERGE_HEAD fail the check below,
     # stranding its own conflict as "someone else's".
@@ -422,7 +541,7 @@ def sync(repo=None, canonical=None):
         return out
     out["status"] = "BLOCKED_DIRTY_OVERLAP"
     out["blocked_paths"] = paths
-    out["detail"] = "git refused before writing anything (%d local path(s) overlap %s): %s" % (
+    out["detail"] = "git refused the merge (%d local path(s) overlap %s): %s" % (
         len(out["blocked_paths"]), target, _strip_warnings(raw)[:500])
     return out
 
