@@ -65,11 +65,11 @@ CONTRACTS = [
         "max_age_hours": 36,
     },
     {
-        "name": "emit-fleet-heartbeat -> ora-cowork-watchdog dead-man's-switch",
-        "producer": "emit-fleet-heartbeat.py (pushed via push-fleet-heartbeat.ps1)",
-        "output_file": os.path.join(STATE_DIR, "fleet-heartbeat.json"),
-        "consumer": "external GitHub ora-cowork-watchdog (checks the pushed copy; a stale LOCAL file is a leading indicator the push side broke too)",
-        "max_age_hours": 20,  # producer's own cron is twice-daily, 05:50 + 17:50
+        "name": "publish-fleet-heartbeat -> fleet-deadman GitHub Action",
+        "producer": "publish-fleet-heartbeat.py (run daily by push-fleet-heartbeat.ps1; OI-323)",
+        "output_file": os.path.join(STATE_DIR, "heartbeat-publish-ok.json"),
+        "consumer": "external fleet-deadman.yml (reads the deadman-heartbeat branch this publish updates; a stale ok-stamp means the publish stopped and the dead-man is reading old data)",
+        "max_age_hours": 26,  # daily 07:30 ET publish + slack, same window as publish-fleet-heartbeat.py --status
     },
 ]
 
