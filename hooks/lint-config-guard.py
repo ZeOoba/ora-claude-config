@@ -124,6 +124,13 @@ try:
     TOOL_PATHS_LOADED = True
 except Exception:
     TOOL_PATHS_LOADED = False
+# Imported SEPARATELY (see config-write-guard.py): a lib without blank_exempt_token must
+# degrade to the raw pattern, not make this whole guard inert.
+try:
+    from tool_call_paths import blank_exempt_token  # noqa: E402
+except Exception:
+    def blank_exempt_token(text, marker):
+        return _re.sub(r"\S*" + _re.escape(marker) + r"\S*", " <exempt> ", text)
 
 LINT_CONFIG_WRITE = Tier("allow-lint-config-write", "lint-config-write", 3600)
 
@@ -245,7 +252,7 @@ def _blank_exempt(text, marker):
     marker anywhere in the command, this only silences the SPECIFIC token
     that names a worktree path; an unrelated write elsewhere in the same
     command (a different argument, a later chained command) still matches."""
-    return _re.sub(r"\S*" + _re.escape(marker) + r"\S*", " <exempt> ", text)
+    return blank_exempt_token(text, marker)
 
 
 def classify_shell_text(command):
