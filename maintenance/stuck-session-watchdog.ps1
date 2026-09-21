@@ -78,10 +78,20 @@ function Main {
         $now = Get-Date
         $procs = Get-CimInstance Win32_Process -Filter "Name = 'claude.exe'" |
                  Select-Object ProcessId, CommandLine, CreationDate
-        $candidates = Get-KillCandidates -Procs $procs -Now $now -ThresholdMinutes $ThresholdMinutes
+        # 2026-09-21: only a session the Desktop's own records identify as a scheduled task (and the user
+        # has not continued) may be killed. Command-line flags cannot tell a fresh interactive Code-tab
+        # session from a scheduled one; without this the age test killed interactive sessions ~114 min
+        # old. Anything unidentifiable is spared and logged. See stuck-session-watchdog-lib.ps1.
+        $sessionInfo = Get-SessionInfoMap -Procs $procs
+        # -SessionInfo $null means "legacy: kill on age alone" -- the very bug this fixes. Never let a
+        # broken lookup fall through to it: no session map, no kills this run (fail SAFE).
+        if ($sessionInfo -isnot [hashtable]) { Log "no session map -- killing nothing this run"; return }
+        $skipped = New-Object System.Collections.ArrayList
+        $candidates = Get-KillCandidates -Procs $procs -Now $now -ThresholdMinutes $ThresholdMinutes -SessionInfo $sessionInfo -Skipped $skipped
+        foreach ($s in $skipped) { Log "SPARED PID $($s.ProcessId), age $($s.AgeMin) min ($($s.Reason))" }
 
         if ($candidates.Count -eq 0) {
-            Log "clean run -- 0 stuck sessions (checked $($procs.Count) claude.exe processes, threshold ${ThresholdMinutes}m)"
+            Log "clean run -- 0 stuck sessions (checked $($procs.Count) claude.exe processes, threshold ${ThresholdMinutes}m, spared $($skipped.Count))"
             return
         }
 
