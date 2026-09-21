@@ -808,6 +808,229 @@ with tempfile.TemporaryDirectory() as td:
     check("dir->file: untracked WIP preserved",
           os.path.isfile(os.path.join(local, "x", "untracked.txt")))
 
+# =====================================================================================
+# Refused merge rewrote the whole dirty tree (2026-09-21). On a branch with its own
+# commits (non-ff), `git merge --no-commit --no-ff` refusing over overlapping WIP still
+# rewrote EVERY dirty tracked file -- new mtime, LF->CRLF under core.autocrlf=true --
+# including files that do not overlap. The overlap is now computed read-only first and
+# `git merge` is never invoked when it is non-empty.
+# =====================================================================================
+
+
+def _non_ff_with_dirty(td):
+    """local has its own commit (non-ff), autocrlf=true, a dirty OVERLAPPING tracked
+    file and a dirty NON-overlapping tracked file, both LF on disk with an old mtime."""
+    local, origin = make_pair(td)
+    run(local, "config", "core.autocrlf", "true")
+    for f in ("shared.txt", "bystander.txt"):
+        with open(os.path.join(local, f), "wb") as fh:
+            fh.write(b"committed\n")
+        run(local, "add", f)
+    run(local, "commit", "-q", "-m", "local own commit", "--no-verify")
+    run(origin, "pull", "-q", local, "main")  # origin shares the base, then diverges
+    with open(os.path.join(origin, "shared.txt"), "wb") as fh:
+        fh.write(b"origin edit\n")
+    run(origin, "commit", "-q", "-am", "origin edits shared", "--no-verify")
+    commit(local, "local diverges", fname="mine.txt")  # local now non-ff
+    snap = {}
+    for f in ("shared.txt", "bystander.txt"):
+        p = os.path.join(local, f)
+        with open(p, "wb") as fh:
+            fh.write(("dirty %s\nsecond line\n" % f).encode())
+        os.utime(p, (1_600_000_000, 1_600_000_000))
+        snap[f] = (os.stat(p).st_mtime_ns, open(p, "rb").read())
+    return local, origin, snap
+
+
+with tempfile.TemporaryDirectory() as td:
+    local, origin, snap = _non_ff_with_dirty(td)
+    merges = []
+    real = cmf._git
+
+    def spy(args, repo):
+        if args[:1] == ["merge"]:
+            merges.append(args)
+        return real(args, repo)
+    cmf._git = spy
+    try:
+        r = cmf.sync(local, "main")
+    finally:
+        cmf._git = real
+    check("non-ff dirty: status BLOCKED_DIRTY_OVERLAP", r["status"] == "BLOCKED_DIRTY_OVERLAP", repr(r))
+    check("non-ff dirty: blocked_paths names only the overlapping file",
+          r.get("blocked_paths") == ["shared.txt"], repr(r))
+    for f in ("bystander.txt", "shared.txt"):
+        p = os.path.join(local, f)
+        check("non-ff dirty: %s mtime unchanged" % f, os.stat(p).st_mtime_ns == snap[f][0],
+              "%r -> %r" % (snap[f][0], os.stat(p).st_mtime_ns))
+        check("non-ff dirty: %s bytes unchanged (no LF->CRLF)" % f,
+              open(p, "rb").read() == snap[f][1], repr(open(p, "rb").read()))
+    check("non-ff dirty: git merge never invoked", merges == [], repr(merges))
+    check("non-ff dirty: HEAD untouched, no MERGE_HEAD", not _has(local, "MERGE_HEAD"))
+
+# --- the read-only overlap check itself cannot run -> ERROR, merge never attempted ------
+with tempfile.TemporaryDirectory() as td:
+    local, origin, snap = _non_ff_with_dirty(td)
+    merges = []
+    real = cmf._git
+
+    def broken_status(args, repo):
+        if args[:1] == ["merge"]:
+            merges.append(args)
+        if args[:1] == ["status"]:
+            return 128, "", "fatal: simulated"
+        return real(args, repo)
+    cmf._git = broken_status
+    try:
+        r = cmf.sync(local, "main")
+    finally:
+        cmf._git = real
+    check("precheck fails: status ERROR", r["status"] == "ERROR", repr(r))
+    check("precheck fails: git merge never invoked", merges == [], repr(merges))
+    check("precheck fails: bystander untouched",
+          open(os.path.join(local, "bystander.txt"), "rb").read() == snap["bystander.txt"][1])
+
+# --- dirty but DISJOINT from the incoming change -> still merges ------------------------
+with tempfile.TemporaryDirectory() as td:
+    local, origin = make_pair(td)
+    commit(origin, "origin adds new", fname="new.txt")
+    write(local, "base_commit.txt", "dirty, not touched by origin\n")
+    write(local, "scratch.txt", "untracked, not touched by origin\n")
+    r = cmf.sync(local, "main")
+    check("disjoint dirty: status MERGED", r["status"] == "MERGED", repr(r))
+    check("disjoint dirty: WIP preserved",
+          open(os.path.join(local, "base_commit.txt")).read() == "dirty, not touched by origin\n"
+          and os.path.isfile(os.path.join(local, "scratch.txt")))
+
+# --- PR #250 adversarial review F1: a dirty file on a conflict path whose merge-tree result
+# keeps HEAD's version (modify/delete, binary) is absent from diff(HEAD, result). The old
+# code merged, conflicted, and `merge --abort` REVERTED the dirty edit ("tree restored").
+def _dirty_on_conflict(td, kind):
+    local, origin = make_pair(td)
+    name = "f.txt" if kind == "moddel" else "img.bin"
+    with open(os.path.join(local, name), "wb") as fh:
+        fh.write(b"a\nb\nc\n" if kind == "moddel" else b"\x00\x01base")
+    run(local, "add", name); run(local, "commit", "-q", "-m", "add", "--no-verify")
+    run(origin, "pull", "-q", local, "main")
+    if kind == "moddel":
+        run(origin, "rm", "-q", name)
+    else:
+        with open(os.path.join(origin, name), "wb") as fh:
+            fh.write(b"\x00\x02origin")
+        run(origin, "add", name)
+    run(origin, "commit", "-q", "-m", "origin side", "--no-verify")
+    with open(os.path.join(local, name), "wb") as fh:
+        fh.write(b"a\nb-ours\nc\n" if kind == "moddel" else b"\x00\x03ours")
+    run(local, "commit", "-q", "-am", "local side", "--no-verify")
+    dirty = b"a\nb-ours\nc\nDIRTY\n" if kind == "moddel" else b"\x00\x04dirty"
+    with open(os.path.join(local, name), "wb") as fh:
+        fh.write(dirty)
+    return local, name, dirty
+
+
+for kind in ("moddel", "binary"):
+    with tempfile.TemporaryDirectory() as td:
+        local, name, dirty = _dirty_on_conflict(td, kind)
+        r = cmf.sync(local, "main")
+        check("conflict-path dirty (%s): BLOCKED_DIRTY_OVERLAP naming it" % kind,
+              r["status"] == "BLOCKED_DIRTY_OVERLAP" and r.get("blocked_paths") == [name], repr(r))
+        check("conflict-path dirty (%s): uncommitted edit survives" % kind,
+              open(os.path.join(local, name), "rb").read() == dirty,
+              repr(open(os.path.join(local, name), "rb").read()))
+
+# --- F2: assume-unchanged / skip-worktree files are invisible to `git status` but git
+# still refuses the merge over them (rewriting every dirty file, per the bug above).
+for flag in ("--assume-unchanged", "--skip-worktree"):
+    with tempfile.TemporaryDirectory() as td:
+        local, origin, snap = _non_ff_with_dirty(td)
+        run(local, "update-index", flag, "shared.txt")
+        merges = []
+        real = cmf._git
+
+        def spy2(args, repo):
+            if args[:1] == ["merge"]:
+                merges.append(args)
+            return real(args, repo)
+        cmf._git = spy2
+        try:
+            r = cmf.sync(local, "main")
+        finally:
+            cmf._git = real
+        check("hidden dirty (%s): BLOCKED_DIRTY_OVERLAP naming it" % flag,
+              r["status"] == "BLOCKED_DIRTY_OVERLAP" and "shared.txt" in (r.get("blocked_paths") or []),
+              repr(r))
+        check("hidden dirty (%s): git merge never invoked" % flag, merges == [], repr(merges))
+        check("hidden dirty (%s): bystander bytes unchanged" % flag,
+              open(os.path.join(local, "bystander.txt"), "rb").read() == snap["bystander.txt"][1])
+
+# --- F4: incoming set cannot be computed (merge-tree AND fallback fail) -> ERROR, no merge;
+# merge-tree alone failing -> the HEAD...<sha> fallback still catches the overlap.
+for label, fail_fallback, want in (("both fail", True, "ERROR"),
+                                   ("merge-tree fails", False, "BLOCKED_DIRTY_OVERLAP")):
+    with tempfile.TemporaryDirectory() as td:
+        local, origin, snap = _non_ff_with_dirty(td)
+        merges = []
+        real = cmf._git
+
+        def broken(args, repo, fail_fallback=fail_fallback):
+            if args[:1] == ["merge"]:
+                merges.append(args)
+            if args[:1] == ["merge-tree"]:
+                return 129, "", "unknown option"
+            if fail_fallback and args[:1] == ["diff"]:
+                return 128, "", "fatal: simulated"
+            return real(args, repo)
+        cmf._git = broken
+        try:
+            r = cmf.sync(local, "main")
+        finally:
+            cmf._git = real
+        check("incoming %s: status %s" % (label, want), r["status"] == want, repr(r))
+        check("incoming %s: git merge never invoked" % label, merges == [], repr(merges))
+
+with tempfile.TemporaryDirectory() as td:
+    local, origin, snap = _non_ff_with_dirty(td)
+    merges = []
+    real = cmf._git
+
+    def broken_ls(args, repo):
+        if args[:1] == ["merge"]:
+            merges.append(args)
+        if args[:1] == ["ls-files"]:
+            return 128, "", "fatal: simulated"
+        return real(args, repo)
+    cmf._git = broken_ls
+    try:
+        r = cmf.sync(local, "main")
+    finally:
+        cmf._git = real
+    check("ls-files fails: status ERROR naming it",
+          r["status"] == "ERROR" and "ls-files" in (r["detail"] or ""), repr(r))
+    check("ls-files fails: git merge never invoked", merges == [], repr(merges))
+
+check("overlap: exact, dir-prefix both ways, case-insensitive, disjoint",
+      cmf.overlapping_paths(["a/b.txt", "x/wip.txt", "D/e.md", "keep.txt", "sub/new.txt"],
+                            ["a/b.txt", "x", "d/E.md", "sub", "other.txt"])
+      == ["a/b.txt", "x/wip.txt", "D/e.md", "sub/new.txt"])
+check("overlap: 'ab' is not under 'a'", cmf.overlapping_paths(["ab/c.txt"], ["a"]) == [])
+check("porcelain v2 -z: modified, rename pair, unmerged, untracked, spaces in names",
+      cmf.parse_porcelain_v2_z(
+          "1 .M N... 100644 100644 100644 aaa aaa one two.txt\0"
+          "2 R. N... 100644 100644 100644 aaa aaa R100 new name.txt\0old name.txt\0"
+          "u UU N... 100644 100644 100644 100644 a b c conf.txt\0"
+          "? dir/u v.txt\0")
+      == ["one two.txt", "new name.txt", "old name.txt", "conf.txt", "dir/u v.txt"])
+with tempfile.TemporaryDirectory() as td:
+    local, origin = make_pair(td)
+    write(local, "base_commit.txt", "modified\n")
+    write(local, "a b.txt", "untracked\n")
+    os.makedirs(os.path.join(local, "nd"))
+    write(local, os.path.join("nd", "deep.txt"), "untracked in new dir\n")
+    rc, out, _ = cmf._git(["status", "--porcelain=v2", "-z", "--untracked-files=all"], local)
+    check("porcelain v2 -z: live git output parses (first entry intact after strip)",
+          sorted(cmf.parse_porcelain_v2_z(out)) == ["a b.txt", "base_commit.txt", "nd/deep.txt"],
+          repr(out))
+
 passed = sum(1 for ok, _ in _results if ok)
 print("\ncheckout-merge-forward tests: %d/%d passed" % (passed, len(_results)))
 sys.exit(0 if passed == len(_results) else 1)
