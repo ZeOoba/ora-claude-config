@@ -123,7 +123,7 @@ try:
     from tool_call_paths import (  # noqa: E402
         GIT_MUTATE_RE, _FD_DUP_RE, _NULL_REDIRECT_RE, is_shell_tool,
         normalize_text, recursive_delete, resolve_path, shell_analysis,
-        write_targets)
+        strip_heredoc_bodies, write_targets)
     TOOL_PATHS_LOADED = True
 except Exception:
     TOOL_PATHS_LOADED = False
@@ -487,19 +487,11 @@ def _marker_matches(text, marker):
 # everything after the closing delimiter are left untouched, so a heredoc
 # actually used to write INTO a governance path is still caught via its
 # redirect target.
-_HEREDOC_RE = re.compile(
-    r"<<-?\s*['\"]?([a-zA-Z0-9_]+)['\"]?[^\n]*\n"  # opening line, through \n
-    r".*?\n"                                        # body (non-greedy)
-    r"[ \t]*\1(?=[ \t\r\n]|$)",                     # closing delimiter line
-    re.DOTALL,
-)
-
-
+# The scanner lives in hooks/lib/tool_call_paths.py (shared with lint-config-guard.py):
+# the regex this used to be was O(markers * n) on unclosed `<<WORD` markers -- see
+# the TIME BOUND note there. Output is byte-identical to the old regex.
 def _strip_heredoc_bodies(text):
-    def _blank(m):
-        opening_line = m.group(0).split("\n", 1)[0] + "\n"
-        return opening_line + " <heredoc-body> \n" + m.group(1)
-    return _HEREDOC_RE.sub(_blank, text)
+    return strip_heredoc_bodies(text)
 
 
 # --- quoting/escaping normalization (2026-08-05) -----------------------------

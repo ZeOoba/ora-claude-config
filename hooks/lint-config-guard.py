@@ -119,7 +119,8 @@ except Exception:
 # the gate is inert (identical to this hook not existing, never a NEW hole).
 try:
     from tool_call_paths import (  # noqa: E402
-        is_shell_tool, normalize_text, resolve_path, shell_analysis, write_targets)
+        is_shell_tool, normalize_text, resolve_path, shell_analysis,
+        strip_heredoc_bodies, write_targets)
     TOOL_PATHS_LOADED = True
 except Exception:
     TOOL_PATHS_LOADED = False
@@ -201,19 +202,13 @@ def classify_path(raw_path):
 # --- quoting/escaping normalization (ported from config-write-guard.py, 2026-08-05
 # there / 2026-08-13 here) -- see the module docstring's QUOTE-SPLIT DEFENSE note.
 _CARET_ESCAPE_RE = _re.compile(r"\^(.)", _re.DOTALL)
-_HEREDOC_RE = _re.compile(
-    r"<<-?\s*['\"]?([a-zA-Z0-9_]+)['\"]?[^\n]*\n"  # opening line, through \n
-    r".*?\n"                                        # body (non-greedy)
-    r"[ \t]*\1(?=[ \t\r\n]|$)",                     # closing delimiter line
-    _re.DOTALL,
-)
 
 
+# The scanner lives in hooks/lib/tool_call_paths.py (shared with config-write-guard.py):
+# the regex this used to be was O(markers * n) on unclosed `<<WORD` markers -- see
+# the TIME BOUND note there. Output is byte-identical to the old regex.
 def _strip_heredoc_bodies(text):
-    def _blank(m):
-        opening_line = m.group(0).split("\n", 1)[0] + "\n"
-        return opening_line + " <heredoc-body> \n" + m.group(1)
-    return _HEREDOC_RE.sub(_blank, text)
+    return strip_heredoc_bodies(text)
 
 
 def _decaret(text):
