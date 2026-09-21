@@ -811,52 +811,21 @@ _WRITE_REDIRECT_TOKENS = frozenset((">", ">>"))
 # TIME BOUND (2026-09-21). stdlib shlex builds each token with `self.token += ch`, one
 # full string copy per character: ONE long token (a base64 blob, a minified one-liner)
 # is O(len^2) memcpy -- 256KB 1.5s, 512KB 6.3s per pass, and _shlex_passes() makes
-# three passes on every write-shaped Bash call. The subclass below swaps the token
-# accumulator for a list-backed buffer and changes NOTHING else: the state machine is
-# still the stdlib's own (no copied logic to drift), so behavior is identical by
-# construction and pinned against stdlib shlex by differential fuzz. It is only used
-# past _SHLEX_LINEAR_MIN_CHARS; small commands keep the stdlib class untouched.
-_SHLEX_LINEAR_MIN_CHARS = 12288  # below ~12KB the stdlib class is the faster one
-
-
-class _TokenBuf(object):
-    """Append-only token accumulator supporting exactly what shlex.read_token does to
-    `self.token`: `+= str`, truthiness, `== ''`, and being read out once. (After a
-    parse `lex.token` is a _TokenBuf, not a str as in stdlib; nothing reads it.)"""
-    __slots__ = ("_parts",)
-
-    def __init__(self, first=""):
-        self._parts = [first] if first else []
-
-    def __iadd__(self, piece):
-        if piece:
-            self._parts.append(piece)
-        return self
-
-    def __bool__(self):
-        return bool(self._parts)
-
-    def __eq__(self, other):
-        return "".join(self._parts) == other
-
-    __hash__ = None
-
-    def __str__(self):
-        return "".join(self._parts)
-
-
-class _LinearShlex(shlex.shlex):
-    @property
-    def token(self):
-        return self._tokbuf
-
-    @token.setter
-    def token(self, value):
-        self._tokbuf = value if isinstance(value, _TokenBuf) else _TokenBuf(value)
-
-    def read_token(self):
-        result = shlex.shlex.read_token(self)
-        return str(result) if isinstance(result, _TokenBuf) else result
+# three passes on every write-shaped Bash call. hooks/lib/linear_shlex.py swaps the token
+# accumulator for a list-backed buffer and changes NOTHING else (the state machine is
+# still the stdlib's own, so behavior is identical by construction and pinned against
+# stdlib shlex by differential fuzz). Shared with commit-hygiene-guard and
+# memory-orphan-link-guard; used only past _SHLEX_LINEAR_MIN_CHARS. Imported in its own
+# try/except so a partial deploy (guard landed before the lib) degrades to the stdlib
+# class instead of tripping the imports above and turning this guard inert.
+try:
+    from linear_shlex import (  # noqa: E402
+        LinearShlex as _LinearShlex, TokenBuf as _TokenBuf,
+        SHLEX_LINEAR_MIN_CHARS as _SHLEX_LINEAR_MIN_CHARS)
+except Exception:
+    _SHLEX_LINEAR_MIN_CHARS = 12288
+    _TokenBuf = None
+    _LinearShlex = shlex.shlex
 
 
 def _tokenize(text, escape):
