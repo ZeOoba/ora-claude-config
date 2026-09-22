@@ -338,6 +338,11 @@ def run_test_file(path, timeout=None):
     module docstring for how a first genuine timeout is retried before it can block."""
     timeout = timeout if timeout is not None else PER_TEST_TIMEOUT_SECONDS
     env = {k: v for k, v in os.environ.items() if k not in GIT_ENV_LEAK_VARS}
+    # The child's stdout is a PIPE, so Python defaults it to cp1252 on Windows: a test
+    # that prints U+2192 in a FAIL detail crashed with UnicodeEncodeError and the push log
+    # showed a traceback instead of the finding (2026-09-22). We decode as utf-8 below;
+    # make the child ENCODE utf-8 too.
+    env["PYTHONIOENCODING"] = "utf-8"
     try:
         scratch = make_test_scratch()
     except Exception:  # fail OPEN: housekeeping must never be what blocks a push
