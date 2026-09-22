@@ -1,5 +1,5 @@
 {
-  "active": true,
+  "active": false,
   "since": "2026-09-08",
   "review_by": "2026-09-22",
   "reason": "Notion workspace free-block quota exhausted — notion-create-pages fails; update-page still works",
@@ -8,8 +8,10 @@
     "OI-288"
   ],
   "mode": "email-only",
-  "clear_when": "a notion-create-pages call succeeds (plan upgraded or blocks freed) — set active:false and record cleared_at",
-  "cleared_at": null,
+  "clear_when": "a notion-create-pages call succeeds — practically this means the Notion plan was upgraded (Plus+). Deleting/archiving/emptying trash does NOT clear this: verified 2026-09-18 against notion.com/help/understanding-block-usage, block count is cumulative-since-signup and deletions never reduce it. Set active:false and record cleared_at once cleared.",
+  "cleared_at": "2026-09-18",
+  "cleared_how": "Gabriel started a 14-day Notion paid-plan trial 2026-09-18. Live-verified: notion-create-pages succeeded creating a test page under Ops Hub (3df6ecd8-9e59-81f4-a31e-e56de97ae737).",
+  "trial_expiry_risk": "This is a 14-DAY TRIAL, not a converted paid plan — assumed expiry ~2026-10-02 (14 days from 2026-09-18; confirm exact start/expiry date in Notion billing, not verified here). If Gabriel does not convert to a paid tier before it lapses, the free-plan 1,000-block cap returns and EVERY producer below degrades again with no warning. Whichever task/session next touches this file before ~2026-10-02 should re-verify a live notion-create-pages call and, if it fails, immediately set active:true again and re-arm the email-only fallback.",
   "consumers": [
     "~/.claude/scheduled-tasks/ora-health-guard/SKILL.md (B.2(C.0c))",
     "ora-skills/automation-health-monitor/SKILL.md (Step 2a)",

@@ -1,6 +1,14 @@
 {
   "_comment": "Retirements RATIFIED but not yet EXECUTED (or half-executed). A task listed here is registered with enabled:false ONLY because its retirement is still in flight -- it is NOT paused, and any fleet-wide resume that re-enables it silently reverses a ratified decision. pause-resume-guard.py (native, off-fleet, every 6h) alarms if a listed id is found enabled:true on its named fleet; register-scheduled-task v2.14 requires every bulk resume to carve these ids out. Remove an entry in the same pass that actually completes its retirement. This file is a plain state register consulted by a guard -- it is NOT a scheduler registry, and writing to it retires nothing by itself (Rule 2 is unaffected).",
-  "pending": [],
+  "pending": [
+    {
+      "fleet": "lams",
+      "id": "ora-ar-export-freshness-nudge",
+      "ratified": "2026-09-22",
+      "reason": "Superseded by ora-ar-feed-sweep (CC, weekly, live since 2026-08-17, imports Business/A.R. Reports via ar-import-headless.ts). Gabriel ruled 'Retire it' in the 2026-09-22 ground-truth audit decision form. Currently enabled:false; must NOT be re-enabled by the LAMS resume.",
+      "executeFrom": "native on-device Cowork session"
+    }
+  ],
   "_completed": [
     {
       "fleet": "lams",
