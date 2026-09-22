@@ -49,7 +49,12 @@ except Exception as exc:  # pragma: no cover
     print("[ERROR] cannot import _shared/fleet_pause: %s: %s" % (type(exc).__name__, exc))
     sys.exit(2)
 
-DEFAULT_MAX_AGE_H = 48.0
+# One weekly cycle + 24h grace. Since 2026-09-17 every routine except ora-am-brief and
+# the dead-man chain runs at most once a week (Gabriel-directed), so a 48h default
+# flagged every weekly producer [STALE] on days 3-7 of its cycle. Daily-or-faster
+# producers are held tight below in MAX_AGE_OVERRIDES. Enforced by
+# _tests/test_state_freshness_thresholds.py.
+DEFAULT_MAX_AGE_H = 192.0
 
 # Files that are NOT periodic producers. Each needs a stated reason -- an unexplained
 # entry here is how a real detector gets muted, which is the failure this probe exists
@@ -73,7 +78,18 @@ NOT_PERIODIC = {
 # already absorbs the common false positive, so the default should do the work and a
 # surprise [STALE] is a finding to investigate rather than a threshold to raise.
 # Raise one of these only with a stated cadence, never to quiet a result.
+#
+# Since 2026-09-22 the overrides run the other way too: the weekly default is the
+# fleet norm, and the daily-or-faster producers listed here are held TIGHTER than it.
+# A dead dead-man/heartbeat must not hide for a week. Each entry names its producer
+# and cadence (verified against Windows Task Scheduler 2026-09-22).
 MAX_AGE_OVERRIDES = {
+    "fleet-deadman.log": 48.0,           # ORA Fleet Dead-Man (Windows, daily)
+    "push-fleet-heartbeat.log": 48.0,    # ORA Fleet Heartbeat Push (Windows, daily)
+    "heartbeat-publish-ok.json": 48.0,   # ORA Fleet Heartbeat Push (Windows, daily)
+    "stuck-session-watchdog.log": 48.0,  # ORA Stuck-Session Watchdog (Windows, 30 min)
+    "fleet-pause-windows.json": 48.0,    # ORA Fleet Pause-Resume Guard (Windows, 6h)
+    "fleet-heartbeat.json": 48.0,        # emit-fleet-heartbeat.py (sub-daily)
     # quarterly producers would go here, with the cron that justifies the number
 }
 
