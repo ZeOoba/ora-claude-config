@@ -125,10 +125,12 @@ threshold -- the threshold lives there, not here (one fact, one home).
 
 STREAK ALARM (added 2026-09-12): the weekly check can sit a full week behind
 the streak it reports. With --state-file, the JSON also carries
-`streak_alarm`, true on the STREAK_ALARM_RUNS-th (14th) consecutive unsynced
-run and then every STREAK_ALARM_REPEAT_RUNS (7) runs after that. The daily
-scheduled task emails on it, so a two-week pin reaches the inbox without
-waiting for Sunday, and the repeat interval keeps it from mailing every day.
+`streak_alarm`, true on the STREAK_ALARM_RUNS-th consecutive unsynced run and
+then every STREAK_ALARM_REPEAT_RUNS runs after that. The scheduled task emails
+on it, so a two-week pin reaches the inbox. The thresholds express ELAPSED TIME:
+14 / 7 runs while the task was daily, and 2 / 1 since it went weekly (Fri) on
+2026-09-22. That still means "alarm at two weeks pinned, then weekly". Re-derive
+both numbers if the cadence changes again.
 Without --state-file the streak is unmeasured and `streak_alarm` is false.
 
 Exit 0 = MERGED or NOOP_CLEAN (nothing needed doing). Exit 1 = BLOCKED_*
@@ -151,8 +153,8 @@ SYNCED_STATUSES = ("MERGED", "NOOP_CLEAN")
 # untracked files sit inside it.
 _OVERLAP_HEADERS = ("would be overwritten by merge:",
                     "would lose untracked files in them:")
-STREAK_ALARM_RUNS = 14
-STREAK_ALARM_REPEAT_RUNS = 7
+STREAK_ALARM_RUNS = 2          # weekly cadence since 2026-09-22: 2 runs = 14 days
+STREAK_ALARM_REPEAT_RUNS = 1   # then every weekly run (was 7 daily runs = 7 days)
 
 # In-progress operation markers (step 0a): refs, then git-path files/directories.
 IN_PROGRESS_REFS = (("MERGE_HEAD", "merge"), ("CHERRY_PICK_HEAD", "cherry-pick"),
@@ -183,7 +185,8 @@ OWN_CLAIM_SLUG = "sched-repo-housekeeping"
 
 
 def streak_alarm(consecutive_unsynced):
-    """True at the 14th consecutive unsynced run, then every 7th after."""
+    """True at the STREAK_ALARM_RUNS-th consecutive unsynced run, then every
+    STREAK_ALARM_REPEAT_RUNS-th after (two weeks pinned, then weekly)."""
     if not isinstance(consecutive_unsynced, int) or consecutive_unsynced < STREAK_ALARM_RUNS:
         return False
     return (consecutive_unsynced - STREAK_ALARM_RUNS) % STREAK_ALARM_REPEAT_RUNS == 0

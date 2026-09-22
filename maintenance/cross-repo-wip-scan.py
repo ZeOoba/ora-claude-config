@@ -46,9 +46,9 @@ this dimension, by design -- their feature-branch churn is expected.
 CORRECTOR STREAK (added 2026-09-12): for a repo with a paired daily corrector
 (currently only `~/.claude` -> checkout-merge-forward.py), this also reads the
 corrector's last-run state file and flags CORRECTOR_STUCK when its
-`consecutiveUnsynced` streak reaches CORRECTOR_UNSYNCED_ESCALATE_RUNS (default
-7 -- a week of daily runs that never ended MERGED/NOOP_CLEAN). Any single
-BLOCKED_* day is routine and the corrector stays silent on it by design; a
+`consecutiveUnsynced` streak reaches CORRECTOR_UNSYNCED_ESCALATE_RUNS (1 since the
+corrector went weekly on 2026-09-22, and 7 while it was daily: either way, a week of
+runs that never ended MERGED/NOOP_CLEAN). Any single BLOCKED_* day was routine and the corrector stays silent on it by design; a
 week-long streak means the WIP backlog is pinning the checkout and drift is
 compounding with nothing correcting it. A missing, corrupt, or pre-counter
 state file is flagged too (unmeasurable, not clean). The corrector is the
@@ -123,12 +123,15 @@ DEFAULT_CORRECTOR_STATE = {
 # Test seam (mirrors KNOWN_REPOS_OVERRIDE). None -> canonical map above.
 CORRECTOR_STATE_OVERRIDE = None
 
-CORRECTOR_UNSYNCED_ESCALATE_RUNS = 7
+# Elapsed-time thresholds expressed in corrector runs. The corrector went weekly (Fri)
+# on 2026-09-22, so 1 run = the old 7 daily runs (a week unsynced). Re-derive if the
+# cadence changes again.
+CORRECTOR_UNSYNCED_ESCALATE_RUNS = 1
 
-# The corrector is daily; 72h tolerates a missed day or a weekend with the
-# Desktop app closed (the fleet only fires while it is open) without masking
-# a task that has genuinely stopped.
-CORRECTOR_STALE_HOURS = 72
+# One weekly cycle + 24h grace. The daily-era 72h tolerated a missed day or a weekend
+# with the Desktop app closed; on a weekly cadence it would read "has not run" 4 days
+# in 7. This still catches a task that has genuinely stopped, one cycle late.
+CORRECTOR_STALE_HOURS = 192
 
 
 def corrector_state_map():

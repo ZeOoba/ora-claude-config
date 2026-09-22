@@ -39,6 +39,43 @@ class PauseDetection(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
 
+    # ---- standing carve-outs (2026-09-22) ----------------------------------
+    def test_cc_pause_with_am_brief_carved_out_is_paused(self):
+        """ora-am-brief is never paused by standing rule, so every real CC pause keeps
+        exactly it enabled. Before this fix that read as 'live' and every pause-frozen
+        detector output alarmed as [STALE]."""
+        reg = _reg(self.tmp, [
+            {"id": "ora-am-brief", "cronExpression": "0 6 * * *", "enabled": True},
+            {"id": "a", "cronExpression": "0 5 * * 1", "enabled": False},
+            {"id": "r", "fireAt": _ms(48), "enabled": True},
+        ])
+        st = fleet_pause.pause_state("cc", registry=reg)
+        self.assertTrue(st["paused"])
+
+    def test_carve_out_does_not_apply_to_other_fleet(self):
+        reg = _reg(self.tmp, [
+            {"id": "ora-am-brief", "cronExpression": "0 6 * * *", "enabled": True},
+            {"id": "a", "cronExpression": "0 5 * * 1", "enabled": False},
+            {"id": "r", "fireAt": _ms(48), "enabled": True},
+        ])
+        self.assertFalse(fleet_pause.pause_state("lams", registry=reg)["paused"])
+
+    def test_non_carved_enabled_task_still_means_live(self):
+        reg = _reg(self.tmp, [
+            {"id": "ora-am-brief", "cronExpression": "0 6 * * *", "enabled": True},
+            {"id": "a", "cronExpression": "0 5 * * 1", "enabled": True},
+            {"id": "r", "fireAt": _ms(48), "enabled": True},
+        ])
+        self.assertFalse(fleet_pause.pause_state("cc", registry=reg)["paused"])
+
+    def test_only_carve_outs_recurring_is_not_a_pause(self):
+        """A fleet whose only recurring task is the carve-out has nothing paused."""
+        reg = _reg(self.tmp, [
+            {"id": "ora-am-brief", "cronExpression": "0 6 * * *", "enabled": True},
+            {"id": "r", "fireAt": _ms(48), "enabled": True},
+        ])
+        self.assertFalse(fleet_pause.pause_state("cc", registry=reg)["paused"])
+
     # ---- negative cases: must NOT report paused ----------------------------
     def test_live_fleet_is_not_paused(self):
         reg = _reg(self.tmp, [

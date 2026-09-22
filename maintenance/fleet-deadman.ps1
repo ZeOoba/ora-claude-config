@@ -48,7 +48,37 @@ $probe   = Join-Path $env:USERPROFILE '.claude\maintenance\phantom-dispatch-prob
 
 function Log($m) { "$([DateTime]::UtcNow.ToString('s'))Z  $m" | Out-File -FilePath $log -Append -Encoding utf8 }
 
-function Test-BoundedPause($reg) {
+function Invoke-PyBounded($py, [string[]]$pyArgs, [int]$TimeoutSec = 120) {
+    # Added 2026-09-22. Runs a child with a hard wall-clock limit and returns
+    # @{ Out; Rc; TimedOut }. Before this, both python calls below were unbounded: a child
+    # that hung (e.g. reading desktop logs that Claude Desktop holds open right after a
+    # logon catch-up) held the whole run open until Windows ended it with 0xC000013A. That
+    # run then wrote NO log line at all, which is how 5 of 9 days from 09-12 to 09-21 left
+    # no trace. A timeout is reported as a problem ("could not look"), never as clean.
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $py
+    $psi.Arguments = (($pyArgs | ForEach-Object { '"' + ($_ -replace '"', '\"') + '"' }) -join ' ')
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
+    $p = [System.Diagnostics.Process]::Start($psi)
+    $so = $p.StandardOutput.ReadToEndAsync()
+    $se = $p.StandardError.ReadToEndAsync()
+    if (-not $p.WaitForExit($TimeoutSec * 1000)) {
+        try { $p.Kill() } catch { }
+        return @{ Out = ''; Rc = $null; TimedOut = $true }
+    }
+    $p.WaitForExit()
+    return @{ Out = ($so.Result + $se.Result); Rc = $p.ExitCode; TimedOut = $false }
+}
+
+function Test-BoundedPause($reg, $label = '') {
+    # Carve-outs (2026-09-22): recurring tasks that stay ENABLED through every pause by
+    # standing rule, so their being enabled is not evidence the fleet is live. Mirrors
+    # _shared/fleet_pause.py PAUSE_CARVE_OUTS. Keep the two lists identical. Before this,
+    # the ora-am-brief carve-out made every real CC pause read as live.
+    $carveOuts = @{ cc = @('ora-am-brief'); lams = @() }
     # Added 2026-09-10 (ORA Automation Audit R24-3). Returns the earliest future resume
     # time (UTC DateTime) if this fleet is under a DELIBERATE bounded pause, else $null.
     #
@@ -69,7 +99,8 @@ function Test-BoundedPause($reg) {
         $d = Get-Content -Raw -Path $reg | ConvertFrom-Json
         $tasks = @($d.scheduledTasks)
         if ($tasks.Count -eq 0) { return $null }
-        $recurring = @($tasks | Where-Object { $_.cronExpression })
+        $carve = if ($label -and $carveOuts.ContainsKey($label)) { @($carveOuts[$label]) } else { @() }
+        $recurring = @($tasks | Where-Object { $_.cronExpression -and ($carve -notcontains $_.id) })
         if ($recurring.Count -eq 0) { return $null }
         $enabledRecurring = @($recurring | Where-Object { $_.enabled })
         if ($enabledRecurring.Count -gt 0) { return $null }   # not paused: something still fires
@@ -119,6 +150,10 @@ function Find-Registry($store) {
 }
 
 try {
+    # START breadcrumb (2026-09-22): the only other line is written at the END, so a run
+    # killed mid-way was indistinguishable from one that never started. A START with no
+    # matching result line on the same run now means "started and died".
+    Log ('START pid=' + $PID)
     $problems     = @()
     $okBits       = @()
     $pausedFleets = @()   # R24-3: fleets found under a deliberate bounded pause this run
@@ -154,7 +189,7 @@ try {
             # R24-3: a deliberate bounded pause is not an outage. Suppress the alarm, but
             # ALWAYS log the suppression and the resume time -- the evidence is never hidden,
             # only the alert, same principle as $PhantomThreshold above.
-            $pauseUntil = Test-BoundedPause $reg
+            $pauseUntil = Test-BoundedPause $reg $fleet.Label
             if ($null -ne $pauseUntil) {
                 $pausedFleets += $fleet.Label
                 $okBits += ($fleet.Label + '=' + $count + ' tasks, BOUNDED PAUSE (all recurring disabled, resume queued ' +
@@ -193,8 +228,9 @@ try {
     } else {
         $py = 'C:\Users\Owner\AppData\Local\Programs\Python\Python313\python.exe'
         if (-not (Test-Path $py)) { $py = 'python' }
-        $out = & $py $probe --hours $PhantomHours 2>&1
-        $rc  = $LASTEXITCODE
+        $r   = Invoke-PyBounded $py @($probe, '--hours', [string]$PhantomHours) 120
+        $out = if ($r.TimedOut) { @() } else { $r.Out -split "`r?`n" }
+        $rc  = if ($r.TimedOut) { 2 } else { $r.Rc }   # a hang is "could not look", never clean
         $count = 0
         foreach ($ln in $out) {
             $s = [string]$ln
@@ -231,9 +267,12 @@ try {
     } else {
         $py = 'C:\Users\Owner\AppData\Local\Programs\Python\Python313\python.exe'
         if (-not (Test-Path $py)) { $py = 'python' }
-        $pout = & $py $pub --status 2>&1
-        $prc  = $LASTEXITCODE
-        if ($prc -eq 1) {
+        $pr   = Invoke-PyBounded $py @($pub, '--status') 120
+        $pout = $pr.Out
+        $prc  = if ($pr.TimedOut) { 'timeout' } else { $pr.Rc }
+        if ($pr.TimedOut) {
+            $problems += 'publish-fleet-heartbeat.py --status TIMED OUT after 120s - heartbeat publish state UNKNOWN, not clean'
+        } elseif ($prc -eq 1) {
             $problems += ('HEARTBEAT PUBLISH FAILED: ' + (($pout | Out-String).Trim()) +
                           ' - the GitHub dead-man is reading a stale heartbeat')
         } elseif ($prc -eq 0) {
