@@ -56,17 +56,87 @@ Expect 'publish exit 0 is ok'                            (($v.Ok -eq $true) -and
 $v = Get-PublishVerdict @{ TimedOut = $false; Rc = 1; Out = 'stale' }
 Expect 'publish exit 1 is a problem'                     (($v.Ok -eq $false) -and ($v.Problem -match 'HEARTBEAT PUBLISH FAILED'))
 
-# --- static checks on the script text
-$src = Get-Content -Raw -Path $target
-$calls = $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.CommandAst] -and
-                        $args[0].GetCommandName() -eq 'Test-BoundedPause' }, $true)
-Expect 'every Test-BoundedPause call passes a fleet label' (($calls.Count -gt 0) -and
-    (@($calls | Where-Object { $_.CommandElements.Count -lt 3 }).Count -eq 0))
-# START must NOT go to fleet-deadman.log: state-freshness-probe judges that file by mtime,
-# so a START written there on every killed run would keep a dead dead-man looking fresh.
-Expect 'START is not written to the main verdict log'    (($src -notmatch "(?m)^\s*Log\s*\(\s*'START") -and ($src -match "LogStart\s*\(\s*'START"))
-$hb = Get-Content -Raw -Path (Join-Path $PSScriptRoot 'push-fleet-heartbeat.ps1')
-Expect 'heartbeat START is not written to its main log'  (($hb -notmatch "(?m)^\s*Log\s*\(\s*'START") -and ($hb -match "LogStart\s*\(\s*'START"))
+$v = Get-PublishVerdict @{ TimedOut = $false; Rc = 3; Out = '' }
+Expect 'publish unexpected exit is a problem, not ok'    (($v.Ok -eq $false) -and ($v.Problem -match 'unexpected exit 3'))
+
+# --- AST checks on the scripts' main bodies (round-2 merge-gate findings, 2026-09-22) ---
+# Regex over source text was defeated by trivial respellings; everything below walks the AST.
+$T = [System.Management.Automation.Language.Ast]
+function AllOf($root, [scriptblock]$pred) { @($root.FindAll($pred, $true)) }
+function Cmds($root, $name) {
+    AllOf $root { param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq $name }
+}
+function InsideFunction($node, $fname) {
+    $p = $node.Parent
+    while ($p) { if ($p -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $p.Name -eq $fname) { return $true }; $p = $p.Parent }
+    return $false
+}
+
+# Test-BoundedPause: every call must pass a NON-EMPTY label, positionally or as -label.
+$tbp = Cmds $ast 'Test-BoundedPause'
+$labelOk = ($tbp.Count -gt 0)
+foreach ($c in $tbp) {
+    $els = @($c.CommandElements | Select-Object -Skip 1)
+    $named = @($els | Where-Object { $_ -is [System.Management.Automation.Language.CommandParameterAst] })
+    $lblParam = @($named | Where-Object { $_.ParameterName -eq 'label' })
+    if ($lblParam.Count -gt 0) {
+        $idx = [array]::IndexOf($els, $lblParam[0])
+        $val = if ($lblParam[0].Argument) { $lblParam[0].Argument } elseif ($idx + 1 -lt $els.Count) { $els[$idx + 1] } else { $null }
+    } else {
+        $positional = @($els | Where-Object { $_ -isnot [System.Management.Automation.Language.CommandParameterAst] })
+        # when -reg is named, its value is the element right after it and is not the label
+        $regParam = @($named | Where-Object { $_.ParameterName -eq 'reg' })
+        if ($regParam.Count -gt 0) { $positional = @($positional | Where-Object { $_ -ne $els[[array]::IndexOf($els, $regParam[0]) + 1] }) ; $val = $positional[0] }
+        else { $val = if ($positional.Count -ge 2) { $positional[1] } else { $null } }
+    }
+    if ($null -eq $val) { $labelOk = $false }
+    elseif ($val -is [System.Management.Automation.Language.StringConstantExpressionAst] -and $val.Value -eq '') { $labelOk = $false }
+}
+Expect 'every Test-BoundedPause call passes a non-empty fleet label' $labelOk
+
+# START must never reach a main verdict log. state-freshness-probe judges those logs by
+# mtime, so a START written there by every killed run would keep a dead dead-man fresh.
+# Rule: every string literal containing START sits inside a LogStart call, nowhere else.
+function StartOnlyViaLogStart($root) {
+    $strs = AllOf $root { param($n) ($n -is [System.Management.Automation.Language.StringConstantExpressionAst] -or
+                                     $n -is [System.Management.Automation.Language.ExpandableStringExpressionAst]) -and
+                                    $n.Value -cmatch '^START\b' }
+    if ($strs.Count -eq 0) { return $false }
+    foreach ($s in $strs) {
+        $p = $s.Parent; $ok = $false
+        while ($p) { if ($p -is [System.Management.Automation.Language.CommandAst]) { $ok = ($p.GetCommandName() -eq 'LogStart'); break }; $p = $p.Parent }
+        if (-not $ok) { return $false }
+    }
+    return $true
+}
+# Behavioural: LogStart must write to the start log and leave the main log untouched.
+function LogStartIsolated($root) {
+    $fn = AllOf $root { param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'LogStart' }
+    if ($fn.Count -ne 1) { return $false }
+    $main = Join-Path $env:TEMP ('dm-main-' + [guid]::NewGuid() + '.log')
+    $st   = Join-Path $env:TEMP ('dm-start-' + [guid]::NewGuid() + '.log')
+    $sb = [scriptblock]::Create('param($log, $startLog) ' + $fn[0].Extent.Text + '; LogStart ''START pid=1''')
+    & $sb $main $st
+    $ok = (-not (Test-Path $main)) -and (Test-Path $st) -and ((Get-Content -Raw $st) -match 'START pid=1')
+    Remove-Item $main, $st -ErrorAction SilentlyContinue
+    return $ok
+}
+$hbPath = Join-Path $PSScriptRoot 'push-fleet-heartbeat.ps1'
+$hbAst = [System.Management.Automation.Language.Parser]::ParseFile($hbPath, [ref]$null, [ref]$null)
+Expect 'START literals only ever go through LogStart (dead-man)'   (StartOnlyViaLogStart $ast)
+Expect 'START literals only ever go through LogStart (heartbeat)'  (StartOnlyViaLogStart $hbAst)
+Expect 'LogStart writes the start log, never the main log (dead-man)'  (LogStartIsolated $ast)
+Expect 'LogStart writes the start log, never the main log (heartbeat)' (LogStartIsolated $hbAst)
+
+# Main-body wiring: the helpers are only worth testing if the main body actually uses them.
+$rcAssign = AllOf $ast { param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+                                   $n.Left.Extent.Text -eq '$rc' }
+Expect 'main body assigns $rc from Resolve-ProbeRc' (($rcAssign.Count -ge 1) -and
+    (@($rcAssign | Where-Object { @(Cmds $_ 'Resolve-ProbeRc').Count -eq 0 }).Count -eq 0))
+$gpv = @(Cmds $ast 'Get-PublishVerdict' | Where-Object { -not (InsideFunction $_ 'Get-PublishVerdict') })
+$vOkIfs = AllOf $ast { param($n) $n -is [System.Management.Automation.Language.IfStatementAst] -and
+                                 $n.Clauses[0].Item1.Extent.Text -match '^\$v\.Ok$' }
+Expect 'main body calls Get-PublishVerdict and branches on its .Ok' (($gpv.Count -ge 1) -and ($vOkIfs.Count -ge 1))
 
 if ($fail -gt 0) { Write-Output "FAILED: $fail"; exit 1 }
 Write-Output 'ALL PASS'; exit 0
