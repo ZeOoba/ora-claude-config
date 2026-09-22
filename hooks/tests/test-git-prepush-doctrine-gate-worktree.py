@@ -225,6 +225,30 @@ try:
            "2020-01-01" in out3 or "bare" in out3.lower() or "date" in out3.lower(),
            "out3=%s" % out3[-500:])
 
+    # 2026-09-22 regression: the probe child is launched with stdout PIPED, so without
+    # PYTHONIOENCODING it writes cp1252 and any echoed doctrine text containing U+2192
+    # (CLAUDE.md is full of arrows) raises UnicodeEncodeError inside the probe.
+    _arrow_dir = tempfile.mkdtemp(prefix="ora-dg-arrow-")
+    _arrow_probe = os.path.join(_arrow_dir, "arrow-probe.py")
+    with open(_arrow_probe, "w", encoding="utf-8") as f:
+        f.write("import sys\nprint('  [MISSING] rule a \\u2192 b')\nsys.exit(1)\n")
+    dg.REPO_ROOT_OVERRIDE = repo3
+    dg.PROBE_SCRIPT_OVERRIDE = _arrow_probe
+    # Strip any ambient encoding override, or this passes vacuously (review MED).
+    _saved_enc = {k: os.environ.pop(k) for k in ("PYTHONIOENCODING", "PYTHONUTF8")
+                  if k in os.environ}
+    try:
+        rc_ar, out_ar = dg.run_doctrine_probe()
+    finally:
+        os.environ.update(_saved_enc)
+        dg.REPO_ROOT_OVERRIDE = None
+        dg.PROBE_SCRIPT_OVERRIDE = None
+        shutil.rmtree(_arrow_dir, ignore_errors=True)
+    expect("run_doctrine_probe: a probe printing U+2192 to its piped stdout delivers the "
+           "real finding, not a UnicodeEncodeError (child gets PYTHONIOENCODING=utf-8)",
+           rc_ar == 1 and "rule a → b" in (out_ar or ""),
+           "rc=%r out=%r" % (rc_ar, (out_ar or "")[-300:]))
+
     # Full end-to-end: main() itself (not just run_doctrine_probe()) must BLOCK too,
     # with no session id / no override token available in this test environment.
     os.environ.pop("CLAUDE_CODE_SESSION_ID", None)
