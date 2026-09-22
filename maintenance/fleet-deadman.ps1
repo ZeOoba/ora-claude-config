@@ -48,6 +48,32 @@ $probe   = Join-Path $env:USERPROFILE '.claude\maintenance\phantom-dispatch-prob
 
 function Log($m) { "$([DateTime]::UtcNow.ToString('s'))Z  $m" | Out-File -FilePath $log -Append -Encoding utf8 }
 
+# START breadcrumbs go to a SEPARATE file (merge-gate finding 2026-09-22). state-freshness-probe
+# judges fleet-deadman.log by mtime at 48h, so a START line written there by every run that is
+# then killed would keep a dead dead-man looking fresh -- exactly the failure it exists to catch.
+# fleet-deadman.log is touched only by runs that reach a verdict.
+$startLog = Join-Path $env:USERPROFILE '.claude\maintenance\fleet-deadman.start.log'
+function LogStart($m) { "$([DateTime]::UtcNow.ToString('s'))Z  $m" | Out-File -FilePath $startLog -Append -Encoding utf8 }
+
+function Resolve-ProbeRc($r) {
+    # A hung phantom probe is "could not look" (exit 2), never clean.
+    if ($r.TimedOut) { return 2 }
+    return $r.Rc
+}
+
+function Get-PublishVerdict($pr) {
+    # Returns @{ Ok; Problem } for publish-fleet-heartbeat.py --status. A timeout is UNKNOWN, never ok.
+    if ($pr.TimedOut) {
+        return @{ Ok = $false; Problem = 'publish-fleet-heartbeat.py --status TIMED OUT after 120s - heartbeat publish state UNKNOWN, not clean' }
+    }
+    if ($pr.Rc -eq 1) {
+        return @{ Ok = $false; Problem = ('HEARTBEAT PUBLISH FAILED: ' + (($pr.Out | Out-String).Trim()) +
+                                          ' - the GitHub dead-man is reading a stale heartbeat') }
+    }
+    if ($pr.Rc -eq 0) { return @{ Ok = $true; Problem = $null } }
+    return @{ Ok = $false; Problem = ('publish-fleet-heartbeat.py --status returned unexpected exit ' + $pr.Rc) }
+}
+
 function Invoke-PyBounded($py, [string[]]$pyArgs, [int]$TimeoutSec = 120) {
     # Added 2026-09-22. Runs a child with a hard wall-clock limit and returns
     # @{ Out; Rc; TimedOut }. Before this, both python calls below were unbounded: a child
@@ -100,7 +126,10 @@ function Test-BoundedPause($reg, $label = '') {
         $tasks = @($d.scheduledTasks)
         if ($tasks.Count -eq 0) { return $null }
         $carve = if ($label -and $carveOuts.ContainsKey($label)) { @($carveOuts[$label]) } else { @() }
-        $recurring = @($tasks | Where-Object { $_.cronExpression -and ($carve -notcontains $_.id) })
+        # id first, taskId as fallback -- same key order as fleet_pause.py.
+        $recurring = @($tasks | Where-Object {
+            $tid = if ($_.id) { $_.id } else { $_.taskId }
+            $_.cronExpression -and ($carve -notcontains $tid) })
         if ($recurring.Count -eq 0) { return $null }
         $enabledRecurring = @($recurring | Where-Object { $_.enabled })
         if ($enabledRecurring.Count -gt 0) { return $null }   # not paused: something still fires
@@ -150,10 +179,10 @@ function Find-Registry($store) {
 }
 
 try {
-    # START breadcrumb (2026-09-22): the only other line is written at the END, so a run
-    # killed mid-way was indistinguishable from one that never started. A START with no
-    # matching result line on the same run now means "started and died".
-    Log ('START pid=' + $PID)
+    # START breadcrumb (2026-09-22): the verdict line is written at the END, so a run killed
+    # mid-way was indistinguishable from one that never started. A START in fleet-deadman.start.log
+    # with no verdict in fleet-deadman.log at a matching time means "started and died".
+    LogStart ('START pid=' + $PID)
     $problems     = @()
     $okBits       = @()
     $pausedFleets = @()   # R24-3: fleets found under a deliberate bounded pause this run
@@ -230,7 +259,7 @@ try {
         if (-not (Test-Path $py)) { $py = 'python' }
         $r   = Invoke-PyBounded $py @($probe, '--hours', [string]$PhantomHours) 120
         $out = if ($r.TimedOut) { @() } else { $r.Out -split "`r?`n" }
-        $rc  = if ($r.TimedOut) { 2 } else { $r.Rc }   # a hang is "could not look", never clean
+        $rc  = Resolve-ProbeRc $r   # a hang is "could not look", never clean
         $count = 0
         foreach ($ln in $out) {
             $s = [string]$ln
@@ -268,18 +297,8 @@ try {
         $py = 'C:\Users\Owner\AppData\Local\Programs\Python\Python313\python.exe'
         if (-not (Test-Path $py)) { $py = 'python' }
         $pr   = Invoke-PyBounded $py @($pub, '--status') 120
-        $pout = $pr.Out
-        $prc  = if ($pr.TimedOut) { 'timeout' } else { $pr.Rc }
-        if ($pr.TimedOut) {
-            $problems += 'publish-fleet-heartbeat.py --status TIMED OUT after 120s - heartbeat publish state UNKNOWN, not clean'
-        } elseif ($prc -eq 1) {
-            $problems += ('HEARTBEAT PUBLISH FAILED: ' + (($pout | Out-String).Trim()) +
-                          ' - the GitHub dead-man is reading a stale heartbeat')
-        } elseif ($prc -eq 0) {
-            $okBits += 'heartbeat-publish=ok'
-        } else {
-            $problems += ('publish-fleet-heartbeat.py --status returned unexpected exit ' + $prc)
-        }
+        $v = Get-PublishVerdict $pr
+        if ($v.Ok) { $okBits += 'heartbeat-publish=ok' } else { $problems += $v.Problem }
     }
 
     if ($problems.Count -eq 0) {

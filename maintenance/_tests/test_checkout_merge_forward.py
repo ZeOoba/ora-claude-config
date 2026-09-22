@@ -312,7 +312,7 @@ with tempfile.TemporaryDirectory() as td:
     with contextlib.redirect_stdout(buf):
         rc = cmf.main(["--repo", local, "--canonical", "main", "--json", "--state-file", sp])
     out = _json.loads(buf.getvalue())
-    check("main: streak_alarm true in JSON on the 14th unsynced run",
+    check("main: streak_alarm true in JSON on the STREAK_ALARM_RUNS-th unsynced run",
           out.get("streak_alarm") is True and out.get("consecutive_unsynced") == A, repr(out))
     check("main: unsynced_since surfaced for the alarm body",
           out.get("unsynced_since") == "2026-08-30", repr(out))
