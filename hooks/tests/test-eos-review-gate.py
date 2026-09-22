@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 
 # This test spins up its own throwaway git repos in temp dirs. When invoked as part of
 # the real pre-push hook chain, git sets GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE (etc.) in
@@ -1720,6 +1721,267 @@ def test_degraded_honors_an_override_token():
     finally:
         shutil.rmtree(sessions, ignore_errors=True)
         shutil.rmtree(td, ignore_errors=True)
+
+
+def _run_partial_with_token(tool_input):
+    """Run the partially-degraded gate with a valid single-use token present and
+    return (rc, stderr, token_survived). `tool_input` is the raw payload value so a
+    test can also pass a non-dict."""
+    sessions = tempfile.mkdtemp(prefix="eos-rg-degraded-strict-")
+    td, hook = _partially_degraded_gate_copy()
+    token = os.path.join(sessions, "sess1", "overrides", "allow-unreviewed-commit")
+    try:
+        os.makedirs(os.path.dirname(token))
+        with open(token, "w") as fh:
+            fh.write("scope: unreviewed-blast-radius-commit\n"
+                     "session: sess1\nreason: strict-regex test\n")
+        env = dict(os.environ)
+        for var in ("EOS_REVIEW_MODELS", "EOS_REVIEW_GATE_MODE", "PYTHONPATH"):
+            env.pop(var, None)
+        env["EOS_SESSIONS_DIR"] = sessions
+        env["ORA_OVERRIDE_SESSIONS_DIR"] = sessions
+        proc = subprocess.run(
+            [sys.executable, hook],
+            input=json.dumps({"session_id": "sess1", "cwd": td, "tool_name": "Bash",
+                              "tool_input": tool_input}),
+            capture_output=True, text=True, env=env)
+        return proc.returncode, proc.stderr, os.path.exists(token)
+    finally:
+        shutil.rmtree(sessions, ignore_errors=True)
+        shutil.rmtree(td, ignore_errors=True)
+
+
+def test_degraded_token_not_spent_on_commit_graph_or_commit_tree():
+    """REVIEW FINDING (PR #234, adversarial, verified): `commit\\b` has a word
+    boundary before `-`, so `git commit-graph write` and `git commit-tree ...`
+    matched the STRICT pattern and burned Gabriel's single-use token on a command
+    that is not a commit, leaving the real commit blocked with none left -- the
+    exact failure the strict pattern exists to prevent. They must still BLOCK
+    (loose match) but must not spend the token."""
+    for cmd in ("git -c x=y commit-graph write",
+                "git commit-tree HEAD^{tree} -m x",
+                # SECOND REVIEW (same day): value-less long options that make git
+                # print and exit before any subcommand -- a flag lookup, not a commit.
+                "git --help commit",
+                "git --version commit",
+                "git --exec-path commit",
+                "git --html-path commit"):
+        rc, err, survived = _run_partial_with_token({"command": cmd})
+        assert rc == 2, "%r must still block while degraded, got rc=%s" % (cmd, rc)
+        assert survived, "%r CONSUMED the single-use token: %r" % (cmd, err)
+
+
+def test_degraded_token_spendable_on_quoted_and_global_option_commits():
+    """REVIEW FINDING (PR #234, verified): the strict pattern rejected real commits
+    whose global options contain a quoted space or use a long option, so a valid
+    token could not be spent on them. The non-degraded is_git_commit() accepts all
+    of these."""
+    for cmd in ('git -C "C:/path with space" commit -m x',
+                'git -c user.name="a b" commit -m x',
+                "git --no-pager commit -m x",
+                "git --exec-path=/x commit -m x",   # sets the path AND runs the command
+                "git -C 'C:/p q' -c core.x=1 commit -m x"):
+        rc, err, survived = _run_partial_with_token({"command": cmd})
+        assert rc == 0, "%r is a real commit; a valid token must be honored, rc=%s err=%r" % (
+            cmd, rc, err)
+        assert not survived, "%r should have spent the single-use token" % cmd
+
+
+def test_degraded_detector_is_case_insensitive():
+    """REVIEW FINDING (PR #234, verified): Git Bash on Windows resolves `GIT`, so an
+    upper-case `GIT commit` created a commit while the case-sensitive degraded
+    detector allowed it ungated."""
+    rc, err = _run_degraded('GIT commit -m "x"')   # empty-lib fixture: no token
+    assert rc == 2, "upper-case GIT commit must block while degraded, got rc=%s err=%r" % (rc, err)
+    # ...and with a token present the strict pattern must recognise it as a commit
+    # too, so the token is honored (spent) rather than the commit being unreachable.
+    rc2, err2, survived = _run_partial_with_token({"command": 'GIT commit -m "x"'})
+    assert rc2 == 0 and not survived, (
+        "upper-case GIT commit must be spendable with a valid token, rc=%s err=%r" % (rc2, err2))
+
+
+def test_degraded_non_dict_tool_input_still_announces():
+    """REVIEW FINDING (PR #234, verified): a non-dict tool_input raised inside
+    _degraded, was swallowed by main's catch-all and produced rc=0 with EMPTY
+    stderr -- the 'always announce' promise was not kept."""
+    rc, err, _ = _run_partial_with_token(["git commit -m x"])
+    assert rc == 0, "a malformed payload is not a commit; expected allow, got rc=%s" % rc
+    assert "eos-review-gate" in err and "could not be imported" in err, (
+        "a degraded gate must announce even on a malformed payload: %r" % err)
+
+
+# --------------------------------------------------------------------------
+# degraded detector: BOUNDED TIME (PR #234 review, measured 2026-09-19)
+# --------------------------------------------------------------------------
+# `\bgit\b[^;&|]*\bcommit\b` and the strict form are O(n^2): re.search retries
+# at every `\bgit\b` and each attempt scans to the end of the `;&|` segment.
+# `'git' + ' -c git=git' * n` is the worst shape (every unit re-arms a `git`).
+# Measured on the real compiled patterns: n=2000 (22KB) ~2s, n=4000 ~8s, and a
+# 99KB command that IS a real commit took ~84s (loose + strict). The dispatcher
+# runs guards in-process with no per-guard timeout, so a slow detector on the
+# path that exists to fail CLOSED on commits can outlive Claude Code's own hook
+# timeout -- and everything after it in the chain never runs.
+#
+# Time is asserted at the process boundary against a budget far above the fixed
+# cost (~1s, mostly interpreter start) and far below the broken cost (30-90s),
+# so a loaded machine does not flake it but a regression cannot hide.
+
+_DEGRADED_TIME_BUDGET_S = 15.0
+
+
+def _quadratic_cmd(n, tail=" x"):
+    return "git" + " -c git=git" * n + tail
+
+
+def test_degraded_quadratic_real_commit_blocks_in_bounded_time():
+    cmd = _quadratic_cmd(9000, " log; git commit -m x")   # ~99KB, IS a commit
+    assert len(cmd) > 90_000, len(cmd)
+    t0 = time.monotonic()
+    rc, err = _run_degraded(cmd)
+    elapsed = time.monotonic() - t0
+    assert rc == 2, "an oversized real commit must FAIL CLOSED, got rc=%s err=%r" % (rc, err[:300])
+    assert "BLOCKED (eos-review-gate)" in err, err[:300]
+    assert elapsed < _DEGRADED_TIME_BUDGET_S, (
+        "degraded detector took %.1fs on a 99KB command (budget %.0fs) -- the "
+        "quadratic scan is back" % (elapsed, _DEGRADED_TIME_BUDGET_S))
+
+
+def test_degraded_quadratic_input_without_commit_word_is_allowed_in_bounded_time():
+    """The loose regex is quadratic even when it FAILS, so a huge command that never
+    says `commit` used to burn the same ~40s to reach an allow. It must skip the
+    scan entirely (and must not be over-blocked just for being large)."""
+    cmd = _quadratic_cmd(9000)
+    t0 = time.monotonic()
+    rc, err = _run_degraded(cmd)
+    elapsed = time.monotonic() - t0
+    assert rc == 0, "no `commit` anywhere -> not a commit, got rc=%s err=%r" % (rc, err[:300])
+    assert elapsed < _DEGRADED_TIME_BUDGET_S, (
+        "degraded detector took %.1fs on a 99KB non-commit (budget %.0fs)" % (
+            elapsed, _DEGRADED_TIME_BUDGET_S))
+
+
+def test_degraded_large_command_without_commit_word_is_not_over_blocked():
+    rc, err = _run_degraded("echo " + "x" * 200_000)
+    assert rc == 0, "size alone must not block a command that never mentions commit: %r" % err[:300]
+
+
+def test_degraded_oversize_commit_blocks_without_spending_the_token():
+    """Past the size cap the detector cannot afford the strict scan, so it must not
+    SPEND the single-use token on an input it never classified -- it blocks, like any
+    loose match, and the token survives for the real (short) commit."""
+    cmd = 'git commit -m "' + "x" * 40_000 + '"'
+    rc, err, survived = _run_partial_with_token({"command": cmd})
+    assert rc == 2, "an oversize commit must block while degraded, got rc=%s err=%r" % (rc, err[:300])
+    assert survived, "the single-use token was CONSUMED by an unclassified oversize command"
+    assert "-F" in err and "Write tool" in err, (
+        "the block must tell the operator how to get under the cap (`git commit -F "
+        "<file>`, message file made with the Write tool since a Bash heredoc naming "
+        "git and commit is scanned too), or it is a dead end: %r" % err[:600])
+
+
+def test_degraded_long_but_ordinary_commit_message_is_still_spendable():
+    """The cap must sit well above any legitimate message: an 8KB heredoc-sized
+    commit is a real commit and a valid token must still be honored on it."""
+    cmd = 'git commit -m "' + "x" * 8_000 + '"'
+    rc, err, survived = _run_partial_with_token({"command": cmd})
+    assert rc == 0, "a real 8KB commit must remain spendable, rc=%s err=%r" % (rc, err[:300])
+    assert not survived, "the real commit should have spent the token"
+
+
+def test_degraded_commit_kind_boundary_and_shape():
+    mod = _load_gate_module()
+    cap = mod._DEGRADED_MAX_CMD_CHARS
+    # Upper bound is the measured limit, not a comfort range: at 65,536 the worst
+    # shape costs ~39s CPU (see the at-cap test). Raise it only with new numbers.
+    assert 8_192 <= cap <= 16_384, "cap %r outside the reviewed range" % cap
+    kind = mod._degraded_commit_kind
+    base = "git commit -m "
+    at_cap = base + "x" * (cap - len(base))
+    assert len(at_cap) == cap and kind(at_cap) == "strict", kind(at_cap)
+    assert kind(at_cap + "x") == "oversize"
+    # size alone is not a reason to act: no commit word -> not a commit
+    assert kind("git " + "x" * (cap * 4)) is None
+    assert kind("ls -la") is None
+    assert kind("git log --grep commit") == "loose"
+    assert kind("GIT commit -m x") == "strict"
+    assert kind(None) is None and kind(["git commit"]) is None
+
+
+def test_degraded_commit_kind_short_circuits_never_reach_the_regexes():
+    """Inputs the prefilter or the cap decide must cost ~nothing however large.
+    In-process, on THIS THREAD's CPU time: not wall clock (machine load cannot
+    flake it) and not process_time() (this suite runs its tests in a thread pool,
+    and process_time() would bill this test for its neighbours' work)."""
+    mod = _load_gate_module()
+    for cmd in (_quadratic_cmd(9000),                          # no `commit`
+                _quadratic_cmd(9000, " log; git commit -m x"),  # over the cap
+                "git " + "commit " * 20_000,                    # over the cap
+                "commit " * 20_000,                             # no `git`
+                "git" + " -C x" * 20_000 + " y"):               # no `commit`
+        t0 = time.thread_time()
+        mod._degraded_commit_kind(cmd)
+        spent = time.thread_time() - t0
+        assert spent < 1.0, "%d-char input took %.2fs CPU" % (len(cmd), spent)
+
+
+def test_degraded_commit_kind_time_is_bounded_at_the_cap():
+    """The one that pins the CAP. Every short-circuit test above passes for ANY
+    cap; this runs the real regexes on the worst shape found that fits under it
+    (`git` + ` --git` * n: every `git` chains, and a `; git commit-x` tail makes the
+    strict scan run through the whole first segment). Measured 1.1-2.4s CPU at
+    16,384 and ~39s at 65,536, so a cap raised without new numbers fails here.
+    Budget 8s: 3x the worst measured, 5x under the mutant."""
+    mod = _load_gate_module()
+    cap = mod._DEGRADED_MAX_CMD_CHARS
+    tail = "; git commit-x"
+    cmd = "git" + " --git" * ((cap - 3 - len(tail)) // 6) + tail
+    cmd += "x" * (cap - len(cmd))
+    assert len(cmd) == cap, (len(cmd), cap)
+    t0 = time.thread_time()
+    kind = mod._degraded_commit_kind(cmd)
+    spent = time.thread_time() - t0
+    assert kind in ("loose", "strict"), kind   # it really ran the patterns
+    assert spent < 8.0, "worst shape at the cap took %.2fs CPU" % spent
+
+
+def test_degraded_oversize_without_git_is_not_blocked_for_length_alone():
+    """Review finding: a prefilter on `commit` alone blocked
+    `echo <20KB> # db.commit()` -- no `git`, so neither pattern can match -- purely
+    for its length. It also made the documented `-F` remedy self-blocking when the
+    message file was written with a Bash heredoc that mentions `commit`."""
+    for cmd in ("echo " + "x" * 20_000 + " # db.commit()",
+                "cat > /tmp/msg.txt <<'EOF'\n" + "fix the commit path\n" * 1000 + "EOF"):
+        assert len(cmd) > 16_384, len(cmd)
+        rc, err = _run_degraded(cmd)
+        assert rc == 0, "no `git` -> cannot be a git commit, got rc=%s err=%r" % (rc, err[:300])
+
+
+def test_degraded_oversize_still_honors_mode_off_and_warn_and_rejects_a_typo():
+    """Ordering guard: the size block sits AFTER the mode switch, so the documented
+    escape hatches still win over it. A re-ordering would strand a real commit."""
+    cmd = 'git commit -m "' + "x" * 40_000 + '"'
+    assert _run_degraded(cmd, extra_env={"EOS_REVIEW_GATE_MODE": "off"})[0] == 0
+    rc, err = _run_degraded(cmd, extra_env={"EOS_REVIEW_GATE_MODE": "warn"})
+    assert rc == 0 and "not blocking" in err, (rc, err[:300])
+    assert _run_degraded(cmd, extra_env={"EOS_REVIEW_GATE_MODE": "bogus"})[0] == 2
+
+
+def test_degraded_commit_kind_matches_the_raw_regexes_under_the_cap():
+    """The prefilter and cap are pure short-circuits: for anything under the cap the
+    decision must equal what the two compiled patterns alone would have said. Seeded
+    fuzz over the token classes that separate loose from strict."""
+    import random
+    mod = _load_gate_module()
+    rng = random.Random(20260919)
+    toks = ["git", "GIT", "commit", "Commit", "commit-graph", "-c", "-C", "x=y",
+            '"a b"', "'c d'", "--no-pager", "--help", "--exec-path", "--exec-path=/x",
+            ";", "&&", "|", "\n", " ", "  ", "gitx", "xgit", "x"]
+    for _ in range(4000):
+        cmd = "".join(rng.choice(toks) + rng.choice(("", " ", " ")) for _ in range(rng.randint(1, 14)))
+        want = None
+        if mod._DEGRADED_COMMIT_RE.search(cmd):
+            want = "strict" if mod._DEGRADED_STRICT_COMMIT_RE.search(cmd) else "loose"
+        assert mod._degraded_commit_kind(cmd) == want, (cmd, mod._degraded_commit_kind(cmd), want)
 
 
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

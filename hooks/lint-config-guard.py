@@ -119,10 +119,18 @@ except Exception:
 # the gate is inert (identical to this hook not existing, never a NEW hole).
 try:
     from tool_call_paths import (  # noqa: E402
-        is_shell_tool, normalize_text, resolve_path, shell_analysis, write_targets)
+        is_shell_tool, normalize_text, resolve_path, shell_analysis,
+        strip_heredoc_bodies, write_targets)
     TOOL_PATHS_LOADED = True
 except Exception:
     TOOL_PATHS_LOADED = False
+# Imported SEPARATELY (see config-write-guard.py): a lib without blank_exempt_token must
+# degrade to the raw pattern, not make this whole guard inert.
+try:
+    from tool_call_paths import blank_exempt_token  # noqa: E402
+except Exception:
+    def blank_exempt_token(text, marker):
+        return _re.sub(r"\S*" + _re.escape(marker) + r"\S*", " <exempt> ", text)
 
 LINT_CONFIG_WRITE = Tier("allow-lint-config-write", "lint-config-write", 3600)
 
@@ -201,19 +209,13 @@ def classify_path(raw_path):
 # --- quoting/escaping normalization (ported from config-write-guard.py, 2026-08-05
 # there / 2026-08-13 here) -- see the module docstring's QUOTE-SPLIT DEFENSE note.
 _CARET_ESCAPE_RE = _re.compile(r"\^(.)", _re.DOTALL)
-_HEREDOC_RE = _re.compile(
-    r"<<-?\s*['\"]?([a-zA-Z0-9_]+)['\"]?[^\n]*\n"  # opening line, through \n
-    r".*?\n"                                        # body (non-greedy)
-    r"[ \t]*\1(?=[ \t\r\n]|$)",                     # closing delimiter line
-    _re.DOTALL,
-)
 
 
+# The scanner lives in hooks/lib/tool_call_paths.py (shared with config-write-guard.py):
+# the regex this used to be was O(markers * n) on unclosed `<<WORD` markers -- see
+# the TIME BOUND note there. Output is byte-identical to the old regex.
 def _strip_heredoc_bodies(text):
-    def _blank(m):
-        opening_line = m.group(0).split("\n", 1)[0] + "\n"
-        return opening_line + " <heredoc-body> \n" + m.group(1)
-    return _HEREDOC_RE.sub(_blank, text)
+    return strip_heredoc_bodies(text)
 
 
 def _decaret(text):
@@ -250,7 +252,7 @@ def _blank_exempt(text, marker):
     marker anywhere in the command, this only silences the SPECIFIC token
     that names a worktree path; an unrelated write elsewhere in the same
     command (a different argument, a later chained command) still matches."""
-    return _re.sub(r"\S*" + _re.escape(marker) + r"\S*", " <exempt> ", text)
+    return blank_exempt_token(text, marker)
 
 
 def classify_shell_text(command):

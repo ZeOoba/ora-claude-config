@@ -11,7 +11,7 @@ market-monitor skill, replacing manually-tracked figures in market_general.
 
 Requires env var FRED_API_KEY (free key: https://fredaccount.stlouisfed.org/apikeys).
 
-Run:  uv run --with mcp --with httpx python server.py
+Run:  uv run --with "mcp<2" --with httpx python server.py   (mcp 2.x renamed FastMCP)
 
 Useful series IDs for ORA workflows:
   DGS10  10-Yr Treasury        DGS5   5-Yr Treasury     DGS2   2-Yr Treasury
@@ -21,9 +21,15 @@ Useful series IDs for ORA workflows:
   State payrolls: OHNA, MDNA, INNA, WINA, MONA, KSNA, TNNA
 """
 
+import logging
 import os
 import httpx
 from mcp.server.fastmcp import FastMCP
+
+# httpx logs full request URLs at INFO, and the FRED key travels in the query
+# string (api_key=...) -- silence it so the key never reaches stderr / MCP server logs.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 FRED_BASE = "https://api.stlouisfed.org/fred"
 API_KEY = os.environ.get("FRED_API_KEY", "").strip()
@@ -41,7 +47,7 @@ def _get(path: str, params: dict) -> dict:
     q["api_key"] = API_KEY
     q["file_type"] = "json"
     try:
-        with httpx.Client(timeout=30) as client:
+        with httpx.Client(timeout=30, follow_redirects=False) as client:
             r = client.get(f"{FRED_BASE}/{path}", params=q)
             r.raise_for_status()
             return r.json()

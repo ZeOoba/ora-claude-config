@@ -102,6 +102,16 @@ ACTIVITY_CAP    = 50
 RENAME_RETRIES    = 6
 RENAME_RETRY_S    = 0.05
 
+# Subagent-dispatch tool names. EXACT match only -- never a prefix/substring test:
+# TaskCreate / TaskUpdate / TaskList / TaskGet / TaskOutput / TaskStop are
+# todo-management tools and must not be counted as dispatch. The name the harness
+# actually emits is "Agent" (890 tool_use blocks across the 1,642 local transcripts
+# on 2026-09-10; "Task" 0). "Task" is kept only as insurance against a rename --
+# matching it alone made this branch dead code, the same failure hooks/eos-telemetry.py
+# was fixed for on 2026-07-24 (memory:
+# feedback_fixture_shaped_tests_certify_dead_branches.md).
+DISPATCH_TOOLS  = frozenset(("Agent", "Task"))
+
 
 def now():
     return datetime.datetime.now()
@@ -503,7 +513,7 @@ def main():
                 add_feed_local(s, "bg-bash", cmd)
                 add_activity(s, "[bg] %s" % trunc(cmd, 60))
 
-            elif tool == "Task":
+            elif tool in DISPATCH_TOOLS:
                 desc = ti.get("description") or ti.get("subagent_type") or "subagent"
                 add_feed_local(s, "subagent", desc)
                 add_activity(s, "[agent] %s" % trunc(desc, 60))

@@ -1,6 +1,6 @@
 # Deal-Sourcing Scan 2026-09-05 — Remediation Plan
 
-**Goal:** close what's fixable from the 2026-09-05 `ora-deal-sourcing-scan` run's Benchmark Honesty and Coverage Gap findings. Three of five coverage gaps are recurring, structural, and now fixed directly in `SKILL.md` (this session, uncommitted — see Landing note). The rest are either one-off verification follow-ups, already-correct behavior, or a cross-skill item owned elsewhere.
+**Goal:** close what's fixable from the 2026-09-05 `ora-deal-sourcing-scan` run's Benchmark Honesty and Coverage Gap findings. Four coverage-gap findings (#5, #8, #9, #10 below) are now fixed directly in `SKILL.md` (see Landing note) — three (#5, #8, #9) close recurring, structural gaps in submarket/procedure coverage; the fourth (#10) closes a dispatch-design gap this run's own tooling created, not a pre-existing doctrine absence. The rest are either one-off verification follow-ups, already-correct behavior, or a cross-skill item owned elsewhere.
 
 **Scope note:** this is not a code plan — `ora-deal-sourcing-scan` is a prompt/doctrine skill (Markdown), not a program. "Implementation" here means SKILL.md text edits, not TDD workstreams.
 
@@ -14,7 +14,7 @@
 | 2 | Basis = price×1.02 excludes CapEx/lease-up carry | **By design, already documented** (SKILL.md STEP 3A + BENCHMARK HONESTY). No fix — the scan already flags capex-heavy candidates (did so this run on 1809 & 1815 Commerce Rd). No task. |
 | 3 | 5 near-line T2 WATCH deals (722 Ketcham St <1%, 1945 Jackson Rd 2.9%, 8301 Cane Run Rd 9.4%, 15665 S Keeler St ~10%, 2201 Advance Ave 10.6%) | **Action item**, not a skill fix — see Action Items §1. |
 | 4 | 1809 & 1815 Commerce Rd — unpriced roof-replacement CapEx behind a headline $20.15/SF | **Action item** — see Action Items §2. |
-| 5 | Construction-photo analysis (Step 1 v2.4 procedure) skipped this run | **Gabriel's call** — W-A below. |
+| 5 | Construction-photo analysis (Step 1 v2.4 procedure) skipped this run | **W-A, DONE** (SKILL.md edited this session) — Gabriel ratified making it mandatory; see W-A below. |
 | 6 | Crexi/LoopNet 403 on WebFetch | **No task** — expected, already mitigated (CommercialSearch/CommercialCafe primary, search-snippet fallback). Working as designed. |
 | 7 | Montgomery County MD skipped | **No task** — correct per existing monthly-cadence doctrine. |
 | 8 | Curtis Bay/Dundalk/Rosedale/Glen Burnie MD — aggregate counts only, no addressable listings | **W-B, DONE** (SKILL.md edited this session). |
@@ -29,8 +29,9 @@
 
 All three are additive text edits to `~/.claude/scheduled-tasks/ora-deal-sourcing-scan/SKILL.md`, made directly (Hard Invariant 5 — Claude-system paths are free working surface; no permission needed to edit). Diffs:
 
-- **SUBMARKET COVERAGE bullet** (Step 1): added explicit per-submarket query requirements for Curtis Bay, Dundalk, Rosedale, Glen Burnie MD, and for Whiteland IN / Beech Grove IN — mirroring the existing Howard County / KC-Kansas-side pattern, so these stop getting silently folded into a broader metro query.
-- **SUBAGENT DISPATCH GUARDRAIL** (Step 1): added a standing rule that a per-market dispatch given only WebSearch/WebFetch cannot read JS-rendered broker sites, and must either get browser-pane/Claude-in-Chrome access or explicitly flag "text-only pass attempted" rather than reporting a false "no crawlable inventory."
+- **W-B — Baltimore submarket coverage bullet** (Step 1): added explicit per-submarket query requirements for Curtis Bay, Dundalk, Rosedale, and Glen Burnie MD — mirroring the existing Howard County / KC-Kansas-side pattern, so these stop getting silently folded into a broader "Baltimore" metro query.
+- **W-C — Indianapolis submarket coverage bullet** (Step 1): added the same explicit per-submarket query requirement for Whiteland IN / Beech Grove IN, so they stop getting folded into a combined Noblesville-area query.
+- **W-D — Subagent dispatch guardrail** (Step 1): added a standing rule that a per-market dispatch given only WebSearch/WebFetch cannot read JS-rendered broker sites, and must either get browser-pane/Claude-in-Chrome access or explicitly flag "text-only pass attempted" rather than reporting a false "no crawlable inventory."
 
 **Landing note:** `~/.claude`'s main checkout carries 42 unrelated uncommitted changes from other live sessions on branch `feat/model-canary-probe-step25` (exact count and session attribution shift as sessions come and go — verify live with `git status --short -sb` rather than trusting a snapshot count). Neither of the two files this plan touches appears among them (confirmed via a path-scoped `git status`). Landed via `anthropic-skills:isolated-commit`: claimed the narrow slug `ora-deal-sourcing-scan-doctrine`, staged only these two paths (`git add --`, never `-A`), independently reviewed, committed with `git commit -- <paths>` — never a bare commit on the dirty main checkout.
 

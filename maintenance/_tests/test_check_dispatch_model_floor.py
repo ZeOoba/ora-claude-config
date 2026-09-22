@@ -148,6 +148,16 @@ def test_opus5_is_below_fable_floor():
     expect("mythos == floor", cdmf.model_rank("claude-mythos-5") == FR)
 
 
+def test_5_1_generation_ids_rank_at_the_floor():
+    """OI-228 regression guard: MODEL_RANK's 5.1-generation ids (both were
+    missing at once -- claude-fable-5-1 fixed in PR #176, claude-mythos-5-1
+    here) must rank at the SAME tier as their 5.0 counterparts, not fall
+    through to UNKNOWN_RANK. Without this, a genuinely top-tier subagent on
+    either id is reported as a floor VIOLATION."""
+    expect("fable-5-1 == floor", cdmf.model_rank("claude-fable-5-1") == FR)
+    expect("mythos-5-1 == floor", cdmf.model_rank("claude-mythos-5-1") == FR)
+
+
 def test_unknown_model_fails_closed():
     with tempfile.TemporaryDirectory() as d:
         write_agent(d, "agent-a.jsonl", [_msg(FABLE), _msg("claude-future-9")])
