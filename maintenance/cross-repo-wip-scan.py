@@ -48,7 +48,10 @@ CORRECTOR STREAK (added 2026-09-12): for a repo with a paired corrector (weekly 
 corrector's last-run state file and flags CORRECTOR_STUCK when its
 `consecutiveUnsynced` streak reaches CORRECTOR_UNSYNCED_ESCALATE_RUNS (1 since the
 corrector went weekly on 2026-09-22, and 7 while it was daily: either way, a week of
-runs that never ended MERGED/NOOP_CLEAN). Any single BLOCKED_* day was routine and the corrector stays silent on it by design; a
+runs that never ended MERGED/NOOP_CLEAN, counted from the last successful sync). On the
+daily cadence a single BLOCKED_* day was routine; on the weekly cadence one unsynced run
+already IS a week, so it escalates, while the corrector itself still stays silent on
+BLOCKED_* by design. A
 week-long streak means the WIP backlog is pinning the checkout and drift is
 compounding with nothing correcting it. A missing, corrupt, or pre-counter
 state file is flagged too (unmeasurable, not clean). The corrector is the

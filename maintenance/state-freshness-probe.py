@@ -93,6 +93,21 @@ MAX_AGE_OVERRIDES = {
     # quarterly producers would go here, with the cron that justifies the number
 }
 
+# Producers that run OUTSIDE the scheduled-task fleets (Windows Task Scheduler), so a fleet
+# pause never explains their staleness. Merge-gate R3 finding, 2026-09-22: once the
+# ora-am-brief carve-out in _shared/fleet_pause.py made CC pauses visible, a dead dead-man
+# written after the pause began was reported [PAUSED] (rc 0) instead of [STALE] (rc 1)
+# for the whole pause, which can last up to 14 days. Enforced by
+# _tests/test_state_freshness_thresholds.py.
+PAUSE_INDEPENDENT = frozenset({
+    "fleet-deadman.log",            # ORA Fleet Dead-Man
+    "push-fleet-heartbeat.log",     # ORA Fleet Heartbeat Push
+    "heartbeat-publish-ok.json",    # ORA Fleet Heartbeat Push
+    "stuck-session-watchdog.log",   # ORA Stuck-Session Watchdog
+    "fleet-pause-windows.json",     # ORA Fleet Pause-Resume Guard
+    "fleet-heartbeat.json",         # emit-fleet-heartbeat.py, run by ORA Fleet Heartbeat Push
+})
+
 WATCH_GLOBS = (
     "_state/*.log",
     "_state/*.json",
@@ -162,8 +177,11 @@ def main():
                 ok += 1
                 continue
 
-            # Stale. Was it already stale when the pause began?
-            if pause_start is not None and mtime >= (pause_start - PAUSE_GRACE_H * 3600.0):
+            # Stale. Was it already stale when the pause began? Only CC-fleet producers can be
+            # explained by a CC pause: the Windows Task Scheduler producers keep running through
+            # it, so their staleness is never pause-explained (merge-gate R3, 2026-09-22).
+            if (pause_start is not None and name not in PAUSE_INDEPENDENT
+                    and mtime >= (pause_start - PAUSE_GRACE_H * 3600.0)):
                 print("  [PAUSED] %-51s %.1fh stale, but last written after the pause began "
                       "(%s) -- expected" % (
                           rel, age_h, time.strftime("%Y-%m-%dT%H:%MZ", time.gmtime(pause_start))))
