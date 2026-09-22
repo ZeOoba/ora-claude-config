@@ -20,6 +20,7 @@ You are `ora-weekly-hygiene`. You replace five previously-separate hygiene tasks
 Fires **weekly: `0 20 * * 0`** (Sunday 20:00 ET). All thirteen blocks run every fire — no weekday/weekend branching.
 - **Day-move note (2026-06-03):** Block A (`ora-claude-workspace-hygiene`) previously ran **Friday 17:15**; it moves to this Sunday 20:00 session. No Friday dependency exists (its weekly heartbeat-log rotation only needs to happen ~weekly; nothing reads it on a Friday-specific schedule). If a future watchdog ever expects the rotation on Fridays, re-split Block A — but none does today.
 - Blocks B–E retain their native Sunday cadence (were 21:00 / 20:00 / 23:00 / 22:00 — now sequential under the single 20:00 fire).
+- **Run date (all blocks):** compute once at session start with `date '+%A %Y-%m-%d'` (date part in every date slot; weekday only where one is named) and reuse that exact value in every title, subject and body (a brief once mixed Tuesday/Wednesday).
 
 ## SHARED MCP ROUTING (canonical — corrected 2026-06-11)
 
@@ -32,7 +33,7 @@ Applies to ALL blocks. Composio is fully REMOVED (connector gone 2026-06-11 — 
 
 Reference: `…\Documents\Claude\Scheduled\_shared\PUBLICATION_GUARD.md` v1.1. SUPERSEDES any v1.0 "log inline / don't retry" wording. If this reference file did not survive the migration, apply this inline procedure:
 1. **Capture** `response.pages[0].id` → `publishedId`, `.url` → `publishedUrl`.
-2. **Retry once** if `publishedId` is null/undefined/error or the call errored. No loop.
+2. **Search before any retry** if `publishedId` is null/undefined/error or the call errored (e.g. a grace-period/quota notice): search by the exact title; a match created at/after the create call is this run's page — use it, do not retry. Retry once only if no match; never blind-retry a create (it produced a duplicate). Quota errors → `notion-quota-fallback` skill. No loop.
 3. **Search-verify** via `notion-search(query=<literal title>, filters={created_date_range:{start: today, end: today+1}})`; ID must match.
 4. **Outlook fallback (auto-send)** IFF 1+2+3 failed: send via `C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1` (Outlook COM — the SOLE path; Composio removed 2026-06-11), `-To "ggoldberg@oxfordra.net"`, `-Subject "❌ ora-weekly-hygiene/<block> PUBLICATION FAILED — <YYYY-MM-DD>"`, body = intended page content verbatim + Notion error verbatim + line "AUTO-SENT — meta-failure path, no human-in-loop available". On non-zero COM exit retry once, then record ❌❌ total-blackout in the summary.
 5. **Failure-mode logging** — append `Publish[<block>]: [✅ direct | ✅ retry | ❌ fallback-sent | ❌❌ total-blackout]` to the chat summary.
