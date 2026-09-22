@@ -5,12 +5,39 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-09-17T20:58:32.186Z
+  modified: 2026-09-22T14:30:05.865Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-09-22 -- Correction to the ground-truth audit: the 12550 S Lombard IC memo EXISTS (the Q7 uncheck was NOT applied)
+
+The audit's claim that "no memo exists" for 12550 S Lombard Ln (Deal Sourcing Log row `3cf6ecd8-9e59-8106-8c00-e73978f8a4a8`, "IC Memo Done = YES") was wrong.
+
+- **Where the memo is:** `2026-09-02_12550-S-Lombard-Alsip_IC-Memo_v01.docx` and `.pdf` are in the Cowork session outputs folder `local-agent-mode-sessions\...\local_b9819dc4-5ea6-404a-8661-3a17588568f3\outputs\`. The row's own Notes name them.
+- **How it was missed:** the verifier and the refuter searched only `Business\Investment Candidates -- 2026`.
+- **Consequence:** Gabriel's "uncheck IC Memo Done" ruling rested on that false premise, so it was NOT applied. The checkbox stays YES.
+- **Effect on the audit:** the IC-memo reconciliation's stale-pointer count is 0, not 1. The pending correction draft for that run overstates it.
+- **Open:** the memo was never filed into the deal folder. Filing it is a write to a business folder, so it needs Gabriel's permission.
+- **Lesson for verifiers:** a "file does not exist" claim must search the session `outputs` stores as well as the canonical folder.
+
+## 2026-09-22 -- Ground-truth audit follow-ups: Gabriel's rulings + retirements (RATIFIED)
+
+Source: Ground-Truth Audit 2026-09-22 (`maintenance/_state/ground-truth/digest-2026-09-22.html`), decisions given in-turn by Gabriel via the decision form.
+
+- **RATIFIED retire `ora-arch-review-followup-check` (CC/MCP).** One-time follow-up whose work is done: OI-319..OI-325 filed, and the self-retire disable landed 2026-09-19 13:00 ET. No producer scripts depend on it. CC order: `delete_scheduled_task` first, then archive the folder to `scheduled-tasks/_archive_2026-09-18_completed-onetime/`.
+- **RATIFIED retire `ora-ar-export-freshness-nudge` (LAMS).** Superseded by `ora-ar-feed-sweep` (CC, weekly, live since 2026-08-17). Filed in `retire-pending.json`; to be executed from a native on-device Cowork session (archive first, then registry drop).
+- **LAMS re-enable, 11 tasks:** Gabriel: "All 12 back on", minus the AR nudge retired above. Queued for a native on-device Cowork session (OI-340).
+- **3034 Westerville deductible:** the 26-27 renewal deductible step from $10K to $25K (with GL limits doubled) was **authorized** by Gabriel. Workbook row 25 is NOT to be touched by automation.
+- **PRs #347/#348/#349 + migration 032 (2026-09-21):** Gabriel confirms he directed them in-session. An after-the-fact adversarial review was ordered anyway (OI-345).
+- **1900 N Broadway contacts:** both are correct. George Renehan = ops/finance contact; Steve Seh (CRC) = PM.
+- **LoopNet Banwick "208":** a mis-keyed 2808; Gabriel will fix it on LoopNet.
+- **12550 S Lombard:** uncheck "IC Memo Done" in the Deal Sourcing Log (no memo exists).
+- **Corrections:** no retraction emails and no page/store edits (drafts left in `ground-truth-pending-approval/2026-09-22/`, not to be sent).
+- **Standing rule (OI-345), WARN only:** a scheduled session that continues past its send should warn before merging or pushing, not block.
+- **Owner-outreach vintage (form left blank, default applied):** require a fresh off-market master by 2026-10-05 before the one-time 07-27 ratification keeps clearing waves.
 
 ## 2026-09-19 — UPDATE: OI-333 is now filed in the live tracker (supersedes "row handed to session 1a4250d3")
 
