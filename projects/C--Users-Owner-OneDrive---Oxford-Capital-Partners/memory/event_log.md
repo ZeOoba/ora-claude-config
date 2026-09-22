@@ -12,6 +12,19 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-09-22 — CLOSED: broker-touch-cadence / deal-sourcing-scan doctrine conflicts (local 09-19 versions canonical)
+
+Closes the "Preserved verbatim, NOT reconciled — needs Gabriel" item in today's "Live ~/.claude checkout synced to origin/main" entry.
+
+- **Gabriel's ruling, 2026-09-22:** the live-checkout 09-19 versions are canonical over main's 09-13 graft B.
+- `ora-deal-sourcing-scan` v2.7 (listing-agent capture): landed on `origin/main` in `37f247d`. The live file is byte-identical to main.
+- `ora-broker-touch-cadence` v1.2: landed via ZeOoba/ora-claude-config PR #258, merged 2026-09-22T21:00Z (`6a55596` + `7e3dc7a`; merge `bf21a54`).
+  - Kept: the STEP 0 double-fire guard (`--period month`) and the figure-safe draft path.
+  - Dropped: graft-B scorecard ranking and listing citation. If listing citation returns, its non-disclosure and ACTIVE-DEAL CHECK guards must return with it.
+  - The run-guard conformance test was updated in the same PR (pre-push 131/131).
+- Residual: the live checkout differs from main by one changelog sentence that PR #258 reworded. It is wording only and does not change behavior; it syncs when the checkout is switched to `main` (claimed by another session).
+- Verified by the ORA Setup Audit session (Rev 26 follow-up) with `git diff origin/main` on both specs and `gh pr view 258`.
+
 ## 2026-09-19 — UPDATE: OI-333 is now filed in the live tracker (supersedes "row handed to session 1a4250d3")
 
 The earlier correction entry said the OI-333 row was handed to session 1a4250d3, which held the live `open-items-tracker` claim while pruning the tracker (`5cc4457`, deletion-only, not yet on `origin/main`). That session declined to fold the row in. On Gabriel's explicit instruction ("force the claim now") the claim was force-taken, one additive row plus a `### OI-333` stub were inserted in the LIVE working copy of `open-items-tracker.md` (above OI-332; uncommitted), and the claim was restored to 1a4250d3 via `claim_work.py restore`. The row is trimmed to the two items still open: the `test-ora-autonomy-gate.py` slug-dir exemption assertion under a git worktree (live-checkout result unverified), and the flaky `test_append_event_log_lock.py` 0.5s timeout. The doctrine-probe test (`a8d7fc0`) and the append-event-log test (`0cfbb41`) are fixed on `fix/unblock-prepush-gate`. When the checkout later syncs to the pruned tracker, the OI-333 row and stub must be kept.
