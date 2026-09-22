@@ -75,6 +75,7 @@ MODEL_RANK = {
     # (--floor claude-fable-5-1) resolves it. Deleting this entry breaks the
     # default floor invocation (exit 2, TOOLING ERROR -- fails closed, but loud).
     "claude-fable-5": 100,
+    "claude-opus-5-5": 95,  # 2026-09-22 -- above opus-5, still below the Fable floor
     "claude-opus-5": 90,
     "claude-opus-4-8": 80,
     "claude-opus-4.8": 80,

@@ -452,6 +452,27 @@ with open(log_path, encoding="utf-8") as f:
     expect("main() still appended the entry", "via main()" in f.read())
 os.remove(entry_path)
 
+# 2026-09-22 (/insights): main() rejects a malformed header UP FRONT with a readable
+# message and exit 1 -- no traceback, no write. An undated '## Foo' used to be written
+# (insert_newest only checks the '## ' prefix) yet is not an entry to entry_blocks().
+for bad in ("## Undated heading\n- x", "2026-09-22 — no hashes\n- x",
+            "### 2026-09-22 — wrong level\n- x"):
+    with open(log_path, encoding="utf-8") as f:
+        before = f.read()
+    efd, epath = tempfile.mkstemp(suffix=".md", text=True)
+    with os.fdopen(efd, "w", encoding="utf-8") as f:
+        f.write(bad)
+    try:
+        err = _captured_stderr_of(ael.main, ["--entry-file", epath, "--log", log_path])
+        rc_bad = ael.main(["--entry-file", epath, "--log", log_path])
+        expect("rejects malformed header %r with exit 1" % bad[:20], rc_bad == 1)
+        expect("rejection names the expected format", "## YYYY-MM-DD" in err, err)
+    except Exception as e:
+        expect("malformed header does not raise", False, repr(e))
+    with open(log_path, encoding="utf-8") as f:
+        expect("malformed header wrote nothing", f.read() == before)
+    os.remove(epath)
+
 
 passed = sum(1 for ok, _ in results if ok)
 print("\nappend-event-log tests: %d/%d passed" % (passed, len(results)))
