@@ -41,6 +41,22 @@
 # (GitHub API, dedicated branch, no gate) and exits NONZERO when that publish fails. The
 # backup push below is unchanged and stays best-effort.
 #
+# WHY v3.1 (2026-09-22, OI-331): v3.0 fixed the heartbeat's own signal but left the backup
+# push (the OTHER thing this script does -- getting pending main-checkout work onto GitHub)
+# with none of its own. Its failures (no worktree on main, a real merge conflict, or the push
+# itself failing) were only ever a log line -- the exit code never reflected them, and nothing
+# outside this script's own log read them, so ~a dozen hook-test-gate failures and 4 remote-
+# main races since 08-15 went unnoticed until a second adversarial review of the OI-323 build
+# found them by hand. Fix (Gabriel-ratified 2026-09-22, option (a) of three): the backup push
+# now writes its own marker/stamp pair, same pattern as publish-fleet-heartbeat.py's
+# heartbeat-publish-failed.json/-ok.json -- backup-push-failed.json on any of the three
+# failure paths (cleared on the next success), backup-push-ok.json on every success
+# (including a no-op day with nothing to push). This is a SEPARATE signal from $pubExit,
+# which still reflects ONLY the heartbeat publish -- the backup step stays Fail-OPEN and this
+# script's own exit code is unchanged by it, per the same reasoning as v3.0: a stuck merge or
+# a gate failure needs a human session to reconcile, not a louder scheduled-task alarm racing
+# ahead of that.
+#
 # Backup step is Fail-OPEN: any internal error, or any real merge conflict, -> log and carry
 # on (a stuck merge is exactly what a human session must resolve); only the heartbeat publish
 # sets the exit code. ASCII-only (PS 5.1 reads non-BOM as ANSI).
@@ -81,6 +97,34 @@ Invoke-LogRotation $log
 
 function Log($m) { "$([DateTime]::UtcNow.ToString('s'))Z  $m" | Out-File -FilePath $log -Append -Encoding utf8 }
 
+# --- Backup-push marker/stamp (added 2026-09-22, OI-331) -----------------------------------
+# Same pattern as publish-fleet-heartbeat.py's heartbeat-publish-failed.json/-ok.json: a
+# marker written on failure (cleared on the next success) and a stamp written on every
+# success, both in maintenance/_state/ so any session or probe can check the backup push's
+# OWN status independently of this script's exit code (which stays reserved for the
+# heartbeat publish, unchanged from v3.0). Fail-open: a write error here is logged and
+# swallowed, never allowed to affect the backup step's own fail-open behavior.
+$stateDir       = Join-Path $primaryRepo 'maintenance\_state'
+$backupMarker   = Join-Path $stateDir 'backup-push-failed.json'
+$backupStamp    = Join-Path $stateDir 'backup-push-ok.json'
+
+function Write-BackupPushFailed($reason) {
+    try {
+        if (-not (Test-Path -LiteralPath $stateDir)) { New-Item -ItemType Directory -Path $stateDir -Force | Out-Null }
+        $obj = @{ ts = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'); reason = $reason }
+        ($obj | ConvertTo-Json -Compress) | Out-File -LiteralPath $backupMarker -Encoding utf8
+    } catch { Log ('backup-push marker write FAILED (non-fatal): ' + $_.Exception.Message) }
+}
+
+function Write-BackupPushOk {
+    try {
+        if (-not (Test-Path -LiteralPath $stateDir)) { New-Item -ItemType Directory -Path $stateDir -Force | Out-Null }
+        $obj = @{ ts = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ') }
+        ($obj | ConvertTo-Json -Compress) | Out-File -LiteralPath $backupStamp -Encoding utf8
+        if (Test-Path -LiteralPath $backupMarker) { Remove-Item -LiteralPath $backupMarker -Force }
+    } catch { Log ('backup-push stamp write FAILED (non-fatal): ' + $_.Exception.Message) }
+}
+
 # v3.0 (OI-323): publish the heartbeat FIRST, on its own path. It goes to the dedicated
 # deadman-heartbeat branch through the GitHub API, so it no longer waits on the reconcile,
 # the ~12-min pre-push gate or a race with main below. This is the ONLY result that sets the
@@ -117,6 +161,7 @@ try {
     }
     if (-not $repo) {
         Log 'FAIL-OPEN: no worktree has main checked out (git worktree list) - skipping backup push'
+        Write-BackupPushFailed 'no worktree has main checked out'
         exit $pubExit
     }
     Log ("using main worktree: " + $repo)
@@ -145,6 +190,7 @@ try {
         if ($mergeExit -ne 0 -or $unmerged) {
             git -C $repo merge --abort 2>&1 | ForEach-Object { Log ("abort: " + $_) }
             Log 'REAL CONFLICT - merge aborted, tree left clean and unchanged; needs a session to reconcile by hand. Backup push skipped this cycle (the heartbeat itself was published above)'
+            Write-BackupPushFailed 'real merge conflict - aborted, needs a session to reconcile'
             exit $pubExit
         }
         Log 'auto-merge clean, no conflicts - reconciled, will push everything below'
@@ -189,15 +235,21 @@ try {
     #    fails loud and this script does not retry; log and let the next run, or
     #    a human, reconcile.
     $ahead = git -C $repo log 'origin/main..HEAD' --oneline
-    if (-not $ahead) { Log 'nothing ahead of origin/main - nothing to push'; exit $pubExit }
+    if (-not $ahead) { Log 'nothing ahead of origin/main - nothing to push'; Write-BackupPushOk; exit $pubExit }
     $aheadCount = ($ahead | Measure-Object).Count
     Log ("pushing " + $aheadCount + " commit(s) ahead of origin/main")
     git -C $repo push origin main 2>&1 | ForEach-Object { Log ("push: " + $_) }
-    if ($LASTEXITCODE -ne 0) { Log 'backup push FAILED - pending main work NOT on GitHub (heartbeat unaffected: published above); needs a session to reconcile' }
-    else { Log 'OK - pushed' }
+    if ($LASTEXITCODE -ne 0) {
+        Log 'backup push FAILED - pending main work NOT on GitHub (heartbeat unaffected: published above); needs a session to reconcile'
+        Write-BackupPushFailed 'git push origin main failed'
+    } else {
+        Log 'OK - pushed'
+        Write-BackupPushOk
+    }
     exit $pubExit
 }
 catch {
     Log ('ERROR (backup step, fail-open): ' + $_.Exception.Message)
+    Write-BackupPushFailed ('unhandled error: ' + $_.Exception.Message)
     exit $pubExit
 }

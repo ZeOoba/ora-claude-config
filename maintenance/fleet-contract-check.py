@@ -71,6 +71,23 @@ CONTRACTS = [
         "consumer": "external fleet-deadman.yml (reads the deadman-heartbeat branch this publish updates; a stale ok-stamp means the publish stopped and the dead-man is reading old data)",
         "max_age_hours": 26,  # daily 07:30 ET publish + slack, same window as publish-fleet-heartbeat.py --status
     },
+    {
+        # OI-331 (2026-09-22): before this, the backup push's failures (no main
+        # worktree, a real merge conflict, or the push itself failing) were only
+        # ever a log line in push-fleet-heartbeat.log -- nothing outside that log
+        # read them, so ~a dozen hook-test-gate failures and 4 remote-main races
+        # since 08-15 went unnoticed until a second adversarial review of the
+        # OI-323 build found them by hand. This entry gives that signal the same
+        # freshness-contract monitoring as the heartbeat publish above -- a stale
+        # or missing stamp here means the backup push (getting pending
+        # main-checkout work onto GitHub) has stopped succeeding, independent of
+        # whether the heartbeat publish itself is still healthy.
+        "name": "push-fleet-heartbeat backup-push -> ~/.claude durable-backup coverage",
+        "producer": "push-fleet-heartbeat.ps1 backup-push step (writes on every success, including a no-op day; OI-331)",
+        "output_file": os.path.join(STATE_DIR, "backup-push-ok.json"),
+        "consumer": "no automated consumer yet -- this is currently the SOLE route any local ~/.claude history has to GitHub (confirmed 2026-09-22: no other script in the codebase runs `git push` against this repo), so a stale/missing stamp means committed work is accumulating with no durable copy off this machine",
+        "max_age_hours": 26,  # daily 07:30 ET run + slack, same window as the heartbeat-publish contract above
+    },
 ]
 
 
