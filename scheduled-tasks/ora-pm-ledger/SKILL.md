@@ -1,9 +1,9 @@
 ---
 name: ora-pm-ledger
-description: ORA Evening Ledger — consolidated daily close. Runs three blocks in order at one cadence — A Notion Daily Digest (every day), B Outbox QC Sweep (weekdays only), C EOD Action Ledger (every day). Restored 2026-07-08 from three separately-archived block specs after the 2026-07-05 CC/MCP registry loss destroyed the original consolidated file; routing/send-path/paths corrected to current canon during restoration (see RESTORATION NOTE in `references/CHANGELOG-2026-07-08-to-2026-08-16.md`). CC canonical file inlined 2026-07-08 (second restoration same day) to remove a redirect-to-OneDrive pattern that had already broken twice. Re-enabled 2026-07-09 (Gabriel-approved, post-recovery-stabilization confirmation). Block A edit-detection coverage gaps fixed 2026-07-16 (see AMENDMENT NOTE in `references/CHANGELOG-2026-07-08-to-2026-08-16.md`). [MODEL: claude-opus-5 observed | checked 2026-08-12 via live-run transcript canary]
+description: ORA Evening Ledger — consolidated WEEKLY close (Fri 15:00 ET since 2026-09-17; covers {TODAY}−7…{TODAY} per §0.1). Runs three blocks in order — A Notion Digest, B Outbox QC Sweep (retro-sweep, lookback 15), C EOD Action Ledger. Restored 2026-07-08 from three separately-archived block specs after the 2026-07-05 CC/MCP registry loss destroyed the original consolidated file; routing/send-path/paths corrected to current canon during restoration (see RESTORATION NOTE in `references/CHANGELOG-2026-07-08-to-2026-08-16.md`). CC canonical file inlined 2026-07-08 (second restoration same day) to remove a redirect-to-OneDrive pattern that had already broken twice. Re-enabled 2026-07-09 (Gabriel-approved, post-recovery-stabilization confirmation). Block A edit-detection coverage gaps fixed 2026-07-16 (see AMENDMENT NOTE in `references/CHANGELOG-2026-07-08-to-2026-08-16.md`). [MODEL: claude-opus-5 observed | checked 2026-08-12 via live-run transcript canary]
 ---
 
-# ORA EVENING LEDGER — Consolidated Daily Close (ora-pm-ledger)
+# ORA EVENING LEDGER — Consolidated Weekly Close (ora-pm-ledger; weekly since 2026-09-17, see §0.1)
 
 ## 0. RUN ORDER & PURPOSE
 
@@ -17,6 +17,28 @@ still "today's" run). Execute, branching by ET day-of-week:
 3. **BLOCK C — EOD Action Ledger** (every day) — day-closing orchestrator:
    inventories every open manual action Gabriel owes, auto-resolves what's
    safely reversible, and reports the rest.
+
+### 0.1 WEEKLY WINDOW — read before any block (added 2026-09-22)
+
+The cron has been **`0 15 * * 5` (Fridays 15:00 ET) since 2026-09-17**, set under the
+fleet once-a-week cap Gabriel directed. The "18:00 fire", "day-closing" and "today" wording
+below dates from the daily era. Apply this rule wherever that wording appears:
+
+- **`{TODAY}`** is still today's ET date. It stays the key for DELIVERY and IDEMPOTENCY
+  only: email subjects, Ops Hub page titles, the §0.5 de-dupe guard, and HTML fallback
+  filenames. One ledger per week, stamped with the run date.
+- **`{WINDOW_START}` = `{TODAY}` − 7 days** (ISO `YYYY-MM-DD`). Every CHANGE-DETECTION
+  filter covers the inclusive range `{WINDOW_START}` … `{TODAY}`, not `{TODAY}` alone.
+  "Changed today", "sent today" and "findings from today" all mean "in the window".
+  The window deliberately overlaps the previous Friday. That covers the hours after the
+  previous run, at the cost of possibly repeating a few of its items; label repeats "carried
+  from last week's window" rather than dropping them. If the previous run is known to have
+  been missed, widen `{WINDOW_START}` back to the day after the last delivered ledger, and
+  say so in the header.
+- Snapshot-diff helpers (`*_snapshot_diff.py`) already diff against the PREVIOUS run's
+  snapshot. They cover the window by construction, so pass `--date {TODAY}` unchanged.
+- Block B's retro-sweep (B.2) sizes itself from covered intervals. It runs with
+  `--lookback 15`, so one missed weekly fire is still swept rather than dropped.
 
 Each block below is otherwise self-contained. A shared **§ GLOBAL — SEND
 PATH, ROUTING, PYTHON** section at the end applies to all three and
@@ -177,7 +199,7 @@ Use all of the following signals and merge, deduping by page ID:
 
 1. **Newly created today (precise):** `notion-search` with
    `query_type: "internal"` and
-   `filters.created_date_range.start_date = {TODAY}`. Run it (a) workspace-wide
+   `filters.created_date_range.start_date = {WINDOW_START}` (§0.1). Run it (a) workspace-wide
    for the catch-all, and (b) scoped to each priority data source via
    `data_source_url` (use the `collection://…` form for the Tenant DB; for the
    others, first `notion-fetch` the database ID to read its
@@ -189,7 +211,7 @@ Use all of the following signals and merge, deduping by page ID:
    `last_edited_time` column (name per the A.1 table — `Last Updated` for
    five, `Last Edited` for CapEx & Maintenance Log). Where it works, query it:
    ```sql
-   SELECT * FROM "<data_source_url>" WHERE date("<column name>") = '{TODAY}'
+   SELECT * FROM "<data_source_url>" WHERE date("<column name>") >= '{WINDOW_START}'
    ```
 
    **⚠ DEFECT 1 — the Tenant DB's `Last Updated` DOES NOT BUMP. A zero result
@@ -260,7 +282,7 @@ Use all of the following signals and merge, deduping by page ID:
    POST https://api.notion.com/v1/databases/{database_id}/query
    Authorization: Bearer $NOTION_TOKEN   ·   Notion-Version: 2022-06-28
    {"filter":{"timestamp":"last_edited_time",
-              "last_edited_time":{"on_or_after":"{TODAY}T00:00:00Z"}}}
+              "last_edited_time":{"on_or_after":"{WINDOW_START}T00:00:00Z"}}}
    ```
    This is a true server-side last-edited filter. **Verified working 2026-07-16:**
    sorting `/v1/search` by `last_edited_time` returned real, VARIED timestamps
@@ -603,7 +625,7 @@ Use all of the following signals and merge, deduping by page ID:
       free, precise, unlimited, server-side. Blocked only on the one-time share.
       **This is the target state; once granted, rungs 2–3 become fallbacks only.**
    2. **`notion-search` via MCP, scoped per `data_source_url`**, keeping results
-      whose returned `timestamp` (= last-edited) date == `{TODAY}`. **Not
+      whose returned `timestamp` (= last-edited) date is within `{WINDOW_START}`…`{TODAY}`. **Not
       entitlement-gated** — it ran freely throughout 2026-07-16 while the SQL
       tool was exhausted, so this rung is always available. Recall is
       ranked/semantic, so it is genuinely best-effort: it can miss rows and MUST
@@ -636,7 +658,7 @@ Use all of the following signals and merge, deduping by page ID:
    they have no queryable last-edited column. For these two only:
    `notion-fetch` the page and scan child pages' last-edited stamps, plus a
    broad `notion-search` semantic query, KEEPing any result whose `timestamp`
-   date == `{TODAY}`.
+   date is within `{WINDOW_START}`…`{TODAY}` (§0.1).
 
    **Section D producer classification (added 2026-08-25 — read before writing COVERAGE GAPS
    for Section D).** A title-search over child pages structurally cannot find every producer
@@ -657,8 +679,8 @@ Use all of the following signals and merge, deduping by page ID:
      counterpart by design," not as an unresolved search gap.
    - **MONDAY-ONLY (do not expect a same-day send on other weekdays):** Cash Position Snapshot is
      `ora-am-brief` Block D, Mondays only. A send-log check on any other weekday finding no Cash
-     Position entry is correct, not a gap — do not list it among "today's sends" to reconcile
-     unless `{TODAY}` is a Monday.
+     Position entry is correct, not a gap. Under the §0.1 weekly window, the window always
+     contains exactly one Monday, so expect exactly one Cash Position send in it.
    - **DEDICATED CHILD PAGE (the default; title-search works):** everything else that posts to the
      Hub creates its own titled page (e.g. `Automation Health — {TODAY}`, `Deal Aging SLA —
      {TODAY}`, `Doctrine/Governor Integrity — {TODAY}`) — title-search these normally.
@@ -868,8 +890,10 @@ mechanism.
 **Step 1 — plan the windows.** Run:
 ```
 C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \
-  C:/Users/Owner/.claude/scheduled-tasks/ora-pm-ledger/outbox_qc_window.py --plan
+  C:/Users/Owner/.claude/scheduled-tasks/ora-pm-ledger/outbox_qc_window.py --plan --lookback 15
 ```
+(`--lookback 15`, per §0.1: the script's default of 7 would drop the previous Friday's
+post-run tail on a weekly cadence.)
 The last stdout line is `RESULT_JSON={...}` with `days_to_sweep[]` (each carrying
 `date`, `is_today`, `weekend`, `gaps[[from,to]]`, `uncovered_minutes`),
 `retro_days[]`, and `dropped_beyond_lookback[]`. State lives in
