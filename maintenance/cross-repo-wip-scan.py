@@ -43,7 +43,7 @@ signal (dirty-file staleness above catches a different dimension and did not
 catch this one). Repos with no CANONICAL_BRANCH entry are never flagged on
 this dimension, by design -- their feature-branch churn is expected.
 
-CORRECTOR STREAK (added 2026-09-12): for a repo with a paired daily corrector
+CORRECTOR STREAK (added 2026-09-12): for a repo with a paired corrector (weekly since 2026-09-22)
 (currently only `~/.claude` -> checkout-merge-forward.py), this also reads the
 corrector's last-run state file and flags CORRECTOR_STUCK when its
 `consecutiveUnsynced` streak reaches CORRECTOR_UNSYNCED_ESCALATE_RUNS (1 since the
@@ -53,7 +53,7 @@ week-long streak means the WIP backlog is pinning the checkout and drift is
 compounding with nothing correcting it. A missing, corrupt, or pre-counter
 state file is flagged too (unmeasurable, not clean). The corrector is the
 sole writer of that file; this only reads it. A `lastRun` older than
-CORRECTOR_STALE_HOURS (72h), or one that cannot be parsed, is also flagged:
+CORRECTOR_STALE_HOURS (192h: one weekly cycle + 24h grace), or one that cannot be parsed, is also flagged:
 a disabled task, a run that keeps failing its claim step, or one that dies
 before invoking the script leaves the streak frozen below threshold, and
 without this check that frozen value would read as clean indefinitely.
@@ -113,7 +113,7 @@ CANONICAL_BRANCH_OVERRIDE = None
 
 BRANCH_BEHIND_THRESHOLD = 10
 
-# Repos with a paired daily corrector -> that corrector's last-run state file
+# Repos with a paired corrector -> that corrector's last-run state file
 # (written solely by checkout-merge-forward.py --state-file).
 DEFAULT_CORRECTOR_STATE = {
     r"C:\Users\Owner\.claude":

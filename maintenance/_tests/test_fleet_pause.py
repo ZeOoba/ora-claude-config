@@ -52,6 +52,16 @@ class PauseDetection(unittest.TestCase):
         st = fleet_pause.pause_state("cc", registry=reg)
         self.assertTrue(st["paused"])
 
+    def test_taskid_keyed_registry_gets_the_carve_out(self):
+        """Registries have been keyed `id` so far, but the code accepts `taskId` too;
+        that fallback must actually be exercised (merge-gate finding 2026-09-22)."""
+        reg = _reg(self.tmp, [
+            {"taskId": "ora-am-brief", "cronExpression": "0 6 * * *", "enabled": True},
+            {"taskId": "a", "cronExpression": "0 5 * * 1", "enabled": False},
+            {"taskId": "r", "fireAt": _ms(48), "enabled": True},
+        ])
+        self.assertTrue(fleet_pause.pause_state("cc", registry=reg)["paused"])
+
     def test_carve_out_does_not_apply_to_other_fleet(self):
         reg = _reg(self.tmp, [
             {"id": "ora-am-brief", "cronExpression": "0 6 * * *", "enabled": True},
