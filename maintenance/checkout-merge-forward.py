@@ -153,7 +153,7 @@ SYNCED_STATUSES = ("MERGED", "NOOP_CLEAN")
 # untracked files sit inside it.
 _OVERLAP_HEADERS = ("would be overwritten by merge:",
                     "would lose untracked files in them:")
-STREAK_ALARM_RUNS = 2          # weekly cadence since 2026-09-22: 2 runs = 14 days
+STREAK_ALARM_RUNS = 2          # weekly cadence since 2026-09-22: 2 unsynced runs = 14 days since the last successful sync
 STREAK_ALARM_REPEAT_RUNS = 1   # then every weekly run (was 7 daily runs = 7 days)
 
 # In-progress operation markers (step 0a): refs, then git-path files/directories.
