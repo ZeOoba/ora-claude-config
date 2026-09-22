@@ -897,7 +897,7 @@ post-run tail on a weekly cadence.)
 The last stdout line is `RESULT_JSON={...}` with `days_to_sweep[]` (each carrying
 `date`, `is_today`, `weekend`, `gaps[[from,to]]`, `uncovered_minutes`),
 `retro_days[]`, and `dropped_beyond_lookback[]`. State lives in
-`state/outbox-qc-coverage.json`; lookback is 7 days.
+`state/outbox-qc-coverage.json`; script default lookback is 7 days; this task passes `--lookback 15` (§0.1).
 
 **Step 2 — sweep each gap.** For every entry in `days_to_sweep`, query Sent Items with
 `sentDateTime` inside that entry's gap interval(s) — NOT "today". A retro day's gap is
