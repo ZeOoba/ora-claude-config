@@ -12,11 +12,14 @@ $fail = 0
 function Expect($label, $cond) {
     if ($cond) { Write-Output "  PASS $label" } else { Write-Output "  FAIL $label"; $script:fail++ }
 }
+$script:tempFiles = @()
 function Reg($tasks) {
     $p = Join-Path $env:TEMP ("deadman-test-" + [guid]::NewGuid() + '.json')
     (@{ scheduledTasks = $tasks } | ConvertTo-Json -Depth 5) | Set-Content -Path $p -Encoding utf8
+    $script:tempFiles += $p   # removed in the finally block at the end (merge-gate R3)
     return $p
 }
+try {
 $future = [DateTimeOffset]::UtcNow.AddHours(48).ToUnixTimeMilliseconds()
 
 # --- pause carve-out: ora-am-brief never vetoes a CC pause (mirrors _shared/fleet_pause.py)
@@ -36,8 +39,10 @@ Expect 'another enabled recurring task still means live'  ($null -eq (Test-Bound
 $py = 'C:\Users\Owner\AppData\Local\Programs\Python\Python313\python.exe'
 $res = Invoke-PyBounded $py @('-c', 'import time; time.sleep(30)') 3
 Expect 'hung child returns TimedOut'                      ($res.TimedOut -eq $true)
-$res = Invoke-PyBounded $py @('-c', 'print(\"hi\"); raise SystemExit(1)') 20
-Expect 'normal child returns output and exit code'        (($res.TimedOut -eq $false) -and ($res.Rc -eq 1) -and ($res.Out -match 'hi'))
+# 120s = the production bound. A 20s budget false-failed under load (merge-gate R3), and a
+# timeout here must be distinguishable from a logic failure, so TimedOut goes in the label.
+$res = Invoke-PyBounded $py @('-c', 'print(\"hi\"); raise SystemExit(1)') 120
+Expect ('normal child returns output and exit code (TimedOut=' + $res.TimedOut + ', Rc=' + $res.Rc + ')') (($res.TimedOut -eq $false) -and ($res.Rc -eq 1) -and ($res.Out -match 'hi'))
 
 # --- taskId-keyed registries get the same carve-out as id-keyed ones (parity with fleet_pause.py)
 $r3 = Reg @(
@@ -100,7 +105,10 @@ Expect 'every Test-BoundedPause call passes a non-empty fleet label' $labelOk
 function StartOnlyViaLogStart($root) {
     $strs = AllOf $root { param($n) ($n -is [System.Management.Automation.Language.StringConstantExpressionAst] -or
                                      $n -is [System.Management.Automation.Language.ExpandableStringExpressionAst]) -and
-                                    $n.Value -cmatch '^START\b' }
+                                    $n.Value -imatch '\bSTART\b' -and             # any case, any position (R3-F4)
+                                    $n.Value -notmatch '\.start\.log$' -and       # the start-log PATH itself
+                                    -not ($n.Parent -is [System.Management.Automation.Language.MemberExpressionAst] -and
+                                          $n.Parent.Member -eq $n) }             # a .NET member name, e.g. ::Start()
     if ($strs.Count -eq 0) { return $false }
     foreach ($s in $strs) {
         $p = $s.Parent; $ok = $false
@@ -137,6 +145,52 @@ $gpv = @(Cmds $ast 'Get-PublishVerdict' | Where-Object { -not (InsideFunction $_
 $vOkIfs = AllOf $ast { param($n) $n -is [System.Management.Automation.Language.IfStatementAst] -and
                                  $n.Clauses[0].Item1.Extent.Text -match '^\$v\.Ok$' }
 Expect 'main body calls Get-PublishVerdict and branches on its .Ok' (($gpv.Count -ge 1) -and ($vOkIfs.Count -ge 1))
+# R3-F2: a not-ok verdict must actually land in $problems (else-branch), or a failed
+# publish raises no alarm at all.
+Expect 'a not-ok publish verdict is appended to $problems' (($vOkIfs.Count -ge 1) -and
+    (@($vOkIfs | Where-Object { $_.ElseClause -and ($_.ElseClause.Extent.Text -match '\$problems\s*\+=\s*\$v\.Problem') }).Count -ge 1))
+
+# R3-F3: the pause call must pass the fleet's own label, and those labels must be the
+# carve-out table's keys -- a typo'd or wrong property silently disables the carve-out.
+$tbpTexts = @($tbp | ForEach-Object { ($_.Extent.Text -replace '\s+', ' ').Trim() })
+Expect 'Test-BoundedPause is called exactly as Test-BoundedPause $reg $fleet.Label' (($tbpTexts.Count -ge 1) -and
+    (@($tbpTexts | Where-Object { $_ -ne 'Test-BoundedPause $reg $fleet.Label' }).Count -eq 0))
+$fleetsAssign = AllOf $ast { param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$fleets' }
+$fleetLabels = @($fleetsAssign | ForEach-Object { [regex]::Matches($_.Extent.Text, "Label\s*=\s*'([^']+)'") | ForEach-Object { $_.Groups[1].Value } }) | Sort-Object -Unique
+$carveAssign = AllOf $ast { param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$carveOuts' }
+$carveTable = if ($carveAssign.Count -eq 1) { & ([scriptblock]::Create($carveAssign[0].Right.Extent.Text)) } else { $null }
+$carveKeys = if ($carveTable) { @($carveTable.Keys) | Sort-Object } else { @() }
+Expect 'fleet labels are exactly the carve-out keys' (($fleetLabels.Count -gt 0) -and
+    ((@($fleetLabels) -join ',') -eq (@($carveKeys) -join ',')))
+
+# Parity with _shared/fleet_pause.py PAUSE_CARVE_OUTS ("keep the two lists identical").
+$pyOut = & $py -c "import sys; sys.path.insert(0, r'$(Join-Path $PSScriptRoot '_shared')'); import fleet_pause as f; print(';'.join(k + '=' + ','.join(sorted(v)) for k, v in sorted(f.PAUSE_CARVE_OUTS.items())))"
+$psOut = if ($carveTable) { (@($carveTable.Keys | Sort-Object) | ForEach-Object { $_ + '=' + ((@($carveTable[$_]) | Sort-Object) -join ',') }) -join ';' } else { '' }
+Expect ('PowerShell and Python carve-out lists are identical (py=' + $pyOut + ' ps=' + $psOut + ')') (($pyOut -join '').Trim() -eq $psOut)
+
+# R3-F1: resolve each script's REAL top-level $log / $startLog assignments (not the
+# behavioural check's temp paths) and require two different files, the start one *.start.log.
+function ResolvedLogPaths($root) {
+    $sb = { param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+                      $n.Left.Extent.Text -in @('$primaryRepo', '$log', '$startLog') -and
+                      -not (InsideFunction $n '*') }
+    $assigns = @($root.FindAll($sb, $true) | Where-Object {
+        $p = $_.Parent; $inFn = $false
+        while ($p) { if ($p -is [System.Management.Automation.Language.FunctionDefinitionAst]) { $inFn = $true; break }; $p = $p.Parent }
+        -not $inFn } | Sort-Object { $_.Extent.StartOffset })
+    $code = ($assigns | ForEach-Object { $_.Extent.Text }) -join "`n"
+    $vals = & ([scriptblock]::Create($code + "`n" + '@{ log = $log; start = $startLog }'))
+    return $vals
+}
+foreach ($pair in @(@('dead-man', $ast), @('heartbeat', $hbAst))) {
+    $v = ResolvedLogPaths $pair[1]
+    Expect ("$($pair[0]): START log is a separate *.start.log file (log=$($v.log) start=$($v.start))") (
+        $v.log -and $v.start -and ($v.start -ne $v.log) -and ($v.start -like '*.start.log') -and ($v.log -notlike '*.start.log'))
+}
+
+} finally {
+    foreach ($t in $script:tempFiles) { Remove-Item -LiteralPath $t -ErrorAction SilentlyContinue }
+}
 
 if ($fail -gt 0) { Write-Output "FAILED: $fail"; exit 1 }
 Write-Output 'ALL PASS'; exit 0
