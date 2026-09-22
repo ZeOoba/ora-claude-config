@@ -307,8 +307,8 @@ CHANGELOG
   (2) DOUBLE-FIRE GUARD (new Step 0). The task had none and fired twice in September against a monthly
       cron — 2 drafts on 09-02, 5 more on 09-05 (audit §4). Wired to the fleet standard per
       `_shared/README-DOUBLE-FIRE-GUARD.md`, copying the monthly pattern from
-      `ora-tenant-hubspot-reconciliation`: `block-sentinel.py claim --block main --period month
-      --ttl-min 45`; exit 10/11 stand down as a NORMAL skip with no drafts and no email; exit 0
+      `ora-tenant-hubspot-reconciliation`: the Step 0 claim on block `main` with `--period month`
+      and `--ttl-min 45`; exit 10/11 stand down as a NORMAL skip with no drafts and no email; exit 0
       proceeds; only the claim-holder calls `complete`/`fail`, a stood-down run calls neither, and
       `--period month` is mandatory on every call because omitting it defeats the guard silently.
       Step 0 runs before the backlog gate and before any Drafts counting or Notion pull. The
