@@ -4,7 +4,7 @@ description: "Full text of Engineering OS's 'Done' bar (L2-L7 completion criteri
 metadata:
   type: reference
   originSessionId: 5c8afbd3-8eaa-4e0c-9874-8c300884ab7c
-  modified: 2026-08-13T23:09:20.496Z
+  modified: 2026-09-22T20:46:38.000Z
 ---
 
 Extracted verbatim 2026-08-13 (external-artifact-intake setup-improvement follow-up, Gabriel-approved) from CLAUDE.md's Engineering OS section, which had drifted to 1766 words — past the 1700 WARN threshold and outside the 1694–1755 "don't trim" band on the high side. No content was cut; this is a relocation (one fact, one home), not a trim — CLAUDE.md now carries a condensed pointer instead of the full clause.
