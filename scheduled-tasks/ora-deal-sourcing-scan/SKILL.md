@@ -1,37 +1,32 @@
 ---
 name: ora-deal-sourcing-scan
-description: Weekly on-market deal-sourcing scan (Tuesdays) — searches new industrial/flex listings across ORA's ten target markets, applies the basis/physical hard floors as a GATE, scores survivors, dedupes against the Notion Deal Sourcing Log, mechanically detects price cuts off the stored first-sighting ask, and emails a ranked digest. Restored 2026-07-07 — no replacement task applies the scoring rubric or writes to the Deal Sourcing Log. v2.7: links listings to Broker Relationships on unambiguous roster matches. [MODEL: claude-opus-5 observed | checked 2026-08-12 via live-run transcript canary]
+description: Weekly on-market deal-sourcing scan (Tuesdays) — searches new industrial/flex listings across ORA's ten target markets, applies the basis/physical hard floors as a GATE, scores survivors, dedupes against the Notion Deal Sourcing Log, mechanically detects price cuts off the stored first-sighting ask, and emails a ranked digest. Restored 2026-07-07 — no replacement task applies the scoring rubric or writes to the Deal Sourcing Log. [MODEL: claude-opus-5 observed | checked 2026-08-12 via live-run transcript canary]
 ---
 
-ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.7, 2026-09-13).
+ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.7, 2026-09-19).
 
-v2.7 — BROKER LINK (graft B, Gabriel-ratified 2026-09-13; no scoring weight changed).
-The Deal Sourcing Log and the Acquisition Pipeline Tracker now carry a `Broker (Linked)`
-relation to the Broker Relationships DB, which rolls up per-broker Listings Sent / T1-T2
-Listings / LOIs / Closed. `Broker / Contact` stayed free text with no join, so no broker
-could ever be scored. STEP 5 now sets the relation on an UNAMBIGUOUS roster match only,
-never creates roster rows, backfills the link on every re-sighted row whose link is empty,
-and STEP 6 lists this run's unlinked brokers for Gabriel. The Pipeline Tracker's
-`Broker (Linked)` is maintained by the deal owner; this task never writes it.
+v2.7 — LISTING-AGENT CAPTURE + BROKER RELATION LINKING (2026-09-19, Gabriel-directed).
+NO SCORE, WEIGHT, GATE, THRESHOLD OR GOVERNOR CHANGED — this version only adds data
+capture. Driven by the 2026-09-19 broker-coverage analysis: of 545 Deal Sourcing Log
+rows, only 310 (56.9%) carry a usable broker NAME; the rest name an aggregator (Crexi,
+CommercialSearch, Revere) or a placeholder, and the `Broker (Linked)` relation is
+essentially empty (the Broker Relationships DB holds 9 rows). ORA therefore cannot see
+which brokers are actually active in its markets. Fixed at the source: STEP 1 now
+requires the listing AGENT off the listing DETAIL page, STEP 5 writes `Broker / Contact`
+as "Name, Firm" AND links `Broker (Linked)` to a Broker Relationships row (creating a
+minimal row when none exists, capped at 25/run), and STEP 6 reports a "Broker capture"
+section. Match key is NAME + FIRM, not email — see the executability findings in STEP 1.
+*** PROVENANCE NOTE FOR WHOEVER COMMITS THIS FILE: v2.7 was layered on TOP of the
+UNCOMMITTED v2.6 own-portfolio-guard change in the shared ~/.claude checkout, on branch
+`feat/model-canary-probe-step25`. The working tree therefore carries TWO separate
+uncommitted changes (v2.6 and v2.7) by two different sessions. Commit accordingly. ***
 
-v2.6 — FOUR COVERAGE-GAP FINDINGS CLOSED FROM THE 2026-09-05 RUN (three coverage-gap
-fixes + one procedure made mandatory, no scoring weight changed; this entry documents
-changes already made inline below — the version banner and this changelog entry were
-the only pieces missing when those edits first landed). Full remediation analysis for
-that run: `docs/superpowers/plans/2026-09-05-deal-sourcing-scan-remediation.md`.
-(1) BROWSER-TOOL REQUIREMENT added as a sibling bullet to the Step 1 dispatch guardrail
-— a per-market agent given only WebSearch/WebFetch cannot read JS-rendered broker-direct
-inventory pages and was reporting 7 real brokerage sites across four target markets
-(Michigan, Virginia, Iowa, Kentucky) as having "no crawlable inventory" when the gap was
-the dispatch's own tooling, not the market. (2) Baltimore's Curtis Bay/Dundalk/Rosedale/Glen
-Burnie MD now get the same explicit per-submarket query treatment Howard County already
-had — a generic "Baltimore" metro-level sweep does not reliably surface addressable
-listings for any of these four. (3) Indianapolis's Whiteland/Beech Grove IN get the same
-treatment — they were getting folded into a combined Noblesville-area query. (4) The
-Step 1 construction-photo-analysis procedure (v2.4) is now MANDATORY, not a discretionary
-scope trade-off a run can skip — Gabriel ratified this 2026-09-05 after that run skipped
-it entirely with no compensating check; skipping it going forward is a reportable
-coverage gap, same standing as an unsearched submarket.
+v2.6 — OWN-PORTFOLIO GUARD (2026-09-18, Gabriel-directed). STEP 2 gains criterion (e),
+run first: every candidate goes through _shared\own_portfolio_guard.py (range-aware
+match against _shared\ora-own-portfolio-exclusions.json). Closes the 2026-09-05 defect
+where ORA's own Cushman-listed 2000-2026 Zettler complex was logged T1 PURSUE. Own assets
+seen on market now go to a digest section, never to Notion as leads. STEP 4 reports
+legacy own-asset rows for retirement. No scoring weight changed.
 
 v2.5 — LOUISVILLE KY LEG ADDED; THE SCAN IS NOW TEN MARKETS, NOT NINE (2026-08-11,
 coverage fix + mirror sync, no scoring weight changed). Louisville was ratified as the
@@ -296,13 +291,55 @@ For each of the ten clusters, web-search for newly listed industrial/flex produc
   hybrid — see the Construction & envelope score in Step 3B), broker + firm,
   listing URL, date first seen.
 
+  *** LISTING-AGENT CAPTURE — MANDATORY (v2.7, 2026-09-19, Gabriel-directed) ***
+  Capture the LISTING AGENT(S) for every candidate: full name, firm, and email/phone
+  ONLY where actually shown. This is the fix for the 545/310 (56.9%) broker-name gap.
+  A PLATFORM IS NOT A BROKER. Never write "Crexi", "LoopNet", "CommercialSearch",
+  "CommercialCafe", "Revere", "CoStar", "PropertyShark" or any other platform name into
+  a broker field — those belong in the Deal Sourcing Log's own `Source` select, not in
+  `Broker / Contact`. Never guess a name, never construct or infer an email address from
+  a firm's domain pattern, and never carry an agent name over from a different listing.
+  SOURCE ORDER (measured 2026-09-19 against real current Columbus OH and Indianapolis IN
+  industrial listings — write around what actually works, per the v2.4 lesson):
+  1) commercialsearch.com / commercialcafe.com listing DETAIL pages — WORKS. 5 of 5
+     detail pages returned a clean agent name + firm via plain WebFetch (Dan Sheeran Jr.
+     / NAI Ohio Equities · Michael J. Semon / NAI Ohio Equities · Matthew Ferguson /
+     Premier Commercial | TCN Worldwide · Annie Scott / Annie Scott Realty Group). This
+     is the PRIMARY source and it is the same Yardi-network ladder Step 1 already uses.
+     THE DETAIL PAGE IS REQUIRED: the city SEARCH-RESULT pages show address/price/SF and
+     NO agent at all, so a search-card scrape yields nothing. Get the detail-page slug
+     from the index, then fetch it.
+  2) Brokerage's OWN site — BEST-EFFORT FALLBACK ONLY, not the preferred source. Measured
+     worse than the aggregators: drk-realty.com's listings page returned no listings at
+     all to WebFetch, and ohioequities.com is query-param/JS-driven and yielded only the
+     firm switchboard number, no agent. Try it (browser pane if WebFetch is empty, per
+     the BROWSER-TOOL REQUIREMENT above) but do not spend a run's budget here.
+  3) Crexi / LoopNet — DO NOT COUNT ON THESE. Both 403 on BOTH the search index and the
+     listing detail page to automated fetch (re-confirmed 2026-09-19). A blocked
+     aggregator is `AGENT NOT CAPTURED`, reason `aggregator blocked` — it is NEVER a
+     reason to guess, and NEVER a reason to attempt a login, a paywall bypass or a
+     CAPTCHA (see the standing rule above).
+  EMAIL AND PHONE ARE USUALLY UNOBTAINABLE — THIS IS EXPECTED, NOT A FAILURE. Every
+  aggregator detail page tested gates contact behind a "Contact Broker" form; 0 of 5
+  published an agent email or direct phone. Capture them when a page genuinely shows
+  them (brokerage sites sometimes do) and leave them blank otherwise. Do NOT hold up a
+  listing waiting for contact details.
+  FALLBACK ORDER when the agent cannot be resolved: (i) named individual agent + firm —
+  best; (ii) firm only, with the agent as `AGENT NOT CAPTURED` — acceptable, record the
+  firm; (iii) neither — write the literal string `AGENT NOT CAPTURED` and record the
+  REASON in Notes / Flags (`aggregator blocked` · `detail page not loaded` · `no agent
+  shown on page` · `listing came from an OM/broker email with no agent named`).
+  BROKER CAPTURE NEVER BLOCKS A LISTING WRITE. A candidate whose agent cannot be
+  captured is still logged, still gated, still scored and still written to Notion
+  exactly as it would otherwise be — `AGENT NOT CAPTURED` is a data state, not an error
+  and not a filter. Never drop, defer or fail a listing over a missing broker.
+
   *** HOW TO ACTUALLY DETERMINE CONSTRUCTION TYPE (added 2026-08-04 — the previous
   instruction was just "LOOK: listing photos usually settle it in seconds", and on the
   2026-08-04 run ALL NINE market agents reported it as impossible and returned UNKNOWN
   for every candidate. UNKNOWN scores the same as PEMB (2/5), so that silently
   suppressed ~3 points on essentially the whole scan. The instruction was wrong, not
-  the agents — WebFetch returns text only and cannot see images. ***
-
+  the agents — WebFetch returns text only and cannot see images. Use this instead: ***
   *** MANDATORY, NOT DISCRETIONARY (ratified by Gabriel 2026-09-05, after the 2026-09-05
   run skipped this whole procedure "for scope reasons" with no compensating check). The
   score impact is genuinely small — ~1 in 5 candidates resolvable, up to 3 points each
@@ -311,9 +348,7 @@ For each of the ten clusters, web-search for newly listed industrial/flex produc
   the real yield is the by-products below, which listing text never discloses. Skipping
   this step is a COVERAGE GAP to name explicitly in that run's digest, exactly like a
   submarket that returned nothing — never a silent scope trade-off a run makes on its
-  own. Run it every run, not at a run's discretion. ***
-
-  Use this instead:
+  own. Restore it every run. ***
   1. Read the listing text first. A minority state it outright ("masonry", "precast
      concrete", "pre-engineered steel", "block"). Cheapest win; take it and stop.
   2. Otherwise open the listing in the BROWSER PANE (preview_start / navigate), then:
@@ -376,9 +411,38 @@ For each of the ten clusters, web-search for newly listed industrial/flex produc
 STEP 2 — ELIGIBILITY GATE
 Keep a candidate only if: (a) industrial/flex/office-warehouse product; (b) in a
 target cluster; (c) within or plausibly within 10-80K SF and $1-10M; (d) no instant
-disqualifier. Log filtered items with one-line reasons in the run notes; do not
-write them to Notion. Unpriced listings in-cluster and on-product PASS the gate
-(price discovery is a next action, not a disqualifier).
+disqualifier; (e) NOT ORA's OWN PORTFOLIO (v2.6 — see below; runs FIRST, before a-d).
+Log filtered items with one-line reasons in the run notes; do not
+write them to Notion.
+
+*** (e) OWN-PORTFOLIO GUARD (v2.6, 2026-09-18, Gabriel-directed after a real incident) ***
+On 2026-09-05 this scan logged ORA's OWN Cushman & Wakefield listing — "2000-2026 Zettler
+Road Complex, Columbus OH" — as a new lead: T1 PURSUE, score 71, Next Action "REQUEST
+PRICE" from our own listing broker. The address range never string-matched any owned
+address (2000-2002 / 2018 / 2022 Zettler) and NO step checked ownership. A scan that
+tells us to call our own broker for our own price is not a sourcing tool.
+For EVERY candidate, before any scoring or Notion read/write:
+  python "C:\Users\Owner\.claude\scheduled-tasks\_shared\own_portfolio_guard.py" "<full listing address as titled>" --broker "<listing broker firm + names>"
+  - exit 2 / OWN-PORTFOLIO → DROP. Never score it, never write it to the Deal Sourcing Log
+    or Pipeline Tracker. Put one line in the digest under "OWN ASSETS SEEN ON MARKET"
+    (address, platform, ask if shown, days on market) — that is disposition intel for
+    Gabriel, not a lead.
+  - exit 3 / BROKER-FLAG → the listing broker is one ORA has engaged on its own assets.
+    Not a drop by itself; verify the address against the roster by hand and state the
+    check in Notes / Flags before logging.
+  - exit 0 / CLEAR → continue to (a)-(d).
+  The matcher is RANGE-AWARE (a "2000-2026" listing hits owned 2018) and normalizes
+  suffixes/directionals. Roster: _shared\ora-own-portfolio-exclusions.json (v1.0).
+  ROSTER REFRESH each run: read the Notion Property Register
+  (collection://24d6a531-f4b7-4c38-87fb-3b1be4a4f1f3) Address column and the Tenant DB
+  'Property Address' options; any owned address missing from the roster → treat as owned
+  for this run and report "ROSTER DRIFT: <address>" in the run notes (do not edit the
+  roster file unattended). Known gap: the Sepich Portfolio is one aggregate Register row
+  with no addresses — the roster covers only the Sepich buildings named elsewhere.
+  If the guard script cannot run (python missing, file absent), FAIL CLOSED for Columbus
+  OH candidates on streets that appear in the roster, and say so in the digest.
+Unpriced listings in-cluster and on-product PASS the gate (a)-(d) (price discovery is a
+next action, not a disqualifier) — but never (e): an unpriced own asset is still ours.
 
 STEP 2.5 — FUNCTIONAL SF NORMALIZATION (do this BEFORE any $/SF is computed)
 Compute $/SF on FUNCTIONAL SF, not marketed SF. Marketed SF routinely includes
@@ -595,9 +659,7 @@ spot. All 144 priced rows were backfilled on 2026-07-14, so the baseline exists:
   $2,332,000)". No manual arithmetic; read it.
 
 On each run:
-- Existing + unchanged: skip silently — EXCEPT set `Broker (Linked)` per the BROKER LINK
-  RULE (STEP 5) when it is empty. This exception applies in EVERY branch below too (price
-  cut, re-list, correction); besides `Listing URL` (STEP 5), it is the only extra field a re-sighting may write.
+- Existing + unchanged: skip silently.
 - Existing + PRICE CUT: update `Asking Price` and `Price / SF` ONLY. Leave
   `Ask at First Sighting` untouched. The formula surfaces the delta. These LEAD the
   digest — a cut is the strongest motivation signal in the whole scan.
@@ -609,6 +671,11 @@ On each run:
   this happened on 3255 N 7th St Trafficway, corrected 2026-07-14.
 - New: create a record. Never create duplicates. Also check the Acquisition
   Pipeline Tracker (bcfe4a03) so active deals are not re-surfaced as leads.
+- EXISTING ROW THAT IS AN OWN ASSET (v2.6): if the full active-set fetch contains a row
+  the own-portfolio guard flags (e.g. legacy LoopNet-inbound rows for 2800-2826 Banwick,
+  384-398 Morrison, 1100 Rarig; the 2026-09-05 Zettler row), do NOT update it as a lead.
+  Report it once per run under "OWN-ASSET ROWS IN SOURCING LOG" for Gabriel to retire —
+  never flip Status unattended.
 
 STEP 5 — WRITE TO NOTION (canonical record — write BEFORE email)
 Create/update Deal Sourcing Log records: Deal Name / Address; Metro / Submarket;
@@ -624,30 +691,71 @@ update); Asking Price;
 (FUNCTIONAL — per Step 2.5); Year Built; Buy Box Score (100); **Verdict** (T1 PURSUE /
 T2 WATCH / PASS / KILLED); **Floor Result** (PASS / FAIL-BASIS / FAIL-YIELD /
 FAIL-BOTH / N/A — this is the gate outcome from Step 3A); Asset Type; Broker /
-Contact; **`Broker (Linked)`** (see BROKER LINK RULE below); Date Seen; Notes / Flags (gate outcome FIRST, then score breakdown, the
+Contact; Date Seen; Notes / Flags (gate outcome FIRST, then score breakdown, the
 pre-mortem, the benchmark used and whether the deal sits near the floor line, plus
 PRICE CUT / RE-LIST / REQUEST PRICE / PROVISIONAL / SUB-SCALE flags); Next Action
 (what to do, and the decision rule — e.g. "decline if the ask implies over $105/SF").
 
-BROKER LINK RULE (v2.7). Keep writing the raw `Broker / Contact` text exactly as today — the
-relation supplements it, never replaces it. Then, for each named listing broker (not a
-platform sender such as Crexi/CommercialCafe/CommercialSearch/LoopNet, not a role mailbox
-(info@, investments@, team@, listings@, emails@ — on any domain) with no person named, not a
-firm-only string, not a placeholder). First strip credentials (CCIM/SIOR/Jr./III) and Inc/LLC;
-then split co-listed strings on "&", "/" and ";" only (never on ",", which separates name from
-firm) and treat each named person separately:
-  1. Load the Broker Relationships roster once per run (data source
-     48e43778-b1f2-4b16-8f3c-0bf18f8642e9: Broker Name, Company / Brokerage, Email, url).
-  2. Match by EXACT email (case-insensitive) first; else by exact normalized full name
-     (strip CCIM/SIOR/Jr./III and punctuation) AND the same normalized firm (lower-case;
-     strip Inc/LLC/Co./punctuation and any "|" affiliate suffix, so "Cushman & Wakefield |
-     Thalhimer" == "Cushman & Wakefield"). A role-mailbox email never counts as a match.
-  3. Exactly one roster match → add that page to `Broker (Linked)` (append; never remove an
-     existing link). Zero or more than one match → leave the relation untouched.
-  4. NEVER create a Broker Relationships row from this task. New roster entries are
-     Gabriel-approved only.
-  5. On an UPDATE to an existing row, apply the same rule if `Broker (Linked)` is empty.
-Tally every named broker you could NOT link, with its listing count this run, for STEP 6.
+*** STEP 5A — BROKER FIELD + BROKER RELATION (v2.7, 2026-09-19, Gabriel-directed) ***
+Two writes per listing, both in the Deal Sourcing Log row you just created/updated:
+  - `Broker / Contact` (text — this is the ACTUAL property name in the log's schema;
+    verified 2026-09-19 against collection://9a6ae219-85a3-4621-899c-c757fd062f8b.
+    It is NOT called "Broker / Source"): write `Name, Firm` — e.g.
+    `Dan Sheeran Jr., NAI Ohio Equities`. Firm only when the agent is unknown:
+    `AGENT NOT CAPTURED, NAI Ohio Equities`. Neither known: `AGENT NOT CAPTURED`.
+    Multiple agents: `Name1, Name2, Firm`. NEVER a platform name (see Step 1).
+  - `Broker (Linked)` (relation → collection://48e43778-b1f2-4b16-8f3c-0bf18f8642e9):
+    link to the matching Broker Relationships row. The broker-side mirror of this
+    relation is `Sourced Listings` — link ONE side and Notion populates the other; do
+    not write both. Leave the relation EMPTY when the agent is `AGENT NOT CAPTURED` —
+    never link a row to a firm-only placeholder, and never create a placeholder row.
+
+MATCHING — NAME + FIRM IS THE KEY, NOT EMAIL. The 2026-09-19 executability test found
+agent emails are essentially never published (0 of 5 detail pages), so an email-first
+match would almost always miss and manufacture duplicates. Read the Broker
+Relationships DB first, then match in this order, stopping at the first hit:
+  1. exact `Broker Name` + exact `Company / Brokerage`;
+  2. case-insensitive / whitespace-normalized `Broker Name` within the same firm;
+  3. if `Email` is known AND a row carries that exact `Email`, that row wins outright.
+NEVER CREATE A DUPLICATE WHEN A MATCH EXISTS. If two existing rows both match, link the
+one with the higher `Tier` and report the duplicate pair in the digest — do not merge
+them unattended.
+
+CREATING A NEW BROKER ROW (only when no match exists). Write ONLY these properties —
+they are the ones that actually exist in this DB (schema read 2026-09-19); inventing a
+property or a select option will fail the write:
+  - `Broker Name`          (title)        — the agent's full name. Required.
+  - `Company / Brokerage`  (text)         — the firm.
+  - `Email`                (email)        — ONLY if the page actually published it; else blank.
+  - `Phone`                (phone_number) — ONLY if actually published; else blank.
+  - `Markets`              (multi_select) — ONLY an option that ALREADY EXISTS:
+        Columbus OH · Kansas City MO · Indianapolis IN · Maryland · Cleveland OH ·
+        Nashville TN · Multi-Market · Des Moines IA · Cincinnati OH · Louisville KY ·
+        Madison WI · Grand Rapids MI · Richmond VA
+      (The last five were ADDED to the database by Gabriel's direction on 2026-09-19 — the
+      original 8 kept their option ids and all 9 existing rows read identically before
+      and after.) For a market with NO matching option — e.g. a new entry market — LEAVE
+      `Markets` BLANK and name the market in `Notes`. NEVER invent a select option — the
+      scan runs unattended and must not mutate the DB's schema. Report any such gap once
+      per run in the digest ("Markets option missing for: <market>") so Gabriel can add it
+      by hand.
+  - `Tier`                 (select)       — `Tier 3 — Cold` for every new row (verify that
+      exact option string, EM DASH included, exists before writing; the live options are
+      `Tier 1 — Active` / `Tier 2 — Warm` / `Tier 3 — Cold` / `Inactive`). A broker the
+      scan has merely observed is cold by definition — never open a row at a warmer tier.
+  - `Notes`                (text)         — `Source: ora-deal-sourcing-scan; First seen: <listing date>`.
+      *** There is NO `Source` property and NO `First Seen` property on this DB. That is
+      why both go in `Notes`. `Date Added` is a created_time and is READ-ONLY. ***
+  Do NOT write `Relationship Owner`, `Specialty`, `Contact Frequency`, `Last Contacted`,
+  `Deals Referred`/`Deals Closed`, `Volume Closed ($)`, `HubSpot Contact Link` or
+  `LinkedIn` — those are relationship-management fields a human owns, and the rollup /
+  formula properties (`Listings Sent (Auto)`, `T1/T2 Listings (Auto)`, `LOIs (Auto)`,
+  `Closed (Auto)`) are computed and must never be written.
+
+CAP: at most 25 NEW broker rows per run. Linking to EXISTING rows is uncapped. On
+hitting the cap, stop creating rows, still write `Broker / Contact` text for every
+remaining listing, leave those relations empty, and report the overflow count and the
+names not created in the digest's "Broker capture" section so the next run picks them up.
 
 STEP 5B — CROSS-WRITE THE VERIFIED ASK TO THE ACQUISITION PIPELINE TRACKER
 (added 2026-08-12, Gabriel-directed in-turn. Closes a real 36-minute-fuse defect: on
@@ -712,7 +820,7 @@ fields, ratified by Gabriel 2026-08-12 over the simpler option of reusing `Purch
 An ask is broker marketing. `Purchase Price` is what ORA would or did pay. They are
 different quantities and they now live in different fields — keep it that way.
 
-ALSO NEVER WRITE, from this task, on a pipeline-tracker row: `Broker (Linked)` (v2.7), `Next Action`, `Stage`,
+ALSO NEVER WRITE, from this task, on a pipeline-tracker row: `Next Action`, `Stage`,
 `LOI Status`, `PSA Status`, `Last Activity`, `Last Updated`, `Notes`, `Kill Reason`.
 Those are posture and clock fields owned by the deal owner and by `ora-deal-aging-sla`,
 which measures staleness against them — a scan touching them would reset the very clock
@@ -778,9 +886,17 @@ Body order:
       [EST] and PROVISIONAL, and any deal within ~3 ppt of the floor line.
   (7) Coverage gaps, named explicitly — a submarket that returned nothing gets said
       out loud, never silently omitted.
-  (8) Unlinked brokers (v2.7): named brokers from this run with no `Broker (Linked)` roster
-      match, with listing counts, plus one line "X of Y active (Status not Dead/Passed) log rows broker-linked". Candidates for Gabriel to add to Broker Relationships —
-      this task never adds them. Omit the section when every named broker linked.
+  (8) BROKER CAPTURE (added v2.7, 2026-09-19) — four counts, one short section:
+        - listings scanned this run;
+        - listings with a NAMED listing agent;
+        - count of `AGENT NOT CAPTURED`, broken out by reason (aggregator blocked /
+          detail page not loaded / no agent shown / OM-or-email with no agent named);
+        - NEW Broker Relationships rows created this run.
+      Also name here, when they occur: the 25-row cap being hit and the names not
+      created; any missing `Markets` select option (e.g. a market outside the 13 current options);
+      and any duplicate broker rows found while matching. This section is the audit
+      trail for the 56.9% broker-name gap this version exists to close — report the
+      counts even when they are bad, and never round them up.
   (9) Link to the Deal Sourcing Log.
 If nothing new: send a brief "no new on-doctrine listings this week" note — a short,
 honest digest is the correct output of a quiet week.
