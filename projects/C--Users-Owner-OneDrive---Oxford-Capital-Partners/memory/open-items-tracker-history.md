@@ -1126,6 +1126,29 @@ Built: `oxford-command-center/scripts/mirror-classify-offfleet.ps1` (runs the sa
 
 | ID | Opened | Closed | Source | One-line |
 |----|--------|--------|--------|----------|
+| [OI-317](#OI-317) | 2026-09-18 | 2026-09-18 | `ora-vacancy-aging-report` weekly run, 2026-09-18 (STEP 4 property→PM mapping) | **CLOSED 2026-09-18 (same day)** — Gabriel supplied the missing contacts in chat; recorded in [memory/people.md](people.md) PM/leasing-side table and cross-checked against the task's own STEP 4 mapping (found already independently updated by a concurrent session with matching PM names — see detail). *Original finding:* **LOW — that day's run found 4 vacancy/coming-vacancy rows across 3 properties (29000 Information Lane, 9050 Red Branch Rd, 9620 State 350) with no PM/leasing contact in STEP 4's mapping**, each routed to "PM NOT ON FILE — confirm with Gabriel" in the sent report. No further action — contacts now on file: Civita Peters (PM) + Trent Spicer-Davis (leasing) for 29000 Information Lane; Steve Seh (PM) + Heather Applegarth (leasing/accounting) for 9050 Red Branch Rd; Garrett Alejos (PM) + Wyatt Palmer (leasing) for 9620 State 350 |
+| [OI-293](#OI-293) | 2026-09-13 | 2026-09-13 | [PR #197](https://github.com/ZeOoba/ora-claude-config/pull/197) body, verified live via `gh pr view` this session | **FIXED 2026-09-13** — [PR #193](https://github.com/ZeOoba/ora-claude-config/pull/193) merged 12:59:38Z (by `ZeOoba`); [PR #197](https://github.com/ZeOoba/ora-claude-config/pull/197) closed 12:59:34Z as superseded — its own fix plus one further fix (unexpanded `~` paths under PowerShell 5.1) landed inside #193's branch instead. Verified via `gh pr view 197/193 --json state,mergedAt,closedAt`. Original finding: **LOW (process gate, not a defect) — [PR #197](https://github.com/ZeOoba/ora-claude-config/pull/197) (`preflight-shared-checkout.py` path-containment fix) is stacked on [PR #193](https://github.com/ZeOoba/ora-claude-config/pull/193) (OI-249 checkout-corrector port to `main`) and cannot merge before it; #197's own body also states "do not merge without Gabriel's go" even once #193 lands.** Both PRs confirmed OPEN/MERGEABLE via `gh pr view` this session. |
+| [OI-234](#OI-234) | 2026-09-05 | 2026-09-12 | `ora-appsec-sweep` 2026-09-05 (ora-pm @ `ca62ecb`, security-auditor dispatch) | **FIXED 2026-09-12** — [ora-pm PR #27](https://github.com/ZeOoba/ora-pm/pull/27) merged `9013b40` (23:30Z) and deployed (CI run success incl. `Deploy to Cloudflare Pages`). Gabriel ruled "Oldest-first": fee iff `ar_ledger.balance − Σ charges due in the last 30 days > $0.005`. Fails closed on a PostgREST row-cap page; combined with OI-278's payments-feed guard (which currently suppresses ALL fees — payments table empty). Adversarial refute pass run pre-merge; merge with #26 verified by tests only. Original finding: **MEDIUM — the delinquency/late-fee cron (`cron.ts:496-519,529-540`) fires on ANY lease carrying a charge older than 30 days regardless of whether the tenant's CURRENT balance is actually overdue, so a tenant inside the grace period or already paid can still be assessed a wrongful $50 late fee.** Adjacent to but distinct from [OI-229](#OI-229) (missing off-host backup trigger for this same cron — a different problem). Candidate fix: gate the fee condition on the lease's current unpaid balance via `ar_ledger`, not merely charge age; add a regression test. Not applied |
+| [OI-229](#OI-229) | 2026-09-03 | 2026-09-12 | `register-scheduled-task` v2.19 step 3b applied to the live fleet; Automation Audit Rev 21 R21-2/R21-4 | **MEDIUM — `ora-pm-daily-crons` posts late fees and has NO off-host backup trigger (`offhost-backup: none — GAP`); ora-pm PR #24 covers monthly billing only.** **RESOLVED 2026-09-12:** secret set, PR #25 merged, first run success ([run 34725864211](https://github.com/ZeOoba/ora-pm/actions/runs/34725864211)); frontmatter `live since 2026-09-12`. Earlier 09-12 note: fix built in [ora-pm PR #25](https://github.com/ZeOoba/ora-pm/pull/25) (delinquency-check only) — NOT live: repo secret `ORA_PM_CRON_SECRET` missing (also leaves PR #24's backup dormant). Close on secret set + merge + one successful run. |
+| [OI-222](#OI-222) | 2026-09-02 | 2026-09-13 | `ora-appsec-sweep` 2026-09-02 (ora-pm @ `ca62ecb`, security-auditor dispatch) | **FIXED 2026-09-13** — [ora-pm PR #31](https://github.com/ZeOoba/ora-pm/pull/31) merged `253f2925`. On `23505`, the handler now reads the existing row's status and only skips a genuinely `processed` duplicate; a `failed` row is re-driven through `handleStripeEvent`. Independent adversarial REFUTE pass (cold read, no knowledge of the implementation) confirmed no double-processing risk — every downstream write in `stripe-events.ts` is an idempotent per-payment-intent update — and no scope creep into the migration/RLS. Original finding: **MEDIUM — a Stripe webhook event that throws on first processing is permanently dropped, not retried.** The event id is inserted into `stripe_webhook_events` *before* processing; a transient failure marks the row `failed` and returns 500, Stripe retries, the retry's insert hits `23505` and short-circuits to `{skipped:true}` 200 — the retry is discarded and the row never re-processes. |
+| [OI-213](#OI-213) | 2026-09-02 | 2026-09-18 | `ora-tenant-hubspot-reconciliation` monthly run (this task) | **CLOSED 2026-09-18** — acceptance met; HubSpot now reflects the exercised renewal. Applied earlier the same day by another session (`hs_lastmodifieddate` 2026-09-18T16:41:37Z), read-back verified this session. *Original finding:* **ELEVATED — Heritage Pool Supply's exercised renewal option (2026-04-26) is documented in Notion and the workbook but the HubSpot deal still carries the superseded 2026-09-30 expiration in `appointmentscheduled`.** Notion's own row is RETIRED as a duplicate and names the canonical record and the correct date; `portfolio.json` independently says `leaseEnd 2031-09-30, Active`. Recommend `dealstage` → `closedwon`, `closedate` → `2031-09-30`. Detection-only — not written |
+| [OI-214](#OI-214) | 2026-09-02 | 2026-09-18 | `ora-tenant-hubspot-reconciliation` monthly run (this task) | **CLOSED 2026-09-18** — acceptance met; `closedate` corrected to the rent-roll-confirmed 2027-05-31, applied and read-back verified this session. *Original finding:* **ELEVATED (Step 3d escalation — a correction that propagated to two systems and not the third) — Maryland Hospital Association's HubSpot deal still carries `2027-06-30`, the exact value Notion's own note records as disproven and replaced by `2027-05-31` on 2026-07-21.** `portfolio.json` agrees with the corrected date. Deal is already `closedwon`, so the wrong date is now baked into a closed record. Recommend `closedate` → `2027-05-31`. Detection-only — not written |
+| [OI-215](#OI-215) | 2026-09-02 | 2026-09-18 | `ora-tenant-hubspot-reconciliation` monthly run (this task) | **CLOSED 2026-09-18** — acceptance met; the canonical Notion row now carries 2026-12-31, consistent with HubSpot and the workbook. Applied earlier the same day by another session, read-back verified this session. *Original finding:* **ELEVATED (Step 3d escalation, reverse direction) — the Notion Tenant DB row for J&R ENTERPRISES still carries Lease Expiration `2026-07-31`, a date now 33 days in the past, while HubSpot and the workbook both agree on `2026-12-31`.** This is the same tenant named in this task's own 2026-07-25 Step-3d precedent; the drift has since inverted — HubSpot is now correct and Notion is the stale system. Recommend correcting **Notion**, not HubSpot. Detection-only — not written |
+| [OI-218](#OI-218) | 2026-09-02 | 2026-09-18 | `ora-tenant-hubspot-reconciliation` monthly run (this task) | **CLOSED 2026-09-18** — CJ's Tint Shop vacated at expiration; unit 105 re-let to Capital Property Recovery 2026-09-10 (live workbook + Gabriel); HubSpot deal `closedlost`, Notion row retired. Evidence in the detail section. *Original finding:* **WATCH (Step 3b) — CJ's Tint Shop's lease expired 2026-08-31 (two days ago) with no renewal, vacate, or holdover signal in any system.** All three sources agree on the date — HubSpot `closedate` 2026-08-31 still in `appointmentscheduled`, Notion Lease Expiration 2026-08-31 / Lease Status `Active`, `portfolio.json` `leaseEnd 2026-08-31` / status `Expiring Soon` — and none of them records what happened. Notion's Notes field is empty. **No outcome inferred**: this is a question for Gabriel, not a finding |
+| [OI-219](#OI-219) | 2026-09-02 | 2026-09-18 | `ora-tenant-hubspot-reconciliation` monthly run (this task) | **CLOSED 2026-09-18** — stage-advance rule ratified by Gabriel and carried by the new weekly task `ora-renewal-hubspot-reconcile` (first run clean). Step 3e will re-raise unless amended — see detail. *Original finding:* **IDLE (Step 3e, the standing monthly sweep for the population [OI-021](#OI-021)'s batch pass confirmed was legitimately not-yet-due) — 6 deals sit in `appointmentscheduled` 37–159 days untouched with lease expirations 210–2,524 days out.** The more useful signal is the denominator: **every one of the 37 open deals is 37+ days idle** — the newest `hs_lastmodifieddate` anywhere in the open pipeline is 2026-07-27, so the whole renewal pipeline has been quiet since that batch. Flag-only; the stage disposition is Gabriel's call |
+| [OI-166](#OI-166) | 2026-08-16 | 2026-08-16 | Concurrency near-miss during the passed-deal-tracker guard session (Gabriel-directed) | **FIXED 2026-08-16** — `claim` consulted only its OWN slug's file, never whether a live claim under a DIFFERENT slug already covered the same `--paths`. Two sessions held `open-items-tracker` and `repo-housekeeping` over the same two files; neither exit-3 refusal could fire. `claims_touching()` already existed and was wired into `shared-checkout-guard`'s Edit/Write path, but not into `claim` itself. See detail section |
+| [OI-170](#OI-170) | 2026-08-16 | 2026-08-16 | Root cause of the whole passed-deal-tracker guard session (Gabriel-directed) | **FIXED 2026-08-16** — the scheduler resolves a registry `filePath` against the LIVE WORKING TREE, so a SKILL.md can be merged in git and still inert on disk. `ora-passed-deal-tracker`'s double-fire guard sat merged-but-inert for hours with zero hits in the live file. `task-folder-registration-probe.py` checked filePath EXISTENCE but never CONTENT-vs-git. See detail section |
+| [OI-163](#OI-163) | 2026-08-16 | 2026-08-16 | Cross-repo architecture-diagram review (Gabriel-directed, this session); corroborates [[project_aaos_agent_coordination_layer]] | **CLOSED 2026-08-16** — the round-trip had actually happened 2026-07-10 (a real Cowork handoff + drained event, verified via `tools/validate.py` → VALID); the gap was Code never running `complete-task.py`. Leased/completed/archived `t-cowork-seam-confirm` this session. See detail section |
+| [OI-165](#OI-165) | 2026-08-16 | 2026-08-16 | Cross-repo architecture-diagram review (Gabriel-directed, this session) | **CLOSED 2026-08-16** — `netlify.toml` build command now chains `build-kb.mjs && build-dist.mjs`; verified locally end to end, Gabriel-confirmed past the site-tree gate. See detail section |
+| [OI-050](#OI-050) | 2026-07-31 | 2026-09-13 | ora-appsec-sweep 2026-07-31 (oxford-command-center @ `3692385`, security-auditor dispatch) | **FIXED 2026-09-13** — [oxford-command-center PR #327](https://github.com/ZeOoba/oxford-command-center/pull/327) merged `304bcbb0`. Original finding: **MEDIUM** oxford-command-center brain server has NO Host-header validation (`server/index.ts:531` binds 127.0.0.1, `server/cors-policy.ts` enforces localhost-only CORS) — but CORS is the wrong control for DNS rebinding: an attacker page whose DNS rebinds to 127.0.0.1 makes SAME-ORIGIN requests, so no CORS check applies at all. There is no Host allowlist and no CSRF token, and every state-changing route (`POST /api/actions/*`, `/api/refresh`, `/api/warehouse/properties/onboard`) is unauthenticated by design. A malicious page open in Gabriel's browser while the server runs can exfiltrate `GET /api/snapshot` — the full portfolio including confidential deals, tenants, loans, counterparty data — and can mutate deal stages, NOI budgets, tenant notes and lease-run assumptions |
+| [OI-071](#OI-071) | 2026-08-03 | 2026-09-13 | Production verification of [OI-067](#OI-067), 2026-08-03 | **FIXED 2026-09-13** — [ora-pm PR #31](https://github.com/ZeOoba/ora-pm/pull/31) merged `253f2925`. `PortalInsurance.tsx` now resolves `tenants.id` via `GET /api/portal/me` (same pattern as `PortalPayNow`/`PortalDashboard`) instead of `session.user.id`, with a loading/error guard. Original finding: ora-pm `PortalInsurance.tsx` uploads COI files to `session.user.id`'s folder, but the live (confirmed-applied, confirmed-correct) RLS policy requires `tenants.id` — every real tenant COI upload fails today. Confirmed against production, not just the repo. Misleadingly-named variable (`tenantId = session.user.id`) is likely the root cause |
+| [OI-078](#OI-078) | 2026-08-05 | 2026-09-18 | ora-appsec-sweep 2026-08-05 (ora-pm @ `a29f8f0`, security-auditor dispatch) | **CRITICAL, CONFIRMED CLOSED 2026-09-18** — dispatched `DB Migrate (manual)` as a read-only dry-run against production ([run 35388593228](https://github.com/ZeOoba/ora-pm/actions/runs/35388593228)) — `supabase migration list --linked` shows all 17 migrations 0001-0017 with LOCAL==REMOTE, including `0013_enable_rls_remaining_tables.sql` (this item's own fix); `supabase db push --dry-run` reports "Remote database is up to date." RLS is live in production. Original finding: ora-pm Row Level Security was enabled on only 6 of 23 tables while `VITE_SUPABASE_ANON_KEY` ships in the public JS bundle by design — the other 17 tables had no `ENABLE ROW LEVEL SECURITY` statement in any migration, so an RLS-disabled public table was readable and writable via PostgREST with the bundle-extractable anon key. Code fixed 2026-08-17 ([ora-pm PR #23](https://github.com/ZeOoba/ora-pm/pull/23)), but production migrations sat unapplied for weeks pending `SUPABASE_ACCESS_TOKEN`/`SUPABASE_DB_PASSWORD` repo secrets — those were confirmed set 2026-09-16, and this session's dry-run confirmed the migration is now live. See detail section for the full multi-week evidence trail |
+| [OI-090](#OI-090) | 2026-08-05 | 2026-09-13 | ora-appsec-sweep 2026-08-05 (oxford-command-center @ `175e3f9`, security-auditor dispatch) | **FIXED 2026-09-13** — [oxford-command-center PR #328](https://github.com/ZeOoba/oxford-command-center/pull/328) merged `b34add2d`. Original finding: **MEDIUM** oxford-command-center has no rate or concurrency limit on `/api/ai` (`server/index.ts:460-493`), `/api/documents/search` (`:447-453`) or `/api/actions/om-extract` (`:358`). Per-request bounds are good (`maxTurns: 8`, `max_tokens: 16000`, 25 MB cap) but nothing bounds concurrent or repeated calls, and each `/api/ai` call spends real Anthropic tokens against the machine's key. OWASP-LLM10 unbounded consumption; combined with [OI-050](#OI-050)'s unauthenticated cross-site write path this is the cheapest denial-of-wallet route in the repo. ora-pm's equivalent gap was closed under OI-038/044; occ has no counterpart |
+| [OI-181](#OI-181) | 2026-08-16 | 2026-08-16 | Hit live while recording the OI-176 review artifact (session 76023481), then reproduced deterministically | **MEDIUM, LANDED 2026-08-16** — a stale copy of the review gate silently discarded `--notes-file`, yielding an APPROVED security-review artifact with an EMPTY audit trail, exit 0, no warning. Fixed as `4cbebe8` (from worktree commit `43be6ca`) on Gabriel's in-turn "land it the same way OI-176 went" — `reject_unknown_flags()` on both `--key`/`--record`, `__version__` stamped into every artifact. Live post-landing verification with the override token removed confirmed the fix live, not just in a harness; independently reviewed (claude-fable-5) before landing. No lingering damage from the triggering incident. See detail section |
+| [OI-127](#OI-127) | 2026-08-12 | 2026-09-18 | session `e0f8485e`, hitting pre-push failures under concurrent load | **CLOSED 2026-09-18 — duplicate of OI-135, same fix — see OI-135 for the live item.** Original text: DUPLICATE — superseded by OI-135; no separate investigation needed. Same defect, same file, same number: `hooks/git-prepush-hook-tests-gate.py`'s 180s per-test timeout budget is too low under concurrent load, so healthy tests exit-124 and hard-block a push. OI-127 (20:52Z) is the EARLIER reservation; OI-135 (22:00Z, Gabriel-directed, filed by session `2fb76021`) covers the same finding with fuller evidence. Filed only to close the orphan reservation and stop a third session re-deriving it. **duplicate/orphan-reservation closure — see OI-127's own text; OI-135 (the item it points to) is already closed elsewhere in the tracker history.** |
+| [OI-079](#OI-079) | 2026-08-05 | 2026-09-18 | ora-appsec-sweep 2026-08-05 (ora-pm @ `a29f8f0`, security-auditor dispatch) | **CLOSED 2026-09-18** — **HIGH** ora-pm's `ar_ledger`, `rent_roll` and `critical_dates` views are created without `WITH (security_invoker = true)` (`0011_appsec_idempotency_and_scale.sql:118-151`, `0004_views_and_rls.sql:33-99`) — grep confirms the string appears nowhere in `supabase/migrations/**`. A view without it runs as its owner and IGNORES the RLS policies on `charges`/`payments`/`leases`/`tenants`, so one `GET /rest/v1/ar_ledger` returns every tenant's balance and payment totals even after [OI-078](#OI-078) is fixed. Cross-tenant financial disclosure in one request. **CODE FIXED 2026-08-17, NOT YET LIVE**: `0012_view_security_invoker.sql` adds `security_invoker=true` to all 3 views. Postgres 17 (`supabase/config.toml`) supports it; the one caller class (server/routes/**) uses the service-role key, unaffected. REFUTE-confirmed. Merged via [ora-pm PR #23](https://github.com/ZeOoba/ora-pm/pull/23) (`aede030`) — same NOT-YET-APPLIED-to-production caveat as [OI-078](#OI-078) (manual `db-migrate.yml` workflow required). **Confirmed 2026-08-22 via the same dry-run** ([run 32583466897](https://github.com/ZeOoba/ora-pm/actions/runs/32583466897)) that closed the gap on OI-078 — see that item's entry for the full result (failed cleanly at the link step, secrets not configured, no partial action) |
+| [OI-171](#OI-171) | 2026-08-16 | 2026-09-19 | Found while root-causing Gabriel's report of the Command Center `loans · name` safety-section flag | **CLOSED 2026-09-19** — **MEDIUM — self-masking alert.** `ora-cc-snapshot-refresh` STEP 5(b) escalates to email on any data-quality flag `severity: warn` or higher — but the one permanent, intentional flag (`loans · name`, the tombstoned Loan Index row 24 duplicate marker) was bumped `info`→`warn` in oxford-command-center `490d89f` (2026-08-11) ~21h before the snapshot task's own severity gate (`1706bc2`, 2026-08-12) was written around the stale `info` belief — so every clean, no-drift run has sent a false `[ALERT]` since. **Status: FIXED 2026-08-16** in the live SKILL.md + registry — **UNVERIFIED** until the next run (2026-08-17 ~06:21 ET) actually suppresses the email; see full section |
+| [OI-318](#OI-318) | 2026-09-18 | 2026-09-19 | Code session, `ora-skills` `market-status.md` counterparty-redaction review (branch `claude/beautiful-noyce-3e6e7f`) | **CLOSED 2026-09-19 — accepted risk, history left alone per Gabriel.** Working copy redacted (commit `ff48473` on `origin/main`, per Gabriel's explicit instruction) but the original counterparty/locale-identifying text (Clermont "754 Old SR 74" seller, Butler "Liberty Office Park" seller) is still live in git history at `ec9c626` on `ora-skills`' public GitHub remote (`ZeOoba/ora-skills`), reachable from `main` and most other branches. Gabriel explicitly said "leave history alone" for this pass — open question is whether that stands or whether a history rewrite (filter-repo + force-push across every affected branch, or repo delete/recreate) is warranted given the public remote |
 | [OI-287](#OI-287) | 2026-09-12 | 2026-09-12 | `ora-ground-truth-auditor` 2026-09-12 digest | CLOSED on arrival — `session-context-xref-probe.py` omitted `maintenance/_state` from its search roots (false `[XREF-MISSING]`); fixed same day via `xref-extra-roots.json`. Row restored 2026-09-13; section was orphaned |
 | [OI-136](#OI-136) | 2026-08-12 | 2026-08-28 | `event_log.md` entries committed as `75ab0de`, cross-read against this session's own two declined overrides | CLOSED — row flipped, stale for 15 days. `allow-hook-test-failure` normalised (5 uses across 4 sessions in 47 min, 2026-08-12), but the finding was **ALREADY CLOSED as of `b1cbd0d` (2026-08-13)** — `git-prepush-hook-tests-gate.py`'s `record_override_use()`/`override_frequency()` already log every override and surface a repeat-use warning to the next approver, exactly this item's ask. Re-verified live this session: `test-git-prepush-hook-tests-gate.py` → 146/146 pass (was 129/129 at last check), `record_override_use`/`override_frequency` confirmed wired. No new work needed |
 | [OI-080](#OI-080) | 2026-08-05 | 2026-08-28 | ora-appsec-sweep 2026-08-05 (ora-pm @ `a29f8f0`, security-auditor dispatch) | CLOSED — row flipped, stale for 11 days. ora-pm tenant portal login's open self-registration gap (`PortalLogin.tsx` missing `shouldCreateUser: false`) fixed 2026-08-17 via [ora-pm PR #23](https://github.com/ZeOoba/ora-pm/pull/23) (`aede030`), REFUTE-confirmed, 470/470 tests pass. Re-verified live this session: `shouldCreateUser: false` confirmed present in the current file; CI run for the merge completed SUCCESS 2026-08-17 |
@@ -1194,6 +1217,1515 @@ Built: `oxford-command-center/scripts/mirror-classify-offfleet.ps1` (runs the sa
 | [OI-093](#OI-093) | 2026-08-05 | 2026-08-05 | surfaced by the OI-092 `portfolio.json` re-bake (`51d4039`) | **RESOLVED 2026-08-05 — journal sheet recreated, verified end-to-end (0 unintended changes elsewhere), see full entry for caveat on cached formula values.** Was **MEDIUM** (silent history split in the debt warehouse): the internal 2203-2207 Northwood loan had parsed with **no journal sheet**, changing its snapshot id from `internal-2203-2207-northwood` to `internal-2203-2207-northwood-no-journal-sheet`. `debt_positions` keys `ON CONFLICT(id, snapshot_date)`, so every future snapshot lands under a NEW key — silently orphaning the loan's prior history rather than continuing it; `monthsToMaturity` also went null → 105. **Diagnosed 2026-08-05:** full 50-sheet enumeration confirms **no Northwood journal sheet exists in any spelling**, so the parser's `⚠ NO JOURNAL SHEET` marker is **correct and reporting a real accounting gap**, not a parser defect — aliasing the id would hide a genuinely missing record. **Provenance problem:** workbook `Claude Log` Turn 144 (2026-08-03) states the sheet *was created* during the EXTERNAL→INTERNAL reclassification, and it is not there. **Gabriel ruled 2026-08-05:** create the journal sheet — but **chase the provenance first**, since "never completed" vs "created then removed" implies different things about the rest of that reclassification |
 | [OI-094](#OI-094) | 2026-08-05 | 2026-08-05 | adversarial REFUTE pass on the OI-092 detector; independently re-verified against the live workbook | **MEDIUM now, HIGH from ~mid-2030** (understates annual debt service by $3.35M when it bites) — needs Gabriel's ruling to execute (workbook edit, Hard Invariant 4). `'External Loans Summary'!H9`/`I9` sum the Banwick-Morrison schedule over `B11:B70`, but the schedule's **final payment is row 71** and it carries the balloon (r71: 2031-06-05, principal 3,333,953.68, total $3,349,289.87 — matching Symetra loan 11153's documented balloon to within rounding). `K9` maturity = 2031-06-05, the very row the range stops one short of. **Audit COMPLETE 2026-08-05, all six ranges checked** (scanning 40 rows past each range end): Banwick is the **only** truncated range; 3540 E Fifth Ave, 9050 Red Branch, 29000 Information Ln, Restoration Church Trust and 485 S Walnut St all end on their final payment row. Reproduced exactly by a second independent audit (session `3d9d97cf`). **Gabriel ruled: consolidated fix** — one workbook session covering (1) extend the Banwick ranges to row 71, and (2) the February pair fix: six cells to `EOMONTH(Assumptions!$B$30,12)` **and** `B30` constrained to month-end. Both edits are required together — a 1,080-case simulation (120 month-ends × 9 pay-days) shows `EDATE` right-edge → 9 under-capture deviations, `EOMONTH` → 0, but `EOMONTH` under manual override (`B32` non-month-end) → **1,428 deviations**. Two findings this audit surfaced were **promoted out** so closing OI-094 on the range fix cannot silently close them: → [OI-095](#OI-095), [OI-096](#OI-096) |
 | [OI-095](#OI-095) | 2026-08-05 | 2026-08-05 | OI-094 range audit, finding (b); promoted out per Gabriel ruling 2026-08-05 | **CLOSED 2026-08-05 — final basis: INCLUDE the balloon.** Superseded this session's earlier "no change" reading. `I15` now -$978,763.425 (was ~0); `J15` -$1,022,692.32. Gabriel confirmed 2026-08-05 he authorized the Turn 149 reversal; root cause was `I14`/`I15`/`I16` computing three different bases under one header, now made consistently forward-looking — see full entry. Historical framing below retained for context, superseded, not authoritative. Restoration Church Trust's balloon rows carry their amount in column `C` only, with `D`/`E` originally empty, so `'External Loans Summary'!H15`/`I15` (which sum `D`/`E`) exclude the $1,945,102.73 balloon / $972,551.37 Oxford share due 2027-02-20 from next-12-month principal return. **This paragraph is HISTORICAL — superseded same-day by Turn 149 and Gabriel's confirmation, see the CLOSED status above. Retained so the reasoning trail is visible, not as current guidance.** At the time, Gabriel ruled this was intended modelling (`C` = total payment, `D`/`E` = itemized split that balloon rows legitimately do not carry) and that `3540 E Fifth Ave`'s captured balloon vs RCT's excluded one was a principled borrower/lender asymmetry. Turn 149 found a different, more precise root cause — the three lender rows (`I14`/`I15`/`I16`) computed principal on three inconsistent bases, not one deliberate design choice — and fixed all three to a consistent forward-looking basis. RCT's balloon is now included. **Detector constraint SUPERSEDED:** the OI-092 detector retry must NOT be built to treat balloon-excluded lender principal as correct — RCT's current behavior (balloon INCLUDED, forward basis) is what the detector should expect on all three lender rows |
+| [OI-031](#OI-031) | 2026-07-27 | 2026-09-19 | `orphaned-task-forensics` trace of the `ora-master-workbook-ingest` 2026-07-20 gap, [event_log.md](event_log.md#2026-07-27) | **CLOSED 2026-09-19 (verified) — fleet-status.py (~L326-361) has the missed-cycle detector; maintenance/_tests/test_fleet_status_missed_cycle.py exists. OI-058/070 stay open on their own terms.** Prior row text: `fleet-status.py`'s overdue/missed-stuck detectors are structurally blind to a single skipped weekly cycle on an already-established recurring task — neither check applies to it (confirmed by reading the script) |
+| [OI-062](#OI-062) | 2026-08-04 | 2026-09-19 | `pending_reimport.py` frontmatter-norm session, 2026-08-04 | **CLOSED 2026-09-19 (verified) — ora-skills plugin-build.json no longer modified and _check_plugin.py gone; only unrelated untracked _archive dirs remain.** Prior row text: ora-skills MAIN checkout has unattributed uncommitted WIP (modified `plugins/ora-operations-extensions/plugin-build.json` version bump 0.1.5→0.1.6, plus untracked `_check_plugin.py`, both dated ~2026-07-29) — present at session start and still present after PR #38 merged; spans ≥2 sessions unclaimed, nobody has picked it up or discarded it |
+| [OI-074](#OI-074) | 2026-08-04 | 2026-09-19 | OI-073 follow-up, root-causing why ora-pm migrations keep landing untracked | **CLOSED 2026-09-19 (verified) — SUPABASE_ACCESS_TOKEN and SUPABASE_DB_PASSWORD provisioned 2026-09-16; db-migrate.yml runs on 09-17 and 09-18 succeeded.** Prior row text: ora-pm migration-tracking root cause: no `SUPABASE_ACCESS_TOKEN` in the Code sandbox, so `supabase db push` (the only auto-tracking path) can't run here. Two-tier fix built (dashboard-paste tracking generator + inert `workflow_dispatch` CI job) — CI piece needs Gabriel-provisioned secrets before it can close |
+| [OI-075](#OI-075) | 2026-08-04 | 2026-09-19 | Session brief follow-up — standing fix for skill-store/repo drift | **CLOSED 2026-09-19 (verified) — Superseded: ora-skill-cache-drift-alert retired 2026-08-09; ora-doctrine-integrity-guard engine 4 replaced it; PR #39 merged.** Prior row text: Skill-cache drift standing fix: new CC/MCP task `ora-skill-cache-drift-alert` (cron `*/30 * * * *`) runs `ora-skills/tools/repo_first_check.py --all` (built on [PR #39](https://github.com/ZeOoba/ora-skills/pull/39)) at a tighter cadence than the existing daily `ora-doctrine-integrity-guard`, auto-filing an OI item + Notion/email alert on new drift. Not yet closed — hasn't fired against a real finding |
+| [OI-116](#OI-116) | 2026-08-11 | 2026-09-19 | Landing [PR #52](https://github.com/ZeOoba/ora-claude-config/pull/52) (`claim_work.py` refusal gate), 08-11 | **CLOSED 2026-09-19 (verified) — origin/main claim_work.py has is_sched_slug (L171) and _effective_ttl (L176); ora-skills bc42852 'v2.21 sched- carrier (OI-116)'. Section already said CLOSED 2026-09-07.** Prior row text: **MEDIUM** An **unattended** session can hold a `claim_work.py` slug indefinitely and cannot be released or contacted: `send_message` refuses delivery to unattended sessions, and `shared-checkout-guard`'s `_self_renew_claims` keeps re-stamping `claimed_at` so the 2h TTL never expires it. Hit **three times in one session** (`1d88885d` on `hooks-override-auth`; `05236b94` on `open-items-tracker`, twice — including while filing this item). The new refusal correctly names the collision and prints the holder's `host_session_id` per OI-108, but "message them" is a dead end for exactly this class of holder, leaving `--force` as the only exit — the operation the gate exists to make rare. |
+| [OI-129](#OI-129) | 2026-08-12 | 2026-09-19 | `maintenance/_tests/test_check_open_items_duplicate_ids.py`, hit via `.git/hooks/pre-push` gate 2 while pushing two unrelated SKILL.md commits | **CLOSED 2026-09-19 (verified) — Main test file now treats orphaned/missing sections as advisory only (L186-190, 296-302); duplicates still fail.** Prior row text: **MEDIUM** A pre-push test asserts a live-shared-state invariant: `test_check_open_items_duplicate_ids.py` checks that *the canonical `open-items-tracker.md` has zero id collisions **right now***, and that file is written continuously by every session — six ids (OI-123→OI-128) were allocated by six different sessions inside one hour on 2026-08-12. Any session that writes a `### OI-NNN` detail section before its table row (or vice-versa) puts the file in a state that fails the assertion, which then **hard-blocks an unrelated session's push**. That is exactly what happened here: OI-125's section existed with no row, and it blocked two `ora-deal-*` SKILL.md commits that touch none of this. **Distinct from [OI-119](#OI-119)/OI-127, which are the LOAD/TIMEOUT class** — this failure is `exit 1`, a real assertion, and is fully deterministic: it reproduces on a completely idle machine any time a half-filed item is present, so retrying and raising timeout budgets cannot fix it. The fixture half of the same test file is correct and should be kept (it caught a seeded OI-027 duplicate in its own temp file this run). Fix options: (a) assert only against fixtures and move the canonical-file check to a non-blocking report, (b) keep it blocking but tolerate section-without-row as in-flight rather than a collision, or (c) gate it on the tracker being clean in HEAD instead of the working tree |
+| [OI-132](#OI-132) | 2026-08-12 | 2026-09-19 | `~/.claude/scheduled-tasks/ora-sofr-direct-prefetch/SKILL.md` STEP 4 — observed live during that task's own 2026-08-12 run | **CLOSED 2026-09-19 (verified) — Commits 96a97d3 and 4ae999c (v1.2/v1.3) on origin/main; STEP 4 keys on am_brief_pending with a supersede-status log.** Prior row text: **LOW** STEP 4 verifies seconds after its own STEP 3c write, but `ora-am-brief` supersedes ~6 minutes later — so the "superseded by am-brief = PASS" branch that v1.1 added *specifically* for the catch-up-burst ordering hazard is effectively **unreachable**, and the run log records "my write landed, no supersede" as settled fact while a supersede is still pending. Measured 2026-08-12: prefetch dispatched `15:13:20.983Z`, am-brief `15:13:21.612Z` (629 ms apart); prefetch verified at `15:14:11Z` and logged no supersede; am-brief rewrote §2 at `15:20:26Z`. **No data harm that run** — am-brief independently pulled the NY Fed API and matched all five SOFR fields exactly. Cost is a false run-log claim plus silent undercounting of how often the burst inverts producer order. Cheap fix available: STEP 2 already computes `am_brief_pending`, so condition STEP 4's wording on it rather than adding a wait |
+| [OI-134](#OI-134) | 2026-08-12 | 2026-09-19 | Gabriel-approved in-turn 2026-08-12 as option (c), alongside (a) the sweep remediation ([PR #271](https://github.com/ZeOoba/oxford-command-center/pull/271)); detail in [project_deal_join_id_based_redesign_queued_2026-08-12.md](project_deal_join_id_based_redesign_queued_2026-08-12.md) | **CLOSED 2026-09-19 (verified) — oxford-command-center #273 (6e7c5bd) on main; joins on notionDealId, dealJoinKey now only a detection-only migration tripwire.** Prior row text: **QUEUED — approved, not started.** Retire name-based seed↔Notion deal joining in favour of a **stable shared deal id** (a `Deal ID` on the Notion Acquisition Pipeline Tracker mirrored as `id` in `src/data/seed-deals.ts`), so `mergeDeals` joins on an opaque key no rename, locality suffix, alias, or punctuation variant can perturb. `dealJoinKey` (`server/sources/deal-name.ts`) strips the `" — City, ST"` tail before matching — but that suffix exists *precisely because* bare street names repeat across metros, so the key deletes the only disambiguator, and **confidentiality rides on the join** (a wrong merge folds an unmatched, fail-closed-confidential row into a public seed record — Hard Invariant 3). Four adversarial passes 2026-08-11/12 yielded 9+7+5+6 defects concentrated here, incl. a CRITICAL cross-side wrong merge with executed repros, an alias path bypassing the corroboration guard, corroboration inert for **11 of 20 live rows**, and a degenerate `acceptedPairKey` (`"k\|\|k"`) that grandfathers all future collisions. Each fix needed *another* corroboration signal bolted on — the signature of a wrong primitive, not unlucky bugs. Acute defects were remediated by PR #271; this is the structural fix. Migration must be fail-closed: a missing/duplicate id **refuses**, never falls back to name matching |
+| [OI-137](#OI-137) | 2026-08-12, **FIX LANDED 2026-08-17** | 2026-09-19 | Control run while verifying [PR #268](https://github.com/ZeOoba/oxford-command-center/pull/268)'s test failures were pre-existing; re-confirmed against `origin/main` at `c5db68c`; fix landed same day as an independent re-derivation of this exact item (OI-186, retracted as duplicate — see below) | **CLOSED 2026-09-19 (verified) — 680018f (structural-mismatch status) and #285 on main. The gate:ci exclusion is by design, tracked as OI-254. Live cross-check not re-run.** Prior row text: **MEDIUM-HIGH, mostly resolved.** `npm run reconcile:noi-crosscheck`'s Spine A (workbook, current rent roll) vs. Spine B (warehouse `oxfordNoi`, latest-full-year historical actuals) disagreement was root-caused to recently-leased/acquired properties whose comparison-year actuals predate the current rent roll — "neither spine is defective." **Fixed in `680018f`** (Gabriel, in-turn ruling): `classifyNoiReconciliation` gained a `structural-mismatch` status — fires only on positive, corroborated evidence (leases starting on/after the comparison period covering ≥half the dollar delta, or an acquisition since then plus some corroborating leasing activity), gated off entirely on any sign-inverted disagreement. Adversarially reviewed; 3 real gaps found and closed (uncorroborated ownership signal, `Lease.status` not checked, CLI summary miscounting). 57 tests (24 new), full suite 3672/3672. **Verified live 2026-08-17:** Livingston and Raytown now correctly downgrade to `structural-mismatch`/warn (no longer fail the gate); Westerville stayed large-drift/error until [OI-184](#OI-184)'s propertyId fix — **[OI-184](#OI-184) MERGED 2026-08-17/18 ([PR #285](https://github.com/ZeOoba/oxford-command-center/pull/285)), all 3 originally-failing properties now clear, 0 errors portfolio-wide**, confirmed by re-running the cross-check against the real warehouse DB with the merged fix applied. `gate:ci` still excludes this check by design (needs a live workbook/warehouse) |
+| [OI-139](#OI-139) | 2026-08-12 | 2026-09-19 | `fleet-status.py`'s `find_missed_cycles()` CRON-AWARE GUARD fix (commits `40b6176`/`30d2869`, merged to `main` and pushed as `08e0daa`); Cowork handoff "Health Guard FAIL-Aging Follow-Up" 2026-08-11, `scheduled-tasks/ora-health-guard/SKILL.md` C.1.1 | **CLOSED 2026-09-19 (verified) — Accepted-tradeoff design on main (MISSED_CYCLE_INTERVAL_MULTIPLE = 1.5, commit 08e0daa); no open work.** Prior row text: **LOW — accepted tradeoff, documented, not a defect.** The 2026-08-11 fix that made the missed-cycle detector cron-aware (escalate only past `max(24h, 1.5x own cadence)`, replacing the flat 24h wall that produced 8/13 false positives on 2026-08-10) is pure cadence math with no runtime signal for "was this a genuine catch-up burst." The superseded per-run SKILL.md logic additionally suppressed a `gap ≈ 1x interval` entry only when a late wake was detected *that run*, and otherwise escalated immediately as a likely phantom dispatch or dead task — a signal the code-level threshold structurally cannot see. **Consequence:** a task that misses exactly one slot with the machine fully up (no catch-up excuse available) now surfaces one cycle later than the old per-run logic could have caught it. Deliberate, Gabriel-approved simplification (the 2026-08-11 Cowork handoff spec explicitly specified the 1.5x-cadence rule) — do not re-litigate the threshold on this row alone. **Re-open only if a real single-slot dead-task/phantom-dispatch incident is observed and traced to this specific gap** — do not preemptively bolt an A.0-style runtime signal back into the code threshold without one |
+| [OI-140](#OI-140) | 2026-08-12 | 2026-09-19 | Hit live while verifying the [OI-136](#OI-136) filing against a `git show HEAD:` extract — the checker reported a defect that existed only in the working tree | **CLOSED 2026-09-19 (verified) — check-open-items-duplicate-ids.py on main now rejects any CLI argument with exit 2.** Prior row text: **MEDIUM** `maintenance/check-open-items-duplicate-ids.py` **silently ignores its CLI path argument** and always reads the canonical tracker. `main()` does `path = tracker_path()` (line 180) → `TRACKER_PATH_OVERRIDE or DEFAULT_TRACKER_PATH`; **`sys.argv` appears zero times in the file** — no argparse, no positional handling. Passing a nonexistent path still returns a normal clean canonical report, because the `COULD NOT READ %s ... treat as a check failure` branch is unreachable from the CLI. Three things make it read as a working feature: it prints the path it checked, it formats a path into that error branch, and it accepts an argument without complaint. **Tests do not catch it** — `_tests/test_check_open_items_duplicate_ids.py` drives `main()`'s read path by assigning `codc.TRACKER_PATH_OVERRIDE` (a module attribute), so the logic is covered and the entry point never is. **Production caller is unaffected**: `ora-weekly-hygiene` Block N passes no argument. The harm is ad-hoc verification of a worktree copy / candidate edit / `HEAD` extract, which silently returns a verdict about a *different file* — false FAIL (blaming your copy for a live-file defect) or false PASS (your broken copy looks clean because the live one is). A verification tool that answers about an artifact you did not name is the [[feedback_verified_null_vs_inferred_null]] failure in its purest form |
+| [OI-147](#OI-147) | 2026-08-13 | 2026-09-19 | ECC repo intake ([external-artifact-intake](../../skills/external-artifact-intake) ruling, Gabriel 2026-08-13, this session) | **CLOSED 2026-09-19 (verified) — Section already CLOSED (REJECTED); shell_tokenizer.py does not exist on main or in the tree.** Prior row text: **REJECTED after a full build + adversarial gauntlet — do not re-attempt without reading the evidence first.** Built `hooks/lib/shell_tokenizer.py`, a real recursive-descent quote/substitution-state tokenizer (not a regex) adapting ECC's `gateguard-fact-force.js` technique, integrated as a downgrade-only narrowing of `ora-autonomy-gate.py` Gate 2b (falls back to today's exact broad match on any parse uncertainty). Correctly classified all 3 historical bypass commands as dangerous, passed a mutation battery (6/8 killed, 2 proven equivalent/safe-direction), and passed all 72 tests (66 original + 6 new) including the 3 historical bypasses run through the full integrated hook. **Killed in Round 1 of the mandated 3-round adversarial gauntlet** (`pr-review-toolkit:code-reviewer`, opus): confirmed live, sandbox-verified bypass — quoting a path operand (`cp evil.html 'oxford-site/index.html'`) or wrapping in an interpreter (`bash -c "..."`, `powershell -Command "..."`, `eval "..."`) makes the tokenizer confidently (and wrongly) classify the write as fully inert, since **quoting suppresses metacharacter interpretation, it does not remove text from the command's argument vector** — a categorically different, more fundamental problem than the quote-state-tracking bugs rounds 1-3 (2026-07-16) found, and NOT fixable by deepening the parser (would need shell command-semantics modeling — which command consumes which argument and whether it writes — a strictly larger problem). Independently found: unbounded `$()`-nesting recursion in the tokenizer throws an uncaught `RecursionError`, which `ora-autonomy-gate.py`'s `main()` has no outer try/except for, crashing Gate 2b entirely (exit 1, non-blocking) rather than just skipping the narrowing — an attacker-triggerable disable of Hard Invariant 2's sole enforcement, strictly worse than a narrowing bug. **Everything reverted** (`git checkout --` on `ora-autonomy-gate.py`/its test file, `shell_tokenizer.py` + its tests deleted) — nothing landed, worktree carries only OI-148's unrelated changes now. Full evidence trail: [[feedback_autonomy_gate_matcher_cannot_be_safely_narrowed]] Round 4 section. Do not re-attempt the quote-state-narrowing approach; a 5th attempt needs a command-semantics model, not a better tokenizer |
+| [OI-149](#OI-149) | 2026-08-13 | 2026-09-19 | Landing [OI-148](#OI-148), PR [#94](https://github.com/ZeOoba/ora-claude-config/pull/94) — pre-push gate blocked on this, overridden (Gabriel approved in-turn) | **CLOSED 2026-09-19 (verified) — Allowlist on main (doctrine-integrity-probe.py ~L346) repopulated for morning and schedule 2026-08-14; probe not re-run. PR #99 follow-ups merged into a feature branch, reaching main by other routes.** Prior row text: **LOW** `maintenance/test-doctrine-integrity-probe.py`'s known-plugin-skill allowlist is stale: flags `morning`, `register-scheduled-task`, `schedule` as unresolved, but all 3 are live installed `anthropic-skills` plugin skills (confirmed against this session's own SessionStart skill listing). Blocks the pre-push gate for ANY push right now, regardless of diff content — hit while landing an unrelated `hooks/**` change. Needs: find and update the probe's plugin-skill allowlist (likely a hardcoded list or stale-generated manifest in `maintenance/doctrine-integrity-probe.py`) to recognize these 3 |
+| [OI-151](#OI-151) | 2026-08-14 | 2026-09-19 | Independent review (`claude-fable-5`) during PR [#99](https://github.com/ZeOoba/ora-claude-config/pull/99) | **CLOSED 2026-09-19 (verified) — On main the array fingerprint is [array:%d:%s] with a digest.** Prior row text: **MEDIUM** `property_register_snapshot_diff.py` line 165: array rollups fingerprint by LENGTH ONLY (`"[array:%d]" % len(...)`), so an equal-length element swap is a SILENT false negative — the exact failure class the script exists to prevent. Latent only while relations stay empty |
+| [OI-152](#OI-152) | 2026-08-14 | 2026-09-19 | Independent review (`claude-fable-5`) during PR [#99](https://github.com/ZeOoba/ora-claude-config/pull/99) | **CLOSED 2026-09-19 (verified) — On main the retry catches TimeoutError, with a comment citing OI-152.** Prior row text: **LOW** `property_register_snapshot_diff.py` lines 344-355: a socket read timeout on the RESPONSE BODY raises `TimeoutError`, which matches neither `HTTPError` nor `URLError`, so it bypasses the bounded retry the comment at :340 claims to provide. Fails loudly (traceback, no state written), so robustness not correctness |
+| [OI-154](#OI-154) | 2026-08-14 | 2026-09-19 | ora-task-integrity-guard follow-up session, PR [#99](https://github.com/ZeOoba/ora-claude-config/pull/99) | **CLOSED 2026-09-19 (verified) — The 8-guard roster line is committed in CLAUDE.md on origin/main and matches the working tree.** Prior row text: **MEDIUM** CLAUDE.md's inline 8-guard `Guards:` roster restore (reverting half of `8438df1`, which silently disabled doctrine-integrity-probe Check 11) is edited in the working tree but NOT COMMITTED — another session holds unrelated staged files, and the isolated-commit path finishes with a bare `git commit` that would sweep them in. Until it lands, Check 11 is still disabled on the branch |
+| [OI-158](#OI-158) | 2026-08-15 | 2026-09-19 | Manual T3-5 cross-check (Gabriel-directed workflow-optimization pass), ahead of `ora-tenant-hubspot-reconciliation`'s next scheduled run (2026-09-01) | **CLOSED 2026-09-19 (verified) — Live HubSpot: deal 'Sky Shield - Lease Renewal 2026-09-30' is closedwon, close date 2029-08-31, modified 2026-09-18.** Prior row text: **DATE-MISMATCH** Sky Shield — workbook `leaseEnd 2029-08-31`, `status Active`; HubSpot deal "Sky Shield — Lease Renewal 2026-09-30" still `appointmentscheduled`, `closedate 2026-09-30`. Lease renewed in the workbook but the original HubSpot renewal deal was never closed out — same failure class as the 2026-07-16 lease-date correction (J&R/Stone Crest/Chesapeake), different symptom: stale open deal rather than stale wrong date |
+| [OI-159](#OI-159) | 2026-08-15 | 2026-09-19 | Manual T3-5 cross-check (Gabriel-directed workflow-optimization pass), ahead of `ora-tenant-hubspot-reconciliation`'s next scheduled run (2026-09-01) | **CLOSED 2026-09-19 (verified) — Live HubSpot: deal 'Medspeed - Lease Renewal 2026-08-31' is closedwon, close date 2029-08-31.** Prior row text: **DATE-MISMATCH** Medspeed, LLC — workbook `leaseEnd 2029-08-31`, `status Active`; HubSpot deal "Medspeed — Lease Renewal 2026-08-31" still `appointmentscheduled`, `closedate 2026-08-31`. Lease renewed in the workbook but the original HubSpot renewal deal was never closed out |
+| [OI-172](#OI-172) | 2026-08-16 | 2026-09-19 | Rev 2 fleet re-check (session 6797e01b); reopens the T3-12 follow-up | **CLOSED 2026-09-19 (verified) — fleet-roster.md (generated 2026-09-14 from live registries) lists ora-passed-deal-tracker on the CC fleet only.** Prior row text: **MEDIUM — COWORK-ONLY WRITE, do not retry from Code.** `ora-passed-deal-tracker` is live on BOTH fleets at `30 6 15 * *`. The CC copy is the one that must SURVIVE (it alone reaches the Outlook COM send path); the LAMS twin must be disabled from a Cowork session. Ids collide and CC `list_scheduled_tasks` shows no LAMS entries, so an `enabled:false` issued from Code hits the WRONG copy. Double-fire guard is live, so 2026-09-15 is mitigated — the defect is not. |
+| [OI-041](#OI-041) | 2026-07-31 | 2026-09-19 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **CLOSED 2026-09-19 (verified) — On ora-pm origin/main every flagged route does safeParse after req.json() (budgets, insurance, renewals, units, cam, leases, tenants).** Prior row text: **MEDIUM** ora-pm mass assignment — 10 handlers pass `await c.req.json()` straight into `.insert()`/`.update()`/`.upsert()` with no Zod schema (`budgets.ts:25`, `insurance.ts:35,46`, `renewals.ts:22`, `units.ts:20,28`, `cam.ts:23-24`, `leases.ts:74,98`, `tenants.ts:62`) while sibling routes correctly use `safeParse`. `budgets.ts:25` also accepts an ARRAY body, making the upsert unbounded in row count. Admin-authenticated only, so integrity/defense-in-depth rather than a breach path — but an admin (or anything holding an admin JWT, see OI-036) can set columns the UI never exposes including `id` and `created_at` |
+| [OI-042](#OI-042) | 2026-07-31 | 2026-09-19 | ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch) | **CLOSED 2026-09-19 (verified) — Portal and route sites return 'DB error'; OI-063 sweep merged. Two error.message leaks remain at cron.ts:690-691, reachable with the cron secret only, not by tenants.** Prior row text: **MEDIUM** ora-pm returns RAW Postgres error messages to clients from ~20 call sites (`portal.ts:50,74,93,117,141`, `insurance.ts:38,50`, `cam.ts:79`, `reports.ts:15,27,35,53,57,62`, `cron.ts:40,131,167,227`, `units.ts`, `budgets.ts`, `renewals.ts`, `webhook.ts:20,40`). `server/middleware/error-handler.ts` sanitizes *thrown* errors and its comment claims raw DB messages are never exposed — but that only covers the catch path; these sites `return c.json({error: error.message}, 500)` from a Supabase result. Several are on `/api/portal/*`, reachable by any authenticated tenant, disclosing table/column/constraint/RLS-policy names as a free schema map |
+| [OI-064](#OI-064) | 2026-08-03 | 2026-09-19 | REFUTE pass on the [OI-035](#OI-035) fix, 2026-08-03 | **CLOSED 2026-09-19 (verified) — ora-pm PR #39 (fix/oi-064-paynow-retry-idempotency) merged; stripe.ts has a resume path with an idempotency window.** Prior row text: ora-pm portal payment retry doesn't dedupe as the OI-035 fix's commit message claims — every retry re-links the bank account, producing a new `payment_method_id`, so Stripe's idempotency layer rejects the reused key as a mismatch (caught, returned as a clean 400 — fails safe, no double charge) rather than returning the original PaymentIntent. Risk is operational (tenant sees "failed" for a payment that went through, may pay again another way), not a code-level double-charge. The retry-recovery test is regex-over-source-text, never actually exercised this |
+| [OI-065](#OI-065) | 2026-08-03 | 2026-09-19 | REFUTE pass on the [OI-035](#OI-035) fix, 2026-08-03 | **CLOSED 2026-09-19 (verified) — ora-pm PR #41 merged; stripe.ts uses reserve_payment_intent RPC under pg_advisory_xact_lock.** Prior row text: ora-pm `POST /api/stripe/payment-intent` has no lock between the `ar_ledger.balance` read and PaymentIntent creation — two genuinely concurrent requests (two tabs, or a bypassed client guard) each read the same stale balance and each create a separate, individually-valid PI, exceeding the true balance. Requires the tenant's own concurrent action, not a third-party attack. Outside OI-035/OI-040's original scope |
+| [OI-082](#OI-082) | 2026-08-05 | 2026-09-19 | ora-appsec-sweep 2026-08-05 (ora-pm @ `a29f8f0`, security-auditor dispatch) | **CLOSED 2026-09-19 (verified) — ora-pm PR #38 merged; migration 0015_payments_idempotency_key.sql adds payments_idempotency_key_uniq. Production application not separately confirmed; db-migrate runs of 09-17/18 succeeded.** Prior row text: **MEDIUM** ora-pm `payments` has no idempotency or uniqueness constraint for non-Stripe methods. `0011`'s two partial unique indexes cover `stripe_payment_intent_id` and `(lease_id, autopay_period)` only; `method IN ('check','wire','other')` rows are NULL on both and so fall outside each. `charges` got `idempotency_key TEXT UNIQUE NOT NULL`; `payments` did not. A double-submitted admin form or replayed import writes two identical rows and `ar_ledger`'s `payment_totals` CTE sums both — the tenant's balance silently drops, and that understated balance then feeds the payment-intent cap and the autopay lifetime cap. Same failure class as the two AR bugs already shipped here (cartesian fan-out, divide-by-100): the join was fixed, the write path was not |
+| [OI-224](#OI-224) | 2026-09-02 | 2026-09-19 | `ora-appsec-sweep` 2026-09-02 (ora-pm @ `ca62ecb`, security-auditor dispatch) | **CLOSED 2026-09-19 (verified) — origin/main server/lib/schemas.ts has method: z.enum(['check','wire','other']); ach_stripe not accepted.** Prior row text: **MEDIUM — the admin manual-payment route's schema allows `method:'ach_stripe'` with no `stripe_status`, producing rows the ledger never counts but the admin UI shows as paid.** `PaymentInsertSchema` doesn't restrict `method` to `check`/`wire`/`other` despite the route comment saying it should; such a row has NULL `stripe_status` so `ar_ledger` (which only sums `succeeded`) excludes it while `GET /api/payments`/admin PaymentsList display it as a recorded payment. Related but distinct from [OI-082](#OI-082) (missing uniqueness on non-Stripe methods, a double-counting bug in the opposite direction). Not applied |
+| [OI-225](#OI-225) | 2026-09-02 | 2026-09-19 | `ora-appsec-sweep` 2026-09-02 (oxford-command-center @ `d30d71e`, security-auditor dispatch) | **CLOSED 2026-09-19 (verified) — origin/main server/ai/tools.ts has confidentialScope keyed on the confidential flag; agent.ts has a pre-send scan tagged OI-225.** Prior row text: **MEDIUM — the AI agent's tool results can carry confidential-deal identifiers to the Anthropic API with no redaction, unlike every other egress path in the repo.** `get_deals`/`search_entities` correctly drop `confidential:true` rows, but `get_alerts`/`evaluateConditions` and `get_relationships` do not, and `agent.ts` appends tool results verbatim into the outbound `messages` with no pre-send scan — while `comps.ts`, `om-extract.ts`, and `narrative.ts` all fail closed on the same egress. Asking "any deadlines?" with a confidential deal in an alert-eligible stage sends its name/detail to api.anthropic.com. Not applied |
+| [OI-228](#OI-228) | 2026-09-02 | 2026-09-19 | `ora-appsec-sweep` 2026-09-02, DISPATCH INTEGRITY GATE assertion 4 (post-hoc model-floor probe) | **CLOSED 2026-09-19 (verified) — origin/main check-dispatch-model-floor.py has commit 1b445cb adding claude-mythos-5-1; section said CLOSED 2026-09-08 (PRs #176/#177). Live ~/.claude checkout is behind origin/main.** Prior row text: **LOW — tooling defect, not a real floor breach: `check-dispatch-model-floor.py`'s `MODEL_RANK` table doesn't recognize `claude-fable-5-1` (the current Fable 5.1 model id) and ranks it UNKNOWN (fail-closed, -1), firing exit 1 on both this sweep's subagents even though each ran 100% on Fable with zero fallback events — the best possible outcome, not a violation.** `MODEL_RANK` only has bare `claude-fable-5`/`claude-mythos-5`; the table appears to predate the Fable 5.1 rollout. Verified directly: `agent-ae4ff02601b0e1cdb.jsonl` (ora-pm, 62 msgs) and `agent-ae7f6e4c49d408b89.jsonl` (occ, 110 msgs) both show `model:"claude-fable-5-1"` on every line, 0 fallback blocks. Distinct from [OI-052](#OI-052) (the documented fable→opus mid-run fallback pattern, ruled compliant) — this is a false-positive FAIL from a stale id mapping, not a fallback of any kind. Per the sweep's own doctrine this still had to be recorded and escalated (never silently loosen the assertion), but the fix here is adding `claude-fable-5-1`/`claude-mythos-5-1` (rank 100) to `MODEL_RANK`, not touching the floor logic. Not applied |
+| [OI-233](#OI-233) | 2026-09-05 | 2026-09-19 | `ora-appsec-sweep` 2026-09-05 (ora-pm @ `ca62ecb`, security-auditor dispatch) | **CLOSED 2026-09-19 (verified) — ora-pm PR #41 merged; stripe.ts calls reserve_payment_intent() (migration 0014) and inserts a pending row keyed by client_request_id before Stripe.** Prior row text: **MEDIUM — `server/routes/stripe.ts:172-224` confirms the Stripe PaymentIntent (real ACH debit) before the ledger insert; if that insert fails for any reason OTHER than the OI-035 dedupe unique-constraint, the confirmed debit has no ledger row and no compensating record.** Same "money moved, correctness assumed a guarantee that isn't enforced" class as [OI-222](#OI-222)/[OI-223](#OI-223); OI-035's unique index absorbs a *duplicate* insert but not a *failed* one. Candidate fix: write a `pending` row keyed by `client_request_id` before calling Stripe, update with the PI id after; have the webhook upsert-by-PI when no row matches. Not applied |
+| [OI-255](#OI-255) | 2026-09-10 | 2026-09-19 | Cross-repo architecture-diagram review (Gabriel-directed, this session) | **CLOSED 2026-09-19 (verified) — ora-pm PR #40 merged; package.json has lint (--max-warnings 0) and check:refute; ci.yml runs both ahead of deploy steps.** Prior row text: **HIGH (gate strength inverted against blast radius).** `ora-pm` is the only ORA repo that debits real bank accounts (Stripe ACH autopay, late-fee posting) and carries the weakest gate of the three application repos: `package.json` has `"lint": "tsc --noEmit"` — there is no linter, `lint` is an alias for `typecheck` — no `gate`/`check:refute`/reconcile script of any kind, and `.github/workflows/ci.yml` runs typecheck → test → build → `wrangler pages deploy` **on every push to `main`**. `oxford-command-center`, which only READS money, runs `eslint . --max-warnings 0` plus a `refute-required` PR job enforcing a Refute-Reviewed trailer on financial-decision diffs. Nothing equivalent guards `server/lib/billing.ts`, `server/routes/cron.ts`, `server/routes/stripe.ts` or `server/lib/cam.ts`. Fix direction: add ESLint and stop aliasing `lint`; port `scripts/check-refute-required.ts` scoped to those four paths and make the deploy step depend on it |
+| [OI-259](#OI-259) | 2026-09-10 | 2026-09-19 | Cross-repo architecture-diagram review (Gabriel-directed, this session); overlaps [OI-175](#OI-175) | **CLOSED 2026-09-19 (verified) — AAOS PR #4 merged (cc8fbc6); .github/workflows/ci.yml on origin/main and check-contract-drift.py referenced in ora-aaos-publish-contracts SKILL. Green CI run not separately confirmed.** Prior row text: **MEDIUM (unguarded correctness on the agent-coordination substrate).** `C:\Users\Owner\AAOS` has 216 tests and **no CI at all** — `.github/workflows` does not exist, so `python -m unittest discover -s tests` runs only when a human types it. AAOS owns the lease/lock discipline that stops two agents clobbering each other's task state, and its one documented Critical bug (two near-simultaneous appends to `aaos-events.ndjson` silently clobbering each other, `docs/GATE3-REVIEW.md`) is guarded by those tests alone. Compounding asymmetry: `tools/publish-contracts.py` runs 1x/day (weekdays 09:15 ET) as `ora-aaos-publish-contracts`, but `tools/check-contract-drift.py` — the script written to prove that publish worked — is referenced by **nothing** (0 hits across `~/.claude/scheduled-tasks/` and any CI). Fix direction: one GitHub Actions workflow (`pip install jsonschema` + `unittest discover`, ~31s, no secrets, no data access) on push/PR, plus `check-contract-drift.py` as a second step on the existing publish task. Closes OI-175's jsonschema pin as a side effect |
+| [OI-263](#OI-263) | 2026-09-10 | 2026-09-19 | Surfaced by [OI-259](#OI-259)'s new CI workflow on its FIRST run ([ZeOoba/AAOS PR #4](https://github.com/ZeOoba/AAOS/pull/4), run 34514715973) — green locally, red on every runner | **CLOSED 2026-09-19 (verified) — AAOS tests/test_queue_scripts.py derives the in-scope artifact under REPO_ROOT (L523-538); PR #4 merged. Green CI run not separately confirmed.** Prior row text: **MEDIUM (false-confidence test coverage on the colonization guard).** 9 AAOS tests in `tests/test_queue_scripts.py` (`PostHandoffHappyPath/Idempotency/Blocker` classes) assert that a handoff artifact is IN write-scope, but `make_in_scope_artifact` (`tests/test_queue_scripts.py:522,528`) creates it under `REPO_ROOT` while the production `agent-registry.json:18` declares `claude-code`'s scope as the literal absolute `"C:/Users/Owner/AAOS/**"`. They pass ONLY because the operating machine's checkout happens to sit at that exact path — **they validate Gabriel's directory layout, not `match_write_scope()`'s logic**, and would break identically if the repo were ever moved or cloned elsewhere. On CI both matrix legs fail 9/226 with `WRITE-SCOPE VIOLATION: path '/home/runner/work/AAOS/AAOS/aaos-artifacts-*/evidence.txt' is outside agent 'claude-code's declared write_scope`. No seam exists to fix it cheaply: `tools/post-handoff.py:26` states outright "There is no `--registry` override here", and `_aaos_common.registry_path()` hard-returns `REPO_ROOT / "agent-registry.json"`. **Blocks OI-259** — PR #4 is deliberately held unmerged rather than landing a red-on-arrival CI. Fix direction (needs its own review — this touches the colonization guard's inputs): add a `--registry` override to `post-handoff.py` mirroring `validate.py`'s existing one, and have the test base write a temp registry whose `write_scope` is derived from `REPO_ROOT` at runtime |
+| [OI-264](#OI-264) | 2026-09-10 | 2026-09-19 | Surfaced by [OI-259](#OI-259)'s CI on [ZeOoba/AAOS PR #4](https://github.com/ZeOoba/AAOS/pull/4) (run 34518125534, 3.11 leg; 3.13 leg passed the SAME run) | **CLOSED 2026-09-19 (verified) — AAOS acquire_lease writes a staged sidecar and links it with _exclusive_link, so the lock is never empty. Race test not re-run.** Prior row text: **MEDIUM-HIGH (real concurrency defect in the lock protocol — the one thing AAOS exists to get right).** `_aaos_common.acquire_lease()` creates the lock with exclusive-create and writes its JSON content as a SEPARATE step. A second writer that opens the lock inside that window reads a zero-byte file and `load_json` raises `CorruptStateError: unparseable JSON at …/locks/t-race-8.lock: Expecting value: line 1 column 1 (char 0)` — instead of the clean `denied` the protocol promises. `tests/test_aaos_common.py::AcquireLeaseRaceTests::test_genuine_race_exactly_one_acquired_never_two` therefore observes `['acquired']` where it asserts `['acquired', 'denied']`, and `Scenario03TwoWritersRaceTests` fails with it. **Intermittent, not deterministic** — passed on the 3.13 leg of the same run, and reproduced once locally under heavy load (13 concurrent sessions) while passing in isolation and on two subsequent full runs, so this is a genuine timing window, not a platform-only artifact. The consequence is worse than a flaky test: a real contended lease raises a corruption error rather than denying, and `CorruptStateError` is the signal AAOS reserves for genuinely damaged state — so a routine race would read as data corruption and could trigger the wrong operator response. Also directly on the Cowork sandbox path (`docs/COWORK-BOOTSTRAP.md` contemplates Linux sandboxes). Fix direction — **the reader side, not the writer**: an existing-but-empty/unparseable lock inside the settle window means "held by a writer mid-create", i.e. deny/retry, not corrupt. That is a semantic change to the lease protocol and needs its own adversarial REFUTE pass (Engineering OS done-bar), NOT a CI-unblocking patch. **Do not fix by skipping or weakening the race test** |
+| [OI-310](#OI-310) | 2026-09-17 | 2026-09-19 | `/code-review` (high effort, 8-angle + verify) on [ora-pm PR #42](https://github.com/ZeOoba/ora-pm/pull/42) (OI-278 void fix), this session | **CLOSED 2026-09-19 (verified) — ora-pm PR #43 merged 2026-09-18; DELETE handler selects source, voided_at; push CI at 5e822e3 succeeded. Deferred follow-ups (atomic delete, DB-level guard) filed as a new item.** Prior row text: **LOW-MEDIUM (latent audit-trail gap, PLAUSIBLE — not currently reachable) — `server/routes/charges.ts` DELETE `/:id` blocks deleting `source='auto'` charges but never checks `voided_at`, even though migration 0016's whole premise (this same PR) is "void, never delete" for an audit trail.** The route's own comment defers enforcement to a future manual-void action that doesn't exist yet — today the only `voided_at` writer (migration 0017) is scoped to `source='auto'` rows, which DELETE already refuses on the separate `source` check, so the two conditions never currently overlap. Once any future manual-void feature sets `voided_at` on a `source='manual'` charge, this route will still hard-delete it on request, destroying the audit record the void mechanism exists to guarantee. Fix direction: add a `voided_at IS NOT NULL` guard to the DELETE handler (400, mirroring the existing `source==='auto'` rejection), landed before or alongside whatever ships the manual-void endpoint. **PR OPEN 2026-09-18 (excess-usage sweep): [ora-pm PR #43](https://github.com/ZeOoba/ora-pm/pull/43)** — guard + 4 tests (the 2 guard tests fail against the unpatched route, the 2 controls pass either way); 433 tests/44 files green, typecheck clean. **Adversarial REFUTE pass run (Fable tier) after CI's `check:refute` gate blocked the first push** — guard CONFIRMED correct + fail-closed, no other app-layer charge-delete path exists; 1 finding fixed (missing fail-closed test), **2 deferred and recorded on the PR: (a) read-then-delete TOCTOU needs the atomic conditional `.delete().is('voided_at',null)` form, (b) no BEFORE DELETE trigger / DELETE RLS policy, so a service-role or dashboard DELETE bypasses the app guard entirely.** Neither reachable today; **both should land before any manual-void endpoint ships.** MERGED 2026-09-18. **REGRESSION FOUND AND FIXED SAME DAY:** the gate blocked the very first real push to main that ran it ([run 35388439275](https://github.com/ZeOoba/ora-pm/actions/runs/35388439275), the #44 merge commit itself) — this repo's `supabase migration list --linked` wraps versions in backticks (`` `0016` ``), which the parser's `/^\d+$/` test rejected, so it parsed zero rows and tripped its own fail-closed path on fully-applied, legitimate output. The gate did what it was designed to do (fail closed, explain why); the parser itself was wrong. Fixed in [ora-pm PR #46](https://github.com/ZeOoba/ora-pm/pull/46) — strips backticks before matching, adds a regression fixture built from verbatim captured production output. 817 tests/80 files green, typecheck+lint clean. **`main`'s deploy path is blocked until #46 merges** — needs priority review |
+| [OI-312](#OI-312) | 2026-09-17 | 2026-09-19 | Materialized live during [ora-pm PR #42](https://github.com/ZeOoba/ora-pm/pull/42)'s merge, this session — caught and hand-closed for this one release before it became an outage | **CLOSED 2026-09-19 (verified) — ora-pm PRs #44 and #46 merged; ci.yml L136 runs check-migrations-applied.mjs; push CI at 664f026 and 5e822e3 succeeded.** Prior row text: **HIGH (deploy-ordering race, confirmed unmitigated) — `ora-pm`'s `.github/workflows/ci.yml` has NO step coupling the app deploy to migration-apply order.** `supabase/migrations/0016_charges_void.sql`'s own header says the app must deploy AFTER 0016 is live (its `.is('voided_at', null)` filters 42703 against the old schema otherwise), but `ci.yml`'s `push`-to-`main` job goes straight from `Check commit is still the tip of main` to `Deploy to Cloudflare Pages` with no migration check in between; `db-migrate.yml` is `workflow_dispatch`-only, deliberately decoupled. Confirmed by reading the live `ci.yml` on `main` (2026-09-17): the "Deploy to Cloudflare Pages" step's only gates are the tip-check and the Cloudflare-env check, nothing DB-related. This is exactly what almost happened on PR #42's merge — caught only because this session was watching CI live and asked Gabriel to confirm before the deploy step ran; nothing would have caught it on an unattended merge. Fix direction: add a "Check migrations are applied" step to `ci.yml`, gated the same way as "Check Cloudflare Pages production env" (after the tip-check, before Deploy), running `supabase migration list --linked` (reusing `db-migrate.yml`'s existing `SUPABASE_ACCESS_TOKEN`/`SUPABASE_DB_PASSWORD` secrets) and failing the job if any local migration file has no matching remote entry — forcing a human to run `DB Migrate (manual)` first rather than racing it. **PR OPEN 2026-09-18 (excess-usage sweep): [ora-pm PR #44](https://github.com/ZeOoba/ora-pm/pull/44)** — `scripts/check-migrations-applied.mjs` + gate step, plus the `supabase/setup-cli`/`link` steps the ci job lacked (without them the gate would ENOENT and block every deploy); fails closed on pending/CLI-error/missing-secret/unparseable output; 814 tests/80 files green, typecheck+lint clean. **Both required secrets confirmed present on the repo as of 2026-09-16**, so the gate can actually run. NOT merged — the gate is push-to-main-only, so its first real merge is its live test |
+| [OI-184](#OI-184) | 2026-08-17, widened 2026-08-17, root-caused 2026-08-17, **MERGED 2026-08-17/18 ([PR #285](https://github.com/ZeOoba/oxford-command-center/pull/285), `e29dc49`→`fa27d4c`)** | 2026-09-19 | Working the P4 AR review queue; widened + root-caused investigating the NOI cross-check drift; fix went through 5 rounds of the `refute-financial-change` adversarial pass (this session) | **CLOSED 2026-09-19 (verified) — PR #285 present on oxford-command-center origin/main. Not deploy-verified.** Prior row text: **RESOLVED.** Root cause: `resolvePropertyId` (`server/workbook/parse.ts`) tokenized an address and matched each token as a raw SUBSTRING against every property's address, first-match-wins, in array order — `"3034 Westerville Road"` includes `"road"`, a literal substring of `"B-ROAD-way"` in `"1900 N Broadway, Baltimore MD"`, pure spelling coincidence. Both real Westerville leases (Buckeye's Best Transport $13,005/mo, Lamar Advertising billboard $300/mo) were mis-tagged to Baltimore as a result. First fix attempt (a street-suffix denylist, `b8e868c`) closed only that one word; the mandatory refute pass caught real order-dependence and city-token-hijack defects on LIVE data (round 1), then progressively caught defects in each rewrite across 4 more rounds (numeric-veto too strict/too loose, missing score floor, a length-filter bug dropping 1-2 digit house numbers, generic-word/city-word-plus-coincidental-number collisions) — full history in this session's transcript. **Final mechanism** (`e29dc49`): whole-token equality (not substring) + a house-number range gate (candidate disqualified if its own leading number doesn't cover the key's) + a distinctiveness requirement (at least one matched word must be non-generic and non-city, unless that word is also the property's own street name) + fail-closed ties. Round 5 (5/5 lenses, worst severity LOW) confirmed via exhaustive/fuzz verification (167k+30k+20k permutations) that no wrong-match is constructible against the live 14-property/17-key corpus; remaining gap classes (an off-sheet property sharing a common word + coincidental number; comma-less addresses; abbreviation-variant duplicate rows) are all disclosed, fail-safe (miss, not mis-tag) residuals needing a different mechanism (an explicit alias/crosswalk table), not further denylist rounds — logged as follow-up, not filed as a new OI yet. 21 tests. Verified pre-merge against the real live workbook + real warehouse DB: 0 errors portfolio-wide, Westerville correctly downgrades to structural-mismatch/warn with $159,660/yr corroborating rent (exactly Buckeye's + Lamar's combined annual rent). CI (`gate` + `refute-required`) both passed. **One disclosed residual not yet closed:** the tracked snapshot mirror `data/snapshots/portfolio.json` still carried the pre-fix Westerville→Baltimore tag as of merge (the worktree couldn't safely regenerate it without `NOTION_TOKEN`) — self-corrects via the existing `ora-cc-snapshot-refresh` scheduled task (3x/weekday); worth a one-line confirmation next time that task's output is checked |
+| [OI-186](#OI-186) | 2026-08-17, **RETRACTED as duplicate 2026-08-17** | 2026-09-19 | Investigating the pre-push NOI large-drift gate (3 properties failing, this session) — filed without first grepping the tracker for prior art | **CLOSED 2026-09-19 (verified) — Retracted as a duplicate of OI-137 (row already said so).** Prior row text: ~~MEDIUM — portfolio-wide data staleness~~. **Duplicate of [OI-137](#OI-137)**, independently re-derived 5 days later, same 3 properties, same root cause — should have been caught by a tracker search before filing. **Also overstated a claim never checked against data already in hand:** "the other 9 are equally stale and will start tripping it too" — false as stated. The full cross-check's own per-property output (already captured, never re-read before writing that line) shows only 3 of the other 11 properties show ANY drift at all (29000 Info Lane 5.09%, 3540 E 5th 8.37%, Sepich Portfolio -6.76%, all WARN-tier, none within striking distance of the 20% gate), 5 are in-tolerance (≤3.8%), and 2 are structurally not comparable (`lease-run-skipped`). Staleness is real and portfolio-wide (confirmed: every property's full-year `import_batches` row shares the identical `2026-06-13T19:52:51.1xx` timestamp, one single backfill never refreshed since); its CONSEQUENCE is not — it only shows up as large drift where real 2025→2026 tenancy change also occurred, which is a small minority of the portfolio. **The one genuinely new fact this item added to OI-137** (kept, not duplicated): no fresher P&L source files exist anywhere in `Business/Property Financials/` to backfill from — verified directly, only the same June-12-dated exports already ingested — so a `warehouse:backfill` re-run right now would be a no-op. Folded into OI-137's entry rather than carried as a separate row |
+| [OI-271](#OI-271) | 2026-09-11 | 2026-09-19 | `dirty-tree-triage` follow-up — independent review (claude-opus-5) of `CLAUDE.md` commit `b777625` | **CLOSED 2026-09-19 (verified) — Tracker recorded CLOSED 2026-09-11 (commit 607a2d0); not re-verified.** Prior row text: **LOW (doc contradiction, no automated behavior affected).** `rules.md` §2 line 32 ("On non-zero COM exit: retry once … do NOT halt") now directly contradicts its own exit-code table two lines below (exit 1/3 = do NOT retry) — harmless while `CLAUDE.md` inlined the same split for a reader to reconcile against, live now that `CLAUDE.md` points straight at §2 instead. Documentation-only; `send-via-outlook.ps1`'s actual exit-code handling is unaffected. See detail section below |
+### OI-317
+**Status:** CLOSED 2026-09-18 (same day as opened)
+**See:** the `## Closed` table above — the row's own one-line cell is the full write-up; not restated here per this file's own text-lives-in-one-place rule.
+
+### OI-293
+**Status:** CLOSED 2026-09-13
+**See:** the `## Closed` table above — the row's own one-line cell is the full write-up; not restated here per this file's own text-lives-in-one-place rule. This stub exists only to give `open-items-tracker-history.md#OI-293` a working anchor.
+
+### OI-213
+**Status:** CLOSED
+**Opened:** 2026-09-02
+**Closed:** 2026-09-18
+**Evidence:** Acceptance met — the HubSpot deal reflects the exercised renewal term. HubSpot deal `58514721860` read-back 2026-09-18 (this session) returns `dealstage closedwon` / `closedate 2031-09-30T00:00:00Z`, `hs_lastmodifieddate` **2026-09-18T16:41:37Z** — i.e. applied earlier the same day by a different session, NOT by this one; this session only verified it. That matches the recommended correction exactly (`dealstage` → `closedwon`, `closedate` → `2031-09-30`). Independently corroborated against the workbook-derived snapshot re-read the same session: `propertyKey "7658 Fishel"`, `leaseEnd "2031-09-30"`, `status "Active"`. The secondary observation stands and was honored — the correction is keyed to the canonical ORA-T-3 record, not the retired duplicate Notion row.
+**Source:** `ora-tenant-hubspot-reconciliation` monthly run, 2026-09-02 (Step 3a — ELEVATED)
+**Acceptance:** The HubSpot deal for Heritage Pool Supply reflects the exercised renewal term, or Gabriel rules that it should not.
+
+**Description:** **HubSpot deal `58514721860` ("Heritage Pool Supply — Lease Renewal 2026-09-30") sits in `appointmentscheduled` with `closedate 2026-09-30` — an expiration both other systems of record document as superseded by an exercised renewal option.**
+
+Quoted Notion evidence (Tenant DB row "Heritage Pool Supply", `Row Retired: true`, Notes field verbatim):
+
+> "Duplicate of SRS Distribution / Heritage Pool Supply (ORA-T-3) - retired 2026-07-29 per lease-abstraction-pipeline targeted-fix reconciliation (Single Tenant Property Lease Terms batch). ORA-T-3 is canonical: more complete record (Lease Extension/Amendment Log, renewal terms, current expiration 2031-09-30 reflecting the exercised 1st Renewal Term). This row's Lease Expiration (2026-09-30) was stale - did not reflect the 2026-04-26 renewal exercise."
+
+Independent corroboration from the workbook-derived snapshot (`oxford-command-center/data/snapshots/portfolio.json`, `asOf 2026-08-25`): `propertyKey "7658 Fishel"`, `leaseEnd "2031-09-30"`, `status "Active"`.
+
+Both non-HubSpot systems agree on 2031-09-30 and Notion names the instrument (1st Renewal Term, exercised 2026-04-26) — this clears the evidence bar this task holds to (quote the note, never infer from pattern).
+
+**Recommended correction (NOT applied — this task is detection-only and never writes to HubSpot):** `dealstage` → `closedwon`, `closedate` → `2031-09-30`.
+
+**Secondary observation:** the HubSpot deal matches a Notion row that is itself retired as a duplicate; the canonical row is ORA-T-3 (SRS Distribution / Heritage Pool Supply). Any correction should be keyed to ORA-T-3, not the retired row.
+
+### OI-214
+**Status:** CLOSED
+**Opened:** 2026-09-02
+**Closed:** 2026-09-18
+**Evidence:** Acceptance met — `closedate` now matches the rent-roll-confirmed 2027-05-31. **Applied by this session** via `manage_crm_objects` on deal `58522276169` at 2026-09-18T19:19:31Z; read-back confirms `closedate 2027-05-31T00:00:00Z` with `dealstage` left unchanged at `closedwon`, per this item's own "do not reopen the stage" instruction. Pre-write verification against the workbook-derived snapshot: `propertyKey "2207 Northwood"`, `unit "B2+B3"`, `leaseEnd "2027-05-31"`, `status "Active"` — so Notion, the workbook and now HubSpot all agree, and the 2026-07-21 correction that had reached only two of three systems has finally propagated to the third.
+**Source:** `ora-tenant-hubspot-reconciliation` monthly run, 2026-09-02 (Step 3d, escalated to ELEVATED per the skill's "fix silently failed to propagate" clause)
+**Acceptance:** The Maryland Hospital Association deal's `closedate` matches the rent-roll-confirmed 2027-05-31, or Gabriel rules the 2027-06-30 figure is right and Notion/the workbook are wrong.
+
+**Description:** **HubSpot deal `58522276169` ("Maryland Hospital Assoc — Lease Renewal 2026-05-31", `closedwon`) carries `closedate 2027-06-30` — the exact value Notion's own correction note records as disproven and replaced six weeks ago.**
+
+Quoted Notion evidence (Tenant DB row "Maryland Hospital Association", Notes field verbatim):
+
+> "Lease Expiration and Escalation Date corrected 2026-07-21 per Rent Roll 7.20.2026.xlsx (was 2027-06-30/2026-05-01, rent roll shows 2027-05-31/2027-06-01)."
+
+Notion Lease Expiration now reads `2027-05-31`. `portfolio.json` independently agrees: `propertyKey "2207 Northwood"`, `unit "B2+B3"`, `leaseEnd "2027-05-31"`, `status "Active"`.
+
+**Why this is escalated rather than an ordinary DATE-MISMATCH:** the note does not merely disagree with HubSpot — it names `2027-06-30` as the specific wrong value it replaced. The 2026-07-21 correction reached Notion and the workbook and did not reach HubSpot. That is the "a fix silently failed to propagate" case Step 3d escalates by design, and it is the same failure shape as the 2026-07-25 Stone Crest / Chesapeake precedent that created Step 3d in the first place.
+
+**Compounding factor:** the deal was moved to `closedwon` on 2026-07-21 — the same day as the Notion correction — by the [OI-021](#OI-021) batch pass. The wrong date is therefore frozen inside a closed record rather than sitting on an open one, so nothing in the normal renewal workflow will surface it again.
+
+**Recommended correction (NOT applied):** `closedate` → `2027-05-31`. Do not reopen the stage; the renewal itself is not in question.
+
+### OI-215
+**Status:** CLOSED
+**Opened:** 2026-09-02
+**Closed:** 2026-09-18
+**Evidence:** Acceptance met — the Notion Tenant DB row is now consistent with the workbook. Canonical row `32c6ecd8-9e59-8108-a136-f8050119cf21` (`Tenant Name` "J&R ENTERPRISES", `Suite / Unit` "Unit 105B", `Row Retired` NO, `Lease Status` Active, $1,105/mo, Jeff Menke) read-back 2026-09-18 (this session) returns `Lease Expiration 2026-12-31`, and its Notes field carries an appended line: "2026-09-18: synced to Master Workbook rent roll (as of 2026-09-18) — Lease Expiration." Applied earlier the same day by a different session, NOT by this one. HubSpot needed no change and received none — deal `58524287555` still reads `closedate 2026-12-31` / `appointmentscheduled`, `hs_lastmodifieddate` 2026-07-27, untouched. Workbook agrees (`9620 State 350` / `105B` / Jeff Menke / `leaseEnd 2026-12-31` / Active). **Incidental, verified not a defect:** a second row `32b6ecd8-9e59-819a-9b10-c593fdab7a33` ("⛔ ARCHIVED 2026-07-12 — J&R ENTERPRISES", Suite B1, `Lease Expiration 2026-04-30`) still exists and is correctly `Row Retired = YES`. The reusable lesson above is unaffected by this closure and still applies to any field back-filled from a snapshot.
+**Source:** `ora-tenant-hubspot-reconciliation` monthly run, 2026-09-02 (Step 3d escalation, direction reversed)
+**Acceptance:** The Notion Tenant DB row for J&R ENTERPRISES carries a lease expiration consistent with the workbook, or the discrepancy is adjudicated against a primary document.
+
+**Description:** **The Notion Tenant DB row for J&R ENTERPRISES still carries `Lease Expiration 2026-07-31` — a date 33 days in the past — while HubSpot and the workbook both say `2026-12-31`.**
+
+This is the third tenant named in this task's own 2026-07-25 Step-3d precedent (alongside STONE CREST COUNTERS and Chesapeake Brands). At that time the defect ran the other way: Notion had been corrected and HubSpot still carried the disproven date. It has since inverted.
+
+Current three-way state:
+- HubSpot deal `58524287555` — `closedate 2026-12-31`, `appointmentscheduled`; the dealname itself reads "(orig. exp. 2026-07-31 → term thru 2026-12-31)"
+- `portfolio.json` — `propertyKey "9620 State 350"`, `unit "105B"`, `leaseEnd "2026-12-31"`, `status "Active"`
+- Notion Tenant DB — `Lease Expiration 2026-07-31`, `Lease Status "Active"`
+
+Quoted Notion evidence (Notes field verbatim):
+
+> "Lease Expiration was missing entirely (null). Filled 2026-07-16 per Master Workbook / oxford-command-center portfolio.json snapshot (same unit 105B, same tenant contact Jeff Menke, same $1,105/mo rent — confirmed same lease); portfolio.json also flags this lease status 'Expiring Soon'."
+
+The note documents Notion being filled *from* `portfolio.json` on 2026-07-16, when that snapshot said 2026-07-31. The snapshot has since moved to 2026-12-31 and Notion did not follow. A row that was correct at write time silently became a stale expired date.
+
+**Recommended correction (NOT applied — this task never writes to Notion either):** set Notion `Lease Expiration` → `2026-12-31`. **No HubSpot change** — HubSpot is the correct system here.
+
+**Reusable lesson worth more than the row fix:** a Notion field back-filled *from* a snapshot inherits that snapshot's point-in-time value with no link back to it, so it cannot self-correct when the source moves. The 2026-07-16 remediation created three such copies; two (STONE CREST, Chesapeake) have since converged, this one has not.
+
+### OI-218
+**Status:** CLOSED
+**Opened:** 2026-09-02
+**Closed:** 2026-09-18
+**Evidence:** Acceptance met — outcome recorded and the deal advanced. (1) Live Master Workbook `Master Tenant Rent Roll` (as of 2026-09-18, read-only COM attach): CJ's Tint Shop is no longer on the roster; 29000 Information Lane unit 105 is leased to CAPITAL PROPERTY RECOVERY, LLC, Lease Start 2026-09-10, Lease End 2029-09-30, $1,700/mo (prior tenant paid $1,850). (2) Gabriel confirmed the vacate in-session 2026-09-18. (3) HubSpot deal `58521500852` moved `appointmentscheduled` → `closedlost` via `manage_crm_objects` with a NOTE citing the workbook row; verified by a follow-up `search_crm_objects` (deal absent from the open set). (4) Notion Tenant DB row `32c6ecd8…9460` set `Row Retired = YES` / `Lease Status = Vacant`, read-back verified; new Capital Property Recovery row created. Outcome = **vacated at expiration, unit backfilled in 10 days**. Detail: [[reference_hubspot_lease_renewal_pipeline_stalled_2026-08-23]], `event_log.md` 2026-09-18.
+**Source:** `ora-tenant-hubspot-reconciliation` monthly run, 2026-09-02 (Step 3b — WATCH, stale open deal with no corroborating signal)
+**Acceptance:** Gabriel records what actually happened at CJ's Tint Shop (renewed / vacated / holdover) and the deal is advanced accordingly.
+
+**Description:** **CJ's Tint Shop's lease expired 2026-08-31 — two days before this run — and no system records a renewal, a vacate, or a holdover.**
+
+Unusually, all three sources agree on the date, and all three are silent about the outcome:
+- HubSpot deal `58521500852` — `closedate 2026-08-31`, still `appointmentscheduled`, `hs_lastmodifieddate 2026-03-27` (159 days idle; never touched since the original bulk import)
+- Notion Tenant DB — `Lease Expiration 2026-08-31`, `Lease Status "Active"`, `Property Address "29000 Information Ln — Easton MD"`, `Suite / Unit "Unit 105"`, **Notes field empty**
+- `portfolio.json` — `propertyKey "29000 Information Lane"`, `unit "105"`, `leaseEnd "2026-08-31"`, `status "Expiring Soon"`
+
+This is the cleanest Step 3b case in the sweep: the date is not in dispute, the term has run out, and there is genuinely no evidence either way. **No outcome is inferred** — per this task's standing rule, silence in Notion is not evidence of a vacate, a renewal, or a holdover.
+
+It is also the only deal in the pipeline whose `closedate` has elapsed *and* whose lease genuinely ended on that date; the two other elapsed-`closedate` deals (Medspeed, Robert & Kesha Best, both under [OI-216](#OI-216)) have later true expirations in the other two systems.
+
+### OI-219
+**Status:** CLOSED
+**Opened:** 2026-09-02
+**Closed:** 2026-09-18
+**Evidence:** Acceptance branch 1 met — a rule now exists for when a Lease Renewal deal leaves `appointmentscheduled`. Gabriel ratified it in-session 2026-09-18: closed-won = executed doc or workbook Lease End beyond the deal's target date; closed-lost = workbook `Notice to Vacate = Yes` or unit re-let; otherwise the deal stays parked, and anything inside 120 days is listed as UPCOMING. The rule is carried by the new weekly CC/MCP task `ora-renewal-hubspot-reconcile` (cron `20 10 * * 1`, registered via `create_scheduled_task` 2026-09-18); its first run (`run_scheduled_task`, session `local_8d6c9a45…`) completed `done (success)` — workbook read via the locked-file COM fallback, 21 open deals all tied to the workbook, 0 writes. Of the six deals tabled below, The Companies, LLC is now `closedlost` (notice given); the other five are genuinely not-yet-due and correctly parked. **Follow-up, not filed as a new item:** `ora-tenant-hubspot-reconciliation` Step 3e will re-raise this same IDLE finding on its next monthly run unless Step 3e is amended to defer to the weekly actuator — that spec was NOT edited here (task is paused until 2026-09-21; changing a detection task's scope is Gabriel's call).
+**Source:** `ora-tenant-hubspot-reconciliation` monthly run, 2026-09-02 (Step 3e — IDLE, the standing monthly sweep)
+**Acceptance:** A rule exists for when a not-yet-due Lease Renewal deal leaves `appointmentscheduled` — or Gabriel confirms parking them there indefinitely is intended and this check is retired.
+
+**Description:** **6 deals meet the Gabriel-set IDLE threshold (30+ days since last modification AND lease expiration 183+ days out).** This is the recurring sweep for the ~37-deal population [OI-021](#OI-021)'s 2026-07-25 batch pass confirmed was legitimately not-yet-due — not a re-litigation of the 8 real items that pass already resolved.
+
+| Deal | Idle (days) | Lease expiration | Days out |
+|---|---:|---|---:|
+| I.M.H LLC | 126 | 2033-07-31 | 2,524 |
+| The Companies, LLC | 159 | 2028-09-30 | 759 |
+| STONE CREST COUNTERS LLC | 37 | 2028-07-31 | 698 |
+| Terrone T. White | 48 | 2027-03-31 | 210 |
+| I Dig Ditches | 47 | 2027-03-31 | 210 |
+| Chesapeake Brands, LLC | 37 | 2027-03-31 | 210 |
+
+Two further deals meet the same threshold but are filed under [OI-216](#OI-216) instead, because they carry a date defect on top of being idle: Medspeed (107 days idle, 2029-08-31) and Robert & Kesha Best (159 days idle, 2027-08-31).
+
+**Flag-only, never auto-advanced** — matches this task's detection-only posture and Hard Invariant 1. The stage change (advance, close-lost, or re-scope) is Gabriel's call.
+
+**The denominator is the more useful finding.** The 183-day leg is doing all the filtering: **every one of the 37 open deals is 37+ days idle**, because the newest `hs_lastmodifieddate` anywhere in the open pipeline is 2026-07-27. The entire Lease Renewal pipeline has had no activity in over five weeks. That is consistent with [reference_hubspot_lease_renewal_pipeline_stalled_2026-08-23.md](reference_hubspot_lease_renewal_pipeline_stalled_2026-08-23.md) and this run is a second, independent observation of it.
+
+### OI-222
+**Status:** CLOSED
+**Opened:** 2026-09-02 · **Closed:** 2026-09-13 · **Source:** `ora-appsec-sweep` 2026-09-02 (ora-pm @ `ca62ecbed3aff0a1d21585dcf40f62d823810296`, security-auditor dispatch)
+**Severity:** MEDIUM (money-state correctness — webhook resilience)
+**Evidence:** [ora-pm PR #31](https://github.com/ZeOoba/ora-pm/pull/31) merged `253f2925` 2026-09-13. TDD (RED confirmed before fix); on `23505` the handler now `SELECT`s the existing row's status and re-drives `handleStripeEvent` for any non-`processed` row instead of unconditionally skipping. Full suite 479/479 passing, typecheck/build clean, re-verified after a rebase onto current `origin/main`. Independent adversarial REFUTE pass (Fable-tier security-auditor, cold read, no knowledge of the implementation) checked specifically for double-processing risk from concurrent retries — confirmed benign, every write in `server/lib/stripe-events.ts` is an idempotent per-payment-intent update — and found no scope creep or regression. Residual, not introduced by this fix: no `'pending'` status exists on `stripe_webhook_events` (only `processed`/`failed`, defaulting to `processed`), so a process crash mid-handler before the `failed` update runs can still strand a row at `processed`; closing that needs a schema migration and was left as a follow-up, not silently expanded into this fix's scope.
+
+**Description:** `server/routes/webhook.ts:30-46` inserts the Stripe event id into `stripe_webhook_events` *before* calling `handleStripeEvent`. If the handler throws (e.g. a transient Supabase error), the row is marked `failed` and the endpoint returns 500. Stripe retries the same event; the retry's insert hits Postgres `23505` (unique violation) and the handler short-circuits to `{received:true, skipped:true}` with 200 — the retry is discarded, and nothing ever re-drives a `failed` row.
+
+**Impact:** A lost `payment_intent.succeeded` leaves a real ACH payment stuck at `processing` (balance overstated, risk of a duplicate manual payment). A lost `charge.failed`/`charge.dispute.created` arriving after a `succeeded` event leaves `ar_ledger` counting a returned/disputed ACH as paid (balance understated). Same failure class as the two AR-ledger bugs already shipped in this repo (cartesian fan-out, divide-by-100): correctness of money state depends on an implicit guarantee — here, "every webhook eventually processes" — that isn't actually enforced.
+
+**Candidate fix (NOT applied):** on `23505`, read the existing row's `status`; if `failed`, re-run `handleStripeEvent` and update the row (idempotent updates make this safe to retry). Add a periodic re-drive of `status='failed'` rows (existing cron infrastructure), and a test asserting a Stripe retry after a failed handler actually re-processes rather than silently skipping.
+
+**Auto-check:** none.
+
+### OI-181
+**Status:** CLOSED 2026-08-16 (LANDED)
+**Opened:** 2026-08-16
+**Source:** Hit live while recording the OI-176 review artifact (session 76023481), then reproduced deterministically.
+**Acceptance:** Running any `eos-review-gate.py --record` copy with a flag that copy does not support **fails loudly** (non-zero exit, explicit message) instead of recording. Proven by running the repro against a deliberately stale copy and observing a non-zero exit rather than `notes: ""`.
+
+**Description:** **A stale copy of the review gate silently discards `--notes-file`, producing an approved security-review artifact with an EMPTY audit trail, exit 0, no warning.**
+
+**Reproduced** (no artifacts written; exercises each copy's own notes-resolution path). Same argv — `--record --verdict approved --model claude-fable-5 --notes-file <tmp>` — against two copies:
+- LIVE `hooks/eos-review-gate.py`: `_resolve_notes` present, **notes preserved, 50 chars**.
+- STALE `.claude/worktrees/oi173-spec-liveness-probe/hooks/eos-review-gate.py`: no `_resolve_notes`, **notes `''` — silently empty, exit 0**.
+
+**Three compounding causes, none sufficient alone:**
+1. **`_arg()` cannot detect an unsupported flag.** It is a positional `argv.index()` scan (`hooks/eos-review-gate.py:768`), not argparse, so an unknown flag is ignored rather than rejected. Telling detail from the repro: the stale copy's own `_arg(argv, "--notes-file")` **does** return the path — the value is right there in argv; the stale code simply never asks for it. Detection is therefore cheap.
+2. **`config-write-guard` actively routes callers to the stale copy.** Its block message prescribes *"re-run the command against a WORKTREE checkout's copy of the tool (worktree paths are exempt, and the tool still writes to the live tree)."* So the recommended workaround is precisely the path that can be stale — and invoking the LIVE binary by absolute path is blocked, because a governance path plus a write-shaped command trips the matcher.
+3. **No version stamp.** `eos-review-gate.py` has no `__version__`/`VERSION` constant, so neither the tool nor the caller can detect skew, and the artifact does not record which tool version wrote it.
+
+**Why it is not cosmetic:** `notes` is not part of the artifact key, so the gate still **PASSES** and the commit lands. The failure is invisible at exactly the moment the audit trail is being created, on the tool whose entire job is to prove a blast-radius change was reviewed.
+
+**Live exposure at filing:** `--notes-file` is the ONLY flag divergence between live and the stale copy (all 15 others match). Of 3 live worktrees, **1 is stale** — `oi173-spec-liveness-probe` (0 `notes-file` refs); `build-lane-capability-check` and `.claude-worktrees/retro-fixes` both have it. Flag landed in `fe14d91` (2026-08-16, PR #136); any worktree branched before that commit is exposed. Not fixed in that worktree — it is another session's workspace.
+
+**Suggested fix (not applied — `hooks/**`, needs the review pass):** in the `--record` path, reject any `--`-prefixed token not in a known-flag set, exiting non-zero. ~10 lines, and it converts silent skew into a loud failure for *every* future flag, not just this one. Optionally add a `__version__` stamped into the artifact so skew is visible after the fact. Ownership note: `eos-review-gate.py` was last touched by session `6797e01b` (retro tooling fixes).
+
+**Closure evidence (2026-08-16):** **LANDED** as `4cbebe8` (from worktree commit `43be6ca`) on Gabriel's in-turn "land it the same way OI-176 went." `reject_unknown_flags()` on both `--key`/`--record`, correctly skipping value-taking flags' values; `KNOWN_CLI_FLAGS` self-checked against real `_arg()` call sites so the fix cannot itself go stale; `__version__` stamped into every artifact. Claim re-checked before landing (`hooks-override-auth` free; `fleet-status-reconcile`'s claimed paths were disjoint — `maintenance/fleet-status.py`/`test-fleet-status.py`, not this file); two-pass mtime identical; worktree branch point confirmed an ancestor of live HEAD. Live post-landing verification with the override token removed: unknown flag rejected on the LIVE binary (rc=1, names the flag + accepted set + staleness diagnosis); `--notes-file` itself still accepted (rc=0); the verification Bash calls themselves ran through the live dispatcher's `--chain bash` in-process path with no `unrecognised` output — proving the scoping fix live, not just in a harness; a real governance write was still BLOCKED through the same chain. Independently reviewed (claude-fable-5) before landing: scoping hazard proven both by tracing and by running the dispatcher both directions, flag-set completeness re-derived independently and matched exactly, adversarial parsing cases all correct, no artifact written on rejection. No lingering damage from the triggering incident: the empty artifact was overwritten at the same key, both this session's artifacts carry notes.
+
+### OI-163
+**Status:** CLOSED
+**Opened:** 2026-08-16
+**Closed:** 2026-08-16
+**Source:** Cross-repo architecture-diagram review (Gabriel-directed, this session) — `AAOS/README.md` §1 and its cited `docs/DELIVERABLES-MANIFEST.md`; corroborates the existing memory pointer [[project_aaos_agent_coordination_layer]] ("real infra; Cowork round-trip unreachable from Code")
+**Description:** **MEDIUM** AAOS (`C:\Users\Owner\AAOS`) is a filesystem-based Code↔Cowork task-queue/handoff protocol over an OneDrive-synced "seam" — no daemon, no network listener. It self-grades as v1.0 feature-complete: 216 unit/integration tests (all green), 6 documented adversarial gate reviews, 5 ADRs. But the README states directly that the one capability the whole system exists to prove — a live, same-session round-trip confirming a real Cowork session can read/write the seam — "has explicitly still [been] open": `t-cowork-seam-confirm.json` sits queued and unconsumed in the live seam as of this review. `docs/DELIVERABLES-MANIFEST.md` additionally records that none of the six phase gates received explicit Gabriel sign-off before the next phase began — each was presented and the project simply proceeded. In production, only `tools/expire-leases.py` actually runs unattended (`ora-aaos-expire-leases`, CC/MCP fleet, 3x/day since 2026-07-10); every other component (task lifecycle CLIs, handoffs, the Notion projection publisher) is unexercised outside its own test suite.
+**Fix direction:** either force one genuine live round-trip (a real task created by Code, leased/completed by an actual Cowork session) to validate the core claim, or stop counting AAOS as shipped/production infrastructure in future audits until it is — right now it is unproven maintenance surface with a real (if patched) history of concurrency bugs (see the README's own event-log clobbering note).
+**Evidence:** The round-trip had ALREADY genuinely happened — over a month before this item was filed. `handoffs/h-cowork-seam-ack-e7c490.json` (posted 2026-07-10T13:46 -04:00 by a real Cowork session, per its own context_summary: ran the COWORK-BOOTSTRAP.md probes for real, landed in SAFE-BY-HAND mode after Probe X's `validate.py` subprocess exited 1 on a jsonschema import error, then wrote the handoff + a paired spool event per §7) satisfies all three acceptance criteria — verified directly this session, not taken on the handoff's own word: `grep`'d `aaos-events.ndjson` and confirmed the paired `HandoffPosted` event was drained (`e-2026-07-10T17:46:23.580832Z-826571`), and ran `python tools/validate.py` against the handoff file → `VALID`. The actual gap all along was that Cowork's handoff explicitly said "a Code session should drain the spool... and may then lease/complete/archive the task" — and no Code session ever did. Closed properly this session: `tools/lease-task.py` + `tools/complete-task.py --archive` against `t-cowork-seam-confirm`, evidence citing the handoff/event/validation above. Task now `state:"archived"`. A companion handoff from the same Cowork session (`h-cowork-jsonschema-pin-request-9ac653.json`) also flagged that Cowork's `jsonschema` package fix was session-local/non-durable and spawned a follow-up task, `t-cowork-jsonschema-pin-952743` — **that one is still open**, unrelated to this closure, worth a separate look if Cowork FULL-EXEC parity is ever wanted.
+
+### OI-166
+**Status:** FIXED 2026-08-16
+**Opened:** 2026-08-16
+**Source:** Live concurrency near-miss during the `ora-passed-deal-tracker` double-fire-guard session (Gabriel-directed) — [[event_log]] 2026-08-16
+**Description:** `claim_work.py claim` refuses (exit 3) when a live claim exists **under the same slug**, but never asks whether a live claim under a *different* slug already covers the same `--paths`. Observed live: this session held `open-items-tracker` while session `30b5a31f` held `repo-housekeeping`, both declaring `memory/open-items-tracker.md` and `memory/MEMORY.md` — the exact two files each was trying to settle. Neither refusal could fire, because the gate is keyed on slug, not path. Both sessions independently root-caused the same blocked pull; only luck (the other claim being released first) prevented duplicate commits.
+The overlap primitive was **not** missing: `claims_touching()` has existed and is wired into `shared-checkout-guard.py:362` on the Edit/Write hot path, and into `dirty-file-owner-report.py`. It was simply never consulted by the `claim` command itself, so overlap surfaced only *after* someone edited a file — too late to prevent duplicated investigation.
+**Fix applied:** wired `claims_touching()` into the claim path so a cross-slug `--paths` overlap is surfaced at claim time, naming the other slug and session. Deliberately a **loud warning, not a refusal**: the module's docstring endorses distinct slugs as a feature ("a distinct slug keeps BOTH claims independently visible"), and its ratified design is fail-open, not a hard lock — a refusal here would wedge legitimate broad-`--paths` claims. Making the overlap *visible at claim time* is what "independently visible" was always meant to deliver.
+
+### OI-170
+**Status:** FIXED 2026-08-16
+**Opened:** 2026-08-16
+**Source:** Root cause of the entire `ora-passed-deal-tracker` double-fire-guard session (Gabriel-directed) — [[event_log]] 2026-08-16
+**Description:** The scheduler resolves a registry entry's `filePath` against the **live working tree**, not git. A SKILL.md can therefore be authored, reviewed, merged via PR, and present on `origin` while the checkout the scheduler actually reads still holds the old content — merged and inert, with nothing detecting it. Confirmed live: `ora-passed-deal-tracker`'s two-layer double-fire guard merged as `b734674` (PR #116, commit `c16667c`) but the primary checkout sat at `588ec1b`, so `grep -cE "block-sentinel|outlook-sent-probe"` against the live file returned **0** while every git-side check said the guard had shipped. It would have stayed inert through the 2026-09-15 06:30 ET dual-fleet fire had a human not noticed.
+`task-folder-registration-probe.py` was the closest existing guard and could not catch it: its three checks (UNREGISTERED, ORPHANED_REGISTRATION, ARCHIVED_BUT_REGISTERED) all reason about whether the filePath **exists**, never about whether its **content** matches what git says it should be. A merged-but-not-checked-out SKILL.md exists at the right path with the wrong bytes, which is clean by all three.
+**Fix applied:** extended `task-folder-registration-probe.py` with a fourth check, STALE_VS_GIT — for every enabled registry entry whose filePath is inside a git repo, compare the on-disk SKILL.md against the committed blob at HEAD and flag a mismatch. Catches this class directly: merged-but-not-pulled, locally-edited-but-uncommitted, and reverted-in-tree.
+
+### OI-165
+**Status:** CLOSED
+**Opened:** 2026-08-16
+**Closed:** 2026-08-16
+**Source:** Cross-repo architecture-diagram review (Gabriel-directed, this session) — `website-canonical/README.md` "Build & deploy flow" diagram and accompanying prose
+**Description:** **LOW** `scripts/build-kb.mjs` builds the `/api/chat` assistant's `netlify/edge-functions/knowledge-base.json` from `scripts/meta.md` plus 8 public pages, but is deliberately excluded from `netlify.toml`'s build command (`node scripts/build-dist.mjs` only) — the README states this directly: "editing a page does not change what the assistant knows until it is re-run" by hand. There is no CI check, pre-commit hook, or any other mechanism flagging that the committed `knowledge-base.json` has gone stale relative to `scripts/meta.md` or the site pages it's built from — so the chat assistant can silently serve outdated firm facts (leadership, markets, deal parameters, contact info) for an unbounded period after a real content edit, with zero signal that it happened.
+**Fix direction:** fold `build-kb.mjs` into the Netlify build command (it's a local, deterministic, no-external-call step — cheap to run on every build) or, if the hand-run cadence is intentional, add a pre-commit/CI check that compares `knowledge-base.json`'s content hash against a hash of `meta.md` + the pages it's built from and fails/warns on mismatch.
+**Evidence:** Gabriel confirmed in-turn 2026-08-16 ("Yes, do the website KB build fix"), authorizing the write past Hard Invariant 2's site-tree gate. `netlify.toml`'s `[build] command` changed from `node scripts/build-dist.mjs` to `node scripts/build-kb.mjs && node scripts/build-dist.mjs`. Verified locally by running the new chained command end to end: `build-kb.mjs` regenerated `netlify/edge-functions/knowledge-base.json` (pages=9, chars=37327, only the `generatedAt` timestamp changed vs. the prior committed copy — confirming site content hadn't actually drifted since 08-13, this just closes the future gap) and `build-dist.mjs` completed with its own required-file/leak/HTML-count checks passing (`OK — 40 root entries -> dist/ (18 pages)`, no failures). README's diagram + prose updated to describe the new automated behavior. No deploy performed — that stays a separate confirmation per Hard Invariant 2.
+
+### OI-050
+**Status:** CLOSED
+**Opened:** 2026-07-31
+**Closed:** 2026-09-13
+**Source:** ora-appsec-sweep 2026-07-31 (oxford-command-center @ `3692385`, security-auditor dispatch)
+**Severity:** MEDIUM (rated below HIGH only because it requires the server running AND the victim
+visiting attacker-controlled content)
+**Description:** `server/index.ts:531`; `server/cors-policy.ts`. Hono's `cors()` never gates a
+same-origin request, and after a DNS rebind the attacker's origin *is* the request origin, so the
+localhost-only CORS policy is bypassed entirely rather than violated.
+**Impact:** `/api/snapshot` is the single highest-value data set in the fleet. Both read and write are
+reachable.
+**Evidence:** [oxford-command-center PR #327](https://github.com/ZeOoba/oxford-command-center/pull/327)
+merged `304bcbb0` 2026-09-13. New `server/host-guard.ts` mounted on `/api/*` and `/sse` before `cors()`/
+`accessAuthz`: exact-match Host allowlist (defeats DNS rebinding), fail-closed Origin check on any
+present Origin, and a required `X-ORA-Client` header on every non-GET/HEAD/OPTIONS request (forces a
+CORS preflight on any cross-origin write, which the existing origin allowlist then blocks). All 20
+mutating `fetch(` sites in `src/**`/`scripts/ar-import.ts` updated to send the header. TDD (RED
+confirmed first), full suite 281 files/4023 tests passing, typecheck/lint/build clean, re-verified
+after a rebase across 25 intervening upstream commits (zero file collisions; mutating-fetch-site count
+re-swept at 20/20 against the rebased tree). Independent adversarial REFUTE pass (Fable-tier
+security-auditor, cold read) ran a raw-socket bypass matrix directly against the real
+`@hono/node-server` adapter — DNS rebinding, duplicate/case-varied Host headers, `Origin: null`, empty
+`X-ORA-Client`, IPv6 loopback, path-encoding tricks — every attempt held; confirmed bind is `127.0.0.1`
+only. The REFUTE pass caught the one caller a repo-scoped sweep could not see — the `ora-om-intake-ocr`
+scheduled task (LAMS/Cowork fleet, outside this repo) POSTs to `/api/actions/om-extract` with no
+`X-ORA-Client` header — fixed in that task's SKILL.md (v1.6) in the same session before merging, so
+nothing broke on its next fire.
+**Auto-check:** none.
+
+### OI-071
+**Status:** CLOSED
+**Opened:** 2026-08-03
+**Closed:** 2026-09-13
+**Source:** Production verification of [OI-067](#OI-067), 2026-08-03
+**Severity:** MEDIUM (broken feature, confirmed — not a security exposure; the RLS policy is correct and holding)
+**Description:** `src/portal/pages/PortalInsurance.tsx` uploads tenant COI files to
+`${session.user.id}/${file.name}` in the `insurance-certs` bucket, but the live `tenant_upload_insurance`
+RLS policy (confirmed applied and correct, see OI-067) requires the folder to equal `tenants.id`
+(resolved via `tenants.auth_user_id = auth.uid()`). Every real tenant COI upload through this page
+fails today — confirmed against production, not just the repo.
+**Corroborated independently, 2026-08-04:** a REFUTE pass on the OI-048 docs/tripwire fix, reading
+`server/db/client.ts` cold with no knowledge of this item, re-derived the exact same
+`session.user.id`-vs-`tenants.id` mismatch from first principles. Two independent passes reaching the
+identical root cause is corroboration, not new information — no change to this item's status or scope.
+**Evidence:** [ora-pm PR #31](https://github.com/ZeOoba/ora-pm/pull/31) merged `253f2925` 2026-09-13.
+`PortalInsurance.tsx` now resolves `tenants.id` via the existing `GET /api/portal/me` (same pattern as
+`PortalPayNow.tsx`/`PortalDashboard.tsx`) instead of `session.user.id`, with a loading/error guard so
+the upload can't fire before the tenant id is available. New component test added (no jsdom/
+testing-library in this repo, so it combines a source-text assertion with a `react-dom/server`-rendered
+behavioral check of the loading guard). Full suite 479/479 passing. Independent adversarial REFUTE pass
+confirmed: no stuck-loading state on a slow/failed `/me` (TanStack Query retries on focus/remount), no
+path for a stale/undefined tenant id to reach `.upload()`, and defense-in-depth still holds even if it
+did (server resolves the tenant from the JWT independently; RLS `WITH CHECK` compares against the
+caller's own `tenants.id`).
+**Auto-check:** none.
+
+### OI-229
+**Status:** CLOSED 2026-09-12 — all three close conditions met (see Closure below); moved to history
+**Opened:** 2026-09-03
+**Source:** `register-scheduled-task` v2.19 step 3b (ora-skills `be1deda`) applied to the live fleet, 2026-09-03; Automation Audit Rev 21 R21-2/R21-4 (every trigger of a money-moving task co-located on the host whose outage was the outage)
+**Acceptance:** `ora-pm-daily-crons` carries an `offhost-backup:` frontmatter line naming a LIVE trigger that does not run on this laptop (repo + workflow + cron + live-since date), OR Gabriel rules the late-fee posting out of the money-moving class and the frontmatter is re-declared accordingly.
+
+**Description:** **`ora-pm-daily-crons` posts late fees (delinquency-check) and has no off-host backup trigger — declared `offhost-backup: none — GAP` on 2026-09-03.** ora-pm PR #24 (`monthly-billing-backup.yml`, cron `40 17 1 * *` UTC, still OPEN) covers monthly billing only. During the 2026-08-29→09-01 host outage this task's late-fee posting was silent for four days with nothing off-host to catch it (recovered in the 09-02 catch-up burst: 35 late fees). Gabriel's call: extend the ora-pm GitHub Actions backup to the two daily endpoints (critical-dates-alerts, delinquency-check — both idempotent per the endpoints' own upsert semantics, to be confirmed in the PR), or accept the gap explicitly in the frontmatter. Companion: `ora-pm-monthly-billing` is declared `pending` on PR #24 and flips to a live declaration when that PR merges.
+
+**Update 2026-09-12 — fix built, NOT live; stays OPEN.** [ZeOoba/ora-pm PR #25](https://github.com/ZeOoba/ora-pm/pull/25) adds `.github/workflows/delinquency-backup.yml` (cron `10 16 * * *` UTC) + `scripts/delinquency-backup.sh` (13-case no-network test, CI green, adversarial refute pass: no logic defects). Scope correction to the description above: backs up **delinquency-check ONLY** — `critical-dates-alerts` is NOT double-fire safe (it inserts `sent_notifications` dedup rows before returning a digest only the laptop's Outlook-COM run can send) and is not money-moving. Double-fire safety of delinquency-check confirmed: `charges.idempotency_key TEXT UNIQUE` (`0002_financial_tables.sql:17`) + existing-fee guard. **Blocker found:** repo secret `ORA_PM_CRON_SECRET` does not exist (`gh secret list`, 2026-09-12) — so PR #24's `monthly-billing-backup.yml` has also never run and was wrongly declared `live since 2026-09-03`; both frontmatter lines corrected 2026-09-12 (`pending` / `dormant — secret missing`). **Close only when all three hold:** (1) Gabriel sets `ORA_PM_CRON_SECRET`, (2) PR #25 merged, (3) one real run of `delinquency-backup.yml` concludes `success` — cite the run URL, then flip the frontmatter to `live since <date>`. Adjacent, unchanged: [OI-234](#OI-234) (fee condition is charge age, not current overdue balance) — this backup makes that existing logic more reliable, it does not fix it.
+
+**Closure 2026-09-12 (evidence):** (1) `ORA_PM_CRON_SECRET` set by Gabriel, listed by `gh secret list` at 2026-09-12T23:35:36Z; (2) [PR #25](https://github.com/ZeOoba/ora-pm/pull/25) merged `f756687`, `delinquency-backup.yml` active on main; (3) first real run (manual `workflow_dispatch`) concluded `success`: https://github.com/ZeOoba/ora-pm/actions/runs/34725864211 — self-test ALL PASS, `delinquency-check: HTTP 200 late_fees_posted=0 delinquent_count=68` (0 fees expected: OI-278 payments-feed guard + this month's fees already posted). `ora-pm-daily-crons` frontmatter now `live since 2026-09-12` with that URL. Companion `ora-pm-monthly-billing` moved `dormant` → `pending — awaiting first run` (first scheduled fire 2026-10-01 17:40Z; deliberately not proven by manual dispatch because that endpoint posts charges). Also landed from this item: [OI-234](#OI-234) fixed (PR #27), `register-scheduled-task` v2.24 live-proof rule + `automation-health-monitor` v1.10 backup checks ([ora-skills PR #52](https://github.com/ZeOoba/ora-skills/pull/52)).
+
+### OI-078
+**Status:** CLOSED 2026-09-18
+**Opened:** 2026-08-05
+**Source:** ora-appsec-sweep 2026-08-05 (ora-pm @ `a29f8f0`, security-auditor dispatch)
+**Severity:** CRITICAL (data exposure / authorization)
+**Description:** `supabase/migrations/0001_core_entities.sql`, `0002_financial_tables.sql` (no RLS
+anywhere in either), `0004_views_and_rls.sql:102-107` (RLS enabled on 6 tables only),
+`src/lib/supabase.ts:3-6`, `src/portal/lib/supabase-portal.ts:4-7`. Row Level Security is enabled on
+`charges`, `payments`, `lease_documents`, `lease_amendments`, `tenant_notices`,
+`insurance_certificates` — and on nothing else. The 17 remaining tables (`properties`, `units`,
+`tenants`, `leases`, `expenses`, `budgets`, `renewals`, `broker_commissions`, `cam_reconciliations`,
+`correspondence_log`, `journal_entry_exports`, `lease_move_events`, `sent_notifications`,
+`stripe_webhook_events`, `tenant_sales_reports`, `utility_meters`, `utility_readings`) have no
+`ENABLE ROW LEVEL SECURITY` statement in any migration. `VITE_SUPABASE_URL` and
+`VITE_SUPABASE_ANON_KEY` are compiled into the public JS bundle by design. In a stock Supabase
+project `anon`/`authenticated` hold default GRANTs on `public` tables, so an RLS-disabled table is
+readable and writable straight through PostgREST.
+**Impact:** anyone who loads the site can extract the anon key and read the whole portfolio — 14
+properties, ~140 tenants, contact PII, `stripe_customer_id`, full lease economics (base rent, CAM,
+TI allowances, security deposits, options) — and, absent an explicit `REVOKE`, write to it:
+rewriting `leases.base_rent_monthly`, or inserting `payments` rows that zero a tenant's balance in
+`ar_ledger`.
+**Relationship to [OI-048](#OI-048):** OI-048 records that the API uses the service-role key so RLS
+is not the API's control, and that RLS reads as a safety net which is not actually one. This item is
+the other half and the more severe one: for 17 tables the net is not merely bypassed by the API, it
+does not exist at all on the internet-facing database endpoint. The in-repo rebuttal at
+`supabase/migrations/README.md:23-29` and `server/db/client.ts:18-23` — "these policies protect a
+code path that doesn't exist yet", true of the app and confirmed by grep — does not apply, because
+the attacker brings their own PostgREST client rather than using the app's.
+**Verification status (IMPORTANT — inferred, not verified):** the migration-level facts above were
+independently re-verified this run by direct grep against the pinned worktree, not taken on the
+agent's word. What was NOT verified is whether the live Supabase project actually grants
+`anon`/`authenticated` on these tables — this sweep is report-only and does no live probing. Do not
+record this as exploited-in-production until someone runs the check. One command settles it:
+`curl -s "https://<project-ref>.supabase.co/rest/v1/tenants?select=id,name&limit=1" -H "apikey: <anon key from the deployed bundle>"`
+— any row returned confirms it.
+**Candidate fix (NOT applied — this sweep is report-only):** enable RLS on every `public` table (no
+policies = deny-all for anon/authenticated, service-role API unaffected), or
+`REVOKE ALL ON <table> FROM anon, authenticated` for tables that should never be client-reachable.
+Then change `tests/db/rls-inventory.test.ts` from a manifest match to a COMPLETENESS check — parse
+every `CREATE TABLE` in the migrations and fail on any without a corresponding enable or a
+documented exemption. As written that test asserts the claim set hasn't changed, which locks the gap
+in rather than catching it. Sequence with [OI-080](#OI-080) and [OI-079](#OI-079): they are one
+chain, and fixing any one alone leaves it intact.
+**Closure evidence (2026-09-18):** **CODE FIXED 2026-08-17** via `supabase/migrations/0013_enable_rls_remaining_tables.sql` (default-deny, no policies), REFUTE-verified, merged to `main` via [ora-pm PR #23](https://github.com/ZeOoba/ora-pm/pull/23) (`aede030`). Production migrations sat unapplied for weeks pending `SUPABASE_ACCESS_TOKEN`/`SUPABASE_DB_PASSWORD` repo secrets (dry-run executed 2026-08-22 failed cleanly at the credential step). Those secrets were confirmed set on `ZeOoba/ora-pm` 2026-09-16. **CONFIRMED CLOSED 2026-09-18:** dispatched `DB Migrate (manual)` as a read-only dry-run against production ([run 35388593228](https://github.com/ZeOoba/ora-pm/actions/runs/35388593228)) — `supabase migration list --linked` shows all 17 migrations 0001-0017 with LOCAL==REMOTE, including `0013_enable_rls_remaining_tables.sql`; `supabase db push --dry-run` reports "Remote database is up to date." RLS is live in production.
+**Auto-check:** none.
+
+### OI-090
+**Status:** CLOSED
+**Opened:** 2026-08-05
+**Closed:** 2026-09-13
+**Source:** ora-appsec-sweep 2026-08-05 (oxford-command-center @ `175e3f9`, security-auditor dispatch)
+**Severity:** MEDIUM (unbounded consumption, OWASP-LLM10)
+**Description:** `server/index.ts:460-493` (`/api/ai`, SSE), `:447-453` (`/api/documents/search`),
+`:358` (`/api/actions/om-extract`). Per-request bounds are correct and worth keeping — the agent
+loop caps at `maxTurns: 8` (`server/ai/agent.ts:178`) and `max_tokens: 16000` (`:203`), the upload
+caps at 25 MB — but nothing bounds CONCURRENT or REPEATED requests. Each `/api/ai` call spends real
+Anthropic tokens against the machine's `ANTHROPIC_API_KEY`.
+**Impact:** any local process — or a cross-site simple POST per [OI-050](#OI-050) — can drive
+unbounded API spend and memory pressure on a workstation with a ~5.7 GB ceiling. Combined with
+OI-050 this is the cheapest denial-of-wallet path in the repo. ora-pm's equivalent exposure was
+closed under OI-038/044 (KV-backed `checkRateLimit`, per-route ceilings); oxford-command-center has
+no counterpart at all.
+**Evidence:** [oxford-command-center PR #328](https://github.com/ZeOoba/oxford-command-center/pull/328)
+merged `b34add2d` 2026-09-13. New `server/rate-limit.ts` — in-process token bucket
+(`createRateLimiter`) + concurrency gate (`createConcurrencyLimiter`), no external/KV dependency.
+Mounted per-route (fresh instance each) after the OI-050 boundary/cors/accessAuthz chain:
+`/api/ai` 10 starts/min + max 3 concurrent, `/api/actions/om-extract` 5/min,
+`/api/documents/search` 90/min (raised from an initial 30/min after REFUTE caught that ordinary
+interactive typing — no debounce on the search box — would trip 30). The concurrency gate's slot
+tracks the actual SSE response BODY's lifetime via a wrapping `holdUntilSettled` stream, not the
+handler function's synchronous return (`streamSSE()` returns before the agent loop finishes, so a
+naive release-in-finally would gate nothing); client disconnects forward to the existing
+`AbortController` so an abandoned client stops spending tokens.
+**Two REFUTE rounds, both real findings, both fixed before merge:**
+(1) HIGH — the first cut mounted limiters with `app.use(path, ...)`, method-agnostic in Hono. Three
+unauthenticated `HEAD /api/ai` requests permanently exhausted the concurrency gate (Hono discards the
+HEAD response body before the wrapped stream is ever read, so release never fires), killing the route
+until restart; any wrong-method request also drained the rate bucket for free. Fixed with
+method-scoped `app.on(METHOD, path, ...)` mounts plus a defensive HEAD guard in the concurrency
+wrapper; independently re-verified with raw-TCP probes against a real `@hono/node-server` instance
+(not just in-memory tests) — concurrent load, client-abort, and every throw/no-body exit path all
+release correctly, and no path-spelling or method trick routes around it.
+(2) MEDIUM — the original 30/min search limit would trip on ordinary typing (fetch per keystroke, no
+debounce); raised to 90/min.
+**Follow-ups filed, not blocking:** the Cloudflare Pages mirror (`functions/api/ai.ts`) runs the same
+agent with no rate bound — OI-090 is closed for the Brain Server/tunnel surface only, not the mirror;
+`/api/documents/search`'s 429 still surfaces client-side as a generic "Search unavailable" message
+(needs a debounce + distinct 429 branch); a slow reader that never drains its `/api/ai` stream holds a
+concurrency slot indefinitely (same-machine-process only, not browser-reachable) — a max-stream-lifetime
+timeout would close this; pre-existing (not introduced here) — `stream.onAbort` in the real `/api/ai`
+handler is registered after `await c.req.json()`, so a disconnect during body parsing isn't caught.
+**Auto-check:** none.
+
+### OI-127
+**Status:** CLOSED 2026-09-18 — duplicate of OI-135, same fix — see OI-135 for the live item.
+**Opened:** 2026-08-12 (id reserved 2026-08-12T20:52:45Z by session `e0f8485e`; row written 2026-08-12 by session
+`1de11c79` during an orphan-reservation sweep, with the reserving session inactive on it and holding no claim)
+**Severity:** see OI-135 — this row carries no independent severity assessment.
+
+**Why this row exists.** The id was reserved and the row never written, so `allocate-oi-id.py --report` listed it
+as an orphan. Sixty-eight minutes later a different session (`2fb76021`) reserved **OI-135** for the same defect
+and filed it with fuller evidence. Leaving OI-127 as a bare reservation invites a third session to re-derive the
+same finding a third time; writing it as a full standalone row would put two live items in the tracker for one
+defect. Hence a pointer.
+
+**The defect (tracked under OI-135, not here).** `hooks/git-prepush-hook-tests-gate.py` applies a 180s per-test
+timeout budget. Under concurrent load that budget is below the real runtime of several suites, so healthy tests
+exit-124 and the gate hard-blocks the push. Measured on 2026-08-12: 5 sessions hit exit-124 on
+`test-eos-review-gate.py` and siblings, ~150–300s actual against the 180s budget under 12–16+ concurrent
+sessions, **all clearing on rerun**.
+
+Independently corroborated the same day: the push of `oi122-gate-msg` (PR #67) emitted
+`timeout-retry (timed out under load, passed on the doubled-budget rerun; not blocking)` naming
+`test-commit-hygiene-guard.py`, `test-eos-review-gate.py`, and `test-memory-orphan-link-guard.py` — i.e. the
+doubled-budget rerun path already exists and works; the first-pass budget is what is mis-set.
+
+**Do not fix from this row.** Track the fix, evidence, and any REFUTE pass under **OI-135**.
+
+**Related:** [OI-119](#OI-119) — same gate, the *flakiness* failure mode (errored tests are not retried) rather
+than the timeout budget. A fix for one should be checked against the other.
+
+**Closure evidence (2026-09-18):** duplicate/orphan-reservation closure — see this item's own text above; OI-135 (the item it points to) is already closed elsewhere in the tracker history.
+
+### OI-079
+**Status:** CLOSED 2026-09-18
+**Opened:** 2026-08-05
+**Source:** ora-appsec-sweep 2026-08-05 (ora-pm @ `a29f8f0`, security-auditor dispatch)
+**Severity:** HIGH (cross-tenant data exposure)
+**Description:** `supabase/migrations/0011_appsec_idempotency_and_scale.sql:118-151` (`ar_ledger`),
+`0004_views_and_rls.sql:33-99` (`rent_roll`, `critical_dates`). None of the three views is created
+`WITH (security_invoker = true)` — the string does not appear anywhere in `supabase/migrations/**`
+(verified by grep this run). A view without it executes with the view owner's privileges and
+therefore ignores the RLS policies on the underlying `charges`/`payments`/`leases`/`tenants`.
+**Impact:** one `GET /rest/v1/ar_ledger?select=tenant_name,balance` with the anon key — or with an
+`authenticated` JWT minted via [OI-080](#OI-080) — returns every tenant's name, total charged, total
+paid, balance and property. `rent_roll` additionally discloses full per-suite rent economics. This
+survives a fix to [OI-078](#OI-078), which is why it is filed separately.
+**Candidate fix (NOT applied):** `ALTER VIEW ar_ledger SET (security_invoker = true);` (same for
+`rent_roll`, `critical_dates`), plus
+`REVOKE ALL ON ar_ledger, rent_roll, critical_dates FROM anon, authenticated;`. The service-role API
+reads all three (`server/routes/reports.ts:13,24,34`, `cron.ts:160,322`, `stripe.ts:159`) and is
+unaffected by either change.
+**Auto-check:** none.
+
+**Closed:** 2026-09-18
+
+**Closure evidence (2026-09-19):** `supabase/migrations/0012_view_security_invoker.sql` sets `security_invoker = true` on `ar_ledger`, `rent_roll` and `critical_dates`. `DB Migrate (manual)` dry-run against production ([run 35388593228](https://github.com/ZeOoba/ora-pm/actions/runs/35388593228), 2026-09-18) lists `0012` with LOCAL==REMOTE and reports "Remote database is up to date." The same evidence closed [OI-078](open-items-tracker-history.md#OI-078).
+
+### OI-171
+**Status:** CLOSED 2026-09-19
+**Opened:** 2026-08-16
+**Source:** found while root-causing Gabriel's report of the `loans · name` flag in the Command
+Center safety section. That flag itself is correct behavior and was ruled LEAVE-AS-IS in-turn; this
+item is the separate defect one layer downstream.
+**Severity:** MEDIUM — no wrong numbers, but a permanent false `warn` email is exactly what trains
+a reader to ignore the real one. Self-masking alert.
+
+**Defect.** `ora-cc-snapshot-refresh` STEP 5 clause (b) escalated to email on "at least one
+data-quality flag of severity `warn` or higher". The single permanent, intentional flag —
+`loans · name`, the tombstoned Loan Index row 24 duplicate marker — **is** `warn`. So the gate's own
+condition matched it and every clean exit-0/no-drift run still sent `[ALERT]`.
+
+**Why it slipped through.** The v1.1 severity gate (`1706bc2`, 2026-08-12 15:42:50 -0400) was written
+around the belief that the permanent flag was `severity: info`. It had already been bumped `info` →
+`warn` in `490d89f` (2026-08-11 18:15:14 -0400, oxford-command-center) **~21 hours earlier** — a
+deliberate change, because skipping the row removes its balance from aggregate debt and moves
+portfolio LTV in the falsely-clearing direction against Hard Invariant 4's 40% ceiling
+(`server/workbook/parse.ts:655-658`). Two individually-correct changes; the interaction is the bug.
+The stale `info` claim propagated into the SKILL.md body, its frontmatter description, and
+`reference_cc_snapshot_refresh_dq_flag_alert_is_count_not_severity.md` (archived 2026-08-21, finding closed — see `_archive/reference_cc_snapshot_refresh_dq_flag_alert_is_count_not_severity_archived_2026-08-21.md`) — all three corrected 2026-08-16.
+
+**Fix (Gabriel ruled in-turn, multiple-choice: "Allowlist the ratified tombstone").** SKILL.md v1.3
+adds a RATIFIED-TOMBSTONE ALLOWLIST to the severity gate: clause (b) now escalates only on a
+warn-or-higher flag NOT on the allowlist. Exactly one flag is allowlisted and the match requires all
+four of `entity=="loans"`, `field=="name"`, `rawValue` exactly `⚠ DUPLICATE OF ROW 22 — DO NOT USE`,
+and `issue` containing `Loan Index row 24 is tombstoned`. Any deviation — different row number, a
+second tombstone, an altered marker — is NOT allowlisted and DOES email. It suppresses one ruled-on
+flag, never a class.
+
+**Explicitly NOT fixed by downgrading the parser back to `info`.** That would re-open the
+governor-guard hole `490d89f` closed. Suppression is at the ALERT layer only. Row 24 carries no
+balance either way: `C24:G24` are all `='Portfolio Summary — Internal'!#REF!`.
+
+**Auto-check:** none automated. To verify by hand:
+`python -c "import json;print([f['severity'] for f in json.load(open(r'C:/Users/Owner/oxford-command-center/data/snapshots/portfolio.json',encoding='utf-8'))['dataQuality']])"`
+must print `['warn']`, AND `grep -c "RATIFIED-TOMBSTONE ALLOWLIST" ~/.claude/scheduled-tasks/ora-cc-snapshot-refresh/SKILL.md`
+must be ≥ 1. Both true ⇒ gate is correctly configured. Real proof is the 2026-08-17 run posting a
+Notion note with **no** email.
+
+**Closed:** 2026-09-19
+
+**Closure evidence (2026-09-19):** (1) `grep -c "RATIFIED-TOMBSTONE ALLOWLIST" ~/.claude/scheduled-tasks/ora-cc-snapshot-refresh/SKILL.md` = 3. (2) `send-log.txt` holds no `[ALERT] ora-cc-snapshot-refresh - data-quality flag count > 0` email after 2026-08-11, across 2026-08-17 to 2026-09-18, while the task kept running and alerting for unrelated causes (08-17, 08-24, 09-02, 09-05, 09-07). (3) `portfolio.json` `dataQuality` now reads `[]`, not the `['warn']` the hand-check expected, so the tombstone flag is no longer emitted at all and there is nothing left to escalate.
+
+### OI-318
+**Status:** CLOSED 2026-09-19
+**See:** the Closed table above — the row's own one-line cell is the full write-up; not restated here per this file's own text-lives-in-one-place rule.
+**Opened:** 2026-09-18
+**Closed:** 2026-09-19
+
+**Closure evidence (2026-09-19):** Gabriel ruled "Leave history alone" in-turn (interactive choice). Working-copy redaction stands (`ff48473` on `origin/main`); commit `ec9c626` remains in public history on `ZeOoba/ora-skills`. The detail is address-level (no owner names) for two never-call sellers that are not on the `confidential-terms.json` roster. No rewrite, no force-push.
+
+### OI-031
+**Status:** CLOSED 2026-09-19
+**Prior status:** OPEN
+**Opened:** 2026-07-27
+**Source:** `orphaned-task-forensics` trace of the `ora-master-workbook-ingest` 2026-07-20 silent
+gap, [event_log.md](event_log.md#2026-07-27)
+**Description:** `fleet-status.py`'s missed-cycle detectors are structurally blind to an
+already-established recurring task silently skipping a single scheduled fire — confirmed by
+reading the script directly (`C:\Users\Owner\.claude\maintenance\fleet-status.py`). "Overdue"
+(`never_ran_overdue`) only fires for a RECURRING task that has NEVER fired even once (a
+cadence-buffer heuristic meant for brand-new tasks). "Missed/stuck" (`expired_needs_attention`)
+applies only to expired ONE-TIME tasks. Throttle-skip tracking catches a task that fired and got
+rate-limited, not one that never attempted to fire at all. None of the three checks can detect
+"this weekly/monthly task has run before, is still enabled, but silently missed this one cycle" —
+exactly the gap that let `ora-master-workbook-ingest`'s 2026-07-20 Monday fire go unnoticed for a
+full week despite the fleet's own Monday-afternoon schematic-refresh snapshot reporting "0
+overdue, 0 missed/stuck" that same day.
+**Candidate fix (not built):** extend `fleet-status.py` with a per-task expected-fire-window
+check for tasks that HAVE fired before, comparing `lastRunAt` against the most recent
+cron-predicate fire time (mirroring `automation-health-monitor`'s Step 0.5 `expectedFireTime`
+walk-backward logic, already implemented for the LAMS fleet) — flagging MISSED/OUT-OF-WINDOW
+the same way that step does, rather than only checking never-fired-at-all or expired-one-time
+states.
+**Auto-check:** none (a tooling-logic gap, not a fleet-registry state comparable to the closed
+Auto-check vocabulary above).
+
+**Closed:** 2026-09-19
+**Closure evidence (2026-09-19, batch verification against live state):** fleet-status.py (~L326-361) has the missed-cycle detector; maintenance/_tests/test_fleet_status_missed_cycle.py exists. OI-058/070 stay open on their own terms.
+
+### OI-062
+**Status:** CLOSED 2026-09-19
+**Prior status:** OPEN
+**Opened:** 2026-08-04
+**Source:** `pending_reimport.py` frontmatter-normalization session, 2026-08-04 (port of PR #35's
+YAML-quoting fix into `pending_reimport.py`'s comparator, [PR #38](https://github.com/ZeOoba/ora-skills/pull/38),
+merged `33d2579`)
+**Description:** At session start, `C:\Users\Owner\ora-skills` (the MAIN checkout, not a
+worktree) had two uncommitted changes with no attributable owner: `plugins/ora-operations-extensions/plugin-build.json`
+modified (version bump `0.1.5` → `0.1.6`) and an untracked `_check_plugin.py` (112 bytes,
+mtime 2026-07-29). Neither relates to any work this session did. Per the repo's single-writer
+convention, isolated all of this session's own work into a git worktree (`.claude/worktrees/pending-reimport-frontmatter-norm`)
+rather than touch or clean up the stray files, then fast-forwarded the main checkout's `main`
+branch after the PR merged — confirmed the two stray changes were still present and untouched
+afterward. No `claim_work.py`-style claim was found recorded against either file. Left open
+because deleting or committing someone else's possible in-progress change without confirmation
+would be the wrong default; needs either the owning session to finish/commit it, or Gabriel to
+confirm it's abandoned so it can be discarded.
+**Auto-check:** none.
+
+**Closed:** 2026-09-19
+**Closure evidence (2026-09-19, batch verification against live state):** ora-skills plugin-build.json no longer modified and _check_plugin.py gone; only unrelated untracked _archive dirs remain.
+
+### OI-074
+**Status:** CLOSED 2026-09-19
+**Prior status:** OPEN (partially fixed — CI piece inert pending Gabriel-provisioned secrets)
+**Opened:** 2026-08-04
+**Source:** OI-073 follow-up session, root-causing why ora-pm migrations keep landing untracked
+**Severity:** MEDIUM (tooling blind spot, not a live defect — same class as OI-073/OI-048)
+**Root cause (confirmed by direct testing, not inference):** this Code sandbox has no
+`SUPABASE_ACCESS_TOKEN` set (`npx supabase migration list --linked` fails with
+`LegacyPlatformAuthRequiredError`) and no `supabase login` session exists — so `supabase db push`/`migration
+up`, the only CLI commands that write a row into `supabase_migrations.schema_migrations` as a side effect of
+applying a migration, cannot run from here. Raw TCP to the Supabase Postgres pooler on 5432 DOES connect from
+this sandbox (contradicting an earlier 2026-08-03 event_log claim of "no network egress at all" — that may
+have been a different sandbox/environment, or a stale claim), but CLI auth requires the access token
+regardless of TCP reachability. Sessions have therefore applied migrations out-of-band instead — pasting SQL
+into the Supabase Dashboard SQL editor via Claude-in-Chrome, or an ad-hoc Node script against the
+service-role key (0008's self-documented history) — and neither path touches the tracking table. This is the
+process OI-073 left unidentified.
+**Fix, two-tier (Gabriel-directed via AskUserQuestion, 2026-08-04):**
+1. **Fallback (built, tested, no credentials needed):** `ora-pm/scripts/prepare-migration-for-dashboard.mjs`
+   — given a migration file, wraps its SQL together with an idempotent
+   `INSERT ... ON CONFLICT (version) DO NOTHING` tracking row in a single `BEGIN;...COMMIT;` block, so a
+   human pastes ONE block into the Dashboard SQL editor and apply+track can't be split into two steps to
+   forget between. Guards added after an adversarial REFUTE pass (security-auditor agent): refuses to wrap
+   SQL containing `CONCURRENTLY`/`VACUUM`/`ALTER SYSTEM`/`CREATE DATABASE` (can't run inside a transaction),
+   and refuses unbalanced `/* */` block comments (would silently swallow the appended COMMIT). 21 vitest
+   tests incl. a real-subprocess CLI test (caught and fixed a genuine bug: the original `import.meta.url`
+   vs. hand-built `file://${argv[1]}` comparison never matches on Windows, silently no-op'ing `main()`).
+   404→414/414 suite green, typecheck clean. **Caveat, not yet empirically verified:** the script's
+   atomicity claim assumes the Supabase Dashboard SQL editor honors explicit `BEGIN`/`COMMIT` the way
+   `psql -f` does — untested against the live editor; probe instructions are in the script's own header
+   comment before relying on it for anything touching `charges`/`payments`/`ar_ledger`.
+2. **Primary path (built, YAML-validated, NOT yet live-tested — needs Gabriel):** `ora-pm/.github/workflows/db-migrate.yml`,
+   a `workflow_dispatch`-only GitHub Actions job that runs the real `supabase db push` (auto-tracking) against
+   project ref `tvfarkddtbtdrpvvehth`. Requires two repo secrets Gabriel has not yet added —
+   `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD` — until then it fails cleanly at the link step. REFUTE
+   pass caught and fixed two HIGH findings before this could be considered safe to use: `dry_run` now
+   defaults to `true` (a bare "Run workflow" click is always a no-op preview), and the job is gated
+   `if: github.ref == 'refs/heads/main'` (workflow_dispatch could otherwise target an unmerged branch and
+   push an unreviewed migration straight to prod). Added `timeout-minutes: 10` as defense-in-depth.
+**Residual, not closed:** the CI path cannot be exercised until Gabriel adds the two secrets and runs it once
+with `dry_run: true`; the dashboard-paste script's core atomicity assumption is unverified against the live
+Supabase Studio editor. Full REFUTE report (security-auditor agent, 2026-08-04) available in this session's
+transcript — 2 HIGH (fixed), 2 MEDIUM (1 fixed via `timeout-minutes`, 1 residual — atomicity), 3 LOW (fixed:
+transaction-unsafe-SQL guard, unbalanced-comment guard; 1 accepted as-is — no static pre-flight-comment
+detector added, judged low-value for a script whose whole job is to wrap arbitrary migration SQL verbatim).
+**Auto-check:** none.
+
+**Closed:** 2026-09-19
+**Closure evidence (2026-09-19, batch verification against live state):** SUPABASE_ACCESS_TOKEN and SUPABASE_DB_PASSWORD provisioned 2026-09-16; db-migrate.yml runs on 09-17 and 09-18 succeeded.
+
+### OI-075
+**Status:** CLOSED 2026-09-19
+**Prior status:** OPEN (fix built + scheduled; first live alert not yet observed)
+**Opened:** 2026-08-04
+**Source:** Session brief follow-up — standing fix for skill-store/repo drift (2 same-day REVERSE-DIRECTION
+reconciles, event_log.md commits `a2b34ad` and `3825ac5`)
+**Severity:** MEDIUM (process gap — content itself was recovered both times, but only by manual diffing)
+**Description:** Cowork's `save_skill`/`create-skill` writes straight to the AppData runtime skill cache from
+outside git — no repo commit, and no Code-side hook can intercept a different app's write (confirmed: grepped
+`hooks/` for any save_skill/Cowork interception point, found none). **Correction to the session brief's framing:**
+the detector this item asks for was NOT missing — `ora-skills/tools/repo_first_check.py` (merged to main
+2026-08-03/04, PR `store-ahead-of-repo-ledger`, commit `1e714eb`) already does exactly this, per-file (not
+just SKILL.md), with proper git-ancestry-based CACHE-AHEAD/DIVERGENT/REPO-MISSING classification and a
+rescue-copy safety net — built by a concurrent session working the same problem. It was already wired into
+two places: the ora-skills pre-commit hook (`--check-staged`, only fires on a commit touching that exact
+skill) and `ora-doctrine-integrity-guard`'s **daily** sweep (`--all`, cron `55 12 * * *`, alarms via
+email+Notion on any `!! REPO-FIRST` finding). Neither catches drift on a skill nobody is committing to AND
+edited same-day — daily is too slow for "3 occurrences in one day."
+**Fix:** new CC/MCP scheduled task `ora-skill-cache-drift-alert` (registered via supervised
+`create_scheduled_task`, cron `*/30 * * * *`), narrowly scoped to ONLY the `repo_first_check.py --all` sweep
+(not the other 3 doctrine-guard engines, so a 30-min cadence stays cheap). On a finding NOT already tracked
+by an open item (cross-checks this tracker first, dedup by skill name — avoids re-filing every 30 min for
+the same unresolved drift), it allocates a real OI id via `allocate-oi-id.py`, appends an entry to this
+tracker (isolated hunk, re-verify-before-write — same discipline as any interactive session), and alerts via
+Notion + email (reusing `ora-doctrine-integrity-guard`'s proven STEP 3 alarm mechanism). A clean run is
+silent — no Notion, no email, no OI item — matching every other guard in this fleet.
+**Residual, not closed:** built and registered but has not yet fired against a real finding (next run within
+30 min of registration) — the dedup-cross-check logic and the OI-filing step are unverified against a live
+drift event. `ora-doctrine-integrity-guard`'s daily sweep and this task's 30-min sweep will both alarm on the
+same finding until the daily guard's own STEP 3 is taught to check this task's already-filed OI items too
+(not done this session — flagged, not fixed, to avoid scope creep into a guard another session may still be
+actively working: `b5d8615c` was mid-session on "3 systematization items" when this session's `claim_work.py`
+call overwrote its `repo-housekeeping` claim broadcast).
+**Auto-check:** ~~`ora-skill-cache-drift-alert`, cron `*/30 * * * *`~~ → **`ora-doctrine-integrity-guard` engine 4, cron `55 12 * * *`** (updated 2026-08-09).
+**2026-08-09 — the fix built for this item was RETIRED; item stays OPEN with a narrowed residual.**
+`ora-skill-cache-drift-alert` is gone from the CC/MCP registry (archived to
+`scheduled-tasks/_archive_2026-08-09_retired/`; RATIFIED drop logged in `event_log.md`). It was collapsed
+`*/30` → `0 11 * * *` by the 2026-08-05 ORA-wide once/day cadence policy, which erased the only thing it did
+that the daily guard didn't — sub-daily detection — leaving it running the identical `repo_first_check.py --all`
+sweep ~2h before `ora-doctrine-integrity-guard`. **Sweep coverage is NOT lost** (two live invokers remain: the
+`ora-skills` pre-commit hook `--check-staged`, and the daily guard's engine 4). **What IS lost, and is the
+residual this item now tracks:** the retired task also filed a durable OI-NNN item on a finding and cross-checked
+this tracker to dedup; the daily guard alarms via email + Notion only, so a finding can still be lost to a
+scrolled terminal or an unread Notion page. Closing OI-075 would assert a durable-record capability that no
+longer exists — so it stays OPEN. The original "not yet fired against a real finding" residual is moot: the task
+never fired on a real finding before retirement (its last live sweep, 2026-08-09, returned 50 skills / 0 findings).
+
+**Closed:** 2026-09-19
+**Closure evidence (2026-09-19, batch verification against live state):** Superseded: ora-skill-cache-drift-alert retired 2026-08-09; ora-doctrine-integrity-guard engine 4 replaced it; PR #39 merged.
+
+### OI-116
+**Status:** CLOSED 2026-09-19
+**Prior status:** CLOSED 2026-09-07
+**Opened:** 2026-08-11
+**Source:** landing [PR #52](https://github.com/ZeOoba/ora-claude-config/pull/52) (`claim_work.py` refusal
+gate), 2026-08-11 — hit twice in a single session, then a third time filing this very item
+**Severity:** MEDIUM — it removes the only non-destructive response to a claim collision.
+**Description:** An **unattended** session (scheduled-task run or dispatched session) can hold a
+`claim_work.py` slug indefinitely, and cannot be contacted to release it. Two mechanisms compound:
+`mcp__ccd_session_mgmt__send_message` refuses delivery to unattended sessions outright
+(`"Session <id> is unattended … messages can't be delivered there"`), and `shared-checkout-guard.py`'s
+`_self_renew_claims` re-stamps `claimed_at` on **all** of a session's live claims whenever it edits
+anywhere in a claim-relevant repo — so the 2-hour TTL never expires the claim while that session lives.
+The holder is therefore neither reachable nor wait-out-able.
+
+**Observed three times on 2026-08-11**, all real, none contrived:
+1. `1d88885d` (host `local_fdd428b9`, "Ora deal aging sla") held `hooks-override-auth` while this
+   session needed it. `send_message` refused; its claim self-renewed at 15:17:24 while being read.
+   Worked around by claiming a distinct slug, `hooks-override-auth-claim-work`, with `--paths`.
+2. `05236b94` (host `local_25942895`) held `open-items-tracker` with `--paths` on this very file.
+   `send_message` refused again.
+3. Filing THIS item hit (2) — the refusal correctly reported an `OVERLAP` verdict on
+   `open-items-tracker.md`, and the only paths forward were `--force` or an isolated worktree + PR.
+
+**Why the refusal gate makes this sharper, not worse:** before PR #52 the collision was invisible and
+the clobber silent, so this was never felt. Now the collision is named and correctly refused — which is
+the improvement — but the recommended response ("message the holder", printed from the claim's
+`host_session_id`, the field OI-108 added specifically to make holders contactable) is a dead end for
+exactly the class of session most likely to hold a slug unattended for hours. That leaves `--force` as
+the only exit, which is the operation the gate exists to make rare.
+
+**Candidate fixes (NOT applied, unevaluated):** (a) record whether the claiming session is unattended
+(the runtime knows) and have the refusal say so, replacing the useless "message them" line with the
+honest "this holder cannot be contacted — `--force` or use a distinct slug"; (b) scope
+`_self_renew_claims` to unattended sessions differently, or cap total renewals, so an unattended claim
+can age out even while its session lives; (c) have scheduled-task wrappers `release` on exit.
+Note (b) fights `_self_renew_claims`'s own documented rationale — read its docstring before touching it.
+**Closing condition (as originally drafted):** a session that collides with an unattended holder gets a
+refusal that names the holder as uncontactable and offers a next step that is not `--force`.
+**Resolved differently, closed 2026-09-07.** Gabriel ratified a reserved `sched-` slug namespace instead
+of options (a)/(b)/(c) above: an unattended claim now gets a 30-minute TTL (vs. 120 default,
+`min(caller_ttl, 30)`, never widened) so it ages out before it can block a live person, and the refusal
+message states outright that force-takeover is ROUTINE for such a holder — rather than avoiding `--force`,
+it makes `--force` the documented, safe, expected response. Implemented in `hooks/lib/claim_work.py`
+(`is_sched_slug()`, `_effective_ttl()`; doctrine: `memory/tech.md` §3e; landed via
+[PR #171](https://github.com/ZeOoba/ora-claude-config/pull/171), merged). That alone left the fix inert,
+though — no scheduled task's own instructions ever claimed under a `sched-` slug, so the shorter TTL and
+routine-force-takeover language never reached a live unattended holder. Closed today by adding the
+carrier: `register-scheduled-task` v2.21 (ora-skills `bc42852`) adds step 3c + a QC-gate item requiring
+any `claim_work.py claim` call in a scheduled task's own instructions to use `sched-<slug>`, not the bare
+slug, going forward.
+**Auto-check:** none.
+
+**Closed:** 2026-09-19
+**Closure evidence (2026-09-19, batch verification against live state):** origin/main claim_work.py has is_sched_slug (L171) and _effective_ttl (L176); ora-skills bc42852 'v2.21 sched- carrier (OI-116)'. Section already said CLOSED 2026-09-07.
+
+### OI-129
+**Status:** CLOSED 2026-09-19
+**Prior status:** OPEN (diagnosed and reproduced same-day; fix is a judgement call between three options)
+**Opened:** 2026-08-12
+**Source:** `maintenance/_tests/test_check_open_items_duplicate_ids.py`, hit via `.git/hooks/pre-push` gate 2
+(`hooks/git-prepush-hook-tests-gate.py`) while pushing two unrelated `ora-deal-*` SKILL.md commits
+(`c0517fb`, `2c3d8ce`)
+**Severity:** MEDIUM — blocks arbitrary sessions' pushes, but the escape (fix the tracker, or re-run) is cheap
+and no data is at risk.
+
+**Description:** The test asserts `canonical open-items-tracker.md has zero id collisions right now`. That is a
+global invariant evaluated against a **shared mutable file that every session writes continuously** — and it is
+evaluated from inside the *pre-push* gate, so when it trips it blocks whatever push happens to be in flight,
+regardless of what that push touches.
+
+**Reproduced, not inferred (2026-08-12):**
+
+| Observation | Value |
+|---|---|
+| ids allocated in one hour, by six different sessions | OI-123 (19:56Z) → OI-128 (20:53Z) |
+| table rows actually filed at that moment | through OI-123 only |
+| file state that tripped the assertion | `orphaned_sections: ['OI-125']`, `missing_sections: ['OI-121']` |
+| what OI-125 was | section written, table row not yet written; id allocated 20:26Z, ~28 min earlier |
+| what it blocked | two SKILL.md commits touching none of this code |
+| failure signature | `exit 1` — a real assertion, **not** `exit 124` |
+
+**This is NOT the [OI-119](#OI-119) / OI-127 load-flake class, and must not be closed as a duplicate of it.**
+Those are timing failures (`exit 124`, tests exceeding a 180s per-test budget under concurrency) and their fixes
+are retries and bigger budgets. This one is **deterministic**: it reproduces on a completely idle machine any
+time a half-filed item is sitting in the tracker, and no amount of retrying or budget-raising touches it. The
+two classes did co-occur on the same push, which is precisely why they are easy to conflate — the run reported
+`test-eos-review-gate.py` (timeout, OI-119's class) and this test (assertion, this item) side by side.
+
+**A section-before-row file state is normal, not corruption.** Writing the detail section first and the table
+row second is a perfectly reasonable authoring order, and with six sessions filing concurrently the file is
+*routinely* mid-write. The test currently treats that transient as a defect.
+
+**Keep the fixture half — it works.** The same test file correctly caught a seeded duplicate `OI-027` in its own
+temp `dirty-tracker.md` during this run. The defect is only in the assertion that reaches out to the live
+canonical file.
+
+**Fix options (pick one; not yet decided):**
+1. Assert only against fixtures; move the canonical-file check to a **non-blocking** report (matches how the
+   doctrine gate reports warnings without blocking).
+2. Keep it blocking, but treat `section-without-row` (and `row-without-section`) as **in-flight**, not a
+   collision — reserve the block for genuine duplicate ids, which is the actual corruption this guards against.
+3. Evaluate the invariant against the tracker **as committed in HEAD** rather than the working tree, so another
+   session's uncommitted mid-write cannot block a push.
+
+**Note on the related gap this surfaced:** OI-121 has had a table row since 2026-08-11 22:54Z with no `### OI-121`
+detail section — ~22 h, so its own `[OI-121](#OI-121)` self-link resolves to nothing. The checker rates that INFO
+("a one-line row is often the whole story"), which is defensible, but the dead self-link is worth a decision.
+
+**Auto-check:** this item IS the auto-check's design. Whichever option is chosen, the acceptance test is: with a
+deliberately half-filed item in the tracker, an unrelated `git push` must succeed.
+
+**Closed:** 2026-09-19
+**Closure evidence (2026-09-19, batch verification against live state):** Main test file now treats orphaned/missing sections as advisory only (L186-190, 296-302); duplicates still fail.
+
+### OI-132
+**Status:** CLOSED 2026-09-19
+**Prior status:** FIX APPLIED 2026-08-12 — options 2 **and 3** both shipped (`ora-sofr-direct-prefetch` **v1.2** then
+**v1.3**). Option 3 adds STEP 4b: a closed-enum `supersede_status` (`NO_PATCH_NEEDED` · `NOT_EXPECTED` ·
+`EXPECTED_NOT_YET_OBSERVED` · `OBSERVED` · `FAILED`) appended one line per run to
+`maintenance/_state/sofr-supersede-status.log`, on **every** terminating path including no-ops and failures — a
+log that recorded only successes would have no denominator and could not produce a rate. Write path verified live
+2026-08-12 via Desktop Commander (creates, appends, `Select-String`-countable). Passive telemetry: nothing
+consumes it and it raises no alarm. Kept **OPEN**,
+because the fix is a wording/branching change that cannot be confirmed until the next catch-up burst puts both
+producers in the same window. Nothing observable changes on a normal-cadence day, when `am_brief_pending` is
+false and the flat "landed" path is already correct. Close only after a run log shows the EXPECTED wording on a
+real burst. Option 3 (a `supersede_status` enum, the only way to *count* the hazard) was deliberately NOT bundled
+and remains open below.
+**Opened:** 2026-08-12
+**Source:** `~/.claude/scheduled-tasks/ora-sofr-direct-prefetch/SKILL.md` STEP 4 — caught by that task's own
+2026-08-12 run while it was executing, not by a later audit
+**Severity:** LOW — no data loss or wrong figure in the observed case; the cost is a run-log claim that becomes
+false minutes after it is written, plus silent undercounting of the ordering hazard v1.1 exists to manage.
+
+**Description:** STEP 4 re-fetches the Rate Snapshot page immediately after STEP 3c's write and classifies the
+result three ways: *my write landed* · *superseded by `ora-am-brief` (also a PASS)* · *still stale (FAIL)*. The
+supersede branch was added in v1.1 precisely for the catch-up-burst case where both producers backfill together.
+
+But the verify fires **seconds** after the write, while `ora-am-brief` — dispatched in the same burst — is still
+mid-run and does not write for several more minutes. So STEP 4 reliably observes "my write landed" and the
+supersede branch is, in that scenario, **unreachable by construction**.
+
+**Measured 2026-08-12 (timestamps from the CC registry and the Notion page's own `as of` stamps):**
+
+| Event | Time (UTC) | ET |
+|---|---|---|
+| `ora-sofr-direct-prefetch` dispatched | `15:13:20.983Z` | 11:13:20 |
+| `ora-am-brief` dispatched | `15:13:21.612Z` | 11:13:21 |
+| prefetch STEP 2 read the page (saw 08-11 values) | `15:14:11Z`-ish | 11:14 |
+| prefetch write landed; STEP 4 verified, logged **"no supersede"** | `15:14:11.040Z` | 11:14:11 |
+| `ora-am-brief` rewrote §2, superseding the patch | `15:20:26.837Z` | 11:20:26 |
+
+Gap between the verify and the supersede: **~6 minutes**. The two producers dispatched **629 ms** apart.
+
+**No data harm this run, and that is not luck to rely on.** `ora-am-brief`'s own run note records that it pulled
+the NY Fed API independently and "observed an exact match" on all five SOFR fields. The values agreed because
+both read the same upstream minutes apart — not because anything reconciled them.
+
+**Do NOT close this as a duplicate of [OI-129](#OI-129).** That item is about a *test* asserting on live mutable
+state and blocking pushes. This one is about a *scheduled task* verifying too early to observe the event its
+own spec tells it to look for. They share the 2026-08-12 burst as a trigger and nothing else.
+
+**Fix options — 2 APPLIED (v1.2) and 3 APPLIED (v1.3), both 2026-08-12; 1 and 4 declined:**
+1. Re-verify after a delay (5–10 min). Correct but expensive — holds a session open purely to watch.
+2. **Condition the wording on state STEP 2 already has.** STEP 2 computes `am_brief_pending` (true when Block A's
+   `fetched_at` is not today). When it is true, STEP 4 should record *"my write landed as of HH:MM; `ora-am-brief`
+   dispatched at <t> and has not yet written — a supersede is EXPECTED and is not a failure"* instead of the flat
+   "no supersede". Zero extra cost, no new calls, and it stops the run log asserting something unobserved.
+3. Have STEP 4 emit a `supersede_status` enum (`OBSERVED` · `EXPECTED_NOT_YET_OBSERVED` · `NOT_EXPECTED`) so the
+   hazard can actually be counted across runs rather than inferred.
+4. Accept it and document STEP 4's output as point-in-time only.
+
+**Auto-check:** none today. Option 3 would supply one — a run-over-run count of `EXPECTED_NOT_YET_OBSERVED` is
+the only way to know how often the burst inverts producer order, which is currently invisible.
+
+**Related:** [[reference_fleet_throttle_skip_catchup_burst]] (the ordering hazard and its 2026-07-24 / 2026-08-12
+recurrences), `reference_scheduler_lastrunat_stamped_at_dispatch` (why the dispatch timestamps above are the
+right evidence for ordering but not for execution).
+
+**Closed:** 2026-09-19
+**Closure evidence (2026-09-19, batch verification against live state):** Commits 96a97d3 and 4ae999c (v1.2/v1.3) on origin/main; STEP 4 keys on am_brief_pending with a supersede-status log.
+
+### OI-134
+**Status:** CLOSED 2026-09-19
+**Prior status:** QUEUED — approved by Gabriel in-turn 2026-08-12, **no work started**
+**Opened:** 2026-08-12 (approved 2026-08-12 but unfiled here until now: the `open-items-tracker` claim slug was
+held by another session, and `claim_work.py` refuses rather than clobbering)
+**Source:** Gabriel's in-turn approval of option (c), alongside (a) the sweep remediation
+([PR #271](https://github.com/ZeOoba/oxford-command-center/pull/271)). Full design and evidence:
+[[deal-join-id-based-redesign-queued]]
+**Severity:** structural, confidentiality-adjacent (Hard Invariant 3). The acute defects were remediated by
+PR #271 — this is the primitive change that stops the class from regenerating.
+
+**What to build.** Give every deal a **stable id shared by both sides** of the seed↔Notion join and retire name
+normalization from the join path entirely. Candidate shape: a `Deal ID` property on the Notion Acquisition
+Pipeline Tracker, mirrored as the `id` in `src/data/seed-deals.ts`, so `mergeDeals` joins on an opaque key that
+no rename, locality suffix, alias, or punctuation variant can perturb.
+
+**Why — evidence, not preference.** `dealJoinKey` (`server/sources/deal-name.ts`) strips a `" — City, ST"`
+locality tail, then lowercases and collapses punctuation. Notion's suffix exists *precisely because* bare street
+names repeat across metros, so the key deletes the only disambiguator. Confidentiality rides on this join: a
+wrong merge folds an unmatched (fail-closed confidential) row into a public seed record.
+
+Four adversarial passes over 2026-08-11/12 produced **9 + 7 + 5 + 6** defects, with the join subsystem
+generating the worst:
+
+| Defect | Detail |
+|---|---|
+| CRITICAL cross-side wrong merge | 2 lenses, executed repros — one deal's economics published under another's identity and public confidential flag |
+| Alias bypass | an alias path skipped the corroboration guard entirely |
+| Corroboration inert | **11 of 20 live rows** (10 map to `Other`, 1 null) — `MARKET_MAP` covers 6 metros, the pipeline spans ~10 |
+| Degenerate `acceptedPairKey` | colliding names share one key, so a single acceptance grandfathers all future collisions |
+| Duplicate seed join keys | one live row merged and "refused" simultaneously |
+
+Every fix bolted on *another* corroboration signal — mapped market, then the locality tail, then literal
+equality. That is the signature of a wrong primitive. Three defects shared one shape: a guard stated over a
+**mechanism** rather than the **invariant**, which keeps recurring because "same deal" has no ground truth in a name.
+
+**How to apply.**
+- Read PR #271's commit bodies first — they record what each guard defends and why, so the redesign preserves
+  the invariants instead of rediscovering them.
+- Migration must be **fail-closed**: an unmatched row keeps defaulting confidential (Hard Invariant 3), and a
+  missing or duplicate id must **refuse** rather than fall back to name matching — otherwise the old class
+  returns through the back door.
+- Retiring name joining should also retire `NOTION_DEALS_NAME_ALIASES`, `NOTION_DEALS_ACCEPTED_NEAR_DUPES`, and
+  `findNearDuplicateNames`' gate-blocking role — check each for other callers before removing.
+- **Cheap interim win, independent of the redesign:** extend `MARKET_MAP` past its 6 entries to the metros
+  actually in use, shrinking the uncorroborable zone from ~55% to near zero. Needs the live Notion select values.
+
+**Related:** [OI-122](#OI-122) — filed the same day, blocked from filing by the same claim-contention mechanism;
+both are cases where a guard keyed on a proxy rather than on the thing it meant to protect.
+
+**Closed:** 2026-09-19
+**Closure evidence (2026-09-19, batch verification against live state):** oxford-command-center #273 (6e7c5bd) on main; joins on notionDealId, dealJoinKey now only a detection-only migration tripwire.
+
+### OI-137
+**Status:** CLOSED 2026-09-19
+**Prior status:** OPEN
+**Opened:** 2026-08-12
+**Source:** surfaced as a control run while verifying [PR #268](https://github.com/ZeOoba/oxford-command-center/pull/268)'s test failures were pre-existing; re-confirmed against `origin/main` at `c5db68c`
+**Severity:** MEDIUM-HIGH (Spine A and Spine B materially disagree on NOI for 3 owned properties; NOI feeds valuation, DSCR and the capital-allocation surface)
+**Description:** `npm run reconcile:noi-crosscheck` FAILS on `main`: 14 properties checked, **3 errors,
+4 warnings**. All three errors are the same shape — the workbook NOI vastly exceeds the warehouse
+`oxfordNoi`:
+| Property | Workbook NOI | Warehouse oxfordNoi | Drift | Delta |
+|---|---|---|---|---|
+| 3875-3883 E Livingston Ave, Columbus OH | $98,550 | $8,638 | 91.23% | $89,912 |
+| 3034 Westerville Rd, Columbus OH | $117,660 | $29,387 | 75.02% | $88,273 |
+| 9620 E State Route 350, Raytown MO | $108,438 | $27,614 | 74.53% | $80,824 |
+
+Combined NOI disagreement across the three: **$259,009**. Not a test flake — reproduced on two
+separate runs hours apart, on an unmodified clean checkout, at two different `main` commits.
+**Why nobody has noticed:** `npm run gate` includes `reconcile:noi-crosscheck`, but **`gate:ci`
+does not** (`gate:ci` = typecheck, lint, check:dev-css, test, reconcile:snapshot, build,
+check:bundle). So the LOCAL Done-bar gate has been red on `main` while every PR's CI gate goes
+green — including PR #268's, which passed CI the same day this was failing. Any session that runs
+the full local gate hits this and may wrongly attribute it to their own branch.
+
+**Closed:** 2026-09-19
+**Closure evidence (2026-09-19, batch verification against live state):** 680018f (structural-mismatch status) and #285 on main. The gate:ci exclusion is by design, tracked as OI-254. Live cross-check not re-run.
+
+### OI-140
+**Status:** CLOSED 2026-09-19
+**Prior status:** OPEN
+**Opened:** 2026-08-12
+**Severity:** MEDIUM
+**Source:** Hit live 2026-08-12 while verifying the [OI-136](#OI-136) filing had committed intact. A
+`git show HEAD:open-items-tracker.md` extract was checked with this tool; it reported an
+`ORPHANED_SECTION OI-137` that does **not** exist in that extract (confirmed: 0 rows, 0 sections for OI-137 in
+HEAD) but does exist in the live working tree. The tool had silently answered about a different file.
+**Description:** `maintenance/check-open-items-duplicate-ids.py` accepts a path argument on the command line
+and **discards it**. `main()` (line 180) does:
+
+    path = tracker_path()          # -> TRACKER_PATH_OVERRIDE or DEFAULT_TRACKER_PATH
+
+`sys.argv` appears **zero times** in the 197-line file — no `argparse`, no positional handling, no error on an
+unexpected argument. `TRACKER_PATH_OVERRIDE` (line 73) is documented "test seam only" and is settable only by
+importing the module and assigning the attribute, never from a shell.
+
+**Why it reads as a working feature rather than an unimplemented one.** Three signals actively suggest the
+argument was honoured:
+1. Every report prints the file it checked — but that is `path` from the default, not your argument, and the
+   two are easy to conflate when the default is the file you usually mean.
+2. There is a fully-formed read-failure branch: `COULD NOT READ %s (%s) -- treat as a check failure, not a
+   clean result.` It is **unreachable from the CLI**. Passing a nonexistent path returns a normal, clean,
+   canonical report — verified: `check-open-items-duplicate-ids.py <path-that-does-not-exist>` exits with the
+   canonical file's verdict.
+3. It never rejects the argument, so there is no feedback that it was ignored.
+
+**Why the tests do not catch it.** `maintenance/_tests/test_check_open_items_duplicate_ids.py` covers
+`main()`'s file-read path — including the missing-file case — by assigning `codc.TRACKER_PATH_OVERRIDE`
+directly (lines ~154-181). That is a module attribute, not the command line. The result is a suite that
+genuinely exercises the read logic while leaving the **entry point** untested, so the seam that makes the code
+testable is also what conceals that the CLI never reaches it. Worth generalising: a `*_OVERRIDE` test seam
+tests the function, never the invocation.
+
+**Blast radius is narrower than it looks — record this so nobody over-fixes.** The production caller,
+`ora-weekly-hygiene` Block N, invokes the script with **no argument at all**, so the scheduled weekly check has
+always been correct and is unaffected. The harm is confined to ad-hoc/interactive use: validating a worktree
+copy, a candidate edit, a `git show HEAD:` extract, or a PR branch's version. In those cases the tool returns a
+verdict about an artifact the caller did not name, in **both** directions:
+- **False FAIL** — your copy is blamed for a defect that exists only in the live tracker (the case that
+  surfaced this; live had a half-filed OI-137 from another session).
+- **False PASS** — your genuinely broken copy reports clean because the live tracker happens to be clean. This
+  is the dangerous direction, and on a shared checkout with a dozen sessions editing this file, the live
+  tracker's state is effectively random with respect to your edit.
+
+This is [[feedback_verified_null_vs_inferred_null]] in a verification tool: a result that looks verified but is
+an answer to a question you did not ask. Any session that "confirmed" a tracker copy with this tool has an
+unverified copy.
+
+**Candidate fixes (not yet chosen, smallest first):**
+- Reject unexpected arguments — two lines, and it converts a silent wrong answer into a loud one. This alone
+  removes the hazard even if no path support is ever added.
+- Or accept a real positional path (`argparse`, defaulting to the canonical tracker) and add ONE test that
+  drives the script through `subprocess` rather than the attribute seam, so the entry point is covered.
+- Whichever is chosen, keep `TRACKER_PATH_OVERRIDE` — the seam is fine; the gap is that nothing tests argv.
+**Auto-check:** none. Detection today is manual and accidental.
+**Related:** [OI-136](#OI-136) (filed in the same session; this defect surfaced while verifying it),
+[[feedback_verified_null_vs_inferred_null]], [[feedback_absence_claims_need_verification_before_building]].
+**Escalation evidence, 2026-08-12 — five same-day override tokens (the severity signal this item asked to
+track).** Filed as OI-135 (allocator-assigned) before checking for a duplicate; folded in here instead of
+landing as its own tracker entry, since it is the same gate/class OI-119 already covers and OI-129 explicitly
+warns not to re-split. `OI-127` (allocated by session `e0f8485e`, reservation log only, no tracker entry filed
+yet) looks like the same near-duplicate — whoever lands it should fold it in here too rather than opening a
+third entry.
+
+| Time (local) | Session | Failing test(s) | Push contents |
+|---|---|---|---|
+| 16:32:04 | `d37e22c1` | `test-eos-review-gate.py`, exit 124 | `feat/model-canary-probe-step25` |
+| 16:38:29 | `b0e10e03` | `test-eos-review-gate.py` + 7 siblings, exit 124 | ora-deal-sourcing-scan STEP 5B + ora-deal-aging-sla STEP 3e |
+| 16:38:47 | `e0f8485e` | `test-eos-review-gate.py`, exit 124 | `46cf1e2` — doc-only SKILL.md rationale correction, zero blast-radius files |
+| 17:03:00 | `e89ddd24` | same gate | health-guard threshold fix + OI-098 tracker-structure merge |
+| 17:19:23 | `e89ddd24` | same gate, second push | (as above, retry) |
+
+All five: `exit 124` TIMEOUT, never an assertion — standalone reruns pass clean in 145s–5m08s against the
+gate's 180s per-test budget, and every one needed a Gabriel-authorized `allow-hook-test-failure` override to
+land. Source: `event_log.md` commit `75ab0de` (2026-08-12). Five tokens against this gate in under an hour,
+under 12–16+ concurrent sessions — reinforces **option 1 / 1b** over the per-test options 2/3, since the
+failing test varies by run (plain `test-eos-review-gate.py` alone in three of five, seven further siblings
+in the fourth) — a budget-vs-load mismatch across the whole suite, not one flaky test.
+
+**Sixth token, and the first IDLE measurement — one file is over budget with zero contention (2026-08-12,
+session `e23f4c54`).** `OI-144` was allocator-assigned for this before I read the item; folded in here rather
+than filed separately, per OI-129 and the OI-135/OI-127 precedent two paragraphs up. The id stays reserved and
+unused.
+
+| Time (local) | Session | Failing test | Push contents |
+|---|---|---|---|
+| ~19:5x | `e23f4c54` | `test-memory-orphan-link-guard.py`, exit 124 after the retry | `feat/mutation-testing-harness` — two NEW test-infra files, nothing imports them |
+
+Landed via `--no-verify` on Gabriel's explicit in-turn call ([PR #75](https://github.com/ZeOoba/ora-claude-config/pull/75)) rather than a sixth
+`allow-hook-test-failure` token — worth noting for the severity tally this item tracks, since a `--no-verify`
+push leaves *less* audit trail than the token it avoided: no gate record at all, versus a token with a stated
+reason.
+
+**What is new here, and why it sharpens the option-1 choice.** Every prior data point is a run *under* gate
+load, framed above as budget-vs-load. This one was measured STANDALONE ON AN OTHERWISE-IDLE MACHINE:
+
+| Measurement | Result |
+|---|---|
+| `test-memory-orphan-link-guard.py`, standalone, idle | **192.7s, rc=0 (PASSES)** |
+| Gate budget (`PER_TEST_TIMEOUT_SECONDS`) | 90s |
+| Doubled budget on the timeout retry | 180s |
+| `test-mutation-lib.py` (the branch's own new suite), standalone | 2.4s |
+
+So this file **cannot pass the gate at any concurrency** — it exceeds even the doubled retry budget with zero
+load, which no amount of reducing worker count (option 1b) will fix. That does not overturn the
+budget-vs-load diagnosis for the *other* failures; it adds a second, independent cause sitting underneath it:
+at least one file whose idle runtime is already over the retry ceiling. Consequences for the fix:
+
+1. Option 1's new budget must clear the slowest file's IDLE runtime with real headroom, not merely absorb
+   contention. 192.7s idle means a 180s ceiling is under water before the first concurrent session starts.
+   Whoever picks the number should MEASURE the slowest files idle rather than scaling the old value.
+2. Option 1b (lower concurrency) is now insufficient alone, on this file's evidence.
+3. A per-file cause, measured — NOT folded into the budget decision, and worth fixing on its own.
+   `test-memory-orphan-link-guard.py` invokes the hook **70 times**, each a fresh `sys.executable` spawn, and
+   each invocation runs its own `git` subprocesses inside `_git()` (`memory-orphan-link-guard.py:308-318`).
+   192.7s / 70 = **~2.75s per invocation**, which accounts for essentially the whole runtime. My first guess
+   was wrong and is recorded here so nobody re-checks it: this is NOT the OI-061 shape. That item was about
+   per-call REPO CONSTRUCTION and was fixed by the shared `gitfixture` template — which this file already
+   imports and uses (line 7, and one `repo_with_commit` call). The remaining cost is hook-invocation count,
+   which `gitfixture` does not address. The OI-061 playbook therefore does not transfer; the analogous move
+   would be amortizing the 70 spawns (batching cases into fewer hook runs, or exercising the hook in-process
+   where a case does not need the subprocess boundary), which is a different piece of work and should be
+   scoped as such.
+
+**Not caused by the change that surfaced it:** the branch is `main` plus two new files that nothing imports,
+and its own suite runs in 2.4s.
+
+**Closed:** 2026-09-19
+**Closure evidence (2026-09-19, batch verification against live state):** check-open-items-duplicate-ids.py on main now rejects any CLI argument with exit 2.
+
+### OI-147
+**Status:** CLOSED 2026-09-19
+**Prior status:** CLOSED — REJECTED 2026-08-13; nothing landed, everything reverted
+**Opened:** 2026-08-13
+**Source:** ECC repo intake ([external-artifact-intake](../../skills/external-artifact-intake) ruling,
+Gabriel 2026-08-13)
+**Severity:** n/a — closed as rejected. Recorded so the approach is not re-attempted.
+**Auto-check:** none
+
+**Do not re-attempt the quote-state-narrowing approach without reading the evidence first.** A real
+recursive-descent tokenizer (`hooks/lib/shell_tokenizer.py`, adapting ECC's `gateguard-fact-force.js`
+technique) was built as a downgrade-only narrowing of `ora-autonomy-gate.py` Gate 2b. It classified all
+3 historical bypass commands correctly, killed 6/8 mutants (2 proven equivalent), and passed 72 tests.
+
+**Killed in Round 1 of the mandated 3-round adversarial gauntlet** (`pr-review-toolkit:code-reviewer`,
+opus), on a sandbox-verified live bypass: quoting a path operand (`cp evil.html 'oxford-site/index.html'`)
+or wrapping in an interpreter (`bash -c "..."`, `eval "..."`) makes the tokenizer confidently and wrongly
+classify the write as inert — because **quoting suppresses metacharacter interpretation, it does not
+remove text from the command's argument vector.** That is categorically different from the quote-state
+bugs rounds 1–3 (2026-07-16) found, and is not fixable by deepening the parser: it needs shell
+command-semantics modelling (which command consumes which argument, and whether it writes), a strictly
+larger problem. Independently found: unbounded `$()`-nesting recursion threw an uncaught `RecursionError`
+that `main()` does not catch, crashing Gate 2b entirely rather than skipping the narrowing — an
+attacker-triggerable disable of Hard Invariant 2's sole enforcement, strictly worse than a narrowing bug.
+
+A 5th attempt needs a command-semantics model, not a better tokenizer.
+
+**Related:** [[feedback_autonomy_gate_matcher_cannot_be_safely_narrowed]] (Round 4 section — full
+evidence trail); [OI-148](#OI-148) (the companion intake item, which did land).
+
+**Closed:** 2026-09-19
+**Closure evidence (2026-09-19, batch verification against live state):** Section already CLOSED (REJECTED); shell_tokenizer.py does not exist on main or in the tree.
+
+### OI-149
+**Status:** CLOSED 2026-09-19
+**Prior status:** OPEN — symptom no longer reproduces as of 2026-08-16; awaiting close-out ratification
+**Opened:** 2026-08-13
+**Source:** hit while landing [OI-148](#OI-148), PR [#94](https://github.com/ZeOoba/ora-claude-config/pull/94)
+— the pre-push gate blocked on this and was overridden (Gabriel approved in-turn)
+**Severity:** LOW — pure friction. It blocked pushes indiscriminately, never allowed a bad one.
+**Auto-check:** none
+
+**Symptom, as filed 2026-08-13.** `maintenance/test-doctrine-integrity-probe.py`'s known-plugin-skill
+allowlist was stale: it flagged `morning`, `register-scheduled-task` and `schedule` as unresolved when
+all three are live installed `anthropic-skills` plugin skills. Because the probe gates every push, this
+blocked ANY push regardless of diff content — it was hit while landing an unrelated `hooks/**` change.
+
+**Re-check 2026-08-16 (this session, `ora-health-guard` follow-up).** The symptom is gone. Live
+`maintenance/doctrine-integrity-probe.py` now resolves all three:
+`morning -> (plugin-provided skill; no local skill dir)`,
+`register-scheduled-task -> skill dir 'register-scheduled-task' (Code/Cowork surface)`,
+`schedule -> (plugin-provided skill; no local skill dir)` — all `[OK]`, probe exit 0
+("all referenced commands, local files and skills resolve"). `test-doctrine-integrity-probe.py` also
+runs fully green (ALL DOCTRINE-PROBE TESTS PASS).
+
+**Left OPEN deliberately.** The fix was not attributed to a specific commit in this pass, so what
+closed it is unverified — and this session's remit was reporting, not close-out. Gabriel's call to
+close. Do not re-file this as a new item; re-check the two commands above first.
+
+**Closed:** 2026-09-19
+**Closure evidence (2026-09-19, batch verification against live state):** Allowlist on main (doctrine-integrity-probe.py ~L346) repopulated for morning and schedule 2026-08-14; probe not re-run. PR #99 follow-ups merged into a feature branch, reaching main by other routes.
+
+### OI-158
+**Status:** CLOSED 2026-09-19
+**Prior status:** OPEN
+**Opened:** 2026-08-15
+**Source:** Manual T3-5 cross-check (Gabriel-directed workflow-optimization pass), applying `ora-tenant-hubspot-reconciliation`'s existing Step 3d (DATE-MISMATCH) logic ahead of its next scheduled run (2026-09-01, 08:15 ET)
+**Description:** **DATE-MISMATCH** — Sky Shield. Workbook (`portfolio.json`-derived source of record): `leaseEnd 2029-08-31`, `status Active` — the lease was renewed to a new multi-year term. HubSpot deal "Sky Shield — Lease Renewal 2026-09-30" is still `dealstage=appointmentscheduled`, `closedate=2026-09-30` — the original pre-renewal deal was never closed out to reflect the executed renewal. Same failure class as the 2026-07-16 lease-date correction (J&R/Stone Crest/Chesapeake — see [reference_hubspot_missed_lease_date_correction.md](reference_hubspot_missed_lease_date_correction.md)), different symptom: a stale open deal rather than a stale wrong date. Recommended correction (not applied — this task never writes to HubSpot itself): advance the deal to `closedwon` with `closedate` matching the executed renewal, or close it out and open a fresh renewal-tracking deal per current process. `ora-tenant-hubspot-reconciliation`'s 2026-09-01 run should independently re-surface and can formally close this.
+
+**Closed:** 2026-09-19
+**Closure evidence (2026-09-19, batch verification against live state):** Live HubSpot: deal 'Sky Shield - Lease Renewal 2026-09-30' is closedwon, close date 2029-08-31, modified 2026-09-18.
+
+### OI-159
+**Status:** CLOSED 2026-09-19
+**Prior status:** OPEN
+**Opened:** 2026-08-15
+**Source:** Manual T3-5 cross-check (Gabriel-directed workflow-optimization pass), applying `ora-tenant-hubspot-reconciliation`'s existing Step 3d (DATE-MISMATCH) logic ahead of its next scheduled run (2026-09-01, 08:15 ET)
+**Description:** **DATE-MISMATCH** — Medspeed, LLC. Workbook (`portfolio.json`-derived source of record): `leaseEnd 2029-08-31`, `status Active` — the lease was renewed to a new multi-year term. HubSpot deal "Medspeed — Lease Renewal 2026-08-31" is still `dealstage=appointmentscheduled`, `closedate=2026-08-31` — the original pre-renewal deal was never closed out. Same pattern and same recommended correction as [OI-158](#OI-158); filed as a separate item per this tracker's one-row-per-finding convention.
+
+**Closed:** 2026-09-19
+**Closure evidence (2026-09-19, batch verification against live state):** Live HubSpot: deal 'Medspeed - Lease Renewal 2026-08-31' is closedwon, close date 2029-08-31.
+
+### OI-172
+**Status:** CLOSED 2026-09-19
+**Prior status:** OPEN
+**Opened:** 2026-08-16
+**Source:** Rev 2 fleet re-check (session 6797e01b). Reopens the follow-up left open by the 2026-08-15 T3-12 migration and re-stated in event_log.md on 2026-08-16.
+**Acceptance:** `list_scheduled_tasks` run FROM A COWORK SESSION shows `ora-passed-deal-tracker` with the LAMS/Cowork `path` (`...\Documents\Claude\Scheduled\ora-passed-deal-tracker\SKILL.md`) at `enabled: false`, while the CC/MCP entry (`~\.claude\scheduled-tasks\...`) remains `enabled: true`. Verified by pasting both entries.
+**Description:** **DUAL-FLEET TWIN STILL LIVE.** `ora-passed-deal-tracker` is registered on BOTH fleets at the same cron (`30 6 15 * *`). Gabriel-directed item T3-12 moved it LAMS -> CC/MCP on 2026-08-15 because the LAMS surface has no path to `scheduled-tasks/_shared/send-via-outlook.ps1`, the sole Outlook COM send path — confirmed by a live "SEND FAILURE — no COM access" surfaced by an `ora-pm-ledger` run. The CC copy is therefore the one that must SURVIVE; the LAMS copy must be disabled.
+
+**Why this cannot be done from Code (do not retry here):** the taskId is IDENTICAL on both fleets and `list_scheduled_tasks` from CC/MCP returns CC-only entries (38 entries, zero LAMS `path`s — verified 2026-08-16). So `update_scheduled_task(taskId:"ora-passed-deal-tracker", enabled:false)` issued from Code resolves to the **CC** copy — disabling exactly the twin meant to survive and leaving the COM-less one firing silently. Requires a Cowork-session `enabled:false` toggle. **NEVER the Scheduled-sidebar delete/trash icon** — folder-destructive, and the standing warning that it can break a same-id task on the other fleet is not theoretical here, because the ids collide.
+
+**Mitigated, not resolved:** the double-fire guard (PR #116, `c16667c`) is now LIVE in the working tree (verified 2026-08-16: 7 `block-sentinel`/`outlook-sent-probe` hits in the CC SKILL.md, landed via `90d02ae`), so the 2026-09-15 06:30 ET fire will not double-send. That removes the urgency, not the defect — the LAMS twin still runs and still cannot send.
+
+**Correction recorded:** the Rev 2 Fleet Operations Report initially described the CC copy as "never fired — dead weight" and a retirement of the CC copy was requested on that basis. That inference was wrong: the CC copy has never fired because it was registered 2026-08-16 11:47 on a monthly cron (`nextRunAt 2026-09-15T10:34:44Z`). It is new, not dead. The artifact has been corrected.
+
+**Closed:** 2026-09-19
+**Closure evidence (2026-09-19, batch verification against live state):** fleet-roster.md (generated 2026-09-14 from live registries) lists ora-passed-deal-tracker on the CC fleet only.
+
+### OI-041
+**Status:** CLOSED 2026-09-19
+**Prior status:** OPEN
+**Opened:** 2026-07-31
+**Source:** ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch)
+**Severity:** MEDIUM (input validation / integrity)
+**Description:** unvalidated request bodies written straight to the database at `server/routes/`
+`budgets.ts:25`, `insurance.ts:35` and `:46`, `renewals.ts:22`, `units.ts:20` and `:28`,
+`cam.ts:23-24`, `leases.ts:74` and `:98`, `tenants.ts:62`. The sibling routes (`charges`, `payments`,
+`properties`, `tenants` core, `expenses`, `leases` core) already use `safeParse` correctly — so this
+is an incomplete rollout, not a missing pattern. `server/lib/schemas.ts` covers 6 of 13 write routes.
+**Impact:** admin-authenticated only. An admin can set columns the UI never exposes (`id`,
+`created_at`) and bulk-write unbounded rows via the array body on `budgets`.
+**Candidate fix (NOT applied):** extend `server/lib/schemas.ts` to the remaining routes, apply
+`safeParse` uniformly, cap array bodies with `.array().max(200)`, and add a test asserting every
+mutating handler parses its body.
+**Auto-check:** none.
+
+**Closed:** 2026-09-19
+**Closure evidence (2026-09-19, batch verification against live state):** On ora-pm origin/main every flagged route does safeParse after req.json() (budgets, insurance, renewals, units, cam, leases, tenants).
+
+### OI-042
+**Status:** CLOSED 2026-09-19
+**Prior status:** OPEN
+**Opened:** 2026-07-31
+**Source:** ora-appsec-sweep 2026-07-31 (ora-pm @ `a226f2b`, security-auditor dispatch)
+**Severity:** MEDIUM (information disclosure)
+**Description:** the error-handler middleware's sanitization covers only *thrown* errors; every site
+listed above *returns* the raw PostgREST/Postgres message from a Supabase result object instead. The
+middleware's own comment therefore overstates the guarantee, which is the part most likely to mislead
+a future reviewer.
+**Impact:** discloses table names, column names, constraint names and RLS policy names to any
+authenticated tenant — a free schema map for anyone probing for a missed authorization check.
+**Candidate fix (NOT applied):** log server-side, return generic text
+(`console.error('[ORA PM] portal/charges', error); return c.json({error:'Unable to load charges'},500)`).
+Reserve specific messages for 4xx validation responses the caller can act on. Correct the
+error-handler comment so it describes what it actually covers.
+**Auto-check:** none.
+
+**Closed:** 2026-09-19
+**Closure evidence (2026-09-19, batch verification against live state):** Portal and route sites return 'DB error'; OI-063 sweep merged. Two error.message leaks remain at cron.ts:690-691, reachable with the cron secret only, not by tenants.
+
+### OI-064
+**Status:** CLOSED 2026-09-19
+**Prior status:** OPEN
+**Opened:** 2026-08-03
+**Source:** REFUTE pass on the [OI-035](#OI-035) fix (security-auditor dispatch), 2026-08-03; verified directly by the Code-surface session that merged it
+**Severity:** LOW-MEDIUM (reliability/UX, not a money-safety bug — the code fails safe)
+**Description:** `src/portal/pages/PortalPayNow.tsx:74-108` + `server/routes/stripe.ts:155-171`. The
+commit that fixed OI-035 claims a client retry after a network timeout "reuses the same
+client_request_id ... so Stripe returns the original PaymentIntent." That's not what actually happens
+for THIS flow: every Pay-button click re-runs the full bank-account linking sequence
+(`createSetupIntent` → `collectBankAccountForSetup` → `confirmUsBankAccountSetup`) before reusing
+`clientRequestIdRef.current`, which produces a new `payment_method_id` each time. Stripe's idempotency
+layer rejects a reused key paired with different request params as an `IdempotencyError`, which is a
+`Stripe.errors.StripeError` subclass and gets caught generically and returned as a plain 400 — so no
+double charge occurs, but the retry doesn't dedupe/recover either. Net effect: if attempt 1 actually
+succeeded server-side but the client never saw the response (pure network drop), the tenant sees
+"payment failed" for a payment that went through, and may reasonably try to pay again through a
+different channel (mailing a check) — an operational double-payment, just not a code-level one.
+**Test gap (PARTIALLY CLOSED 2026-08-03, `ora-pm` commit `607cf13`):** the regex was unanchored enough
+that it would still pass even if the reset logic were deleted. Retroactively found a pre-existing fix
+for this on the source branch (`fded57c`, authored between the OI-035 and OI-036 fixes but missed by
+the original OI-035 cherry-pick) and brought it over: the regex now requires the reset to immediately
+precede `setStep('done')`, verified by deleting the reset line and confirming the test now fails. This
+closes the test-anchoring gap specifically — it does NOT touch the underlying retry-recovery behavior
+below, which is still real and still open.
+**Candidate fix (NOT applied):** either redesign the retry path to not require re-linking the bank
+account (persist the first attempt's `payment_method_id` client-side and reuse it on retry, so the
+idempotency key AND params both match), or catch the specific `IdempotencyError` server-side and
+surface a clearer "check your payment history before retrying" message instead of a generic 400.
+**Auto-check:** none.
+
+**Closed:** 2026-09-19
+**Closure evidence (2026-09-19, batch verification against live state):** ora-pm PR #39 (fix/oi-064-paynow-retry-idempotency) merged; stripe.ts has a resume path with an idempotency window.
+
+### OI-065
+**Status:** CLOSED 2026-09-19
+**Prior status:** OPEN
+**Opened:** 2026-08-03
+**Source:** REFUTE pass on the [OI-035](#OI-035) fix (security-auditor dispatch), 2026-08-03
+**Severity:** LOW-MEDIUM (financial edge case — requires the tenant's own concurrent action, not a third-party attack)
+**Description:** `server/routes/stripe.ts:139-148`. No transactional lock or row lock around the
+`ar_ledger.balance` read and the subsequent PaymentIntent creation. Two genuinely distinct requests
+(e.g. two open browser tabs, or a fast double-submit that bypasses the client's
+`disabled={step==='processing'}` guard via a direct API call) each get their own valid
+`client_request_id`, each read the same stale balance, and each create a fully separate, individually
+idempotent-and-legitimate PI. The `payments_stripe_pi_uniq` index doesn't catch this — the PI ids
+genuinely differ. Outside OI-035/OI-040's original stated scope (which covered retry-dedup and the
+absolute/balance ceiling per-request, not cross-request concurrency), but directly adjacent to both.
+**Candidate fix (NOT applied):** a Postgres advisory lock or `SELECT ... FOR UPDATE` on the lease's
+outstanding-balance row for the duration of the check-then-create sequence; or a lightweight
+per-lease mutex (Durable Object) around the whole handler, similar to what OI-038's shared-state
+rate-limiting redesign would need anyway.
+**Auto-check:** none.
+
+**Closed:** 2026-09-19
+**Closure evidence (2026-09-19, batch verification against live state):** ora-pm PR #41 merged; stripe.ts uses reserve_payment_intent RPC under pg_advisory_xact_lock.
+
+### OI-082
+**Status:** CLOSED 2026-09-19
+**Prior status:** OPEN
+**Opened:** 2026-08-05
+**Source:** ora-appsec-sweep 2026-08-05 (ora-pm @ `a29f8f0`, security-auditor dispatch)
+**Severity:** MEDIUM (financial data integrity)
+**Description:** `supabase/migrations/0002_financial_tables.sql:26-40`,
+`0011_appsec_idempotency_and_scale.sql:39-53`, insert path `server/routes/payments.ts:28-36`.
+`0011` hardened `charges` with `idempotency_key TEXT UNIQUE NOT NULL` but gave `payments` only two
+PARTIAL unique indexes, on `stripe_payment_intent_id` and on `(lease_id, autopay_period)`. Rows with
+`method IN ('check','wire','other')` are NULL on both columns and so fall outside both indexes.
+Nothing prevents a second identical row.
+**Impact:** a double-submitted admin form, a retried request, or a re-run import writes a duplicate
+payment; `ar_ledger`'s `payment_totals` CTE sums both and the tenant's balance silently drops by the
+duplicated amount. That understated balance then propagates: `POST /api/stripe/payment-intent`'s
+balance cap (`server/routes/stripe.ts:166-168`) and the autopay lifetime cap
+(`server/routes/cron.ts:173-174`) both read it, so under-collection reaches automated billing. Same
+class as the two AR defects already shipped in this repo (cartesian fan-out; divide-by-100) — the
+read path was fixed, the write path was not. Distinct from [OI-034](#OI-034)/[OI-035](#OI-035),
+which addressed Stripe-side idempotency keys rather than the manual-entry methods.
+**Candidate fix (NOT applied):** mirror the `charges` treatment —
+`ALTER TABLE payments ADD COLUMN idempotency_key TEXT;`, backfill `'legacy:' || id::text`,
+`SET NOT NULL`, `CREATE UNIQUE INDEX payments_idempotency_key_uniq ON payments(idempotency_key);` —
+and default it in `server/routes/payments.ts` the way `charges.ts:35` does. Run 0011's pre-flight
+equivalent first (`SELECT lease_id, payment_date, amount, method, count(*) ... HAVING count(*)>1`):
+existing duplicates are a live-data finding in their own right, not a migration obstacle to code
+around.
+**Auto-check:** none.
+
+**Closed:** 2026-09-19
+**Closure evidence (2026-09-19, batch verification against live state):** ora-pm PR #38 merged; migration 0015_payments_idempotency_key.sql adds payments_idempotency_key_uniq. Production application not separately confirmed; db-migrate runs of 09-17/18 succeeded.
+
+### OI-224
+
+**Status:** CLOSED 2026-09-19
+**Prior status:** OPEN
+**Opened:** 2026-09-02 · **Source:** `ora-appsec-sweep` 2026-09-02 (ora-pm @ `ca62ecbed3aff0a1d21585dcf40f62d823810296`, security-auditor dispatch)
+**Severity:** MEDIUM (money-state correctness — ledger/display divergence)
+
+**Description:** `server/lib/schemas.ts:74-81`'s `PaymentInsertSchema` allows `method:'ach_stripe'` with no `stripe_status` field, even though `server/routes/payments.ts:28-36`'s own code comment says this admin manual-entry route is for `check`/`wire`/`other` only. A row inserted this way has `stripe_status` NULL, so `ar_ledger` (which sums only `stripe_status='succeeded'` ACH rows) excludes it from the tenant's balance — while `GET /api/payments` and the admin PaymentsList display it as a recorded payment. There is also no unique constraint on manual payments (`check_number` isn't even in the schema), so the same check can be entered twice.
+
+**Impact:** Admin-visible "paid" rows that don't reduce the tenant's actual balance (the exact display/ledger divergence class in this repo's defect history), or duplicate manual entries that double-credit a tenant. Related but distinct from [OI-082](#OI-082), which is about missing uniqueness on non-Stripe payments causing double-COUNTING (understated balance) — this is a schema gap allowing an uncounted-but-displayed row (the opposite-direction bug), on the same route.
+
+**Candidate fix (NOT applied):** restrict `PaymentInsertSchema.method` to `['check','wire','other']`; add `check_number` to the schema; add a partial unique index, e.g. `(lease_id, payment_date, amount, check_number) WHERE method IN ('check','wire','other')`.
+
+**Auto-check:** none.
+
+**Closed:** 2026-09-19
+**Closure evidence (2026-09-19, batch verification against live state):** origin/main server/lib/schemas.ts has method: z.enum(['check','wire','other']); ach_stripe not accepted.
+
+### OI-225
+
+**Status:** CLOSED 2026-09-19
+**Prior status:** OPEN
+**Opened:** 2026-09-02 · **Source:** `ora-appsec-sweep` 2026-09-02 (oxford-command-center @ `d30d71ea78f98ebfc1deee4ee6847672baca78d2`, security-auditor dispatch)
+**Severity:** MEDIUM (OWASP LLM02 sensitive-information disclosure / Invariant 3 egress)
+
+**Description:** `server/ai/tools.ts:251-269` (`get_alerts` → `evaluateConditions`) and `:238-249` (`get_relationships`) do not filter out confidential deals the way `get_deals`/`search_entities` do — `src/analytics/conditions.ts:786-814` generates deal-insight alerts (LOI/PSA deadlines, next-actions) named for every deal with no `confidential` check, and `get_relationships` returns counterparties/emails tied to confidential deals too. `server/ai/agent.ts:249` then appends tool results verbatim into the outbound `messages` array with no pre-send scan — unlike `server/ai/comps.ts:26-29`, `server/warehouse/om-extract.ts:90-106`, and `server/ai/narrative.ts:118-123,252-254`, which all fail closed on the same Anthropic-API egress. The Pages-mirror path (`functions/api/ai.ts`) runs the identical agent against a snapshot deliberately baked WITH confidential data (`MIRROR_INCLUDE_CONFIDENTIAL=1`), so it inherits the same gap.
+
+**Impact:** A question like "what's at risk right now?" against a confidential deal in an alert-eligible stage (e.g. LOI/PSA within `loiDeadlineWarnDays`) sends that deal's name and free-text `nextAction`/detail to api.anthropic.com. 16 of 22 deals in the committed snapshot are `confidential:true` at this SHA.
+
+**Candidate fix (NOT applied):** share one `redactConfidential()` function (the bake pipeline's `scripts/bake-mirror.ts:78` already has the right shape) between the bake, the agent, and the mirror Function, and/or run `server/briefing/confidential.ts`'s `scanForConfidential` over each tool_result before it's pushed into `messages`, dropping/nulling hits — matching the belt-and-suspenders pattern the other three egress points already use.
+
+**Auto-check:** none.
+
+**Closed:** 2026-09-19
+**Closure evidence (2026-09-19, batch verification against live state):** origin/main server/ai/tools.ts has confidentialScope keyed on the confidential flag; agent.ts has a pre-send scan tagged OI-225.
+
+### OI-228
+
+**Status:** CLOSED 2026-09-19
+**Prior status:** CLOSED 2026-09-08
+**Opened:** 2026-09-02 · **Source:** `ora-appsec-sweep` 2026-09-02, DISPATCH INTEGRITY GATE assertion 4 (post-hoc model-floor probe, mandatory per SKILL.md v1.5+)
+**Severity:** LOW (tooling false-positive, not a real floor breach)
+
+**Description:** `~/.claude/maintenance/check-dispatch-model-floor.py --floor claude-opus-4-8` exited 1 ("FAIL — below-floor model") against both of this sweep's subagent transcripts. Root cause: its `MODEL_RANK` table recognizes only `claude-mythos-5` and `claude-fable-5` (rank 100) — it has no entry for `claude-fable-5-1`, the model id this session's own environment reports as the current Fable 5.1 release, so `model_rank()` falls through to `UNKNOWN_RANK = -1` (fail-closed by design for genuinely unplaceable ids) and reads a valid top-tier model as a violation.
+
+**Verified directly** (not just inferred from the probe's summary line): `agent-ae4ff02601b0e1cdb.jsonl` (ora-pm dispatch, 62 assistant messages) and `agent-ae7f6e4c49d408b89.jsonl` (oxford-command-center dispatch, 110 assistant messages) both show `message.model:"claude-fable-5-1"` on every single line, with **zero** `"type":"fallback"` events in either transcript. Both dispatches ran entirely on Fable for their full duration — the best possible outcome under Gabriel's ratified Option C (2026-07-24), not a degradation.
+
+**Distinct from [OI-052](#OI-052).** OI-052 documents a real, repeatedly-observed mid-run fallback pattern (`claude-fable-5` → `claude-opus-5`/`claude-opus-4-8`), ruled compliant 2026-08-14 because Opus is still top-tier. This item is a different mechanism entirely: no fallback occurred; the probe's own lookup table is stale.
+
+**Per the sweep's own doctrine, this had to be recorded and escalated regardless of diagnosis** ("Do NOT 'fix' a firing by loosening the floor below Opus or deleting the assertion") — see the completion report / escalation email for the mandatory MODEL-FLOOR BREACH notice. The actual fix belongs in the probe script, not the floor logic: add `claude-fable-5-1` (and, proactively, `claude-mythos-5-1`) to `MODEL_RANK` at rank 100.
+
+**Candidate fix (NOT applied):** `~/.claude/maintenance/check-dispatch-model-floor.py` — add `"claude-fable-5-1": 100` and `"claude-mythos-5-1": 100` to `MODEL_RANK`. Out of scope for this report-only task to apply (the file lives outside both audited repos and this task's writes are limited to Notion/tracker/scratch/worktrees).
+
+**Closed 2026-09-08.** Applied in two parts: `claude-fable-5-1` landed incidentally in [PR #176](https://github.com/ZeOoba/ora-claude-config/pull/176) (the `REVIEWER_MODEL_LADDER` staleness fix that surfaced this item's twin gap); `claude-mythos-5-1` — the half this item explicitly called for and #176 missed — landed in [PR #177](https://github.com/ZeOoba/ora-claude-config/pull/177), independently reviewed (Opus), with a regression test asserting both 5.1-generation ids rank at the floor (`maintenance/_tests/test_check_dispatch_model_floor.py`, 45/45 assertions). **Evidence:** `model_rank("claude-fable-5-1") == 100` and `model_rank("claude-mythos-5-1") == 100`, verified directly post-merge. See also [OI-248](#OI-248), a distinct adjacent gap the same review surfaced (`REVIEWER_MODEL_LADDER` itself has no Mythos entry) — flagged, not closed by this fix.
+
+**Auto-check:** none.
+
+**Closed:** 2026-09-19
+**Closure evidence (2026-09-19, batch verification against live state):** origin/main check-dispatch-model-floor.py has commit 1b445cb adding claude-mythos-5-1; section said CLOSED 2026-09-08 (PRs #176/#177). Live ~/.claude checkout is behind origin/main.
+
+### OI-255
+**Status:** CLOSED 2026-09-19
+**Prior status:** OPEN
+**Opened:** 2026-09-10
+**Severity:** HIGH — the repo with the largest financial blast radius carries the weakest merge gate in the estate
+**Source:** Cross-repo architecture-diagram review (Gabriel-directed, this session) — `ora-pm/package.json`, `ora-pm/.github/workflows/ci.yml`, compared against `oxford-command-center/package.json`
+
+**Description:** `ora-pm` is the only ORA repo that moves real money: monthly billing generates charges and fires Stripe ACH autopay debits, and the delinquency cron posts late fees. Its gate, verified against `package.json` this session:
+
+- `"lint": "tsc --noEmit"` — there is no linter configured at all; `lint` is a second name for `typecheck`, so the whole `npm run lint` step is a no-op relative to the step before it. The README states this plainly, which means it was a known shortcut, not an accident.
+- No `gate`, no `check:refute`, no reconcile script of any kind exists in the scripts block.
+- `.github/workflows/ci.yml` is typecheck -> test -> build -> `npx wrangler pages deploy ./dist --project-name ora-pm`, with the deploy gated only on `github.ref == 'refs/heads/main' && github.event_name == 'push'`. Every push to `main` ships to production.
+
+`oxford-command-center`, which only reads money and never initiates a transfer, runs `eslint . --max-warnings 0` inside `gate:ci` plus a separate `refute-required` PR job that enforces a `Refute-Reviewed` commit trailer on financial-decision diffs. The protection is inversely proportional to the consequence.
+
+The exposure is not theoretical for this file set: `server/routes/cron.ts` alone carries five rounds of subrequest-budget fixes, an `AUTOPAY_BATCH_LIMIT`, and an in-file warning that the limit is "MAX SAFE for this endpoint's subrequest budget, not conservative." That is exactly the class of constant a linter cannot catch but a refute gate is designed to force a second pair of eyes onto.
+
+**Candidate fix:** two independent pieces, either shippable alone. (1) Add ESLint with a real config, stop aliasing `lint`, and add it to `ci.yml` before the test step. (2) Port `oxford-command-center/scripts/check-refute-required.ts` into ora-pm, scoped to `server/lib/billing.ts`, `server/routes/cron.ts`, `server/routes/stripe.ts` and `server/lib/cam.ts`, and make the `Deploy to Cloudflare Pages` step `needs:` it. Per CLAUDE.md's Engineering OS done-bar, changes to those four files should be carrying an adversarial REFUTE pass already; this makes that structural instead of remembered.
+
+**Related:** [OI-233](#OI-233), [OI-234](#OI-234), [OI-235](#OI-235) (all ora-pm financial-path findings from `ora-appsec-sweep` runs that a standing gate would have surfaced earlier), [OI-261](#OI-261) (same repo, secret hygiene).
+
+**Closed:** 2026-09-19
+**Closure evidence (2026-09-19, batch verification against live state):** ora-pm PR #40 merged; package.json has lint (--max-warnings 0) and check:refute; ci.yml runs both ahead of deploy steps.
+
+### OI-259
+**Status:** CLOSED 2026-09-19
+**Prior status:** OPEN
+**Opened:** 2026-09-10
+**Severity:** MEDIUM — 216 tests guarding a concurrency-critical substrate, with nothing running them
+**Source:** Cross-repo architecture-diagram review (Gabriel-directed, this session) — `AAOS/README.md` §2/§6, `ls AAOS/.github/workflows`, grep for `check-contract-drift` across the fleet
+
+**Description:** AAOS is the filesystem task-queue and lease/lock protocol that lets a Claude Code session and a Cowork session coordinate without clobbering each other's state. Two gaps, both verified this session:
+
+- `C:\Users\Owner\AAOS\.github\workflows` **does not exist**. There is no CI of any kind. The 216-test suite (`python -m unittest discover -s tests`, ~31 seconds) runs only when a human types it. AAOS's one documented Critical bug — two near-simultaneous direct appends to `aaos-events.ndjson` silently clobbering each other, recorded in `docs/GATE3-REVIEW.md` and fixed via the spool + `O_EXCL` drain-lock now in `_aaos_common.py` — is regression-guarded by those tests alone.
+- `tools/check-contract-drift.py` is referenced by **nothing**: zero hits across `~/.claude/scheduled-tasks/**/SKILL.md` and any CI. Meanwhile `tools/publish-contracts.py` runs once a day (weekdays 09:15 ET) as the registered `ora-aaos-publish-contracts` task. The publisher is automated; the auditor written to prove the publish worked has never been wired to a trigger.
+
+The second gap is the more interesting one, because it is the inverse of the usual failure: normally the detector runs and the fix is manual. Here the fix runs unattended and the detector is dormant, so a publish that silently half-succeeded would look identical to one that worked.
+
+Note the repo also has no dependency manifest — `jsonschema` is the single non-stdlib import and there is no `requirements.txt`, which is the standing problem in [OI-175](#OI-175).
+
+**Candidate fix:** one GitHub Actions workflow: `pip install jsonschema` then `python -m unittest discover -s tests -p "test_*.py"` on push and pull_request. It needs no secrets, no data access, and no self-hosted runner — this is a genuinely 20-minute change with a real safety return. Pinning `jsonschema` in a `requirements.txt` as part of the same change closes OI-175's non-durable pip fix, since the workflow gives that manifest a consumer. Separately, append `check-contract-drift.py` as a second step to the existing `ora-aaos-publish-contracts` scheduled task so publish and verify happen in one pass — an edit to that task's `SKILL.md`, not a new registration.
+
+**Related:** [OI-175](#OI-175) (AAOS jsonschema pin — closed incidentally by this fix), [OI-257](#OI-257) (the AAOS mirror is the estate's best-behaved one; this is what is missing behind it).
+
+**Closed:** 2026-09-19
+**Closure evidence (2026-09-19, batch verification against live state):** AAOS PR #4 merged (cc8fbc6); .github/workflows/ci.yml on origin/main and check-contract-drift.py referenced in ora-aaos-publish-contracts SKILL. Green CI run not separately confirmed.
+
+### OI-263
+**Status:** CLOSED 2026-09-19
+**Prior status:** OPEN — blocks [OI-259](#OI-259)
+**Opened:** 2026-09-10
+**Severity:** MEDIUM — nine tests that appear to guard the write-scope check actually assert a directory layout
+**Source:** Surfaced by [OI-259](#OI-259)'s CI workflow on its first run — [ZeOoba/AAOS PR #4](https://github.com/ZeOoba/AAOS/pull/4), Actions run 34514715973, both matrix legs (3.11 and 3.13)
+
+**Description:** AAOS's `match_write_scope()` is the "colonization guard" — it checks a handoff's artifact paths against the sending agent's declared `write_scope` in `agent-registry.json`, and it is the thing that stops one agent writing artifacts into another's territory. Nine tests exercise the positive path (an artifact that SHOULD be accepted), and all nine are coupled to one machine:
+
+- `tests/test_queue_scripts.py:522` — `PostHandoffTestBase.setUp` does `tempfile.mkdtemp(prefix="aaos-artifacts-", dir=str(REPO_ROOT))`.
+- `tests/test_queue_scripts.py:528` — `make_in_scope_artifact()` writes into that directory and returns its absolute path.
+- `agent-registry.json:18` — `claude-code`'s `write_scope` is the literal `"C:/Users/Owner/AAOS/**"`.
+
+So "in scope" is true only while `REPO_ROOT == C:/Users/Owner/AAOS`. The helper's name asserts a property the code does not establish; it establishes it by coincidence of where the repo sits.
+
+Verified failure on CI (identical on both legs, 9 of 226):
+
+```
+FAIL: test_posts_handoff_with_artifact_manifest (test_queue_scripts.PostHandoffHappyPathTests)
+AssertionError: 1 != 0 : VALIDATION FAILED: handoff failed validation:
+  ["WRITE-SCOPE VIOLATION: path '/home/runner/work/AAOS/AAOS/aaos-artifacts-py73zpen/evidence.txt'
+    is outside agent 'claude-code's declared write_scope"]
+```
+
+Also failing: `test_identical_repost_is_noop_exit_0_no_reemit`, `test_write_once_conflict_exits_3`, `test_nonempty_blocker_blocks_task_and_emits_blocked`, `test_blocking_drops_lease_and_archives_live_lock`, `test_blocker_with_lost_lease_exits_4`, and three others in the same base class. Every one fails for the same single reason, and each was previously asserting a DIFFERENT exit code (0, 3, 4) — so the coupling silently converts three distinct assertions into the same validation error, masking whatever those tests were actually meant to prove.
+
+**Why there is no cheap fix.** There is no injection seam:
+
+- `tools/post-handoff.py:26-27` says so explicitly in its own module docstring: *"agent-registry.json — aaos.validate_obj("handoff", registry=None) loads it via aaos.load_registry(). There is no --registry override here"*.
+- `tools/_aaos_common.py:268` — `def registry_path() -> Path: return REPO_ROOT / "agent-registry.json"`.
+
+Note `tools/validate.py` DOES accept `--registry`, so the seam exists in the codebase's own idiom; it simply was never extended to `post-handoff.py`.
+
+**Why this matters beyond CI.** Two things, independent of whether AAOS ever gets CI:
+1. The nine tests provide false confidence. Nothing in the suite currently proves `match_write_scope()` accepts a genuinely in-scope path for a reason other than the repo's location.
+2. It is a latent portability trap. AAOS's own `docs/MIGRATIONS.md` and the ora-claude-config `MIGRATION_RUNBOOK.md` contemplate restoring onto a fresh machine; a restore to any path other than `C:\Users\Owner\AAOS` would fail nine tests for a reason that looks like a real guard violation.
+
+**Candidate fix (NOT applied — needs its own review, this touches the colonization guard's inputs):** add a `--registry <path>` override to `tools/post-handoff.py`, mirroring the one `tools/validate.py` already has, and have `PostHandoffTestBase.setUp` write a temp `agent-registry.json` whose `claude-code` `write_scope` is derived from `REPO_ROOT` at runtime rather than hard-coded. That makes the positive-path assertions test the matcher instead of the filesystem, and leaves the production registry untouched. Deliberately NOT chosen: rewriting `agent-registry.json` to relative scopes (it is a schema-validated contract published to the seam mirror, so changing its shape has blast radius well past the tests), and monkeypatching `aaos.registry_path` from the test base (works, but hides the missing seam rather than closing it).
+
+**Blocking relationship:** [OI-259](#OI-259)'s CI workflow is written, verified, pushed and correct — the workflow itself is not at fault. PR #4 is held unmerged on purpose: landing a CI that is red on arrival trains everyone to ignore it, which is worse than having none. Merge PR #4 once this item is fixed.
+
+**Related:** [OI-259](#OI-259) (the CI that surfaced this — blocked by it), [OI-175](#OI-175) (also rides on PR #4).
+
+**Closed:** 2026-09-19
+**Closure evidence (2026-09-19, batch verification against live state):** AAOS tests/test_queue_scripts.py derives the in-scope artifact under REPO_ROOT (L523-538); PR #4 merged. Green CI run not separately confirmed.
+
+### OI-264
+**Status:** CLOSED 2026-09-19
+**Prior status:** OPEN — blocks the 3.11 leg of [OI-259](#OI-259)'s CI
+**Opened:** 2026-09-10
+**Severity:** MEDIUM-HIGH — a contended lease can surface as data corruption rather than a clean denial
+**Source:** Surfaced by [OI-259](#OI-259)'s CI workflow — [ZeOoba/AAOS PR #4](https://github.com/ZeOoba/AAOS/pull/4), run 34518125534
+
+**Description:** AAOS's entire purpose is that two agents cannot both hold the same task. `acquire_lease()` implements that with the spec's 6-step protocol: stage the lock, exclusive-create it, settle, rescan for conflicts, fail closed on ambiguity. The exclusive-create is atomic — but the lock's JSON *content* is written as a separate step immediately after, and nothing makes create-plus-write atomic together.
+
+A second writer arriving inside that window opens a zero-byte lock file:
+
+```
+_aaos_common.CorruptStateError: unparseable JSON at
+  /tmp/aaos-test-1cp9nqfb/projects/ora-ops/locks/t-race-8.lock:
+  Expecting value: line 1 column 1 (char 0)
+```
+
+and the race assertion then observes:
+
+```
+FAIL: test_genuine_race_exactly_one_acquired_never_two
+  (test_aaos_common.AcquireLeaseRaceTests)
+AssertionError: Lists differ: ['acquired'] != ['acquired', 'denied']
+```
+
+`tests/test_failure_injection_matrix.py::Scenario03TwoWritersRaceTests` fails alongside it, since its meta-test asserts that coverage passes.
+
+**Evidence it is a timing window, not a platform difference.** The 3.13 leg of the SAME CI run passed while 3.11 failed. Locally it reproduced once during a full-suite run under heavy load (13 concurrent Claude sessions on the machine; that run took 193s against a 14s baseline), then passed in isolation (3.4s) and on two subsequent full runs. So the window is real and narrow, and load — not OS — decides whether it is hit. Windows is not immune; it is merely slower to lose the race.
+
+**Why this is worse than a flaky test.** `CorruptStateError` is the exception AAOS reserves for genuinely damaged state, and `docs/OPERATIONS.md`'s runbook treats it as such. A routine contended lease — the single most expected event in the whole system — can therefore present as corruption, inviting exactly the wrong operator response (inspect/repair state) to a situation whose correct handling is "back off and retry." The protocol's own promise, per `AAOS-SPEC.md` §7, is ACQUIRED / DENIED / CONTESTED; a corruption exception is outside that contract.
+
+It also sits on the Cowork path: `docs/COWORK-BOOTSTRAP.md` contemplates a Cowork sandbox driving these same tools, and a sandbox racing the local session is precisely the scenario the lease discipline was built for.
+
+**Candidate fix (NOT applied — needs its own review):** correct the READER, not the writer. Making create-and-write atomic is not available: the exclusive-create IS the mutual-exclusion primitive, so it cannot be replaced by the repo's atomic write-rename (a rename would clobber a rival's lock and destroy the guarantee). The tractable change is to teach the reader that an existing-but-empty/unparseable lock encountered inside the settle window means "held by a writer mid-create" — deny or retry — while an unparseable lock encountered OUTSIDE that window still means corruption. That is a semantic change to the lease state machine and carries the Engineering OS done-bar's mandatory adversarial REFUTE pass; it is explicitly not a CI-unblocking patch.
+
+**Explicitly rejected:** skipping the race test on POSIX, marking it `expectedFailure`, or loosening its assertion. Every one of those makes CI green by deleting the only evidence of a real defect in the system's core guarantee — the same move refused for [OI-263](#OI-263).
+
+**Related:** [OI-259](#OI-259) (the CI that surfaced this), [OI-263](#OI-263) (the other defect the same CI surfaced), [OI-174](#OI-174) (prior load-sensitive-test flake with the same "passes in isolation, fails under load" signature — worth checking whether that one was also a real window rather than a flake).
+
+**Closed:** 2026-09-19
+**Closure evidence (2026-09-19, batch verification against live state):** AAOS acquire_lease writes a staged sidecar and links it with _exclusive_link, so the lock is never empty. Race test not re-run.
+
+### OI-310
+**Status:** CLOSED 2026-09-19
+**Prior status:** OPEN
+**See:** the Closed table above — the row's own one-line cell is the full write-up; not restated here per this file's own text-lives-in-one-place rule. This stub exists only to give `open-items-tracker.md#OI-310` a working anchor.
+
+**Closed:** 2026-09-19
+**Closure evidence (2026-09-19, batch verification against live state):** ora-pm PR #43 merged 2026-09-18; DELETE handler selects source, voided_at; push CI at 5e822e3 succeeded. Deferred follow-ups (atomic delete, DB-level guard) filed as a new item.
+
+### OI-312
+**Status:** CLOSED 2026-09-19
+**Prior status:** OPEN
+**See:** the Closed table above — the row's own one-line cell is the full write-up; not restated here per this file's own text-lives-in-one-place rule. This stub exists only to give `open-items-tracker.md#OI-312` a working anchor.
+
+**Closed:** 2026-09-19
+**Closure evidence (2026-09-19, batch verification against live state):** ora-pm PRs #44 and #46 merged; ci.yml L136 runs check-migrations-applied.mjs; push CI at 664f026 and 5e822e3 succeeded.
+
+### OI-271
+
+**Status:** CLOSED 2026-09-19
+**Prior status:** CLOSED 2026-09-11
+**Opened:** 2026-09-11 · **Source:** `dirty-tree-triage` follow-up — independent review (claude-opus-5) of CLAUDE.md commit `b777625`
+**Severity:** LOW (doc contradiction, no automated behavior affected — `rules.md` §2 has always been the operational-detail target, and the exit-code table itself is correct and complete)
+
+**Description:** `rules.md` §2's own bullet on the send path (line 32: "On non-zero COM exit: retry once, then flag loudly … do NOT halt") now directly contradicts the detailed exit-code table two lines below it (line 34: "Exit 1 (usage error) / Exit 3 (stuck wizard): do NOT retry — flag immediately"). This was harmless while CLAUDE.md still inlined the same exit 1/3 split and a reader would reconcile the two; CLAUDE.md's word-budget pass (2026-09-10, ORA Automation Audit R24-4) replaced its own inline copy with a pointer straight to §2, so §2's line 32 is now the first thing a top-down reader hits and it reads as blanket "always retry once," directly opposite the very next bullet's exit 1/3 carve-out.
+
+**Impact:** documentation-only today — no code reads line 32 as an instruction, `send-via-outlook.ps1`'s actual exit-code handling is unaffected. Risk was a future human or session reading only line 32 and retrying a stuck-wizard (exit 3) send, which the table two lines down explicitly says makes the stuck state worse.
+
+**Evidence:** fixed and committed together with landing the settled word-budget-pass insertion itself (`rules.md` commit `607a2d0`, dirty-tree-triage/OI-249 follow-up session) — reworded line 32 to "On non-zero COM exit: see the per-code table below — not every exit code retries — and never route through Composio/Rube/Gmail regardless of exit code," removing the blanket-retry claim. Verified via `git show 607a2d0 -- rules.md`: no remaining contradiction between line 32 and the exit-code table.
+
+**Auto-check:** none.
+
+**Closed:** 2026-09-19
+**Closure evidence (2026-09-19, batch verification against live state):** Tracker recorded CLOSED 2026-09-11 (commit 607a2d0); not re-verified.
+
 ### OI-028
 **Status:** CLOSED (RESOLVED)
 **Opened:** 2026-07-26
@@ -2289,3 +3821,32 @@ smaller diff, and are outside the ratified 6-file scope. Needs its own scoping d
 **Source:** `ora-ground-truth-auditor` 2026-09-12 digest / drafted correction at `maintenance/_state/ground-truth-pending-approval/2026-09-12/cc_ora-doctrine-integrity-guard_2026-09-12T16_55_00.000Z/correction-note.md` — the same root cause was independently diagnosed and fixed in a separate session earlier the same day while resolving an `ora-doctrine-integrity-guard` scheduled-run `[XREF-MISSING]` alarm, before the auditor's run reached its own OI-filing step
 **Description:** `session-context-xref-probe.py`'s `search_roots()` omitted `maintenance/_state`, so `session-context.md:20`'s `retire-pending.json` citation raised a false `[XREF-MISSING]` (the file genuinely exists there — the retirement-pending ledger). The line-20 "PAUSED 2026-09-07" bullet was also itself stale per its own "delete once resume fires and block reads 36" instruction — the resume had already completed (manually, per [OI-273](#OI-273)) days earlier.
 **Evidence:** Added `maintenance/_state/xref-extra-roots.json` (the probe's own pre-existing, documented extension point for citations outside its built-in search roots — no probe code touched) listing `maintenance/_state`; deleted the stale session-context.md line-20 bullet. Re-ran `session-context-xref-probe.py` -> exit 0, "19 file citation(s) checked", 0 `[XREF-MISSING]` (was 1). Re-ran `doctrine-integrity-probe.py` after the session-context.md edit -> still exit 0, confirming no regression. Logged same-session in `event_log.md` 2026-09-12 ("session-context-xref-probe [XREF-MISSING] false alarm fixed (probe root-coverage gap, not a missing file)"). Filed here CLOSED-on-arrival specifically so the auditor's independently-allocated OI-287 is not duplicated as a live fix task.
+
+| [OI-270](#OI-270) | 2026-09-10 | CI on [ZeOoba/AAOS PR #5](https://github.com/ZeOoba/AAOS/pull/5) (run 34527574215) — surfaced by the CI added in [OI-259](#OI-259), on a **docs-only** commit | **CLOSED 2026-09-18 — fixed and merged.** The append-only event log lost records under concurrent writers: `_read_drain_lock_acquired` treated any lock-read failure as "stale," so a contender could archive a genuinely live drain lock and let two drainers fold the NDJSON from the same snapshot. Fixed and adversarially verified (two independent REFUTE passes, second NOT REFUTED) in [PR #8](https://github.com/ZeOoba/AAOS/pull/8), squash-merged `1b13606`. Full detail in the `### OI-270` section below |
+
+### OI-270
+**Status:** CLOSED — fixed and merged
+**Opened:** 2026-09-10
+**Closed:** 2026-09-18
+**Severity:** HIGH — the append-only event log, which is the commit point of every transaction, loses records under concurrent writers
+**Source:** CI on [ZeOoba/AAOS PR #5](https://github.com/ZeOoba/AAOS/pull/5), run 34527574215 — found by the CI workflow added in [OI-259](#OI-259)
+**Evidence:** [ZeOoba/AAOS PR #8](https://github.com/ZeOoba/AAOS/pull/8) squash-merged to `main` as `1b13606` 2026-09-18T20:31:17Z, branch deleted. CI green on both matrix legs on the merged head ([run 35391689636](https://github.com/ZeOoba/AAOS/actions/runs/35391689636)).
+
+**Description:** `tests/test_event_log_concurrency.py::test_concurrent_writers_lose_zero_events` spawns concurrent writers emitting 240 events, drains the spool to completion, and asserts every one reaches `aaos-events.ndjson`. On PR #5 it failed on **both** matrix legs:
+
+```
+test (3.11)  AssertionError: 234 != 240 : expected 240 NDJSON lines, got 234 (6 events lost to the append race)
+test (3.13)  AssertionError: 232 != 240 : expected 240 NDJSON lines, got 232 (8 events lost to the append race)
+```
+
+`docs/GATE3-REVIEW.md` had recorded this exact failure mode (two near-simultaneous direct appends to `aaos-events.ndjson` silently clobbering each other) as Critical and **fixed** by the spool-file + `O_EXCL` drain-lock mechanism in `_aaos_common.py`; this result said the guarantee did not hold under real contention. `commit_state_change` treats the event write as the commit point of every transaction, so a lost event is lost evidence a transaction happened. Intermittent and contention-dependent (passed 5/5 locally in isolation; CI's real 2-core parallelism exposed it — same signature as [OI-264](#OI-264)). Not caused by the commit that surfaced it (`598ef51` touched only a docs file).
+
+**Root cause.** `_read_drain_lock_acquired` returned `None` on ANY read failure, and `_try_acquire_drain_lock` treated `None` as "stale." Under contention the commonest failure is `FileNotFoundError` — the incumbent released between a contender's failed exclusive-create and its read. The contender then "archived the stale lock" with a path-based `os.replace`, moving whatever sat at the path *by then*: a third drainer's live lock. Two drainers fold the NDJSON from the same snapshot; the later `os.replace` clobbers the earlier fold's lines, whose spool files are already moved to `_drained/`, so no later drain could recover them. Linux-only in practice: `os.replace` there succeeds regardless of open handles, where Windows's steal usually dies on a sharing violation — every recorded occurrence was ubuntu-only for that reason.
+
+**Evidence gathered.** 400-run observe-only repro (8 writers × 30 events) on `ubuntu-latest` ([CI run 35389532700](https://github.com/ZeOoba/AAOS/actions/runs/35389532700), py 3.11 + 3.13): pre-fix 64/200 runs (32%) lost events, every lossy run showed a live-lock steal and zero without one, 475/475 lost events found sitting in `_drained/` (folded, then clobbered) — never in `_corrupt/`, never left pending. Post-fix: 0/200 steals, 0/200 losses, both Pythons.
+
+**Fix.** `_read_drain_lock_acquired`/`_try_acquire_drain_lock`: `FileNotFoundError` on the lock read means released, not stale — archive nothing, retry the create; any other `OSError` means age unknown — fail closed on a fresh lock, fall back to the lock file's own mtime (compared against the real wall clock, never an injected `now`) so a crashed drainer's persistently unreadable lock still unwedges after `_DRAIN_LOCK_STALE_MINUTES`; a pending file vanishing under a held drain lock now warns loudly instead of the prior "benign timing quirk" read. Deterministic forced-interleaving tests added (no reliance on CI's scheduler) plus a tripwire in the existing test: nothing can be legitimately stale in a seconds-long run, so any lock-archive attempt is a proven steal. Scope confined to the event-spool functions — no edit to `acquire_lease`/`archive_lock`/`assert_lease_held` (OI-265/267 territory, both in flight in separate worktrees, confirmed disjoint before starting).
+
+**Adversarial REFUTE pass (Fable tier, independent, mandatory for commit-point code) — two passes, second NOT REFUTED.** First pass found the targeted race genuinely closed (every revert-mutant killed) but caught one flaw the fix itself introduced (mtime fallback compared against the caller's injected `now` instead of the real clock — fixed same day) plus test gaps (fixed same day, mutants re-run and killed) and three pre-existing defects filed separately rather than folded in: [OI-314](open-items-tracker.md#OI-314) (clock-mixing in the `acquired` stamp itself, plus the steal/release of a genuinely-stale lock staying path-based), [OI-315](open-items-tracker.md#OI-315) (`splitlines()` vs U+2028/U+0085), [OI-316](open-items-tracker.md#OI-316) (undelimited event-id concatenation). Second pass (independent, same tier), on the claim narrowed to "agreeing clocks, no crash/no >5min drain ⇒ never a second drainer": NOT REFUTED — 241/241 tests after one more pinning test for a surviving mutant, F2 fix confirmed closed via 3 scenarios incl. real clocks, 16/17 mutants killed cleanly on first re-run, 15 consecutive runs clean on Windows. One residual noted as outside the narrowed claim's premise, same class as [OI-314](open-items-tracker.md#OI-314): the unreadable-lock mtime fallback trusts filesystem mtime, so a >5min clock-skewed seam-root host could still misjudge a fresh-but-unreadable lock.
+
+**Related:** [OI-264](#OI-264) (same "green locally, red under CI contention" signature, in the lock protocol rather than the event log), [OI-259](#OI-259) (the CI that surfaced this), [OI-314](open-items-tracker.md#OI-314)/[OI-315](open-items-tracker.md#OI-315)/[OI-316](open-items-tracker.md#OI-316) (sibling defects filed separately from the REFUTE pass, not fixed here).
