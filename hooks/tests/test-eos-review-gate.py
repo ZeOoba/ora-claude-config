@@ -672,6 +672,20 @@ def test_record_cli_rejects_under_tier_model():
     print("PASS test_record_cli_rejects_under_tier_model")
 
 
+def test_record_cli_accepts_opus_5_5():
+    """2026-09-22: a genuine Opus 5.5 reviewer (claude-opus-5-5, above claude-opus-5)
+    was refused because the ladder predated its release. Opus 5.5, including a
+    context-tagged self-report, must record."""
+    for mid in ("claude-opus-5-5", "claude-opus-5-5[1m]"):
+        repo, tmp = make_repo(), tempfile.mkdtemp(prefix="eos-rg-s-")
+        write(repo, "hooks/new-guard.py", "x = 1\n")
+        git(repo, "add", "-A")
+        rc, out, err = run_cli(
+            ["--record", "--verdict", "approved", "--model", mid], repo, tmp)
+        assert rc == 0, "--record must accept %s: %s" % (mid, err)
+    print("PASS test_record_cli_accepts_opus_5_5")
+
+
 def test_env_review_models_widens_and_narrows_accepted_tier():
     """EOS_REVIEW_MODELS is the documented escape hatch for a retired/unlisted
     ladder id (settings.json's top-level "env" block is what actually delivers
