@@ -204,6 +204,12 @@ Mirrors Claude task state into `C:/Users/Owner/Obsidian/BrainVault/_Claude/`. `C
 - `claude-code-plugins` marketplace registration (zero installs) lives in harness-managed `plugins/known_marketplaces.json` — left as-is; the settings-level zero-install registration (`chrome-devtools-plugins`) was removed 2026-07-29.
 - `skillOverrides` is a documented NO-OP for plugin-qualified skill names (/plugin is the real mechanism — T12, claude-code-guide-verified 2026-07-29); the ~14 inert plugin-qualified entries in settings.json are harmless and kept for intent-documentation until Gabriel rules on /plugin actions.
 
+## 9c. Windows text-integrity gotchas (added 2026-09-22, /insights sweep — each cost cleanup in multiple sessions)
+- **cp1252 shell:** Git Bash heredocs and `echo` mangle non-ASCII (em dashes, `§`, `→`) on the way into a file. Write non-ASCII content with the Write/Edit tools, or Python `open(p, "w", encoding="utf-8", newline="\n")`. Hook files stay ASCII-only (`ascii-only-guard.py`).
+- **LF → CRLF flips:** a Python or PowerShell rewrite without `newline="\n"` flips the whole file, so the diff shows every line changed. Before committing, check `git diff --stat`: a file whose changed-line count equals its length was flipped. Restore LF and re-apply only your change.
+- **WinError 5 / PermissionError on `event_log.md` and other OneDrive-synced files:** a transient lock (OneDrive sync, AV scan, a sibling append). Retry up to 3× with a 1–2 s sleep; never fall back to Edit-anchoring the log (session context: appends go through `append-event-log.py` only).
+- **`/tmp` differs:** Git Bash `/tmp` ≠ Python's `tempfile` dir. Pass absolute Windows paths between them (detail: the `C--Users-Owner` memory scope's `feedback_mutation_check_on_a_copy_and_tmp_paths.md`).
+
 ## 10. Archive notes
 ORA root pre-merge snapshot: `C:/Users/Owner/ORA_pre_consolidation/` (2026-04-09). Rube recipe archive (historical): `ORA/Migrations/2026-04-15_Rube_Export/`. Connectors removed 2026-06-02: Microsoft Learn, Google Drive, stray `searchapi`; earlier: QBO, Adobe, Gmail, Google Calendar.
 

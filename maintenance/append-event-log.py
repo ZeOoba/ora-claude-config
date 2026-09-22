@@ -610,6 +610,15 @@ def main(argv=None):
         return 1
 
     header = entry.splitlines()[0]
+    # Validate the header UP FRONT (2026-09-22, /insights). insert_newest() checks only the
+    # '## ' prefix, so an undated '## Foo' was written yet is not an entry to entry_blocks()
+    # (ENTRY_HEADER_RE), and a prefix-less entry surfaced as a raw ValueError traceback.
+    if not ENTRY_HEADER_RE.match(header):
+        sys.stderr.write(
+            "REJECTED: first line must be a dated entry header '## YYYY-MM-DD — <title>'.\n"
+            "  got: %r\n  Nothing was appended. Match the newest existing entry's heading.\n"
+            % header[:120])
+        return 1
 
     # Drain anything parked by a prior locked run first, so pending entries land as
     # soon as the lock clears. They are older than this new entry, so they end up

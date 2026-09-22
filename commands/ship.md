@@ -8,6 +8,12 @@ Target-aware. The confidentiality guard hard-wraps every path. **NEVER deploy wi
 3. Run the target's QC sub-agent.
 4. **Ask for explicit permission**, naming the target and exactly what will change.
 
+## Push & PR mechanics (all repos)
+- **Branch + PR, never a direct push to `main`.** Protected repos reject it; unprotected ones (ora-pm) deploy on it. A protection rejection is a routing signal, not something to retry or `--force` past.
+- **Push in the background.** The pre-push gate chain (doctrine + hook-tests + confidential scan) routinely outlasts the 2-min Bash timeout, and a timed-out foreground push leaves the push state unknown. Run `git push` with `run_in_background`, wait for the completion notice, then run `verify-push.py` (After, step 1).
+- **PR shows BEHIND** → `gh pr update-branch <n>`, then wait for checks on the NEW head before merging; a green check on the old head proves nothing.
+- **Message length:** keep commit bodies and PR descriptions under ~1,000 characters; longer ones have been rejected. Put the detail in the PR thread or `event_log.md`.
+
 ## Targets
 - **Brain mirror (`oxford-command-center`):** gate `npm run gate` (typecheck · lint · test · reconcile $0) → deploy `scripts/deploy-mirror.ps1` (redacted, behind Cloudflare Access) → post-verify: curl apex + a `*.pages.dev` hash → expect **302**; confirm **0 confidential terms** in `dist` → rollback: redeploy the previous build.
 - **oxfordra.net:** HARD GUARDRAIL — never edit/build/deploy without explicit permission. gate PageSpeed/CSP + **site-qc-reviewer** sub-agent → deploy Netlify MCP → `npx netlify-cli` fallback → post-verify curl 200 + visual → rollback: Netlify "publish previous deploy".

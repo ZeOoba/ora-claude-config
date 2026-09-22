@@ -133,6 +133,8 @@ GUARD_CHAIN = [
 #   7 lint-config-guard, 8 workbook-write-guard, 10 eos-evidence-gate,
 #   11 eos-review-gate, 12 commit-provenance-guard, 13 memory-orphan-link-guard,
 #   15 commit-hygiene-guard
+# Later additions (dispatcher-only, no settings.json entry): worktree-isolation-guard
+# (OI-252) and destructive-git-guard (2026-09-22), both stateless -- order-independent.
 BASH_GUARD_CHAIN = [
     "ora-autonomy-gate",
     "confidentiality-guard",
@@ -143,6 +145,8 @@ BASH_GUARD_CHAIN = [
     "eos-review-gate",
     "commit-provenance-guard",
     "worktree-isolation-guard",
+    "destructive-git-guard",  # 2026-09-22 -- blocks checkout --/reset --hard/clean -f
+    # only when they would discard uncommitted work
     "memory-orphan-link-guard",
     "commit-hygiene-guard",
 ]
