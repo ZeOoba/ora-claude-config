@@ -68,6 +68,8 @@ spec.loader.exec_module(ael)
 log, hold_s, out_path = sys.argv[1], float(sys.argv[2]), sys.argv[3]
 with ael._log_lock(log):
     start = time.time()
+    if len(sys.argv) > 4:  # optional ready-signal path: written once the lock is held
+        open(sys.argv[4], "w").close()
     time.sleep(hold_s)
     end = time.time()
 with open(out_path, "w", encoding="utf-8") as f:
@@ -128,9 +130,17 @@ def main():
     with open(driver, "w", encoding="utf-8") as f:
         f.write(_HOLD_INTERVAL_DRIVER % {"append": APPEND})
     out_holder = os.path.join(tmp, "holder.json")
-    holder = subprocess.Popen([sys.executable, driver, log, "2.0", out_holder],
+    ready = os.path.join(tmp, "holder.ready")
+    holder = subprocess.Popen([sys.executable, driver, log, "2.0", out_holder, ready],
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    time.sleep(0.3)  # let the holder actually acquire before we contend
+    # Wait for the holder to signal it actually HOLDS the lock. A fixed sleep raced
+    # interpreter startup under a loaded gate run (holder not yet locked -> contender
+    # acquired in ~0.01s -> false FAIL on the timeout check).
+    ready_deadline = time.time() + 30
+    while not os.path.exists(ready) and time.time() < ready_deadline:
+        time.sleep(0.02)
+    expect("holder signalled it holds the lock before we contend",
+           os.path.exists(ready), holder.poll())
     t0 = time.time()
     with m._log_lock(log, timeout=0.5):
         waited = time.time() - t0
@@ -140,7 +150,7 @@ def main():
            waited >= 0.4, waited)
     holder.communicate(timeout=30)
     expect("holder process exits 0", holder.returncode == 0, holder.returncode)
-    for p in (log, out_holder, driver, log + ".lock"):
+    for p in (log, out_holder, ready, driver, log + ".lock"):
         if os.path.exists(p):
             os.remove(p)
     os.rmdir(tmp)
