@@ -123,7 +123,7 @@ UNGUARDED_BACKLOG = {
     "ora-cc-snapshot-refresh", "ora-checkout-merge-forward",
     "ora-command-center-mirror-drift-check", "ora-deal-command-board",
     "ora-deal-sourcing-scan", "ora-doctrine-integrity-guard",
-    "ora-entry-market-scan", "ora-financial-code-integrity-sweep",
+    "ora-financial-code-integrity-sweep",
     "ora-lease-snapshot-refresh", "ora-master-workbook-ingest",
     "ora-model-release-watch", "ora-pm-daily-crons", "ora-pm-ledger",
     "ora-pm-monthly-billing", "ora-routine-pause-resume-2026-09-11",
@@ -163,6 +163,11 @@ NO_SIDE_EFFECT_REVIEWED = {
 # Listing one is a claim that someone READ it and confirmed the claim precedes every
 # side effect. A NEW guarded task whose ordering is unverifiable FAILS until read.
 ORDERING_VERIFIED_BY_HAND = {
+    # Read by hand 2026-09-23 (v1.8 guard landed from the live file): the sole claim is
+    # the fenced STEP 0-B block at :33. STEP 0-A (:18-24) runs first but only exits
+    # silently. Side effects all follow: Deal Sourcing Log creates :96, COM send :125,
+    # Ops Hub failure log :127. Off UNGUARDED_BACKLOG in the same change (ratchet).
+    "ora-entry-market-scan": "claim@33 precedes Notion creates@96, send@125, Ops Hub@127",
     # claim@27, only send at :241, inside a prose line beginning "Post a NEW DATED
     # CHILD PAGE" that matches neither a fence nor a step marker.
     "ora-deal-aging-sla": "claim@27 precedes sends@40,241",

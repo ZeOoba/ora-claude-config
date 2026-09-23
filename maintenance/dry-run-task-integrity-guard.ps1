@@ -13,10 +13,11 @@
 # against SKILL.md's STEP 3 conditions. If SKILL.md's alarm list ever changes, update the
 # reading below to match -- do not let this script and the guard's own doctrine drift apart.
 #
-# NOT RUN: push-fleet-heartbeat.ps1 (STEP 1.5 script 3) -- it commits+pushes to the
-# ora-claude-config repo, and SKILL.md itself notes a push failure there is a STEP-4 note
-# only, never a STEP-3 alarm, so it has no bearing on "would this alarm" and this tool
-# should not cause pushes just to answer a read-only question.
+# NOT RUN: push-fleet-heartbeat.ps1 (STEP 1.5 script 3) -- it publishes the heartbeat and
+# pushes pending work to the ora-claude-config repo, and this tool should not cause
+# publishes or pushes just to answer a read-only question. NOTE (OI-330, 2026-09-22):
+# SKILL.md STEP 3 now DOES treat a nonzero script-3 exit (2 = heartbeat publish failed) as
+# an alarm, so this wrapper's "WOULD ALARM / CLEAN" verdict does NOT cover that condition.
 #
 # STEP 0.5's real engine call (list_scheduled_tasks) is an MCP tool only an agent session
 # can invoke -- a standalone script cannot call it. Pass a freshly-fetched result via
@@ -268,7 +269,7 @@ if ($efh.exit -ne 0) {
 }
 
 Write-Output ''
-Write-Output 'SKIPPED (by design, per this wrapper''s scope): push-fleet-heartbeat.ps1 (STEP 1.5 script 3) -- commits+pushes to ora-claude-config; a push failure there is a STEP-4 note only, never a STEP-3 alarm.'
+Write-Output 'SKIPPED (by design, per this wrapper''s scope): push-fleet-heartbeat.ps1 (STEP 1.5 script 3) -- publishes and pushes to ora-claude-config, so a dry-run must not trigger it. NOTE: a nonzero exit from it IS a STEP-3 alarm in the real run (OI-330), so this verdict does not cover that condition.'
 
 # ---------------------------------------------------------------------------
 # STEP 2.75 -- task-folder-registration-probe.py
