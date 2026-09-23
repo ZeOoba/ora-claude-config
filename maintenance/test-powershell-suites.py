@@ -13,7 +13,7 @@ Contract:
                suites were found (a silent zero would hide a moved directory).
   * `CANNOT RUN:` + exit 1 -- PowerShell itself is unavailable. That is the gate's
                ENV-SKIP sentinel, so a machine without Windows PowerShell does not block.
-Suites run concurrently (each ~2-35s; all six ~35s wall) so the whole file stays well
+Suites run concurrently (each ~2-50s; all six ~50-105s wall under load) so the whole file stays
 inside the gate's 240s per-file budget. ORA_POWERSHELL_EXE overrides the interpreter
 (used by _tests/test_powershell_suites_runner.py to simulate its absence).
 """

@@ -72,13 +72,32 @@ with tempfile.TemporaryDirectory() as td:
     check("the timeout is actually honoured (<30s for a 3s bound)", el < 30, "elapsed=%.1fs" % el)
 
 # Review of #269 (LOW): a suite's own child process must not hold the runner past the bound.
+pid_dir = tempfile.mkdtemp()   # outside the suite dir, so an orphan cannot pin its cleanup
+pid_file = os.path.join(pid_dir, "child.pid")
 with tempfile.TemporaryDirectory() as td:
-    write(td, "test-child-hang.ps1", "& ping -n 60 127.0.0.1 | Out-Host; exit 0\n")
+    # The suite starts a long-lived child, records the child's PID, then waits on it.
+    write(td, "test-child-hang.ps1",
+          "$c = Start-Process -FilePath ping -ArgumentList '-n','60','127.0.0.1' -NoNewWindow -PassThru\n"
+          "Set-Content -Path '%s' -Value $c.Id\n"
+          "$c.WaitForExit(); exit 0\n" % pid_file)
     t0 = _time.time()
     rc, out = run(td, {"ORA_PS_SUITE_TIMEOUT": "3"})
     el = _time.time() - t0
-    check("a suite's lingering child cannot stretch the bound (tree kill; <30s for 3s)", rc != 0 and el < 30,
-          "rc=%s elapsed=%.1fs out=%s" % (rc, el, out))
+    _time.sleep(1)
+    child_pid = int(open(pid_file).read().strip()) if os.path.exists(pid_file) else 0
+    alive = False
+    if child_pid:
+        q = subprocess.run(["tasklist", "/FI", "PID eq %d" % child_pid, "/NH"], capture_output=True, text=True)
+        alive = str(child_pid) in q.stdout
+        if alive:   # never leak it, whatever the verdict
+            subprocess.run(["taskkill", "/F", "/PID", str(child_pid)], capture_output=True)
+    # Re-review of #269: the old '<30s' check passed with the tree kill removed, because the
+    # bounded post-kill read alone kept the runner under 30s. Assert the child is actually gone.
+    check("a suite's lingering child is killed with the suite (tree kill; child PID gone)",
+          rc != 0 and child_pid > 0 and not alive, "rc=%s pid=%s alive=%s elapsed=%.1fs out=%s" % (rc, child_pid, alive, el, out))
+    check("a suite's lingering child cannot stretch the bound (<30s for 3s)", el < 30, "elapsed=%.1fs" % el)
+import shutil as _sh
+_sh.rmtree(pid_dir, ignore_errors=True)
 
 # Review of #269 (LOW): a FAILING suite that happens to print the gate's ENV-SKIP sentinel must
 # not turn the runner's failure into an env-skip -- the runner rewrites the sentinel it echoes.
