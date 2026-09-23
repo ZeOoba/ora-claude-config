@@ -191,6 +191,31 @@ expect("run_test_file: captures a UTF-8 smart-quote byte from the child's own "
        out_sq is not None and "finding:" in out_sq,
        "got rc=%r out=%r" % (rc_sq, out_sq))
 
+# --- run_test_file(): a test that does NOT reconfigure its own stdout must still be ----
+# able to print non-cp1252 text (2026-09-22 regression) --------------------------------
+# The gate decodes child output as UTF-8 but never told the child to WRITE UTF-8: a
+# piped child stdout on Windows defaults to cp1252, so test_scheduled_task_run_guard.py's
+# `print("  FAIL ...")` of a detail containing U+2192 raised UnicodeEncodeError and the
+# push log showed a traceback in place of the real failure. Fix: PYTHONIOENCODING=utf-8
+# in the child env, once, for every test file.
+arrow_probe_root = tempfile.mkdtemp(prefix="gt-arrow-probe-")
+arrow_probe = write_dummy_test(
+    arrow_probe_root, "test-arrow-probe.py",
+    "import sys\n"
+    "print('  FAIL  real finding: a \\u2192 b')\n"
+    "sys.exit(1)\n")
+# Strip any ambient encoding override, or this passes vacuously (review MED).
+_saved_enc = {k: os.environ.pop(k) for k in ("PYTHONIOENCODING", "PYTHONUTF8")
+              if k in os.environ}
+try:
+    rc_ar, out_ar, _ = gt.run_test_file(arrow_probe)
+finally:
+    os.environ.update(_saved_enc)
+expect("run_test_file: a child printing U+2192 without reconfiguring stdout reports its "
+       "real failure line, not a UnicodeEncodeError",
+       "real finding: a → b" in (out_ar or "") and "UnicodeEncodeError" not in (out_ar or ""),
+       "got rc=%r out=%r" % (rc_ar, (out_ar or "")[-300:]))
+
 # --- run_test_file(): must not leak git hook env vars into the test subprocess --------
 # Simulates git's own pre-push hook environment: git sets GIT_DIR/GIT_WORK_TREE (and
 # friends) in the hook process's env so IT can operate on the outer repo. Bug: this
