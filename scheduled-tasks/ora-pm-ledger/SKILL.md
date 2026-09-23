@@ -109,8 +109,10 @@ either fleet. Run it before anything else:
 
 You are generating Gabriel Goldberg's end-of-day digest of everything that
 moved in the Oxford Realty Advisors Notion workspace **today**. Today's date
-(America/New_York) is available in your environment — call it `{TODAY}`
-(ISO `YYYY-MM-DD`). This is an INTERNAL status report to Gabriel, not a
+(America/New_York) is the run date computed once at run start with `date '+%A %Y-%m-%d'` — call
+its date part `{TODAY}` (ISO `YYYY-MM-DD`) — and is reused verbatim in every title,
+subject, header, filename and body in all three blocks (date part in every date slot;
+weekday only where a format names one, e.g. the `{Weekday, …}` headers). This is an INTERNAL status report to Gabriel, not a
 counterparty communication — sending it is permitted.
 
 ORA context: ~600K SF shallow-bay industrial/flex, ~140 tenants, ~27
@@ -1039,6 +1041,13 @@ PATTERN OBSERVATIONS (week-rolling):
 - Post the report to Notion Ops Hub (`32b6ecd8-9e59-81f2-b329-df3fd0e25062`)
   as a child page titled "Outbox QC — YYYY-MM-DD". Tags: qc, outbox,
   daily-sweep. Auto-archive after 30 days.
+  Page creates (retro pages included) that error or return a grace/quota notice have no
+  page ID: look for it — `notion-fetch` the parent for an exact-title child, then search
+  by the exact title (search lags: a miss alone is not proof) — a match created at/after
+  the create call is this run's page, use it; never blind-retry a create (it produced a
+  duplicate). After a grace/quota notice with no match, do not retry: the create is
+  UNVERIFIED and takes this block's failure path (flag it, carry it into Block C's
+  COVERAGE GAPS, never report the page as posted). Quota errors → `notion-quota-fallback` skill.
 - Email summary — see GLOBAL § routing/send-path (TO ggoldberg@ ONLY, COM-only
   send). Subject: "ORA Outbox QC — [YYYY-MM-DD] — [n] defects ([h] HIGH / [m]
   MED / [l] LOW)". Body: full report, Notion link at top.
@@ -1267,7 +1276,9 @@ Garamond / DM Sans / IBM Plex Mono). Structure:
 
 ### C.5 DELIVERY
 - Post the ledger to Notion Ops Hub as a child page ("EOD Action Ledger —
-  YYYY-MM-DD") and email — see GLOBAL § routing/send-path (TO ggoldberg@
+  YYYY-MM-DD"; on a create error or grace/quota notice, look for it exactly as B.5
+  says — never blind-retry; no match after a grace/quota notice = UNVERIFIED, listed
+  under COVERAGE GAPS) and email — see GLOBAL § routing/send-path (TO ggoldberg@
   ONLY, COM-only send. This corrects the original spec, which routed via the
   now-retired Composio connector and cc'd Eric).
 - Persist the ledger as a Cowork artifact ("ORA EOD Action Ledger") so it is
