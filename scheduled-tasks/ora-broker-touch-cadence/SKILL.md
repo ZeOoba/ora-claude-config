@@ -96,7 +96,7 @@ report the gap, create no drafts, and close the claim. An unreadable folder is n
 powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt>"
   - Always `-SubjectFile`, never a literal `-Subject` — non-ASCII subject characters are mangled in transit.
   - Use a DATED STEM, not the full subject, since the subject's tail carries live counts that
-    legitimately differ between runs. Stem: `Broker Touch Cadence - <YYYY-MM-DD>`. Keep the date in the
+    legitimately differ between runs. Stem: `Broker Touch Cadence - <YYYY-MM-DD>` (<YYYY-MM-DD> = the run date computed once at run start with `date '+%A %Y-%m-%d'`, date part only, reused verbatim in the subject, the Ops Hub row and the body). Keep the date in the
     stem or every day matches every day; keep it specific enough that no other ORA producer matches it.
   - Exit 0 (NOT_SENT) → proceed with the send. Exit 10 (ALREADY_SENT) → SKIP the send, log a NORMAL
     skip, and still call `complete` so Layer 1 re-converges with reality. Exit 1 (PROBE_ERROR) → FAIL
@@ -265,7 +265,7 @@ if ($missing.Count -gt 0) {
 # describe such a draft to Gabriel as ready to send.
 
 STEP 5 — Completion reporting.
-Post one row to the Notion Ops Hub (parent page 32b6ecd8-9e59-81f2-b329-df3fd0e25062) listing who was drafted, their market, and why (stale-touch trigger + any Outlook thread context used).
+Post one row to the Notion Ops Hub (parent page 32b6ecd8-9e59-81f2-b329-df3fd0e25062) listing who was drafted, their market, and why (stale-touch trigger + any Outlook thread context used). If that create (on any path — 0.5b gate, GUARD CONDITION or here) returns a grace/quota notice or no page ID, look for it — `notion-fetch` the parent for an exact-title child, then search by the exact title (search lags: a miss alone is not proof) — a match created at/after the create call is this run's page, use it; never blind-retry a create (it produced a duplicate). After a grace/quota notice with no match, do not retry: the row is UNVERIFIED — say so in the summary email (on the GUARD CONDITION path, which sends none, in the run output). Quota errors → `notion-quota-fallback` skill.
 The row and the summary email must ALSO carry, as separate named lines (added v1.1):
   - every candidate dropped by the STEP 2.5 gate, with its reason (30-day contact/draft, existing
     unsent cadence draft and its age, or same-person-two-addresses);
