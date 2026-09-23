@@ -34,6 +34,7 @@ WINDOWS_PRODUCED = FAST_PRODUCERS + (
     "fleet-deadman.start.log",
     "push-fleet-heartbeat.start.log",
     "ora-nightly-disk.log",         # ORA Nightly Disk Clean, WEEKLY since 2026-09-17
+    "task-folder-registration.log", # ORA Headless - stranded-spec, WEEKLY (merge-gate R8)
 )
 
 
@@ -143,6 +144,8 @@ def test_weekly_producer_frozen_by_a_long_pause_is_pause_explained(tmp_path, mon
     wl = "\n".join(l for l in out.splitlines() if "weekly-detector.json" in l)
     dl = "\n".join(l for l in out.splitlines() if "dead-detector.json" in l)
     assert "[PAUSED]" in wl, wl
+    # R8: the stated reason must be true -- this file was written BEFORE the pause began
+    assert "within its limit when the pause began" in wl and "written after the pause began" not in wl, wl
     # the genuinely stale one is still a finding, with the true (CC-branch) reason
     assert "[STALE]" in dl and "ALREADY stale before the pause began" in dl, dl
     assert rc == 1
