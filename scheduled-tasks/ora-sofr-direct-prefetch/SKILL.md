@@ -31,7 +31,7 @@ Then:
 
 3a. From the page content you just fetched in STEP 2, extract the EXACT verbatim markup of the SOFR Strip table (the `<table>...</table>` block immediately following the "## 2. SOFR Strip" heading, up to but not including "## 3. Spreads & Credit"). This becomes your `old_str` — it MUST be copied character-for-character from what you just read, not reconstructed from memory or from a prior run's example, because `ora-am-brief` regenerates page wording daily and it will not match yesterday's exact text.
 
-3b. Build the `new_str`: same table shape (header row + 6 data rows: Overnight SOFR, 30-day avg, 90-day avg, 180-day avg, SOFR Index, CME Term SOFR), with:
+3b. (`<today's date>` / `<date>` in this file = the run date computed once at run start with `date '+%A %Y-%m-%d'` — date part in every date slot, weekday only where one is named — reused verbatim.) Build the `new_str`: same table shape (header row + 6 data rows: Overnight SOFR, 30-day avg, 90-day avg, 180-day avg, SOFR Index, CME Term SOFR), with:
    - Overnight SOFR: rate = `percentRate` from the SOFR pull, date = its `effectiveDate`, source = "NY Fed SOFR API — direct pull, local machine (ora-sofr-direct-prefetch, <today's date>)"
    - 30-day avg / 90-day avg / 180-day avg: the three averages from the SOFRAI pull, rounded to 3 decimals, date = the SOFRAI `effectiveDate`, same source string
    - SOFR Index: the `index` value from the SOFRAI pull, rounded to 8 decimals, date = the SOFRAI `effectiveDate`, same source string
