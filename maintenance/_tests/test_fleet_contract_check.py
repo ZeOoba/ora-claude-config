@@ -85,7 +85,10 @@ class TestMainExitCode(unittest.TestCase):
         self.assertEqual(matches[0]["max_age_hours"], 26)
         with open(os.path.join(repo, "maintenance", "push-fleet-heartbeat.ps1"), encoding="utf-8") as f:
             ps1 = f.read()
-        self.assertIn("backup-push-ok.json", ps1)
+        # Match the real assignment, not the bare name: the WHY-v3.1 header comment also
+        # contains "backup-push-ok.json", so assertIn alone survives the producer renaming it.
+        self.assertRegex(
+            ps1, r"(?m)^\$backupStamp\s*=\s*Join-Path\s+\$stateDir\s+'backup-push-ok\.json'")
         with open(os.path.join(repo, ".gitignore"), encoding="utf-8") as f:
             gi = f.read().splitlines()
         self.assertIn("maintenance/_state/backup-push-ok.json", gi)
