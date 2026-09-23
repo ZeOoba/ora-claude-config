@@ -38,6 +38,13 @@ WINDOWS_PRODUCED = FAST_PRODUCERS + (
 )
 
 
+def test_backup_push_failed_marker_is_declared_not_periodic():
+    # OI-331: written only when the backup push fails and removed on the next success, so its
+    # age means nothing; the ok stamp (48h, pause-independent) is what catches a dead backup.
+    assert "backup-push-failed.json" in sfp.NOT_PERIODIC
+    assert sfp.NOT_PERIODIC["backup-push-failed.json"].strip()
+
+
 def test_default_covers_one_weekly_cycle_plus_grace():
     assert sfp.DEFAULT_MAX_AGE_H >= 7 * 24 + 12
     assert sfp.DEFAULT_MAX_AGE_H <= 8 * 24
