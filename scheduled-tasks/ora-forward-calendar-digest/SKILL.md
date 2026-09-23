@@ -1,6 +1,6 @@
 ---
 name: ora-forward-calendar-digest
-description: Weekly Monday 12:10 ET — emails the next 90 days from the ORA Forward Calendar artifact store and regenerates an importable .ics at ~/.claude/artifacts/ora-forward-calendar/out/. Complements the Command Center Calendar module, which owns lease/loan/insurance dates inside 12 months; this carries the session-derived operational and beyond-12-month dates that module cannot see. Subject flips [ORA] to [ACTION] when anything is overdue. Reads the artifact db only — never writes to it, never touches HubSpot, Notion or the workbook. ggoldberg-only via Outlook COM; an unreadable or empty store sends an explicit FAILED email rather than a silent success. NOTE: send-via-outlook.ps1 has no attachment parameter, so the .ics is named by absolute path in the body rather than attached. v1.2 2026-09-18 (STEP 0 wires the shared double-fire entry guard — block-sentinel.py claim/complete/fail, period week, plus an outlook-sent-probe before the send — required by test_scheduled_task_run_guard.py's ratchet before this task's first commit could land; v1.1 STEP 2 routes ArtifactData's out_dir through a neutral, unslugged temp staging folder — writing directly under ~/.claude is refused by the harness's own file-edit safety rules on every run, confirmed via OI-313; the prior v1.0 STEP 2 would fail every week on this fleet). [MODEL: claude-opus-5 | set 2026-09-18]
+description: Weekly Monday 12:10 ET — emails the next 90 days from the ORA Forward Calendar artifact store and regenerates an importable .ics at ~/.claude/artifacts/ora-forward-calendar/out/. Complements the Command Center Calendar module, which owns lease/loan/insurance dates inside 12 months; this carries the session-derived operational and beyond-12-month dates that module cannot see. Subject flips [ORA] to [ACTION] when anything is overdue. Reads the artifact db only — never writes to it, never touches HubSpot, Notion or the workbook. ggoldberg-only via Outlook COM; an unreadable or empty store sends an explicit FAILED email rather than a silent success. The regenerated .ics is ATTACHED to the email via send-via-outlook.ps1 -Attachment. v1.3 2026-09-19 (STEP 4 passes -Attachment now that the live send script has it, ora-claude-config PR #220 / OI-326; exit 1 from the send = attachment rejected = STEP 3 failure, no retry). v1.2 2026-09-18 (STEP 0 wires the shared double-fire entry guard — block-sentinel.py claim/complete/fail, period week, plus an outlook-sent-probe before the send — required by test_scheduled_task_run_guard.py's ratchet before this task's first commit could land; v1.1 STEP 2 routes ArtifactData's out_dir through a neutral, unslugged temp staging folder — writing directly under ~/.claude is refused by the harness's own file-edit safety rules on every run, confirmed via OI-313; the prior v1.0 STEP 2 would fail every week on this fleet). [MODEL: claude-opus-5 | set 2026-09-18]
 ---
 
 Weekly ORA Forward Calendar digest. CC/MCP fleet, Mondays 12:10 ET.
@@ -56,18 +56,27 @@ If exit code is non-zero or ok is false, go to STEP 5 quoting the reason field.
 The builder reuses forward-calendar.html's own functions, so the email, the .ics and the published page cannot drift apart. Do not hand-write either output.
 
 STEP 4 — send
-Subject: "[ORA] Forward Calendar - week of YYYY-MM-DD" using today's date.
+Subject: "[ORA] Forward Calendar - week of YYYY-MM-DD" using today's date — the run date computed once at run start with `date '+%A %Y-%m-%d'` (date part only), reused verbatim in both subjects, the probe stem and STEP 5's failure subject.
 If overdue > 0, use "[ACTION] Forward Calendar - N overdue - week of YYYY-MM-DD" instead, with N the overdue count.
 
-Pre-send Sent-Items probe (Layer 2, before the COM send). The two subject branches share no
-fixed substring except the dated `week of YYYY-MM-DD` tail (the "[ACTION] ... N overdue ..."
-branch breaks contiguity with everything before it, the same problem ora-deal-aging-sla's
-run-composed headline has) — so probe that dated tail, not the full subject:
-  powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: week of YYYY-MM-DD>"
-Exit 10 → do NOT send; log `MAIN_EMAIL_ALREADY_IN_SENT_ITEMS`, record a NORMAL skip, and still call `block-sentinel.py complete` below so Layer 1 re-converges with reality. Exit 1 → fail open: send, and note the probe gap in the run summary. Exit 0 → proceed.
+Pre-send Sent-Items probe (Layer 2, before the COM send). The probe's Normalized match strips
+any leading bracket tag ("[ORA]", "[ACTION]") and then requires the stem at POSITION 0 of what
+remains — it is prefix-anchored, not a substring search. (Corrected 2026-09-22: the prior stem
+"week of YYYY-MM-DD" could never match, because the stripped subject starts "Forward Calendar - ".)
+Run TWO probes, both scoped to today's Sent Items by the probe's default -OnDate:
+  (a) ORA branch — dated stem:
+  powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: Forward Calendar - week of YYYY-MM-DD>"
+  (b) [ACTION] branch — its "N overdue" segment sits BEFORE "week of" and N can differ between
+  two fires, so no dated stem is contiguous with it; probe the undated prefix instead:
+  powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: Forward Calendar - >"
+  Stem (b) cannot swallow the FAILED alert ("[ACTION] ORA Forward Calendar digest FAILED ..." strips
+  to "ORA Forward Calendar digest ...", which does not start "Forward Calendar -"). Do not widen
+  either stem further.
+Exit 10 on EITHER probe → do NOT send; log `MAIN_EMAIL_ALREADY_IN_SENT_ITEMS`, record a NORMAL skip, and still call `block-sentinel.py complete` below so Layer 1 re-converges with reality. Exit 1 → fail open: send, and note the probe gap in the run summary. Exit 0 → proceed.
 
-  powershell -NoProfile -File "C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1" -To "ggoldberg@oxfordra.net" -Subject "<subject>" -BodyFile "C:\Users\Owner\.claude\artifacts\ora-forward-calendar\out\digest.html" -BodyFormat html
-On a non-zero exit: retry ONCE. If it fails again, stop, report the failure loudly in the run log, and close the guard with `fail` (below) quoting the send error — do not halt silently, do not attempt any other send mechanism, and do not call `complete` for a digest that was never actually sent.
+  powershell -NoProfile -File "C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1" -To "ggoldberg@oxfordra.net" -Subject "<subject>" -BodyFile "C:\Users\Owner\.claude\artifacts\ora-forward-calendar\out\digest.html" -BodyFormat html -Attachment "C:\Users\Owner\.claude\artifacts\ora-forward-calendar\out\ora-forward-calendar.ics"
+Exit 1 here means the attachment was rejected (missing/empty/oversize file) and NOTHING was sent — fail-closed by design, since the body promises the file. That can only happen if STEP 3 did not actually write the .ics, so treat it as a STEP 3 failure: do not retry the send, and go to STEP 5 quoting the log line.
+On any other non-zero exit: retry ONCE. If it fails again, stop, report the failure loudly in the run log, and close the guard with `fail` (below) quoting the send error — do not halt silently, do not attempt any other send mechanism, and do not call `complete` for a digest that was never actually sent.
 
 Close the entry guard once the send resolves (success, probe-skip, or exhausted retry — never leave STEP 0's claim open):
   python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-forward-calendar-digest --block main --run-id <run_id> --period week --email-sent-at <ISO8601>
@@ -81,7 +90,7 @@ Body: name the step that failed, the exact error or reason string, and state pla
 Then stop.
 
 NOTES FOR WHOEVER MAINTAINS THIS
-- The .ics is NOT attached. send-via-outlook.ps1 exposes only -To/-Subject/-Body/-BodyFile/-BodyFormat/-Cc; it has no attachment parameter. The digest body names the file by absolute path instead, and Outlook imports it on double-click. Adding an -Attachment parameter to that shared script would improve this, but it is the sole send path for the entire fleet and any change to it needs its own adversarial review — do not bolt one on from inside this task.
+- The .ics IS attached (v1.3, 2026-09-19), via send-via-outlook.ps1's `-Attachment` (ora-claude-config PR #220, adversarially reviewed, merged; deployed to the live checkout by a targeted single-file swap — see OI-326). Attachments are INTERNAL-ONLY by design: the script refuses any attachment on a send with an external recipient (exit 5), which never applies here (ggoldberg only). The digest body also still prints the file's absolute path as a fallback. If a future run reports `Unknown parameter -Attachment`/`positional parameter cannot be found`, the live checkout's script has regressed to a pre-PR-#220 version — that is an OI-326 recurrence, not a task bug.
 - Entries carry a verified_on date. The page flags anything older than 60 days for re-check; the digest shows the source citation so a stale entry can be traced to the session that produced it.
 - Scope boundary: lease, loan and insurance dates INSIDE 12 months belong to the Command Center Calendar module (oxford-command-center src/brain/critical-dates.ts). Do not duplicate them here. This calendar deliberately carries only what that module cannot see.
 - If the ArtifactData read is refused for permissions in an unattended run, that is a real finding, not a transient error: report it via STEP 5 so it surfaces rather than degrading quietly.

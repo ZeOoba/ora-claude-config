@@ -381,6 +381,19 @@ def sweep_stale_push_worktrees(repo_root=None, temp_root=None,
     return removed, prune_ran
 
 
+def _safe_echo(stream, text):
+    """Write text to stream; characters the stream cannot encode become '?' instead of
+    raising. Display only -- never allowed to affect the gate's decision."""
+    if not text:
+        return
+    try:
+        stream.write(text)
+    except UnicodeEncodeError:
+        enc = getattr(stream, "encoding", None) or "ascii"
+        stream.write(text.encode(enc, "replace").decode(enc, "replace"))
+    stream.flush()
+
+
 def run_doctrine_probe():
     """Materialize the commit about to be pushed into a scratch worktree (see
     materialize_pushed_commit()) and run the probe against it with --live-root=, so it
@@ -419,17 +432,20 @@ def run_doctrine_probe():
         return 1, ""
     try:
         probe_script = PROBE_SCRIPT_OVERRIDE or PROBE_SCRIPT
+        # Piped stdout defaults to cp1252 in the child; echoed doctrine text carries U+2192
+        # and friends, so make the child ENCODE the utf-8 we decode (2026-09-22).
+        probe_env = _clean_git_env()
+        probe_env["PYTHONIOENCODING"] = "utf-8"
         result = subprocess.run(
             [sys.executable, probe_script, "--live-root=%s" % worktree_path],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
-            env=_clean_git_env())
+            env=probe_env)
         # Echo exactly what the user would have seen when the probe inherited the console.
-        if result.stdout:
-            sys.stdout.write(result.stdout)
-            sys.stdout.flush()
-        if result.stderr:
-            sys.stderr.write(result.stderr)
-            sys.stderr.flush()
+        # Encoding-safe: main() reconfigures the streams to utf-8, but a caller that skips
+        # main() leaves them cp1252, and a raise HERE used to land in the except below and
+        # turn a real probe verdict into "could not launch" (2026-09-22).
+        _safe_echo(sys.stdout, result.stdout)
+        _safe_echo(sys.stderr, result.stderr)
         return result.returncode, (result.stdout or "")
     except Exception as e:  # pragma: no cover - defensive
         sys.stderr.write(

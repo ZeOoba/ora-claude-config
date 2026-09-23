@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: rules
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-09-21T22:30:00.000Z
+  modified: 2026-09-22T19:18:11.000Z
 ---
 
 # ORA Standing Rules & Preferences

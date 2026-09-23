@@ -119,11 +119,11 @@ CLAIM_ONLY_FLAGS = {"--ttl-min": 1, "--force": 0}
 # retrofitted en masse"), ranked there by the consequence of a duplicate.
 UNGUARDED_BACKLOG = {
     "ora-aaos-expire-leases", "ora-aaos-publish-contracts", "ora-appsec-sweep",
-    "ora-ar-feed-sweep", "ora-broker-touch-cadence", "ora-calibration-snapshot",
+    "ora-ar-feed-sweep", "ora-calibration-snapshot",
     "ora-cc-snapshot-refresh", "ora-checkout-merge-forward",
     "ora-command-center-mirror-drift-check", "ora-deal-command-board",
     "ora-deal-sourcing-scan", "ora-doctrine-integrity-guard",
-    "ora-entry-market-scan", "ora-financial-code-integrity-sweep",
+    "ora-financial-code-integrity-sweep",
     "ora-lease-snapshot-refresh", "ora-master-workbook-ingest",
     "ora-model-release-watch", "ora-pm-daily-crons", "ora-pm-ledger",
     "ora-pm-monthly-billing", "ora-routine-pause-resume-2026-09-11",
@@ -163,9 +163,21 @@ NO_SIDE_EFFECT_REVIEWED = {
 # Listing one is a claim that someone READ it and confirmed the claim precedes every
 # side effect. A NEW guarded task whose ordering is unverifiable FAILS until read.
 ORDERING_VERIFIED_BY_HAND = {
+    # Read by hand 2026-09-23 (v1.8 guard landed from the live file): the sole claim is
+    # the fenced STEP 0-B block at :33. STEP 0-A (:18-24) runs first but only exits
+    # silently. Side effects all follow: Deal Sourcing Log creates :96, COM send :125,
+    # Ops Hub failure log :127. Off UNGUARDED_BACKLOG in the same change (ratchet).
+    "ora-entry-market-scan": "claim@33 precedes Notion creates@96, send@125, Ops Hub@127",
     # claim@27, only send at :241, inside a prose line beginning "Post a NEW DATED
     # CHILD PAGE" that matches neither a fence nor a step marker.
     "ora-deal-aging-sla": "claim@27 precedes sends@40,241",
+    # Read by hand 2026-09-22 (v1.2 adoption): the sole claim is the unfenced STEP 0
+    # line at :23. first_side_effect(lines) (any-mode) finds email mentions only at
+    # :80 (STEP 0.5 backlog-gate email), :208/:210 (STEP 4 comments naming
+    # send-via-outlook as forbidden), :277 (STEP 5 email), :333 (changelog), none
+    # fenced or on a STEP_LINE. The STEP 4 Outlook COM draft (CreateItem/.Save()
+    # at :227-232) is no SIDE_EFFECTS kind at all. Every one follows the claim.
+    "ora-broker-touch-cadence": "claim@23 precedes email@80,277 and COM draft@227",
     "ora-monthly-portfolio-briefing": "claim@17 precedes sends@40,59",
     "ora-open-sessions-board": "claim@13 precedes send@65",
     # :8 is a RESTORATION NOTE naming send-via-outlook.ps1 in prose, not a step.

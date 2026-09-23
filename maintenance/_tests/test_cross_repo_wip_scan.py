@@ -420,7 +420,11 @@ with tempfile.TemporaryDirectory() as td:
     repo = init_repo(os.path.join(td, "r"))
     sp = os.path.join(td, "state.json")
     H = wipscan.CORRECTOR_STALE_HOURS
-    expect("corrector-stale: threshold is 72h", H == 72, repr(H))
+    # Corrector went weekly (Fri) 2026-09-22: one cycle + 24h grace. At 72h it would read
+    # as "has not run" 4 days out of every 7.
+    expect("corrector-stale: threshold is 192h (weekly + 24h)", H == 192, repr(H))
+    expect("corrector-stuck: escalates after 1 unsynced weekly run (7d, as before)",
+           wipscan.CORRECTOR_UNSYNCED_ESCALATE_RUNS == 1, repr(wipscan.CORRECTOR_UNSYNCED_ESCALATE_RUNS))
 
     old = (_dt.datetime.now().astimezone() - _dt.timedelta(hours=H + 1)).isoformat(timespec="seconds")
     _write_state(sp, {"lastRun": old, "status": "NOOP_CLEAN", "consecutiveUnsynced": 0})
@@ -432,7 +436,9 @@ with tempfile.TemporaryDirectory() as td:
            old[:10] in wipscan.format_report([r]), wipscan.format_report([r]))
 
     recent = (_dt.datetime.now().astimezone() - _dt.timedelta(hours=H - 1)).isoformat(timespec="seconds")
-    _write_state(sp, {"lastRun": recent, "status": "BLOCKED_STAGED", "consecutiveUnsynced": 2})
+    # streak held below the escalation threshold so this isolates the RECENCY check
+    _write_state(sp, {"lastRun": recent, "status": "BLOCKED_STAGED",
+                      "consecutiveUnsynced": wipscan.CORRECTOR_UNSYNCED_ESCALATE_RUNS - 1})
     r = _scan_with_state(repo, sp)
     expect("corrector-stale: lastRun inside threshold -> not stuck",
            r.get("corrector_stuck") is False, repr(r))

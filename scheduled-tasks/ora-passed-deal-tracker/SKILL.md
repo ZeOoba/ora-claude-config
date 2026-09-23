@@ -129,6 +129,34 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    never RECORDED-DEED.** Say which channel produced each price. Do not expand
    county-sales-monitor's county coverage from this task — that is that skill's
    own documented next phase.
+
+   **3b — RE-MARKETED PASSES (added 2026-09-22).** For every watch-list row (after the
+   duplicate-address merge), search the Outlook inbox with `outlook_email_search`
+   over the trailing 35 days, once for the street address (street number + street
+   name) and once for the property name if the row has one. Never open links.
+   - Ignore ORA's own mail: any @oxfordra.net sender AND the Exchange
+     legacy-DN form (`/O=EXCHANGELABS/…/CN=…GGOLDBERG`) — ORA's own digests
+     (Daily Brief, sourcing scans, this task's prior runs) quote these
+     addresses and were the majority of raw hits in the 2026-09-22 dry run.
+     Also ignore `notifications@github.com`. Real hits are broker blasts and
+     listing-alert senders (e.g. `@crexi.com`, `@loopnet.com`).
+   - A hit requires the street number AND street name in subject or body; a
+     name-only or partial match is **UNCONFIRMED** (listed, never escalated).
+   - Extract an asking price only if stated as a dollar figure tied to the
+     property; otherwise price = unknown (listing alerts usually omit it —
+     report the sender + date so Gabriel can check the listing himself).
+   - Walk threshold = `Walk Price`; if blank, `ORA Max Defensible Price`
+     (LOI-stage rows only). Last known ask = `Asking Price`; if blank,
+     `Ask at First Sighting`. Never back-compute either.
+   - Classify: **INSIDE-WALK** if ask ≤ walk threshold (confirmed hits only) ·
+     **PRICE-CUT x%** if ask < last known ask · else **RE-MARKETED**.
+   - Any INSIDE-WALK forces the email path even when zero trades were found.
+   - Read-only: no Notion writes, no outreach drafts. A row with no walk
+     threshold can be PRICE-CUT or RE-MARKETED, never INSIDE-WALK.
+   - Dry run 2026-09-22 (validation): 8720 Robbins Rd (PASS 2026-07-14,
+     Walk $1,054,066) → Crexi alerts 2026-08-30 and 2026-09-16, no price →
+     RE-MARKETED. 808 Rhoads / 6150 Avery / 1255 N Winchester → only ORA
+     self-mail or >35 days → no hit.
 4. On a detected trade, log to the deal's Notion row ("Exception Outcome" if an
    exception, else "Notes / Flags"): clearing price, date, buyer if public, and
    CLEARING PRICE vs ORA WALK delta ($ and %). Also append one line to the
@@ -321,7 +349,7 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    expecting the model to discover it by name.
 
 ## Output
-6. If zero trades detected: one-line "no trades" note to Ops Hub; NO email. **If Step 4d
+6. If zero trades detected: one-line "no trades" note to Ops Hub; NO email. **Ops Hub create (this note and Step 7's block):** if the create returns a grace/quota notice or no page ID, look for it — `notion-fetch` the Ops Hub parent (32b6ecd8) for an exact-title child, then search by the exact title (search lags: a miss alone is not proof) — a match created at/after the create call is this run's page, use it (its id is the `--notion-page-id`); never blind-retry a create (it produced a duplicate). After a grace/quota notice with no match, do not retry: the create is UNVERIFIED — close with `complete` (no `--notion-page-id`), stating UNVERIFIED in the run summary and the email body — never `fail`, which would release the claim and invite a duplicate create on the next fire. Quota errors → `notion-quota-fallback` skill. **If Step 4d
    found any passed-deal `RE-CHECK:` line due or overdue, carry that list on the Ops Hub
    note** (added 2026-09-19) — it is the only surface this branch writes, and a due
    re-check that lands nowhere is the same silent-loss failure 4d was added to close.
@@ -367,6 +395,10 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    passed with `Re-Engagement Flag` still ticked. **If nothing resolved, print
    nothing** — no "no post-mortems this month" filler, no synthetic content.
 
+   **RE-MARKETED PASSES** — table: Property · Flag · Ask · Last ask · Max Defensible ·
+   Broker/sender · Email date. Omit the section when there are no hits; UNCONFIRMED
+   hits are listed in a sub-table.
+
    **"PASSED-DEAL RE-CHECKS DUE" section (added 2026-09-19).** If Step 4d found any
    `RE-CHECK:` line already past or due within 30 days, add a section listing one line per
    row: deal · date · trigger verbatim · days until/overdue. Same rule as above — **if
@@ -406,7 +438,7 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    *distributional* claims are not, and must not be made. This ledger is
    supposed to be boring for its first year.
    **Subject line (added 2026-07-21 — pm-ledger Check I, Frozen-Date Subject):** use the
-   date this email is actually sent (`YYYY-MM-DD`, today's real date at send time), e.g.
+   run date (`YYYY-MM-DD` — the run date computed once at run start with `date '+%A %Y-%m-%d'`, date part only, reused verbatim in the subject, the 7a probe and the Ops Hub note), e.g.
    "ORA Passed-Deal Tracker — Monthly Sweep — 2026-08-15". Never use the nominal "15th"
    schedule date from this task's own description/cron, and never carry forward a prior
    run's date. Recurring/automated report subjects are never exempt from this — a subject
@@ -420,7 +452,7 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt>"
    ```
 
-   Probe the **full dated subject** — `ORA Passed-Deal Tracker — Monthly Sweep — YYYY-MM-DD`, using the same real send date the subject rule above fixes. The full string is correct here, and this is a deliberate departure from `ora-am-brief` Block C and `ora-deal-aging-sla`, which must probe a shortened dated stem: those subjects carry live counts or a run-composed headline in the tail that legitimately differ between two fires of the same day, so the full string would fail to match the earlier send and wave the duplicate through. **This** subject carries no counts and no run-composed text — it is fully determined by the send date — so it is stable across fires and safe to match on whole. Matching is substring and normalization-tolerant (dash family folded to `-`, non-ASCII dropped, casefolded), so the em-dash form written here still matches a plain-hyphen message in the store.
+   Probe the **full dated subject** — `ORA Passed-Deal Tracker — Monthly Sweep — YYYY-MM-DD`, using the same run date the subject rule above fixes. The full string is correct here, and this is a deliberate departure from `ora-am-brief` Block C and `ora-deal-aging-sla`, which must probe a shortened dated stem: those subjects carry live counts or a run-composed headline in the tail that legitimately differ between two fires of the same day, so the full string would fail to match the earlier send and wave the duplicate through. **This** subject carries no counts and no run-composed text — it is fully determined by the send date — so it is stable across fires and safe to match on whole. Matching is substring and normalization-tolerant (dash family folded to `-`, non-ASCII dropped, casefolded), so the em-dash form written here still matches a plain-hyphen message in the store.
 
    **Always `-SubjectFile`, never a literal `-Subject`** — the em-dashes in this subject are mangled in transit on the command line.
 
