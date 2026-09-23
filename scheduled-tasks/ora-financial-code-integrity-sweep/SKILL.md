@@ -84,7 +84,7 @@ FINANCIAL-CODE PATHS (the review scope — only changes touching these matter):
   the scoped log is non-empty.)
 
 STEPS:
-1. PRE-FLIGHT: confirm the repo exists and git works. If not, write a Notion completion row noting the failure and STOP (do not fabricate a result).
+1. PRE-FLIGHT: confirm the repo exists and git works. If not, write a Notion completion row (see step 6's create guard) noting the failure and STOP (do not fabricate a result).
 2. SCOPE THE WINDOW: compute the review range. Run BOTH logs — the unscoped one is not optional:
      git log --since="7 days ago" --pretty=format:"%h %ad %s" --date=short
      git log --since="7 days ago" --pretty=format:"%h %ad %s" --date=short -- <financial paths above>
@@ -100,7 +100,7 @@ STEPS:
    find, and report the scope defect itself as a finding — the list is a cache of where financial
    code lived when it was written, never an authority on where it lives now.
 3. GUARD — NO-CHANGE WEEK: if NO commits in the window touched financial-code paths AND step 2a
-   found nothing outside the list, do NOT run the workflow. Write a Notion completion row "CLEAN — no
+   found nothing outside the list, do NOT run the workflow. Write a Notion completion row (see step 6's create guard) "CLEAN — no
    financial-code changes in the trailing 7 days" with the date, and STOP. Do NOT send an email on a
    clean week (the Notion row + ora-automation-health-monitor cover liveness). A "clean" row is a
    POSITIVE claim that the window was reviewed — never write one to record that the scope matched
