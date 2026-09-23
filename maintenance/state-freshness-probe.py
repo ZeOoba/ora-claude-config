@@ -190,7 +190,13 @@ def main():
 
             why = "limit %.0fh" % limit
             if pause_start is not None:
-                why += "; ALREADY stale before the pause began, so the pause does not explain it"
+                if name in PAUSE_INDEPENDENT:
+                    # Merge-gate R4: the old wording claimed "already stale before the pause",
+                    # which is false for these -- they are never pause-explained at all.
+                    why += ("; runs outside the scheduled-task fleets (Windows Task Scheduler), "
+                            "so a fleet pause never explains it")
+                else:
+                    why += "; ALREADY stale before the pause began, so the pause does not explain it"
             print("  [STALE] %-52s %.1fh since last write (%s)" % (rel, age_h, why))
             stale.append(rel)
 
