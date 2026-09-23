@@ -31,11 +31,17 @@ FINANCIAL-CODE PATHS (the review scope — only changes touching these matter):
                          balances (arBalances[], ~$204,788 on its first live run) that feed the
                          daily brief's collections alerts. NOT a warehouse/workbook file, which is
                          exactly why it was missed until this run's pre-flight scope check caught it.)
-  data/snapshots/portfolio.json, data/ar/**, docs/templates/property-tax-assessments*.csv,
-  scripts/import-assessments.ts
+  data/snapshots/portfolio.json, data/ar/**, data/ar-mapping-cache.json, data/overlay.json,
+  docs/templates/property-tax-assessments*.csv, scripts/import-assessments.ts
                         (added 2026-08-17 — see the lesson below. These are DATA artifacts, not
                          code, but they carry NOI/AR/tax figures directly and this task's own scope
-                         had never named a single data file before this.)
+                         had never named a single data file before this. data/ar-mapping-cache.json
+                         and data/overlay.json added 2026-09-22 — 5TH RECURRENCE of this exact
+                         failure mode: both are top-level data/ files, not under data/ar/**, so they
+                         sat off this list for over a month after the 2026-08-17 lesson that should
+                         have caught them. A confirmed SKIP ruling or a dangling lease-id mapping in
+                         ar-mapping-cache.json is as consequential as any figure named above — it
+                         silently governs which delinquency rows auto-attribute.)
   scripts/**, server/index.ts, server/brief/run.ts
                         (added 2026-08-24 — see the lesson below. scripts/** is now IN SCOPE
                          WHOLESALE, not by individual filename: scripts/bake-warehouse.ts bakes

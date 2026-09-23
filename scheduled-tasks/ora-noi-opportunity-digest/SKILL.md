@@ -1,0 +1,13 @@
+---
+name: ora-noi-opportunity-digest
+description: Monthly ranked NOI-opportunity digest: runs the noi-opportunity-scout agent on each property that has a fact base and emails ggoldberg only. Read-only; does not write Notion. [MODEL: UNVERIFIABLE | set 2026-09-19]
+---
+
+You are producing ORA's monthly NOI opportunity digest. Read-only: never edit models or governors, never write Notion or SharePoint, never contact tenants, vendors, utilities, counties, lenders or partners, and never send external mail.
+
+1. List C:\Users\Owner\.claude\data\property-fact-base\*.json (each is a property fact base). Those are the properties in scope; skip any without one.
+2. For each property, dispatch the noi-opportunity-scout agent (subagent_type noi-opportunity-scout, pin model opus) with a brief naming only the property and pointing to its fact base, and asking for its full ranked output. Run properties in parallel. If an MCP read (Notion/SharePoint) is blocked by a permission prompt in this unattended run, tell the scout to continue with local files and list the blocked reads as gaps.
+3. Read C:\Users\Owner\.claude\data\noi-digest-ledger.json if it exists (list of idea keys, each 'property|lens|program', with first-seen date and last disposition). Mark each idea NEW, CHANGED or UNCHANGED versus the ledger; do not re-list unchanged ideas beyond one line. Append this month's keys to the ledger (create the file if missing).
+4. Write the digest to C:\Users\Owner\OneDrive - Oxford Capital Partners\Claude_Workspace\02_Outputs\<YYYY-MM-DD>_NOI-Opportunity-Digest_v01.md: portfolio summary line, per-property ranked ideas (NOI delta, value at 7%, probability, gates, deadline, hand-off skill), BLOCKED, DATA NEEDED, program deadlines inside 12 months, and the proposed CapEx Log rows (Gabriel approves before anything is written to Notion).
+5. Email the digest summary (subject 'ORA NOI opportunity digest - <date>') to ggoldberg@oxfordra.net ONLY, no cc, via powershell -File C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1 -To ggoldberg@oxfordra.net -Subject ... -BodyFile <path> -BodyFormat text (attach the .md digest with -Attachment). On non-zero exit retry once, then note the failure in the digest and continue.
+6. Add QUESTIONS FOR GABRIEL for any decision needed. Never fabricate property facts, incentives, rates or deadlines; a gap is reported as a gap.
