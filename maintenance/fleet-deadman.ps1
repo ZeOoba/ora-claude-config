@@ -83,20 +83,66 @@ function Invoke-PyBounded($py, [string[]]$pyArgs, [int]$TimeoutSec = 120) {
     # no trace. A timeout is reported as a problem ("could not look"), never as clean.
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $py
-    $psi.Arguments = (($pyArgs | ForEach-Object { '"' + ($_ -replace '"', '\"') + '"' }) -join ' ')
+    $psi.Arguments = (@($pyArgs | ForEach-Object { ConvertTo-WinArg $_ }) -join ' ')
     $psi.UseShellExecute = $false
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
     $psi.CreateNoWindow = $true
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
     $p = [System.Diagnostics.Process]::Start($psi)
     $so = $p.StandardOutput.ReadToEndAsync()
     $se = $p.StandardError.ReadToEndAsync()
-    if (-not $p.WaitForExit($TimeoutSec * 1000)) {
+    $limitMs = $TimeoutSec * 1000
+    if (-not $p.WaitForExit($limitMs)) {
+        # Kill the whole TREE: a grandchild would otherwise outlive the kill (merge-gate R4).
+        try { & taskkill.exe /T /F /PID $p.Id 2>&1 | Out-Null } catch { }
         try { $p.Kill() } catch { }
         return @{ Out = ''; Rc = $null; TimedOut = $true }
     }
-    $p.WaitForExit()
+    # The child exited, but a grandchild that inherited stdout/stderr keeps the streams open,
+    # and waiting for them unbounded would hang the run (merge-gate R4). Give them only the
+    # time remaining; if they are still open, report "could not look".
+    $remain = [Math]::Max(0, $limitMs - [int]$sw.ElapsedMilliseconds)
+    if (-not [System.Threading.Tasks.Task]::WaitAll([System.Threading.Tasks.Task[]]@($so, $se), $remain)) {
+        return @{ Out = ''; Rc = $null; TimedOut = $true }
+    }
     return @{ Out = ($so.Result + $se.Result); Rc = $p.ExitCode; TimedOut = $false }
+}
+
+function ConvertTo-WinArg([string]$a) {
+    # Standard Windows argv quoting (CommandLineToArgvW rules): backslashes are literal except
+    # before a quote, where they must be doubled, plus one more to escape the quote itself;
+    # a trailing run of backslashes is doubled before the closing quote. Merge-gate R4: the
+    # previous `"` -> `\"` replacement merged 'C:\dir\' and the next argument into one.
+    if ($a.Length -gt 0 -and $a -notmatch '[\s"]') { return $a }
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.Append('"')
+    $bs = 0
+    foreach ($c in $a.ToCharArray()) {
+        if ($c -eq '\') { $bs++; continue }
+        if ($c -eq '"') { [void]$sb.Append('\' * (2 * $bs + 1)); [void]$sb.Append('"') }
+        else            { [void]$sb.Append('\' * $bs); [void]$sb.Append($c) }
+        $bs = 0
+    }
+    [void]$sb.Append('\' * (2 * $bs))
+    [void]$sb.Append('"')
+    return $sb.ToString()
+}
+
+function Get-PhantomSummary($r) {
+    # Parses phantom-dispatch-probe.py's result: @{ Rc; Count; Detail }. Extracted so the
+    # stdout parse is testable (merge-gate R4: losing stdout silently zeroed the count, which
+    # suppresses a PHANTOM DISPATCH alarm).
+    $rc = Resolve-ProbeRc $r
+    $count = 0
+    $detail = @()
+    $lines = if ($r.TimedOut) { @() } else { [string]$r.Out -split "`r?`n" }
+    foreach ($ln in $lines) {
+        $s = [string]$ln
+        if ($s -match '^\s*phantom\s*:\s*(\d+)') { $count = [int]$Matches[1] }
+        if ($s -match '^\s{2}\d{4}-\d\d-\d\d .*\[(cleared-stale|never-confirmed)\]') { $detail += $s.Trim() }
+    }
+    return @{ Rc = $rc; Count = $count; Detail = $detail }
 }
 
 function Test-BoundedPause($reg, $label = '') {
@@ -258,14 +304,10 @@ try {
         $py = 'C:\Users\Owner\AppData\Local\Programs\Python\Python313\python.exe'
         if (-not (Test-Path $py)) { $py = 'python' }
         $r   = Invoke-PyBounded $py @($probe, '--hours', [string]$PhantomHours) 120
-        $out = if ($r.TimedOut) { @() } else { $r.Out -split "`r?`n" }
-        $rc  = Resolve-ProbeRc $r   # a hang is "could not look", never clean
-        $count = 0
-        foreach ($ln in $out) {
-            $s = [string]$ln
-            if ($s -match '^\s*phantom\s*:\s*(\d+)') { $count = [int]$Matches[1] }
-            if ($s -match '^\s{2}\d{4}-\d\d-\d\d .*\[(cleared-stale|never-confirmed)\]') { $phantomDetail += $s.Trim() }
-        }
+        $ph  = Get-PhantomSummary $r
+        $rc  = $ph.Rc   # a hang is "could not look" (2), never clean -- via Resolve-ProbeRc
+        $count = $ph.Count
+        $phantomDetail += @($ph.Detail)
         if ($rc -eq 2) {
             # "Could not look" must never read as "nothing wrong" (verified null).
             $problems += 'phantom-dispatch-probe COULD NOT LOOK (exit 2) - desktop logs unreadable; phantom state UNKNOWN, not clean'
