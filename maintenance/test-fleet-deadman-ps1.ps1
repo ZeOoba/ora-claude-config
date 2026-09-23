@@ -112,6 +112,22 @@ Expect 'a DISABLED carve-out task is not reported (it is paused on purpose)' (@(
 Expect 'a DISABLED carve-out task does not count as enabled' (-not (Test-HasEnabledCarveOut $r7 'cc'))
 Expect 'fleet with an enabled carve-out is not fully paused for send-log purposes' (Test-HasEnabledCarveOut $r5 'cc')
 Expect 'lams has no enabled carve-out'                   (-not (Test-HasEnabledCarveOut $r5 'lams'))
+# R8 (correctness): the taskId fallback in the carve-out helpers must be exercised too.
+$r8 = Reg @(
+    @{ taskId = 'ora-am-brief'; cronExpression = '0 6 * * *'; enabled = $true; lastRunAt = $old },
+    @{ taskId = 'a'; cronExpression = '0 5 * * 1'; enabled = $false; lastRunAt = $old },
+    @{ taskId = 'r'; fireAt = $future; enabled = $true })
+$st8 = @(Get-StaleCarveOuts $r8 'cc' 30)
+Expect ('taskId-keyed stale carve-out is reported (' + ($st8 -join ',') + ')') (($st8.Count -eq 1) -and ($st8[0] -match '^ora-am-brief'))
+# R8 (race): one parsed snapshot feeds every check. Helpers accept the parsed task list,
+# and give the same answers as when handed the path.
+$snap = Get-RegistryTasks $r4
+Expect 'helpers accept a pre-parsed snapshot (pause)'      ($null -ne (Test-BoundedPause $snap 'cc'))
+Expect 'helpers accept a pre-parsed snapshot (stale)'      (@(Get-StaleCarveOuts $snap 'cc' 30).Count -eq 1)
+Expect 'helpers accept a pre-parsed snapshot (enabled)'    (Test-HasEnabledCarveOut $snap 'cc')
+$torn = Join-Path $env:TEMP ('deadman-test-' + [guid]::NewGuid() + '.json'); $script:tempFiles += $torn
+Set-Content -Path $torn -Value '{"scheduledTasks": [ {"id": "ora-am-br' -Encoding utf8
+Expect 'a torn registry file is not read as parseable'     ($null -eq (Get-RegistryTasks $torn))
 
 # --- taskId-keyed registries get the same carve-out as id-keyed ones (parity with fleet_pause.py)
 $r3 = Reg @(
@@ -253,8 +269,15 @@ Expect 'a not-ok publish verdict is appended to $problems' (($vOkIfs.Count -ge 1
 # R3-F3: the pause call must pass the fleet's own label, and those labels must be the
 # carve-out table's keys -- a typo'd or wrong property silently disables the carve-out.
 $tbpTexts = @($tbp | ForEach-Object { ($_.Extent.Text -replace '\s+', ' ').Trim() })
-Expect 'Test-BoundedPause is called exactly as Test-BoundedPause $reg $fleet.Label' (($tbpTexts.Count -ge 1) -and
-    (@($tbpTexts | Where-Object { $_ -ne 'Test-BoundedPause $reg $fleet.Label' }).Count -eq 0))
+Expect 'Test-BoundedPause is called exactly as Test-BoundedPause $regTasks $fleet.Label' (($tbpTexts.Count -ge 1) -and
+    (@($tbpTexts | Where-Object { $_ -ne 'Test-BoundedPause $regTasks $fleet.Label' }).Count -eq 0))
+# R8: the fleet loop parses each registry exactly once, and every pause/carve-out check
+# reads that one snapshot (no re-read that could see a torn mid-rewrite file).
+$loop = AllOf $ast { param($n) $n -is [System.Management.Automation.Language.ForEachStatementAst] -and $n.Variable.Extent.Text -eq '$fleet' }
+$loopText = if ($loop.Count -eq 1) { $loop[0].Body.Extent.Text } else { '' }
+Expect 'the fleet loop parses the registry exactly once (Get-RegistryTasks)' (
+    (@(Cmds $loop[0] 'Get-RegistryTasks').Count -eq 1) -and ($loopText -notmatch 'ConvertFrom-Json'))
+Expect 'no check in the fleet loop re-reads the registry by path' ($loopText -notmatch '(Test-BoundedPause|Test-HasEnabledCarveOut|Get-StaleCarveOuts)\s+\$reg\b')
 $fleetsAssign = AllOf $ast { param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$fleets' }
 $fleetLabels = @($fleetsAssign | ForEach-Object { [regex]::Matches($_.Extent.Text, "Label\s*=\s*'([^']+)'") | ForEach-Object { $_.Groups[1].Value } }) | Sort-Object -Unique
 $carveAssign = AllOf $ast { param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$carveOuts' }
@@ -269,7 +292,7 @@ $ifs = AllOf $ast { param($n) $n -is [System.Management.Automation.Language.IfSt
                                $n.Clauses[0].Item1.Extent.Text -match '^\$null -ne \$pauseUntil$' }
 $pausedBody = if ($ifs.Count -eq 1) { $ifs[0].Clauses[0].Item2 } else { $null }
 Expect 'paused branch calls Get-StaleCarveOuts with the fleet label and threshold' (($null -ne $pausedBody) -and
-    (@(Cmds $pausedBody 'Get-StaleCarveOuts' | Where-Object { ($_.Extent.Text -replace '\s+', ' ') -eq 'Get-StaleCarveOuts $reg $fleet.Label $ThresholdHours' }).Count -eq 1))
+    (@(Cmds $pausedBody 'Get-StaleCarveOuts' | Where-Object { ($_.Extent.Text -replace '\s+', ' ') -eq 'Get-StaleCarveOuts $regTasks $fleet.Label $ThresholdHours' }).Count -eq 1))
 $probAssign = if ($pausedBody) { AllOf $pausedBody { param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and
                                    $n.Left.Extent.Text -eq '$problems' -and $n.Right.Extent.Text -match '\$staleCarve' } } else { @() }
 Expect 'paused branch turns stale carve-outs into $problems' ($probAssign.Count -ge 1)
@@ -283,7 +306,7 @@ foreach ($pa in $probAssign) {
 }
 Expect 'the stale-carve-out problem is guarded by $staleCarve.Count -gt 0' $guardOk
 Expect 'fleet joins $pausedFleets only when it has no enabled carve-out' (($null -ne $pausedBody) -and
-    ($pausedBody.Extent.Text -match 'if\s*\(\s*-not\s*\(\s*Test-HasEnabledCarveOut\s+\$reg\s+\$fleet\.Label\s*\)\s*\)\s*\{\s*\$pausedFleets\s*\+=\s*\$fleet\.Label'))
+    ($pausedBody.Extent.Text -match 'if\s*\(\s*-not\s*\(\s*Test-HasEnabledCarveOut\s+\$regTasks\s+\$fleet\.Label\s*\)\s*\)\s*\{\s*\$pausedFleets\s*\+=\s*\$fleet\.Label'))
 
 # R6: each fleet label must point at ITS store, matching fleet_pause.STORES. Swapping the
 # two labels passed every other check while applying the CC carve-out to the LAMS registry.

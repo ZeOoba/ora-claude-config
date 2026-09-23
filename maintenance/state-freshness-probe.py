@@ -124,6 +124,7 @@ PAUSE_INDEPENDENT = frozenset({
     "ensure-claude-renderer.log",   # ORA Claude Desktop Wake-and-Launch (daily)
     "ora-nightly-disk.log",         # ORA Nightly Disk Clean (WEEKLY since 2026-09-17: default limit)
     "pause-resume-guard-state.json",  # ORA Fleet Pause-Resume Guard (every 6h) (R7)
+    "task-folder-registration.log",  # ORA Headless - stranded-spec (Windows, WEEKLY: default limit) (R8)
 })
 
 WATCH_GLOBS = (
@@ -132,7 +133,8 @@ WATCH_GLOBS = (
     "*.log",
 )
 
-# A file whose mtime is at/after (pause_start - grace) went stale because of the pause.
+# A file whose mtime is at/after (pause_start - max(its own limit, PAUSE_GRACE_H)) was still
+# within its limit when the pause began, so it went stale because of the pause (merge-gate R7).
 PAUSE_GRACE_H = 6.0
 
 
@@ -204,7 +206,7 @@ def main():
                 # pause start exceeded its own limit, not a flat 6h grace. With the 192h weekly
                 # default, the flat grace falsely flagged every weekly producer that a pause
                 # longer than the rest of its cycle had frozen.
-                print("  [PAUSED] %-51s %.1fh stale, but last written after the pause began "
+                print("  [PAUSED] %-51s %.1fh stale, but still within its limit when the pause began "
                       "(%s) -- expected" % (
                           rel, age_h, time.strftime("%Y-%m-%dT%H:%MZ", time.gmtime(pause_start))))
                 paused_ct += 1

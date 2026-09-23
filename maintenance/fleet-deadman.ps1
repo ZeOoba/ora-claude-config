@@ -155,30 +155,42 @@ function Get-CarveOutIds($label) {
     return @()
 }
 
-function Get-EnabledCarveOutTasks($reg, $label) {
+function Get-RegistryTasks($src) {
+    # Merge-gate R8 (race): the fleet loop parses each registry ONCE and hands the parsed
+    # task list to every pause / carve-out check, so all checks judge one snapshot. Four
+    # separate re-reads could straddle a Desktop-app rewrite; a torn read in the carve-out
+    # helper silently read as "no carve-out enabled". Accepts a registry path (parsed here)
+    # or an already-parsed task list (returned as-is). Returns $null if a path won't parse.
+    if ($src -is [string]) {
+        try { return ,@((Get-Content -Raw -Path $src | ConvertFrom-Json).scheduledTasks) } catch { return $null }
+    }
+    if ($null -eq $src) { return $null }
+    return ,@($src)
+}
+
+function Get-EnabledCarveOutTasks($src, $label) {
     $ids = @(Get-CarveOutIds $label)
     if ($ids.Count -eq 0) { return @() }
-    try {
-        $tasks = @((Get-Content -Raw -Path $reg | ConvertFrom-Json).scheduledTasks)
-    } catch { return @() }
+    $tasks = Get-RegistryTasks $src
+    if ($null -eq $tasks) { return @() }
     return @($tasks | Where-Object {
         $tid = if ($_.id) { $_.id } else { $_.taskId }
         $_.cronExpression -and $_.enabled -and ($ids -contains $tid) })
 }
 
-function Test-HasEnabledCarveOut($reg, $label) {
+function Test-HasEnabledCarveOut($src, $label) {
     # A fleet whose carve-out task is still enabled is NOT "all paused" for the send-log
     # check: that task still sends (the Daily Brief). Merge-gate R7, 2026-09-22.
-    return (@(Get-EnabledCarveOutTasks $reg $label).Count -gt 0)
+    return (@(Get-EnabledCarveOutTasks $src $label).Count -gt 0)
 }
 
-function Get-StaleCarveOuts($reg, $label, [double]$thresholdH) {
+function Get-StaleCarveOuts($src, $label, [double]$thresholdH) {
     # Merge-gate R7, 2026-09-22: a carve-out task keeps running through a bounded pause, so
     # the pause must NOT excuse it. Before this, a dead ora-am-brief during a CC pause read as
     # "BOUNDED PAUSE, alarm suppressed" for up to 14 days. Returns 'id (Nh)' for each enabled
     # carve-out task whose own lastRunAt is older than the threshold, or has never run.
     $out = @()
-    foreach ($t in @(Get-EnabledCarveOutTasks $reg $label)) {
+    foreach ($t in @(Get-EnabledCarveOutTasks $src $label)) {
         $tid = if ($t.id) { $t.id } else { $t.taskId }
         $ageH = $null
         if ($t.lastRunAt) { try { $ageH = [math]::Round(((Get-Date).ToUniversalTime() - ([DateTime]::Parse($t.lastRunAt)).ToUniversalTime()).TotalHours, 1) } catch { } }
@@ -188,7 +200,7 @@ function Get-StaleCarveOuts($reg, $label, [double]$thresholdH) {
     return $out
 }
 
-function Test-BoundedPause($reg, $label = '') {
+function Test-BoundedPause($src, $label = '') {
     # Added 2026-09-10 (ORA Automation Audit R24-3). Returns the earliest future resume
     # time (UTC DateTime) if this fleet is under a DELIBERATE bounded pause, else $null.
     #
@@ -206,9 +218,8 @@ function Test-BoundedPause($reg, $label = '') {
     # A fleet that is merely idle still has enabled recurring tasks, so it cannot match.
     # Fail-OPEN like everything else here: any parse problem returns $null (alarm normally).
     try {
-        $d = Get-Content -Raw -Path $reg | ConvertFrom-Json
-        $tasks = @($d.scheduledTasks)
-        if ($tasks.Count -eq 0) { return $null }
+        $tasks = Get-RegistryTasks $src
+        if ($null -eq $tasks -or $tasks.Count -eq 0) { return $null }
         $carve = @(Get-CarveOutIds $label)
         # id first, taskId as fallback -- same key order as fleet_pause.py.
         $recurring = @($tasks | Where-Object {
@@ -269,7 +280,7 @@ try {
     LogStart ('START pid=' + $PID)
     $problems     = @()
     $okBits       = @()
-    $pausedFleets = @()   # R24-3: fleets found under a deliberate bounded pause this run
+    $pausedFleets = @()   # R24-3: fleets under a deliberate bounded pause with NO enabled carve-out task (R7)
 
     $fleets = @(
         @{ Label = 'cc';   Store = 'claude-code-sessions' },
@@ -283,9 +294,9 @@ try {
         }
         $last = $null
         $count = 0
+        $regTasks = Get-RegistryTasks $reg   # ONE parse; every check below reads this snapshot (R8)
         try {
-            $d = Get-Content -Raw -Path $reg | ConvertFrom-Json
-            $tasks = @($d.scheduledTasks)
+            $tasks = if ($null -ne $regTasks) { $regTasks } else { @() }
             $count = $tasks.Count
             foreach ($t in $tasks) {
                 if ($t.lastRunAt) {
@@ -302,13 +313,13 @@ try {
             # R24-3: a deliberate bounded pause is not an outage. Suppress the alarm, but
             # ALWAYS log the suppression and the resume time -- the evidence is never hidden,
             # only the alert, same principle as $PhantomThreshold above.
-            $pauseUntil = Test-BoundedPause $reg $fleet.Label
+            $pauseUntil = if ($null -ne $regTasks) { Test-BoundedPause $regTasks $fleet.Label } else { $null }
             if ($null -ne $pauseUntil) {
-                if (-not (Test-HasEnabledCarveOut $reg $fleet.Label)) { $pausedFleets += $fleet.Label }
+                if (-not (Test-HasEnabledCarveOut $regTasks $fleet.Label)) { $pausedFleets += $fleet.Label }
                 $okBits += ($fleet.Label + '=' + $count + ' tasks, BOUNDED PAUSE (all recurring disabled, resume queued ' +
                             $pauseUntil.ToString('s') + 'Z) - last run ' + $ageH + 'h ago, alarm suppressed')
                 # R7: carve-out tasks run THROUGH the pause, so the pause never excuses them.
-                $staleCarve = @(Get-StaleCarveOuts $reg $fleet.Label $ThresholdHours)
+                $staleCarve = @(Get-StaleCarveOuts $regTasks $fleet.Label $ThresholdHours)
                 if ($staleCarve.Count -gt 0) {
                     $problems += ('fleet ' + $fleet.Label + ': carve-out task(s) not run during the bounded pause: ' +
                                   ($staleCarve -join ', ') + ' (threshold ' + $ThresholdHours + 'h)')
@@ -326,7 +337,8 @@ try {
     if (Test-Path $sendLog) {
         $sendAgeH = [math]::Round(((Get-Date) - (Get-Item $sendLog).LastWriteTime).TotalHours, 1)
     }
-    # R24-3: when EVERY fleet is under a bounded pause, nothing is scheduled to send, so a
+    # R24-3: when EVERY fleet is under a bounded pause (and none still has an enabled carve-out
+    # task such as ora-am-brief, which keeps sending -- R7), nothing is scheduled to send, so a
     # stale send-log is the expected consequence of the pause rather than independent evidence
     # of a broken send path. Suppress it only in that total-pause case -- if even one fleet is
     # live and still nothing has sent, that is a real finding and still alarms.
