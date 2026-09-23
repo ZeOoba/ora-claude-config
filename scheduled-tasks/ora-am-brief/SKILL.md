@@ -199,7 +199,7 @@ Additionally, after pulling Section 3's FRED rates, add one tailored paragraph: 
 
 # BLOCK C — INBOX PRE-BRIEF (weekdays only; SKIP Sat/Sun & federal holidays)
 
-Triage overnight Outlook activity BEFORE Gabriel opens his inbox. Output → Notion Ops Hub + an email to Gabriel (only). On Monday, the sweep window covers the full weekend.
+Triage overnight Outlook activity BEFORE Gabriel opens his inbox. Output → Notion Ops Hub + an email to Gabriel (only). On Monday, the sweep window covers the full weekend. Every `YYYY-MM-DD` date slot and the `[day-of-week]` tag in this block (C.6 header, C.7 title and tags, C.8 probe stem and subject) = the run date computed once at run start with `date '+%A %Y-%m-%d'` (date part in every date slot; weekday only where one is named) and reused verbatim in every title, subject and body.
 
 ## CANONICAL PATHS
 
@@ -332,7 +332,7 @@ Total messages swept: [n] | Excluded as noise: [n] | For triage: [n]
 ```
 
 ## C.7 — NOTION POST
-Post to Notion Ops Hub (parent UUID `32b6ecd8-9e59-81f2-b329-df3fd0e25062`) as a new page: Title "Inbox Pre-Brief — YYYY-MM-DD"; Tags: pre-brief, inbox, [day-of-week]; auto-archive after 14 days. Tool: `notion-create-pages` with `parent: { type: "page_id", page_id: "32b6ecd8-9e59-81f2-b329-df3fd0e25062" }`. Apply the same publication guard as Block B (capture id, retry once, verify via `notion-fetch` not search).
+Post to Notion Ops Hub (parent UUID `32b6ecd8-9e59-81f2-b329-df3fd0e25062`) as a new page: Title "Inbox Pre-Brief — YYYY-MM-DD"; Tags: pre-brief, inbox, [day-of-week]; auto-archive after 14 days. Tool: `notion-create-pages` with `parent: { type: "page_id", page_id: "32b6ecd8-9e59-81f2-b329-df3fd0e25062" }`. Apply the same publication guard as Block B (capture id, verify via `notion-fetch` not search), except the retry: on a create error or grace/quota notice, first look for it — `notion-fetch` the parent for an exact-title child, then search by the exact title (search lags: a miss alone is not proof) — a match created at/after the create call is this run's page, use it; never blind-retry a create (it produced a duplicate); retry once only for a non-grace/quota failure with no match. After a grace/quota notice with no match, do not retry: the create is UNVERIFIED and takes BLOCK C — ERROR HANDLING's Notion-error path. Quota errors → `notion-quota-fallback` skill.
 
 ## C.8 — EMAIL DELIVERY
 
@@ -360,7 +360,7 @@ Log: run completed [timestamp]; messages processed [n]; Notion page [URL]; email
 
 # BLOCK D — CASH POSITION SNAPSHOT (Mondays only)
 
-Multi-entity cash consolidation across the Master Workbook with reserve thresholds and distribution-availability flags. Email to Gabriel (only). **Run only on Mondays** (the Master Workbook is freshly ingested Mon 05:45 by `ora-master-workbook-ingest`, so the 06:00 read is post-ingest).
+Multi-entity cash consolidation across the Master Workbook with reserve thresholds and distribution-availability flags. Email to Gabriel (only). Every `[date]` slot in this block (Notion title, email subject, probe stem, failure subject) = the run date computed once at run start with `date '+%A %Y-%m-%d'` (date part in every date slot; weekday only where one is named) and reused verbatim in every title, subject and body — never the Cash Data as-of date. **Run only on Mondays** (the Master Workbook is freshly ingested Mon 05:45 by `ora-master-workbook-ingest`, so the 06:00 read is post-ingest).
 
 **D.0 ENTRY GUARD (first action in this block).** Run `block-sentinel.py claim --task ora-am-brief --block blockD --run-id <run_id> --ttl-min 30` per DOUBLE-FIRE ENTRY GUARD above. Exit 10 → log `BLOCK_D_ALREADY_COMPLETE_TODAY`, skip the block, record a NORMAL skip. Exit 11 → stand down. **A Monday catch-up burst is exactly when this fires twice** — a duplicate "ORA Cash Position" email carrying reserve-floor and distribution-headroom figures is the same defect as the Block B duplicate, and is arguably worse: two cash snapshots of the same date invite a reader to treat the second as an update.
 
@@ -378,7 +378,7 @@ Sources:
 Compute: A. Total cash by entity and consolidated portfolio total. B. Operating reserves vs. policy minimum (flag if below). C. Capex reserves vs. budgeted draws (next 90 days). D. Distribution headroom = consolidated cash − (next 30-day debt service + reserve floors + known payables). E. Week-over-week delta (vs. prior Monday snapshot stored in Notion).
 
 Output:
-- **Notion page** in the Operations Hub titled "Cash Position Snapshot — [date]" with full table. Publication guard: capture `pages[0].id`; retry once; verify via `notion-fetch`; if all fail, AUTO-SEND an Outlook email subject `❌ ora-am-brief CASH-SNAPSHOT PUBLICATION FAILED — [date]` to Gabriel with the snapshot inlined as plain text.
+- **Notion page** in the Operations Hub titled "Cash Position Snapshot — [date]" with full table. Publication guard: capture `pages[0].id`; on a create error or grace/quota notice, first look for it — `notion-fetch` the parent for an exact-title child, then search by the exact title (search lags: a miss alone is not proof) — a match created at/after the create call is this run's page, use it; never blind-retry a create (it produced a duplicate); retry once only for a non-grace/quota failure with no match (after a grace/quota notice with no match, do not retry: the create is UNVERIFIED — go straight to the failure email below; quota errors → `notion-quota-fallback` skill); verify via `notion-fetch`; if all fail, AUTO-SEND an Outlook email subject `❌ ora-am-brief CASH-SNAPSHOT PUBLICATION FAILED — [date]` to Gabriel with the snapshot inlined as plain text.
 - **Email summary** to ggoldberg@oxfordra.net ONLY. Subject: "ORA Cash Position — [date]".
 - If any reserve falls below policy floor: prefix the subject line with "[ALERT]" and flag immediately in the body.
 - (Dropped on this surface, 2026-07-16 migration: the LAMS spec's `mcp__cowork__update_artifact` refresh of an `ora-cash-position` Cowork artifact — that tool doesn't exist here. The Notion page + email above are this surface's durable outputs; if a live cash artifact is wanted again, it needs a Cowork-side session to maintain it.)

@@ -17,7 +17,7 @@ If the run aborts: python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-s
 STEP 1 - PULL THE NOTION LOANS DB (read-only).
 Use the Notion MCP notion-query-data-sources tool (SQL mode) on data source collection://05b0012c-453c-45f5-a7c6-16efd2e3013e:
 SELECT "Loan Name" AS name, "Outstanding Balance" AS balance, "date:Maturity Date:start" AS maturity FROM "collection://05b0012c-453c-45f5-a7c6-16efd2e3013e" ORDER BY "Loan Name"
-Write the rows as a JSON list [{"name":..., "balance":..., "maturity":...}] to %TEMP%\ora-loan-balance-notion-<YYYY-MM-DD>.json with a DIRECT file write (never a shell here-string). If Notion is unreachable, skip --notion-json in Step 2 and put "Notion unreachable, expected balances only" in the subject.
+Write the rows as a JSON list [{"name":..., "balance":..., "maturity":...}] to %TEMP%\ora-loan-balance-notion-<YYYY-MM-DD>.json (every <YYYY-MM-DD> / <today YYYY-MM-DD> slot in this task, including the Step 3 subject and the Step 4 row date, = the run date computed once at run start with `date '+%A %Y-%m-%d'`, date part in every date slot, reused verbatim) with a DIRECT file write (never a shell here-string). If Notion is unreachable, skip --notion-json in Step 2 and put "Notion unreachable, expected balances only" in the subject.
 
 STEP 2 - RUN THE CALCULATOR.
 C:\Users\Owner\AppData\Local\Programs\Python\Python313\python.exe C:\Users\Owner\.claude\maintenance\loan_balance_check.py --as-of <today YYYY-MM-DD> --notion-json <the json from Step 1> --html-out %TEMP%\ora-loan-balance-<YYYY-MM-DD>.html --md-out "C:\Users\Owner\OneDrive - Oxford Capital Partners\Claude_Workspace\02_Outputs\<YYYY-MM-DD>_LoanBalanceCheck_Report_v01.md"
@@ -32,7 +32,7 @@ STEP 3 - EMAIL (ggoldberg@oxfordra.net ONLY, no cc, routing canon).
 Send the HTML report via C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1 -To ggoldberg@oxfordra.net -Subject "ORA Loan Balance Check -- <YYYY-MM-DD> -- <N> difference(s)" -BodyFile <the html from Step 2>. The email is sent every month (the LTV watch is a standing report). On a non-zero exit: retry once, then flag loudly in the Ops Hub row (Step 4) and do NOT halt.
 
 STEP 4 - OPS HUB ROW.
-Post one row to the Notion Operations Hub (parent page 32b6ecd8-9e59-81f2-b329-df3fd0e25062): the date, the number of differences, the watch-list count, and the email send status. This is the only Notion write this task makes.
+Post one row to the Notion Operations Hub (parent page 32b6ecd8-9e59-81f2-b329-df3fd0e25062): the date, the number of differences, the watch-list count, and the email send status. This is the only Notion write this task makes. If the create errors or returns a grace/quota notice, look for it — `notion-fetch` the parent for a child carrying this run's date, then search by that date + task name (search lags: a miss alone is not proof) — a match created at/after the create call is this run's row, use it; never blind-retry a create (it produced a duplicate). After a grace/quota notice with no match, do not retry: the row is UNVERIFIED — say so in the run report and continue to Step 5. Quota errors → `notion-quota-fallback` skill.
 
 STEP 5 - CLOSE.
 Run the Step 0 complete command with --email-sent-at. On any abort run the fail command. Report only what happened; never fabricate a balance or a payment.
