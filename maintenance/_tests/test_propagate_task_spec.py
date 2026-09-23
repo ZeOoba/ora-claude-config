@@ -4,6 +4,7 @@ Run: python maintenance/_tests/test_propagate_task_spec.py
 """
 import importlib.util
 import pathlib
+import subprocess
 import tempfile
 import unittest
 
@@ -52,10 +53,64 @@ class PropagateTests(unittest.TestCase):
 
     def test_existing_backup_is_never_overwritten(self):
         src, live = self.pair(b"a\nB\n", b"a\nb\n")
-        (live.parent / "SKILL.md.bak-t").write_bytes(b"original\n")
+        bak = live.parent / "SKILL.md.bak-t"
+        bak.write_bytes(b"a\nb\n")  # matching backup from an interrupted earlier run
+        before = bak.stat().st_mtime_ns
         r = pts.propagate(src, live, max_replaced=1, tag="t", apply=True)
         self.assertTrue(r.ok, r.reason)
-        self.assertEqual((live.parent / "SKILL.md.bak-t").read_bytes(), b"original\n")
+        self.assertEqual(bak.read_bytes(), b"a\nb\n")
+        self.assertEqual(bak.stat().st_mtime_ns, before)
+
+    def test_missing_live_is_refusal_not_crash(self):
+        src, live = self.pair(b"a\n", b"a\n")
+        live.unlink()
+        r = pts.propagate(src, live, max_replaced=1, tag="t", apply=True)
+        self.assertFalse(r.ok)
+        self.assertFalse(live.exists())
+
+    def test_unplanned_insertions_are_capped(self):
+        src, live = self.pair(b"a\nX\nY\nZ\nb\n", b"a\nb\n")
+        r = pts.propagate(src, live, max_replaced=0, tag="t", apply=True)
+        self.assertFalse(r.ok)
+        self.assertEqual(live.read_bytes(), b"a\nb\n")
+
+    def test_stale_backup_refuses(self):
+        src, live = self.pair(b"a\nB\n", b"a\nb\n")
+        (live.parent / "SKILL.md.bak-t").write_bytes(b"something else\n")
+        r = pts.propagate(src, live, max_replaced=1, tag="t", apply=True)
+        self.assertFalse(r.ok)
+        self.assertIn("stale backup", r.reason)
+        self.assertEqual(live.read_bytes(), b"a\nb\n")
+
+    def test_git_failure_is_refusal(self):
+        src, live = self.pair(b"a\nB\n", b"a\nb\n")
+        r = pts.propagate(src, live, max_replaced=1, tag="t", apply=True, git_repo=self.tmp)
+        self.assertFalse(r.ok)
+        self.assertEqual(live.read_bytes(), b"a\nb\n")
+
+    def test_git_committed_blob_match_and_uncommitted_refusal(self):
+        repo = self.tmp / "repo"
+        (repo / "scheduled-tasks" / "t").mkdir(parents=True)
+        run = lambda *a: subprocess.run(["git", "-C", str(repo), *a], capture_output=True, check=True)
+        run("init", "-q")
+        run("config", "core.autocrlf", "true")
+        run("config", "user.email", "t@t")
+        run("config", "user.name", "t")
+        src = repo / "scheduled-tasks" / "t" / "SKILL.md"
+        src.write_bytes(b"a\r\nB\r\n")
+        run("add", ".")
+        run("commit", "-qm", "x")
+        live = self.tmp / "live" / "SKILL.md"
+        live.parent.mkdir()
+        live.write_bytes(b"a\nb\n")
+        r = pts.propagate(src, live, max_replaced=1, tag="t", apply=True, git_repo=repo)
+        self.assertTrue(r.ok, r.reason)
+        self.assertEqual(live.read_bytes(), b"a\nB\n")
+        src.write_bytes(b"a\r\nC\r\n")  # edited, not committed
+        r = pts.propagate(src, live, max_replaced=1, tag="t2", apply=True, git_repo=repo)
+        self.assertFalse(r.ok)
+        self.assertIn("commit it first", r.reason)
+        self.assertEqual(live.read_bytes(), b"a\nB\n")
 
     def test_identical_is_noop_not_error(self):
         src, live = self.pair(b"a\n", b"a\n")
