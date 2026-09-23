@@ -21,6 +21,8 @@ HARD RULES
 
 PROCEDURE
 
+Run date: compute once at run start with `date '+%A %Y-%m-%d'` (date part in every date slot; weekday only where one is named) and reuse that exact value for every YYYY-MM-DD below (banner, report title, body).
+
 STEP 1 — Enumerate candidate deals.
 Query the Notion Acquisition Pipeline Tracker (data source collection://bcfe4a03-7e61-4ac1-a0bb-c44174fa138b) for every row where "PSA Status" = "Executed" OR "Stage" = "Under Contract". These are the deals in scope. If there are none, skip to STEP 5 and post a clean-pass entry.
 
@@ -48,7 +50,7 @@ For each deal with one or more non-corroborated assertions, append to the pipeli
 Do NOT touch the "Next Action" property — appending there risks mangling a long escaped text field. The body banner is the record.
 
 STEP 5 — Post the run report to the Notion Operations Hub (page 32b6ecd8-9e59-81f2-b329-df3fd0e25062).
-Title: "PSA Drift Watch — YYYY-MM-DD". Include:
+Title: "PSA Drift Watch — YYYY-MM-DD". If the create response has no page ID (e.g. a grace-period/quota notice), search by the exact title before any retry; a match created at/after the create call is this run's page; never blind-retry the create (it produced a duplicate). Quota errors → `notion-quota-fallback` skill. Include:
   - Deals scanned (count and names), with PSA Status / Stage.
   - Class (A) NEVER-RECONCILED findings — deal, executed-PSA filename and date, and the recommendation to run psa-reconciliation.
   - Class (B) DRIFT findings — deal, each non-corroborated assertion with narrative-claim vs executed-PSA-reading and section cite, and whether a DISPUTED banner was appended.
