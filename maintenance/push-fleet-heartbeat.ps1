@@ -95,7 +95,11 @@ function Invoke-LogRotation($path, $maxBytes = 1048576) {
 }
 Invoke-LogRotation $log
 
-function Log($m) { "$([DateTime]::UtcNow.ToString('s'))Z  $m" | Out-File -FilePath $log -Append -Encoding utf8 }
+# Non-throwing (OI-331 gate finding): two overlapping runs (the daily Windows task and the
+# integrity guard's STEP 1.5 script 3) can collide on this log; an IOException here used to
+# land in the publish try/catch and set $pubExit = 2, so a SUCCESSFUL publish could exit
+# nonzero and trip the STEP-3 alarm. A lost log line must never change the exit code.
+function Log($m) { try { "$([DateTime]::UtcNow.ToString('s'))Z  $m" | Out-File -FilePath $log -Append -Encoding utf8 } catch { } }
 
 # --- Backup-push marker/stamp (added 2026-09-22, OI-331) -----------------------------------
 # Same pattern as publish-fleet-heartbeat.py's heartbeat-publish-failed.json/-ok.json: a
