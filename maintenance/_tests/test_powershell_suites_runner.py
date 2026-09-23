@@ -60,5 +60,33 @@ with tempfile.TemporaryDirectory() as td:
     check("no suites found -> non-zero (a silent zero would hide a moved directory)", rc != 0 and "CANNOT RUN:" not in out,
           "rc=%s out=%s" % (rc, out))
 
+# Review of #269 (MED): a suite that hangs past the per-suite timeout must FAIL, never pass.
+import time as _time
+with tempfile.TemporaryDirectory() as td:
+    write(td, "test-hang.ps1", "Start-Sleep -Seconds 60; exit 0\n")
+    t0 = _time.time()
+    rc, out = run(td, {"ORA_PS_SUITE_TIMEOUT": "3"})
+    el = _time.time() - t0
+    check("a hanging suite times out as FAIL (non-zero, 'timeout(' named, not an env-skip)",
+          rc != 0 and "timeout(" in out and "test-hang.ps1" in out and "CANNOT RUN:" not in out, "rc=%s out=%s" % (rc, out))
+    check("the timeout is actually honoured (<30s for a 3s bound)", el < 30, "elapsed=%.1fs" % el)
+
+# Review of #269 (LOW): a suite's own child process must not hold the runner past the bound.
+with tempfile.TemporaryDirectory() as td:
+    write(td, "test-child-hang.ps1", "& ping -n 60 127.0.0.1 | Out-Host; exit 0\n")
+    t0 = _time.time()
+    rc, out = run(td, {"ORA_PS_SUITE_TIMEOUT": "3"})
+    el = _time.time() - t0
+    check("a suite's lingering child cannot stretch the bound (tree kill; <30s for 3s)", rc != 0 and el < 30,
+          "rc=%s elapsed=%.1fs out=%s" % (rc, el, out))
+
+# Review of #269 (LOW): a FAILING suite that happens to print the gate's ENV-SKIP sentinel must
+# not turn the runner's failure into an env-skip -- the runner rewrites the sentinel it echoes.
+with tempfile.TemporaryDirectory() as td:
+    write(td, "test-sentinel.ps1", "Write-Output 'FAIL check 3: CANNOT RUN: fixture missing'; exit 1\n")
+    rc, out = run(td)
+    check("an echoed 'CANNOT RUN:' from a failing suite is neutralised", rc != 0 and "CANNOT RUN:" not in out
+          and "CANNOT-RUN" in out, "rc=%s out=%s" % (rc, out))
+
 print("powershell-suites runner tests: %d/%d passed" % (sum(results), len(results)))
 sys.exit(0 if all(results) else 1)

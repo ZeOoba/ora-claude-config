@@ -25,7 +25,21 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-PER_SUITE_TIMEOUT = 200
+# Overridable for the runner's own tests (ORA_PS_SUITE_TIMEOUT). A timeout is always a FAIL.
+PER_SUITE_TIMEOUT = int(os.environ.get("ORA_PS_SUITE_TIMEOUT", "200"))
+ENV_SKIP_SENTINEL = "CANNOT RUN:"
+
+
+def kill_tree(p):
+    """Kill the suite AND anything it started. p.kill() alone left a suite's child holding
+    the output pipe, so the runner waited on it far past the bound (review of #269)."""
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        p.kill()
+    except OSError:
+        pass
 
 
 def find_powershell():
@@ -64,14 +78,19 @@ def main():
             out, _ = p.communicate(timeout=PER_SUITE_TIMEOUT)
             rc = p.returncode
         except subprocess.TimeoutExpired:
-            p.kill()
-            out, _ = p.communicate()
+            kill_tree(p)
+            try:
+                out, _ = p.communicate(timeout=10)   # bounded: never wait on a straggler's pipe
+            except subprocess.TimeoutExpired:
+                out = ""
             rc = "timeout(%ss)" % PER_SUITE_TIMEOUT
         if rc == 0:
             print("PASS %s" % name)
         else:
             failed += 1
-            lines = (out or "").strip().splitlines()
+            # A failing suite's text must never carry the gate's ENV-SKIP sentinel, or the gate
+            # would reclassify this runner's FAILURE as an env-skip (review of #269).
+            lines = (out or "").replace(ENV_SKIP_SENTINEL, "CANNOT-RUN:").strip().splitlines()
             # the FAIL lines are what a reader needs; a suite's tail is usually PASS noise
             shown = [l for l in lines if "FAIL" in l][:12] or lines[-12:]
             tail = "\n    ".join(shown)
