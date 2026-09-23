@@ -21,6 +21,18 @@ FAST_PRODUCERS = (
     "heartbeat-publish-ok.json",    # ORA Fleet Heartbeat Push, daily
     "stuck-session-watchdog.log",   # ORA Stuck-Session Watchdog, every 30 min
     "fleet-heartbeat.json",         # emit-fleet-heartbeat.py, sub-daily
+    "phantom-dispatch.log",         # phantom-dispatch-probe.py, run daily by ORA Fleet Dead-Man (R6)
+    "phantom-dispatch.json",        # same
+    "ensure-claude-renderer.log",   # ORA Claude Desktop Wake-and-Launch, daily (R6)
+)
+
+# Every watched file a Windows Task Scheduler job writes (enumerated from the live ORA*
+# tasks and their scripts, merge-gate R6, 2026-09-22). All must be pause-independent;
+# only the daily-or-faster ones get the tight 48h override (ora-nightly-disk is weekly).
+WINDOWS_PRODUCED = FAST_PRODUCERS + (
+    "fleet-deadman.start.log",
+    "push-fleet-heartbeat.start.log",
+    "ora-nightly-disk.log",         # ORA Nightly Disk Clean, WEEKLY since 2026-09-17
 )
 
 
@@ -77,6 +89,20 @@ def test_pause_windows_is_event_driven_not_periodic():
     assert "fleet-pause-windows.json" in sfp.NOT_PERIODIC
     assert "fleet-pause-windows.json" not in sfp.MAX_AGE_OVERRIDES
     assert "fleet-pause-windows.json" not in sfp.PAUSE_INDEPENDENT
+
+
+def test_every_windows_produced_file_is_pause_independent():
+    """Merge-gate R6: two daily Windows producers (phantom-dispatch via the dead-man,
+    ensure-claude-renderer via Wake-and-Launch) and the weekly disk-clean log were
+    missing, so a CC pause could 'explain' them going dead."""
+    missing = [n for n in WINDOWS_PRODUCED if n not in sfp.PAUSE_INDEPENDENT]
+    assert not missing, missing
+    extra = sorted(set(sfp.PAUSE_INDEPENDENT) - set(WINDOWS_PRODUCED))
+    assert not extra, ("PAUSE_INDEPENDENT lists files no Windows job writes", extra)
+
+
+def test_weekly_windows_producer_keeps_the_weekly_limit():
+    assert "ora-nightly-disk.log" not in sfp.MAX_AGE_OVERRIDES
 
 
 def test_start_logs_are_never_pause_explained():

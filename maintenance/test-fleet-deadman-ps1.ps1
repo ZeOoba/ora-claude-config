@@ -67,15 +67,11 @@ Expect ('pipe-holding grandchild cannot exceed the bound (elapsed=' + [int]$sw.E
 # not survive. The parent records its grandchild's PID, then hangs past the bound.
 $pidFile = Join-Path $env:TEMP ('dm-gc-' + [guid]::NewGuid() + '.pid')
 $script:tempFiles += $pidFile
-$gcPy = Join-Path $env:TEMP ('dm-gc-' + [guid]::NewGuid() + '.py')
-$script:tempFiles += $gcPy
-@"
-import subprocess, sys, time
-g = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
-open(sys.argv[1], 'w').write(str(g.pid))
-time.sleep(60)
-"@ | Set-Content -Path $gcPy -Encoding ascii
-$res = Invoke-PyBounded $py @($gcPy, $pidFile) 4
+# R6: passed with -c, not a freshly written .py -- real-time AV scanning of a new script in
+# %TEMP% delayed python startup past the bound (observed: no output at all for 6s), which
+# made this check flaky. ConvertTo-WinArg now quotes the embedded quotes correctly.
+$gcCode = "import subprocess, sys, time; g = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); open(sys.argv[1], 'w').write(str(g.pid)); time.sleep(60)"
+$res = Invoke-PyBounded $py @('-c', $gcCode, $pidFile) 20
 Start-Sleep -Milliseconds 1500
 $gcPid = if (Test-Path $pidFile) { [int](Get-Content -Raw $pidFile).Trim() } else { 0 }
 $alive = if ($gcPid) { [bool](Get-Process -Id $gcPid -ErrorAction SilentlyContinue) } else { $true }
@@ -237,6 +233,13 @@ $carveTable = if ($carveAssign.Count -eq 1) { & ([scriptblock]::Create($carveAss
 $carveKeys = if ($carveTable) { @($carveTable.Keys) | Sort-Object } else { @() }
 Expect 'fleet labels are exactly the carve-out keys' (($fleetLabels.Count -gt 0) -and
     ((@($fleetLabels) -join ',') -eq (@($carveKeys) -join ',')))
+
+# R6: each fleet label must point at ITS store, matching fleet_pause.STORES. Swapping the
+# two labels passed every other check while applying the CC carve-out to the LAMS registry.
+$pairs = @($fleetsAssign | ForEach-Object { [regex]::Matches($_.Extent.Text, "Label\s*=\s*'([^']+)'\s*;\s*Store\s*=\s*'([^']+)'") | ForEach-Object { $_.Groups[1].Value + '=' + $_.Groups[2].Value } }) | Sort-Object
+$pyStores = & $py -c "import sys; sys.path.insert(0, r'$(Join-Path $PSScriptRoot '_shared')'); import fleet_pause as f; print(';'.join(sorted(k + '=' + v for k, v in f.STORES.items())))"
+Expect ('each fleet label maps to its own store, as in fleet_pause.STORES (ps=' + ($pairs -join ';') + ' py=' + $pyStores + ')') (
+    ($pairs.Count -eq 2) -and (($pairs -join ';') -eq ($pyStores -join '').Trim()))
 
 # Parity with _shared/fleet_pause.py PAUSE_CARVE_OUTS ("keep the two lists identical").
 $pyOut = & $py -c "import sys; sys.path.insert(0, r'$(Join-Path $PSScriptRoot '_shared')'); import fleet_pause as f; print(';'.join(k + '=' + ','.join(sorted(v)) for k, v in sorted(f.PAUSE_CARVE_OUTS.items())))"

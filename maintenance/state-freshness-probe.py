@@ -93,6 +93,9 @@ MAX_AGE_OVERRIDES = {
     "heartbeat-publish-ok.json": 48.0,   # ORA Fleet Heartbeat Push (Windows, daily)
     "stuck-session-watchdog.log": 48.0,  # ORA Stuck-Session Watchdog (Windows, 30 min)
     "fleet-heartbeat.json": 48.0,        # emit-fleet-heartbeat.py (sub-daily)
+    "phantom-dispatch.log": 48.0,        # phantom-dispatch-probe.py, run daily by ORA Fleet Dead-Man (R6)
+    "phantom-dispatch.json": 48.0,       # same
+    "ensure-claude-renderer.log": 48.0,  # ORA Claude Desktop Wake-and-Launch (Windows, daily) (R6)
     # quarterly producers would go here, with the cron that justifies the number
 }
 
@@ -110,6 +113,12 @@ PAUSE_INDEPENDENT = frozenset({
     "fleet-deadman.start.log",      # ORA Fleet Dead-Man START breadcrumbs (merge-gate R5)
     "push-fleet-heartbeat.start.log",  # ORA Fleet Heartbeat Push START breadcrumbs
     "fleet-heartbeat.json",         # emit-fleet-heartbeat.py, run by ORA Fleet Heartbeat Push
+    # Merge-gate R6: the full set, enumerated from the live ORA* Windows tasks and their
+    # scripts -- the earlier hand-kept list missed these three producers.
+    "phantom-dispatch.log",         # phantom-dispatch-probe.py via ORA Fleet Dead-Man (daily)
+    "phantom-dispatch.json",        # same
+    "ensure-claude-renderer.log",   # ORA Claude Desktop Wake-and-Launch (daily)
+    "ora-nightly-disk.log",         # ORA Nightly Disk Clean (WEEKLY since 2026-09-17: default limit)
 })
 
 WATCH_GLOBS = (
