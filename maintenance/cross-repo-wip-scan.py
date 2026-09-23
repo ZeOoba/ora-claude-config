@@ -18,8 +18,9 @@ and the OLDEST uncommitted path's on-disk mtime (best-effort -- a path git
 reports as deleted has no file left to stat and is excluded from the age
 calculation, though it still counts toward uncommitted_count). A repo is
 STALE when it has 1+ uncommitted items AND the oldest is older than
-STALE_THRESHOLD_HOURS (default 48h, matching the freshness window several
-other probes in this tree already use for "worth a look" staleness).
+STALE_THRESHOLD_HOURS (default 48h: uncommitted work sitting two days is "worth a
+look". This is independent of any fleet cadence, so it did not move when the scheduled
+routines went weekly on 2026-09-17 and state-freshness-probe's default became 192h).
 
 BRANCH DRIFT (added 2026-09-09, open-items-tracker.md#OI-249): a handful of
 repos have a declared CANONICAL_BRANCH -- currently only `~/.claude`, which
