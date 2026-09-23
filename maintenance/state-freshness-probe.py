@@ -67,8 +67,10 @@ NOT_PERIODIC = {
         "an empty, old file is the healthy steady state",
     "oi-id-reservations.log":
         "append-only allocation ledger, written only when an OI id is allocated",
-    "pause-resume-guard-state.json":
-        "written by the pause/resume guard on state change, not on a cadence",
+    "heartbeat-publish-failed.json":
+        "failure marker: written by publish-fleet-heartbeat.py only on a failed publish and "
+        "removed on the next success; its absence or age means nothing (merge-gate R7). "
+        "A dead publisher is caught by heartbeat-publish-ok.json (48h, pause-independent)",
     "fleet-pause-windows.json":
         "written by pause_windows.capture() only when a hold starts or ends, so it is "
         "untouched for as long as the fleet is live; any age limit false-alarms after "
@@ -96,6 +98,8 @@ MAX_AGE_OVERRIDES = {
     "phantom-dispatch.log": 48.0,        # phantom-dispatch-probe.py, run daily by ORA Fleet Dead-Man (R6)
     "phantom-dispatch.json": 48.0,       # same
     "ensure-claude-renderer.log": 48.0,  # ORA Claude Desktop Wake-and-Launch (Windows, daily) (R6)
+    "pause-resume-guard-state.json": 48.0,  # ORA Fleet Pause-Resume Guard: save_state() on EVERY 6h run (R7;
+                                            # was misfiled as NOT_PERIODIC, leaving the guard unwatched)
     # quarterly producers would go here, with the cron that justifies the number
 }
 
@@ -119,6 +123,7 @@ PAUSE_INDEPENDENT = frozenset({
     "phantom-dispatch.json",        # same
     "ensure-claude-renderer.log",   # ORA Claude Desktop Wake-and-Launch (daily)
     "ora-nightly-disk.log",         # ORA Nightly Disk Clean (WEEKLY since 2026-09-17: default limit)
+    "pause-resume-guard-state.json",  # ORA Fleet Pause-Resume Guard (every 6h) (R7)
 })
 
 WATCH_GLOBS = (
@@ -194,7 +199,11 @@ def main():
             # explained by a CC pause: the Windows Task Scheduler producers keep running through
             # it, so their staleness is never pause-explained (merge-gate R3, 2026-09-22).
             if (pause_start is not None and name not in PAUSE_INDEPENDENT
-                    and mtime >= (pause_start - PAUSE_GRACE_H * 3600.0)):
+                    and mtime >= (pause_start - max(limit, PAUSE_GRACE_H) * 3600.0)):
+                # Merge-gate R7: "already stale when the pause began" means its age AT the
+                # pause start exceeded its own limit, not a flat 6h grace. With the 192h weekly
+                # default, the flat grace falsely flagged every weekly producer that a pause
+                # longer than the rest of its cycle had frozen.
                 print("  [PAUSED] %-51s %.1fh stale, but last written after the pause began "
                       "(%s) -- expected" % (
                           rel, age_h, time.strftime("%Y-%m-%dT%H:%MZ", time.gmtime(pause_start))))
