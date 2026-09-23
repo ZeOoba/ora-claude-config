@@ -1,0 +1,35 @@
+---
+name: ora-sourcing-construction-verify
+description: Weekly follow-on to ora-deal-sourcing-scan: resolves Construction Type for T1/T2 Deal Sourcing Log rows still 'Unknown — CONFIRM' by reading listing photos in the browser pane; corrects the construction score only. [MODEL: claude-sonnet-5 | set 2026-09-23]
+---
+
+ORA SOURCING CONSTRUCTION-VERIFY — weekly, Tue 14:15, after ora-deal-sourcing-scan (Tue 10:45). Compute the run date once: `date '+%A %Y-%m-%d'` and reuse it in every title, subject and note.
+
+GUARD 0 — SCAN MUST BE DONE (added 2026-09-23 with scan v2.8). Read C:\Users\Owner\OneDrive - Oxford Capital Partners\Claude_Workspace\_state\deal-sourcing-scan-done.json. Proceed ONLY if its "run_date" equals today's date. Otherwise the scan is still running (or never ran today) and both tasks would drive the one browser pane at once: send NO email, write nothing to Notion, and end with the one-line summary "scan done-marker not today (<value or 'file absent'>) — construction-verify skipped". Never wait, sleep or poll for it. The next weekly run picks up the queue.
+
+WHY THIS EXISTS: the scan's construction-type photo step is MANDATORY but was skipped on 2026-09-05 and 2026-09-23 (a long scan run runs out of budget for it), leaving every new row 'Unknown — CONFIRM' and scored 2/5 on Construction. The score impact is small (up to +3) but the by-products are real: photos expose special-purpose build-outs, in-place tenants, separate parcels, rail/site problems that listing text never states. This task does that step on its own budget. It never creates rows, never changes Verdict/Status/Floor Result, never contacts anyone.
+
+TARGET SET: Deal Sourcing Log data source collection://9a6ae219-85a3-4621-899c-c757fd062f8b. SQL: rows with "Construction Type" = 'Unknown — CONFIRM' AND Status NOT IN ('Dead','Passed') AND Verdict IN ('T1 PURSUE','T2 WATCH') AND "Listing URL" is not empty AND (Notes / Flags does NOT contain 'CONSTRUCTION-CHECKED') AND (Notes / Flags does NOT contain 'PROVISIONAL-UNRESOLVED') . Use that exact token, never a bare 'PROVISIONAL' match: resolved rows keep the word in their notes history and would be excluded forever. PROVISIONAL rows (scan v2.8) carry an index-page URL with no gallery; loading one would stamp CONSTRUCTION-CHECKED on a row nobody has actually seen, and it would never be re-queued. The scan also leaves their Construction Type blank, so this clause is a second guard, not the only one. FILTER BEFORE THE CAP: also require "Listing URL" NOT LIKE '%crexi.com%' AND NOT LIKE '%loopnet.com%' inside the query itself, THEN order by Buy Box Score desc and cap 25 per run — applying the domain skip after the cap would let high-scoring Crexi/LoopNet rows hold slots every week and never leave. Only listing URLs on commercialsearch.com / commercialcafe.com / broker-direct sites. (Crexi/LoopNet are excluded because this task has no validated gallery/attribution method for them and must not add load that risks an Access-Denied block on ora-loopnet-listings-sync — the public Crexi search does load logged-out as of 2026-09-23.) Never log in, never bypass paywalls/CAPTCHAs.
+
+PROCEDURE PER ROW (browser pane, mcp__Claude_Browser__*):
+1. Read listing text first (WebFetch): if it states masonry/block/tilt-up/precast/PEMB outright, use that and skip photos.
+2. Otherwise navigate the pane to the URL. FIRST call resize_window width 1280 height 900 (a fresh pane is 0x0 and renders nothing — do not misread that as 'screenshot failed'); confirm window.innerWidth.
+3. javascript_tool: document.querySelectorAll('.property-details-gallery img') — take full hrefs, dedupe on src minus query, check each alt matches the SUBJECT address/title (the .similarproperty carousel serves OTHER buildings; discard any image whose alt does not match). Never reconstruct CDN URLs (the CDN keys on the GUID; reused GUIDs return the same image). Drop aerials, site plans, location maps, cover/marketing overlays.
+4. curl each remaining image with ?width=1400 to the scratchpad, then Read it. Classify: regular 8x16 coursing with mortar joints = BLOCK/CMU; large panels with vertical joints/fluted = TILT-UP/PRECAST; ribbed/corrugated metal skin = PEMB; brick = MASONRY; masonry walls + metal roof/addition = HYBRID. Interior shots count (exposed block + bar-joist = masonry).
+5. Empty gallery or only non-diagnostic images = verified-attempt UNKNOWN: leave the type unchanged and record why so the next run does not repeat it.
+Expected hit rate ~1 in 5. A low hit rate is normal, not a bug.
+
+WRITES (notion-update-page, update_properties only):
+- Construction Type select: 'Masonry / Brick' | 'Block / CMU' | 'Tilt-Up / Precast Concrete' | 'Hybrid (masonry + metal)' | 'Pre-Engineered Metal (PEMB)' — only on a confident classification.
+- Buy Box Score (100): apply the construction delta ONLY (old component was UNKNOWN=2): masonry/block/tilt-up/precast +3, hybrid +1, PEMB 0. Never touch any other component or recompute the rest.
+- Notes / Flags: append (never replace) one line `CONSTRUCTION-CHECKED <run date>: <type or 'UNKNOWN — <reason: gallery empty / aerials only / not loaded>'> ; findings: <by-products>` . Always append this line, including for UNKNOWN, so the row drops out of next week's target set.
+- A PEMB result on a row that PASSED the basis floor by <15% gets the note 'METAL-BUILDING BASIS DISTORTION — basis discount suspect' (do not change Floor Result).
+- If the score change would cross a tier boundary (T2 PASS-gate row reaching >=60, or a T1 falling <60), DO NOT change Verdict — list it in the email as 'TIER REVIEW'.
+- Never write Asking Price, Ask at First Sighting, or any pipeline-tracker row.
+Notion create/update quota errors: use skill notion-quota-fallback; an update with no confirmation is UNVERIFIED — report it, do not blindly retry.
+
+BY-PRODUCTS to capture in Notes and the email (these are the point): special-purpose build-outs (taproom/arcade/studio/lab) that Step 2.5 zero-credits, in-place tenants/signage, separate parcels marketed beside the building, site geometry (triangular, pinched by rail), cell towers, outside storage.
+
+EMAIL: one summary to ggoldberg@oxfordra.net ONLY via C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1 (-To ... -Subject "ORA Sourcing Construction-Verify — <run date> — <N> resolved / <M> attempted" -BodyFile <html> -BodyFormat html). The helper now self-heals an Outlook cold start (waits up to 120s); on a non-zero exit retry once, then flag loudly in the run summary — do NOT halt. Body: counts (targets, resolved by type, verified-attempt UNKNOWN by reason, not-loaded), a table of resolved rows with old→new score, TIER REVIEW list, by-products list, and any coverage gap. If the target set is empty send nothing and end with a one-line 'no eligible rows' summary.
+
+INTEGRITY: never guess construction from a single ambiguous image; never assign an image whose alt does not match the subject; report only what was actually viewed. Do not call Agent/Task/Workflow tools; do the work directly.
