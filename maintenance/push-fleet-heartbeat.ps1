@@ -203,7 +203,11 @@ try {
         if ($mergeExit -ne 0 -or $unmerged) {
             git -C $repo merge --abort 2>&1 | ForEach-Object { Log ("abort: " + $_) }
             Log 'REAL CONFLICT - merge aborted, tree left clean and unchanged; needs a session to reconcile by hand. Backup push skipped this cycle (the heartbeat itself was published above)'
-            Write-BackupPushFailed 'real merge conflict - aborted, needs a session to reconcile'
+            # Only a genuine conflict (unmerged paths) is a "real merge conflict". A nonzero merge
+            # with none is usually another run holding .git/index.lock (the daily Windows task and
+            # the guard's script 3 can overlap), so say that instead of misleading a later reader.
+            if ($unmerged) { Write-BackupPushFailed 'real merge conflict - aborted, needs a session to reconcile' }
+            else { Write-BackupPushFailed 'merge failed with no conflicting files - likely git lock contention with an overlapping run; retry next cycle' }
             exit $pubExit
         }
         Log 'auto-merge clean, no conflicts - reconciled, will push everything below'

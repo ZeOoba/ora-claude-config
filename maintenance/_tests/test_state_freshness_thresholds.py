@@ -19,6 +19,7 @@ FAST_PRODUCERS = (
     "fleet-deadman.log",            # ORA Fleet Dead-Man, daily
     "push-fleet-heartbeat.log",     # ORA Fleet Heartbeat Push, daily
     "heartbeat-publish-ok.json",    # ORA Fleet Heartbeat Push, daily
+    "backup-push-ok.json",          # ORA Fleet Heartbeat Push backup step, daily (OI-331)
     "stuck-session-watchdog.log",   # ORA Stuck-Session Watchdog, every 30 min
     "phantom-dispatch.log",         # phantom-dispatch-probe.py, run daily by ORA Fleet Dead-Man (R6)
     "phantom-dispatch.json",        # same

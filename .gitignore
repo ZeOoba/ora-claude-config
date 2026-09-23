@@ -237,7 +237,7 @@ maintenance/_state/heartbeat-publish-ok.json
 maintenance/_state/heartbeat-publish-ok.json.tmp
 # Same pattern, one level down: failure marker / success stamp for push-fleet-heartbeat.ps1's
 # backup-push step (OI-331, 2026-09-22). fleet-contract-check.py freshness-checks the ok
-# stamp and state-freshness-probe.py (48h) globs both files. Tracking either would commit a
+# stamp and state-freshness-probe.py holds it to 48h (the failed marker is not-periodic there). Tracking either would commit a
 # failure marker or a daily-changing timestamp.
 maintenance/_state/backup-push-failed.json
 maintenance/_state/backup-push-ok.json

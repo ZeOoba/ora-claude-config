@@ -85,7 +85,7 @@ CONTRACTS = [
         "name": "push-fleet-heartbeat backup-push -> ~/.claude durable-backup coverage",
         "producer": "push-fleet-heartbeat.ps1 backup-push step (writes on every success, including a no-op day; OI-331)",
         "output_file": os.path.join(STATE_DIR, "backup-push-ok.json"),
-        "consumer": "no automated consumer yet -- this is currently the SOLE route any local ~/.claude history has to GitHub (confirmed 2026-09-22: no other script in the codebase runs `git push` against this repo), so a stale/missing stamp means committed work is accumulating with no durable copy off this machine",
+        "consumer": "state-freshness-probe.py (guard STEP 2.95; 48h, pause-independent) also watches this file; nothing else reads it. This is currently the SOLE route any local ~/.claude history has to GitHub (confirmed 2026-09-22: no other script in the codebase runs `git push` against this repo), so a stale/missing stamp means committed work is accumulating with no durable copy off this machine",
         "max_age_hours": 26,  # daily 07:30 ET run + slack, same window as the heartbeat-publish contract above
     },
 ]
