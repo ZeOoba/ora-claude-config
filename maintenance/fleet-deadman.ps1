@@ -294,9 +294,16 @@ try {
         }
         $last = $null
         $count = 0
-        $regTasks = Get-RegistryTasks $reg   # ONE parse; every check below reads this snapshot (R8)
+        $regTasks = Get-RegistryTasks $reg   # ONE parse; every task-level check below reads this snapshot (R8)
+        if ($null -eq $regTasks) {
+            # R9: an unparseable registry (torn mid-rewrite, or corrupt) is "could not look", never
+            # clean. The old mtime fallback read a just-rewritten file as "0 tasks, last run 0h
+            # ago" -> OK, which could even clear an existing FLEET-DOWN alert.
+            $problems += ('fleet ' + $fleet.Label + ': registry could not be parsed (torn mid-rewrite or corrupt) - liveness UNKNOWN, not clean  [' + $reg + ']')
+            continue
+        }
         try {
-            $tasks = if ($null -ne $regTasks) { $regTasks } else { @() }
+            $tasks = @($regTasks)   # R9: @() -- an if-expression unrolled a 1-task list, so .Count was empty
             $count = $tasks.Count
             foreach ($t in $tasks) {
                 if ($t.lastRunAt) {
@@ -307,13 +314,13 @@ try {
                 }
             }
         } catch { }
-        if ($null -eq $last) { $last = (Get-Item $reg).LastWriteTime }   # fallback: registry mtime
+        if ($null -eq $last) { $last = (Get-Item $reg).LastWriteTime }   # fallback: registry mtime (parsed registry, no task has run yet)
         $ageH = [math]::Round(((Get-Date) - $last).TotalHours, 1)
         if ($ageH -gt $ThresholdHours) {
             # R24-3: a deliberate bounded pause is not an outage. Suppress the alarm, but
             # ALWAYS log the suppression and the resume time -- the evidence is never hidden,
             # only the alert, same principle as $PhantomThreshold above.
-            $pauseUntil = if ($null -ne $regTasks) { Test-BoundedPause $regTasks $fleet.Label } else { $null }
+            $pauseUntil = Test-BoundedPause $regTasks $fleet.Label
             if ($null -ne $pauseUntil) {
                 if (-not (Test-HasEnabledCarveOut $regTasks $fleet.Label)) { $pausedFleets += $fleet.Label }
                 $okBits += ($fleet.Label + '=' + $count + ' tasks, BOUNDED PAUSE (all recurring disabled, resume queued ' +

@@ -277,6 +277,23 @@ $loop = AllOf $ast { param($n) $n -is [System.Management.Automation.Language.For
 $loopText = if ($loop.Count -eq 1) { $loop[0].Body.Extent.Text } else { '' }
 Expect 'the fleet loop parses the registry exactly once (Get-RegistryTasks)' (
     (@(Cmds $loop[0] 'Get-RegistryTasks').Count -eq 1) -and ($loopText -notmatch 'ConvertFrom-Json'))
+# R9 (correctness): an `if` expression unrolls a one-element array, so `$tasks = if (...)
+# { $regTasks }` turned a 1-task registry into a bare object whose .Count is empty ("cc= tasks").
+$tAssign = if ($loop.Count -eq 1) { AllOf $loop[0] { param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$tasks' } } else { @() }
+Expect ('the loop builds $tasks as @($regTasks) (' + (@($tAssign | ForEach-Object { $_.Right.Extent.Text }) -join ' ; ') + ')') (
+    ($tAssign.Count -eq 1) -and ($tAssign[0].Right.Extent.Text -eq '@($regTasks)'))
+$one = Get-RegistryTasks (Reg @(@{ id = 'solo'; cronExpression = '0 5 * * 1'; enabled = $true }))
+Expect 'a 1-task registry counts as 1 through @($regTasks)' (@($one).Count -eq 1)
+# R9 (race): an unparseable registry is a PROBLEM, never a fall-back to the file mtime --
+# a torn read of a just-rewritten file would otherwise read "0 tasks, last run 0h ago", OK,
+# and could even clear an existing FLEET-DOWN alert.
+$nullIf = if ($loop.Count -eq 1) { AllOf $loop[0] { param($n) $n -is [System.Management.Automation.Language.IfStatementAst] -and
+                                      ($n.Clauses[0].Item1.Extent.Text -replace '\s+', ' ') -eq '$null -eq $regTasks' } } else { @() }
+Expect 'an unparseable registry adds a problem and skips the fleet' (($nullIf.Count -eq 1) -and
+    ($nullIf[0].Clauses[0].Item2.Extent.Text -match '\$problems\s*\+=') -and ($nullIf[0].Clauses[0].Item2.Extent.Text -match '\bcontinue\b'))
+# R9 (test-validity): the one parse must be fed the registry PATH, not e.g. $fleet.Store.
+Expect 'the fleet loop parses exactly Get-RegistryTasks $reg' ((@(Cmds $loop[0] 'Get-RegistryTasks' | Where-Object {
+    ($_.Extent.Text -replace '\s+', ' ') -eq 'Get-RegistryTasks $reg' }).Count -eq 1))
 Expect 'no check in the fleet loop re-reads the registry by path' ($loopText -notmatch '(Test-BoundedPause|Test-HasEnabledCarveOut|Get-StaleCarveOuts)\s+\$reg\b')
 $fleetsAssign = AllOf $ast { param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$fleets' }
 $fleetLabels = @($fleetsAssign | ForEach-Object { [regex]::Matches($_.Extent.Text, "Label\s*=\s*'([^']+)'") | ForEach-Object { $_.Groups[1].Value } }) | Sort-Object -Unique
