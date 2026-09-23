@@ -94,7 +94,6 @@ MAX_AGE_OVERRIDES = {
     "push-fleet-heartbeat.log": 48.0,    # ORA Fleet Heartbeat Push (Windows, daily)
     "heartbeat-publish-ok.json": 48.0,   # ORA Fleet Heartbeat Push (Windows, daily)
     "stuck-session-watchdog.log": 48.0,  # ORA Stuck-Session Watchdog (Windows, 30 min)
-    "fleet-heartbeat.json": 48.0,        # emit-fleet-heartbeat.py (sub-daily)
     "phantom-dispatch.log": 48.0,        # phantom-dispatch-probe.py, run daily by ORA Fleet Dead-Man (R6)
     "phantom-dispatch.json": 48.0,       # same
     "ensure-claude-renderer.log": 48.0,  # ORA Claude Desktop Wake-and-Launch (Windows, daily) (R6)
@@ -116,7 +115,9 @@ PAUSE_INDEPENDENT = frozenset({
     "stuck-session-watchdog.log",   # ORA Stuck-Session Watchdog
     "fleet-deadman.start.log",      # ORA Fleet Dead-Man START breadcrumbs (merge-gate R5)
     "push-fleet-heartbeat.start.log",  # ORA Fleet Heartbeat Push START breadcrumbs
-    "fleet-heartbeat.json",         # emit-fleet-heartbeat.py, run by ORA Fleet Heartbeat Push
+    # NOT fleet-heartbeat.json (merge-gate R9): the watched ~/.claude copy is written by the
+    # weekly CC ora-task-integrity-guard STEP 1.5; the Windows Heartbeat Push emits into the
+    # main-checkout worktree's copy instead. It takes the 192h default and is pause-explainable.
     # Merge-gate R6: the full set, enumerated from the live ORA* Windows tasks and their
     # scripts -- the earlier hand-kept list missed these three producers.
     "phantom-dispatch.log",         # phantom-dispatch-probe.py via ORA Fleet Dead-Man (daily)

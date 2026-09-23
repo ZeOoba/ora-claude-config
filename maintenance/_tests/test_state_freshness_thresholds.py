@@ -20,7 +20,6 @@ FAST_PRODUCERS = (
     "push-fleet-heartbeat.log",     # ORA Fleet Heartbeat Push, daily
     "heartbeat-publish-ok.json",    # ORA Fleet Heartbeat Push, daily
     "stuck-session-watchdog.log",   # ORA Stuck-Session Watchdog, every 30 min
-    "fleet-heartbeat.json",         # emit-fleet-heartbeat.py, sub-daily
     "phantom-dispatch.log",         # phantom-dispatch-probe.py, run daily by ORA Fleet Dead-Man (R6)
     "phantom-dispatch.json",        # same
     "ensure-claude-renderer.log",   # ORA Claude Desktop Wake-and-Launch, daily (R6)
@@ -101,6 +100,15 @@ def test_every_windows_produced_file_is_pause_independent():
     assert not missing, missing
     extra = sorted(set(sfp.PAUSE_INDEPENDENT) - set(WINDOWS_PRODUCED))
     assert not extra, ("PAUSE_INDEPENDENT lists files no Windows job writes", extra)
+
+
+def test_watched_fleet_heartbeat_copy_is_a_weekly_cc_output():
+    """Merge-gate R9: the WATCHED ~/.claude copy of fleet-heartbeat.json is written by the
+    weekly CC ora-task-integrity-guard (STEP 1.5). The daily Windows Heartbeat Push runs the
+    emitter from the main-checkout worktree, so it writes THAT worktree's copy. Pinning the
+    watched copy at 48h / pause-independent false-alarmed on every manual probe run."""
+    assert "fleet-heartbeat.json" not in sfp.MAX_AGE_OVERRIDES
+    assert "fleet-heartbeat.json" not in sfp.PAUSE_INDEPENDENT
 
 
 def test_weekly_windows_producer_keeps_the_weekly_limit():
