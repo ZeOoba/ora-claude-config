@@ -48,7 +48,159 @@ $probe   = Join-Path $env:USERPROFILE '.claude\maintenance\phantom-dispatch-prob
 
 function Log($m) { "$([DateTime]::UtcNow.ToString('s'))Z  $m" | Out-File -FilePath $log -Append -Encoding utf8 }
 
-function Test-BoundedPause($reg) {
+# START breadcrumbs go to a SEPARATE file (merge-gate finding 2026-09-22). state-freshness-probe
+# judges fleet-deadman.log by mtime at 48h, so a START line written there by every run that is
+# then killed would keep a dead dead-man looking fresh -- exactly the failure it exists to catch.
+# fleet-deadman.log is touched only by runs that reach a verdict.
+$startLog = Join-Path $env:USERPROFILE '.claude\maintenance\fleet-deadman.start.log'
+function LogStart($m) { "$([DateTime]::UtcNow.ToString('s'))Z  $m" | Out-File -FilePath $startLog -Append -Encoding utf8 }
+
+function Resolve-ProbeRc($r) {
+    # A hung phantom probe is "could not look" (exit 2), never clean.
+    if ($r.TimedOut) { return 2 }
+    return $r.Rc
+}
+
+function Get-PublishVerdict($pr) {
+    # Returns @{ Ok; Problem } for publish-fleet-heartbeat.py --status. A timeout is UNKNOWN, never ok.
+    if ($pr.TimedOut) {
+        return @{ Ok = $false; Problem = 'publish-fleet-heartbeat.py --status TIMED OUT after 120s - heartbeat publish state UNKNOWN, not clean' }
+    }
+    if ($pr.Rc -eq 1) {
+        return @{ Ok = $false; Problem = ('HEARTBEAT PUBLISH FAILED: ' + (($pr.Out | Out-String).Trim()) +
+                                          ' - the GitHub dead-man is reading a stale heartbeat') }
+    }
+    if ($pr.Rc -eq 0) { return @{ Ok = $true; Problem = $null } }
+    return @{ Ok = $false; Problem = ('publish-fleet-heartbeat.py --status returned unexpected exit ' + $pr.Rc) }
+}
+
+function Invoke-PyBounded($py, [string[]]$pyArgs, [int]$TimeoutSec = 120) {
+    # Added 2026-09-22. Runs a child with a hard wall-clock limit and returns
+    # @{ Out; Rc; TimedOut }. Before this, both python calls below were unbounded: a child
+    # that hung (e.g. reading desktop logs that Claude Desktop holds open right after a
+    # logon catch-up) held the whole run open until Windows ended it with 0xC000013A. That
+    # run then wrote NO log line at all, which is how 5 of 9 days from 09-12 to 09-21 left
+    # no trace. A timeout is reported as a problem ("could not look"), never as clean.
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $py
+    $psi.Arguments = (@($pyArgs | ForEach-Object { ConvertTo-WinArg $_ }) -join ' ')
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $p = [System.Diagnostics.Process]::Start($psi)
+    $so = $p.StandardOutput.ReadToEndAsync()
+    $se = $p.StandardError.ReadToEndAsync()
+    $limitMs = $TimeoutSec * 1000
+    if (-not $p.WaitForExit($limitMs)) {
+        # Kill the whole TREE: a grandchild would otherwise outlive the kill (merge-gate R4).
+        try { & taskkill.exe /T /F /PID $p.Id 2>&1 | Out-Null } catch { }
+        try { $p.Kill() } catch { }
+        return @{ Out = ''; Rc = $null; TimedOut = $true }
+    }
+    # The child exited, but a grandchild that inherited stdout/stderr keeps the streams open,
+    # and waiting for them unbounded would hang the run (merge-gate R4). Give them only the
+    # time remaining; if they are still open, report "could not look".
+    $remain = [Math]::Max(0, $limitMs - [int]$sw.ElapsedMilliseconds)
+    if (-not [System.Threading.Tasks.Task]::WaitAll([System.Threading.Tasks.Task[]]@($so, $se), $remain)) {
+        return @{ Out = ''; Rc = $null; TimedOut = $true }
+    }
+    return @{ Out = ($so.Result + $se.Result); Rc = $p.ExitCode; TimedOut = $false }
+}
+
+function ConvertTo-WinArg([string]$a) {
+    # Standard Windows argv quoting (CommandLineToArgvW rules): backslashes are literal except
+    # before a quote, where they must be doubled, plus one more to escape the quote itself;
+    # a trailing run of backslashes is doubled before the closing quote. Merge-gate R4: the
+    # previous `"` -> `\"` replacement merged 'C:\dir\' and the next argument into one.
+    if ($a.Length -gt 0 -and $a -notmatch '[\s"]') { return $a }
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.Append('"')
+    $bs = 0
+    foreach ($c in $a.ToCharArray()) {
+        if ($c -eq '\') { $bs++; continue }
+        if ($c -eq '"') { [void]$sb.Append('\' * (2 * $bs + 1)); [void]$sb.Append('"') }
+        else            { [void]$sb.Append('\' * $bs); [void]$sb.Append($c) }
+        $bs = 0
+    }
+    [void]$sb.Append('\' * (2 * $bs))
+    [void]$sb.Append('"')
+    return $sb.ToString()
+}
+
+function Get-PhantomSummary($r) {
+    # Parses phantom-dispatch-probe.py's result: @{ Rc; Count; Detail }. Extracted so the
+    # stdout parse is testable (merge-gate R4: losing stdout silently zeroed the count, which
+    # suppresses a PHANTOM DISPATCH alarm).
+    $rc = Resolve-ProbeRc $r
+    $count = 0
+    $detail = @()
+    $lines = if ($r.TimedOut) { @() } else { [string]$r.Out -split "`r?`n" }
+    foreach ($ln in $lines) {
+        $s = [string]$ln
+        if ($s -match '^\s*phantom\s*:\s*(\d+)') { $count = [int]$Matches[1] }
+        if ($s -match '^\s{2}\d{4}-\d\d-\d\d .*\[(cleared-stale|never-confirmed)\]') { $detail += $s.Trim() }
+    }
+    return @{ Rc = $rc; Count = $count; Detail = $detail }
+}
+
+function Get-CarveOutIds($label) {
+    # Carve-outs (2026-09-22): recurring tasks that stay ENABLED through every pause by
+    # standing rule, so their being enabled is not evidence the fleet is live. Mirrors
+    # _shared/fleet_pause.py PAUSE_CARVE_OUTS. Keep the two lists identical. Before this,
+    # the ora-am-brief carve-out made every real CC pause read as live.
+    $carveOuts = @{ cc = @('ora-am-brief'); lams = @() }
+    if ($label -and $carveOuts.ContainsKey($label)) { return @($carveOuts[$label]) }
+    return @()
+}
+
+function Get-RegistryTasks($src) {
+    # Merge-gate R8 (race): the fleet loop parses each registry ONCE and hands the parsed
+    # task list to every pause / carve-out check, so all checks judge one snapshot. Four
+    # separate re-reads could straddle a Desktop-app rewrite; a torn read in the carve-out
+    # helper silently read as "no carve-out enabled". Accepts a registry path (parsed here)
+    # or an already-parsed task list (returned as-is). Returns $null if a path won't parse.
+    if ($src -is [string]) {
+        try { return ,@((Get-Content -Raw -Path $src | ConvertFrom-Json).scheduledTasks) } catch { return $null }
+    }
+    if ($null -eq $src) { return $null }
+    return ,@($src)
+}
+
+function Get-EnabledCarveOutTasks($src, $label) {
+    $ids = @(Get-CarveOutIds $label)
+    if ($ids.Count -eq 0) { return @() }
+    $tasks = Get-RegistryTasks $src
+    if ($null -eq $tasks) { return @() }
+    return @($tasks | Where-Object {
+        $tid = if ($_.id) { $_.id } else { $_.taskId }
+        $_.cronExpression -and $_.enabled -and ($ids -contains $tid) })
+}
+
+function Test-HasEnabledCarveOut($src, $label) {
+    # A fleet whose carve-out task is still enabled is NOT "all paused" for the send-log
+    # check: that task still sends (the Daily Brief). Merge-gate R7, 2026-09-22.
+    return (@(Get-EnabledCarveOutTasks $src $label).Count -gt 0)
+}
+
+function Get-StaleCarveOuts($src, $label, [double]$thresholdH) {
+    # Merge-gate R7, 2026-09-22: a carve-out task keeps running through a bounded pause, so
+    # the pause must NOT excuse it. Before this, a dead ora-am-brief during a CC pause read as
+    # "BOUNDED PAUSE, alarm suppressed" for up to 14 days. Returns 'id (Nh)' for each enabled
+    # carve-out task whose own lastRunAt is older than the threshold, or has never run.
+    $out = @()
+    foreach ($t in @(Get-EnabledCarveOutTasks $src $label)) {
+        $tid = if ($t.id) { $t.id } else { $t.taskId }
+        $ageH = $null
+        if ($t.lastRunAt) { try { $ageH = [math]::Round(((Get-Date).ToUniversalTime() - ([DateTime]::Parse($t.lastRunAt)).ToUniversalTime()).TotalHours, 1) } catch { } }
+        if ($null -eq $ageH) { $out += ($tid + ' (never ran)') }
+        elseif ($ageH -gt $thresholdH) { $out += ($tid + ' (' + $ageH + 'h)') }
+    }
+    return $out
+}
+
+function Test-BoundedPause($src, $label = '') {
     # Added 2026-09-10 (ORA Automation Audit R24-3). Returns the earliest future resume
     # time (UTC DateTime) if this fleet is under a DELIBERATE bounded pause, else $null.
     #
@@ -66,10 +218,13 @@ function Test-BoundedPause($reg) {
     # A fleet that is merely idle still has enabled recurring tasks, so it cannot match.
     # Fail-OPEN like everything else here: any parse problem returns $null (alarm normally).
     try {
-        $d = Get-Content -Raw -Path $reg | ConvertFrom-Json
-        $tasks = @($d.scheduledTasks)
-        if ($tasks.Count -eq 0) { return $null }
-        $recurring = @($tasks | Where-Object { $_.cronExpression })
+        $tasks = Get-RegistryTasks $src
+        if ($null -eq $tasks -or $tasks.Count -eq 0) { return $null }
+        $carve = @(Get-CarveOutIds $label)
+        # id first, taskId as fallback -- same key order as fleet_pause.py.
+        $recurring = @($tasks | Where-Object {
+            $tid = if ($_.id) { $_.id } else { $_.taskId }
+            $_.cronExpression -and ($carve -notcontains $tid) })
         if ($recurring.Count -eq 0) { return $null }
         $enabledRecurring = @($recurring | Where-Object { $_.enabled })
         if ($enabledRecurring.Count -gt 0) { return $null }   # not paused: something still fires
@@ -119,9 +274,13 @@ function Find-Registry($store) {
 }
 
 try {
+    # START breadcrumb (2026-09-22): the verdict line is written at the END, so a run killed
+    # mid-way was indistinguishable from one that never started. A START in fleet-deadman.start.log
+    # with no verdict in fleet-deadman.log at a matching time means "started and died".
+    LogStart ('START pid=' + $PID)
     $problems     = @()
     $okBits       = @()
-    $pausedFleets = @()   # R24-3: fleets found under a deliberate bounded pause this run
+    $pausedFleets = @()   # R24-3: fleets under a deliberate bounded pause with NO enabled carve-out task (R7)
 
     $fleets = @(
         @{ Label = 'cc';   Store = 'claude-code-sessions' },
@@ -135,9 +294,16 @@ try {
         }
         $last = $null
         $count = 0
+        $regTasks = Get-RegistryTasks $reg   # ONE parse; every task-level check below reads this snapshot (R8)
+        if ($null -eq $regTasks) {
+            # R9: an unparseable registry (torn mid-rewrite, or corrupt) is "could not look", never
+            # clean. The old mtime fallback read a just-rewritten file as "0 tasks, last run 0h
+            # ago" -> OK, which could even clear an existing FLEET-DOWN alert.
+            $problems += ('fleet ' + $fleet.Label + ': registry could not be parsed (torn mid-rewrite or corrupt) - liveness UNKNOWN, not clean  [' + $reg + ']')
+            continue
+        }
         try {
-            $d = Get-Content -Raw -Path $reg | ConvertFrom-Json
-            $tasks = @($d.scheduledTasks)
+            $tasks = @($regTasks)   # R9: @() -- an if-expression unrolled a 1-task list, so .Count was empty
             $count = $tasks.Count
             foreach ($t in $tasks) {
                 if ($t.lastRunAt) {
@@ -148,17 +314,23 @@ try {
                 }
             }
         } catch { }
-        if ($null -eq $last) { $last = (Get-Item $reg).LastWriteTime }   # fallback: registry mtime
+        if ($null -eq $last) { $last = (Get-Item $reg).LastWriteTime }   # fallback: registry mtime (parsed registry, no task has run yet)
         $ageH = [math]::Round(((Get-Date) - $last).TotalHours, 1)
         if ($ageH -gt $ThresholdHours) {
             # R24-3: a deliberate bounded pause is not an outage. Suppress the alarm, but
             # ALWAYS log the suppression and the resume time -- the evidence is never hidden,
             # only the alert, same principle as $PhantomThreshold above.
-            $pauseUntil = Test-BoundedPause $reg
+            $pauseUntil = Test-BoundedPause $regTasks $fleet.Label
             if ($null -ne $pauseUntil) {
-                $pausedFleets += $fleet.Label
+                if (-not (Test-HasEnabledCarveOut $regTasks $fleet.Label)) { $pausedFleets += $fleet.Label }
                 $okBits += ($fleet.Label + '=' + $count + ' tasks, BOUNDED PAUSE (all recurring disabled, resume queued ' +
                             $pauseUntil.ToString('s') + 'Z) - last run ' + $ageH + 'h ago, alarm suppressed')
+                # R7: carve-out tasks run THROUGH the pause, so the pause never excuses them.
+                $staleCarve = @(Get-StaleCarveOuts $regTasks $fleet.Label $ThresholdHours)
+                if ($staleCarve.Count -gt 0) {
+                    $problems += ('fleet ' + $fleet.Label + ': carve-out task(s) not run during the bounded pause: ' +
+                                  ($staleCarve -join ', ') + ' (threshold ' + $ThresholdHours + 'h)')
+                }
             } else {
                 $problems += ('fleet ' + $fleet.Label + ': no task run in ' + $ageH + 'h (threshold ' + $ThresholdHours + 'h)  [' + $reg + ']')
             }
@@ -172,7 +344,8 @@ try {
     if (Test-Path $sendLog) {
         $sendAgeH = [math]::Round(((Get-Date) - (Get-Item $sendLog).LastWriteTime).TotalHours, 1)
     }
-    # R24-3: when EVERY fleet is under a bounded pause, nothing is scheduled to send, so a
+    # R24-3: when EVERY fleet is under a bounded pause (and none still has an enabled carve-out
+    # task such as ora-am-brief, which keeps sending -- R7), nothing is scheduled to send, so a
     # stale send-log is the expected consequence of the pause rather than independent evidence
     # of a broken send path. Suppress it only in that total-pause case -- if even one fleet is
     # live and still nothing has sent, that is a real finding and still alarms.
@@ -193,14 +366,11 @@ try {
     } else {
         $py = 'C:\Users\Owner\AppData\Local\Programs\Python\Python313\python.exe'
         if (-not (Test-Path $py)) { $py = 'python' }
-        $out = & $py $probe --hours $PhantomHours 2>&1
-        $rc  = $LASTEXITCODE
-        $count = 0
-        foreach ($ln in $out) {
-            $s = [string]$ln
-            if ($s -match '^\s*phantom\s*:\s*(\d+)') { $count = [int]$Matches[1] }
-            if ($s -match '^\s{2}\d{4}-\d\d-\d\d .*\[(cleared-stale|never-confirmed)\]') { $phantomDetail += $s.Trim() }
-        }
+        $r   = Invoke-PyBounded $py @($probe, '--hours', [string]$PhantomHours) 120
+        $ph  = Get-PhantomSummary $r
+        $rc  = $ph.Rc   # a hang is "could not look" (2), never clean -- via Resolve-ProbeRc
+        $count = $ph.Count
+        $phantomDetail += @($ph.Detail)
         if ($rc -eq 2) {
             # "Could not look" must never read as "nothing wrong" (verified null).
             $problems += 'phantom-dispatch-probe COULD NOT LOOK (exit 2) - desktop logs unreadable; phantom state UNKNOWN, not clean'
@@ -231,16 +401,9 @@ try {
     } else {
         $py = 'C:\Users\Owner\AppData\Local\Programs\Python\Python313\python.exe'
         if (-not (Test-Path $py)) { $py = 'python' }
-        $pout = & $py $pub --status 2>&1
-        $prc  = $LASTEXITCODE
-        if ($prc -eq 1) {
-            $problems += ('HEARTBEAT PUBLISH FAILED: ' + (($pout | Out-String).Trim()) +
-                          ' - the GitHub dead-man is reading a stale heartbeat')
-        } elseif ($prc -eq 0) {
-            $okBits += 'heartbeat-publish=ok'
-        } else {
-            $problems += ('publish-fleet-heartbeat.py --status returned unexpected exit ' + $prc)
-        }
+        $pr   = Invoke-PyBounded $py @($pub, '--status') 120
+        $v = Get-PublishVerdict $pr
+        if ($v.Ok) { $okBits += 'heartbeat-publish=ok' } else { $problems += $v.Problem }
     }
 
     if ($problems.Count -eq 0) {

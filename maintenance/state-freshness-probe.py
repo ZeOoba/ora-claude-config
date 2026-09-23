@@ -49,7 +49,12 @@ except Exception as exc:  # pragma: no cover
     print("[ERROR] cannot import _shared/fleet_pause: %s: %s" % (type(exc).__name__, exc))
     sys.exit(2)
 
-DEFAULT_MAX_AGE_H = 48.0
+# One weekly cycle + 24h grace. Since 2026-09-17 every routine except ora-am-brief and
+# the dead-man chain runs at most once a week (Gabriel-directed), so a 48h default
+# flagged every weekly producer [STALE] on days 3-7 of its cycle. Daily-or-faster
+# producers are held tight below in MAX_AGE_OVERRIDES. Enforced by
+# _tests/test_state_freshness_thresholds.py.
+DEFAULT_MAX_AGE_H = 192.0
 
 # Files that are NOT periodic producers. Each needs a stated reason -- an unexplained
 # entry here is how a real detector gets muted, which is the failure this probe exists
@@ -62,8 +67,14 @@ NOT_PERIODIC = {
         "an empty, old file is the healthy steady state",
     "oi-id-reservations.log":
         "append-only allocation ledger, written only when an OI id is allocated",
-    "pause-resume-guard-state.json":
-        "written by the pause/resume guard on state change, not on a cadence",
+    "heartbeat-publish-failed.json":
+        "failure marker: written by publish-fleet-heartbeat.py only on a failed publish and "
+        "removed on the next success; its absence or age means nothing (merge-gate R7). "
+        "A dead publisher is caught by heartbeat-publish-ok.json (48h, pause-independent)",
+    "fleet-pause-windows.json":
+        "written by pause_windows.capture() only when a hold starts or ends, so it is "
+        "untouched for as long as the fleet is live; any age limit false-alarms after "
+        "every pause (merge-gate R5, 2026-09-22)",
 }
 
 # Per-file overrides where a slower cadence is genuinely by design. Basename -> hours.
@@ -73,9 +84,49 @@ NOT_PERIODIC = {
 # already absorbs the common false positive, so the default should do the work and a
 # surprise [STALE] is a finding to investigate rather than a threshold to raise.
 # Raise one of these only with a stated cadence, never to quiet a result.
+#
+# Since 2026-09-22 the overrides run the other way too: the weekly default is the
+# fleet norm, and the daily-or-faster producers listed here are held TIGHTER than it.
+# A dead dead-man/heartbeat must not hide for a week. Each entry names its producer
+# and cadence (verified against Windows Task Scheduler 2026-09-22).
 MAX_AGE_OVERRIDES = {
+    "fleet-deadman.log": 48.0,           # ORA Fleet Dead-Man (Windows, daily)
+    "push-fleet-heartbeat.log": 48.0,    # ORA Fleet Heartbeat Push (Windows, daily)
+    "heartbeat-publish-ok.json": 48.0,   # ORA Fleet Heartbeat Push (Windows, daily)
+    "stuck-session-watchdog.log": 48.0,  # ORA Stuck-Session Watchdog (Windows, 30 min)
+    "phantom-dispatch.log": 48.0,        # phantom-dispatch-probe.py, run daily by ORA Fleet Dead-Man (R6)
+    "phantom-dispatch.json": 48.0,       # same
+    "ensure-claude-renderer.log": 48.0,  # ORA Claude Desktop Wake-and-Launch (Windows, daily) (R6)
+    "pause-resume-guard-state.json": 48.0,  # ORA Fleet Pause-Resume Guard: save_state() on EVERY 6h run (R7;
+                                            # was misfiled as NOT_PERIODIC, leaving the guard unwatched)
     # quarterly producers would go here, with the cron that justifies the number
 }
+
+# Producers that run OUTSIDE the scheduled-task fleets (Windows Task Scheduler), so a fleet
+# pause never explains their staleness. Merge-gate R3 finding, 2026-09-22: once the
+# ora-am-brief carve-out in _shared/fleet_pause.py made CC pauses visible, a dead dead-man
+# written after the pause began was reported [PAUSED] (rc 0) instead of [STALE] (rc 1)
+# for the whole pause, which can last up to 14 days. Enforced by
+# _tests/test_state_freshness_thresholds.py.
+PAUSE_INDEPENDENT = frozenset({
+    "fleet-deadman.log",            # ORA Fleet Dead-Man
+    "push-fleet-heartbeat.log",     # ORA Fleet Heartbeat Push
+    "heartbeat-publish-ok.json",    # ORA Fleet Heartbeat Push
+    "stuck-session-watchdog.log",   # ORA Stuck-Session Watchdog
+    "fleet-deadman.start.log",      # ORA Fleet Dead-Man START breadcrumbs (merge-gate R5)
+    "push-fleet-heartbeat.start.log",  # ORA Fleet Heartbeat Push START breadcrumbs
+    # NOT fleet-heartbeat.json (merge-gate R9): the watched ~/.claude copy is written by the
+    # weekly CC ora-task-integrity-guard STEP 1.5; the Windows Heartbeat Push emits into the
+    # main-checkout worktree's copy instead. It takes the 192h default and is pause-explainable.
+    # Merge-gate R6: the full set, enumerated from the live ORA* Windows tasks and their
+    # scripts -- the earlier hand-kept list missed these three producers.
+    "phantom-dispatch.log",         # phantom-dispatch-probe.py via ORA Fleet Dead-Man (daily)
+    "phantom-dispatch.json",        # same
+    "ensure-claude-renderer.log",   # ORA Claude Desktop Wake-and-Launch (daily)
+    "ora-nightly-disk.log",         # ORA Nightly Disk Clean (WEEKLY since 2026-09-17: default limit)
+    "pause-resume-guard-state.json",  # ORA Fleet Pause-Resume Guard (every 6h) (R7)
+    "task-folder-registration.log",  # ORA Headless - stranded-spec (Windows, WEEKLY: default limit) (R8)
+})
 
 WATCH_GLOBS = (
     "_state/*.log",
@@ -83,7 +134,8 @@ WATCH_GLOBS = (
     "*.log",
 )
 
-# A file whose mtime is at/after (pause_start - grace) went stale because of the pause.
+# A file whose mtime is at/after (pause_start - max(its own limit, PAUSE_GRACE_H)) was still
+# within its limit when the pause began, so it went stale because of the pause (merge-gate R7).
 PAUSE_GRACE_H = 6.0
 
 
@@ -146,9 +198,16 @@ def main():
                 ok += 1
                 continue
 
-            # Stale. Was it already stale when the pause began?
-            if pause_start is not None and mtime >= (pause_start - PAUSE_GRACE_H * 3600.0):
-                print("  [PAUSED] %-51s %.1fh stale, but last written after the pause began "
+            # Stale. Was it already stale when the pause began? Only CC-fleet producers can be
+            # explained by a CC pause: the Windows Task Scheduler producers keep running through
+            # it, so their staleness is never pause-explained (merge-gate R3, 2026-09-22).
+            if (pause_start is not None and name not in PAUSE_INDEPENDENT
+                    and mtime >= (pause_start - max(limit, PAUSE_GRACE_H) * 3600.0)):
+                # Merge-gate R7: "already stale when the pause began" means its age AT the
+                # pause start exceeded its own limit, not a flat 6h grace. With the 192h weekly
+                # default, the flat grace falsely flagged every weekly producer that a pause
+                # longer than the rest of its cycle had frozen.
+                print("  [PAUSED] %-51s %.1fh stale, but still within its limit when the pause began "
                       "(%s) -- expected" % (
                           rel, age_h, time.strftime("%Y-%m-%dT%H:%MZ", time.gmtime(pause_start))))
                 paused_ct += 1
@@ -156,7 +215,13 @@ def main():
 
             why = "limit %.0fh" % limit
             if pause_start is not None:
-                why += "; ALREADY stale before the pause began, so the pause does not explain it"
+                if name in PAUSE_INDEPENDENT:
+                    # Merge-gate R4: the old wording claimed "already stale before the pause",
+                    # which is false for these -- they are never pause-explained at all.
+                    why += ("; runs outside the scheduled-task fleets (Windows Task Scheduler), "
+                            "so a fleet pause never explains it")
+                else:
+                    why += "; ALREADY stale before the pause began, so the pause does not explain it"
             print("  [STALE] %-52s %.1fh since last write (%s)" % (rel, age_h, why))
             stale.append(rel)
 
