@@ -286,13 +286,17 @@ with tempfile.TemporaryDirectory() as td:
     check("main: --state-file written and exit code unchanged",
           rc == 1 and _json.load(open(sp))["consecutiveUnsynced"] == 1, "rc=%r" % rc)
 
-# --- streak_alarm: daily self-alarm at 14 unsynced runs, then every 7 ---------------
+# --- streak_alarm: self-alarm at 2 WEEKS unsynced, then every week -------------------
+# The corrector went weekly (Fri) on 2026-09-22. The thresholds are elapsed time, not run
+# counts: the daily-era 14 / 7 runs meant 14 days / 7 days. At one run a week the same
+# intent is 2 / 1. Leaving 14 / 7 would have meant a 14-WEEK silence before the alarm.
 A, R = cmf.STREAK_ALARM_RUNS, cmf.STREAK_ALARM_REPEAT_RUNS
-check("streak_alarm: constants are 14 / 7", (A, R) == (14, 7), repr((A, R)))
+check("streak_alarm: constants are 2 / 1 (14d / 7d at a weekly cadence)", (A, R) == (2, 1), repr((A, R)))
 check("streak_alarm: below threshold silent", cmf.streak_alarm(A - 1) is False)
 check("streak_alarm: fires at threshold", cmf.streak_alarm(A) is True)
-check("streak_alarm: silent between repeats", cmf.streak_alarm(A + 1) is False
-      and cmf.streak_alarm(A + R - 1) is False)
+if R > 1:
+    check("streak_alarm: silent between repeats", cmf.streak_alarm(A + 1) is False
+          and cmf.streak_alarm(A + R - 1) is False)
 check("streak_alarm: repeats every R runs", cmf.streak_alarm(A + R) is True
       and cmf.streak_alarm(A + 2 * R) is True)
 check("streak_alarm: None/0 silent", cmf.streak_alarm(None) is False and cmf.streak_alarm(0) is False)
@@ -308,7 +312,7 @@ with tempfile.TemporaryDirectory() as td:
     with contextlib.redirect_stdout(buf):
         rc = cmf.main(["--repo", local, "--canonical", "main", "--json", "--state-file", sp])
     out = _json.loads(buf.getvalue())
-    check("main: streak_alarm true in JSON on the 14th unsynced run",
+    check("main: streak_alarm true in JSON on the STREAK_ALARM_RUNS-th unsynced run",
           out.get("streak_alarm") is True and out.get("consecutive_unsynced") == A, repr(out))
     check("main: unsynced_since surfaced for the alarm body",
           out.get("unsynced_since") == "2026-08-30", repr(out))

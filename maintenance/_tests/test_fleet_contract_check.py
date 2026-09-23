@@ -73,6 +73,30 @@ class TestMainExitCode(unittest.TestCase):
             self.assertGreater(c["max_age_hours"], 0)
             self.assertTrue(c["output_file"].endswith(".json"))
 
+    def test_backup_push_contract_is_pinned_to_what_the_producer_writes(self):
+        """OI-331: the backup-push contract must exist, watch the ok stamp (not the failed
+        marker), use the daily-cadence 26h window, and name a file the producer script
+        really writes and .gitignore really ignores. A generic well-formedness check let a
+        renamed, retargeted or deleted contract pass."""
+        repo = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        matches = [c for c in fcc.CONTRACTS
+                   if os.path.basename(c["output_file"]) == "backup-push-ok.json"]
+        self.assertEqual(len(matches), 1, "expected exactly one backup-push-ok.json contract")
+        self.assertEqual(matches[0]["max_age_hours"], 26)
+        with open(os.path.join(repo, "maintenance", "push-fleet-heartbeat.ps1"), encoding="utf-8") as f:
+            ps1 = f.read()
+        # Match the real assignment, not the bare name: the WHY-v3.1 header comment also
+        # contains "backup-push-ok.json", so assertIn alone survives the producer renaming it.
+        self.assertRegex(
+            ps1, r"(?m)^\$backupStamp\s*=\s*Join-Path\s+\$stateDir\s+'backup-push-ok\.json'")
+        # ...and that the stamp is actually written, not merely named (a producer that
+        # assigns the path but never writes it would otherwise pass).
+        self.assertRegex(ps1, r"Out-File\s+-LiteralPath\s+\$backupStamp\b")
+        with open(os.path.join(repo, ".gitignore"), encoding="utf-8") as f:
+            gi = f.read().splitlines()
+        self.assertIn("maintenance/_state/backup-push-ok.json", gi)
+        self.assertIn("maintenance/_state/backup-push-failed.json", gi)
+
 
 if __name__ == "__main__":
     unittest.main()

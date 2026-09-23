@@ -56,7 +56,7 @@ If exit code is non-zero or ok is false, go to STEP 5 quoting the reason field.
 The builder reuses forward-calendar.html's own functions, so the email, the .ics and the published page cannot drift apart. Do not hand-write either output.
 
 STEP 4 — send
-Subject: "[ORA] Forward Calendar - week of YYYY-MM-DD" using today's date.
+Subject: "[ORA] Forward Calendar - week of YYYY-MM-DD" using today's date — the run date computed once at run start with `date '+%A %Y-%m-%d'` (date part only), reused verbatim in both subjects, the probe stem and STEP 5's failure subject.
 If overdue > 0, use "[ACTION] Forward Calendar - N overdue - week of YYYY-MM-DD" instead, with N the overdue count.
 
 Pre-send Sent-Items probe (Layer 2, before the COM send). The probe's Normalized match strips

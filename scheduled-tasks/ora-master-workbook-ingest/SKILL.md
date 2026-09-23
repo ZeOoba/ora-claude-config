@@ -62,7 +62,7 @@ MANDATORY TIE-OUTS (run all of these; report each as PASS with the figure, or as
 
 STEP 4 — REFRESH THE MIRROR (do NOT create duplicate databases)
 a. Update the Portfolio Intelligence Dashboard (Notion page 3396ecd8-9e59-819c-a598-e55dc5581504): replace the metric tables and set the "Last refreshed" line to today with the workbook lastModifiedDateTime cited.
-b. Write a dated archive page "Portfolio Metrics Snapshot — [date] (Master Workbook ingest)" under the Knowledge Base (3386ecd8-9e59-8166-af49-da066dc7ca14), same structure as prior snapshots.
+b. Write a dated archive page "Portfolio Metrics Snapshot — [date] (Master Workbook ingest)" under the Knowledge Base (3386ecd8-9e59-8166-af49-da066dc7ca14), same structure as prior snapshots. [date] = the run date computed once at run start with `date '+%A %Y-%m-%d'` (date part in every date slot; weekday only where one is named) and reused verbatim in every title, subject and body.
 c. If the ora-master-dashboard / ora-cash-position artifacts exist, refresh their numbers. Reliable channel: mcp__Desktop_Commander__edit_block in place on the artifact index.html (e.g. C:\Users\Owner\OneDrive - Oxford Capital Partners\Documents\Claude\Artifacts\<id>\index.html — no "(1)" suffix; verified 2026-07-08, that directory currently has no artifacts, so this step is a no-op) — the cowork Edit tool is blocked there (outside connected folders) and mcp__cowork__update_artifact requires a full faithful HTML reproduction. Patch the `const D = {…}` data object + header "As of" stamp.
 d. Update DSOR page 3706ecd8-9e59-813a-b4c7-ecbc2c213fa8 §5 "Current state" with the new workbook lastModifiedDateTime and today's ingest date; append a §6 change-log line.
 e. [added 2026-08-03] Maintain the **Open Workbook Corrections register** — Notion page 3b16ecd8-9e59-8153-8c9e-f264e301b3ca, under the Operations Hub. This is the aging ledger for workbook defects that only Eric or Gabriel can fix (this task is READ-ONLY against the workbook, and Hard Invariant 4 blocks it from touching the model). It exists so a correction's AGE lives in one durable place instead of being re-narrated as prose in every weekly email.
@@ -72,7 +72,7 @@ e. [added 2026-08-03] Maintain the **Open Workbook Corrections register** — No
    Then reference the register (by link, one-line status each) in the Dashboard's QC Exceptions section and in the STEP 6 email — do NOT restate each correction's full detail in the email. The register holds the detail; the email holds only what changed.
 
 STEP 5 — PUBLICATION GUARD
-For each Notion write, capture pages[0].id; retry once on failure; verify by title search. Apply the shared _shared\PUBLICATION_GUARD.md pattern if present.
+For each Notion write, capture pages[0].id; if the id is missing or the call failed (e.g. a grace-period/quota notice), first look for it — `notion-fetch` the parent for an exact-title child, then search by the exact title (search lags: a miss alone is not proof; the retry below is only for non-grace/quota failures — after a grace/quota notice with no match, do not retry: the create is UNVERIFIED and takes this task's publication-failure path) — a match created at/after the create call is this run's page, use it, do not retry; retry once only if no match (never blind-retry a create — it produced a duplicate; quota errors → `notion-quota-fallback` skill); verify by `notion-fetch` of the page id (not title search — it lags). Apply the shared _shared\PUBLICATION_GUARD.md pattern if present.
 
 STEP 6 — CONDITIONAL NOTIFICATION
 Email if any of:

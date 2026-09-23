@@ -678,6 +678,7 @@ On each run:
   never flip Status unattended.
 
 STEP 5 — WRITE TO NOTION (canonical record — write BEFORE email)
+CREATE-VERIFY (Deal Sourcing Log rows AND new Broker Relationships rows): if a create returns a grace/quota notice or no page ID, look for it — query the data source for the row's natural key (address / `Listing URL`; `Broker Name` + `Company / Brokerage`), then search by that key (search lags: a miss alone is not proof) — a match created at/after the create call is this run's row, use it; never blind-retry a create (it produced a duplicate). After a grace/quota notice with no match, do not retry: the create is UNVERIFIED — name it under the digest's coverage gaps. Quota errors → `notion-quota-fallback` skill.
 Create/update Deal Sourcing Log records: Deal Name / Address; Metro / Submarket;
 Source; **`Listing URL`** (the working public URL captured in Step 1 — field added
 2026-08-12; before that STEP 1 was told to capture a URL for every listing and STEP 5 had
@@ -865,7 +866,7 @@ Email send path (per ORA standing rule — COM is PRIMARY):
     log the failure — do NOT halt. The automation-health-monitor producer-beacon check surfaces
     the silent send to Gabriel.
   Outlook only — never Gmail; never route to Composio (gone) or Rube (shut down).
-Subject: "ORA Deal-Sourcing Scan — [date] — [N] pursue / [P] pending price / [M] flagged".
+Subject: "ORA Deal-Sourcing Scan — [date] — [N] pursue / [P] pending price / [M] flagged". [date] = the run date computed once at run start with `date '+%A %Y-%m-%d'` (date part only), reused verbatim in every title, subject and body.
 Count T1 PURSUE and T1-PENDING-PRICE SEPARATELY in the subject and everywhere else.
 Body order:
   (1) PRICE CUT / RE-LIST flags first — the strongest motivation signals. Read them

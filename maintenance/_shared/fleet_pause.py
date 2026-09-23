@@ -50,6 +50,18 @@ __all__ = ["discover_registry", "pause_state", "STORES", "MAX_RESUME_HORIZON_DAY
 # genuine pause simply alarms (false alarm, the safe direction).
 MAX_RESUME_HORIZON_DAYS = 14
 
+# Recurring tasks that stay ENABLED through every pause by standing rule, so their being
+# enabled is not evidence the fleet is live (2026-09-22). Without this, a CC pause read
+# as "live" because ora-am-brief is never paused (session-context: "the CC copy MUST stay
+# enabled"), and every pause-frozen detector output alarmed as [STALE]. Per-fleet and
+# deliberately tiny: an entry here stops that task from ever vetoing a pause, so only
+# add a task with a ratified never-pause rule. LAMS has none on purpose; see the
+# docstring above. Its monitors firing through a pause genuinely means LAMS is not paused.
+PAUSE_CARVE_OUTS = {
+    "cc": frozenset({"ora-am-brief"}),
+    "lams": frozenset(),
+}
+
 STORES = {
     "cc": "claude-code-sessions",
     "lams": "local-agent-mode-sessions",
@@ -122,7 +134,9 @@ def pause_state(fleet="cc", registry=None):
             out["error"] = "registry parsed but holds no tasks"
             return out
 
-        recurring = [t for t in tasks if t.get("cronExpression")]
+        carve = PAUSE_CARVE_OUTS.get(fleet, frozenset())
+        recurring = [t for t in tasks if t.get("cronExpression")
+                     and (t.get("id") or t.get("taskId")) not in carve]
         out["recurring"] = len(recurring)
         enabled_recurring = [t for t in recurring if t.get("enabled")]
         out["enabled_recurring"] = len(enabled_recurring)
