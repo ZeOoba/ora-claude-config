@@ -1,6 +1,6 @@
 ---
 name: ora-ground-truth-auditor
-description: Nightly re-derivation audit of the previous 24h of scheduled-task runs across both fleets. Dispatches one verifier agent per side-effecting run (side-effect-free runs get a cheap deterministic stamp, no agent) to re-derive every factual claim from PRIMARY SOURCES ONLY -- never a prior summary, log line, or finding. Reports on four axes: IDEMPOTENCY, CLAIM ACCURACY, STALENESS, FRESHNESS OF INPUTS. Emails one morning digest to ggoldberg@oxfordra.net; any retraction or published-page edit is drafted and named in the digest, never sent or applied. Full design: docs/superpowers/specs/2026-09-10-ground-truth-auditor-design.md. [MODEL: claude-opus-5 | set 2026-09-10]
+description: Weekly (Tue 04:00 ET; nightly until 2026-09-17) re-derivation audit of every scheduled-task run since the previous auditor run, across both fleets. The window auto-widens; sub-weekly tasks' extra runs get a status-only STEP 1b pass. Dispatches one verifier agent per side-effecting run (side-effect-free runs get a cheap deterministic stamp, no agent) to re-derive every factual claim from PRIMARY SOURCES ONLY -- never a prior summary, log line, or finding. Reports on four axes: IDEMPOTENCY, CLAIM ACCURACY, STALENESS, FRESHNESS OF INPUTS. Emails one morning digest to ggoldberg@oxfordra.net; any retraction or published-page edit is drafted and named in the digest, never sent or applied. Full design: docs/superpowers/specs/2026-09-10-ground-truth-auditor-design.md. [MODEL: claude-opus-5 | set 2026-09-10]
 ---
 
 # ORA Ground-Truth Auditor
@@ -108,6 +108,25 @@ never treat them the same:**
   there is no data to report on). Do not attempt to synthesize a normal-shaped digest
   around a missing run-index. It goes out under the separate could-not-start subject
   (STEP 8), then the claim closes with `fail` (STEP 0b).
+
+## STEP 1b -- sub-weekly tasks: account for the runs the index cannot see (added 2026-09-22)
+
+This task runs **weekly** (Tuesday 04:00) under the fleet once-a-week cap. The window
+auto-widens to the gap since the last auditor run, so every WEEKLY task's run is still
+indexed. The run index, however, holds ONE row per task id: the registry keeps only each
+task's latest `lastRunAt`. For a task that fires more often than weekly, that means only
+its latest run is indexed and verified. Today that is `ora-am-brief` (daily) on CC; it
+would be any other task that is exempt from the cap.
+
+For each enabled CC task whose `cronExpression` fires more often than weekly, call
+`list_task_runs(taskId, limit: 10)`. For every run whose start falls inside the run
+index's window and that is NOT the indexed run, record one SUPPLEMENTAL line in the
+digest: date, status, and one-line summary. Also flag any run whose status is not
+`succeeded`, and any calendar day in the window with no run at all (a missed daily brief).
+Do NOT dispatch verifier agents for supplemental runs. Their claims are not re-derived,
+so label them "status-only, not re-derived" and never count them toward the
+CLAIM-ACCURACY axis. If `list_task_runs` is unavailable on this surface, say so in the
+digest's status section rather than omitting the section.
 
 ## STEP 2 -- extract side effects (Stage 1, deterministic, no judgment)
 

@@ -27,7 +27,7 @@ STEPS:
    - outcomes resolved this run
    - any errors (ok:false means at least one property failed — report which)
 
-4. NOTION COMPLETION ROW: Write a row to the Ops Hub calibration log page noting date, verdicts logged, outcomes resolved, and ok/error status. Use the Notion MCP (DB 8dbbaec0 or the Ops Hub page 32b6ecd8).
+4. NOTION COMPLETION ROW: Write a row to the Ops Hub calibration log page noting date, verdicts logged, outcomes resolved, and ok/error status. Use the Notion MCP (DB 8dbbaec0 or the Ops Hub page 32b6ecd8). The date is the run date computed once at run start with `date '+%A %Y-%m-%d'` (date part in every date slot; weekday only where one is named) and reused verbatim in every title, subject and body. If a create returns no page ID (e.g. a grace-period/quota notice), search by the exact title before any retry; a match created at/after the create call is this run's page — use it; never blind-retry a create (it produced a duplicate). Quota errors → `notion-quota-fallback` skill.
 
 5. EMAIL: Only if ok:false (real error) — send a summary to ggoldberg@oxfordra.net via C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1. Never email on a successful run.
 
