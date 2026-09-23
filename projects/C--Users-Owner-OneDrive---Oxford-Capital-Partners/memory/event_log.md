@@ -5,12 +5,81 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-09-23T15:14:10.914Z
+  modified: 2026-09-23T17:57:37.506Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-09-23 -- lease-addendum v1.1 reimport
+- lease-addendum v1.1 reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
+
+## 2026-09-23 — PR #260 follow-ups: #269 merged (fdd80a5); LAMS resume reconciled
+
+**Authority:** Gabriel, in-turn: "fix the open follow-ups", "merge #269 if the review is clean", "merge #269 when the push lands", and the LAMS choice "Resume with CC on 09-28".
+
+- **#269 merged.** New `maintenance/test-powershell-suites.py`: the pre-push gate now runs all six `maintenance/test-*.ps1` suites, including the dead-man's 60-check suite and the previously uncovered `test-stuck-session-watchdog.ps1`. Also new: `_tests/test_powershell_suites_runner.py` (13 checks). The `ora-weekly-hygiene` Block I thresholds now match #260. Two independent Opus reviews ran; the 1 MED test gap and 3 LOWs they found were fixed and mutation-verified. Propagated live, hash-verified; live runner 13/13, suites 6/6. The prior hygiene SKILL.md is archived at `maintenance/_archive/2026-09-23_pr269-merge/`.
+- **Gate cost:** the runner adds ~50–105s of concurrent PowerShell per push. On the 95407c4 push, test_checkout_merge_forward.py and test_preflight_shared_checkout.py timed out under load and passed on the automatic doubled-budget rerun. Watch for this; if it recurs, run the suites serially.
+- **0xC000013A kills, diagnosed:** on 09-23, Heartbeat Push was killed (0x40010004) after its heartbeat published successfully, when the machine entered Modern Standby at 07:57. The Dead-Man and Wake-and-Launch ran clean (0x0). The 09-21/22 kills were on wake catch-ups. Common factor: power/standby transitions. Restart-on-failure, added by another session, is the mitigation; the START logs now show start-vs-die. No power-setting change was made (system setting).
+- **LAMS resume reconciled:** the session "LAMS weekly cleanup handoff" (Claude Code, not Cowork, and stopped at Step 0 on 09-22) had already written a manual resume brief, `handoffs/2026-09-28_LAMS-fleet-resume_brief.md`, and pointed both CC reminders at it. My registered-resume Step 2b is marked SUPERSEDED so there is one resume path. That session has since added Step 2c to the cleanup brief on Gabriel's instruction: re-enable and run `ora-cowork-heartbeat` now. **Gabriel's two native-Cowork steps:** (1) the cleanup brief, any day before 09-28; (2) the resume brief, 09-28 by 10:30.
+
+## 2026-09-23 — Live ~/.claude checkout brought current with main (was 45 behind); branch content landed on main
+- **Authority:** Gabriel, in-turn: "yes, run all three steps". This closes the 09-22 follow-up "switch the checkout to `main`" that the Dirty tree triage session (e8ca1031, archived) left undone.
+- **Step 1, PR #270 (merged `6351579`):** three retired specs moved into their archive folders on main (`ora-754-flaute-escalation-check`, `ora-resume-0921-attend-reminder`, `ora-routine-pause-resume-09-21`). They were archived only in the live tree, so moving to main would have brought them back. Adversarial review APPROVE (opus).
+- **Step 2a, merge `a44f5bb`, PR #271 (merged `b1533a3`):** origin/main merged into `feat/model-canary-probe-step25` in a worktree, then landed on main. Conflicts: `event_log.md` (all 129 main and 137 branch headings kept, no duplicate entries) and `rules.md` (`modified:` stamp only). The blast-radius files are byte-identical to main; eos-review-gate artifact recorded (opus, approved).
+- **Step 2b, live checkout:** the live checkout is NOT switched to the `main` branch label, and cannot be. Local `main` is checked out in `.claude/worktrees/main-checkout`, which `push-fleet-heartbeat.ps1` depends on. Instead the live branch was fast-forwarded 21342b3 to b1533a3 (tree identical to origin/main, 0/0). This was done by an explicit script, not git switch/merge (rules.md §14):
+  - 87 incoming paths: 63 already identical to main, 21 clean ones written, 3 live WIP files merged.
+  - `retire-pending.json`: live kept; it is a pure superset.
+  - `open-items-tracker.md`: 3-way merge. Two add/add hunks took the live side, which verifiably contains every main line. OI-187/188/192 are absent because live WIP moved them to the history file.
+  - `people.md`: clean 3-way merge; the 09-19 808 Rhoads correction is kept.
+  - The 661 other dirty files were hash-verified unchanged. Pre-state backup: `maintenance/_archive/2026-09-23_live-ff-to-main/live-before/`. Dirty count went 167 to 107.
+- **Step 3:** the live pre-push gate now carries main's `91b77ca` (PYTHONIOENCODING for test children). Gate result (live, 2026-09-23): 134 pass, 1 fail, 0 env-skip (of 135). There is no UnicodeEncodeError; the encoding fix is live and the real failures now print. The one failure, `test_scheduled_task_run_guard.py`, is live-tree state and not a code defect: 8 untracked task folders with no run guard (OI-352), plus the two untracked 09-28 one-time tasks (`ora-resume-0928-attend-reminder`, `ora-routine-pause-resume-09-28`) and `ora-loan-balance-check` ordering-by-hand. Pushes from the live checkout stay blocked until those are guarded, or until the one-time folders are archived after they fire on 09-28. Worktree pushes are unaffected.
+- **Found, not fixed:** the `main-checkout` worktree's local `main` holds 5 heartbeat commits (0e1c435..6da7059) that are on no remote and is behind origin/main. The heartbeat's `git push origin main` backup leg is not landing; see OI-330/OI-331.
+
+## 2026-09-23 — insights5: scheduled-task output rules A/B/D retrofitted fleet-wide; register-scheduled-task v2.29; deferred WIP landed
+
+- **Rules live** (register-scheduled-task step 3: run date once; Notion no-ID create → fetch parent then title search, grace/quota no-match = UNVERIFIED, no retry; event-log via append-event-log.py with `## YYYY-MM-DD — <title>`): 42 CC + 24 LAMS task SKILL.mds, each only where its instructions exercise the behavior. Every CC live file hash-verified (`git hash-object`) against its merged blob; backups `SKILL.md.bak-2026-09-22-insights5*` / `-2026-09-23-insights5-{b,c,d}`.
+- **Merged:** ora-claude-config #267 (retrofit + `maintenance/propagate-task-spec.py`, 11 tests) and #268 (landing + second retrofit, b53d418); ora-skills #76 (v2.29: rule-B search-lag fix, rule-A date slots, content-edit steps 5–6 use live EOL + `git hash-object`). #264 closed (branch carried 7 unrelated commits). Three independent opus reviews, all APPROVE-WITH-FIXES, all findings fixed.
+- **dirty-tree-triage** (27 deferred CC task files, settled across two snapshots 20 min apart): 10 landed with attribution in 98be142; am-brief/broker-touch-cadence already superseded by main (3-way); 4 already == main; pause/resume 09-28 pair left untouched (live session 40e33334). 9 never-tracked specs split out at the push gate — 8 carry unguarded side effects → OI-352.
+- **Doctrine fix found in passing:** a scheduled-task retry-once publication guard re-creates the duplicate after a grace-period notice, because Notion search lags; v2.29 routes that case to UNVERIFIED instead of a retry.
+
+## 2026-09-23 -- package-and-stage-skill v1.33 reimport confirmed
+
+package-and-stage-skill v1.33 reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
+
+## 2026-09-23 -- loi-generation, document-assembly, register-scheduled-task reimport
+
+loi-generation, document-assembly, register-scheduled-task v2.29 reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
+
+## 2026-09-23 — PR #260 merged (20a0391) after a 9-round adversarial merge gate; live ~/.claude updated
+
+**Authority:** Gabriel, in-turn: "run the review and merge if clean", then "1, and merge after this round if only lows". Round 9 reported LOW findings only; all were fixed in 979b323 before the squash-merge.
+
+**Gate history.** 9 rounds × 5 independent reviewers (correctness, race, test-validity, scope, blast-radius), Opus, each round on a pinned SHA. Real defects the gate caught in this session's own changes:
+- R1: a START line in the main log masked a dead dead-man.
+- R3: the carve-out made Windows producers read [PAUSED] for up to 14 days.
+- R5: fleet-pause-windows.json false-alarmed after every pause.
+- R6: daily Windows producers were missing from the pause-independent list.
+- R7: a dead ora-am-brief during a pause was silenced (it was LIVE via the early 14bc76e copy), and a flat 6h grace flagged weekly producers.
+- R8: registry re-reads could see a torn file.
+- R9: 1-task count unroll; unparseable registry fell back to mtime; fleet-heartbeat.json misclassified.
+The remaining findings were test-coverage gaps, each closed with a failing-first test and mutation replay.
+
+**Live gap closed 09-23:** the live fleet-deadman.ps1 (14bc76e, blind to a dead Daily Brief during the CC pause) was reverted to origin/main before the merge (option 1, Gabriel-approved). The 14bc76e copy is archived at `maintenance/_archive/2026-09-23_deadman-restore/`.
+
+**Propagated after merge:** the 11 maintenance/ files. Each live hash was checked first against a version this session had placed (14bc76e or pre-merge main); archive at `maintenance/_archive/2026-09-23_pr260-merge/`. All are hash-equal to 20a0391. Live checks: test-fleet-deadman-ps1 60/60, test_state_freshness_thresholds 11/11, the probe reads cc=PAUSED correctly.
+
+**NOT propagated (another session's live edits):** scheduled-tasks/ora-pm-ledger, ora-ground-truth-auditor and ora-checkout-merge-forward SKILL.md. The live copies carry uncommitted 'run date computed once with `date`' edits. The PR's small changes to those files (trailing newline, the lookback wording, and the merge-forward threshold text) reach live only when that session commits and reconciles.
+
+**Open follow-ups:** (1) test-fleet-deadman-ps1.ps1 is not run by any gate, since the pre-push gate runs Python only. (2) ora-weekly-hygiene Block I text still says 7 runs / 72h. (3) The Wake-and-Launch, Dead-Man, Heartbeat Push and Headless tasks were all killed 0xC000013A on the 09-21/22 wake catch-ups; the START logs will now show this. (4) LAMS is fully disabled with no resume queued; the dead-man alarms on this daily, correctly. (5) The LAMS handoff brief still needs a native Cowork session.
+
+## 2026-09-23 — Runtime-cache sync gated: main-only + per-file direction (ora-skills f7b8d56)
+
+- Defect: pre-commit Check 4 (`tools/sync_appdata_mirror.py`) wrote the Cowork runtime cache from any branch/worktree, blind to direction. 09-23: a worktree feature-branch commit put pre-review register-scheduled-task v2.29 over a just-installed v2.28 for 11 min. 09-22: a main commit overwrote platform-only pma-qc v1.3.
+- Fix: writes only from the primary checkout on `main`; per shipped file, only when the cache is IN-SYNC/REPO-AHEAD (CACHE-AHEAD/DIVERGENT/MAIN-BEHIND-ORIGIN/UNKNOWN leave the cache untouched; cache-only REPO-MISSING files ignored). New `--changed-range ORIG_HEAD HEAD` from post-merge/post-rewrite syncs skills that arrive by merge/fast-forward. 23 tests incl. real-git integration.
+- Review: adversarial BLOCK on round 1 (skill-level REPO-MISSING would have disabled syncing after any file deletion; lease-form-qc and the eval harness were already in that state), fixed and re-reviewed APPROVE-WITH-NITS. Live: 73/73 installed mirrors IN-SYNC.
+- Consequence: a skill edited on a feature branch no longer reaches Cowork until it merges to main in the primary checkout.
 
 ## 2026-09-23 -- acquisition-underwriting v4.23 reimport confirmed
 
