@@ -49,7 +49,7 @@ STEP 4 — CLOSE OUT.
 For every item completed inline or PR'd, mark it appropriately in open-items-tracker.md (done, or "PR open: <link>") — respecting the Step 2 claim. Release the claim (`claim_work.py release sched-open-items-tracker`) when done, even on a partial run.
 
 STEP 5 — REPORT.
-Compose the summary subject with a **dated stem**, `Excess-Usage Sweep - {YYYY-MM-DD}` (today's date), and append whatever run-specific counts/tags fleet convention uses — the stem is what the pre-send probe below matches on.
+Compose the summary subject with a **dated stem**, `Excess-Usage Sweep - {YYYY-MM-DD}` (today's date, computed once at run start with `date '+%A %Y-%m-%d'` — date part in every date slot, weekday only where one is named — and reused exactly in every title, subject and body), and append whatever run-specific counts/tags fleet convention uses — the stem is what the pre-send probe below matches on.
 
 **PRE-SEND SENT-ITEMS PROBE (mandatory, immediately before the send).** Layer 2 of the STEP 0 guard:
 
