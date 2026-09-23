@@ -129,6 +129,34 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    never RECORDED-DEED.** Say which channel produced each price. Do not expand
    county-sales-monitor's county coverage from this task — that is that skill's
    own documented next phase.
+
+   **3b — RE-MARKETED PASSES (added 2026-09-22).** For every watch-list row (after the
+   duplicate-address merge), search the Outlook inbox with `outlook_email_search`
+   over the trailing 35 days, once for the street address (street number + street
+   name) and once for the property name if the row has one. Never open links.
+   - Ignore ORA's own mail: any @oxfordra.net sender AND the Exchange
+     legacy-DN form (`/O=EXCHANGELABS/…/CN=…GGOLDBERG`) — ORA's own digests
+     (Daily Brief, sourcing scans, this task's prior runs) quote these
+     addresses and were the majority of raw hits in the 2026-09-22 dry run.
+     Also ignore `notifications@github.com`. Real hits are broker blasts and
+     listing-alert senders (e.g. `@crexi.com`, `@loopnet.com`).
+   - A hit requires the street number AND street name in subject or body; a
+     name-only or partial match is **UNCONFIRMED** (listed, never escalated).
+   - Extract an asking price only if stated as a dollar figure tied to the
+     property; otherwise price = unknown (listing alerts usually omit it —
+     report the sender + date so Gabriel can check the listing himself).
+   - Walk threshold = `Walk Price`; if blank, `ORA Max Defensible Price`
+     (LOI-stage rows only). Last known ask = `Asking Price`; if blank,
+     `Ask at First Sighting`. Never back-compute either.
+   - Classify: **INSIDE-WALK** if ask ≤ walk threshold (confirmed hits only) ·
+     **PRICE-CUT x%** if ask < last known ask · else **RE-MARKETED**.
+   - Any INSIDE-WALK forces the email path even when zero trades were found.
+   - Read-only: no Notion writes, no outreach drafts. A row with no walk
+     threshold can be PRICE-CUT or RE-MARKETED, never INSIDE-WALK.
+   - Dry run 2026-09-22 (validation): 8720 Robbins Rd (PASS 2026-07-14,
+     Walk $1,054,066) → Crexi alerts 2026-08-30 and 2026-09-16, no price →
+     RE-MARKETED. 808 Rhoads / 6150 Avery / 1255 N Winchester → only ORA
+     self-mail or >35 days → no hit.
 4. On a detected trade, log to the deal's Notion row ("Exception Outcome" if an
    exception, else "Notes / Flags"): clearing price, date, buyer if public, and
    CLEARING PRICE vs ORA WALK delta ($ and %). Also append one line to the
@@ -366,6 +394,10 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    evidence citation. Also list any row whose `Re-Engagement Tickler Date` has
    passed with `Re-Engagement Flag` still ticked. **If nothing resolved, print
    nothing** — no "no post-mortems this month" filler, no synthetic content.
+
+   **RE-MARKETED PASSES** — table: Property · Flag · Ask · Last ask · Max Defensible ·
+   Broker/sender · Email date. Omit the section when there are no hits; UNCONFIRMED
+   hits are listed in a sub-table.
 
    **"PASSED-DEAL RE-CHECKS DUE" section (added 2026-09-19).** If Step 4d found any
    `RE-CHECK:` line already past or due within 30 days, add a section listing one line per
