@@ -50,7 +50,9 @@ Expect 'normal child: STDERR captured too'                 ($res.Out -match 'QQQ
 
 # R4 correctness-F2: Windows argv quoting must round-trip trailing backslashes, embedded
 # quotes and spaces.
-$tricky = @('C:\dir\', 'a"b', 'two words', 'x\\"y', '')
+# R5: include arguments that NEED quoting and contain backslashes (a quoted trailing run,
+# an interior backslash), each followed by another argument, so a merge would show.
+$tricky = @('C:\dir\', 'a"b', 'two words', 'x\\"y', '', 'C:\my dir\', 'next', 'a\b c', 'C:\a b\\', 'tail')
 $res = Invoke-PyBounded $py (@('-c', 'import sys, json; print(json.dumps(sys.argv[1:]))') + $tricky) 60
 $got = try { @($res.Out.Trim() | ConvertFrom-Json) } catch { @('PARSE-FAIL: ' + $res.Out) }
 Expect ('arguments round-trip exactly (got=' + ($got -join '|') + ')') ((($got -join '|') -eq ($tricky -join '|')) -and ($got.Count -eq $tricky.Count))
@@ -60,6 +62,25 @@ $sw = [System.Diagnostics.Stopwatch]::StartNew()
 $res = Invoke-PyBounded $py @('-c', 'import subprocess, sys; subprocess.Popen([sys.executable, chr(45)+chr(99), chr(105)+chr(109)+chr(112)+chr(111)+chr(114)+chr(116)+chr(32)+chr(116)+chr(105)+chr(109)+chr(101)+chr(59)+chr(116)+chr(105)+chr(109)+chr(101)+chr(46)+chr(115)+chr(108)+chr(101)+chr(101)+chr(112)+chr(40)+chr(50)+chr(48)+chr(41)]); print(1)') 3
 $sw.Stop()
 Expect ('pipe-holding grandchild cannot exceed the bound (elapsed=' + [int]$sw.Elapsed.TotalSeconds + 's, TimedOut=' + $res.TimedOut + ')') (($sw.Elapsed.TotalSeconds -lt 12) -and ($res.TimedOut -eq $true))
+
+# R5: on a timeout of a still-running child, the whole TREE is killed -- a grandchild must
+# not survive. The parent records its grandchild's PID, then hangs past the bound.
+$pidFile = Join-Path $env:TEMP ('dm-gc-' + [guid]::NewGuid() + '.pid')
+$script:tempFiles += $pidFile
+$gcPy = Join-Path $env:TEMP ('dm-gc-' + [guid]::NewGuid() + '.py')
+$script:tempFiles += $gcPy
+@"
+import subprocess, sys, time
+g = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
+open(sys.argv[1], 'w').write(str(g.pid))
+time.sleep(60)
+"@ | Set-Content -Path $gcPy -Encoding ascii
+$res = Invoke-PyBounded $py @($gcPy, $pidFile) 4
+Start-Sleep -Milliseconds 1500
+$gcPid = if (Test-Path $pidFile) { [int](Get-Content -Raw $pidFile).Trim() } else { 0 }
+$alive = if ($gcPid) { [bool](Get-Process -Id $gcPid -ErrorAction SilentlyContinue) } else { $true }
+if ($alive -and $gcPid) { Stop-Process -Id $gcPid -Force -ErrorAction SilentlyContinue }   # never leak it
+Expect ('timeout kills the grandchild too (TimedOut=' + $res.TimedOut + ', gcPid=' + $gcPid + ', alive=' + $alive + ')') (($res.TimedOut -eq $true) -and ($gcPid -gt 0) -and (-not $alive))
 
 # R4 test-validity-F1: the phantom-count parse is a helper; stdout loss must not zero the count.
 $ph = Get-PhantomSummary @{ TimedOut = $false; Rc = 1; Out = "header`nphantom : 3`n  2026-09-20 10:00 ora-x [never-confirmed]`n" }
@@ -168,6 +189,31 @@ $phAssign = AllOf $ast { param($n) $n -is [System.Management.Automation.Language
                                    $n.Left.Extent.Text -eq '$ph' }
 Expect 'main body builds $ph with Get-PhantomSummary from the probe result' (($phAssign.Count -eq 1) -and
     ($phAssign[0].Right.Extent.Text -match '^Get-PhantomSummary\s+\$r$'))
+# R5: $count and $phantomDetail must come from the summary too -- `$count = 0` or `$r.Count`
+# would silently suppress a PHANTOM DISPATCH alarm.
+function AssignRhs($root, $lhs) {
+    @(AllOf $root { param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+                               $n.Left.Extent.Text -eq $lhs -and -not (InsideFunction $n 'Get-PhantomSummary') } |
+      ForEach-Object { ($_.Operator.ToString()) + ' ' + $_.Right.Extent.Text.Trim() })
+}
+# Scope to the phantom block: the statement block that assigns $ph (the fleet loop above
+# reuses the name $count for an unrelated task count).
+$phBlock = if ($phAssign.Count -eq 1) { $b = $phAssign[0].Parent; while ($b -and $b -isnot [System.Management.Automation.Language.StatementBlockAst]) { $b = $b.Parent }; $b } else { $null }
+$countRhs = if ($phBlock) { @(AssignRhs $phBlock '$count') } else { @() }
+Expect ('phantom block takes $count only from $ph.Count (' + ($countRhs -join ' ; ') + ')') (
+    ($countRhs.Count -ge 1) -and (@($countRhs | Where-Object { $_ -notmatch '^Equals \$ph\.Count$' }).Count -eq 0))
+$detRhs = @(AssignRhs $ast '$phantomDetail' | Where-Object { $_ -notmatch '^Equals @\(\)$' })
+Expect ('main body fills $phantomDetail only from $ph.Detail (' + ($detRhs -join ' ; ') + ')') (
+    ($detRhs.Count -ge 1) -and (@($detRhs | Where-Object { $_ -notmatch '\$ph\.Detail' }).Count -eq 0))
+
+# R5: the publish verdict must be computed from the PUBLISH call's result, not the probe's.
+$gpvCalls = @(Cmds $ast 'Get-PublishVerdict' | Where-Object { -not (InsideFunction $_ 'Get-PublishVerdict') })
+$prRhs = @(AssignRhs $ast '$pr')
+Expect ('Get-PublishVerdict is fed $pr, and $pr comes from Invoke-PyBounded on $pub (' + ($prRhs -join ' ; ') + ')') (
+    ($gpvCalls.Count -ge 1) -and
+    (@($gpvCalls | Where-Object { ((@($_.CommandElements | Select-Object -Skip 1 | ForEach-Object { $_.Extent.Text })) -join ' ') -ne '$pr' }).Count -eq 0) -and
+    ($prRhs.Count -eq 1) -and ($prRhs[0] -match '^Equals Invoke-PyBounded \$py @\(\$pub,'))
+
 $gps = AllOf $ast { param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-PhantomSummary' }
 Expect 'Get-PhantomSummary derives its rc via Resolve-ProbeRc' (($gps.Count -eq 1) -and (@(Cmds $gps[0] 'Resolve-ProbeRc').Count -ge 1))
 $gpv = @(Cmds $ast 'Get-PublishVerdict' | Where-Object { -not (InsideFunction $_ 'Get-PublishVerdict') })
