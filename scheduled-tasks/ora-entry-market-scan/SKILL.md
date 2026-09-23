@@ -15,11 +15,48 @@ You are running the monthly ORA entry market scan for 4 markets where ORA has NO
 
 ## Execution sequence
 
-### Step 0 — FIRST-TUESDAY GUARD (v1.7, 2026-09-07 — mandatory, run before anything else)
+### Step 0-A — FIRST-TUESDAY GUARD (v1.7, 2026-09-07 — mandatory, run before anything else)
+*(Ordering note, v1.8 2026-09-19: this gate is **STEP 0-A** and runs BEFORE the STEP 0-B block-sentinel claim below. A fire that is not a first Tuesday must exit here, having claimed nothing — otherwise a stray Tuesday fire would consume the month's claim and suppress the real first-Tuesday run. The section body below is unchanged.)*
 The registered cron fires every Tuesday (`45 11 * * 2`), not just the first Tuesday of the month — this scheduler's day-of-month + day-of-week fields, when both restricted, resolve as OR not AND, so a combined expression like the prior `45 11 1-7 * 2` actually fired daily on days 1–7 AND every Tuesday, causing real duplicate monthly runs 2026-09-02 through 2026-09-07 (documented in `memory/event_log.md`, entries 2026-09-03/09-06/09-07 — the 09-07 fire went uncaught and produced a genuine duplicate Notion write + duplicate Gabriel email). The fix moves the "first Tuesday only" logic in-task instead of in the cron:
 - Compute today's day-of-month. **If it is NOT between 1 and 7 inclusive, STOP IMMEDIATELY — do not execute Step 1 or any subsequent step, do not write to Notion, do not send email.** This is a silent no-op exit; no summary file, no output.
 - If it is a first-Tuesday fire (day-of-month 1–7), before executing Step 1 SOURCE, **check `C:\Users\Owner\.claude\scheduled-tasks\ora-entry-market-scan\outputs\` for a summary file dated within the last 10 days whose `status` reflects a completed monthly cycle** (i.e. not `SKIPPED_DUPLICATE_FIRE` / `DUPLICATE_FIRE_EXECUTED_UNCAUGHT`). If one exists, this month's cycle is already done — write a `SKIPPED_DUPLICATE_FIRE` summary (see the existing 2026-09-03/09-06 summaries for the format) and STOP. No Notion writes, no email.
 - Only proceed to Step 1 if today is day-of-month 1–7 AND no completed-cycle summary exists for this month.
+- Only once BOTH of those hold, continue to STEP 0-B and claim the month.
+
+### Step 0-B — DOUBLE-FIRE ENTRY GUARD (v1.8, 2026-09-19 — Layer 1; run only after STEP 0-A passes)
+
+This task was unwired against the fleet's shared double-fire guard even though its two monthly siblings — `ora-tenant-hubspot-reconciliation` and `ora-renewal-hubspot-reconcile` — already carry it, and this task has the worse demonstrated exposure of the three: the 2026-09-07 fire executed a genuine duplicate cycle (11 new Notion Deal Sourcing Log records, 6 row updates, a duplicate digest email). STEP 0-A stops the wrong-DAY fire; it cannot stop two fires on the SAME first Tuesday, nor a catch-up burst after the Desktop app reopens, nor a fire that overlaps a still-running one (the outputs-directory check only sees a summary file that a COMPLETED run has already written). `--period month` keys the claim to the calendar month, which is this task's real cycle.
+
+Run this as the first action AFTER STEP 0-A passes, before Step 1 SOURCE:
+
+```
+python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-entry-market-scan --block main --run-id <run_id> --period month --ttl-min 45
+```
+
+- **Exit 10** → this month's cycle already completed. Log `BLOCK_MAIN_ALREADY_COMPLETE_TODAY`, **exit without sourcing, without writing to Notion and without emailing**, and report it as a **NORMAL skip** (not a miss), citing the earlier run's summary file in `outputs\`.
+- **Exit 11** → another fire is live this month. Stand down identically.
+- **Exit 0** → claim held; proceed to Step 1.
+- **Any other exit** → tooling failure. The guard **fails open**: proceed with the run, and surface the exit code and any `stateFileError` string verbatim in the digest's data-gaps section. Never read a non-10/11 code as "already done".
+
+**Ordering is load-bearing.** STEP 0-A's two silent-exit paths (day-of-month outside 1–7; a completed-cycle summary within the last 10 days) both fire BEFORE this claim exists, so a stray non-first-Tuesday fire consumes nothing and the real first-Tuesday run still claims cleanly. The outputs-directory check in STEP 0-A stays in place as the second belt — it survives a lost/rolled-back sentinel state file, which lives on OneDrive.
+
+**Closing the claim — only the claim holder may do it.** A run that got exit 10 or 11 owns nothing and calls NEITHER `complete` nor `fail`. A run that got exit 0 MUST close with exactly one of:
+
+```
+python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-entry-market-scan --block main --run-id <run_id> --period month --email-sent-at <ISO8601>
+```
+
+```
+python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py fail --task ora-entry-market-scan --block main --run-id <run_id> --period month --error "<what broke>"
+```
+
+- `complete` after Step 5's digest lands (or after the Layer 2 probe reports ALREADY_SENT — see Step 5).
+- **`fail`, never `complete`, on any abort or non-zero exit** — a crash, an unusable doctrine-version check (the Step 2 stop-and-flag path), or a send path that failed both attempts. `fail` releases the claim immediately so a legitimate same-month re-run is possible; a `complete` on a broken run would lock the month out.
+- **Every early-exit path that occurs AFTER the claim must still close it.** A zero-qualifier run (no listings clear the buy-box in any of the 4 markets) and a Notion-MCP-unavailable run are both NORMAL completions under this task's own Invariants, not aborts: write the outputs summary / JSON fallback, send the digest stating the result explicitly per market, post the Ops Hub row where the Invariants call for one, then call `complete`. Do not exit silently leaving the claim open — it would hold the month for the full 45-minute TTL and then expire as if the run had crashed.
+- **Always pass `--period month` on every call** for this task. Omitting it addresses the day-keyed bucket instead and defeats the guard silently — no error, the claim just never persists across days.
+- **A scheduled fire must never pass `--force`.** That is a human-directed, in-session override only.
+
+Full contract: `C:\Users\Owner\.claude\scheduled-tasks\_shared\README-DOUBLE-FIRE-GUARD.md`.
 
 ### Execution sequence (continued)
 
@@ -52,6 +89,8 @@ Critical market flags:
 - Grand Rapids MI: Michigan Proposal A applies. Append PROP-A-UNCAP-PREMORTEM-REQUIRED to every MI listing.
 
 ### Step 3 — LOG
+**Own-portfolio guard FIRST (added 2026-09-18, mirrors ora-deal-sourcing-scan v2.6):** before logging any candidate, run `python "C:\Users\Owner\.claude\scheduled-tasks\_shared\own_portfolio_guard.py" "<listing address>" --broker "<broker>"`. Exit 2 (OWN-PORTFOLIO) → never log; list under "OWN ASSETS SEEN ON MARKET" in the digest. Exit 3 (BROKER-FLAG) → verify by hand and note the check. ORA holds Salisbury/Easton/Cambridge MD assets inside the Delmarva scan area, so this is live for this task. Guard unavailable → fail closed on roster streets and say so.
+
 Dedup against and update the Notion Deal Sourcing Log (collection ID: 9a6ae219-85a3-4621-899c-c757fd062f8b):
 - Match on address (≥90% similarity) or listing URL (exact). Update existing records in place — do NOT duplicate.
 - Create new records for first-time listings.
@@ -69,6 +108,19 @@ Dedup against and update the Notion Deal Sourcing Log (collection ID: 9a6ae219-8
 For any previously-screened deal in these 4 markets logged as PASS/T2-WATCH with a gap-to-ask >30% (ask was >30% above ORA walk price at last screen): check current listing price. If the current ask is within 5% of the ORA walk price (basis floor), flag as RE-ENGAGE, update the Notion record, and elevate to top of email.
 
 ### Step 5 — EMAIL
+
+**LAYER 2 — PRE-SEND SENT-ITEMS PROBE (v1.8, 2026-09-19 — mandatory, run immediately BEFORE the COM send below):** Layer 1's claim state lives on OneDrive and can be lost or rolled back; this probe asks the mail store itself, so it is the backstop that actually stopped the duplicate digest on 2026-09-07.
+
+```
+powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly the dated stem>"
+```
+
+- **Dated stem: `ORA Entry Market Scan - <YYYY-MM-DD>`** — written to a temp file under `C:\Users\Owner\AppData\Local\Temp\ora-entry-market-scan\`, never passed as a literal `-Subject` (non-ASCII is mangled in transit). Use the dated stem, NOT the full Step 5 subject line: that subject carries live counts (`[N] New Candidates, [N] Watched, [N] Passed`) which legitimately differ between two runs of the same cycle, so probing the full string would fail to match the earlier send and wave the duplicate through. Matching is substring and normalization-tolerant (dash family folded, casefolded), and the stem must sit at position 0 after any `[ORA]`/`[ACTION]` tag is stripped — so keep the date immediately after the stem and put variable text after it.
+- **Exit 10 (ALREADY_SENT)** → do NOT send. Log `MAIN_EMAIL_ALREADY_IN_SENT_ITEMS`, record a NORMAL skip citing the earlier message, and still call Layer 1 `complete` (with `--period month`) so the sentinel re-converges with reality.
+- **Exit 0 (NOT_SENT)** → proceed with the send below.
+- **Exit 1 (PROBE_ERROR)** → fail open: send anyway, and note the probe gap in the digest's data-gaps section. Layer 1 already said PROCEED; suppressing a real report because a probe broke is worse than a duplicate.
+- A scheduled fire never passes `-Force`.
+
 Send summary email via Outlook COM:
 - Script: C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1
 - To: ggoldberg@oxfordra.net ONLY (never cc egoldberg@, never ze@ addresses)
@@ -76,7 +128,15 @@ Send summary email via Outlook COM:
 - Subject: "ORA Entry Market Scan — [Month YYYY]: [N] New Candidates, [N] Watched, [N] Passed"
 - Body: RE-ENGAGE alerts first (if any), then T1/T2 ranked table (address, market, ask, SF, $/SF, Combined [est], P(exec)%, Expected Score, verdict, top seller signal, flags) — for any GATE-FLAGGED Delmarva listing already carrying a `Gate Review` ratification, mark it "reviewed <date>" in the table instead of re-asking, then market summary, then data gaps / questions for Gabriel (genuinely new items only)
 
+### Step 6 — CLOSE THE CLAIM (v1.8, 2026-09-19 — mandatory whenever STEP 0-B returned exit 0)
+Last action of the run, after the outputs summary is archived (see Invariants):
+- Digest sent, or Layer 2 reported ALREADY_SENT, or the run completed normally with zero qualifiers / a Notion fallback → `block-sentinel.py complete … --period month --email-sent-at <ISO8601>`.
+- Run aborted, crashed, or exited non-zero (incl. the Step 2 doctrine-version stop-and-flag, and a COM send that failed both attempts) → `block-sentinel.py fail … --period month --error "<what broke>"`. Never `complete` on a broken run.
+- Stood down at STEP 0-B with exit 10 or 11 → this run owns nothing; call NEITHER.
+
 ## Invariants
+- **Guard-suppressed skips are NORMAL, not misses.** A STEP 0-B exit-10/11 stand-down, and a Layer 2 ALREADY_SENT, are reported in the same class as a non-first-Tuesday no-op — cite the earlier run's artifact. Classing one as a failure trains a false alarm into `ora-health-guard` / `automation-health-monitor` and invites someone to "fix" it by removing the guard.
+- **If STEP 0-B returned exit 0, the run must close the claim before it ends** — `complete` on any normal outcome (including zero qualifiers or the Notion-unavailable fallback), `fail` on any abort. Never exit with the claim open.
 - READ-ONLY task: no LOIs, no counterparty emails, no underwriting commits, no capital decisions.
 - Never fabricate listings, scores, or market data. Zero qualifying results = state that explicitly per market.
 - Never send to Eric (egoldberg@) — ggoldberg@ only on this task.
@@ -102,3 +162,5 @@ Full procedure, scoring rubric, Notion field map, and escalation logic: C:\Users
 - **v1.5 (2026-08-09): LOUISVILLE KY REMOVED FROM THE OFF-TAXONOMY CLAUSE — Gabriel ratified it as ORA's 10th canonical cluster (entry-phase) 2026-08-05 (target-markets.json v1.7/v1.8, acquisition-underwriting v4.10), one day after the 2026-08-04 run. Delmarva MD/DE is now the sole off-taxonomy market here; Louisville scores like Grand Rapids/Des Moines (no Ruling 5 market cap, no auto-GATE-FLAGGED, no blank Gate Review, Market baseline 8/12, Ruling 3 unchanged). Caught by the v1.3 doctrine-version check on its first live outing — same failure class as the RCT v02 incident it was built for, different constant (market taxonomy, not the cost table). Six Notion rows re-scored Market 7 to 8 the same day; one verdict flipped (2990 W Jefferson St, PASS-band to T2 WATCH at Combined 60); Gabriel's pending gate-review queue fell 6 to 3, all Delmarva. [MODEL: claude-opus-5 observed | checked 2026-08-12 via live-run transcript canary]
 
 - **v1.7 (2026-09-07, Gabriel-authorized fix): cron changed `45 11 1-7 * 2` → `45 11 * * 2` (fires every Tuesday) plus a new Step 0 FIRST-TUESDAY GUARD added to the body.** Root cause: this scheduler resolves a restricted day-of-month + day-of-week cron as OR, not AND — `45 11 1-7 * 2` fired on every day 1–7 of the month PLUS every Tuesday, not only the first Tuesday. Confirmed empirically: fires landed on 2026-09-02 (Wed, day 2) and 2026-09-03 (Thu, day 3), both non-Tuesdays inside the day-1-7 window. This produced real duplicate monthly cycles 2026-09-02 through 2026-09-07 — 2026-09-03 and 2026-09-06 self-detected via a pre-existing outputs-directory check and correctly skipped (no writes, no email), but 2026-09-07 did not check first and executed a full duplicate cycle: 11 new Notion Deal Sourcing Log records, 6 row updates, and a duplicate digest email to Gabriel (corrected with an immediate follow-up email same day). Fix moves the "first Tuesday only" logic in-task (Step 0, above) rather than relying on the cron field, and formalizes the outputs-directory pre-check that 09-03/09-06 each had to re-derive from first principles. Full incident record: `memory/event_log.md` 2026-09-03/09-06/09-07 entries.
+
+- **v1.8 (2026-09-19, Gabriel-directed): wired the fleet-standard DOUBLE-FIRE GUARD — Layer 1 `block-sentinel.py … --period month --ttl-min 45` as new STEP 0-B, Layer 2 `outlook-sent-probe.ps1` pre-send probe in Step 5, claim close-out as new Step 6.** Reason: this task was the only monthly CC/MCP task still unwired, while both monthly siblings — `ora-tenant-hubspot-reconciliation` (wired 2026-09-06, the `--period month` reference implementation) and `ora-renewal-hubspot-reconcile` (Layer 2 added 2026-09-18) — already carry it, and this task has the worst demonstrated exposure of the three: the 2026-09-07 fire produced a real duplicate cycle (11 new Notion records, 6 row updates, a duplicate digest to Gabriel). v1.7's STEP 0-A gate closes the wrong-DAY case only; it cannot stop two fires on the same first Tuesday, a catch-up burst after the Desktop app reopens, or an overlapping fire (the outputs-directory check only sees a summary a COMPLETED run already wrote). **Ordering is the load-bearing part: STEP 0-A runs and can exit silently BEFORE STEP 0-B claims**, so a stray non-first-Tuesday Tuesday fire never consumes the month's claim; the outputs-directory check is retained as the second belt against a lost OneDrive sentinel file. No scoring, gate, market-taxonomy, routing or email-content doctrine was touched — the edit is additive except for renaming the `### Step 0` heading to `### Step 0-A`. **Housekeeping for whoever commits this file: it currently carries TWO uncommitted changes on branch `feat/model-canary-probe-step25` — this guard wiring, and another session's Step 3 "Own-portfolio guard FIRST" block (added 2026-09-18, preserved byte-for-byte here). Commit them as two separate, separately-attributed changes; this entry does not cover that one.**
