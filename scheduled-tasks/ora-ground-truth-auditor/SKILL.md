@@ -84,6 +84,8 @@ C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:\Users\Owner
 
 ## STEP 1 -- build the run index (Stage 0, deterministic, no judgment)
 
+`<today's date>` everywhere in this file = the run date computed once at run start with `date '+%A %Y-%m-%d'` (date part in every date slot; no weekday is named here) and reused verbatim in every filename, folder, subject, stem and body.
+
 ```
 "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe" "C:/Users/Owner/.claude/maintenance/ground-truth-run-index.py" --out "C:/Users/Owner/.claude/maintenance/_state/ground-truth/run-index-<today's date, YYYY-MM-DD>.json"
 ```
