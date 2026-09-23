@@ -1,4 +1,4 @@
-# ORA Fleet Heartbeat + Pending-Work Push -- local pulse leg of the EXTERNAL cross-fleet dead-man (v3.1 2026-09-22)
+# ORA Fleet Heartbeat + Pending-Work Push -- local pulse leg of the EXTERNAL cross-fleet dead-man (v3.2 2026-09-23)
 # ----------------------------------------------------------------------------------
 # WHY v1.0 (2026-07-09): Task 6 (DEADMAN_APPROACH=GITHUB-ACTION, Gabriel-ratified). The
 # GitHub Action .github/workflows/fleet-deadman.yml checks a copy of the heartbeat on GitHub
@@ -56,6 +56,13 @@
 # script's own exit code is unchanged by it, per the same reasoning as v3.0: a stuck merge or
 # a gate failure needs a human session to reconcile, not a louder scheduled-task alarm racing
 # ahead of that.
+#
+# WHY v3.2 (2026-09-23, OI-353): the ~11-min pre-push gate gives other sessions time to move
+# remote main, so the backup push kept losing the race (`cannot lock ref ... but expected`;
+# consecutive runs 09-22 and 09-23). On a push rejection that is recognisably a lost race, the
+# step-1 reconcile (now Invoke-MainReconcile) runs once more -- merge, never rebase -- and the
+# push is retried ONCE. Any other failure, a second loss, or an unclean reconcile fails loud
+# as before. A failed fetch is now its own outcome instead of a silent stale ff-only.
 #
 # Backup step is Fail-OPEN: any internal error, or any real merge conflict, -> log and carry
 # on (a stuck merge is exactly what a human session must resolve); only the heartbeat publish
@@ -129,6 +136,63 @@ function Write-BackupPushOk {
     } catch { Log ('backup-push stamp write FAILED (non-fatal): ' + $_.Exception.Message) }
 }
 
+# --- Reconcile main with origin/main (v3.2, OI-353: factored out of step 1 so step 4 can
+# run it again before its one retry push). Fetch, then ff-only (the common case per the
+# 2026-08-04 fix: 6 of 8 historical failures were pure races, not real conflicts); only on
+# ff-only failure (true two-sided divergence) one real merge, and ANY failure from that
+# aborts immediately, leaving the tree exactly as found. MERGE, NEVER REBASE: main-checkout
+# carries prior auto-reconcile merge commits, and this script never rewrites history or
+# resolves a conflict itself. Returns 'ok', 'conflict', 'merge-failed' or 'fetch-failed'.
+function Invoke-MainReconcile($repo) {
+    git -C $repo fetch origin main 2>&1 | ForEach-Object { Log ("fetch: " + $_) }
+    # A failed fetch leaves origin/main stale, so ff-only would report "up to date" and a
+    # retry push would re-run the whole gate only to lose again (merge-gate finding, OI-353).
+    if ($LASTEXITCODE -ne 0) { return 'fetch-failed' }
+    git -C $repo merge --ff-only origin/main 2>&1 | ForEach-Object { Log ("ff-only: " + $_) }
+    if ($LASTEXITCODE -eq 0) { return 'ok' }
+    Log 'ff-only merge failed (real divergence, not just a race) - attempting one real merge'
+    $mergeMsg = 'Merge origin/main into main-checkout (auto-reconcile, push-fleet-heartbeat v2.0, ' + [DateTime]::UtcNow.ToString('yyyy-MM-dd') + ')'
+    git -C $repo merge origin/main -m $mergeMsg 2>&1 | ForEach-Object { Log ("merge: " + $_) }
+    $mergeExit = $LASTEXITCODE
+    $unmerged = git -C $repo diff --name-only --diff-filter=U
+    if ($mergeExit -ne 0 -or $unmerged) {
+        git -C $repo merge --abort 2>&1 | ForEach-Object { Log ("abort: " + $_) }
+        if ($unmerged) { return 'conflict' }
+        return 'merge-failed'
+    }
+    Log 'auto-merge clean, no conflicts - reconciled, will push everything below'
+    return 'ok'
+}
+
+# Push main, and on a lost race reconcile once and push once more (v3.2, OI-353). Output is
+# streamed to the log line by line as it arrives -- the pre-push gate runs ~11 min and a
+# killed run (0xC000013A, seen 09-22) must still leave the gate lines behind. Returns the
+# final push exit code.
+function Invoke-BackupPush($repo) {
+    $script:pushOut = New-Object System.Collections.Generic.List[string]
+    git -C $repo push origin main 2>&1 | ForEach-Object { $script:pushOut.Add("$_"); Log ("push: " + $_) }
+    $pushExit = $LASTEXITCODE
+    if ($pushExit -eq 0 -or -not (Test-PushRaceRejection $script:pushOut)) { return $pushExit }
+    Log 'push lost a race (remote main moved during the pre-push gate) - reconciling once more and retrying the push once'
+    $rec = Invoke-MainReconcile $repo
+    if ($rec -ne 'ok') {
+        Log ('retry reconcile did not come back clean (' + $rec + ') - tree left unchanged; not retrying the push')
+        return $pushExit
+    }
+    git -C $repo push origin main 2>&1 | ForEach-Object { Log ("push-retry: " + $_) }
+    return $LASTEXITCODE
+}
+
+# OI-353: a push rejected because remote main moved while the ~11-min pre-push gate ran
+# (`cannot lock ref ... but expected`, or git's own fetch-first / non-fast-forward refusal)
+# is a lost race -- worth one reconcile + retry. Anything else (a failing gate, auth,
+# network) is not, and a retry would only burn another gate run.
+function Test-PushRaceRejection($lines) {
+    $text = (@($lines) | ForEach-Object { "$_" }) -join "`n"
+    return [bool]($text -match "cannot lock ref '[^']*': is at \S+ but expected" -or
+                  $text -match '\[rejected\].*\((fetch first|non-fast-forward)\)')
+}
+
 # v3.0 (OI-323): publish the heartbeat FIRST, on its own path. It goes to the dedicated
 # deadman-heartbeat branch through the GitHub API, so it no longer waits on the reconcile,
 # the ~12-min pre-push gate or a race with main below. This is the ONLY result that sets the
@@ -191,31 +255,25 @@ try {
     #    failures were pure races, not real conflicts) -- only on ff-only failure
     #    (true two-sided divergence) do we attempt one real merge, and ANY
     #    conflict from that aborts immediately, leaving the tree exactly as
-    #    found. This script NEVER resolves a conflict itself.
-    git -C $repo fetch origin main 2>&1 | ForEach-Object { Log ("fetch: " + $_) }
-    git -C $repo merge --ff-only origin/main 2>&1 | ForEach-Object { Log ("ff-only: " + $_) }
-    if ($LASTEXITCODE -ne 0) {
-        Log 'ff-only merge failed (real divergence, not just a race) - attempting one real merge'
-        $mergeMsg = 'Merge origin/main into main-checkout (auto-reconcile, push-fleet-heartbeat v2.0, ' + [DateTime]::UtcNow.ToString('yyyy-MM-dd') + ')'
-        git -C $repo merge origin/main -m $mergeMsg 2>&1 | ForEach-Object { Log ("merge: " + $_) }
-        $mergeExit = $LASTEXITCODE
-        $unmerged = git -C $repo diff --name-only --diff-filter=U
-        if ($mergeExit -ne 0 -or $unmerged) {
-            git -C $repo merge --abort 2>&1 | ForEach-Object { Log ("abort: " + $_) }
-            # Only unmerged paths make it a genuine conflict. A nonzero merge with none has more than
-            # one possible cause (another run holding .git/index.lock -- the daily Windows task and
-            # the guard's script 3 can overlap -- or local changes that the merge would overwrite),
-            # and only the second is not cured by retrying, so name both rather than assert one.
-            if ($unmerged) {
-                Log 'REAL CONFLICT - merge aborted, tree left clean and unchanged; needs a session to reconcile by hand. Backup push skipped this cycle (the heartbeat itself was published above)'
-                Write-BackupPushFailed 'real merge conflict - aborted, needs a session to reconcile'
-            } else {
-                Log 'merge failed with no conflicting files - see the merge: lines above (git lock contention with an overlapping run, or local changes blocking the merge). Merge aborted; backup push skipped this cycle (the heartbeat itself was published above)'
-                Write-BackupPushFailed 'merge failed with no conflicting files (git lock contention with an overlapping run, or local changes blocking the merge) - see the merge: lines in push-fleet-heartbeat.log'
-            }
-            exit $pubExit
-        }
-        Log 'auto-merge clean, no conflicts - reconciled, will push everything below'
+    #    found. This script NEVER resolves a conflict itself. (Logic lives in
+    #    Invoke-MainReconcile since v3.2 so step 4's race retry reuses it.)
+    $rec = Invoke-MainReconcile $repo
+    # Only unmerged paths make it a genuine conflict. A nonzero merge with none has more than
+    # one possible cause (another run holding .git/index.lock -- the daily Windows task and
+    # the guard's script 3 can overlap -- or local changes that the merge would overwrite),
+    # and only the second is not cured by retrying, so name both rather than assert one.
+    if ($rec -eq 'conflict') {
+        Log 'REAL CONFLICT - merge aborted, tree left clean and unchanged; needs a session to reconcile by hand. Backup push skipped this cycle (the heartbeat itself was published above)'
+        Write-BackupPushFailed 'real merge conflict - aborted, needs a session to reconcile'
+        exit $pubExit
+    } elseif ($rec -eq 'fetch-failed') {
+        Log 'fetch of origin/main FAILED - see the fetch: lines above; backup push skipped this cycle (the heartbeat itself was published above)'
+        Write-BackupPushFailed 'git fetch origin main failed - see the fetch: lines in push-fleet-heartbeat.log'
+        exit $pubExit
+    } elseif ($rec -ne 'ok') {
+        Log 'merge failed with no conflicting files - see the merge: lines above (git lock contention with an overlapping run, or local changes blocking the merge). Merge aborted; backup push skipped this cycle (the heartbeat itself was published above)'
+        Write-BackupPushFailed 'merge failed with no conflicting files (git lock contention with an overlapping run, or local changes blocking the merge) - see the merge: lines in push-fleet-heartbeat.log'
+        exit $pubExit
     }
 
     # 2) Refresh the heartbeat (full interpreter path first -- scheduled sessions
@@ -252,16 +310,18 @@ try {
     #    pre-push hook suite as the safety net, same gate every manual push
     #    already goes through; no additional review/marker gate added). Checked
     #    explicitly first so a no-op day logs cleanly instead of a wasted push
-    #    attempt. NO rebase/reset fallback here ever -- if the remote moved again
-    #    between this run's fetch and now (a genuine late race), the push below
-    #    fails loud and this script does not retry; log and let the next run, or
-    #    a human, reconcile.
+    #    attempt. NO rebase/reset fallback here ever. v3.2 (OI-353): if the remote
+    #    moved during the ~11-min pre-push gate (a lost race -- two consecutive
+    #    daily runs, 09-22 and 09-23, died exactly this way), re-run the SAME
+    #    merge-based reconcile once and push once more. Bounded to ONE retry: a
+    #    second loss, a non-race failure, or a reconcile that is not clean fails
+    #    loud as before and waits for the next run or a human.
     $ahead = git -C $repo log 'origin/main..HEAD' --oneline
     if (-not $ahead) { Log 'nothing ahead of origin/main - nothing to push'; Write-BackupPushOk; exit $pubExit }
     $aheadCount = ($ahead | Measure-Object).Count
     Log ("pushing " + $aheadCount + " commit(s) ahead of origin/main")
-    git -C $repo push origin main 2>&1 | ForEach-Object { Log ("push: " + $_) }
-    if ($LASTEXITCODE -ne 0) {
+    $pushExit = Invoke-BackupPush $repo
+    if ($pushExit -ne 0) {
         Log 'backup push FAILED - pending main work NOT on GitHub (heartbeat unaffected: published above); needs a session to reconcile'
         Write-BackupPushFailed 'git push origin main failed'
     } else {
