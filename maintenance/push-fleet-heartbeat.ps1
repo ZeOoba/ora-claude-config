@@ -87,6 +87,15 @@ function Log($m) { "$([DateTime]::UtcNow.ToString('s'))Z  $m" | Out-File -FilePa
 # exit code: nonzero (2) on failure, and publish-fleet-heartbeat.py leaves a marker that
 # fleet-deadman.ps1 reports the same day. The backup push below stays best-effort.
 $pubExit = 0
+# START breadcrumb (2026-09-22): on 09-22 this task and ORA Fleet Dead-Man both launched at
+# 09:37:33 and both ended 0xC000013A with NO log line, so "killed before the publish printed"
+# and "never started" could not be told apart. A START with nothing after it now means the
+# run started and died. It goes to a SEPARATE file (merge-gate finding 2026-09-22):
+# state-freshness-probe judges push-fleet-heartbeat.log by mtime at 48h, and a START written
+# there by a killed run would keep that log looking fresh.
+$startLog = Join-Path $primaryRepo 'maintenance\push-fleet-heartbeat.start.log'
+function LogStart($m) { "$([DateTime]::UtcNow.ToString('s'))Z  $m" | Out-File -FilePath $startLog -Append -Encoding utf8 }
+LogStart ('START pid=' + $PID)
 try {
     $py = 'C:\Users\Owner\AppData\Local\Programs\Python\Python313\python.exe'
     if (-not (Test-Path $py)) { $py = 'python' }
