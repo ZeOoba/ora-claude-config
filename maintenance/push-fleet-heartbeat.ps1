@@ -202,12 +202,17 @@ try {
         $unmerged = git -C $repo diff --name-only --diff-filter=U
         if ($mergeExit -ne 0 -or $unmerged) {
             git -C $repo merge --abort 2>&1 | ForEach-Object { Log ("abort: " + $_) }
-            Log 'REAL CONFLICT - merge aborted, tree left clean and unchanged; needs a session to reconcile by hand. Backup push skipped this cycle (the heartbeat itself was published above)'
-            # Only a genuine conflict (unmerged paths) is a "real merge conflict". A nonzero merge
-            # with none is usually another run holding .git/index.lock (the daily Windows task and
-            # the guard's script 3 can overlap), so say that instead of misleading a later reader.
-            if ($unmerged) { Write-BackupPushFailed 'real merge conflict - aborted, needs a session to reconcile' }
-            else { Write-BackupPushFailed 'merge failed with no conflicting files - likely git lock contention with an overlapping run; retry next cycle' }
+            # Only unmerged paths make it a genuine conflict. A nonzero merge with none has more than
+            # one possible cause (another run holding .git/index.lock -- the daily Windows task and
+            # the guard's script 3 can overlap -- or local changes that the merge would overwrite),
+            # and only the second is not cured by retrying, so name both rather than assert one.
+            if ($unmerged) {
+                Log 'REAL CONFLICT - merge aborted, tree left clean and unchanged; needs a session to reconcile by hand. Backup push skipped this cycle (the heartbeat itself was published above)'
+                Write-BackupPushFailed 'real merge conflict - aborted, needs a session to reconcile'
+            } else {
+                Log 'merge failed with no conflicting files - see the merge: lines above (git lock contention with an overlapping run, or local changes blocking the merge). Merge aborted; backup push skipped this cycle (the heartbeat itself was published above)'
+                Write-BackupPushFailed 'merge failed with no conflicting files (git lock contention with an overlapping run, or local changes blocking the merge) - see the merge: lines in push-fleet-heartbeat.log'
+            }
             exit $pubExit
         }
         Log 'auto-merge clean, no conflicts - reconciled, will push everything below'

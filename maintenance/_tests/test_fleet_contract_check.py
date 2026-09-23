@@ -89,6 +89,9 @@ class TestMainExitCode(unittest.TestCase):
         # contains "backup-push-ok.json", so assertIn alone survives the producer renaming it.
         self.assertRegex(
             ps1, r"(?m)^\$backupStamp\s*=\s*Join-Path\s+\$stateDir\s+'backup-push-ok\.json'")
+        # ...and that the stamp is actually written, not merely named (a producer that
+        # assigns the path but never writes it would otherwise pass).
+        self.assertRegex(ps1, r"Out-File\s+-LiteralPath\s+\$backupStamp\b")
         with open(os.path.join(repo, ".gitignore"), encoding="utf-8") as f:
             gi = f.read().splitlines()
         self.assertIn("maintenance/_state/backup-push-ok.json", gi)
