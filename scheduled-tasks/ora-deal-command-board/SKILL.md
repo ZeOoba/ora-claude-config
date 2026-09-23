@@ -53,14 +53,14 @@ If you also send an email pointer, it MUST go via `send-via-outlook.ps1` (the so
 
 ## STEP 6 — Ops Hub posting (MANDATORY — added 2026-07-18, Plan 2 output-contract retrofit)
 
-This is the task's final step and runs on EVERY fire — mandatory, not optional, and additive to (never a replacement for) the in-session widget rendering in STEP 5. Post a NEW DATED CHILD PAGE under the Notion Ops Hub parent page (`32b6ecd8-9e59-81f2-b329-df3fd0e25062`), titled exactly `"Deal Command Board — {YYYY-MM-DD}"` (today's date) — a distinct page created fresh each run, never an appended row/block inside an existing page's body (an append isn't reliably freshness-checkable downstream; a new titled child page is — standardized pattern, see `ora-deal-aging-sla` STEP 7).
+This is the task's final step and runs on EVERY fire — mandatory, not optional, and additive to (never a replacement for) the in-session widget rendering in STEP 5. Post a NEW DATED CHILD PAGE under the Notion Ops Hub parent page (`32b6ecd8-9e59-81f2-b329-df3fd0e25062`), titled exactly `"Deal Command Board — {YYYY-MM-DD}"` (today's date — the run date computed once at run start with `date '+%A %Y-%m-%d'`, date part in every date slot, weekday only where one is named, reused verbatim in every title, subject and body) — a distinct page created fresh each run, never an appended row/block inside an existing page's body (an append isn't reliably freshness-checkable downstream; a new titled child page is — standardized pattern, see `ora-deal-aging-sla` STEP 7).
 
 Content, at minimum:
 - Deals surfaced (count pulled in STEP 1)
 - Deals flagged STALLED (count from STEP 2)
 - A pointer to the full board: link(s) to the surfaced deals' Notion pages, or a note that the full interactive board rendered in-session (widget) and is not separately archived
 
-If STEP 1's Notion query failed or returned clearly incomplete data (per HARD GUARDRAILS), post this page anyway, stating that explicitly — a missing post must never be the silent downstream result of an upstream query failure. On a Notion post failure, retry once, then flag loudly in the chat/run summary — do not silently drop the post.
+If STEP 1's Notion query failed or returned clearly incomplete data (per HARD GUARDRAILS), post this page anyway, stating that explicitly — a missing post must never be the silent downstream result of an upstream query failure. On a Notion post failure (including a create response without a page ID, e.g. a grace-period/quota notice), first look for it — `notion-fetch` the parent for an exact-title child, then search by the exact title (search lags: a miss alone is not proof; the retry below is only for non-grace/quota failures — after a grace/quota notice with no match, do not retry: flag the post loudly as UNVERIFIED) — a match created at/after the create call is this run's page, use it and do not retry (never blind-retry a create — that produced a duplicate; quota errors → `notion-quota-fallback` skill); retry once only if no match, then flag loudly in the chat/run summary — do not silently drop the post.
 
 ## HARD GUARDRAILS (verbatim from ora-open-sessions-board — do not weaken)
 - No money, trades, or any external send without Gabriel's in-turn confirmation.
