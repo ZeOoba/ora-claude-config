@@ -145,12 +145,50 @@ function Get-PhantomSummary($r) {
     return @{ Rc = $rc; Count = $count; Detail = $detail }
 }
 
-function Test-BoundedPause($reg, $label = '') {
+function Get-CarveOutIds($label) {
     # Carve-outs (2026-09-22): recurring tasks that stay ENABLED through every pause by
     # standing rule, so their being enabled is not evidence the fleet is live. Mirrors
     # _shared/fleet_pause.py PAUSE_CARVE_OUTS. Keep the two lists identical. Before this,
     # the ora-am-brief carve-out made every real CC pause read as live.
     $carveOuts = @{ cc = @('ora-am-brief'); lams = @() }
+    if ($label -and $carveOuts.ContainsKey($label)) { return @($carveOuts[$label]) }
+    return @()
+}
+
+function Get-EnabledCarveOutTasks($reg, $label) {
+    $ids = @(Get-CarveOutIds $label)
+    if ($ids.Count -eq 0) { return @() }
+    try {
+        $tasks = @((Get-Content -Raw -Path $reg | ConvertFrom-Json).scheduledTasks)
+    } catch { return @() }
+    return @($tasks | Where-Object {
+        $tid = if ($_.id) { $_.id } else { $_.taskId }
+        $_.cronExpression -and $_.enabled -and ($ids -contains $tid) })
+}
+
+function Test-HasEnabledCarveOut($reg, $label) {
+    # A fleet whose carve-out task is still enabled is NOT "all paused" for the send-log
+    # check: that task still sends (the Daily Brief). Merge-gate R7, 2026-09-22.
+    return (@(Get-EnabledCarveOutTasks $reg $label).Count -gt 0)
+}
+
+function Get-StaleCarveOuts($reg, $label, [double]$thresholdH) {
+    # Merge-gate R7, 2026-09-22: a carve-out task keeps running through a bounded pause, so
+    # the pause must NOT excuse it. Before this, a dead ora-am-brief during a CC pause read as
+    # "BOUNDED PAUSE, alarm suppressed" for up to 14 days. Returns 'id (Nh)' for each enabled
+    # carve-out task whose own lastRunAt is older than the threshold, or has never run.
+    $out = @()
+    foreach ($t in @(Get-EnabledCarveOutTasks $reg $label)) {
+        $tid = if ($t.id) { $t.id } else { $t.taskId }
+        $ageH = $null
+        if ($t.lastRunAt) { try { $ageH = [math]::Round(((Get-Date).ToUniversalTime() - ([DateTime]::Parse($t.lastRunAt)).ToUniversalTime()).TotalHours, 1) } catch { } }
+        if ($null -eq $ageH) { $out += ($tid + ' (never ran)') }
+        elseif ($ageH -gt $thresholdH) { $out += ($tid + ' (' + $ageH + 'h)') }
+    }
+    return $out
+}
+
+function Test-BoundedPause($reg, $label = '') {
     # Added 2026-09-10 (ORA Automation Audit R24-3). Returns the earliest future resume
     # time (UTC DateTime) if this fleet is under a DELIBERATE bounded pause, else $null.
     #
@@ -171,7 +209,7 @@ function Test-BoundedPause($reg, $label = '') {
         $d = Get-Content -Raw -Path $reg | ConvertFrom-Json
         $tasks = @($d.scheduledTasks)
         if ($tasks.Count -eq 0) { return $null }
-        $carve = if ($label -and $carveOuts.ContainsKey($label)) { @($carveOuts[$label]) } else { @() }
+        $carve = @(Get-CarveOutIds $label)
         # id first, taskId as fallback -- same key order as fleet_pause.py.
         $recurring = @($tasks | Where-Object {
             $tid = if ($_.id) { $_.id } else { $_.taskId }
@@ -266,9 +304,15 @@ try {
             # only the alert, same principle as $PhantomThreshold above.
             $pauseUntil = Test-BoundedPause $reg $fleet.Label
             if ($null -ne $pauseUntil) {
-                $pausedFleets += $fleet.Label
+                if (-not (Test-HasEnabledCarveOut $reg $fleet.Label)) { $pausedFleets += $fleet.Label }
                 $okBits += ($fleet.Label + '=' + $count + ' tasks, BOUNDED PAUSE (all recurring disabled, resume queued ' +
                             $pauseUntil.ToString('s') + 'Z) - last run ' + $ageH + 'h ago, alarm suppressed')
+                # R7: carve-out tasks run THROUGH the pause, so the pause never excuses them.
+                $staleCarve = @(Get-StaleCarveOuts $reg $fleet.Label $ThresholdHours)
+                if ($staleCarve.Count -gt 0) {
+                    $problems += ('fleet ' + $fleet.Label + ': carve-out task(s) not run during the bounded pause: ' +
+                                  ($staleCarve -join ', ') + ' (threshold ' + $ThresholdHours + 'h)')
+                }
             } else {
                 $problems += ('fleet ' + $fleet.Label + ': no task run in ' + $ageH + 'h (threshold ' + $ThresholdHours + 'h)  [' + $reg + ']')
             }

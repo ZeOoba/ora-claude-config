@@ -24,6 +24,7 @@ FAST_PRODUCERS = (
     "phantom-dispatch.log",         # phantom-dispatch-probe.py, run daily by ORA Fleet Dead-Man (R6)
     "phantom-dispatch.json",        # same
     "ensure-claude-renderer.log",   # ORA Claude Desktop Wake-and-Launch, daily (R6)
+    "pause-resume-guard-state.json",  # ORA Fleet Pause-Resume Guard, save_state() every 6h run (R7)
 )
 
 # Every watched file a Windows Task Scheduler job writes (enumerated from the live ORA*
@@ -105,10 +106,46 @@ def test_weekly_windows_producer_keeps_the_weekly_limit():
     assert "ora-nightly-disk.log" not in sfp.MAX_AGE_OVERRIDES
 
 
+def test_event_driven_windows_files_are_not_periodic():
+    """Merge-gate R7: failure markers and on-change records are skipped, not aged. The
+    pause-resume guard's own state file is NOT one of them: it is saved on every run."""
+    assert "heartbeat-publish-failed.json" in sfp.NOT_PERIODIC
+    assert "pause-resume-guard-state.json" not in sfp.NOT_PERIODIC
+
+
 def test_start_logs_are_never_pause_explained():
     """Merge-gate R5: the *.start.log breadcrumbs are written by the same Windows tasks as
     the verdict logs, which keep running through a fleet pause."""
     assert {"fleet-deadman.start.log", "push-fleet-heartbeat.start.log"} <= sfp.PAUSE_INDEPENDENT
+
+
+def test_weekly_producer_frozen_by_a_long_pause_is_pause_explained(tmp_path, monkeypatch, capsys):
+    """Merge-gate R7: a weekly CC producer last written 72h BEFORE the pause began was
+    not stale then (72h < 192h); the pause stopped its next run. It must read [PAUSED],
+    not a false '[STALE] ALREADY stale before the pause began'. The old test used a flat
+    6h grace instead of the file's own limit."""
+    import time as _t
+    now = _t.time()
+    pause_start = now - 5 * 86400
+    (tmp_path / "_state").mkdir()
+    weekly = tmp_path / "_state" / "weekly-detector.json"
+    weekly.write_text("x")
+    os.utime(weekly, (pause_start - 72 * 3600, pause_start - 72 * 3600))   # 192h old now
+    really_stale = tmp_path / "_state" / "dead-detector.json"
+    really_stale.write_text("x")
+    os.utime(really_stale, (pause_start - 200 * 3600, pause_start - 200 * 3600))  # > limit at pause start
+    monkeypatch.setattr(sfp, "HERE", str(tmp_path))
+    monkeypatch.setattr(sfp.fleet_pause, "pause_state", lambda f: (
+        {"paused": True, "paused_since": pause_start, "resume_epoch": now + 86400, "error": None}
+        if f == "cc" else {"paused": False, "paused_since": None, "resume_epoch": None, "error": None}))
+    rc = sfp.main()
+    out = capsys.readouterr().out
+    wl = "\n".join(l for l in out.splitlines() if "weekly-detector.json" in l)
+    dl = "\n".join(l for l in out.splitlines() if "dead-detector.json" in l)
+    assert "[PAUSED]" in wl, wl
+    # the genuinely stale one is still a finding, with the true (CC-branch) reason
+    assert "[STALE]" in dl and "ALREADY stale before the pause began" in dl, dl
+    assert rc == 1
 
 
 def test_no_override_is_looser_than_default():

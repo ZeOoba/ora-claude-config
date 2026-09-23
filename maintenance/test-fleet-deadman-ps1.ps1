@@ -84,6 +84,35 @@ Expect 'phantom summary parses count and detail from stdout' (($ph.Rc -eq 1) -an
 $ph = Get-PhantomSummary @{ TimedOut = $true; Rc = $null; Out = '' }
 Expect 'phantom summary: timeout is exit 2 with count 0'      (($ph.Rc -eq 2) -and ($ph.Count -eq 0))
 
+# --- R7: a carve-out task (ora-am-brief) that dies DURING a bounded pause must still alarm.
+# The carve-out made the fleet read as paused, which suppressed the only alarm that would
+# have caught a dead Daily Brief for up to 14 days.
+$old = [DateTime]::UtcNow.AddHours(-40).ToString('o')
+$new = [DateTime]::UtcNow.AddHours(-2).ToString('o')
+$r4 = Reg @(
+    @{ id = 'ora-am-brief'; cronExpression = '0 6 * * *'; enabled = $true; lastRunAt = $old },
+    @{ id = 'a'; cronExpression = '0 5 * * 1'; enabled = $false; lastRunAt = $old },
+    @{ id = 'r'; fireAt = $future; enabled = $true })
+$stale = @(Get-StaleCarveOuts $r4 'cc' 30)
+Expect ('stale carve-out task is reported during a pause (' + ($stale -join ',') + ')') (($stale.Count -eq 1) -and ($stale[0] -match '^ora-am-brief'))
+$r5 = Reg @(
+    @{ id = 'ora-am-brief'; cronExpression = '0 6 * * *'; enabled = $true; lastRunAt = $new },
+    @{ id = 'a'; cronExpression = '0 5 * * 1'; enabled = $false; lastRunAt = $old },
+    @{ id = 'r'; fireAt = $future; enabled = $true })
+Expect 'fresh carve-out task is not reported'            (@(Get-StaleCarveOuts $r5 'cc' 30).Count -eq 0)
+$r6 = Reg @(
+    @{ id = 'ora-am-brief'; cronExpression = '0 6 * * *'; enabled = $true },
+    @{ id = 'r'; fireAt = $future; enabled = $true })
+Expect 'carve-out task that never ran is reported'       (@(Get-StaleCarveOuts $r6 'cc' 30).Count -eq 1)
+Expect 'no carve-outs on lams -> nothing reported'       (@(Get-StaleCarveOuts $r4 'lams' 30).Count -eq 0)
+$r7 = Reg @(
+    @{ id = 'ora-am-brief'; cronExpression = '0 6 * * *'; enabled = $false; lastRunAt = $old },
+    @{ id = 'r'; fireAt = $future; enabled = $true })
+Expect 'a DISABLED carve-out task is not reported (it is paused on purpose)' (@(Get-StaleCarveOuts $r7 'cc' 30).Count -eq 0)
+Expect 'a DISABLED carve-out task does not count as enabled' (-not (Test-HasEnabledCarveOut $r7 'cc'))
+Expect 'fleet with an enabled carve-out is not fully paused for send-log purposes' (Test-HasEnabledCarveOut $r5 'cc')
+Expect 'lams has no enabled carve-out'                   (-not (Test-HasEnabledCarveOut $r5 'lams'))
+
 # --- taskId-keyed registries get the same carve-out as id-keyed ones (parity with fleet_pause.py)
 $r3 = Reg @(
     @{ taskId = 'ora-am-brief'; cronExpression = '0 6 * * *'; enabled = $true },
@@ -233,6 +262,28 @@ $carveTable = if ($carveAssign.Count -eq 1) { & ([scriptblock]::Create($carveAss
 $carveKeys = if ($carveTable) { @($carveTable.Keys) | Sort-Object } else { @() }
 Expect 'fleet labels are exactly the carve-out keys' (($fleetLabels.Count -gt 0) -and
     ((@($fleetLabels) -join ',') -eq (@($carveKeys) -join ',')))
+
+# R7 wiring: the paused branch must check carve-out staleness and turn it into a problem,
+# and a fleet with an enabled carve-out must not join $pausedFleets (send-log suppression).
+$ifs = AllOf $ast { param($n) $n -is [System.Management.Automation.Language.IfStatementAst] -and
+                               $n.Clauses[0].Item1.Extent.Text -match '^\$null -ne \$pauseUntil$' }
+$pausedBody = if ($ifs.Count -eq 1) { $ifs[0].Clauses[0].Item2 } else { $null }
+Expect 'paused branch calls Get-StaleCarveOuts with the fleet label and threshold' (($null -ne $pausedBody) -and
+    (@(Cmds $pausedBody 'Get-StaleCarveOuts' | Where-Object { ($_.Extent.Text -replace '\s+', ' ') -eq 'Get-StaleCarveOuts $reg $fleet.Label $ThresholdHours' }).Count -eq 1))
+$probAssign = if ($pausedBody) { AllOf $pausedBody { param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+                                   $n.Left.Extent.Text -eq '$problems' -and $n.Right.Extent.Text -match '\$staleCarve' } } else { @() }
+Expect 'paused branch turns stale carve-outs into $problems' ($probAssign.Count -ge 1)
+# The problem line must be guarded by exactly `$staleCarve.Count -gt 0` (a neutered guard
+# such as `if ($false)` kept the line present but unreachable).
+$guardOk = $false
+foreach ($pa in $probAssign) {
+    $p = $pa.Parent
+    while ($p -and $p -isnot [System.Management.Automation.Language.IfStatementAst]) { $p = $p.Parent }
+    if ($p -and (($p.Clauses[0].Item1.Extent.Text -replace '\s+', ' ') -eq '$staleCarve.Count -gt 0')) { $guardOk = $true }
+}
+Expect 'the stale-carve-out problem is guarded by $staleCarve.Count -gt 0' $guardOk
+Expect 'fleet joins $pausedFleets only when it has no enabled carve-out' (($null -ne $pausedBody) -and
+    ($pausedBody.Extent.Text -match 'if\s*\(\s*-not\s*\(\s*Test-HasEnabledCarveOut\s+\$reg\s+\$fleet\.Label\s*\)\s*\)\s*\{\s*\$pausedFleets\s*\+=\s*\$fleet\.Label'))
 
 # R6: each fleet label must point at ITS store, matching fleet_pause.STORES. Swapping the
 # two labels passed every other check while applying the CC carve-out to the LAMS registry.
