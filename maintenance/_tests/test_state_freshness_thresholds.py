@@ -19,6 +19,7 @@ FAST_PRODUCERS = (
     "fleet-deadman.log",            # ORA Fleet Dead-Man, daily
     "push-fleet-heartbeat.log",     # ORA Fleet Heartbeat Push, daily
     "heartbeat-publish-ok.json",    # ORA Fleet Heartbeat Push, daily
+    "backup-push-ok.json",          # ORA Fleet Heartbeat Push backup step, daily (OI-331)
     "stuck-session-watchdog.log",   # ORA Stuck-Session Watchdog, every 30 min
     "phantom-dispatch.log",         # phantom-dispatch-probe.py, run daily by ORA Fleet Dead-Man (R6)
     "phantom-dispatch.json",        # same
@@ -35,6 +36,13 @@ WINDOWS_PRODUCED = FAST_PRODUCERS + (
     "ora-nightly-disk.log",         # ORA Nightly Disk Clean, WEEKLY since 2026-09-17
     "task-folder-registration.log", # ORA Headless - stranded-spec, WEEKLY (merge-gate R8)
 )
+
+
+def test_backup_push_failed_marker_is_declared_not_periodic():
+    # OI-331: written only when the backup push fails and removed on the next success, so its
+    # age means nothing; the ok stamp (48h, pause-independent) is what catches a dead backup.
+    assert "backup-push-failed.json" in sfp.NOT_PERIODIC
+    assert sfp.NOT_PERIODIC["backup-push-failed.json"].strip()
 
 
 def test_default_covers_one_weekly_cycle_plus_grace():
