@@ -71,6 +71,11 @@ NOT_PERIODIC = {
         "failure marker: written by publish-fleet-heartbeat.py only on a failed publish and "
         "removed on the next success; its absence or age means nothing (merge-gate R7). "
         "A dead publisher is caught by heartbeat-publish-ok.json (48h, pause-independent)",
+    "backup-push-failed.json":
+        "failure marker: written by push-fleet-heartbeat.ps1's backup-push step only when that "
+        "step fails and removed on the next success; its absence or age means nothing "
+        "(OI-331, same class as heartbeat-publish-failed.json). A dead or failing backup is "
+        "caught by backup-push-ok.json (48h, pause-independent)",
     "fleet-pause-windows.json":
         "written by pause_windows.capture() only when a hold starts or ends, so it is "
         "untouched for as long as the fleet is live; any age limit false-alarms after "
@@ -93,6 +98,7 @@ MAX_AGE_OVERRIDES = {
     "fleet-deadman.log": 48.0,           # ORA Fleet Dead-Man (Windows, daily)
     "push-fleet-heartbeat.log": 48.0,    # ORA Fleet Heartbeat Push (Windows, daily)
     "heartbeat-publish-ok.json": 48.0,   # ORA Fleet Heartbeat Push (Windows, daily)
+    "backup-push-ok.json": 48.0,         # ORA Fleet Heartbeat Push backup step (Windows, daily; OI-331)
     "stuck-session-watchdog.log": 48.0,  # ORA Stuck-Session Watchdog (Windows, 30 min)
     "phantom-dispatch.log": 48.0,        # phantom-dispatch-probe.py, run daily by ORA Fleet Dead-Man (R6)
     "phantom-dispatch.json": 48.0,       # same
@@ -112,6 +118,7 @@ PAUSE_INDEPENDENT = frozenset({
     "fleet-deadman.log",            # ORA Fleet Dead-Man
     "push-fleet-heartbeat.log",     # ORA Fleet Heartbeat Push
     "heartbeat-publish-ok.json",    # ORA Fleet Heartbeat Push
+    "backup-push-ok.json",          # ORA Fleet Heartbeat Push backup step (OI-331)
     "stuck-session-watchdog.log",   # ORA Stuck-Session Watchdog
     "fleet-deadman.start.log",      # ORA Fleet Dead-Man START breadcrumbs (merge-gate R5)
     "push-fleet-heartbeat.start.log",  # ORA Fleet Heartbeat Push START breadcrumbs
