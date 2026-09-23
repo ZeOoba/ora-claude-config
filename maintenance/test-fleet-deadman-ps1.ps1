@@ -41,8 +41,31 @@ $res = Invoke-PyBounded $py @('-c', 'import time; time.sleep(30)') 3
 Expect 'hung child returns TimedOut'                      ($res.TimedOut -eq $true)
 # 120s = the production bound. A 20s budget false-failed under load (merge-gate R3), and a
 # timeout here must be distinguishable from a logic failure, so TimedOut goes in the label.
-$res = Invoke-PyBounded $py @('-c', 'print(\"hi\"); raise SystemExit(1)') 120
-Expect ('normal child returns output and exit code (TimedOut=' + $res.TimedOut + ', Rc=' + $res.Rc + ')') (($res.TimedOut -eq $false) -and ($res.Rc -eq 1) -and ($res.Out -match 'hi'))
+# R4: the old payload carried quotes that were mangled into a SyntaxError, so "hi" was only
+# ever matched on STDERR and stdout capture was never tested. Quote-free payload, and
+# stdout / stderr asserted separately.
+$res = Invoke-PyBounded $py @('-c', 'import sys; print(123456); sys.stderr.write(chr(81)*3); raise SystemExit(1)') 120
+Expect ('normal child: exit code and STDOUT captured (TimedOut=' + $res.TimedOut + ', Rc=' + $res.Rc + ')') (($res.TimedOut -eq $false) -and ($res.Rc -eq 1) -and ($res.Out -match '123456'))
+Expect 'normal child: STDERR captured too'                 ($res.Out -match 'QQQ')
+
+# R4 correctness-F2: Windows argv quoting must round-trip trailing backslashes, embedded
+# quotes and spaces.
+$tricky = @('C:\dir\', 'a"b', 'two words', 'x\\"y', '')
+$res = Invoke-PyBounded $py (@('-c', 'import sys, json; print(json.dumps(sys.argv[1:]))') + $tricky) 60
+$got = try { @($res.Out.Trim() | ConvertFrom-Json) } catch { @('PARSE-FAIL: ' + $res.Out) }
+Expect ('arguments round-trip exactly (got=' + ($got -join '|') + ')') ((($got -join '|') -eq ($tricky -join '|')) -and ($got.Count -eq $tricky.Count))
+
+# R4 correctness-F1: a grandchild that inherits the output pipes must not defeat the bound.
+$sw = [System.Diagnostics.Stopwatch]::StartNew()
+$res = Invoke-PyBounded $py @('-c', 'import subprocess, sys; subprocess.Popen([sys.executable, chr(45)+chr(99), chr(105)+chr(109)+chr(112)+chr(111)+chr(114)+chr(116)+chr(32)+chr(116)+chr(105)+chr(109)+chr(101)+chr(59)+chr(116)+chr(105)+chr(109)+chr(101)+chr(46)+chr(115)+chr(108)+chr(101)+chr(101)+chr(112)+chr(40)+chr(50)+chr(48)+chr(41)]); print(1)') 3
+$sw.Stop()
+Expect ('pipe-holding grandchild cannot exceed the bound (elapsed=' + [int]$sw.Elapsed.TotalSeconds + 's, TimedOut=' + $res.TimedOut + ')') (($sw.Elapsed.TotalSeconds -lt 12) -and ($res.TimedOut -eq $true))
+
+# R4 test-validity-F1: the phantom-count parse is a helper; stdout loss must not zero the count.
+$ph = Get-PhantomSummary @{ TimedOut = $false; Rc = 1; Out = "header`nphantom : 3`n  2026-09-20 10:00 ora-x [never-confirmed]`n" }
+Expect 'phantom summary parses count and detail from stdout' (($ph.Rc -eq 1) -and ($ph.Count -eq 3) -and (@($ph.Detail).Count -eq 1))
+$ph = Get-PhantomSummary @{ TimedOut = $true; Rc = $null; Out = '' }
+Expect 'phantom summary: timeout is exit 2 with count 0'      (($ph.Rc -eq 2) -and ($ph.Count -eq 0))
 
 # --- taskId-keyed registries get the same carve-out as id-keyed ones (parity with fleet_pause.py)
 $r3 = Reg @(
@@ -138,9 +161,15 @@ Expect 'LogStart writes the start log, never the main log (heartbeat)' (LogStart
 
 # Main-body wiring: the helpers are only worth testing if the main body actually uses them.
 $rcAssign = AllOf $ast { param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and
-                                   $n.Left.Extent.Text -eq '$rc' }
-Expect 'main body assigns $rc from Resolve-ProbeRc' (($rcAssign.Count -ge 1) -and
-    (@($rcAssign | Where-Object { @(Cmds $_ 'Resolve-ProbeRc').Count -eq 0 }).Count -eq 0))
+                                   $n.Left.Extent.Text -eq '$rc' -and -not (InsideFunction $n 'Get-PhantomSummary') }
+Expect 'main body takes $rc from the phantom summary (which uses Resolve-ProbeRc)' (($rcAssign.Count -ge 1) -and
+    (@($rcAssign | Where-Object { $_.Right.Extent.Text -notmatch '^\$ph\.Rc$' }).Count -eq 0))
+$phAssign = AllOf $ast { param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+                                   $n.Left.Extent.Text -eq '$ph' }
+Expect 'main body builds $ph with Get-PhantomSummary from the probe result' (($phAssign.Count -eq 1) -and
+    ($phAssign[0].Right.Extent.Text -match '^Get-PhantomSummary\s+\$r$'))
+$gps = AllOf $ast { param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-PhantomSummary' }
+Expect 'Get-PhantomSummary derives its rc via Resolve-ProbeRc' (($gps.Count -eq 1) -and (@(Cmds $gps[0] 'Resolve-ProbeRc').Count -ge 1))
 $gpv = @(Cmds $ast 'Get-PublishVerdict' | Where-Object { -not (InsideFunction $_ 'Get-PublishVerdict') })
 $vOkIfs = AllOf $ast { param($n) $n -is [System.Management.Automation.Language.IfStatementAst] -and
                                  $n.Clauses[0].Item1.Extent.Text -match '^\$v\.Ok$' }

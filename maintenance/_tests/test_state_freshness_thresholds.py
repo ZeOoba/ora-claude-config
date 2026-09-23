@@ -64,9 +64,20 @@ def test_windows_producers_are_never_pause_suppressed(tmp_path, monkeypatch, cap
     for name in FAST_PRODUCERS:
         assert "[STALE] " in "\n".join(l for l in out.splitlines() if name in l), (name, out)
     assert "[PAUSED]" in "\n".join(l for l in out.splitlines() if "registry-membership.log" in l), out
+    # R4: the stated reason must be the true one -- these files were written AFTER the
+    # pause began; they are stale because they run outside the fleets, not "already stale".
+    dm_line = "\n".join(l for l in out.splitlines() if "fleet-deadman.log" in l)
+    assert "outside the scheduled-task fleets" in dm_line and "ALREADY stale" not in dm_line, dm_line
     assert rc == 1
 
 
 def test_no_override_is_looser_than_default():
     for name, hours in sfp.MAX_AGE_OVERRIDES.items():
         assert hours <= sfp.DEFAULT_MAX_AGE_H, name
+
+
+if __name__ == "__main__":
+    # The pre-push hook-tests gate runs every _tests file as `python <file>` (merge-gate R4:
+    # without this block the file ran zero assertions under the gate and always exited 0).
+    import sys
+    sys.exit(pytest.main([__file__, "-q", "-p", "no:cacheprovider"]))
