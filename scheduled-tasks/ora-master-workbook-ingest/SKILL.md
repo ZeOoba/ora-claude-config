@@ -72,7 +72,7 @@ e. [added 2026-08-03] Maintain the **Open Workbook Corrections register** — No
    Then reference the register (by link, one-line status each) in the Dashboard's QC Exceptions section and in the STEP 6 email — do NOT restate each correction's full detail in the email. The register holds the detail; the email holds only what changed.
 
 STEP 5 — PUBLICATION GUARD
-For each Notion write, capture pages[0].id; if the id is missing or the call failed (e.g. a grace-period/quota notice), first search by the exact title — a match created at/after the create call is this run's page, use it, do not retry; retry once only if no match (never blind-retry a create — it produced a duplicate; quota errors → `notion-quota-fallback` skill); verify by title search. Apply the shared _shared\PUBLICATION_GUARD.md pattern if present.
+For each Notion write, capture pages[0].id; if the id is missing or the call failed (e.g. a grace-period/quota notice), first look for it — `notion-fetch` the parent for an exact-title child, then search by the exact title (search lags: a miss alone is not proof; after a grace/quota notice never retry, report UNVERIFIED) — a match created at/after the create call is this run's page, use it, do not retry; retry once only if no match (never blind-retry a create — it produced a duplicate; quota errors → `notion-quota-fallback` skill); verify by title search. Apply the shared _shared\PUBLICATION_GUARD.md pattern if present.
 
 STEP 6 — CONDITIONAL NOTIFICATION
 Email if any of:
