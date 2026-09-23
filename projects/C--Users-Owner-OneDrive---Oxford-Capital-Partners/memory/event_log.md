@@ -5,12 +5,78 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-09-22T22:56:18.384Z
+  modified: 2026-09-23T15:14:10.914Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-09-23 -- acquisition-underwriting v4.23 reimport confirmed
+
+acquisition-underwriting v4.23 reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
+
+## 2026-09-23 — 09-28 resume reminder email now names the LAMS resume brief
+- **Authority:** Gabriel, in-turn: "yes, add the path to the reminder too".
+- `scheduled-tasks/ora-resume-0928-attend-reminder/SKILL.md` (09:30 heads-up): the LAMS sentence now says the resume is not a registered task and gives the brief path `maintenance/_state/handoffs/2026-09-28_LAMS-fleet-resume_brief.md`, with start-by-10:30 ET. Only that sentence changed; frontmatter and registry are untouched.
+- Preflight CONTESTED was handled per rules.md §14, exactly as for the resume task earlier today: the folder is untracked and was written by `create_scheduled_task` at 09-22 10:42:37 (mtime = creation), with no claims. Still uncommitted, as it has been since registration.
+
+## 2026-09-23 — ora-skills `tools tests` CI green again; zero-skip gate moved into `tools/run_suite.sh`
+- **Authority:** Gabriel, in-turn: fix the failing `tools tests` workflow without relaxing the zero-skip gate; then merge #72, #73, #75 and clean up worktrees.
+- **Cause:** `tools/test_package_census.py` reported `OK (skipped=7)` ("PyMuPDF not installed"), so the zero-skip gate failed every main push from 2026-09-22 (e.g. run 35786603866).
+- **#72 (`f7658af`):** workflow installs `pymupdf`. That exposed a platform skip: `test_path_over_260_characters_is_read_and_flagged` only runs on Windows (`skipUnless(os.name == "nt")`). `ALLOWED_SKIPS` is now exact-count `path=N`; before, an entry exempted the whole file. Only entry: `tools/test_package_census.py=1`. Losing PyMuPDF (skipped=7) still fails.
+- **#73 (`117fd1e`):** README step 7.4 now requires zero skips locally (was "no new SKIP"), adds the PyMuPDF install prerequisite and documents the `path=N` form.
+- **#75 (`0b12a85`):** gate logic moved out of the workflow into `tools/run_suite.sh`; CI and README step 7 both run it. The census allowance applies only when `OS != Windows_NT`, so the Windows baseline stays zero. `.gitattributes` adds `*.sh text eol=lf`. Gate checked on 6 synthetic cases, all correct.
+- **Verified:** main CI green after each merge. Full suite on Windows through the script: 0 failures, 0 skips.
+- **Review gap:** merged on CI plus local evidence only. CodeRabbit was rate-limited on all three PRs, and no adversarial review ran on #75's CI-gate rewrite. Gabriel accepted this at merge.
+- **Lesson (friction):** an earlier local run printed 5 false `FAIL`s because its worktree was force-removed mid-run. Let a suite running in a worktree finish before removing the worktree.
+- **Housekeeping:** worked under claim slug `repo-housekeeping-tools-ci`, because `repo-housekeeping` was held by session 27a75818 on disjoint paths. Claim released; all three worktrees and branches removed.
+
+## 2026-09-23 — CC resume task's STEP 5 email corrected: no LAMS resume is registered
+- **Authority:** Gabriel, in-turn: "yes, fix the CC resume email line".
+- `scheduled-tasks/ora-routine-pause-resume-09-28/SKILL.md` STEP 5: the reminder said the LAMS resume was "registered 2026-09-22", which is false. It now says LAMS is not covered, has no registered resume, and is resumed by hand from a native Cowork session via `maintenance/_state/handoffs/2026-09-28_LAMS-fleet-resume_brief.md` (start by 10:30 ET). The edit touches only that sentence; frontmatter, cron and registry are untouched (probe clean, CC still 1 recurring + 5 one-time).
+- Preflight returned CONTESTED, handled per rules.md §14 as a zero-live-owner file: the folder is untracked, written by `create_scheduled_task` at 09-22 10:42:33 (mtime = creation, so unedited since), with no claims. Checked by hand, then edited directly. The folder is still uncommitted, as it has been since registration.
+
+## 2026-09-22 — LAMS fleet resume handoff written for 09-28 (closes "no LAMS resume" gap)
+- **Authority:** Gabriel, in-turn: "write a LAMS resume handoff for 09-28".
+- **Brief:** `maintenance/_state/handoffs/2026-09-28_LAMS-fleet-resume_brief.md`. It is run by hand from a native on-device Cowork session on Mon 09-28, in the same attended sitting as the CC `ora-routine-pause-resume-09-28` (10:00), starting by 10:30 so the LAMS Monday slots (10:35+) fire on schedule. It is a brief rather than a registered task because a scheduled resume blocks on approval prompts when nobody is present (OI-273).
+- **Scope:** re-enables 25 LAMS recurring ids (27 disabled minus `ora-ar-export-freshness-nudge` and `ora-health-guard-fail-aging-nudge`, both retire-pending). Step 1 requires `2026-09-22_LAMS-once-weekly-cleanup_brief.md` to finish first, or runs it inline. It subsumes the 09-22 partial re-enable (outreach-queue-refresh, heartbeat, AHM) and does not re-stamp `[MODEL:]` (skill doctrine over the 09-22 note). Heartbeat gets a same-day catch-up run to restore the dead-man chain.
+- **Found while writing (not fixed):** the CC `ora-routine-pause-resume-09-28` SKILL.md STEP 5 email tells Gabriel the LAMS resume was "registered 2026-09-22". That is false: no LAMS resume is registered, and the brief is the resume. Also, 09-22 Claude Code sessions were blocked from reading the LAMS registry via Bash (config-write-guard matches the path + a heredoc); Grep/Read works.
+
+## 2026-09-22 — R27 remediation Phase 0 + Phase 1 (setup audit, Gabriel-directed)
+
+Plan: `~/.claude/docs/plans/2026-09-22-setup-remediation-plan.md`. Audit: Automation Audit Rev 27.
+
+**Phase 0 (baseline):** local tags `pre-r27-2026-09-22` on ~/.claude b394e1c, ora-skills 275bb39, occ f5ec375, ora-pm 35669b8 (not pushed). Warehouse DB backed up to `data/warehouse/archive/`. Baseline: hooks 57/57, maintenance 41/41, both JS suites green when run serially, registries snapshotted, 268-row capability ledger, hook latency 1,323ms blocking per Bash call. Record: `maintenance/_state/r27-baseline/BASELINE.md`.
+
+**Phase 1 executed:**
+- Windows tasks Dead-Man, Heartbeat Push, Wake-and-Launch and Headless ×3 now carry RestartOnFailure (3×, PT5M). The 09-22 09:37 wake catch-ups died `0xC000013A` in 6–8s, before their first log write. Root cause still unproven; see PR #260's START lines. Heartbeat push re-run → `publish --status` OK. Post-change XML: `_state/task-xml-backup-2026-09-22-r27/`. The pre-change XML export failed, so rollback = remove RestartOnFailure (the 09-17 backups had none).
+- 4 same-minute collisions retimed, all still `enabled:false`: forward-calendar-digest `30 12 * * 1`, loopnet-listings-sync `30 14 * * 1`, hubspot-renewal-closeout-tasks `0 15 * * 1`, excess-usage-sweep `45 15 * * 5`. **The cron update RE-ENABLED all 4**, the same footgun as 09-17. Re-disabled within ~1 min, nothing fired, enabled count re-verified = baseline 6. Rule landed: ora-skills #74 (`register-scheduled-task` v2.28).
+- Uninstalled disabled plugins `code-review` and `commit-commands` (no live dependents).
+
+**Closed, no change:** 1.2 roster cadence mismatch: the 09-17 weekly cap is intentional and the roster is stale (regenerates after resume). 1.5 excel MCP allow: inert under bypassPermissions; workbook-write hook already matches `mcp__excel__.*`. 1.6 blocklist is harness-managed.
+
+**Corrected audit finding:** the `OneDrive - Oxford Capital Partners (1)` mount is Gabriel's account sync root, NOT a duplicate. Left untouched.
+
+**Awaiting Gabriel:** import `ora-skills/_staging/2026-09-22_R27-phase1_reimport/` (acquisition-underwriting v4.23 + register-scheduled-task v2.28; supersedes the R26-2 packages). Decide on 3 unlanded ~/.claude worktree branches (feat/prune-exclude-bridges, feat/prepush-gate-preexisting-on-main, fix/eval-harness-poll-skip-gate: 1 unique commit each, no PR). Decide on `Claude_Workspace/_CLAUDE_REVIEW_DELETE_` (26MB).
+
+## 2026-09-22 — LAMS fleet fully disabled; Gabriel approves partial re-enable (option 2)
+- **Finding:** all 27 LAMS/Cowork recurring tasks read `enabled:false` (registry, 2026-09-22); no LAMS resume queued (09-22 pause resume `ora-routine-pause-resume-09-28` is CC-only; `ora-lams-fleet-resume-20260911` already fired). No event_log record of the LAMS disable. Consequence: dead-man chain (`ora-cowork-heartbeat`) and `automation-health-monitor` silent — why the 09-21 `ora-owner-outreach-queue-refresh` miss went unalarmed. Confirmed independently by session "Routines audit and optimization".
+- **Decision (Gabriel, in-turn):** re-enable ONLY `ora-owner-outreach-queue-refresh`, `ora-cowork-heartbeat`, `automation-health-monitor`. Other 24 stay disabled pending `handoffs/2026-09-22_LAMS-once-weekly-cleanup_brief.md` (its "do not re-enable" line superseded for these 3 ids only).
+- **Execution:** PENDING — LAMS write; must run from a native on-device Cowork session or the Cowork UI enable toggle (never the trash icon). Re-tag `[MODEL:]` with current date at enable. Log completion here.
+
+## 2026-09-22 — CLOSED: broker-touch-cadence / deal-sourcing-scan doctrine conflicts (local 09-19 versions canonical)
+
+Closes the "Preserved verbatim, NOT reconciled — needs Gabriel" item in today's "Live ~/.claude checkout synced to origin/main" entry.
+
+- **Gabriel's ruling, 2026-09-22:** the live-checkout 09-19 versions are canonical over main's 09-13 graft B.
+- `ora-deal-sourcing-scan` v2.7 (listing-agent capture): landed on `origin/main` in `37f247d`. The live file is byte-identical to main.
+- `ora-broker-touch-cadence` v1.2: landed via ZeOoba/ora-claude-config PR #258, merged 2026-09-22T21:00Z (`6a55596` + `7e3dc7a`; merge `bf21a54`).
+  - Kept: the STEP 0 double-fire guard (`--period month`) and the figure-safe draft path.
+  - Dropped: graft-B scorecard ranking and listing citation. If listing citation returns, its non-disclosure and ACTIVE-DEAL CHECK guards must return with it.
+  - The run-guard conformance test was updated in the same PR (pre-push 131/131).
+- Residual: the live checkout differs from main by one changelog sentence that PR #258 reworded. It is wording only and does not change behavior; it syncs when the checkout is switched to `main` (claimed by another session).
+- Verified by the ORA Setup Audit session (Rev 26 follow-up) with `git diff origin/main` on both specs and `gh pr view 258`.
 
 ## 2026-09-22 — Skill hygiene sweep landed; 18 skills installed/reimported and verified
 

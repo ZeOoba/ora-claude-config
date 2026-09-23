@@ -64,7 +64,7 @@ correctly respond to a genuine false-positive block without touching the gate at
 
 ## Round 4 (2026-08-13): a REAL shell tokenizer was built and adversarially killed on Round 1 -- a NEW, more fundamental failure mode, not a repeat of 1-3
 
-Context: [OI-147](open-items-tracker.md#OI-147), an [[external-artifact-intake]] evaluation of the
+Context: [OI-147](open-items-tracker-history.md#OI-147), an [[external-artifact-intake]] evaluation of the
 external ECC repo, ratified adopting the SHELL-PARSING TECHNIQUE from its `gateguard-fact-force.js`
 (quote/subshell-aware tokenizer) specifically because this file's own line 45-48 conclusion --
 "a real shell-aware parser... is the only way to do this soundly, and is disproportionate
@@ -114,7 +114,7 @@ correct answer to the friction case; do not reach for tokenizer depth as the fix
 
 **What survived from this attempt: nothing landed.** `hooks/lib/shell_tokenizer.py` and its test
 file were deleted; `ora-autonomy-gate.py`'s Gate 2b is unchanged (`git checkout --` reverted the
-integration cleanly, uncommitted). [OI-147](open-items-tracker.md#OI-147) closed as REJECTED with
+integration cleanly, uncommitted). [OI-147](open-items-tracker-history.md#OI-147) closed as REJECTED with
 this file as the evidence trail. If a 5th attempt is tempted: the bar is not "build a better
 parser" -- it is "model which shell command consumes each argument and whether that command
 writes", which is a different and larger engineering problem, not a deeper version of this one.
