@@ -69,6 +69,10 @@ NOT_PERIODIC = {
         "append-only allocation ledger, written only when an OI id is allocated",
     "pause-resume-guard-state.json":
         "written by the pause/resume guard on state change, not on a cadence",
+    "fleet-pause-windows.json":
+        "written by pause_windows.capture() only when a hold starts or ends, so it is "
+        "untouched for as long as the fleet is live; any age limit false-alarms after "
+        "every pause (merge-gate R5, 2026-09-22)",
 }
 
 # Per-file overrides where a slower cadence is genuinely by design. Basename -> hours.
@@ -88,7 +92,6 @@ MAX_AGE_OVERRIDES = {
     "push-fleet-heartbeat.log": 48.0,    # ORA Fleet Heartbeat Push (Windows, daily)
     "heartbeat-publish-ok.json": 48.0,   # ORA Fleet Heartbeat Push (Windows, daily)
     "stuck-session-watchdog.log": 48.0,  # ORA Stuck-Session Watchdog (Windows, 30 min)
-    "fleet-pause-windows.json": 48.0,    # ORA Fleet Pause-Resume Guard (Windows, 6h)
     "fleet-heartbeat.json": 48.0,        # emit-fleet-heartbeat.py (sub-daily)
     # quarterly producers would go here, with the cron that justifies the number
 }
@@ -104,7 +107,8 @@ PAUSE_INDEPENDENT = frozenset({
     "push-fleet-heartbeat.log",     # ORA Fleet Heartbeat Push
     "heartbeat-publish-ok.json",    # ORA Fleet Heartbeat Push
     "stuck-session-watchdog.log",   # ORA Stuck-Session Watchdog
-    "fleet-pause-windows.json",     # ORA Fleet Pause-Resume Guard
+    "fleet-deadman.start.log",      # ORA Fleet Dead-Man START breadcrumbs (merge-gate R5)
+    "push-fleet-heartbeat.start.log",  # ORA Fleet Heartbeat Push START breadcrumbs
     "fleet-heartbeat.json",         # emit-fleet-heartbeat.py, run by ORA Fleet Heartbeat Push
 })
 

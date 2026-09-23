@@ -20,7 +20,6 @@ FAST_PRODUCERS = (
     "push-fleet-heartbeat.log",     # ORA Fleet Heartbeat Push, daily
     "heartbeat-publish-ok.json",    # ORA Fleet Heartbeat Push, daily
     "stuck-session-watchdog.log",   # ORA Stuck-Session Watchdog, every 30 min
-    "fleet-pause-windows.json",     # ORA Fleet Pause-Resume Guard, every 6h
     "fleet-heartbeat.json",         # emit-fleet-heartbeat.py, sub-daily
 )
 
@@ -69,6 +68,21 @@ def test_windows_producers_are_never_pause_suppressed(tmp_path, monkeypatch, cap
     dm_line = "\n".join(l for l in out.splitlines() if "fleet-deadman.log" in l)
     assert "outside the scheduled-task fleets" in dm_line and "ALREADY stale" not in dm_line, dm_line
     assert rc == 1
+
+
+def test_pause_windows_is_event_driven_not_periodic():
+    """Merge-gate R5: pause_windows.capture() saves only when a hold starts or ends, so
+    fleet-pause-windows.json is untouched for as long as the fleet is live. A 48h (or any)
+    age limit false-alarms 48h after every pause ends."""
+    assert "fleet-pause-windows.json" in sfp.NOT_PERIODIC
+    assert "fleet-pause-windows.json" not in sfp.MAX_AGE_OVERRIDES
+    assert "fleet-pause-windows.json" not in sfp.PAUSE_INDEPENDENT
+
+
+def test_start_logs_are_never_pause_explained():
+    """Merge-gate R5: the *.start.log breadcrumbs are written by the same Windows tasks as
+    the verdict logs, which keep running through a fleet pause."""
+    assert {"fleet-deadman.start.log", "push-fleet-heartbeat.start.log"} <= sfp.PAUSE_INDEPENDENT
 
 
 def test_no_override_is_looser_than_default():
