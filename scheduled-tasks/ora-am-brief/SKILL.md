@@ -218,7 +218,7 @@ Run `block-sentinel.py claim --task ora-am-brief --block blockC --run-id <run_id
 
 This precedes the heartbeat write deliberately: C.0's heartbeat is an *observability* record (it proves the block was entered), not a mutual-exclusion primitive — it appends unconditionally, so a second fire writes a second `status=ENTERED` line and then re-does the whole sweep. The entry guard is what decides whether the block runs; the heartbeat records what happened once it does.
 
-Call `block-sentinel.py complete --task ora-am-brief --block blockC --run-id <run_id> --notion-page-id <C.7 page id> --email-sent-at <ISO8601>` at C.9, alongside the run summary.
+Call `block-sentinel.py complete --task ora-am-brief --block blockC --run-id <run_id> --notion-page-id <C.7 page id> --email-sent-at <ISO8601>` at C.9, alongside the run summary (omit `--notion-page-id` if the C.7 page is UNVERIFIED).
 
 ## C.0 — HEARTBEAT WRITE-FIRST GUARD
 
@@ -332,7 +332,7 @@ Total messages swept: [n] | Excluded as noise: [n] | For triage: [n]
 ```
 
 ## C.7 — NOTION POST
-Post to Notion Ops Hub (parent UUID `32b6ecd8-9e59-81f2-b329-df3fd0e25062`) as a new page: Title "Inbox Pre-Brief — YYYY-MM-DD"; Tags: pre-brief, inbox, [day-of-week]; auto-archive after 14 days. Tool: `notion-create-pages` with `parent: { type: "page_id", page_id: "32b6ecd8-9e59-81f2-b329-df3fd0e25062" }`. Apply the same publication guard as Block B (capture id, verify via `notion-fetch` not search), except the retry: on a create error or grace/quota notice, first look for it — `notion-fetch` the parent for an exact-title child, then search by the exact title (search lags: a miss alone is not proof) — a match created at/after the create call is this run's page, use it; never blind-retry a create (it produced a duplicate); retry once only for a non-grace/quota failure with no match. After a grace/quota notice with no match, do not retry: the create is UNVERIFIED and takes BLOCK C — ERROR HANDLING's Notion-error path. Quota errors → `notion-quota-fallback` skill.
+Post to Notion Ops Hub (parent UUID `32b6ecd8-9e59-81f2-b329-df3fd0e25062`) as a new page: Title "Inbox Pre-Brief — YYYY-MM-DD"; Tags: pre-brief, inbox, [day-of-week]; auto-archive after 14 days. Tool: `notion-create-pages` with `parent: { type: "page_id", page_id: "32b6ecd8-9e59-81f2-b329-df3fd0e25062" }`. Apply the same publication guard as Block B (capture id, verify via `notion-fetch` not search), except the retry: on a create error or grace/quota notice, first look for it — `notion-fetch` the parent for an exact-title child, then search by the exact title (search lags: a miss alone is not proof) — a match created at/after the create call is this run's page, use it; never blind-retry a create (it produced a duplicate); retry once only for a non-grace/quota failure with no match; if that retry also fails, likewise take BLOCK C — ERROR HANDLING's Notion-error path (not Block B's failure email). After a grace/quota notice with no match, do not retry: the create is UNVERIFIED and takes BLOCK C — ERROR HANDLING's Notion-error path. Quota errors → `notion-quota-fallback` skill.
 
 ## C.8 — EMAIL DELIVERY
 
@@ -366,7 +366,7 @@ Multi-entity cash consolidation across the Master Workbook with reserve threshol
 
 **D.SEND.0 — pre-send Sent-Items probe** (Layer 2, same contract as B.SEND.0): probe with the full dated subject `ORA Cash Position - [date]`. Exit 10 → do NOT send; log `BLOCK_D_EMAIL_ALREADY_IN_SENT_ITEMS`, record a NORMAL skip, and still call `complete` so the state file re-converges. Exit 1 → fail open: send, and record the probe gap. Note the `[ALERT]` prefix below changes the subject — probe on the un-prefixed dated stem so a first send that alerted and a second that would not still match each other.
 
-Call `block-sentinel.py complete --task ora-am-brief --block blockD --run-id <run_id> --notion-page-id <page id> --email-sent-at <ISO8601>` once the Notion page and the send both resolve.
+Call `block-sentinel.py complete --task ora-am-brief --block blockD --run-id <run_id> --notion-page-id <page id> --email-sent-at <ISO8601>` once the Notion page and the send both resolve (omit `--notion-page-id` if the page is UNVERIFIED).
 
 Email via the Outlook COM helper (`_shared\send-via-outlook.ps1`) — the SOLE send path.
 

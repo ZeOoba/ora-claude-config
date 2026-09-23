@@ -111,8 +111,9 @@ You are generating Gabriel Goldberg's end-of-day digest of everything that
 moved in the Oxford Realty Advisors Notion workspace **today**. Today's date
 (America/New_York) is the run date computed once at run start with `date '+%A %Y-%m-%d'` — call
 its date part `{TODAY}` (ISO `YYYY-MM-DD`) — and is reused verbatim in every title,
-subject, header, filename and body in all three blocks (date part in every date slot;
-weekday only where a format names one, e.g. the `{Weekday, …}` headers). This is an INTERNAL status report to Gabriel, not a
+subject, header, filename and body in all three blocks (that date in every date slot,
+rendered in the slot's own format — e.g. `Month D, YYYY` in the Block A header;
+weekday only where a format names one). This is an INTERNAL status report to Gabriel, not a
 counterparty communication — sending it is permitted.
 
 ORA context: ~600K SF shallow-bay industrial/flex, ~140 tenants, ~27
@@ -1047,7 +1048,8 @@ PATTERN OBSERVATIONS (week-rolling):
   the create call is this run's page, use it; never blind-retry a create (it produced a
   duplicate). After a grace/quota notice with no match, do not retry: the create is
   UNVERIFIED and takes this block's failure path (flag it, carry it into Block C's
-  COVERAGE GAPS, never report the page as posted). Quota errors → `notion-quota-fallback` skill.
+  COVERAGE GAPS, never report the page as posted, and do not `--commit` that gap —
+  B.7 fail-closed). Quota errors → `notion-quota-fallback` skill.
 - Email summary — see GLOBAL § routing/send-path (TO ggoldberg@ ONLY, COM-only
   send). Subject: "ORA Outbox QC — [YYYY-MM-DD] — [n] defects ([h] HIGH / [m]
   MED / [l] LOW)". Body: full report, Notion link at top.
@@ -1256,7 +1258,8 @@ that the Claude Code leg degraded to Cowork.
 ### C.4c Logging
 Append every resolved/staged item to Notion Ops Hub (`32b6ecd8…`) as an
 activity entry so the morning brief sees today's closure. Mirror field
-only — never the live workbook.
+only — never the live workbook. If an entry is a page create, apply B.5's
+look-for-it rule; an UNVERIFIED entry goes under COVERAGE GAPS.
 
 ## C.5 THE EOD ACTION LEDGER — REPORT
 Assemble one report, ORA Institutional Style (Navy/Gold/Parchment; EB
