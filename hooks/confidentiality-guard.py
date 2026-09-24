@@ -266,21 +266,31 @@ def surface_staleness(detail, session_id):
         pass  # telemetry only -- egress safety must never depend on this write succeeding
 
 
-def find_hit(text, terms):
-    """Return (deal_label, term) on first confidential hit in `text`, else None."""
+def _str_terms(deal, field):
+    """The string entries of a roster list. A malformed entry (a number, a nested list) is skipped
+    rather than allowed to raise: an uncaught exception here exits 1, which is NON-BLOCKING."""
+    value = deal.get(field) or []
+    return [t for t in value if isinstance(t, str) and t] if isinstance(value, list) else []
+
+
+def find_hit(text, terms, context_text=None):
+    """Return (deal_label, term) on first confidential hit in `text`, else None. A context term
+    counts when its trigger (context_requires_any) appears in `context_text`, which defaults to
+    `text`; seam windows pass the whole post-edit file so a trigger elsewhere on the page counts."""
     if not text:
         return None
     low = text.lower()
+    ctx_low = low if context_text is None else context_text.lower()
     for key, deal in terms.items():
         if key.startswith("_") or not isinstance(deal, dict) or not deal.get("active", True):
             continue
-        for t in deal.get("always", []):
-            if t and t.lower() in low:
+        for t in _str_terms(deal, "always"):
+            if t.lower() in low:
                 return (deal.get("label", key), t)
-        reqs = [r.lower() for r in deal.get("context_requires_any", [])]
-        if reqs and any(r in low for r in reqs):
-            for t in deal.get("context", []):
-                if t and t.lower() in low:
+        reqs = [r.lower() for r in _str_terms(deal, "context_requires_any")]
+        if reqs and any(r in ctx_low for r in reqs):
+            for t in _str_terms(deal, "context"):
+                if t.lower() in low:
                     return (deal.get("label", key), t)
     return None
 
@@ -308,9 +318,18 @@ def collect_text(obj):
 # this, that shape passed unscanned; and a delete-only Edit (new_string "") had nothing to scan at
 # all, so it fail-closed on every public-site edit that only removed text. Both close the same way:
 # apply the edit(s) to the file's current text in memory and scan a window around every seam, at
-# least as wide as the longest term on each side. If the file cannot be read or an old_string is not
-# in it, there are no seams, and the caller falls back to exactly the pre-2026-09-24 behavior
+# least as wide as the longest term on each side. Context triggers are looked up in the WHOLE
+# post-edit file, since a trigger elsewhere on the page makes a context term at the seam a hit.
+#
+# Fail closed when the edit cannot be simulated against a file that EXISTS: the real Edit tool
+# matches more leniently than `old in text` (curly/straight quote folding, \uXXXX decoding,
+# UTF-16 files by BOM, files far past our size cap), so "old_string not found here" does not mean
+# "the tool will refuse". Only a target that does not exist yet keeps the pre-2026-09-24 behavior
 # (scan new_string; nothing to scan -> block).
+#
+# Known limit: the decision is taken on a snapshot. A writer that changes the file between this hook
+# and the Edit's apply (seconds, measured) is not seen; nothing re-scans after the write. The
+# pre-2026-09-24 guard had the same gap for any non-empty edit (a seam it never looked at).
 #
 # Why the windows cover every new occurrence (MultiEdit applies edits in order): take a term present
 # after the last edit that was not there before. Let k be the last edit whose replaced span or
@@ -341,26 +360,30 @@ def _seam_width(terms):
 
 
 def _edit_seams(path, edits, width):
-    """Windows of post-edit text around each seam, or None when the edit cannot be simulated
-    (unreadable/oversized file, missing or empty old_string, old_string not in the text). Never
-    raises: an uncaught exception exits 1, which is NON-BLOCKING, i.e. fail-open on this gate.
+    """(windows, post_edit_text) for the edit(s), or None when they cannot be simulated (unreadable,
+    non-UTF-8 or oversized file, a non-dict edit, missing or empty old_string, old_string not in the
+    text). Never raises: an uncaught exception exits 1, which is NON-BLOCKING, i.e. fail-open.
 
-    The file is read with universal newlines and old/new are normalized the same way, matching the
-    Edit tool, which matches LF old_strings against CRLF files. Windows only feed the term scan, so
-    the normalization cannot change what is written."""
+    Mirrors the Edit tool where it matters: universal newlines (it matches LF old_strings against
+    CRLF files), and a delete (new_string "") of text followed by a newline also removes that
+    newline. Windows only feed the term scan, so none of this changes what is written."""
     try:
         if not path or os.path.getsize(path) > SEAM_MAX_FILE_BYTES:
             return None
-        with open(path, encoding="utf-8", errors="replace", newline=None) as f:
+        with open(path, encoding="utf-8", errors="strict", newline=None) as f:
             text = f.read()
         windows = []
         for ed in edits:
+            if not isinstance(ed, dict):
+                return None
             old, new = ed.get("old_string"), ed.get("new_string")
             if not isinstance(old, str) or not isinstance(new, str) or not old:
                 return None
             old, new = old.replace("\r\n", "\n"), new.replace("\r\n", "\n")
             if old not in text:
                 return None
+            if new == "" and not old.endswith("\n") and old + "\n" in text:
+                old += "\n"
             if ed.get("replace_all"):
                 parts = text.split(old)
                 text = new.join(parts)
@@ -373,9 +396,17 @@ def _edit_seams(path, edits, width):
                 at = text.index(old)
                 text = text[:at] + new + text[at + len(old):]
                 windows.append(text[max(0, at - width):at + len(new) + width])
-        return windows
+        return windows, text
     except Exception:
         return None
+
+
+def _exists(path):
+    """True when something is at `path` (file, directory, anything). Never raises."""
+    try:
+        return bool(path) and isinstance(path, str) and os.path.lexists(path)
+    except Exception:
+        return False
 
 
 def path_egress_surface(path):
@@ -422,22 +453,36 @@ def main():
     # File-writing tools: only egress when the target path is an external surface.
     if tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
         path = ti.get("file_path") or ti.get("notebook_path") or ""
+        if not isinstance(path, str):
+            block("file path is not a string; cannot classify the write target.")
         surface = path_egress_surface(path)
         if surface:
             # scan the content being written/inserted (not old_string)
             pieces = [ti.get("content", ""), ti.get("new_string", ""), ti.get("new_source", "")]
-            for ed in ti.get("edits", []) or []:
-                if isinstance(ed, dict):
-                    pieces.append(ed.get("new_string", ""))
+            raw_edits = ti.get("edits")
+            for ed in raw_edits if isinstance(raw_edits, list) else ([raw_edits] if raw_edits else []):
+                pieces.append(ed.get("new_string", "") if isinstance(ed, dict) else ed)
             scan_text = " ".join(str(p) for p in pieces if p)
             # An explicit empty Write writes nothing that could leak.
             extracted = tool == "Write" and isinstance(ti.get("content"), str)
             if tool in ("Edit", "MultiEdit"):
-                edits = [ti] if tool == "Edit" else [e for e in (ti.get("edits") or []) if isinstance(e, dict)]
+                edits = [ti] if tool == "Edit" else ti.get("edits")
                 width = _seam_width(terms)
-                seams = _edit_seams(path, edits, width) if edits and width is not None else None
-                if seams is not None:
-                    scan_text = " ".join(p for p in [scan_text] + seams if p)
+                seams = None
+                if isinstance(edits, list) and edits and width is not None:
+                    seams = _edit_seams(path, edits, width)
+                if seams is None:
+                    if _exists(path):
+                        block("edit to %s could not be simulated against the file on disk, so the "
+                              "text at its seams cannot be checked." % surface)
+                else:
+                    windows, post_edit = seams
+                    for w in windows:
+                        hit = find_hit(w, terms, context_text=post_edit)
+                        if hit:
+                            block("'%s' identifier ('%s') would be formed where this edit joins the "
+                                  "existing text of %s. This deal must not reach any external surface "
+                                  "until closing." % (hit[0], hit[1], surface))
                     extracted = True
             if not scan_text and not extracted:
                 # egress write we cannot read -> fail closed
