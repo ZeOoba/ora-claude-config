@@ -642,6 +642,74 @@ nonascii_err = p_nonascii.stderr.decode("utf-8", "replace")
 expect("BLOCK egress write containing a non-ASCII confidential term (end-to-end)",
        2, p_nonascii.returncode, nonascii_err)
 
+# --- Edit seams (2026-09-24): a term created where the edit joins existing text ----------
+# The guard applies Edit/MultiEdit to the file's current text and scans each seam. These use a
+# REAL file under a site-marker path, because the seam only exists against on-disk text. A1 is a
+# live or synthetic always-term; it is split in two around a filler the edit removes.
+SEAM_DIR = os.path.join(tempfile.mkdtemp(prefix="seam-"), "website-canonical")
+os.makedirs(SEAM_DIR)
+atexit.register(lambda: __import__("shutil").rmtree(os.path.dirname(SEAM_DIR), ignore_errors=True))
+_cut = max(1, len(A1) // 2)
+HEAD, TAIL = A1[:_cut], A1[_cut:]
+
+
+def seam_file(name, text, newline="\n"):
+    p = os.path.join(SEAM_DIR, name)
+    with open(p, "w", encoding="utf-8", newline=newline) as f:
+        f.write(text)
+    return p
+
+
+def edit(path, old, new, replace_all=False):
+    return {"tool_name": "Edit", "tool_input": {"file_path": path, "old_string": old,
+                                                "new_string": new, "replace_all": replace_all}}
+
+
+def multi(path, pairs):
+    return {"tool_name": "MultiEdit", "tool_input": {"file_path": path, "edits": [
+        {"old_string": o, "new_string": n} for o, n in pairs]}}
+
+
+split = seam_file("split.html", "<p>Welcome to %sQQZX%s today.</p>\n" % (HEAD, TAIL))
+expect("BLOCK seam: delete-only Edit joins a split always-term", 2,
+       *run(edit(split, "QQZX", "")))
+expect("BLOCK seam: non-empty new_string completes a term it does not contain", 2,
+       *run(edit(split, "QQZX" + TAIL[:1], TAIL[:1])))
+expect("BLOCK seam: MultiEdit's second edit joins the term", 2,
+       *run(multi(split, [("Welcome", "Hello"), ("QQZX", "")])))
+twice = seam_file("twice.html", "<p>%sQQZX%s</p><p>clean QQZX text</p>\n" % (HEAD, TAIL))
+expect("BLOCK seam: replace_all deletion joins the term at one of two sites", 2,
+       *run(edit(twice, "QQZX", "", replace_all=True)))
+crlf = seam_file("crlf.html", "<p>Welcome to %sQQZX%s\ntoday.</p>\n" % (HEAD, TAIL), newline="\r\n")
+expect("BLOCK seam: LF old_string against a CRLF file still joins the term", 2,
+       *run(edit(crlf, "QQZX%s\ntoday" % TAIL, "%s\ntoday" % TAIL)))
+clean = seam_file("clean.html", "<p>Columbus industrial market update</p>\n<p>stale line</p>\n")
+expect("ALLOW seam: delete-only Edit on clean site text (was a fail-closed false alarm)", 0,
+       run(edit(clean, "<p>stale line</p>\n", ""))[0])
+expect("ALLOW seam: delete-only Edit on a clean CRLF file", 0,
+       run(edit(seam_file("clean-crlf.html", "<p>a</p>\n<p>b</p>\n", newline="\r\n"), "<p>b</p>\n", ""))[0])
+expect("ALLOW explicit empty Write to a site file", 0, run(write_payload(SITE, ""))[0])
+expect("BLOCK seam: delete-only Edit whose old_string is not in the file (cannot simulate)", 2,
+       run(edit(clean, "not present anywhere", ""))[0])
+expect("BLOCK seam: delete-only Edit on a file that does not exist", 2,
+       run(edit(os.path.join(SEAM_DIR, "missing.html"), "x", ""))[0])
+expect("BLOCK seam: delete-only Edit whose target is a directory", 2,
+       run(edit(SEAM_DIR, "x", ""))[0])
+# With no active deal the seam windows are empty strings, so this is the case where "the edit was
+# simulated" alone must carry the ALLOW. It is also the live state whenever the roster is empty.
+_inactive_fd, INACTIVE_TERMS = tempfile.mkstemp(prefix="inactive-terms-", suffix=".json")
+with os.fdopen(_inactive_fd, "w", encoding="utf-8") as f:
+    json.dump({"_meta": {"roster_last_verified": datetime.date.today().isoformat()},
+               "closed_deal": {"active": False, "label": "closed fixture", "always": ["Zephyr Corp Portfolio"]}}, f)
+atexit.register(lambda: os.path.exists(INACTIVE_TERMS) and os.remove(INACTIVE_TERMS))
+_p = subprocess.run([sys.executable, GUARD], input=json.dumps(edit(clean, "<p>stale line</p>\n", "")).encode("utf-8"),
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    env=dict(os.environ, CONFIDENTIAL_TERMS_FILE_OVERRIDE=INACTIVE_TERMS))
+expect("ALLOW seam: delete-only Edit on a site file when no deal is active (empty windows)", 0,
+       _p.returncode, _p.stderr.decode("utf-8", "replace"))
+expect("BLOCK Write with no content key at all", 2,
+       run({"tool_name": "Write", "tool_input": {"file_path": SITE}})[0])
+
 # --- summary ---------------------------------------------------------------------------
 passed = sum(1 for ok, _ in results if ok)
 total = len(results)
