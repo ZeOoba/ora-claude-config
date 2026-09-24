@@ -7,6 +7,28 @@ Recurring and unattended (cron `35 9-21/3 * * *`: 09:35, 12:35, 15:35, 18:35 and
 
 Compute the run date ONCE: `date '+%A %Y-%m-%d'`. Reuse it everywhere, with its date part in every date slot.
 
+## Step 0: double-fire guard (before ANY other step)
+The scheduler fires missed slots in a CATCH-UP BURST when the Desktop app reopens. This guard makes that burst, or an overlapping manual run, a no-op after the first run. Without it, the same queue would be polled twice and the summary sent twice.
+- SLOT is the latest cron slot at or before now (ET): `09`, `12`, `15`, `18` or `21` (a slot counts once its HH:35 has passed). Before 09:35 ET, SLOT is `pre09`. All runs of one burst compute the same SLOT, so only the first proceeds.
+- RUN_ID: `date +%s` (compute once).
+
+python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-pr-land-watch --block slot-<slot> --run-id <run_id> --ttl-min 120
+
+- Exit 10 → this slot's run already completed. End the run silently: no poll, no email. This is a normal skip, not a miss.
+- Exit 11 → another run holds this slot. Stand down in the same way.
+- Exit 0 → proceed to Step 1.
+
+When the run ends normally (the silent stop in Step 2, or after the Step 4 email):
+
+python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-pr-land-watch --block slot-<slot> --run-id <run_id>
+
+If the run aborts instead:
+
+python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py fail --task ora-pr-land-watch --block slot-<slot> --run-id <run_id> --error "<what broke>"
+
+- ONLY the run holding the claim may call `complete` or `fail`. A run that stood down (exit 10 or 11) calls NEITHER.
+- The watcher's own in-flight window (150 min per due payload) separately stops one payload from running twice. This guard only dedupes the run itself.
+
 ## Step 1: run the MERGED origin/main copy of the script (never the working tree)
 The live `~/.claude` checkout only moves when ora-checkout-merge-forward runs. So always run the reviewed version on origin/main, extracted to TEMP:
 ```
@@ -19,7 +41,7 @@ If the fetch fails, try the extraction anyway: the last-fetched origin/main is f
 If the extraction or the poll fails outright (nonzero exit or no JSON), send the failure email (Step 4) with the error output, then stop.
 
 ## Step 2: nothing to do → stop silently
-If the poll JSON has `"needsAttention": false`, END THE RUN NOW. No email, no output files, no Notion. This is the normal case on most runs.
+If the poll JSON has `"needsAttention": false`, run the Step 0 `complete` command and END THE RUN. No email, no output files, no Notion. This is the normal case on most runs.
 
 ## Step 3: run each entry in `due`, one at a time
 Each due entry carries `id`, `repo`, `pr`, `mergeSha`, `attempt` and `payloadText`.
@@ -39,7 +61,9 @@ Each due entry carries `id`, `repo`, `pr`, `mergeSha`, `attempt` and `payloadTex
 
 ## Step 4: one summary email (only when needsAttention was true, or Step 1 failed)
 Send through Outlook COM, the SOLE send path:
-`powershell -File C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1 -To ggoldberg@oxfordra.net -Subject "<subject>" -Body "<body>"`
+```
+powershell -File C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1 -To ggoldberg@oxfordra.net -Subject "<subject>" -Body "<body>"
+```
 - Send to ggoldberg@oxfordra.net ONLY, with no cc.
 - On a nonzero exit, retry once, then flag it loudly in the run summary. Do not halt.
 
