@@ -68,10 +68,10 @@ Each due entry carries `id`, `repo`, `pr`, `mergeSha`, `attempt` and `payloadTex
   An unmarked due watch re-fires about 2.5h later, up to 3 attempts. Payloads are written to be idempotent.
 - Do NOT run `poll` again during this run: each poll spends attempts. For a read-only look at the queue, use `list`.
 
-## Step 4: one summary email (only when needsAttention was true, or Step 1 failed)
+## Step 4: one summary email (only when needsAttention was true, Step 1 failed, or the Step 0 guard failed)
 Send through Outlook COM, the SOLE send path:
 ```
-powershell -File C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1 -To ggoldberg@oxfordra.net -Subject "<subject>" -Body "<body>"
+powershell -File C:/Users/Owner/.claude/scheduled-tasks/_shared/send-via-outlook.ps1 -To ggoldberg@oxfordra.net -Subject "<subject>" -Body "<body>"
 ```
 - Send to ggoldberg@oxfordra.net ONLY, with no cc.
 - On a nonzero exit, retry once, then flag it loudly in the run summary. Do not halt.
