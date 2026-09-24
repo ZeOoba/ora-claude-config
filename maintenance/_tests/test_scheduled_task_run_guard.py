@@ -168,6 +168,11 @@ ORDERING_VERIFIED_BY_HAND = {
     # silently. Side effects all follow: Deal Sourcing Log creates :96, COM send :125,
     # Ops Hub failure log :127. Off UNGUARDED_BACKLOG in the same change (ratchet).
     "ora-entry-market-scan": "claim@33 precedes Notion creates@96, send@125, Ops Hub@127",
+    # Read by hand 2026-09-23 (new task, guard added before its first live fire): the
+    # sole claim is the unfenced GUARD 1 line at :12. GUARD 0 (:8) only reads the scan's
+    # done-marker file and ends silently -- no write, no send. Side effects all follow:
+    # Notion update_properties WRITES :34, COM send EMAIL :45.
+    "ora-sourcing-construction-verify": "claim@12 precedes Notion writes@34, send@45",
     # claim@27, only send at :241, inside a prose line beginning "Post a NEW DATED
     # CHILD PAGE" that matches neither a fence nor a step marker.
     "ora-deal-aging-sla": "claim@27 precedes sends@40,241",
