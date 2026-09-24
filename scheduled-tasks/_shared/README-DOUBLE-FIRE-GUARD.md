@@ -100,13 +100,19 @@ python block-sentinel.py claim    --task <task> --block <blockId> --run-id <id> 
 python block-sentinel.py complete --task <task> --block <blockId> --run-id <id> [--notion-page-id ID] [--email-sent-at ISO] [--adopt]
 python block-sentinel.py fail     --task <task> --block <blockId> --run-id <id> [--error "..."] [--adopt]
 python block-sentinel.py status   --task <task> --block <blockId>          # read-only, creates nothing
-python block-sentinel.py slot     --times 09:35,12:35,15:35                # read-only -> {"block": "slot-12", ...}
+python block-sentinel.py claim    --task <task> --slot-times 09:35,12:35,15:35 --run-id <id> [--ttl-min 30]
+python block-sentinel.py slot     --times 09:35,12:35,15:35                # read-only preview -> {"block": "slot-12", ...}
 ```
 
-Multi-fire-per-day tasks get their block id from `slot`, never from shell time
-math: Git Bash on this host ignores `TZ=America/New_York` and silently returns UTC
-(on 2026-09-24 that claimed `slot-15` at 12:51 EDT). `slot` uses the same ET clock
-as `claim`, and bad `--times` exits 2 with no `block` instead of failing open.
+Multi-fire-per-day tasks pass `claim --slot-times` and reuse the emitted `block`
+verbatim for complete/fail. They never do shell time math: Git Bash on this host
+ignores `TZ=America/New_York` and silently returns UTC (on 2026-09-24 that claimed
+`slot-15` at 12:51 EDT). Resolving inside the claim takes the slot and the date
+bucket from ONE clock reading. A separate `slot` call followed by `claim` can straddle
+midnight (slot-21 resolved at 23:59:40, claimed under the next day) and silently skip
+the next day's slot. Bad `--slot-times`/`--times` exits 2 with no `block` instead of
+failing open, because a guessed slot id is the defect being fixed. The calling spec
+must treat exit 2 as an alert, not as PROCEED.
 
 Write each invocation on ONE line. `^` is cmd.exe continuation and hard-fails in
 both shells this host offers — in Bash it splits into two commands, in PowerShell it

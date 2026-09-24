@@ -607,6 +607,86 @@ def test_slot_times_order_insensitive_and_validated():
     check("invalid --times -> no block emitted", not out.get("block"), str(out))
 
 
+def test_slot_rejects_out_of_range_and_duplicate_hours():
+    print("\ntest_slot_rejects_out_of_range_and_duplicate_hours")
+    for bad in ("09:35,25:00", "09:35,12:60", "09:35,", "09:05,09:35"):
+        rc, out = run_slot(bad, "2026-09-24T16:51:00Z")
+        check("%r -> exit 2" % bad, rc == 2, "got %s (%s)" % (rc, out))
+        check("%r -> no block" % bad, not out.get("block"), str(out))
+
+
+def test_slot_dst_days_fallback_parity():
+    print("\ntest_slot_dst_days_fallback_parity")
+    # 2026-03-08 spring-forward, 2026-11-01 fall-back: 09:40 local on both.
+    for now, want in (("2026-03-08T13:40:00Z", "slot-09"), ("2026-11-01T14:40:00Z", "slot-09"),
+                      ("2026-03-08T13:30:00Z", "slot-pre09")):
+        rc, a = run_slot(PR_LAND_TIMES, now)
+        rc2, b = run_slot(PR_LAND_TIMES, now, {"ORA_SENTINEL_NO_ZONEINFO": "1"})
+        check("%s -> %s" % (now, want), a.get("block") == want, str(a))
+        check("%s fallback agrees" % now, b.get("block") == want, str(b))
+
+
+def test_claim_slot_times_resolves_and_stores_block():
+    print("\ntest_claim_slot_times_resolves_and_stores_block")
+    st = tmp_state()
+    rc, out = run_env(["claim", "--task", "t", "--slot-times", PR_LAND_TIMES, "--run-id", "r1"],
+                      st, {"ORA_SENTINEL_NOW": "2026-09-24T16:51:00Z"})
+    check("exit 0 PROCEED", rc == 0 and out.get("decision") == "PROCEED", "got %s (%s)" % (rc, out))
+    check("emits resolved block slot-12", out.get("block") == "slot-12", str(out.get("block")))
+    check("stored under 2026-09-24/slot12 (canon key)", "slot12" in read_state(st).get("2026-09-24", {}),
+          str(read_state(st)))
+    rc, out = run_env(["claim", "--task", "t", "--slot-times", PR_LAND_TIMES, "--block", "slot-15",
+                       "--run-id", "r2"], st, {"ORA_SENTINEL_NOW": "2026-09-24T16:52:00Z"})
+    check("--slot-times overrides a wrong --block -> stands down on slot-12",
+          rc == 11 and out.get("block") == "slot-12", "got %s (%s)" % (rc, out))
+    os.remove(st)
+
+
+def test_claim_slot_times_single_instant_near_midnight():
+    """Reviewer finding: `slot` then `claim` as two calls can straddle midnight
+    (slot-21 at 23:59:40, claim keyed to the next day). In-claim resolution uses
+    one clock reading for both, so block and date always agree."""
+    print("\ntest_claim_slot_times_single_instant_near_midnight")
+    st = tmp_state()
+    rc, out = run_env(["claim", "--task", "t", "--slot-times", PR_LAND_TIMES, "--run-id", "r"],
+                      st, {"ORA_SENTINEL_NOW": "2026-09-25T03:59:40Z"})   # 23:59:40 EDT 09-24
+    check("slot-21 keyed to 09-24", out.get("block") == "slot-21" and out.get("etDate") == "2026-09-24",
+          str(out))
+    os.remove(st)
+    rc, out = run_env(["claim", "--task", "t", "--slot-times", PR_LAND_TIMES, "--run-id", "r"],
+                      st, {"ORA_SENTINEL_NOW": "2026-09-25T04:00:05Z"})   # 00:00:05 EDT 09-25
+    check("slot-pre09 keyed to 09-25", out.get("block") == "slot-pre09" and out.get("etDate") == "2026-09-25",
+          str(out))
+    os.remove(st)
+
+
+def test_claim_without_block_or_slot_times_writes_nothing():
+    print("\ntest_claim_without_block_or_slot_times_writes_nothing")
+    st = tmp_state()
+    rc, out = run_env(["claim", "--task", "t", "--run-id", "r"], st,
+                      {"ORA_SENTINEL_NOW": "2026-09-24T16:51:00Z"})
+    check("exit 2", rc == 2, "got %s (%s)" % (rc, out))
+    check("no state file created", not os.path.exists(st), "state exists")
+    rc, out = run_env(["claim", "--task", "t", "--slot-times", "9:35", "--run-id", "r"], st,
+                      {"ORA_SENTINEL_NOW": "2026-09-24T16:51:00Z"})
+    check("bad --slot-times -> exit 2", rc == 2, "got %s (%s)" % (rc, out))
+    check("bad --slot-times -> no state file", not os.path.exists(st), "state exists")
+
+
+def test_claim_slot_times_then_finalize_with_emitted_block():
+    print("\ntest_claim_slot_times_then_finalize_with_emitted_block")
+    st = tmp_state()
+    env = {"ORA_SENTINEL_NOW": "2026-09-24T16:51:00Z"}
+    rc, out = run_env(["claim", "--task", "t", "--slot-times", PR_LAND_TIMES, "--run-id", "r1"], st, env)
+    block = out.get("block")
+    rc, out = run_env(["complete", "--task", "t", "--block", block, "--run-id", "r1"], st,
+                      {"ORA_SENTINEL_NOW": "2026-09-24T17:10:00Z"})
+    check("complete with emitted block -> exit 0", rc == 0, "got %s (%s)" % (rc, out))
+    check("record COMPLETE", read_state(st)["2026-09-24"]["slot12"]["status"] == "COMPLETE",
+          str(read_state(st)))
+    os.remove(st)
+
+
 if __name__ == "__main__":
     print("block-sentinel.py -- entry-guard contract tests")
     test_virgin_claim_proceeds()
@@ -641,6 +721,12 @@ if __name__ == "__main__":
     test_slot_late_evening_keys_to_et_date()
     test_slot_winter_offset_and_fallback_agree()
     test_slot_times_order_insensitive_and_validated()
+    test_slot_rejects_out_of_range_and_duplicate_hours()
+    test_slot_dst_days_fallback_parity()
+    test_claim_slot_times_resolves_and_stores_block()
+    test_claim_slot_times_single_instant_near_midnight()
+    test_claim_without_block_or_slot_times_writes_nothing()
+    test_claim_slot_times_then_finalize_with_emitted_block()
     if _failures:
         print("\n%d FAILURE(S): %s" % (len(_failures), ", ".join(_failures)))
         sys.exit(1)

@@ -82,6 +82,9 @@ Exit codes:  0 PROCEED/ok  |  10 SKIP_ALREADY_COMPLETE  |  11 STAND_DOWN_IN_PROG
              12 REFUSED (finalize without ownership; nothing written)
              any other (2 argparse, 9009/127 no interpreter) -> treat as PROCEED, fail-open,
              and surface verbatim in the run summary
+             EXCEPTION: claim --slot-times / slot exit 2 with no `block` on bad times or a
+             missing block. There is no block id to proceed under, so the caller must ALERT
+             and stop, never guess one.
 JSON is written to stdout in every case so the calling run can log deterministically.
 
 Stdlib only. ASCII-only. Windows (`python`).
@@ -163,7 +166,7 @@ def et_date():
 PERIODS = ("day", "week", "month")
 
 
-def period_key(period):
+def period_key(period, now=None):
     """The state-file bucket key for `period`, US/Eastern.
 
     day   -> et_date() unchanged ("YYYY-MM-DD")
@@ -172,12 +175,17 @@ def period_key(period):
 
     All three formats sort lexically in chronological order, which `prune()`
     and `_period_key_to_date()` both rely on.
+
+    `now` (an ET datetime) pins the key to a clock reading the caller already
+    took -- claim --slot-times uses it so the slot and the date bucket come from
+    ONE instant and cannot straddle midnight.
     """
+    now = now or _eastern_now()
     if period == "week":
-        return _eastern_now().strftime("%G-W%V")
+        return now.strftime("%G-W%V")
     if period == "month":
-        return _eastern_now().strftime("%Y-%m")
-    return et_date()
+        return now.strftime("%Y-%m")
+    return now.strftime("%Y-%m-%d")
 
 
 def _period_key_to_date(key, period):
@@ -424,7 +432,23 @@ def emit(payload, code):
 def cmd_claim(args):
     path = args.state or default_state_path(args.task)
     period = getattr(args, "period", None) or "day"
-    today = period_key(period)
+    slot_times = getattr(args, "slot_times", None)
+    if slot_times:
+        # Slot and date bucket from ONE clock reading: a separate `slot` call
+        # followed by `claim` can straddle midnight (slot-21 resolved at 23:59:40,
+        # claimed under the next day) and silently skip that next day's slot.
+        now = _eastern_now()
+        try:
+            args.block, _ = resolve_slot(slot_times, now)
+        except ValueError as exc:
+            return emit({"task": args.task, "decision": "ERROR",
+                         "error": str(exc)}, EXIT_BAD_SLOT_TIMES)
+        today = period_key(period, now)
+    elif not args.block:
+        return emit({"task": args.task, "decision": "ERROR",
+                     "error": "claim needs --block or --slot-times"}, EXIT_BAD_SLOT_TIMES)
+    else:
+        today = period_key(period)
     run_id = args.run_id or "run-%s" % utc_iso()
     ttl = args.ttl_min if args.ttl_min is not None else DEFAULT_TTL_MIN
 
@@ -600,34 +624,49 @@ def cmd_status(args):
                  "statePath": path, "stateFileError": err}, EXIT_OK)
 
 
-def cmd_slot(args):
-    """Read-only. Resolve which cron slot a multi-fire-per-day task is in, on the
-    ET clock this module already owns -- so callers never do timezone math in a
-    shell. Added 2026-09-24: an ora-pr-land-watch run used Git Bash
-    `TZ=America/New_York date`, which this machine silently evaluates as UTC,
-    read 12:51 EDT as 16:51 and claimed slot-15 instead of slot-12.
+EXIT_BAD_SLOT_TIMES = 2    # same code argparse uses for bad input
 
-    --times is the task's ET fire times (HH:MM, any order). The slot is the
-    latest time at or before now; before the first one it is `slot-pre<HH>`.
-    Labels use the hour only, so fire times must have distinct hours.
-    Unlike claim, bad input does NOT fail open: exit 2 with no `block`, because
-    a guessed slot id is exactly the failure this subcommand exists to prevent.
+
+def resolve_slot(times_arg, now):
+    """Which cron slot a multi-fire-per-day task is in at ET datetime `now`.
+
+    Added 2026-09-24: an ora-pr-land-watch run used Git Bash
+    `TZ=America/New_York date`, which this machine silently evaluates as UTC,
+    read 12:51 EDT as 16:51 and claimed slot-15 instead of slot-12. Slot math
+    now lives next to the ET clock this module already owns.
+
+    `times_arg` is the task's ET fire times, "HH:MM,..." in any order. The slot
+    is the latest time at or before now (inclusive, to the minute); before the
+    first one it is `slot-pre<HH>`. Labels use the hour only, so the hours must
+    be distinct. Returns (block, sorted times); raises ValueError on bad input.
     """
     import re
     times = []
-    for raw in args.times.split(","):
+    for raw in str(times_arg).split(","):
         t = raw.strip()
         m = re.match(r"^([01][0-9]|2[0-3]):([0-5][0-9])$", t)
         if not m:
-            return emit({"decision": "ERROR", "error": "invalid --times entry %r (need HH:MM, 24h)" % t}, 2)
+            raise ValueError("invalid slot time %r (need HH:MM, 24h)" % t)
         times.append((int(m.group(1)), int(m.group(2))))
     times = sorted(set(times))
     if len({h for h, _ in times}) != len(times):
-        return emit({"decision": "ERROR", "error": "--times hours must be distinct (labels are slot-HH)"}, 2)
-    now = _eastern_now()
-    current = (now.hour, now.minute)
-    started = [t for t in times if t <= current]
+        raise ValueError("slot times must have distinct hours (labels are slot-HH)")
+    started = [t for t in times if t <= (now.hour, now.minute)]
     block = "slot-%02d" % started[-1][0] if started else "slot-pre%02d" % times[0][0]
+    return block, times
+
+
+def cmd_slot(args):
+    """Read-only preview of the block `claim --slot-times` would resolve.
+
+    Unlike claim/complete/fail, bad input does NOT fail open: exit 2 with no
+    `block`, because a guessed slot id is exactly the defect this exists to fix.
+    """
+    now = _eastern_now()
+    try:
+        block, times = resolve_slot(args.times, now)
+    except ValueError as exc:
+        return emit({"decision": "ERROR", "error": str(exc)}, EXIT_BAD_SLOT_TIMES)
     return emit({"block": block, "etDate": now.strftime("%Y-%m-%d"),
                  "etTime": now.strftime("%H:%M"),
                  "times": ["%02d:%02d" % t for t in times]}, EXIT_OK)
@@ -639,7 +678,8 @@ def main(argv=None):
     for name in ("claim", "complete", "fail", "status"):
         sp = sub.add_parser(name)
         sp.add_argument("--task", required=True)
-        sp.add_argument("--block", required=True)
+        # claim may resolve its block from --slot-times instead (checked in cmd_claim)
+        sp.add_argument("--block", required=(name != "claim"))
         sp.add_argument("--state", default=None,
                         help="state file path; defaults to Claude_Workspace/_state/<task>-block-completion.json")
         sp.add_argument("--run-id", default=None)
@@ -650,6 +690,10 @@ def main(argv=None):
             sp.add_argument("--ttl-min", type=int, default=None)
             sp.add_argument("--force", action="store_true",
                             help="override a COMPLETE record (documented manual-rerun escape hatch)")
+            sp.add_argument("--slot-times", default=None,
+                            help="ET fire times HH:MM,... -- resolve the block (slot-HH) inside the "
+                                 "claim from the same clock reading as the date; overrides --block. "
+                                 "Reuse the emitted `block` verbatim for complete/fail")
         if name == "complete":
             sp.add_argument("--notion-page-id", default=None)
             sp.add_argument("--email-sent-at", default=None)
