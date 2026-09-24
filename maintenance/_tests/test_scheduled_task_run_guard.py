@@ -67,7 +67,7 @@ for _s in (sys.stdout, sys.stderr):  # UTF-8 safe output on Windows cp1252 pipes
     except Exception:
         pass
 
-HERE =os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.abspath(__file__))
 CLAUDE = os.path.dirname(os.path.dirname(HERE))          # ~/.claude
 SCHED = os.path.join(CLAUDE, "scheduled-tasks")
 SENTINEL = os.path.join(SCHED, "_shared", "block-sentinel.py")
