@@ -707,6 +707,68 @@ _p = subprocess.run([sys.executable, GUARD], input=json.dumps(edit(clean, "<p>st
                     env=dict(os.environ, CONFIDENTIAL_TERMS_FILE_OVERRIDE=INACTIVE_TERMS))
 expect("ALLOW seam: delete-only Edit on a site file when no deal is active (empty windows)", 0,
        _p.returncode, _p.stderr.decode("utf-8", "replace"))
+# Round-2 cases (merge-gate review of 2a939b6). FILLER is wider than any seam window (2*term+8), so
+# a case that needs the far site/trigger to be OUTSIDE the first window really puts it there.
+FILLER = "<p>" + "clean filler text " * 150 + "</p>\n"
+expect("BLOCK seam: delete-only Edit also removes the following newline, joining two lines", 2,
+       *run(edit(seam_file("nl.html", "<p>%sQQZX\n%s</p>\n" % (HEAD, TAIL)), "QQZX", "")))
+far = seam_file("far.html", "<p>QQZX</p>\n" + FILLER + "<p>%sQQZX%s</p>\n" % (HEAD, TAIL))
+expect("BLOCK seam: replace_all joins the term only at the SECOND site, far from the first", 2,
+       *run(edit(far, "QQZX", "", replace_all=True)))
+many = seam_file("many.html", ("<p>aQQZXb</p>\n" + FILLER) * 3 + "<p>%sQQZX%s</p>\n" % (HEAD, TAIL[1:]))
+expect("BLOCK seam: replace_all with a 1-char new_string completes the term at the LAST of 4 sites", 2,
+       *run(edit(many, "QQZX", TAIL[:1], replace_all=True)))
+expect("BLOCK seam: term split after its FIRST character", 2,
+       *run(edit(seam_file("a1.html", "<p>%sQQZX%s</p>\n" % (A1[:1], A1[1:])), "QQZX", "")))
+expect("BLOCK seam: term split before its LAST character", 2,
+       *run(edit(seam_file("a2.html", "<p>%sQQZX%s</p>\n" % (A1[:-1], A1[-1:])), "QQZX", "")))
+crlf2 = seam_file("crlf2.html", "<p>x</p>\n<p>%sQQZX%s</p>\n" % (HEAD, TAIL), newline="\r\n")
+expect("BLOCK seam: CRLF old_string against a CRLF file, non-empty new_string completes the term", 2,
+       *run(edit(crlf2, "</p>\r\n<p>%sQQZX" % HEAD, "</p>\r\n<p>%s" % HEAD)))
+code, err = run_ctx(edit(seam_file("ctx.html", "<h1>%s</h1>\n" % CTX_TRIGGER + FILLER
+                                   + "<p>%sQQZX%s</p>\n" % (CTX_CONTEXT[:5], CTX_CONTEXT[5:])), "QQZX", ""))
+expect("BLOCK seam: context term formed at the seam, its trigger far away on the same page", 2, code, err)
+code, err = run_ctx(edit(seam_file("ctx2.html", "<h1>no trigger here</h1>\n" + FILLER
+                                   + "<p>%sQQZX%s</p>\n" % (CTX_CONTEXT[:5], CTX_CONTEXT[5:])), "QQZX", ""))
+expect("ALLOW seam: context term formed at the seam with no trigger anywhere in the file", 0, code, err)
+# The Edit tool folds curly/straight quotes, decodes \uXXXX, reads UTF-16 by BOM and handles files
+# past our size cap, so "old_string not found" against an EXISTING file must block, not fall back.
+quoted = seam_file("quoted.html", "<p>%s“Q”%s</p>\n" % (HEAD, TAIL))
+expect("BLOCK seam: old_string only matches via quote folding (existing file, cannot simulate)", 2,
+       run(edit(quoted, '"Q"', "x"))[0])
+utf16 = os.path.join(SEAM_DIR, "utf16.html")
+with open(utf16, "wb") as f:
+    f.write(b"\xff\xfe" + ("<p>%sQQZX%s</p>\n" % (HEAD, TAIL)).encode("utf-16-le"))
+expect("BLOCK seam: UTF-16 file (read by BOM in the tool, not simulated here)", 2,
+       run(edit(utf16, "QQZX" + TAIL[:1], TAIL[:1]))[0])
+badbytes = os.path.join(SEAM_DIR, "badbytes.html")
+with open(badbytes, "wb") as f:
+    f.write(b"<p>caf\xe9</p>\n" + ("<p>%sQQZX%s</p>\n" % (HEAD, TAIL)).encode("utf-8"))
+expect("BLOCK seam: non-UTF-8 byte elsewhere in the file, new_string completes the term", 2,
+       run(edit(badbytes, "QQZX" + TAIL[:1], TAIL[:1]))[0])
+expect("ALLOW Edit that creates a NEW site file (nothing on disk to simulate), clean content", 0,
+       run(edit(os.path.join(SEAM_DIR, "brand-new.html"), "", "<p>Columbus flex space</p>"))[0])
+expect("BLOCK MultiEdit with a non-dict entry carrying a term", 2,
+       run({"tool_name": "MultiEdit", "tool_input": {"file_path": clean, "edits": [
+           "%s" % A1, {"old_string": "<p>stale line</p>\n", "new_string": ""}]}})[0])
+expect("BLOCK (exit 2, not a crash) Edit whose file_path is not a string", 2,
+       run({"tool_name": "Edit", "tool_input": {"file_path": 5, "old_string": "a", "new_string": "b"}})[0])
+expect("BLOCK (exit 2, not a crash) MultiEdit whose edits is an int", 2,
+       run({"tool_name": "MultiEdit", "tool_input": {"file_path": clean, "edits": 5}})[0])
+_bad_fd, BAD_ROSTER = tempfile.mkstemp(prefix="malformed-terms-", suffix=".json")
+with os.fdopen(_bad_fd, "w", encoding="utf-8") as f:
+    json.dump({"_meta": {"roster_last_verified": datetime.date.today().isoformat()},
+               "d": {"active": True, "label": "malformed fixture", "always": [5, "Zephyr Corp Portfolio"]}}, f)
+atexit.register(lambda: os.path.exists(BAD_ROSTER) and os.remove(BAD_ROSTER))
+_bad_env = dict(os.environ, CONFIDENTIAL_TERMS_FILE_OVERRIDE=BAD_ROSTER)
+for _label, _payload, _want in [
+        ("BLOCK malformed roster entry: site write carrying the term still blocks (no crash)",
+         write_payload(SITE, "Press: Zephyr Corp Portfolio"), 2),
+        ("ALLOW malformed roster entry: clean delete-only Edit (no crash)",
+         edit(clean, "<p>stale line</p>\n", ""), 0)]:
+    _p = subprocess.run([sys.executable, GUARD], input=json.dumps(_payload).encode("utf-8"),
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=_bad_env)
+    expect(_label, _want, _p.returncode, _p.stderr.decode("utf-8", "replace"))
 expect("BLOCK Write with no content key at all", 2,
        run({"tool_name": "Write", "tool_input": {"file_path": SITE}})[0])
 
