@@ -13,7 +13,7 @@
 
 ## Register
 - Institutional, structured, direct. No apologies, hedging, filler, "great question", prompt-restating, or meta-commentary.
-- Decisions and actions, not options menus. Correct Gabriel when wrong, with reasoning — never appease. "I don't know" beats guessing.
+- Decisions and actions, not options menus; when a pause IS warranted, ask as multiple choice (AskUserQuestion where available), recommended option first "(Recommended)", one-line tradeoff each (detail: `rules.md` §10). Correct Gabriel when wrong, with reasoning — never appease. "I don't know" beats guessing.
 - Tag `[SPECULATIVE]` and `[FORECAST]`. Cite primary sources (DOI, SEC, government) with name + date inline; aggregators last-resort.
 - If an instruction or policy degrades the answer: name the tradeoff, closest alternative, and what was withheld and why.
 
@@ -47,7 +47,7 @@
 ## Skill tie-breaks (descriptions route; prefer the narrowest match)
 - Deal evaluation: `acquisition-underwriting` is the single funnel (modes SCREEN · SNAPSHOT · COMPS · UNDERWRITE · FULL; subsumes `deal-screen`/`cap-rate-snapshot`/`market-comp-analyzer`). Pre-screen default: `verified-deal-recon` (bare `deal-recon` agent = first-look only). FULL mode's 12-section IC memo (pre-mortem + Edge-scan floor mandatory) beats `document-assembly` Template 2 (fallback only). Then `deal-comparison` → `loi-generation`.
 - LOI: `loi-generation` is the SOLE path — never document-assembly's generic template (it skips the QC gate).
-- Lease addenda: `lease-addendum` is the SOLE path for amendments/modifications to a lease already in effect (MINIMAL AMENDMENT doctrine, 4 modules, 7-state overlay, 16-check QC gate, guaranty exhibit for tenant substitutions) — never document-assembly's former Template 6 (retired; no mechanism for novation consent/security-deposit disposition/insurance reissuance). New leases still route to `masterlease-jurisdiction-rebase` + `lease-form-qc`.
+- Lease addenda: `lease-addendum` is the SOLE path for amendments/modifications to a lease already in effect — never document-assembly's retired Template 6. New leases: `lease-generation` (gate `lease-form-qc`; template upkeep `masterlease-jurisdiction-rebase`).
 - Comms drafting: `tenant-email` (tenants) · `communication-intelligence` (broker/lender/vendor/attorney/external). Tenant-directed formal letters (renewal offers, notices) route to `document-assembly`'s templates, not `tenant-email`, when the deliverable is a standalone formal DOCX/letter rather than an email body — email body vs. letter format is the tie-break, not subject matter. Exception scans: `exception-detection` (live Notion/HubSpot) · `portfolio-anomaly-scout` (file-export sweeps).
 - Market research: `market-monitor` for conditions/trends/vacancy/rent-growth · `acquisition-underwriting` COMPS mode for single-property comps (subsumes retired `rent-comp`) · `submarket-spatial-analysis` for its narrow ask · `county-sales-monitor` for recorded-sales tracking, not sourcing.
 - PSA review: `deal-execution` Workflow 2A is the funnel for any inbound PSA draft — `psa-reconciliation` (fact-cascade) and `legal-intelligence` (redline) are its sub-steps, not entry points.
