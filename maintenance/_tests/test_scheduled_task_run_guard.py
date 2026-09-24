@@ -58,6 +58,15 @@ import sys
 import tempfile
 from datetime import datetime, timedelta
 
+# FAIL details quote task SKILL.md lines verbatim (e.g. "STEP 2 → ..."); on a Windows
+# cp1252 pipe (the pre-push hook-tests gate) printing one raised UnicodeEncodeError,
+# aborting the run before the failure was recorded or summarized.
+for _s in (sys.stdout, sys.stderr):  # UTF-8 safe output on Windows cp1252 pipes
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 CLAUDE = os.path.dirname(os.path.dirname(HERE))          # ~/.claude
 SCHED = os.path.join(CLAUDE, "scheduled-tasks")
