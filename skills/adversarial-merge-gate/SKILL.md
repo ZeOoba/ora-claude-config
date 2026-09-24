@@ -104,7 +104,11 @@ Scope and staging is substrate-independent, which is part of why it yields most.
 All five in **one message** so they run concurrently. Prompt templates:
 `agent-prompts.md` in this directory.
 
-Three clauses every mandate needs, and the reason each exists:
+Right before dispatch (after writing any override of your own), list
+`~/.claude/hooks/sessions/<your session>/` and `overrides/` with names, modification
+times and the contents of any `override`. Step 4 compares against this listing.
+
+Four clauses every mandate needs, and the reason each exists:
 
 1. **Read-only, worktree-scoped, live tree named as forbidden.** Otherwise agents edit
    what you told them to review.
@@ -113,6 +117,26 @@ Three clauses every mandate needs, and the reason each exists:
 3. **Zero findings is a valid and expected outcome; manufacturing one is a mandate
    failure and will be discarded.** Without this an agent under a "find problems" framing
    reliably produces something. This clause is what makes a clean pass mean anything.
+4. **Guard surface is off limits.** Never create, edit or move anything under
+   `~/.claude/hooks/` (override markers, tokens, claims), and never encode, obfuscate or
+   split command text to get past a guard. A blocked command is reported, not worked
+   around. If a repo has a sanctioned workaround for a known false positive (such as
+   the scratchpad-glob pattern for site-marker reads), name it in the dispatch prompt;
+   reviewers use only the workarounds you name. Reviewers run as subagents of your
+   session, so a marker one of them writes exempts *your* session from that gate for
+   the rest of the run. In the PR #89 gate a test-validity reviewer blocked by
+   `eos-plan-gate` on its scratch harness scripts wrote the override marker itself,
+   and base64-encoded a site path in one command, which would have got it past the
+   site-write guard. Only the orchestrating session writes an override, and only
+   where that gate's own rules allow it (the site-write token needs the user's
+   in-turn go-ahead).
+
+   `eos-plan-gate` counts every code-file Write/Edit in the session, scratch copies
+   included, and denies the 4th. Reviewers share your session, so a swarm with a
+   mutation harness will hit it. When a mandate will write scratch code, write the
+   plan-gate `override` yourself before dispatch, with the reason (e.g. "merge gate
+   PR #N: throwaway mutation-harness scripts outside the repo"), rather than leaving
+   the reviewer to stall or improvise.
 
 ### When a mandate has no surface
 
@@ -152,6 +176,21 @@ Test the matcher, do not read it. A regex that looks like it covers a tool frequ
 does not, and the difference is invisible until you run the tool name against it.
 
 ## Step 4 — Consolidate, then STOP before fixing
+
+Before consolidating, check the swarm against clause 4. List
+`~/.claude/hooks/sessions/<your session>/` again and compare it with the Step 3
+listing. The bypass markers are `override`, `plan-approved` and anything under
+`overrides/`; any of them that is new or changed since that listing is a breach.
+Counters, logs, `touched-files.txt` and `gate-green` are written by the hooks during
+normal tool use and are expected. Archive a breach marker (never delete) to
+`~/.claude/hooks/sessions/_archive_override_tokens/`, the folder
+`override-token-frequency-probe.py` reads and the weekly sweep archives into:
+- `overrides/<tier>` goes to `<session>_overrides_<tier>`, so the probe counts it.
+- A plain `override` goes to `<session>_override.breach-<YYYY-MM-DD>`. The suffix
+  stops the weekly sweep (`Move-Item -Force` to `<session>_override`) from later
+  overwriting the evidence with a legitimate override of yours.
+
+Report every breach to the user alongside the findings.
 
 One table, most severe first:
 
