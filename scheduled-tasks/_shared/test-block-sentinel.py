@@ -536,6 +536,77 @@ def test_ttl_exact_boundary():
     os.remove(st)
 
 
+# ------------------------------------ slot subcommand (added 2026-09-24)
+# Incident: an ora-pr-land-watch run computed its SLOT with Git Bash
+# `TZ=America/New_York date`, which this machine silently evaluates as UTC.
+# At 16:51Z (12:51 EDT) it read "16:51 ET", claimed slot-15 instead of slot-12,
+# and would have blocked the real 15:35 run had the claim not been released by
+# hand. The fix moves slot arithmetic into the sentinel, which already owns the
+# ET clock (zoneinfo + statutory-DST fallback).
+
+PR_LAND_TIMES = "09:35,12:35,15:35,18:35,21:35"
+
+
+def run_slot(times, now, extra_env=None):
+    e = dict(os.environ)
+    e["ORA_SENTINEL_NOW"] = now
+    e.update(extra_env or {})
+    p = subprocess.run([sys.executable, SCRIPT, "slot", "--times", times],
+                       capture_output=True, text=True, env=e)
+    try:
+        return p.returncode, json.loads(p.stdout)
+    except Exception:
+        return p.returncode, {"_raw": p.stdout, "_err": p.stderr}
+
+
+def test_slot_incident_utc_afternoon_is_et_noon_slot():
+    print("\ntest_slot_incident_utc_afternoon_is_et_noon_slot")
+    rc, out = run_slot(PR_LAND_TIMES, "2026-09-24T16:51:00Z")
+    check("exit 0", rc == 0, "got %s (%s)" % (rc, out))
+    check("16:51Z == 12:51 EDT -> slot-12 (not slot-15)", out.get("block") == "slot-12", str(out))
+    check("reports ET date", out.get("etDate") == "2026-09-24", str(out.get("etDate")))
+    check("reports ET wall time", out.get("etTime") == "12:51", str(out.get("etTime")))
+
+
+def test_slot_boundary_is_inclusive():
+    print("\ntest_slot_boundary_is_inclusive")
+    rc, out = run_slot(PR_LAND_TIMES, "2026-09-24T19:35:00Z")   # 15:35 EDT exactly
+    check("at HH:35 exactly the slot has started", out.get("block") == "slot-15", str(out))
+    rc, out = run_slot(PR_LAND_TIMES, "2026-09-24T19:34:59Z")   # 15:34:59 EDT
+    check("one second before -> previous slot", out.get("block") == "slot-12", str(out))
+
+
+def test_slot_before_first_time_is_pre_label():
+    print("\ntest_slot_before_first_time_is_pre_label")
+    rc, out = run_slot(PR_LAND_TIMES, "2026-09-24T13:00:00Z")   # 09:00 EDT
+    check("before 09:35 ET -> slot-pre09", out.get("block") == "slot-pre09", str(out))
+
+
+def test_slot_late_evening_keys_to_et_date():
+    print("\ntest_slot_late_evening_keys_to_et_date")
+    rc, out = run_slot(PR_LAND_TIMES, "2026-08-10T02:30:00Z")   # 22:30 EDT Aug 9
+    check("22:30 EDT -> slot-21", out.get("block") == "slot-21", str(out))
+    check("ET date is 08-09, not UTC 08-10", out.get("etDate") == "2026-08-09", str(out))
+
+
+def test_slot_winter_offset_and_fallback_agree():
+    print("\ntest_slot_winter_offset_and_fallback_agree")
+    now = "2026-01-15T17:40:00Z"                                 # 12:40 EST
+    rc, a = run_slot(PR_LAND_TIMES, now)
+    rc2, b = run_slot(PR_LAND_TIMES, now, {"ORA_SENTINEL_NO_ZONEINFO": "1"})
+    check("EST: 17:40Z -> slot-12", a.get("block") == "slot-12", str(a))
+    check("no-zoneinfo fallback agrees", b.get("block") == a.get("block"), "%s vs %s" % (a, b))
+
+
+def test_slot_times_order_insensitive_and_validated():
+    print("\ntest_slot_times_order_insensitive_and_validated")
+    rc, out = run_slot("21:35,09:35,15:35,12:35,18:35", "2026-09-24T16:51:00Z")
+    check("unsorted --times still -> slot-12", out.get("block") == "slot-12", str(out))
+    rc, out = run_slot("9:35,25:00", "2026-09-24T16:51:00Z")
+    check("invalid --times -> nonzero exit", rc != 0, "got %s (%s)" % (rc, out))
+    check("invalid --times -> no block emitted", not out.get("block"), str(out))
+
+
 if __name__ == "__main__":
     print("block-sentinel.py -- entry-guard contract tests")
     test_virgin_claim_proceeds()
@@ -564,6 +635,12 @@ if __name__ == "__main__":
     test_period_day_is_unaffected_default()
     test_period_month_and_day_buckets_are_independent()
     test_ttl_exact_boundary()
+    test_slot_incident_utc_afternoon_is_et_noon_slot()
+    test_slot_boundary_is_inclusive()
+    test_slot_before_first_time_is_pre_label()
+    test_slot_late_evening_keys_to_et_date()
+    test_slot_winter_offset_and_fallback_agree()
+    test_slot_times_order_insensitive_and_validated()
     if _failures:
         print("\n%d FAILURE(S): %s" % (len(_failures), ", ".join(_failures)))
         sys.exit(1)

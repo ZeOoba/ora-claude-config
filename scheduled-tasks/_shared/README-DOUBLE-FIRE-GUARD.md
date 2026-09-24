@@ -100,7 +100,13 @@ python block-sentinel.py claim    --task <task> --block <blockId> --run-id <id> 
 python block-sentinel.py complete --task <task> --block <blockId> --run-id <id> [--notion-page-id ID] [--email-sent-at ISO] [--adopt]
 python block-sentinel.py fail     --task <task> --block <blockId> --run-id <id> [--error "..."] [--adopt]
 python block-sentinel.py status   --task <task> --block <blockId>          # read-only, creates nothing
+python block-sentinel.py slot     --times 09:35,12:35,15:35                # read-only -> {"block": "slot-12", ...}
 ```
+
+Multi-fire-per-day tasks get their block id from `slot`, never from shell time
+math: Git Bash on this host ignores `TZ=America/New_York` and silently returns UTC
+(on 2026-09-24 that claimed `slot-15` at 12:51 EDT). `slot` uses the same ET clock
+as `claim`, and bad `--times` exits 2 with no `block` instead of failing open.
 
 Write each invocation on ONE line. `^` is cmd.exe continuation and hard-fails in
 both shells this host offers — in Bash it splits into two commands, in PowerShell it

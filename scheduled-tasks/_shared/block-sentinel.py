@@ -62,6 +62,9 @@ USAGE
   python block-sentinel.py fail     --task ora-am-brief --block blockB --run-id <id>
                                     [--error "..."] [--period day|week|month]
   python block-sentinel.py status   --task ora-am-brief --block blockB   (read-only) [--period day|week|month]
+  python block-sentinel.py slot     --times 09:35,12:35,15:35            (read-only) -> {"block": "slot-12", ...}
+                                    For multi-fire-per-day tasks: resolves the current ET cron slot so
+                                    no caller does timezone math in a shell (Git Bash ignores TZ here).
 
 --period (added 2026-09-06, default "day"): which calendar bucket a block's
 claim-then-complete record is keyed to. A DAILY task keyed to the ET date is
@@ -597,6 +600,39 @@ def cmd_status(args):
                  "statePath": path, "stateFileError": err}, EXIT_OK)
 
 
+def cmd_slot(args):
+    """Read-only. Resolve which cron slot a multi-fire-per-day task is in, on the
+    ET clock this module already owns -- so callers never do timezone math in a
+    shell. Added 2026-09-24: an ora-pr-land-watch run used Git Bash
+    `TZ=America/New_York date`, which this machine silently evaluates as UTC,
+    read 12:51 EDT as 16:51 and claimed slot-15 instead of slot-12.
+
+    --times is the task's ET fire times (HH:MM, any order). The slot is the
+    latest time at or before now; before the first one it is `slot-pre<HH>`.
+    Labels use the hour only, so fire times must have distinct hours.
+    Unlike claim, bad input does NOT fail open: exit 2 with no `block`, because
+    a guessed slot id is exactly the failure this subcommand exists to prevent.
+    """
+    import re
+    times = []
+    for raw in args.times.split(","):
+        t = raw.strip()
+        m = re.match(r"^([01][0-9]|2[0-3]):([0-5][0-9])$", t)
+        if not m:
+            return emit({"decision": "ERROR", "error": "invalid --times entry %r (need HH:MM, 24h)" % t}, 2)
+        times.append((int(m.group(1)), int(m.group(2))))
+    times = sorted(set(times))
+    if len({h for h, _ in times}) != len(times):
+        return emit({"decision": "ERROR", "error": "--times hours must be distinct (labels are slot-HH)"}, 2)
+    now = _eastern_now()
+    current = (now.hour, now.minute)
+    started = [t for t in times if t <= current]
+    block = "slot-%02d" % started[-1][0] if started else "slot-pre%02d" % times[0][0]
+    return emit({"block": block, "etDate": now.strftime("%Y-%m-%d"),
+                 "etTime": now.strftime("%H:%M"),
+                 "times": ["%02d:%02d" % t for t in times]}, EXIT_OK)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -623,7 +659,12 @@ def main(argv=None):
             sp.add_argument("--adopt", action="store_true",
                             help="record a terminal status with no prior claim (state-file-loss "
                                  "re-convergence only); without it a non-owner is REFUSED exit 12")
+    sp = sub.add_parser("slot", help="print the current ET cron-slot block id (read-only)")
+    sp.add_argument("--times", required=True,
+                    help="comma-separated ET fire times, HH:MM (e.g. 09:35,12:35,15:35)")
     args = parser.parse_args(argv)
+    if args.cmd == "slot":
+        return cmd_slot(args)
     try:
         return {"claim": cmd_claim, "complete": cmd_complete,
                 "fail": cmd_fail, "status": cmd_status}[args.cmd](args)
