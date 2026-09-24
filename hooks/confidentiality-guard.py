@@ -301,6 +301,83 @@ def collect_text(obj):
     return " ".join(p for p in parts if p)
 
 
+# --- Edit seams (2026-09-24) ---------------------------------------------------------------------
+# An Edit's new_string is not the whole story: the text it lands between is already on disk, so a
+# term can be CREATED at the seam -- "Zephyr C|QQ|orp Portfolio" with QQ -> "" (or with QQ -> "o",
+# which alone contains no term) becomes a confidential name that new_string never carried. Before
+# this, that shape passed unscanned; and a delete-only Edit (new_string "") had nothing to scan at
+# all, so it fail-closed on every public-site edit that only removed text. Both close the same way:
+# apply the edit(s) to the file's current text in memory and scan a window around every seam, at
+# least as wide as the longest term on each side. If the file cannot be read or an old_string is not
+# in it, there are no seams, and the caller falls back to exactly the pre-2026-09-24 behavior
+# (scan new_string; nothing to scan -> block).
+#
+# Why the windows cover every new occurrence (MultiEdit applies edits in order): take a term present
+# after the last edit that was not there before. Let k be the last edit whose replaced span or
+# insertion point falls inside the term. No later edit changes the term's characters, so the term is
+# already present, intact, in the text right after edit k -- and it contains or straddles k's seam.
+# The window taken from that intermediate text, [seam - W, seam + len(new) + W] with W >= the term's
+# length, contains it.
+SEAM_MAX_FILE_BYTES = 20 * 1024 * 1024
+
+
+def _seam_width(terms):
+    """Window margin on each side of a seam: twice the longest active term (lower() can lengthen
+    some non-ASCII characters) plus slack. 0 when no deal is active -- nothing to find. None on a
+    roster shape it cannot read, which disables seam simulation (the caller then fails closed on
+    an empty scan, as before)."""
+    try:
+        longest = 0
+        for key, deal in terms.items():
+            if key.startswith("_") or not isinstance(deal, dict) or not deal.get("active", True):
+                continue
+            for field in ("always", "context", "context_requires_any"):
+                for t in deal.get(field, []) or []:
+                    if isinstance(t, str):
+                        longest = max(longest, len(t))
+        return 2 * longest + 8 if longest else 0
+    except Exception:
+        return None
+
+
+def _edit_seams(path, edits, width):
+    """Windows of post-edit text around each seam, or None when the edit cannot be simulated
+    (unreadable/oversized file, missing or empty old_string, old_string not in the text). Never
+    raises: an uncaught exception exits 1, which is NON-BLOCKING, i.e. fail-open on this gate.
+
+    The file is read with universal newlines and old/new are normalized the same way, matching the
+    Edit tool, which matches LF old_strings against CRLF files. Windows only feed the term scan, so
+    the normalization cannot change what is written."""
+    try:
+        if not path or os.path.getsize(path) > SEAM_MAX_FILE_BYTES:
+            return None
+        with open(path, encoding="utf-8", errors="replace", newline=None) as f:
+            text = f.read()
+        windows = []
+        for ed in edits:
+            old, new = ed.get("old_string"), ed.get("new_string")
+            if not isinstance(old, str) or not isinstance(new, str) or not old:
+                return None
+            old, new = old.replace("\r\n", "\n"), new.replace("\r\n", "\n")
+            if old not in text:
+                return None
+            if ed.get("replace_all"):
+                parts = text.split(old)
+                text = new.join(parts)
+                at = 0
+                for part in parts[:-1]:
+                    at += len(part)
+                    windows.append(text[max(0, at - width):at + len(new) + width])
+                    at += len(new)
+            else:
+                at = text.index(old)
+                text = text[:at] + new + text[at + len(old):]
+                windows.append(text[max(0, at - width):at + len(new) + width])
+        return windows
+    except Exception:
+        return None
+
+
 def path_egress_surface(path):
     pl = (path or "").lower()
     if any(m in pl for m in SITE_MARKERS):
@@ -353,7 +430,16 @@ def main():
                 if isinstance(ed, dict):
                     pieces.append(ed.get("new_string", ""))
             scan_text = " ".join(str(p) for p in pieces if p)
-            if not scan_text:
+            # An explicit empty Write writes nothing that could leak.
+            extracted = tool == "Write" and isinstance(ti.get("content"), str)
+            if tool in ("Edit", "MultiEdit"):
+                edits = [ti] if tool == "Edit" else [e for e in (ti.get("edits") or []) if isinstance(e, dict)]
+                width = _seam_width(terms)
+                seams = _edit_seams(path, edits, width) if edits and width is not None else None
+                if seams is not None:
+                    scan_text = " ".join(p for p in [scan_text] + seams if p)
+                    extracted = True
+            if not scan_text and not extracted:
                 # egress write we cannot read -> fail closed
                 block("write to %s but content could not be extracted." % surface)
 
