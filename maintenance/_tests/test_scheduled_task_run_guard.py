@@ -121,7 +121,9 @@ STEP_LINE = re.compile(r"^\s{0,3}(?:\*\*)?(?:\d+[.)]|[A-Z]\.\d+|Step\s+\d+)", re
 
 # Flags `claim` accepts that `complete`/`fail` reject -- stripped when the same
 # parsed argv is reused to close the claim (a stray --ttl-min exits 2).
-CLAIM_ONLY_FLAGS = {"--ttl-min": 1, "--force": 0}
+# --slot-times (2026-09-24): claim resolves the block itself; the spec then closes
+# with the `block` claim emitted, which finalize_argv appends via `resolved_block`.
+CLAIM_ONLY_FLAGS = {"--ttl-min": 1, "--force": 0, "--slot-times": 1}
 
 # Frozen 2026-09-10. Side effects, no run guard. The documented per-task adoption
 # backlog (README-DOUBLE-FIRE-GUARD.md: "adoption is proven per-task, not
@@ -337,16 +339,25 @@ def flag_value(argv, flag, default=None):
     return default
 
 
-def finalize_argv(claim_argv, verb):
-    """Turn a parsed `claim ...` argv into the matching `complete`/`fail` argv."""
+def finalize_argv(claim_argv, verb, resolved_block=None):
+    """Turn a parsed `claim ...` argv into the matching `complete`/`fail` argv.
+
+    A `claim --slot-times` spec closes with the `block` the claim emitted (the
+    spec tells the run to reuse it verbatim), so pass it as `resolved_block`; it
+    replaces any literal --block."""
     out, i = [verb], 1
     while i < len(claim_argv):
         tok = claim_argv[i]
         if tok in CLAIM_ONLY_FLAGS:
             i += 1 + CLAIM_ONLY_FLAGS[tok]
             continue
+        if resolved_block and tok == "--block":
+            i += 2
+            continue
         out.append(tok)
         i += 1
+    if resolved_block:
+        out += ["--block", resolved_block]
     return out
 
 
@@ -543,7 +554,13 @@ def test_second_invocation_in_same_cycle_is_a_noop():
                     check("%s :: fire #1 claims" % label, False,
                           "exit %s %s" % (rc1, out1))
                     continue
-                rc, _ = run_sentinel(finalize_argv(argv, "complete"), state)
+                resolved = out1.get("block") if "--slot-times" in argv else None
+                if "--slot-times" in argv and not resolved:
+                    check("%s :: fire #1 emits a resolved block" % label, False, str(out1))
+                    continue
+                if resolved:
+                    label = "%s/%s" % (task, resolved)
+                rc, _ = run_sentinel(finalize_argv(argv, "complete", resolved), state)
                 if rc != 0:
                     check("%s :: fire #1 completes" % label, False, "exit %s" % rc)
                     continue
