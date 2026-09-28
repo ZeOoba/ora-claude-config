@@ -160,6 +160,19 @@ UNGUARDED_BACKLOG = {
     # live working tree -- which is how it reached a push gate as a surprise. Inert once
     # the task fires and its folder is archived.
     "ora-routine-pause-resume-09-21",
+    # Added 2026-09-28 (dirty-tree-triage, PR #284). Registered after the 2026-09-10
+    # inventory and UNTRACKED until that PR, so this suite passed at every commit and
+    # failed only in the live working tree. Each has a real side effect and no run guard;
+    # adopt the guard per task (README-DOUBLE-FIRE-GUARD.md) and remove the entry then.
+    "ora-audit-log-sweep",                       # emails on errors / skipped_locked
+    "ora-hubspot-renewal-closeout-tasks",        # creates HubSpot tasks (manage_crm_objects)
+    "ora-incentive-registry-refresh",            # emails a summary
+    "ora-jackson-boe-prep-reminder",             # one-time reminder email
+    "ora-loopnet-listings-sync",                 # git push
+    "ora-noi-opportunity-digest",                # emails the monthly digest
+    "ora-recovery-billing-monthly",              # emails a billing-check summary
+    "ora-recovery-structure-audit-annual",       # emails an annual summary
+    "ora-wicomico-reassessment-reminder",        # one-time reminder email
 }
 
 # The ONLY way to declare a task harmless. Each entry means a human read the spec
@@ -174,6 +187,10 @@ NO_SIDE_EFFECT_REVIEWED = {
 # Listing one is a claim that someone READ it and confirmed the claim precedes every
 # side effect. A NEW guarded task whose ordering is unverifiable FAILS until read.
 ORDERING_VERIFIED_BY_HAND = {
+    # Read by hand 2026-09-28: the sole claim is the STEP 0 line at :11, the run's first
+    # action. Step 1 only READS Notion and writes a %TEMP% json; the side effects all
+    # follow: COM send :32, Ops Hub Notion row :35.
+    "ora-loan-balance-check": "claim@11 precedes send@32, Ops Hub write@35",
     # Read by hand 2026-09-23 (v1.8 guard landed from the live file): the sole claim is
     # the fenced STEP 0-B block at :33. STEP 0-A (:18-24) runs first but only exits
     # silently. Side effects all follow: Deal Sourcing Log creates :96, COM send :125,
