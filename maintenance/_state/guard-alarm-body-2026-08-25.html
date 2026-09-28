@@ -1,0 +1,14 @@
+<p><b>ORA Task Guard — 2026-08-25 07:05 ET run — ALARM</b></p>
+
+<p>guard.ps1 and membership-guard.ps1 both came back CLEAN (checked=66, restored=[], missing_everywhere=[], regressed=[], unreadable=[], errors=[], id_collisions=[], ledger_status=ok; membership disappeared=[], disabled=[], parse_miss=[]). STEP 2.9 (dangling-mutation-probe) also clean: 0 lost writes, 0 uncollected observations. Three alarm conditions fired from the remaining sub-steps:</p>
+
+<p><b>1. phantom-dispatch-probe.py exited 2 — PROBE COULD NOT LOOK</b><br>
+Claude Desktop's own log files (main.log through main4.log) have not been written to since <b>2026-08-20 20:51:03 — approximately 110 hours ago</b>, well outside the probe's 26-hour look-back window. The app is still dispatching scheduled tasks (this run proves that), but it has stopped logging. Per doctrine this is never reportable as clean — every log-derived signal on this machine is stale until Claude Desktop is restarted, including dispatch-skip-probe's confirmation leg, host-availability-report.py, and automation-health-monitor Step 0.08's log scan. <code>_state\phantom-dispatch.log</code> is itself stale (last entry 2026-08-24T11:18:00, not today), corroborating the same root cause. <b>Recommended action: restart the Claude Desktop app</b> to resume logging; this does not require any registry or scheduled-task change.</p>
+
+<p><b>2. task-folder-registration-probe.py (Step 2.75) exited 1 — [ACTION] UNCOMMITTED_VS_GIT</b><br>
+Task: <b>ora-psa-drift-watch-recheck-0826</b> (cc fleet, one-time, fires 2026-08-26 14:15 ET). The SKILL.md on disk differs from git HEAD, so the bytes the scheduler will actually read on Wednesday exist in no commit anywhere — nothing reviews, backs up, or can reproduce this content if lost before it fires. Fix: commit the file (or revert it if the on-disk version is unintended).</p>
+
+<p><b>3. task-folder-backup-completeness-probe.py (Step 2.8) exited 1 — [ACTION] UNBACKED</b><br>
+Path: <b>scheduled-tasks/_tmp/ora-insurance-renewal-monitor-20260824-body.html</b> (cc fleet). Git-ignored and not on the reviewed-exempt list. Fix: either allow-list it durably in .gitignore's per-file ladder, or add it to <code>maintenance/_shared/task-folder-runtime-state-allowlist.json</code> with a dated reason if it is deliberate runtime state.</p>
+
+<p><b>Informational (not alarms):</b> guard.ps1 backed up 14 task ids to their mirrors this run (normal canonical→mirror sync, not a restore). STEP 2.5 model-currency canary logged 17 CONTRADICTED tag/observed-model mismatches, consistent with the ongoing non-actionable server-side session-model assignment drift on this server-pinned fleet (full detail: <code>maintenance/_state/model-currency-cc.md</code>, 2026-08-25 entry). push-fleet-heartbeat.ps1 succeeded (exit 0).</p>

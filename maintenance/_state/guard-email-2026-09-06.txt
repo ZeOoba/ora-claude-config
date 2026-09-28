@@ -1,0 +1,58 @@
+ORA Task Integrity Guard -- 2026-09-06 07:05 ET run
+
+ALARM CONDITIONS:
+
+1) STEP 2.75 task-folder-registration-probe.py exited 1 -- [ACTION] UNREGISTERED in cc:
+   ora-pm-daily-crons, ora-pm-monthly-billing -- SKILL.md folders exist on disk but are
+   NOT wired into the live CC/MCP registry (live registry = 34 ids, confirmed via a fresh
+   list_scheduled_tasks call this run). This is the SAME open finding as Automation Audit
+   Rev 22 R22-1 (2026-09-05) -- still unresolved, no ruling found in event_log.md since.
+   Both tasks self-declare money-moving in frontmatter (monthly-billing posts rent/CAM
+   charges; daily-crons posts late fees to tenant ledgers).
+
+2) STEP 1.5 script 4 (phantom-dispatch-probe.py) exited 1 -- fleet-wide phantom-dispatch
+   rate is 171/208 (82%) in the trailing 26h window, far above the historical baseline
+   this check was built against (the 2026-08-04/08-05 incident that motivated it). By-task
+   counts top out at 6 (repeating ~every 6 min) across ~19 CC/MCP and LAMS tasks. NEW,
+   directly relevant to R22-1: ora-pm-monthly-billing and ora-pm-daily-crons themselves
+   appear as CC/MCP dispatch attempts on 2026-09-05 (13:58, 14:00, 14:04, 14:06, 14:10,
+   14:12 -- 3 phantom attempts each, all [never-confirmed]) despite being entirely absent
+   from list_scheduled_tasks. That is new evidence the underlying scheduler/dispatch log
+   still carries entries for these two ids after they vanished from the registry -- worth
+   folding into whoever investigates R22-1's cause. Given the volume and the money-moving
+   tasks involved, recommend checking whether the 2026-08-05 renderer root cause (stuck-
+   session-watchdog killing the Electron renderer) has recurred, per the phantom-dispatch
+   probe's own diagnostic note (verify against transcript OUTPUT, never lastRunAt).
+
+3) STEP 2.75 also flagged [ACTION] UNCOMMITTED_VS_GIT in cc: ora-cc-snapshot-refresh,
+   ora-command-center-mirror-drift-check, ora-lease-snapshot-refresh -- the SKILL.md the
+   scheduler actually reads for each differs from HEAD, so that content exists in no
+   commit. Commit or revert each.
+
+4) DELIBERATE SKIP, itself an alarm condition under this guard's own doctrine: STEP 1.5
+   script 1 (registry-membership-probe.py) was NOT run this cycle. Reason: memory
+   (project_automation_audit_rev22_2026-09-05.md S1) flags that the frozen 2026-09-03
+   registry-membership.json/.log snapshot is the ONLY surviving proof ora-pm-monthly-
+   billing/ora-pm-daily-crons were ever registered, and running the probe overwrites it.
+   No ruling from you has landed since, so this run preserved the evidence rather than
+   run the probe unattended. Detail: guard-note-2026-09-06.md. Recommend running the
+   probe deliberately once you're ready to consume that baseline (or after the R22-1
+   question is otherwise resolved).
+
+Both deterministic engines otherwise clean: guard.ps1 checked=62, restored=[],
+missing_everywhere=[], regressed=[], unreadable=[], errors=[], id_collisions=[],
+ledger_status=ok (backed_up: ora-command-center-mirror-drift-check, informational);
+membership-guard.ps1 disappeared=[], disabled=[], added=[], parse_miss=[] (lams
+enabled_total=27, mcp_snapshot_stale_days=1). Step 2.8 (backup-completeness) and
+Step 2.9 (dangling-mutation) both clean (exit 0).
+
+MODEL-CURRENCY (informational only, Step 2.5, never an independent alarm trigger): 34
+in-scope CC/MCP tasks -- 20 CONTRADICTED (tag vs. observed model mismatch; non-
+actionable on this server-pinned fleet per doctrine), 8 OBSERVATION_STALE (tag predates
+the 2026-09-02 lineup anchor, needs re-observation not recreate), remainder OBSERVED
+clean; 3 unverifiable (ora-calibration-snapshot, ora-county-sales-monitor,
+ora-passed-deal-tracker -- no usable scheduled-portion observation this run).
+Distribution: claude-sonnet-5=19, claude-opus-5=12. Full list: model-currency-cc.md
+2026-09-06 entry.
+
+-- ora-task-integrity-guard, automated run
